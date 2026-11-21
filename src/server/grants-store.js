@@ -168,7 +168,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     // lane lg-group-parents B-526c: a row that carries a rule's record or the agents' blocks is a row (never removed for empty
     // lists); a change of what it carries alone is a change
     const carried = (r) => (r ? { rule: r.rule, blocks: r.blocks, cleared: r.cleared } : {});
-    const removing = !v.row.to.length && !v.row.except.length && !v.row.rule && !v.row.blocks && !v.row.cleared;   // r937 MUST 2: a row a removal emptied is KEPT (`cleared`)
+    const removing = !v.row.to.length && !v.row.except.length && !v.row.rule && !(v.row.blocks && v.row.blocks.length) && !v.row.cleared;   // r937 MUST 2: a row a removal emptied is KEPT (`cleared`)
     if (removing ? !was : (was && JSON.stringify({ to: was.to, except: was.except, ...carried(was) }) === JSON.stringify({ to: v.row.to, except: v.row.except, ...carried(v.row) }))) return { ok: true, change: null, row: was, was };
     // r9: the audit's own key lists pass the masker too, by value (a token-shaped conversation key is never written in clear)
     const byValue = (dd) => ({ added: dd.added.map((x) => redactSecrets(String(x)).text), removed: dd.removed.map((x) => redactSecrets(String(x)).text) });

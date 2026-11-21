@@ -877,7 +877,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     dirty = false;   // handed to the writer — a failed write dirties it again (indexWritten)
     if (!p) return null;
     pendingTop = p.top;
-    producedUnlanded = new Set(unlanded);   // B-526c r937: what this write carries of the rows born since the last landing
+    producedUnlanded = new Set([...unlanded].filter((k) => hasOwn(ix.conversations, k)));   // B-526c r937: what this write carries of the rows born since the last landing — r1040: only rows PRESENT at the produce (one purged and born again inside the pace stays unlanded)
     return p.parts;
   }
   function indexWritten(ok) {

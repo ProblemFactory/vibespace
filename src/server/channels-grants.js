@@ -347,7 +347,10 @@ function create({ grants = null, dataDir = null } = {}) {
       // r937 MUST 2: a write that EMPTIES a stored watch row keeps it, stamped `cleared` — the boot can then redo the removal its
       // index copy may not have landed (a row deleted from the record is a removal no boot can read back)
       const emptied = !ch.to.length && clearedAt && doorIndex(DOORS.watch).rows.has(String(res));
-      out.push({ ...ch, ...(Array.isArray(blocks) && blocks.length ? { blocks } : {}), ...(emptied ? { cleared: clearedAt } : {}) });
+      // r1040: a row already cleared and still empty keeps its FIRST stamp (no record write, audit line or broadcast for nothing)
+      const was = doorIndex(DOORS.watch).rows.get(String(res));
+      const clearedStamp = was && was.cleared && !was.to.length ? was.cleared : clearedAt;
+      out.push({ ...ch, ...(Array.isArray(blocks) ? { blocks } : {}), ...(emptied ? { cleared: clearedStamp } : {}) });   // r1040: the carried blocks list, [] included
     }
     return out;
   }

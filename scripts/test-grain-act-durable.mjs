@@ -24,6 +24,10 @@
 //      durable write: the row rides its journal line); MUST 2 an agent's own unwatch that EMPTIES the row (kept `cleared`, the
 //      boot redoes the removal); (b) an edit across a clock that stepped back (its stamp monotonic); a body over its bound waits
 //      for the index's disk; (c) a row the boot cannot complete is said ONCE
+//   ⑤ r1040 (the follow) — a row written short (its blocks past what the record carries) LIFTS NOTHING at a boot; «last» for the act's
+//      stamp is the grain's newest over the index's rows AND the record's own (a watch removed and set again inside the pace, the
+//      clock stepped back, a kill); a conversation's own filter, edited through its route, is never put back at a boot (inline ids
+//      are only those with the bar). Real processes, each with its red
 // Run: node scripts/test-grain-act-durable.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -146,6 +150,40 @@ if (process.argv[2] === '--child') {
     say({ role, gone: !eng.store.index.peek(KEY) });
     process.exit(0);
   }
+  const F1 = { match: 'any', rules: [{ kind: 'keyword', value: 'alpha' }] }, F2 = { match: 'any', rules: [{ kind: 'keyword', value: 'beta' }] }, F3 = { match: 'any', rules: [{ kind: 'keyword', value: 'gamma' }] };
+  if (role === 'write-blockshort') {   // r1040 1: a block the record cannot carry — the save is written short (durable), nothing is lifted
+    await seed();
+    await eng.agentWatch(AG, KEY, { delivery: 'next-turn' });
+    await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [] }, { by: 'user' });   // the person removes the agent's own row: its block
+    await eng.store.index.update((ix) => { ix.agentWatchBlocks[`conversation:${KEY}|not a key`] = { at: clock(), by: 'user' }; });   // a key the record cannot read
+    eng.store.index.flush(); held = true;
+    const r = await bound(eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: OTHER, delivery: 'next-turn' }] }, { by: 'user' }), ms);
+    const row = grantsRows().find((x) => x.door === 'channel-watch' && x.resource === `conversation:${KEY}`) || null;
+    say({ role, save: { answered: r.answered, ok: !!(r.v && r.v.ok) }, rowBlocks: row ? ('blocks' in row ? row.blocks : 'absent') : null });
+    process.kill(process.pid, 'SIGKILL');
+  }
+  if (role === 'write-reset') {   // r1040 2: a watch removed, then set again inside the pace — the clock an hour back between them
+    await seed();
+    await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', dailyWakeCap: 7 }] }, { by: 'user' });
+    eng.store.index.flush(); held = true;
+    const r1 = await bound(eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [] }, { by: 'user' }), ms);
+    skew = -3600e3;
+    const r2 = await bound(eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'next-turn', notify: 'digest', digestMinutes: 30, dailyWakeCap: 1 }] }, { by: 'user' }), ms);
+    say({ role, removed: !!(r1.v && r1.v.ok), set: !!(r2.v && r2.v.ok) });
+    process.kill(process.pid, 'SIGKILL');
+  }
+  if (role === 'write-filter') {   // r1040 3: the conversation's own filter, then an inline one for its watcher, then the route edits its own
+    await seed();
+    await eng.setFilter(A, C, F1);
+    const fid = (eng.store.index.peek(KEY) || {}).filterId;
+    await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake', mode: 'filtered', filterId: fid }] }, { by: 'user' });
+    const inl = await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake', mode: 'filtered', filter: F2 }] }, { by: 'user' });
+    const ed = await eng.setFilter(A, C, F3);
+    eng.store.index.flush(); eng.stop();
+    const w = ((eng.store.index.peek(KEY) || {}).watchers || []).find((x) => x && x.principal && x.principal.id === 'agent-1') || {};
+    say({ role, fid, inline: !!(inl && inl.ok), edit: !!(ed && ed.ok), editCode: ed && ed.code, watcherFilter: w.filterId || null });
+    process.exit(0);
+  }
   if (role === 'boot') {
     eng.start();
     await eng.store.index.update(() => {}); await eng.store.index.update(() => {});   // behind the boot's own queued completion
@@ -166,11 +204,12 @@ if (process.argv[2] === '--child') {
     const fl = pid ? await eng.flushScope(A, 'pattern', pid, 'agent:agent-1') : null;
     if (eng.settleWakes) await eng.settleWakes();
     const count = eng.agentWatchCount ? eng.agentWatchCount('agent:agent-1') : null, recCount = recordCount();
+    const convFilter = filters[`f-${KEY}`] ? filters[`f-${KEY}`].rules.map((r) => r.value) : null;
     const newRow = eng.store.index.live()[KEY_NEW] || null;
     const room = ((eng.store.index.live()[KEY] || {}).watchers || []).find((x) => x && x.principal && x.principal.id === 'agent-1') || null;
     const rewatch = await eng.agentWatch(AG, KEY, { delivery: 'next-turn' });
     eng.stop();
-    say({ role, count, recCount, newRow: newRow ? { watchers: (newRow.watchers || []).map((x) => x && x.principal && x.principal.id) } : null, roomW: room ? { notify: room.notify, delivery: room.delivery || null, digestMinutes: room.digestMinutes, dailyWakeCap: room.dailyWakeCap } : null,
+    say({ role, count, recCount, convFilter, newRow: newRow ? { watchers: (newRow.watchers || []).map((x) => x && x.principal && x.principal.id) } : null, roomW: room ? { notify: room.notify, delivery: room.delivery || null, digestMinutes: room.digestMinutes, dailyWakeCap: room.dailyWakeCap } : null,
       journal: lines.filter((l) => /grain|completed|carried|without access/.test(l)), roomWatchers, rule: pa ? { pattern: pa.pattern } : null,
       watcher: w ? { notify: w.notify, mode: w.mode, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, delivery: w.delivery || null, filter: w.filterId && filters[w.filterId] ? filters[w.filterId].rules : null } : null,
       block: Object.keys(blocks).filter((k) => k.endsWith('|agent:agent-1')), held, flushed: fl ? !!fl.ok : null, delivered: delivered.filter((d) => d.cid === 'agent-1').map((d) => /deploy at noon/.test(d.text) && !/lunch at noon/.test(d.text)), rewatch: { ok: !!rewatch.ok, code: rewatch.code || null } });
@@ -298,7 +337,10 @@ const INDEX_ONLY = MUT.write('src/server/channels-access.js', anchored(anchored(
 const MUST1_OFF = MUT.write('src/server/channels-access.js', anchored(asrc, "    const unlandedRow = kind === 'conversation' && typeof store.index.landed === 'function' && !store.index.landed(site.key);\n", '    const unlandedRow = false;\n', 'an act on a conversation the disk does not list, paced'), 'must1-off');
 const csrc = fs.readFileSync(path.join(REPO, 'src/server/channels-grants.js'), 'utf8');
 const MUST2_OFF = MUT.write('src/server/channels-grants.js', anchored(csrc, '      const emptied = !ch.to.length && clearedAt && doorIndex(DOORS.watch).rows.has(String(res));\n', '      const emptied = false;\n', 'an emptied watch row deleted from the record'), 'must2-off');
-const BY_CLOCK = MUT.write('src/server/channels-access.js', anchored(asrc, 'updatedAt: stampAfter(pw, t),', 'updatedAt: t,', 'the stamp the bare clock (not monotonic)'), 'by-clock');
+const BY_CLOCK = MUT.write('src/server/channels-access.js', anchored(asrc, 'updatedAt: stamp,', 'updatedAt: t,', 'the stamp the bare clock (not monotonic)'), 'by-clock');
+const LIFT_ALL = MUT.write('src/server/channels-access.js', anchored(asrc, '          for (const pk of Array.isArray(row.blocks) ? scopeBlocksOf(scope).keys() : []) {\n', '          for (const pk of scopeBlocksOf(scope).keys()) {\n', 'a row written short lifts its scope\'s blocks'), 'lift-all');   // stale-pins: kept — the RED plants the cure's lift-every-block walk back
+const INDEX_LAST = MUT.write('src/server/channels-access.js', anchored(asrc, /    const recordLast = Math\.max\(0, [^\n]*\n/, '    const recordLast = 0;\n', '«last» read from the index alone'), 'index-last');
+const REUSE_ANY = MUT.write('src/server/channels-access.js', anchored(anchored(asrc, ' && /\\|/.test(prevWatcher.filterId)) return prevWatcher.filterId;', ') return prevWatcher.filterId;', 'any f- id reused as an inline id'), '  const inlineFilterId = (fid) => /\\|/.test(fid);', '  const inlineFilterId = (fid) => /\\|/.test(fid) || /^f-/.test(fid);', 'any f- body carried'), 'reuse-any');
 const NO_REMOVAL = MUT.write('src/server/channels-access.js', anchored(asrc, '            if (apply && gone.length) holder.watchers = holder.watchers.filter((w) => !gone.includes(w));\n', '', 'the completion keeps a removed watcher'), 'no-removal');
 const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
 const SWEEP_FIRST = MUT.write('src/server/channels-engine.js', anchored(esrc, '    if (owedAtBoot.completed.length) track(completing.then(sweepNow)); else sweepNow();\n', '    sweepNow();\n', 'the boot sweep before the completion'), 'sweep-first');
@@ -309,7 +351,7 @@ const t0 = Date.now();
 const killThenBoot = async (dir, mutant, { role = 'write', wm = '', mode = 'all', boots = 1 } = {}) => { const w2 = await child(role, path.join(ROOT, dir), { mutant: wm, mode }); const b = await child('boot', path.join(ROOT, dir), { mutant }); const b2 = boots > 1 ? await child('boot', path.join(ROOT, dir)) : null; return { w2, b, b2 }; };
 // THE WORLDS, at most FOUR at once (each a real node process or a chain of them)
 const pool = async (jobs, n) => { const out = new Array(jobs.length); let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < jobs.length) { const k = i++; out[k] = await jobs[k](); } })); return out; };
-const [W1, RED_W, RED_B, RED_R, RED_S, RED_A, M1, M1R, M2, M2R, BE, BER, BIG, GONE] = await pool([
+const [W1, RED_W, RED_B, RED_R, RED_S, RED_A, M1, M1R, M2, M2R, BE, BER, BIG, GONE, BS, BSR, RS, RSR, FL, FLR] = await pool([
   async () => { const w = await child('write', D1); const b1 = await child('boot', D1); const b2 = await child('boot', D1); return { w, b1, b2 }; },
   () => child('write', path.join(ROOT, 'w-red'), { mutant: ACC(OLD_DURABLE), boundMs: 2500 }),
   () => killThenBoot('w2', ACC(NO_COMPLETION)), () => killThenBoot('w3', ACC(NO_REMOVAL)), () => killThenBoot('w4', ENGF(SWEEP_FIRST)), () => killThenBoot('w5', ACC(INDEX_ONLY)),
@@ -318,6 +360,9 @@ const [W1, RED_W, RED_B, RED_R, RED_S, RED_A, M1, M1R, M2, M2R, BE, BER, BIG, GO
   () => killThenBoot('be', '', { role: 'write-edit' }), () => killThenBoot('ber', '', { role: 'write-edit', wm: ACC(BY_CLOCK) }),   // the stamp is the WRITER's
   () => child('write-big', path.join(ROOT, 'big'), { boundMs: 2500 }),
   () => killThenBoot('gone', '', { role: 'write-gone', boots: 2 }),
+  () => killThenBoot('bs', '', { role: 'write-blockshort', mode: 'index' }), () => killThenBoot('bsr', ACC(LIFT_ALL), { role: 'write-blockshort', mode: 'index' }),
+  () => killThenBoot('rs', '', { role: 'write-reset' }), () => killThenBoot('rsr', '', { role: 'write-reset', wm: ACC(INDEX_LAST) }),
+  () => killThenBoot('fl', '', { role: 'write-filter', boots: 2 }), () => killThenBoot('flr', '', { role: 'write-filter', wm: ACC(REUSE_ANY) }),
 ], 4);
 console.log(`    (the fourteen worlds, at most four at once, in ${Date.now() - t0} ms)`);
 
@@ -407,5 +452,22 @@ console.log('④ r937 — the law: an act told «done» is on the index\'s disk 
   const once = (j) => (j || []).filter((l) => /not completed \(said once a version\).*the index lists no such conversation/.test(l)).length;
   console.log('    (c) a row the boot cannot complete: ' + J({ first: g1.journal, second: g2.journal }));
   ok(!!(GONE.w2.facts && GONE.w2.facts.gone && once(g1.journal) === 1 && once(g2.journal) === 0), '(c) a carrying row whose conversation the index no longer lists is said ONCE — the first boot says it, the next says nothing', { first: g1.journal, second: g2.journal });
+}
+console.log('⑤ r1040 (the follow): a row written short lifts nothing; one stamp an act over the index AND the record; a conversation\'s own filter is its own');
+{
+  const w = BS.w2.facts || {}, b = BS.b.facts || {}, r = BSR.b.facts || {};
+  console.log('    1. the writer: ' + J(w) + ' · boot: ' + J({ block: b.block, rewatch: b.rewatch }) + ' · RED: ' + J({ block: r.block, rewatch: r.rewatch }));
+  ok(!!(w.save && w.save.answered && w.save.ok && w.rowBlocks === 'absent' && b.rewatch && b.rewatch.code === 'removed-by-user' && J(b.block) === J(['conversation:fake-poll/fake-poll-ops|agent:agent-1'])),
+    '1. a save whose blocks the record cannot carry (a key it cannot read) is written SHORT — no blocks on the row — and the boot LIFTS NOTHING: the agent\'s own re-watch still refused, its block stands', { w, b });
+  ok(!!(r.rewatch && r.rewatch.ok === true && J(r.block) === J([])), 'RED «a row written short lifts its scope\'s blocks»: the boot deletes the person\'s block and the agent watches again', r);
+  const rb = RS.b.facts || {}, rr = RSR.b.facts || {};
+  console.log('    2. removed then set again (the clock an hour back), a kill: ' + J({ writer: RS.w2.facts, boot: rb.roomW, red: rr.roomW }));
+  ok(!!(RS.w2.facts && RS.w2.facts.removed && RS.w2.facts.set && J(rb.roomW) === J({ notify: 'digest', delivery: 'next-turn', digestMinutes: 30, dailyWakeCap: 1 })), '2. a watch removed and set again inside the pace, the clock an hour back between: the boot completes the person\'s LAST act — its stamp after the record\'s own (the removal\'s `cleared`)', rb.roomW);
+  ok(!!(rr.roomW && rr.roomW.notify === 'wake' && rr.roomW.dailyWakeCap === 7), 'RED «last read from the index alone»: the boot keeps the removed settings — a billed wake where the person chose next turn', rr.roomW);
+  const fw = FL.w2.facts || {}, f1 = FL.b.facts || {}, f2 = (FL.b2 && FL.b2.facts) || {}, fr = FLR.b.facts || {};
+  console.log('    3. the conversation\'s own filter: ' + J({ writer: fw, boot1: f1.convFilter, boot2: f2.convFilter, red: fr.convFilter, redWriter: FLR.w2.facts }));
+  ok(!!(fw.inline && fw.edit && /^f-/.test(fw.fid || '') && !/\|/.test(fw.fid || '') && /\|/.test(fw.watcherFilter || '') && J(f1.convFilter) === J(['gamma']) && J(f2.convFilter) === J(['gamma'])),
+    '3. the conversation\'s own filter (its route\'s id, no bar) is never an inline id: the watcher\'s inline filter gets its own; the route\'s edit stands at EVERY boot', { fw, f1: f1.convFilter, f2: f2.convFilter });
+  ok(!!(fr.convFilter && J(fr.convFilter) !== J(['gamma'])), 'RED «any f- id reused and carried»: the route\'s edit is put back to the record\'s older body at the boot', fr.convFilter);
 }
 report();

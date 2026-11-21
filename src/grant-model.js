@@ -149,7 +149,8 @@ const textOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= TEXT_
  * whose index half never landed (never read by `admits`):
  *   `rule`    a `rule:<id>` row of channel-reach / channel-watch: `{adapterId, pattern, at?}` — the rule's account and its pattern
  *   `blocks`  a channel-watch row: `[{key, at?, by?}]` — the agents whose OWN watch the person removed at this grain (the mark
- *             that refuses their own re-watch there)
+ *             that refuses their own re-watch there); r1040: an EMPTY list is kept — a row that carried the grain's blocks says
+ *             so even when there are none, and a row without the field (written short, or older) carried none: the boot lifts nothing
  *   `cleared` a channel-watch row a grain write EMPTIED: the instant (r937 MUST 2 — the row is kept, so the boot can redo the
  *             removal its index copy may not have landed)
  * A row holding only these is a row (the grants store keeps it). → `{fields, bad}` — `bad` names the first field that cannot be
@@ -176,7 +177,7 @@ function rowFieldsOf(door, resource, src) {
       out.push({ key, ...(Number(b.at) > 0 && Number(b.at) <= 8.64e15 ? { at: Number(b.at) } : {}), ...(typeof b.by === 'string' && b.by ? { by: b.by.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 64) } : {}) });
     }
     if (!readable) bad = bad || 'blocks';
-    else if (out.length) fields.blocks = out;
+    else fields.blocks = out;   // r1040: [] kept — «the record carried this grain's blocks: none»
   }
   if (o.cleared !== undefined && o.cleared !== null) {   // r937 MUST 2
     const c = Number(o.cleared);
