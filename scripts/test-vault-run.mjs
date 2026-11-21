@@ -955,6 +955,81 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
   const n = sw.door.sweep();
   await sleep(30);
   ok(n === 1 && !fs.existsSync(gone) && fs.existsSync(kept) && fs.existsSync(path.join(kept, 'f0')) && !alive(orphan.pid), 'the BOOT SWEEP: the folder of a hub that is GONE is shredded after its marked orphan child (deaf to SIGTERM) is ended; the folder of a hub that LIVES (another hub on the box) is never touched', { n, gone: fs.existsSync(gone), kept: fs.existsSync(kept), orphan: alive(orphan.pid) });
+  // r1152 — A SWEEP REMOVES ONLY WHAT IT CAN PROVE IS ITS OWN DEAD THING: a folder of the door's name that carries NO owner mark
+  // is not the door's to judge (another program's, a suite's scratch, a second hub's before its mark) — LEFT, its file untouched;
+  // beside it a MARKED folder of a dead owner is still shredded and a live one's kept (the plant proves itself before the sweep)
+  const unmarked = path.join(sw.runRoot, DOOR.RUN_DIR_PREFIX + 'nomark01'); fs.mkdirSync(unmarked, { mode: 0o700 }); fs.writeFileSync(path.join(unmarked, 'f0'), 'not the door\'s');
+  const gone2 = mkRunDir(DOOR.RUN_DIR_PREFIX + 'gone02', deadId);
+  const planted = fs.existsSync(path.join(unmarked, 'f0')) && !fs.existsSync(path.join(unmarked, DOOR.OWNER_FILE)) && fs.existsSync(path.join(gone2, DOOR.OWNER_FILE));
+  const n2 = sw.door.sweep();
+  ok(planted && n2 === 1 && fs.existsSync(unmarked) && fs.readFileSync(path.join(unmarked, 'f0'), 'utf8') === 'not the door\'s' && !fs.existsSync(gone2) && fs.existsSync(kept),
+    'r1152: the sweep removes only what it can PROVE is its own dead thing — a folder of its name with NO owner mark is LEFT (its file untouched); a marked folder of a dead owner is shredded; a live owner\'s is kept', { planted, n2, unmarked: fs.existsSync(unmarked), gone2: fs.existsSync(gone2), kept: fs.existsSync(kept) });
+  // RED — today's sweep (an anchored copy without the «no mark ⇒ left» line) takes the unmarked folder
+  {
+    const SRCs = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const NEWB = "      if (!owner || typeof owner !== 'object' || !Number.isInteger(Number(owner.pid))) continue;\n      // this hub's own run is its pid AND its start: a container restarted under the same small pid is NOT this hub, so its dead\n      // folder is judged, never kept forever by the pid alone — and ANOTHER hub that lives (or one that cannot be proven gone)\n      // keeps its runs (the review)\n      if (PI.aliveIdentity(owner) !== false) continue;\n";
+    const OLDB = "      if (owner && Number(owner.pid) === process.pid) continue;   // this hub's own run\n      if (owner && PI.aliveIdentity(owner) !== false) continue;\n";
+    const oldSweep = M.load('src/server/vault-run-door.js', anchored(SRCs, NEWB, OLDB, 'test-vault-run ⑥b r1152 sweep-unmarked (the release\'s two lines)'), 'r1152-sweep-unmarked');
+    const ow = await world({ doorMod: oldSweep });
+    const um = path.join(ow.runRoot, DOOR.RUN_DIR_PREFIX + 'nomark02'); fs.mkdirSync(um, { mode: 0o700 }); fs.writeFileSync(path.join(um, 'f0'), 'not the door\'s');
+    const before = fs.existsSync(path.join(um, 'f0'));
+    const nr = ow.door.sweep();
+    ok(before && nr === 1 && !fs.existsSync(um), 'RED — today\'s sweep (the copy\'s plant proves itself: the unmarked folder was there): it SHREDS the unmarked folder of its name — the leg above goes red there', { before, nr, left: fs.existsSync(um) });
+    // THIS HUB'S OWN RUN IS ITS PID AND ITS START: a folder marked with this very pid but ANOTHER start (a container restarted
+    // under the same small pid) is a dead thing — shredded; this hub's real own folder is kept
+    const me = R('src/proc-identity.js').identityOf(process.pid);
+    const recycledOf = (w) => { const d = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'recycled01'); fs.mkdirSync(d, { mode: 0o700 }); fs.writeFileSync(path.join(d, DOOR.OWNER_FILE), JSON.stringify({ ...me, starttime: (Number(me && me.starttime) || 1) + 987654 })); fs.writeFileSync(path.join(d, 'f0'), VALUE, { mode: 0o600 }); return d; };
+    const mineOf = (w) => { const d = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'mine01'); fs.mkdirSync(d, { mode: 0o700 }); fs.writeFileSync(path.join(d, DOOR.OWNER_FILE), JSON.stringify(me)); return d; };
+    const rw = await world(), rec = recycledOf(rw), mine = mineOf(rw);
+    const n3 = rw.door.sweep();
+    ok(!!me && me.starttime != null && n3 === 1 && !fs.existsSync(rec) && fs.existsSync(mine), 'r1152: this hub\'s own run is its pid AND its start — a folder marked with this pid but another start (a recycled pid) is shredded as the dead thing it is; this hub\'s real own folder is kept', { start: me && me.starttime, n3, recycled: fs.existsSync(rec), mine: fs.existsSync(mine) });
+    const pidOnly = M.load('src/server/vault-run-door.js', anchored(SRCs, "      if (PI.aliveIdentity(owner) !== false) continue;\n", "      if (Number(owner.pid) === process.pid) continue;\n      if (PI.aliveIdentity(owner) !== false) continue;\n", 'test-vault-run ⑥b r1152 own-by-pid-only'), 'r1152-own-by-pid-only');
+    const pw = await world({ doorMod: pidOnly }), rec2 = recycledOf(pw);
+    const np = pw.door.sweep();
+    ok(fs.existsSync(path.join(rec2, DOOR.OWNER_FILE)) && np === 0 && fs.existsSync(rec2), 'RED — a sweep that keeps «this hub\'s own run» by the pid alone (its plant proves itself: the recycled folder carries its mark): the dead folder is KEPT forever — the leg above goes red there', { np, kept: fs.existsSync(rec2) });
+    // THE MARK GOES LAST: shredding a dead folder unlinks every other file first and the mark last (a hub ended mid-shred leaves a
+    // marked folder the next sweep finishes; a mark shredded first would leave its values unmarked forever)
+    const unlinkOrder = async (doorMod) => {
+      const w = await world({ doorMod });
+      const d = path.join(w.runRoot, DOOR.RUN_DIR_PREFIX + 'gone03'); fs.mkdirSync(d, { mode: 0o700 });
+      fs.writeFileSync(path.join(d, DOOR.OWNER_FILE), JSON.stringify(deadId)); fs.writeFileSync(path.join(d, 'f0'), VALUE, { mode: 0o600 }); fs.writeFileSync(path.join(d, 'f1'), VALUE, { mode: 0o600 });
+      const order = [], un0 = fs.unlinkSync;
+      fs.unlinkSync = function (p, ...rest) { try { if (String(p).startsWith(d + path.sep)) order.push(path.basename(String(p))); } catch { } return un0.call(this, p, ...rest); };
+      let n = null; try { n = w.door.sweep(); } finally { fs.unlinkSync = un0; }
+      return { n, order, gone: !fs.existsSync(d) };
+    };
+    const ul = await unlinkOrder(DOOR);
+    ok(ul.n === 1 && ul.gone && ul.order.length === 3 && ul.order[2] === DOOR.OWNER_FILE, 'r1152: a dead folder is shredded MARK LAST — every value file first, then .owner, then the folder', ul);
+    const markFirst = M.load('src/server/vault-run-door.js', anchored(SRCs, "  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n", "  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));\n  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));\n", 'test-vault-run ⑥b r1152 mark-first'), 'r1152-mark-first');
+    const ulR = await unlinkOrder(markFirst);
+    ok(ulR.n === 1 && ulR.order.length === 3 && ulR.order[0] === DOOR.OWNER_FILE, 'RED — a shred that takes the mark FIRST (its plant proves itself: three files were unlinked): the mark-last leg goes red there', ulR);
+  }
+  // THE ORDER THE LAW STANDS ON (pinned): in a run folder the door's mark is the FIRST file made — before any value file — so a
+  // folder with no mark never holds a value of the door's. Every O_CREAT open under the world's run root is recorded
+  {
+    const orderOf = async (doorMod) => {
+      const ow = await world({ doorMod });
+      openRow(ow);
+      const made = [], under = (p) => { try { return String(p).startsWith(ow.runRoot + path.sep); } catch { return false; } };
+      const creates = (flags) => (typeof flags === 'number' ? !!(flags & fs.constants.O_CREAT) : /[wax]/.test(String(flags == null ? 'r' : flags)));
+      const saved = { openSync: fs.openSync, writeFileSync: fs.writeFileSync, copyFileSync: fs.copyFileSync, renameSync: fs.renameSync, mkdirSync: fs.mkdirSync };   // every road a file is made by
+      fs.openSync = function (p, flags, ...rest) { if (under(p) && creates(flags)) made.push(path.basename(String(p))); return saved.openSync.call(this, p, flags, ...rest); };
+      fs.writeFileSync = function (p, ...rest) { if (under(p)) made.push(path.basename(String(p))); return saved.writeFileSync.call(this, p, ...rest); };
+      fs.copyFileSync = function (a, b, ...rest) { if (under(b)) made.push(path.basename(String(b))); return saved.copyFileSync.call(this, a, b, ...rest); };
+      fs.renameSync = function (a, b, ...rest) { if (under(b)) made.push(path.basename(String(b))); return saved.renameSync.call(this, a, b, ...rest); };
+      let r = null;
+      try { ({ r } = await runAnswered(ow, ['--file', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'ran', path.join(ow.work, 'ran.txt')])); } finally { Object.assign(fs, saved); }
+      return { ok: !!(r && r.ok), code: r && r.code, made };
+    };
+    const real = await orderOf(DOOR);
+    ok(real.ok && real.made[0] === DOOR.OWNER_FILE && real.made.includes('f0') && real.made.indexOf(DOOR.OWNER_FILE) < real.made.indexOf('f0'),
+      'r1152: the order the law stands on — a run folder\'s FIRST file is the door\'s mark (.owner), then its value file (f0): a folder with no mark holds no value of the door\'s', real);
+    const SRCo = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const OWN2 = "      const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);\n      try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); }\n";
+    const late = M.load('src/server/vault-run-door.js', anchored(anchored(SRCo, OWN2, '', 'test-vault-run ⑥b r1152 mark-late (cut)'), '      const rec = { conv: caller.conversationId', "      { const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600); try { fs.writeSync(ofd, JSON.stringify(hubIdentity || { pid: process.pid })); } finally { fs.closeSync(ofd); } }\n      const rec = { conv: caller.conversationId", 'test-vault-run ⑥b r1152 mark-late (after)'), 'r1152-mark-late');
+    const lateR = await orderOf(late);
+    ok(lateR.ok && lateR.made.includes(DOOR.OWNER_FILE) && lateR.made.includes('f0') && lateR.made.indexOf('f0') < lateR.made.indexOf(DOOR.OWNER_FILE), 'RED — a door that writes a VALUE file before its mark (an anchored copy: the mark moved after the files; its run still runs — the plant is where it claims): the order leg above goes red there', lateR);
+  }
   try { liveKid.kill('SIGKILL'); } catch { }
   // THE STORE'S MARK: a non-hex mark reads as empty (never a throw); a restored OLDER copy is a replay
   const mw = await world();

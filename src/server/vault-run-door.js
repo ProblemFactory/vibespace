@@ -330,7 +330,12 @@ function endMarked(mark) {
   return n;
 }
 function shredDir(dir) {
-  try { for (const n of fs.readdirSync(dir)) shredFile(path.join(dir, n)); } catch { }
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { }
+  // r1152: the door's MARK goes LAST — a hub ended mid-shred (a kill, a crash) leaves a folder that still carries its mark, so the
+  // next start's sweep (which judges only a marked folder) finishes the job; shredded first, its values would be left unmarked forever
+  for (const n of names) if (n !== OWNER_FILE) shredFile(path.join(dir, n));
+  if (names.includes(OWNER_FILE)) shredFile(path.join(dir, OWNER_FILE));
   try { fs.rmdirSync(dir); } catch { }
 }
 /** The command as a shell would read it back — the card, the audit (references stay references). */
@@ -2563,8 +2568,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       let st = null; try { st = fs.lstatSync(p); } catch { continue; }
       if (!st.isDirectory() || (typeof process.getuid === 'function' && st.uid !== process.getuid())) continue;
       let owner = null; try { owner = JSON.parse(readBounded(path.join(p, OWNER_FILE), 4096).toString('utf8')); } catch { owner = null; }
-      if (owner && Number(owner.pid) === process.pid) continue;   // this hub's own run
-      if (owner && PI.aliveIdentity(owner) !== false) continue;   // ANOTHER hub that lives (or one that cannot be proven gone): its runs are its own (the review)
+      // r1152 (主开发's law — A SWEEP REMOVES ONLY WHAT IT CAN PROVE IS ITS OWN DEAD THING): a folder of this name that carries NO
+      // owner mark the door could have written is not the door's to judge — it is LEFT. The door writes its mark right after it
+      // makes the folder and BEFORE any value file (spawnRun: mkdtemp, then .owner, then the f<slot> files), so a folder with no
+      // mark holds no value of the door's: it is another program's, a suite's scratch folder (a run root on the shared temp folder
+      // shredded a running suite's copies — the red two lanes met on 2026-11-21), or a second hub's in the instant before its mark
+      if (!owner || typeof owner !== 'object' || !Number.isInteger(Number(owner.pid))) continue;
+      // this hub's own run is its pid AND its start: a container restarted under the same small pid is NOT this hub, so its dead
+      // folder is judged, never kept forever by the pid alone — and ANOTHER hub that lives (or one that cannot be proven gone)
+      // keeps its runs (the review)
+      if (PI.aliveIdentity(owner) !== false) continue;
       endMarked(e);   // the children that outlived their hub end first — then the files
       shredDir(p); n++;
     }
