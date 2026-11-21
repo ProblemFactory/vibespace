@@ -10,7 +10,9 @@
 //  ③ A LISTENING SERVER'S LATER ERROR AFTER A STAY takes the boot's own fatal road (serverFatal: exit 1, said); RED: the stay's error
 //     handler without its «listening» branch ⇒ read as a failed re-listen (exit 75)
 //  ④ A SUCCESSOR START THAT FAILS WITH EMFILE inside a real daemon (its table filled around the start, released after it): the error
-//     is heard and the daemon STAYS; RED: the successor's error listener cut (the shape before B-147f) ⇒ the unheard error ends it
+//     is heard and the daemon STAYS; RED: the successor's error listener cut (the shape before B-147f) ⇒ the unheard error ends it.
+//     The table is bounded first (prlimit --nofile=1024, said if it fails) and the fill stops at 4096: no prlimit on the machine ⇒ ④
+//     is SKIPPED BY NAME, never a fill of whatever table the daemon inherited
 // Every wait is bounded on what happened; the roads are waited for together.
 // Run: node scripts/test-agentd-stay-window.mjs
 import fs from 'node:fs';
@@ -55,12 +57,13 @@ const plantAfterUnlinks = (src, code) => {
 };
 const serverName = (/([\w$]+)\.removeAllListeners\("error"\);\s*let [\w$]+ = false;/.exec(bsrc) || [])[1];
 const plantInStayListening = (src, code) => { const i = src.indexOf('const stayListening = () => {'); return i < 0 ? src : src.slice(0, i + 'const stayListening = () => {'.length) + '\n' + code + '\n' + src.slice(i + 'const stayListening = () => {'.length); };
+const PRLIMIT = (() => { try { execFileSync('prlimit', ['--version'], { stdio: 'ignore', timeout: 5000 }); return true; } catch { return false; } })();
 const fillAroundStart = (src) => {   // the file table FULL during the successor's start, released right after it
   const s0 = src.indexOf('spawnNext: () => {'); if (s0 < 0) return src;
   const re = /return ([\w$]*startSuccessor[\w$]*)\(/g; re.lastIndex = s0; const m = re.exec(src); if (!m) return src;
   const end = src.indexOf(';', m.index); if (end < 0) return src;
   const call = src.slice(m.index + 'return '.length, end);
-  return src.slice(0, m.index) + `{ const __fs = require("fs"); const __h = []; try { for (let __i = 0; __i < 300000; __i++) __h.push(__fs.openSync("/dev/null", "r")); } catch { } let __r; try { __r = ${call}; } finally { for (const __f of __h) { try { __fs.closeSync(__f); } catch { } } } return __r; }` + src.slice(end + 1);
+  return src.slice(0, m.index) + `{ const __fs = require("fs"); const __h = []; try { for (let __i = 0; __i < 4096; __i++) __h.push(__fs.openSync("/dev/null", "r")); } catch { } let __r; try { __r = ${call}; } finally { for (const __f of __h) { try { __fs.closeSync(__f); } catch { } } } return __r; }` + src.slice(end + 1);
 };
 const muts = {
   thirdLock: plantAfterUnlinks(bsrc, ({ fs: F, lock }) => `${F}.writeFileSync(${lock}, String(process.env.VS_PLANT_THIRD || ""));`),
@@ -121,23 +124,24 @@ try {
   kids.push(third);
   const GO = path.join(T, 'third-sock.go');
   start(W1, { env: { VS_PLANT_THIRD: String(third.pid) } }); start(W2, { env: { VS_PLANT_GO: GO } }); start(W3); start(W3r);
-  start(W4, { node: process.execPath }); start(W4r, { node: process.execPath });   // ④: the node is THERE — only the full table fails its start
-  const ALL = [W1, W2, W3, W3r, W4, W4r], L = {};
+  if (PRLIMIT) { start(W4, { node: process.execPath }); start(W4r, { node: process.execPath }); }   // ④: the node is THERE — only the full table fails its start
+  const ALL = [W1, W2, W3, W3r, ...(PRLIMIT ? [W4, W4r] : [])], L = {};
   await Promise.all(ALL.map(async (d) => { L[d.name] = await sockLink(d); }));
   const up = ALL.every((d) => L[d.name] && L[d.name].ack.op === 'hello-ack');
-  ok(up, `(six real daemons answer hello on their sockets — ${realVersion})`, Object.fromEntries(Object.entries(L).map(([k, v]) => [k, v && v.ack && v.ack.op])));
+  ok(up, `(${ALL.length} real daemons answer hello on their sockets — ${realVersion})`, Object.fromEntries(Object.entries(L).map(([k, v]) => [k, v && v.ack && v.ack.op])));
   // ②'s third process: it listens on W2's socket path the moment the GO file is written (spawnNext's unlinks done)
   const sock2 = L[W2.name] && L[W2.name].p;
   const holder = spawn(process.execPath, ['-e', `const fs = require('fs'), net = require('net'); const go = ${JSON.stringify(GO)}, p = ${JSON.stringify(sock2 || '')}; const t = setInterval(() => { if (fs.existsSync(go)) { clearInterval(t); net.createServer((c) => c.end()).listen(p); } }, 5); setInterval(() => { }, 1000);`], { stdio: 'ignore' });
   kids.push(holder);
   fs.unlinkSync(NODE);   // ①–③: a successor started from it cannot start
-  for (const d of [W4, W4r]) { try { execFileSync('prlimit', ['--pid', String(d.child.pid), '--nofile=1024:'], { stdio: 'ignore', timeout: 5000 }); } catch { } }   // ④: a bounded table to fill (no prlimit: the one inherited)
+  const bounded = {};   // ④: a bounded table to fill — a failed bound is SAID in the leg, never a fill of the inherited one
+  if (PRLIMIT) for (const d of [W4, W4r]) { try { execFileSync('prlimit', ['--pid', String(d.child.pid), '--nofile=1024:'], { stdio: 'ignore', timeout: 5000 }); bounded[d.name] = true; } catch (e) { bounded[d.name] = String((e && e.message) || e).slice(0, 160); } }
   const r = {};
   await Promise.all(ALL.map(async (d) => { const k = L[d.name]; r[d.name] = k ? (await push(k.L)).op : 'NO LINK'; try { k && k.s.destroy(); } catch { } }));
   await Promise.all([
     until(() => W1.exited && W2.exited, 10000),
     until(() => W3.exited && W3r.exited, 10000),
-    until(() => (stayed(W4) || W4.exited) && W4r.exited, 10000),
+    until(() => !PRLIMIT || ((stayed(W4) || W4.exited) && W4r.exited), 10000),
   ]);
   const lockedBy = W1.lockPid();
   ok(r[W1.name] === 'upgrade-done' && !!W1.exited && W1.exited.code === 75 && /upgrade hand-over: it could not stay \(the singleton lock is another agent's, or it could not be opened\) — exit 75/.test(W1.log()) && lockedBy === String(third.pid) && third.exitCode === null,
@@ -149,10 +153,12 @@ try {
     `③ a listening server's error AFTER a stay takes the boot's own fatal road: exit ${W3.exited && W3.exited.code}, «server error: …» said`, { exited: W3.exited, log: W3.log().split('\n').slice(-3) });
   ok(stayed(W3r) && !!W3r.exited && W3r.exited.code === 75 && /did not listen again \(EPLANTED\) — exit 75/.test(W3r.log()),
     `RED ③ the stay's handler without its «listening» branch ⇒ the later error read as a failed re-listen (exit ${W3r.exited && W3r.exited.code})`, { exited: W3r.exited, log: W3r.log().split('\n').slice(-3) });
-  ok(r[W4.name] === 'upgrade-done' && stayed(W4) && W4.exited === null && /the successor could not be started: E[MN]FILE/.test(W4.log()),
-    `④ a successor start that fails with EMFILE inside a real daemon (its table full during the start): the error is HEARD and the daemon STAYS, listening again — alive while the red's has ended`, { exited: W4.exited, log: W4.log().split('\n').filter((l) => /successor|stay/.test(l)).slice(-4) });
-  ok(r[W4r.name] === 'upgrade-done' && !!W4r.exited && W4r.exited.code !== 0 && W4r.exited.code !== 75 && !/the successor could not be started: E[MN]FILE/.test(W4r.log()),
-    `RED ④ the successor's error listener cut (the shape before B-147f) ⇒ the unheard EMFILE ends the daemon (exit ${W4r.exited && W4r.exited.code})`, { exited: W4r.exited, log: W4r.log().split('\n').slice(-3) });
+  if (PRLIMIT) {
+  ok(bounded[W4.name] === true && r[W4.name] === 'upgrade-done' && stayed(W4) && W4.exited === null && /the successor could not be started: E[MN]FILE/.test(W4.log()),
+    `④ a successor start that fails with EMFILE inside a real daemon (its table full during the start): the error is HEARD and the daemon STAYS, listening again — alive while the red's has ended`, { bounded: bounded[W4.name], exited: W4.exited, log: W4.log().split('\n').filter((l) => /successor|stay/.test(l)).slice(-4) });
+  ok(bounded[W4r.name] === true && r[W4r.name] === 'upgrade-done' && !!W4r.exited && W4r.exited.code !== 0 && W4r.exited.code !== 75 && !/the successor could not be started: E[MN]FILE/.test(W4r.log()),
+    `RED ④ the successor's error listener cut (the shape before B-147f) ⇒ the unheard EMFILE ends the daemon (exit ${W4r.exited && W4r.exited.code})`, { bounded: bounded[W4r.name], exited: W4r.exited, log: W4r.log().split('\n').slice(-3) });
+  } else console.log('  – ④ SKIPPED BY NAME: no prlimit on this machine — the daemon\'s table cannot be bounded, and the leg never fills the one it inherited');
 } catch (e) { fail++; console.error('  ✗ threw: ' + ((e && e.stack) || e)); }
 finally {
   endKids('SIGTERM');

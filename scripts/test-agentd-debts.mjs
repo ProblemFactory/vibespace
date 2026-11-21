@@ -4,10 +4,15 @@
 //  ① A LOCK THAT NAMES NO PROCESS (r569, older than B-147f): an EMPTY lock (its open succeeded, its write failed: ENOSPC) was read as
 //     pid 0 — process.kill(0, 0) SUCCEEDS (it signals the group) — so every later start was refused for good. Now: an empty lock, or
 //     one naming no number, older than a write's moment is STALE — the agent starts and holds it; a FRESH empty lock (another agent
-//     between its open and its write) is refused, exit 3. RED: the cure cut ⇒ the aged empty lock refuses the start, exit 3
+//     between its open and its write) is refused, exit 3 — planted a minute AHEAD, so no slow start can age it out (the scene's
+//     daemons start together). The lock's write REALLY failing (a file-size limit of 0: the kernel refuses it, EFBIG — node ignores SIGXFSZ):
+//     the agent refuses its OWN empty lock, exit 3, and never runs without it. RED: the cure cut ⇒ the aged empty lock refuses the
+//     start, exit 3; RED: the write's error swallowed ⇒ the start goes past the singleton holding an EMPTY lock. No prlimit on the
+//     machine ⇒ that scene is SKIPPED BY NAME
 //  ② THE PIPE CONVERSATION'S START (pipeSessions.open, the B-147f cure read only until now): the daemon's own copy of the input fifo
 //     is closed after the spawn — its descriptors grow by the attach's one tail a start, no more — and a start that never got a pid
-//     closes its three handles. Counted in the daemon's own table (/proc/<pid>/fd). RED: the fifo's close cut ⇒ one more a start;
+//     closes its three handles. Counted in the daemon's own table (/proc/<pid>/fd: Linux — elsewhere ② is SKIPPED BY NAME). RED: the
+//     fifo's close cut ⇒ one more a start;
 //     RED: the no-pid road's closes cut ⇒ three more a start
 //  ③ THE PID-0 KILL LAW IN THE STREAM MODULES (r569): every process.kill there is guarded by a real pid, and the five sites the
 //     B-147f fold guarded keep `pid > 0` beside their kill (a census by line; CONTROL a guard removed in a copy is named). Their
@@ -50,8 +55,9 @@ const muts = {
   noEmptyStale: bsrc.replace('if (!(pid > 0)) {', 'if (false) {'),
   fifoKept: bsrc.replace(/(\w+)\.closeSync\(errFd\);(\s*)\w+\.closeSync\(inFd\);/, '$1.closeSync(errFd);$2/* the daemon\'s copy of the fifo kept */'),   // the pipe start's (another road closes an inFd too)
   noPidKept: bsrc.replace('for (const fd of [inFd, outFd, errFd])', 'for (const fd of [])'),   // the no-pid road's loop (the spawn's own stdio array is the same three)
+  writeSwallowed: (() => { const re = /([\w$]+)\.writeSync\(([\w$]+), String\(process\.pid\)\);/g; return (bsrc.match(re) || []).length === 1 ? bsrc.replace(re, 'try { $1.writeSync($2, String(process.pid)); } catch { }') : bsrc; })(),   // the lock's write (the ONE such write) with its error swallowed
 };
-ok(!!realVersion && Object.values(muts).every((m) => m !== bsrc), `(the base: the built bundle ${realVersion}, its release keys emptied; three RED copies, each with one edit applied: ${Object.entries(muts).map(([k, m]) => `${k} ${m !== bsrc ? 'applied' : 'NOT APPLIED'}`).join(', ')})`);
+ok(!!realVersion && Object.values(muts).every((m) => m !== bsrc), `(the base: the built bundle ${realVersion}, its release keys emptied; ${Object.keys(muts).length} RED copies, each with one edit applied: ${Object.entries(muts).map(([k, m]) => `${k} ${m !== bsrc ? 'applied' : 'NOT APPLIED'}`).join(', ')})`);
 const HOMEN = path.join(T, 'home'); fs.mkdirSync(HOMEN, { recursive: true });   // never the person's HOME
 const tok = (p) => [p, '_'].join('') + crypto.randomBytes(12).toString('hex');   // built at run time (no token-shaped literal)
 const install = (name, src) => {
@@ -71,6 +77,16 @@ const start = (d) => {
   c.unref(); kids.push(c); d.child = c;
   d.exited = null; c.once('exit', (code, sig) => { d.exited = { code, sig }; });
 };
+const PRLIMIT = (() => { try { execFileSync('prlimit', ['--version'], { stdio: 'ignore', timeout: 5000 }); return true; } catch { return false; } })();
+const PROC = process.platform === 'linux' && fs.existsSync('/proc/self/fd');   // ②'s count reads the daemon's own table
+// the lock's write REALLY fails: under a file-size limit of 0 the kernel refuses every write to a file (EFBIG; node ignores SIGXFSZ) —
+// the lock's open succeeds, its write does not. Its stderr is kept (the refusal's words); its end is read at 'close' (stderr drained)
+const startNoWrite = (d) => {
+  const c = spawn('prlimit', ['--fsize=0', '--', process.execPath, path.join(d.root, 'current', 'agentd.js')], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, HOME: HOMEN, VIBESPACE_AGENTD_ROOT: d.root, VIBESPACE_DEVICE_ROOT: d.root } });
+  d.err = ''; c.stderr.on('data', (b) => { if (d.err.length < 8192) d.err += b; });
+  c.unref(); kids.push(c); d.child = c;
+  d.exited = null; c.once('close', (code, sig) => { d.exited = { code, sig }; });
+};
 const link = (stream, token) => {
   const inbox = []; let waiters = [];
   const mux = new Mux(stream, { onControl: (m) => { inbox.push(m); waiters = waiters.filter((w) => !w(m)); }, onData: () => { }, onDead: () => { } });
@@ -89,18 +105,29 @@ try {
   console.log('— ① A LOCK THAT NAMES NO PROCESS · ② THE PIPE CONVERSATION\'S START — real daemons of the built bundle');
   const aged = (d, text) => { fs.writeFileSync(d.lock, text); const t = new Date(Date.now() - 60000); fs.utimesSync(d.lock, t, t); };
   const E1 = install('empty-aged', bsrc), E2 = install('empty-aged-red', muts.noEmptyStale), E3 = install('empty-fresh', bsrc), E4 = install('word-aged', bsrc);
+  const E5 = install('write-fails', bsrc), E6 = install('write-fails-red', muts.writeSwallowed);
   const P1 = install('pipe', bsrc), P2 = install('pipe-fifo-red', muts.fifoKept), P3 = install('pipe-nopid-red', muts.noPidKept);
-  aged(E1, ''); aged(E2, ''); fs.writeFileSync(E3.lock, ''); aged(E4, 'not-a-pid\n');
-  for (const d of [E1, E2, E3, E4, P1, P2, P3]) start(d);
+  const ahead = (d, text) => { fs.writeFileSync(d.lock, text); const t = new Date(Date.now() + 60000); fs.utimesSync(d.lock, t, t); };   // a slow start cannot age it out
+  aged(E1, ''); aged(E2, ''); ahead(E3, ''); aged(E4, 'not-a-pid\n');
+  const PIPES = PROC ? [P1, P2, P3] : [];
+  for (const d of [E1, E2, E3, E4, ...PIPES]) start(d);
+  if (PRLIMIT) { startNoWrite(E5); startNoWrite(E6); }
   const holds = (d) => d.exited === null && d.lockPid() === String(d.child.pid);
   const pl = {};
   await Promise.all([
-    until(() => holds(E1) && holds(E4) && E2.exited && E3.exited, 10000),
-    ...[P1, P2, P3].map(async (d) => { pl[d.name] = await sockLink(d); }),
+    until(() => holds(E1) && holds(E4) && E2.exited && E3.exited && (!PRLIMIT || (E5.exited && E6.exited)), 10000),
+    ...PIPES.map(async (d) => { pl[d.name] = await sockLink(d); }),
   ]);
   ok(holds(E1) && holds(E4), `① an EMPTY lock, and one naming no number, older than a write's moment: STALE — the agent starts and holds it (pids ${E1.lockPid()}, ${E4.lockPid()})`, { e1: E1.exited, e4: E4.exited, log: E1.log().split('\n').slice(-3) });
-  ok(!!E3.exited && E3.exited.code === 3 && E3.lockPid() === '', `① a FRESH empty lock — another agent between its open and its write — is refused, exit 3 (${JSON.stringify(E3.exited)}), and left as it is`, E3.exited);
+  ok(!!E3.exited && E3.exited.code === 3 && E3.lockPid() === '', `① a FRESH empty lock — another agent between its open and its write (its time a minute AHEAD: no slow start ages it out; a clock ahead reads the same) — is refused, exit 3 (${JSON.stringify(E3.exited)}), and left as it is`, E3.exited);
   ok(!!E2.exited && E2.exited.code === 3, `RED: the cure cut ⇒ the aged empty lock refuses the start for good (exit ${E2.exited && E2.exited.code}: «already running (pid ?)»)`, E2.exited);
+  if (PRLIMIT) {
+    ok(!!E5.exited && E5.exited.code === 3 && /already running \(pid \?/.test(E5.err) && E5.lockPid() === '',
+      `① the lock's write REALLY fails (the kernel refuses it: EFBIG under a file-size limit of 0): the agent refuses its OWN empty lock — exit ${E5.exited && E5.exited.code}, «already running (pid ?» — and never runs without it; the empty lock is left (a start past the grace takes it)`, { exited: E5.exited, err: E5.err.slice(0, 300), lock: E5.lockPid() });
+    ok(E6.lockPid() === '' && !/already running/.test(E6.err) && !(E6.exited && E6.exited.code === 3),
+      `RED: the write's error swallowed ⇒ the start goes PAST the singleton holding an EMPTY lock (${E6.exited ? `exit ${E6.exited.code} at a later write: ${(/\bE[A-Z]{3,}\b/.exec(E6.err) || ['?'])[0]}` : 'still running'})`, { exited: E6.exited, err: E6.err.slice(0, 300) });
+  } else console.log('  – ① the lock\'s failed write: SKIPPED BY NAME — no prlimit on this machine (the kernel\'s refusal needs a file-size limit of 0)');
+  if (PROC) {
   const up = [P1, P2, P3].every((d) => pl[d.name] && pl[d.name].ack.op === 'hello-ack');
   ok(up, `(② three real daemons answer hello on their sockets — ${realVersion})`, Object.fromEntries(Object.entries(pl).map(([k, v]) => [k, v && v.ack && v.ack.op])));
   const N = 6;   // a start's handles counted at its reply: ONE transient handle (a log append, mkfifo's pipes) may sit in a count — each bound allows it
@@ -123,6 +150,7 @@ try {
     `② ${N} pipe conversations started: the daemon's descriptors grew by ${g.fresh.delta} — the attach's one tail each, no more (its copy of the fifo closed after the spawn; ±1 a transient handle); ${N} starts that never got a pid: ${g.nopid.delta} (their three handles closed)`, { g });
   ok(r1.fresh.delta >= 2 * N - 1, `RED: the fifo's close cut ⇒ one more a start (${r1.fresh.delta} for ${N}: at least ${2 * N - 1})`, r1);
   ok(r2.nopid.delta >= 4 * N - 1, `RED: the no-pid road's closes cut ⇒ three more a start (${r2.nopid.delta} for ${N}: at least ${4 * N - 1})`, r2);
+  } else console.log(`  – ② SKIPPED BY NAME: the descriptor count reads /proc/<pid>/fd — this machine (${process.platform}) has none`);
 
   console.log('— ③ THE PID-0 KILL LAW IN THE STREAM MODULES (by line)');
   {
