@@ -40,6 +40,15 @@ const ok = (n, c, e) => {
   if (typeof n !== 'string') { fail++; console.error(`  ✗ ok() was handed a ${typeof n} as its NAME (arguments swapped?): ${String(c).slice(0, 160)}`); return; }
   if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
@@ -1711,7 +1720,7 @@ console.log('— §10 (r3) every engine name a consumer destructures is wired');
       const real = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf8');
       const anchor10 = '  function attach(session, id, ptyProcess,';
       const copy = path.join(dir10, 'acp-events.js');
-      fs.writeFileSync(copy, real.replace(anchor10, "  const planted1 = engine.BUFFERS_DIR?.(null); const planted2 = engine['notWiredName']; const planted3 = engine?.[\"alsoNotWired\"]; const planted4 = engine?.optionalUnwired?.(null);\n" + anchor10));
+      fs.writeFileSync(copy, editAnchor(real, anchor10, "  const planted1 = engine.BUFFERS_DIR?.(null); const planted2 = engine['notWiredName']; const planted3 = engine?.[\"alsoNotWired\"]; const planted4 = engine?.optionalUnwired?.(null);\n" + anchor10, "src/server/stdout/acp-events.js"));
       const caught = directMissing([copy], wired['src/server/session-stdout.js']);
       ok('§10 RED control: reads PLANTED into a copy of acp-events.js — an option name (engine.BUFFERS_DIR?.()), engine[\'x\'], engine?.["x"], engine?.x?.() — are each caught by the census over that file', real.includes(anchor10) && ['BUFFERS_DIR', 'notWiredName', 'alsoNotWired', 'optionalUnwired'].every((n) => caught.some((c) => c.endsWith('engine.' + n))) && directMissing([path.join(REPO, 'src/server/stdout/acp-events.js')], wired['src/server/session-stdout.js']).length === 0, JSON.stringify(caught));
     } finally { fs.rmSync(dir10, { recursive: true, force: true }); }
@@ -4239,7 +4248,7 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
       const CORE_MATCH = "  const alias = Object.keys(al).find((k) => typeof al[k] === 'string' && k.toLowerCase() === name.toLowerCase());   // an alias → its model\n";
       const ROW_MATCH = "  const row = key ? rows.find((m) => m && ((m.id && core(m.id) === key) || (m.firstParty && core(m.firstParty) === key))) : null;";
       ok('§B-6c55 (c) setup: the verdict\'s alias and row matching are ONE line each (the control edits them)', LCSRC.split(CORE_MATCH).length === 2 && LCSRC.split(ROW_MATCH).length === 2);
-      const EX = MUTF.load('src/lock-context.js', LCSRC.replace(CORE_MATCH, "  const alias = Object.prototype.hasOwnProperty.call(al, name) && typeof al[name] === 'string' ? name : null;   // stale-pins: kept — the exact-id RED control\n").replace(ROW_MATCH, "  const id = alias ? al[alias] : name; const row = rows.find((m) => m && (m.id === id || m.firstParty === id));   // stale-pins: kept — the exact-id RED control"), 'exact-id');
+      const EX = MUTF.load('src/lock-context.js', editAnchor(editAnchor(LCSRC, CORE_MATCH, "  const alias = Object.prototype.hasOwnProperty.call(al, name) && typeof al[name] === 'string' ? name : null;   // stale-pins: kept — the exact-id RED control\n", "src/lock-context.js"), ROW_MATCH, "  const id = alias ? al[alias] : name; const row = rows.find((m) => m && (m.id === id || m.firstParty === id));   // stale-pins: kept — the exact-id RED control", "src/lock-context.js"), 'exact-id');
       ok('§B-6c55 (c) RED CONTROL: a copy with the exact-id matching (the tip before the cure) leaves these spellings unjudged — the leg above can go red', spell.filter((m) => EX.longContextOf(cat, m) === null).length >= 3, spell.map((m) => EX.longContextOf(cat, m)));
     }
     ok('§B-6c55 (a) no saved fact and a spawn model without [1m] commands the model as asked; no lock, no fact at all', d.cmd === 'claude-fable-5' && !d.ctx && e.cmd === 'claude-fable-5' && e.ctx === null, JSON.stringify({ d, e }));

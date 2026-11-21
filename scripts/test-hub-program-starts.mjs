@@ -35,6 +35,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (typeof name !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof name} — the arguments are swapped?`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 700) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await sleep(20); } return !!fn(); };
 
@@ -70,7 +79,7 @@ try {
     await S0.run(process.execPath, ['-e', '0'], { timeoutMs: 10000 });   // the starter's own start (made once), outside the window
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/desktop-app-keeper.js'), 'utf8'), INJ = "displayFacts.useStarter(require('./child-starter').childStarter());";
     const KREQ = "const displayFacts = require('../desktop-display');", MK = mutantCopies('hub-program-starts-k', REPO), dsrc0 = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
-    const keeperOver = (tag, withInj) => { const dp = MK.write('src/desktop-display.js', dsrc0, 'dd-' + tag, { same: true })   /* a per-keeper copy, deliberate (B-0d3e's guard) */; MK.load('src/server/desktop-app-keeper.js', ksrc.replace(KREQ, () => `const displayFacts = require(${JSON.stringify(dp)});`).replace(INJ, () => (withInj ? INJ : '/* no injection */')), 'k-' + tag); return require(dp); };
+    const keeperOver = (tag, withInj) => { const dp = MK.write('src/desktop-display.js', dsrc0, 'dd-' + tag, { same: true })   /* a per-keeper copy, deliberate (B-0d3e's guard) */; MK.load('src/server/desktop-app-keeper.js', editAnchor(editAnchor(ksrc, KREQ, () => `const displayFacts = require(${JSON.stringify(dp)});`, "src/server/desktop-app-keeper.js"), INJ, () => (withInj ? INJ : '/* no injection */'), "src/server/desktop-app-keeper.js"), 'k-' + tag); return require(dp); };
     const DR = keeperOver('red', false), DG = keeperOver('green', true);   // each its OWN desktop-display instance, loaded by its keeper
     const red0 = await counting(() => beltSize(DR, { ...process.env }));
     const r0 = S0.stats().requests, now0 = await counting(() => beltSize(DG, { ...process.env }));
@@ -172,7 +181,7 @@ try {
   const burst = async (M) => { const mm = Object.create(M.MountManager.prototype); const r = await mm._probeMountpoint(T, 2000, 'attr'); await sleep(50); return { health: r.health, held: mm._heldProbes.size }; };
   const ON_T = "{ timeoutMs, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((PI.statOf(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })";
   const HUNG_NOW = "        if (r.timedOut) return { health: 'hung', ms: Date.now() - t0 };";
-  const RB = MC.load('src/mounts.js', msrc.replace(ON_T, () => "{ timeoutMs, onLateExit: () => heldMap.delete(key) })").replace(HUNG_NOW, () => "        if (r.timedOut) { heldMap.set(key, { t0 }); return { health: 'hung', ms: Date.now() - t0 }; }"), 'red-late-mark');
+  const RB = MC.load('src/mounts.js', editAnchor(editAnchor(msrc, ON_T, () => "{ timeoutMs, onLateExit: () => heldMap.delete(key) })", "src/mounts.js"), HUNG_NOW, () => "        if (r.timedOut) { heldMap.set(key, { t0 }); return { health: 'hung', ms: Date.now() - t0 }; }", "src/mounts.js"), 'red-late-mark');
   const b1 = await burst({ MountManager }), b1r = await burst(RB);
   SB.closePipe();
   ok(msrc.split(ON_T).length === 2 && msrc.split(HUNG_NOW).length === 2 && b1.health === 'hung' && b1.held === 0 && b1r.health === 'hung' && b1r.held === 1,

@@ -35,6 +35,15 @@ process.setMaxListeners(64); // every world's stores register their own exit flu
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
@@ -347,8 +356,8 @@ console.log('③ control (a patched copy)');
 {
   const M = mutantCopies('exitrejudge', REPO);
   const src = read('src/exit-proxy.js');
-  const patched = src.replace("        for (const sid of new Set([...live.users, ...(live.bySession ? live.bySession.keys() : [])])) {", '        for (const sid of []) {')
-    .replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", '        const kwhy = null;');
+  const patched = editAnchor(editAnchor(src, "        for (const sid of new Set([...live.users, ...(live.bySession ? live.bySession.keys() : [])])) {", '        for (const sid of []) {', "src/exit-proxy.js"),
+    "        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", '        const kwhy = null;', "src/exit-proxy.js");
   ok(patched !== src && patched.split('for (const sid of [])').length === 2 && patched.includes('const kwhy = null;'), '(the control patch applies: a re-judge that judges nobody)');
   const { ExitProxyManager: Dead } = M.load('src/exit-proxy.js', patched, 'judgesnobody');
   const picks = EVENTS.filter(([n]) => /cwd moves|codex thread change|Import config narrowing|Task Group DELETE/.test(n));

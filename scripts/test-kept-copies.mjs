@@ -40,6 +40,15 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const KC = require(path.join(REPO, 'src/kept-copies.js'));
 const SS = require(path.join(REPO, 'src/session-store.js'));
@@ -296,9 +305,9 @@ ok(kcSrc.includes(DROP) && fs.existsSync(path.join(kd, KC.namesIn(leakLine)[0]))
 // first transcript record» — the acceptance's order-preserving mutant): the init lands after the batch it names
 const HOLD_A = '      if (hit !== undefined) { if (hit > anchor) anchor = hit; continue; } // in JSONL — advances the position cursor';
 const HOLD_C = '      const list = inserts.get(anchor) || inserts.set(anchor, []).get(anchor);\n      list.push(msg);\n      anyInsert = true;\n    }\n';
-const holdSrc = ssSrc.replace('    let anyInsert = false;\n', '    let anyInsert = false;\n    let pend = [];\n')
-  .replace(HOLD_A, '      if (hit !== undefined) { if (hit > anchor) anchor = hit; if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); pend = []; anyInsert = true; } continue; }')
-  .replace(HOLD_C, "      if (pend.length || (msg.type === 'system' && msg.subtype === 'init')) { pend.push(msg); continue; }\n" + HOLD_C + '    if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); anyInsert = true; }\n');
+const holdSrc = editAnchor(editAnchor(editAnchor(ssSrc, '    let anyInsert = false;\n', '    let anyInsert = false;\n    let pend = [];\n', "src/session-store.js"),
+  HOLD_A, '      if (hit !== undefined) { if (hit > anchor) anchor = hit; if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); pend = []; anyInsert = true; } continue; }', "src/session-store.js"),
+  HOLD_C, "      if (pend.length || (msg.type === 'system' && msg.subtype === 'init')) { pend.push(msg); continue; }\n" + HOLD_C + '    if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); anyInsert = true; }\n', "src/session-store.js");
 const heldInit = await realMerge(b312.jsonl, [...b312.head, ...b312.rest], { SSx: require(M.write('src/session-store.js', holdSrc, 'init-held')) });
 ok(ssSrc.includes(HOLD_A) && ssSrc.includes(HOLD_C) && holdSrc !== ssSrc && heldInit.initAt > heldInit.recAt, `MUTANT the merge holds the init for the next matched record: RED — the init lands AFTER its batch's record (init ${heldInit.initAt} > record ${heldInit.recAt})`, heldInit.raw.map((r) => r.type + (r.uuid ? ':' + r.uuid.slice(-3) : '')));
 // (r9) the init as the ONE road (r8): a batch whose init the hub never read has no witness — the earlier frame drawn twice

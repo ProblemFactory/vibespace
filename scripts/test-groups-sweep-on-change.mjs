@@ -31,6 +31,15 @@ process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true 
 let passed = 0, failed = 0;
 const say = console.log.bind(console);
 function ok(c, name, detail) { if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + String(detail).slice(0, 700)}`); } return !!c; }
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quietLog = { log() { }, warn() { }, info() { }, error() { } };
 
@@ -283,7 +292,7 @@ function patched(tag) {
   const [from, to] = PATCHES[tag];
   if (WIRING.split(from).length !== 2) return null;
   const M = path.join(ROOT, 'patch-' + tag);
-  const link = (rel) => { const src = path.join(REPO, rel), dst = path.join(M, rel); for (const e of fs.readdirSync(src, { withFileTypes: true })) { const r = path.join(rel, e.name); if (r === path.join('src', 'server')) { fs.mkdirSync(path.join(M, r), { recursive: true }); link(r); } else if (r === path.join('src', 'server', 'channels-wiring.js')) fs.writeFileSync(path.join(M, r), WIRING.replace(from, to)); else fs.symlinkSync(path.join(src, e.name), path.join(dst, e.name)); } };
+  const link = (rel) => { const src = path.join(REPO, rel), dst = path.join(M, rel); for (const e of fs.readdirSync(src, { withFileTypes: true })) { const r = path.join(rel, e.name); if (r === path.join('src', 'server')) { fs.mkdirSync(path.join(M, r), { recursive: true }); link(r); } else if (r === path.join('src', 'server', 'channels-wiring.js')) fs.writeFileSync(path.join(M, r), editAnchor(WIRING, from, to, "src/server/channels-wiring.js")); else fs.symlinkSync(path.join(src, e.name), path.join(dst, e.name)); } };
   fs.mkdirSync(path.join(M, 'src'), { recursive: true });
   for (const f of ['package.json', 'server.js', 'node_modules']) fs.symlinkSync(path.join(REPO, f), path.join(M, f));
   link('src');

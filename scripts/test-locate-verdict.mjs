@@ -40,6 +40,15 @@ const { LOCATE_WORDS, LOCATE_ORDER, locateVerdict, NON_ARCHIVED } = require(path
 const { CARD_TO_WINDOW } = require(path.join(REPO, 'scripts/lib/session-menu-parity.js'));
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra ? '\n      ' + extra : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = JSON.stringify;
 const cartesian = (...sets) => sets.reduce((acc, set) => acc.flatMap((a) => set.map((v) => [...a, v])), [[]]);
 
@@ -188,7 +197,7 @@ console.log('② THE LIST FILTERS WITH THE VERDICT (B-b842): one predicate — s
   ok(!!C1.bad, `RED CONTROL: a verdict without the status filter — the list (it filters with it) and Locate both disagree with the rules (${C1.bad ? 'listed ' + C1.bad.got.ids + ' vs ' + C1.bad.want.ids : 'NOT CAUGHT'})`);
   // THE «ALL FOUR» RULE (the status filter narrows only below all four non-archived statuses) changes nothing for a row of one of the
   // four — it is seen only on a row whose status the list does not know: kept while all four are on, dropped once the person narrows
-  const VSRC = read('src/locate-verdict.js'), VSRC0 = VSRC.replace('const narrows = on.length < NON_ARCHIVED;', 'const narrows = true;');
+  const VSRC = read('src/locate-verdict.js'), VSRC0 = editAnchor(VSRC, 'const narrows = on.length < NON_ARCHIVED;', 'const narrows = true;', "src/locate-verdict.js");
   const always = VSRC0 !== VSRC ? new Function('module', VSRC0 + '\nreturn module.exports;')({ exports: {} }).locateVerdict : null;
   const unknown = cartesian([FOUR, ['live'], [...FOUR, 'archived'], ['live', 'archived']], [false, true], ['folders', 'tasks']).map(([sf, arch, tab]) => ({ term: '', s: { sessionId: 'c1', _match: true, _kind: true, _arch: arch, status: undefined, _stopped: false }, more: MORE, bf: [], hf: [], kf: null, so: false, sf, av: null, tab, pill: false }));
   const keep = states.splice(0, states.length, ...unknown);

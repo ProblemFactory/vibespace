@@ -54,6 +54,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const spin = (ms) => { const t = Date.now(); while (Date.now() - t < ms); };
 const FILE = path.join(REPO, 'package.json');
 const SRC = fs.readFileSync(path.join(REPO, 'src/server/fs-canary.js'), 'utf8');
@@ -226,7 +235,7 @@ console.log('§7 the blocked loop names its blocker (lane vault-slow-load)');
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/loop-blame.js'), 'utf8');
     const CUT = /\n    for \(const k of Reflect\.ownKeys\(orig\)\)[^\n]*\n/;
     const pre = path.join(ROOT, 'loop-blame-pre.js');
-    fs.writeFileSync(pre, SRC.replace(CUT, '\n'));
+    fs.writeFileSync(pre, editAnchor(SRC, CUT, '\n', "src/server/loop-blame.js"));
     const mk = () => ({ realpathSync: Object.assign(function realpathSync(p) { return p; }, { native: (p) => p }), readFileSync: function readFileSync() { return ''; } });
     const mPre = mk(), bPre = { realpathSync: { native: mPre.realpathSync.native } };
     require(pre).install({ fsMod: mPre });
@@ -558,7 +567,7 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     const was = spied(() => DDo.binOnPath(TN, { env: env10 }));
     ok(oldWalk !== ddSrc && intoMounts().length === 2 && was === path.join(NB, TN) && w.counts.refused === refused0 + 1,
       `CONTROL (the old walk): ${intoMounts().length} statSync(s) into a mount on the main thread (the rclone's refused: ${w.counts.refused - refused0}) ⇒ RED`);
-    const answersStorage = ddSrc.replace("    if (r && r.kind === 'storage') continue;\n", '').replace(".filter(([, r]) => r && r.kind !== 'storage');", '.filter(([, r]) => r);');
+    const answersStorage = editAnchor(editAnchor(ddSrc, "    if (r && r.kind === 'storage') continue;\n", '', "src/desktop-display.js"), ".filter(([, r]) => r && r.kind !== 'storage');", '.filter(([, r]) => r);', "src/desktop-display.js");
     const ssSrc = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8');
     const skipAll = ssSrc.replace("    if (r && r.kind === 'storage') continue;   // B-1425: never read from the main thread (the guard refuses it)\n", '    if (r) continue;\n');
     const SSo = M.load('src/session-store.js', skipAll, 'b1425-tmuxskip');

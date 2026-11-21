@@ -22,6 +22,15 @@ const FIX = path.join(REPO, 'scripts/fixtures/global-search');
 const MUT = mutantCopies('global-search', REPO);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error('ok(cond, name, extra?)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const M = require(path.join(REPO, 'src/search-model.js'));
 const SI = require(path.join(REPO, 'src/server/search-index.js'));
@@ -226,7 +235,7 @@ console.log('§9 the controls: trigram, the index under data/, a raw-shape branc
   await t.close({ final: true });
   ok(tr.total === 0, `CONTROL (trigram tokenizer): the 2-character Chinese query finds ${tr.total} rows — the §3 leg goes RED`);
   const O0 = read('src/server/search-index.js');
-  const under = MUT.load('src/server/search-index.js', O0.replace("return { dir: path.join(homeDir, '.vibespace', 'db', hash), real };", "return { dir: path.join(dataDir, 'search-db'), real };").replace("if (dataReal && (inside(path.resolve(dir), dataReal) || inside(real, dataReal))) return REASON.UNDER_DATA;", ''), 'underdata');
+  const under = MUT.load('src/server/search-index.js', editAnchor(editAnchor(O0, "return { dir: path.join(homeDir, '.vibespace', 'db', hash), real };", "return { dir: path.join(dataDir, 'search-db'), real };", "src/server/search-index.js"), "if (dataReal && (inside(path.resolve(dir), dataReal) || inside(real, dataReal))) return REASON.UNDER_DATA;", '', "src/server/search-index.js"), 'underdata');
   const judgeDir = (o) => { const x = o.create({ dataDir, homeDir: home, log: quiet, exitHook: false }); x.start(); const d = x.stats(); x.close({ final: true }); return d.state === 'starting' && !path.resolve(d.dir).startsWith(fs.realpathSync(dataDir)); };
   ok(judgeDir(SI) && !judgeDir(under), 'the index starts on local disk outside data/; CONTROL (the index under data/, the refusal removed) is RED');
   ok(SI.localDiskVerdict(path.join(dataDir, 'x'), fs.realpathSync(dataDir)) === 'index-under-data' && SI.localDiskVerdict('/tmp/x', '/nowhere', { statfs: () => ({ type: 0x6969 }) }) === 'not-local-disk' && SI.localDiskVerdict('/tmp/x', '/nowhere', { statfs: () => ({ type: 0xef53 }) }) === null,
@@ -822,7 +831,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     // the RED controls: each piece put back as it was (the copy's registrations cut — the real module holds them)
     const SWsrc = read('src/lib/search-window.js');
     const REG = "\nregisterWindowType({ type: 'search'";
-    const copy = async (from, to, tag) => { const src = SWsrc.replace(pin(SWsrc, from), to); return import(pathToFileURL(MUT.write('src/lib/search-window.js', src.slice(0, src.indexOf(pin(src, REG))) + '\n', tag, { esm: true })).href); };
+    const copy = async (from, to, tag) => { const src = editAnchor(SWsrc, pin(SWsrc, from), to, "src/lib/search-window.js"); return import(pathToFileURL(MUT.write('src/lib/search-window.js', src.slice(0, src.indexOf(pin(src, REG))) + '\n', tag, { esm: true })).href); };
     const plc = await run5(await copy('const same = !!q && q === painted; painted = q;', 'const same = false; painted = q;', 'nokeep'), 'place');
     ok(plc.after === -1 && plc.more === 1 && plc.next === 0, `CONTROL (no keep): the re-ask drops the selection and folds the group — Enter would open the first hit — the leg goes RED (${plc.after}, ${plc.more})`, plc);
     const amc = await run5(await copy('const cur = rows[sel]; more.replaceWith(...hits.slice(3).map(addHit)); rows = [...list.querySelectorAll(\'.search-hit\')]; sel = cur ? rows.indexOf(cur) : -1;', 'more.replaceWith(...hits.slice(3).map(addHit)); rows = [...list.querySelectorAll(\'.search-hit\')];', 'staleclick'), 'afterMore');

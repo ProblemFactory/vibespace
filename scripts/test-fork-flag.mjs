@@ -23,6 +23,15 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, m, extra) => { if (c) { pass++; console.log('  ok  ' + m); } else { fail++; console.log('  ✗   ' + m + (extra ? ' — ' + extra : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.replace(/^\s*\/\/.*$/, '').replace(/\s\/\/ .*$/, '')).join('\n');
 
@@ -83,7 +92,7 @@ ok(/fork: true,/.test(doFork) && /forkAtUuid: resumeAt \|\| undefined,/.test(doF
 
 const M = mutantCopies('fork-flag', REPO);
 const adSrc = read('src/adapters/claude-code.js');
-const mutSrc = adSrc.replace("    args.push(...claudeForkArgs({ resumeId, fork: options.fork, forkAt: options.forkAt }));\n", '').replace("    if (FORK_FLAGS.has(flag)) {", '    if (false) {');   // (billing pick alive's cure: the person's extra args are read by normalizeExtraArgs — the adapter's own, shared with the create)
+const mutSrc = editAnchor(editAnchor(adSrc, "    args.push(...claudeForkArgs({ resumeId, fork: options.fork, forkAt: options.forkAt }));\n", '', "src/adapters/claude-code.js"), "    if (FORK_FLAGS.has(flag)) {", '    if (false) {', "src/adapters/claude-code.js");   // (billing pick alive's cure: the person's extra args are read by normalizeExtraArgs — the adapter's own, shared with the create)
 ok(mutSrc !== adSrc && mutSrc.includes('if (false) {'), 'control edit applied (the adapter reads the flag from the client\'s extraArgs again)');
 const mt = table(M.load('src/adapters/claude-code.js', mutSrc, 'client-flag'));
 ok(!mt.fork && !mt.at, 'control: the client-extraArgs adapter ⇒ an API fork (no extraArgs) RESUMES the parent ⇒ ① RED', JSON.stringify(mt.argv.fork));

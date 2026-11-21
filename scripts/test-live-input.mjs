@@ -51,6 +51,15 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 10) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
@@ -296,7 +305,7 @@ console.log('§4 the fit chip: a claim rules the page; the words say where the s
   const CJ = "  const join = (...parts) => parts.filter(Boolean).reduce((a, b) => t('{first} {then}', { first: a, then: b }));";
   const CU = "    return { text: t('Page {w}×{h} · could not resize', size), title: t('The page could not be resized to this window, so it is shown scaled.') };";
   ok(fsrc.split(CJ).length === 2 && fsrc.split(CU).length === 2, 'control setup: the sentence join and the unavailable words are each found once');
-  const Fj = M.load('src/browser-fit.js', fsrc.replace(CJ, "  const join = (...parts) => parts.filter(Boolean).join(' ');").replace(CU, "    return { text: t('Page {w}×{h} · could not resize', size), title: t('The page could not be resized to this window, so it is shown scaled.') + (c.error ? ' ' + t('Details: {why}', { why: String(c.error).slice(0, 200) }) : '') };"), 'pre-words');
+  const Fj = M.load('src/browser-fit.js', editAnchor(editAnchor(fsrc, CJ, "  const join = (...parts) => parts.filter(Boolean).join(' ');", "src/browser-fit.js"), CU, "    return { text: t('Page {w}×{h} · could not resize', size), title: t('The page could not be resized to this window, so it is shown scaled.') + (c.error ? ' ' + t('Details: {why}', { why: String(c.error).slice(0, 200) }) : '') };", "src/browser-fit.js"), 'pre-words');
   const zj = Fj.fitChipWords(Fj.fitChipState({ fit: { state: 'agent', width: 390, height: 844, device: 'iPhone 15' } }), { t: tr(zh) }).title;
   const zu = Fj.fitChipWords(Fj.fitChipState({ fit: { state: 'unavailable', width: 698, height: 435, error: raw } }), { t: tr(zh) }).title;
   ok(/。 这个窗口/.test(zj) && /CDP error/.test(zu), `NEGATIVE CONTROL: the pre-fix words put a space after 。 ("${zj}") and the agent's CDP refusal in the tooltip`);
@@ -618,7 +627,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
     heldLeg(BS),
     heldLeg(M.load('src/server/browser-stream.js', src.replace(CA2, '      fs.failed = { width: v.width, height: v.height, at: now() };'), 'held-remembered')),
     pressLeg(BS),
-    pressLeg(M.load('src/server/browser-stream.js', src.replace(CB1, '    if (false) {').replace(CB2, "    if (relay.fits.size) scheduleFit(relay, 'mode');"), 'no-button-hold')),
+    pressLeg(M.load('src/server/browser-stream.js', editAnchor(editAnchor(src, CB1, '    if (false) {', "src/server/browser-stream.js"), CB2, "    if (relay.fits.size) scheduleFit(relay, 'mode');", "src/server/browser-stream.js"), 'no-button-hold')),
   ]);
   ok(a1.sets >= 1 && !a1.agent && !a1.states.includes('agent') && a1.last && a1.last.state === 'unavailable', `A1: a failed set whose command mirror lands AFTER the CLI returned is still OURS — never "the agent's size" (states ${JSON.stringify(a1.states)})`);
   ok(a1pre.agent && a1pre.states.includes('agent'), `NEGATIVE CONTROL: the pre-fix failure path (pending dropped) reads our own late mirror as the agent's (states ${JSON.stringify(a1pre.states)} — the verifier's "Agent's size 1398×835")`);
@@ -710,7 +719,7 @@ async function recLeg(Rmod) {
   ok(src.split(C).length === 2, 'control setup: the single flight is found once');
   const G = '      if (!recordings.has(key)) { recordingRefusals.set(profileId, { code, error, at: now() });';
   ok(src.split(G).length === 2, 'control setup: the real-refusal guard is found once');
-  const c = await recLeg(M.load('src/server/browser-trace.js', src.replace(C, '').replace(G, '      if (true) { recordingRefusals.set(profileId, { code, error, at: now() });'), 'pre-fix-recording'));
+  const c = await recLeg(M.load('src/server/browser-trace.js', editAnchor(editAnchor(src, C, '', "src/server/browser-trace.js"), G, '      if (true) { recordingRefusals.set(profileId, { code, error, at: now() });', "src/server/browser-trace.js"), 'pre-fix-recording'));
   ok(c.execs >= 2 && c.recording && c.refused && c.refused.code === 'record_failed', `NEGATIVE CONTROL: the pre-fix start (no single flight, a loser's failure always written) — ${c.execs} starts race and the digest carries a refusal BESIDE the live recording (the owner's journal: "record start failed" 106 ms after "recording …")`, JSON.stringify(c));
 }
 
