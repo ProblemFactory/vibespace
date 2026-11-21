@@ -28,7 +28,8 @@ const SPENT = { error: 'no-owner', why: 'this link\'s channel numbers are spent 
 /** THE DECLARED LIST (law 6): what differs from the plain form, and why — closed; the differential reads it by these names */
 const DECLARED = Object.freeze({
   version: 'the hub reads every forwarded head as HTTP/1.1: Node\'s client writes no other version',
-  oldPage: 'an HTTP/1.0 page\'s answer was framed by the hub for HTTP/1.1, so its Transfer-Encoding, Connection, Keep-Alive and Trailer lines are dropped and the interface\'s Node frames it for HTTP/1.0: by the hub\'s Content-Length when it gave one, else by the close',
+  oldHostless: 'so an HTTP/1.0 head with no Host line is refused 400 by the hub\'s Node, which asks every HTTP/1.1 head for one (the plain form serves it)',
+  oldPage: 'an HTTP/1.0 page\'s answer was framed by the hub for HTTP/1.1, so its Transfer-Encoding, Connection, Keep-Alive and Trailer lines are dropped and the interface\'s Node frames it for HTTP/1.0: by the hub\'s Content-Length when it gave one, else by the close; and the 100 Continue the hub\'s Node says to an Expect it read as HTTP/1.1 is not forwarded (Node never says one to HTTP/1.0)',
   informational: 'an informational answer is written by Node with Node\'s reason phrase; on a Node without writeInformation (22) only 100, 102 and 103 are forwarded',
   orphanTrailer: 'a Trailer line on a request that is not chunked is dropped: no trailer can follow it, and Node\'s writer refuses to write it',
   chunks: 'a chunked body\'s chunk sizes and chunk extensions are Node\'s; the body is equal by digest',
@@ -97,7 +98,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     stats.exchanges++; Object.assign(live.get(sock.chan) || {}, { res, out });
     out.on('information', (i) => {
       try {
-        if (i.statusCode === 100) res.writeContinue();
+        if (i.statusCode === 100) { if (req.httpVersion !== '1.0') res.writeContinue(); }   // DECLARED.oldPage: Node says no 100 to HTTP/1.0
         else if (typeof res.writeInformation === 'function') res.writeInformation(i.statusCode, i.rawHeaders);
         else if (i.statusCode === 102) res.writeProcessing();
         else if (i.statusCode === 103) res.writeEarlyHints(hintsOf(i.rawHeaders));
@@ -133,7 +134,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     if (!sock) { stats.noOwner++; try { socket.end('HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json; charset=utf-8\r\nconnection: close\r\n\r\n' + JSON.stringify(exhausted ? SPENT : NO_OWNER)); } catch { } return; }
     stats.upgrades++; Object.assign(live.get(sock.chan) || {}, { page: socket });
     socket.on('error', () => { });
-    sock.write(headOf(req)); if (head && head.length) sock.write(head);
+    sock.write(head && head.length ? Buffer.concat([headOf(req), head]) : headOf(req));   // ONE write: the bytes that came with the head reach the party with it, as its own 'upgrade' head
     socket.pipe(sock); sock.pipe(socket); tap(socket);
     socket.once('close', () => sock.destroy());
     sock.once('close', () => socket.destroy());   // an upgraded socket never outlives its channel

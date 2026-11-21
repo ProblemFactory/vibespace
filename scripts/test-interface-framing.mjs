@@ -9,8 +9,9 @@
 //     reverse order, come back in request order, each with its own marker, over one accept, K open lines and K distinct
 //     channels; 1 000 requests over six kept-alive sockets leave zero channels in the interface and zero sockets in the
 //     hub's router; a page reset mid-answer shows the hub's handler its socket gone; an answer before the page's body ended
-//     drops the rest and the connection's next request is answered. RED CONTROLS: the channel's end cut ⇒ the counts stay
-//     at 1 000; the drop cut ⇒ the next request is never answered.
+//     drops the rest and the connection's next request is answered; a link that dies with an upgraded channel open throws
+//     nothing in the hub. RED CONTROLS: the channel's end cut ⇒ the counts stay at 1 000; the drop cut ⇒ the next request
+//     is never answered; the party's channel listener cut ⇒ the dead link's error is thrown out of the hub.
 //   ④ THE HUB OBEYS NO CLASS (leg 4): an open line that CLAIMS a class, and a page header that claims a stamp, on a cookie-less
 //     head for /api/sessions, are answered 401 by the hub's own gate (src/auth.js); the open line's keys and the stamp's
 //     keys are exactly the declared ones. RED CONTROL: a hub whose gate reads the claimed class serves the request.
@@ -46,6 +47,8 @@ const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 1500) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let lapAt = performance.now(), lapName = 'the start';
+const lap = (name) => { const now = performance.now(); console.log(`    (${lapName}: ${Math.round(now - lapAt)} ms)`); lapAt = now; lapName = name; };   // printed for the row's time, never judged
 const until = async (f, ms = 5000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) return false; await sleep(5); } return true; };
 const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iface-framing-'));
 process.on('exit', () => { try { fs.rmSync(T, { recursive: true, force: true }); } catch { } });
@@ -103,6 +106,7 @@ async function fakeInterface(server, partyMod, { onData } = {}) {
   return { side: () => side, party, journal, close: () => { try { party.mux.destroy(); } catch { } srv.close(); } };
 }
 
+lap('② ');
 console.log('— ② ONE CHANNEL IS ONE EXCHANGE, at the hub: raw bytes on ONE channel serve exactly one head');
 {
   async function oneChannel(bytes, partyMod) {
@@ -134,6 +138,7 @@ console.log('— ② ONE CHANNEL IS ONE EXCHANGE, at the hub: raw bytes on ONE c
   ok(red.heads.length === 2, `RED CONTROL — the count cut: the second head is served (${JSON.stringify(red.heads)})`, red);
 }
 
+lap('③ ');
 console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
 {
   const K = 6, socks = new Set();
@@ -189,6 +194,23 @@ console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
   }
   const e1 = await early();
   ok(/^HTTP\/1\.1 401/.test(e1.first) && e1.next && e1.opened === 2, `an answer before the page's body ended («${e1.first}» after 64 KiB of 200 000): the rest is read and dropped, and the same page connection's next request is answered (${e1.next}, ${e1.opened} exchanges)`, e1);
+  /** the link dies while an UPGRADED channel is open at the hub (Node detaches an upgraded socket from its server's listeners) */
+  async function deathWithUpgrade(partyMod) {
+    const uncaught = []; const onU = (e) => uncaught.push(String(e && e.message)); process.on('uncaughtException', onU);
+    const P4 = await pair((req, res) => res.end('x'), { partyMod });
+    let held = null; P4.hub.on('upgrade', (req, socket) => { held = socket; socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n'); });   // kept open, no listener of its own
+    const u = await rawPage(P4.port); u.write('GET /ws HTTP/1.1\r\nHost: hub.example\r\nConnection: Upgrade\r\nUpgrade: x\r\n\r\n');
+    await until(() => held && u.got.includes('101'), 2000);
+    P4.party.mux.destroy(); await sleep(50);   // the link dies
+    process.off('uncaughtException', onU);
+    const r = { upgraded: !!held, uncaught: uncaught.length, why: uncaught[0] || null }; u.destroy(); await P4.close(); return r;
+  }
+  const lives = await deathWithUpgrade();
+  ok(lives.upgraded && lives.uncaught === 0, `the link dies while an upgraded channel is open at the hub: nothing thrown in the hub (${lives.uncaught} uncaught) — the death is said by name, never thrown`, lives);
+  const PARTY = read('src/server/interface-party.js'), ERR = "          s.on('error', () => { });";
+  if (PARTY.split(ERR).length !== 2) throw new Error('CONTROL needle not found exactly once: the party\'s channel error listener');
+  const dies = await deathWithUpgrade(compileAt('src/server/interface-party.js', PARTY.replace(ERR, '')));
+  ok(dies.uncaught >= 1, `RED CONTROL — the party's listener cut: the dead link's «${dies.why}» is thrown out of the hub (${dies.uncaught} uncaught)`, dies);
   const RS = read('src/interface/relay.js');
   const D1 = "        if (!req.complete) { req.unpipe(out); req.resume(); }   // answered before the page's body ended: the rest is read and dropped, as the plain form's Node dumps it — the page connection goes on\n";
   const D2 = "      req.unpipe(out); req.resume();   // nobody takes the rest of the page's body now\n";
@@ -197,6 +219,7 @@ console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
   ok(!e2.next, `RED CONTROL — the drop cut: the rest of the body is never read, and the page connection's next request is never answered (${e2.next})`, e2);
 }
 
+lap('④ ');
 console.log('— ④ THE HUB OBEYS NO CLASS');
 {
   const express = require('express');
@@ -233,7 +256,7 @@ console.log('— ④ THE HUB OBEYS NO CLASS');
   ok(keys === 'chan,op,stamp,to,trace' && skeys === 'addr,port,secure' && lines[0].stamp.secure === false, `the open line's keys: ${keys}; the stamp's: ${skeys} (secure: ${lines[0] && lines[0].stamp.secure}) — no class, no who, nothing a page wrote`, lines[0]);
   try { mx.destroy(); } catch { } await I.close(); recSrv.close();
   // RED CONTROL: a hub whose gate READS the claimed class — the party puts it on the socket, the gate obeys it
-  const OPEN = "        if (m && m.op === 'open' && Number.isInteger(m.chan)) { const s = router.open(m.chan, m.stamp || {}); s[EXCHANGE] = { heads: 0, chan: m.chan };";
+  const OPEN = 'const s = router.open(m.chan, m.stamp || {}); s[EXCHANGE] = { heads: 0, chan: m.chan };';
   const tells = mutant('src/server/interface-party.js', OPEN, OPEN + ' s.claimedClass = m.class;');
   const GATE = '      const d = doorClassOf({ method: req.method, path: req.path, headers: req.headers, encrypted: !!(req.socket && req.socket.encrypted) }, { enabled: this.enabled });';
   const obeys = mutant('src/auth.js', GATE, GATE.replace('const d = doorClassOf(', 'const d = req.socket && req.socket.claimedClass ? { kind: req.socket.claimedClass } : doorClassOf(')).Auth;
@@ -241,6 +264,7 @@ console.log('— ④ THE HUB OBEYS NO CLASS');
   ok(red === 200, `RED CONTROL — a hub whose gate reads the claimed class: ${red} (it served the cookie-less head)`);
 }
 
+lap('⑥ ');
 console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain form (src/interface/relay.js DECLARED only)');
 {
   const pathOf = (u) => { const i = u.indexOf('?'); return i < 0 ? u : u.slice(0, i); };
@@ -253,7 +277,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
         const seen = { method: req.method, url: req.url, version: req.httpVersion, raw: req.rawHeaders, trailers: req.rawTrailers, digest: digest(Buffer.concat(parts)), cls: classOf(req, req.socket.encrypted) };
         sink.push(seen);
         res.sendDate = false;
-        const out = Buffer.from(JSON.stringify(seen));
+        const out = Buffer.from(JSON.stringify({ url: req.url, digest: seen.digest }));   // not the lines: a declared difference must show once, where it is declared
         const mode = req.headers['x-answer'] || 'length';
         try { answerAs(mode, res, out); } catch { res.destroy(); }
       });
@@ -269,7 +293,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
         else res.writeHead(200, ['Content-Type', 'application/json', 'X-Dup', 'one', 'X-Dup', 'two', 'Content-Length', String(out.length)]).end(out);
     };
     const server = http.createServer(echo);
-    server.on('upgrade', (req, socket, head) => { sink.push({ method: req.method, url: req.url, version: req.httpVersion, raw: req.rawHeaders, upgrade: true, head: digest(head), cls: classOf(req, socket.encrypted) }); socket.end(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: ${req.headers.upgrade}\r\nConnection: Upgrade\r\nX-Head: ${digest(head)}\r\n\r\n`); });
+    server.on('upgrade', (req, socket, head) => { sink.push({ method: req.method, url: req.url, version: req.httpVersion, raw: req.rawHeaders, upgrade: true, head: digest(head), cls: classOf(req, socket.encrypted) }); socket.end(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: ${req.headers.upgrade}\r\nConnection: Upgrade\r\nX-Head: ${digest(head)}\r\n\r\n`); socket.on('error', () => { }); socket.resume(); });   // read to its end, so its close is seen
     return server;
   };
   const plainSeen = [], hubSeen = [], ifaceCls = [];
@@ -316,7 +340,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   const declared = (v, old) => (old ? { ...v, lines: v.lines.filter((l) => !RELAY.OLD_PAGE_DROPS.has(lc(l)) && lc(l) !== 'content-length') } : v);   // DECLARED.oldPage
   const dropOrphan = (raw) => { const out = []; for (let i = 0; i + 1 < raw.length; i += 2) if (lc(raw[i]) !== 'trailer') out.push(raw[i], raw[i + 1]); return out; };
   const seenView = (x, old, chunked) => (x ? { ...x, version: old ? '(DECLARED.version)' : x.version, raw: chunked ? x.raw : dropOrphan(x.raw) } : null);   // DECLARED.orphanTrailer
-  const N = 300, diffs = [], tally = {}; let inner = 0, innerOpened = 0, alive = 0;
+  const N = 300, diffs = [], tally = {}, declaredSeen = {}; let inner = 0, innerOpened = 0, alive = 0;
   for (let i = 0; i < N; i++) {
     const method = pick(METHODS), target = pick(TARGETS), old = rnd() < 0.12, up = !old && rnd() < 0.08;
     const answer = pick(old || method === 'HEAD' ? ANSWERS.filter((x) => x !== 'trailers') : ANSWERS);   // trailers need a chunked answer: Node's own writer refuses them to HTTP/1.0 and to HEAD, in either form
@@ -333,6 +357,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
     const conn = up ? 'Connection: Upgrade\r\nUpgrade: websocket\r\n' : `${rnd() < 0.3 ? 'Connection: keep-alive, X-Token\r\nX-Token: 1\r\n' : ''}Connection: close\r\n`;
     const host = rnd() < 0.05 ? '' : 'Host: hub.example\r\n';
     const bytes = `${method} ${target} HTTP/1.${old ? 0 : 1}\r\n${host}X-Answer: ${answer}\r\n${hs.map(([k, v]) => `${k}: ${v}\r\n`).join('')}${pad}${framing}${conn}\r\n${body}`;
+    const hostless = old && !host && !hs.some(([k]) => k.toLowerCase() === 'host');   // DECLARED.oldHostless: the hub reads it as HTTP/1.1 with no Host
     const p0 = plainSeen.length, h0 = hubSeen.length, c0 = ifaceCls.length, o0 = P.iface.stats().opened;
     const a = await ask(plain.address().port, bytes), b = await ask(P.port, bytes);
     const chunked = bodyKind.startsWith('chunked');
@@ -341,13 +366,20 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
     const clsSame = hubSeen.slice(h0).every((x, j) => x.cls === ifaceCls[c0 + j]);
     const opened = P.iface.stats().opened - o0;
     if (bodyKind === 'inner-head') { inner++; if (opened === sb.length && sb.length <= 1) innerOpened++; }
-    const same = JSON.stringify(va) === JSON.stringify(vb) && JSON.stringify(sa) === JSON.stringify(sb) && clsSame && !a.timedOut && !b.timedOut && opened === sb.length;
+    const same = hostless ? /^HTTP\/1\.1 400 /.test(vb.status) && sb.length === 0 && !b.timedOut   // the declared refusal, by Node at the hub
+      : JSON.stringify(va) === JSON.stringify(vb) && JSON.stringify(sa) === JSON.stringify(sb) && clsSame && !a.timedOut && !b.timedOut && opened === sb.length;
+    const met = (k) => { declaredSeen[k] = (declaredSeen[k] || 0) + 1; };
+    if (hostless) met('oldHostless'); else if (old && sb.length) met('version'), met('oldPage');
+    if (!chunked && sb.length && hs.some(([k]) => k === 'Trailer')) met('orphanTrailer');
+    if (chunked && sb.length) met('chunks');
     const key = `${va.status.split(' ').slice(0, 2).join(' ')}`; tally[key] = (tally[key] || 0) + 1;
     if (!same) diffs.push({ i, bytes: bytes.slice(0, 260), plain: { view: va, seen: sa, timedOut: a.timedOut }, through: { view: vb, seen: sb, timedOut: b.timedOut, opened, cls: ifaceCls.slice(c0) } });
     if ((await get(P.port, '/alive')).status === 200) alive++;
   }
-  console.log(`    the seed ${SEED} (FRAMING_SEED replays another) · ${N} requests · their answers: ${Object.entries(tally).map(([k, v]) => `${k} ×${v}`).join(' · ')}`);
-  for (const d of diffs.slice(0, 4)) console.log(`    DIFFERS ${JSON.stringify(d).slice(0, 1400)}`);
+  console.log(`    the seed ${SEED} (FRAMING_SEED replays another) · ${N} requests · their answers: ${Object.entries(tally).map(([k, v]) => `${k} ×${v}`).join(' · ')} · declared cases met: ${JSON.stringify(declaredSeen)}`);
+  const partsOf = (d) => { const a = d.plain, b = d.through, out = []; for (const k of ['infos', 'status', 'lines', 'body', 'trailers']) if (JSON.stringify(a.view[k]) !== JSON.stringify(b.view[k])) out.push(k); if (JSON.stringify(a.seen) !== JSON.stringify(b.seen)) out.push('seen'); if (a.timedOut || b.timedOut) out.push('timedOut'); if (b.opened !== b.seen.length) out.push('opened'); return out.join('+') || 'cls'; };
+  for (const d of diffs) console.log(`    DIFFERS #${d.i} ${d.bytes.split('\r\n')[0]} [${partsOf(d)}] ${d.bytes.includes('Expect') ? 'expect ' : ''}${/Upgrade: /.test(d.bytes) ? 'upgrade ' : ''}${d.bytes.includes('Trailer') ? 'trailer ' : ''}`);
+  for (const d of diffs.slice(0, 2)) console.log(`    THE FIRST, WHOLE: ${JSON.stringify(d).slice(0, 1400)}`);
   ok(diffs.length === 0, `${N} generated requests (targets absolute, «*», «//», dot segments, %2e, a byte above 0x7f; duplicated and reordered Cookie / Authorization / Origin / Sec-Fetch-Site / Host / X-Forwarded-*; no body, a length, chunked with extensions and trailers, a length AND chunked, Expect, a head inside a body; Connection tokens; upgrades with and without a body; HTTP/1.0; heads at the size limit; answers by length, chunked, streamed, with trailers, close-delimited, 204, 304, 102 + 103, to HEAD): what the hub's handler saw and what the page got are the plain form's but for the declared list (${Object.keys(RELAY.DECLARED).join(', ')}), the door class equal at both ends — ${diffs.length} differ`, diffs.slice(0, 2));
   ok(inner > 0 && innerOpened === inner, `a head inside a body (${inner} cases) opens no channel of its own (${innerOpened} with one open line or none, as the plain hub served one head)`);
   ok(alive === N, `the interface answered after every case (${alive} of ${N})`);
@@ -366,6 +398,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   await P.close(); plain.close();
 }
 
+lap('⑧ ');
 console.log('— ⑧ EVERY CLOCK ON A PAGE SOCKET IS THE INTERFACE\'S, named, and each fires in its own case');
 {
   const names = { PAGE_HEAD_MS: FRONT.PAGE_HEAD_MS, PAGE_REQUEST_MS: FRONT.PAGE_REQUEST_MS, PAGE_IDLE_MS: FRONT.PAGE_IDLE_MS, PAGE_MAX_HEAD: FRONT.PAGE_MAX_HEAD, PAGE_CHECK_MS: FRONT.PAGE_CHECK_MS };
@@ -373,12 +406,12 @@ console.log('— ⑧ EVERY CLOCK ON A PAGE SOCKET IS THE INTERFACE\'S, named, an
   ok(FRONT.PAGE_HEAD_MS >= plainForm.headersTimeout && FRONT.PAGE_REQUEST_MS >= plainForm.requestTimeout && FRONT.PAGE_IDLE_MS >= plainForm.keepAliveTimeout && FRONT.PAGE_MAX_HEAD >= http.maxHeaderSize && FRONT.PAGE_CHECK_MS <= plainForm.connectionsCheckingInterval,
     `the named clocks ${JSON.stringify(names)} are no shorter than the plain form's (${plainForm.headersTimeout} / ${plainForm.requestTimeout} / ${plainForm.keepAliveTimeout} ms, ${http.maxHeaderSize} B; looked at every ${plainForm.connectionsCheckingInterval} ms)`);
   plainForm.close();
-  const CLOCKS = { headMs: 300, requestMs: 600, idleMs: 300, maxHead: 2048, checkMs: 50 };
+  const CLOCKS = { headMs: 150, requestMs: 300, idleMs: 150, maxHead: 2048, checkMs: 25 };   // short ones handed to the page server, each fired below
   const firstLine = (s) => s.got.toString().split('\r\n')[0] || (s.ended ? '(closed)' : '(open)');
   async function silentHead(frontMod) {
     const P = await pair((req, res) => res.end('ok'), { clocks: CLOCKS, frontMod });
     const s = await rawPage(P.port); s.write('GET / HTTP/1.1\r\nHost: hub.example\r\n');
-    await until(() => s.ended, 1500);
+    await until(() => s.ended, 5 * CLOCKS.headMs);
     const r = { line: firstLine(s), ended: s.ended, opened: P.iface.stats().opened }; s.destroy(); await P.close(); return r;
   }
   const head = await silentHead();
@@ -417,6 +450,7 @@ console.log('— ⑧ EVERY CLOCK ON A PAGE SOCKET IS THE INTERFACE\'S, named, an
   ok(!red.ended, `RED CONTROL — the page server never told it listens: the silent head is still open after five times its clock («${red.line}»)`, red);
 }
 
+lap('⑨ ');
 console.log('— ⑨ A REQUEST WITH NO OWNER IS ANSWERED BY NAME');
 {
   const P = await pair(() => { }, { link: false });
@@ -429,6 +463,7 @@ console.log('— ⑨ A REQUEST WITH NO OWNER IS ANSWERED BY NAME');
   await P.close();
 }
 
+lap('⑩ ');
 console.log('— ⑩ NO PAGE BYTE IS A CONTROL LINE: the channel numbers stop before 0');
 {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
@@ -455,5 +490,6 @@ console.log('— ⑩ NO PAGE BYTE IS A CONTROL LINE: the channel numbers stop be
   await R.close();
 }
 
+lap('the end');
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

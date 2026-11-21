@@ -58,7 +58,11 @@ function join({ start, server, connect = (p) => net.connect(p), onDead = () => {
           else if (m && m.op === 'auth-fail') { clearTimeout(silent); reject(new Error('the interface refused this party (auth-fail)')); try { mux.destroy(); } catch { } }
           return;
         }
-        if (m && m.op === 'open' && Number.isInteger(m.chan)) { const s = router.open(m.chan, m.stamp || {}); s[EXCHANGE] = { heads: 0, chan: m.chan }; server.emit('connection', s); }   // ONE exchange this channel
+        if (m && m.op === 'open' && Number.isInteger(m.chan)) {
+          const s = router.open(m.chan, m.stamp || {}); s[EXCHANGE] = { heads: 0, chan: m.chan };   // ONE exchange this channel
+          s.on('error', () => { });   // a dead link destroys its channels «with an error»; an UPGRADED socket has no http.Server listener left, so that error would end the hub — the death is said by name (onDead), never thrown
+          server.emit('connection', s);
+        }
       },
       onData: (chan, buf) => { if (!router.onData(chan, buf)) mux.credit(chan, buf.length); },   // a channel the router does not hold: dropped, never owed
       onWritable: (chan) => { router.onWritable(chan); },

@@ -32,7 +32,7 @@
 //     the link keeps no send window and no queue for any of them (every pair drop goes through closeChan, which forgets
 //     once its CLOSE is out — the relay needs no forget of its own; 10 000 by hand, the same). RED CONTROL: the frame code's
 //     forget neutered.
-//   ⑪ MUST 4 — A CLOSE NEVER OVERTAKES ITS OWN BYTES: a page uploads one window + 1000 bytes and ends, to an owner that
+//   ⑪ MUST 4 — A CLOSE NEVER OVERTAKES ITS OWN BYTES: a page uploads one window + 64 KiB + 1000 bytes and ends, to an owner that
 //     holds its credit ⇒ the owner has every byte when the close arrives. RED CONTROL: the page's end sent as a CLOSE at once,
 //     past the bytes still waiting in the channel's socket ⇒ the close arrives first. (A link without closeAfterQueue is
 //     refused by the channel sockets themselves: src/agentd/chan-socket.js, scripts/test-chan-socket.mjs.)
@@ -56,6 +56,8 @@ const { Mux, INITIAL_WINDOW } = require(path.join(REPO, 'src/agentd/mux.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 500) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let lapAt = performance.now(), lapName = 'the start';
+const lap = (name) => { const now = performance.now(); console.log(`    (${lapName}: ${Math.round(now - lapAt)} ms)`); lapAt = now; lapName = name; };   // printed for the row's time, never judged
 const until = async (f, ms = 5000) => { const t = Date.now(); while (!f()) { if (Date.now() - t > ms) return false; await sleep(5); } return true; };
 const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iface-'));
 process.on('exit', () => { try { fs.rmSync(T, { recursive: true, force: true }); } catch { } });
@@ -184,6 +186,7 @@ async function roundTrips(port, n = 30) {
   return { median: times[Math.floor(n / 2)], p90: times[Math.floor(n * 0.9)] };
 }
 
+lap('① ');
 console.log('— ① THE MODULE GRAPH');
 {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
@@ -208,6 +211,7 @@ console.log('— ① THE MODULE GRAPH');
   ok(planted.files.includes('src/server/vault-engine.js') && planted.files.some((f) => FORBIDDEN.test(f)), 'RED CONTROL — a vault module planted in the relay is caught by the walk', planted.files);
 }
 
+lap('② ');
 console.log('— ② NO SYNCHRONOUS DISK CALL once it listens');
 const mkPair = (cn) => {
   const key = path.join(T, `${cn}.key.pem`), cert = path.join(T, `${cn}.cert.pem`);
@@ -244,6 +248,7 @@ async function syncCalls(I) {
   ok(mut.ok && mut.n > 0, `RED CONTROL — one stat planted on the relay's exchange path: ${mut.n} counted`, mut);
 }
 
+lap('③ ');
 console.log('— ③ THE LAW OF THE SOCKET\'S OWNER (a keystroke\'s echo in two pieces)');
 /** what every accepted socket was told: a spy on net.Socket's two option calls while `n` pages connect */
 async function optionsSeen(I, n = 4) {
@@ -270,6 +275,7 @@ async function optionsSeen(I, n = 4) {
   ok(opts.noDelay >= 4 && opts.keepAlive >= 4 && bare.noDelay === 0 && bare.keepAlive === 0, `4 pages: every socket told no-delay (${opts.noDelay}) and keep-alive (${opts.keepAlive}) HERE — RED CONTROL, the options cut: ${bare.noDelay} / ${bare.keepAlive}`, { opts, bare });
 }
 
+lap('④ ');
 console.log('— ④ UNDER CREDIT, BOTH WAYS');
 const BIG = 64 * 1024 * 1024;   // far larger than any kernel's loopback buffers: what is held here cannot be the kernel's doing
 async function stalledThenResumed(I, { resumeMs = 15000 } = {}) {
@@ -314,6 +320,7 @@ async function uploadToDeafOwner(I) {
   ok(noPause.toLink > 8 * INITIAL_WINDOW, `RED CONTROL — no pause: ${noPause.toLink} bytes taken from the page and queued here for an owner that reads nothing`, noPause);
 }
 
+lap('⑤ ');
 console.log('— ⑤ TLS, decrypted here with a pushed certificate');
 const peerCN = (port) => new Promise((resolve) => { const c = tls.connect({ host: '127.0.0.1', port, rejectUnauthorized: false }, () => { const cn = c.getPeerCertificate().subject.CN; c.destroy(); resolve(cn); }); c.on('error', () => resolve(null)); });
 async function renewal(I) {
@@ -339,6 +346,7 @@ async function renewal(I) {
   ok(ignored.after === 'localhost', `RED CONTROL — the renewal ignored: the page still sees ${ignored.after}`, ignored);
 }
 
+lap('⑥ ');
 console.log('— ⑥ THE OPEN LINE');
 {
   const B = await boot();
@@ -352,6 +360,7 @@ console.log('— ⑥ THE OPEN LINE');
   await B.close();
 }
 
+lap('⑦ ');
 console.log('— ⑦ CLOSES');
 {
   const B = await boot(); far.mode = 'raw';
@@ -369,6 +378,7 @@ console.log('— ⑦ CLOSES');
   await B.close();
 }
 
+lap('⑩ ');
 console.log('— ⑩ EVERY PAGE CONNECTION LEAVES NOTHING IN THE LINK\'S FRAME CODE');
 async function connectionsLeave(I, N = 1000) {
   const B = await boot(I);   // HTTP: each request one exchange on its own channel, answered and let go
@@ -390,15 +400,17 @@ async function connectionsLeave(I, N = 1000) {
   ok(red.after.win >= 900, `RED CONTROL — the frame code that never forgets a channel: ${red.after.win} send windows kept after 1 000 requests`, red);
 }
 
+lap('⑪ ');
 console.log('— ⑪ A CLOSE NEVER OVERTAKES ITS OWN BYTES');
 async function uploadThenEnd(I) {
-  // one write of a window and 1000 bytes, then the end, to an owner that holds its credit 200 ms: the 1000 bytes are still
-  // queued in the interface's frame code when the page's end is read — the moment a close could overtake them
+  // one write of a window, a 64 KiB read and 1000 bytes, then the end, to an owner that holds its credit 200 ms: when the
+  // page's end is read, one read is queued in the frame code and the 1000 bytes still wait in the channel's socket — the
+  // moment a close could overtake them
   const B = await boot(I); far.mode = 'raw';
   const s = await upgraded(B.port); s.resume();
   s.write('SLOW 200\n');
   await until(() => [...far.chans.values()].some((c) => c.slow));
-  const total = INITIAL_WINDOW + 1000;
+  const total = INITIAL_WINDOW + 65536 + 1000;   // past the window: one 64 KiB read the frame code holds as its ONE queued write, and 1000 bytes that wait in the channel's socket
   s.end(Buffer.alloc(total, 5));
   const c = [...far.chans.values()].find((x) => x.slow);
   await until(() => c.gotAtClose !== undefined, 8000);
@@ -409,12 +421,13 @@ async function uploadThenEnd(I) {
 }
 {
   const law = await uploadThenEnd();
-  ok(law.gotAtClose === law.total, `a page uploads one window and 1000 bytes (${law.total}) to an owner that holds its credit, and ends: the owner has all ${law.gotAtClose} bytes when the close arrives`, law);
+  ok(law.gotAtClose === law.total, `a page uploads one window, a 64 KiB read and 1000 bytes (${law.total}) to an owner that holds its credit, and ends: the owner has all ${law.gotAtClose} bytes when the close arrives`, law);
   const early = mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock, { end: false }); socket.on('end', () => { try { sock.mux.closeChan(sock.chan); } catch { } }); sock.pipe(socket); tap(socket);\n");
   const red = await uploadThenEnd(interfaceWith({ relay: early }));
   ok(red.gotAtClose !== undefined && red.gotAtClose < red.total, `RED CONTROL — the page's end sent as a CLOSE at once, past the bytes still in the channel's socket: the owner sees the close after ${red.gotAtClose} of ${red.total} bytes`, red);
 }
 
+lap('⑧ ');
 console.log('— ⑧ THE LISTENER NEVER ENDS ON ITS OWN ERROR (judged in a child)');
 {
   const child = path.join(T, 'accept-error.cjs');
@@ -441,6 +454,7 @@ f.server.listen(0, '127.0.0.1', () => {
   ok(cut.code !== 0 && /Unhandled 'error' event|EMFILE/.test(cut.err + cut.out), `RED CONTROL — without the permanent listener the process ENDS (exit ${cut.code}: ${cut.err.trim().slice(0, 90)})`, cut);
 }
 
+lap('⑨ ');
 console.log('— ⑨ THE FIRST BYTE THAT NEVER COMES');
 async function silent(I) {
   const iface = I.create({ firstByteMs: 60 });
@@ -458,6 +472,7 @@ async function silent(I) {
   ok(!unbound.closed, `RED CONTROL — the bound not set: the silent socket is still open`, unbound);
 }
 
+lap('⑫ ');
 console.log('— ⑫ THE ADMISSION (piece B2b): a link is a party only once its hello is admitted by this start\'s secret');
 /** an interface whose supervisor wrote `admits` (digests, in order) for the hub; a party then joins saying `secret` */
 async function admission(I, secret, admits = [HUB_DIGEST], opts = {}) {
@@ -494,6 +509,7 @@ async function admission(I, secret, admits = [HUB_DIGEST], opts = {}) {
   ok(lax.acked && lax.opens === 1, 'RED CONTROL — the secret\'s check cut: the PREVIOUS generation is admitted and pages are relayed to it', lax);
 }
 
+lap('⑬ ');
 console.log('— ⑬ A RE-ATTACH: the old link goes first, and an old link\'s late death never empties the new link\'s pairs');
 async function reattach(I, { lateDeath = false, bound = null } = {}) {
   const t0 = performance.now(), took = {};
@@ -526,6 +542,7 @@ async function reattach(I, { lateDeath = false, bound = null } = {}) {
   ok(!both.bAnswers, 'RED CONTROL — the relay\'s per-link death cut too: the old link\'s late death empties the NEW link\'s pairs (its page never answers)', both);
 }
 
+lap('⑭ ');
 console.log('— ⑭ A PUSHED CERTIFICATE THAT CANNOT BE LOADED keeps the old context, and never throws out of the control callback');
 async function pushes(I) {
   const Bt = await boot(I); const uncaught = []; const onU = (e) => uncaught.push(String(e && e.message)); process.on('uncaughtException', onU);
@@ -547,6 +564,7 @@ async function pushes(I) {
   ok(thrown.uncaught >= 1, `RED CONTROL — the judgement cut: the malformed pair throws out of the frame code's control callback (${thrown.uncaught} uncaught)`, thrown);
 }
 
+lap('⑮ ');
 console.log('— ⑮ THE TLS STAGE STATES ITS OWN BOUND: a handshake that never finishes is dropped at HANDSHAKE_MS');
 async function stalledHello(I, handshakeMs) {
   const Bt = await boot(I, { handshakeMs }); Bt.iface.useCertificate(pair);
@@ -564,6 +582,7 @@ async function stalledHello(I, handshakeMs) {
   ok(!unbound.closed, 'RED CONTROL — the bound not passed: after four times the bound the stalled handshake is still open', unbound);
 }
 
+lap('⑯ ');
 console.log('— ⑯ THE OWNER DESTROYS ITS CHANNEL MID-UPLOAD, THEN THE PAGE CLOSES; AND A PAGE THAT LEAVES MID-UPLOAD — on the REAL socket-shaped channel');
 async function midUpload(I, bound = null, { hubDestroys = true } = {}) {
   // the far end is today's hub's own road: src/server/interface-party.js join() — the REAL ChanSocket router behind an http.Server.
@@ -599,6 +618,7 @@ async function midUpload(I, bound = null, { hubDestroys = true } = {}) {
   ok(leaks.routerSize >= 1 && !leaks.hubSawGone, `RED CONTROL — the page's going ends nothing (its answer's close cut): the hub's router keeps the channel (${leaks.routerSize}) and its handler waits on (saw its socket gone: ${leaks.hubSawGone})`, leaks);
 }
 
+lap('th');
 console.log('— the B2b cure 2: a page with NO address is closed at once and never stamped (the far side reads a null address as loopback)');
 {
   const { EventEmitter } = await import('node:events');
@@ -624,5 +644,6 @@ console.log('— the B2b cure 2: a page with NO address is closed at once and ne
   ok(red.opens.length === 2 && red.opens.some((s) => s.addr === null), 'RED CONTROL — the guard cut: the unknown page is stamped with a null address (loopback on the far side)', red);
 }
 
+lap('the end');
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
