@@ -188,7 +188,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   };
   const readHelperFact = (o) => {
     let timer = null;
-    const late = new Promise((r) => { timer = setTimeout(() => r(null), HELPER_FACT_MS); timer.unref?.(); });
+    const late = new Promise((r) => { timer = setTimeout(() => { if (o && o.sink) o.sink.late = true; r(null); }, HELPER_FACT_MS); timer.unref?.(); });   // B-e7c0: a machine that did not answer is not asked again
     return Promise.race([readHelperFactOf(o).catch(() => null), late]).finally(() => clearTimeout(timer));
   };
 
@@ -1331,6 +1331,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // exactly. The env override exists for tests only.
             } catch { }
           }
+          // B-e7c0 ON A PAIRED MACHINE (r723): where this start sets the person's own settings file aside (a subscription pick, the
+          // machine's helper named or unread — the adapter said «billing» / «billingUnread»), its agent merges it THERE (src/server/settings-merge-device.js)
+          // — after every layer this hub adds (the statusline above), before the ladder; a start whose agent cannot keeps the set-aside
+          let deviceMerged = null;
+          if (data.hostId && !data.keeperSid && keyHelperOff && !onProvider && keyHelperNamed !== undefined && keyHelperNamed !== false && !ownRead.late   // a machine whose probe went unanswered is not asked again (no second wait)
+            && sessionSpec && Array.isArray(sessionSpec.settingsNotes) && sessionSpec.settingsNotes.some((k) => k === 'billing' || k === 'billingUnread')) {
+            const ownFile = typeof adapter.ownSettingsFile === 'function' ? adapter.ownSettingsFile(extraArgs) : null;
+            const r = ownFile ? await require('./server/settings-merge-device.js').askDeviceMerge({ hosts, hostId: data.hostId, id, args: spawnArgs, cwd, ownFile, by: (ws && ws._actBy) || 'system:spawn' }) : null;
+            if (r && r.args) { spawnArgs = r.args; deviceMerged = r; sessionSpec.settingsNotes = sessionSpec.settingsNotes.filter((k) => k !== 'billing' && k !== 'billingUnread'); }
+            else if (r && r.refused) console.warn(`[ws-create] ${id}: the paired machine did not merge the person's settings file (${r.refused}) — it is set aside for this start, as before`);
+          }
           let spawnCwd = cwd;
           // Integration master switch (agents.vibespaceIntegration, 2.190.0):
           // OFF ⇒ this spawn carries nothing AGENT-VISIBLE — no VIBESPACE_API,
@@ -1805,8 +1816,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', () => name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }   // a function: a «$&» in a name is words
           }
           // B-e7c0 cure: a merged copy that dropped names SAYS them once, by name, with the door to the pick (a fallen-back start said «billing»)
-          if (!data.keeperSid && ownDropped.length && sessionSpec && sessionSpec.ownFileMerged && !sessionSpec.ownFellBack) {
-            const w = SFW.MERGE_DROPPED_WORDS, name = String(session.name || data.name || '').slice(0, 80) || 'This conversation', names = [...new Set(ownDropped)].join(', ').slice(0, 400);
+          const mergedDropped = deviceMerged ? deviceMerged.dropped : (sessionSpec && sessionSpec.ownFileMerged && !sessionSpec.ownFellBack ? ownDropped : []);   // B-e7c0: a paired machine's merge says its own
+          if (!data.keeperSid && mergedDropped.length) {
+            const w = SFW.MERGE_DROPPED_WORDS, name = String(session.name || data.name || '').slice(0, 80) || 'This conversation', names = [...new Set(mergedDropped)].join(', ').slice(0, 400);
             try { serverNotice?.(`settings-file-mergeDropped-${id}`, w.replace('{name}', () => name).replace('{names}', () => names), { level: 1, i18n: { key: w, params: { name, names } } }); } catch { }
           }
           // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form — SAID here, after the start's refusals (batch 21's cure);

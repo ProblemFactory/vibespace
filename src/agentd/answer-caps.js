@@ -39,7 +39,7 @@ const CAPS = Object.freeze({
   'attach-pipe-session': SMALL, 'browser-serve': SMALL, 'desktop-input': SMALL, 'dial-status': SMALL, 'discovery-watch': SMALL,
   'display-facts': SMALL, 'hello': SMALL, 'input-events': SMALL, 'kill-pipe-session': SMALL, 'kill-session': SMALL,
   'left-behind': SMALL, 'ok': SMALL, 'open-pipe-session': SMALL, 'open-session': SMALL, 'peer-post': SMALL, 'peer-state': SMALL /* B-95fc: {live, inbox} */, 'ping-info': SMALL,
-  'place-secret': SMALL, 'pool-orders-log-ack': SMALL, 'probe-cli': SMALL, 'remoteapp-facts': SMALL, 'resize-session': SMALL,
+  'place-secret': SMALL, 'settings-merge': SMALL /* B-e7c0: {ok, path, dropped names} */, 'pool-orders-log-ack': SMALL, 'probe-cli': SMALL, 'remoteapp-facts': SMALL, 'resize-session': SMALL,
   'run-stream': SMALL, 'serve-folder': SMALL, 'serve-socks': SMALL, 'session-events-watch': SMALL, 'settings-open': SMALL,
   'stream-answer': SMALL, 'stream-audio': SMALL, 'stream-facts': SMALL, 'stream-mic': SMALL, 'stream-offer': SMALL,
   'stream-stats': SMALL, 'stream-stop': SMALL, 'sysinfo': SMALL, 'tcp-connect': SMALL, 'tcp-listen': SMALL, 'tcp-unlisten': SMALL,

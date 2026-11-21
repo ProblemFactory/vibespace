@@ -628,6 +628,93 @@ const helperSaid = (x) => x.notices.filter((n) => n.key.startsWith('billing-pick
     '…with the person\'s settings file: no settings-file words and no helper notice for the adopted process (the fact was asked once, before the build — the ladder adopts after it)', { asked: ahF.asked, notices: adF.notices.map((n) => n.key) });
 }
 
+console.log('— ⑦b B-e7c0 ON A PAIRED MACHINE (r723): the merge made ON the device by its agent; the line carries only its path');
+{
+  // PURE: the one merge both sides run, the layer's bound, the id, the argv swap
+  const layer = { apiKeyHelper: '', outputStyle: 'Concise' };
+  const m = BP.deviceMergeOf({ ownText: JSON.stringify(PERSON), layer, row: CLAUDE_CREDS.keyHelper });
+  const mj = m.ok ? JSON.parse(m.json) : {};
+  console.log(`    (the merged keys: ${Object.keys(mj).join(', ')} · env: ${Object.keys(mj.env || {}).join(', ')} · dropped: ${(m.dropped || []).join(', ')})`);
+  ok(m.ok && mj.hooks && JSON.stringify(mj.permissions) === JSON.stringify(PERSON.permissions) && mj.env.PERSON_MARK === OWN_MARK && !('ANTHROPIC_API_KEY' in mj.env) && m.dropped.includes('ANTHROPIC_API_KEY') && mj.apiKeyHelper === '' && mj.outputStyle === 'Concise',
+    '⑦b PURE deviceMergeOf: the person\'s hooks, deny rules and own env KEPT, every route / credential name DROPPED (named), the start\'s layer applied LAST', { keys: Object.keys(mj), dropped: m.dropped });
+  const helperFile = BP.deviceMergeOf({ ownText: JSON.stringify({ apiKeyHelper: '/x/key.sh' }), layer, row: CLAUDE_CREDS.keyHelper });
+  const notJson = BP.deviceMergeOf({ ownText: '[1]', layer, row: CLAUDE_CREDS.keyHelper }), big = BP.deviceMergeOf({ ownText: '{}', layer: { k: 'x'.repeat(BP.LAYER_MAX) }, row: CLAUDE_CREDS.keyHelper });
+  ok(helperFile.reason === 'own-names-helper' && notJson.reason === 'own-not-json' && big.reason === 'layer-too-large' && BP.layerRefusal([]) === 'layer-not-object',
+    '⑦b PURE: a person\'s file that names the helper itself, one that is no JSON object, and a layer over LAYER_MAX are refused BY NAME (each falls to the set-aside)', { helperFile, notJson, big: big.reason });
+  ok(BP.MERGE_SID_RE.test('sess-abc_1') && !BP.MERGE_SID_RE.test('../etc') && !BP.MERGE_SID_RE.test('a/b') && !BP.MERGE_SID_RE.test('x'.repeat(65)),
+    '⑦b PURE: the id a device names its file by is a closed alphabet, bounded — no path part from the hub');
+  const args = ['-p', '--settings', JSON.stringify(layer), '--x'];
+  ok(JSON.stringify(BP.settingsLayerOf(args)) === JSON.stringify(layer) && JSON.stringify(BP.withSettingsPath(args, '/d/s.settings')) === JSON.stringify(['-p', '--settings', '/d/s.settings', '--x']) && BP.settingsLayerOf(['--settings', '/a/file.json']) === null,
+    '⑦b PURE: the layer is the argv\'s inline --settings (a file path is none), and only the merged file\'s PATH goes back into the line');
+  // THE HUB'S ONE ASK (src/server/settings-merge-device.js) over stand-in agents
+  const ASK = require(path.join(REPO, 'src/server/settings-merge-device.js'));
+  const hostsOf = (dm) => ({ deviceBounded: async () => dm });
+  const okDm = { asked: [], settingsMerge: async (o) => { okDm.asked.push(o); return { ok: true, path: `/home/u/.vibespace/agentd/state/settings/${o.sid}.settings`, dropped: ['ANTHROPIC_API_KEY'] }; } };
+  const good = await ASK.askDeviceMerge({ hosts: hostsOf(okDm), hostId: 'h-2', id: 'sess-1', args, cwd: '/home/u/proj', ownFile: '/home/u/my.json', by: 'human:t' });
+  ok(good.args && good.args[2] === '/home/u/.vibespace/agentd/state/settings/sess-1.settings' && okDm.asked.length === 1 && JSON.stringify(okDm.asked[0].layer) === JSON.stringify(layer) && okDm.asked[0].by === 'human:t',
+    '⑦b the ask: the layer sent is EXACTLY the inline settings (no widening), named `by`, and the argv comes back with the device\'s path only', { good, asked: okDm.asked[0] && Object.keys(okDm.asked[0]) });
+  const t0 = Date.now();
+  const hung = await ASK.askDeviceMerge({ hosts: hostsOf({ settingsMerge: () => new Promise(() => { }) }), hostId: 'h-2', id: 'sess-1', args, boundMs: 200 });
+  const old = await ASK.askDeviceMerge({ hosts: hostsOf({ probeCli: async () => ({}) }), hostId: 'h-2', id: 'sess-1', args });
+  const none = await ASK.askDeviceMerge({ hosts: { deviceBounded: async () => { throw new Error('no agent'); } }, hostId: 'h-2', id: 'sess-1', args });
+  const foreign = await ASK.askDeviceMerge({ hosts: hostsOf({ settingsMerge: async () => ({ ok: true, path: '/etc/passwd', dropped: [] }) }), hostId: 'h-2', id: 'sess-1', args });
+  const refused = await ASK.askDeviceMerge({ hosts: hostsOf({ settingsMerge: async () => { const e = new Error('op not allowed'); e.code = 'op-not-allowed'; throw e; } }), hostId: 'h-2', id: 'sess-1', args });
+  const badId = await ASK.askDeviceMerge({ hosts: hostsOf(okDm), hostId: 'h-2', id: '../x', args });
+  console.log(`    (no answer: ${hung.refused} after its bound · old agent: ${old.refused} · no agent: ${none.refused} · foreign path: ${foreign.refused} · refused: ${refused.refused} · bad id: ${badId.refused})`);
+  ok(hung.refused === 'late' && Date.now() - t0 >= 150 && old.refused === 'no-agent' && none.refused === 'no agent' && foreign.refused && !foreign.args && refused.refused === 'op-not-allowed' && badId.refused === 'bad-sid' && okDm.asked.length === 1,
+    '⑦b the ask never hangs and never widens: no answer ⇒ «late» at its ONE bound; an agent without the op, no agent, a path not of the device\'s own shape, a refusal (its policy\'s), a bad id ⇒ refused by name, no argv — the create keeps the set-aside', { hung, old, none, foreign, refused, badId });
+  // THE MACHINE'S OWN POLICY: a machine that allows no file writes refuses the op by name (and that too falls to the set-aside)
+  const DP = require(path.join(REPO, 'src/device-policy.js'));
+  const v = DP.verdict(DP.readOf(JSON.stringify({ v: 1, allow: ['run'] })), { op: 'settings-merge', sid: 'sess-1' });
+  ok(v.ok === false && v.flag === 'files' && v.code === 'op-not-allowed' && DP.verdict(DP.readOf(null), { op: 'settings-merge' }).ok === true,
+    '⑦b a machine whose own allow list holds no `files` refuses settings-merge BY NAME (flag files); an older list-less machine (every flag) allows it', v);
+  // THE FILE'S LIFE on the device: the agent's hourly sweep (src/machine-probes.js sweepMergedSettings)
+  const MP = require(path.join(REPO, 'src/machine-probes.js'));
+  const SD = path.join(scratchDir('bpick-merged'), 'settings'); fs.mkdirSync(SD, { recursive: true });   // the agent's own folder (the scratch dir keeps its own marker file)
+  for (const n of ['ended-1', 'old-1', 'live-1']) fs.writeFileSync(path.join(SD, `${n}.settings`), '{}', { mode: 0o600 });
+  fs.writeFileSync(path.join(SD, 'other.txt'), 'x');
+  const oldAt = new Date(Date.now() - MP.SETTINGS_KEEP_MS - 60000); fs.utimesSync(path.join(SD, 'old-1.settings'), oldAt, oldAt);
+  const gone = await MP.sweepMergedSettings(SD, { ended: (sid) => sid === 'ended-1' });
+  const left = fs.readdirSync(SD).sort().join(',');
+  console.log(`    (the sweep removed ${gone}; left: ${left})`);
+  ok(gone === 2 && left === 'live-1.settings,other.txt' && MP.SETTINGS_KEEP_MS === 7 * 86400000,
+    '⑦b the merged file\'s life: the sweep takes the one whose conversation ENDED (by the agent\'s own record) and the one past 7 days; a live one and anything not <id>.settings stay', left);
+  // RED CONTROL: the merge without its drop of route / credential names — the person's credential rides the device's file
+  const SMSRC = read('src/settings-merge.js');
+  const noDrop = M.load('src/settings-merge.js', anchored(SMSRC, "    for (const [k, v] of Object.entries(settings.env)) { if (ROUTE.routeNameAny(k)) dropped.push(k); else env[k] = v; }", "    for (const [k, v] of Object.entries(settings.env)) { env[k] = v; }", 'B-e7c0 the drop of route / credential names'), 'nodrop-device');
+  const nd = noDrop.deviceMergeOf({ ownText: JSON.stringify(PERSON), layer, row: CLAUDE_CREDS.keyHelper });
+  ok(nd.ok && JSON.parse(nd.json).env.ANTHROPIC_API_KEY === PAID_KEY, '⑦b RED CONTROL (the merge with no drop list): the person\'s ANTHROPIC_API_KEY rides the merged file — the leg above can go red');
+}
+{
+  // THROUGH THE REAL CREATE on the paired machine (its ladder stood in): the device merges ⇒ the remote line carries only the path
+  function mergeHosts(mode) {
+    const base = hostsStub({ helper: true }), merges = [];
+    return new Proxy(base, { get: (t, k) => (k === 'merges' ? merges : k === 'deviceBounded' ? async (...a) => {
+      const dm = await t.deviceBounded(...a);
+      return { ...dm, settingsMerge: async (o) => { merges.push(o); if (mode === 'hang') return new Promise(() => { }); if (mode === 'refuse') { const e = new Error('op not allowed'); e.code = 'op-not-allowed'; throw e; } return { ok: true, path: `/home/u/.vibespace/agentd/state/settings/${o.sid}.settings`, dropped: ['ANTHROPIC_API_KEY'] }; } };
+    } : t[k]) });
+  }
+  const mh = mergeHosts('ok'), x = await makeCreate(remoteCreate, { hosts: mh }).create(R({ accountId: 'sub-a1', extraArgs: FILE }), { wait: 5000 });
+  const lx = lineOf(x), path0 = lx.line ? lx.line[lx.line.indexOf('--settings') + 1] : null;
+  const rf = mergeHosts('refuse'), y = await makeCreate(remoteCreate, { hosts: rf }).create(R({ accountId: 'sub-a1', extraArgs: FILE }), { wait: 5000 });
+  const ly = lineOf(y);
+  console.log(`    (the merged start's --settings: ${path0} · asked with ${mh.merges[0] ? JSON.stringify(mh.merges[0].layer) : 'nothing'} · the refused start's inline: ${JSON.stringify(ly.settings)})`);
+  ok(!lx.why && mh.merges.length === 1 && path0 === `/home/u/.vibespace/agentd/state/settings/${mh.merges[0].sid}.settings` && !lx.line.includes('/home/u/my-settings.json') && mh.merges[0].ownFile === '/home/u/my-settings.json' && mh.merges[0].cwd === '/home/u/proj',
+    '⑦b the REAL create on the paired machine: a pick whose start carries the person\'s file asks its agent ONCE (the start\'s cwd and file named as the start has them) and the remote line carries ONLY the merged file\'s path', { why: lx.why, path0, asked: mh.merges.length });
+  ok(JSON.stringify(mh.merges[0] && mh.merges[0].layer) === JSON.stringify(ly.settings) && neutralized(ly),
+    '⑦b NO WIDENING: the layer the device merged is EXACTLY the inline settings the set-aside start carries (the refused run\'s line)', { asked: mh.merges[0] && mh.merges[0].layer, setAside: ly.settings });
+  ok(saidKind(x, 'billing') === 0 && x.notices.filter((n) => n.key.startsWith('settings-file-mergeDropped-')).length === 1 && saidKind(y, 'billing') === 1,
+    '⑦b SAID like this machine\'s merge: the merged start names what it dropped (once) and says no set-aside; the refused one (its policy) keeps the set-aside, said «billing» as today', { merged: x.notices.map((n) => n.key), refused: y.notices.map((n) => n.key) });
+  const nh = hostsStub({ helper: false }), merges0 = [];
+  const nhm = new Proxy(nh, { get: (t, k) => (k === 'deviceBounded' ? async (...a) => ({ ...(await t.deviceBounded(...a)), settingsMerge: async (o) => { merges0.push(o); return { ok: false }; } }) : t[k]) });
+  const z = await makeCreate(remoteCreate, { hosts: nhm }).create(R({ accountId: 'sub-a1', extraArgs: FILE }), { wait: 5000 });
+  ok(merges0.length === 0 && lineOf(z).line && lineOf(z).line.includes('/home/u/my-settings.json'), '⑦b a paired machine that names NO helper: never asked — the person\'s file applies whole, as on the release', { asked: merges0.length });
+  const SRCW = SRC;
+  const noAsk = withLadder(anchored(SRCW, "            if (r && r.args) { spawnArgs = r.args; deviceMerged = r;", "            if (false) { spawnArgs = r.args; deviceMerged = r;", 'B-e7c0 the paired machine\'s merge taken'), 'e7c0-device-off');
+  const mo = mergeHosts('ok'), w = await makeCreate(noAsk, { hosts: mo }).create(R({ accountId: 'sub-a1', extraArgs: FILE }), { wait: 5000 });
+  ok(neutralized(lineOf(w)) && saidKind(w, 'billing') === 1, '⑦b RED CONTROL (the create that never takes the device\'s merge): the same paired start sets the person\'s file aside — the legs above can go red');
+}
+
 console.log('— ⑧ A RESUME and A FORK of a picked conversation through the real create');
 {
   const RID = 'c0ffee00-1111-4222-8333-444455556666';

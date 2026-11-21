@@ -180,6 +180,34 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
   }
 }
 
+// 4d. B-e7c0 (r723): a subscription pick's merge of the person's own settings file, made ON the device by its agent — driven through
+// the hub's own DeviceManager against the REAL daemon (a scratch HOME stands in for the paired machine)
+{
+  ok(conn.info?.capabilities?.includes?.('settings-merge'), 'daemon advertises the settings-merge capability');
+  const proj = path.join(home, 'proj'); fs.mkdirSync(proj, { recursive: true });
+  const KEY = ['sk', 'ant', 'api03', 'stand-in'].join('-');   // built at run time
+  fs.writeFileSync(path.join(proj, 'my-settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] }, permissions: { deny: ['Bash(rm -rf:*)'] }, env: { ANTHROPIC_BASE_URL: 'https://elsewhere.example', ANTHROPIC_API_KEY: KEY, MINE: 'yes' } }));
+  const layer = { apiKeyHelper: '', outputStyle: 'Concise' }, sid = `sm-${process.pid}`;
+  const r = await dm.settingsMerge({ sid, cwd: proj, ownFile: 'my-settings.json', layer, by: 'system:test' });
+  let merged = {}, mode = 0;
+  try { merged = JSON.parse(fs.readFileSync(r.path, 'utf8')); mode = fs.statSync(r.path).mode & 0o777; } catch { }
+  console.log(`    (the device wrote ${r.path || r.reason} · mode ${mode.toString(8)} · keys ${Object.keys(merged).join(', ')} · env ${Object.keys(merged.env || {}).join(', ')} · dropped ${(r.dropped || []).join(', ')})`);
+  ok(r.ok === true && r.path === path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'settings', `${sid}.settings`) && mode === 0o600,
+    'settings-merge answers through the hub\'s DeviceManager (its reply routed by id): the device wrote <its state>/settings/<sid>.settings, 0600 — a path it made itself');
+  ok(merged.hooks && JSON.stringify(merged.permissions) === JSON.stringify({ deny: ['Bash(rm -rf:*)'] }) && merged.env.MINE === 'yes' && !('ANTHROPIC_BASE_URL' in merged.env) && !('ANTHROPIC_API_KEY' in merged.env) && merged.apiKeyHelper === '' && merged.outputStyle === 'Concise'
+    && r.dropped.includes('ANTHROPIC_BASE_URL') && r.dropped.includes('ANTHROPIC_API_KEY') && !JSON.stringify(r).includes(KEY),
+    'the device\'s merge: the person\'s hooks and deny rules KEPT, the route and the credential DROPPED (their names said, never a value), the start\'s layer LAST — the file\'s text never in the answer');
+  const bad = await dm.settingsMerge({ sid: '../escape', cwd: proj, ownFile: 'my-settings.json', layer, by: 'system:test' });
+  const big = await dm.settingsMerge({ sid, cwd: proj, ownFile: 'my-settings.json', layer: { k: 'x'.repeat(70000) }, by: 'system:test' });
+  const unplaced = await dm.settingsMerge({ sid, cwd: proj, ownFile: '~bob/x.json', layer, by: 'system:test' });
+  ok(bad.ok === false && bad.reason === 'bad-sid' && !fs.existsSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'escape.settings')) && big.reason === 'layer-too-large' && unplaced.reason === 'own-file-unplaced',
+    'the device refuses BY NAME: an id outside its closed alphabet (nothing written), a layer over its bound, a file its own placement rule cannot place', { bad, big, unplaced });
+  const { DeviceManager: DMC } = require(REPO + '/src/agentd/client.js');
+  let asked = false, oldErr = null;
+  try { await DMC.prototype.settingsMerge.call({ connect: async () => ({ info: { capabilities: ['probe', 'sysinfo'] } }), _request: async () => { asked = true; return {}; } }, { sid, layer, by: 'system:test' }); } catch (e) { oldErr = e; }
+  ok(!!oldErr && oldErr.code === 'host_needs_daemon' && asked === false, 'an OLD agent (no settings-merge in its hello) is NEVER asked: the client refuses before any request (an unknown op would hang)', oldErr && oldErr.message);
+}
+
 // 5. the shared parser + cap (the ssh fallback rung's interpretation)
 // the probe must never list ITSELF (owner report: a 200% `ps` topped the CPU
 // sort forever — ps computes %CPU over its own ~10ms lifetime and its pid is

@@ -1581,9 +1581,18 @@ const pipeSessions = {
     }
   },
 };
-const _pipeSweep = setInterval(() => { try { pipeSessions.sweep(); } catch { } }, 3600000);
+// B-e7c0 (paired machine): the merged settings files (state/settings/<sid>.settings) — gone once their conversation ENDED by this
+// agent's own records (its pipe session not alive, or the keeper's meta says exited), or past SETTINGS_KEEP_MS (7 days)
+const SETTINGS_DIR = path.join(STATE, 'settings');
+const mergedEnded = (sid) => {
+  const pm = pipeSessions._meta(sid);
+  if (pm) return pm.exited !== undefined || !pipeSessions._childAlive(pm);
+  try { const km = JSON.parse(fs.readFileSync(path.join(process.env.VIBESPACE_KEEPER_DIR || path.join(os.homedir(), '.vibespace', 'run'), sid + '.json'), 'utf8')); return km && km.exited !== undefined; } catch { return false; }
+};
+const sweepSettings = () => { machineProbes.sweepMergedSettings(SETTINGS_DIR, { ended: mergedEnded }).catch(() => { }); };
+const _pipeSweep = setInterval(() => { try { pipeSessions.sweep(); } catch { } sweepSettings(); }, 3600000);
 if (_pipeSweep.unref) _pipeSweep.unref();
-setTimeout(() => { try { pipeSessions.sweep(); } catch { } }, 30000); // boot pass, off the startup hot path
+setTimeout(() => { try { pipeSessions.sweep(); } catch { } sweepSettings(); }, 30000); // boot pass, off the startup hot path
 
 // ── M5+: REVERSE TCP FORWARD registry ("互挂云盘" tunnel — the NAT-traversal
 // primitive). The server registers a listener; we bind 127.0.0.1:<port> on
@@ -2065,7 +2074,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind', 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */ /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2733,6 +2742,10 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         const on = !!msg.on;
         require('./../machine-window.js').pinWindow({ platform: process.platform, hwnd: rec.last.hwnd, pid: rec.last.pid, bundle: rec.last.bundle, on, execFile: require('child_process').execFile, env: spawnEnv() })
           .then((r) => { if (r && r.ok) rec.pinned = !!r.pinned; mux.control({ op: 'window-pin-result', id: msg.id, result: r }); }, (e) => mux.control({ op: 'window-pin-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      if (msg.op === 'settings-merge') {   // B-e7c0 (r723): the person's own settings file merged HERE (this machine places, reads and names the file; 0600)
+        machineProbes.settingsMergeOp(msg, { dir: SETTINGS_DIR, write: (file, text) => fs.promises.writeFile(file, text, { mode: 0o600, flag: 'wx' }) }).then((r) => mux.control({ op: 'settings-merge-result', id: msg.id, ...r }), (e) => mux.control({ op: 'settings-merge-result', id: msg.id, ok: false, reason: 'failed', error: String((e && e.message) || e).slice(0, 200) }));
         return;
       }
       if (msg.op === 'left-behind') {   // B-69a7: READ-ONLY — the same read as the hub's (src/left-behind.js), this agent's own tree and its desktop apps held out, the chain known by its records

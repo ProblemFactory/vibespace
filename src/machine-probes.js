@@ -143,6 +143,57 @@ async function startHelperFact({ cwd = null, ownFile = null } = {}, o = {}) {
   const late = new Promise((r) => { timer = setTimeout(() => r('unread'), bound); if (timer.unref) timer.unref(); });
   try { return await Promise.race([work.catch(() => 'unread'), late]); } finally { clearTimeout(timer); }
 }
+/** B-e7c0 ON A PAIRED MACHINE (ruled 2026-11-21 00:26Z, r723) — THE DEVICE'S OWN MERGE (op `settings-merge`): {sid, cwd, ownFile, layer}
+ *  → { ok: true, path, dropped } | { ok: false, reason }. THIS machine decides what it reads and where it writes: the person's own
+ *  file is found by the one placement the start's probe uses here (startFilesOf over this machine's home; a «~/» name: the literal
+ *  under the cwd, as the hub's own rule) — a path the hub states is never opened as given; it is read bounded (settingsReadOff:
+ *  non-blocking, a regular file ≤ SETTINGS_READ_MAX); the file it writes is named from the sid it checks itself (MERGE_SID_RE)
+ *  under `dir` (the agent's state/settings), 0600, exclusive create; the layer a plain object ≤ LAYER_MAX, refused by name
+ *  otherwise; the merge is src/settings-merge.js deviceMergeOf (the one rule both sides run). Bounded whole (`boundMs`). */
+async function settingsMergeOp(msg, { dir, write = null, readOff = settingsReadOff, boundMs = 3000 } = {}) {   // `write(file, text)`: the agent's own 0600 exclusive writer (this module writes nothing itself)
+  const BILLPICK = require('./settings-merge.js');   // the one merge (PURE) — billing-pick's words stay off the device bundle
+  const sid = msg && typeof msg.sid === 'string' && BILLPICK.MERGE_SID_RE.test(msg.sid) ? msg.sid : null;
+  if (!sid) return { ok: false, reason: 'bad-sid' };
+  const lr = BILLPICK.layerRefusal(msg.layer);
+  if (lr) return { ok: false, reason: lr };
+  if (typeof dir !== 'string' || !path.isAbsolute(dir) || typeof write !== 'function') return { ok: false, reason: 'no-state-dir' };
+  const work = (async () => {
+    const at = nodeAt(path, os.homedir());
+    const all = startFilesOf({ cwd: msg.cwd, ownFile: msg.ownFile }, at), bare = startFilesOf({ cwd: msg.cwd }, at);
+    const own = all.files.filter((f) => !bare.files.includes(f));
+    if (!own.length) return { ok: false, reason: 'own-file-unplaced' };
+    const r = await readOff(own[own.length - 1]);   // the literal file the CLI opens (the last placed: under the cwd for a «~/» name)
+    if (!r || typeof r.text !== 'string') return { ok: false, reason: r && r.missing ? 'own-file-missing' : 'own-file-unread' };
+    const m = BILLPICK.deviceMergeOf({ ownText: r.text, layer: msg.layer, row: HELPER_ROW });
+    if (!m.ok) return m;
+    const file = path.join(dir, `${sid}.settings`);
+    await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+    await fs.promises.unlink(file).catch(() => { });
+    await write(file, m.json);
+    return { ok: true, path: file, dropped: m.dropped.slice(0, 64) };
+  })();
+  let timer = null;
+  const late = new Promise((res) => { timer = setTimeout(() => res({ ok: false, reason: 'late' }), boundMs); if (timer.unref) timer.unref(); });
+  try { return await Promise.race([work.catch((e) => ({ ok: false, reason: 'write-failed', code: (e && e.code) || null })), late]); } finally { clearTimeout(timer); }
+}
+/** …and its files' life: a merged file whose conversation ENDED by this machine's own record (`ended(sid)`: a pipe session or a
+ *  keeper that says it exited) or older than SETTINGS_KEEP_MS goes — run with the agent's hourly sweep of its other state */
+const SETTINGS_KEEP_MS = 7 * 86400000;
+async function sweepMergedSettings(dir, { ended = () => false, now = Date.now() } = {}) {   // off the loop (the sync-fs census)
+  let names = [], gone = 0;
+  try { names = await fs.promises.readdir(dir); } catch { return 0; }
+  for (const fn of names) {
+    const m = /^([A-Za-z0-9_-]{1,64})\.settings$/.exec(fn);
+    if (!m) continue;
+    const f = path.join(dir, fn);
+    let mt = 0;
+    try { mt = (await fs.promises.stat(f)).mtimeMs; } catch { continue; }
+    let over = false;
+    try { over = !!(await ended(m[1])); } catch { over = false; }
+    if (over || now - mt > SETTINGS_KEEP_MS) { try { await fs.promises.unlink(f); gone++; } catch { } }
+  }
+  return gone;
+}
 /** (a suite's seam: forget the login shell's answer) */
 const forgetLoginDir = () => { loginDirMemo = null; loginDirAsk = null; loginDirGen++; };
 function statMtime(p) { try { return Math.floor(fs.statSync(p).mtimeMs / 1000); } catch { return null; } }
@@ -394,4 +445,4 @@ async function cliBinaryIdentity(cmd) {
   try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
 }
 
-module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, cliLevel, _levelReset, _levelInFlight, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };
+module.exports = { settingsMergeOp, sweepMergedSettings, SETTINGS_KEEP_MS, cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, cliLevel, _levelReset, _levelInFlight, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };

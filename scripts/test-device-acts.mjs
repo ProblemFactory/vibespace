@@ -107,7 +107,7 @@ console.log('— ② the summary redaction (sizes, never bytes)');
 }
 
 console.log('— ③ THE ONE SEND POINT (a fake daemon link)');
-const CAPS = ['run-shell', 'fs-portable', 'fs-write-stream', 'place-secret', 'input-events', 'desktop-serve', 'app-install', 'browser-serve', 'design-fs', 'peer-post', 'pool-orders', 'settings-open', 'window-pin', 'proc-list', 'sysinfo', 'display-facts', 'desktop-grab', 'desktop-input', 'stream-mic']; // int315: + lane desktop-handover's two; lane stream-mic-road
+const CAPS = ['run-shell', 'fs-portable', 'fs-write-stream', 'place-secret', 'input-events', 'desktop-serve', 'app-install', 'browser-serve', 'design-fs', 'peer-post', 'pool-orders', 'settings-open', 'window-pin', 'proc-list', 'sysinfo', 'display-facts', 'desktop-grab', 'desktop-input', 'stream-mic', 'settings-merge']; // int315: + lane desktop-handover's two; lane stream-mic-road
 function fakeDm() {
   const lines = [], sent = [], logs = [];
   const dm = new DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'no-bundle.js'), version: '0', log: (...a) => logs.push(a.join(' ')), onAct: (l) => lines.push(l) });
@@ -159,6 +159,7 @@ function fakeDm() {
     ['desktopGrab', (dm) => dm.desktopGrab('s1', { by: BY }), 'desktop-grab'], // int315: lane desktop-handover's two acts (.313)
     ['desktopInput', (dm) => dm.desktopInput('s1', [{ t: 'kd', c: 'KeyA' }], { by: BY }), 'desktop-input'],
     ['streamMic default', (dm) => dm.streamMic({ action: 'default', to: 'virtual', by: BY }), 'stream-mic:default'], // lane stream-mic-road: 「设为默认麦克风」
+    ['settingsMerge', (dm) => dm.settingsMerge({ sid: 's1', cwd: '/t', ownFile: 'x.json', layer: { apiKeyHelper: '' }, by: BY }), 'settings-merge'], // B-e7c0: the person's settings file merged on the device
   ];
   const bad = [];
   for (const [name, fn, op] of acts) {

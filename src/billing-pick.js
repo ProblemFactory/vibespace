@@ -43,9 +43,15 @@
  *     (0600). A paired machine, a provider's start, a file that is no JSON object or names a helper itself: set aside, as above.
  *     The machine's fact UNREAD (null) with the person's own file read whole: MERGED too — billing still wins (the override last,
  *     every route / credential name dropped; ruled 2026-11-19 09:30Z); an own file over SETTINGS_READ_MAX or unreadable is never merged.
+ *   · B-e7c0 ON A PAIRED MACHINE (ruled 2026-11-21 00:26Z, r723): the merge is made ON THE DEVICE by its own agent (op
+ *     `settings-merge`, src/machine-probes.js settingsMergeOp) — src/settings-merge.js deviceMergeOf (PURE, bundled; re-exported here) is the one merge both sides run:
+ *     the person's own file as the device places and reads it, every route / credential name dropped by ownSettingsOf, refused if
+ *     it names a helper itself or is no JSON object, and the LAYER LAST — the layer is exactly the inline JSON this hub hands the
+ *     set-aside start today (its additions + the override), never more (no widening). The merged file stays on the device; only
+ *     its path rides the argv (withSettingsPath); the person's file text never reaches the hub. An old agent, a machine without
+ *     one, a refusal or no answer in DEVICE_MERGE_MS: the release's set-aside, said as today.
  */
 const { namesHelper, helperFactOfText, SETTINGS_READ_MAX, startFilesOf, nodeAt, combinedFact } = require('./helper-fact.js');   // B-bc9f: ONE rule with a paired machine's probe
-const ROUTE = require('./claude-route-names.js');
 
 /** does this spawn set the machine's key helper aside? `creds` = the harness's creds row, `account` = what
  *  accounts.resolveForSpawn answered (null = the CLI's own login), `linked` = the picked account id that resolved to the
@@ -76,28 +82,7 @@ function ownSettingsPathOf(cwd, ownFile = null) {
   const f = typeof ownFile === 'string' ? ownFile.trim() : '';
   return !f ? null : f.startsWith('/') ? f : base ? `${base}/${f}` : null;
 }
-/** B-e7c0 cure: the top-level settings keys that run a cloud credential command (the AWS refresh and export, the Google refresh) */
-const MERGE_DROPS_KEYS = Object.freeze(['awsAuthRefresh', 'awsCredentialExport', 'gcpAuthRefresh']);
-/** B-e7c0: the person's file text → { settings, dropped } (a plain JSON object), else null — no object is never merged. Under a pick
- *  the pick decides where the turn goes and who bills, so EVERY env name the tree's own rule counts is dropped (src/claude-route-
- *  names.js, the list src/managed-claude-settings.js refuses: the routes and their switches — a switch when present, whatever its
- *  value — the credentials, the proxies and TLS trust, the config folders another login is read from), matched in ANY case, and so
- *  are the cloud credential commands. `dropped` names each (the create says them once, by name, with the door to the pick). */
-function ownSettingsOf(text) {
-  if (typeof text !== 'string') return null;
-  let o = null;
-  try { o = JSON.parse(text); } catch { return null; }
-  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
-  const settings = { ...o }, dropped = [];
-  for (const k of MERGE_DROPS_KEYS) if (Object.prototype.hasOwnProperty.call(settings, k)) { delete settings[k]; dropped.push(k); }
-  if (settings.env && typeof settings.env === 'object' && !Array.isArray(settings.env)) {
-    const env = {};
-    for (const [k, v] of Object.entries(settings.env)) { if (ROUTE.routeNameAny(k)) dropped.push(k); else env[k] = v; }
-    settings.env = env;
-  }
-  return { settings, dropped };
-}
-
+// B-e7c0: ownSettingsOf / MERGE_DROPS_KEYS live in src/settings-merge.js (PURE — the one merge a paired machine's agent runs too)
 
 /** THE FACT, on this machine: the CLI's settings file as read (`text`; `missing` = no such file) → true / false / null — the ONE rule
  *  of src/helper-fact.js, which a paired machine's device probe runs too (B-bc9f) */
@@ -135,4 +120,5 @@ function helperNotice({ name, account, accountId, host = null, hostId = null, pr
   return { key: noticeKey(accountId, hostId), words, params, text };
 }
 
-module.exports = { setsHelperAside, settingsFileOf, startFilesOf, nodeAt, ownSettingsPathOf, ownSettingsOf, MERGE_DROPS_KEYS, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };
+const { ownSettingsOf, MERGE_DROPS_KEYS, LAYER_MAX, MERGE_SID_RE, DEVICE_MERGE_MS, layerRefusal, deviceMergeOf, settingsLayerOf, withSettingsPath } = require('./settings-merge.js');   // re-exported: one spelling
+module.exports = { LAYER_MAX, MERGE_SID_RE, DEVICE_MERGE_MS, layerRefusal, deviceMergeOf, settingsLayerOf, withSettingsPath, setsHelperAside, settingsFileOf, startFilesOf, nodeAt, ownSettingsPathOf, ownSettingsOf, MERGE_DROPS_KEYS, combinedFact, namesHelper, localHelperFact, remoteHelperFact, SETTINGS_READ_MAX, HELPER_SET_ASIDE, noticeKey, helperNotice };

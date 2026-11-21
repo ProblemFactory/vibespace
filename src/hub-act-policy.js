@@ -44,7 +44,7 @@ const WAY_OUT = 'the user can change it under "Who can use it" on the machine ro
 const KIND_OF = Object.freeze({
   'run-cmd': 'run', 'run-stream': 'run', 'pool-orders': 'run',
   'fs-op:write': 'files', 'fs-op:rm': 'files', 'fs-op:rename': 'files', 'fs-op:mkdir': 'files', 'fs-op:copy': 'files', 'fs-op:move': 'files', 'fs-op:write-stream': 'files',
-  'place-secret': 'files', 'design-fs:write-user': 'files',
+  'place-secret': 'files', 'design-fs:write-user': 'files', 'settings-merge': 'files' /* B-e7c0: the person's settings file merged on the device */,
   'input-events': 'input', 'desktop-grab': 'input', 'desktop-input': 'input', 'window-pin': 'input', 'settings-open': 'input', 'peer-post': 'input',
   'stream-mic:default': 'input', // lane stream-mic-road: 「设为默认麦克风」 / 「改回」 — the machine's default microphone, like a Settings pane
   'tcp-connect': 'forward', 'serve-socks': 'forward',
