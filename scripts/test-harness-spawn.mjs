@@ -629,12 +629,24 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
     && wAbsentNative.cause === 'windows-absent' && wAbsentNative.onWsl === false && wAbsentNativeWords.i18n.key === MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative && !/WSL/.test(wAbsentNativeWords.message) && /reg\.exe \(in System32\)/.test(wAbsentNativeWords.message)
     && dicts.every((d) => d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsent) + ':') && d.includes(JSON.stringify(MANAGED.MANAGED_HELPER_WORDS.windowsAbsentNative) + ':')),
     'the Windows helper ABSENT is said in its own words — what a person can do BY PLATFORM (on WSL: turn on running Windows programs; on Windows: reg.exe itself, no word of WSL), no bare retry, no administrator (en, zh, ja)', { wsl: wAbsentWords.message.slice(-120), native: wAbsentNativeWords.message.slice(-120) });
-  // THE OUTER BOUND ending while the Windows read is pending is THAT read's verdict — never the administrator's words for the Linux folder
-  const wOuter = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: DRV, boundMs: 1500, reg: { regExe: path.join(regSlow, 'reg.exe'), env: {}, boundMs: 4000 } });
+  // THE OUTER BOUND ending while the Windows read is pending is THAT read's verdict — never the administrator's words for the Linux folder.
+  // The clock is PLACED (lane bl-release, 主开发 r1154 — the row read ~5.8 s against its 184 ms, 3.0 s of it these two waits on a real
+  // 1.5 s bound behind real reg.exe stand-ins): the reg reads go through the fact's own `exec` seam and answer from no process at all —
+  // the outer read never answers, the hang's two keys answer «no such value» at once — and the Linux managed folder answers from memory
+  // too (an empty local folder, as the reader's own fsOf below), so NOTHING real runs before the outer bound and it ends inside the
+  // Windows phase on any load (the real-process roads, the reg read's own SIGKILL bound included, are the legs above: wSlow, wFail,
+  // wAbsent, wNoExec; the real Linux folder, wNone and wDrv). And the run is KEPT ALIVE across these legs: with no real child left, a
+  // never-answering read holds no handle and the fact's timer is unref'd — a busy machine would otherwise drain the loop with this
+  // module's await still pending (node exits 13, the suite cut short) — the lane's read of this cure
+  const OUTER_MS = 250;
+  const alive = setInterval(() => {}, 1 << 30);   // cleared after the reader's legs below
+  const emptyLocal = (hangAt = null) => ({ stat: (p) => (p === hangAt ? new Promise(() => {}) : Promise.resolve({ isDirectory: () => true })), statfs: async () => ({ type: 0xef53 }), readdir: async () => [], open: async () => { const e = new Error('none'); e.code = 'ENOENT'; throw e; } });
+  const neverAnswers = () => {};   // a reg read that is still pending when the outer bound ends
+  const answersNone = (file, args, opts, cb) => setImmediate(() => cb(Object.assign(new Error('reg exited 1'), { code: 1 }), '', 'ERROR: The system was unable to find the specified registry key or value.'));
+  const wOuter = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: '/stand-in/outer/managed', drvfsDir: '/stand-in/outer/drvfs', fsp: emptyLocal(), boundMs: OUTER_MS, reg: { exec: neverAnswers, regExe: '/stand-in/outer/reg.exe', env: {}, boundMs: 4000 } });
   // …and NAMES what it waited on: the DrvFs folder hanging (its stat never answers) after both keys answered
-  const DRV_HANG = path.join(mdir({}), 'hung-drvfs');
-  const hangFsp = { ...fs.promises, stat: (p) => (p === DRV_HANG ? new Promise(() => {}) : fs.promises.stat(p)) };
-  const wHang = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: EMPTY, drvfsDir: DRV_HANG, fsp: hangFsp, boundMs: 1500, reg: { regExe: path.join(regNone, 'reg.exe'), env: {}, boundMs: 4000 } });
+  const DRV_HANG = '/stand-in/hang-drvfs/managed';
+  const wHang = await MANAGED.managedHelperFact({ platform: 'linux', wsl: true, dir: '/stand-in/hang/managed', drvfsDir: DRV_HANG, fsp: emptyLocal(DRV_HANG), boundMs: OUTER_MS, reg: { exec: answersNone, regExe: '/stand-in/hang/reg.exe', env: {}, boundMs: 4000 } });
   ok(wOuter.named === null && wOuter.cause === 'windows-unread' && wOuter.why === 'timeout' && /HKLM/.test(wOuter.where) && wHang.named === null && wHang.cause === 'windows-unread' && wHang.where === DRV_HANG,
     'the outer bound ending inside the Windows read answers «could not read the Windows policy» (its own verdict), naming what it waited on — a key, or the DrvFs folder', { wOuter, wHang });
   // (C) THE ENV RULE IS THE CLI'S OWN LIST, WHOLE (the cure2 read, S2/S3): its connection names (`lu` — 138 once its spreads are
@@ -686,6 +698,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const fsOf = (type) => ({ stat: async () => ({ isDirectory: () => true }), statfs: async () => ({ type }), readdir: async () => [], open: async () => { const e = new Error('none'); e.code = 'ENOENT'; throw e; } });
   const nfs = await MANAGED.managedHelperFact({ dir: '/stand-in/nfs', platform: 'linux', wsl: false, fsp: fsOf(0x6969) });
   const local = await MANAGED.managedHelperFact({ dir: '/stand-in/local', platform: 'linux', wsl: false, fsp: fsOf(0x794c7630 /* overlay */) });
+  clearInterval(alive);   // the never-answering reads above held nothing; from here every leg holds its own handle
   ok(fifo.named === null && fifo.cause === 'unreadable' && /10-pipe\.json$/.test(String(fifo.where)) && big.named === null && hang.named === null && hang.cause === 'timeout' && nfs.named === null && nfs.cause === 'network-mount' && local.named === false,
     'the reader: a FIFO drop-in answers «cannot tell» as NOT A REGULAR FILE (the open never blocked — its code is never the bound\'s «timeout»), a file over 1 MiB too, a stuck read at its bound; a network filesystem is not read, a local mount is', { fifo: fifo.cause, fifoWhere: fifo.where, big: big.cause, hang: hang.cause, nfs: nfs.cause, local: local.named });
   // macOS: the CLI's own managed-preferences file cannot be told (not parsed here) — Claude Desktop's is not the CLI's; WSL: the
