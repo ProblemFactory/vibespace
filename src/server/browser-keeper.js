@@ -2351,6 +2351,15 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  may be the very one asking now, stamped before this judge — takeover C3), so its own quiet is no longer than that. Why it
    *  ended (a crash, a kill) is not known here: the words say so. stoppedBy stays 'idle': every behaviour keyed on it (the
    *  next verb starts it again, its kept tabs reopen) is the idle-out's. */
+  /** B-346d law 1 (the coordinator's r803): HOW a stopped browser ended, from its own record — for the person's words on its view.
+   *  `by` = the record's stoppedBy ('idle' = its daemon gone on its own / idled out; else the act that stopped it), `early` = found
+   *  gone BEFORE its idle timeout (a BOUND, law 2's), `idleMs` = the idle it was launched with. null when the record says nothing. */
+  function endedFactsOf(rec) {
+    if (!rec || rec.state !== 'stopped') return null;
+    const idle = Number.isInteger(rec.idleMs) ? rec.idleMs : null;
+    const early = rec.endedEarly && Number.isFinite(Number(rec.endedEarly.withinMs)) ? { withinMs: Number(rec.endedEarly.withinMs), idleMs: Number(rec.endedEarly.idleMs) || idle } : null;
+    return { by: rec.stoppedBy ? String(rec.stoppedBy).slice(0, 40) : null, idleMs: idle, early, at: Number(rec.endedAt) || null };
+  }
   function markEphemeralGone(rec, seenBy = 'the tick') {
     const idleFor = Number.isInteger(rec.idleMs) ? rec.idleMs : pairsIdleMs(pairsOf(rec.profileId));
     const pe = profile(rec.profileId);
@@ -8541,7 +8550,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (bk) judgeEphemeral(bk, 'a view asked for its port'); // VERIFY r1 H2: the PROCESS, not the record (a ready record lies until the tick)
       const e = bk ? ephemeralFor(bk) : null;
       { const eRec = e && e.state === 'ready' ? reg.browsers[e.profileId] : null; if (eRec && isLocalRec(eRec) && !starting.has(e.profileId) && !stopping.has(e.profileId)) recaptureBrowser(eRec, 'a view asked for its port'); } // verify r3 M1 (a)
-      if (e && e.state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', state: e.state, error: e.state === 'starting' ? 'this conversation\'s browser is starting — the view connects when it is ready' : 'this conversation\'s browser is not running (it idled out or was stopped) — the agent\'s next browser command starts it again, and this view reconnects then' };
+      if (e && e.state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', state: e.state, ...(e.state === 'stopped' ? { ended: endedFactsOf(reg.browsers[e.profileId]) } : {}), error: e.state === 'starting' ? 'this conversation\'s browser is starting — the view connects when it is ready' : 'this conversation\'s browser is not running (it idled out or was stopped) — the agent\'s next browser command starts it again, and this view reconnects then' };
       // lane P verify (2026-09-26, finding 2): NO record = the conversation has not opened its browser yet
       // (the default target of a live view opened before its first command). `stream status` under its
       // pairs would SPAWN a background daemon on the real 0.38.1 (measured) that nobody records — so only

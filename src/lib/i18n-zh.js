@@ -3,6 +3,12 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "the agent's next browser command starts it again, and this view reconnects then": "Agent 的下一条浏览器命令会再次启动它，这个视图随后会重新连接",
+  "Stopped — {tail}": "已停止——{tail}",
+  "Ended on its own — found gone within {sec} s of a command it served, before its {min} min idle timeout; why is not known here. {tail}": "它自己结束了——在它执行的一条命令后 {sec} 秒内发现已不在，早于 {min} 分钟的空闲超时；这里无法得知原因。{tail}",
+  "Ended on its own — found gone within {sec} s of a command it served; why is not known here. {tail}": "它自己结束了——在它执行的一条命令后 {sec} 秒内发现已不在；这里无法得知原因。{tail}",
+  "Stopped on its own after {min} min with no command (its idle timeout) — {tail}": "{min} 分钟没有命令后自行停止（它的空闲超时）——{tail}",
+  "Stopped on its own (its idle timeout) — {tail}": "自行停止（它的空闲超时）——{tail}",
   // lane login-request-card piece 1 (the design's «Internal links» — the words on screen, LINKS): a link to a conversation or a desktop
   "Go": "前往",
   "Go to this desktop": "前往这个桌面",
@@ -4925,7 +4931,6 @@ export default {
   "This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh": "这个浏览器反复关闭——VibeSpace 已不再自动重新启动它。请在 ⚙ → 工具 → Agent 浏览器… 中停止它,之后的下一条命令会重新启动它",
   "Closed — the agent's next browser command starts it again, and this view reconnects then": "已关闭——agent 的下一条浏览器命令会再次启动它,届时这个视图会自动重新连接",
   "Stop this profile's browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)": "立即停止这个配置的浏览器——登录状态保留在配置中;下一条命令会再次启动它(这也会重置一个反复关闭的浏览器)",
-  "Stopped — the agent's next browser command starts it again, and this view reconnects then": "已停止——agent 的下一条浏览器命令会再次启动它,届时这个视图会自动重新连接",
   "Live view unavailable: {why}": "实时视图不可用: {why}",
   "Starting the browser stream…": "正在启动浏览器流…",
   "Connected — waiting for the first frame…": "已连接 — 等待第一帧…",

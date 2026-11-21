@@ -3,6 +3,12 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "the agent's next browser command starts it again, and this view reconnects then": "エージェントの次のブラウザーコマンドで再び起動し、この表示もそのとき再接続します",
+  "Stopped — {tail}": "停止しました — {tail}",
+  "Ended on its own — found gone within {sec} s of a command it served, before its {min} min idle timeout; why is not known here. {tail}": "自然に終了しました — 実行したコマンドから {sec} 秒以内に消えていました（{min} 分のアイドルタイムアウトより前）。理由はここではわかりません。{tail}",
+  "Ended on its own — found gone within {sec} s of a command it served; why is not known here. {tail}": "自然に終了しました — 実行したコマンドから {sec} 秒以内に消えていました。理由はここではわかりません。{tail}",
+  "Stopped on its own after {min} min with no command (its idle timeout) — {tail}": "{min} 分間コマンドがなく自然に停止しました（アイドルタイムアウト） — {tail}",
+  "Stopped on its own (its idle timeout) — {tail}": "自然に停止しました（アイドルタイムアウト） — {tail}",
   // lane login-request-card piece 1 (the design's «Internal links» — the words on screen, LINKS): a link to a conversation or a desktop
   "Go": "移動",
   "Go to this desktop": "このデスクトップへ移動",
@@ -4924,7 +4930,6 @@ export default {
   "This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh": "このブラウザは繰り返し閉じています — VibeSpace は自動での再起動をやめました。⚙ → ツール → エージェントブラウザ… で停止すると、次のコマンドで新たに起動します",
   "Closed — the agent's next browser command starts it again, and this view reconnects then": "閉じられています — エージェントの次のブラウザコマンドで再び起動し、そのときこのビューは自動で再接続します",
   "Stop this profile's browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)": "このプロファイルのブラウザを今すぐ停止します — ログインはプロファイルに残り、次のコマンドで再び起動します(繰り返し閉じるブラウザもこれでリセットされます)",
-  "Stopped — the agent's next browser command starts it again, and this view reconnects then": "停止中 — エージェントの次のブラウザコマンドで再び起動し、そのときこのビューは自動で再接続します",
   "Live view unavailable: {why}": "ライブビューを利用できません: {why}",
   "Starting the browser stream…": "ブラウザストリームを開始中…",
   "Connected — waiting for the first frame…": "接続済み — 最初のフレームを待機中…",

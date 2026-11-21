@@ -554,7 +554,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!keeper) { broadcast(relay, { type: 'status', state: 'error', code: 'unavailable', error: 'browser profiles are not available on this server' }); return endRelay(relay, 1011); }
     const r = await keeper.streamPortFor(relay.target);
     if (!relay.viewers.size && !relay.taps.size) return endRelay(relay);           // everyone left while the port was asked for
-    if (!r.ok) { broadcast(relay, { type: 'status', state: 'error', code: r.code || 'stream_unavailable', error: r.error, ...(r.unstable ? { unstable: r.unstable } : {}), ...(r.state ? { browserState: String(r.state) } : {}) }); return endRelay(relay, 1011); } // lane H verify r6: an unstable verdict's kind rides (the view's words); lane P verify: `browserState` = the keeper's record state (not-started / stopped) — the view draws it hollow
+    if (!r.ok) { broadcast(relay, { type: 'status', state: 'error', code: r.code || 'stream_unavailable', error: r.error, ...(r.unstable ? { unstable: r.unstable } : {}), ...(r.state ? { browserState: String(r.state) } : {}), ...(r.ended && typeof r.ended === 'object' ? { ended: r.ended } : {}) }); return endRelay(relay, 1011); } // lane H verify r6: an unstable verdict's kind rides (the view's words); lane P verify: `browserState` = the keeper's record state (not-started / stopped) — the view draws it hollow
     relay.port = r.port;
     const up = new WebSocketImpl(`ws://127.0.0.1:${r.port}`, { headers: { Origin: S.originHeaderFor(r.port) }, maxPayload: MAX_PAYLOAD, handshakeTimeout: connectTimeoutMs });
     relay.upstream = up;

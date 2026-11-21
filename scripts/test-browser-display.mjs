@@ -760,5 +760,31 @@ console.log('— ④ the words every surface says it with, and where they are dr
   ok((cliSrc.match(/if \(r\.displayNote\) console\.error\(`note: \$\{r\.displayNote\}`\)/g) || []).length === 2, 'WIRING: the CLI prints the note on a page verb and on `use`');
 }
 
+// ═══ B-346d law 1 (the coordinator's r803): a stopped browser's view says WHY it stopped ═══
+console.log('— B-346d law 1: the live view of a stopped browser says why, from the keeper\'s record');
+{
+  const W = await import('../src/lib/browser-display-words.js');
+  const tail = 'the agent\'s next browser command starts it again, and this view reconnects then';
+  const idle = W.stoppedText({ by: 'idle', idleMs: 900000, early: null });
+  const early = W.stoppedText({ by: 'idle', idleMs: 900000, early: { withinMs: 69000, idleMs: 900000 } });
+  const earlyNoIdle = W.stoppedText({ by: 'idle', idleMs: null, early: { withinMs: 1400 } });
+  const idleNoMs = W.stoppedText({ by: 'idle', idleMs: null, early: null });
+  const user = W.stoppedText({ by: 'user', idleMs: 900000, early: null }), none = W.stoppedText(null);
+  ok(idle === `Stopped on its own after 15 min with no command (its idle timeout) — ${tail}` && idleNoMs === `Stopped on its own (its idle timeout) — ${tail}`,
+    'its own idle timeout: «Stopped on its own after 15 min with no command (its idle timeout)» (the record\'s launched idle), and without a known idle the same without the minutes', { idle, idleNoMs });
+  ok(early === `Ended on its own — found gone within 69 s of a command it served, before its 15 min idle timeout; why is not known here. ${tail}` && earlyNoIdle.startsWith('Ended on its own — found gone within 1 s of a command it served; why is not known here.'),
+    'ended EARLY (law 2\'s bound): «found gone within 69 s of a command it served, before its 15 min idle timeout; why is not known here» — a bound, never when it ended', { early, earlyNoIdle });
+  ok(user === `Stopped — ${tail}` && none === `Stopped — ${tail}`, 'CONTROL: a stop by an act (the user, a release) or no record keeps the plain sentence — never a guessed cause', { user, none });
+  // the wiring: the keeper's refusal carries the record's facts, the bridge forwards them, the view says them
+  const KS = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), BS = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), LW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  const pins = [[KS, "code: 'browser_stopped', state: e.state, ...(e.state === 'stopped' ? { ended: endedFactsOf(reg.browsers[e.profileId]) } : {}),"], [KS, 'return { by: rec.stoppedBy ? String(rec.stoppedBy).slice(0, 40) : null, idleMs: idle, early, at: Number(rec.endedAt) || null };'], [BS, "...(r.ended && typeof r.ended === 'object' ? { ended: r.ended } : {}) });"], [LW, 'setStatus(stoppedText(m.ended), { reconnect: true });']];
+  const n = (txt, x) => txt.split(x).length - 1;
+  ok(pins.every(([txt, x]) => n(txt, x) === 1), 'WIRING, each line ONCE: the keeper\'s browser_stopped carries `ended` (endedFactsOf over the record: stoppedBy, the launched idle, endedEarly), the bridge forwards it, the stopped view says stoppedText(m.ended)', pins.filter(([txt, x]) => n(txt, x) !== 1).map(([, x]) => x));
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const keys = ["the agent's next browser command starts it again, and this view reconnects then", 'Stopped — {tail}', 'Ended on its own — found gone within {sec} s of a command it served, before its {min} min idle timeout; why is not known here. {tail}', 'Ended on its own — found gone within {sec} s of a command it served; why is not known here. {tail}', 'Stopped on its own after {min} min with no command (its idle timeout) — {tail}', 'Stopped on its own (its idle timeout) — {tail}'];
+  const miss = keys.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
+  ok(miss.length === 0, `every key stoppedText asks for (${keys.length}) has a zh and a ja row`, miss);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

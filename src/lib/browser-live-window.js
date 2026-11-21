@@ -172,7 +172,7 @@ import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces:
 import { createLoopBanner, loopTabRowOf, loopDoorsShown } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
-import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
+import { displayFactOf, displayFactText, stoppedText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
 import { pictureSourceOf, pictureForView, BG_SETTLE_MS } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
 import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
@@ -2368,7 +2368,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
             // naive study 2 (finding 3): the browser is not running and a view never starts one — say so plainly, keep the
             // LAST frame (greyed), the badge says "Browser stopped"; the view resumes by itself when the browser runs again
             st.error = m; st.stopped = true; noteStop(); st.stoppedHow = null; st.hollow = false; renderMode();
-            setStatus(t('Stopped — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true });
+            setStatus(stoppedText(m.ended), { reconnect: true }); // B-346d law 1: WHY it stopped, from the keeper's record (its own idle, or ended early)
           } else hollowFor(m); // MULTIVIEW: a released / stopped browser (lane P verify: an attachment too) is HOLLOW — the tab's own words
           maybeShowSessions(); // 2026-09-27: its past sessions, each with Replay
         } else if (m.state === 'error' && m.code === 'browser_released') {

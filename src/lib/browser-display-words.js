@@ -6,6 +6,21 @@
 import { t } from './i18n.js';
 import { factCode, kindName, NO_DESKTOP_WINDOW_DEFAULT } from '../browser-display.js';
 
+/** B-346d law 1 (the coordinator's r803): a stopped browser's view says WHY it stopped, from the keeper's record (`ended`, carried
+ *  with browser_stopped): its own idle timeout after N minutes with no command, or ended on its own BEFORE it (found gone within N s
+ *  of a command it served — a bound, never when it ended; why is not known here); anything else keeps the plain sentence. */
+export function stoppedText(ended) {
+  const tail = t("the agent's next browser command starts it again, and this view reconnects then");
+  const e = ended && typeof ended === 'object' ? ended : null;
+  if (!e || e.by !== 'idle') return t('Stopped — {tail}', { tail });
+  const min = Number.isFinite(Number(e.idleMs)) && Number(e.idleMs) > 0 ? Math.max(1, Math.round(Number(e.idleMs) / 60000)) : null;
+  if (e.early && Number.isFinite(Number(e.early.withinMs))) {
+    const sec = Math.max(1, Math.round(Number(e.early.withinMs) / 1000));
+    return min ? t('Ended on its own — found gone within {sec} s of a command it served, before its {min} min idle timeout; why is not known here. {tail}', { sec, min, tail }) : t('Ended on its own — found gone within {sec} s of a command it served; why is not known here. {tail}', { sec, tail });
+  }
+  return min ? t('Stopped on its own after {min} min with no command (its idle timeout) — {tail}', { min, tail }) : t('Stopped on its own (its idle timeout) — {tail}', { tail });
+}
+
 /** The fact of a profile's CURRENT browser from the profile digest (`browsers[id].display`), or null. */
 export function displayFactOf(digest, profileId) {
   const b = digest && digest.browsers && profileId ? digest.browsers[profileId] : null;
