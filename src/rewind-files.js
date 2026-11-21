@@ -67,28 +67,32 @@ const STEPS = Object.freeze({ conversation: Object.freeze(['conversation']), fil
 //   `helper` — it starts (or resumes: SendMessage) another agent, whose own edits are not these records: every listed file «a helper
 //            worked here» (the skill tool counts whole: a skill whose `context` is `fork` runs as a helper and the record does
 //            not say which one did).
-//   `untracked` — the checkpoints do NOT hold its writes (the shell, a read, a search, a plan, a schedule, a connector's tool), and
+//   `untracked` — the checkpoints do NOT hold its writes (the shell, a read, a search, a plan, the task list, a worktree), and
 //            such a write cannot hide: BEFORE the agent's first edit of a file it sits in that edit's backup (the file is put back
 //            as it was, that write included); AFTER it, the file's time moved past the edit (changed).
 // A NAME THE TABLE DOES NOT KNOW (or a call with no name), or a program it was not read for: every listed file «could not be
 // checked», with its reason (`unknown-tool`, `version-unread`). Unknown so today: MultiEdit, Grep, Glob (no recorded frame names
-// them). A connector's tools are ONE row by their prefix (`mcp__<server>__<tool>`, the naming src/conversation-facts.js reads):
-// untracked, with the same reasoning. Not src/channel-touch.js HELPER_TOOLS: that table is the touch chip's cause.
+// them). A connector's tools (`mcp__…`) are NOT
+// in it (r1330: no recorded frame holds a connector call): every connector call reads «could not be checked». Not src/channel-touch.js HELPER_TOOLS: that table is the touch chip's cause.
 const READ_CLI = '2.1.322';
 const TABLE_READ_FOR = Object.freeze([READ_CLI]);
 const INIT_312 = 'scripts/fixtures/claude-cli/2.1.312-frames.jsonl:2';
+// a file's time against the agent's last edit of it, on the machine where both are read: the tool WRITES, then its result is
+// recorded — so the agent's own write is at or BEFORE its result (LOW: how long before, a long edit's own run); a time past the
+// result by more than the clock's grain (HIGH) is a write after the agent's
+const HIGH_SLACK_MS = 1000;
+const LOW_SLACK_MS = 5000;
 // WHY a row's kind (each row names one): the reason it is in its kind, said once per kind of tool
 const TOOL_WHY = Object.freeze({
   writer: 'a file writer the checkpoints hold: each of its edits is counted',
   agent: 'it starts another agent (or resumes one) whose own edits are not these records',
   skill: 'a skill whose context is fork runs as a helper, and the record does not say which one did',
   later: 'it schedules a prompt that runs later as its own turn, where a skill or a helper may run: counted as one now',
-  shell: 'its writes are not held by the checkpoints: before the agent\'s first edit of a file such a write sits in that edit\'s backup; after it, the file\'s time moved past the edit',
+  shell: `its writes are not held by the checkpoints: before the agent's first edit of a file such a write sits in that edit's backup; after it, the file's time moved past the edit — OUTSIDE the window around the edit's time (${LOW_SLACK_MS / 1000} seconds before it, ${HIGH_SLACK_MS / 1000} second after): inside that window a time-preserving copy or a background writer reads «same»`,
   reads: 'it reads, searches or fetches: it writes none of the person\'s files',
   ui: 'it asks, plans, lists or reports to the person or the CLI itself: it writes none of the person\'s files',
-  tasks: 'it keeps the CLI\'s own task list, or watches or stops a process the shell started: no file of its own',
+  tasks: 'it keeps the CLI\'s own task list, or stops a process the shell started: no file of its own',
   worktree: 'it makes or leaves a git worktree: a write there is not held by the checkpoints — before the agent\'s first edit it sits in that edit\'s backup; after it, the time moved',
-  connector: 'a connector\'s tool: its writes are not held by the checkpoints — before the agent\'s first edit they sit in that edit\'s backup; after it, the time moved',
 });
 const TOOL_TABLE = Object.freeze(Object.fromEntries([
   ['Edit', 'edit', INIT_312, 'writer'], ['Write', 'edit', INIT_312, 'writer'], ['NotebookEdit', 'edit', INIT_312, 'writer'],
@@ -97,12 +101,14 @@ const TOOL_TABLE = Object.freeze(Object.fromEntries([
   ['Bash', 'untracked', INIT_312, 'shell'],
   ...['Read', 'WebFetch', 'WebSearch', 'ToolSearch'].map((n) => [n, 'untracked', INIT_312, 'reads']),
   ...['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'ListAgents', 'ReportFindings', 'CronDelete', 'CronList'].map((n) => [n, 'untracked', INIT_312, 'ui']),
-  ...['TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'TaskStop', 'Monitor'].map((n) => [n, 'untracked', INIT_312, 'tasks']),
+  ...['TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'TaskStop'].map((n) => [n, 'untracked', INIT_312, 'tasks']),
+  ['Monitor', 'untracked', INIT_312, 'shell'],   // the watcher can run a command of its own (r1332 (4)): the shell's why
   ...['EnterWorktree', 'ExitWorktree'].map((n) => [n, 'untracked', INIT_312, 'worktree']),
 ].map(([name, kind, evidence, why]) => [name, Object.freeze({ kind, evidence, why })])));
-// the connector's tools: ONE row by prefix. Its evidence is NOT a recorded frame (no fixture holds a connector call): it is the
-// tree's own reading of such a name (src/conversation-facts.js ownToolName) — said so in the line
-const TOOL_PREFIXES = Object.freeze([Object.freeze({ prefix: 'mcp__', kind: 'untracked', evidence: "src/conversation-facts.js ownToolName (the tree's reading of a connector tool's name; no recorded frame holds a connector call)", why: 'connector' })]);
+// a tool named by a PREFIX class: NONE (主开发 r1330 — the connector row is OUT: a row whose evidence is our own reading of a
+// name is a guess, and a shape with no recording is not guessed). Every connector call (`mcp__…`) reads «could not be checked»
+// until a recorded frame holds one.
+const TOOL_PREFIXES = Object.freeze([]);
 const toolKind = (name) => {
   if (typeof name !== 'string' || !name) return null;
   if (Object.prototype.hasOwnProperty.call(TOOL_TABLE, name)) return TOOL_TABLE[name].kind;
@@ -122,17 +128,21 @@ const BUILT_IN_COMMANDS = Object.freeze({
   compact: 'scripts/fixtures/message-origin/claude-user-records.jsonl:3 (a typed /compact record); the init frame: a command, not a skill',
   color: `${INIT_312}: a command, not a skill — a terminal command`, focus: `${INIT_312}: a command, not a skill — a terminal command`, 'reload-plugins': `${INIT_312}: a command, not a skill — a terminal command`,
 });   // NOT doctor: the same recorded frame lists it among its SKILLS
-const COMMAND_TAG_RE = /<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/;
-const TYPED_COMMAND_RE = /^\/([A-Za-z_][\w:.-]*)(?=\s|$)/;   // `__remote-workflow` too
-/** the command a message carries (its name), or null: the CLI's command tag in any of its text, or a person's text starting with one */
-function commandOf(m) {
-  if (!m || typeof m !== 'object') return null;
+const TYPED_COMMAND_RE = /^\/([^\s/]+)(?=\s|$)/;   // ANY name up to a space (r1332 (1) and its reader: a digit, `__x`, `/部署`, `/a+b`); a path («/w/a.js …») is none
+const COMMAND_TAGS_RE = /<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/g;
+/** EVERY command a message carries (r1332 (2): every tag, not the first alone): the CLI's command tags in any of its text, and a
+ *  person's text starting with one */
+function commandsOf(m) {
+  if (!m || typeof m !== 'object') return [];
   const texts = typeof m.content === 'string' ? [m.content] : (Array.isArray(m.content) ? m.content : []).filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text);
   if (typeof m.text === 'string') texts.push(m.text);
-  for (const t of texts) { const a = COMMAND_TAG_RE.exec(t); if (a) return a[1]; }
-  if (m.role === 'user') for (const t of texts) { const b = TYPED_COMMAND_RE.exec(t.trimStart()); if (b) return b[1]; }
-  return null;
+  const out = [];
+  for (const t of texts) for (const a of t.matchAll(COMMAND_TAGS_RE)) out.push(a[1]);
+  if (m.role === 'user') for (const t of texts) { const b = TYPED_COMMAND_RE.exec(t.trimStart()); if (b) out.push(b[1]); }
+  return out;
 }
+/** the first command a message carries, or null */
+const commandOf = (m) => commandsOf(m)[0] || null;
 // the CLI's own words for the two refusals it names (2.1.322) — an answer in other words is `cli-other`, said with its text
 const CLI_WORDS = Object.freeze({ 'checkpoints-off': 'File rewinding is not enabled.', 'no-checkpoint': 'No file checkpoint found for this message.' });
 const FAILED_PREFIX = 'Failed to rewind';
@@ -144,13 +154,8 @@ const FAILED_PREFIX = 'Failed to rewind';
 const NONE_RESTORED = Object.freeze({ [READ_CLI]: 'No files were restored' });
 // this door's own reasons, each with its class (one of the conversation door's ANSWER_CLASSES)
 const FILES_REFUSALS = Object.freeze({ 'files-off': 'cannot', 'not-a-choice': 'cannot', 'checkpoints-off': 'cannot', 'no-checkpoint': 'cannot', failed: 'failed', 'cli-other': 'other', 'no-answer': 'failed', 'changed-since': 'moved' });
-// a file's time against the agent's last edit of it, on the machine where both are read: the tool WRITES, then its result is
-// recorded — so the agent's own write is at or BEFORE its result (LOW: how long before, a long edit's own run); a time past the
-// result by more than the clock's grain (HIGH) is a write after the agent's
-const HIGH_SLACK_MS = 1000;
-const LOW_SLACK_MS = 5000;
 // why a file reads «could not be checked» (the confirm words each)
-const UNKNOWN_WHY = Object.freeze(['version-unread', 'helper-worked', 'unknown-tool', 'relative-path', 'records-cut', 'target-not-found', 'no-edit-known', 'refused-edit', 'edited-before', 'several-edits', 'several-turns', 'unreadable', 'older-time', 'over-bound']);
+const UNKNOWN_WHY = Object.freeze(['version-unread', 'helper-worked', 'unknown-tool', 'relative-path', 'case-twins', 'records-cut', 'target-not-found', 'no-edit-known', 'refused-edit', 'edited-before', 'several-edits', 'several-turns', 'unreadable', 'older-time', 'over-bound']);
 // the files ONE confirm judges (the door reads their times); a list past it: the rest «could not be checked: over-bound»
 const MAX_FILES = 64;
 
@@ -231,7 +236,9 @@ const isAbsPath = (p) => typeof p === 'string' && (p.startsWith('/') || /^[A-Za-
  *  under the agent)}}} */
 // r1307: + `cli` (the conversation's program: `tableRead` only for one the table was read for), `unknownTool` (the first name
 // the table does not know), a typed command not proven built in sets `helper`; every path in its lexical form (normPath)
-function editsFromMessages(messages, { targetId, whole = false, cli = null } = {}) {
+// r1332 (6) + r1336: + `skills` (the conversation's OWN init's skills: a name there is a helper whatever the table says); an
+// edit call with no readable path is a call that proves nothing (unknownTool)
+function editsFromMessages(messages, { targetId, whole = false, cli = null, skills = null } = {}) {
   const byPath = {}, before = new Set();
   let known = false, helper = false, unknownTool = null, relativePath = false, turn = 0;
   const blocks = (m) => (m && Array.isArray(m.content) ? m.content : []);
@@ -242,15 +249,19 @@ function editsFromMessages(messages, { targetId, whole = false, cli = null } = {
     if (raw !== null && !isAbsPath(raw)) relativePath = true;   // r1307 (4): a path the judge cannot compare for sure
     return normPath(raw);
   };
+  // the conversation's own skills: names (a row `{name}` read as its name); a list in any other shape proves nothing (fails closed)
+  const ownList = skills == null ? [] : Array.isArray(skills) ? skills.map((x) => (typeof x === 'string' ? x : x && typeof x.name === 'string' ? x.name : null)) : [null];
+  const own = new Set(ownList.filter((x) => typeof x === 'string'));
+  if (ownList.some((x) => typeof x !== 'string')) unknownTool = '(skills unreadable)';
   for (const m of Array.isArray(messages) ? messages : []) {
     for (const b of blocks(m)) {
       if (!isCall(b)) continue;
-      const k = toolKind(b.toolName);
+      const k = own.has(b.toolName) ? 'helper' : toolKind(b.toolName);
       if (k === 'helper') helper = true;
       else if (k === null && unknownTool === null) unknownTool = typeof b.toolName === 'string' && b.toolName ? b.toolName.slice(0, 80) : '(no name)';
+      if (k === 'edit' && unknownTool === null && !(b.input && ((typeof b.input.file_path === 'string' && b.input.file_path) || (typeof b.input.notebook_path === 'string' && b.input.notebook_path)))) unknownTool = '(an edit with no path)';   // r1336 (an empty path too)
     }
-    const cmd = commandOf(m);
-    if (cmd !== null && !Object.prototype.hasOwnProperty.call(BUILT_IN_COMMANDS, cmd)) helper = true;   // a typed command not proven to start none
+    for (const cmd of commandsOf(m)) if (own.has(cmd) || !Object.prototype.hasOwnProperty.call(BUILT_IN_COMMANDS, cmd)) helper = true;   // a typed command not proven to start none
     if (!known) {
       if (m && typeof targetId === 'string' && m.id === targetId) { known = true; continue; }
       for (const b of blocks(m)) { const p = editOf(b); if (p) before.add(p); }
@@ -276,12 +287,23 @@ function editsFromMessages(messages, { targetId, whole = false, cli = null } = {
  *  last edit of it), or 'unknown' with its reason (UNKNOWN_WHY) — every file `helper-worked` where a helper worked, every one
  *  `records-cut` where the records are not whole */
 function changedAfterOf(files, { mtimes = {}, edits = null, max = MAX_FILES } = {}) {
+  // r1332 (5): two listed or edited paths equal but for letter case — one file on a case-blind storage, two on another: not judged
+  // (its reader: also a composed vs a decomposed letter — one file on APFS — and a trailing dot or space — one file on Windows)
+  const seen = new Map();
+  for (const p of [...(Array.isArray(files) ? files : []).map(normPath), ...(edits && Array.isArray(edits.before) ? edits.before : []), ...Object.keys((edits && edits.byPath) || {})]) {
+    if (typeof p !== 'string') continue;
+    const low = p.normalize('NFC').toLowerCase().replace(/[. ]+(?=[\\/]|$)/g, '');   // case, a composed / decomposed letter, a trailing dot or space (Windows drops them)
+    if (!seen.has(low)) seen.set(low, new Set());
+    seen.get(low).add(p);
+  }
+  const twins = [...seen.values()].some((set) => set.size > 1);
   return (Array.isArray(files) ? files : []).map((path, i) => {
     if (!edits) return { path, state: 'unknown', why: 'records-cut' };
     if (edits.tableRead !== true) return { path, state: 'unknown', why: 'version-unread' };
     if (edits.helper === true) return { path, state: 'unknown', why: 'helper-worked' };
     if (edits.unknownTool) return { path, state: 'unknown', why: 'unknown-tool' };
     if (edits.relativePath === true) return { path, state: 'unknown', why: 'relative-path' };
+    if (twins) return { path, state: 'unknown', why: 'case-twins' };
     if (edits.whole !== true) return { path, state: 'unknown', why: 'records-cut' };
     if (edits.known !== true) return { path, state: 'unknown', why: 'target-not-found' };
     if (i >= max) return { path, state: 'unknown', why: 'over-bound' };
@@ -339,4 +361,4 @@ function outcomeOf(steps, results, { cli = null } = {}) {
   return { done, failed, notTried, maybePartial };
 }
 
-module.exports = { CHOICES, STEPS, READ_CLI, TABLE_READ_FOR, TOOL_WHY, TOOL_TABLE, TOOL_PREFIXES, EDIT_TOOLS, HELPER_TOOLS, BUILT_IN_COMMANDS, commandOf, normPath, CLI_WORDS, FAILED_PREFIX, NONE_RESTORED, FILES_REFUSALS, HIGH_SLACK_MS, LOW_SLACK_MS, UNKNOWN_WHY, MAX_FILES, NO_CHANGE, choicesOf, stepsOf, filesVerdict, filesRequestOf, filesAnswerOf, editsFromMessages, changedAfterOf, defaultChoiceOf, sameDrawOf, outcomeOf };
+module.exports = { CHOICES, STEPS, READ_CLI, TABLE_READ_FOR, TOOL_WHY, TOOL_TABLE, TOOL_PREFIXES, EDIT_TOOLS, HELPER_TOOLS, BUILT_IN_COMMANDS, commandOf, commandsOf, normPath, CLI_WORDS, FAILED_PREFIX, NONE_RESTORED, FILES_REFUSALS, HIGH_SLACK_MS, LOW_SLACK_MS, UNKNOWN_WHY, MAX_FILES, NO_CHANGE, choicesOf, stepsOf, filesVerdict, filesRequestOf, filesAnswerOf, editsFromMessages, changedAfterOf, defaultChoiceOf, sameDrawOf, outcomeOf };

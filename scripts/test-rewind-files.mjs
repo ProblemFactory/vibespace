@@ -16,14 +16,18 @@
 //   ⑤ «BOTH» — a files failure is «some may have been put back» but where nothing changed by construction (r1232); «No files
 //      were restored» only in the measured shape and only from the program measured (r1247)
 //   r1307's follow: THE TOOL TABLE is closed and version-gated (each row's evidence read back from its recorded frame; a name it
-//      does not know, a program it was not read for: every file could not be checked; a connector's tools one row by prefix); a
+//      does not know, a program it was not read for: every file could not be checked; no connector row (r1330)); a
 //      person's typed command not proven built in counts as a helper (the recorded command shapes); paths compared in one lexical
 //      form; the second «nothing was changed» sentence is not in the capture, so not read as «nothing put back»
+//   r1330 / r1332 / r1336: NO connector prefix row; a typed name may start with a digit; every command tag read; the shell's why
+//      names its window and the watcher takes it; two paths equal but for letter case; the conversation's own skills are helpers;
+//      an edit call with no readable path proves nothing
 //   RED CONTROLS (anchored copies): no one-edit rule, no edited-before rule, no turn rule, no refused rule, no write-after check,
 //   the default without the changed check, «both» in the other order, an unreadable list read as known, only the named failure,
 //   no helper rule, edited-before only when it succeeded, no whole-records rule, a waiting call not read, before the target
 //   results only, the words anywhere, no version gate, unknown tools passed, typed commands not read, Skill alone untracked,
-//   paths not normalised, relative paths passed, the taken-back refusal skipped
+//   paths not normalised, relative paths passed, the taken-back refusal skipped; r1330/r1332/r1336: a digit command not read, the
+//   first tag alone, case twins passed, an edit with no path passed, the conversation's own skills ignored
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -47,7 +51,7 @@ const noDraw = [['checkpoints off', { checkpoints: false, dry: DRY }], ['no dry 
 ok(noDraw.every(([, a]) => JSON.stringify(F.choicesOf(a)) === '["conversation"]'), `① the files choices ABSENT (never greyed) where they cannot work: ${noDraw.map(([n]) => n).join(' · ')}`);
 ok(JSON.stringify(F.stepsOf('both')) === '["files","conversation"]' && JSON.stringify(F.stepsOf('files')) === '["files"]' && F.stepsOf('files', F.choicesOf({ checkpoints: false })) === null && F.stepsOf('nonsense') === null,
   '① «both» runs the files, then the conversation (主开发 r1080 (7)); a choice not offered has no steps');
-ok([F.CHOICES, F.STEPS, F.STEPS.both, F.EDIT_TOOLS, F.HELPER_TOOLS, F.CLI_WORDS, F.NONE_RESTORED, F.NO_CHANGE, F.FILES_REFUSALS, F.UNKNOWN_WHY, F.TOOL_WHY, F.TOOL_TABLE, F.TOOL_TABLE.Skill, F.TOOL_PREFIXES, F.TOOL_PREFIXES[0], F.BUILT_IN_COMMANDS, F.TABLE_READ_FOR].every(Object.isFrozen), '① the tables are frozen');
+ok([F.CHOICES, F.STEPS, F.STEPS.both, F.EDIT_TOOLS, F.HELPER_TOOLS, F.CLI_WORDS, F.NONE_RESTORED, F.NO_CHANGE, F.FILES_REFUSALS, F.UNKNOWN_WHY, F.TOOL_WHY, F.TOOL_TABLE, F.TOOL_TABLE.Skill, F.TOOL_PREFIXES, F.BUILT_IN_COMMANDS, F.TABLE_READ_FOR].every(Object.isFrozen), '① the tables are frozen');
 
 console.log('— ② the verdict');
 const CP = { conversation: true, granularity: 'message' };
@@ -171,16 +175,16 @@ const badRows = Object.entries(F.TOOL_TABLE).filter(([n, r]) => !['edit', 'helpe
 const INIT = lineOf('scripts/fixtures/claude-cli/2.1.312-frames.jsonl:2');
 const badCmds = Object.entries(F.BUILT_IN_COMMANDS).filter(([c, ev]) => { const rec = lineOf(ev); const typed = !!rec && String((rec.message || {}).content || '').startsWith(`<command-name>/${c}</command-name>`); return !INIT || !(INIT.slash_commands || []).includes(c) || (INIT.skills || []).includes(c) || !(typed || (INIT.terminal_slash_commands || []).includes(c)); }).map(([c]) => c);
 ok(Object.keys(F.TOOL_TABLE).length >= 30 && !badRows.length && !badCmds.length && JSON.stringify(F.EDIT_TOOLS) === '["Edit","Write","NotebookEdit"]' && JSON.stringify(F.HELPER_TOOLS) === '["Agent","Task","Workflow","SendMessage","Skill","CronCreate","ScheduleWakeup"]' && Object.values(F.TOOL_TABLE).every((r) => Object.prototype.hasOwnProperty.call(F.TOOL_WHY, r.why)) && F.TOOL_PREFIXES.every((r) => Object.prototype.hasOwnProperty.call(F.TOOL_WHY, r.why))
-  && F.TOOL_PREFIXES.length === 1 && F.TOOL_PREFIXES[0].prefix === 'mcp__' && fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8').includes("n.startsWith('mcp__')"),
-  `④ THE TOOL TABLE IS CLOSED (r1307 (1)): ${Object.keys(F.TOOL_TABLE).length} names, each row's EVIDENCE read back from its recorded frame (the 2.1.312 init frame's tools, a recorded Agent call) and each with its WHY; the built-in commands proven from the same frame (a command, not a skill — so not doctor — and typed on record, or a terminal command); a connector's tools one row by prefix (its evidence the tree's own reading: no recorded frame holds a connector call); scheduled prompts count as helpers`, { badRows, badCmds });
+  && F.TOOL_PREFIXES.length === 0 && F.TOOL_TABLE.Monitor.why === 'shell' && F.TOOL_WHY.shell.includes(`(${F.LOW_SLACK_MS / 1000} seconds before it, ${F.HIGH_SLACK_MS / 1000} second after)`) && /inside that window a time-preserving copy or a background writer reads «same»/.test(F.TOOL_WHY.shell),
+  `④ THE TOOL TABLE IS CLOSED (r1307 (1)): ${Object.keys(F.TOOL_TABLE).length} names, each row's EVIDENCE read back from its recorded frame (the 2.1.312 init frame's tools, a recorded Agent call) and each with its WHY; the built-in commands proven from the same frame (a command, not a skill — so not doctor — and typed on record, or a terminal command); NO prefix row (r1330: a connector's tools have no recorded frame); the shell's why names its window (five seconds before the edit, one after), the watcher takes the shell's why (r1332 (3), (4)); scheduled prompts count as helpers`, { badRows, badCmds });
 const withRec = (rec, where = 'after') => { const r = [...recs]; r.splice(where === 'before' ? 1 : recs.findIndex((m) => m.id === 'k1') + 1, 0, rec); return r; };
 const judgeAll = (r, cli = F.READ_CLI) => F.changedAfterOf(LIST, { mtimes: MT, edits: F.editsFromMessages(r, { targetId: 'p1', whole: true, cli }) }).map((x) => `${x.state}${x.why ? ':' + x.why : ''}`);
 const VER = [['a program the table was not read for (2.1.399)', judgeAll(recs, '2.1.399')], ['no program named', judgeAll(recs, null)]];
 ok(VER.every(([, j]) => j.every((x) => x === 'unknown:version-unread')) && JSON.stringify(F.TABLE_READ_FOR) === JSON.stringify(Object.keys(F.NONE_RESTORED)) && F.READ_CLI === '2.1.322',
   `④ VERSION-GATED (r1307 (1)): ${VER.map(([n]) => n).join(' · ')} — every file could not be checked; the table and the measured words are read for ONE program, the same`, VER);
-const UNK = [['a tool no recorded frame names (MultiEdit)', withRec(tool('u1', 'MultiEdit', { file_path: '/w/z.js' }, 11))], ['an unknown name before the target', withRec(tool('u1', 'Teleport', {}, 1), 'before')], ['a call with no name', withRec({ id: 'u1', role: 'tool', content: [{ type: 'tool_call', toolCallId: 'c-u1', input: {} }] })], ['the bare connector prefix', withRec(tool('u1', 'mcp__', {}, 11))]]
+const UNK = [['a tool no recorded frame names (MultiEdit)', withRec(tool('u1', 'MultiEdit', { file_path: '/w/z.js' }, 11))], ['an unknown name before the target', withRec(tool('u1', 'Teleport', {}, 1), 'before')], ['a call with no name', withRec({ id: 'u1', role: 'tool', content: [{ type: 'tool_call', toolCallId: 'c-u1', input: {} }] })], ['the bare connector prefix', withRec(tool('u1', 'mcp__', {}, 11))], ['a connector\'s tool (r1330: no recorded frame holds one)', withRec(tool('u1', 'mcp__files__write_file', { path: '/w/q.txt' }, 11))], ['an edit call with no readable path (r1336)', withRec(tool('u1', 'Edit', { old_string: 'a' }, 1), 'before')]]
   .map(([n, r]) => [n, judgeAll(r)]);
-const KNOWN = [['the shell', withRec(tool('q1', 'Bash', { command: 'ls' }, 11))], ['a connector\'s tool (by its prefix)', withRec(tool('q1', 'mcp__files__write_file', { path: '/w/q.txt' }, 11))]].map(([n, r]) => [n, judgeAll(r)]);
+const KNOWN = [['the shell', withRec(tool('q1', 'Bash', { command: 'ls' }, 11))], ['the watcher', withRec(tool('q1', 'Monitor', { command: 'tail -f x' }, 11))]].map(([n, r]) => [n, judgeAll(r)]);
 console.log(`    (unknown tools: ${JSON.stringify(UNK)})`);
 ok(UNK.every(([, j]) => j.every((x) => x === 'unknown:unknown-tool')) && KNOWN.every(([, j]) => JSON.stringify(j) === '["same","same","changed"]'),
   `④ A NAME THE TABLE DOES NOT KNOW (r1304 (c)): ${UNK.map(([n]) => n).join(' · ')} — every file could not be checked; an untracked tool it knows (${KNOWN.map(([n]) => n).join(', ')}) leaves the judge as it was (a write by it before the agent's first edit sits in that edit's backup; after it, the time moved)`);
@@ -188,15 +192,27 @@ ok(UNK.every(([, j]) => j.every((x) => x === 'unknown:unknown-tool')) && KNOWN.e
 const recText = (rel, n) => { const r = JSON.parse(fs.readFileSync(path.join(REPO, rel), 'utf8').split('\n')[n - 1]); return r.message ? r.message.content : r.content; };
 const COMPACT = recText('scripts/fixtures/message-origin/claude-user-records.jsonl', 3), BRANCH = recText('scripts/fixtures/unknown-records/claude-transcript.jsonl', 4);
 const said = (text, role = 'user') => ({ id: 'cmd-' + text.length, role, content: [{ type: 'text', text }] });
-const CMD = [['the recorded /compact record (built in)', said(COMPACT), 'same'], ['/compact typed by the person', said('/compact'), 'same'], ['a terminal command (/color)', said('/color'), 'same'], ['/doctor — the recorded frame lists it as a SKILL', said('/doctor'), 'helper'], ['a command whose name starts with «_» (/__remote-workflow)', said('/__remote-workflow go'), 'helper'],
+const CMD = [['the recorded /compact record (built in)', said(COMPACT), 'same'], ['/compact typed by the person', said('/compact'), 'same'], ['a terminal command (/color)', said('/color'), 'same'], ['/doctor — the recorded frame lists it as a SKILL', said('/doctor'), 'helper'], ['a command whose name starts with «_» (/__remote-workflow)', said('/__remote-workflow go'), 'helper'], ['a command whose name starts with a digit (/2fa-reset, r1332 (1))', said('/2fa-reset now'), 'helper'], ['a name in another script (/部署)', said('/部署 now'), 'helper'], ['a name with a sign in it (/deploy+prod)', said('/deploy+prod'), 'helper'],
+  ['two tags in one message, the second a skill (r1332 (2): every tag)', said('<command-name>/compact</command-name>\n<command-name>/deep-research</command-name>'), 'helper'],
   ['the recorded local_command record /branch (built in, not proven to start nothing)', said(BRANCH, 'system'), 'helper'], ['a skill typed by the person (/deep-research)', said('/deep-research look at auth'), 'helper'],
   ['a plugin\'s command (/code-review:review)', said('/code-review:review 12'), 'helper'], ['a path, not a command (/w/a.js is broken)', said('/w/a.js is broken'), 'same']]
   .map(([n, m, want]) => [n, F.commandOf(m), judgeAll(withRec(m, 'before'))[0], want]);
 console.log(`    (typed commands: ${JSON.stringify(CMD.map(([n, c, j]) => [n, c, j]))})`);
 ok(typeof COMPACT === 'string' && COMPACT.startsWith('<command-name>/compact</command-name>') && typeof BRANCH === 'string' && BRANCH.startsWith('<command-name>/branch</command-name>')
-  && CMD.every(([, , j, want]) => (want === 'same' ? j === 'same' : j === 'unknown:helper-worked')),
+  && CMD.every(([, , j, want]) => (want === 'same' ? j === 'same' : j === 'unknown:helper-worked'))
+  && F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages(withRec(said('/compact'), 'before'), { targetId: 'p1', whole: true, cli: F.READ_CLI, skills: ['compact'] }) })[0].why === 'helper-worked'
+  && F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages(withRec(tool('s1', 'Bash', { command: 'x' }, 11)), { targetId: 'p1', whole: true, cli: F.READ_CLI, skills: ['Bash'] }) })[0].why === 'helper-worked',
   `④ A PERSON'S TYPED COMMAND (r1304 (a)) counts as a helper unless it is a built-in proven to start none — the shapes from the recorded records: ${CMD.map(([n, , , w]) => `${n} ⇒ ${w}`).join(' · ')}`);
 // r1307 (4): paths in ONE lexical form on both sides
+// its reader: the conversation's skills in another shape fail closed; an edit with an EMPTY path is an edit with no path
+const SK = [['skills as one string', F.editsFromMessages(recs, { targetId: 'p1', whole: true, cli: F.READ_CLI, skills: 'compact' }), 'unknown-tool'], ['skills as rows {name}', F.editsFromMessages(withRec(tool('s1', 'Bash', { command: 'x' }, 11)), { targetId: 'p1', whole: true, cli: F.READ_CLI, skills: [{ name: 'Bash' }] }), 'helper-worked'],
+  ['an edit whose path is empty', F.editsFromMessages(withRec(tool('u2', 'Edit', { file_path: '' }, 1), 'before'), { targetId: 'p1', whole: true, cli: F.READ_CLI }), 'unknown-tool']].map(([n, e, want]) => [n, F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: e })[0].why, want]);
+ok(SK.every(([, got, want]) => got === want), `④ its reader\'s smalls: ${SK.map(([n, , w]) => `${n} ⇒ ${w}`).join(' · ')} (never a silent «same»)`, SK);
+// r1332 (5): two listed or edited paths equal but for letter case — every file could not be checked
+const TW1 = F.changedAfterOf(['/w/a.js', '/w/A.js'], { mtimes: MT, edits: E }).map((x) => x.why), TW2 = F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages(withRec(tool('c0', 'Edit', { file_path: '/w/A.js' }, 1), 'before'), { targetId: 'p1', whole: true, cli: F.READ_CLI }) }).map((x) => x.why);
+const TW3 = F.changedAfterOf(['/w/caf\u00e9.js', '/w/cafe\u0301.js'], { mtimes: MT, edits: E }).map((x) => x.why), TW4 = F.changedAfterOf(['C:\\w\\a.js', 'C:\\w\\a.js.'], { mtimes: MT, edits: E }).map((x) => x.why);
+ok(TW1.every((w) => w === 'case-twins') && TW2.every((w) => w === 'case-twins') && TW3.every((w) => w === 'case-twins') && TW4.every((w) => w === 'case-twins') && F.UNKNOWN_WHY.includes('case-twins'),
+  '④ TWO PATHS EQUAL BUT FOR LETTER CASE (r1332 (5)) — two listed, or one listed and one edited before the target: one file on a case-blind storage, two on another — and (its reader) a composed vs a decomposed letter, a trailing dot: every file could not be checked', { TW1, TW2, TW3, TW4 });
 const PATHS = [['/w/./a.js', '/w/a.js'], ['/w//a.js', '/w/a.js'], ['/w/x/../a.js', '/w/a.js'], ['/', '/'], ['/..', '/'], ['C:\\w\\.\\a.js', 'C:\\w\\a.js'], ['a.js', 'a.js'], ['x/../a.js', 'a.js'], ['a/../../b', '../b']];
 const pr = [person('p0', 'u-0'), tool('k0', 'Edit', { file_path: '/w//two.js' }, 1), person('p1', 'u-1'), tool('k1', 'Edit', { file_path: '/w/two.js' }, 10), tool('k2', 'Edit', { file_path: '/w/./one.js' }, 11)];
 const PJ = F.changedAfterOf(['/w/two.js', '/w/one.js'], { mtimes: { '/w/two.js': at(10), '/w/one.js': at(11) }, edits: F.editsFromMessages(pr, { targetId: 'p1', whole: true, cli: F.READ_CLI }) }).map((x) => `${x.state}${x.why ? ':' + x.why : ''}`);
@@ -256,7 +272,7 @@ const noVersion = load("    if (edits.tableRead !== true) return { path, state: 
 ok(judge1(noVersion, '/w/a.js', recs, true, '2.1.399') === 'same', 'RED CONTROL (no version gate): a program the table was not read for — a.js reads «same»');
 const unknownPass = load("    if (edits.unknownTool) return { path, state: 'unknown', why: 'unknown-tool' };\n", '', 'unknown-tools-pass');
 ok(judge1(unknownPass, '/w/a.js', withRec(tool('u1', 'Teleport', {}, 11))) === 'same', 'RED CONTROL (unknown tools passed): a tool the table does not know — a.js reads «same»');
-const noCommands = load("    if (cmd !== null && !Object.prototype.hasOwnProperty.call(BUILT_IN_COMMANDS, cmd)) helper = true;   // a typed command not proven to start none\n", '', 'typed-commands-not-read');
+const noCommands = load("    for (const cmd of commandsOf(m)) if (own.has(cmd) || !Object.prototype.hasOwnProperty.call(BUILT_IN_COMMANDS, cmd)) helper = true;   // a typed command not proven to start none\n", '', 'typed-commands-not-read');
 ok(judge1(noCommands, '/w/a.js', withRec(said('/deep-research look at auth'), 'before')) === 'same', 'RED CONTROL (typed commands not read): a typed skill before the target — a.js reads «same»');
 const skillQuiet = load("['Skill', 'helper', INIT_312, 'skill']", "['Skill', 'untracked', INIT_312, 'shell']", 'skill-alone-untracked');
 ok(judge1(skillQuiet, '/w/a.js', helperAt('after', 'Skill')) === 'same' && judge1(skillQuiet, '/w/a.js', helperAt('after', 'Agent')) === 'unknown', 'RED CONTROL (Skill ALONE moved off the helpers — r1307 (5)): a skill call — a.js reads «same» (the agent tool still caught)');
@@ -264,6 +280,16 @@ const noNorm = load('    return normPath(raw);', '    return raw;', 'paths-not-n
 ok(noNorm.changedAfterOf(['/w/two.js'], { mtimes: { '/w/two.js': at(10) }, edits: noNorm.editsFromMessages(pr, { targetId: 'p1', whole: true, cli: F.READ_CLI }) })[0].state === 'same', 'RED CONTROL (paths not normalised): an edit before the target spelled «/w//two.js» escapes edited-before — «same»');
 const relPass = load("    if (edits.relativePath === true) return { path, state: 'unknown', why: 'relative-path' };\n", '', 'relative-paths-pass');
 ok(judge1(relPass, '/w/a.js', withRec(tool('r0', 'Edit', { file_path: 'a.js' }, 1), 'before')) === 'same', 'RED CONTROL (relative paths passed): an edit before the target spelled «a.js» escapes edited-before — «same»');
+const letterOnly = load("const TYPED_COMMAND_RE = /^\\/([^\\s/]+)(?=\\s|$)/;", "const TYPED_COMMAND_RE = /^\\/([A-Za-z_][\\w:.-]*)(?=\\s|$)/;", 'narrow-commands-not-read');   // stale-pins: kept — the control PLANTS the line as it read before r1332
+ok(judge1(letterOnly, '/w/a.js', withRec(said('/2fa-reset now'), 'before')) === 'same' && judge1(letterOnly, '/w/a.js', withRec(said('/部署 now'), 'before')) === 'same', 'RED CONTROL (a narrow name pattern): /2fa-reset and /部署 before the target — a.js reads «same»');
+const firstOnly = load("  for (const t of texts) for (const a of t.matchAll(COMMAND_TAGS_RE)) out.push(a[1]);", "  for (const t of texts) { const a = t.match(/<command-name>\\s*\\/?([^<\\s]+)\\s*<\\/command-name>/); if (a) out.push(a[1]); }", 'first-tag-only');
+ok(judge1(firstOnly, '/w/a.js', withRec(said('<command-name>/compact</command-name>\n<command-name>/deep-research</command-name>'), 'before')) === 'same', 'RED CONTROL (the first tag alone): a skill in a message\'s second tag — a.js reads «same»');
+const noTwins = load("    if (twins) return { path, state: 'unknown', why: 'case-twins' };\n", '', 'case-twins-pass');
+ok(noTwins.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: noTwins.editsFromMessages(withRec(tool('c0', 'Edit', { file_path: '/w/A.js' }, 1), 'before'), { targetId: 'p1', whole: true, cli: F.READ_CLI }) })[0].state === 'same', 'RED CONTROL (case twins passed): /w/A.js edited before the target, /w/a.js listed — «same»');
+const pathless = load("      if (k === 'edit' && unknownTool === null && !(b.input && ((typeof b.input.file_path === 'string' && b.input.file_path) || (typeof b.input.notebook_path === 'string' && b.input.notebook_path)))) unknownTool = '(an edit with no path)';   // r1336 (an empty path too)\n", '', 'pathless-edits-pass');
+ok(judge1(pathless, '/w/a.js', withRec(tool('u1', 'Edit', { old_string: 'a' }, 1), 'before')) === 'same', 'RED CONTROL (an edit with no path passed — r1336): an edit before the target whose path is unreadable — a.js reads «same»');
+const noOwn = load("      const k = own.has(b.toolName) ? 'helper' : toolKind(b.toolName);", "      const k = toolKind(b.toolName);", 'own-skills-ignored');   // stale-pins: kept — the control PLANTS the line as it read before r1332
+ok(noOwn.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: noOwn.editsFromMessages(withRec(tool('s1', 'Bash', { command: 'x' }, 11)), { targetId: 'p1', whole: true, cli: F.READ_CLI, skills: ['Bash'] }) })[0].state === 'same', 'RED CONTROL (the conversation\'s own skills ignored — r1332 (6)): a name it lists among its skills reads as the table says — «same»');
 const noTaken = load('  const v = DOOR.rewindVerdict(checkpoints, msg, state);', '  const v = DOOR.rewindVerdict(checkpoints, { ...msg, rewound: false }, state);', 'taken-back-skipped');
 ok(noTaken.filesVerdict(CP, { ...msg, rewound: true }, live, 'files', DRY).ok === true, 'RED CONTROL (the already-taken-back refusal skipped — r1307 (5)): a message whose conversation was taken back offers the files');
 const noWaiting = load("  const isCall = (b) => !!b && (b.type === 'tool_result' || b.type === 'tool_call');", "  const isCall = (b) => !!b && b.type === 'tool_result';", 'waiting-call-not-read');
