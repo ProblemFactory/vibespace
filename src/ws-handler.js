@@ -1206,6 +1206,14 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        case 'rewind-files': {   // B-437e files tier: the confirm's facts (dryRun) or a press with its choice — src/server/rewind-files-door.js; the PERSON only
+          const session = activeSessions.get(data.sessionId), D = require('./server/rewind-files-door.js'), by = ws._personPage === true ? byOfWs(ws) : null;
+          const job = data.dryRun === true ? D.filesConfirmOf({ session, msgId: data.msgId, by, hosts })
+            : D.pressFiles({ session, msgId: data.msgId, by, hosts, choice: typeof data.choice === 'string' ? data.choice : 'conversation', drawn: data.drawn || null, lastSeenUuid: data.lastSeenUuid, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null, reqId: typeof data.reqId === 'string' ? data.reqId : null });
+          job.then((r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { } }, () => { });
+          break;
+        }
+
         case 'end-left-behind': {   // B-69a7: «End them» — a PERSON's press only (the page verdict proved at this socket's handshake)
           const session = activeSessions.get(data.sessionId);
           require('./server/left-behind-door.js').endLeft(session, { by: ws._personPage === true ? byOfWs(ws) : null, at: data.at })

@@ -6,6 +6,9 @@
 
 /** OUR rewind requests carry this request_id prefix: the CLI's answer is known as ours by it. */
 const REWIND_REQUEST_PREFIX = 'vsr-';
+/** row B-437e, the files tier: OUR rewind_files requests (a dry run or a press) carry this prefix — the normalizer routes the
+ *  CLI's answer to ONE `rewind-files-answer` meta the hub's files door waits on (src/server/rewind-files-door.js). */
+const REWIND_FILES_PREFIX = 'vsf-';
 /** The one number the rewind's three clocks read: the `expires_at` we state, the hub's «one at a time» mark, the page's
  *  watchdog. A LOCAL 2.1.322 never expires a request (⇒ kb-file-structure «rewind-door.js»). */
 const REWIND_LIFE_MS = 60000;
@@ -50,4 +53,4 @@ function cutOf(messages, { targetUuid = null, leafUuid = undefined, untilId = nu
   return { ids: take.map((m) => m.id), placed: true, already: false };
 }
 
-module.exports = { REWIND_REQUEST_PREFIX, REWIND_LIFE_MS, isPersonPrompt, startsATurn, cutOf };
+module.exports = { REWIND_REQUEST_PREFIX, REWIND_FILES_PREFIX, REWIND_LIFE_MS, isPersonPrompt, startsATurn, cutOf };

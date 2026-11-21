@@ -14,7 +14,7 @@
  */
 
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
-const { cutOf, isPersonPrompt, REWIND_REQUEST_PREFIX } = require('./rewind-cut.js'); // B-437e: the person's rewind, in record order (the cut only — the device bundles this file)
+const { cutOf, isPersonPrompt, REWIND_REQUEST_PREFIX, REWIND_FILES_PREFIX } = require('./rewind-cut.js'); // B-437e: the person's rewind, in record order (the cut only — the device bundles this file)
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
 const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js'); // PURE: the head our notifications open with (S3 verify F3: a peer record's PATH, peerOriginOf)
 const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5) + its resolution (lane reset-path R3)
@@ -1133,6 +1133,13 @@ class MessageManager extends MessageWindow {
     if (emit) this._emit({ op: 'meta', subtype: 'rewind-answer', data: { requestId, answer: body, taken: cut ? cut.taken : 0, already: !!(cut && cut.already) } });
   }
 
+  // B-437e files tier: the CLI's answer to OUR rewind_files (vsf-) — ONE meta with the reply as it came; the hub's files door waits on it ⇒ kb-file-structure «rewind-files-door.js»
+  _processRewindFilesAnswer(resp, emit) {
+    const requestId = String((resp && resp.request_id) || '');
+    const body = resp && resp.subtype === 'error' ? { error: String(resp.error || 'error') } : (resp && resp.response) || null;
+    if (emit) this._emit({ op: 'meta', subtype: 'rewind-files-answer', data: { requestId, answer: body } });
+  }
+
   // B-437e: a rewound:true row waits for the next record — the CLI's heal row (a plain explicit one) cancels it ⇒ kb-file-structure «rewind-door.js»
   _processLastPrompt(raw, emit) {
     if (this._pendingRowCut && raw.explicit === true && raw.rewound !== true && this._namesThePendingCut(raw.leafUuid)) { this._pendingRowCut = null; return; } // the CLI healed: no cut was made
@@ -2212,6 +2219,7 @@ class MessageManager extends MessageWindow {
       existing.content = [{
         type: 'tool_result', toolCallId: toolUseId, toolName: pending.block.name,
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
+        ...(Number.isFinite(Date.parse(raw.timestamp)) ? { resultAt: Date.parse(raw.timestamp) } : {}), // B-437e files tier: the CLI's own time of the result (the clock of the machine its files are on)
         ...(split.images.length ? { images: split.images } : {}),
         ...(tr.is_error && isStoppedRun(resultText) ? { stoppedWhileRunning: true } : {}), // lane cli-2-1-314-records: the census's word, for the tool card
         ...(tr.is_error && isAgentCutOff(resultText) ? { agentCutOff: true } : {}), // lane cli-2-1-319-records: the process ended under this agent — the Agent card's words
@@ -2753,6 +2761,7 @@ class MessageManager extends MessageWindow {
     const requestId = raw.response?.request_id;
     if (!requestId) return;
     if (String(requestId).startsWith(REWIND_REQUEST_PREFIX)) return this._processRewindAnswer(raw.response, emit); // B-437e: ours
+    if (String(requestId).startsWith(REWIND_FILES_PREFIX)) return this._processRewindFilesAnswer(raw.response, emit); // B-437e files tier: ours
     const approved = raw.response?.response?.behavior === 'allow';
     // lane J r2: a deny that names browser_paused is the takeover's STALE answer — the
     // card says why (and keeps saying it after a restart: this record is replayed from the buffer)

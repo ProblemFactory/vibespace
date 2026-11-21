@@ -231,6 +231,11 @@ function overloadErrorsOf(id) {
 function rewindRoad(id) {
   try { const r = get(id).rewind; return r && typeof r.request === 'function' ? r : null; } catch { return null; }
 }
+/** B-437e files tier: the harness's road for its FILES rewind (claude: rewind_files) — null where it names none (the door
+ *  offers no files choice there) */
+function rewindFilesRoad(id) {
+  try { const r = get(id).rewind; return r && typeof r.files === 'function' ? r.files : null; } catch { return null; }
+}
 /** A harness whose `checkpoints` row says it rewinds the conversation names its road — a door with no road is refused. */
 function assertRewindContract(h) {
   const row = h && h.caps && h.caps.checkpoints;
@@ -240,4 +245,4 @@ function assertRewindContract(h) {
 }
 
 module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, predictShapeErrs, QUOTA_PROBE_RUNGS, NULL_QUOTA,
-  hasLimitSignal, assertResumeContract, resumeVerb, overloadErrorsOf, rewindRoad, assertRewindContract, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };
+  hasLimitSignal, assertResumeContract, resumeVerb, overloadErrorsOf, rewindRoad, rewindFilesRoad, assertRewindContract, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };
