@@ -18,8 +18,8 @@
 //        I8 the words are a function of the state alone (the view of a copy is the view)
 //        I9 THE DOORS (B-225c): every press is answered ONCE, by its own outcome — never by a commit for another text or machine, never
 //           dropped while its text and machine are the field's, never left hanging (an owed commit holds every door still waiting)
-//        I10 (B-f3a1 / r1204) the facts still coming: ONE re-ask a key, quiet and in the late class, started only by a complete listing that
-//           says its kids' facts were still out; its reply that is not complete never replaces the complete answer
+//        I10 (B-f3a1 / r1204) the facts still coming: ONE re-ask a key per FRESH ask (r1399 4), quiet and in the late class, started only by a
+//           complete listing that says its kids' facts were still out; its reply that is not complete never replaces the complete answer
 //      each invariant with its RED CONTROL: the rule removed in a copy of the model (an anchored edit of the shipped source) — the
 //      same driver finds the scene by itself and prints its seed
 //   ②b THE EVENT CENSUS (every event handled is fired at a named site, every fire( names its event, the list closes in one place)
@@ -257,7 +257,8 @@ function lawRun(G, seed, steps = 60) {
       const lateOk = ev.type === 'reply' && ev.factsLate && ev.kind === 'listing' && a.quiet === true && a.by === 'late' && a.key === ev.key;   // r1204: the ONE quiet re-ask a complete listing with its facts still out starts
       if (!STARTERS.has(ev.type) && !lateOk && !(G.sameAsk && G.sameAsk(e0.cur, before.key) && e0.cur !== before.key)) fail(`I5 an ask on «${ev.type}», an event that starts none (and no rebase)`);
       // I10 (B-f3a1 / r1204) — the late re-ask: quiet, the LAST class, at most once a key in a run; and its reply never unsays a complete answer
-      if (a.by === 'late' || a.quiet) { if (!(a.quiet && a.by === 'late')) fail('I10 a quiet ask not in the late class (or a late one with words)'); if (lateKeys.has(a.key)) fail('I10 the facts still coming asked twice for one key'); lateKeys.add(a.key); }
+      if (a.by === 'late' || a.quiet) { if (!(a.quiet && a.by === 'late')) fail('I10 a quiet ask not in the late class (or a late one with words)'); if (lateKeys.has(a.key)) fail('I10 the facts still coming asked twice for one key with no fresh ask between'); lateKeys.add(a.key); }
+      else lateKeys.delete(a.key);   // r1399 (4): a fresh ask for the key may earn one more
       if (a.reask) { if (++runReasks > P.PARTIAL_REPLIES - 1) fail('I5 more partial replies than PARTIAL_REPLIES in one run'); } else runReasks = 0;
       net = { key: a.key };
       // I7 — A1
@@ -626,6 +627,14 @@ console.log('\n── ⑥ the page\'s one gate · each ask\'s cause · the facts
   const sticky = load(anchored(SRC, '  s.lateOut = quiet ? s.key : null;   // the LATE mark', '  if (quiet) s.lateOut = s.key;   // the LATE mark', 'B-f3a1 the late mark cleared'));
   const lpm0 = lateThenPress(sticky);
   ok('⑥ RED CONTROL: the late mark left on the key — the person\'s partial reply is swallowed, the press hangs with nothing out or due', !lpm0.reaskArmed, lpm0);
+  const fresh = (M) => { let st = M.init(A); const asks = []; const go = (e, now) => { const r = M.step(st, { ...e, cur: A, now, env: envOf(A, { rank: 'resolved' }) }); st = r.state; asks.push(...r.effects.filter((x) => x.do === 'ask').map((x) => x.by)); };
+    go({ type: 'typed', soon: false }, 5); go({ type: 'reply', key: A, kind: 'listing', factsLate: true }, 6); go({ type: 'reply', key: A, kind: 'listing', factsLate: true }, 7);
+    go({ type: 'typed', soon: false }, 10000); go({ type: 'reply', key: A, kind: 'listing', factsLate: true }, 10001); go({ type: 'reply', key: A, kind: 'listing', factsLate: true }, 10002); return asks; };   // (the fresh ask past the dedupe window)
+  const fr = fresh(P);
+  ok(`⑥ r1399 (4): a person's FRESH ask whose listing again says the facts are still coming earns ONE more quiet re-ask — once a fresh ask, never a loop (${fr.join(',')})`, fr.join() === 'person,late,person,late', fr);
+  const fr0 = fresh(load(anchored(SRC, "  if (!quiet && (s.lateAsked || []).includes(s.key)) s.lateAsked = s.lateAsked.filter((k) => k !== s.key);", '', 'r1399 4 the fresh ask')));
+  ok('⑥ RED CONTROL (r1399 4): the copy that asks once a key for the field\'s whole life — the second fresh ask earns nothing', fr0.join() === 'person,late,person', fr0);
+  ok('⑥ r1399 (3): the field\'s VALUE law states itself above its function (the gate\'s essay once replaced it)', /\/\* THE FIELD'S VALUE \(B-5736\):[\s\S]{0,900}\*\/\nfunction valueFor\(committed, cur, at = null\) \{/.test(SRC));
   const lt0 = late(load(anchored(SRC, " && !(s.lateAsked || []).includes(s.key)) {", ') {', 'r1204 once')));
   ok('⑥ RED CONTROL (r1204): the copy that asks again at every «facts still coming» — a loop of asks', lt0.a2.length === 1, lt0);
   // THE PAGE: every fetchJson( of the file is one of the named non-folder reads or the gate's own (a new folder check past the gate is named)
@@ -637,18 +646,24 @@ console.log('\n── ⑥ the page\'s one gate · each ask\'s cause · the facts
     late: w.includes('if (stillWanted && !stillWanted()) { gateFire({ type: \'done\', id }); done(GATE_DROPPED); return; }'),
     tree: w.includes('{ field: `${pickKey}:tree:${h || \'\'}:${p}`, by: \'person\' }'),
     facts: w.includes('factsLate: !!(d && d.factsLate) });'),
-    dropped: w.includes('done(GATE_DROPPED); return; }') && w.includes("if (d === GATE_DROPPED) { traceReply(h, my, null, 'dropped'); return; }"),
+    dropped: w.includes('done(GATE_DROPPED); return; }') && w.includes("if (d === GATE_DROPPED) { if (my === st.seq) delete wrap.dataset.pending; traceReply(h, my, null, 'dropped'); return; }"),
     lateWorld: w.includes("if (by !== 'late' || replyKind(d) === 'listing') mergeReply(W, h, d, probe, key);"),
     treeEnds: w.includes('{ signal: st.treeCtl ? st.treeCtl.signal : undefined }') && w.includes('onClose: () => { st.treeCtl?.abort(); st.treeCtl = null;'),
+    removed: w.includes("{ signal: st.probeCtl.signal }, { field: pickKey + ':chips', by: 'door' }") && /function destroy\(\) \{[\s\S]{0,400}st\.probeCtl\?\.abort\?\.\(\); st\.treeCtl\?\.abort\?\.\(\);/.test(w),
+    pending: w.includes("if (by !== 'late') wrap.dataset.pending = '1';") && w.includes('if (d === GATE_DROPPED) { if (my === st.seq) delete wrap.dataset.pending;'),
   });
   const gw = gateWiring(WIRE);
-  ok(`⑥ WIRED: no folder check past the gate (${gw.gated - 1} gated sites + its definition); the field's ask carries its cause, a late one dropped unsent if its text moved — no reply then; a late reply that is not complete never touches the page's world; each folder of the picker tree its own id, its listings ending with the picker; the reply carries the facts flag`, gw.past.length === 0 && gw.gated === 6 && gw.cause && gw.late && gw.tree && gw.facts && gw.dropped && gw.lateWorld && gw.treeEnds, gw);
+  ok(`⑥ WIRED: no folder check past the gate (${gw.gated - 1} gated sites + its definition); the field's ask carries its cause, a late one dropped unsent if its text moved — no reply then; a late reply that is not complete never touches the page's world; each folder of the picker tree its own id, its listings ending with the picker; a removed field's chips probe and tree listings leave the gate; the quiet ask marks nothing pending; the reply carries the facts flag`, gw.past.length === 0 && gw.gated === 6 && gw.cause && gw.late && gw.tree && gw.facts && gw.dropped && gw.lateWorld && gw.treeEnds && gw.removed && gw.pending, gw);
   const gw0 = gateWiring(anchored(WIRE, "      return gatedFetch(url, { signal: ctl.signal }, { field: pickKey, by, stillWanted: by === 'late' ? () => keyNow() === key : null }).then((d) => {", '      return fetchJson(url, { signal: ctl.signal }).then((d) => {', 'B-f3a1 the field\'s ask past the gate'));   // stale-pins: kept (the old ask past the gate, planted by its RED)
   ok('⑥ RED CONTROL: the field\'s own ask past the gate (the ordinary way: fetchJson(url, { signal })) is named', gw0.past.some((c) => c.startsWith('fetchJson(url, { signal')), gw0.past);   // stale-pins: kept (the planted ask past the gate, named by its RED)
   const gw1 = gateWiring(anchored(WIRE, "{ field: `${pickKey}:tree:${h || ''}:${p}`, by: 'person' }", "{ field: pickKey + ':tree', by: 'person' }", 'B-f3a1 the tree\'s one id'));
   ok('⑥ RED CONTROL: one id for the whole picker tree (its folders\' listings would supersede each other) — the pin goes red', !gw1.tree, gw1);
   const gw2 = gateWiring(anchored(WIRE, "        if (by !== 'late' || replyKind(d) === 'listing') mergeReply(W, h, d, probe, key);", '        mergeReply(W, h, d, probe, key);', 'B-f3a1 the late reply in the world'));   // stale-pins: kept (the old merge, planted by its RED)
   ok('⑥ RED CONTROL: the page that merges a failed late reply (the list says «did not answer» while the answer stands) — the pin goes red', !gw2.lateWorld, gw2);
+  const gw3 = gateWiring(anchored(WIRE, ' st.probeCtl?.abort?.(); st.treeCtl?.abort?.();', '', 'r1399 1 the removed field'));
+  ok('⑥ RED CONTROL (r1399 1): a removed field whose chips\' probe and picker listings stay queued — the pin goes red', !gw3.removed, gw3);
+  const gw4 = gateWiring(anchored(WIRE, "      if (by !== 'late') wrap.dataset.pending = '1';", "      wrap.dataset.pending = '1';", 'r1399 2 the quiet ask\'s mark'));   // stale-pins: kept (the old mark, planted by its RED)
+  ok('⑥ RED CONTROL (r1399 2): the quiet ask marking the field pending (a drawn wait on it could hang) — the pin goes red', !gw4.pending, gw4);
 }
 
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);

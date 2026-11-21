@@ -149,6 +149,7 @@ function ask(s, fx, now, { force = false, reask = false, press = false, quiet = 
   disarm(s, fx, 'soon');   // an ask now supersedes the debounce
   s.everAsked = true; s.out = s.key;
   s.lateOut = quiet ? s.key : null;   // the LATE mark is the late re-ask's alone: any other ask on the key clears it (its reply is a real one)
+  if (!quiet && (s.lateAsked || []).includes(s.key)) s.lateAsked = s.lateAsked.filter((k) => k !== s.key);   // r1399 (4): a FRESH ask may earn one more quiet re-ask (once a fresh ask, never a loop)
   // B-f3a1: every ask names its CAUSE — the person's (the field a person typed in, pressed, opened, picked in), a door's (a text set from
   // outside, a derived one, a refresh) or LATE (the facts still coming, quiet) — the page's ONE gate sends them in that order
   fx.push({ do: 'ask', key: s.key, reask: !!reask, by: quiet ? 'late' : s.personal ? 'person' : 'door', ...(press ? { press: true } : {}), ...(quiet ? { quiet: true } : {}) });   // (B-d833 R-i: a press is attended — the machine sends a dead entrance's call once inside its window)
@@ -371,6 +372,11 @@ function valueAtAfter(at, { info = null, as = 'ok', keys = [] } = {}) {
   if (as === 'empty') return null;
   return at ? { ...at, voided: true } : null;
 }
+/* THE FIELD'S VALUE (B-5736): the committed folder only while the PATH's key now (tickKey: its text, its machine and, for a relative
+   text, its bases) is the key the folder came from (the press's own, or the box as its door's onCommit left it: a door may write the
+   folder's path into the box), and nothing since took it back: a press ended with nothing (refused, owed, dropped, moved, quiet), a create
+   that failed, the «create» consent taken off. A box, a machine or a Task Group moved by any road answers nothing: never the last folder
+   under another key. `at` = { keys: [the press's key, the key right after its onCommit], voided } */
 function valueFor(committed, cur, at = null) {
   if (!committed || typeof committed !== 'object' || !at || at.voided) return null;
   return Array.isArray(at.keys) && at.keys.includes(String(cur == null ? '' : cur)) ? committed : null;

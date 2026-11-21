@@ -472,11 +472,11 @@ export function pathField(input, opts = {}) {
       const prev = st.ctls.get(h); if (prev) prev.abort();
       const ctl = new AbortController(); st.ctls.set(h, ctl); st.ctl = ctl;
       const my = ++st.seq;
-      wrap.dataset.pending = '1';
+      if (by !== 'late') wrap.dataset.pending = '1';   // r1399 (2): the quiet re-ask marks nothing
       return gatedFetch(url, { signal: ctl.signal }, { field: pickKey, by, stillWanted: by === 'late' ? () => keyNow() === key : null }).then((d) => {
         if (st.destroyed) return;
         if (st.ctls.get(h) === ctl) st.ctls.delete(h);
-        if (d === GATE_DROPPED) { traceReply(h, my, null, 'dropped'); return; }   // the late ask was dropped unsent (its text moved): nothing was answered
+        if (d === GATE_DROPPED) { if (my === st.seq) delete wrap.dataset.pending; traceReply(h, my, null, 'dropped'); return; }   // r1399 (2): nothing is pending then   // the late ask was dropped unsent (its text moved): nothing was answered
         if (my !== st.seq) {   // superseded by an ask for ANOTHER machine (one for this machine would have aborted it): kept in its world
           if (d && d.listing && !st.ctls.has(h)) mergeReply(W, h, d, probe);
           traceReply(h, my, d, 'superseded');
@@ -711,7 +711,8 @@ export function pathField(input, opts = {}) {
     if (!want.length || W.unreachable) return;
     st.probeTimer = setTimeout(() => {
       if (st.destroyed || hk() !== h) return;
-      const go = () => gatedFetch((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + `?path=&bases=${encodeURIComponent('[]')}&probe=${encodeURIComponent(JSON.stringify(want))}&q=&kind=folder`, {}, { field: pickKey + ':chips', by: 'door' }).then((d) => {
+      st.probeCtl = st.probeCtl || new AbortController();   // r1399 (1): the probe ends with its field (destroy() aborts it: a queued one leaves the gate unsent)
+      const go = () => gatedFetch((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + `?path=&bases=${encodeURIComponent('[]')}&probe=${encodeURIComponent(JSON.stringify(want))}&q=&kind=folder`, { signal: st.probeCtl.signal }, { field: pickKey + ':chips', by: 'door' }).then((d) => {
         if (!d || !d.listing || st.destroyed) return;
         mergeListing(W.L, d.listing);
         if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
@@ -1001,7 +1002,7 @@ export function pathField(input, opts = {}) {
   }
   function destroy() {
     st.destroyed = true; clearTimeout(st.timer); clearTimeout(st.probeTimer); st.ctl?.abort?.(); for (const c of st.ctls.values()) c.abort(); st.ctls.clear();
-    fire({ type: 'destroyed' }); st.pctl?.abort?.(); answer([...waiters.keys()], null);   // the model's timers disarmed: no ask after the page is gone; every press still waiting hears «nothing»
+    fire({ type: 'destroyed' }); st.pctl?.abort?.(); st.probeCtl?.abort?.(); st.treeCtl?.abort?.(); answer([...waiters.keys()], null);   // r1399 (1): its chips' probe and its picker tree's listings leave the page's gate with it   // the model's timers disarmed: no ask after the page is gone; every press still waiting hears «nothing»
     // lane dialog-yield r5: ITS OPEN PICKER GOES WITH IT, said — a pick there would land in no field (37c1b566: a Task Detail row
     // removed while its picker was open kept the picker, and the pick was dropped in silence)
     if (st.picker && st.picker.live()) { const pk = st.picker; st.picker = null; st.picking = false; pk.close(); showToast(t('The field this picker was for is gone — the picker closed and nothing was written')); }
