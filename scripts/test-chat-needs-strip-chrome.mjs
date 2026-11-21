@@ -38,6 +38,9 @@ import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { chatNeedsKit, loadDesk } from './chat-needs-kit.mjs';
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a read whose state never came is SAID on its own line, right above the
+// judge that reads it, and MARKED (an object or a list carries `timedOut`) — so its red reads that, never a verdict on the product
+const markTimedOut = (v, ms, what) => { console.log(`    (${what}: the state it waits for did not come in ${ms / 1000} s (a wait that expects nothing ends so too); its last read ${JSON.stringify(v === undefined ? null : v).slice(0, 160)})`); return v && typeof v === 'object' ? Object.assign(v, { timedOut: `the state never came in ${ms / 1000} s` }) : v; };
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -374,7 +377,7 @@ try {
     const sid = await newConv('r2'); await sleep(600);
     let bsid = '', total = 0;
     const page = async (offset, limit) => { try { return await (await fetch(`${ORIGIN}/api/session-messages?backend=claude&backendSessionId=${encodeURIComponent(bsid)}&cwd=${encodeURIComponent(WORK)}&offset=${offset}&limit=${limit}`)).json(); } catch { return {}; } };
-    const grown = async (n) => { for (let i = 0; i < 200; i++) { total = (await page(0, 1)).total || 0; if (total >= n) return total; await sleep(200); } return total; };
+    const grown = async (n) => { for (let i = 0; i < 200; i++) { total = (await page(0, 1)).total || 0; if (total >= n) return total; await sleep(200); } return markTimedOut(total, 200 * 200, 'grown (the total)'); };
     const q = [];
     for (const n of [81, 82, 83]) {
       sayTo(sid, `an ask do:q${n}`);
