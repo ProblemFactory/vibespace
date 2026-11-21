@@ -79,6 +79,11 @@ const PUSH_LINES = 500, PUSH_TEXT = 8 * MiB;
 // The walk's dropped events (an id over its bound: src/usage-walker.js) ride the batch's LAST chunk (`oversize`) and the
 // hub says them: a dropped usage event is money not counted, never silent.
 const PUSH_WALK_BYTES = 24 * MiB, PUSH_WALK_MS = 60 * 1000, PUSH_ACK_WAIT_MS = 60 * 1000;
+// (r557 (1)) the push walk's time is counted from its FIRST LINE READ (`--clock-read`), never from before its listing — a
+// machine whose listing alone takes a minute walked one line a walk — and its child may run PUSH_WALK_TIMEOUT_MS (a listing
+// of up to three minutes, then its minute of reading). The harvest roads keep the clock from the walk's start (the hub's
+// deadline is theirs).
+const PUSH_WALK_TIMEOUT_MS = 4 * 60 * 1000;
 function pushChunksOf(lines, maxLines = PUSH_LINES, maxText = PUSH_TEXT) {
   const chunks = [];
   for (let i = 0, n = 0, start = 0; i <= lines.length; i++) {
@@ -142,9 +147,40 @@ function oversizeOf(text) {
   const n = o && Number(o.__oversize__);
   return n > 0 ? Math.floor(n) : 0;
 }
+// THE PUSH's LOOP (B-5278; the coordinator's r557 (5): one body, run by the suite — agentd.js hands it the walk child, the
+// line and the cursor writer): one walk at a time (a kick while one runs walks again after it); a kick coalesces for
+// kickMs; a walk stopped on its bound has its batch's ack awaited (usagePushWaitMs: at most PUSH_ACK_WAIT_MS) and the
+// ack walks the rest (st.acked); one stopped on its bound with nothing to send walks again at once; a dead link (st.dead)
+// walks nothing.
+function usagePushLoop(st, { walk, send, commit, log = () => { }, now = Date.now, timers = { setTimeout, clearTimeout }, kickMs = 1500, againMs = 200 }) {
+  const runWalk = () => {
+    if (st.dead) return; // its link died (U1): no walk, no push, no cursor written for a link nobody hears
+    if (st.running) { st.again = true; return; }
+    const wait = usagePushWaitMs(st, now());
+    if (wait > 0) { if (!st.waitTimer) { st.waitTimer = timers.setTimeout(() => { st.waitTimer = null; runWalk(); }, wait); if (st.waitTimer && st.waitTimer.unref) st.waitTimer.unref(); } return; }
+    st.running = true;
+    walk((err, stdout) => {
+      st.running = false;
+      let r = null;
+      try {
+        if (err) log('usage-events walk failed: ' + err.message);
+        if (!err && stdout) r = usagePushWalked(st, stdout, send, commit, { now });
+      } catch (e) { log('usage-events push failed: ' + e.message); }
+      if (r && r.committed && r.more) st.again = true;   // stopped on its bound with nothing to send: the rest now
+      if (st.again && !st.dead) { st.again = false; timers.setTimeout(runWalk, againMs); }
+    });
+  };
+  let kickTimer = null;
+  st.runWalk = runWalk;
+  st.kick = () => { if (kickTimer) return; kickTimer = timers.setTimeout(() => { kickTimer = null; runWalk(); }, kickMs); };
+  st.clearKick = () => { if (kickTimer) { timers.clearTimeout(kickTimer); kickTimer = null; } if (st.waitTimer) { timers.clearTimeout(st.waitTimer); st.waitTimer = null; } };
+  st.walkNow = () => { if (st.waitTimer) { timers.clearTimeout(st.waitTimer); st.waitTimer = null; } runWalk(); };
+  st.acked = (seq) => usagePushAcked(st, seq, commit, () => timers.setTimeout(() => { if (!st.dead) st.walkNow(); }, 0));
+  return st;
+}
 // the hub's journal line for a walk's dropped events (each road says it once: a dropped usage event is money not counted)
 function droppedSaid(machine, n, road) {
   return `[usage] ${machine || 'a machine'}: ${n} usage record${n === 1 ? '' : 's'} left out of its ${road || 'walk'} — an id longer than 256 bytes is no vendor id (B-5278); ${n === 1 ? 'its' : 'their'} tokens are not counted`;
 }
 
-module.exports = { MiB, FRAME_MAX, LINE_MAX, SMALL, CAPS, capOf, sizeOf, refusalOf, PUSH_LINES, PUSH_TEXT, PUSH_WALK_BYTES, PUSH_WALK_MS, PUSH_ACK_WAIT_MS, pushChunksOf, usagePushWalked, usagePushWaitMs, usagePushAcked, droppedSaid, cursorsWithoutSid, oversizeOf };
+module.exports = { MiB, FRAME_MAX, LINE_MAX, SMALL, CAPS, capOf, sizeOf, refusalOf, PUSH_LINES, PUSH_TEXT, PUSH_WALK_BYTES, PUSH_WALK_MS, PUSH_ACK_WAIT_MS, PUSH_WALK_TIMEOUT_MS, pushChunksOf, usagePushWalked, usagePushWaitMs, usagePushAcked, usagePushLoop, droppedSaid, cursorsWithoutSid, oversizeOf };

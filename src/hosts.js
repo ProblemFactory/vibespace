@@ -2037,13 +2037,14 @@ class HostManager {
       dm.watchUsageEvents?.((m) => {
         try {
           const text = (m.batch || []).join('\n');
-          if (m.seq != null && Number(m.oversize) > 0) console.warn(AC.droppedSaid((dm._machineName && dm._machineName()) || id, Math.floor(Number(m.oversize)), 'usage push'));   // B-5278: said once
+          // B-5278 (r557 (6)): the batch's left-out count is said at its ACK — once; a batch left unacked is sent again, unsaid till then
+          const said = () => { if (m.seq != null && Number(m.oversize) > 0) console.warn(AC.droppedSaid((dm._machineName && dm._machineName()) || id, Math.floor(Number(m.oversize)), 'usage push')); };
           let r = this.onUsageEvents?.(id, text);
           // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — the seq is acked once EVERY chunk of
           // its push has (the daemon walks again from its committed cursor: an ack is never ahead of what landed)
           if (r && typeof r.then === 'function') { landing.push(r); r = true; }
           if (r === false) held = true;
-          if (m.seq != null && landing.length) { const seq = m.seq, ok = !held, w = landing; held = false; landing = []; Promise.all(w).then((rs) => { if (ok && rs.every((x) => x !== false)) dm.ackUsageEvents(seq); }, () => { }); return; }
+          if (m.seq != null && landing.length) { const seq = m.seq, ok = !held, w = landing; held = false; landing = []; Promise.all(w).then((rs) => { if (ok && rs.every((x) => x !== false)) { dm.ackUsageEvents(seq); said(); } }, () => { }); return; }
           if (m.seq != null) { if (held) r = false; held = false; }
           if (m.seq != null) {
             // ingest is synchronous today (ingestRemoteEvents appends + fsyncs
@@ -2053,7 +2054,7 @@ class HostManager {
             // the harvest road's own verdict — deferred, or a month's hold
             // unwritten; a pause alone acks: its rows are held): unacked,
             // the device keeps the batch
-            if (r !== false) dm.ackUsageEvents(m.seq);
+            if (r !== false) { dm.ackUsageEvents(m.seq); said(); }
           }
         } catch { held = m.seq == null; /* unacked → re-emitted → the write-time dedup keeps none of it twice */ }
       }).catch(() => { });
@@ -3256,15 +3257,16 @@ class HostManager {
   async harvestUsage(id, { force = false, scannerPath, minIntervalMs, ledger = null } = {}) {
     const h = this.get(id);
     const ingest = (text, { cursors = null, since = null, oversize = 0 } = {}) => {
-      // B-5278: a walk's dropped usage events (an id over its bound) are said once, whichever road walked — money not counted
+      // B-5278: a walk's dropped usage events (an id over its bound) are said once, whichever road walked — money not counted —
+      // and (r557 (6)) only when that walk's rows were made durable (an unacked walk is walked again, unsaid till then)
       const dropped = oversize || AC.oversizeOf(text);
-      if (dropped) console.warn(AC.droppedSaid((h && h.name) || id, dropped, 'usage walk'));
-      if (!ledger) return text;
+      const said = (x) => { if (dropped && !(x && x.ack === false)) console.warn(AC.droppedSaid((h && h.name) || id, dropped, 'usage walk')); return x; };
+      if (!ledger) return said(text);
       // B-5278: a walk with no events still hands its cursors over (one stopped on its bound with none, one whose records were
       // all dropped) — the hub's copy moves, never re-read from the same place at every harvest
       const r = (text || cursors) ? ledger.ingestRemoteEvents(id, (h && h.name) || id, text || '', { cursors, since }) : { added: 0, appended: 0, duplicates: 0 };
       const out = (x) => (since ? { ...x, since } : x);
-      return r && typeof r.then === 'function' ? r.then(out) : out(r); // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — awaited
+      return r && typeof r.then === 'function' ? r.then(out).then(said) : said(out(r)); // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — awaited
     };
     if (!this._usageHarvestAt) this._usageHarvestAt = new Map();
     const last = this._usageHarvestAt.get(id) || 0;

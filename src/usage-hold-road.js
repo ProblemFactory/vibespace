@@ -1575,9 +1575,17 @@ class UsageHoldRoad {
   }
   _writeHostCursor(hostId, { cursors, since, lastTs, lastRid, events }) {
     const prev = this.hostCursorOf(hostId);
+    // B-5278 (the coordinator's r557 (3)): written only when the cursor MOVED — an acked harvest that found nothing hands its
+    // cursors over too (B-5278 unit 1), and the release's writer rewrote the whole map each time (tens of MB a minute a host
+    // on a big machine, a synchronous write on the loop)
+    const json = JSON.stringify(cursors);
+    if (!this._hostCursorJson) this._hostCursorJson = new Map();
+    const was = this._hostCursorJson.has(hostId) ? this._hostCursorJson.get(hostId) : (prev ? JSON.stringify(prev.cursors) : null);
+    if (prev && prev.since === since && was === json) { this._hostCursorJson.set(hostId, json); return prev; }
     const rec = { v: 1, host: String(hostId), cursors, since, lastTs: lastTs || (prev && prev.lastTs) || null, lastRid: lastRid || (prev && prev.lastRid) || null, events, at: Date.now() };
     timedSync('usage-host-cursors.write', () => { fs.mkdirSync(this.hostCursorsDir, { recursive: true }); this._writeAtomic(this._hostCursorFile(hostId), JSON.stringify(rec)); });
     this._hostCursors.set(hostId, rec);
+    this._hostCursorJson.set(hostId, json);
     return rec;
   }
   /** The warm still loading past the takeover bound → {bytesLeft, at}, else null. A sync reader meanwhile answers from the

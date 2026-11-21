@@ -76,10 +76,18 @@ function boundedEvent(ev) {
   return ev;
 }
 const idKey = (v) => (typeof v === 'string' && Buffer.byteLength(v, 'utf8') <= ID_MAX ? v : String(v).slice(0, ID_MAX + 1));   // an id as a cursor keeps it
-function goneKeys(keys, listed) {   // a folder holding a LISTED entry was listed: its other entries, not listed, are gone
-  const live = new Set();
-  for (const k of keys) if (listed.has(k)) live.add(path.dirname(k));
-  return keys.filter((k) => !listed.has(k) && live.has(path.dirname(k)));
+function goneKeys(keys, listed, under = null) {   // a folder holding a LISTED entry was listed: its other entries, not listed, are gone
+  const live = new Set(); let rootLive = false;
+  for (const k of keys) if (listed.has(k)) { live.add(path.dirname(k)); rootLive = true; }
+  return keys.filter((k) => {
+    if (listed.has(k)) return false;
+    if (live.has(path.dirname(k))) return true;
+    // (r557 (4)) a session folder gone from its project folder's listing (the project folder read, a live entry in it): the
+    // entries of its agents' files are gone with it — the map then equals the files on disk for agents too
+    if (!under || !rootLive) return false;
+    const top = path.relative(under.root, k).split(path.sep)[0];
+    return !!top && top !== '..' && !under.entries.has(top);
+  });
 }
 let oversize = 0;
 function emitEv(ev) { if (!boundedEvent(ev)) { oversize++; return; } emit(JSON.stringify(ev)); }
@@ -284,7 +292,7 @@ for (const pd of projDirs) {
     cursors[fp] = cur;
   }
   // B-5278: this folder's listings were read whole — an entry is dropped only by the proof (goneKeys)
-  if (whole) for (const k of goneKeys(projKeys.get(pd) || [], new Set(files.map((f) => f.fp)))) if (Object.prototype.hasOwnProperty.call(cursors, k)) delete cursors[k];
+  if (whole) for (const k of goneKeys(projKeys.get(pd) || [], new Set(files.map((f) => f.fp)), { root: pdAbs, entries: new Set(entries) })) if (Object.prototype.hasOwnProperty.call(cursors, k)) delete cursors[k];
 }
 
 // zstd rollouts (codex ≥0.153 may write rollout-*.jsonl.zst; S3). Node ≥22.15
@@ -351,7 +359,7 @@ for (const rel of rollouts) {
     if (plain.length < cur.offset) { cur.offset = 0; cur.lastRid = null; }
     const whole = scanBufferWith(plain, cur, onLine);
     cur.zsize = st.size;
-    if (whole) delete cur.zpart; else cur.zpart = 1; // read part-way (the run's bound): the next run goes on from its offset
+    if (whole || cur.offset >= plain.length) delete cur.zpart; else cur.zpart = 1; // read part-way (the run's bound): the next run goes on from its offset (a stop on the last line is the end)
   };
   scanRollout((line) => {
     // FORK REPLAY (2.369.203) — mirror of src/usage-walker.js: a forked rollout (session_meta

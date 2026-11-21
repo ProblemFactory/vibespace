@@ -121,7 +121,7 @@ console.log('③ the agent: an over-long answer refused for that ONE op, a push 
   ok(p.op === 'line-refused' && p.of === 'usage-events' && p.code === 'answer-too-large' && !('batch' in p) && !('id' in p), 'a push (no id) becomes `line-refused` naming the push — the link kept (the usage push used to end it)', p);
   const AG = read('src/agentd/agentd.js');
   ok(AG.includes("overLong: (obj, bytes, cap) => require('./answer-caps.js').refusalOf(obj, bytes, cap),") && /'hub-key', 'answer-bounds'/.test(AG), 'the agent\'s Mux takes that refusal as its `overLong`, and its hello-ack states `answer-bounds`');
-  ok(AG.includes("if (!err && stdout) r = AC.usagePushWalked(st, stdout, (obj) => mux.control(obj), st.commit);") && AG.includes("if (st) require('./answer-caps.js').usagePushAcked(st, msg.seq, st.commit, ") && !/pendingCursors\.(?:set|get|delete)\(/.test(AG),
+  ok(AG.includes('AC.usagePushLoop(st, {') && AG.includes('if (st && st.acked) st.acked(msg.seq);') && read('src/agentd/answer-caps.js').includes('if (!err && stdout) r = usagePushWalked(st, stdout, send, commit, { now });') && !/pendingCursors\.(?:set|get|delete)\(/.test(AG),
     'the agent\'s usage push and its ack run the ONE law (answer-caps.js usagePushWalked / usagePushAcked, its own bounds) — the agent holds no copy of it');
   ok(AC.PUSH_LINES === 500 && AC.PUSH_TEXT === 8 * 1024 * 1024 && JSON.stringify(AC.pushChunksOf(Array.from({ length: 1200 }, (_, i) => 'e' + i)).map((c) => c.length)) === '[500,500,200]', 'the push\'s chunks: ≤ 500 lines and ≤ 8 MiB of their text each (1200 events ⇒ 500 + 500 + 200)');
   const tc = AC.pushChunksOf(['a'.repeat(40), 'b'.repeat(40), 'c'.repeat(40), 'd'.repeat(300), 'e'.repeat(10)], 500, 100);
