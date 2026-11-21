@@ -10560,6 +10560,7 @@ function create(deps = {}) {
     setReach: ['refused', 'async', 'writes a grants row CG.setLevel channels-access.js:807, 815; owner route'],
     reachView: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (grantsOfConversation over the passed en + the patternAssignments table chann'],
     reachFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (over the passed en; derivesFromRule reads the index table patternAssignments'],
+    reachWalkOf: ['refused', 'sync', 'one walk’s reader of reach (B-360d, the rule walk): the reader it makes reads the rules that hold a row and each account’s own answer from the index — while paused that answer would say «nothing reaches» to every conversation a walk asks, so the door is refused by name before a reader is made; the engine’s own walks call the access module’s reader, never this door'],
     request: ['refused', 'async', 'agent door: files a For-you item userTodos.add channels-access.js:849 then index.update :869'],
     decideRequest: ['refused', 'async', 'owner decide route routes/channels.js:1382: index.update + CG.setLevel channels-access.js:902, 915'],
     expireWatchRequests: ['paused', 'async', 'minute sweep / boot: index.update channels-access.js:1696; no-op answer [] callers read .length'],
