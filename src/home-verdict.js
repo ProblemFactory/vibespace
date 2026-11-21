@@ -235,6 +235,7 @@ const HUB_NOT = Object.freeze([
     .map(N("the CALLER's conversation (src/conversation-env.js): its route, its credential, its account's sign-in, its telemetry receiver or its hub's own family — a hub started from inside a conversation is not that conversation", 'a conversation name')),
   ...CE.CONVERSATION_ENV_FAMILIES.map((prefix) => Object.freeze({ prefix, why: "a conversation family (src/conversation-env.js CONVERSATION_ENV_FAMILIES): the caller's harness names and its browser", tag: 'a conversation family' })),
   ...HUB_KNOBS.credentials.map((c) => Object.freeze({ name: c.name, why: c.why, tag: "a credential of the person's own hub" })),
+  ...(HUB_KNOBS.refused || []).map((c) => Object.freeze({ name: c.name, why: c.why, tag: 'a root act over the person\'s home' })),
 ]);
 const HUB_ROWS_ALL = Object.freeze([...HUB_ROWS, ...HUB_OWN]);
 /** THE HANDED ENV, JUDGED (B-ba47 pick B, 主开发 r1139 / r1156 — never the source's forms): every name of `env` that the handing

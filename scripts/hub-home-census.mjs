@@ -550,7 +550,7 @@ export function hubKnobCensus(reads, HV) {
   const row = (n) => HV.HUB_ROWS.some((r) => r.name === n || (r.prefix && n.startsWith(r.prefix)));
   const not = (n) => HV.HUB_NOT.some((x) => x.name === n || (x.prefix && n.startsWith(x.prefix) && n.length > x.prefix.length));
   const unruled = [...reads.keys()].filter((n) => n !== 'HOME' && n !== 'PATH' && !row(n) && !not(n)).sort();
-  const unread = [...HV.HUB_KNOBS.knobs, ...HV.HUB_KNOBS.credentials.map((c) => c.name)].filter((n) => !reads.has(n)).sort();
+  const unread = [...HV.HUB_KNOBS.knobs, ...HV.HUB_KNOBS.credentials.map((c) => c.name), ...(HV.HUB_KNOBS.refused || []).map((c) => c.name)].filter((n) => !reads.has(n)).sort();
   return { unruled, unread };
 }
 

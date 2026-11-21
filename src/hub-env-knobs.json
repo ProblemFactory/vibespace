@@ -1,5 +1,5 @@
 {
- "_": "B-ba47 shape H (主开发 r1222 (a)): the hub's OWN env knobs, DERIVED from what server.js and src/ read (scripts/hub-home-census.mjs hubEnvReads; the device agent's src/agentd/ aside). test-architecture §113 (h) holds this file EQUAL to that reading both ways. knobs: carried by a re-homed hub by shape; credentials: never carried (named NOTs).",
+ "_": "B-ba47 shape H (主开发 r1222 (a)): the hub's OWN env knobs, DERIVED from what server.js and src/ read (scripts/hub-home-census.mjs hubEnvReads; the device agent's src/agentd/ aside). test-architecture §113 (h) holds this file EQUAL to that reading both ways. knobs: carried by a re-homed hub by shape; credentials and refused: never carried (named NOTs).",
  "knobs": [
   "ANTIGRAVITY_CMD",
   "AT_SPI_BUS_ADDRESS",
@@ -21,7 +21,6 @@
   "SYSTEMROOT",
   "USERPROFILE",
   "VIBESPACE_APPS_STUB",
-  "VIBESPACE_APP_SYSTEM",
   "VIBESPACE_BOOT_TRACE",
   "VIBESPACE_BOOT_TRACE_CPU",
   "VIBESPACE_BOOT_TRACE_SYNC",
@@ -152,6 +151,12 @@
   {
    "name": "VIBESPACE_TLS_KEY",
    "why": "the person's TLS private key: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  }
+ ],
+ "refused": [
+  {
+   "name": "VIBESPACE_APP_SYSTEM",
+   "why": "the app system's acts (its boot-time helper and sudoers install, Set up, Repair, Migrate) run AS ROOT over the PERSON's home — the helper reads SUDO_UID's passwd entry, whatever HOME says: a throwaway copy never keeps one (its requests meet «no app system here» by name)"
   }
  ]
 }
