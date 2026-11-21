@@ -690,7 +690,17 @@ function addAllowRule(rule) {
   const allow = Array.isArray(perms.allow) ? perms.allow : (perms.allow = []);
   if (!allow.includes(rule)) allow.push(rule);
   const tmp = `${f.fp}.vs-${process.pid}.tmp`;
-  try { fs.writeFileSync(tmp, JSON.stringify(j, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(tmp, f.fp); }
+  // B-bcb8 unit A (lane lg-store-writes, 主开发 r1366): the account's settings are the PERSON's file — its bytes SYNCED before they
+  // take its name; a failed sync is a failed write (nothing renamed, the file as it was, the reason returned). Same bytes as before:
+  // an older wrapper and this one write and read the same file
+  try {
+    const b = Buffer.from(JSON.stringify(j, null, 2) + '\n'), fd = fs.openSync(tmp, 'w', 0o600);
+    let err = null;
+    try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } fs.fsyncSync(fd); } catch (e) { err = e; }
+    try { fs.closeSync(fd); } catch (e) { if (!err) err = e; }
+    if (err) throw err;
+    fs.renameSync(tmp, f.fp);
+  }
   catch (e) { try { fs.unlinkSync(tmp); } catch { } return { ok: false, why: `writing it failed (${e.message})` }; }
   return { ok: true, fp: f.fp };
 }

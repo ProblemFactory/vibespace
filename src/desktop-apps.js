@@ -497,6 +497,9 @@ const XPRA_KEY_SHA256 = '4df3209ea4b759f0b5838b60baedb6893ec62df7abad9046462176a
  *  (The fingerprint alone was not enough: `gpg --show-keys | grep fpr` passes a file that also carries any other key.) */
 const XPRA_KEY_CHECK = `(K=/usr/share/keyrings/xpra.asc.new; echo '${XPRA_KEY_SHA256}  '"$K" | sha256sum -c --status || { rm -f "$K"; echo "the key file at ${XPRA_KEY_URL} is not the pinned one (SHA-256 ${XPRA_KEY_SHA256}, xpra.org's key ${XPRA_KEY_FINGERPRINT} alone) - a key the publisher changed is refused too - nothing was changed" >&2; exit 3; })`;
 /** The key fetch: curl, else wget; a fetch that fails leaves nothing in the keyring folder (wget creates its -O file first). */
+// B-bcb8 unit A (lane lg-store-writes, 主开发 r1366): the checked key is SYNCED before it takes the keyring's name — a power loss
+// after the move can never leave apt a torn key file; a failed sync removes the new file and changes nothing, said
+const XPRA_KEY_SYNC = '(K=/usr/share/keyrings/xpra.asc.new; sync -- "$K" || { rm -f "$K"; echo "the key file could not be written to disk (its sync failed) - nothing was changed"; exit 3; })';
 const XPRA_KEY_FETCH = `{ (command -v curl >/dev/null && curl -fsSL ${XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new) || wget -qO /usr/share/keyrings/xpra.asc.new ${XPRA_KEY_URL}; } || { rm -f /usr/share/keyrings/xpra.asc.new; echo "the key at ${XPRA_KEY_URL} could not be fetched - nothing was changed" >&2; exit 3; }`;
 /** What the rung installs beside xpra: the default registry's first row, the fit/enumeration tools, the X cookie
  *  tool and the X server the xpra recipe starts (measured on the paired test box, 2026-09-25: noble's xpra 6.5.3
@@ -527,6 +530,7 @@ function xpraRepoSteps(cn) {
     'install -d -m 0755 /usr/share/keyrings',
     XPRA_KEY_FETCH, // pick 3d: a failed fetch leaves no .new behind
     XPRA_KEY_CHECK, // lane machine-needs-at-pairing pick 3: the pinned key or nothing
+    XPRA_KEY_SYNC, // B-bcb8 unit A: the checked bytes on disk before the move
     'mv -f /usr/share/keyrings/xpra.asc.new /usr/share/keyrings/xpra.asc',
     `printf '%s\\n' 'Types: deb' 'URIs: ${XPRA_REPO_URL}' 'Suites: ${cn}' 'Components: main' 'Signed-By: /usr/share/keyrings/xpra.asc' > /etc/apt/sources.list.d/xpra.sources`,
     `printf '%s\\n' 'Package: xpra*' 'Pin: version ${XPRA_PIN_MAJOR}.*' 'Pin-Priority: 1001' > /etc/apt/preferences.d/xpra-vibespace`,
