@@ -192,7 +192,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   //     owed to the stash's writer (produceStash) when that is not the file as it is;
   //   · a post before the replay ended WAITS for it (its records in the spill meanwhile): nothing answers the map half-replayed.
   const replay = { cutoff: Date.now() - KEEP_MS, done: false };
-  let head = 0;   // while it replays: order[head..] are the rids in the map, oldest first
+  let head = 0;   // order[head..] are the rids in the map, oldest first (compacted when the dead prefix reaches MAX_TRUTH)
   const replayRid = (rid, acct) => {
     if (truth.has(rid)) { truth.set(rid, acct); return; }   // a rid written twice keeps its first place, its last account (as remember() does)
     truth.set(rid, acct); order.push(rid);
@@ -305,12 +305,10 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     return { known: false, acct: null };
   }
 
-  function remember(rid, acct) {
-    if (truth.has(rid)) { truth.set(rid, acct); return; }
-    truth.set(rid, acct);
-    order.push(rid);
-    if (order.length > MAX_TRUTH) { const drop = order.splice(0, order.length - MAX_TRUTH); for (const r of drop) truth.delete(r); }
-  }
+  // ONE insertion for the replay and every take (row B-360d): the cap held at every insert, the oldest by first insertion out,
+  // O(1) — the release spliced the whole 60 000-row order at each new rid past the cap (a 2 000-record drain: ~120 M element
+  // moves, one 296 ms turn measured at the replay's end over the placed 480 MB stash)
+  function remember(rid, acct) { replayRid(rid, acct); }
 
   /** One OTLP payload → {kept, disagreements, seen}, or (before the replay ended) a promise of it: the post waits behind the
    *  replay, its records in the spill meanwhile. The liveness witness is noted at arrival either way. */
