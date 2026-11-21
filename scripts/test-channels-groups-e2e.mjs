@@ -62,6 +62,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a read whose state never came is SAID on its own line, right above the
+// judge that reads it, and MARKED (an object or a list carries `timedOut`) — so its red reads that, never a verdict on the product
+const markTimedOut = (v, ms, what) => { console.log(`    (${what}: the state it waits for did not come in ${ms / 1000} s (a wait that expects nothing ends so too); its last read ${JSON.stringify(v === undefined ? null : v).slice(0, 160)})`); return v && typeof v === 'object' ? Object.assign(v, { timedOut: `the state never came in ${ms / 1000} s` }) : v; };
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -800,7 +803,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   }
   const FOLDED = `(() => { const P = document.querySelector('.rail-panel-channels'); const ih = P && P.querySelector('.chan-groups .chan-ihead'); if (!ih) return null;
     return { folded: ih.classList.contains('chan-ihead-folded'), expanded: ih.getAttribute('aria-expanded'), groups: P.querySelectorAll('.chan-groups .chan-grow[data-group]').length, convs: P.querySelectorAll('.chan-groups .chan-grow:not([data-group])').length, count: ih.querySelector('.chan-ihead-count').textContent }; })()`;
-  const on = (pg, want, ms = 15000) => (async () => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await pg.evaljs(FOLDED); } catch {} if (v && v.folded === want) return v; await sleep(250); } return v; })();
+  const on = (pg, want, ms = 15000) => (async () => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await pg.evaljs(FOLDED); } catch {} if (v && v.folded === want) return v; await sleep(250); } return markTimedOut(v, ms, 'on (the fold)'); })();
   const before = await p1.evaljs(FOLDED), before2 = await on(p2, false);
   ok(before && before.folded === false && before.expanded === 'true' && before.groups >= 1 && before2 && before2.folded === false && before2.groups >= 1,
     '⑪ lane channels-fold: the owner\'s explicit UNFOLD (①b) holds here AND on the SECOND client\'s fresh load (user state, not this page)', JSON.stringify({ before, before2 }));
@@ -838,7 +841,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   await p1.evaljs(`app.attachSession('sess-grp-b', 'beta', ${JSON.stringify(wt)}, { mode: 'chat', backend: 'claude' }); true`);
   const VIEWB = `(() => { const v = ${BV}; if (!v || !v._messageList) return null; const st = v._stashFact && v._stashFact.stash; const items = (st && st.items) || [];
     return { group: items.filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0), cards: [...v._messageList.querySelectorAll('.chat-group-message')].map((e) => e.textContent) }; })()`;
-  const viewUntil = async (pred, ms = 20000) => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await p1.evaljs(VIEWB); } catch {} if (v && pred(v)) return v; await sleep(250); } return v; };
+  const viewUntil = async (pred, ms = 20000) => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await p1.evaljs(VIEWB); } catch {} if (v && pred(v)) return v; await sleep(250); } return markTimedOut(v, ms, 'viewUntil (the view)'); };
   const pre = await viewUntil((v) => v.group >= 1);
   ok(pre && pre.group >= 1 && !pre.cards.some((t) => t.includes(PARKED)), '⑫ beta\'s strip counts the parked group message (waiting for the next turn) and its chat has no card for it yet', JSON.stringify(pre));
   // the wake: alpha @mentions beta in a SECOND group (a group wake through THE ladder — the fixture sessions share no
