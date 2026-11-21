@@ -6612,6 +6612,7 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .jobs-payload { white-space: pre-wrap; background: var(--bg-panel); padding: 8px; border-radius: var(--radius-sm); font-size: 11px; margin: 6px 0; }
 .jobs-log { white-space: pre-wrap; max-height: 220px; overflow: auto; background: var(--bg-panel); padding: 8px; border-radius: var(--radius-sm); font-size: 10px; margin-top: 6px; }
 .jobs-access { display: flex; gap: 8px; align-items: center; margin: 6px 0; color: var(--text-dim); font-size: 11px; flex-wrap: wrap; }
+.jobs-memory-input { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 6px; font: inherit; font-size: 11px; } /* B-d73c (主开发 r701): the Memory bound field wore the browser's own white box — the theme's field at the card's type size (on a finger the phone rule above lifts every field to 16 px, on purpose) */
 .jobs-esc-line { color: var(--text-dim); font-family: monospace; font-size: 11px; overflow-wrap: anywhere; } /* lane ui-phone-and-fit pick 1 (its second claim): a crontab or unit line wider than a 155 px column never runs past it; it breaks at its own joints (escLine's <wbr> in jobs-panel.js), inside a run only when that run alone is wider than the line */
 .jobs-sec-esc { margin-top: 16px; }
 .jobs-rail-bar { padding: 8px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
