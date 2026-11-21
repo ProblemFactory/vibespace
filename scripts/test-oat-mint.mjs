@@ -35,8 +35,9 @@ const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(25); } return fn(); };
 const feedAll = (text, size) => { let s = null; const steps = []; for (let i = 0; i < text.length; i += size) { const r = M.mintStep(s, text.slice(i, i + size)); s = r.state; steps.push(...r.steps); } return { s, steps }; };
-// a per-PROCESS tail (lane oat-census-closure): the §4 spy scans os.tmpdir()'s top level, so a parallel copy of this suite
-// (a mutant matrix) writing ITS token there was read as a leak in this one; the fixed part keeps every slice below
+// a per-PROCESS tail (lane oat-census-closure): the §4 spy scanned the shared os.tmpdir()'s top level, so a parallel copy of this
+// suite (a mutant matrix) writing ITS token there was read as a leak in this one; the fixed part keeps every slice below (since
+// B-fe02 each copy's os.tmpdir() is its own folder, and the tail still names its own run)
 const TOKEN = ['sk', '-ant-oat01-'].join('') + 'Q7fakeTOKEN_' + require('node:crypto').randomBytes(8).toString('hex') + 'a1B2c3D4e5F6g7H8'.repeat(4) + '-zz';
 const CODE = 'fakeAuthCode123#FAKESTATE';
 
@@ -133,7 +134,7 @@ function captureStd() {
   return () => { for (const k of Object.keys(keep)) console[k] = keep[k]; process.stdout.write = w1; process.stderr.write = w2; return got; };
 }
 // F4: FILE WRITES — every fs write door the ORCH could take, plus a post-run
-// scan of this run's dirs and os.tmpdir()'s top level for the token's bytes
+// scan of this run's dirs (os.tmpdir() among them since B-fe02) for the token's bytes
 function spyFiles() {
   const t0 = Date.now(); const got = []; const keep = {};
   const has = (d) => { try { const b = Buffer.isBuffer(d) ? d.toString('latin1') : (ArrayBuffer.isView(d) ? Buffer.from(d.buffer, d.byteOffset, d.byteLength).toString('latin1') : String(d)); return b.includes(TOKEN) || b.includes(TOKEN.slice(13, 40)); } catch { return false; } };
@@ -146,11 +147,17 @@ function spyFiles() {
     for (const k of ['writeFile', 'appendFile']) fs.promises[k] = keep['p' + k];
     fs.createWriteStream = ws0;
     const scan = (d, deep) => { let n = []; try { n = fs.readdirSync(d); } catch { } for (const f of n) { const p = path.join(d, f); let st; try { st = fs.lstatSync(p); } catch { continue; } if (st.isDirectory() && deep) scan(p, deep); else if (st.isFile() && st.mtimeMs >= t0 - 1000 && st.size < 4e6) { try { if (has(fs.readFileSync(p))) got.push('on-disk:' + p); } catch { } } } };
-    scan(tmpBase, true); scan(os.tmpdir(), false);
+    scan(tmpBase, true);   // os.tmpdir() IS tmpBase/tmp (B-fe02): the suite's own folder, whole — never the shared root
     return got;
   };
 }
 const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oatmint-'));
+// B-fe02: THIS SUITE'S OWN FOLDER IS ITS os.tmpdir(). The spy used to list the SHARED temp root's top level after every mint —
+// tens of thousands of entries on a lanes box, the cost §8 paid at each step. Now a path the ORCH (or a planted leak) writes under
+// os.tmpdir() lands inside tmpBase, which the spy scans whole; the shared root is never read (a check below says so by fact).
+// The mint's default tmpRoot and its boot sweep follow os.tmpdir() too, so no create here can sweep the shared root either.
+const SHARED_TMP = os.tmpdir(), OWN_TMP = path.join(tmpBase, 'tmp');
+fs.mkdirSync(OWN_TMP, { recursive: true }); process.env.TMPDIR = OWN_TMP;
 const am = new AccountManager({ dataDir: path.join(tmpBase, 'data') });
 const sub = am.createSubscription({ name: 'Work Max' }).id;
 const sub2 = am.createSubscription({ name: 'Second' }).id;
@@ -400,6 +407,19 @@ console.log('§4 RED mutants — the spy catches each leak');
   am.clearOat(sub);
   const r = await saveFlow(loadOrch(), sub);
   ok(r.leaks.length === 0 && am.getOat(sub) === TOKEN, 'control: the shipped ORCH, same harness → no leak');
+  // B-fe02: THE SCAN READS THE SUITE'S OWN FOLDER, NEVER THE SHARED ROOT — by fact, over one run of the F4 mutant (a token written
+  // under os.tmpdir()): every folder listed during it is recorded; the leak file lands inside the suite's own folder and the disk
+  // scan finds it there (the write-door spy names it too — the RED above), while the shared root is listed by no one
+  const rd0 = fs.readdirSync, listed = [];
+  fs.readdirSync = function (d, ...a) { listed.push(String(d)); return rd0.call(this, d, ...a); };
+  let rf = null;
+  try { am.clearOat(sub); rf = await saveFlow(loadOrch(mutants[5][1]), sub); } finally { fs.readdirSync = rd0; }
+  fs.rmSync(path.join(os.tmpdir(), 'oatv-leak-' + process.pid + '.txt'), { force: true });
+  const sharedListed = listed.filter((d) => path.resolve(d) === path.resolve(SHARED_TMP));
+  const diskHit = ((rf && rf.files) || []).filter((x) => x.startsWith('on-disk:' + OWN_TMP + path.sep));
+  ok(os.tmpdir() === OWN_TMP && OWN_TMP.startsWith(tmpBase + path.sep) && sharedListed.length === 0 && diskHit.length === 1 && rf.leaks.includes('file:token'),
+    `B-fe02: the spy's disk scan reads the suite's OWN folder (os.tmpdir() = ${path.relative(tmpBase, OWN_TMP)} inside ${path.basename(tmpBase)}) and NEVER the shared root — ${listed.length} folder(s) listed in one run, ${sharedListed.length} of them ${SHARED_TMP}; the F4 leak file is found on disk inside it (${diskHit.map((x) => path.basename(x)).join(', ') || 'NOT FOUND'})`);
+  am.clearOat(sub);
 }
 
 /** One mint through an ORCH copy up to where it stops: saved / failed / confirm. */
