@@ -119,7 +119,7 @@ for (const c of C) {
     // each family's count only falls: B-d073 0 (主开发's ruling (a), 2026-11-18 23:33Z, was 4 — B-d073 built their doors); B-8703 29
     // (主开发 r533, 2026-11-20: unit 1 LISTS what the closed path net and the zh / ja value net newly catch — 22 menu paths, 7 values;
     // unit 2 makes doors of them where a helper that exists makes it one line)
-    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 7 });   // B-8703 unit 2: 29 → 7 — the long-lived-token words and doors (12), the beside sentences said without their direction (8), the Agent browser door (2); the 7 left keep their row with the reason (主开发 r700)
+    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 5 });   // B-7aef: 7 → 5 — the two Settings descriptions naming the gear menu's report and Customize UI now carry their door (settings-ui.js SETTINGS_DOORS);   // B-8703 unit 2: 29 → 7 — the long-lived-token words and doors (12), the beside sentences said without their direction (8), the Agent browser door (2); the 7 left keep their row with the reason (主开发 r700)
     const owedBy = (f) => (c.T.DOORS_OWED || []).filter((r) => r.family === f).length;
     // a B-8703 row names its file(s), and each file it names says the sentence it claims (the list is honest about where)
     const named = (r) => { const fs8 = (/^((?:src\/[\w./-]+\.js)(?:, src\/[\w./-]+\.js)*): /.exec(r.why) || [])[1]; const got = c.owed.filter((x) => x.row === r); return !!fs8 && got.length > 0 && got.every((x) => fs8.split(', ').every((f) => (words.get(x.s) || new Set()).has(f))); };
@@ -1412,6 +1412,64 @@ if (CL) {
     ok(!err1 && drawn && JSON.stringify(counts) === '[1,1,1,0]',
       `settings-13 (verifier #1): the reload line's store listener (${path1}) leaves with the surface that bound it — one while the row is drawn (open, a re-render, a search keystroke), none after the window closes (r.dcd495a1f: one more per render, kept after the close)`, { err1, drawn, counts });
     FETCH = async () => { throw new Error('no fetch in this leg'); };
+  }
+  // B-7aef (B-8703's remainder, items 3–4): A SETTINGS ROW WHOSE WORDS NAME A COMMAND ELSEWHERE CARRIES ITS DOOR on the row's own line
+  // (src/lib/settings-ui.js SETTINGS_DOORS — a row's `door` names one). Every schema row with a `door` is drawn by the REAL SettingsUI
+  // (the window opened searched for the row's label) and its door PRESSED: «Diagnostics report…» opens the report (app._openDiagnostics),
+  // «Customize UI…» enters Customize mode (app._customize.enter) — the gear menu's own commands; on a phone no Customize door (the gear
+  // menu's own rule: no Customize mode there); an app without the opener draws no door (a dead button is worse than none); no such row's
+  // words route by a menu path (the path net). RED CONTROLS, copies of settings-ui.js: a renderer without its door line draws none; a
+  // Customize door that forgets the phone is drawn there
+  {
+    const SUSRC = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
+    const suOf = async (src, tag) => {   // settings-ui.js bundled alone from a given source (a RED control's copy, built by anchored())
+      const swap = { name: 'su-src', setup(b) { b.onLoad({ filter: /settings-ui\.js$/ }, () => ({ contents: src, loader: 'js' })); } };
+      const out = await esbuild.build({ stdin: { contents: "export * as SU from './settings-ui.js';", resolveDir: path.join(REPO, 'src/lib'), sourcefile: tag + '-entry.js', loader: 'js' }, bundle: true, format: 'esm', write: false, plugins: [swap, stubBuildVersion], logLevel: 'silent', loader: { '.css': 'empty' } });
+      const f = path.join(TMP, tag + '.mjs'); fs.writeFileSync(f, out.outputFiles[0].text);
+      return (await import(pathToFileURL(f).href)).SU;
+    };
+    const DOORED = Object.keys(SS.SETTINGS_SCHEMA).filter((p) => SS.SETTINGS_SCHEMA[p] && SS.SETTINGS_SCHEMA[p].door);
+    const WORDS = { diagnostics: 'Diagnostics report…', customize: 'Customize UI…' };
+    const draw = async (S, p, { isMobile = false, openers = true } = {}) => {
+      FETCH = async () => ({ ok: true, status: 200, json: async () => ({}) });
+      const m = new SET.SettingsManager(); await m.load();
+      const wins = new Map(), calls = [];
+      let win = null, err = null, door = null, onLine = false;
+      const app = { settings: m, isMobile, wm: { windows: wins, revealWindow() {}, createWindow: (o) => { win = { id: 'settings-1', type: o.type, content: DOC.createElement('div'), onClose: null }; wins.set(win.id, win); DOC.body.appendChild(win.content); return win; } } };
+      if (openers) { app._openDiagnostics = () => calls.push('diagnostics'); app._customize = { enter: () => calls.push('customize') }; }
+      let words = null, data = null;
+      try {
+        new S.SettingsUI(app).open({ search: String(SS.SETTINGS_SCHEMA[p].label) });
+        const row = win.content.querySelectorAll('.settings-row').find((r) => r.dataset.path === p);
+        const info = row && row.querySelector('.settings-row-info');
+        door = info ? info.querySelector('.need-door[data-door]') : null;
+        // ON ITS LINE: the door stands in the row's words, right after the description (before the details fold and the key)
+        const kids = info ? info.children : [], di = kids.findIndex((k) => /\bsettings-row-desc\b/.test(k.className || ''));
+        onLine = !!door && di >= 0 && kids[di + 1] === door;
+        words = door ? door.textContent : null; data = door ? door.dataset.door : null;
+        if (door) door.click();
+      } catch (e) { err = String((e && e.stack) || e).slice(0, 400); }
+      if (win) { if (typeof win.onClose === 'function') win.onClose(); win.content.remove(); }
+      if (m._saveTimer) { clearTimeout(m._saveTimer); m._saveTimer = null; }
+      FETCH = async () => { throw new Error('no fetch in this leg'); };
+      return { err, door: !!door, onLine, words, data, calls };
+    };
+    const want = (p) => SS.SETTINGS_SCHEMA[p].door;
+    const pressed = (r, p) => !r.err && r.door && r.onLine && r.data === want(p) && r.words === WORDS[want(p)] && JSON.stringify(r.calls) === JSON.stringify([want(p)]);
+    const D = {};
+    for (const p of DOORED) D[p] = await draw(SU, p);
+    const pathNet = TABLES.find((x) => x.scope === 'ui').T.NET.path;
+    ok(DOORED.includes('telemetry.enabled') && DOORED.includes('chrome.arrangement') && DOORED.every((p) => want(p) in WORDS && pressed(D[p], p) && !pathNet.test(String(SS.SETTINGS_SCHEMA[p].description))),
+      `B-7aef: every Settings row whose words name a command elsewhere (${DOORED.join(', ')}) carries that command's door on its own line, PRESSED — «Diagnostics report…» opens the report, «Customize UI…» enters Customize mode; its words name no menu path`, D);
+    const phone = await draw(SU, 'chrome.arrangement', { isMobile: true }), bare = await draw(SU, 'telemetry.enabled', { openers: false }), bareC = await draw(SU, 'chrome.arrangement', { openers: false });
+    const phoneOk = (r) => !r.err && !r.door && r.calls.length === 0;
+    ok(phoneOk(phone) && phoneOk(bare) && phoneOk(bareC), 'B-7aef: on a phone the Customize door is not drawn (the gear menu offers no Customize mode there); an app without the opener draws no door (never a dead button)', { phone, bare, bareC });
+    const noDoor = await suOf(anchored(SUSRC, '    if (door && door.when(this.app || {})) info.append(', '    if (false) info.append(', 'B-7aef: the renderer draws no door'), 'su-nodoor');
+    const nd = await draw(noDoor, 'telemetry.enabled');
+    ok(!nd.err && !pressed(nd, 'telemetry.enabled'), 'RED control: a renderer without its door line leaves the row\'s words with no door — the judge above goes red', nd);
+    const noPhone = await suOf(anchored(SUSRC, "when: (app) => !app.isMobile && typeof app._customize?.enter === 'function'", "when: (app) => typeof app._customize?.enter === 'function'", 'B-7aef: the Customize door forgets the phone'), 'su-nophone');
+    const np = await draw(noPhone, 'chrome.arrangement', { isMobile: true });
+    ok(!np.err && !phoneOk(np), 'RED control: a Customize door that forgets the phone is drawn there — the phone judge goes red', np);
   }
   // plugins-integrations-13: the https why's door, DRAWN (reader #4 / #14) — on the default «auto» the line also says what is missing
   {

@@ -309,7 +309,8 @@ const SETTINGS_SCHEMA = {
   'chrome.arrangement': {
     type: 'json', default: null,
     label: t('Chrome element arrangement'),
-    description: t('Which bar hosts each movable element, in what order ({zone: [elementId, …]}). Managed by Customize mode (⚙ → Customize UI… → drag elements); edit by hand only if you know what you are doing.'),
+    description: t('Which bar hosts each movable element, in what order ({zone: [elementId, …]}). Customize mode keeps it (drag the elements there); edit by hand only if you know what you are doing.'),
+    door: 'customize',   // B-7aef: Customize mode's door on the row's own line (settings-ui.js SETTINGS_DOORS) — the words name no menu path
     tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
@@ -317,6 +318,7 @@ const SETTINGS_SCHEMA = {
     type: 'json', default: null,
     label: t('Chrome alignment'),
     description: t('Alignment per area: taskbar-items left/center (Windows-11-style centered icons), toolbar-center left/center/right, taskbar-tray left/right end. Managed by Customize mode.'),
+    door: 'customize',   // B-7aef (also cured): the row names Customize mode — its door on the row's own line
     tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
@@ -324,6 +326,7 @@ const SETTINGS_SCHEMA = {
     type: 'json', default: null,
     label: t('Spring configs'),
     description: t('Per-spring config: {mode:"flex", weight:1-9} (strength = flex-grow share) or {mode:"fixed", px:N} (rigid spacer). Managed by Customize mode (click a spring).'),
+    door: 'customize',   // B-7aef (also cured): the row names Customize mode — its door on the row's own line
     tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
@@ -1547,7 +1550,8 @@ const SETTINGS_SCHEMA = {
   'telemetry.enabled': {
     type: 'boolean', default: true,
     label: t('Local diagnostics (errors + feature usage)'),
-    description: t('Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. Powers the ⚙ → Diagnostics report.'),
+    description: t('Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. The Diagnostics report reads it.'),
+    door: 'diagnostics',   // B-7aef: the report's door on the row's own line (settings-ui.js SETTINGS_DOORS) — the words name no menu path
     category: t('Session'), liveApply: true,
   },
   'telemetry.loopHoldSampling': {   // lane hub-loop-stalls: THE off switch of the hold sampler (src/server/sync-fs-witness.js reads it at every beat)

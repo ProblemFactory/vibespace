@@ -1254,6 +1254,7 @@ The hub's journal (evidence: the `[stream] host-dial-Macbook` lines 13:04–13:1
 **不变量.**
 - A need sentence names the state; its act is a button on its line. A menu path or a direction in a sentence is red in the census.
 - A door is the existing opener, never a copy of a dialog.
+- A Settings row whose description names a command elsewhere carries that command's door on its line (schema `door`, settings-ui.js SETTINGS_DOORS), never «⚙ → …» in its words.
 - A failure's code names what failed: a missing FILE is `file_missing`, never a missing package's `not_found`.
 - A person's new door on the server is the person's: a bearer (an agent's session token, a job token, an automation key) is refused by name.
 

@@ -18,6 +18,14 @@ import { mountSuggestionList } from './voice-teach-ui.js';   // lane voice-dicti
 import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
 import { holdWords } from './user-todos-row.js';   // lane setting-doors pick 2: a held row's words («1600 until 22:00, then 800») — ONE spelling with the For-you card's held line
 import { renderAutoResumeBulk } from './bulk-resume.js'; // lane auto-resume-bulk: the auto-resume row's two bulk acts + the passive cost line
+
+/** THE DOORS A SETTINGS ROW MAY CARRY (B-7aef — B-8703's remainder: a Settings description named «⚙ → Diagnostics report» / «⚙ →
+ *  Customize UI…» with no button): a row's `door` names one; the button stands on the row's own line, its words the command's own. */
+const SETTINGS_DOORS = Object.freeze({
+  diagnostics: { label: () => t('Diagnostics report…'), when: (app) => typeof app._openDiagnostics === 'function', run: (app) => app._openDiagnostics() },
+  // the gear menu's own rule: no Customize mode on a phone
+  customize: { label: () => t('Customize UI…'), when: (app) => !app.isMobile && typeof app._customize?.enter === 'function', run: (app) => app._customize.enter() },
+});
 const DECISION_BUDGET_PATH = 'plugin.llm.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 const VOICE_SUGGEST_PATH = 'plugin.voice-input.suggest';     // src/plugin-settings.js: 「词典建议」 — its row lists the words suggested now
 
@@ -528,6 +536,10 @@ class SettingsUI {
     info.append(label);
     if (chipLine.childNodes.length) info.append(chipLine);
     info.append(desc);
+    // B-7aef (B-8703's remainder): a row whose words name a command elsewhere carries its DOOR on its own line — the sentence
+    // says the state, the button does the act (src/ui-needs.js: a description never routes by a menu path)
+    const door = schema.door ? SETTINGS_DOORS[schema.door] : null;   // a door whose opener is missing here is never drawn (a dead button is worse than none)
+    if (door && door.when(this.app || {})) info.append(needDoorButton({ label: door.label(), kind: 'secondary', door: schema.door, run: () => door.run(this.app) }));
     const more = schema.details ? techFold(schema.details, { summary: 'details' }) : null;   // lane ui-plain-words: the face is the description, the mechanics fold
     if (more) info.append(more);
     info.append(pathEl);
