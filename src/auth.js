@@ -42,23 +42,10 @@ const { doorClassOf } = require('./door.js');   // THE DOOR CLASS: one pure func
 const PASSES = Object.freeze(new Set(['door', 'open', 'login']));
 const PD = require('./path-dot-segment.js'); // PURE (r1317): a path with a dot segment is never a door
 const { replaceShredding } = require('./secret-file.js');
+// THE TABLE'S SHARED LAW (src/signin-table.js, the separation's B3b-1): the cookie, the ages, the digest, the held judgement and words
+const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, MAX_TOKENS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, escHtml, tokenDigest, DIGEST_RE, loginAlive, cookieMaxAge, judgeRead } = require('./signin-table.js');
+const { loginHtml } = require('./login-page.js');   // the sign-in page, one for both holders
 
-const TOKEN_COOKIE = 'vs_token';
-const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // THE CAP: 180 days from the sign-in, however often the login is used
-const TOKEN_IDLE_MS = 30 * 24 * 3600 * 1000; // THE SLIDE: 30 days from the last use (each use extends it)
-const TOKEN_SLIDE_SAVE_MS = 3600 * 1000;     // a use moves `usedAt` on disk (and the cookie's Max-Age) at most once an hour
-const MAX_TOKENS = 200;
-/** the upgrade roads a held file never shuts: a paired machine's dial-in carries its own dial token (server.js
- *  gateDialUpgrade); what it reaches goes back through the app, where the gate refuses it, or needs no person's allow */
-const OWN_RULE_UPGRADES = new Set(['/api/device-dial', '/api/agentd-dial']);
-/** the local sign-in road — refused while held, also where single sign-on still guards */
-const LOCAL_ROAD = new Set(['/api/login', '/api/auth/set-password']);
-/** a path as express 4's router matches a route (its defaults: case-insensitive, one optional trailing slash) — so a held
- *  refusal by name meets every spelling the route itself would answer (主开发 r1195 3) */
-const routeKey = (p) => String(p || '').toLowerCase().replace(/(.)\/$/, '$1');
-/** the held words in the asked language: why and the way out; `sso` = single sign-on still guards (B-dc3f) */
-function heldWords(lang, sso) { const w = loginWords(lang); return { title: w.title, why: w[sso ? 'signin-held-sso' : 'signin-held'], fix: w[sso ? 'signin-held-sso-fix' : 'signin-held-fix'] }; }
-const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 /** the held state's answer (B-dc3f): a page navigation gets the words (in the asked language), an API or a door gets them as
  *  JSON — 503, the way out named. `page` = THE SIGN-IN PAGE itself: it answers AS A PAGE, 200 whatever the request accepts
  *  (a health check asks it — the tree's chart: start, ready and alive — and a refusal there restarted a held pod for ever) */
@@ -71,9 +58,6 @@ function refuseHeld(held, req, res, { sso = false, page = false } = {}) {
   return res.status(503).json({ error: 'signin-held', why: w.why, fix: w.fix, lang, detail: held.why });
 }
 const heldError = (held) => Object.assign(new Error(`the sign-in file is held (${held.why}) — nothing is written over it`), { code: 'signin-held' });
-/** auth.json keys a login by sha256(token) — never the token. A 48-hex key is a token an older build stored (hashed at load). */
-const tokenDigest = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
-const DIGEST_RE = /^[0-9a-f]{64}$/;
 
 class Auth {
   constructor(dataDir, { clerk = null } = {}) {
@@ -86,18 +70,14 @@ class Auth {
 
   _load() {
     this._held = null;
-    let text;
-    try { text = fs.readFileSync(this._file, 'utf-8'); } catch (e) {
-      if (!e || e.code !== 'ENOENT') return this._hold(`it cannot be read (${(e && e.code) || 'an error'})`);
-      try { fs.lstatSync(this._file); } catch { this._state = null; return; }   // truly missing: nothing at the path — a new instance
-      return this._hold('it is a link to a file that is not there');   // ENOENT, yet something stands at the path
-    }
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { return this._hold('its text is not a sign-in table (it does not parse)'); }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return this._hold('it holds no sign-in table');
-    if (parsed.passwordHash !== undefined && (typeof parsed.passwordHash !== 'string' || typeof parsed.salt !== 'string')) return this._hold('its password record is not text');   // a hash that is not text: no login could ever verify (500), held by name
-    if (parsed.tokens !== undefined && (!parsed.tokens || typeof parsed.tokens !== 'object' || Array.isArray(parsed.tokens))) return this._hold('its logins are not a table');
-    this._state = parsed;
+    // ONE READ, judged by the table's shared law (src/signin-table.js judgeRead — B-dc3f's shapes and words, the interface's too)
+    let text = null, error = null, linkGone = false;
+    try { text = fs.readFileSync(this._file, 'utf-8'); } catch (e) { error = e || Object.assign(new Error('an error'), { code: 'an error' }); }
+    if (error && error.code === 'ENOENT') { try { fs.lstatSync(this._file); linkGone = true; } catch { /* nothing at the path */ } }
+    const j = judgeRead({ error, text, linkGone });
+    if (j.held) return this._hold(j.held);
+    if (j.missing) { this._state = null; return; }   // truly missing: nothing at the path — a new instance
+    this._state = j.state;
     // THE MIGRATION (once, at the first start of this build): a plaintext token map becomes its digests — every login
     // stays valid ONCE (the cookie's token hashes to its key; an older build never stamped a use, so the migration counts as
     // one: 30 days from now, still inside its 180-day cap); the old file's bytes are overwritten (replaceShredding)
@@ -151,16 +131,9 @@ class Auth {
     return Object.prototype.hasOwnProperty.call(this._state.tokens, d) ? this._state.tokens[d] : null;
   }
   /** alive = inside the cap (180 days from the sign-in) AND the slide (30 days from the last use) */
-  static loginAlive(rec, now = Date.now()) {
-    if (!rec) return false;
-    const born = Number(rec.createdAt) || 0, used = Number(rec.usedAt || rec.createdAt) || 0;
-    return now - born < TOKEN_TTL_MS && now - used < TOKEN_IDLE_MS;
-  }
+  static loginAlive(rec, now = Date.now()) { return loginAlive(rec, now); }   // the table's shared law (src/signin-table.js)
   /** The cookie's Max-Age for a login: the slide, never past the cap. */
-  static cookieMaxAge(rec, now = Date.now()) {
-    const left = rec ? TOKEN_TTL_MS - (now - (Number(rec.createdAt) || now)) : TOKEN_IDLE_MS;
-    return Math.max(0, Math.floor(Math.min(TOKEN_IDLE_MS, left) / 1000));
-  }
+  static cookieMaxAge(rec, now = Date.now()) { return cookieMaxAge(rec, now); }
 
   /** A configured password specifically (Clerk SSO alone also enables auth). */
   get passwordEnabled() { return !!this._held || !!(this._state && this._state.passwordHash); }   // held: «on» — a held file never reads as «off»
@@ -506,136 +479,6 @@ function express_json_lite(req, res, next) {
     try { req.body = JSON.parse(data || '{}'); } catch { req.body = {}; }
     next();
   });
-}
-
-/**
- * The login page. Password form when a password is set; Clerk SSO section
- * when Clerk is configured (either alone or alongside the password). The
- * ClerkJS bundle is served from the instance's own Clerk frontend-API host.
- * SSO flow: button → Clerk hosted sign-in (redirect back here) → on load with
- * a live Clerk session, auto-exchange the session JWT at /api/clerk-login →
- * our cookie. A 403 (email not allowed / missing claim) offers an SSO
- * sign-out link so the user can retry with a different account.
- */
-function loginHtml({ clerk = null, passwordEnabled = true, held = null, nonce = '', lang = 'en' } = {}) {
-  const clerkOn = !!clerk?.enabled;
-  // lane ui-language (the walk's first-run-3): the page's words in the browser's language (src/login-words.js); its script
-  // re-applies this device's own choice below — the app's per-device rule (localStorage `vibespace.lang`)
-  const W = loginWords(lang);
-  const e = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const sub = passwordEnabled ? W.subPassword : W.subSso;
-  return `<!DOCTYPE html>
-<html lang="${e(lang === 'zh' ? 'zh-CN' : lang === 'ja' ? 'ja' : 'en')}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${e(W.title)}</title>
-<style>
-  :root { color-scheme: dark; }
-  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
-         background:#0f1115; color:#e2e5ea; font-family:-apple-system,'Segoe UI',Roboto,sans-serif; }
-  .card { background:#161a21; border:1px solid #262c37; border-radius:12px; padding:36px 40px;
-          width:320px; box-shadow:0 12px 40px rgba(0,0,0,.5); }
-  h1 { margin:0 0 4px; font-size:20px; letter-spacing:.3px; }
-  p  { margin:0 0 22px; font-size:12px; color:#8a93a3; }
-  input { width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px; border-radius:8px;
-          border:1px solid #2b3341; background:#0d1015; color:#e2e5ea; outline:none; }
-  input:focus { border-color:#2dd4bf; }
-  button { width:100%; margin-top:14px; padding:10px; font-size:14px; font-weight:600; border:none;
-           border-radius:8px; background:#2dd4bf; color:#042f2a; cursor:pointer; }
-  button:hover { background:#575af0; }
-  button.sso { background:#3b4252; color:#e2e5ea; }
-  button.sso:hover { background:#4c566a; }
-  .or { display:flex; align-items:center; gap:10px; margin:16px 0 2px; color:#5b6270; font-size:11px; }
-  .or::before, .or::after { content:''; flex:1; height:1px; background:#262c37; }
-  .err { color:#f87171; font-size:12px; min-height:16px; margin-top:10px; }
-  .err a { color:#8a93a3; }
-  .held { color:#fbbf24; font-size:13px; }
-</style></head>
-<body><form class="card" id="f">
-  <h1>VibeSpace</h1>
-  <p data-w="${passwordEnabled ? 'subPassword' : 'subSso'}">${e(sub)}</p>
-  ${held ? `<p class="held" data-w="signin-held-sso">${e(W['signin-held-sso'])}</p><p class="held" data-w="signin-held-sso-fix">${e(W['signin-held-sso-fix'])}</p>` : ''}
-  ${passwordEnabled ? `
-  <input type="password" id="pw" placeholder="${e(W.password)}" data-w-ph="password" autofocus autocomplete="current-password">
-  <button type="submit" data-w="signIn">${e(W.signIn)}</button>` : ''}
-  ${clerkOn ? `${passwordEnabled ? `<div class="or" data-w="or">${e(W.or)}</div>` : ''}
-  <button type="button" class="sso" id="sso" disabled>${e(W.ssoLoading)}</button>` : ''}
-  <div class="err" id="err"></div>
-</form>
-<script nonce="${nonce}">
-  // the device's own language wins over the browser's ask (the app's rule); the words are the page's own table
-  const ALL = ${JSON.stringify(LOGIN_WORDS).replace(/</g, '\\u003c')};
-  const LANG = (() => { let p = null; try { p = localStorage.getItem('vibespace.lang'); } catch {} const n = (navigator.language || '').toLowerCase();
-    return p && p !== 'auto' && ['en', 'zh', 'ja'].includes(p) ? p : n.startsWith('zh') ? 'zh' : n.startsWith('ja') ? 'ja' : 'en'; })();
-  const w = (k) => (ALL[k] && (ALL[k][LANG] || ALL[k].en)) || k;
-  if (LANG !== ${JSON.stringify(lang)}) {
-    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG; document.title = w('title');
-    for (const el of document.querySelectorAll('[data-w]')) el.textContent = w(el.dataset.w);
-    for (const el of document.querySelectorAll('[data-w-ph]')) el.placeholder = w(el.dataset.wPh);
-    const sb = document.getElementById('sso'); if (sb) sb.textContent = w('ssoLoading');
-  }
-  const err = document.getElementById('err');
-  document.getElementById('f').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const pwEl = document.getElementById('pw');
-    if (!pwEl) return;
-    err.textContent = '';
-    try {
-      const r = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ password: pwEl.value }) });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) location.href = '/';
-      else err.textContent = d.code && ALL[d.code] ? w(d.code) : (d.error || w('loginFailed'));
-    } catch { err.textContent = w('network'); }
-  });
-  ${clerkOn ? `
-  (() => {
-    const PK = ${JSON.stringify(clerk.publishableKey)};
-    const ssoBtn = document.getElementById('sso');
-    const s = document.createElement('script');
-    s.src = ${JSON.stringify(`https://${clerk.frontendApi}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`)};
-    s.async = true;
-    s.crossOrigin = 'anonymous';
-    // clerk-js v5 from the CDN self-bootstraps window.Clerk as an INSTANCE
-    // using this attribute ("window.Clerk is not a constructor" without it).
-    s.setAttribute('data-clerk-publishable-key', PK);
-    s.onerror = () => { ssoBtn.textContent = w('ssoUnavailable'); };
-    s.onload = async () => {
-      try {
-        // Instance (v5 CDN) or constructor (older builds) — accept both.
-        const clerk = typeof window.Clerk === 'function' ? new window.Clerk(PK) : window.Clerk;
-        await clerk.load({ standardBrowser: true });
-        const exchange = async () => {
-          ssoBtn.disabled = true;
-          ssoBtn.textContent = w('signingIn');
-          let token = null;
-          // Prefer a "vibespace" JWT template (guaranteed email claim); fall
-          // back to the plain session token (works when the dashboard adds
-          // email to the session token's custom claims).
-          try { token = await clerk.session.getToken({ template: 'vibespace' }); } catch {}
-          if (!token) token = await clerk.session.getToken();
-          const r = await fetch('/api/clerk-login', { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ token }) });
-          const d = await r.json().catch(() => ({}));
-          if (r.ok) { location.href = '/'; return; }
-          ssoBtn.disabled = false;
-          ssoBtn.textContent = w('ssoSignIn');
-          err.innerHTML = '';
-          err.appendChild(document.createTextNode(d.code && ALL[d.code] ? w(d.code) : (d.error || w('ssoFailed'))));
-          const out = document.createElement('a');
-          out.href = '#'; out.textContent = ' ' + w('switchAccount');
-          out.onclick = (e) => { e.preventDefault(); clerk.signOut({ redirectUrl: location.href }); };
-          err.appendChild(out);
-        };
-        if (clerk.user) { exchange(); }
-        else {
-          ssoBtn.disabled = false;
-          ssoBtn.textContent = w('ssoSignIn');
-          ssoBtn.onclick = () => clerk.redirectToSignIn({ redirectUrl: location.href });
-        }
-      } catch (e) { ssoBtn.textContent = w('ssoUnavailable'); err.textContent = String(e.message || e); }
-    };
-    document.head.appendChild(s);
-  })();` : ''}
-</script></body></html>`;
 }
 
 module.exports = { Auth, TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, tokenDigest };

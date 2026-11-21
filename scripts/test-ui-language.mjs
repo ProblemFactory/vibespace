@@ -48,8 +48,8 @@
 //      `.resolvedOptions()`, a YYYY-MM-DD key) or a PURE shared module that takes its caller's locale says
 //      `// page-time: <why>` on its line or the line above.
 //   ⑧ THE SIGN-IN PAGE (served before sign-in: no bundle, no dictionary — src/login-words.js holds its words): every row
-//      whole in en / zh / ja (zh / ja in their own script), and the page src/auth.js draws shows no English literal of
-//      its own (the ① scan over auth.js).
+//      whole in en / zh / ja (zh / ja in their own script), and the page (src/login-page.js, drawn for src/auth.js) shows
+//      no English literal of its own (the ① scan over login-page.js, auth.js and signin-table.js).
 //
 // Every leg runs its NEGATIVE CONTROL first on a planted source / dictionary: it must go red; the same plant worded through
 // t() must stay green. Run: node scripts/test-ui-language.mjs [--lower] [--print]
@@ -578,8 +578,9 @@ export async function census(repo = REPO) {
   const plugins = pluginFindings(createRequire(path.join(repo, 'package.json'))(path.join(repo, 'src', 'plugins', 'index.js')), { zh: rowsOf(zh), ja: rowsOf(ja) });
   const lw = createRequire(path.join(repo, 'package.json'))(path.join(repo, 'src', 'login-words.js'));
   const loginRows = loginFindings(lw.LOGIN_WORDS);
-  const authSrc = fs.readFileSync(path.join(repo, 'src', 'auth.js'), 'utf8');
-  const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
+  // lane artifacts-by-intent (B3b-1): the page moved out of src/auth.js into src/login-page.js and the held words' table into
+  // src/signin-table.js — the scan reads all three (a scan of auth.js alone would pass over a page it no longer holds)
+  const authScan = ['src/auth.js', 'src/login-page.js', 'src/signin-table.js'].flatMap((f) => scanFile(f, fs.readFileSync(path.join(repo, f), 'utf8')).visible.map((h) => `${f}:${h.line} [${h.sink}] ${h.text}`));
   const markLines = scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : (r.markLines || []).map((m) => ({ file: r.file, ...m }))));
   const ptUsed = [...new Set(scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : r.ptNames || [])))];
   return { files: files.length, ptUsed, markLines, visible, raw, time, units, clocks, caps, swallowed, sentenceDates, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
@@ -816,7 +817,7 @@ if (isMain) {
   ok(rw.fresh.length === 0, `⑥ no NEW code-named field drawn raw in a visible sink (${count(now.raw)} today = the baseline's ${count(base.raw || {})}) — word it through src/lib/value-words.js`, rw.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}`));
   ok(rw.stale.length === 0, `⑥ no raw-field baseline row the tree no longer holds (lower it)`, rw.stale.map((h) => `${h.file}: ${h.text}`));
   ok(now.login.findings.length === 0 && now.login.rows >= 10, `⑧ every row of the sign-in page's words (${now.login.rows}) is whole in en / zh / ja`, now.login.findings);
-  ok(now.login.page.length === 0, `⑧ the sign-in page src/auth.js draws shows no English literal outside src/login-words.js`, now.login.page);
+  ok(now.login.page.length === 0, `⑧ the sign-in page (src/login-page.js, src/auth.js, src/signin-table.js) shows no English literal outside src/login-words.js`, now.login.page);
   ok(now.heads.missing.length === 0 && now.heads.lines > 20, `⑥ every literal For-you head (${now.heads.lines} producer lines) is a row of FORYOU_HEADS (${now.heads.table}) — worded at display, never in the store`, now.heads.missing);
   ok(now.dict.missing.length === 0, `② every extracted key has a zh AND a ja row`, now.dict.missing);
   // B-cc5e (lane bl-tests-e): THE ONE ENTRY PARSER (scripts/i18n-extract.mjs dictEntries — i18n-check's duplicates / parity /
