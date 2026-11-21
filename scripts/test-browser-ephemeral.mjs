@@ -76,6 +76,15 @@ const LIMITS = require('../src/keeper-limits.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const REPO = new URL('..', import.meta.url).pathname;
 
@@ -163,7 +172,7 @@ console.log('— ① the ephemeral record, the set, the ceiling (PURE)');
     const src = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
     const anchor = "const mineOf = (r) => !!bk && (((leases || []).some((l) => l.profileId === r.profileId && parentKeyOf(l.browserKey) === bk)) || (!!r.owner && parentKeyOf(r.owner) === bk));";
     const namesAll = "  const holders = live.filter(mineOf).map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: [], kind: r.ephemeral ? 'ephemeral' : 'profile' }));";
-    const pre = src.includes(anchor) && src.includes(namesAll) ? src.replace(anchor, 'const mineOf = () => true;').replace(namesAll, "  const holders = [...live.map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: (leases || []).filter((l) => l.profileId === r.profileId).map((l) => l.browserKey), kind: r.ephemeral ? 'ephemeral' : 'profile' })), ...extra.map((o) => ({ profileId: null, label: String(o.label), ephemeral: false, sessions: [], kind: 'desktop-app' }))];") : null;
+    const pre = src.includes(anchor) && src.includes(namesAll) ? editAnchor(editAnchor(src, anchor, 'const mineOf = () => true;', "src/browser-profiles.js"), namesAll, "  const holders = [...live.map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: (leases || []).filter((l) => l.profileId === r.profileId).map((l) => l.browserKey), kind: r.ephemeral ? 'ephemeral' : 'profile' })), ...extra.map((o) => ({ profileId: null, label: String(o.label), ephemeral: false, sessions: [], kind: 'desktop-app' }))];", "src/browser-profiles.js") : null;
     ok(!!pre, 'NEGATIVE CONTROL setup: the narrowed ceiling\'s two lines are found in src/browser-profiles.js');
     if (pre) {
       const PB = MB.load('src/browser-profiles.js', pre, 'names-every-holder');
@@ -326,7 +335,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     ok(cx.status === 0 && last && last.socketDir === KROOT, 'r2: `export AGENT_BROWSER_SOCKET_DIR=<mine>` (+ XDG_RUNTIME_DIR) — the shipped CLI still lands under the KEEPER\'s root', { st: cx.status, last, err: cx.stderr.slice(0, 300) });
     ok(/\[env_twin_dropped\]/.test(cx.stderr) && /AGENT_BROWSER_SOCKET_DIR/.test(cx.stderr) && /XDG_RUNTIME_DIR/.test(cx.stderr), 'r2: …and says, by name, that the shell\'s socket root was not used', cx.stderr);
     const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
-    const r1v = vsrc.replace("'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);").replace('if (absPath(a.socketDir)) {', 'if (false) {');
+    const r1v = editAnchor(editAnchor(vsrc, "'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);", "src/browser-verbs.js"), 'if (absPath(a.socketDir)) {', 'if (false) {', "src/browser-verbs.js");
     const D2 = path.join(ROOT, 'r1-cli'); fs.mkdirSync(D2, { recursive: true });
     fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D2, 'cli-call.js'));
     const ctl = await new Promise((resolve) => execFile(process.execPath, [path.join(D2, 'vibespace-browser'), 'click', '@e1'], { env: decoyEnv, encoding: 'utf8', timeout: 30000 }, (err, so, se) => resolve({ status: err ? err.code : 0, stderr: String(se || '') })));
@@ -397,7 +406,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
       kl.shutdown();
       // NEGATIVE CONTROL: the r3 memo check (`fs.existsSync`, which follows the link) keeps naming the swapped-in link
       const lsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-      const lpre = lsrc.replace('if (memo === text && own()) return file;', 'if (memo === text && fs.existsSync(file)) return file;');
+      const lpre = editAnchor(lsrc, 'if (memo === text && own()) return file;', 'if (memo === text && fs.existsSync(file)) return file;', "src/server/browser-keeper.js");
       const { createRequire: crl } = await import('node:module');
       const lreq = crl(path.join(REPO, 'src/server/browser-keeper.js'));
       const lm = { exports: {} }; new Function('module', 'exports', 'require', '__dirname', '__filename', lpre)(lm, lm.exports, lreq, path.join(REPO, 'src/server'), path.join(REPO, 'src/server/browser-keeper.js'));
@@ -413,7 +422,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     // (verify r2 G4: the anchor carries the pinned-CLI rung lane browser-admin 2b added — the old spelling matched nothing and
     // this control judged the UNPATCHED keeper, red on the lane head)
-    const kpre = ksrc.replace('const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp }));', 'const rt = runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp });'); // int236: + lane browser-resource-care's tmpDir (the old anchor matched nothing)
+    const kpre = editAnchor(ksrc, 'const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp }));', 'const rt = runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp });', "src/server/browser-keeper.js"); // int236: + lane browser-resource-care's tmpDir (the old anchor matched nothing)
     const { createRequire: cr } = await import('node:module');
     const kreq = cr(path.join(REPO, 'src/server/browser-keeper.js'));
     const km = { exports: {} }; new Function('module', 'exports', 'require', '__dirname', '__filename', kpre)(km, km.exports, kreq, path.join(REPO, 'src/server'), path.join(REPO, 'src/server/browser-keeper.js'));
@@ -2005,7 +2014,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     const M6 = mutantCopies('browser-ephemeral-orphan', REPO);
     const k6src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     // (1) no orphan handling at all: no reap on a gone daemon, no lock check before a launch
-    const k6a = k6src.replace('  function reapOrphan(rec, seenBy) {\n', '  function reapOrphan(rec, seenBy) { return Promise.resolve(null);\n').replace('  async function clearProfileLock(p, ns, prev) {\n', '  async function clearProfileLock(p, ns, prev) { return { ok: true };\n');
+    const k6a = editAnchor(editAnchor(k6src, '  function reapOrphan(rec, seenBy) {\n', '  function reapOrphan(rec, seenBy) { return Promise.resolve(null);\n', "src/server/browser-keeper.js"), '  async function clearProfileLock(p, ns, prev) {\n', '  async function clearProfileLock(p, ns, prev) { return { ok: true };\n', "src/server/browser-keeper.js");
     if (k6a !== k6src && (k6a.match(/return Promise\.resolve\(null\);\n|return \{ ok: true \};\n/g) || []).length >= 2) {
       const ca = await namedLeg(M6.load('src/server/browser-keeper.js', k6a, 'no-orphan'), 'ctl');
       ok(ca.orphanAliveAfterKill && !ca.orphanGoneAfterTick && ca.refused >= 1 && /exit code: 21|launch_failed/.test(ca.restartErr || ''), `⑥ M1 CONTROL: a keeper copy with no orphan rule leaves pid ${ca.chrome} alive after the tick and the relaunch dies on the lock (${ca.refused} exit-21 refusal: ${String(ca.restartErr || '').slice(0, 80)})`, ca);
@@ -2033,7 +2042,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     // r4: the r2 keeper had no launch MARK either — the new layer is stripped from the old layer's control (else the mark
     // alone proves the relaunched chrome and this control would go green for the wrong reason)
     const MK = '  const markOf = (p) => (p ? (isEph(p) ? p.owner.id : p.id) : null);';
-    const k6c = k6src.replace(RC, RC + '    return rec ? rec.browser || null : null;\n').replace(MD, MD + '    return false;\n').replace(MK, '  const markOf = () => null;');
+    const k6c = editAnchor(editAnchor(editAnchor(k6src, RC, RC + '    return rec ? rec.browser || null : null;\n', "src/server/browser-keeper.js"), MD, MD + '    return false;\n', "src/server/browser-keeper.js"), MK, '  const markOf = () => null;', "src/server/browser-keeper.js");
     if (k6src.includes(RC) && k6src.includes(MD) && k6src.includes(MK)) {
       const KC = M6.load('src/server/browser-keeper.js', k6c, 'r2-witness');
       const cf = await respawnLeg(KC, 'ctl-relaunch');
@@ -2111,7 +2120,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     // (9c) B-47f9 verify r1 LOW: the journal lines before the fix — the day's ledger length read as the 10-min count
     { const J1 = '(restart ${healTiers(rec)})', J2 = "after ${count} restarts in ${windowMs >= 2 * 3600e3 ? Math.round(windowMs / 3600e3) + ' h' : Math.round(windowMs / 60000) + ' min'} — NOT";
       if (k6src.includes(J1) && k6src.includes(J2)) {
-        const cj = await slowLeg(M6.load('src/server/browser-keeper.js', k6src.replace(J1, '(restart ${B.healLedger(rec.heals).attempts.length} of ${B.HEAL_BUDGET} in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min)').replace(J2, 'after ${count} restarts in ${Math.round(windowMs / 60000)} min — NOT'), 'journal-old'), 'ctl-journal');
+        const cj = await slowLeg(M6.load('src/server/browser-keeper.js', editAnchor(editAnchor(k6src, J1, '(restart ${B.healLedger(rec.heals).attempts.length} of ${B.HEAL_BUDGET} in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min)', "src/server/browser-keeper.js"), J2, 'after ${count} restarts in ${Math.round(windowMs / 60000)} min — NOT', "src/server/browser-keeper.js"), 'journal-old'), 'ctl-journal');
         ok(!cj.threw && !tiersOk(cj) && cj.restarts.some((w) => { const [n, b] = w.split('/'); return Number(n) > Number(b); }), `⑥ B-47f9 verify r1 CONTROL: a keeper copy with the lane's first journal lines says "restart ${(cj.restarts || []).slice(-1)[0]}" and "${cj.unstableLine}" — the journal row can go red`, JSON.stringify({ restarts: cj.restarts, unstableLine: cj.unstableLine }));
       } else ok(false, '⑥ B-47f9 verify r1 CONTROL: the journal anchors were not found in src/server/browser-keeper.js'); }
     // (10) r5 MAJOR 1 (b): the identified-check neutered — a healed chrome that died before its recapture reads as a success
@@ -2622,7 +2631,7 @@ process.exit(code);
       // and judges the fix legs' OWN predicates (lane H's `starting` refusal on the conversation's browser is not a pass either)
       const HW = "    if (starting.has(p.id)) { try { await starting.get(p.id); } catch { /* its own verdict */ } }\n";
       ok(ksrc.includes(HW), 'F2 NEGATIVE CONTROL setup: lane H\'s attachment wait is found in src/server/browser-keeper.js');
-      const mut = MK2.load('src/server/browser-keeper.js', ksrc.replace(W1, '    const inFlightLaunch = null;\n').replace(HW, ''), 'view-during-launch');
+      const mut = MK2.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, W1, '    const inFlightLaunch = null;\n', "src/server/browser-keeper.js"), HW, '', "src/server/browser-keeper.js"), 'view-during-launch');
       const rc = await runF2((o) => mut.create(o), 'ctl');
       const legOk = (r) => r.v.ok && Number.isInteger(r.v.port) && r.atAnswer === 'ready' && orderOk(r.seq);
       for (const [what, r] of Object.entries(rc)) ok(!legOk(r), `F2 NEGATIVE CONTROL (${what}): without the wait the view answers before \`open\` settled (a half-launched record: ${r.v.ok ? 'served' : r.v.code}) — the F2 legs are red on it: ${r.seq.join(' → ')}`, { v: r.v, seq: r.seq });

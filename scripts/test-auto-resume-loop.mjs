@@ -44,6 +44,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const arMod = require(path.join(REPO, 'src/server/auto-resume.js'));
 const { create, CONTINUE_PROMPT, GRACE_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, FIRE_WINDOW_MS } = arMod;
@@ -1020,7 +1029,7 @@ if (!probe) {
     const last = '    const lv = pooled && !v.held ? linkHold(session, scope, model, v, at) : null;\n';
     ok('§4i RED CONTROL: the patches (the re-decision taken out — 9d53db09\'s gate; the fire\'s last check taken out — b552c972\'s) hit', esrc.includes(cut) && esrc.includes(last));
     if (esrc.includes(cut) && esrc.includes(last)) {
-      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, '').replace(last, '    const lv = null;\n'), 'no-redecide'));
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc, cut, '', "src/server/usage-pool-engine.js"), last, '    const lv = null;\n', "src/server/usage-pool-engine.js"), 'no-redecide'));
       ok('§4i RED CONTROL: without the re-decision AND the last check the SAME fire continues into m-spare — the member its own fresh probe just called spent (the wall again)', r && r.did === true && r.link === 'm-spare', JSON.stringify(r));
       // THE FIRE'S LAST CHECK IS THE LINK'S MEMBER (acceptance r3): with the re-decision out, the belt alone still holds it
       const h = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, ''), 'no-redecide-belt'));
@@ -1036,7 +1045,7 @@ if (!probe) {
     const share = '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return p.done || Promise.resolve();\n';
     ok('§4j RED CONTROL: the patch (a sibling gate does not await the in-flight probe — b552c972\'s stamp) hits', esrc.includes(share));
     if (esrc.includes(share)) {
-      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(share, '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return Promise.resolve();\n').replace(last, '    const lv = null;\n'), 'no-share'), { n: 2, probeDelay: 150 });
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc, share, '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return Promise.resolve();\n', "src/server/usage-pool-engine.js"), last, '    const lv = null;\n', "src/server/usage-pool-engine.js"), 'no-share'), { n: 2, probeDelay: 150 });
       ok('§4j RED CONTROL: a sibling that judges the pre-probe cache continues into m-spare (the wall its fresh probe names)', r && r.firedOn.some((f) => f.link === 'm-spare'), JSON.stringify(r && r.firedOn));
     }
     const af = await fire(null, { authFailOk: true });
@@ -1044,7 +1053,7 @@ if (!probe) {
     const excl = "      if (authOut.has(m.id)) {";
     ok('§4j RED CONTROL: the patch (the verdict without the switch\'s auth exclusion — b552c972) hits', esrc.includes(excl));
     if (esrc.includes(excl)) {
-      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(excl, '      if (false) {').replace(last, '    const lv = null;\n'), 'no-authout'), { authFailOk: true });
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc, excl, '      if (false) {', "src/server/usage-pool-engine.js"), last, '    const lv = null;\n', "src/server/usage-pool-engine.js"), 'no-authout'), { authFailOk: true });
       ok('§4j RED CONTROL: without it the verdict says «usable via m-ok» and the continue goes into m-spare — CONTINUED INTO THE WALL', r && r.did === true && r.link === 'm-spare', JSON.stringify(r && { did: r.did, link: r.link }));
     }
   }
@@ -1196,7 +1205,7 @@ if (!probe) {
   // re-pointed at the real files. The MUTATION is still exactly one line — the
   // control differs from the shipped module in the named dimension and in
   // nothing else, which is the whole point of a negative control.
-  const mutated = src.replace('if (worked) noteFireOutcome(id, true, why);', 'noteFireOutcome(id, true, why);')
+  const mutated = editAnchor(src, 'if (worked) noteFireOutcome(id, true, why);', 'noteFireOutcome(id, true, why);', "src/server/auto-resume.js")
     .replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`)
     .replace(/require\('\.\//g, `require('${path.join(REPO, 'src/server')}/`);   // same-folder requires too (B-9a2e's lazy ./sent-record.js on the deliver road): the copy differs in the one named line ONLY
   ok('MUTATION CONTROL: the guard is one identifiable line', mutated !== src && !/require\('\.\.?\//.test(mutated));
@@ -1415,7 +1424,7 @@ if (!probe) {
   const h1 = "        if (ds && ds.reason === 'removed-hold') { holdRemoved(poolId, sid, s2, curFor, ds, now); continue; }\n";
   const h2 = "if (d && d.reason === 'removed-hold') { const h = holdRemoved(poolId, sid, s, on, d, now); if (h.held || h.deferred) out.held.push({ sid, on, to: h.to, deferred: h.deferred }); else out.stayed.push({ sid, on }); continue; } // 全B: stop and wait (a mid-turn one at its stop)";
   ok('§7 CONTROL: the patch (the hold removed from the pass and from memberRemoved) hits', esrc.split(h1).length === 2 && esrc.split(h2).length === 2);
-  const wc = setup(M7.load('src/server/usage-pool-engine.js', esrc.replace(h1, '').replace(h2, ''), 'nohold'));
+  const wc = setup(M7.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc, h1, '', "src/server/usage-pool-engine.js"), h2, '', "src/server/usage-pool-engine.js"), 'nohold'));
   stop(wc);
   ok('§7 CONTROL: without it the conversation KEEPS BILLING the removed member after its turn, and nothing is armed', wc.linkNow() === wc.LINK && !wc.ar._armed.get(wc.SID), JSON.stringify({ on: wc.nameOf(wc.linkNow()) }));
   // CONTROL 2: auto-resume without the hold's exception — the result boundary's "turn completed normally" (a CLI that

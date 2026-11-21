@@ -82,6 +82,15 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 3000, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(every); } return pred(); };
 const TOK = 'a'.repeat(32);
@@ -235,7 +244,7 @@ console.log('— ②r3 verify r3: Input.setIgnoreInputEvents refused on every le
   const medSrc = fs.readFileSync(path.join(REPO_R3, 'src/browser-mediation.js'), 'utf8');
   const n1 = "setIgnoreInputEvents: { cls: 'refused', since: '2026-09-26', why:", n2 = "focus: 'input',";
   ok(censusSrc.split(n1).length === 2 && censusSrc.split(n2).length === 2 && medSrc.split("require('./cdp-census.js')").length === 2, '②r3 control setup: both r3 rows are found once in src/cdp-census.js, the rules module requires the census once');
-  const demoted = MUT2.write('src/cdp-census.js', censusSrc.replace(n1, "setIgnoreInputEvents: { cls: 'harmless', since: '2026-09-26', why:").replace(n2, "focus: 'read',"), 'no-r3');
+  const demoted = MUT2.write('src/cdp-census.js', editAnchor(editAnchor(censusSrc, n1, "setIgnoreInputEvents: { cls: 'harmless', since: '2026-09-26', why:", "src/cdp-census.js"), n2, "focus: 'read',", "src/cdp-census.js"), 'no-r3');
   const mut = MUT2.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(demoted)})`), 'no-r3');
   ok(code(mut, IGN, {}) === 'forward' && code(mut, { id: 41, method: 'DOM.focus', params: { nodeId: 3 }, sessionId: 'S-A' }, { paused: true }) === 'forward', '②r3 CONTROL (the two rows demoted in a census copy): the deaf-page arm and DOM.focus while paused are ADMITTED — the holes the rows close');
   for (const r of copiesCensus(MUT2.files, MUT2.dir, REPO_R3, { minCopies: 2, label: '②r3 ' })) ok(r.pass, r.name, r.detail);
@@ -632,7 +641,7 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
   const only = (pairs) => (r) => pairs.some(([st, act]) => r.state === st && r.act === act);
   const c1 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW.replace(firstA, "      if (false && left.length) return { ...out, state: { ...st, began: left } };   /* MUTANT: the window closes at the FIRST completion */"), 'first-completion'), only: only([['flight2', 'endAdmitted']]) });
   ok(redOf(c1).length === 1, '⑥e CONTROL: the window closing at the FIRST completion turns «two downloads in one window» RED (behavioural — the cell flight2 × endAdmitted)', say(c1.results));
-  const c2 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW.replace(leaseA, "      if (st && st.phase === 'open') return close('the lease ended');   /* MUTANT: any lease's end closes the window */"), 'any-lease-end'), only: only([['armed', 'leaseEndM'], ['flight', 'leaseEndM']]) });
+  const c2 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(editAnchor(bmSrcW, leaseA, "      if (st && st.phase === 'open') return close('the lease ended');   /* MUTANT: any lease's end closes the window */", "src/browser-mediation.js"), 'any-lease-end'), only: only([['armed', 'leaseEndM'], ['flight', 'leaseEndM']]) });
   ok(redOf(c2).length === 2, '⑥e CONTROL: a revoke closing ANY lease\'s window turns the two-lease cells RED (armed / flight × another lease\'s end)', say(c2.results));
   process.env.VS_WINDOW_FORM = 'browser';   // (the leak needs the browser form: measured, the session form's events are that page's own)
   const c3 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW, 'events-unfiltered', medSrcW.replace(deliverA, "        const deliver = !!guid;   /* MUTANT: every download event reaches the lease */")), only: only([['flight', 'beginOther'], ['armed', 'endOther']]) });
@@ -673,7 +682,7 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
     for (let i = 0; i < 10; i++) ssx.pushNotice('k1', { kind: 'browser-download-folder', text: 'words ' + i, at: 2 + i });
     ok(!ssx._state.statuses.k1.pendingNotices.some((x) => x.kind === 'browser-takeover'), '⑥e CONTROL (F2): with no one-state kind ten folder notices EVICT the takeover notice the agent is owed');
   }
-  const Mb = MUTW.load('src/browser-mediation.js', realReq(bmSrcW.replace(scopeA, '  /* MUTANT: the scope road without the verdict */')), 'scope-no-verdict');
+  const Mb = MUTW.load('src/browser-mediation.js', realReq(editAnchor(bmSrcW, scopeA, '  /* MUTANT: the scope road without the verdict */', "src/browser-mediation.js")), 'scope-no-verdict');
   ok(Mb.judgeScope({ id: 8, method: 'Network.clearBrowserCookies', params: {} }, sc).kind === 'forward' && Mb.judgeScope({ id: 9, method: 'Browser.close', params: {} }, sc).kind === 'forward', '⑥c CONTROL: judgeScope without the one verdict FORWARDS Network.clearBrowserCookies and Browser.close — the scope road would empty the person\'s jar and close their browser');
   for (const r of copiesCensus(MUTW.files, MUTW.dir, REPO, { minCopies: 2, label: '⑥c ' })) ok(r.pass, r.name, r.detail);
 }
@@ -866,7 +875,7 @@ console.log('— ③b a client socket parked on the upstream open: a reset is no
   const src = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
   const a = "    socket.on('error', parkedError);\n", b = "    socket.once('close', parkedGone);\n", c2 = "      if (socket.destroyed || !socket.readable || !socket.writable) { try { up.close(); } catch { /* none */ } try { socket.destroy(); } catch { /* gone */ } return; } // half-closed: ws would drop it without its callback\n";
   ok(src.split(a).length === 2 && src.split(b).length === 2 && src.split(c2).length === 2, 'CONTROL setup: the parked listeners and the half-closed guard are spelled once');
-  const pre = MUT.load('src/server/cdp-mediator.js', src.replace(a, '\n').replace(b, '\n').replace(c2, '\n'), 'parked');
+  const pre = MUT.load('src/server/cdp-mediator.js', editAnchor(editAnchor(editAnchor(src, a, '\n', "src/server/cdp-mediator.js"), b, '\n', "src/server/cdp-mediator.js"), c2, '\n', "src/server/cdp-mediator.js"), 'parked');
   const m1 = await parked(pre, 'rst'), m2 = await parked(pre, 'half');
   ok(m1.uncaught.some((x) => /ECONNRESET/.test(x)), `CONTROL: the pre-fix mediator lets the reset escape as an uncaught ${JSON.stringify(m1.uncaught)} — the hub's exit`, JSON.stringify(m1));
   ok(m2.opened > m2.closed, `CONTROL: the pre-fix mediator leaves the half-closed client's upstream OPEN (${m2.opened} opened / ${m2.closed} closed)`, JSON.stringify(m2));

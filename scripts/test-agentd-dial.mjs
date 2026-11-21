@@ -26,6 +26,15 @@ const AGENTD_ROOT = path.join(tmp, 'agentd');
 
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // build + install the daemon into the throwaway root, provision device token
@@ -577,11 +586,11 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const M = mutantCopies('dialctl', repo);
     const dfSrc = fs.readFileSync(path.join(repo, 'src/dial-facts.js'), 'utf8');
-    const dfMut = dfSrc.replace("if (cb && ib && cb === ib) return { action: 'replace', why: 'same-daemon' };", "if (!cb || !ib) return { action: 'replace', why: 'unknown-boot' };\n  if (cb === ib) return { action: 'replace', why: 'same-daemon' };");
+    const dfMut = editAnchor(dfSrc, "if (cb && ib && cb === ib) return { action: 'replace', why: 'same-daemon' };", "if (!cb || !ib) return { action: 'replace', why: 'unknown-boot' };\n  if (cb === ib) return { action: 'replace', why: 'same-daemon' };", "src/dial-facts.js");
     check('(B9 control: the verdict patch applies)', dfMut !== dfSrc);
     const dfPath = M.write('src/dial-facts.js', dfMut, 'r1rule', { name: 'dial-facts-r1' });
     const dpSrc = fs.readFileSync(path.join(repo, 'src/server/dial-pairing.js'), 'utf8');
-    const dpMut = dpSrc.replace("const DF = require('../dial-facts.js');", `const DF = require(${JSON.stringify(dfPath)});`);
+    const dpMut = editAnchor(dpSrc, "const DF = require('../dial-facts.js');", `const DF = require(${JSON.stringify(dfPath)});`, "src/server/dial-pairing.js");
     check('(B9 control: the gate is bound to the patched verdict)', dpMut !== dpSrc);
     const DPm = M.load('src/server/dial-pairing.js', dpMut, 'r1gate');
     await twoDaemons({ tag: 'dupctl', bundleA: bsrc, bundleB: noBoot, DPmod: DPm, run: async ({ spawnOne, facts }) => {
@@ -637,7 +646,7 @@ console.log('— verify-r2 B8-r2: a rotation disconnects the holder NOW; the dev
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const M = mutantCopies('dialrot', repo);
     const dpSrc = fs.readFileSync(path.join(repo, 'src/server/dial-pairing.js'), 'utf8');
-    const dpMut = dpSrc.replace('const lockedOut = keepLink === true ? false : lockOutDialHolder(deviceId);', 'const lockedOut = false;');
+    const dpMut = editAnchor(dpSrc, 'const lockedOut = keepLink === true ? false : lockOutDialHolder(deviceId);', 'const lockedOut = false;', "src/server/dial-pairing.js");
     check('(B8-r2 control: the no-lockout patch applies)', dpMut !== dpSrc);
     const DPm = M.load('src/server/dial-pairing.js', dpMut, 'nolockout');
     await twoDaemons({ tag: 'rotatectl', bundleA: bsrc, bundleB: bsrc, DPmod: DPm, run: async ({ spawnOne, facts, logOf, DPD, PD }) => {

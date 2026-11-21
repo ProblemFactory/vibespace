@@ -54,6 +54,15 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(15); } return !!(await f()); };
 const J = (x) => JSON.stringify(x);
@@ -573,7 +582,7 @@ let work, solo, shop;
     const lsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const lneedles = ["    noteLeftTab(id, browserKey); // verify r3", "    for (const l of reg.leases) if (l.browserKey === handle) noteLeftTab(l.profileId, handle);", " || !(B.isBrowserKey(browserKey) || B.isChildKey(browserKey))) return false;"];
     ok(lneedles.every((n) => lsrc.includes(n)), 'the left-tab needles (the control below puts r2\'s shape back)');
-    const Kl = M.load('src/server/browser-keeper.js', lsrc.replace(lneedles[0], '    // (r2: no record at a detach)').replace(lneedles[1], '').replace(lneedles[2], ' || !B.isBrowserKey(browserKey)) return false;'), 'left-tick-parent-only');
+    const Kl = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(editAnchor(lsrc, lneedles[0], '    // (r2: no record at a detach)', "src/server/browser-keeper.js"), lneedles[1], '', "src/server/browser-keeper.js"), lneedles[2], ' || !B.isBrowserKey(browserKey)) return false;', "src/server/browser-keeper.js"), 'left-tick-parent-only');
     const cDet = await leftLeg(Kl, 'data-left-dc', 'detach'), cCh = await leftLeg(Kl, 'data-left-cc', 'child');
     ok([cDet, cCh].every((x) => !x.left && !x.marked && x.backNewTab === 0 && x.take && x.take.adopted === true), 'CONTROL: r2\'s shape (only the tick\'s parent-key drop recorded) — he takes the tab, nothing is marked, the returning session binds nothing (its next command lands in his page) — the leg above can go red', { cDet, cCh });
     // verify r3 (#3, "prove its next command never lands in his tab"): the returning session's bind (`tab new`) FAILS — a busy
@@ -625,7 +634,7 @@ let work, solo, shop;
     const RN = B.normalizeRegistry({ leftTabs: { 'bp-0000e0d5': { 'bk-0000e0d5': 5, 'bk-0000e0d6.2': 6, 'xx': 7 } }, humans: { 'bp-0000e0d5': { key: 'hu-0000e0d5', adopted: ['C0C0000000000000000000000000002D', 'nope'], state: 'away' } } });
     const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
     const bn = 'leftTabs: Object.fromEntries(Object.entries(obj(d.leftTabs))';
-    const Bx = M.load('src/browser-profiles.js', bsrc.replace(bn, 'leftTabs: Object.fromEntries(Object.entries(obj(null))').replace("adopted: (Array.isArray(v.adopted) ? v.adopted : [])", 'adopted: ([])'), 'normalize-drops-orphans');
+    const Bx = M.load('src/browser-profiles.js', editAnchor(editAnchor(bsrc, bn, 'leftTabs: Object.fromEntries(Object.entries(obj(null))', "src/browser-profiles.js"), "adopted: (Array.isArray(v.adopted) ? v.adopted : [])", 'adopted: ([])', "src/browser-profiles.js"), 'normalize-drops-orphans');
     const RX = Bx.normalizeRegistry({ leftTabs: { 'bp-0000e0d5': { 'bk-0000e0d5': 5 } }, humans: { 'bp-0000e0d5': { key: 'hu-0000e0d5', adopted: ['C0C0000000000000000000000000002D'], state: 'away' } } });
     ok(J(RN.leftTabs) === J({ 'bp-0000e0d5': { 'bk-0000e0d5': 5, 'bk-0000e0d6.2': 6 } }) && J(RN.humans['bp-0000e0d5'].adopted) === J(['C0C0000000000000000000000000002D']) && bsrc.includes(bn) && !Object.keys(RX.leftTabs).length && !RX.humans['bp-0000e0d5'].adopted.length,
       'PURE normalizeRegistry keeps leftTabs (a helper\'s child key with its suffix) and his adopted tab ids, drops what is malformed; CONTROL a normalizer copy that drops both', { left: RN.leftTabs, adopted: RN.humans['bp-0000e0d5'] && RN.humans['bp-0000e0d5'].adopted });
@@ -712,7 +721,7 @@ let work, solo, shop;
       'verify r4: the take is made where it is judged — a conversation that comes back WHILE his switch to its page is in flight binds a NEW tab (never lands in the page he takes); a take whose switch fails gives the tab back (not his to close) and its marks stay', tr1);
     const rsrc4 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const rn4a = '      if (tv.adopt) adoptOrphan(h, tv.targetId);\n    }\n', rn4b = "    return { ok: true, act: v.act, url: v.url || null, ...(tv && tv.adopt ? { adopted: true } : {}) };";
-    const tr0 = await takeRaceLeg(M.load('src/server/browser-keeper.js', rsrc4.replace(rn4a, '    }\n').replace(rn4b, '    if (tv && tv.adopt) adoptOrphan(h, tv.targetId);\n' + rn4b), 'take-after-switch'), 'data-left-racec');
+    const tr0 = await takeRaceLeg(M.load('src/server/browser-keeper.js', editAnchor(editAnchor(rsrc4, rn4a, '    }\n', "src/server/browser-keeper.js"), rn4b, '    if (tv && tv.adopt) adoptOrphan(h, tv.targetId);\n' + rn4b, "src/server/browser-keeper.js"), 'take-after-switch'), 'data-left-racec');
     ok(rsrc4.includes(rn4a) && rsrc4.includes(rn4b) && tr0.take && tr0.take.adopted === true && tr0.backNewTab === 0, 'CONTROL: r3\'s order (the adoption after his switch returned) binds the returning conversation nothing — its next command would run in the page he took — the leg above can go red', tr0);
     // verify r4 (the revert table): r3's `tab_unbound` reached the agent through its ROUTE unpinned — the STATUS row removed
     // answered the refusal as a 500 and the whole fast list stayed green. Through the agent's own route: 503 by name

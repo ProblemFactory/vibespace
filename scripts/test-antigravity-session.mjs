@@ -44,6 +44,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(50); } return null; };
 const DTACH = ['/usr/bin/dtach', '/usr/local/bin/dtach', '/bin/dtach'].find((p) => fs.existsSync(p));
@@ -254,7 +263,7 @@ try {
   const BASE_GUARD = "  const t = String(text || '').trimStart();\n  if (!/^\\/[A-Za-z]/.test(t)) return false;\n  const word = (t.match(/^\\/[\\w:-]+/) || ['/'])[0];\n";
   const RED = path.join(ROOT, 'red');
   fs.mkdirSync(path.join(RED, 'data/bin'), { recursive: true }); fs.symlinkSync(path.join(REPO, 'src'), path.join(RED, 'src'));
-  fs.writeFileSync(path.join(RED, 'data/bin/agy-wrapper.js'), W_SRC.replace(GUARD, BASE_GUARD));
+  fs.writeFileSync(path.join(RED, 'data/bin/agy-wrapper.js'), editAnchor(W_SRC, GUARD, BASE_GUARD, "data/bin/agy-wrapper.js"));
   const b = await create(STUB, { accountId: acct.id }, path.join(RED, 'data/bin'));
   await until(() => b.journal().find((x) => x.type === 'acp' && x.kind === 'session'), 10000);
   const red = await sayAll(b, ['/home/u/x.zip 这里是…'], 1);

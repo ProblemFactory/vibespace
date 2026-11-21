@@ -28,6 +28,15 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1600) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms = 8000) => { const t0 = Date.now(); for (;;) { let v = false; try { v = await fn(); } catch { v = false; } if (v) return true; if (Date.now() - t0 > ms) return false; await sleep(40); } };
 
@@ -568,8 +577,8 @@ console.log('— ⑥ controls');
   ok(fm.pinned.installed === true && fs.existsSync(path.join(Dm, 'browser-tools', 'cli-pin.json')), 'control (e): …the wiped install still read "installed", the pin file still named it — exactly what ②\'s vanished-pin leg catches', fm.pinned);
   // verify r1 (F10): the words of the pre-fix model — every install button "the measured version", a named version in use never drifts
   const ms = read('src/lib/browser-cli-model.js');
-  const oldWords = ms.replace("    case 'install': return named ? t(i18nKey('Install agent-browser {version}…'), { version: String(version) }) : t(i18nKey('Install the measured version…'));", "    case 'install': return t(i18nKey('Install the measured version…'));")
-    .replace("    else { parts.push(t(i18nKey(\"in use: VibeSpace's own {version} (your choice) — drifts\"), { version: pinned.version })); warn = true; }", "    else parts.push(t(i18nKey(\"in use: VibeSpace's own {version} (your choice)\"), { version: pinned.version }));");
+  const oldWords = editAnchor(editAnchor(ms, "    case 'install': return named ? t(i18nKey('Install agent-browser {version}…'), { version: String(version) }) : t(i18nKey('Install the measured version…'));", "    case 'install': return t(i18nKey('Install the measured version…'));", "src/lib/browser-cli-model.js"),
+    "    else { parts.push(t(i18nKey(\"in use: VibeSpace's own {version} (your choice) — drifts\"), { version: pinned.version })); warn = true; }", "    else parts.push(t(i18nKey(\"in use: VibeSpace's own {version} (your choice)\"), { version: pinned.version }));", "src/lib/browser-cli-model.js");
   ok(oldWords !== ms && !oldWords.includes('(your choice) — drifts'), 'control (g): the patch (the pre-fix words for a named version) applies');
   const Wo = await import(MUT.write('src/lib/browser-cli-model.js', oldWords, 'old-words'));
   const base = { table: '0.38.1', record: V.CLI_PIN_RECORD, npm: true, install: {} }; const t = (k2, p) => String(k2).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));

@@ -40,6 +40,15 @@ const S = require('../src/browser-stream.js');
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const done = () => { console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`); process.exit(fail ? 1 : 0); };
@@ -297,7 +306,7 @@ console.log('— ④ CONTROL: a keeper whose launch records no display fact (the
   const factLine = '        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode(), preference: headedSetting() });'; // + H5's preference (lane hooks-create; the 2.369.200 integration re-anchored)
   const envLine = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });';
   ok(src.includes(factLine) && src.includes(envLine), 'CONTROL setup: the launch\'s fact line is found in the keeper');
-  const pre = MK.load('src/server/browser-keeper.js', src.replace(factLine, '        rec.display = null;').replace(envLine, '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });'), 'no-fact');
+  const pre = MK.load('src/server/browser-keeper.js', editAnchor(editAnchor(src, factLine, '        rec.display = null;', "src/server/browser-keeper.js"), envLine, '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });', "src/server/browser-keeper.js"), 'no-fact');
   const kPre = mkKeeper(pre, path.join(ROOT, 'd3'));
   setupRoutes(kPre);
   const s = mkSession('sess-c', KEY_C, 'c');
