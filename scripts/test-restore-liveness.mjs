@@ -154,7 +154,9 @@ ok(fs.readFileSync(FAULT_BUNDLE, 'utf-8').includes('injected fault: open-session
 {
   const src = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf-8');
   let out = src, hits = 0;
-  const gateA = "if (deviceMgr && !session.host && deviceMgr.status?.().connected) {";
+  // the gate's text at the tip: B-cd4b added `!restore &&` (a restore attach keeps the local road); master's gate had neither
+  // that nor the link check — the control plants it whole (a restore attach through the daemon, fire-and-forget, as master did)
+  const gateA = "if (!restore && deviceMgr && !session.host && deviceMgr.status?.().connected) {";
   if (out.includes(gateA)) { out = out.replace(gateA, 'if (deviceMgr && !session.host) {'); hits++; }
   const start = out.indexOf('    deviceMgr.openSession({');
   const tail = '\n    return;\n  }\n  localAttach();\n}';

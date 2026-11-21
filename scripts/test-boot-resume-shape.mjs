@@ -254,6 +254,15 @@ async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFi
   console.log(`  ${label}: /login — ${s.n} samples, ${s.preListen} refused before the listen, ${s.answered} answered, worst ${s.worst} ms (at +${s.worstAt != null ? (s.worstAt / 1000).toFixed(1) : '?'} s), ${s.overLaw} over ${ANSWER_LAW_MS} ms, ${s.overProbe} over the probe's ${PROBE_TIMEOUT_MS} ms; unanswered ${s.unansweredN} ${s.unansweredN ? S(s.unanswered) : ''}`);
   console.log(`  ${label}: loop — longest hold ${h.maxHeld} ms; ${h.over} gaps held ≥ ${HOLD_LAW_MS} ms (${h.sum} ms in all); the top: ${h.top.map((g) => `+${((g.abs - first) / 1000).toFixed(1)} s ${g.ms} ms (cpu ${g.cpu} · wait ${g.wait} · control ${g.ctl} ⇒ held ${g.held})`).join('; ')}`);
   console.log(`  ${label}: boot trace ≥ 100 ms: ${steps.join(' · ') || 'none'}`);
+  // THE LISTEN STEP's window (the round's follow): from the listen callback to its last turn's end — server.js runs the restore's
+  // registration ('restore') and the rest of the step ('listen') each in a loop turn of its own, the boot trace's steps — and the
+  // longest hold in it: the room under the bound, said in numbers (the law above judges every hold of the window)
+  if (trace && trace.listenAt != null && clock && clock.first != null) {
+    const base = trace.startedAt - trace.startAt, turns = (trace.steps || []).filter((x) => x.name === 'restore' || x.name === 'listen');
+    const w0 = base + trace.listenAt, w1 = base + (turns.length ? Math.max(...turns.map((x) => x.at + x.ms)) : trace.listenAt);
+    const hw = holdsOver(clock, control, w0 - 2 * 10, w1);   // a hold begins at the clock's tick before it: one tick of slack
+    console.log(`  ${label}: the listen step — ${turns.length ? turns.map((x) => `${x.name} ${x.ms} ms`).join(' · ') : 'no turns of its own (one turn)'}; ${Math.round(w1 - w0)} ms from the listen to its last turn's end; the longest hold in it ${hw.maxHeld} ms (${HOLD_LAW_MS - (hw.maxHeld || 0)} ms under the bound)`);
+  }
   console.log(`  ${label}: the boot trace's holds ≥ 100 ms, named: ${named.length ? '\n    ' + named.join('\n    ') : 'none'}`);
   const hl = holdLines(tag); console.log(`  ${label}: the hub's [loop-hold] lines: ${hl.length}${hl.length ? '\n    ' + hl.slice(0, 6).join('\n    ') : ''}`);
   if (judge === 'law') {
@@ -327,10 +336,11 @@ const PLANTS = {
   'one-pass-attach': (t) => (once(t, 'const ATTACH_BATCH = 8,') ? t.replace('const ATTACH_BATCH = 8,', 'const ATTACH_BATCH = Infinity,') : null),
   'forking-backfill': (t) => { if (!once(t, BACKFILL_FROM)) return null; const i = t.indexOf(BACKFILL_FROM), j = t.indexOf(BACKFILL_TO, i); return j < 0 ? null : t.slice(0, i) + RELEASE_BACKFILL + t.slice(j + BACKFILL_TO.length); },
 };
-// what names each plant's hold in the boot trace: the one-pass attach runs in the listen step (its attaches' localAttach); the
-// forking backfill's callback is the planted code in the restore file
+// what names each plant's hold in the boot trace: the one-pass attach runs in the restore's own turn (the listen step's
+// 'restore' turn since the round's follow; the attaches' localAttach); the forking backfill's callback is the planted code in
+// the restore file
 const PLANT_NAMES = {
-  'one-pass-attach': { re: /^listen\b|session-stdout\.js/, what: 'the listen step (the attaches\' localAttach)' },
+  'one-pass-attach': { re: /^(?:listen|restore)\b|session-stdout\.js/, what: 'the restore\'s turn of the listen step (the attaches\' localAttach)' },
   'forking-backfill': { re: null, what: 'the planted backfill\'s own lines in the restore file' },   // its line range is set at the plant (below)
 };
 const plant = (name) => {

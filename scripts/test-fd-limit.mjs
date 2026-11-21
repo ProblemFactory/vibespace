@@ -310,7 +310,7 @@ console.log('\n§H the wiring in server.js');
   ok((S.match(/onWriteError: \(e, file, o\) => fdGauge\.reportWriteError\(e, file, o\)/g) || []).length === 2, 'BOTH debounced stores report their failed writes to it (session-status + user-todos)');
   const crash = (/process\.on\('uncaughtException', \(e\) => \{([\s\S]*?)\n\}\);/.exec(S) || [])[1] || '';
   ok(/e\.code === 'EMFILE' \|\| e\.code === 'ENFILE'[^\n]*fdGauge\.blame\(e, e\.path\)\.words/.test(crash), 'the crash handler names an EMFILE/ENFILE before exiting');
-  ok(/fdGauge\.bootLine\(\{ sessions: /.test(S) && /fdGauge\.start\(\)/.test(S) && S.indexOf('fdGauge.bootLine(') > S.indexOf('restoreSessions(); bootBrowserKeeper()'), 'the boot line + the gauge run after the restore (the session count is known)');
+  ok(/fdGauge\.bootLine\(\{ sessions: /.test(S) && /fdGauge\.start\(\)/.test(S) && S.indexOf('fdGauge.bootLine(') > S.indexOf('restoreSessions(); hub.turn(() => { bootBrowserKeeper()'), 'the boot line + the gauge run after the restore (the session count is known)');
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);

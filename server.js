@@ -106,7 +106,7 @@ setInterval(refreshAvailableModels, 3600000); // refresh hourly
 const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
-const server = http.createServer(app); const hub = require('./src/server/tls.js').create({ app, httpServer: server, dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting: (k) => serverSetting(k), getUserTodos: () => userTodos, log: console, tailscaleBin: throwawayRoot && !process.env.VIBESPACE_TAILSCALE_BIN ? null : undefined }); // lane https-tailscale: ONE port, two servers — hub.front peeks each connection's first byte (TLS → https, else http), every listener reaches both through hub.attachToServers (test-architecture §89); a throwaway root never asks the real tailscale ⇒ src/server/tls.js
+const server = http.createServer(app); const hub = require('./src/server/tls.js').create({ app, httpServer: server, dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting: (k) => serverSetting(k), getUserTodos: () => userTodos, log: console, tailscaleBin: throwawayRoot && !process.env.VIBESPACE_TAILSCALE_BIN ? null : undefined, step: (name, fn) => bootTrace.step(name, fn) }); // lane https-tailscale: ONE port, two servers — hub.front peeks each connection's first byte (TLS → https, else http), every listener reaches both through hub.attachToServers (test-architecture §89); a throwaway root never asks the real tailscale ⇒ src/server/tls.js
 
 // ── Optional password auth (VIBESPACE_PASSWORD env / data/auth.json) +
 //    optional Clerk SSO (VIBESPACE_CLERK_PUBLISHABLE_KEY — src/clerk-auth.js) ──
@@ -1538,7 +1538,7 @@ if (METRICS_PORT > 0) {
 
 probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
   const ver = require('./package.json').version;
-  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); try { require('./src/server/local-index.js').configure({ rootDir: __dirname, port: PORT, host: HOST, version: ver, owner: (() => { try { return ownerWriteRefusal(); } catch { return { kind: 'unknown' }; } })(), adapters: adapterRegistry, sessions: () => activeSessions, buffersDir: BUFFERS_DIR, dataDir: path.join(__dirname, 'data'), turnOf: (s) => require('./src/server/turn-facts.js').turnOf(s), log: console }); } catch (e) { console.warn('[local-index] not started: ' + e.message); } // lane human-cli: the person's CLI index on the machine's own disk · + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
+  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); // lane human-cli: the person's CLI index on the machine's own disk is configured in the listen step's LAST turn (below, B-cd4b: its boot write lists the restored survivors, as when the step was one turn) · + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
   // PID file for the supervised-restart path (scripts/update.sh in a container:
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).
@@ -1586,9 +1586,9 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
   bootTrace.span('identity-repair', require('./src/reading-repair.js').prefetchAnchorRows(path.join(__dirname, 'data', 'usage-anchors')).then(() => { try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); } })); // B-1319: its anchors read off the loop first
   // …and STANDING (final verifier): a weekly window that moved between boots must not wait for the next boot — hourly, idempotent, quiet unless it changed something, the panel memory re-read only then
   setInterval(() => { require('./src/reading-repair.js').prefetchAnchorRows(path.join(__dirname, 'data', 'usage-anchors')).then(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }); }, 3600e3).unref(); // …the hourly run too
-  migrateLegacyHomeProjects();
-  restoreSessions(); bootBrowserKeeper(); bootWindowLeases(); try { channelsWiring.groups.noteUserState(); } catch {} hooksLate.ready(); // hooksLate.ready() (lane hooks-create): the live-session set is final — a hook file the boot registration created is told to the sessions just restored. agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
-  bootRestored(); require('./src/routes/sessions').warmSessions().catch((e) => console.warn('[boot] first sessions sweep failed:', e.message)).finally(bootSessionsIndexed); bootPhase.arm(); // B-0ece: pages reload onto `ready`, not onto `listening`
+  migrateLegacyHomeProjects(); hub.turn(() => { // B-cd4b (the round's follow): THE LISTEN STEP IN TURNS — the restore's registration (the next line) runs in a loop turn of its own ('restore'), the rest of the step in the turn after it ('listen'), each after a timers phase; the front hands no new connection to the servers before the step's last turn has run, so nothing asks for a survivor before it is in the live set (src/server/tls.js turn · src/server/loop-turns.js)
+  restoreSessions(); hub.turn(() => { bootBrowserKeeper(); bootWindowLeases(); try { channelsWiring.groups.noteUserState(); } catch {} hooksLate.ready(); // hooksLate.ready() (lane hooks-create): the live-session set is final — a hook file the boot registration created is told to the sessions just restored. agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
+  try { require('./src/server/local-index.js').configure({ rootDir: __dirname, port: PORT, host: HOST, version: ver, owner: (() => { try { return ownerWriteRefusal(); } catch { return { kind: 'unknown' }; } })(), adapters: adapterRegistry, sessions: () => activeSessions, buffersDir: BUFFERS_DIR, dataDir: path.join(__dirname, 'data'), turnOf: (s) => require('./src/server/turn-facts.js').turnOf(s), log: console }); } catch (e) { console.warn('[local-index] not started: ' + e.message); } bootRestored(); require('./src/routes/sessions').warmSessions().catch((e) => console.warn('[boot] first sessions sweep failed:', e.message)).finally(bootSessionsIndexed); bootPhase.arm(); // B-0ece: pages reload onto `ready`, not onto `listening`
   try { fdGauge.bootLine({ sessions: [...activeSessions.values()].filter((x) => x.socketPath).length }); fdGauge.start(); } catch (e) { console.warn('[fd] gauge failed to start:', e.message); } // lane-dead-bridge: the limit node REALLY runs at + the estimate; refuses nothing
   setTimeout(() => { try { bridgeWatch.bootSweep(); bridgeWatch.start(); } catch (e) { console.warn('[bridge] boot sweep failed:', e.message); } }, 1500); // AFTER the restore's attaches connected: end a dead server's orphaned attach clients, then watch (lane-dead-bridge)
   // Plan C boot reconciliation: a per-session pool link whose session did not
@@ -1643,7 +1643,7 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
   }, 30000);
 
   console.log(`  Ready.\n`);
-}));
+}, 'listen'); }, 'restore'); }));
 
 // On server shutdown: only kill the attach PTYs, NOT the dtach sessions
 // Claude processes in dtach survive the server restart

@@ -226,18 +226,24 @@ try {
 
   console.log('⑤ B-cd4b: the survivors\' attaches in bounded batches (every survivor in the live set at once; one used before its batch is attached at once)');
   {
-    // 20 survivors no probe answered (adopted ALIVE, as ③): restoreSessions returns with all 20 in the live set and the FIRST
-    // batch attached; the rest attach a batch a turn after a yield, each waiting one carrying its attach-at-first-use
+    // 20 survivors no probe answered (adopted ALIVE, as ③): restoreSessions returns with all 20 in the live set and NONE attached
+    // (the round's follow: a restore bigger than one batch attaches from the next loop turn on — the registration's turn holds no
+    // attach); they attach a batch a turn (src/server/loop-turns.js — the listen step's turns in the same queue: a step asked
+    // right after the restore returns, as server.js asks the rest of its listen step, runs AFTER the first batch and BEFORE the
+    // second: a batch never shares a turn with it), each waiting one carrying its attach-at-first-use
     // (`_attachPending` — every door that writes to its pty asks it first): one USED before its batch is attached at once and
     // never again; one whose attach throws stays pending (said) and its next use attaches it; one that ended while it waited is
     // never attached; every attach takes the local road (`restore: true`); the restore's timing said once. THE DOOR (the real
     // sender, src/server/user-input.js send): a chat message to a survivor whose attach still waits is written after its attach,
     // never refused. RED: the bound taken away (one batch of all) ⇒ every attach in the listen turn; the attach-at-first-use taken
-    // away ⇒ the used one waits for its batch; the door's ask taken away ⇒ «not a live chat session», nothing written
+    // away ⇒ the used one waits for its batch; the door's ask taken away ⇒ «not a live chat session», nothing written; the first
+    // batch put back in the registration's turn ⇒ 8 attached at its return; the batches chained by setImmediate ⇒ the second
+    // batch runs before the step asked after the first (the two share a turn)
     const BATCH = 'const ATTACH_BATCH = 8,';
+    const LT = require(path.join(REPO, 'src/server/loop-turns.js'));   // the ONE queue (a copy of the restore requires the same file)
     const run = async (BRm, tag) => {
-      const opts = [], byId = new Map(), threw = new Set(); let throwId = null;
-      const X = instance(BRm, dataDir(tag), { onAttach: (id, s, o) => { opts.push(o || null); if (id === throwId && !threw.has(id)) { threw.add(id); throw new Error('spawn EAGAIN (planted)'); } byId.set(id, o || null); } });
+      const opts = [], byId = new Map(), threw = new Set(), order = []; let throwId = null;
+      const X = instance(BRm, dataDir(tag), { onAttach: (id, s, o) => { order.push(id); opts.push(o || null); if (id === throwId && !threw.has(id)) { threw.add(id); throw new Error('spawn EAGAIN (planted)'); } byId.set(id, o || null); } });
       const socks = Array.from({ length: 20 }, (_, i) => X.add(300 + i));
       throwId = socks[15].id;
       const t = await logged(async () => X.api.restoreSessions());
@@ -252,13 +258,18 @@ try {
       if (usedPend) used._attachPending();   // a door's ask, before the survivor's batch
       const usedAtOnce = X.attached.includes(usedId);
       const gone = socks.find((x) => !X.attached.includes(x.id) && x.id !== throwId); if (gone) X.activeSessions.delete(gone.id);   // ends before its turn
+      LT.turn(() => order.push('step'));   // the rest of the listen step, asked right after the restore returned (server.js hub.turn)
       const lines = [];
       const log0 = console.log, warn0 = console.warn; console.log = console.warn = (...a) => lines.push(a.join(' '));
-      try { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); } finally { console.log = log0; console.warn = warn0; }
+      const RESTORED = /^\[boot-restore\] 20 survivor\(s\): registered in /;
+      try { const tEnd = Date.now() + 5000; while (!lines.concat(t.lines).some((l) => RESTORED.test(l)) && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 5)); }   // the restore's own last line: its batches are done
+      finally { console.log = log0; console.warn = warn0; }
+      const si = order.indexOf('step'), early = socks.slice(0, 8).map((x) => x.id), late = socks.slice(8).map((x) => x.id);
+      const stepBetween = si > 0 && order.slice(0, si).some((x) => early.includes(x)) && order.slice(0, si).every((x) => early.includes(x) || x === usedId) && order.slice(si + 1).length > 0 && order.slice(si + 1).every((x) => late.includes(x));
       const after = X.attached.length, thrown = X.activeSessions.get(throwId);
       const stillPending = !!thrown && typeof thrown._attachPending === 'function' && !X.attached.includes(throwId);
       if (stillPending) thrown._attachPending();   // its next use
-      return { atReturn, usedPend, usedAtOnce, usedOnce: X.attached.filter((x) => x === usedId).length, after, goneAttached: gone ? X.attached.includes(gone.id) : null,
+      return { atReturn, usedPend, usedAtOnce, usedOnce: X.attached.filter((x) => x === usedId).length, after, goneAttached: gone ? X.attached.includes(gone.id) : null, stepBetween, stepAt: si, order: order.map((x) => (x === 'step' ? x : socks.findIndex((y) => y.id === x))),
         stillPending, thrownAttached: X.attached.includes(throwId), allLocal: opts.length > 0 && opts.every((o) => !!o && o.restore === true),
         cuBatched: (byId.get(socks[18].id) || {}).catchUp || null, cuUsed: (byId.get(usedId) || {}).catchUp || null, cuOther: (byId.get(socks[17].id) || {}).catchUp || null, GROWN,
         warned: lines.find((l) => /the attach failed \(spawn EAGAIN \(planted\)\) — it stays pending: its next use attaches it, or a retry in 2 s/.test(l)) || null,
@@ -268,13 +279,17 @@ try {
     const r1 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, BATCH, 'const ATTACH_BATCH = Infinity,', 'b-cd4b-one-pass'), 'cd4b-one-pass')), 'batches-red');
     const r2 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, ' entry[2]._attachPending = entry.pend; }', ' }', 'b-cd4b-no-first-use'), 'cd4b-no-first-use')), 'batches-red2');
     const r3 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, 'catchUp: cu && cu.text ? cu : null', 'catchUp: null', 'b-cd4b-no-catchup'), 'cd4b-no-catchup')), 'batches-red3');
+    const r4 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, '  if (total <= ATTACH_BATCH) one(); else loopTurn(one);', '  one();', 'b-cd4b-first-in-turn'), 'cd4b-first-in-turn')), 'batches-red4');
+    const r5 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, '    if (queue.length) { loopTurn(one); return; }', '    if (queue.length) { setImmediate(one); return; }', 'b-cd4b-immediate-chain'), 'cd4b-immediate-chain')), 'batches-red5');   // stale-pins: kept (the red plants the old chain)
     const cuOk = (c, G) => !!c && c.text === '$ ' + G && c.drop === '$ ';
     ok(cuOk(g.cuBatched, g.GROWN) && cuOk(g.cuUsed, g.GROWN) && g.cuOther === null,
       `THE ROUND'S MUST: a survivor that WROTE after the restore's read hands it to its attach, in the attach's turn — waiting for a later batch (${JSON.stringify(g.cuBatched)}) and used first; its read's partial last line moves with it (whole records); one that wrote nothing hands nothing`, { batched: g.cuBatched, used: g.cuUsed, other: g.cuOther });
     ok(r3.cuBatched === null && r3.cuUsed === null, 'RED: the catch-up dropped ⇒ the two attaches hand nothing — what was written in the window never reaches the conversation');
-    ok(g.atReturn.live === 20 && g.atReturn.attached === 8 && g.atReturn.pending === 12 && g.usedPend && g.usedAtOnce && g.usedOnce === 1 && g.after === 18 && g.goneAttached === false
-      && g.stillPending && g.thrownAttached && g.allLocal && !!g.warned && !!g.said,
-      `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the first batch), ${g.atReturn.pending} waiting with their attach-at-first-use; one USED before its batch attached at once (and once: ${g.usedOnce}); then the batches, the one that ended never, the one whose attach threw said and kept pending — its next use attached it; every attach on the local road; said: ${g.said}`, g);
+    ok(g.atReturn.live === 20 && g.atReturn.attached === 0 && g.atReturn.pending === 20 && g.usedPend && g.usedAtOnce && g.usedOnce === 1 && g.after === 18 && g.goneAttached === false
+      && g.stillPending && g.thrownAttached && g.allLocal && !!g.warned && !!g.said && g.stepBetween,
+      `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the registration's turn holds no attach), ${g.atReturn.pending} waiting with their attach-at-first-use; the step asked after the restore ran between the first and the second batch (the order: ${JSON.stringify(g.order)}); one USED before its batch attached at once (and once: ${g.usedOnce}); then the batches, the one that ended never, the one whose attach threw said and kept pending — its next use attached it; every attach on the local road; said: ${g.said}`, g);
+    ok(r4.atReturn.attached === 8 && r5.stepBetween === false && r5.stepAt > 8,
+      `RED: the first batch back in the registration's turn ⇒ ${r4.atReturn.attached} attached at its return; the batches chained by setImmediate ⇒ the second batch runs before the step asked after the first (the step at ${r5.stepAt}: ${JSON.stringify(r5.order)})`, { r4: r4.atReturn, r5: r5.order });
     ok(r1.atReturn.attached >= 19 && r2.usedPend === false && r2.usedAtOnce === false,
       `RED: one batch of all ⇒ every attach in the listen turn (${r1.atReturn.attached}); the attach-at-first-use taken away ⇒ a survivor used before its batch is not attached (${r2.usedAtOnce})`, { r1: r1.atReturn, r2: { usedPend: r2.usedPend, usedAtOnce: r2.usedAtOnce } });
     // ONE CARD, ONE CHAIN (round wed0m8jzl): a survivor whose attach ALWAYS throws — its retries shortened in a copy (20, 40,
@@ -380,6 +395,35 @@ try {
       && /if \(session && !session\.pty && typeof session\._attachPending === 'function'\) session\._attachPending\(\);/.test(fs.readFileSync(path.join(REPO, 'src/server/permission-answer.js'), 'utf8'))
       && /return s && \(s\.pty !== null \|\| typeof s\._attachPending === 'function'\) \? null : \{ cause: 'not-running'/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')),
       'a survivor whose attach spent its retries: ONE card at the conversation, and a send answers «could not be reconnected after the restart (its words)»; the permission answer asks the attach first; the deliverer\'s wake gate counts a waiting survivor as running (r587) — pinned by text');
+  }
+  console.log('⑦ B-cd4b (the round\'s follow): one job a loop turn — the listen step in turns of its own, the restore\'s batches in the same queue');
+  {
+    // src/server/loop-turns.js — asked from a TIMERS callback (the listen callback ran in one: the restore's probes ended on their
+    // cap on the first test machine): a timer asked beside the ask fires BEFORE the first job (a timers phase between the asking
+    // turn and the job: the loop turned), and the first job's own immediate runs before the second job (the second is a turn
+    // later). RED: a hop by setImmediate alone ⇒ the job runs in the asking turn's own check phase, before the timer (one hold
+    // for the loop's clock); every queued job in one hop ⇒ the second job runs before the first's immediate (one turn)
+    const ltSrc = fs.readFileSync(path.join(REPO, 'src/server/loop-turns.js'), 'utf8');
+    const seq = (T) => new Promise((resolve) => setTimeout(() => {
+      const seen = [], push = (x) => { seen.push(x); if (seen.length === 4) resolve(seen); };
+      setTimeout(() => push('timer'), 0);
+      T.turn(() => { push('job1'); setImmediate(() => push('imm1')); });
+      T.turn(() => push('job2'));
+    }, 0));
+    const lg = await seq(require(path.join(REPO, 'src/server/loop-turns.js')));
+    const lr1 = await seq(require(M.write('src/server/loop-turns.js', anchored(ltSrc, 'setTimeout(() => setImmediate(next), 0)', 'setImmediate(next)', 'b-cd4b-turn-immediate'), 'cd4b-turn-immediate')));
+    const lr2 = await seq(require(M.write('src/server/loop-turns.js', anchored(ltSrc, '  const fn = queue.shift();\n  try { if (fn) fn(); }', '  const fn = () => { while (queue.length) queue.shift()(); };\n  try { if (fn) fn(); }', 'b-cd4b-turn-all'), 'cd4b-turn-all')));
+    ok(lg.join() === 'timer,job1,imm1,job2', `one job a loop turn: asked from a timers callback, the first job runs after the next timers phase (${lg.join(' → ')}), the second a turn after the first`, lg);
+    ok(lr1.indexOf('job1') < lr1.indexOf('timer') && lr2.indexOf('job2') < lr2.indexOf('imm1'), `RED: a hop by setImmediate alone ⇒ the job before the timer (${lr1.join(' → ')}); every job in one hop ⇒ the second before the first's immediate (${lr2.join(' → ')})`, { lr1, lr2 });
+    // server.js (pinned by text: it is not loaded here): the listen callback's restore in a turn of its own ('restore'), the rest of
+    // the step in the turn after it ('listen'); the person's CLI index configured in that last turn (its boot write lists the
+    // survivors); the hub's turns named through the boot trace; the front holds new connections until the last turn (test-tls-demux §6)
+    const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+    const lA = srv.indexOf('  migrateLegacyHomeProjects(); hub.turn(() => { //'), lB = srv.indexOf('\n  restoreSessions(); hub.turn(() => { bootBrowserKeeper(); ');
+    const lI = srv.indexOf("try { require('./src/server/local-index.js').configure("), lEnd = srv.indexOf("\n}, 'listen'); }, 'restore'); }));\n");
+    ok(lA > 0 && srv.indexOf('\n', lA) === lB && lI > lB && lEnd > lI && srv.split("require('./src/server/local-index.js').configure(").length === 2
+      && /const hub = require\('\.\/src\/server\/tls\.js'\)\.create\(\{[^\n]*, step: \(name, fn\) => bootTrace\.step\(name, fn\) \}\);/.test(srv),
+      'server.js: the restore\'s registration in a loop turn of its own (\'restore\'), the rest of the listen step in the turn after it (\'listen\'), the CLI index configured in that last turn, the turns named in the boot trace');
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }
 

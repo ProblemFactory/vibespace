@@ -640,8 +640,11 @@ async function reprobePass() {
 // B-cd4b: THE SURVIVORS' ATTACHES IN BOUNDED BATCHES. Each attach starts a pty (a fork of the hub's whole memory) and wires its
 // stream consumer: a hub restart with 80 survivors held its listen turn 527 ms in ONE synchronous pass (the B-cd4b measure, the
 // first test machine). Every survivor is in the live set when restoreSessions returns (the listen callback's later steps and an
-// attach read it); its ATTACH runs here — the first ATTACH_BATCH at once (a small restore is what it always was), then
-// ATTACH_BATCH a turn with a yield between (setImmediate: the sign-in page and every request answer between two batches).
+// attach read it); its ATTACH runs here — a small restore (one batch) at once, as it always was; a bigger one ATTACH_BATCH a
+// turn, the FIRST in a turn after the registration's own (the round's follow: the registration and its first batch shared the
+// listen turn — 275 ms at 80 survivors on the first test machine), each batch in a loop turn of its own (src/server/loop-turns.js:
+// after a timers phase, one job a turn, the listen step's turns in the same queue — a batch never shares a turn with them; the
+// sign-in page and every request answer between two batches, once the listen step's last turn has run).
 // A SURVIVOR USED BEFORE ITS BATCH IS ATTACHED AT ONCE: the doors read `session.pty` and refused a pty-less one («not a live chat
 // session» — the page's resent message, an agent's delivery: dropped), so each asks `session._attachPending()` first — the page's
 // socket messages (src/ws-handler.js: its input, an interrupt, a resize, an attach) and every chat send
@@ -652,6 +655,7 @@ async function reprobePass() {
 // ATTACH_BATCH = 8: the measured attach is ~1.1 ms of JavaScript a survivor plus its fork (localAttach 88 ms over 80) — eight a
 // turn stays an order of magnitude under the 250 ms boot law; the restore's own timing is said once, at the end.
 const ATTACH_BATCH = 8, ATTACH_RETRY_MS = [2000, 10000, 30000];
+const { turn: loopTurn } = require('./loop-turns.js');
 function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
   const total = queue.length;
   if (!total) return;
@@ -688,10 +692,10 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
     const t0 = performance.now();
     for (const entry of queue.splice(0, ATTACH_BATCH)) attach(entry);
     const ms = performance.now() - t0; batches++; attachMs += ms; if (ms > longest) longest = ms;
-    if (queue.length) { setImmediate(one); return; }
+    if (queue.length) { loopTurn(one); return; }
     console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)${used ? `; ${used} attached at their first use` : ''}${caught ? `; ${caught} caught up what they wrote since the read` : ''}`);
   };
-  one();
+  if (total <= ATTACH_BATCH) one(); else loopTurn(one);   // the round's follow: a big restore's first batch leaves the registration's turn
 }
 
 function restoreSessions() {

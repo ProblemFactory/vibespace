@@ -243,7 +243,7 @@ console.log('\n§F the wiring');
   const S = read('server.js');
   ok(/onLocalReattach: \(\.\.\.a\) => bridgeWatch\.afterReattach\(\.\.\.a\)/.test(S), 'server.js hands session-stdout the watch\'s afterReattach');
   ok(/const bridgeWatch = require\('\.\/src\/server\/bridge-watch\.js'\)\.create\(\{ activeSessions, BUFFERS_DIR, SOCKETS_DIR, reattachLocalPty, serverSetting, getOtelIngest: \(\) => otelIngest, feedPeerCard/.test(S), 'the watch is built from the one healer, the setting, the OTel witness and the card door');
-  const iRestore = S.indexOf('restoreSessions(); bootBrowserKeeper()'), iSweep = S.indexOf('bridgeWatch.bootSweep(); bridgeWatch.start();');
+  const iRestore = S.indexOf('restoreSessions(); hub.turn(() => { bootBrowserKeeper()'), iSweep = S.indexOf('bridgeWatch.bootSweep(); bridgeWatch.start();');
   ok(iSweep > iRestore && /setTimeout\(\(\) => \{ try \{ bridgeWatch\.bootSweep\(\); bridgeWatch\.start\(\); \}/.test(S), 'the boot sweep runs AFTER the restore\'s attaches (attach first, then end the orphans)');
   const crash = (/process\.on\('uncaughtException', \(e\) => \{([\s\S]*?)\n\}\);/.exec(S) || [])[1] || '';
   ok(/bridgeWatch\.endAttachPtys\(\)/.test(crash) && crash.indexOf('endAttachPtys') < crash.indexOf('process.exit(1)'), 'THE CRASH PATH ends the attach clients like the clean shutdown (no orphan survives a crash)');

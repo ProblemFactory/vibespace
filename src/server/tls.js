@@ -36,6 +36,7 @@ const STATUS_TIMEOUT_MS = 10000;
 const CERT_TIMEOUT_MS = 90000;
 const PASS_MS = TP.PASS_MS;
 const FIRST_BYTE_MS = 120000; // a connection that never says anything is dropped (the servers' own timeouts start at routing)
+const HOLD_MAX_MS = 5000; // B-cd4b: the boot's listen step holds a new connection's hand-over at most this long (said, then let go)
 const INBOX_KEY = 'tls';
 
 /** What `server`'s own accept gives a connection (net onconnection: TCP_NODELAY, half-open, TCP keep-alive) — the
@@ -108,7 +109,7 @@ async function readPair(certFile, keyFile) {
 
 function create({ app, httpServer, dataDir, port, serverSetting = () => undefined, getUserTodos = () => null, log = console, env = process.env,
   tailscaleBin: binArg, run = runChild, now = () => Date.now(), user = (() => { try { return os.userInfo().username; } catch { return 'vibespace'; } })(),
-  statusTimeoutMs = STATUS_TIMEOUT_MS, timers = { setTimeout, clearTimeout } } = {}) {
+  statusTimeoutMs = STATUS_TIMEOUT_MS, timers = { setTimeout, clearTimeout }, step = (name, fn) => fn(), holdMaxMs = HOLD_MAX_MS } = {}) {
   const tailscaleBin = binArg === null ? null : binArg || env.VIBESPACE_TAILSCALE_BIN || 'tailscale';
   const dir = path.join(dataDir, 'tls');
   const stateFile = path.join(dir, 'state.json');
@@ -145,17 +146,43 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
     socket.on('error', drop); // a reset before the first byte
     socket.setTimeout(FIRST_BYTE_MS, drop);
     socket.once('data', (chunk) => {
-      socket.removeListener('error', drop); socket.removeListener('timeout', drop); socket.setTimeout(0);
+      socket.removeListener('timeout', drop); socket.setTimeout(0);
       socket.pause();
       socket.unshift(chunk);
-      if (chunk[0] === 0x16) {
-        if (!serving()) return socket.destroy();
-        acceptAs(httpsServer, socket);
-        httpsServer.emit('connection', socket);
-      } else { acceptAs(httpServer, socket); httpServer.emit('connection', socket); }
-      process.nextTick(() => socket.resume());
+      const hand = () => {
+        socket.removeListener('error', drop); // the servers' own listeners from here (a reset while held is dropped as before the first byte)
+        if (socket.destroyed) return;
+        if (chunk[0] === 0x16) {
+          if (!serving()) return socket.destroy();
+          acceptAs(httpsServer, socket);
+          httpsServer.emit('connection', socket);
+        } else { acceptAs(httpServer, socket); httpServer.emit('connection', socket); }
+        process.nextTick(() => socket.resume());
+      };
+      if (held) held.then(hand).catch((e) => { log.warn?.(`[tls] a connection held through the boot's listen step was not handed over — ${e && e.message}`); socket.destroy(); });
+      else hand();
     });
   });
+
+  // ── THE BOOT'S LISTEN STEP IN TURNS (B-cd4b, the round's follow) ──
+  // server.js's listen callback runs the restore's registration and the rest of its step each in a loop turn of its own
+  // (src/server/loop-turns.js: after a timers phase, one job a turn), so the loop turns between them. A connection that
+  // arrives meanwhile is accepted and its first bytes read, and it is handed to the servers only once the step's last turn
+  // has run: nothing asks the hub for a conversation before every survivor is in the live set, and every request sees the
+  // step whole — as when the step was one turn. `step(name, fn)` names the turn's hold in the boot trace (server.js wires
+  // bootTrace.step). Bounded: past holdMaxMs the hold is said and let go (a step that never ends never stops the hub
+  // answering).
+  let stepTurns = 0, held = null, lift = null, holdTimer = null;
+  const letGo = () => { if (holdTimer) { timers.clearTimeout(holdTimer); holdTimer = null; } const l = lift; held = null; lift = null; if (l) l(); };
+  function turn(fn, name = 'turn') {
+    if (typeof fn !== 'function') throw new TypeError('tls: turn(fn, name) takes a function');
+    if (!stepTurns++ && !held) {
+      held = new Promise((r) => { lift = r; });
+      holdTimer = timers.setTimeout(() => { holdTimer = null; log.warn?.(`[tls] the boot's listen step held new connections ${holdMaxMs} ms — handed over now (its turns still run)`); letGo(); }, holdMaxMs);
+      holdTimer.unref?.();
+    }
+    require('./loop-turns.js').turn(() => { try { step(name, fn); } finally { if (!--stepTurns) letGo(); } });
+  }
 
   function applyPlan(p, pem) {
     plan = p;
@@ -274,7 +301,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
       res.json(status());
     });
   }
-  return { front, attachToServers, listen: (...a) => front.listen(...a), address: () => front.address(), start, stop, pass, url, bootSuffix, status, registerRoutes,
+  return { front, attachToServers, listen: (...a) => front.listen(...a), address: () => front.address(), start, stop, pass, url, bootSuffix, status, registerRoutes, turn, holding: () => !!held,
     _https: () => httpsServer, _state: () => ({ ...state }), _cadence: () => ({ started, liveOnce, misses, nextMs }), INBOX_KEY };
 }
 

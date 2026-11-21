@@ -224,6 +224,47 @@ try {
     const bare = await order(require(cp));
     ok(bare.seen !== plain.seen && bare.seen.startsWith('push,answer') && Math.min(...bare.ms) >= 30, `CONTROL the bare front (Nagle on): the body waits for the delayed ACK, the push overtakes the answer — RED (${bare.seen}; ${bare.ms.join('/')} ms)`);
   }
+  console.log('§6 THE BOOT\'S LISTEN STEP IN TURNS (B-cd4b, the round\'s follow): a connection while the step\'s turns run is handed over after its last turn');
+  {
+    // hub.turn(fn, name): fn in a loop turn of its own (src/server/loop-turns.js); the front reads a new connection's first bytes and
+    // hands it to the servers only once the step's last turn has run — nothing asks the hub for a conversation before every survivor
+    // is in the live set. The step here keeps itself open a turn at a time until the client's request is written and ten more turns
+    // have passed (an accept and a read are two polled turns: the front has the bytes), then ends; each turn named through `step`.
+    // RED: the hold taken away ⇒ the request answered while the step's turns still run. THE BOUND: a step that never ends lets go at
+    // holdMaxMs and says so; its control (a bound past the step) answers only once the step ends.
+    const scene = async (M, { tag, holdMaxMs, endAt = null } = {}) => {
+      const names = [], warns = [], ev = [];
+      const r = rig(M, { env: {}, dataDir: path.join(DIR, 'd7' + tag), tailscaleBin: null, step: (n, f) => { names.push(n); return f(); }, log: { log: () => { }, warn: (l) => warns.push(String(l)) }, ...(holdMaxMs ? { holdMaxMs } : {}) });
+      const port = await listen(r.hub); closers.push(r.hub.front);
+      let wrote = false, after = 0, ended = null, answered = null;
+      const t0 = Date.now();
+      const keep = () => { ev.push('turn'); if (endAt == null ? wrote && ++after >= 10 : Date.now() >= endAt(t0)) { ev.push('end'); ended = Date.now() - t0; return; } r.hub.turn(keep, 'listen'); };
+      r.hub.turn(keep, 'restore');
+      const holding = r.hub.holding();
+      const body = await new Promise((resolve) => {
+        const c = net.connect(port, '127.0.0.1', () => c.write('GET /held HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n', () => { wrote = true; }));
+        let b = ''; const t = setTimeout(() => { c.destroy(); resolve(b); }, 8000);
+        c.on('data', (d) => { if (answered === null) { answered = Date.now() - t0; ev.push('answer'); } b += d.toString('latin1'); });
+        c.on('close', () => { clearTimeout(t); resolve(b); }); c.on('error', () => resolve(b));
+      });
+      const tEnd = Date.now() + 8000; while (ended === null && Date.now() < tEnd) await sleep(5);   // the step's own end (the bound's scenes outlive their answer)
+      return { names, warns, ev: ev.filter((x, i) => x !== 'turn' || ev[i - 1] !== 'turn'), ended, answered, holding, after: r.hub.holding(), ok: /http GET \/held 0$/.test(body) };
+    };
+    const g6 = await scene(TLS, { tag: 'g' });
+    const src = fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8');
+    const from = '      if (held) held.then(hand).catch(';
+    ok(src.split(from).length === 2, 'the control\'s anchor is in the module');
+    const cp = path.join(DIR, 'tls-control-nohold.js');
+    fs.writeFileSync(cp, src.replace(from, '      if (false) held.then(hand).catch(').replace("require('../tls-plan.js')", JSON.stringify(path.join(REPO, 'src/tls-plan.js')).replace(/^/, 'require(') + ')').replace("require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')'));
+    const r6 = await scene(require(cp), { tag: 'r' });
+    ok(g6.ok && g6.holding && !g6.after && g6.ev.indexOf('answer') > g6.ev.indexOf('end') && g6.ev.indexOf('end') > 0 && g6.names[0] === 'restore' && g6.names.length > 2 && g6.names.slice(1).every((n) => n === 'listen'),
+      `held: a request written while the step's turns run is answered AFTER its last turn (${g6.ev.join(' → ')}; the step ${g6.ended} ms, the answer at ${g6.answered} ms), each turn named (${g6.names[0]}, then ${g6.names.length - 1} × ${g6.names[1]}); holding while it runs, not after`, g6);
+    ok(r6.ok && r6.ev.indexOf('answer') >= 0 && r6.ev.indexOf('answer') < r6.ev.indexOf('end'), `RED the hold taken away: the request answered while the step's turns still run (${r6.ev.join(' → ')})`, r6);
+    const b6 = await scene(TLS, { tag: 'b', holdMaxMs: 120, endAt: (t) => t + 400 }), c6 = await scene(TLS, { tag: 'c', holdMaxMs: 60000, endAt: (t) => t + 400 });
+    ok(b6.ok && b6.answered >= 110 && b6.answered < b6.ended && b6.warns.some((l) => /the boot's listen step held new connections 120 ms — handed over now/.test(l)),
+      `THE BOUND: a step that does not end lets go at 120 ms, said (answered at ${b6.answered} ms, the step ended at ${b6.ended} ms: «${b6.warns[0] || 'nothing said'}»)`, b6);
+    ok(c6.ok && c6.answered >= c6.ended, `its control: a bound past the step ⇒ answered only once the step ended (answered at ${c6.answered} ms, the step at ${c6.ended} ms)`, c6);
+  }
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack)); }
 finally {
   for (const s of closers) { try { s.close(); } catch { } }

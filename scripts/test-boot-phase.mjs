@@ -115,8 +115,8 @@ report(await ladderLegs(ladderMod));
 
 // ── ③ the wiring ──
 const server = read('server.js'), app = read('src/lib/app.js'), layout = read('src/lib/layout.js'), ops = read('src/server/ops-routes.js'), sessions = read('src/routes/sessions.js');
-const restoreAt = server.indexOf('restoreSessions(); bootBrowserKeeper();'), armAt = server.indexOf('bootPhase.arm()');
-check('server.js: the phase is armed in the listen callback, AFTER restoreSessions (restore done, the first sweep warmed)', restoreAt > 0 && armAt > restoreAt && /bootRestored\(\); require\('\.\/src\/routes\/sessions'\)\.warmSessions\(\)[^\n]*\.finally\(bootSessionsIndexed\)/.test(server));
+const restoreAt = server.indexOf('restoreSessions(); hub.turn(() => { bootBrowserKeeper();'), armAt = server.indexOf('bootPhase.arm()');
+check('server.js: the phase is armed in the listen callback, AFTER restoreSessions (restore done, the first sweep warmed) — in the listen step\'s last turn (B-cd4b: the step in turns)', restoreAt > 0 && armAt > restoreAt && /bootRestored\(\); require\('\.\/src\/routes\/sessions'\)\.warmSessions\(\)[^\n]*\.finally\(bootSessionsIndexed\)/.test(server));
 check('ops-routes: GET /api/boot answers the snapshot (no-store); /api/version carries the phase', /app\.get\('\/api\/boot'/.test(ops) && /no-store/.test(ops) && /phase: bootPhase \? bootPhase\.snapshot\(\)\.phase : 'ready'/.test(ops));
 check('sessions route: warmSessions() shares the in-flight sweep (one sweep, never two)', /_warmSweep = \(\) => \{\s*if \(!_sweepInFlight\) _sweepInFlight = _runSessionsSweep\(\)/.test(sessions));
 check('app.ready: gates on awaitBootReady() BEFORE loadAutoSave (a page opened mid-boot waits, then loads by itself)', /if \(!await awaitBootReady\(\)\) return;\s*await this\.layoutManager\.loadAutoSave\(\);/.test(app));
