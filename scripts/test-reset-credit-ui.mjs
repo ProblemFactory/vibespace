@@ -959,6 +959,15 @@ console.log('\n§3 the route over the real engine');
     //    a short ack window), compared phase by phase with src/reset-credit.js attemptStep after every step: the newest
     //    record and its priors (phase / charged / outcome class / settle), the block the preview answers, the ledger
     //    delta within a world. The clock event SHIFTS the record (the timers do not run — exactly the r3 hole)
+    //    主开发 r1036, THE LAW (the 2.369.414 candidate's hosted run 44864416767: red then green, ONE step of 100): the engine
+    //    runs its REAL ack / floor timers, and one may fire in ANY await of a step (the 5 ms tail included), never only in
+    //    the wait steps — so the table is given the engine's timer event WHEN THE ENGINE'S TIMER FIRED, at every step: the
+    //    timers are OBSERVED (armed through a wrapper that notes the arming instant, the delay and whether the callback RAN),
+    //    and a timer that ran is given at the instant it was DUE by its own arming. The table's own clock guard still judges
+    //    it: a shorter window (an engine stamping EARLY) is refused whatever the machine's pauses, a stamp no timer of the
+    //    engine's made is never fed, and a wait step gives the table its own event only for a timer that did not run (an
+    //    engine that never stamps stays red). No bound widened, no sleep added; the controls place their pauses (a blocked
+    //    thread, nothing spins), and a scene a pause could spoil states its precondition and is tried again (at most 3)
     { const FLOOR = 300, ACK = 120;
       const esrcP = read('src/server/usage-pool-engine.js');
       const fromFP = 'const RESET_CREDIT_FLOOR_MS = resetCredit.RESET_CREDIT_FLOOR_MS;';
@@ -970,12 +979,37 @@ console.log('\n§3 the route over the real engine');
       let seed = 0x2545f491; const rnd = () => { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; };
       const cls = (x) => (!x || !x.outcome ? '-' : x.outcome === 'reset' ? 'R' : RC.UNSETTLED_OUTCOMES.includes(x.outcome) ? 'U' : x.outcome === 'not-sent' ? 'N' : 'X');
       const view = (t) => { const v = []; for (let x = t, n = 0; x && n < 4; x = x.prior, n++) v.push(`${RC.phaseOf(x, o())}:${x.charged ? 1 : 0}:${cls(x)}:${x.settled ? x.settled.how : '-'}`); return v.join('|') || 'none'; };
-      const mism = []; let stepsRun = 0, seqs = 0; const kinds = new Set();
+      // the engine's ack timer stamps «not sent», its floor timer «no answer» (the ack timer's «unknown» needs a carrier that cannot
+      // say it sent — reportsSent false — which no world of this leg is)
+      const TIMER_EVENT = { 'not-sent': 'ack-expired', 'no-answer': 'floor-expired' };
+      const realST = globalThis.setTimeout;   // THE TIMERS OBSERVED: the engine reads the global setTimeout at each call; the real Timeout is returned
+      const observedST = function setTimeout(fn, ms, ...a) { if (typeof fn !== 'function') return realST(fn, ms, ...a); const armedAt = Date.now(); const tm = realST(function (...b) { tm._parityRanAt = Date.now(); return fn.apply(this, b); }, ms, ...a); tm._parityArmedAt = armedAt; tm._parityDelay = Number(ms) || 0; return tm; };
+      observedST[require('node:util').promisify.custom] = realST[require('node:util').promisify.custom];
+      const PAUSE = new Int32Array(new SharedArrayBuffer(4));
+      const pauseFor = (ms) => { if (ms > 0) Atomics.wait(PAUSE, 0, 0, ms); };   // a PLACED pause: the thread blocks, nothing spins
       const SEQS = 20, STEPS = 5;
-      for (let n = 0; n < SEQS; n++) {
-        let cur = world({ engine: engP, ackMs: ACK, sends: false });
+      // one run: `pick` chooses each step's event, `engAck` is the ENGINE's ack window (the table's is ACK), `pauses[d]` = [ms in step
+      // d's own tail, ms after its await before the compare], `sync: false` = the leg as it was (the table told only in its waits)
+      const parityRun0 = async ({ seqs: nSeqs, steps: nSteps, pick, engAck = ACK, pauses = {}, sync = true }) => {
+      const mism = []; let stepsRun = 0, seqs = 0; const kinds = new Set(), verdicts = [], stamps = [];
+      for (let n = 0; n < nSeqs; n++) {
+        let cur = world({ engine: engP, ackMs: engAck, sends: false });
         const key = cur.A; let T = null; let ledger0 = cur.charged(), tableCharges = 0; const trail = [];
-        for (let d = 0; d < STEPS; d++) {
+        // THE ENGINE'S TIMER, GIVEN TO THE TABLE ONCE IT RAN, at the instant it was DUE by its own arming (its arming instant + its
+        // own delay): the arming is never before the table's press (taken first), so an on-time timer is at or past the table's
+        // window; a shorter window is refused by the table's guard; a stamp no timer made is never fed (a difference stays red).
+        // The newest record of each chain, as the leg's view pairs them. → the event type given (refused or not), or null
+        const timerToTable = () => {
+          const e3 = cur.eng._resetCreditTries.get(key) || null, type = e3 && TIMER_EVENT[e3.outcome];
+          const tm = type && (type === 'ack-expired' ? e3.ackTimer : e3.timer);
+          // the stamp is the timer's OWN (written after its run began) and the two newest records are ONE attempt (one key)
+          if (!type || !T || T.outcome || !tm || !tm._parityRanAt || !(e3.outcomeAt >= tm._parityRanAt) || e3.idempotencyKey !== T.idempotencyKey) return null;
+          const base = type === 'ack-expired' ? T.at : T.sentAt, due = tm._parityArmedAt + tm._parityDelay;
+          stamps.push({ type, lag: tm._parityArmedAt - base, delay: tm._parityDelay, fedLag: due - base, ranLag: tm._parityRanAt - base });
+          const st = RC.attemptStep(T, { type, now: due }, o()); if (st.effects.charge) tableCharges++; T = st.t;
+          return type;
+        };
+        for (let d = 0; d < nSteps; d++) {
           const e = cur.eng._resetCreditTries.get(key) || null;
           const pv = cur.call('GET', key).body;
           const live = RC.unsettledInChain(T, o());
@@ -989,7 +1023,7 @@ console.log('\n§3 the route over the real engine');
             ['reading', r7(c0 !== null ? c0 - 1 : 2, true)], ['reading', r7(c0 !== null ? c0 : 3, false)], ['reading', r7(null, false)],
             ['clock', FLOOR + 50], ['clock', 8 * 86400e3], ['boot', null], ['boot', null], ['torn', null],
           ];
-          const [kind, arg] = EVS[Math.floor(rnd() * EVS.length)];
+          const [kind, arg] = pick(EVS);
           trail.push(kind); kinds.add(kind);
           const now = Date.now();
           if (kind === 'press') {
@@ -1000,6 +1034,7 @@ console.log('\n§3 the route over the real engine');
             const want = st.effects.minted ? null : st.effects.refused;
             const got = r && r.ok ? null : (r && r.code) || 'refused';
             if (want !== got) mism.push(['press verdict', want, got, trail.join('>')]);
+            verdicts.push(got);
           } else if (kind === 'sent') {
             if (e) cur.quietly(() => cur.eng.recordCodexQuotaSignal(cur.s1, { type: 'reset_credit_sent', idempotencyKey: e.idempotencyKey, attempt: 1 }));
             const st = RC.attemptStep(T, { type: 'sent', now }, o()); T = st.t; if (st.effects.charge) tableCharges++;
@@ -1010,11 +1045,14 @@ console.log('\n§3 the route over the real engine');
           } else if (kind === 'wait-ack' || kind === 'wait-floor') {
             await sleep(arg);
             const n2 = Date.now();
-            let st = RC.attemptStep(T, { type: 'ack-expired', now: n2 }, o()); if (st.effects.charge) tableCharges++; T = st.t;
-            if (kind === 'wait-floor') { st = RC.attemptStep(T, { type: 'floor-expired', now: n2 }, o()); if (st.effects.charge) tableCharges++; T = st.t; }
+            // a timer of the engine's that RAN is given at its own due instant (a shorter window is refused); one that did not, at n2
+            const fed = sync ? timerToTable() : null; let st;
+            if (fed !== 'ack-expired') { st = RC.attemptStep(T, { type: 'ack-expired', now: n2 }, o()); if (st.effects.charge) tableCharges++; T = st.t; }
+            if (kind === 'wait-floor' && fed !== 'floor-expired') { st = RC.attemptStep(T, { type: 'floor-expired', now: n2 }, o()); if (st.effects.charge) tableCharges++; T = st.t; }
           } else if (kind === 'reading') {
+            const nowR = Date.now();   // taken before the engine is told, as on every other road (its re-armed timer is never before it)
             cur.quietly(() => cur.eng.recordCodexQuotaSignal(cur.s1, arg.engine));
-            const st = RC.attemptStep(T, { type: 'reading', r: { fetchedAt: Date.now(), ...arg.table }, now: Date.now() }, o()); T = st.t;
+            const st = RC.attemptStep(T, { type: 'reading', r: { fetchedAt: nowR, ...arg.table }, now: nowR }, o()); T = st.t;
           } else if (kind === 'clock') {
             shift(e, arg); shift(T, arg);
           } else if (kind === 'boot' || kind === 'torn') {
@@ -1023,12 +1061,15 @@ console.log('\n§3 the route over the real engine');
             // would settle the open record and persist it before the "new" engine reads the file (a harness artefact)
             for (const t of cur.eng._resetCreditTries.values()) for (let x = t; x; x = x.prior) { try { clearTimeout(x.ackTimer); clearTimeout(x.timer); } catch { } }
             await sleep(600); // the spend guard flushes its ledger 500 ms after a charge — the next engine reads it from disk
-            cur = world({ root: cur.root, credits: null, engine: engP, ackMs: ACK, sends: false, todos: { add: () => ({ id: 'ut-p' }) } });
+            cur = world({ root: cur.root, credits: null, engine: engP, ackMs: engAck, sends: false, todos: { add: () => ({ id: 'ut-p' }) } });
             const st = RC.attemptStep(T, { type: kind, now: Date.now() }, o()); T = st.t; ledger0 = cur.charged() - (st.effects.charge ? 1 : 0); tableCharges = st.effects.charge ? 1 : 0;
           }
+          pauseFor((pauses[d] || [])[0]);   // a pause placed in the step's own tail (the controls)
           await sleep(5);
+          pauseFor((pauses[d] || [])[1]);   // …and one after its await, before the compare
           stepsRun++;
           const e2 = cur.eng._resetCreditTries.get(key) || null;
+          if (sync) timerToTable();   // a timer of the engine's that ran in this step's awaits, given before the compare
           const ve = view(e2), vt = view(T);
           if (ve !== vt) mism.push(['record', ve, vt, trail.join('>')]);
           const be = RC.attemptBlock(e2, o()).code, bt = RC.attemptBlock(T, o()).code;
@@ -1040,8 +1081,39 @@ console.log('\n§3 the route over the real engine');
         }
         seqs++;
       }
+      return { mism, stepsRun, seqs, kinds, verdicts, stamps };
+      };
+      const parityRun = async (opts) => { globalThis.setTimeout = observedST; try { return await parityRun0(opts); } finally { globalThis.setTimeout = realST; } };
+      const { mism, stepsRun, seqs, kinds } = await parityRun({ seqs: SEQS, steps: STEPS, pick: (EVS) => EVS[Math.floor(rnd() * EVS.length)] });
       ok(`parity: ${seqs} seeded sequences × ${STEPS} steps on the real engine (${stepsRun} steps) agree with the table — the newest record and its priors, the block, the preview, the ledger`, stepsRun === SEQS * STEPS && mism.length === 0, JSON.stringify(mism.slice(0, 6)));
       ok('parity: the sample exercised every event kind (press · sent · answer · the ack and floor waits · reading · clock · boot · torn)', ['press', 'sent', 'answer', 'wait-ack', 'wait-floor', 'reading', 'clock', 'boot', 'torn'].every((k) => kinds.has(k)), [...kinds].join(','));
+      // THE LAW'S CONTROLS (主开发 r1036): scripted runs, each pause PLACED; a scene a pause on the machine could spoil states its
+      // precondition and is tried again until it held (at most 3 tries) — said, never assumed
+      const script = (ks) => { let i = 0; return (EVS) => { const want = ks[i++]; return EVS.find(([k]) => k === want); }; };
+      const NOT_TOLD = ['record', 'not-sent:0:N:-', 'not-sent:0:-:-'];   // the engine stamped «not sent», the table holds no outcome
+      const recordRed = (r) => r.mism.some((m) => m[0] === NOT_TOLD[0] && m[1] === NOT_TOLD[1] && m[2] === NOT_TOLD[2]);
+      const tries = async (run, held) => { let r; for (let k = 1; k <= 3; k++) { r = await run(); if (held(r)) return { ...r, tries: k }; } return { ...r, tries: 0 }; };
+      const earlyHeld = (r) => r.stamps.some((x) => x.type === 'ack-expired' && x.lag + x.delay < ACK);   // the engine's timer was due inside the table's window
+      const early = await tries(() => parityRun({ seqs: 1, steps: 1, pick: script(['press']), engAck: 1, pauses: { 0: [0, ACK] } }), earlyHeld);
+      ok(`parity CONTROL (RED): an engine that stamps «not sent» EARLY (its ack window 1 ms against the table's ${ACK}) stays red though the step's compare comes ${ACK} ms after its stamp — its timer is given at its own due instant, which the table's guard refuses (${early.tries} tr${early.tries === 1 ? 'y' : 'ies'})`,
+        early.tries > 0 && recordRed(early), JSON.stringify([early.stamps, early.mism.slice(0, 3)]));
+      const earlyW = await tries(() => parityRun({ seqs: 1, steps: 2, pick: script(['press', 'wait-ack']), engAck: 60 }), earlyHeld);
+      ok(`parity CONTROL (RED): an engine whose ack window is 60 ms stays red in a WAIT step too — its timer ran, so the wait gives the table that timer at its own due instant, refused, never the wait's own (${earlyW.tries} tr${earlyW.tries === 1 ? 'y' : 'ies'})`,
+        earlyW.tries > 0 && recordRed(earlyW), JSON.stringify([earlyW.stamps, earlyW.mism.slice(0, 3)]));
+      const tail = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK + 30, 0] } });
+      const tailWas = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK + 30, 0] }, sync: false });
+      ok(`parity: a pause of ${ACK + 30} ms PLACED in a press step's own tail (the engine's real ack timer runs before that step's compare) agrees — CONTROL: the leg as it was (the table told only in its waits) is red there`,
+        tail.stepsRun === 1 && tail.mism.length === 0 && recordRed(tailWas), JSON.stringify([tail.mism.slice(0, 2), tailWas.mism.slice(0, 2)]));
+      const edge = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK - 3, 0] } });
+      const edgeWas = await parityRun({ seqs: 1, steps: 1, pick: script(['press']), pauses: { 0: [ACK - 3, 0] }, sync: false });
+      ok(`parity: AT THE EDGE — a pause of ${ACK - 3} ms that ends before the timer is due, so the engine's ack timer runs ON TIME inside the step's 5 ms tail (its own clock in whole milliseconds may read 119), agrees: the table is given it at its DUE instant (its arming + its delay, ≥ the window), never when it ran — CONTROL: the leg as it was is red there`,
+        edge.stepsRun === 1 && edge.mism.length === 0 && edge.stamps.length > 0 && edge.stamps.every((x) => x.fedLag === x.lag + x.delay && x.fedLag >= ACK) && recordRed(edgeWas),
+        JSON.stringify([edge.stamps, edge.mism.slice(0, 2), edgeWas.mism.slice(0, 2)]));
+      const refusedHeld = (r) => r.verdicts.length === 2 && r.verdicts[0] === null && !!r.verdicts[1];   // the second press refused (no pause between them spoiled it)
+      const twice = await tries(() => parityRun({ seqs: 1, steps: 2, pick: script(['press', 'press']), pauses: { 1: [ACK + 30, 0] } }), refusedHeld);
+      const twiceWas = await tries(() => parityRun({ seqs: 1, steps: 2, pick: script(['press', 'press']), pauses: { 1: [ACK + 30, 0] }, sync: false }), refusedHeld);
+      ok(`parity: a press, then a REFUSED press (${twice.verdicts[1]}) with a pause of ${ACK + 30} ms placed in its tail, agrees — CONTROL: the leg as it was is red there (${twice.tries} / ${twiceWas.tries} tr${twice.tries + twiceWas.tries === 2 ? 'y each' : 'ies'})`,
+        twice.tries > 0 && twiceWas.tries > 0 && twice.mism.length === 0 && recordRed(twiceWas), JSON.stringify([twice.verdicts, twice.mism.slice(0, 2), twiceWas.mism.slice(0, 2)]));
     }
     // ── verify r3 T2: the helper's stdout cut MID-JSON (the app-server died while writing its answer) — the line never
     //    parses, the exit ends the run: sent + unanswered, never "answered, nothing spent"; a line that parses but is not
