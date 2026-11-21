@@ -98,6 +98,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE LIST: DOORS_OWED B-8703 7 → 5 (the ceiling with it). KEPT: «Show window frame» and «Scale» — each acts on ONE window from its own ⋯ menu; Settings has no window to aim it at (their reason restated). The plain-words baseline's telemetry row and docs/settings.md follow the new words (no row added).
 - LEGS (test-needs-doors): every schema row with a door drawn by the real SettingsUI in the one client bundle (searched by its label) and its door PRESSED, on the row's line after the description; a phone and an app without the opener draw none. RED controls (copies of settings-ui.js): no door line; a Customize door that forgets the phone.
 
+### bl-scratch — B-1747 part 1: the census reads the pin and failPass families
+
+- scripts/lib/check.mjs HELPER_NAMES gains `pin` and `failPass` as VERDICT_FAMILIES: a definition of either name is judged only when its body states a verdict (VERDICT_RE: a pass / fail counter, the exit code, a ✓ / ✗ line, a hand-off to a census helper). On 2.369.413 the census reads 8 pin definitions in 7 files (ONE judged: test-machine-migrate's name-first `pin`, unguarded — its first reading moves that file's row in scripts/fixtures/unguarded-helpers.json 1 → 2; the 7 others build rows or wrap other helpers: unknown) and 1 failPass (test-channel-drain's simulated backoff: unknown); no swapped call in either family. test-ci-gate-tiers §7b: NEG plants for both shapes of each family, and one anchored RED CONTROL a family (the census before part 1 still finds a ck swap, then misses that family's). Tests only.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
