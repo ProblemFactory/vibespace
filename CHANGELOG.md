@@ -74,6 +74,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A vault entry an agent saves again under the name of one you deleted no longer shows the deleted value's uses: its count starts at zero.
 - The usage popup now updates at once when you allow or stop automatic turns, instead of a few seconds later.
 - In Chinese and Japanese, a few messages no longer point to a menu or a control above or below that the English does not name.
+- A usage reading that reaches VibeSpace late no longer makes a newer reading of that limit look older, or mark it as refused.
 
 ## 2.369.413 — 2026-11-20
 
