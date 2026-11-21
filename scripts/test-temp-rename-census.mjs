@@ -153,7 +153,7 @@ const ROWS = [
   ["src/accounts.js", "move", "move", "", "AccountManager.reloginResolve > moveLogin"],
   ["src/adapters/codex.js", "unsynced", "derived", "a decompressed copy of a .zst transcript (made again from it)", "plainJsonlPath"],
   ["src/agentd/agentd.js", "move", "move", "", "rename", "move", "noteAct", "log"],
-  ["src/agentd/agentd.js", "synced", "self-synced", "", "part-commit", "deviceIdentity"],
+  ["src/agentd/agentd.js", "synced", "self-synced", "", "part-commit", "deviceIdentity", "writeDropped", "dropReportHead"],   // lg-remote-hardening (r1669): the pool report's dropped count and its head's drop, synced before the rename (a sync that fails fails the write)
   ["src/agentd/agentd.js", "unsynced", "device", "", "writeDialStatus", "<module>", "<module>", "pinTrust", "writeFloor", "pinHub", "_persist", "serveConnection > onControl > st.commit", "serveConnection > onControl", "onListening", "learnHub"],
   ["src/agentd/agentd.js", "move", "device", "its signed bundle landed (the temp written by the stream or the ssh road), then `current` repointed", "landBundle"],
   ["src/agentd/agentd.js", "move", "device", "the ssh road's staged bundle moved to its temp", "<module>"],

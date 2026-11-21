@@ -1313,7 +1313,9 @@ function writeDropped(d) {
   // (r1225) KEPT once anything was counted, so the total only ever rises: a late or replayed ack after a new drop never swallows it
   if (!(d.total > 0)) { fs.rmSync(ORDERS_DROPPED, { force: true }); return; }
   const tmp = ORDERS_DROPPED + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ total: d.total, acked: d.acked }));
+  // (r1669) a file that must survive a crash: its new bytes are on disk BEFORE its name points at them — synced, then renamed
+  const fd = fs.openSync(tmp, 'w');
+  try { fs.writeSync(fd, JSON.stringify({ total: d.total, acked: d.acked })); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   fs.renameSync(tmp, ORDERS_DROPPED);
 }
 // (r1155) THE REPORT's TOKEN: the head's bytes, their digest, the dropped total it said — the ack hands it back
@@ -1326,7 +1328,7 @@ function dropReportHead(bytes) {
   const tmp = ORDERS_LOG + '.tmp', src = fs.openSync(ORDERS_LOG, 'r');
   try {
     const dst = fs.openSync(tmp, 'w');
-    try { const b = Buffer.alloc(64 * 1024); let pos = bytes; for (;;) { const n = fs.readSync(src, b, 0, b.length, pos); if (n <= 0) break; fs.writeSync(dst, b, 0, n); pos += n; } }
+    try { const b = Buffer.alloc(64 * 1024); let pos = bytes; for (;;) { const n = fs.readSync(src, b, 0, b.length, pos); if (n <= 0) break; fs.writeSync(dst, b, 0, n); pos += n; } fs.fsyncSync(dst); }   // (r1669) the records not yet acked: synced before the rename
     finally { fs.closeSync(dst); }
   } finally { fs.closeSync(src); }
   fs.renameSync(tmp, ORDERS_LOG);
