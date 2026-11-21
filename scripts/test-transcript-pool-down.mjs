@@ -417,32 +417,37 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // retry is still out. RED: the retry through B-cd4b's warm line (the moved form's road: one warm at a time on the hub, its first page
   // in the history lane) — the second conversation waits behind the dead file
   const SSsrc = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), MC = mutantCopies('pool-down-r2246', REPO);
-  const sidX = '81111111-2222-4333-8444-555555555551', sidY = '81111111-2222-4333-8444-555555555552';
-  const fpX = path.join(projDir, sidX + '.jsonl'), fpY = path.join(projDir, sidY + '.jsonl');
-  const holdRun = async (SM) => {
-    for (const f of [fpX, fpY]) fs.writeFileSync(f, lines.slice(0, 400).join('\n') + '\n');
+  const sidX = '81111111-2222-4333-8444-555555555551', sidY = '81111111-2222-4333-8444-555555555552', sidX2 = '81111111-2222-4333-8444-555555555553';
+  const fpX = path.join(projDir, sidX + '.jsonl'), fpY = path.join(projDir, sidY + '.jsonl'), fpX2 = path.join(projDir, sidX2 + '.jsonl');
+  // `hung`: how many conversations' files the storage holds — the RED's two hold BOTH of the warm's lanes (B-80cb cure r1524: two warms
+  // at once on the train's pager), so a road that puts the retry on the warm line holds the second conversation behind them
+  const holdRun = async (SM, { hung = 1 } = {}) => {
+    const hungFp = hung === 2 ? [fpX, fpX2] : [fpX];
+    for (const f of [fpX, fpX2, fpY]) fs.writeFileSync(f, lines.slice(0, 400).join('\n') + '\n');
     C._setSlicedForTest({ storageRetryMs: 0 });   // its retry due at once (the gap is set when the refusal is noted: first)
-    C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); try { await C.readJsonlTailAsync(fpX, { dropSubagent: true }); } catch { }   // X: the storage's
-    let settle = null;
-    const S = { calls: [], xCalls: [], call(op, payload) { this.calls.push(op); if (payload && payload.fp === fpX) { this.xCalls.push(op); return new Promise((res, rej) => { settle = () => rej(Object.assign(new Error('a stand-in deadline'), { status: 503, safeFsTimeout: true })); }); } return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } };
+    C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); for (const f of hungFp) { try { await C.readJsonlTailAsync(f, { dropSubagent: true }); } catch { } }   // X (and X2): the storage's
+    const settles = [];
+    const S = { calls: [], xCalls: [], call(op, payload) { this.calls.push(op); if (payload && hungFp.includes(payload.fp)) { this.xCalls.push(op); return new Promise((res, rej) => { settles.push(() => rej(Object.assign(new Error('a stand-in deadline'), { status: 503, safeFsTimeout: true }))); }); } return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } };
     C._setTranscriptPoolForTest(S);
-    const premise = C.fileStorageHung(fpX) && !C.poolGone();
+    const premise = hungFp.every((f) => C.fileStorageHung(f)) && !C.poolGone();
     const wx = SM.warmSessionJsonlAsync(sidX, cwd);   // X's storage retry: out, held by its storage
+    const wx2 = hung === 2 ? SM.warmSessionJsonlAsync(sidX2, cwd) : null;   // (the RED's second: the warm's other lane)
     let xDone = false; wx.then(() => { xDone = true; }, () => { xDone = true; });
     await new Promise((res) => setImmediate(res));
     // THE ORDER, read (主开发 r2426 — never a clock bound: test-ci-gate §2e): Y's warm answers while X's retry is STILL OUT (its read held
     // by the stand-in until settle() below). The window is only the RED's: a Y still waiting when it closes is a Y behind X
     const wy = await Promise.race([SM.warmSessionJsonlAsync(sidY, cwd), new Promise((res) => setTimeout(() => res('still waiting'), 1500))]);
     const xStillOut = !xDone, held = S.xCalls.slice();   // what X's retry asked (held by its storage)
-    if (settle) settle();   // X's read ends at its deadline
+    for (const f of settles) f();   // X's read (and X2's) ends at its deadline
+    if (wx2) await Promise.race([wx2.catch(() => null), new Promise((res) => setTimeout(res, 3000))]);
     const wxOut = await Promise.race([wx, new Promise((res) => setTimeout(() => res('still out'), 3000))]);
     return { premise, wy, xStillOut, held, wx: wxOut };
   };
   const h8 = await holdRun(SS0);
   const lineRoad = anchored(SSsrc, '    else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }', '    else { try { r = await warmPaged(known, { bulk }).p; } catch { return false; } }', 'storage-retry-on-the-warm-line');   // stale-pins: kept — the moved form's road, planted back as the RED control
-  const h8r = await holdRun(MC.load('src/session-store.js', lineRoad, 'storage-retry-on-the-warm-line'));
+  const h8r = await holdRun(MC.load('src/session-store.js', lineRoad, 'storage-retry-on-the-warm-line'), { hung: 2 });
   ok(h8.premise && h8.held.join() === 'jsonlTail' && h8.wy === true && h8.xStillOut && h8.wx === false, `(8) a file the storage holds never holds the line: its retry out (${h8.held.join()}: the one-shot on the general pool), a second conversation's warm lands while that retry is still out (the order, read: ${h8.xStillOut})`, h8);
-  ok(h8r.premise && h8r.held.join() === 'boundedParsedPage' && h8r.wy === 'still waiting', `RED: the storage retry on the warm line (the moved form's road: ${h8r.held.join()}) ⇒ the second conversation's warm still waits at 1500 ms (${h8r.wy})`, h8r);
+  ok(h8r.premise && h8r.held.length === 2 && h8r.held.every((x) => x === 'boundedParsedPage') && h8r.wy === 'still waiting', `RED: the storage retry on the warm line (the moved form's road: ${h8r.held.join()}; two files on the hanging storage hold both of the warm's lanes) ⇒ the second conversation's warm still waits at 1500 ms (${h8r.wy})`, h8r);
   // (9) A TRANSCRIPT CUT SHORTER IN PLACE (主开发 r2246, the lane's find — an editor's save, a redirect: the same inode, smaller, LATER by
   // its time): the warm's read of it LANDS — the parse then answers the cache, a stat only, nothing read on the loop. RED: r935 (a)'s
   // size-only rule (the stale copy stays; the parse reads the file on the loop, and the page was told «ready» over «not loaded»)
@@ -460,7 +465,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
     return { w0, w1, inPlace, n: R.out && R.out.n, notLoaded: R.out && R.out.notLoaded, reads: content(R).length };
   };
   const s9 = await shrinkRun(SS0, '91111111-2222-4333-8444-555555555561');
-  const sizeOnly = anchored(SSsrc, ' && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0))) _jsonlCachePut(id, entry); };', ' && (c.size || 0) >= (entry.size || 0))) _jsonlCachePut(id, entry); };', 'r935a-size-only');   // stale-pins: kept — r935 (a) by size alone, planted back as the RED control
+  const sizeOnly = anchored(SSsrc, ' && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0))) _warmPut(id, entry); };', ' && (c.size || 0) >= (entry.size || 0))) _warmPut(id, entry); };', 'r935a-size-only');   // stale-pins: kept — r935 (a) by size alone, planted back as the RED control
   const s9r = await shrinkRun(MC.load('src/session-store.js', sizeOnly, 'r935a-size-only'), '91111111-2222-4333-8444-555555555562');
   ok(s9.w0 === true && s9.w1 === true && s9.inPlace && s9.n === 500 && !s9.notLoaded && s9.reads === 0, `(9) a transcript cut shorter in place: the warm's read lands — the parse answers it from the cache (${s9.n} records), nothing read on the loop (${s9.reads})`, s9);
   ok(s9r.inPlace && s9r.reads > 0, `RED: r935 (a) by size alone ⇒ the stale copy stays and the parse reads the file on the loop (${s9r.reads} reads)`, s9r);
@@ -514,7 +519,7 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
     ok(!L1._hungOf({ fp: claudeFp }, 'jsonlTail', 200) && !!L0._hungOf({ fp: claudeFp }, 'jsonlTail', 200), 'the history lane\'s deadline end adds nothing to the memory (hungMs: 0); the control lane remembers the file', { l1: !!L1._hungOf({ fp: claudeFp }, 'jsonlTail', 200), l0: !!L0._hungOf({ fp: claudeFp }, 'jsonlTail', 200) });
   } finally { L1.close(); L0.close(); }
   const ad = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
-  ok(/pathKeys: \['fp'\],/.test(ad) && /climb: false,/.test(ad) && /laneOpts: \{ history: \{ resourceLimits: \{ maxOldGenerationSizeMb: HISTORY_HEAP_MB \}, hungMs: 0 \} \}/.test(ad), 'the transcript pool is built with all three (pathKeys fp, climb false, the history lane hungMs 0)');
+  ok(/pathKeys: \['fp'\],/.test(ad) && /climb: false,/.test(ad) && /laneOpts: \{ history: \{ resourceLimits: \{ maxOldGenerationSizeMb: HISTORY_HEAP_MB \}, hungMs: 0 \}, warm: \{ resourceLimits: \{ maxOldGenerationSizeMb: HISTORY_HEAP_MB \}, hungMs: 0 \}, warm2: \{ resourceLimits: \{ maxOldGenerationSizeMb: HISTORY_HEAP_MB \}, hungMs: 0 \} \}/.test(ad), 'the transcript pool is built with all three (pathKeys fp, climb false, the history lane hungMs 0)');
 }
 
 // ── r1461 (round wwvmy3yti): THE LEGS ITS READERS FOUND MISSING — the page's re-ask as a PURE decision with its controls, who gets

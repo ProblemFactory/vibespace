@@ -665,7 +665,7 @@ function _transcriptPoolGet() {
         poolSize: 2,
         pathKeys: ['fp'],   // row B-422c: every op names its transcript `fp` — a blocked mount refused by name, a deadline remembered (B-23e5)
         climb: false,       // …that file alone: a transcript op's deadline may end a long parse, so two never name their folder (a project's every conversation)
-        laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB }, hungMs: 0 } },   // row B-422c: the history lane's pages parse a snapshot in memory — its deadline is a parse's, never a dead file: it ASKS the memory, never adds to it (B-23e5's parse-lane rule)
+        laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB }, hungMs: 0 }, warm: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB }, hungMs: 0 }, warm2: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB }, hungMs: 0 } },   // row B-422c: the history lane's pages parse a snapshot in memory — its deadline is a parse's, never a dead file: it ASKS the memory, never adds to it (B-23e5's parse-lane rule) · B-80cb cure: the claude warm's two lanes, the same bound and the same parse-lane rule each (they parse the same pages)
         // B-3b03: no inlineRun — the pool never runs an op on the main thread (a refusal reaches its callers; their own sync
         // fallback after ANY pool failure is theirs — SILENT but for parseCodexSessionJsonl's codex-parse-on-loop: row B-422c)
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, codexHistoryMergedPage: 120000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
@@ -764,7 +764,7 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  `whole` (lane lg-recovery, 主开发 r2374): the file ENTIRE, its one-shot too — the sub-agent viewer's read (slot 'subagent',
  *  src/server/subagent-transcript.js: a null is its refusal, never a read on the loop).
  *  → the records (or, with `entry`, { entry, mode, bytes }), or null */
-async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false, note = true, whole = false } = {}) {   // note: false — a caller whose refusals say nothing of the file's history (the artifact pass's whole-file read)
+async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false, note = true, whole = false, lane = null } = {}) {   // note: false — a caller whose refusals say nothing of the file's history (the artifact pass's whole-file read) · B-80cb cure: `lane` — the claude warm's own (src/session-store.js pumpWarm: 'warm' / 'warm2'); unset = the history lane
   let refusal = null;   // the LAST pool failure on this road (a later op error clears it: then the op's failure is the answer)
   // ownCall: page 0 (it reads the FILE — later pages parse its snapshot in memory) is the history lane's own call; the one-shot runs in
   // the main pool. A pool refusal STAYS the road's answer through a later op error (never a sync parse of a refused file after it)
@@ -785,7 +785,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       const out = [], startsOut = [];
       let total = Infinity, start = 0, gone = false, head = null;
       while (start < total) {
-        const r = await pool.call('boundedParsedPage', { fp, tailOnly, ...(whole ? { whole: true } : {}), start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK && !pool.inPlace ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}), ...(entry ? { entry: true } : {}), ...(dropSubagent ? { dropSubagent: true } : {}) });
+        const r = await pool.call('boundedParsedPage', { fp, tailOnly, ...(whole ? { whole: true } : {}), start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK && !pool.inPlace ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}), ...(entry ? { entry: true } : {}), ...(dropSubagent ? { dropSubagent: true } : {}) }, lane ? { lane } : undefined);   // B-80cb cure: every page in the lane that read page 0
         if (!r || r.gone) { gone = true; _pagedStats.gone++; why = 'its snapshot was gone twice (another read replaced it)'; break; }
         _pagedStats.pages++;
         token = r.token; total = r.total;
@@ -802,7 +802,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       if (!(entry && (code === 'heap_bound' || code === 'history_busy'))) seen(e, !token);
       if (code === 'heap_bound' && !entry) return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
       if (refusal && (refusal.storageHung || fileStorageHung(fp))) { if (entry) { refusal.retryAt = nextReadAt(fp); refusal.readerGone = poolGone(); throw refusal; } return said(`its storage hung (${(e && e.message) || e}) — no one-shot read sent into it`); }   // the warm's road: thrown, its catch reads it as the storage's   // nothing more tried there (a retry of a storage file is ONE call)
-      why = code === 'heap_bound' ? `the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
+      why = code === 'heap_bound' ? `the ${lane || 'history'} worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' || code === 'warm_busy' ? `the ${lane || 'history'} lane was busy past its wait` : `the ${lane || 'history'} worker failed (${(e && e.message) || e})`;
       break;
     }
   }

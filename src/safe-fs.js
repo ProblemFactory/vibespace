@@ -163,6 +163,11 @@ const LANES = {
   // B-23e5: a parse's deadline end is a runaway CPU parse, never a dead path — the lane asks the memory, it never adds to it
   parse: { poolSize: 1, noteHung: false, busy: { message: 'another document is being parsed — try again in a moment', code: 'parse_busy' } },
   history: { poolSize: 1, busy: { message: "another conversation's history is being read — try again in a moment", code: 'history_busy' } },
+  // B-80cb cure (主开发 r1524): the claude warm's pages (B-cd4b unit 2's pager, its slot 'warm') in TWO lanes of their own, one worker
+  // each — two cold tails read at once, as the release read them on the pool's two workers; never behind a codex history read.
+  // src/session-store.js pumpWarm names the lane of each warm (call(op, p, { lane })): a warm's pages all reach the worker of its page 0
+  warm: { poolSize: 1, busy: { message: "another conversation's transcript is being warmed — try again in a moment", code: 'warm_busy' } },
+  warm2: { poolSize: 1, busy: { message: "another conversation's transcript is being warmed — try again in a moment", code: 'warm_busy' } },
 };
 const OP_LANE = { xlsxSheets: 'parse', boundedParsedPage: 'history', codexHistoryMergedPage: 'history' };   // the ops that always run in a lane (a caller may name one: call(op, p, { lane }))
 const gone = () => Object.assign(new Error('the request was closed before its turn'), { status: 499, code: 'request_gone' });

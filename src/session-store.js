@@ -644,13 +644,38 @@ function _jsonlHeldNow() { let h = null; try { h = _jsonlHeldFn(); } catch { h =
 // A grown file the ASYNC warm folds in inline (on the loop) instead of handing
 // a full re-parse to the worker: the append is the only work, bounded here.
 const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
+// B-80cb cure (主开发 r1524): THE WARM'S READ IS NEVER THROWN AWAY. A tail the cache does not ADMIT (its live set past
+// JSONL_LIVE_MAX_BYTES — a restart's storm of long conversations: forty 32 MB tails pass it at the seventeenth; measured at the release:
+// those readers parsed their tails on the loop, its longest step 2.9 s on first attaches and 9.8 s on re-attaches) is handed to that
+// conversation's next parse ONCE (parseSessionJsonl takes it as its previous entry: an unchanged file is a hit), and the warm's own
+// fresh check sees it. ≤ WARM_HANDOFF_MAX held, each ≤ WARM_HANDOFF_MS (an unclaimed one goes, counted: its next parse reads the file,
+// as every parse past the cache's bound always did); counted in the transcript-tails census row.
+const WARM_HANDOFF_MAX = 4, WARM_HANDOFF_MS = 120000;   // a handoff lives from a warm to its reader's parse: two warms at once ⇒ ≤ 2–3 held
+const _warmHandoff = new Map();   // claude session id → { entry, at }
+const _handoffStats = { held: 0, taken: 0, dropped: 0 };
+let _liveMaxBytes = JSONL_LIVE_MAX_BYTES;   // the cache's live bound (a test seam sets it low: the not-admitted road at any size)
+function _handoffGet(id) {
+  const h = _warmHandoff.get(id);
+  if (!h) return null;
+  if (Date.now() - h.at > WARM_HANDOFF_MS) { _warmHandoff.delete(id); _handoffStats.dropped++; return null; }
+  return h.entry;
+}
+/** the warm's put: the cache, and — when the cache did not admit the entry — the handoff to the next parse */
+function _warmPut(id, entry) {
+  _jsonlCachePut(id, entry);
+  if (_jsonlCache.get(id) === entry) { _warmHandoff.delete(id); return; }
+  _warmHandoff.delete(id); _warmHandoff.set(id, { entry, at: Date.now() }); _handoffStats.held++;
+  while (_warmHandoff.size > WARM_HANDOFF_MAX) { _warmHandoff.delete(_warmHandoff.keys().next().value); _handoffStats.dropped++; }
+}
+const warmHandoffStats = () => ({ ..._handoffStats, holding: _warmHandoff.size });
+function _warmHandoffTestSeam({ liveMaxBytes } = {}) { if (liveMaxBytes !== undefined) _liveMaxBytes = liveMaxBytes == null ? JSONL_LIVE_MAX_BYTES : liveMaxBytes; return { liveMaxBytes: _liveMaxBytes }; }
 
 function _jsonlCachePut(id, entry) {
   _jsonlCache.delete(id);
   _jsonlCache.set(id, entry);
   _jsonlUsed.set(entry, Date.now());
   const held = _jsonlHeldNow();
-  const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: JSONL_LIVE_MAX_BYTES, now: Date.now(), sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e), held: (k) => held.has(k) });
+  const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: _liveMaxBytes, now: Date.now(), sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e), held: (k) => held.has(k) });
   _jsonlResident = r.bytes; _jsonlLive = r.live; _jsonlLiveEvicted += r.liveEvicted;
 }
 /** B-360d (A): THE MEMORY CENSUS'S TICK — the idle trim with no newcomer (a cache drop: nothing read, nothing asked). The live
@@ -672,12 +697,13 @@ function jsonlCacheCensus(now = Date.now()) {
   // B-360d (A) (主开发 r1358): TWO ROWS, each judged against its own ceiling — the idle set's 128 MB floor and the live set's 512 MB
   // (the one row said «ceiling 128 · OVER» for a live set the code lawfully keeps, and nothing of how long an idle set stayed over)
   const held = _jsonlHeldNow(); let idleB = 0, idleN = 0, liveB = 0, liveN = 0;
+  let hb = 0; for (const h of _warmHandoff.values()) hb += _jsonlBytes(h.entry);   // B-80cb cure: the warmed tails past the live set held for their reader's parse
   for (const [k, e] of _jsonlCache) { const b = _jsonlBytes(e); if (held.has(k) || now - (_jsonlUsed.get(e) || 0) < JSONL_CACHE_IDLE_MS) { liveB += b; liveN++; } else { idleB += b; idleN++; } }
   const idleRow = cacheRow('transcript tails (idle)', { bytes: idleB, count: idleN, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, enforced: { by: ['src/session-store.js#_jsonlCachePut', 'src/session-store.js#jsonlCacheTrim'], when: 'at every put, and at the memory census tick (a minute): idle tails go oldest-first past the floor' }, basis: `tails not read for ${JSONL_CACHE_IDLE_MS / 60e3} min and not held (no window open on them, no turn running)` });
   const liveRow = cacheRow('transcript tails (live)', { bytes: liveB, count: liveN, unit: 'entries', ceiling: JSONL_LIVE_MAX_BYTES, enforced: { by: ['src/session-store.js#_jsonlCachePut'], when: 'at every put: past the ceiling a newcomer is served and not kept, then the oldest-touched go' }, basis: `tails read in the last ${JSONL_CACHE_IDLE_MS / 60e3} min or held (a window open, a turn running)` });
   // the position indexes ride the live row (they live beside their tails' arrays); OVER stays judged on the tails alone
-  liveRow.bytes = liveB + ix.bytes + ts.bytes;   // the position indexes and the kept task-state answers live beside their tails' arrays: the live row counts them
-  liveRow.basis += ` + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1048576)} MB) + the kept task-state answers (${ts.answers}, ${ts.rows} entries ≈ ${Math.round(ts.bytes / 1024)} KB at ${TASK_ROW_BYTES} B an entry; an answer whose tail was evicted while a reader still holds its records lives with that reader, uncounted)`;
+  liveRow.bytes = liveB + ix.bytes + ts.bytes + hb;   // the position indexes and the kept task-state answers live beside their tails' arrays: the live row counts them
+  liveRow.basis += ` + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1048576)} MB) + the kept task-state answers (${ts.answers}, ${ts.rows} entries ≈ ${Math.round(ts.bytes / 1024)} KB at ${TASK_ROW_BYTES} B an entry; an answer whose tail was evicted while a reader still holds its records lives with that reader, uncounted)${_warmHandoff.size ? ` + ${_warmHandoff.size} warmed tail(s) past the live set held for their reader's parse (${Math.round(hb / 1048576)} MB)` : ''}`;
   return [idleRow, liveRow];
 }
 function _stampJsonlParse(bytes, ms) {
@@ -685,7 +711,7 @@ function _stampJsonlParse(bytes, ms) {
   global.__vsMetric?.('srv-jsonl-parse-ms', Math.round(ms * 10) / 10);
 }
 /** Test hook: forget every cached parse (the cold-read control). */
-function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
+function jsonlCacheClear() { _jsonlCache.clear(); _warmHandoff.clear(); _jsonlResident = 0; }
 
 // Async warm (2.235.0): populate _jsonlCache OFF the main thread via the
 // transcript worker, so the sync parseSessionJsonl below (many sync callers)
@@ -736,7 +762,13 @@ const taggedKeptOf = (list, info = {}) => { let c = _taggedKept.get(list); if (!
 // attach of a conversation a paced «Resume all» created, `bulk: true`) that has not started; a warm in flight finishes. Within each
 // class first come first served; a person's ask for a file whose bulk warm still waits moves that warm into the person's line. The
 // line is let go in a finally: a warm that rejects (its worker dead, its read refused) never holds the warms behind it.
-const _warmQ = { person: [], bulk: [], busy: false };
+// B-80cb cure (主开发 r1524): TWO WARMS AT ONCE, each in its own lane (src/safe-fs.js LANES `warm` / `warm2`: one worker, one 'warm'
+// slot each: 'warm' / 'warm2') — one at a time made a restart's storm of forty wait one by one where the release read two cold tails at once. The line's
+// rules stand: a person's warm before every bulk one not started, the lift, one warm a file joined, the fresh check, let go in a finally.
+const WARM_LANES = ['warm', 'warm2'];
+const _warmQ = { person: [], bulk: [], free: [...WARM_LANES] };
+const _warmLine = { turns: 0, atOnce: 0 };
+const warmLineStats = () => ({ ..._warmLine, free: _warmQ.free.length });
 // its fresh read's MUSTs: ONE warm in flight a file — a second asker (an attach's task-state warm gives up at 10 s, then its transcript
 // warm asks again) joins it, never a second whole read; a warm whose turn comes after the cache was filled for the same file (another
 // road) reads nothing; the read's time is taken from its turn in the line, never the wait before it; a warm that leaves the paged
@@ -744,19 +776,21 @@ const _warmQ = { person: [], bulk: [], busy: false };
 const _warmInFlight = new Map();
 let _warmLeftSaid = false;
 const warmLeft = (why) => { if (_warmLeftSaid) return; _warmLeftSaid = true; console.warn(`[session-store] a claude warm left the paged road: ${why} (said once; the pager's stats count the rest)`); };
-async function warmTurn(fp, fresh) {
+async function warmTurn(fp, fresh, lane) {
   const t0 = performance.now();
   if (fresh && fresh()) return { fresh: true };
   const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
-  const r = await readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: 'warm', onFail: warmLeft });
+  const r = await readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: lane || 'warm', onFail: warmLeft, lane });   // B-80cb cure: the lane's own slot ('warm' / 'warm2')
   return r ? { ...r, t0 } : r;
 }
 function pumpWarm() {
-  if (_warmQ.busy) return;
-  const job = _warmQ.person.shift() || _warmQ.bulk.shift();
-  if (!job) return;
-  _warmQ.busy = true;
-  Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then(job.resolve, job.reject).finally(() => { _warmQ.busy = false; pumpWarm(); });
+  while (_warmQ.free.length) {
+    const job = _warmQ.person.shift() || _warmQ.bulk.shift();
+    if (!job) return;
+    const lane = _warmQ.free.shift();
+    _warmLine.turns++; _warmLine.atOnce = Math.max(_warmLine.atOnce, WARM_LANES.length - _warmQ.free.length);
+    Promise.resolve().then(() => warmTurn(job.fp, job.fresh, lane)).then(job.resolve, job.reject).finally(() => { _warmQ.free.push(lane); pumpWarm(); });
+  }
 }
 function warmPaged(fp, { fresh = null, bulk = false } = {}) {
   let job = null;
@@ -772,7 +806,7 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
 // loaded», again and again). The SAFE side is to take the read: two times that are equal (a rewrite inside one clock tick, a
 // storage with coarse times) put the read — the parse's own stat then folds in anything newer as an append. A read that raced a
 // growth carries mtimeMs -1 and never displaces a cached copy at least as large.
-const putUnlessNewer = (id, entry) => { const c = _jsonlCache.get(id); if (!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0))) _jsonlCachePut(id, entry); };
+const putUnlessNewer = (id, entry) => { const c = _jsonlCache.get(id); if (!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0))) _warmPut(id, entry); };   // B-80cb cure: every warm's put is the warm's — the cache, or (not admitted) the handoff to the next parse
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 // ONE WARM A SESSION AT A TIME: a second ask while one is in flight joins it (the parse's 2 s re-warm, an attach, a page) — never a
 // second history read of the same file sent to the pool (the whole-state read: unjoined re-warms queued reads whose deadlines ended
@@ -825,8 +859,8 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     if (C().fileStorageHung(fp)) return false;   // found now, and the memory calls it the storage's: no stat (the next warm: the pool alone)
     const stat = fs.statSync(fp);
     tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
-    const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
+    const cached = _jsonlCache.get(claudeSessionId) || _handoffGet(claudeSessionId);   // B-80cb cure: or the read the cache did not admit
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _warmPut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
     const { readJsonlTail } = C();
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
@@ -834,14 +868,14 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
       if (r) {
         if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
         _stampJsonlParse(r.bytes, performance.now() - t0);
-        _jsonlCachePut(claudeSessionId, r.entry);
+        _warmPut(claudeSessionId, r.entry);
         return true;
       }
     }
     let w = _warmInFlight.get(fp);   // one warm in flight a file: a second asker joins it (above)
     if (w) { if (!bulk) promoteWarm(w.job); }   // r935: a person's ask for a file a bulk warm waits for moves it into the person's line
     else {
-      const fresh = () => { const c = _jsonlCache.get(claudeSessionId); return !!c && c.mtimeMs === stat.mtimeMs && c.size === stat.size && c.ino === stat.ino; };
+      const fresh = () => { const c = _jsonlCache.get(claudeSessionId) || _handoffGet(claudeSessionId); return !!c && c.mtimeMs === stat.mtimeMs && c.size === stat.size && c.ino === stat.ino; };
       w = { job: null, p: null };
       w.p = (async () => {
         const q = warmPaged(fp, { fresh, bulk }); w.job = q.job;   // B-cd4b unit 2: the entry in pages (above)
@@ -915,7 +949,9 @@ function parseSessionJsonl(claudeSessionId, cwd) {
   if (!fp) return [];
   try {
     const stat = fs.statSync(fp);
-    const cached = _jsonlCache.get(claudeSessionId);
+    const held = _jsonlCache.get(claudeSessionId) ? null : _handoffGet(claudeSessionId);   // B-80cb cure: the warm's read the cache did not admit
+    const cached = held || _jsonlCache.get(claudeSessionId);
+    if (held) { _warmHandoff.delete(claudeSessionId); _handoffStats.taken++; }   // taken once
     // Bounded read: a full readFileSync('utf-8') THROWS past Node's ~512MB
     // string limit (and blocks the event loop for hundreds of MB below it).
     // Tail-only: the client seek-loads the earlier history as a continuous
@@ -2149,7 +2185,7 @@ function dedupWebuiSockets(entries) {
 }
 
 module.exports = { setJsonlHeld, noteJsonlView, dropJsonlView, dropJsonlViews, jsonlCacheTrim, jsonlCacheTestPut, jsonlHas, claudeTranscriptIndex, stuckSaid,
-  warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus, onHistoryReadable,
+  warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus, onHistoryReadable, warmHandoffStats, _warmHandoffTestSeam, warmLineStats,   // B-80cb cure
   taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _taskScanCounts, _taskStateCensus: taskStateCensus, _spanFromStart: spanFromStart, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
   extractSessionMeta,
   SESSIONS_DIR,

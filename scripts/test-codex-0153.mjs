@@ -224,7 +224,7 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
 {
   const CX2 = require(path.join(REPO, 'src/adapters/codex.js'));
   const ctxP = await CX2.lastCodexTurnContextAsync(P), ctxNone = await CX2.lastCodexTurnContextAsync('00000000-0000-4000-8000-000000000000');   // B-80cb: the async twin (the sync pair is gone)
-  ok(!!ctxP && ctxP.effort === 'high' && ctxP.model === 'gpt-6-astra' && (ctxNone === null || !ctxNone.effort), 'the last turn\'s effort (read off the loop) = the last turn_context.effort (model twin unchanged; unknown thread → null)');
+  ok(!!ctxP && ctxP.effort === 'high' && ctxP.model === 'gpt-6-astra' && ctxNone === null, 'the last turn\'s effort (read off the loop) = the last turn_context.effort (model twin unchanged; unknown thread → null)');
   const wc = read('src/ws-create.js');
   const hx = require(path.join(REPO, 'src/harnesses/codex.js'));
   ok((await hx.store.lastTurnEffort(P)) === 'high' && (await hx.store.lastTurnModel(P)) === 'gpt-6-astra',   // async since lane resume-all-paced (read off the loop)

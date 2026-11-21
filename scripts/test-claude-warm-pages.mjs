@@ -10,7 +10,8 @@
 //     one-shot reply planted back (the warm calls `jsonlTail`)
 //  ③ THE SLOTS: a warm ('warm'), a person's history read ('') and a helper's ('helper') at once — each keeps every page (no read's
 //     snapshot cut: nothing «gone»), each equal to its one-shot; RED: the warm on the history reads' slot ⇒ a page gone
-//  ④ ONE WARM AT A TIME: two warms at once both read through their pages, nothing gone; RED: the line taken away ⇒ gone
+//  ④ TWO WARMS AT ONCE (B-80cb cure, 主开发 r1524: the release read two cold tails at once), each in its own lane and slot: both
+//     read through their pages, nothing gone; a third waits its turn; RED: both in one lane ⇒ gone; RED: no bound ⇒ three at once
 // Run: node scripts/test-claude-warm-pages.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -91,13 +92,19 @@ try {
   const r3 = await three('');
   ok(r3.gone > 0, `RED: the warm on the history reads' slot ('') — a person's read finds its snapshot cut (${r3.gone} gone)`);
 
-  console.log('— ④ ONE WARM AT A TIME (the worker keeps one snapshot a slot)');
+  console.log('— ④ TWO WARMS AT ONCE, each in its own lane and slot (the worker keeps one snapshot a slot) — B-80cb cure, 主开发 r1524');
   const two = async (SM) => { const s0 = stats(); const sids = ['a0b10000-0000-4000-8000-00000000c4e1', 'a0b10000-0000-4000-8000-00000000c4e2']; for (const sid of sids) fs.copyFileSync(sid.endsWith('1') ? FX['past the tail bound (its seam)'] : hist, path.join(PROJ, sid + '.jsonl')); SM.jsonlCacheClear?.(); const r = await Promise.all(sids.map((sid) => SM.warmSessionJsonlAsync(sid, CWD))); return { r, gone: stats().gone - s0.gone }; };
   const g4 = await two(S);
-  ok(g4.r.every((x) => x === true) && g4.gone === 0, `two warms at once: both read through their pages, nothing gone (${g4.gone})`);
-  const noLine = anchored(ssSrc, '  if (_warmQ.busy) return;\n', '', 'warm-no-line');
-  const g4r = await two(require(M.write('src/session-store.js', noLine, 'warm-no-line')));
-  ok(g4r.gone > 0, `RED: the line taken away — the second warm's first page cuts the first's snapshot (${g4r.gone} gone)`);
+  ok(g4.r.every((x) => x === true) && g4.gone === 0 && S.warmLineStats().atOnce === 2, `two warms at once: both read AT ONCE (${S.warmLineStats().atOnce} in flight) through their pages, each in its own lane, nothing gone (${g4.gone})`);
+  const oneLane = anchored(ssSrc, "const WARM_LANES = ['warm', 'warm2'];", "const WARM_LANES = ['warm', 'warm'];", 'warm-one-lane');
+  const g4r = await two(require(M.write('src/session-store.js', oneLane, 'warm-one-lane')));
+  ok(g4r.gone > 0, `RED: both warms in ONE lane — the second warm's first page cuts the first's snapshot (${g4r.gone} gone)`);
+  // three at once: two read, the third waits its turn in the line (never a third worker's heap, never a shared slot)
+  const three4 = async (SM) => { const s0 = stats(); const sids = ['a0b10000-0000-4000-8000-00000000c4f1', 'a0b10000-0000-4000-8000-00000000c4f2', 'a0b10000-0000-4000-8000-00000000c4f3']; for (const sid of sids) fs.copyFileSync(hist, path.join(PROJ, sid + '.jsonl')); SM.jsonlCacheClear?.(); const r = await Promise.all(sids.map((sid) => SM.warmSessionJsonlAsync(sid, CWD))); return { r, gone: stats().gone - s0.gone, atOnce: SM.warmLineStats().atOnce }; };
+  const unbounded = anchored(anchored(ssSrc, '  while (_warmQ.free.length) {', '  while (_warmQ.person.length || _warmQ.bulk.length) {', 'warm-unbounded'), '    const lane = _warmQ.free.shift();', "    const lane = _warmQ.free.shift() || 'warm';", 'warm-unbounded-lane');
+  const g43 = await three4(S), g43r = await three4(require(M.write('src/session-store.js', unbounded, 'warm-unbounded')));
+  ok(g43.r.every((x) => x === true) && g43.gone === 0 && g43.atOnce === 2, `three warms at once: two read, the third waits its turn (at most ${g43.atOnce} in flight, nothing gone)`, g43);
+  ok(g43r.gone > 0, `RED: no bound on the warms in flight ⇒ a third warm shares a lane, its snapshot cut (${g43r.gone} gone)`, g43r);   // the line's count stops at its two lanes: the cut snapshot is what the copy shows
 
   console.log('— ⑤ ONE WARM IN FLIGHT A FILE (its fresh read\'s MUST): a second asker joins the first, never a second whole read');
   {
@@ -108,21 +115,27 @@ try {
     const A = 'a0b10000-0000-4000-8000-00000000c5a1', B = 'a0b10000-0000-4000-8000-00000000c5b1';
     const order5 = async (SM) => {
       for (const sid of [A, B]) fs.copyFileSync(hist, path.join(PROJ, sid + '.jsonl'));
-      SM.jsonlCacheClear?.(); const done = [], s0 = stats();
+      SM.jsonlCacheClear?.(); const done = [], s0 = stats(), t0 = SM.warmLineStats ? SM.warmLineStats().turns : 0;
       const r = await Promise.all([[A, 'A'], [B, 'B'], [A, "A'"]].map(([sid, n]) => SM.warmSessionJsonlAsync(sid, CWD).then((x) => { done.push(n); return x; })));
-      return { r, done: done.join(), reads: stats().reads - s0.reads };
+      return { r, done: done.join(), reads: stats().reads - s0.reads, turns: (SM.warmLineStats ? SM.warmLineStats().turns : 0) - t0 };
     };
+    // B-80cb cure: two warms at once ⇒ A and B read together and either may end first; the join is that the second A resolves WITH the
+    // first (right after it) and takes no turn of its own
+    const withIt = (d, a, b) => { const x = d.split(','); return x.indexOf(b) === x.indexOf(a) + 1; };
     // BOTH joins taken away: the file's (this suite's) and row B-422c's of the SESSION around it (one warm a session at a time — A
     // and A' are one session's asks, so that join alone would resolve A' with A and hide the file's join from this control)
     const noJoin = anchored(anchored(ssSrc, '    let w = _warmInFlight.get(fp);', '    let w = null;', 'warm-no-join'), '  if (was && (bulk || !was.bulk)) return was.p;', '  if (false) return was.p;', 'warm-no-session-join');
     const noFresh = anchored(noJoin, '  if (fresh && fresh()) return { fresh: true };', '  if (false) return { fresh: true };', 'warm-no-fresh');
-    const SJ = require(M.write('src/session-store.js', noJoin, 'warm-no-join')), SF = require(M.write('src/session-store.js', noFresh, 'warm-no-fresh'));
+    const SJ = require(M.write('src/session-store.js', noJoin, 'warm-no-join'));   // the fresh check's own pair runs on one lane (below)
     const g5 = await order5(S), r5 = await order5(SJ);
-    ok(g5.r.every((x) => x === true) && g5.done === "A,A',B" && g5.reads === 2, `the second A joins the first (resolved: ${g5.done}; ${g5.reads} reads for two files)`, g5);
-    ok(r5.done === "A,B,A'", `RED: the joins taken away (the file's and the session's) ⇒ the second A waits its own turn after B (${r5.done})`, r5);
+    ok(g5.r.every((x) => x === true) && withIt(g5.done, 'A', "A'") && g5.reads === 2 && g5.turns === 2, `the second A joins the first — resolved with it (${g5.done}); ${g5.reads} reads and ${g5.turns} turns for two files`, g5);
+    ok(r5.turns === 3, `RED: the joins taken away (the file's and the session's) ⇒ the second A takes a turn of its own (${r5.turns} turns for two files)`, r5);
     const twice = async (SM) => { fs.copyFileSync(hist, path.join(PROJ, A + '.jsonl')); SM.jsonlCacheClear?.(); const s0 = stats(); const r = await Promise.all([SM.warmSessionJsonlAsync(A, CWD), SM.warmSessionJsonlAsync(A, CWD)]); return { r, reads: stats().reads - s0.reads }; };
-    const f5 = await twice(SJ), f5r = await twice(SF);
-    ok(f5.r.every((x) => x === true) && f5.reads === 1, `with the join taken away, the second warm's turn finds the cache filled for the same file: ${f5.reads} read`, f5);
+    // the fresh check ALONE, on ONE lane (the second warm's turn comes after the first's read — two lanes would start both at once)
+    const oneLane = (src, tag) => anchored(src, "const WARM_LANES = ['warm', 'warm2'];", "const WARM_LANES = ['warm'];", tag);
+    const SJ1 = require(M.write('src/session-store.js', oneLane(noJoin, 'warm-no-join-1'), 'warm-no-join-1')), SF1 = require(M.write('src/session-store.js', oneLane(noFresh, 'warm-no-fresh-1'), 'warm-no-fresh-1'));
+    const f5 = await twice(SJ1), f5r = await twice(SF1);
+    ok(f5.r.every((x) => x === true) && f5.reads === 1, `with the join taken away (one lane), the second warm's turn finds the cache filled for the same file: ${f5.reads} read`, f5);
     ok(f5r.reads === 2, `RED: the fresh check taken away too ⇒ ${f5r.reads} whole reads of one file`, f5r);
   }
 
@@ -145,8 +158,8 @@ try {
 
   console.log('— ⑦ A PERSON\'S OWN ACT FIRST (its follow, 主开发 r935): a person\'s warm runs before every bulk warm not yet started');
   {
-    // three bulk warms (a paced «Resume all»'s first attaches, `bulk: true`), then a person's: the first bulk warm is in flight and
-    // finishes, the person's runs SECOND; a person's ask for a file whose bulk warm still waits moves that warm up. Each warm's read
+    // three bulk warms (a paced «Resume all»'s first attaches, `bulk: true`), then a person's: the first TWO bulk warms are in flight
+    // (two at once, B-80cb cure) and finish, the person's runs THIRD; a person's ask for a file whose bulk warm still waits moves it up. Each warm's read
     // is seen at the pager (its start, in order). RED: first come first served (one line for all) ⇒ the person's runs last; RED: no
     // move ⇒ the file the person asked for waits its bulk turn
     const small = FX['one under a page'];
@@ -159,38 +172,39 @@ try {
     };
     const B = (k) => `a0b10000-0000-4000-8000-0000000c7${k}`;
     const P4 = [[B('b01'), true], [B('b02'), true], [B('b03'), true], [B('d01'), false]];   // hex ids only (a well-formed conversation id)
-    const UP = [[B('e01'), true], [B('e02'), true], [B('e03'), true], [B('e03'), false]];
+    const UP = [[B('e01'), true], [B('e02'), true], [B('e03'), true], [B('e04'), true], [B('e04'), false]];   // two in flight: the lift is seen with four
     const g7 = await order7(S, P4), u7 = await order7(S, UP);
     const fcfs = require(M.write('src/session-store.js', anchored(ssSrc, '(job.bulk ? _warmQ.bulk : _warmQ.person).push(job);', '_warmQ.bulk.push(job);', 'warm-fcfs'), 'warm-fcfs'));
     const noUp = require(M.write('src/session-store.js', anchored(ssSrc, '    if (w) { if (!bulk) promoteWarm(w.job); }', '    if (w) { }', 'warm-no-promote'), 'warm-no-promote'));
     const r7 = await order7(fcfs, P4.map(([x, b]) => [x.replace('c7', 'c8'), b])), ru7 = await order7(noUp, UP.map(([x, b]) => [x.replace('c7', 'c8'), b]));
-    ok(g7.r.every((x) => x === true) && g7.order === '0,3,1,2' && u7.r.every((x) => x === true) && u7.order === '0,2,1',
-      `three bulk warms then a person's: the bulk one in flight finishes, the person's runs second (${g7.order}); a person's ask for a file whose bulk warm waits moves it up (${u7.order})`, { g7, u7 });
-    ok(r7.order === '0,1,2,3' && ru7.order === '0,1,2', `RED: first come first served ⇒ the person's runs last (${r7.order}); RED: no move ⇒ the asked file waits its bulk turn (${ru7.order})`, { r7, ru7 });
+    ok(g7.r.every((x) => x === true) && g7.order === '0,1,3,2' && u7.r.every((x) => x === true) && u7.order === '0,1,3,2',
+      `three bulk warms then a person's: the two bulk ones in flight finish, the person's runs third (${g7.order}); a person's ask for a file whose bulk warm waits moves it up (${u7.order})`, { g7, u7 });
+    ok(r7.order === '0,1,2,3' && ru7.order === '0,1,2,3', `RED: first come first served ⇒ the person's runs last (${r7.order}); RED: no move ⇒ the asked file waits its bulk turn (${ru7.order})`, { r7, ru7 });
   }
 
   console.log('— ⑧ THE LINE IS LET GO when a warm rejects (its worker dead mid-pages, its read refused): the warm behind it runs');
   {
     const small = FX['one under a page'];
+    // B-80cb cure: two warms at once ⇒ the first TWO reads reject (both lanes), the third warm behind them must still ask its read
     const rej = async (SM, tag) => {
-      const A = `a0b10000-0000-4000-8000-00000000c9${tag}1`, Bb = `a0b10000-0000-4000-8000-00000000c9${tag}2`;
-      for (const sid of [A, Bb]) fs.copyFileSync(small, path.join(PROJ, sid + '.jsonl'));
+      const A = `a0b10000-0000-4000-8000-00000000c9${tag}1`, Bb = `a0b10000-0000-4000-8000-00000000c9${tag}2`, C = `a0b10000-0000-4000-8000-00000000c9${tag}3`;
+      for (const sid of [A, Bb, C]) fs.copyFileSync(small, path.join(PROJ, sid + '.jsonl'));
       SM.jsonlCacheClear?.(); const real = codex.readJsonlBoundedParsedPagedAsync; let n = 0;
-      codex.readJsonlBoundedParsedPagedAsync = function (fp, o) { if (!n++) return Promise.reject(new Error('planted: the worker died mid-pages')); return real.call(this, fp, o); };
+      codex.readJsonlBoundedParsedPagedAsync = function (fp, o) { if (n++ < 2) return Promise.reject(new Error('planted: the worker died mid-pages')); return real.call(this, fp, o); };
       try {
-        const pa = SM.warmSessionJsonlAsync(A, CWD), pb = SM.warmSessionJsonlAsync(Bb, CWD);
-        // what happened, never a clock (r1093's small): the line is let go in microtasks — by the next turn the warm behind has asked
+        const pa = SM.warmSessionJsonlAsync(A, CWD), pb = SM.warmSessionJsonlAsync(Bb, CWD), pc = SM.warmSessionJsonlAsync(C, CWD);
+        // what happened, never a clock (r1093's small): the lanes are let go in microtasks — by the next turn the warm behind has asked
         // its read, or it never will (a held line has nothing left to pump it)
-        const ra = await pa; await new Promise((r) => setImmediate(r));
-        const asked = n, rb = asked >= 2 ? await pb : null;
-        return { ra, rb, asked };
+        const ra = await pa, rb = await pb; await new Promise((r) => setImmediate(r));
+        const asked = n, rc = asked >= 3 ? await pc : null;
+        return { ra, rb, rc, asked };
       } finally { codex.readJsonlBoundedParsedPagedAsync = real; }
     };
     const g8 = await rej(S, 'a');
-    const held = require(M.write('src/session-store.js', anchored(ssSrc, 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then(job.resolve, job.reject).finally(() => { _warmQ.busy = false; pumpWarm(); });', 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh)).then((v) => { job.resolve(v); _warmQ.busy = false; pumpWarm(); }, job.reject);', 'warm-held-on-reject'), 'warm-held-on-reject'));
+    const held = require(M.write('src/session-store.js', anchored(ssSrc, 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh, lane)).then(job.resolve, job.reject).finally(() => { _warmQ.free.push(lane); pumpWarm(); });', 'Promise.resolve().then(() => warmTurn(job.fp, job.fresh, lane)).then((v) => { job.resolve(v); _warmQ.free.push(lane); pumpWarm(); }, job.reject);', 'warm-held-on-reject'), 'warm-held-on-reject'));
     const r8 = await rej(held, 'b');
-    ok(g8.ra === false && g8.asked === 2 && g8.rb === true, `a warm whose read rejects answers false (its caller reads the old road) and the warm behind it asks its read and runs (${g8.rb})`, g8);
-    ok(r8.ra === false && r8.asked === 1 && r8.rb === null, 'RED: the line let go only on success ⇒ the warm behind a rejected one never asks its read', r8);
+    ok(g8.ra === false && g8.rb === false && g8.asked === 3 && g8.rc === true, `two warms whose reads reject answer false (their callers read the old road) and the warm behind them asks its read and runs (${g8.rc})`, g8);
+    ok(r8.ra === false && r8.rb === false && r8.asked === 2 && r8.rc === null, 'RED: the lanes let go only on success ⇒ the warm behind two rejected ones never asks its read', r8);
   }
 
   console.log('— ⑨ THE CONVERSATION DECIDES (主开发 r1035): a bulk resume\'s conversation is bulk on the HISTORY road too, until a person\'s own act');

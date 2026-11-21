@@ -648,8 +648,8 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
   }
   console.log('⑦b the position index is counted (the cure, small): the transcript tails\' census row carries the indexes their merges keep');
   {
-    const ssrcB = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), ROW = 'liveRow.bytes = liveB + ix.bytes + ts.bytes;';   // B-360d (A) r1374: the live row counts the indexes (the single row is gone)
-    const RelC = mutantCopies('a5-census', REPO).load('src/session-store.js', editAnchor(ssrcB, ROW, () => 'liveRow.bytes = liveB + ts.bytes;', "src/session-store.js"), 'uncounted');   // RED: cadb07780's count (the tails without their indexes), planted in the live row
+    const ssrcB = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), ROW = 'liveRow.bytes = liveB + ix.bytes + ts.bytes + hb;';   // B-80cb cure: + the handed-off tails (hb)   // B-360d (A) r1374: the live row counts the indexes (the single row is gone)
+    const RelC = mutantCopies('a5-census', REPO).load('src/session-store.js', editAnchor(ssrcB, ROW, () => 'liveRow.bytes = liveB + ts.bytes + hb;', "src/session-store.js"), 'uncounted');   // RED: cadb07780's count (the tails without their indexes), planted in the live row
     const NC = 400;
     const sceneC = async (M, k) => {
       const sidC = `cccccccc-0000-4000-8000-0000000c${String(k).padStart(4, '0')}`, fC = path.join(projDir, sidC + '.jsonl');

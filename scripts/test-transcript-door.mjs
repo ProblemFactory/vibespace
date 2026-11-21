@@ -7,6 +7,10 @@
 //   D) THE CENSUS (主开发 r1355 D): every product read of a transcript reader goes through the door first (a door between its
 //      maker and its first synchronous read); the synchronous parse has exactly its named callers — a new one is red by name
 //      (the parse itself stays); RED CONTROLS: a planted read with no door, a planted caller — each named
+//   F) THE WARM'S READ IS NEVER THROWN AWAY (B-80cb cure, 主开发 r1524): a tail the cache does not admit (its live set past its bound —
+//      a restart's storm of long conversations; the bound set low here) is handed to its reader's parse — the reader reads it with
+//      ZERO opens of the transcript on this thread; RED: a copy whose warm drops what the cache did not admit (the road before the cure)
+// The stand-ins live on the DISK (fixture-guard TMP_ROOTS[1] — never the memory-backed temp folder) and are removed at every exit.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,8 +24,11 @@ import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { ok, report } = checker();
-const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-transcript-door-'));
-process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+const { TMP_ROOTS } = require(path.join(REPO, 'src/fixture-guard.js'));
+const ROOT = fs.mkdtempSync(path.join(TMP_ROOTS[1], 'vs-transcript-door-'));
+const gone = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } };
+process.on('exit', gone);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { gone(); process.exit(130); });
 const HOME = path.join(ROOT, 'home');
 fs.mkdirSync(HOME, { recursive: true });
 process.env.HOME = HOME;
@@ -46,11 +53,11 @@ fs.writeFileSync(FP, lines.join('\n') + '\n');
 const { readOffLoop } = require(path.join(REPO, 'src/attach-read.js'));
 const SS_REL = 'src/session-store.js', SS_SRC = fs.readFileSync(path.join(REPO, SS_REL), 'utf8');
 // the transcript opened on THIS thread (a worker's reads are its own thread's): fs.openSync / readFileSync of the file
-const opensDuring = async (fn) => {
+const opensDuring = async (fn, fp = FP) => {
   const realOpen = fs.openSync, realRead = fs.readFileSync;
   let n = 0;
-  fs.openSync = function (p, ...a) { if (String(p) === FP) n++; return realOpen.call(this, p, ...a); };
-  fs.readFileSync = function (p, ...a) { if (String(p) === FP) n++; return realRead.call(this, p, ...a); };
+  fs.openSync = function (p, ...a) { if (String(p) === fp) n++; return realOpen.call(this, p, ...a); };
+  fs.readFileSync = function (p, ...a) { if (String(p) === fp) n++; return realRead.call(this, p, ...a); };
   try { const v = await fn(); return { n, v }; } finally { fs.openSync = realOpen; fs.readFileSync = realRead; }
 };
 const session = () => ({ backend: 'claude', claudeSessionId: ID, backendSessionId: ID, cwd: CWD, buffer: '' });
@@ -143,4 +150,27 @@ const planted = { ...files,
 const p = census(planted);
 ok(p.doorless.some((d) => d.includes('sm → sm.chatStatus(')) && p.unnamedSync.some((d) => d.includes('plantedParse')),
   `RED CONTROLS (a planted read with no door, a planted caller of the synchronous parse): each named — ${[...p.doorless, ...p.unnamedSync].join(' · ')}`, p);
+console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail the cache does not admit is handed to its reader\'s parse');
+{
+  const small = (n) => { const id = `7d7d7d7d-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`, fp = path.join(PROJ, `${id}.jsonl`); fs.writeFileSync(fp, lines.map((l) => l.replaceAll(ID, id)).join('\n') + '\n'); return { id, fp }; };
+  const handoff = async (M) => {
+    M._warmHandoffTestSeam({ liveMaxBytes: 1 });   // the cache's live set: one entry — the second warm's tail is not admitted
+    try {
+      M.jsonlCacheClear();
+      const A = small(10), B = small(11), h0 = M.warmHandoffStats();
+      const wa = await M.warmSessionJsonlAsync(A.id, CWD), wb = await M.warmSessionJsonlAsync(B.id, CWD);
+      const rd = await opensDuring(async () => new M.SessionMessages({ backend: 'claude', claudeSessionId: B.id, backendSessionId: B.id, cwd: CWD, buffer: '' }, 'w-handoff', {}).raw().length, B.fp);
+      const h1 = M.warmHandoffStats();
+      return { warmed: [wa, wb], rows: rd.v, opens: rd.n, held: h1.held - h0.held, taken: h1.taken - h0.taken };
+    } finally { M._warmHandoffTestSeam({ liveMaxBytes: null }); M.jsonlCacheClear(); }
+  };
+  const SS = require(path.join(REPO, SS_REL));
+  const ho = await handoff(SS);
+  ok(ho.warmed[0] === true && ho.warmed[1] === true && ho.rows > 0 && ho.opens === 0 && ho.held === 1 && ho.taken === 1,
+    `a warmed tail the cache did not admit: held for its reader (${ho.held}), taken by its parse (${ho.taken}) — ${ho.rows} records, ${ho.opens} open(s) of the transcript on this thread`, ho);
+  let SSh = null, whyh = null;
+  try { SSh = mutantCopies('transcript-door-no-handoff', REPO).load(SS_REL, anchored(SS_SRC, '  if (_jsonlCache.get(id) === entry) { _warmHandoff.delete(id); return; }\n', '  return;\n', 'the warm drops what the cache did not admit'), 'nohandoff'); } catch (e) { whyh = e.message; }
+  const hox = SSh ? await handoff(SSh) : null;
+  ok(!!hox && hox.rows > 0 && hox.opens >= 1 && hox.held === 0, `RED CONTROL (the warm drops what the cache did not admit): its reader opened the transcript ${hox ? hox.opens : '?'} time(s) on this thread — the parse on the loop`, hox || whyh);
+}
 report();

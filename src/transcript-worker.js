@@ -34,10 +34,12 @@ function _codex() { return require('./adapters/codex'); }
 // 35 MB with the string, the records 71 MB — their strings keep slices of it; one worker after four tails: heap 82 MB, not 155).
 // B-299b (主开发 r604): ONE snapshot per SLOT — '' (the history reads, as before) and 'helper' (the artifact door's helper transcripts,
 // read one at a time by the registry): a helper's first page never replaces the snapshot a person's paged read is reading
-// B-cd4b unit 2: 'warm' — the claude transcript warm's ENTRY in pages (`entry`, below), one warm at a time (src/session-store.js)
+// B-cd4b unit 2: 'warm' — the claude transcript warm's ENTRY in pages (`entry`, below), one warm at a time (src/session-store.js);
+// B-80cb cure: 'warm2' — the second warm at once (src/session-store.js pumpWarm: each warm's lane has its own slot, so the two never
+// share a snapshot even where the ops run in place, on a paired machine's agent)
 // lane lg-recovery (主开发 r2374): 'subagent' — a finished agent's transcript for the sub-agent viewer (src/server/subagent-transcript.js,
 // one read at a time), read WHOLE (`whole`: the viewer shows every line; the head + tail bound is the histories')
-const PAGE_SLOTS = new Set(['', 'helper', 'warm', 'subagent']);
+const PAGE_SLOTS = new Set(['', 'helper', 'warm', 'warm2', 'subagent']);
 const _pageSnaps = new Map();   // slot → snapshot
 const slotOf = (payload) => (payload && PAGE_SLOTS.has(payload.slot) ? payload.slot : '');
 // B-f3f9: the merged history of ONE conversation, kept for its pages (codexHistoryMergedPage) — its own snapshot beside the lines'
