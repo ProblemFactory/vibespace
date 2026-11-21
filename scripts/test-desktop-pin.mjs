@@ -30,7 +30,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -643,6 +643,40 @@ console.log('CONTROLS (patched copies)');
     const tRed1 = R1.cells.filter((c) => !c.pass && c.cell.endsWith('·screenshot')), tRed2 = R2.cells.filter((c) => !c.pass && c.cell.startsWith('desktop·') && c.cell.endsWith('·screenshot'));
     ok(tRed1.length > 0, `RED CONTROL: screenshot without the door — its cells go red by name (${tRed1.map((c) => c.cell).slice(0, 4).join(', ')})`, tRed1.slice(0, 4));
     ok(tRed2.length > 0, `RED CONTROL: the desktop record's early return before the door — the person's own desktop's screenshot cells go red (${tRed2.map((c) => c.cell).slice(0, 4).join(', ')})`, tRed2.slice(0, 4));
+    // r1472/r1486 (the box's test-window-targets red at 5b4176f46, «a revoke AFTER the act was issued: that act stands»): THE LEASE
+    // IS READ AT THE CALL — synchronously, before the verb's promise is handed back — for the app's own handle too, and the verbs use
+    // the door's read (never a second read after its wait): a revoke issued right after a call cannot refuse it. Each of the door's
+    // three verbs is CALLED with a facts spy; the read is counted at the moment the call returns. RED CONTROL: 5b4176f46's code (the door
+    // returns nothing for the app's own handle, each verb reads the lease after the wait) — no read at the call
+    {
+      const leaseAtCall = async (Emod, tag) => {
+        const E4 = Emod.create({ keeper: keeperT, dataDir: path.join(dir, 'dbb4-call-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
+        E4.grantReach('da-pop', { kind: 'session', id: 's1' }); E4.setShareMode('da-pop', 'pixels'); try { E4.attach('da-pop', fP); } catch { /* the record's own rule */ }
+        const out = {};
+        for (const [verb, call] of [['screenshot', (f) => E4.screenshot('da-pop', f)], ['act', (f) => E4.act('da-pop', f, { verb: 'click', at: { x: 5, y: 5 } })], ['snapshot', (f) => E4.snapshot('da-pop', f)]]) {
+          let reads = 0;
+          const spy = new Proxy(fP, { get(t, k) { if (k === 'sessionId') reads++; return t[k]; } });
+          const p = call(spy); const atCall = reads;
+          await p.catch(() => { /* the verb's own answer — only WHEN the lease was read is judged here */ });
+          out[verb] = atCall;
+        }
+        return out;
+      };
+      const SRC = read(ENGINE_REL);
+      const PLAIN = "    if (sub == null) { const { rec, lease } = requireLease(handle, facts, verb); return { handle, sub: null, rec, lease }; }";
+      const SNAP = "    const { rec, lease } = await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused; r1486: its lease read at the call, never again after the wait";
+      const ACTS = "    const { handle, sub, rec, lease } = door; // r1486: the door's lease read (at the call), never a second read after its wait";
+      const n = (x) => SRC.split(x).length - 1;
+      ok(n(PLAIN) === 1 && n(SNAP) === 1 && n(ACTS) === 2 && !/await subjectDoor\([^\n]*\n[^\n]*requireLease\(/.test(SRC), 'r1486 PIN: the door reads the lease for the app\'s own handle too, and snapshot / act / screenshot take the door\'s read — no requireLease after its wait', { PLAIN: n(PLAIN), SNAP: n(SNAP), ACTS: n(ACTS) });
+      let rel = anchored(SRC, PLAIN, '    if (sub == null) return { handle, sub: null };', 'r1486: the door\'s plain-handle read taken away'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
+      rel = anchored(rel, SNAP, "    await subjectDoor(handle, facts, 'snapshot', { subjectVerb: true, tree: true }); // B-dbb4 (r946): the one door — a tree verb on a window's handle is refused\n    const { rec, lease } = requireLease(handle, facts, 'snapshot');", 'r1486: snapshot reads after the wait'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
+      const DESKBACK = "\n    if (rec.origin === 'desktop') return desktopScreenshot(rec, facts);";
+      rel = anchored(rel, ACTS + DESKBACK, "    const { handle, sub } = door;\n    const { rec, lease } = requireLease(handle, facts, 'screenshot');" + DESKBACK, 'r1486: screenshot reads after the wait'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
+      rel = anchored(rel, ACTS, "    const { handle, sub } = door;\n    const { rec, lease } = requireLease(handle, facts, verb || 'act');", 'r1486: act reads after the wait'); // stale-pins: kept (r1486's RED CONTROL rebuilds 5b4176f46's lines on purpose)
+      const [nowC, relC] = [await leaseAtCall(ENGINE, 'now'), await leaseAtCall(MUT.load(ENGINE_REL, rel, 'r1486-read-after-wait'), 'release')];
+      ok(Object.values(nowC).every((x) => x >= 1), `r1486: snapshot / act / screenshot read the lease AT THE CALL — an act issued before a revoke stands, as in the release (reads at the call: ${JSON.stringify(nowC)})`, nowC);
+      ok(Object.values(relC).every((x) => x === 0), `r1486 RED CONTROL: 5b4176f46's code reads it only after the door's wait — a revoke issued right after the call lands first (reads at the call: ${JSON.stringify(relC)})`, relC);
+    }
     // THROUGH THE REAL ROUTE AND THE SHIPPED CLI: the header carries a title outside latin-1 (escaped), the CLI prints the words
     const appP = express(); appP.use(express.json()); ROUTES.setup({ engine: EP }); appP.use(ROUTES.router);
     const srvP = await new Promise((res) => { const s0 = appP.listen(0, '127.0.0.1', () => res(s0)); });
