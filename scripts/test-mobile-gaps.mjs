@@ -56,6 +56,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, readRunRecord, runOwnerState, RUN_RECORD, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -267,6 +268,11 @@ for (let i = 0; i < 120 && !target; i++) {
 if (!target) { console.error('✗ chrome never exposed a CDP page target'); process.exit(1); }
 // ONE page client per CDP target (r2: the battery drives TWO pages — the phone
 // and a desktop — on the same server, so the helpers are a factory)
+// A PICTURE IS OF THE PAGE IN FRONT (主开发 r1125; test-ci-gate §2o): ONE front state for the phone and desktop pages — the page
+// connected last is in front, front() (and every input helper, through it) moves it; the phone's pictures go through frontShot
+// (brought to the front only when it is not there, bounded, one retry said, the front handed back): «settings-nav-phone.png» came
+// right after the desktop's own input had brought the desktop page to the front
+const FS = frontState();
 const connectPage = async (wsUrl) => {
   const sock = new WebSocket(wsUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => sock.on('open', r));
@@ -307,12 +313,14 @@ const connectPage = async (wsUrl) => {
   // (Chrome never acks a touch/key dispatched to a hidden renderer — the
   // Puppeteer bringToFront class; measured: the first tap after the desktop
   // tab was created hung the battery). Every input helper fronts its page.
-  const front = () => cdp('Page.bringToFront');
-  return { cdp, evalJs, waitFor, userInput: async () => { await front(); await userInput(); }, front, waitApp, pageErrors, sock };
+  const bring = () => cdp('Page.bringToFront');
+  const front = async () => { await bring(); becameFront(FS, wsUrl, bring); };
+  becameFront(FS, wsUrl, bring);
+  return { cdp, evalJs, waitFor, userInput: async () => { await front(); await userInput(); }, front, bring, key: wsUrl, waitApp, pageErrors, sock };
 };
 const phone = await connectPage(target.webSocketDebuggerUrl);
 const { cdp, evalJs, waitFor, pageErrors } = phone;
-const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch {} };
+const shot = async (name) => { try { const r = await frontShot(FS, phone.key, phone.bring, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${name}` }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch {} };
 // Let a RECEIVER settle before it acts as a sender: _applyRemoteState holds
 // `_restoring` for 1 s and _doAutoSave inside that window returns WITHOUT
 // rescheduling (the anti-ping-pong cooldown) — measured: a user-dirty desktop
@@ -809,7 +817,7 @@ try {
     const openDesks = async () => { const onBar = await evalJs(`(() => { const r = document.getElementById('mobile-nav-desktops')?.getBoundingClientRect(); return !!(r && r.width > 0 && r.height > 0); })()`);
       if (onBar) return tap('#mobile-nav-desktops');
       await tap('#mobile-nav-overflow'); await sleep(300); return tap('.mnav-more-menu .context-menu-item[data-key="desktops"]'); };
-    const snap = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNG, `${TAG}-${name}.png`), Buffer.from(r.data, 'base64')); console.log('    (PNG ' + path.join(PNG, `${TAG}-${name}.png`) + ')'); } catch { } };
+    const snap = async (name) => { try { const r = await frontShot(FS, phone.key, phone.bring, () => cdp('Page.captureScreenshot', { format: 'png' }), { name: `the picture ${name}` }); fs.writeFileSync(path.join(PNG, `${TAG}-${name}.png`), Buffer.from(r.data, 'base64')); console.log('    (PNG ' + path.join(PNG, `${TAG}-${name}.png`) + ')'); } catch { } };
     const errs0 = pageErrors.length;
     const WAITW = /\b2 waiting for input\b|2 个等待输入|2 件が入力待ち/, WAIT1 = /\b1 waiting for input\b|1 个等待输入|1 件が入力待ち/;
     await evalJs(`document.querySelectorAll('.mobile-win-switcher, .mdesk-menu, .context-menu').forEach((m) => m.remove()); true`);
