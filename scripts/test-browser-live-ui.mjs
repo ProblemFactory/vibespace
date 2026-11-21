@@ -335,10 +335,14 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   /** One state: measure, shoot, judge. `fold()` = the page's published verdict (null = no fold judgement). */
   async function record(section, name, barExpr, clipExpr, { moreSel, fold = null, moreAlways = false, extraBad = [] } = {}) {
     await frames();
-    const m = await evaluate(`(${MEASURE.toString()})(${barExpr}, ${JSON.stringify({ moreSel, keepMore: moreAlways })})`);
+    // ONE SCRIPT (r1394's class): the bar measured AS THE PRODUCT'S OWN PASS LEFT IT, then the fold's verdict asked (layoutBar
+    // applies one), in one page script — no fold pass lands between the two facts judged against each other (they were two
+    // scripts with a picture between); a missed or late trigger still shows: a bar the product left wrong disagrees with `v`
+    const mv = await evaluate(`(() => { const m = (${MEASURE.toString()})(${barExpr}, ${JSON.stringify({ moreSel, keepMore: moreAlways })}); const v = ${fold || 'null'}; return { m, v }; })()`);
+    const m = mv ? mv.m : undefined;
     const clip = await evaluate(`(() => { const el = ${clipExpr}; if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`);
     if (clip) await shot(path.join(SHOTS, name + '.png'), clip);
-    const v = fold ? await evaluate(fold) : null;
+    const v = fold && mv ? mv.v : null;
     fs.writeFileSync(path.join(SHOTS, name + '.json'), JSON.stringify({ name, measure: m, fold: v }, null, 1));
     const probs = [...problemsOf(m), ...extraBad];
     tally[section].n++;
@@ -439,11 +443,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
                   // viewers, a fit chip that cannot act, the agent's browser's name — is a CAPTION with its words; an act is an item.
                   // The menu is read AS DRAWN, captions and items in their order, and compared with the product's own folded rows by
                   // caption-or-label in the same order (a caption's words read from the very element the product reads them from)
-                  const drawn = await evaluate(`[...document.querySelector('.browser-live-more-menu').children].filter((e) => e.matches('.context-menu-caption, .context-menu-item')).map((e) => (e.classList.contains('context-menu-caption') ? 'caption: ' : 'item: ') + e.textContent)`);
-                  const want = await evaluate(`(() => { const L = (${LIVE})._browserLive, s = L.state(), root = L.el();
+                  // the menu as drawn and the product's own rows read in ONE script (r1394's class: two facts judged against each other)
+                  const dw = await evaluate(`({ drawn: [...document.querySelector('.browser-live-more-menu').children].filter((e) => e.matches('.context-menu-caption, .context-menu-item')).map((e) => (e.classList.contains('context-menu-caption') ? 'caption: ' : 'item: ') + e.textContent), want: (() => { const L = (${LIVE})._browserLive, s = L.state(), root = L.el();
                     const sel = { badge: '.browser-live-mode', kbd: '.browser-live-kbd-chip', viewers: '.browser-live-viewers', fit: '.browser-live-fit' };
                     const keys = s.folded.filter((k) => !(k === 'open' && s.folded.includes('url')));   // the product's own skip: Open rides the URL row
-                    return s.foldedRows.map((r, i) => { if (r.label != null) return 'item: ' + r.label; const k = keys[i], e = sel[k] && root.querySelector(sel[k]); return 'caption: ' + (e ? (k === 'badge' ? (e.title || e.textContent) : e.textContent) : '<no element for ' + k + '>'); }); })()`);
+                    return s.foldedRows.map((r, i) => { if (r.label != null) return 'item: ' + r.label; const k = keys[i], e = sel[k] && root.querySelector(sel[k]); return 'caption: ' + (e ? (k === 'badge' ? (e.title || e.textContent) : e.textContent) : '<no element for ' + k + '>'); }); })() })`);
+                  const drawn = dw ? dw.drawn : undefined, want = dw ? dw.want : undefined;
                   await evaluate(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
                   const rows = drawn.filter((x) => x.startsWith('item: ')).map((x) => x.slice(6));
                   const tabsRow = r.v.overflow.includes('tabs') ? rows.find((x) => x.includes(`(${mode === 'takeover' ? 3 : 1})`)) : true;
@@ -675,17 +680,38 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         await evaluate(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(S1)} })`);
         await liveUp(); await setMode(mode); for (const up of [upW, upP]) up.setTabs(mode === 'takeover' ? 3 : 1); await setTabs(upE, mode === 'takeover' ? 3 : 1); await placeFree(W);
       };
-      const census = async (name) => { await frames(); const m = await evaluate(`(${MEASURE.toString()})(${liveBar}, { moreSel: '.browser-live-more' })`); const clip = await evaluate(`(() => { const el = ${liveClip}; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`); await shot(path.join(SHOTS, name + '.png'), clip); fs.writeFileSync(path.join(SHOTS, name + '.json'), JSON.stringify(m, null, 1)); return { m, probs: problemsOf(m), wraps: m.items.filter((i) => i.flags.wraps).map((i) => i.el + ':' + i.text) }; };
+      // THE HAND UNFOLD AND ITS READ ARE ONE PAGE SCRIPT (主开发 r1394 — the hotfix cut's first test machine, run 069d049ee…-box:
+      // (c') read the bar FOLDED AGAIN, «0 outside/overlap problem(s)»). The bar's fold (src/lib/bar-fold.js) runs ONE layout an
+      // animation frame, scheduled by its ResizeObserver on the bar, its MutationObserver on the bar's subtree (a label's text,
+      // an item's style / class — never the fold's own class, so the unfold itself is not news) and the fonts' ready. stage()
+      // reloads, opens, sets the mode and the tabs and resizes, and the live view keeps rendering its labels: a pass can be owed,
+      // or newly scheduled, after the unfold, and census() waited two frames + 60 ms before it read — the pass folded again in
+      // that wait. A page script runs to completion (no frame and no observer callback lands inside it), so the unfold and the
+      // measure run in ONE script: the product's pass is held for the read by construction, never by a clock. The picture comes
+      // after, a later frame: a pass that lands first shows in the picture, never in the judgement (its JSON counts the refold).
+      const UNFOLD = `for (const el of bar.children) if (!el.classList.contains('browser-live-more')) el.classList.remove('bar-folded');`;
+      // (a) and (b) the same way (the fresh read's nit): the fold asked NOW (layoutBar applies its verdict) and the bar measured in
+      // its script — a label the live view writes in the last frame before a later read left a pass owed (a false red on (a))
+      const LAYOUT = `(${LIVE})._browserLive.layoutBar();`;
+      const readHeld = async (name, prep) => {
+        await frames();   // what stage() left in flight settles first (the read itself does not depend on it)
+        const m = await evaluate(`(() => { const bar = ${liveBar}; ${prep} return (${MEASURE.toString()})(bar, { moreSel: '.browser-live-more' }); })()`);
+        const clip = await evaluate(`(() => { const el = ${liveClip}; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`);
+        await shot(path.join(SHOTS, name + '.png'), clip);
+        const refolded = await evaluate(`[...(${liveBar}).children].filter((e) => e.classList.contains('bar-folded')).length`);
+        fs.writeFileSync(path.join(SHOTS, name + '.json'), JSON.stringify({ readInOneScript: true, foldedByThePicture: refolded, ...(m || {}) }, null, 1));
+        return { m, probs: problemsOf(m), wraps: ((m && m.items) || []).filter((it) => it.flags.wraps).map((it) => it.el + ':' + it.text) };
+      };
+      const unfoldRead = (name) => readHeld(name, UNFOLD), foldRead = (name) => readHeld(name, LAYOUT);
       // (a) the neutral swap
       await stage('takeover', 600);
       const swapped = await swap(fNeutral);
-      await evaluate(`(${LIVE})._browserLive.layoutBar()`);
-      const a = await census('control-a-neutral-zh-takeover-w600');
+      const a = await foldRead('control-a-neutral-zh-takeover-w600');
       ok(swapped && a.probs.length === 0, 'CONTROL (a): the stylesheet swapped for an IDENTICAL copy — the census stays green (the swap itself is neutral)', a.probs.join('; '));
       // (b) the pre-fix bar rules: the owner's picture
       for (const [mode, W] of [['watch', 1400], ['takeover', 600]]) {
-        await stage(mode, W); await swap(fPre); await evaluate(`(${LIVE})._browserLive.layoutBar()`);
-        const b = await census(`control-b-prefix-zh-${mode}-w${W}`);
+        await stage(mode, W); await swap(fPre);
+        const b = await foldRead(`control-b-prefix-zh-${mode}-w${W}`);
         // 2.369.180 (lanes I + J on one tree): in Take over lane J's "Typing goes to the browser" chip is present (nowrap by
         // its OWN rule) and the fold hides the labels it displaces (Not recording, the backend chip), so the one label left
         // to wrap is the toggle that never folds — the census must still go red, on the Hand back toggle by name
@@ -693,18 +719,20 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         ok(red, `CONTROL (b): a patched copy WITHOUT the bar rules (nowrap / no-shrink / the (0,2,0) width) — zh ${mode} at ${W} — the census goes RED: vertical wrapping (${b.wraps.slice(0, 4).join(', ')}), ${b.probs.length} problem(s)`, b.probs.slice(0, 5).join('; '));
       }
       // (c) the nowrap rule alone removed, the fold's verdict undone (every item unfolded) ⇒ labels wrap; (c') the same under the real sheet ⇒ none
-      const unfold = () => evaluate(`(() => { const bar = ${liveBar}; for (const el of bar.children) if (!el.classList.contains('browser-live-more')) el.classList.remove('bar-folded'); return [...bar.children].filter((e) => getComputedStyle(e).display !== 'none').length; })()`);
-      await stage('takeover', 600); await swap(fNo); await unfold();
-      const c = await census('control-c-nowrap-removed-unfolded-zh-takeover-w600');
+      await stage('takeover', 600); await swap(fNo);
+      const c = await unfoldRead('control-c-nowrap-removed-unfolded-zh-takeover-w600');
       ok(c.wraps.length >= 1, `CONTROL (c): only the nowrap rule removed and the fold undone — zh Take over at 600 — labels wrap vertically (${c.wraps.slice(0, 4).join(', ')})`, c.probs.slice(0, 5).join('; '));
-      await stage('takeover', 600); await unfold();
+      await stage('takeover', 600); await frames();
       // lane engine-spi-egress L3: with no switch target shipped the bar names the browser with a plain LABEL (narrower than the
-      // button it was), and the unfolded zh Take over bar now FITS at 600 — so (c') stages the window where it does not: 600 minus
-      // the unfolded bar's own slack minus 60 px (measured, never a literal that the next label change outgrows)
-      const slack = await evaluate(`(() => { const bar = ${liveBar}; const kids = [...bar.children].filter((e) => getComputedStyle(e).display !== 'none'); const gap = parseFloat(getComputedStyle(bar).columnGap) || 0; const need = kids.reduce((s, e) => s + e.getBoundingClientRect().width, 0) + gap * Math.max(0, kids.length - 1); return Math.round(bar.clientWidth - need); })()`);
+      // button it was), so the unfolded zh Take over bar MAY fit at 600 — (c') stages the window where it does not: 600 minus the
+      // unfolded bar's ROOM (its content width minus its natural width, the flexible URL at its minimum: MEASURE's own numbers, read
+      // in the unfold's own script — r1394's fresh read: the old sum counted the URL at its GROWN width, so the room read as the
+      // padding at most) minus 60 px — measured, never a literal that the next label change outgrows
+      const sm = await evaluate(`(() => { const bar = ${liveBar}; ${UNFOLD} return (${MEASURE.toString()})(bar, { moreSel: '.browser-live-more' }); })()`);
+      const slack = sm && !sm.missing ? Math.round(sm.contentW - sm.natural) : 0;
       const Wc = 600 - Math.max(0, Number(slack) || 0) - 60;
-      await stage('takeover', Wc); await unfold();
-      const cr = await census(`control-c-real-unfolded-zh-takeover-w${Wc}`);
+      await stage('takeover', Wc);
+      const cr = await unfoldRead(`control-c-real-unfolded-zh-takeover-w${Wc}`);
       ok(cr.wraps.length === 0 && cr.probs.some((p) => /^outside/.test(p) || /^overlap/.test(p) || /^cut/.test(p)), `CONTROL (c'): the SAME unfolded bar under the real stylesheet wraps nothing (the nowrap rule holds every label on one line) — the overflow is what the fold exists for (at ${Wc} px: ${cr.probs.length} outside/overlap problem(s))`, cr.probs.slice(0, 4).join('; '));
       if (!deskDone) skip('CONTROL (b) on the strip — no desktop app ran here (④ skipped)');
     }
