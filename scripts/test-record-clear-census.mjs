@@ -1001,6 +1001,7 @@ const SERVER_STORES = {
   'sync:uploads': ['ids', 'data/uploads-sync.json — the upload history: file names, paths, sizes'],
   'sync:stage': ['ids', 'data/stage-sync.json — the stage\'s hero / slot / grid / per-session workspace: openSpecs (H2: ids), bounds, scroll offsets (stage-manager _captureExtras) — no title'],
   'file:layouts.json': ['guarded', 'H2 + H2b: WORDLESS_TITLES at the write choke point, the first read and the client\'s capture; test-record-clear-client reads data/layouts.json after a save'],
+  'file:layouts.owed.json': ['ids', 'B-225b\'s remainder: the desktops\' owed MARK {run, seq, since} — a run id, a write number and a time; no client state reaches it (the hub writes it when a layouts write could not land)'],
   'file:layout-history': ['guarded', 'the rollback points: wordlessTitles on every snapshot (test-record-clear-stores §5b); the Restore list shows desktop names and counts'],
   'file:bookmarks.json': ['owner', 'the folders the owner bookmarked (paths)'],
   'file:custom-themes.json': ['pref', 'the owner\'s custom themes (color variables)'],

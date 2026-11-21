@@ -61,7 +61,7 @@ function unreadError(file, held, what) {
  *   onLift    (value, was) — the hold lifted: the caller's lift is a CHANGE (its hooks run, its pages are told «read again»)
  *   onSaid    (held) — the hold outlasted the silent rungs: the caller says it (the banner, an episode's notice)
  */
-function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, onUnsaved = null, onSaved = null, onOwedRefused = null, schedule = null, writer = null, onLanded = null, liftWaits = null } = {}) {
+function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, onUnsaved = null, onSaved = null, onOwedRefused = null, onOwedBegin = null, onOwedOver = null, schedule = null, writer = null, onLanded = null, liftWaits = null } = {}) {
   if (!file) throw new Error('store-hold: file is required');
   /** the store writer (B-0248 (c)) — a function (the process's writer, made at the first use) or the writer itself; null: at the call */
   const W = () => (typeof writer === 'function' ? writer() : writer);
@@ -235,7 +235,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function failedAtWriter(err) {
     if (!onUnsaved) return;
     const code = (err && err.code) || null, why = String((err && err.message) || err || 'write failed').slice(0, 200);
-    if (!owed) { owed = { produce: null, code, why, since: now(), rung: 'silent', tries: 0 }; log.warn?.(`[store-hold] ${path.basename(file)} could not be written (${code || why}) — the change is kept in memory and the store writer writes it again`); }
+    if (!owed) { owed = { produce: null, code, why, since: now(), rung: 'silent', tries: 0 }; log.warn?.(`[store-hold] ${path.basename(file)} could not be written (${code || why}) — the change is kept in memory and the store writer writes it again`); begun(); }
     owed.tries++; owed.code = code || owed.code; owed.why = why;
     if (owed.rung === 'silent' && owed.tries >= silentMs.length) say();
   }
@@ -243,7 +243,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
    *  `nd`: the caller's own verdict (a door's bound passed while its write still waits to be handed: queued) */
   function notOnDiskOwed(press, nd0 = null) {
     if (!onUnsaved) return;
-    if (!owed) { const nd = nd0 || notDurable() || {}, queued = nd.why === 'queued'; owed = { produce: null, code: nd.code || (queued ? 'queued' : null), why: queued ? 'its write is still queued behind the storage' : (nd.why || 'not on disk'), since: now(), rung: 'silent', tries: 0 }; }   // (a write still QUEUED keeps the code «queued» — the page-facing fact — and is said as queued, never «could not be written»)
+    if (!owed) { const nd = nd0 || notDurable() || {}, queued = nd.why === 'queued'; owed = { produce: null, code: nd.code || (queued ? 'queued' : null), why: queued ? 'its write is still queued behind the storage' : (nd.why || 'not on disk'), since: now(), rung: 'silent', tries: 0 }; begun(); }   // (a write still QUEUED keeps the code «queued» — the page-facing fact — and is said as queued, never «could not be written»)
     if (press && owed.rung !== 'said') say();
   }
   /** why the store's last act is not on disk yet ({ why, code, ahead, lastMs }) — the door's 503 words — or null */
@@ -280,9 +280,13 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   }
   /** the owed chain ENDS without a landing (nothing to write any more, or a refusal by name): no «written again», no onSaved — its
    *  timer goes with it (round wg2vawd0o: one clearing on every road) */
+  /** B-225b's remainder (login-request-card, 主开发 r1353 (6)): an owed episode BEGINS (its first failure on any road — the hold's own
+   *  ladder, the writer's refusal, an answer not on disk past the writer's bound) — the caller's mark that a change may not reach the disk */
+  function begun() { try { onOwedBegin?.(owedFacts()); } catch { /* the caller's */ } }
   function endOwed(why) {
     if (!owed) return null;
     const was = owedFacts(); owed = null;
+    try { onOwedOver?.({ landed: false, said: was.rung === 'said', since: was.since }); } catch { /* the caller's */ }
     if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; }
     log.warn?.(`[store-hold] ${path.basename(file)}: the owed write ends — ${why}`);
     return was;
@@ -296,6 +300,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; }
     log.warn?.(`[store-hold] ${path.basename(file)} is written again — the change kept since ${new Date(was.since).toISOString()} landed`);
     if (was.rung === 'said') { try { onSaved?.({ file: path.basename(file), since: was.since }); } catch { /* said by the caller */ } }
+    try { onOwedOver?.({ landed: true, said: was.rung === 'said', since: was.since }); } catch { /* the caller's */ }
   }
   function say() { owed.rung = 'said'; try { onUnsaved?.(owedFacts()); } catch { /* said by the caller */ } }
   function armOwed() {
@@ -330,7 +335,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     if (r.nothing) { endOwed('nothing to write any more'); return true; }   // nothing owed: no landing said, nothing kept
     if (named(r.error)) { endOwed((r.error && r.error.message) || String(r.error)); throw r.error; }   // the same clearing as the ladder's road
     const code = (r.error && r.error.code) || null, why = String((r.error && r.error.message) || r.error).slice(0, 200);
-    if (!owed) { owed = { produce, code, why, since: now(), rung: 'silent', tries: 0 }; log.warn?.(`[store-hold] ${path.basename(file)} could not be written (${code || why}) — the change is kept in memory and written again`); }
+    if (!owed) { owed = { produce, code, why, since: now(), rung: 'silent', tries: 0 }; log.warn?.(`[store-hold] ${path.basename(file)} could not be written (${code || why}) — the change is kept in memory and written again`); begun(); }
     else { owed.produce = produce; owed.code = code || owed.code; owed.why = why; }
     if (press && owed.rung !== 'said') say();
     armOwed();

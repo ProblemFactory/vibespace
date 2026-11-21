@@ -2658,6 +2658,21 @@ export default {
   "Start empty": "从空开始",
   "Start empty…": "从空开始…",
   "Changes to {what} are not being saved: the storage refused the write. They are kept here and written again by themselves.": "对{what}的更改没有保存下来：存储拒绝了写入。更改保留在这里，会自动再次写入。",
+  "the rollback points of your desktops": "你桌面的回滚点", // B-225b's remainder (login-request-card)
+  "The rollback points of your desktops are not saved yet: the storage has not taken the write in time.": "你桌面的回滚点还没有保存：存储没有及时接受写入。", // B-225b's remainder (login-request-card)
+  "The rollback points of your desktops are not being saved: the storage refused the write; the points made meanwhile are lost.": "你桌面的回滚点没有保存下来：存储拒绝了写入；这期间的回滚点丢失了。", // B-225b's remainder (login-request-card)
+  "When VibeSpace last stopped, your latest desktop changes (made after {time}) had not reached the disk in time. The desktops shown are the last ones saved.": "VibeSpace 上次停止时，你最近的桌面更改（{time} 之后做的）没有及时写入磁盘。现在显示的是最后一次保存的桌面。", // B-225b's remainder (login-request-card)
+  "When VibeSpace last stopped, your latest desktop changes had not reached the disk in time. The desktops shown are the last ones saved.": "VibeSpace 上次停止时，你最近的桌面更改没有及时写入磁盘。现在显示的是最后一次保存的桌面。", // B-225b's remainder (login-request-card)
+  "Earlier layouts are kept as rollback points: {path}.": "之前的布局保存在回滚点中：{path}。", // B-225b's remainder (login-request-card)
+  "{n} rollback points were lost.": "丢失了 {n} 个回滚点。", // B-225b's remainder (login-request-card)
+  "When VibeSpace last stopped, your latest desktop changes (made after {time}) had not been saved: the storage refused the write. The desktops shown are the last ones saved.": "VibeSpace 上次停止时，你最近的桌面更改（{time} 之后做的）没有保存下来：存储拒绝了写入。现在显示的是最后一次保存的桌面。", // B-225b's remainder (login-request-card)
+  "When VibeSpace last stopped, your latest desktop changes had not been saved: the storage refused the write. The desktops shown are the last ones saved.": "VibeSpace 上次停止时，你最近的桌面更改没有保存下来：存储拒绝了写入。现在显示的是最后一次保存的桌面。", // B-225b's remainder (login-request-card)
+  "VibeSpace stopped without a clean stop: desktop changes from its last moments (after {time}) may not have been saved.": "VibeSpace 上次没有正常停止：它最后时刻（{time} 之后）的桌面更改可能没有保存。", // B-225b's remainder (login-request-card)
+  "VibeSpace stopped without a clean stop: desktop changes from its last moments may not have been saved.": "VibeSpace 上次没有正常停止：它最后时刻的桌面更改可能没有保存。", // B-225b's remainder (login-request-card)
+  "Understood": "知道了", // B-225b's remainder (login-request-card)
+  "It could not be noted — try again.": "没能记下 — 请再试一次。", // B-225b's remainder (login-request-card)
+  "This rollback point cannot be read ({code}) — it is not offered.": "这个回滚点无法读取（{code}）— 不提供恢复。", // B-225b's remainder (login-request-card)
+  "This rollback point could not be read — nothing was restored. Pick another.": "这个回滚点无法读取 — 没有恢复任何内容。请换一个。", // B-225b's remainder (login-request-card)
   "Changes to {n} of VibeSpace’s saved files are not being saved: the storage refused the writes. They are kept here and written again by themselves (Details names them).": "VibeSpace 有 {n} 个保存的文件，改动没有保存下来：存储拒绝了写入。更改保留在这里，会自动再次写入（「详情」里列出）。",
   "not being saved — the storage refused the write": "没有保存下来——存储拒绝了写入",
   "Changes to {what} are not saved yet: the storage has not taken the write in time. They are kept here and written by themselves.": "对{what}的更改还没有保存：存储没有及时接下这次写入。更改保留在这里，会自动写入。",

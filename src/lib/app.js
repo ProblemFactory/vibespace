@@ -79,7 +79,7 @@ import { openDesign as openDesignFn, openDesignPublishDialog, installDesignWindo
 import { openArtifacts as openArtifactsFn } from './artifacts-window.js'; // lane artifacts-list-scale: the Artifacts window (window type `artifacts`) — the chip's list at full size behind its ⤢
 import { openDoc as openDocFn } from './doc-window.js'; // lane doc-window: the Doc window (window type `doc`) — a markdown file read, edited and annotated in one rendered view; the editor itself is the lazy public/doc-editor.js
 import { DesktopManager } from './desktop-manager.js';
-import { noteStoreHeld, noteStoreLifted, noteStoreUnsaved, noteStoreSaved, onStoreLift, refreshStoreHolds, setStoreDoors } from './store-held.js'; // B-225b R7: the page's ONE strip for a held store
+import { noteStoreHeld, noteStoreLifted, noteStoreUnsaved, noteStoreSaved, noteStoreStop, noteStoreStopOver, onStoreLift, refreshStoreHolds, setStoreDoors } from './store-held.js'; // B-225b R7: the page's ONE strip for a held store
 import { StageManager, STAGE_ID } from './stage-manager.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
@@ -384,6 +384,8 @@ class App {
       else if (msg.type === 'store-lifted') noteStoreLifted(msg.file);
       else if (msg.type === 'store-unsaved') noteStoreUnsaved(msg);   // B-225b's second half: a write the storage refused — kept, written again
       else if (msg.type === 'store-saved') noteStoreSaved(msg.file);
+      else if (msg.type === 'store-stop-unsaved') noteStoreStop(msg);   // B-225b's remainder: what the last stop lost (or may have)
+      else if (msg.type === 'store-stop-over') noteStoreStopOver();
     });
     // B-360d unit 3 (rank 9): THE HELD DIGEST, KEPT ONCE A PAGE — every jobs-updated carries it; each chat view seeds its chip
     // from here (one GET /api/jobs/held a page while none is kept), never from the whole jobs list

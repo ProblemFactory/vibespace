@@ -2715,14 +2715,15 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
     // conversation list: its write and its flush) — the exit flush and the read path's own rewrites go through them; a store's bytes
     // move only by the damaged door's ONE setAside. Every direct fs write names what it writes, and none is a store's file: the data
     // folder (ensureDir), the rollback points (writeJsonAtomic under HISTORY_DIR — its pid temp then the rename — their folder, their
-    // prune's unlinks), the agent CLIs' credentials of a config import. CONTROLS (planted, the census over a copy's text): a direct
+    // prune's unlinks), the agent CLIs' credentials of a config import; + B-225b's remainder (lane login-request-card): THE OWED MARK
+    // (layouts.owed.json — no store: its pid temp `markTmp`, then the rename, OFF the loop; its removals). CONTROLS (planted, the census over a copy's text): a direct
     // write of a store's file, a second write door of a store, the atomic writer aimed at a store's file — each red by name.
     {
       const ACH = require(path.join(REPO, 'node_modules/acorn'));
       const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
       const HOLD_WRITES = { layoutsHold: 1, bookmarksHold: 1, themesHold: 1, userStateHold: 2, settingsHold: 1 };
       const FS_WRITE = /^(write|append|rename|unlink|rm|copy|cp|truncate|symlink|link|mkdir|chmod|chown|utimes|open|createWriteStream)/;
-      const DIRECT_OK = { mkdirSync: [/^dir$/, /^HISTORY_DIR$/], writeFileSync: [/^tmp$/, /^CLAUDE_CREDS$/, /^CODEX_CREDS$/], renameSync: [/^tmp$/], 'promises.unlink': [/^path\.join\(HISTORY_DIR, /] };
+      const DIRECT_OK = { mkdirSync: [/^dir$/, /^HISTORY_DIR$/], writeFileSync: [/^tmp$/, /^CLAUDE_CREDS$/, /^CODEX_CREDS$/], renameSync: [/^tmp$/], 'promises.unlink': [/^path\.join\(HISTORY_DIR, /, /^OWED_MARK$/, /^markTmp$/], 'promises.writeFile': [/^markTmp$/], 'promises.rename': [/^markTmp$/] };
       const chokeCensus = (src) => {
         const ast = ACH.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true });
         const text = (n) => src.slice(n.start, n.end);
@@ -2754,8 +2755,8 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         return out;
       };
       const real = chokeCensus(PSRC);
-      ok(real.bad.length === 0 && real.direct.length === 5 && real.atomic.length === 0,
-        `⑪ (h) THE ONE CHOKE: every write of a held store's file is its hold's ONE write (${Object.entries(real.holdWrites).map(([h, n]) => `${h} ${n}`).join(', ')}) or the damaged door's setAside; the ${real.direct.length} direct fs writes are the data folder, the rollback points' prune (its two unlinks) and the agent CLIs' credentials — none a store's file (B-0248 (b): the points themselves are the store writer's)`, real);
+      ok(real.bad.length === 0 && real.direct.length === 12 && real.atomic.length === 0,
+        `⑪ (h) THE ONE CHOKE: every write of a held store's file is its hold's ONE write (${Object.entries(real.holdWrites).map(([h, n]) => `${h} ${n}`).join(', ')}) or the damaged door's setAside; the ${real.direct.length} direct fs writes are the data folder, the rollback points' prune (its two unlinks), the owed mark of the desktops (its pid temp + rename, its removals — B-225b's remainder) and the agent CLIs' credentials — none a store's file (B-0248 (b): the points themselves are the store writer's)`, real);
       const plant = (add, name) => chokeCensus(anchored(PSRC, '  function flushLayouts({ press = false, stop = false } = {}, answer = null) {\n', '  function flushLayouts({ press = false, stop = false } = {}, answer = null) {\n' + add, name)).bad;
       const p1 = plant('    fs.writeFileSync(LAYOUTS_FILE, JSON.stringify(_layoutsCache));\n', 'swc-h-direct');
       const p2 = plant('    layoutsHold.write(_layoutsCache);\n', 'swc-h-second');
@@ -3568,7 +3569,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     const oReadFile = (f) => fs.readFileSync(f, 'utf8');
     const LL = await layLoop(() => require(path.join(REPO, PREL)), 'real');
     console.log(`  ⊙ ⑭j the loop's longest turn with ${STALL} ms placed in each main-thread rename / fsync, a window closed (its point and the desktops): ${LL.gap} ms`);
-    const OWE_A = "    try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: () => f.text }); }\n";
+    const OWE_A = "    try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: () => { _producedSeq = f.seq; return f.text; } }); }\n";   // (B-225b's remainder: the producer records which bytes the writer took)
     ok(PSRC.split(OWE_A).length === 2, 'control setup: the desktops\' hand-off to the writer is found once');
     const LLX = await layLoop(() => mutantCopies('swc-pl-layatcall', REPO).load(PREL, anchored(PSRC, OWE_A, "    try { layoutsHold.write(f.doc, f.text); }   // MUTANT: the release's write at the call\n", 'pl-layouts-at-call')), 'atcall');
     const HP_A = "  function handPoint(p, done, late) {\n    const w = storeW();\n";
@@ -3945,7 +3946,7 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
     };
     const MK = await markScene(() => require(path.join(REPO, PREL)), 'real');
     ok(MK.handedWhileWaiting === 0 && MK.handed === 1 && J(MK.answers) === J([true, true, true]) && MK.x === 13, '⑭ad three flushes behind the same point share ONE waiting copy of the desktops: one write handed at its landing (the newest desktops), every answer told «landed»', MK);
-    const MERGE_A = "    if (q && q.upTo === upTo && q.gen === gen) { q.doc = doc; q.text = text; q.press = q.press || press; q.stop = q.stop || stop; if (answer) q.answers.push(answer); return; }\n";
+    const MERGE_A = "    if (q && q.upTo === upTo && q.gen === gen) { q.doc = doc; q.text = text; q.seq = seq; q.press = q.press || press; q.stop = q.stop || stop; if (answer) q.answers.push(answer); return; }\n";   // (B-225b's remainder: the merged flush keeps its bytes' seq)
     ok(PSRC.split(MERGE_A).length === 2, 'control setup: the shared waiting flush is found once');
     const MKX = await markScene(() => mutantCopies('swc-pl-nomerge', REPO).load(PREL, anchored(PSRC, MERGE_A, "    /* MUTANT: each flush waits with its own copy */\n", 'pl-no-merge')), 'nomerge');
     ok(MKX.handed === 3, 'CONTROL (each flush waiting with its own copy, in a copy): three whole copies of the desktops wait and are handed — one for each flush (red)', MKX);
@@ -3977,18 +3978,18 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       g.fireBounds((w) => w === 'point');                         // the point's own bound: late — the desktops handed
       const handedAtPointBound = g.W.pending(LF);
       for (let i = 0; i < 8 && g.flying().length; i++) g.land();   // the storage comes back
-      return { pointOut, atBound, restoredUnsaved: restored && restored.unsaved, words, savedAtOlder, handedAtPointBound, saved: told.filter((x) => x.type === 'store-saved').length, onDisk: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d0.autoSave.windows.map((w) => w.winId) };
+      return { pointOut, atBound, restoredUnsaved: restored && restored.unsaved, words, savedAtOlder, handedAtPointBound, saved: told.filter((x) => x.type === 'store-saved' && x.file === 'layouts.json').length, pointsSaved: told.filter((x) => x.type === 'store-saved' && x.file === 'layout-history').length, onDisk: JSON.parse(fs.readFileSync(LF, 'utf8')).desktops.d0.autoSave.windows.map((w) => w.winId) };
     };
     const DR = await doorScene(() => require(path.join(REPO, PREL)), 'real');
     ok(DR.pointOut >= 1 && DR.atBound.answered === true && DR.atBound.status === 503 && DR.atBound.code === 'store_unsaved' && DR.atBound.unsaved && DR.atBound.unsaved.code === 'queued' && DR.atBound.handed === false
-      && DR.restoredUnsaved && DR.restoredUnsaved.code === 'queued' && J(DR.words) === J(['queued']) && DR.handedAtPointBound === true && DR.saved === 1 && J(DR.onDisk) === J(['w0', 'w1', 'w2']),
-      '⑭ae a restore whose own point stalls is answered at the door\'s bound — 503 «not taken in time» (owed and queued, said at once, its broadcast carries it) while the desktops still wait; at the point\'s bound they are handed, land, and «saved» is said', DR);
+      && DR.restoredUnsaved && DR.restoredUnsaved.code === 'queued' && J(DR.words) === J(['queued']) && DR.handedAtPointBound === true && DR.saved === 1 && DR.pointsSaved === 1 && J(DR.onDisk) === J(['w0', 'w1', 'w2']),
+      '⑭ae a restore whose own point stalls is answered at the door\'s bound — 503 «not taken in time» (owed and queued, said at once, its broadcast carries it) while the desktops still wait; at the point\'s bound they are handed, land, and «saved» is said (once for the desktops; the late point\'s own landing clears the rollback points\' episode once — B-225b\'s remainder)', DR);
     const BOUND_A = "    if (answer) answer = boundedAnswer(answer, press, _layoutsGen);\n";
     ok(PSRC.split(BOUND_A).length === 2, 'control setup: the door\'s bound is found once');
     const DRX = await doorScene(() => mutantCopies('swc-pl-nobound', REPO).load(PREL, anchored(PSRC, BOUND_A, "    /* MUTANT: the door's bound cut */\n", 'pl-no-bound')), 'nobound');
     ok(DRX.atBound.answered === false, 'CONTROL (the door\'s bound cut, in a copy): the restore gets NO answer while its point stalls — «Restoring…» for as long as the storage does (red)', DRX.atBound);
     const DO = await doorScene(() => require(path.join(REPO, PREL)), 'older', { older: true });
-    ok(DO.atBound.status === 503 && DO.savedAtOlder === 0 && DO.saved === 1 && J(DO.onDisk) === J(['w0', 'w1', 'w2']), '⑭ai an OLDER write landing between a door\'s bound and its own hand-off lifts nothing: no «saved» until the door\'s change itself lands (a kill between would lose the restore)', DO);
+    ok(DO.atBound.status === 503 && DO.savedAtOlder === 0 && DO.saved === 1 && DO.pointsSaved === 1 && J(DO.onDisk) === J(['w0', 'w1', 'w2']), '⑭ai an OLDER write landing between a door\'s bound and its own hand-off lifts nothing: no «saved» until the door\'s change itself lands (a kill between would lose the restore)', DO);
     const LIFTW_A = "    if (liftWaits && liftWaits()) {";
     ok(SHSRC_X.split(LIFTW_A).length === 2, 'control setup: the lift\'s wait for a door\'s change is found once');
     const DOX = await holdIn(mutantCopies('swc-pl-liftolder', REPO).load(SHREL_X, anchored(SHSRC_X, LIFTW_A, "    if (false) {   /* MUTANT: an older landing lifts the door's mark */", 'pl-lift-older')), () => doorScene(() => require(path.join(REPO, PREL)), 'olderx', { older: true }));

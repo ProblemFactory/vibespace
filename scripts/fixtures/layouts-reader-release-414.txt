@@ -1,0 +1,36 @@
+// FROZEN: the release 2.369.414 (a117cebb8) — its READER of data/layouts.json, verbatim, for B-225b's remainder (lane
+// login-request-card, 主开发 r1318 note 1): a rollback to the release reads a file that carries this unit's stamp (`_vs`, the last
+// top-level name). scripts/test-store-held-page §9d runs these lines over a stamped file and says what the release does with the name.
+// Never edited: a new release's reader is a new file.
+// ── SERVER readLayouts (src/routes/persistence.js) ──
+  function readLayouts(preread) {
+    if (_layoutsCache) return _layoutsCache;
+    // (B-225b: ONE start read, through the hold — the flag only AFTER it returned: a folder check that throws (a stale or dead data
+    // mount) IS that read's failure, a hold on the ladder, never «read and empty» — round wyzvr7567's MUST 1)
+    if (!_layoutsRead) { let pre = preread; if (pre === undefined) { try { ensureDir(dataDir); } catch (e) { pre = { error: e }; } } layoutsHold.readAtStart(pre); _layoutsRead = true; }
+    const doc = layoutsHold.answer();   // R2: HELD ⇒ store_unread by name — never the empty layout under its name
+    layoutsHold.takeText();
+    _layoutsCache = doc === undefined ? LAYOUTS_EMPTY() : doc;   // NOT THERE (R6): the empty layout in memory, nothing written
+    // what an older build wrote: a Job input window's title naming its job (the next flush writes the generic title)
+    if (wordlessTitles(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
+    // …and a dedup trace naming a window its desktop's record lists (r4 K — tracesTrue below)
+    if (tracesTrue(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
+    return _layoutsCache;
+  }
+// ── SERVER the flush (src/routes/persistence.js flushLayouts) and the bytes the hold writes for it (src/store-hold.js write) ──
+    try { landed = layoutsHold.flush(() => { if (!_layoutsCache) return null; ensureDir(dataDir); return [_layoutsCache]; }, { press }); }
+    const parts = Array.isArray(bytes) ? bytes : [typeof bytes === 'string' ? bytes : JSON.stringify(next, null, 2)];
+// ── PAGE the boot read of GET /api/layouts (src/lib/layout.js) ──
+      const data = await this._bootJson('/api/layouts');
+      this._savedPresets = data.saved || {};
+      this._currentName = data.current || null;
+
+      // Bar-scale boot heal BEFORE the delegate: restoreState only runs when
+      // the active desktop has windows, so an explicit-null reset in the
+      // persisted state must be honored HERE too — else a stale localStorage
+      // (applied by _setupToolbarResize moments ago) resurrects an erased
+      // scale and the first autosave re-broadcasts it fleet-wide.
+      const bootState = data.desktopMeta?.length ? data.desktops?.[data.desktopMeta[0].id]?.autoSave : data.autoSave;
+      const bootBars = applyForViewport(this._viewport(), bootState || data.autoSave, { source: 'boot' }).chrome; // the bars are chrome: a phone keeps its own
+      if (bootBars) this._applyToolbarState(bootBars);
+      // Desktop-aware restore: delegate to DesktopManager

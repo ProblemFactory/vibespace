@@ -932,6 +932,9 @@ html, body {
 #store-held-strip .shs-row { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
 #store-held-strip .shs-what { font-weight: 600; }
 #store-held-strip .shs-file { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+/* B-225b's remainder (r1318 (b)): the last stop's «may not» ALONE is said quietly — no alert colour, no press owed */
+#store-held-strip.is-quiet { background: var(--bg-secondary, transparent); border-bottom-color: var(--border, transparent); color: var(--text-secondary); }
+#store-held-strip.is-quiet .shs-ic { color: var(--text-secondary); }
 .settings-content .settings-held { margin: 24px 4px; color: var(--text-secondary); line-height: 1.5; }
 #main-wrapper.sidebar-resizing { transition: none; }
 .sidebar-resize-preview {

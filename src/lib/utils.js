@@ -1970,7 +1970,8 @@ export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHe
 export function storeWhatOf(file) {
   const f = String(file || '');
   return f === 'layouts.json' ? t('your desktops') : f === 'user-state.json' ? t('your conversation list') : f === 'bookmarks.json' ? t('your bookmarks')
-    : f === 'custom-themes.json' ? t('your custom themes') : f === 'settings.json' ? t('your settings') : t('a saved list');
+    : f === 'custom-themes.json' ? t('your custom themes') : f === 'settings.json' ? t('your settings')
+    : f === 'layout-history' ? t('the rollback points of your desktops') : t('a saved list');   // B-225b's remainder: the points' own name
 }
 export function storeHeldWords(held) {
   if (Array.isArray(held)) return held.length === 1 ? storeHeldWords(held[0]) : t('VibeSpace cannot read {n} of its saved files right now — nothing is written over them (Details names them).', { n: held.length });   // a refusal naming several holds (the export, the import)
@@ -1983,15 +1984,40 @@ export function storeHeldWords(held) {
  *  sentence by its file, in the page's words; several → the count. Said on the strip; a press's own refusal says `storeRestoreUnsavedWords` */
 export function storeUnsavedWords(u) {
   if (Array.isArray(u)) return u.length === 1 ? storeUnsavedWords(u[0]) : t("Changes to {n} of VibeSpace’s saved files are not being saved: the storage refused the writes. They are kept here and written again by themselves (Details names them).", { n: u.length });
+  // B-225b's remainder (主开发 r1353 (2)(3)): the rollback points are no change of the person's — their own sentences: REFUSED (let go,
+  // counted) or only LATE (the desktops went on without waiting for them); the desktops themselves are written either way
+  // (主开发 r1387 (4): nothing here says the desktops themselves are saved — that is the desktops' own row's to say, checked)
+  if (u && u.file === 'layout-history') return u.code === 'queued'
+    ? t('The rollback points of your desktops are not saved yet: the storage has not taken the write in time.')
+    : t('The rollback points of your desktops are not being saved: the storage refused the write; the points made meanwhile are lost.') + (u.lost > 1 ? ' ' + t('{n} rollback points were lost.', { n: u.lost }) : '');
   // (B-0248 step 2: a write only QUEUED past the store writer's bound — code «queued» — is not refused: said as not taken in time)
   if (u && u.code === 'queued') return t("Changes to {what} are not saved yet: the storage has not taken the write in time. They are kept here and written by themselves.", { what: storeWhatOf(u.file) });
   return t("Changes to {what} are not being saved: the storage refused the write. They are kept here and written again by themselves.", { what: storeWhatOf(u && u.file) });
+}
+/** B-225b's remainder (主开发 r1318): what the hub's START knows of the LAST stop — `known` (a layouts write was owed and did not land:
+ *  said until a person notes it) or `maynot` (no clean stop, nothing more known: said once and quietly). `time` = the moment in the
+ *  page's words (page-time's stampAt), or '' when it is not known */
+export function storeStopWords(fact, time = '') {
+  // r1387 (6): the cause as it was (refused, or only not taken in time) — and WHERE the earlier layouts are, for a person to look
+  const where = ' ' + t('Earlier layouts are kept as rollback points: {path}.', { path: `⚙ → ${t('System')} → ${t('Restore a previous layout…')}` });
+  if (fact && fact.kind === 'known') {
+    const late = fact.cause === 'late';
+    return (late
+      ? (time ? t('When VibeSpace last stopped, your latest desktop changes (made after {time}) had not reached the disk in time. The desktops shown are the last ones saved.', { time })
+        : t('When VibeSpace last stopped, your latest desktop changes had not reached the disk in time. The desktops shown are the last ones saved.'))
+      : (time ? t('When VibeSpace last stopped, your latest desktop changes (made after {time}) had not been saved: the storage refused the write. The desktops shown are the last ones saved.', { time })
+        : t('When VibeSpace last stopped, your latest desktop changes had not been saved: the storage refused the write. The desktops shown are the last ones saved.'))) + where;
+  }
+  return (time
+    ? t('VibeSpace stopped without a clean stop: desktop changes from its last moments (after {time}) may not have been saved.', { time })
+    : t('VibeSpace stopped without a clean stop: desktop changes from its last moments may not have been saved.')) + where;
 }
 export function storeRestoreUnsavedWords(code = null) { if (code === 'queued') return t("Restored here, but not saved yet: the storage has not taken the write in time. The restore is kept and written by itself — a restart before then brings back the older desktops."); return t("Restored here, but not saved: the storage refused the write. The restore is kept and written again by itself — a restart before then brings back the older desktops."); }
 function refusalWords(body) {
   if (body && typeof body === 'object' && body.code === 'store_unread') return { ...body, said: body.error, error: storeHeldWords(body.held) };   // B-225b: a held store, in the page's words
   if (body && typeof body === 'object' && body.code === 'store_unsaved') return { ...body, said: body.error, error: storeRestoreUnsavedWords(body.unsaved && body.unsaved.code) };   // B-225b's second half: a restore whose write the storage refused
   if (body && typeof body === 'object' && body.code === 'store_appeared') return { ...body, said: body.error, error: t('A saved file appeared since VibeSpace started — it was read and kept; this change was not made. Make it again.') };
+  if (body && typeof body === 'object' && body.code === 'point_unread') return { ...body, said: body.error, error: t('This rollback point could not be read — nothing was restored. Pick another.') };   // B-225b's remainder P5
   if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };   // the server's words kept as `said`
   if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };
   return body && typeof body === 'object' && body.error === 'cross-site' ? { ...body, code: 'cross-site', error: t('This action came from another site and was refused') } : body;

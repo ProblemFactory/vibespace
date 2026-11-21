@@ -1,4 +1,5 @@
-import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell, storeRestoreUnsavedWords } from './utils.js';
+import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell, storeRestoreUnsavedWords, storeUnsavedWords } from './utils.js';
+import { storesUnsaved } from './store-held.js'; // B-225b's remainder: the rollback points' failed save, named at the dialog's head
 import { maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: the tour ends ⇒ the second password (while not set up)
 import { TerminalSession } from './terminal.js';
 import { t, tc } from './i18n.js';
@@ -530,13 +531,20 @@ export function installSetupFlows(App) {
       return;
     }
     const slotName = String((slot && slot.name) || '');
+    // B-225b's remainder: while the rollback points' save is refused, the dialog says so at its head (the newest point is older than it seems)
+    const unsavedNow = storesUnsaved();
+    const pointsUnsaved = Array.isArray(unsavedNow) ? unsavedNow.find((u) => u && u.file === 'layout-history') : null;
+    const pointsNote = pointsUnsaved ? `<div class="usage-note lh-unsaved" role="status">${escHtml(storeUnsavedWords(pointsUnsaved))}</div>` : '';
     const slotNote = e0 ? `<div class="usage-note lh-slot">${escHtml(pick ? t('Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.', { name: slotName }) : t('No rollback point names the conversation of “{name}”.', { name: slotName }))}</div>` : '';
-    body.innerHTML = `${slotNote}
+    body.innerHTML = `${pointsNote}${slotNote}
       <div class="usage-note">${escHtml(t('Each entry is the layout as it was BEFORE a change. Restoring reloads the page; your sessions are not touched.'))} ${escHtml(t('Press a desktop to restore it alone — your other desktops stay as they are now.'))}</div>
       <div class="lh-list">${entries.map((e) => {
         const per = Object.entries(e.summary || {}).map(([n, c]) => `${escHtml(n)} ${c}`).join(' · ');
         // ONE PRESS RESTORES ONE DESKTOP (lane layout-stopped-window — the owner's 个人 lost seven windows while 工作 / 研究 had
         // moved on): each desktop of the point is its own door (its summary key; the legacy top-level record has none)
+        // B-225b's remainder P5: a point that cannot be read is LISTED with its reason and NEVER offered (no door to restore it)
+        if (e.unread) return `<div class="lh-row lh-unread"><div class="lh-main"><b>${escHtml(when(e.at))}</b>
+            <div class="lh-sub lh-unread-why">${escHtml(t('This rollback point cannot be read ({code}) — it is not offered.', { code: String(e.unread) }))}</div></div></div>`;
         const desks = Object.entries(e.summary || {}).filter(([n]) => n).map(([n, c]) => `<button class="lh-desk" data-id="${escHtml(e.id)}" data-desk="${escHtml(n)}" title="${escHtml(t('Restore only “{desktop}”', { desktop: n }))}">${escHtml(n)} ${escHtml(t('{n} windows', { n: c }))}</button>`).join('');
         // what changed right after this point ("HR 3 → 1") — the row a loss FOLLOWS is the one to restore (userW
         // inc-mun7qjmw-iksh); a point from before the field existed has none

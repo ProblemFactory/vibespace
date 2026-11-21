@@ -90,6 +90,63 @@ function ringKeep(names, { pinned = null, last = RING_KEEP.last, hours = RING_KE
   return keep;
 }
 
+// ── B-225b's REMAINDER (lane login-request-card, 主开发 r1310 / r1318): WHAT THE NEXT START KNOWS OF THE LAST STOP ──
+// Every layouts.json write carries a server-owned STAMP inside its own bytes — the LAST top-level name, `_vs` {run, seq, at, stop,
+// sum, unnoted?} — so the stop's own flush (already there) says «stopped, all landed» (stop:true) with NO write added to the stop
+// (law 3). The store's value in memory never holds it: readLayouts strips it, so no answer, export, broadcast or rollback point
+// carries it (scripts/test-store-held-page §8's census of the roads). `sum` is the checksum of the bytes BEFORE the stamp: a file
+// another reader rewrote and kept the name in (the release 2.369.414 keeps an unknown top-level name and writes it back verbatim)
+// no longer matches it — such a stamp says NOTHING (silence), never a stale «not saved».
+const STAMP = '_vs';
+const STAMP_AT = ',\n  "' + STAMP + '": ';
+const sumOf = (text) => require('crypto').createHash('sha1').update(text).digest('hex').slice(0, 16);
+/** the bytes of `doc` with the stamp as their last name (PURE) */
+function stampedBytes(doc, stamp) {
+  const body = JSON.stringify(doc, null, 2);
+  const tag = JSON.stringify({ ...stamp, sum: sumOf(body) });
+  return body === '{}' ? `{\n  "${STAMP}": ${tag}\n}` : body.slice(0, -2) + STAMP_AT + tag + '\n}';
+}
+/** a read's stamp (PURE): `doc` as parsed, `text` its bytes → { stamp, trusted } — stamp null: the file carries none */
+function stampOfRead(doc, text) {
+  const st = doc && typeof doc === 'object' && doc[STAMP] && typeof doc[STAMP] === 'object' && !Array.isArray(doc[STAMP]) ? doc[STAMP] : null;
+  if (!st) return { stamp: null, trusted: false };
+  const at = typeof text === 'string' ? text.lastIndexOf(STAMP_AT) : -1;
+  const body = at > 0 ? text.slice(0, at) + '\n}' : typeof text === 'string' && text.startsWith(`{\n  "${STAMP}": `) ? '{}' : null;   // (a doc whose only name is the stamp)
+  return { stamp: st, trusted: body !== null && typeof st.sum === 'string' && sumOf(body) === st.sum };
+}
+/** THE START'S VERDICT ON THE LAST STOP (PURE, 主开发 r1318 — two strengths, not one; r1387 (3) the mark's base) → null | { kind: 'known', since, savedAt, cause } |
+ *  { kind: 'maynot', savedAt }.
+ *   KNOWN: the last run's own owed mark (`mark` {run, seq, since}: written when a write could not land) is of the SAME run as the
+ *     file's stamp and NEWER than it — a write was owed and did not land. Said until a person notes it; carried in the next writes'
+ *     stamp (`unnoted`) across a later restart.
+ *   MAY NOT: the stamp says no clean stop (stop false) and no such mark — a kill, a power loss, or a disk that refused the mark too:
+ *     said once and quietly, gone at this run's first landed write, never carried.
+ *   Nothing: no stamp (a file this version never wrote), a stamp another reader kept (`trusted` false), a clean stop. */
+function stopVerdict({ stamp, trusted, mark }) {
+  if (stamp && !trusted) return null;   // another reader rewrote the bytes under the stamp: it says nothing
+  const st = stamp || null, m = mark && typeof mark === 'object' && 'base' in mark ? mark : null;
+  // KNOWN (主开发 r1387 (3)): the mark names the stamp its run STARTED FROM (the last landing it knew, the start's own stamp at first):
+  // when the file still carries exactly that stamp, nothing that run owed ever landed — whatever the stamp's `stop` says (a run whose
+  // every write was refused leaves the older run's clean stamp beside its mark); a base that no longer matches is a stale mark: silent
+  if (m && (m.base == null ? st == null : (!!st && m.base.run === st.run && Number(m.base.seq) === Number(st.seq)))) {
+    return { kind: 'known', since: Number(m.since) || null, savedAt: st ? Number(st.at) || null : null, cause: m.code === 'queued' ? 'late' : 'refused' };
+  }
+  if (!st) return null;
+  const savedAt = Number(st.at) || null;
+  const u = st.unnoted && typeof st.unnoted === 'object' ? st.unnoted : null;
+  if (u && u.kind === 'known') return { kind: 'known', since: Number(u.since) || null, savedAt: Number(u.savedAt) || null, cause: u.cause === 'late' ? 'late' : 'refused' };
+  if (st.stop !== true) return { kind: 'maynot', savedAt };
+  return null;
+}
+/** A ROLLBACK POINT IS OFFERED ONLY WHEN IT CAN BE READ (PURE, r1310 law 1): its sidecar's facts `meta` (null: none read), and a stat of
+ *  the point's own file (`size`, or `statCode` when the stat failed) → null (readable as far as is known) | the reason's code. A meta
+ *  that names the point's byte count (`bytes`, since this unit) must meet it exactly: a torn or shortened point is not offered. */
+function pointUnread(meta, { size = null, statCode = null } = {}) {
+  if (statCode) return statCode;
+  if (meta && Number.isFinite(meta.bytes) && size !== meta.bytes) return 'size';
+  return null;
+}
+
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
 function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {}, getExitProxy = () => null, userStateClock = () => Date.now(), userStateMono = () => performance.now(), writer = null }) {   // (lane sidebar-echo-order r7: the facts' clock — a test's virtual one)
   const broadcast = (msg) => {
@@ -151,6 +208,78 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // ── Layout/Preset Persistence (cached in memory) ──
   const LAYOUTS_FILE = path.join(dataDir, 'layouts.json');
   let _layoutsCache = null;
+  // B-225b's REMAINDER (login-request-card, 主开发 r1318) — THE LAST STOP, TOLD AT THE NEXT START. This run's stamp (stampedBytes above):
+  // its id, the writes' sequence; the OWED MARK (layouts.owed.json {run, seq, since}): written OFF the loop when a layouts write could
+  // not land (the hold's onOwedBegin), removed off the loop when the episode is over — never on the stop (law 3), and judged by its run
+  // and seq against the file's stamp, never by its presence alone. The mark of the LAST run is read once, off the loop, from here.
+  const RUN = `${Date.now().toString(36)}-${process.pid.toString(36)}-${require('crypto').randomBytes(3).toString('hex')}`;
+  const OWED_MARK = path.join(dataDir, 'layouts.owed.json');
+  let _vsSeq = 0;
+  let _stopFact = null;          // the start's verdict (stopVerdict): null | { kind: 'known' | 'maynot', since?, savedAt }
+  let _stopJudged = false;       // the verdict is made once — at the first read that HAS the file's bytes (a held start: at its lift)
+  let _landedThisRun = false;    // a layouts write of THIS run landed: a «may not» goes by itself (r1318 (b))
+  let _oldMarkGone = false;      // the last run's mark removed (off the loop) after this run's first landing
+  // the last run's mark, read ONCE off the loop: { state: 'absent' } | { state: 'read', mark } | { state: 'unknown', code } (r1387 (7): a
+  // mark that cannot be READ is «unknown», said in the journal — never taken as absent, never turned into «may not» by itself)
+  const _markAtStart = fs.promises.readFile(OWED_MARK, 'utf8').then((t) => { try { return { state: 'read', mark: JSON.parse(t) }; } catch { return { state: 'unknown', code: 'not JSON' }; } },
+    (e) => (e && e.code === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', code: (e && e.code) || 'unreadable' }));
+  let _mark = null;              // this run's mark: { run, seq, since, base, code, written, trying }
+  let _lastLanded = null;        // the stamp of the last desktops write that LANDED, as far as this run knows ({run, seq}; the start's own at first)
+  let _producedSeq = 0;          // the seq of the bytes the writer took last (its producer is called right before its write)
+  let _markJudged = false;       // the last run's mark has been JUDGED (read and weighed) — only then may this run remove it
+  let _judgedResolve = null;
+  const _stopJudgedP = new Promise((r) => { _judgedResolve = r; });
+  let _markChain = Promise.resolve();
+  const stopWord = () => (_stopFact ? { file: 'layouts.json', ..._stopFact } : null);
+  /** the episode's mark, written OFF the loop (a temp, then the rename); a failure is the journal's line and is tried again at the next
+   *  failed flush — a stop before it lands is told «may not» at the next start (r1318 (b)) */
+  function writeMark() {
+    const m = _mark;
+    if (!m || m.written || m.trying) return;
+    m.trying = true;
+    _markChain = _markChain.then(async () => {
+      if (_mark !== m) { m.trying = false; return; }   // the episode is over already
+      const markTmp = `${OWED_MARK}.${process.pid}.tmp`;
+      try {
+        await fs.promises.writeFile(markTmp, JSON.stringify({ run: m.run, seq: m.seq, since: m.since, base: m.base, code: m.code }));
+        await fs.promises.rename(markTmp, OWED_MARK);
+        m.written = true;
+        if (_mark !== m) await fs.promises.unlink(OWED_MARK).catch(() => {});   // over while it was written: the removal is the last word
+      } catch (e) {
+        await fs.promises.unlink(markTmp).catch(() => {});
+        console.warn(`[layouts] the owed mark could not be written (${(e && e.code) || (e && e.message) || e}) — a stop before the desktops are written is told «may not have been saved» at the next start`);
+      }
+      m.trying = false;
+    });
+  }
+  /** the owed episode is over (landed, or ended by name): its mark removed OFF the loop (a removal that fails is harmless — judged by run
+   *  and seq) */
+  function markOver() {
+    if (!_mark) return;
+    _mark = null;
+    _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {}));
+  }
+  /** THE VERDICT, once the file's stamp is known (the first read with bytes) and the last run's mark is read (off the loop): every page
+   *  told (a page that connects later asks GET /api/stores/held) */
+  function judgeStop(st) {
+    if (_stopJudged) return;
+    _stopJudged = true;
+    _markAtStart.then((r) => {
+      if (r.state === 'unknown') console.warn(`[layouts] the last run's owed mark could not be read (${r.code}) — whether its last desktop changes landed is UNKNOWN from the mark; the file's own stamp is judged alone`);
+      const v = stopVerdict({ ...st, mark: r.state === 'read' ? r.mark : null });
+      _markJudged = true;
+      if (_landedThisRun && !_oldMarkGone && !_mark) { _oldMarkGone = true; _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {})); }   // a landing came first: the mark goes only now it is judged
+      if (v && !(v.kind === 'maynot' && _landedThisRun)) {   // (b) goes by itself at this run's first landing — even one before the verdict
+        _stopFact = v;
+        const when = (ms) => (ms ? new Date(ms).toISOString() : 'an unknown time');
+        if (v.kind === 'known') console.warn(`[layouts] at the last stop, the desktop changes made since ${when(v.since)} had NOT reached the disk (${v.cause === 'late' ? 'not taken in time' : 'refused'}; the owed mark names the stamp the file still holds) — every page is told until a person notes it`);
+        else console.warn(`[layouts] the last stop was not a clean stop (the file's stamp says so, no owed mark): desktop changes made after ${when(v.savedAt)} may not have been saved — told once, quietly`);
+        storeWord('store-stop-unsaved', stopWord());
+      }
+      _judgedResolve?.(_stopFact);
+    });
+  }
+
   // B-225b (cut 3 — R1, R2, R6, R10, R12): THE DESKTOPS' HOLD. A layouts.json the START could not read (a read that failed, bytes that
   // are not a layout) is HELD and has NO VALUE: GET /api/layouts and every layout door answer 503 store_unread by name, the ws doors
   // answer `layout-held`, and nothing writes over it (writeLayouts and the flush refuse). The release read it as the EMPTY layout:
@@ -172,6 +301,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     onUnsaved: (u) => { console.warn(`[layouts] ${u.file} cannot be written (${unsavedHow(u)}) since ${new Date(u.since).toISOString()} — the desktops in memory are NOT on disk; written again by the ladder`); storeWord('store-unsaved', u); },
     onSaved: (u) => { console.log(`[layouts] ${u.file} is written again — the desktops kept since ${new Date(u.since).toISOString()} are on disk`); storeWord('store-saved', { file: u.file }); },
     onOwedRefused: (e) => { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); },
+    // B-225b's remainder: an owed episode's MARK (written off the loop at its first failure, removed when it is over)
+    onOwedBegin: (o) => { _mark = { run: RUN, seq: _vsSeq, since: (o && o.since) || Date.now(), base: _lastLanded ? { ..._lastLanded } : null, code: (o && o.code) || null, written: false, trying: false }; writeMark(); },
+    onOwedOver: (o) => { markOver(); if (o && o.landed) layoutsLanded(); },
+    // r1387 (1): EVERY landing of the desktops — an autosave nobody waits on too (landLayouts keeps no waiter for it) — is told here
+    onLanded: () => { _lastLanded = { run: RUN, seq: _producedSeq }; layoutsLanded(); },
     onSaid: (h) => { console.warn(`[layouts] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the desktops are HELD: nothing is written over them, their doors refuse by name until it reads`); storeWord('store-held', h); },
   });
   /** the desktops read again WHOLE (the hold lifted, or a file appeared where the start found none): every page told */
@@ -194,7 +328,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // mount) IS that read's failure, a hold on the ladder, never «read and empty» — round wyzvr7567's MUST 1)
     if (!_layoutsRead) { let pre = preread; if (pre === undefined) { try { ensureDir(dataDir); } catch (e) { pre = { error: e }; } } layoutsHold.readAtStart(pre); _layoutsRead = true; }
     const doc = layoutsHold.answer();   // R2: HELD ⇒ store_unread by name — never the empty layout under its name
-    layoutsHold.takeText();
+    const text = layoutsHold.takeText();
+    // B-225b's remainder: the stamp is read ONCE (the first read with the file's bytes) and STRIPPED — the value never holds it
+    if (doc && typeof doc === 'object' && Object.prototype.hasOwnProperty.call(doc, STAMP)) {
+      const st = stampOfRead(doc, text);
+      delete doc[STAMP];
+      if (!_stopJudged && text != null) { if (st.stamp && st.trusted) _lastLanded = { run: st.stamp.run, seq: st.stamp.seq }; judgeStop(st); }
+    } else if (!_stopJudged && (text != null || doc === undefined)) judgeStop({ stamp: null, trusted: false });   // no stamp (an older build's file) or no file: a mark may still name it
     _layoutsCache = doc === undefined ? LAYOUTS_EMPTY() : doc;   // NOT THERE (R6): the empty layout in memory, nothing written
     // what an older build wrote: a Job input window's title naming its job (the next flush writes the generic title)
     if (wordlessTitles(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
@@ -267,11 +407,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // THE BYTES ARE MADE NOW (the fresh read's MUST): the desktops as they stand at THIS flush — every rollback point handed so far
     // preserves an older state, and lands before them; a point made after this flush is a LATER change's, and the flush that writes
     // past it waits for it in its turn (the cache is edited IN PLACE by the socket's apply: bytes made late would hold that change)
-    const gen = _layoutsGen, doc = _layoutsCache, text = doc ? JSON.stringify(doc, null, 2) : null;
+    const gen = _layoutsGen, doc = _layoutsCache;
+    // B-225b's remainder: the bytes carry this run's STAMP (stampedBytes) — the stop's own flush says stop:true; a KNOWN loss not yet
+    // noted by a person rides it (`unnoted`) so a second restart still says it (r1318 (a)); a «may not» is never carried (r1318 (b))
+    const unnoted = _stopFact && _stopFact.kind === 'known' ? { kind: 'known', since: _stopFact.since, savedAt: _stopFact.savedAt } : null;
+    const seq = ++_vsSeq, text = doc ? stampedBytes(doc, { run: RUN, seq, at: Date.now(), stop: !!stop, ...(unnoted ? { unnoted } : {}) }) : null;
     const upTo = handPointsOwed();   // (the points' callbacks are the writer's answer road: at the hub's stop they run inside its exit flush)
     const q = _layoutsWaiting;
-    if (q && q.upTo === upTo && q.gen === gen) { q.doc = doc; q.text = text; q.press = q.press || press; q.stop = q.stop || stop; if (answer) q.answers.push(answer); return; }
-    const f = { upTo, gen, doc, text, press, stop, answers: answer ? [answer] : [] };
+    if (q && q.upTo === upTo && q.gen === gen) { q.doc = doc; q.text = text; q.seq = seq; q.press = q.press || press; q.stop = q.stop || stop; if (answer) q.answers.push(answer); return; }
+    const f = { upTo, gen, doc, text, seq, press, stop, answers: answer ? [answer] : [] };
     if (!pointsLeftUpTo(upTo)) { landLayouts(f); return; }
     _layoutsWaiting = f;
     _pointsWaiters.push({ upTo, cb: () => { if (_layoutsWaiting === f) _layoutsWaiting = null; landLayouts(f); }, ok: true });
@@ -282,7 +426,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     for (const a of f.answers) if (a && typeof a.handed === 'function') a.handed();   // a door past its bound: its change is handed now (or ended)
     if (f.gen !== _layoutsGen) return done(false);   // read again WHOLE meanwhile (a file appeared, a hold lifted): this change was not made
     if (!f.doc) return done(true);
-    try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: () => f.text }); }
+    try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: () => { _producedSeq = f.seq; return f.text; } }); }
     catch (e) { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); return done(false); }   // a refusal BY NAME (held, not read, appeared): nothing written
     // (a write the STORAGE refuses is never thrown here: a store NOT THERE whose exclusive create is refused is KEPT on the hold's own
     // ladder by its owe — B-225b's second half — and the answer below reads it as owed: not on disk, said at once for a press)
@@ -295,8 +439,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     }
     layoutsHold.after((landed) => {
       if (!landed && f.stop) { const o = layoutsHold.owed(); console.error(`[layouts] layouts.json could NOT be written at the stop (${unsavedHow(o)}) — the desktops changed since ${o ? new Date(o.since).toISOString() : 'this flush'} are not on disk: the next start reads the older file`); }
+      if (landed) layoutsLanded();
+      else if (_mark && !_mark.written) writeMark();   // the mark that could not be written is tried again at each flush not on disk (off the loop)
       done(landed);
     }, { press: f.press });
+  }
+  /** a layouts write of THIS run landed (the flush's, or the hold's ladder — onOwedOver): a «may not» goes by itself (r1318 (b): every
+   *  page told), the last run's mark is removed off the loop (its verdict is made; a KNOWN loss rides this run's stamp from here) */
+  function layoutsLanded() {
+    _landedThisRun = true;
+    if (_stopFact && _stopFact.kind === 'maynot') { _stopFact = null; storeWord('store-stop-over', { file: 'layouts.json', why: 'written' }); }
+    if (!_oldMarkGone && _markJudged && !_mark) { _oldMarkGone = true; _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {})); }   // (r1387 (7): never a mark not yet judged)
   }
   // ── LAYOUT HISTORY (2.296.0, after a bug flattened a user's whole desktop
   // layout and the only good copy was gone). Layouts are the one piece of
@@ -364,7 +517,6 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     else _ringNotes.writer = e;
   }
   let _histSeq = 0;
-  let _histWarned = false;
   // «BEFORE THIS RESTART» (B-b05e): the first point this process writes holds the layout as the restart found it (the first
   // write's previous state is what is ON DISK); its FILE NAME says so (`layout-<stamp>-<seq>.restart.json`, its meta too). The
   // newest RING_KEEP.boots such points are PINNED — read off the names the prune lists anyway (the cure of the batch-4 verdict: a
@@ -394,6 +546,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       // to strike (a restart is the usual remedy someone tries first).
       if (!prev) {
         try { prev = JSON.parse(fs.readFileSync(LAYOUTS_FILE, 'utf-8')); } catch { return; }
+        if (prev && typeof prev === 'object') delete prev[STAMP];   // B-225b's remainder: the stamp is no part of a layout (nor of a point)
       }
       const prevShape = layoutShape(prev);
       if (prevShape === nextShape) return;         // shape unchanged — nothing to preserve
@@ -430,7 +583,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         const head = { at, summary: before, totalWindows: total, change, ...seen };
         // whole bytes through the writer's pid temp + rename — a torn rollback point fails exactly when it is finally needed; the
         // tiny sidecar header (the panic-button path lists without parsing 40 whole layouts) lands AFTER its point
-        return { pointFile: path.join(HISTORY_DIR, file), pointText: JSON.stringify({ ...head, layouts: snap }, null, 2), metaFile: path.join(HISTORY_DIR, file.replace(/\.json$/, '.meta.json')), metaText: JSON.stringify(head, null, 2) };
+        const pointText = JSON.stringify({ ...head, layouts: snap }, null, 2);
+        // + the point's own byte count in its header (B-225b's remainder P5: a point that does not read whole is never offered)
+        return { pointFile: path.join(HISTORY_DIR, file), pointText, metaFile: path.join(HISTORY_DIR, file.replace(/\.json$/, '.meta.json')), metaText: JSON.stringify({ ...head, bytes: Buffer.byteLength(pointText) }, null, 2) };
       });
       setImmediate(handPointsOwed);   // (the round's small: the next turn's hand-off keeps no waiter of its own)
     } catch {}
@@ -455,7 +610,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function handPointsOwed() {
     for (const job of _pointsOwed.splice(0)) {
       let p = null;
-      try { p = job(); } catch (e) { pointFailed(e); }
+      try { p = job(); } catch (e) { pointFailed(e, _pointSeq); }   // (no id of its own: every point handed from here on has a higher one)
       if (p) { const id = ++_pointSeq; _pointsOutIds.add(id); handPoint(p, (ok) => pointDone(id, ok), () => pointLate(id)); }
     }
     return _pointSeq;
@@ -472,6 +627,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
   function pointDone(id, ok) {
     _pointsOutIds.delete(id); _pointsLate.delete(id);
+    if (!ok && _pointsEp) _pointsEp.lastRefused = Math.max(_pointsEp.lastRefused, id);   // r1387 (5): the REFUSED point's own id — a point handed after it clears the episode
+    if (ok) pointLanded(id);   // B-225b's remainder: a landing with nothing refused (and nothing still late) since ends the points' episode
     if (!_pointsOutIds.size) pruneHistory().catch(() => {});
     pointsRelease(ok ? null : id);
   }
@@ -479,6 +636,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function pointLate(id) {
     if (!_pointsOutIds.has(id) || _pointsLate.has(id)) return;
     _pointsLate.add(id);
+    if (!_layoutsStopping) pointsLateSaid();   // B-225b's remainder (r1353 (2)): the points' episode SAID, in the «queued» words
     pointsRelease();
   }
   /** ONE rollback point to the store writer (its folder made by the writer when missing): the point's whole bytes, then — at its
@@ -517,8 +675,50 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       w.durable(p.metaFile, { answer: (ok2) => settle(p.metaFile, ok2, () => end(true)) });
     }) });
   }
-  /** never silent: the UI asserts this protection exists (said once a process, as the release's job said it) */
-  function pointFailed(why) { if (!_histWarned) { _histWarned = true; console.warn('[layout-history] snapshot FAILED — rollback points are not being written:', (why && (why.code || why.message || why.why)) || why || 'not on disk'); } }
+  // B-225b's REMAINDER (login-request-card, 主开发 r1310 / r1353 (2)(3)) — THE ROLLBACK POINTS' EPISODE, SAID. The release (and B-0248's
+  // first form) said a failed point ONCE PER PROCESS in the journal and no page knew the protection had stopped. A point the storage
+  // REFUSES is let go (B-0248's way) and COUNTED (`lost`); a point only LATE past the writer's bound is not lost (the desktops go on
+  // without waiting for it — B-0248's cure — and it lands when it can): either way the EPISODE is said ONCE to every page in the store
+  // family's word (`store-unsaved` {file: 'layout-history', code ('queued' for a late one), lost}; GET /api/stores/held carries it for
+  // a page that connects later), and cleared by `store-saved` when a point lands with nothing refused or late since.
+  let _pointsEp = null;   // { code, since, lost, lastRefused }
+  const pointsWord = () => (_pointsEp ? { file: 'layout-history', code: _pointsEp.code, since: _pointsEp.since, rung: 'said', lost: _pointsEp.lost } : null);
+  // r1387 (2): once an episode means once a STATE — a change of its code (late → refused) or of its lost count is told when it changes,
+  // coalesced to one word a turn (never a storm)
+  let _pointsRetell = false;
+  function retellPoints() {
+    if (_pointsRetell) return;
+    _pointsRetell = true;
+    setImmediate(() => { _pointsRetell = false; if (_pointsEp) storeWord('store-unsaved', pointsWord()); });
+  }
+  function pointsEpisode(code, lost, refusedId = null) {
+    const refused = code !== 'queued';
+    // the journal: the release's own line at an episode's FIRST REFUSAL (once — a late point is not a failure), and a late start said as late
+    if (refused && (!_pointsEp || _pointsEp.code === 'queued')) console.warn(`[layout-history] snapshot FAILED — rollback points are not being written: ${code} (every page is told)`);
+    if (!_pointsEp) {
+      _pointsEp = { code, since: Date.now(), lost, lastRefused: refusedId || 0 };
+      if (!refused) console.warn('[layout-history] a rollback point was not taken by the storage in time — rollback points are not saved yet (every page is told)');
+      storeWord('store-unsaved', pointsWord());
+      return;
+    }
+    const was = `${_pointsEp.code}|${_pointsEp.lost}`;
+    _pointsEp.lost += lost;
+    if (refusedId) _pointsEp.lastRefused = Math.max(_pointsEp.lastRefused, refusedId);
+    if (refused) _pointsEp.code = code;   // a refusal outranks lateness in the words
+    if (`${_pointsEp.code}|${_pointsEp.lost}` !== was) retellPoints();
+  }
+  /** a point the storage REFUSED (or whose job threw): let go, counted, the episode said */
+  function pointFailed(why, refusedId = null) { pointsEpisode((why && (why.code || (why.why !== 'queued' && why.why))) || 'write failed', 1, refusedId); }
+  /** a point only LATE past the writer's bound (B-0248's cure: pointLate hands the desktops that waited for it): said, nothing lost */
+  function pointsLateSaid() { pointsEpisode('queued', 0); }
+  /** a point LANDED: the episode is over when nothing refused or late came after it */
+  function pointLanded(id) {
+    if (!_pointsEp || id <= _pointsEp.lastRefused || _pointsLate.size) return;   // nothing refused since, nothing still late
+    const was = _pointsEp; _pointsEp = null;
+    console.log(`[layout-history] rollback points are saved again (not since ${new Date(was.since).toISOString()}${was.lost ? `; ${was.lost} could not be saved and are lost` : ''})`);
+    storeWord('store-saved', { file: 'layout-history' });
+  }
+
   // TIERED retention (adversarial review): a flat newest-40 ring is exactly
   // wrong for this feature's motivating case — a mass-resume storm produces
   // dozens of shape changes in seconds and would evict every PRE-storm point,
@@ -562,6 +762,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function writeLayouts(data) {
     if (!_layoutsRead) readLayouts();   // the start read first (a store never read is no store — MUST 1): held ⇒ refused by name
     layoutsHold.refuseIfHeld('this layout change');   // B-225b R1: the desktops HELD — nothing replaces them (a preset, a restore, an import)
+    if (data && typeof data === 'object') delete data[STAMP];   // B-225b's remainder: a stamp is the hub's own, never a layout's (an import of a file that held one)
     // THE CHOKE POINT keeps no record's words in a window title (above) — IN PLACE: the ws layout-sync handler relays
     // the SAME window objects it hands here, so the frame other clients receive carries the generic title too
     tracesTrue(data);
@@ -588,27 +789,53 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     }
     return null;
   }
+  /** one list row (the sidecar's facts, or the point's own when the sidecar is gone) — B-225b's remainder P5: `unread` (a code) when the
+   *  point's own file does not read whole as far as its stat tells (pointUnread): listed, NEVER offered (no restore door on the page; the
+   *  restore door refuses it by name) */
+  const historyRowOf = (f, m, named, unread = null) => ({ id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}), ...(named.has(f) ? { restart: true } : {}), ...(unread ? { unread } : {}) });
+  const historyFilesOf = (names) => names.filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json'));
+  // the dialog says «before a restart» by the PIN's own rule (B-b05e cure 3): the newest RING_KEEP.boots `.restart.json`
+  // NAMES in ring order (stamp, then sequence) — the very points pruneHistory keeps; no meta speaks for it
+  const bootsNamed = (files) => new Set(ringSort(files.filter((f) => f.endsWith('.restart.json'))).slice(-RING_KEEP.boots));
+  /** the list, SYNC — for the hub's own readers (the incident bundle, the suites): the sidecars only (no stat — nothing sync is added to
+   *  the loop; the PAGE's list below reads OFF the loop and checks each point, and the restore door refuses an unread point by name) */
   function listLayoutHistory() {
     try {
-      const files = fs.readdirSync(HISTORY_DIR).filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json'));
-      // the dialog says «before a restart» by the PIN's own rule (B-b05e cure 3): the newest RING_KEEP.boots `.restart.json`
-      // NAMES in ring order (stamp, then sequence) — the very points pruneHistory keeps; no meta speaks for it
-      const boots = ringSort(files.filter((f) => f.endsWith('.restart.json')));
-      const named = new Set(boots.slice(-RING_KEEP.boots));
+      const files = historyFilesOf(fs.readdirSync(HISTORY_DIR));
+      const named = bootsNamed(files);
       return files.sort().reverse()
         .map((f) => {
           // header from the tiny sidecar; the full snapshot (a whole
           // layouts.json each) is read only when actually restoring
           try {
             const m = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
-            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}), ...(named.has(f) ? { restart: true } : {}) };
+            return historyRowOf(f, m, named);
           } catch {}
           try {
             const j = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf-8'));
-            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null, ...(named.has(f) ? { restart: true } : {}) };
+            return historyRowOf(f, j, named);
           } catch { return null; } // unparseable → omit, never a 1970/0-window row
         }).filter(Boolean);
     } catch { return []; }
+  }
+  /** THE PAGE'S LIST, OFF THE LOOP (B-225b's remainder — ALSO CURED: the release read the folder and every sidecar synchronously on the
+   *  hub's loop at each open of the dialog): the same rows as listLayoutHistory */
+  async function listLayoutHistoryAsync() {
+    let names;
+    try { names = await fs.promises.readdir(HISTORY_DIR); } catch { return []; }
+    const files = historyFilesOf(names).sort().reverse();
+    const named = bootsNamed(files);
+    const rows = await Promise.all(files.map(async (f) => {
+      try {
+        const m = JSON.parse(await fs.promises.readFile(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
+        let size = null, statCode = null;
+        try { size = (await fs.promises.stat(path.join(HISTORY_DIR, f))).size; } catch (e) { statCode = (e && e.code) || 'unreadable'; }
+        return historyRowOf(f, m, named, pointUnread(m, { size, statCode }));
+      } catch {}
+      try { return historyRowOf(f, JSON.parse(await fs.promises.readFile(path.join(HISTORY_DIR, f), 'utf-8')), named); }
+      catch { return null; } // unparseable → omit, never a 1970/0-window row
+    }));
+    return rows.filter(Boolean);
   }
 
   router.get('/api/layouts', (req, res) => res.json(readLayouts()));
@@ -716,20 +943,25 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
   // `?desktop=<id>&win=&type=&title=&cwd=&name=` (a tile's slot) adds `pick` — the point to select (r3); bare = the list as before
   router.get('/api/layout-history', async (req, res) => {
-    const entries = listLayoutHistory();
+    const entries = await listLayoutHistoryAsync();   // B-225b's remainder: off the loop
     const q = req.query || {};
     if (typeof q.desktop !== 'string' || !q.desktop) return res.json({ entries });
     const entry = { type: q.type === 'terminal' ? 'terminal' : 'chat', winId: String(q.win || ''), title: String(q.title || ''), cwd: String(q.cwd || ''), ...(q.name ? { openSpec: { name: String(q.name) } } : {}) };
     let pick = null;
-    try { pick = await namedPointFor(entries, q.desktop, entry); } catch { pick = null; }
+    try { pick = await namedPointFor(entries.filter((e) => !e.unread), q.desktop, entry); } catch { pick = null; }   // an unread point is never picked
     res.json({ entries, pick });
   });
   router.post('/api/layout-history/:id/restore', (req, res) => {
     const id = String(req.params.id || '');
     if (!/^layout-[\w.-]+\.json$/.test(id)) return res.status(400).json({ error: 'bad id' });
     let saved;
-    try { saved = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, id), 'utf-8')); }
-    catch { return res.status(404).json({ error: 'not found' }); }
+    // B-225b's remainder P5: a point that cannot be read is refused BY NAME (`point_unread`, with why) — never «not found» for a point
+    // the list showed; its bytes are left as they are
+    let text;
+    try { text = fs.readFileSync(path.join(HISTORY_DIR, id), 'utf-8'); }
+    catch (e) { const why = (e && e.code) || 'unreadable'; return res.status(why === 'ENOENT' ? 404 : 503).json({ error: `this rollback point could not be read (${why}) — nothing was restored; pick another`, code: 'point_unread', why }); }
+    try { saved = JSON.parse(text); }
+    catch { return res.status(409).json({ error: 'this rollback point is damaged (it does not read whole) — nothing was restored; pick another', code: 'point_unread', why: 'damaged' }); }
     if (!saved?.layouts) return res.status(400).json({ error: 'entry has no layout' });
     // ONE DESKTOP (lane layout-stopped-window — the owner's 个人 lost seven windows while 工作 and 研究 had moved on): the body's
     // `desktop` (a row's summary key — the desktop's name, `name (abcd)` for a repeated one) or `desktopId` restores that
@@ -826,6 +1058,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   // Expose for server.js to use directly
   router.listLayoutHistory = listLayoutHistory;
+  router.listLayoutHistoryAsync = listLayoutHistoryAsync;
+  router.layoutsMarkSettled = () => _markChain;
+  router.layoutsStopJudged = () => _stopJudgedP;   // the start's verdict, once the last run's mark is read and weighed (a suite waits on the EFFECT)   // B-225b's remainder: the owed mark's writes and removals, in order (a suite waits on what happened)
   router.readLayouts = readLayouts;
   router.layoutsCached = () => _layoutsCache; // lane conversation-facts: the in-memory copy only (null before the first read) — the list never reads the file
   // lane conversation-facts (主开发 2026-11-17): before any page has opened since the boot (the fleet's normal case) the list reads
@@ -1743,7 +1978,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // R7 — THE PAGE'S ONE FACE reads the holds here: the boot and every reconnect (a word said while a page was away never arrives)
   router.get('/api/stores/held', (req, res) => {
     // + B-225b's second half: the stores whose owed write is SAID (past its silent rungs, or a press) — `unsaved`, beside the holds
-    res.json({ held: heldSections(Object.keys(STORE_SECTIONS)), unsaved: Object.values(STORE_SECTIONS).map((s) => (typeof s.hold.owed === 'function' ? s.hold.owed() : null)).filter((u) => u && u.rung === 'said') });   // [{ section, file, kind, code, since, rung }] — a page says only those past their silent rungs
+    res.json({ held: heldSections(Object.keys(STORE_SECTIONS)), unsaved: [...Object.values(STORE_SECTIONS).map((s) => (typeof s.hold.owed === 'function' ? s.hold.owed() : null)).filter((u) => u && u.rung === 'said'), ...(pointsWord() ? [pointsWord()] : [])], stop: stopWord() });   // + B-225b's remainder: the rollback points' episode (in `unsaved`, by its own file name) and the last stop's verdict (`stop`)   // [{ section, file, kind, code, since, rung }] — a page says only those past their silent rungs
+  });
+  // B-225b's remainder (r1318 (a)): a PERSON notes the last stop's loss — «Understood» on the strip, every page told; a KNOWN loss then
+  // rides no further write. Only the person, on this page (the tree's one verdict: an agent's bearer never dismisses the person's notice)
+  router.post('/api/stores/layouts.json/stop-noted', (req, res) => {
+    const why = require('../write-origin.js').ownerPageWhy(req);
+    if (why) return res.status(403).json({ error: 'only the person, on this VibeSpace page, notes what the last stop lost', code: 'store_person_only', why });
+    const was = _stopFact;
+    _stopFact = null;
+    if (was) { console.log(`[layouts] the last stop's notice (${was.kind}) was noted by the person`); storeWord('store-stop-over', { file: 'layouts.json', why: 'noted' }); }
+    res.json({ success: true, noted: !!was });
   });
   // the person's choice of an EMPTY store for a damaged one (R5, beside the rollback point and the import): set aside, then read again
   router.post('/api/stores/:file/empty', (req, res) => {
@@ -2003,4 +2248,4 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   return router;
 }
 
-module.exports = { router, setup, wordlessTitles, WORDLESS_TITLES, ringKeep, ringStampMs, ringSeq, ringSort, RING_KEEP };
+module.exports = { router, setup, wordlessTitles, WORDLESS_TITLES, ringKeep, ringStampMs, ringSeq, ringSort, RING_KEEP, stampedBytes, stampOfRead, stopVerdict, pointUnread, STAMP };
