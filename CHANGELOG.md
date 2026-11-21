@@ -12,6 +12,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Diagnostics report now shows the turns a person pressed in the last 24 hours, which the spending ceiling does not count, by how they were started.
 - A tab opened while you take over an agent's browser stays the agent's and says «opened in your takeover»; a tab you open in your own browsing window is yours.
 
+### Changed
+- On a paired Linux or Mac machine, a conversation now starts below that machine's VibeSpace agent (nice +5) once the agent updates; see Session Properties.
+
 ### Fixed
 - A message you held behind a running turn, or a turn that just started or ended, no longer goes missing from the chat if VibeSpace restarts right then.
 - On a paired Windows machine with a POSIX shell (Git Bash), a key helper named in the config folder its login shell sets is now seen at a start.
