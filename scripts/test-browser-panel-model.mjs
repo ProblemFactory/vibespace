@@ -20,6 +20,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const M = await import('../src/lib/browser-panel-model.js');
 const TV = await import('../src/lib/browser-trace-view.js');
@@ -152,7 +161,7 @@ const census = (Mod) => {
   ok(src.includes(needle), 'control setup: the Replay… line is where the control cuts');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-bpm-'));
   const f = path.join(dir, 'browser-panel-model.mjs');
-  fs.writeFileSync(f, src.replace(needle, '  if (false) out.push({ id: \'replay\''));
+  fs.writeFileSync(f, editAnchor(src, needle, '  if (false) out.push({ id: \'replay\'', "src/lib/browser-panel-model.js"));
   const Mc = await import(f);
   const cc = census(Mc);
   ok(cc.missing.join() === 'replay', 'CONTROL: the copy without Replay… is caught by the census (missing: replay)', cc);
@@ -197,7 +206,7 @@ console.log('— ⑦ lane passkey-ui: THE PASSKEYS TABLE (design-passkey-store �
   ok(src.includes(n1) && src.includes(n2), 'control setup: the refusal + the named-field row are where the control cuts');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-bpm-pk-'));
   const f = path.join(dir, 'browser-panel-model.mjs');
-  fs.writeFileSync(f, src.replace(n1, "  if (!k || typeof k !== 'object') return null;").replace(n2, '  return {\n    ...k, id, site:'));
+  fs.writeFileSync(f, editAnchor(editAnchor(src, n1, "  if (!k || typeof k !== 'object') return null;", "src/lib/browser-panel-model.js"), n2, '  return {\n    ...k, id, site:', "src/lib/browser-panel-model.js"));
   const Mc = await import(f);
   ok(keyCensus(Mc) && Mc.passkeyTable({ keys: [pub({ keySealed: 'SECRET' })] }, xw).refused === 0, 'CONTROL: a copy whose row spreads the publicRow (no refusal) is caught by the key census (RED)');
   fs.rmSync(dir, { recursive: true, force: true });
@@ -274,7 +283,7 @@ console.log('— ⑦ B-53df: the three RESTART doors say a refusal by its CODE (
   ok(msrc.includes(cut), 'control setup: the picker\'s person-words line is where the control cuts');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-bpm-rs-'));
   const f = path.join(dir, 'browser-build-model.mjs');
-  fs.writeFileSync(f, msrc.replace(cut, "  const own = '';"));
+  fs.writeFileSync(f, editAnchor(msrc, cut, "  const own = '';", "src/lib/browser-build-model.js"));
   const Mc = await import(f);
   ok(Mc.restartRefusalWords({ code: 'browsing_yourself' }, { label: 'Bank', human: BH.humanRefusalText }, en) !== by, 'CONTROL: a picker without the person\'s words says another sentence for browsing_yourself (RED)');
   fs.rmSync(dir, { recursive: true, force: true });

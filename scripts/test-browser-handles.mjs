@@ -49,6 +49,15 @@ const BH = require('../src/server/browser-helpers.js'); // MULTIVIEW §4: the wi
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const REPO = new URL('..', import.meta.url).pathname;
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
@@ -322,7 +331,7 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
     // the CONTROL: the pre-fix route in a patched copy (both guards removed) queues exactly that notice through the same keeper
     const M = mutantCopies('browser-handles', REPO);
     const src = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-    const pre = src.replace("  if (String(was || '') === String(now || '')) return false;\n", '').replace('if (by === \'user\') { if (moved) noteChange(', 'if (by === \'user\') { if (true) noteChange(');
+    const pre = editAnchor(editAnchor(src, "  if (String(was || '') === String(now || '')) return false;\n", '', "src/routes/browser.js"), 'if (by === \'user\') { if (moved) noteChange(', 'if (by === \'user\') { if (true) noteChange(', "src/routes/browser.js");
     ok(pre !== src && !pre.includes("String(was || '') === String(now || '')") && pre.includes('if (true) noteChange('), 'control: the patched copy really lost both guards (census of the patch)');
     const R0 = M.load('src/routes/browser.js', pre);
     const preNotices = [];
@@ -524,7 +533,7 @@ console.log('— ④ MULTIVIEW: the strip\'s list (truth table + negative contro
     const A2 = 'if (c && !c.witness && !c.orphan && namesHandle(ev.text, c.handle)) {';
     ok(ssrc.includes(A1) && ssrc.includes(A2), 'NEGATIVE CONTROL setup: the close-time judgement is found in src/browser-stream.js');
     if (ssrc.includes(A1) && ssrc.includes(A2)) {
-      const PS = MS.load('src/browser-stream.js', ssrc.replace(A1, 'if (w.mints.length >= 1) {').replace(A2, 'if (c && !c.witness) {'), 'pair-by-order');
+      const PS = MS.load('src/browser-stream.js', editAnchor(editAnchor(ssrc, A1, 'if (w.mints.length >= 1) {', "src/browser-stream.js"), A2, 'if (c && !c.witness) {', "src/browser-stream.js"), 'pair-by-order');
       const run = (evs) => PS.helperNames(evs.reduce((st, ev) => PS.bindHelpers(st, ev), null));
       const got = run([{ kind: 'task', id: 'T1', description: 'Check the prices' }, { kind: 'witness', id: 'B1', parent: 'T1' }, { kind: 'child', handle: bk + '.1' }, { kind: 'child', handle: bk + '.2' }, { kind: 'witness-close', id: 'B1', text: minted(bk + '.2') }]);
       ok(got[bk + '.1'] === 'Check the prices', 'NEGATIVE CONTROL: pairing by order names the SCRIPT\'s helper (.1) with the other helper\'s Task — the outcomes table is red on it', got);

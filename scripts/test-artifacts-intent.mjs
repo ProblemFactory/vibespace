@@ -41,6 +41,15 @@ const MODEL = path.join(REPO, 'src/lib/artifacts-list-model.js');
 const M = await import(pathToFileURL(MODEL).href);
 let pass = 0, fail = 0;
 const ok = (c, msg, why) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (why !== undefined ? ' — ' + (typeof why === 'string' ? why : JSON.stringify(why)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const done = () => { console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASSED'} (${pass} passed)`); process.exit(fail ? 1 : 0); };
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-af-intent-'));
 process.on('exit', () => { try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { } });
@@ -219,7 +228,7 @@ ok(chipOrder(AF) === WANT_ORDER, `view: «for you» (the page, the service) › 
 { const src = fs.readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
   const needle = '(INTENTS.indexOf(intentOf(a)) - INTENTS.indexOf(intentOf(b)))';
   const base = path.join(scratch, 'artifacts-base-order.js');
-  fs.writeFileSync(base, src.replace(needle, '(VIEW_ORDER.indexOf(a.kind) - VIEW_ORDER.indexOf(b.kind))').replace(/require\('\.\/([\w.-]+\.js)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`)); // its relative requires made absolute (r6: + the reply grammar's cut mark)
+  fs.writeFileSync(base, editAnchor(src, needle, '(VIEW_ORDER.indexOf(a.kind) - VIEW_ORDER.indexOf(b.kind))', "src/artifacts.js").replace(/require\('\.\/([\w.-]+\.js)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`)); // its relative requires made absolute (r6: + the reply grammar's cut mark)
   const B = require(base);
   ok(src.includes(needle) && chipOrder(B) !== WANT_ORDER, `CONTROL the base's kind-first view (VIEW_ORDER) ⇒ the order leg is RED ("${chipOrder(B)}")`); }
 

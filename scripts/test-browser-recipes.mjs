@@ -27,6 +27,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const SCRATCH = path.join(os.tmpdir(), `vs-brcp-${process.pid}`);
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(extra).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 fs.rmSync(SCRATCH, { recursive: true, force: true });
 fs.mkdirSync(SCRATCH, { recursive: true });
@@ -156,7 +165,7 @@ ok(!/exit machine/i.test(read('data/bin/vibespace-browser')), 'the CLI spells no
   fs.mkdirSync(MUT, { recursive: true });
   const src = read('data/bin/vibespace-browser');
   const line = '    if (!set.length && r.recipe) console.log(r.recipe);\n';
-  fs.writeFileSync(path.join(MUT, 'vibespace-browser'), src.replace(line, ''), { mode: 0o755 });
+  fs.writeFileSync(path.join(MUT, 'vibespace-browser'), editAnchor(src, line, '', "data/bin/vibespace-browser"), { mode: 0o755 });
   fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(MUT, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(MUT, 'cli-call.js'));
   fs.copyFileSync(path.join(REPO, 'src/browser-stuck.js'), path.join(MUT, 'vibespace-browser-stuck.js'));
   const bad = await statusCensus(path.join(MUT, 'vibespace-browser'));

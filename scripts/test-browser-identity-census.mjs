@@ -48,6 +48,15 @@ const express = require('express');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const stripComments = (src) => src.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n');
 
@@ -644,7 +653,7 @@ console.log('— ④b the user browsing a profile himself: every agent READ byte
   const bsrc = read('src/browser-profiles.js');
   const lneedle = "  if (l.human === true || /^hu-[0-9a-f]{8}$/.test(String(l.browserKey || ''))) return null;";
   ok(bsrc.includes(lneedle), 'the agent lease-view needle (the control below removes it)');
-  const Bh = M.load('src/browser-profiles.js', bsrc.replace(lneedle, '').replace("  delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;\n", ''), 'agent-sees-human');
+  const Bh = M.load('src/browser-profiles.js', editAnchor(editAnchor(bsrc, lneedle, '', "src/browser-profiles.js"), "  delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;\n", '', "src/browser-profiles.js"), 'agent-sees-human');
   const facts = { browserKey: Bk, taskIds: [], groupsUnreadable: false };
   const real = JSON.stringify(B.agentDigestView(k.list(), facts, (id) => k.profile(id)));
   const pre = JSON.stringify(Bh.agentDigestView(k.list(), facts, (id) => k.profile(id)));
@@ -684,7 +693,7 @@ console.log('— ④b the user browsing a profile himself: every agent READ byte
     ok(ksrc.includes(L1) && ksrc.includes(L2), 'the two forAgent layers (the controls below remove them)');
     const kIn = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L1, 'inputs: inputsView()'), 'fa-inputs-only-gone'), 'in');
     const kHu = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L2, 'humans: humanRowsOn(p.id)'), 'fa-rows-only-gone'), 'hu');
-    const kBoth = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L1, 'inputs: inputsView()').replace(L2, 'humans: humanRowsOn(p.id)'), 'fa-both-gone'), 'both');
+    const kBoth = await faLeg(M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, L1, 'inputs: inputsView()', "src/server/browser-keeper.js"), L2, 'humans: humanRowsOn(p.id)', "src/server/browser-keeper.js"), 'fa-both-gone'), 'both');
     ok(kIn.same && kHu.same && !kBoth.same, 'CONTROLS: either forAgent layer alone keeps him out of the agent\'s read (two layers, each enough); with BOTH gone the agent reads his hold ("driven") — the leg above can go red', { inputsGone: kIn, rowsGone: kHu, bothGone: kBoth });
     // …and the BELT's own `hu-` mask (r1: "a raw route tomorrow"): a raw answer carrying his key through the REAL PURE belt is
     // masked; a belt copy without the mask hands it over — r1 added the mask with no control of its own

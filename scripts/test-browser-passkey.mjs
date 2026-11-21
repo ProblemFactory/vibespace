@@ -83,6 +83,15 @@ const PK = require(path.join(REPO, 'src/browser-passkey.js'));
 let pass = 0, fail = 0;
 const keepAlive = setInterval(() => {}, 1000); // the watch's timers are unref'd — the suite holds the loop
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const SENT = 'This page is waiting for a passkey (vercel.com) and nothing in VibeSpace answers it — cancel it (`vibespace-browser passkey cancel`) and use the page\'s other way in (a recovery code, a password), or ask the user to sign in on their own device.';
 
 /** ① as a judge over a module (a patched copy is judged the same way). */
@@ -335,7 +344,7 @@ async function watchOver(modPath, o = {}) {
   fs.mkdirSync(path.join(dir, 'src/server'), { recursive: true });
   for (const x of ['browser-stuck.js', 'browser-passkey.js', 'browser-passkey-store.js']) fs.copyFileSync(path.join(REPO, 'src', x), path.join(dir, 'src', x));
   const needle = '      armPasskey(w, e);\n';
-  fs.writeFileSync(path.join(dir, 'src/server/browser-dialogs.js'), src.replace(needle, ''));
+  fs.writeFileSync(path.join(dir, 'src/server/browser-dialogs.js'), editAnchor(src, needle, '', "src/server/browser-dialogs.js"));
   const W1 = await watchOver(path.join(dir, 'src/server/browser-dialogs.js'));
   await W1.D.arm('bp-1');
   for (let i = 0; i < 10; i++) await tick();
@@ -345,7 +354,7 @@ async function watchOver(modPath, o = {}) {
   W1.D.shutdown();
   // lane mirror-green-222: a copy whose watch is ready before the hook's last answer (the order before the fix) ⇒ `unknown`
   const aneedle = '      await Promise.allSettled([...w.targets.values()].map((e) => e.pk.arming));\n';
-  fs.writeFileSync(path.join(dir, 'src/server/browser-dialogs.js'), src.replace(aneedle, ''));
+  fs.writeFileSync(path.join(dir, 'src/server/browser-dialogs.js'), editAnchor(src, aneedle, '', "src/server/browser-dialogs.js"));
   delete require.cache[path.join(dir, 'src/server/browser-dialogs.js')];
   const W3 = await watchOver(path.join(dir, 'src/server/browser-dialogs.js'));
   await W3.D.arm('bp-1');
@@ -360,7 +369,7 @@ async function watchOver(modPath, o = {}) {
   // the 3 s said at 0 s ⇒ ① red
   const psrc = fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8');
   const pneedle = 'const PENDING_SAID_MS = 3000;';
-  fs.writeFileSync(path.join(dir, 'src/browser-passkey-0s.js'), psrc.replace(pneedle, 'const PENDING_SAID_MS = 0;'));
+  fs.writeFileSync(path.join(dir, 'src/browser-passkey-0s.js'), editAnchor(psrc, pneedle, 'const PENDING_SAID_MS = 0;', "src/browser-passkey.js"));
   const holes = verdictHoles(require(path.join(dir, 'src/browser-passkey-0s.js')));
   ok(psrc.includes(pneedle) && holes.some((h) => /^0 s ⇒ passkey_open/.test(h)), 'CONTROL: a copy that says the ceremony at 0 s FAILS ①', holes);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -1342,7 +1351,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const erBase = await endedRun(MUTe.load('src/server/browser-stream.js', bsB.replace(digestNow, "  const promptDigestOf = (rec) => (rec && rec.fact ? JSON.stringify(rec.fact.prompt) : '');"), 'digest-fact-only'));   // stale-pins: kept — the base's digest, written back by this RED control
     ok(erBase.after.length === 1 && !erBase.after.some((m) => m.ended), 'CONTROL (主开发 (4)): a bridge whose digest reads the fact only never sends the ended note — the window would not say it (RED for the leg above)', erBase);
     const MUTb = mutantCopies('browser-passkey-b56d', REPO);
-    const baseB = await run(MUTb.load('src/server/browser-stream.js', bsB.replace(cut1, "    if (false && credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in").replace(cut2, '    if (false && !(viewer.page && pageVerdict(').replace(cut3, ' }'), 'no-person-road'));
+    const baseB = await run(MUTb.load('src/server/browser-stream.js', editAnchor(editAnchor(editAnchor(bsB, cut1, "    if (false && credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in", "src/server/browser-stream.js"), cut2, '    if (false && !(viewer.page && pageVerdict(', "src/server/browser-stream.js"), cut3, ' }', "src/server/browser-stream.js"), 'no-person-road'));
     ok(baseB.answered.length === 3 && baseB.ack.noId && baseB.ack.noId.code === 'no_prompt' && baseB.ack.script && baseB.ack.script.ok === true && baseB.ack.bearer && baseB.ack.bearer.ok === true && baseB.told.length === 0,
       'CONTROL (B-b56d): a bridge without the two refusals lets a header-less script and a bearer view answer the person\'s sign-in, and without the count the watch never hears the windows (RED for the legs above)', { answered: baseB.answered.length, ack: baseB.ack, told: baseB.told });
   }
