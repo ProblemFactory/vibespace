@@ -274,17 +274,31 @@ fi
 tier_node="$(command -v node 2>/dev/null || true)"
 tier_real="$(readlink -f "$tier_node" 2>/dev/null || true)"; [ -n "$tier_real" ] || tier_real="$tier_node"
 tier_root="${VIBESPACE_HOOK_NODE_DIR:-/var/tmp/vs-tier-node-$(id -u)}"   # local disk (never a checkout's git dir: it may sit on a guarded mount), this user's own
-if ! mkdir -p -m 0700 "$tier_root" 2>/dev/null || [ ! -O "$tier_root" ]; then
-  echo "[ci] REFUSED — the tiers' private node folder $tier_root is not this user's own: nothing was judged" >&2; exit 1
+# the root: a real folder (never a link — `-O` would follow it), this user's own, writable by nobody else
+if [ -L "$tier_root" ] || ! mkdir -p -m 0700 "$tier_root" 2>/dev/null || [ -L "$tier_root" ] || [ ! -O "$tier_root" ] || (( (8#$(stat -c %a "$tier_root" 2>/dev/null || echo 777) & 8#022) != 0 )); then
+  echo "[ci] REFUSED — the tiers' private node folder $tier_root is a link, writable by others or not this user's own: nothing was judged" >&2; exit 1
 fi
+# a node's folder is trusted only when it holds EXACTLY its links — node → this push's node, npm / npx → beside it — and nothing else
+tier_holds() {
+  local d="$1" e
+  [ -d "$d" ] && [ ! -L "$d" ] && [ "$(readlink "$d/node" 2>/dev/null)" = "$tier_real" ] || return 1
+  for e in "$d"/* "$d"/.[!.]*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    case "${e##*/}" in
+      node) ;;
+      npm|npx) [ "$(readlink "$e" 2>/dev/null)" = "$(dirname "$tier_real")/${e##*/}" ] || return 1 ;;
+      *) return 1 ;;
+    esac
+  done
+}
 tier_bin="$tier_root/$(printf '%s' "$tier_real" | cksum | cut -d' ' -f1)"   # ONE folder per node: two pushes with two nodes never share one
-if [ "$(readlink "$tier_bin/node" 2>/dev/null)" != "$tier_real" ]; then
+if ! tier_holds "$tier_bin"; then
   tier_new="$(mktemp -d "$tier_root/.new.XXXXXX" 2>/dev/null)" || { echo "[ci] REFUSED — the tiers' private node folder could not be made in $tier_root: nothing was judged" >&2; exit 1; }
   ln -s "$tier_real" "$tier_new/node"
   for t in npm npx; do [ -e "$(dirname "$tier_real")/$t" ] && ln -s "$(dirname "$tier_real")/$t" "$tier_new/$t"; done
   mv -T "$tier_new" "$tier_bin" 2>/dev/null || rm -rf "$tier_new"   # made whole, then moved in at once — a racing push's own stays
 fi
-[ "$(readlink "$tier_bin/node" 2>/dev/null)" = "$tier_real" ] || { echo "[ci] REFUSED — $tier_bin does not hold this push's node ($tier_real): nothing was judged" >&2; exit 1; }
+tier_holds "$tier_bin" || { echo "[ci] REFUSED — $tier_bin does not hold exactly this push's node ($tier_real) and its npm / npx: nothing was judged" >&2; exit 1; }
 tier_path="$tier_bin:/usr/local/bin:/usr/bin:/bin"
 tier_env=(env -i "PATH=$tier_path" VS_NO_REAL_CLI=1 VIBESPACE_SKIP_AGENT_HOOKS=1)
 for v in HOME USER LOGNAME LANG TMPDIR XDG_RUNTIME_DIR TERM TZ VS_CHROME VIBESPACE_CI_FAST_LANES VIBESPACE_CI_LANES VIBESPACE_CI_HEAVY_LOCK VIBESPACE_CI_LANE_ROOT VIBESPACE_CI_REAP_PROCFS VIBESPACE_CI_REAPER_LOCK VIBESPACE_CI_DIR_SWEEP VIBESPACE_CI_SCRATCH_ROOTS VIBESPACE_CI_REMOTE_RUN VIBESPACE_CI_MODEL; do

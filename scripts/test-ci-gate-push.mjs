@@ -203,8 +203,18 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     fs.writeFileSync(alt, `#!/bin/sh\nexec ${JSON.stringify(realNode)} "$@"\n`); fs.chmodSync(alt, 0o755);
     const rAlt = runHook(B, ZERO, { ...PLANT, PATH: `${altDir}:${PLANT.PATH}` });
     const fa = fastOf(rAlt)[0], altBin = tierPathOf(fa)[0] || '';
-    ok(rAlt.status === 0 && keyed.test(altBin) && altBin !== privateBin && fs.readlinkSync(path.join(altBin, 'node')) === alt && fs.readlinkSync(path.join(privateBin, 'node')) === realNode,
+    ok(rAlt.status === 0 && keyed.test(altBin) && altBin !== privateBin && fs.readlinkSync(path.join(altBin, 'node')) === fs.realpathSync(alt) && fs.readlinkSync(path.join(privateBin, 'node')) === realNode,
       'B-e381: a push with ANOTHER node gets its own folder — the first one\'s link (a full tier may still run on it) is never swapped', { altBin, privateBin });
+    // the folder is trusted only as it was made: a root that is a LINK, and a node's folder holding anything more, are refused
+    const realRoot = mktmp('e381-real-root'), linkRoot = path.join(mktmp('e381-link-root'), 'root');
+    fs.symlinkSync(realRoot, linkRoot);
+    const rLink = runHook(B, ZERO, { ...PLANT, VIBESPACE_HOOK_NODE_DIR: linkRoot });
+    fs.writeFileSync(path.join(privateBin, 'git'), '#!/bin/sh\n');
+    const rExtra = runHook(B, ZERO, PLANT);
+    fs.rmSync(path.join(privateBin, 'git'), { force: true });
+    ok(rLink.status === 1 && /REFUSED — the tiers' private node folder .* is a link, writable by others or not this user's own: nothing was judged/.test(rLink.out) && !fastOf(rLink).length
+      && rExtra.status === 1 && /REFUSED — .* does not hold exactly this push's node .* and its npm \/ npx: nothing was judged/.test(rExtra.out) && !fastOf(rExtra).length,
+      'B-e381: a private-folder root that is a link, and a node folder holding one more entry (a planted git), are REFUSED by name — no tier ran', { link: rLink.out.slice(-200), extra: rExtra.out.slice(-200) });
     const passThrough = preFixHook('e381-pass-through',
       ['      "${tier_env[@]}" node scripts/ci.mjs $kg || {', '      node scripts/ci.mjs $kg || {'],
       ['  "${tier_env[@]}" node scripts/ci.mjs --heavy-launch', '  node scripts/ci.mjs --heavy-launch']);
