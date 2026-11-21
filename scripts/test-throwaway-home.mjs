@@ -104,8 +104,7 @@ const api = async (p, body) => { const r = await fetch(ORIGIN + p, body === unde
 
 const before = listing(STANDIN);
 ok(before.filter((l) => l.startsWith('F ')).length >= 10, `(1) the STAND-IN this suite made (${STANDIN}, inside the helper's minted root) holds what a person's home holds (${before.filter((l) => l.startsWith('F ')).length} files: a sign-in, settings, a transcript, the CLIs' state, an index, a browser's, a login profile and two CLIs)`);
-const hubPath = (process.env.PATH || '').split(':').filter((d) => d && !fs.existsSync(path.join(d, 'claude'))).join(':');
-const env = { ...strippedEnv(), ...VNC_ENV, HOME: STANDIN, VIBESPACE_REHOME_NOT_TEMP: OUTSIDE, PATH: `${STANDIN}/.local/bin:${hubPath}`, SHELL: path.join(tools, 'login-shell'),
+const env = { ...strippedEnv(), ...VNC_ENV, HOME: STANDIN, VIBESPACE_REHOME_NOT_TEMP: OUTSIDE, PATH: `${STANDIN}/.local/bin:${process.env.PATH || ''}`,   /* the handed PATH: the re-home BUILDS its own (nothing of this carried); CLAUDE_CMD names the stand-in claude */ SHELL: path.join(tools, 'login-shell'),
   CLAUDE_CMD: path.join(tools, 'claude'), CLAUDE_CONFIG_DIR: path.join(STANDIN, '.claude'), VIBESPACE_PASSWORD: '' };
 // no switch that would hide the gates under test: the update check and the runtime check must be off BECAUSE the copy is throwaway
 for (const k of ['VS_NO_REAL_CLI', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_FORCE_AGENT_HOOKS', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'VIBESPACE_REAL_INSTALL']) delete env[k];
