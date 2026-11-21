@@ -92,7 +92,10 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // r2: a section that throws is a NAMED failure, never a crash (the suite on an older tree says what it misses)
 const section = async (name, fn) => { try { await fn(); } catch (e) { ok(false, `section ${name} stopped: ${e && e.message}`); } };
 // r2: a control whose mutation anchor is missing FAILS BY NAME (it then runs on an unpatched copy)
-const anchorMissing = (tag, file) => ok(false, `mutation anchor missing: ${tag} (${file}) — the rule this control removes is not in this tree`);
+const anchorMissing = (tag, file, from) => ok(false, `mutation anchor missing: ${tag} (${file})${from === undefined ? '' : ` — it wanted ${from instanceof RegExp ? String(from) : JSON.stringify(String(from)).slice(0, 100)}`} — the rule this control removes is not in this tree`);
+// B-0d3e: a helper's anchor is JUDGED where it is cut — `n` = the anchor's count in the file; any count but one is the red row
+// above, by name with the anchor it wanted and the file (the copy then loads unpatched: nothing crashes, the leg's verdict runs on)
+const okAnchor = (n, tag, file, from) => n === 1 || anchorMissing(tag, `${file}: ${n} times, one meant`, from);
 const T = require(path.join(REPO, 'src/channel-touch.js'));
 const tEn = (s, p = {}) => String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m));
 const touch = (o) => ({ id: o.id || `t-${Math.random().toString(36).slice(2, 8)}`, op: 'read', adapterId: 'gmail', convId: 'c1', title: 'Title', account: 'Work', kind: 'gmail', count: 1, at: 1000, proposalId: null, ...o });
@@ -253,7 +256,7 @@ console.log('④ negative controls (patched scratch copies)');
 await section('④', async () => {
   const MUT = mutantCopies('channel-touch', REPO);
   const src = read('src/channel-touch.js');
-  const copy = (tag, from, to) => { if (!src.includes(from)) anchorMissing(tag, 'src/channel-touch.js'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
   const C = (id, start, end = null, text = '') => ({ id, start, end, text });
   const par = [C('P1', 10000, null, 'vibespace-channels read gmail/c1'), C('P2', 10400, null, 'vibespace-channels read gmail/c2')];
   const q1 = [touch({ id: 'q1', at: 13000, convId: 'c1' })];
@@ -430,7 +433,7 @@ await section('⑥', async () => {
   // CONTROLS (patched scratch copies)
   const MUT = mutantCopies('channel-touch-search', REPO);
   const src = read('src/channel-touch.js');
-  const copy = (tag, from, to) => { if (!src.includes(from)) anchorMissing(tag, 'src/channel-touch.js'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
   const nb = copy('hits-bound', "if (x.hits && r.vendorId && x.hits.length < SEARCH_HITS_MAX) x.hits.push(", "if (x.hits && r.vendorId) x.hits.push(");
   ok(nb.searchTouches(many, { query: 'x y' })[0].hits.length === 130, 'CONTROL the hit-ref bound removed: 130 refs ride one touch (the BOUND check can go red)');
   const old = copy('old-click', "if (row.query && num(la.search) >= newest) return", "if (false) return");
@@ -773,7 +776,7 @@ await section('⑧', async () => {
   // A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-cause', REPO);
   const src = read('src/channel-touch.js');
-  const copy = (tag, from, to) => { if (src.split(from).length !== 2) anchorMissing(tag, 'src/channel-touch.js (one occurrence)'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
   const inertOff = copy('inert', "  if (c.kind === 'command') return !(typeof c.inert === 'boolean' ? c.inert : runsNothing(c.text));", "  if (c.kind === 'command') return true;");
   ok(B8(inertOff, [...conv17, readT], owner, ownerOpts).by.S === 17 && B8(inertOff, hz, helper, h3opts).by.V3 === 4,
     'CONTROL the INERT table ignored (every shell call could run anything): the owner\'s 17 rows land on the lone vibespace-status again, H3\'s on vibespace-status');
@@ -1018,12 +1021,12 @@ await section('⑨', async () => {
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r3', REPO);
   const src = read('src/channel-touch.js');
-  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { if (text.split(from).length !== 2) anchorMissing(tag, file + ' (one occurrence)'); return MUT.load(file, text.replace(from, to), tag); };
+  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { okAnchor(text.split(from).length - 1, tag, file, from); return MUT.load(file, text.replace(from, to), tag); };
   // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
   // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
   const SW = read('src/shell-words.js');
   const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
-  const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
+  const scan = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return scanWith(tag, SW.replace(from, to)); };
   const shellCmd = scan('shell-word', '      if (scripts) { for (const sc of scripts) add(', "      if (scripts) { out.push({ base: cw.base, at, verb: '' }); for (const sc of scripts) add(");
   ok(eq(B9(shellCmd, tn(5, R0 + 10_000), [one('S', A2, R0 + 9_000, R0 + 20_000)], ctx).by, { S: 5 }), 'CONTROL the shell counted as a command of its own (r2): the lone codex `bash -lc vibespace-status …` takes the 5 reads again');
   const noJoin = scan('joined-argv', '    if (!op.q && j + 1 < words.length && c.src) return', '    if (false) return');
@@ -1243,12 +1246,12 @@ await section('⑩', async () => {
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r4', REPO);
   const src = read('src/channel-touch.js'), MMS = read('src/message-manager.js');
-  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { if (text.split(from).length !== 2) anchorMissing(tag, file + ' (one occurrence)'); return MUT.load(file, text.replace(from, to), tag); };
+  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { okAnchor(text.split(from).length - 1, tag, file, from); return MUT.load(file, text.replace(from, to), tag); };
   // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
   // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
   const SW = read('src/shell-words.js');
   const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
-  const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
+  const scan = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return scanWith(tag, SW.replace(from, to)); };
   const noDocs = scan('span-heredoc', "    if (docs && ch === '\\n' && pending.length) {", "    if (false && ch === '\\n' && pending.length) {");
   ok(!noDocs.runsNothing(commit(bodies[0])) && eq(B9(noDocs, t3, [one('COMMIT', commit(bodies[1]), R0 + 40, null)], ctx).by, { COMMIT: 3 }), 'CONTROL a `$( … )` span blind to heredocs (r3): the commit idiom with «1)» in its body could run again — a lone commit takes the 3 reads');
   const blindRun = scan('blind-run', 'return ran.filter((x) => x.base === CLI).map(({ at, verb, query }) => ({ at, verb, ...(query !== undefined ? { query } : {}) })); }', "return [...ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })), ...ran.blind.flatMap((b) => [...b.matchAll(/vibespace-channels(?:\\s+([a-z][\\w-]*))?/g)].map((m) => ({ at: -1, verb: m[1] || '' })))]; }");
@@ -1363,9 +1366,9 @@ await section('⑪', async () => {
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r6', REPO);
   const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
-  const copy = (tag, from, to) => { if (src.split(from).length !== 2) anchorMissing(tag, 'src/channel-touch.js (one occurrence)'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
   const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
-  const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
+  const scan = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return scanWith(tag, SW.replace(from, to)); };
   // r9: r6–r8's job controls (bg-reaper, kill-probe, and-or, job-scope, job-pid, wait-n) went with their rules — the plain
   // shape's conditions each have a copy in ⑬
   const noBound = copy('claim-bound', '      const claims = (c) => !lingering.includes(c) ||', '      const claims = () => true; const claimsR6 = (c) => !lingering.includes(c) ||');
@@ -1463,8 +1466,8 @@ await section('⑫', async () => {
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r7', REPO);
   const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
-  const copy = (tag, from, to) => { if (src.split(from).length !== 2) anchorMissing(tag, 'src/channel-touch.js (one occurrence)'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
-  const sw = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return MUT.load('src/shell-words.js', SW.replace(from, to), tag); };
+  const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const sw = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return MUT.load('src/shell-words.js', SW.replace(from, to), tag); };
   const exactBound = copy('exact-bound', 'const exact = cs.filter((c) => cand.has(c) && namesExactly(c, t));', 'const exact = cs.filter((c) => cand.has(c) && claims(c) && namesExactly(c, t));');
   ok(eq(B9(exactBound, sticky, [LOOP, RB], ctx).by, { LOOP: 2, RB: 5 }), 'CONTROL the claim bound on the NAMED half too (r6): the gmail/fx-b card takes 5 of the loop\'s 7 lark/fx-a reads');
   const convOnly = copy('opening-verb', ' && namesTouch(c.text, t, c.runs, c.kind))); };', ' && namesConv(c.text, t))); };');
@@ -2920,8 +2923,8 @@ await section('⑬', async () => {
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r10', REPO);
   const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
-  const copy = (tag, from, to) => { if (src.split(from).length !== 2) anchorMissing(tag, 'src/channel-touch.js (one occurrence)'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
-  const sw = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return MUT.load('src/shell-words.js', SW.replace(from, to), tag); };
+  const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const sw = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return MUT.load('src/shell-words.js', SW.replace(from, to), tag); };
   const sw2 = (tag, ...pairs) => { let t = SW; for (const [from, to] of pairs) { if (t.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); t = t.replace(from, () => to); } return MUT.load('src/shell-words.js', t, tag); };
   const line = (label) => { const r = TRUTH.find((x) => x[0] === label); return r ? r[1] : `# no row «${label}»`; };
   // each copy drops ONE condition of the reading: a row a shell lets outlive reads not lingering at the CALL (the copy's

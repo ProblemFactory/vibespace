@@ -1,8 +1,8 @@
 {
- "//": "B-0d3e (lane lg-leak-census): per script, the anchor helpers (a function whose own parameter is an anchor and whose body reaches a loader — a suite's cut / swap / mutantOf / patch) that neither throw or check ABOUT their anchor (B-287c: under a test of it, or judging its edit / test) nor build through scripts/scratch.mjs anchored(): when the anchor moves they answer null or an unpatched copy. ONE-WAY (test-suite-files-parse §3): a file that adds one is red by name; a fall is only said. A helper that already fails by name through a wrapper the walk cannot see (test-channel-touch's anchorMissing(tag, file) — «mutation anchor missing: <tag> (<file>)») stays listed with its `why` row. A converted helper THROWS: the first moved anchor stops its suite and the controls after it get no verdict — red by name, the trade ruling B took (test-design-model's helpers keep their per-rule red on purpose, said in their rows). A COUNT NEVER RISES WITHOUT A BACKLOG ROW'S ID BESIDE IT: every count stands under `rows` — { \"B-xxxx\": { \"why\": …, \"files\": { … } } } — a file's cap is the largest count any row gives it; a unit that must raise one ADDS A ROW under its own backlog id with a why of 20 or more characters; the founding row B-0d3e is FALL-ONLY (pinned in census-founding-pins.json); a plain number with no row id, or a count that is not a whole number, is red.",
+ "//": "B-0d3e (lane lg-leak-census): per script, the anchor helpers (a function whose own parameter is an anchor and whose body reaches a loader — a suite's cut / swap / mutantOf / patch) that neither throw or check ABOUT their anchor (B-287c: under a test of it, or judging its edit / test) nor build through scripts/scratch.mjs anchored(): when the anchor moves they answer null or an unpatched copy. ONE-WAY (test-suite-files-parse §3): a file that adds one is red by name; a fall is only said. A helper that fails by name through a wrapper hands the wrapper its anchor's test, so the walk sees it (test-channel-touch's okAnchor(text.split(from).length - 1, tag, file, from) — «mutation anchor missing: <tag> (<file>: <n> times, one meant) — it wanted <anchor>», a red row of the leg it serves). A converted helper THROWS: the first moved anchor stops its suite and the controls after it get no verdict — red by name, the trade ruling B took (test-design-model's helpers keep their per-rule red on purpose, said in their rows). A COUNT NEVER RISES WITHOUT A BACKLOG ROW'S ID BESIDE IT: every count stands under `rows` — { \"B-xxxx\": { \"why\": …, \"files\": { … } } } — a file's cap is the largest count any row gives it; a unit that must raise one ADDS A ROW under its own backlog id with a why of 20 or more characters; the founding row B-0d3e is FALL-ONLY (pinned in census-founding-pins.json); a plain number with no row id, or a count that is not a whole number, is red.",
  "rows": {
   "B-0d3e": {
-   "why": "the list B-0d3e brought (lane lg-leak-census): 35 at fe1d59c41, 38 on 2.369.410, 40 with the 2.369.412 block's units counted in once (test-vault-run's patch, test-vault-standing-request's mutant)",
+   "why": "the list B-0d3e brought (lane lg-leak-census): 35 at fe1d59c41, 38 on 2.369.410, 40 with the 2.369.412 block's units counted in once (test-vault-run's patch, test-vault-standing-request's mutant); the bounded part (lane lg-text-legs-2, 2.369.414): 37 at 5538eecb7, 27 with test-channel-touch",
    "files": {
     "test-boot-phase.mjs": 1,
     "test-browser-stuck.mjs": 1,
@@ -10,7 +10,6 @@
     "test-cdp-census.mjs": 1,
     "test-channel-outbox.mjs": 2,
     "test-channel-send-files.mjs": 1,
-    "test-channel-touch.mjs": 10,
     "test-conversation-ops.mjs": 1,
     "test-cpu-capture-live.mjs": 1,
     "test-design-model.mjs": 3,
@@ -31,8 +30,6 @@
   "test-boot-phase.mjs#mutant": "its caller reds by the control's name with «(anchor moved)» in the reds it prints",
   "test-channel-outbox.mjs#mutant": "its caller reds with «the <line> is not spelled once» — the anchor named",
   "test-channel-outbox.mjs#ocdRed": "its caller reds with «not spelled once in the bundle: <anchor>» — the anchor named",
-  "test-channel-touch.mjs#copy": "it calls anchorMissing(tag, file) — «mutation anchor missing: <tag> (<file>)», a red by the control's name — a wrapper the walk does not follow",
-  "test-channel-touch.mjs#sw": "it calls anchorMissing(tag, file) when its shell-words anchor is not there exactly once — a red by the control's name through a wrapper the walk does not follow",
   "test-design-model.mjs#copy": "its caller names the anchor: «CONTROL setup: the \"<rule>\" anchor is found exactly once» (red, then the loop goes on to the next rule — a throw would hide the other rules' verdicts)",
   "test-design-model.mjs#tcopy": "its caller names the anchor: «CONTROL setup: the \"<rule>\" anchor is found exactly once» (red, then the loop goes on to the next rule)",
   "test-design-model.mjs#ucopy": "its caller names the anchor: «CONTROL setup: the \"<rule>\" anchor is found exactly once» (red, then the loop goes on to the next rule)",
