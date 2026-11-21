@@ -9,10 +9,16 @@
 //   ④ THE PERSON'S OWN LATER EDIT, from the normalizer's records — «same» ONLY where they prove nothing but the agent's ONE write
 //      touched the file (r1232): one successful edit after the target, in its own turn, never refused, of a file not edited before
 //      the target, its time at that edit; else could not be checked; the choice drawn as selected; a taken-back message offers no
-//      files choice (r1232); AT THE PRESS the dry run judged again must equal what the confirm drew (changed-since)
-//   ⑤ «BOTH» — a files failure is «some may have been put back» but where nothing changed by construction (r1232)
+//      files choice (r1232); AT THE PRESS the dry run judged again must equal what the confirm drew (changed-since);
+//      r1247: a helper's call or result ANYWHERE ⇒ every file «a helper worked here»; records that do not reach back to the
+//      conversation's start ⇒ every file could not be checked; every edit before the target counts whatever its status; an
+//      edit still waiting for its result counts as one that may have written (ALSO CURED)
+//   ⑤ «BOTH» — a files failure is «some may have been put back» but where nothing changed by construction (r1232); «No files
+//      were restored» only in the measured shape and only from the program measured (r1247)
 //   RED CONTROLS (anchored copies): no one-edit rule, no edited-before rule, no turn rule, no refused rule, no write-after check,
-//   the default without the changed check, «both» in the other order, an unreadable list read as known, only the named failure
+//   the default without the changed check, «both» in the other order, an unreadable list read as known, only the named failure,
+//   no helper rule, edited-before only when it succeeded, no whole-records rule, a waiting call not read, before the target
+//   results only, the words anywhere
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -36,7 +42,7 @@ const noDraw = [['checkpoints off', { checkpoints: false, dry: DRY }], ['no dry 
 ok(noDraw.every(([, a]) => JSON.stringify(F.choicesOf(a)) === '["conversation"]'), `① the files choices ABSENT (never greyed) where they cannot work: ${noDraw.map(([n]) => n).join(' · ')}`);
 ok(JSON.stringify(F.stepsOf('both')) === '["files","conversation"]' && JSON.stringify(F.stepsOf('files')) === '["files"]' && F.stepsOf('files', F.choicesOf({ checkpoints: false })) === null && F.stepsOf('nonsense') === null,
   '① «both» runs the files, then the conversation (主开发 r1080 (7)); a choice not offered has no steps');
-ok([F.CHOICES, F.STEPS, F.STEPS.both, F.EDIT_TOOLS, F.CLI_WORDS, F.FILES_REFUSALS, F.UNKNOWN_WHY].every(Object.isFrozen), '① the tables are frozen');
+ok([F.CHOICES, F.STEPS, F.STEPS.both, F.EDIT_TOOLS, F.HELPER_TOOLS, F.CLI_WORDS, F.NONE_RESTORED, F.NO_CHANGE, F.FILES_REFUSALS, F.UNKNOWN_WHY].every(Object.isFrozen), '① the tables are frozen');
 
 console.log('— ② the verdict');
 const CP = { conversation: true, granularity: 'message' };
@@ -92,6 +98,7 @@ const person = (id, uuid) => ({ id, role: 'user', uuid, content: [{ type: 'text'
 const tool = (id, name, input, sec, status = 'ok') => ({ id, role: 'tool', content: [{ type: 'tool_result', toolCallId: 'c-' + id, toolName: name, input, output: 'x', status, resultAt: at(sec) }] });
 const recs = [
   person('p0', 'u-0'), tool('k0', 'Edit', { file_path: '/w/old.js' }, 1),                           // BEFORE the target
+  tool('k0e', 'Edit', { file_path: '/w/s.js' }, 2, 'error'),                                         // BEFORE, refused (r1247: counts)
   person('p1', 'u-1'),                                                                               // THE TARGET
   tool('k1', 'Edit', { file_path: '/w/a.js' }, 10),                                                  // one edit: the only plain case
   tool('k2', 'MultiEdit', { file_path: '/w/m.js' }, 12),
@@ -105,17 +112,38 @@ const recs = [
   person('p2', 'u-2'),                                                                                // a later turn
   tool('k14', 'Edit', { file_path: '/w/t.js' }, 40),
 ];
-const E = F.editsFromMessages(recs, { targetId: 'p1' });
-ok(E.known && E.byPath['/w/a.js'].count === 1 && E.byPath['/w/a.js'].at === at(10) && E.byPath['/w/m.js'].count === 1 && E.byPath['/w/n.ipynb'].count === 1 && E.byPath['/w/r.js'].refused === true && E.byPath['/w/e.js'].count === 2 && E.byPath['/w/d.js'].count === 2 && E.byPath['/w/t.js'].turnsAfter === 1 && JSON.stringify(E.before) === '["/w/old.js"]' && !('/w/c.txt' in E.byPath),
-  '④ the agent\'s edits from the normalizer\'s records (Edit, MultiEdit, NotebookEdit, Write; a Read is none): after the target each file\'s count, newest time, turns, refusals — and the files it edited BEFORE the target', E);
+const E = F.editsFromMessages(recs, { targetId: 'p1', whole: true });
+ok(E.known && E.whole === true && E.helper === false && E.byPath['/w/a.js'].count === 1 && E.byPath['/w/a.js'].at === at(10) && E.byPath['/w/m.js'].count === 1 && E.byPath['/w/n.ipynb'].count === 1 && E.byPath['/w/r.js'].refused === true && E.byPath['/w/e.js'].count === 2 && E.byPath['/w/d.js'].count === 2 && E.byPath['/w/t.js'].turnsAfter === 1 && JSON.stringify(E.before) === '["/w/old.js","/w/s.js"]' && !('/w/c.txt' in E.byPath),
+  '④ the agent\'s edits from the normalizer\'s records (Edit, MultiEdit, NotebookEdit, Write; a Read is none): after the target each file\'s count, newest time, turns, refusals — and the files it edited BEFORE the target, a refused edit too (r1247)', E);
 const MT = { '/w/a.js': at(10), '/w/m.js': at(30), '/w/n.ipynb': at(13.5), '/w/r.js': at(18), '/w/e.js': at(22), '/w/d.js': at(24), '/w/old.js': at(25), '/w/s.js': at(26), '/w/t.js': at(40) };
-const J = Object.fromEntries(F.changedAfterOf(['/w/a.js', '/w/m.js', '/w/n.ipynb', '/w/r.js', '/w/e.js', '/w/d.js', '/w/old.js', '/w/t.js', '/w/gone.txt'], { mtimes: { ...MT, '/w/gone.txt': null }, edits: E }).map((x) => [x.path, `${x.state}${x.why ? ':' + x.why : ''}`]));
+const J = Object.fromEntries(F.changedAfterOf(['/w/a.js', '/w/m.js', '/w/n.ipynb', '/w/r.js', '/w/e.js', '/w/d.js', '/w/old.js', '/w/s.js', '/w/t.js', '/w/gone.txt'], { mtimes: { ...MT, '/w/gone.txt': null }, edits: E }).map((x) => [x.path, `${x.state}${x.why ? ':' + x.why : ''}`]));
 console.log(`    (judged: ${JSON.stringify(J)})`);
-ok(J['/w/a.js'] === 'same' && J['/w/n.ipynb'] === 'same' && J['/w/m.js'] === 'changed' && J['/w/r.js'] === 'unknown:refused-edit' && J['/w/old.js'] === 'unknown:edited-before' && J['/w/t.js'] === 'unknown:several-turns' && J['/w/gone.txt'] === 'unknown:no-edit-known',
-  '④ «same» ONLY for one edit in the target\'s own turn, never refused, of a file not edited before the target, its time at that edit; a write past it = changed; a refused edit, an edit before the target (its backup may be the target\'s), a later turn: could not be checked');
+ok(J['/w/a.js'] === 'same' && J['/w/n.ipynb'] === 'same' && J['/w/m.js'] === 'changed' && J['/w/r.js'] === 'unknown:refused-edit' && J['/w/old.js'] === 'unknown:edited-before' && J['/w/s.js'] === 'unknown:edited-before' && J['/w/t.js'] === 'unknown:several-turns' && J['/w/gone.txt'] === 'unknown:no-edit-known',
+  '④ «same» ONLY for one edit in the target\'s own turn, never refused, of a file not edited before the target, its time at that edit; a write past it = changed; a refused edit, an edit before the target (its backup may be the target\'s — a REFUSED one too, r1247), a later turn: could not be checked');
 ok(J['/w/e.js'] === 'unknown:several-edits' && J['/w/d.js'] === 'unknown:several-edits',
   '④ THE LAW (r1232 MUST 1): edit, a read, edit in ONE turn — a person\'s save may sit between — and edit, edit with nothing between: could not be checked, never «same» (the newest edit\'s time would hide the save)');
-const OLD = F.changedAfterOf(['/w/a.js'], { mtimes: { '/w/a.js': at(1) }, edits: E })[0], UNREAD = F.changedAfterOf(['/w/a.js'], { mtimes: {}, edits: E })[0], NOTGT = F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages(recs, { targetId: 'p-404' }) })[0];
+// r1247: A HELPER WORKED HERE — a call or a result of a tool that starts a helper, ANYWHERE in the records
+const helperAt = (where, name, kind = 'result') => {
+  const h = kind === 'call' ? { id: 'h1', role: 'tool', status: 'pending', content: [{ type: 'tool_call', toolCallId: 'c-h1', toolName: name, input: { prompt: 'look around' } }] } : tool('h1', name, { prompt: 'look around' }, 11);
+  const r = [...recs]; r.splice(where === 'before' ? 1 : where === 'after' ? recs.findIndex((m) => m.id === 'k1') + 1 : r.length, 0, h); return r;
+};
+const LIST = ['/w/a.js', '/w/n.ipynb', '/w/m.js'];
+const HJ = [['the agent tool, after the target', helperAt('after', 'Agent')], ['its older name, before the target', helperAt('before', 'Task')], ['the workflow tool, at the end', helperAt('end', 'Workflow')], ['a skill (one whose context is fork runs as a helper; the record does not say which)', helperAt('after', 'Skill')], ['an agent call still waiting for its result', helperAt('after', 'Agent', 'call')], ['a refused agent call', helperAt('after', 'Agent').map((m) => (m.id === 'h1' ? { ...m, content: [{ ...m.content[0], status: 'error' }] } : m))]]
+  .map(([n, r]) => [n, F.changedAfterOf(LIST, { mtimes: MT, edits: F.editsFromMessages(r, { targetId: 'p1', whole: true }) }).map((x) => `${x.state}:${x.why}`)]);
+console.log(`    (with a helper: ${JSON.stringify(HJ)})`);
+const NOHELP = F.changedAfterOf(LIST, { mtimes: MT, edits: F.editsFromMessages(helperAt('after', 'WebFetch'), { targetId: 'p1', whole: true }) }).map((x) => x.state);
+ok(HJ.every(([, j]) => j.length === LIST.length && j.every((x) => x === 'unknown:helper-worked')) && JSON.stringify(NOHELP) === '["same","same","changed"]' && JSON.stringify(F.HELPER_TOOLS) === '["Agent","Task","Workflow","Skill"]' && F.UNKNOWN_WHY.includes('helper-worked'),
+  `④ A HELPER WORKED HERE (r1247): ${HJ.map(([n]) => n).join(' · ')} — EVERY listed file could not be checked (a helper\'s own edits are not these records); a tool with a prompt that starts nothing (WebFetch) is no helper — by the tool\'s NAME`);
+const CUT = F.changedAfterOf(LIST, { mtimes: MT, edits: F.editsFromMessages(recs, { targetId: 'p1' }) }).map((x) => `${x.state}:${x.why}`);
+ok(CUT.every((x) => x === 'unknown:records-cut') && F.changedAfterOf(LIST, { mtimes: MT, edits: F.editsFromMessages(recs, { targetId: 'p1', whole: 'yes' }) }).every((x) => x.why === 'records-cut'),
+  '④ RECORDS THAT DO NOT REACH BACK TO THE CONVERSATION\'S START (r1247: the caller did not say `whole`, or said it in another word): every file could not be checked — an edit before the target may sit in what is missing', CUT);
+const waiting = (r) => [...r.slice(0, r.findIndex((m) => m.id === 'k1') + 1), { id: 'w1', role: 'tool', status: 'pending', content: [{ type: 'tool_call', toolCallId: 'c-w1', toolName: 'Edit', input: { file_path: '/w/a.js' } }] }, ...r.slice(r.findIndex((m) => m.id === 'k1') + 1)];
+const W1 = F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages(waiting(recs), { targetId: 'p1', whole: true }) })[0];
+const W2 = F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages(waiting(recs).filter((m) => m.id !== 'k1'), { targetId: 'p1', whole: true }) })[0];
+const W3 = F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages([recs[0], { id: 'w0', role: 'tool', status: 'error', content: [{ type: 'tool_call', toolCallId: 'c-w0', toolName: 'Write', input: { file_path: '/w/a.js' } }] }, ...recs.slice(1)], { targetId: 'p1', whole: true }) })[0];
+ok(W1.why === 'several-edits' && W3.why === 'edited-before' && W2.state === 'unknown' && W2.why === 'no-edit-known',
+  '④ ALSO CURED: an edit still WAITING for its result (a call with no result: the CLI may have written) counts as an edit — beside a finished one after the target: several edits; a call cut off BEFORE the target: edited before (a.js, edited once after, would read «same» without it); alone, nothing else: no edit with its time known (as before the cure)', { W1, W3, W2 });
+const OLD = F.changedAfterOf(['/w/a.js'], { mtimes: { '/w/a.js': at(1) }, edits: E })[0], UNREAD = F.changedAfterOf(['/w/a.js'], { mtimes: {}, edits: E })[0], NOTGT = F.changedAfterOf(['/w/a.js'], { mtimes: MT, edits: F.editsFromMessages(recs, { targetId: 'p-404', whole: true }) })[0];
 const OVER = F.changedAfterOf(Array.from({ length: F.MAX_FILES + 2 }, (_, k) => k ? `/w/x${k}.js` : '/w/a.js'), { mtimes: MT, edits: E });
 ok(OLD.why === 'older-time' && UNREAD.why === 'unreadable' && NOTGT.why === 'target-not-found' && OVER[0].state === 'same' && OVER.slice(F.MAX_FILES).every((x) => x.why === 'over-bound') && F.MAX_FILES === 64 && [OLD.why, UNREAD.why, NOTGT.why, 'over-bound', 'edited-before', 'several-edits'].every((w) => F.UNKNOWN_WHY.includes(w)),
   '④ a time well BEFORE the edit, a time not read, a target the records lack, a file past the 64 one confirm judges: could not be checked, each with its reason');
@@ -132,19 +160,24 @@ ok(F.sameDrawOf(drawn, { ...drawn, judged: [...drawn.judged] }) && !F.sameDrawOf
   '④ AT THE PRESS the dry run judged again must equal what the confirm drew — else changed-since (moved)');
 
 console.log('— ⑤ «both»');
-const o = (files) => F.outcomeOf(F.STEPS.both, { files, conversation: { ok: true } });
+const o = (files, cli = '2.1.322') => F.outcomeOf(F.STEPS.both, { files, conversation: { ok: true } }, { cli });
 const o1 = F.outcomeOf(F.STEPS.both, { files: { ok: true }, conversation: { ok: true } });
 const o2 = F.outcomeOf(F.STEPS.both, { files: { ok: true }, conversation: { ok: false } });
 ok(JSON.stringify(o1) === '{"done":["files","conversation"],"failed":null,"notTried":[],"maybePartial":false}' && JSON.stringify(o2) === '{"done":["files"],"failed":"conversation","notTried":[],"maybePartial":false}',
   '⑤ in order: the conversation failing after the files leaves the files said as done');
 const partial = [['no answer (a time-out)', { ok: false, reason: 'no-answer' }], ['words this door does not know', { ok: false, reason: 'cli-other', text: 'Something new' }], ['a failure mid-way', { ok: false, reason: 'failed', text: 'Failed to rewind: EACCES' }], ['a CLI that died mid-press', { ok: false, reason: 'no-answer', sent: true }]];
-const none = [['checkpoints off', { ok: false, reason: 'checkpoints-off', text: 'File rewinding is not enabled.' }], ['no checkpoint', { ok: false, reason: 'no-checkpoint' }], ['changed since (the door, before it sent)', { ok: false, reason: 'changed-since', sent: false }], ['a door refusal before anything was sent', { ok: false, reason: 'stopped', sent: false }], ['«No files were restored» (the CLI\'s own words)', { ok: false, reason: 'failed', text: 'Failed to rewind: No files were restored: 2 files failed' }]];
+const none = [['checkpoints off', { ok: false, reason: 'checkpoints-off', text: 'File rewinding is not enabled.' }], ['no checkpoint', { ok: false, reason: 'no-checkpoint' }], ['changed since (the door, before it sent)', { ok: false, reason: 'changed-since', sent: false }], ['a door refusal before anything was sent', { ok: false, reason: 'stopped', sent: false }], ['«No files were restored» (the CLI\'s own words, as 2.1.322 says them)', { ok: false, reason: 'failed', text: 'Failed to rewind: No files were restored: 2 files failed (backup missing, or the file could not be updated)' }]];
 ok(partial.every(([, r]) => o(r).maybePartial === true && o(r).failed === 'files' && JSON.stringify(o(r).notTried) === '["conversation"]') && none.every(([, r]) => o(r).maybePartial === false),
   `⑤ A FILES FAILURE (r1232 MUST 2) is «not known: some files may have been put back» — ${partial.map(([n]) => n).join(', ')} — except where nothing changed by construction: ${none.map(([n]) => n).join(', ')}`);
+const ALLF = none[none.length - 1][1];
+const notShape = [['the same words from a program not measured (2.1.399)', o(ALLF, '2.1.399')], ['no program named', o(ALLF, null)], ['the words not at the start', o({ ...ALLF, text: 'Failed to rewind: EACCES (No files were restored before this)' })], ['the words without the failed prefix', o({ ...ALLF, text: 'No files were restored: 2 files failed' })], ['the CLI\'s fallback words alone', o({ ...ALLF, text: 'Failed to rewind' })], ['the words without their own colon', o({ ...ALLF, text: 'Failed to rewind: No files were restored (some were)' })]];
+ok(notShape.every(([, r]) => r.maybePartial === true), `⑤ «No files were restored» ONLY in the measured shape and from the program measured (r1247) — else «some may have been put back»: ${notShape.map(([n]) => n).join(' · ')}`, notShape);
+ok(!!CAP && Object.entries(F.NONE_RESTORED).every(([v, w]) => { try { const c = JSON.parse(fs.readFileSync(path.join(REPO, `scripts/fixtures/claude-cli/${v}-rewind-files.json`), 'utf8')); return c.cli === v && c.words.failedPrefix === F.FAILED_PREFIX && String(c.pressReply.allFailed).includes(`«${w}:`); } catch { return false; } }),
+  '⑤ THE ORACLE: every program the words are matched for has its capture, and the capture holds those words (pressReply.allFailed) and the failed prefix', F.NONE_RESTORED);
 
 console.log('— red controls');
 const load = (from, to, tag) => M.load('src/rewind-files.js', anchored(SRC, from, to, `rewind-files: ${tag}`), tag);
-const judge1 = (mod, path) => mod.changedAfterOf([path], { mtimes: MT, edits: mod.editsFromMessages(recs, { targetId: 'p1' }) })[0].state;
+const judge1 = (mod, path, r = recs, whole = true) => mod.changedAfterOf([path], { mtimes: MT, edits: mod.editsFromMessages(r, { targetId: 'p1', whole }) })[0].state;
 const noCount = load("    if (e.count !== 1) return { path, state: 'unknown', why: 'several-edits' };\n", '', 'no-count-rule');
 ok(judge1(noCount, '/w/e.js') === 'same' && judge1(noCount, '/w/d.js') === 'same', 'RED CONTROL (no one-edit rule): edit-read-edit and edit-edit read «same» — a person\'s save between them lost');
 const noBefore = load("    if (Array.isArray(edits.before) && edits.before.includes(path)) return { path, state: 'unknown', why: 'edited-before' };\n", '', 'no-before-rule');
@@ -152,7 +185,7 @@ ok(judge1(noBefore, '/w/old.js') === 'same', 'RED CONTROL (no edited-before rule
 const noTurn = load("    if (e.turnsAfter > 0) return { path, state: 'unknown', why: 'several-turns' };\n", '', 'no-turn-rule');
 ok(judge1(noTurn, '/w/t.js') === 'same', 'RED CONTROL (no turn rule): an edit in a later turn reads «same»');
 const noRefused = load("    if (e.refused) return { path, state: 'unknown', why: 'refused-edit' };\n", '', 'no-refused-rule');
-ok(noRefused.changedAfterOf(['/w/r.js'], { mtimes: MT, edits: { ...noRefused.editsFromMessages(recs, { targetId: 'p1' }), byPath: { '/w/r.js': { at: at(18), count: 1, turnsAfter: 0, refused: true } } } })[0].state === 'same', 'RED CONTROL (no refused rule): a file whose edit was refused because it changed under the agent reads «same»');
+ok(noRefused.changedAfterOf(['/w/r.js'], { mtimes: MT, edits: { ...noRefused.editsFromMessages(recs, { targetId: 'p1', whole: true }), byPath: { '/w/r.js': { at: at(18), count: 1, turnsAfter: 0, refused: true } } } })[0].state === 'same', 'RED CONTROL (no refused rule): a file whose edit was refused because it changed under the agent reads «same»');
 const noHigh = load('    if (m > e.at + HIGH_SLACK_MS) return', '    if (false) return', 'no-high-check');
 ok(judge1(noHigh, '/w/m.js') === 'same', 'RED CONTROL (no write-after check): m.js written 18 s after the agent\'s one edit reads «same»');
 const noCheck = load("  return list.every((x) => x && x.state === 'same') ? 'both' : 'conversation';", "  return 'both';", 'default-no-check');
@@ -161,7 +194,20 @@ const swapped = load("both: Object.freeze(['files', 'conversation'])", "both: Ob
 ok(JSON.stringify(swapped.stepsOf('both')) === '["conversation","files"]', 'RED CONTROL (the other order): the control flips the order ① pins');
 const asEmpty = load('  const filesKnown = Array.isArray(raw) && list.length === raw.length;', '  const filesKnown = true;', 'unknown-list-as-empty');
 ok(JSON.stringify(asEmpty.choicesOf({ checkpoints: true, dry: asEmpty.filesAnswerOf({ canRewind: true, filesChanged: ['/w/a.js', { filePath: '/w/b' }] }, { dryRun: true }) })) === '["conversation","files","both"]', 'RED CONTROL (an unreadable list taken as read): the files choices are drawn over a file nobody named');
-const oneNamed = load("  const maybePartial = failed === 'files' && !(fr && (NO_CHANGE.includes(fr.reason) || fr.sent === false || /No files were restored/.test(String(fr.text || ''))));", "  const maybePartial = !!fr && fr.reason === 'failed';", 'only-the-named-failure');
+const oneNamed = load("  const maybePartial = failed === 'files' && !(fr && (NO_CHANGE.includes(fr.reason) || fr.sent === false || noneBack));", "  const maybePartial = !!fr && fr.reason === 'failed';", 'only-the-named-failure');
 ok(oneNamed.outcomeOf(F.STEPS.both, { files: { ok: false, reason: 'no-answer' } }).maybePartial === false, 'RED CONTROL (r1232 MUST 2\'s old rule: only the named failure is partial): a press with no answer reads «nothing put back»');
+const noHelper = load("    if (edits && edits.helper === true) return { path, state: 'unknown', why: 'helper-worked' };\n", '', 'no-helper-rule');
+ok(judge1(noHelper, '/w/a.js', helperAt('after', 'Agent')) === 'same', 'RED CONTROL (no helper rule, r1247): with an agent tool\'s result in the records, a.js reads «same»');
+const okBefore = load('      for (const b of blocks(m)) { const p = editOf(b); if (p) before.add(p); }', "      for (const b of blocks(m)) { const p = editOf(b); if (p && b.status !== 'error') before.add(p); }", 'before-only-when-ok');
+ok(judge1(okBefore, '/w/s.js') === 'same', 'RED CONTROL (edited-before only when it succeeded, r1247): s.js, refused before the target, reads «same»');
+const noWhole = load("    if (!edits || edits.whole !== true) return { path, state: 'unknown', why: 'records-cut' };\n", '', 'no-whole-rule');
+ok(judge1(noWhole, '/w/a.js', recs, false) === 'same', 'RED CONTROL (no whole-records rule, r1247): records the caller did not say reach back to the start judge a.js «same»');
+const beforeResults = load('      for (const b of blocks(m)) { const p = editOf(b); if (p) before.add(p); }', "      for (const b of blocks(m)) { const p = editOf(b); if (p && b.type === 'tool_result') before.add(p); }", 'before-results-only');
+ok(judge1(beforeResults, '/w/a.js', [recs[0], { id: 'w0', role: 'tool', status: 'error', content: [{ type: 'tool_call', toolCallId: 'c-w0', toolName: 'Write', input: { file_path: '/w/a.js' } }] }, ...recs.slice(1)]) === 'same', 'RED CONTROL (before the target, results only): a write cut off before the target (its call, no result) — a.js reads «same»');
+const noWaiting = load("  const isCall = (b) => !!b && (b.type === 'tool_result' || b.type === 'tool_call');", "  const isCall = (b) => !!b && b.type === 'tool_result';", 'waiting-call-not-read');
+ok(judge1(noWaiting, '/w/a.js', waiting(recs)) === 'same' && judge1(noWaiting, '/w/a.js', helperAt('after', 'Agent', 'call')) === 'same', 'RED CONTROL (a call waiting for its result not read): a second edit still waiting, and an agent call still waiting, leave a.js «same»');
+const anywhere = load("  const noneBack = typeof cli === 'string' && Object.prototype.hasOwnProperty.call(NONE_RESTORED, cli) && !!fr && typeof fr.text === 'string' && fr.text.startsWith(`${FAILED_PREFIX}: ${NONE_RESTORED[cli]}:`);", "  const noneBack = !!fr && /No files were restored/.test(String(fr.text || ''));", 'words-anywhere');
+ok(anywhere.outcomeOf(F.STEPS.both, { files: ALLF }, { cli: '2.1.399' }).maybePartial === false && anywhere.outcomeOf(F.STEPS.both, { files: { ...ALLF, text: 'Failed to rewind: EACCES (No files were restored before this)' } }, { cli: '2.1.322' }).maybePartial === false,
+  'RED CONTROL (the words matched anywhere, from any program — r1232\'s rule): an unmeasured program\'s words and words not at the start read «nothing put back»');
 
 report();
