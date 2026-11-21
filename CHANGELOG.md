@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - With hundreds of project folders, VibeSpace no longer pauses while it finds the history of each conversation it opens.
 - When an agent's own browser stops by itself, its live view now says why: it sat idle past its timeout, or it ended early for a reason VibeSpace does not know.
 - `vibespace-vault uses` keeps ended approvals across a restart and while the agent cannot use the entry, and says «used» for a one-time run past its hours.
+- On a paired machine with more than 500 project folders, the newest conversations now show in its list; they could be missing.
 
 ## 2.369.415 — 2026-11-21
 
