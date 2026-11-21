@@ -218,11 +218,12 @@ const ENV_NOT = Object.freeze([
   ...['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'NVM_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'CODEX_API_KEY'].map(N("the person's agent CLIs: their folders, their sign-ins", "the person's agent CLIs", (n) => (['ANTHROPIC_AUTH_TOKEN', 'CODEX_API_KEY'].includes(n) ? 'the agent CLIs' : null))),
 ]);
 const notRow = (k, not = ENV_NOT) => not.find((x) => x.name === k) || null;
-/** THE HANDED ENV, JUDGED (B-ba47 pick B, 主开发 r1139 — never the source's forms): every name of `env` that is NOT in
- *  `started` (what the handing process was itself started with) — a name it ADDED, by whatever road — and that is neither a
- *  row nor a named NOT. HOME and PATH are the re-home's own (built). Sorted. */
+/** THE HANDED ENV, JUDGED (B-ba47 pick B, 主开发 r1139 / r1156 — never the source's forms): every name of `env` that the handing
+ *  process ADDED to what it was itself started with (`started`) or CHANGED there (its value differs), by whatever road, and that
+ *  is neither a row nor a named NOT. HOME and PATH are the re-home's own (built). Sorted. */
 function unruledNames(env = {}, started = {}, { rows = ENV_ROWS, not = ENV_NOT } = {}) {
-  return Object.keys(env || {}).filter((k) => !Object.prototype.hasOwnProperty.call(started || {}, k) && k !== 'HOME' && k !== 'PATH' && !rowOf(k, rows) && !notRow(k, not)).sort();
+  const was = started || {};
+  return Object.keys(env || {}).filter((k) => (!Object.prototype.hasOwnProperty.call(was, k) || String(was[k]) !== String(env[k])) && k !== 'HOME' && k !== 'PATH' && !rowOf(k, rows) && !notRow(k, not)).sort();
 }
 const rowOf = (k, rows = ENV_ROWS) => rows.find((x) => x.name === k) || rows.filter((x) => x.prefix && k.startsWith(x.prefix)).sort((a, b) => b.prefix.length - a.prefix.length)[0] || null;
 /** THE THREE WAYS (主开发 01:18Z / 01:23Z): the absolute path `p` lands where the kernel walks it (going ON past a missing

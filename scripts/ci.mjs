@@ -2842,7 +2842,7 @@ const egressFileFor = (name, lane) => {
   if (!EGRESS_DIR) { EGRESS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-egress-')); process.once('exit', () => { try { fs.rmSync(EGRESS_DIR, { recursive: true, force: true }); } catch { } }); }
   const f = path.join(EGRESS_DIR, `${name}.${lane}.ndjson`); try { fs.rmSync(f, { force: true }); } catch { } return f;
 };
-export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null, egress = true } = {}) {
+export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null, egress = true, envOf = laneEnv } = {}) {   // envOf: the lane's base env (a seam: test-home-verdict drives the refusal through it)
   return new Promise((resolve) => {
     if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
       resolve({ ok: true, ms: 0, absent: true, lines: [`  ⊘ ${s.name} — SKIPPED: not present at ${shortSha(sha)} (this gate's table names it; the commit being gated does not contain it, so this run says nothing about it)`] });
@@ -2857,7 +2857,7 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
     try {
       // B-9dd0's remainder (主开发 r1134): every row is read, the heavy tier too (its own process and, through the reader, its node children)
       egressOn = !!egress && egressArgv().length > 0; egressFile = egressOn ? egressFileFor(s.name, lane) : '';
-      const env = { ...laneEnv(lane), VIBESPACE_SUITE_BUDGET_MS: String(budgetFor(s)) };
+      const env = { ...envOf(lane), VIBESPACE_SUITE_BUDGET_MS: String(budgetFor(s)) };
       if (hr.armed) env.VIBESPACE_SUITE_HANG_REPORT = hr.file; else delete env.VIBESPACE_SUITE_HANG_REPORT; // never an outer run's file
       // unread ON PURPOSE = an EMPTY value, never an absent one: the reader in a suite that runs this one (test-ci-gate's plants)
       // leaves a child whose env names another file, or none on purpose, to that runner (egress-sampler.cjs carry())
@@ -5296,7 +5296,9 @@ export function launchPath(pathStr, { mountinfo = '', gitExecPath = '', nodeDir 
   return { path: keep.join(':'), dropped, judgedMounts: !!String(mountinfo || '').trim() };
 }
 /** the detached tier's env: the caller's, with launchPath's PATH. The mountinfo / exec-path / dirs are injectable (test-ci-heavy-
- *  verdict §7b drives THIS function, so an emptied seam is red). */
+ *  verdict §7b drives THIS function, so an emptied seam is red). It may change the SEARCH PATH ONLY (B-ba47 pick B, 主开发 r1156):
+ *  the detached child is itself a runner, and it takes what it is handed here as what it was «started with» — a name added or
+ *  changed here would never meet runSuiteAsync's judge. */
 export function launchEnvOf(env, { mountinfo, gitExecPath, nodeDir = path.dirname(process.execPath), repoDir = repo } = {}) {
   if (mountinfo === undefined) { mountinfo = ''; try { mountinfo = fs.readFileSync('/proc/self/mountinfo', 'utf8'); } catch { } }
   if (gitExecPath === undefined) gitExecPath = env.GIT_EXEC_PATH || (spawnSync('git', ['--exec-path'], { env, encoding: 'utf8', timeout: 5000 }).stdout || '').trim();

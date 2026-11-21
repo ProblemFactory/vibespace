@@ -792,5 +792,38 @@ console.log('— a fenced real-program leg: the switch, a usable program, named 
     'both fenced suites take the ONE verdict, with the program named only by handedCliNamed (never the first candidate)');
 }
 
+// ── THE JUDGE, THE NAMED PATH, THE HAND-OFF DRIVEN (主开发 r1156) ──────────────────────────────────────────────────────────────
+console.log('— the judge reads CHANGED names too; the NAMED path itself; the one hand-off refuses, driven');
+{
+  // (1) a name the runner was started with and then CHANGES is judged like an added one; every name it changes today is ruled
+  const WAS = { HOME: '/home/u', XDG_RUNTIME_DIR: '/run/user/1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus', VIBESPACE_CI_RUN: 'ci-outer', VIBESPACE_SUITE_BUDGET_MS: '1', PERSON_WORD: 'kept' };
+  const today = HV.unruledNames({ ...WAS, HOME: '/tmp/l/home', XDG_RUNTIME_DIR: '/tmp/l/run', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/l/run/bus', VIBESPACE_CI_RUN: 'ci-fast-pid1@2', VIBESPACE_SUITE_BUDGET_MS: '300000' }, WAS);
+  const changed = HV.unruledNames({ ...WAS, PERSON_WORD: 'changed by the runner' }, WAS);
+  ok(today.length === 0 && changed.join() === 'PERSON_WORD', 'a name the runner CHANGES is judged: every one it changes today (the lane home, its runtime folder and bus, the run id, the budget) is ruled; an unruled one it changes is red by name', { today, changed });
+  // (2) «named and not found» reads the NAMED path itself: another usable candidate never stands in for it
+  const usable = (p) => (p === '/usr/local/bin/claude' || p === '/opt/named/claude-ok' ? p : null);
+  const pick = (o) => SM.fencedProgram({ usable, ...o });
+  const namedGone = pick({ named: '/opt/ci/bin/claude', candidates: ['/usr/local/bin/claude'] });
+  ok(namedGone === null && SM.fencedVerdict({ named: '/opt/ci/bin/claude', found: namedGone }).act === 'red'
+    && pick({ named: '/opt/named/claude-ok', candidates: ['/usr/local/bin/claude'] }) === '/opt/named/claude-ok'
+    && pick({ named: null, candidates: ['/nowhere/claude', '/usr/local/bin/claude'] }) === '/usr/local/bin/claude' && pick({ off: true, named: '/opt/named/claude-ok' }) === null,
+    'the NAMED path itself decides: named and unusable is RED even beside a usable candidate; named and usable runs THAT file; not named takes the first usable candidate; the switch takes none');
+  const both = ['test-claude-steer-chrome.mjs', 'test-claude-wrapper-queue.mjs'].map((f) => fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'));
+  ok(both.every((t) => /fencedProgram\(\{ off: NO_REAL_CLI, named: claudeNamed, candidates: claudeCands, usable: usableClaude \}\)/.test(t)), 'both fenced suites pick their binary through the ONE fencedProgram');
+  // (3) THE HAND-OFF, DRIVEN: scripts/ci.mjs runSuiteAsync with a stand-in suite and an unruled name — the refused line comes
+  // back and nothing is spawned; the same stand-in handed nothing new runs
+  const CI = await import(pathToFileURL(path.join(REPO, 'scripts/ci.mjs')).href);
+  const tree = path.join(DIR, 'handoff-tree'), marker = path.join(DIR, 'handoff-ran');
+  fs.mkdirSync(path.join(tree, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(tree, 'scripts', 'test-hv-handoff.mjs'), `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'ran'); console.log('ALL PASS (1)');\n`);
+  const row = { name: 'test-hv-handoff', tier: 'heavy', why: 'a stand-in suite of test-home-verdict' };
+  const refused = await CI.runSuiteAsync(row, { root: tree, lane: 1, egress: false, envOf: () => ({ ...process.env, VIBESPACE_HANDOFF_UNRULED: 'x' }) });
+  const ranBefore = fs.existsSync(marker);
+  const plain = await CI.runSuiteAsync(row, { root: tree, lane: 1, egress: false, envOf: () => ({ ...process.env }) });
+  const said = (refused.lines || []).join('\n');
+  ok(refused.ok === false && /✗ test-hv-handoff REFUSED/.test(said) && said.includes('VIBESPACE_HANDOFF_UNRULED') && !ranBefore && plain.ok === true && fs.existsSync(marker),
+    'the ONE hand-off, driven: a stand-in suite handed an unruled name is REFUSED by name and never spawned; the same stand-in handed nothing new runs', { refused: said.slice(0, 300), plainOk: plain.ok, ranBefore });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

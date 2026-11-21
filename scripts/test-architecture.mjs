@@ -8506,8 +8506,10 @@ await section(async () => {
     `§113 THE ENVIRONMENT IS BUILT, its table held both ways: every name a suite reads is carried (${HVm.ENV_ROWS.length} rows), not carried by name (${HVm.ENV_NOT.length}), set first, or one of the ${knobsFile.length} suites' own knobs (scripts/suite-env-knobs.json, derived) — and every row is read or names its program${missing.length ? ' — NEW knobs (regenerate the list or give each a row): ' + missing.join(', ') : ''}${stale.length ? ' — STALE knobs: ' + stale.join(', ') : ''}${envc.unread.length ? ' — rows nothing reads: ' + envc.unread.join(', ') : ''}`);
   // (e5) EVERY NAME THE RUNNER, THE WORKFLOW FILE OR THE KIT HANDS A SUITE IS A ROW OR A NAMED NOT (主开发 r1083 cure 1; r1139's
   // shape). THE RUNNER: its HANDED ENV is judged where it hands it — scripts/ci.mjs runSuiteAsync refuses a suite by name when a
-  // name it ADDED to what it was started with is neither (src/home-verdict.js unruledNames; test-home-verdict drives the three
-  // forms) — never its source's forms, which do not converge. THE WORKFLOW (read as data: workflow / job env, each step that RUNS
+  // name it ADDED to what it was started with, or CHANGED there, is neither (src/home-verdict.js unruledNames; test-home-verdict
+  // drives the three forms and the hand-off itself) — never its source's forms, which do not converge. ITS SCOPE: what the runner
+  // was STARTED WITH is not judged there — the push hook's and the cut script's own names reach it as «started with» (and the
+  // detached heavy child takes what launchEnvOf hands it, the search path alone changed, as its own «started with»). THE WORKFLOW (read as data: workflow / job env, each step that RUNS
   // a suite, and every `echo "N=…" >> $GITHUB_ENV`, which reaches every later step) and THE KIT (outside the tree: KIT_HANDED, a
   // hand list held to the kit's own files where they can be read) are read here. HOME and PATH are the re-home's own (built).
   const handed113 = new Map(), addH = (n, at) => { if (!handed113.has(n)) handed113.set(n, at); };

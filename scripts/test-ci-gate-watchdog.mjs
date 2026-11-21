@@ -105,8 +105,9 @@ console.log('\n§12 a suite\'s own clock fires before the gate\'s and names its 
     'CONTROL (RED): a cap that cannot fire before the gate (900 s on a 900 s row), a child-kill timer at 590 s on a 600 s row');
 
   // WIRING: the budget is ONE number (ci.mjs budgetFor) told to the child, with the report's path when the tier arms one
+  // (the lane's base env is runSuiteAsync's envOf, laneEnv by default: test-home-verdict drives the hand-off's refusal through it)
   const CISRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
-  ok(CISRC.includes(`const env = { ...laneEnv(lane), ${WD.SUITE_BUDGET_ENV}: String(budgetFor(s)) };`) && CISRC.includes(`if (hr.armed) env.${WD.SUITE_HANG_ENV} = hr.file; else delete env.${WD.SUITE_HANG_ENV};`) && /\{ cwd: root, stdio: \['ignore', 'pipe', 'pipe'\], env \}\);/.test(CISRC),
+  ok(CISRC.includes(`const env = { ...envOf(lane), ${WD.SUITE_BUDGET_ENV}: String(budgetFor(s)) };`) && /\benvOf = laneEnv \}/.test(CISRC) && CISRC.includes(`if (hr.armed) env.${WD.SUITE_HANG_ENV} = hr.file; else delete env.${WD.SUITE_HANG_ENV};`) && /\{ cwd: root, stdio: \['ignore', 'pipe', 'pipe'\], env \}\);/.test(CISRC),
     `WIRING: runSuiteAsync tells every suite ${WD.SUITE_BUDGET_ENV} (budgetFor) and ${WD.SUITE_HANG_ENV} (or removes an outer run's)`);
 
   // REAL: a planted hang through the gate's own runner — the NEW clock and rel281's OLD one, at once, under a 4 s row

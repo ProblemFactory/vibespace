@@ -514,6 +514,15 @@ export function handedCliNamed(cli) {
   if (!isRowCaller(ME, REAL_CLI_ALLOW)) throw new Error(`handedCliNamed(): ${path.basename(process.argv[1] || '')} is not a row of REAL_CLI_ALLOW (scripts/scratch.mjs) as a file of this checkout`);
   return HANDED[`VS_${String(cli).toUpperCase().replace(/-/g, '_')}_BIN`] || null;   // the key as HANDED spells it
 }
+/** PURE — WHICH binary a fenced leg runs (主开发 r1156): the NAMED path ITSELF when the run names one (another usable candidate
+ *  never stands in for it: named and unusable is «named and not found»), else the first usable candidate; none under the
+ *  switch. `usable(p)` → the resolved usable file, or null. */
+export function fencedProgram({ off = false, named = null, candidates = [], usable = () => null } = {}) {
+  if (off) return null;
+  if (named) return usable(named) || null;
+  for (const c of candidates || []) { const r = usable(c); if (r) return r; }
+  return null;
+}
 /** PURE — a FENCED real-program leg's verdict (主开发 r1083 / r1139), ONE for every fenced suite: the lanes' switch (VS_NO_REAL_CLI)
  *  ⇒ a counted skip; a usable program ⇒ run; the run NAMES its program (the handed variable) and it is not there ⇒ RED; not
  *  named and not found ⇒ a counted skip said by name. Never a pass for a leg that did not run. */
