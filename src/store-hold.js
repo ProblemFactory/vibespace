@@ -61,7 +61,7 @@ function unreadError(file, held, what) {
  *   onLift    (value, was) — the hold lifted: the caller's lift is a CHANGE (its hooks run, its pages are told «read again»)
  *   onSaid    (held) — the hold outlasted the silent rungs: the caller says it (the banner, an episode's notice)
  */
-function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, onUnsaved = null, onSaved = null, onOwedRefused = null, schedule = null, writer = null, onLanded = null } = {}) {
+function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, onUnsaved = null, onSaved = null, onOwedRefused = null, schedule = null, writer = null, onLanded = null, liftWaits = null } = {}) {
   if (!file) throw new Error('store-hold: file is required');
   /** the store writer (B-0248 (c)) — a function (the process's writer, made at the first use) or the writer itself; null: at the call */
   const W = () => (typeof writer === 'function' ? writer() : writer);
@@ -289,6 +289,9 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   }
   function landed() {
     if (!owed) return;
+    // B-0248 (r1353's cure, its read's MUST): the caller's own change past its bound still waits to be handed (`liftWaits`) — this
+    // landing is an OLDER write's: the mark stays (a ladder's own landed bytes are let go: the next change goes to the writer)
+    if (liftWaits && liftWaits()) { if (owed.produce) { owed.produce = null; if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; } } return; }
     const was = owed; owed = null;
     if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; }
     log.warn?.(`[store-hold] ${path.basename(file)} is written again — the change kept since ${new Date(was.since).toISOString()} landed`);

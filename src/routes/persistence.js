@@ -158,6 +158,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // change creates it exclusively. A failed RE-read never replaces the copy in memory (there is no re-read: the copy is the truth).
   let _layoutsRead = false;
   const LAYOUTS_EMPTY = () => ({ current: null, autoSave: null, saved: {}, customGrids: [] });
+  let _doorsWaiting = 0;   // doors past their bound whose change still waits to be handed: no landing lifts their mark (the cure's read, its MUST)
   /** an owed write's words by its code (the second fresh read's should): a write only QUEUED past the writer's bound is said as queued */
   const unsavedHow = (o) => (o && o.code === 'queued' ? 'its write is still queued behind the storage' : (o && o.code) || 'write failed');
   const layoutsHold = SH.create({
@@ -165,6 +166,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
     onLift: () => layoutsAgain('its hold lifted'),
     writer: storeW,   // B-0248 (a) (lane bl-loop-b): the desktops' write is the STORE WRITER's — flushLayouts' owe
+    liftWaits: () => _doorsWaiting > 0,   // a door's change past its bound not handed yet: a landing now is an OLDER write's — the mark stays
     // B-225b's SECOND HALF (主开发 r662): a write the storage refused is OWED — kept, retried on the hold's own ladder; past the silent
     // rungs EVERY page is told (one client's failing save is every client's fact), lifted when a write lands
     onUnsaved: (u) => { console.warn(`[layouts] ${u.file} cannot be written (${unsavedHow(u)}) since ${new Date(u.since).toISOString()} — the desktops in memory are NOT on disk; written again by the ladder`); storeWord('store-unsaved', u); },
@@ -228,25 +230,40 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // moves while a point is in flight on a stalled storage) share ONE waiting flush — the newest bytes take the older's place, every
   // answer told at its landing; so a stalled point holds one copy of the desktops for each mark, never one for each flush
   let _layoutsWaiting = null;   // the newest flush still waiting for its points: { upTo, gen, doc, text, press, stop, answers }
+  let _autosaveWaiting = false;   // ONE durable wait for the autosaves nobody waits on (below)
   // (4) A DOOR'S ANSWER WITHIN ITS BOUND (主开发 r1353): a flush that carries an answer (both restores, the import) is answered within
   // the writer's own bound (its durable bound: 60 s, or the one a writer states) — past it «not taken in time»: the store marked owed
   // and QUEUED first (its words, at once for a press), then the answer false. The flush is KEPT: it still lands after its point, and
   // that landing lifts the mark (the hold's onSaved: every page told it landed). Unref'd: a stop never waits on it
-  const doorBoundMs = () => { const w = storeW(); return w && Number.isFinite(w.durableMs) && w.durableMs > 0 ? w.durableMs : 60000; };
-  function boundedAnswer(answer, press) {
-    let told = false;
-    const t = setTimeout(() => {
-      if (told) return; told = true;
-      try { layoutsHold.owedQueued({ press }); } catch { /* the hold's */ }
-      try { answer(false); } catch (e) { console.warn('[layouts] a flush answer failed:', (e && e.message) || e); }
-    }, doorBoundMs());
+  const boundMs = () => { const w = storeW(); return w && Number.isFinite(w.durableMs) && w.durableMs > 0 ? w.durableMs : 60000; };
+  /** THE ONE BOUND's clock: the writer's own (`onBound(fn, what)` — a suite's stand-in fires it by hand: an injected clock), else a
+   *  timer of the writer's bound, unref'd (a stop never waits on it) → its cancel */
+  function onBound(fn, what) {
+    const w = storeW();
+    if (w && typeof w.onBound === 'function') return w.onBound(fn, what);
+    const t = setTimeout(fn, boundMs());
     if (t && typeof t.unref === 'function') t.unref();
-    return (ok) => { if (told) return; told = true; clearTimeout(t); answer(ok); };
+    return () => clearTimeout(t);
+  }
+  function boundedAnswer(answer, press, gen) {
+    let told = false, waiting = false, handed = false;
+    const cancel = onBound(() => {
+      if (told) return; told = true;
+      // a change a read again WHOLE dropped meanwhile is owed by nobody: answered false unmarked — its door says «dropped» (409)
+      if (gen === _layoutsGen) {
+        try { layoutsHold.owedQueued({ press }); } catch { /* the hold's */ }
+        if (!handed) { waiting = true; _doorsWaiting++; }   // until its flush is handed, no landing lifts the mark (an older write's)
+      }
+      try { answer(false); } catch (e) { console.warn('[layouts] a flush answer failed:', (e && e.message) || e); }
+    }, 'door');
+    const once = (ok) => { if (told) return; told = true; cancel(); answer(ok); };
+    once.handed = () => { handed = true; if (waiting) { waiting = false; _doorsWaiting--; } };   // landLayouts, on every road, BEFORE its owe
+    return once;
   }
   function flushLayouts({ press = false, stop = false } = {}, answer = null) {
     if (_layoutsSaveTimer) { clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = null; }
     if (stop) _layoutsStopping = true;   // (5): from here a point's write tried in the exit's pass hands the desktops in the round after it
-    if (answer) answer = boundedAnswer(answer, press);
+    if (answer) answer = boundedAnswer(answer, press, _layoutsGen);
     // THE BYTES ARE MADE NOW (the fresh read's MUST): the desktops as they stand at THIS flush — every rollback point handed so far
     // preserves an older state, and lands before them; a point made after this flush is a LATER change's, and the flush that writes
     // past it waits for it in its turn (the cache is edited IN PLACE by the socket's apply: bytes made late would hold that change)
@@ -262,13 +279,20 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   /** a flush whose points have landed: its desktops to the hold's ONE write (the store writer's road), every answer told at the landing */
   function landLayouts(f) {
     const done = (ok) => { for (const a of f.answers) { try { a(ok); } catch (e) { console.warn('[layouts] a flush answer failed:', (e && e.message) || e); } } };
+    for (const a of f.answers) if (a && typeof a.handed === 'function') a.handed();   // a door past its bound: its change is handed now (or ended)
     if (f.gen !== _layoutsGen) return done(false);   // read again WHOLE meanwhile (a file appeared, a hold lifted): this change was not made
     if (!f.doc) return done(true);
     try { layoutsHold.owe(f.doc, { name: 'layouts.write', bytes: () => f.text }); }
     catch (e) { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); return done(false); }   // a refusal BY NAME (held, not read, appeared): nothing written
     // (a write the STORAGE refuses is never thrown here: a store NOT THERE whose exclusive create is refused is KEPT on the hold's own
     // ladder by its owe — B-225b's second half — and the answer below reads it as owed: not on disk, said at once for a press)
-    if (!f.answers.length && !f.stop) return;   // (the round's small) an autosave nobody waits on keeps no waiter: its landing is the hold's onWritten
+    if (!f.answers.length && !f.stop) {   // an autosave nobody waits on: ONE durable wait at a time (never one a flush) — at its bound the store
+      // is owed «queued», silently and dated, so the stop's journal line names the first change not on disk (the cure's read, its small)
+      if (_autosaveWaiting) return;
+      _autosaveWaiting = true;
+      layoutsHold.after(() => { _autosaveWaiting = false; });
+      return;
+    }
     layoutsHold.after((landed) => {
       if (!landed && f.stop) { const o = layoutsHold.owed(); console.error(`[layouts] layouts.json could NOT be written at the stop (${unsavedHow(o)}) — the desktops changed since ${o ? new Date(o.since).toISOString() : 'this flush'} are not on disk: the next start reads the older file`); }
       done(landed);
@@ -463,22 +487,34 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
    *  one only still QUEUED past the writer's bound is LATE: `late()` hands the desktops that waited for it, and it is waited for
    *  again — it lands when it can, its header after it. Once the writer is exiting nothing is waited for again (its last pass is the
    *  last write: after it a durable answers at once) */
-  function handPoint(p, done, late = () => { }) {
+  function handPoint(p, done, late) {
     const w = storeW();
     let point = p.pointText, head = p.metaText;
-    const exiting = () => _layoutsStopping || (typeof w.exitStartedAt === 'function' && w.exitStartedAt() != null);
+    // ONE BOUND PER POINT (the cure's read, its should): the point AND its header, counted from the hand-off — the header never gets a
+    // fresh bound of its own (two bounds would hold the desktops twice as long); past it the point is late
+    const unbound = onBound(() => late(), 'point');
+    const end = (ok) => { unbound(); done(ok); };
     const settle = (file, ok, then) => {
       if (_layoutsStopping) late();   // (5) AT A STOP: its write was tried in the exit's pass, landed or not — the desktops go in the round after it
       if (ok) { then(); return; }
       const why = w.whyNotDurable ? w.whyNotDurable(file) : null;
-      if (why && why.why === 'queued' && !exiting()) { late(); w.durable(file, { answer: (ok2) => settle(file, ok2, then) }); return; }
+      // only QUEUED past the writer's bound: late, and waited for again — unless the writer answers «not on disk» AT ONCE (its exit's
+      // last pass is over: nothing writes it any more). Only the hub's stop flush means exiting — the signal's note (exitStartedAt)
+      // comes earlier, while the writer still writes (the cure's read, its should)
+      if (why && why.why === 'queued' && !_layoutsStopping) {
+        late();
+        let inCall = true, overAtOnce = false;
+        w.durable(file, { answer: (ok2) => { if (inCall && !ok2) { overAtOnce = true; return; } settle(file, ok2, then); } });
+        inCall = false;
+        if (!overAtOnce) return;
+      }
       try { w.forget(file); } catch { /* the writer's */ }
-      pointFailed(why); done(false);
+      pointFailed(why); end(false);
     };
     w.dirty(p.pointFile, { name: 'layout-points.write', rank: 0, urgent: true, makeDir: true, produce: () => point, onWritten: (ok) => { if (ok) point = null; } });
     w.durable(p.pointFile, { answer: (ok) => settle(p.pointFile, ok, () => {
       w.dirty(p.metaFile, { name: 'layout-points.write', rank: 0, urgent: true, makeDir: true, produce: () => head, onWritten: (ok2) => { if (ok2) head = null; } });
-      w.durable(p.metaFile, { answer: (ok2) => settle(p.metaFile, ok2, () => done(true)) });
+      w.durable(p.metaFile, { answer: (ok2) => settle(p.metaFile, ok2, () => end(true)) });
     }) });
   }
   /** never silent: the UI asserts this protection exists (said once a process, as the release's job said it) */
