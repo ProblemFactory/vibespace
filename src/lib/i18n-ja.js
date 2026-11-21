@@ -14806,5 +14806,6 @@ export default {
   "Other ({reason})": "その他（{reason}）",
   "This browser engine does not say it reads a profile's time zone, language and location — update the browser plugin. The start is refused so the browser never runs in another time zone than the profile says.": "このブラウザーエンジンは、プロファイルのタイムゾーン・言語・位置を読み込むと宣言していません — ブラウザープラグインを更新してください。プロファイルと違うタイムゾーンで動かないよう、起動は拒否されました。",
   "This browser build cannot set or block the location yet — the kernel update brings it. Set the location to «This machine's» to start it now.": "このブラウザーのビルドはまだ位置の設定やブロックができません — カーネルの更新で対応します。今すぐ起動するには、位置を「このマシンのもの」にしてください。",
-  "The browser engine refused this profile's time zone, language or location.": "ブラウザーエンジンが、このプロファイルのタイムゾーン・言語・位置を拒否しました。",
+  "The browser engine refused this profile's time zone, language or location — set that setting to «This machine's», or update the browser plugin.": "ブラウザーエンジンが、このプロファイルのタイムゾーン・言語・位置を拒否しました — その設定を「このマシンのもの」にするか、ブラウザープラグインを更新してください。",
+  "The browser engine said its browser would start with another time zone, language or location than this profile says — the start was refused. Update the browser plugin, or set that setting to «This machine's».": "ブラウザーエンジンは、このプロファイルと違うタイムゾーン・言語・位置でブラウザーを起動すると答えました — 起動は拒否されました。ブラウザープラグインを更新するか、その設定を「このマシンのもの」にしてください。",
 };

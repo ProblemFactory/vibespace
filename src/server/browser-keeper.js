@@ -1566,6 +1566,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const placeHolds = new Map(); // lane fleet-plugin-catalog r2 (N3): profile id → its start's hold on its engine's kernel place
   const dropPlaceHold = (pid) => { const r = placeHolds.get(pid); if (r) { placeHolds.delete(pid); try { r(); } catch { /* released */ } } };
   async function launchEngineOf(p, c) {
+    // B-9584 U2a (主开发 r745 / r771): A PROFILE'S OWN ENVIRONMENT on an engine — resolved ONCE (src/browser-environment.js, the
+    // contract) and handed beside the exit as the hand-over's own object (`environment`; absent for a profile that sets nothing: its
+    // body is the release's, byte for byte). A profile that SETS anything starts on an engine only when the engine STATES that it
+    // reads it (its manifest's capabilities.browserEngine) — else refused by name FIRST (r991: before a place hold, a probe or a
+    // first-use kernel download), never a browser in another time zone than the profile says
+    const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
+    const engLabel = (() => { try { const r = engs().rows().find((x) => x && x.id === c.id); return String((r && r.label) || c.id).slice(0, 80); } catch { return String(c.id).slice(0, 80); } })();
+    if (p.environment && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id))) throw namedError('browser_engine_environment_unread', `${engLabel} does not state that it reads a profile's time zone, language and location — update the browser plugin; this profile's start is refused, never run in another time zone than the profile says`, { engine: c.id });
     // lane fleet-plugin-catalog: a kernel that waited beside its place (downloaded while a browser ran the previous one) takes it
     // NOW when no browser runs the previous one — this start is «the next browser start»
     // round 2 (N3): then THIS start HOLDS the place until its spawn (released when the start settles — placeHolds) — no landing swaps the
@@ -1613,16 +1621,17 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }
     // the exit check (the owner 2026-11-17): the profile's KEPT exit rides resolve-launch as `egress` {publicIp, country, timezone,
     // checkedAt, source} — the names settled with the plugin's conversation; absent when none is kept. NO request is made here.
-    // B-9584 U2a (主开发 r745 / r771): A PROFILE'S OWN ENVIRONMENT on an engine — resolved ONCE (src/browser-environment.js, the
-    // contract) and handed beside the exit as the hand-over's own object (`environment`; absent for a profile that sets nothing: its
-    // body is the release's, byte for byte). A profile that SETS anything starts on an engine only when the engine STATES that it
-    // reads it (its manifest's capabilities.browserEngine) — else refused by name BEFORE anything starts: never a browser in
-    // another time zone than the profile says
-    const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
-    if (p.environment && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id))) throw namedError('browser_engine_environment_unread', `${String(engine.label || c.id).slice(0, 80)} does not state that it reads a profile's time zone, language and location — update the browser plugin; this profile's start is refused, never run in another time zone than the profile says`, { engine: c.id });
     const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}), ...(p.egress && typeof p.egress === 'object' ? { egress: egressHandOf(p.egress) } : {}), ...(envR.told ? { environment: envR.told } : {}) });
     // a refusal of the profile's ENVIRONMENT is no missing build (no mark, no For-you item of a build): said by its own name
     if (!lo.ok) { if (!['browser_engine_unanswered', 'browser_engine_location_unsupported', 'browser_engine_environment_refused'].includes(lo.code)) noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id, ...(lo.failed ? { failed: lo.failed } : {}) }); }
+    // r991 MUST 1: «confirmed» means the echo EQUALS what was told — each of the three, the location as its word. A difference refuses
+    // the start by name HERE, before the wrapper and the exit are built (nothing has started: the reply only names the program), naming
+    // the setting by its word (never a place); no build is marked missing for it
+    if (p.environment && lo.launch.applied) {
+      const off = ENG.echoMismatch(envR.told, lo.launch.applied);
+      const WORD = { timezone: 'time zone', language: 'language', location: 'location' };
+      if (off.length) throw namedError('browser_engine_environment_mismatch', `${engLabel} answered that its browser would start with another ${off.map((k) => WORD[k]).join(' and ')} than this profile says — the start is refused; update the browser plugin, or set ${off.length > 1 ? 'those settings' : 'that setting'} to «This machine's»`, { engine: c.id, settings: off });
+    }
     if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(c)} answers again`); } // the engine by its id (its label is the plugin's text)
     // lane engine-spi-egress: an engine that must stay inside a list is WRAPPED — THIS profile's allowlisting proxy (the keeper's,
     // its list = the engine's reserved row, read per request); one that cannot listen refuses the launch by name (egress_proxy_missing)

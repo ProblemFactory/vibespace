@@ -428,10 +428,19 @@ function fnv1a(str, seed) {
  *  capabilities, agent tools, routes). A manifest that later grows a
  *  capability hashes differently ⇒ the loader disables it and re-prompts.
  *  Not a security primitive — a collision merely skips a re-prompt. */
+/** B-9584 U2a cure (主开发 r991 MUST 2): the capabilities CONSENT covers — `browserEngine` (the words an engine states it reads) is OUTSIDE:
+ *  it grants nothing (an engine already runs the person's browser and already receives the exit), and the release's validator dropped
+ *  it, so a plugin that declares it was consented without it — inside, its unchanged manifest would lose its trust at this update to a
+ *  dialog that shows nothing new. */
+function consentCapabilities(caps) {
+  if (!caps || typeof caps !== 'object') return {};
+  const { browserEngine, ...rest } = caps;   // eslint-disable-line no-unused-vars
+  return rest;
+}
 function capabilitiesHash(m) {
   if (!m) return null;
   const subject = canonical({
-    client: m.client || 'none', server: !!m.server, capabilities: m.capabilities || {},
+    client: m.client || 'none', server: !!m.server, capabilities: consentCapabilities(m.capabilities),
     agentTools: (m.contributes?.agentTools || []).map((t) => t.name).sort(), routes: !!m.contributes?.routes,
     ...(contributesBrowserEngine(m) ? { browserEngine: true } : {}), // lane engine-plugin: named only when true — every hash before it stays the same
     ...(egressRowDeclared(m) ? { egressAllowlist: true } : {}), // lane engine-spi-egress: the same — a version that drops the site list row drifts (re-enable to accept it)

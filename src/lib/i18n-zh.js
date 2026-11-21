@@ -14807,5 +14807,6 @@ export default {
   "Other ({reason})": "其他（{reason}）",
   "This browser engine does not say it reads a profile's time zone, language and location — update the browser plugin. The start is refused so the browser never runs in another time zone than the profile says.": "这个浏览器引擎没有声明它会读取配置的时区、语言和位置——请更新浏览器插件。为了不让浏览器以与配置不同的时区运行，这次启动被拒绝了。",
   "This browser build cannot set or block the location yet — the kernel update brings it. Set the location to «This machine's» to start it now.": "这个浏览器版本还不能设置或屏蔽位置——内核更新会带来这个功能。把位置设为「这台机器的」即可现在启动。",
-  "The browser engine refused this profile's time zone, language or location.": "浏览器引擎拒绝了这个配置的时区、语言或位置。",
+  "The browser engine refused this profile's time zone, language or location — set that setting to «This machine's», or update the browser plugin.": "浏览器引擎拒绝了这个配置的时区、语言或位置——请把该设置改为「这台机器的」，或更新浏览器插件。",
+  "The browser engine said its browser would start with another time zone, language or location than this profile says — the start was refused. Update the browser plugin, or set that setting to «This machine's».": "浏览器引擎表示它的浏览器会以与这个配置不同的时区、语言或位置启动——启动已被拒绝。请更新浏览器插件，或把该设置改为「这台机器的」。",
 };

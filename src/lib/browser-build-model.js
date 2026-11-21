@@ -431,7 +431,8 @@ export function buildRefusalWords(r, t) {
     // B-9584 U2a: a profile's own environment on an engine
     case 'browser_engine_environment_unread': return t(i18nKey("This browser engine does not say it reads a profile's time zone, language and location — update the browser plugin. The start is refused so the browser never runs in another time zone than the profile says."));
     case 'browser_engine_location_unsupported': return t(i18nKey("This browser build cannot set or block the location yet — the kernel update brings it. Set the location to «This machine's» to start it now."));
-    case 'browser_engine_environment_refused': return t(i18nKey("The browser engine refused this profile's time zone, language or location."));
+    case 'browser_engine_environment_refused': return t(i18nKey("The browser engine refused this profile's time zone, language or location — set that setting to «This machine's», or update the browser plugin."));
+    case 'browser_engine_environment_mismatch': return t(i18nKey("The browser engine said its browser would start with another time zone, language or location than this profile says — the start was refused. Update the browser plugin, or set that setting to «This machine's»."));
     case 'engine_kernel_landing': return t(i18nKey('The browser kernel is being replaced — try again in a moment.')); // lane fleet-plugin-catalog r5: a start refused beside a half-landed kernel
     default: return null;
   }
