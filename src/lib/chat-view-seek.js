@@ -475,6 +475,14 @@ export function installChatSeek(ChatView) {
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 1100);
     const list = this._messageList;
     this._trace?.('landStable', { st: Math.round(list.scrollTop), sh: list.scrollHeight });
+    // THE HOLD LETS GO AT THE READER'S OWN ACT SINCE THIS LANDING (r1175: it had no stop — a person who scrolled within a
+    // second of a jump was put back on its target by the frames and the three re-centres below): the needs card put-back's
+    // stop (_navigatedSince: a wheel, a touch, a paging key, a navigation, a search reveal), and a press on the list's
+    // scrollbar (`_gutterPressAt`, or one held now: a drag's scrolls are not stamped while the guard above stands). The
+    // landing itself (the first centring, in this task) always runs; once let go, the hold stays let go.
+    const since = Date.now();
+    let gone = false;
+    const letGo = () => gone || (gone = !!this._disposed || !!this._pointerDownOnScrollbar || (this._gutterPressAt || 0) > since || !!this._navigatedSince?.(since));
     const center = () => {
       if (!el.isConnected) return;
       const lr = list.getBoundingClientRect();
@@ -486,12 +494,12 @@ export function installChatSeek(ChatView) {
       list.scrollTop += rc.top - lr.top - (fit ? Math.max(0, (lr.height - rc.height) / 2) : lr.height / 2);
     };
     let n = 0;
-    const step = () => { center(); if (++n < 12) requestAnimationFrame(step); };
+    const step = () => { if (n && letGo()) return; center(); if (++n < 12) requestAnimationFrame(step); };
     step();
     // content-visibility keeps computing off-screen heights for ~1s after the
     // jump, shifting the target after rAF convergence ends — re-center a few
     // more times on a timer to stay locked on.
-    for (const d of [180, 400, 750]) setTimeout(() => { center(); if (d === 750) this._trace?.('landStable:end', { st: Math.round(list.scrollTop), sh: list.scrollHeight, connected: el.isConnected ? 1 : 0 }); }, d);
+    for (const d of [180, 400, 750]) setTimeout(() => { if (!letGo()) center(); if (d === 750) this._trace?.('landStable:end', { st: Math.round(list.scrollTop), sh: list.scrollHeight, connected: el.isConnected ? 1 : 0, letGo: gone ? 1 : 0 }); }, d);
   },
 
     async _seekTeleport(line) {

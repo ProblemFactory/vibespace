@@ -23,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, fixtureSid, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { gutterDragger } from './gutter-drag.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
@@ -198,6 +199,119 @@ for (const frac of [0.6, 0.25, 0.85]) {
 }
 
 check('the three jumps measured three DISTINCT targets', new Set(seenTargets).size === 3, JSON.stringify(seenTargets));
+
+// ── 3c. THE JUMP HOLD LETS GO (r1175): a jump's landing holds its target for ~750 ms (_scrollElStable — 12 frames and
+// re-centres at 180/400/750 ms while content-visibility resolves heights). It had no stop: a person who scrolled within a
+// second of a jump was put back on its target up to three times. Now the reader's own act since the landing lets it go
+// (_navigatedSince, or a press on the scrollbar — `_gutterPressAt`: a drag's scrolls are not stamped while the hold's
+// guard stands). Drawn with TRUSTED input (CDP), each at +220 ms (after the 180 ms re-centre, before the 400 ms one): a
+// wheel, a scrollbar drag (the minimap off — with it on, its own drag is a navigation; pressed through scratch.mjs's
+// gutterDragger (scripts/gutter-drag.mjs), the door that checks the press landed on the list's own gutter), a PageDown in the list — each toward the
+// side with more room. The view must stay where the person put it: the target's offset from the hold's aim at the act's end
+// is the same at 1.7 s, NOT back at the aim. THE RED: the same three over the same hold read out of chat-view-seek.js with
+// only its stop blinded (`const letGo = () => false;` — the base's hold): put back on the target.
+function holdKit() {
+  const view = window.__view, list = view._messageList;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+  const middle = () => { const r = list.getBoundingClientRect(); return { r, x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+  const off = (el) => (el && el.isConnected ? Math.round(el.getBoundingClientRect().top - middle().y) : null);   // the hold's own aim: the target's top at the middle
+  const prep = ({ bare = false, focus = false } = {}) => { if (bare) list.classList.remove('chat-minimap-active'); if (focus) list.focus({ preventScroll: true }); };
+  let target = null, anchor = null, at = 0;
+  window.__hold = {
+    async jump(frac, how) {
+      prep(how);
+      const idx = Math.floor(view._total * frac);
+      const ok = await view.jumpToIndex(idx);
+      at = view._lastJumpAt || 0;
+      target = list.querySelectorAll('.chat-msg:not(.chat-gap-msg)')[idx - view._windowStart] || null;
+      return { idx, ok, age: Date.now() - at, off: off(target) };
+    },
+    async until(ms, how) {
+      prep(how);
+      const wait = at + ms - Date.now(); if (wait > 0) await sleep(wait);
+      const m = middle(), hitEl = document.elementFromPoint(m.x, m.y);
+      const st = list.scrollTop, sh = list.scrollHeight, ch = list.clientHeight;
+      return { x: Math.round(m.x), y: Math.round(m.y), top: m.r.top, bottom: m.r.bottom, right: m.r.right, st, sh, ch, sbw: list.offsetWidth - list.clientWidth,
+        dir: sh - ch - st >= st ? 1 : -1, hit: !!hitEl && list.contains(hitEl), focused: document.activeElement === list, age: Date.now() - at, off: off(target) };   // toward the side with more room
+    },
+    onBar() { return !!view._pointerDownOnScrollbar; },   // (read while the door holds the press)
+    async settled() {
+      let last = list.scrollTop, still = 0;
+      for (let i = 0; i < 45 && still < 4; i++) { await frame(); if (Math.abs(list.scrollTop - last) < 0.5) still++; else { still = 0; last = list.scrollTop; } }
+      const m = middle(), hitEl = document.elementFromPoint(m.x, m.y);
+      anchor = (hitEl && hitEl.closest && hitEl.closest('.chat-msg')) || null;
+      return { age: Date.now() - at, off: off(target), anchorTop: anchor ? Math.round(anchor.getBoundingClientRect().top) : null };
+    },
+    async final(ms) {
+      const wait = at + ms - Date.now(); if (wait > 0) await sleep(wait);
+      return { age: Date.now() - at, off: off(target), anchorTop: anchor && anchor.isConnected ? Math.round(anchor.getBoundingClientRect().top) : null, barUp: !view._pointerDownOnScrollbar };
+    },
+    blind(src) { view._scrollElStable = new Function(`return ({ ${src} })._scrollElStable;`)(); return Object.prototype.hasOwnProperty.call(view, '_scrollElStable'); },
+    unblind() { delete view._scrollElStable; return !Object.prototype.hasOwnProperty.call(view, '_scrollElStable') && typeof view._scrollElStable === 'function'; },
+  };
+  return { ok: !!list };
+}
+{
+  const SEEKS = fs.readFileSync(path.join(repo, 'src/lib/chat-view-seek.js'), 'utf8');
+  const a = SEEKS.indexOf('    _scrollElStable(el, '), b = SEEKS.indexOf('    async _seekTeleport(line) {');
+  const real = a >= 0 && b > a ? SEEKS.slice(a, b).trim().replace(/,$/, '') : '';
+  const LETGO = /\n    const letGo = \(\) => [^\n]+\n/;
+  const blind = real.replace(LETGO, '\n    const letGo = () => false;\n');
+  check('3c: the jump hold is read out of chat-view-seek.js and its stop found (the red control blinds exactly that line)', !!real && LETGO.test(real) && blind !== real && /setTimeout\(\(\) => \{ if \(!letGo\(\)\) center\(\);/.test(real), real.slice(0, 160));
+  const kit = await evaljs(`(${holdKit.toString()})()`);
+  const wheel = (x, y, deltaY) => cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(x), y: Math.round(y), deltaX: 0, deltaY });
+  const gutterDrag = gutterDragger({ evalJs: evaljs, cdp, sleep });   // THE scrollbar's door (scripts/gutter-drag.mjs): it presses the list's own gutter and checks where the press landed
+  const key = async (k, code) => {
+    await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+  };
+  const scene = async (act, frac) => {
+    const how = JSON.stringify({ bare: act === 'drag', focus: act === 'key' });
+    const land = await evaljs(`window.__hold.jump(${frac}, ${how})`);
+    const g = await evaljs(`window.__hold.until(220, ${how})`);
+    let onBar = null, drag = null;
+    if (act === 'wheel') await wheel(g.x, g.y, g.dir * 480);
+    else if (act === 'key') await key(g.dir > 0 ? 'PageDown' : 'PageUp', g.dir > 0 ? 34 : 33);
+    else {
+      // the thumb moved by about 520 px of content (the track's ratio), toward the side with more room
+      const track = g.bottom - g.top, thumb = Math.max(track * g.ch / g.sh, 2 * g.sbw);
+      const dy = g.dir * Math.max(4, Math.round(520 * (track - thumb) / Math.max(1, g.sh - g.ch)));
+      drag = await gutterDrag('window.__view._messageList', { dy, whileHeld: () => evaljs('window.__hold.onBar()') });
+      onBar = drag.held;
+    }
+    const done = await evaljs('window.__hold.settled()');
+    const fin = await evaljs('window.__hold.final(1700)');
+    // inside the hold: after its 180 ms re-centre, before its LAST (750 ms — the hold's own constant): the base's hold puts
+    // the view back at 400 and again at 750, so an act that a slow machine delays past 400 still meets the 750 one
+    const inHold = g.age >= 180 && g.age < 750 - 50;
+    const reached = act === 'wheel' ? g.hit : act === 'key' ? g.focused : !!(drag && drag.ok) && onBar === true;
+    // where the person put it: the target's offset from the hold's aim at the act's end, the same at 1.7 s; the hold's aim is 0
+    const moved = done.off != null && land.off != null && Math.abs(done.off - land.off) >= 120;
+    const stayed = done.off != null && fin.off != null && Math.abs(fin.off - done.off) <= 40;
+    const back = fin.off != null && Math.abs(fin.off) <= 40;
+    const notBack = fin.off != null && Math.abs(fin.off) >= 120;
+    return { act, inHold, reached, moved, stayed, back, notBack, land, g: { age: g.age, dir: g.dir, sbw: g.sbw, hit: g.hit, focused: g.focused, st: Math.round(g.st), sh: g.sh, ch: g.ch, off: g.off }, onBar, drag, done, fin };
+  };
+  const ACTS = [['wheel', 0.45, 'a wheel'], ['key', 0.55, 'a PageDown in the list'], ['drag', 0.65, 'a scrollbar drag']];
+  const green = []; for (const [act, frac] of ACTS) green.push(await scene(act, frac));
+  const blinded = kit?.ok && await evaljs(`window.__hold.blind(${JSON.stringify(blind)})`);
+  const red = []; if (blinded) for (const [act, frac] of ACTS) red.push(await scene(act, frac));
+  const restored = await evaljs('window.__hold.unblind()');
+  console.log(`  [3c] ${JSON.stringify({ green, red }).slice(0, 3000)}`);
+  ACTS.forEach(([act, , words], i) => {
+    const r = green[i];
+    check(`3c: ${words} inside the jump's hold (+${r?.g.age} ms) — the view stays where the person put it (the target ${r?.land.off}→${r?.done.off} px from the hold's aim at the act's end, ${r?.fin.off} px at 1.7 s)`,
+      !!r && r.inHold && r.reached && r.moved && r.stayed && r.notBack, JSON.stringify(r));
+  });
+  check('3c RED: the hold with its stop blinded (the base\'s hold) installed on the view', blinded === true && red.length === ACTS.length, JSON.stringify({ kit, blinded }));
+  ACTS.forEach(([act, , words], i) => {
+    const r = red[i];
+    check(`3c RED (r1175): ${words} inside the BLINDED hold (+${r?.g.age} ms) is undone — put back on the jump's target (${r?.fin.off} px from the hold's aim at 1.7 s)`,
+      !!r && r.inHold && r.reached && r.back, JSON.stringify(r));
+  });
+  check('3c: the view\'s own hold is back after the red (the blinded copy removed)', restored === true, String(restored));
+}
 
 // ── 3b. THE PERSON'S ROWS: the outline lists what the person said; the rest waits behind ONE chip ──
 {

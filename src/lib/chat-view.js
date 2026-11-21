@@ -335,6 +335,7 @@ class ChatView {
     // held, a scroll is the reader dragging the view — WHERE the press landed,
     // never WHEN a later scroll happens to arrive (round-4 verifier's MAJORs).
     this._pointerDownOnScrollbar = false;
+    this._gutterPressAt = 0;
     this._pointerDownScrollTop = 0;
     this._resumeRetailTimers = [];
     // INPUT QUEUE (mid-turn sends). `_queueSupported` starts FALSE: we do not
@@ -709,6 +710,8 @@ class ChatView {
       this._noteUserInput();
       this._pointerDownOnScrollbar = this._pointerOnScrollbar(e);
       this._pointerDownScrollTop = this._messageList.scrollTop;
+      // a press on the scrollbar, stamped: a jump's hold lets go at it (r1175, chat-view-seek _scrollElStable)
+      if (this._pointerDownOnScrollbar) this._gutterPressAt = Date.now();
     }, { passive: true });
     // B-ef04 (int358's race hunt on 571f1903: a turn landing grew the drafted row and the tail pin scrolled the card ~110 px between
     // the person's aim and the press — the click opened the NEIGHBOUR's conversation): THE PRESS-ARM RULE FOR A ROW THAT OPENS A
