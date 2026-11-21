@@ -2465,6 +2465,7 @@ await (async () => {
     R.onDisk = () => { try { return (JSON.parse(fs.readFileSync(R.notifsFile, 'utf-8'))[cid] || []).map((n) => n.rt || null); } catch { return []; } };
     R.mem = () => (R.jm.pendingNotifs.get(cid) || []).map((n) => n.rt || null);
     R.boot = (Mod, CDm = CD) => {
+      if (R.jm) now += 5000;   // a restart takes seconds (RestartSec=5): a new process's park ids are its clock and its own count from 1
       for (const t of timers) t.dead = true;   // the previous process is gone: nothing closed, nothing flushed (a crash)
       if (R.jm) { R.jm._unreadStopped = true; if (R.jm._notifsT) { clearTimeout(R.jm._notifsT); R.jm._notifsT = null; } }
       const P = placedWriter(); R.W = P.W; R.land = P.land; R.landUpTo = P.landUpTo; R.setSlow = P.setSlow;
@@ -2705,7 +2706,7 @@ await (async () => {
     // a FRESH event of this engine, parked and delivered during the same hold: never marked (it can have no twin in the file)
     R.setAnswer(MISS); R.jm._notifyRate.delete(R.cid); R.jm._notifyOwner(job, { what: 'finished: a fresh one while held' });
     const fresh = (await until(() => R.deliver.retryCount(R.cid) === 1)) ? R.deliver.retryPeek(R.cid)[0].id : null;
-    R.setAnswer(TAKES); await R.turnEnd();
+    R.setAnswer(TAKES); await R.advance(35 * 1000);   // its retry: past the ladder's 30 s floor after the post just made
     const posted = R.posts.length, strike = [...(R.jm._parkLeftWhileHeld || [])];
     R.lift(twin); await R.jm._notifsRetry();   // the storage answers again, with the twin
     const drained = R.jm.drainNotifs(R.cid).length;
@@ -2714,7 +2715,7 @@ await (async () => {
   };
   {
     const t = await heldTwinScene({ JobManager }, 'held-twin');
-    ok(!!t.id && !!t.fresh && JSON.stringify(t.strike) === JSON.stringify([t.id]) && t.posted === 2 && t.drained === 0 && !t.park, 'B-54b7 (its read\'s should 3): a twin in the held file whose park entry was delivered during the hold is struck at the read again — delivered once; a fresh entry of this engine delivered during the hold is never marked (no clock: its own «parked»)', JSON.stringify(t));
+    ok(!!t.id && !!t.fresh && t.fresh !== t.id && JSON.stringify(t.strike) === JSON.stringify([t.id]) && t.posted === 2 && t.drained === 0 && !t.park, 'B-54b7 (its read\'s should 3): a twin in the held file whose park entry was delivered during the hold is struck at the read again — delivered once; a fresh entry of this engine delivered during the hold is never marked (no clock: its own «parked»)', JSON.stringify(t));
     const tw = await heldTwinScene({ JobManager }, 'held-twin-threw', 'threw');
     ok(!!tw.id && JSON.stringify(tw.strike) === '[]' && tw.posted === 1 && tw.drained === 1, 'B-54b7 (its re-read\'s nit 1): a park entry its judge WITHHELD while held (the judge threw) strikes nothing — its twin is kept and delivered at its drain, once', JSON.stringify(tw));
     const THREW_A = '      if (!extra.threw) this._parkLeftHeld(entry, ownPark);';
