@@ -3677,6 +3677,8 @@ export default {
   "No Codex chat session on {account} is running — the read rides its own app-server": "{account} で実行中の Codex チャットセッションがありません——読み取りはそのセッション自身の app-server を通ります",
   "Codex ⟳ on {account}: no answer from its codex within {sec} s": "{account} の Codex ⟳：{sec} 秒以内に codex から応答がありません",
   "Codex ⟳ on {account} failed — {reason}": "{account} の Codex ⟳ に失敗しました——{reason}",
+  "Codex ⟳ on {account}: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read": "{account} の Codex ⟳：実行中の Codex 会話がどのアカウントを使っているか VibeSpace が特定できないため、読み取っていません",
+  "Codex ⟳: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read": "Codex ⟳：実行中の Codex 会話がどのアカウントを使っているか VibeSpace が特定できないため、読み取っていません",
   "Used at {time} — the new window runs until {until}.": "{time} に使用しました——新しい期間は {until} までです。",
   "Used at {time}.": "{time} に使用しました。",
   "The limit reset at {time} — no credit was needed.": "上限は {time} にリセットされました——クレジットは不要でした。",

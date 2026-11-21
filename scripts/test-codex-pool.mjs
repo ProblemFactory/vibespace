@@ -1090,7 +1090,24 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const byKey = async (eng) => { try { return await eng.refreshCodexForPerson({ key: wu.A, timeoutMs: 500 }); } catch (e) { return { threw: e.message }; } };
     const rk = await byKey(wu.eng);
     delete wu.s1.pty;
-    ok('B-87fd …a ⟳ by the member\'s KEY never takes the unknown holder as its carrier (no_live_session, nothing read)', !!rk && rk.code === 'no_live_session', JSON.stringify(rk));
+    ok('B-87fd …a ⟳ by the member\'s KEY never takes the unknown holder as its carrier — and says WHY (holder_unknown naming the key, no session read), never «no session is running» while one runs', !!rk && rk.code === 'holder_unknown' && rk.key === wu.A && rk.name === 'Cx Alpha' && rk.sessionId === null, JSON.stringify(rk));
+    // its toast words it (en here; zh and ja below), never the generic «failed — <the server's English>» nor «no session»
+    const US87 = await import(path.join(REPO, 'src/lib/usage-source.js'));
+    const tk = US87.codexRefreshToast(rk), t0k = US87.codexRefreshToast({ ok: false, code: 'holder_unknown', key: null, name: null });
+    ok('B-87fd …its toast says the true reason: «Codex ⟳ on Cx Alpha: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read» (without a key: «Codex ⟳: …»)', tk.error === true && tk.text === 'Codex ⟳ on Cx Alpha: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read' && t0k.text === 'Codex ⟳: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read', JSON.stringify([tk, t0k]));
+    { const { dictEntries } = await import('./i18n-extract.mjs');
+      const keys87 = ['Codex ⟳ on {account}: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read', 'Codex ⟳: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read'];
+      const has = (f) => { const m = new Map([...dictEntries(read(f))].map((e) => [e.key, e.value])); return keys87.every((k) => m.has(k)); };
+      ok('B-87fd …both sentences carry zh and ja', has('src/lib/i18n-zh.js') && has('src/lib/i18n-ja.js')); }
+    const preNamed = patchedEngine('unknownUnnamed', [["  if (!s && key) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) return { ok: false, code: 'holder_unknown',", "  if (false) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) return { ok: false, code: 'holder_unknown',"]]);
+    ok('B-87fd NEGATIVE CONTROL (the key road\'s reason): the patch hit the product source', !!preNamed);
+    if (preNamed) {
+      const wq2 = world({ mode: 'off', held: 'unknown', engineModule: preNamed });
+      wq2.s1.pty = { write() { } };
+      const rq2 = await (async () => { try { return await wq2.eng.refreshCodexForPerson({ key: wq2.A, timeoutMs: 500 }); } catch (e) { return { threw: e.message }; } })();
+      delete wq2.s1.pty;
+      ok('B-87fd NEGATIVE CONTROL: without it the press says «no session is running» while the unknown holder runs (the release\'s words) — the leg sees it', !!rq2 && rq2.code === 'no_live_session', JSON.stringify(rq2));
+    }
     const preCarrier = patchedEngine('unknownCarrier', [["  const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host && !heldPoolUnknown(s));", "  const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host);"]]); // stale-pins: kept — the RED plants the release's carrier test without the skip
     ok('B-87fd NEGATIVE CONTROL (the carrier): the patch hit the product source', !!preCarrier);
     if (preCarrier) {
@@ -1098,7 +1115,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       wc.s1.pty = { write() { } };
       const rc = await (async () => { try { return await wc.eng.refreshCodexForPerson({ key: wc.A, timeoutMs: 500 }); } catch (e) { return { threw: e.message }; } })();
       delete wc.s1.pty;
-      ok('B-87fd NEGATIVE CONTROL: without the skip the unknown holder IS taken as the carrier (a read is spent on it) — the leg sees it', !!rc && rc.code !== 'no_live_session', JSON.stringify(rc));
+      ok('B-87fd NEGATIVE CONTROL: without the skip the unknown holder IS taken as the carrier (then refused only by its own guard: its session answered) — the leg sees it', !!rc && rc.code === 'holder_unknown' && rc.sessionId === wc.s1._webuiId, JSON.stringify(rc));
     }
     ok('B-87fd …a person\'s ⟳ on that conversation is refused by its own name — holder_unknown, before any read (never «archived»)', !!rr && rr.ok === false && rr.code === 'holder_unknown', JSON.stringify(rr));
     ok('B-87fd …and the ⟳ ROUTE answers it 409 holder_unknown (like no_live_session), never a 400', routeRes.code === 409 && !!routeRes.body && routeRes.body.code === 'holder_unknown', JSON.stringify({ code: routeRes.code, body: routeRes.body }));
@@ -1121,11 +1138,11 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const bAfterPush = JSON.stringify(w2.cacheOf(w2.B));
       const pushWoke = wakesOf(w2, sA) - wakeBeforePush;
       const t0 = Date.now();
-      const lw = quietly(() => w2.wall(sA));
+      const lw = quietly(() => w2.wall(sA, w2.nowS + 9000));   // its OWN stated reset: the bucket it writes is told from the other wall's
       // the wall SIGNAL's own key: noteWallSignal rings the account it names (noteWallOnAccount — the turn's own signal list dies
       // at the turn end the banner closes with)
       const sigOn = (k) => ((w2.eng._wallRing && w2.eng._wallRing.get(k)) || []).some((e) => e.sid === sA._webuiId && e.at >= t0);
-      return { w2, movedTo, bBefore, bAfterPush, pushWoke, bAfter: JSON.stringify(w2.cacheOf(w2.B)), aCache: w2.cacheOf(w2.A), exhausted, lw, sigOnA: sigOn(w2.A), sigOnB: sigOn(w2.B) };
+      return { w2, movedTo, bBefore, bAfterPush, pushWoke, bAfter: JSON.stringify(w2.cacheOf(w2.B)), aCache: w2.cacheOf(w2.A), bCache: w2.cacheOf(w2.B), exhausted, lw, sigOnA: sigOn(w2.A), sigOnB: sigOn(w2.B) };
     };
     const sc = wallScene();
     console.log(`  · the wall scene: default ${sc.movedTo === sc.w2.B ? 'B' : sc.movedTo === sc.w2.A ? 'A' : '?'} after the other's wall; the push said «${(sc.exhausted.find((x) => /filed nowhere/.test(x)) || '').slice(0, 90)}»; the wall's lines: ${sc.lw.filter((x) => /\[wall\]|\[pool\]/.test(x)).join(' | ').slice(0, 240)}`);
@@ -1134,11 +1151,11 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const preExh = patchedEngine('unknownExhaustedWakes', [["if (sig.kind !== 'exhausted' && w.snap) { try { codexReadingEdge(); } catch { } }", 'if (w.snap) { try { codexReadingEdge(); } catch { } }']]);
     ok('B-87fd NEGATIVE CONTROL (the exhausted push): the patch hit the product source', !!preExh);
     if (preExh) { const se = wallScene(preExh); ok('B-87fd NEGATIVE CONTROL: without the exhausted check the spent push is fed to the wake as a fresh one — the leg sees it', se.pushWoke > 0, String(se.pushWoke)); }
-    ok('B-87fd …its failed turn\'s wall (a REFUSAL) marks A, where its request went out — never healthy B', sc.bAfter === sc.bBefore && Math.round(Number(sc.aCache?.sevenDay?.usedPercent ?? sc.aCache?.fiveHour?.usedPercent ?? 0)) >= 99, JSON.stringify({ A: sc.aCache?.fiveHour, B: sc.bAfter.slice(0, 200) }));
+    ok('B-87fd …its failed turn\'s wall (a REFUSAL) marks A, where its request went out — A carries THAT wall\'s spent bucket (its own stated reset), healthy B untouched', sc.bAfter === sc.bBefore && Number(sc.aCache?.sevenDay?.resetsAt) === sc.w2.nowS + 9000 && Math.round(Number(sc.aCache?.sevenDay?.usedPercent ?? 0)) >= 99, JSON.stringify({ A7: sc.aCache?.sevenDay, B: sc.bAfter.slice(0, 200) }));
     ok('B-87fd …and the wall SIGNAL names the same member: A, never B', sc.sigOnA === true && sc.sigOnB === false, JSON.stringify({ onA: sc.sigOnA, onB: sc.sigOnB }));
     const preSlot = patchedEngine('unknownSlot', [["function readingSlotFor(session, at = Date.now(), opts = {}) {\n", "function readingSlotFor(session, at = Date.now(), opts = {}) {\n  try { if (session && heldPoolUnknown(session)) return { key: null, slotOk: false, slotReason: 'holder-unknown', at }; } catch { }\n"]]); // stale-pins: kept — the RED plants the first cut's early answer (the round's MUST)
     ok('B-87fd NEGATIVE CONTROL (the round\'s MUST): the patch hit the product source (readingSlotFor answering nothing for an unknown holder)', !!preSlot);
-    if (preSlot) { const sr = wallScene(preSlot); ok('B-87fd NEGATIVE CONTROL: with that early answer the refusal falls to the link — the wall marks healthy B and its signal names B (the legs see both)', sr.bAfter !== sr.bBefore && sr.sigOnB === true && sr.sigOnA === false, JSON.stringify({ B: sr.bAfter.slice(0, 200), onA: sr.sigOnA, onB: sr.sigOnB })); }
+    if (preSlot) { const sr = wallScene(preSlot); ok('B-87fd NEGATIVE CONTROL: with that early answer the refusal falls to the link — the wall marks healthy B and its signal names B (the legs see both)', sr.bAfter !== sr.bBefore && Number(sr.bCache?.sevenDay?.resetsAt) === sr.w2.nowS + 9000 && sr.sigOnB === true && sr.sigOnA === false, JSON.stringify({ B: sr.bAfter.slice(0, 200), onA: sr.sigOnA, onB: sr.sigOnB })); }
     const wk = world({ mode: 'off', held: true });
     quietly(() => wk.reading(wk.s1, 88));
     ok('B-87fd …a STAMPED holder\'s reading still lands on its member (A, 88 %)', Math.round(wk.cacheOf(wk.A)?.sevenDay?.usedPercent) === 88, JSON.stringify(wk.cacheOf(wk.A)?.sevenDay));

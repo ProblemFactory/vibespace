@@ -378,6 +378,8 @@ export function codexRefreshToast(a, { t = (s, p) => String(s).replace(/\{(\w+)\
     return { error: false, text: (parts.length ? t('Codex · {account}: {windows}', { account: who(a), windows: parts.join(' · ') }) : t('Codex · {account}: read — the reply named no usage window', { account: who(a) })) + credits };
   }
   if (a.code === 'no_live_session') return { error: true, text: a.key ? t('No Codex chat session on {account} is running — the read rides its own app-server', { account: who(a) }) : t('Needs a running Codex chat session (the read rides its own app-server)') };
+  // B-87fd follow: the running conversation's held member cannot be named — nothing was read, by THAT reason (never «no session»)
+  if (a.code === 'holder_unknown') return { error: true, text: a.name && !/^__global/.test(String(a.name)) ? t('Codex ⟳ on {account}: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read', { account: who(a) }) : t('Codex ⟳: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read') };
   if (a.code === 'timeout') return { error: true, text: t('Codex ⟳ on {account}: no answer from its codex within {sec} s', { account: who(a), sec: Math.round((Number(a.timeoutMs) || 20000) / 1000) }) };
   return { error: true, text: t('Codex ⟳ on {account} failed — {reason}', { account: who(a), reason: String(a.error || a.code || '?').slice(0, 160) }) };
 }

@@ -3546,6 +3546,16 @@ function liveQuotaKeyFor(session) {
   try { const a = accounts.get(key); if (a && a.type === 'pooled') key = heldPoolMemberFor(session, key) || accounts.poolCurrentFor(key, session._webuiId) || accounts.poolCurrent(key) || key; } catch { }
   return key;
 }
+/** B-87fd follow: a running local codex chat conversation that MIGHT hold `key` (its pool lists it, or the pool's link is it) but whose
+ *  held member cannot be named — the one pickLiveProbeSession skips; null when none */
+function unknownHolderOn(key) {
+  for (const [, x] of activeSessions) {
+    if (!(x && x.pty && x.mode === 'chat' && !x.host && liveReadSource(x.backend) && heldPoolUnknown(x))) continue;
+    let members = []; try { members = accounts.poolMembers(x._accountId) || []; } catch { members = []; }
+    if (members.some((m) => m && m.id === key) || liveQuotaKeyFor(x) === key) return x;
+  }
+  return null;
+}
 function pickLiveProbeSession(target, session) {
   const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host && !heldPoolUnknown(s));   // B-87fd: an unknown holder's answer is filed nowhere — never the one asked
   // the asking session itself first: it sits idle-walled on exactly this
@@ -3597,6 +3607,9 @@ async function refreshCodexForPerson({ key = null, sessionId = null, timeoutMs =
   // B-87fd: a conversation whose held member cannot be named is refused BY ITS OWN NAME, before any read — its reading would be filed
   // nowhere (a key's carrier never picks it: pickLiveProbeSession)
   if (s && heldPoolUnknown(s)) return { ok: false, code: 'holder_unknown', key: null, name: null, sessionId: s._webuiId, error: 'this conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' };
+  // B-87fd follow (round wg6jz85ye): no carrier, but a running conversation of the member's pool was SKIPPED because its held member
+  // cannot be named — the press says THAT, never «no session is running» while one visibly runs
+  if (!s && key) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) return { ok: false, code: 'holder_unknown', key: String(key), name: nameOf(key), sessionId: null, error: 'the running Codex conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' }; }
   if (!s) return { ok: false, code: 'no_live_session', key: key || null, name: key ? nameOf(key) : null, error: key ? `no running Codex chat session holds ${nameOf(key)}'s login (the read rides that session's own app-server)` : 'no running Codex chat session (the read rides its own app-server)' };
   const r = await liveRead(s, timeoutMs);
   const k = (r && r.key) || liveQuotaKeyFor(s);

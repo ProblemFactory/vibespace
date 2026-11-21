@@ -3677,6 +3677,8 @@ export default {
   "No Codex chat session on {account} is running — the read rides its own app-server": "{account} 上没有运行中的 Codex 聊天会话——读取要经过它自己的 app-server",
   "Codex ⟳ on {account}: no answer from its codex within {sec} s": "{account} 的 Codex ⟳：它的 codex 在 {sec} 秒内没有响应",
   "Codex ⟳ on {account} failed — {reason}": "{account} 的 Codex ⟳ 失败——{reason}",
+  "Codex ⟳ on {account}: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read": "{account} 的 Codex ⟳：VibeSpace 无法确定正在运行的 Codex 对话用的是哪个账号，所以没有读取",
+  "Codex ⟳: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read": "Codex ⟳：VibeSpace 无法确定正在运行的 Codex 对话用的是哪个账号，所以没有读取",
   "Used at {time} — the new window runs until {until}.": "已于 {time} 使用——新的窗口持续到 {until}。",
   "Used at {time}.": "已于 {time} 使用。",
   "The limit reset at {time} — no credit was needed.": "限额已在 {time} 重置——不需要使用 credit。",

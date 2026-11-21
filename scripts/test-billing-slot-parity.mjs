@@ -133,6 +133,7 @@ export const ROWS = Object.freeze([
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 2],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'refreshCodexForPerson', 'readings', 1],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'resetCreditCarriers', 'spend', 1],
+  ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'unknownHolderOn', 'readings', 1],   // B-87fd follow: the conversation a key's carrier skipped (its held member unknown) — named, never read
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'walkLadderAfterCredit', 'spend', 1],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'writeCodexReading', 'readings', 1],
   ['poolMemberOfSessionFor', 'src/server/usage-pool-engine.js', 'heldPoolMemberFor', 'pile', 1],
@@ -608,6 +609,7 @@ export const CONSUMERS = Object.freeze({
   "sweepNonMemberLinks": {"file": "src/server/usage-pool-engine.js", "fields": ["pool", "removed", "moved", "stayed", "held", "defaultMoved"], "why": "Runs memberRemoved for each pool with stale links; returns the array of those reports, which echo members for the journal and suites."},
   "tick": {"file": "src/server/auto-cli-loop.js", "fields": [], "why": "the auto-cli loop's tick reads the member → sessions index to choose due reads; returns nothing"},
   "turnAskedFamily": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (did this turn ask key for the family); requestSlotFor's key is only compared against it."},
+  "unknownHolderOn": {"file": "src/server/usage-pool-engine.js", "fields": null, "why": "B-87fd follow: finds a running codex conversation that MIGHT hold a key (its pool lists it, or liveQuotaKeyFor matches) but whose held member cannot be named — only so the person's ⟳ names that reason; nothing is read through it and nothing is filed by its answer.", "gap": "Returns a live session object (the whole mutable session record), not an answer object; no fixed field carries the resolver's answer."},
   "unplacedOf": {"file": "src/accounts.js", "fields": ["member", "name"], "why": "Returns the UNPLACED mark (the deleted member; the conversation bills nobody); poolCurrent only checks whether it was re-placed."},
   "updatePool": {"file": "src/accounts.js", "fields": ["members"], "why": "writes a pool's members and points its default at the chooser's pick (setPoolTarget); returns the pool record — its members are the accounts it may bill on, watched by §e"},
   "walkLadderAfterCredit": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Runs the switch rung and notes a wall signal keyed by liveQuotaKeyFor(s), a decision and a write; returns nothing."},
