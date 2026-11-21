@@ -186,7 +186,8 @@ function verdicts(G, only = null) {
     return off.length === 0;
   });
   judge('literal', () => {
-    const lit = Object.keys(R).filter((k) => /verdictOf\(\s*['"`]/.test(R[k].o));
+    const wrappedArgs = (t) => { const out = [], v = (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && /^verdictOf(?:Guard)?$/.test(n.callee.name) && n.arguments.length === 1) out.push(n.arguments[0]); for (const k in n) { const x = n[k]; if (x && typeof x === 'object' && k !== 'loc') (Array.isArray(x) ? x : [x]).forEach((y) => y && typeof y.type === 'string' && v(y)); } }; v(acorn.parse(t, G0.PARSE_OPTS)); return out; };
+    const lit = Object.keys(R).filter((k) => wrappedArgs(R[k].o).some((a) => G0.stringByNode(a)));   // (the new text's own parse: 'ab'.length is no string)
     const swaps = ['swapWhole', 'swapJoined'].map((k) => { const p = plan(LEFT[k][0]); return p.edits.length === 0 && p.left.length === 1 && LEFT[k][1].test(p.left[0].why); });
     say.literal = `no condition shaped as a string is wrapped; a whole and a joined string where the condition goes leave their helper by name (${swaps.join(', ')})${lit.length ? ' — WRAPPED in ' + lit.join(', ') : ''}`;
     return lit.length === 0 && swaps.every(Boolean);
@@ -314,7 +315,7 @@ for (const k of ['applied', 'behaviour', 'later', 'plants', 'vacuous']) console.
 console.log('\n②–⑧ RED CONTROLS: each guarantee\'s leg goes red on a tool that breaks it');
 const REDS = [
   ['lines', 'a guard on its own line', "text: ` ${guard}`, kind: 'guard'", "text: `\\n${guard}`, kind: 'guard'"],
-  ['names', 'the wrap on the name slot', 'const a = c.node.arguments, cond = a[slot], ws = wrapsOf(cond);', 'const a = c.node.arguments, cond = a[nameSlot], ws = wrapsOf(cond);'],
+  ['names', 'the wrap on the name slot', 'const a = c.node.arguments, cond = a[slot], ws = wrapsOf(cond, coerce);', 'const a = c.node.arguments, cond = a[nameSlot], ws = wrapsOf(cond, coerce);'],
   ['literal', 'the string-shaped refusal out', 'if (swap) { leave(', 'if (false) { leave('],
   ['plants', 'the tokenizer filter out', 'for (const d of judged) if (code.inside(d.at)) res.plants.push(', 'for (const d of judged) if (false) res.plants.push('],
   ['inside', "the self-check's span test out", 'if (code.ok) for (const e of es) if (code.inside(e.at))', 'if (false) for (const e of es) if (code.inside(e.at))'],
@@ -329,8 +330,8 @@ const REDS = [
   ['scope', 'calls read by name, not by binding', 'const mine = B.calls.filter((c) => c.bind === b.id);', 'const mine = B.calls.filter((c) => c.node.callee.name === d.name);'],
   ['left', 'the value-use rule out', 'if (u.value) { out.set(t,', 'if (false) { out.set(t,'],
   ['left', 'the hands-back rule out', 'if (u.hands) { const read =', 'if (false) { const read ='],
-  ['twice', 'the guarded set left out of the body rules', "callPos(c.node, parents(), wrapped) === 'value'", "callPos(c.node, parents(), null) === 'value'"],
-  ['clock', 'the whole && chain wrapped', "if (n.type === 'LogicalExpression' && n.operator !== '??') return [...wrapsOf(n.left), ...wrapsOf(n.right)];", 'if (false) return [];'],
+  ['twice', 'the guarded set left out of the body rules', "callPos(c.node, parents(), wrapped, coerce) === 'value'", "callPos(c.node, parents(), null, coerce) === 'value'"],
+  ['clock', 'the whole && chain wrapped in a plain !! (verdictOf( … ) around a whole chain reads the same to the census: a call is no `!`)', "if (n.type === 'LogicalExpression' && n.operator !== '??') return [...wrapsOf(n.left, name), ...wrapsOf(n.right, name)];", 'if (false) return [];', ["text: `${coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"]],
 ];
 const mutants = {};
 for (const [key, what, anchor, to, more] of REDS) {
