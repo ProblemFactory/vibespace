@@ -226,7 +226,9 @@ async function main() {
     const next = withMeasured(ckptFixtureNow(), cx);
     fs.writeFileSync(CKPT_FIXTURE, JSON.stringify(next, null, 1) + '\n');
     process.stderr.write(`[ckpt] fixture ${CKPT_FIXTURE}: ckptSwitchOf(${cx.cliVersion}) = ${ckptSwitchOf(cx.cliVersion, next)}${cx.stop ? ' — STOP: what the CLI sends differs with the switch (to 主开发)' : ''} · it holds ${measuredVersions(next).join(', ')}\n`);
-    if (cx.stop) process.exit(4);   // a STOP is written AND said by the exit code: the tier stops here
   }
+  // r1107: a STOP is said by the exit code whether or not a fixture was written — the tier stops here (to 主开发)
+  const stopped = results.find((x) => x.variant === 'ckpt-on' && x.verdict === 'STOP');
+  if (stopped) { console.error(`STOP: what the CLI sends differs with the checkpoint switch — ${stopped.note.slice(0, 400)}`); process.exit(4); }
   process.exit(0);
 }

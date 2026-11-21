@@ -373,9 +373,23 @@ else {
     !!g.F && K.ckptSwitchOf('9.9.9', g.F) === 'SAME' && K.ckptSwitchOf('2.1.322', g.F) === null && JSON.stringify(g.F.versions['9.9.9'].files) === '{"off":0,"on":1}' && g.F.versions['9.9.9'].script === 'scripts/measure-claude-cred-read.mjs',
     g.F && JSON.stringify(g.F).slice(0, 400));
   const h = runCkpt('ckpt-header', 'header');
-  ok('RED CONTROL: a fake that sends one header more with the switch ⇒ DIFFERENT, STOP, the header and its request named; the fixture says DIFFERENT',
-    !!h.on && h.on.verdict === 'STOP' && h.on.ckpt.stop === true && h.on.ckpt.findings.some((x) => /^request \d header only with the switch: x-fake-ckpt$/.test(x)) && !!h.F && K.ckptSwitchOf('9.9.9', h.F) === 'DIFFERENT' && h.F.versions['9.9.9'].stop === true,
-    h.on && h.on.note);
+  ok('RED CONTROL: a fake that sends one header more with the switch ⇒ DIFFERENT, STOP (exit 4), the header and its request named as the comparer names them; the fixture says DIFFERENT',
+    !!h.on && h.on.verdict === 'STOP' && h.on.ckpt.stop === true && h.r.status === 4 && h.on.ckpt.findings.some((x) => /^request \/v1\/messages\?beta=true stream \["Edit","Read"\] #\d+ header only with the switch: x-fake-ckpt$/.test(x)) && !!h.F && K.ckptSwitchOf('9.9.9', h.F) === 'DIFFERENT' && h.F.versions['9.9.9'].stop === true,
+    h.on && `exit ${h.r.status}: ${h.on.note}`);
+  const plain = measure(['--claude', wrap('ckpt-header'), '--variant', 'ckpt', '--out', path.join(tmp, 'ckpt-rec-plain.json')]);
+  ok('…a STOP exits 4 without the fixture writer too (r1107)', plain.status === 4 && /^STOP: /m.test(plain.stderr), `exit ${plain.status}: ${String(plain.stderr).slice(-200)}`);
+  ok('…the two homes carried ONE made-up device id: the honest fake\'s user id names it, the session masked (r1107 MUST 2 — nothing of the device to mask)',
+    !!g.on && g.on.heads.every((x) => typeof x.body.userId === 'string' && x.body.userId.includes(K.CKPT_DEVICE) && x.body.userId.includes('<session>')) && g.off.heads.every((x) => x.body.userId === g.on.heads[0].body.userId),
+    g.on && JSON.stringify(g.on.heads.map((x) => x.body.userId)));
+  const dv = runCkpt('ckpt-devid', 'devid');
+  ok('RED CONTROL: a fake that mints its own device id per home (the made-up one ignored) ⇒ DIFFERENT on the user id — why both homes carry one',
+    !!dv.on && dv.on.ckpt.verdict === 'DIFFERENT' && dv.on.ckpt.findings.some((x) => / body userId: /.test(x)) && dv.r.status === 4, dv.on && dv.on.note);
+  const ne = runCkpt('ckpt-noedit', 'noedit');
+  ok('a fake whose edit never lands ⇒ INCOMPLETE before any comparison; the writer refuses it (exit 2, no fixture)',
+    !!ne.on && ne.on.ckpt.verdict === 'INCOMPLETE' && ne.r.status === 2 && /measured nothing/.test(ne.r.stderr) && !ne.F, ne.on && `exit ${ne.r.status}: ${ne.on.note}`);
+  const ord = measure(['--claude', wrap('ckpt'), '--variant', 'ckpt-on,ckpt-off', '--out', path.join(tmp, 'ckpt-rec-order.json')]);
+  let RO = null; try { RO = JSON.parse(fs.readFileSync(path.join(tmp, 'ckpt-rec-order.json'), 'utf8')); } catch { }
+  ok('the pair runs off first whatever the order asked (ckpt-on is a diff against ckpt-off)', ord.status === 0 && !!RO && JSON.stringify(RO.results.map((x) => x.variant)) === '["ckpt-off","ckpt-on"]' && RO.results[1].ckpt.verdict === 'SAME', `exit ${ord.status}: ${RO && JSON.stringify(RO.results.map((x) => x.variant))}`);
   const a = runCkpt('ckpt-always', 'always');
   ok('RED CONTROL: a fake that keeps a checkpoint WITHOUT the switch ⇒ ALREADY-ON (the road keeps them already), never SAME',
     !!a.on && a.on.ckpt.verdict === 'ALREADY-ON' && a.on.verdict === 'FAIL' && a.off.checkpointCount === 1, a.on && a.on.note);

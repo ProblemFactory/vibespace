@@ -54,6 +54,11 @@
 //                 differs with the switch (the measurement must say SAME)
 //   ckpt-header   the same, plus ONE header (`x-fake-ckpt: 1`) only with the switch — what it sends differs (must say DIFFERENT, STOP)
 //   ckpt-always   the same, but backs up WITHOUT the switch too (must say ALREADY-ON: the road keeps checkpoints already)
+//   ckpt-devid    the same, but mints its own device id each process, the config's ignored (must say DIFFERENT: why the two
+//                 scratch homes carry one made-up id — 主开发 r1107 MUST 2)
+//   ckpt-noedit   the same, but its Edit never lands (must say INCOMPLETE: nothing to compare)
+//   every ckpt mode sends the CLI's own identity shape: `x-claude-code-session-id` and metadata.user_id = the device id from
+//   $HOME/.claude.json's userID (a random one where it has none — as the CLI does), the account, the session
 // `--version` says 9.9.9 (Fake Claude), so a fixture it produces never names a real CLI.
 // It talks only to $ANTHROPIC_BASE_URL (the measurement's loopback mock).
 import fs from 'node:fs';
@@ -168,7 +173,9 @@ if (KIND === 'walk' && !process.argv.includes('--version')) {
 let misbehaved = false, dropped = false;
 const emit = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 // THE CHECKPOINT MODES (header): one turn = the mock's plan run step by step; a backup only where the vendor would keep one
-const CKPT = KIND === 'ckpt' || KIND === 'ckpt-header' || KIND === 'ckpt-always';
+const CKPT = /^ckpt(?:-header|-always|-devid|-noedit)?$/.test(KIND);
+const SESSION = crypto.randomUUID();
+const DEVICE = (() => { if (KIND === 'ckpt-devid') return crypto.randomBytes(32).toString('hex'); try { const c = JSON.parse(fs.readFileSync(path.join(process.env.HOME || '/', '.claude.json'), 'utf8')); if (typeof c.userID === 'string' && c.userID) return c.userID; } catch { } return crypto.randomBytes(32).toString('hex'); })();
 const SWITCHED = process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === 'true';
 const toolOf = (sseBody) => {   // the stream's tool_use block (its input from the json deltas) | null
   let tool = null, json = '';
@@ -192,14 +199,15 @@ async function ckptTurn(c) {
   const messages = [{ role: 'user', content: [{ type: 'text', text: 'turn' }] }];
   let last = { status: 0 };
   for (let i = 0; i < 4; i++) {
-    const headers = { authorization: 'Bearer ' + c.accessToken, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20', ...(KIND === 'ckpt-header' && SWITCHED ? { 'x-fake-ckpt': '1' } : {}) };
-    last = await post('/v1/messages?beta=true', headers, { model: 'claude-fake', max_tokens: 64, stream: true, tools, messages });
+    const headers = { authorization: 'Bearer ' + c.accessToken, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20', 'x-claude-code-session-id': SESSION, ...(KIND === 'ckpt-header' && SWITCHED ? { 'x-fake-ckpt': '1' } : {}) };
+    last = await post('/v1/messages?beta=true', headers, { model: 'claude-fake', max_tokens: 64, stream: true, tools, messages, metadata: { user_id: `user_${DEVICE}_account_acct-HOME_session_${SESSION}` } });
     if (last.status !== 200) return last;
     const tool = toolOf(last.body);
     if (!tool) return last;
     let out = '';
     try {
       if (tool.name === 'Read') out = fs.readFileSync(tool.input.file_path, 'utf8');
+      else if (tool.name === 'Edit' && KIND === 'ckpt-noedit') out = 'error refused';
       else if (tool.name === 'Edit') { backUp(tool.input.file_path); const t = fs.readFileSync(tool.input.file_path, 'utf8'); fs.writeFileSync(tool.input.file_path, t.replace(tool.input.old_string, tool.input.new_string)); out = 'edited'; }
       else out = 'unknown tool';
     } catch (e) { out = `error ${(e && e.code) || e}`; }

@@ -22,10 +22,31 @@ const CKPT_VARIANTS = Object.freeze(['ckpt-off', 'ckpt-on']);
 const CKPT_VOLATILE = Object.freeze(['x-claude-code-session-id', 'x-client-request-id']);
 // a header the mock keeps RAW (it labels only authorization and x-api-key): compared by value, its value NEVER shown
 const CKPT_SECRET = Object.freeze(['cookie', 'proxy-authorization']);
+// THE MADE-UP DEVICE ID both scratch homes carry (主开发 r1107 MUST 2: what differs BY CONSTRUCTION between two scratch homes
+// is made equal BEFORE the run): a fresh home with none makes the CLI mint a random one and send it inside metadata.user_id,
+// so the pair would read DIFFERENT on noise. Made equal, nothing of the device needs masking
+const CKPT_DEVICE = 'feedface'.repeat(8);
+// THE CLOSED NORMALISED SET (r1107): everything the comparison does NOT compare by value, by name — adding a name to it needs
+// 主开发's word (a later lane never widens it quietly). Anything not here is compared exactly
+const CKPT_NORMALISED = Object.freeze([
+  'header x-claude-code-session-id: by name only (one per process)',
+  'header x-client-request-id: by name only (one per request)',
+  'metadata.user_id: the run\'s own session id masked as <session> (the account and the device compared — the device made equal)',
+  'system[0]: a `cch=<…>` value masked as cch=<masked> (a digest of the request\'s bytes on recent builds, unverified)',
+]);
+// NOT COMPARED AT ALL (r1107's readers, said once): the message texts, the tool schemas (their names are), the system blocks after
+// the first (their count is), the headers of non-messages calls (OAuth, other paths, OTel are compared by count and attributes)
 // the body's top-level keys and its kind fields as the mock records them (src/claude-oat-probe.js the request record):
-// systemHead = a digest of the system's FIRST block (the client's identity prefix); userId = metadata.user_id with the
-// run's own session id masked (the account and the device in it compared); toolChoice / contextManagement = their values
+// systemHead = the system's FIRST block as TEXT (the client's identity prefix; readable in a stop), `cch=` masked (systemHeadOf);
+// userId = metadata.user_id with the run's own session id masked (the account and the device in it compared);
+// toolChoice / contextManagement = their values
 const CKPT_BODY_KINDS = Object.freeze(['keys', 'model', 'max_tokens', 'stream', 'betas', 'thinking', 'tools', 'toolNames', 'system', 'systemHead', 'metadataKeys', 'userId', 'toolChoice', 'contextManagement']);
+/** the system's first block as the record keeps it: its text (a block {type, text} or a string), ≤ 300 characters, any `cch=`
+ *  value masked — never a digest a stop could not be read by */
+function systemHeadOf(block) {
+  const text = typeof block === 'string' ? block : block && typeof block.text === 'string' ? block.text : block == null ? null : JSON.stringify(block);
+  return text == null ? null : text.replace(/\bcch=[0-9A-Za-z]+/g, 'cch=<masked>').slice(0, 300);
+}
 /** PURE — the switch measured: `off` / `on` = one run's summary {heads: [{path, headers: {name: value}, body: {…CKPT_BODY_KINDS}}],
  *  countHeads: [the count_tokens requests, the same shape], calls: [string, repeats kept — the calls, OTel events with their
  *  attributes, OAuth calls, refused escapes], files: n (checkpoint files under its scratch home), edited, turnOk} →
@@ -38,6 +59,8 @@ function ckptVerdict(off, on) {
   if (!runOk(off) || !runOk(on)) return { verdict: 'INCOMPLETE', stop: false, findings: ['both runs are needed (ckpt-off, then ckpt-on, in one invocation)'], files: null };
   const files = { off: Number(off.files) || 0, on: Number(on.files) || 0 };
   if (off.turnOk !== true || on.turnOk !== true) return { verdict: 'INCOMPLETE', stop: false, findings: [`the turn did not finish (${[off.turnOk !== true ? 'without' : null, on.turnOk !== true ? 'with' : null].filter(Boolean).join(' and ')} the switch) — nothing is judged`], files };
+  // an edit that failed on one run changes what that run sends next (r1107): nothing to compare — before any comparison
+  if (!off.edited || !on.edited) return { verdict: 'INCOMPLETE', stop: false, findings: [`the turn did not edit the note (${[!off.edited ? 'without' : null, !on.edited ? 'with' : null].filter(Boolean).join(' and ')} the switch) — nothing is judged`], files };
   const show = (v) => (v === undefined ? '(none)' : String(typeof v === 'string' ? v : JSON.stringify(v)).slice(0, 120));
   const f = [];
   const kindOf = (h) => `${String((h && h.path) || '')} ${h && h.body && h.body.stream ? 'stream' : 'ns'} ${JSON.stringify((h && h.body && h.body.toolNames) || null)}`;
@@ -67,7 +90,6 @@ function ckptVerdict(off, on) {
   const ta = tally(off.calls), tb = tally(on.calls);
   for (const c of [...new Set([...ta.keys(), ...tb.keys()])].sort()) if ((ta.get(c) || 0) !== (tb.get(c) || 0)) f.push(`call ${c}: ${ta.get(c) || 0} without the switch | ${tb.get(c) || 0} with it`);
   if (f.length) return { verdict: 'DIFFERENT', stop: true, findings: f, files };
-  if (!off.edited || !on.edited) return { verdict: 'INCOMPLETE', stop: false, findings: [`the turn did not edit the note (${[!off.edited ? 'without' : null, !on.edited ? 'with' : null].filter(Boolean).join(' and ')} the switch) — nothing to keep a checkpoint of`], files };
   if (files.off > 0) return { verdict: 'ALREADY-ON', stop: false, findings: [`${files.off} checkpoint file(s) WITHOUT the switch: this road keeps checkpoints already`], files };
   if (files.on === 0) return { verdict: 'NO-EFFECT', stop: false, findings: ['no checkpoint file with the switch: it does nothing on this road'], files };
   return { verdict: 'SAME', stop: false, findings: [], files };
@@ -81,4 +103,4 @@ function ckptSwitchOf(version, fixture) {
   return isRecord(rec) && cliVersionOf(rec.cliVersion) === v && typeof rec.verdict === 'string' ? rec.verdict : null;
 }
 
-module.exports = { CKPT_SWITCH, CKPT_VARIANTS, CKPT_VOLATILE, CKPT_SECRET, CKPT_BODY_KINDS, ckptVerdict, ckptSwitchOf };
+module.exports = { CKPT_SWITCH, CKPT_VARIANTS, CKPT_DEVICE, CKPT_NORMALISED, CKPT_VOLATILE, CKPT_SECRET, CKPT_BODY_KINDS, systemHeadOf, ckptVerdict, ckptSwitchOf };

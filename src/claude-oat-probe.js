@@ -46,7 +46,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const { OAT_VARIANTS, OAT_IN_FILE_GATE, MINT_VARIANT, cliVersionOf, mintScopesIn } = require('./cli-caps.js');
-const { CKPT_VARIANTS, CKPT_SWITCH, ckptVerdict } = require('./ckpt-switch.js'); // row B-437e U0: the checkpoint switch's pair + its PURE verdict
+const { CKPT_VARIANTS, CKPT_SWITCH, CKPT_DEVICE, systemHeadOf, ckptVerdict } = require('./ckpt-switch.js'); // row B-437e U0: the checkpoint switch's pair + its PURE verdict
 
 // the measurement's own version: a change to what it measures bumps it, and a hub re-runs a FAIL once (a PASS stays)
 const PROBE_VERSION = 2; // 2 (the incident of 2026-11-11): the hub's run lives outside every guarded root — a cannot-run measured by 1 runs again
@@ -593,9 +593,9 @@ async function measure(o = {}) {
         {
           // the whole head, the credential as its label (oat-env's byte diff reads these); count_tokens heads kept apart (row
           // B-437e U0: the checkpoint pair compares those too)
-          const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, k === 'authorization' ? `${scheme === 'bearer' ? 'Bearer ' : ''}${label(tok)}` : k === 'x-api-key' ? label(tok) : String(v)]).sort(([x], [y]) => (x < y ? -1 : 1)));
+          const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, k === 'authorization' ? `${scheme === 'bearer' ? 'Bearer ' : ''}${label(tok)}` : k === 'x-api-key' ? label(tok) : String(v).replace(/sk-ant-[A-Za-z0-9]+-[A-Za-z0-9_-]+/g, '<token>')]).sort(([x], [y]) => (x < y ? -1 : 1)));
           const sid = String(req.headers['x-claude-code-session-id'] || '');
-          const head = { t: rec.t, method: req.method, path: url, acct: a, stream: rec.stream, headers, body: j ? { keys: Object.keys(j).sort(), model: j.model || null, max_tokens: j.max_tokens ?? null, betas: j.betas || null, thinking: j.thinking ? Object.keys(j.thinking).sort().join(',') : null, tools: Array.isArray(j.tools) ? j.tools.length : null, system: Array.isArray(j.system) ? j.system.length : typeof j.system, stream: !!j.stream, toolNames: Array.isArray(j.tools) ? j.tools.map((x) => x && x.name).filter(Boolean).map(String).sort() : null, metadataKeys: j.metadata && typeof j.metadata === 'object' ? Object.keys(j.metadata).sort() : null, systemHead: Array.isArray(j.system) && j.system.length ? crypto.createHash('sha256').update(JSON.stringify(j.system[0])).digest('hex').slice(0, 16) : typeof j.system === 'string' ? crypto.createHash('sha256').update(j.system).digest('hex').slice(0, 16) : null, userId: j.metadata && typeof j.metadata.user_id === 'string' ? (sid ? j.metadata.user_id.split(sid).join('<session>') : j.metadata.user_id).slice(0, 300) : null, toolChoice: j.tool_choice === undefined ? null : JSON.stringify(j.tool_choice).slice(0, 200), contextManagement: j.context_management === undefined ? null : JSON.stringify(j.context_management).slice(0, 300) } : null };
+          const head = { t: rec.t, method: req.method, path: url, acct: a, stream: rec.stream, headers, body: j ? { keys: Object.keys(j).sort(), model: j.model || null, max_tokens: j.max_tokens ?? null, betas: j.betas || null, thinking: j.thinking ? Object.keys(j.thinking).sort().join(',') : null, tools: Array.isArray(j.tools) ? j.tools.length : null, system: Array.isArray(j.system) ? j.system.length : typeof j.system, stream: !!j.stream, toolNames: Array.isArray(j.tools) ? j.tools.map((x) => x && x.name).filter(Boolean).map(String).sort() : null, metadataKeys: j.metadata && typeof j.metadata === 'object' ? Object.keys(j.metadata).sort() : null, systemHead: Array.isArray(j.system) && j.system.length ? systemHeadOf(j.system[0]) : typeof j.system === 'string' ? systemHeadOf(j.system) : null, userId: j.metadata && typeof j.metadata.user_id === 'string' ? (sid ? j.metadata.user_id.split(sid).join('<session>') : j.metadata.user_id).slice(0, 300) : null, toolChoice: j.tool_choice === undefined ? null : JSON.stringify(j.tool_choice).slice(0, 200), contextManagement: j.context_management === undefined ? null : JSON.stringify(j.context_management).slice(0, 300) } : null };
           (url.includes('count_tokens') ? M.ctHeads : M.heads).push(head);
         }
         if (url.includes('count_tokens')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"input_tokens":12}'); return; }
@@ -658,7 +658,7 @@ async function measure(o = {}) {
     fs.symlinkSync(target, tmp); fs.renameSync(tmp, link);
     if (credsPath) { const n = Date.now() / 1000; fs.utimesSync(credsPath, n, n); }
   };
-  const homeConfig = (home) => fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, numStartups: 5, oauthAccount: { accountUuid: 'acct-HOME', emailAddress: 'home@example.invalid', organizationUuid: ORG.HOME, organizationName: 'Org HOME' } }));
+  const homeConfig = (home, extra = {}) => fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, numStartups: 5, oauthAccount: { accountUuid: 'acct-HOME', emailAddress: 'home@example.invalid', organizationUuid: ORG.HOME, organizationName: 'Org HOME' }, ...extra }));   // `extra` (row B-437e U0): the checkpoint pair's one made-up device id
   const cliEnv = (home) => ({
     PATH: process.env.PATH, HOME: home, TMPDIR: path.join(path.dirname(home), 'tmp'), USER: process.env.USER || 'u', LANG: 'C.UTF-8', TERM: 'dumb',
     ANTHROPIC_BASE_URL: BASE,
@@ -1032,7 +1032,7 @@ async function measure(o = {}) {
     const home = path.join(dir, 'home'), O = path.join(dir, 'subs', 'sub-O');
     const linkDir = path.join(dir, 'pool-links', 'pool-t'), link = path.join(linkDir, 'sess-1');
     for (const d of [home, O, linkDir, path.join(dir, 'cwd'), path.join(dir, 'tmp')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-    homeConfig(home);
+    homeConfig(home, { userID: CKPT_DEVICE });   // r1107 MUST 2: both homes carry the SAME made-up device id — a fresh home would mint a random one
     const credO = path.join(O, '.credentials.json');
     fs.writeFileSync(credO, oatCreds(Date.now() + OAT_TTL_MS, true), { mode: 0o600 });
     fs.symlinkSync(O, link);
@@ -1089,6 +1089,7 @@ async function measure(o = {}) {
     else if (lines.gap) { r.void = lines.gap.void; r.traceGap = lines.gap.why; r.note += ` · VOID: ${lines.gap.why}`; }
     else { const doors = doorsOpenedOf(lines); if (doors.length) { r.void = 'door'; r.doors = doors; r.note += ` · VOID: a door the trace cannot see through opened (${doors.join(', ')})`; } }
     if (r.void && name === 'ckpt-on') r.verdict = 'FAIL';   // a void run proves nothing either way
+    if (name === 'ckpt-on' && RESULTS['ckpt-off'] && RESULTS['ckpt-off'].r.void) { r.verdict = 'FAIL'; r.note += ` · the run without the switch is VOID (${RESULTS['ckpt-off'].r.void}): nothing is compared`; }   // r1107
     r.traceJoined = lines.joined || 0; r.ioUringSetups = lines.filter((x) => x.call === 'io_uring_setup').length; r.cutCalls = (lines.cut || []).map((c) => c.call);   // the evidence the oat runs keep
     RESULTS[name] = { r, summary };
     return r;

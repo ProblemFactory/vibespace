@@ -381,7 +381,9 @@ console.log('⑨ ckptVerdict — the switch changes nothing the CLI sends, or th
     ['the credential\'s label (another member, another scheme) ⇒ DIFFERENT', V(OFF, run({ files: 1, h1: { headers: { authorization: 'Bearer <A token 2>' } } })), 'DIFFERENT', true],
     ['a body byte count (content-length: the two runs\' paths are of equal length) ⇒ DIFFERENT', V(OFF, run({ files: 1, h3: { headers: { 'content-length': '999' } } })), 'DIFFERENT', true],
     ['the system\'s first block (the client\'s identity prefix) ⇒ DIFFERENT', V(OFF, run({ files: 1, h1: { body: { systemHead: 'ffffffffffffffff' } } })), 'DIFFERENT', true],
-    ['the metadata\'s user id (its account or device) ⇒ DIFFERENT', V(OFF, run({ files: 1, h2: { body: { userId: 'user_dev_account_acct-A_session_<session>' } } })), 'DIFFERENT', true],
+    ['the metadata\'s user id, its ACCOUNT part ⇒ DIFFERENT', V(OFF, run({ files: 1, h2: { body: { userId: 'user_dev_account_acct-A_session_<session>' } } })), 'DIFFERENT', true],
+    ['the metadata\'s user id, its DEVICE part ⇒ DIFFERENT (no mask chosen: the two homes carry ONE made-up device id, r1107 MUST 2)', V(OFF, run({ files: 1, h1: { body: { userId: 'user_dev2_account_acct-O_session_<session>' } } })), 'DIFFERENT', true],
+    ['an edit that failed on one run ⇒ INCOMPLETE before any comparison (its byte counts differ too)', V(OFF, run({ files: 1, edited: false, h2: { headers: { 'content-length': '777' } } })), 'INCOMPLETE', false],
     ['a tool choice ⇒ DIFFERENT', V(OFF, run({ files: 1, h2: { body: { toolChoice: '{"type":"auto"}' } } })), 'DIFFERENT', true],
     ['a top-level body key ⇒ DIFFERENT', V(OFF, run({ files: 1, h3: { body: { keys: [...head(1).body.keys, 'context_management'].sort() } } })), 'DIFFERENT', true],
     ['a tool name ⇒ DIFFERENT (another kind of request: the counts by kind differ)', V(OFF, run({ files: 1, h1: { body: { toolNames: ['Edit', 'Read', 'Rewind'], tools: 3 } } })), 'DIFFERENT', true],
@@ -405,7 +407,15 @@ console.log('⑨ ckptVerdict — the switch changes nothing the CLI sends, or th
   ok('ckptSwitchOf: the version\'s measured verdict; null for one not measured, a null fixture, a bare record, a record under the key naming another version',
     K.ckptSwitchOf('9.9.9 (Claude Code)', { versions: { '9.9.9': { cliVersion: '9.9.9', verdict: 'SAME' } } }) === 'SAME' && K.ckptSwitchOf('9.9.8', { versions: { '9.9.9': { cliVersion: '9.9.9', verdict: 'SAME' } } }) === null
     && K.ckptSwitchOf('9.9.9', null) === null && K.ckptSwitchOf('9.9.9', { verdict: 'SAME' }) === null && K.ckptSwitchOf('9.9.9', { versions: { '9.9.9': { cliVersion: '9.9.8', verdict: 'SAME' } } }) === null);
-  ok('the switch, its pair and the lists are one spelling, frozen', K.CKPT_SWITCH === 'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING' && JSON.stringify(K.CKPT_VARIANTS) === '["ckpt-off","ckpt-on"]' && [K.CKPT_VARIANTS, K.CKPT_VOLATILE, K.CKPT_SECRET, K.CKPT_BODY_KINDS].every(Object.isFrozen));
+  ok('the switch, its pair and the lists are one spelling, frozen', K.CKPT_SWITCH === 'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING' && JSON.stringify(K.CKPT_VARIANTS) === '["ckpt-off","ckpt-on"]' && [K.CKPT_VARIANTS, K.CKPT_VOLATILE, K.CKPT_SECRET, K.CKPT_BODY_KINDS, K.CKPT_NORMALISED].every(Object.isFrozen));
+  // THE CLOSED NORMALISED SET (主开发 r1107): pinned word for word — a name added to it turns this red (it needs 主开发's word)
+  ok('the normalised set is CLOSED: exactly the session id and the request id by name, the session masked inside the user id, a cch value masked in the first system block',
+    JSON.stringify(K.CKPT_NORMALISED) === JSON.stringify(['header x-claude-code-session-id: by name only (one per process)', 'header x-client-request-id: by name only (one per request)', 'metadata.user_id: the run\'s own session id masked as <session> (the account and the device compared — the device made equal)', 'system[0]: a `cch=<…>` value masked as cch=<masked> (a digest of the request\'s bytes on recent builds, unverified)'])
+    && JSON.stringify(K.CKPT_VOLATILE) === '["x-claude-code-session-id","x-client-request-id"]', JSON.stringify(K.CKPT_NORMALISED));
+  ok('the made-up device id both homes carry: 64 hex, made up', /^[0-9a-f]{64}$/.test(K.CKPT_DEVICE) && K.CKPT_DEVICE === 'feedface'.repeat(8));
+  const sh1 = K.systemHeadOf({ type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.322.abc; cc_entrypoint=sdk-cli; cch=9f3a1;' }), sh2 = K.systemHeadOf('You are Claude Code.'), sh3 = K.systemHeadOf({ type: 'text', text: 'y'.repeat(400) });
+  ok('the first system block is kept as TEXT (a stop can be read), its cch value masked; a string block too; ≤ 300 characters; none ⇒ null',
+    sh1 === 'x-anthropic-billing-header: cc_version=2.1.322.abc; cc_entrypoint=sdk-cli; cch=<masked>;' && sh2 === 'You are Claude Code.' && sh3.length === 300 && K.systemHeadOf(null) === null, JSON.stringify([sh1, sh2]));
   // RED CONTROLS (anchored copies of src/ckpt-switch.js through mutantCopies: each copy's require is the original's, so its one
   // import — src/cli-caps.js — is the real one)
   const KSRC = fs.readFileSync(path.join(REPO, 'src/ckpt-switch.js'), 'utf8'), KM = mutantCopies('cli-caps-ckpt', REPO);
