@@ -46,6 +46,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A folder you type into an automation key's folder picker before its list loads is no longer replaced by the list's folder, which the key then got instead.
 - A pooled Codex conversation whose account cannot be named no longer has its usage counted against the pool's current account.
 - The hub no longer pauses while it checks folder mounts or reconnects a storage that went down; an unanswered check says so instead of «no permission».
+- A storage folder that cannot be read is no longer mounted over, and files that may have been moved aside before a reconnect are listed in For you.
 
 ### Changed
 - The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
