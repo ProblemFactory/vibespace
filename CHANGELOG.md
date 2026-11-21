@@ -31,7 +31,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The tab row of an agent browser's live view now fits itself again when the font or font size changes, so a tab in front is no longer cut off at its edge.
 - Scrubbing a command's output no longer holds VibeSpace for minutes; past a set limit the rest of the output is held back, and the agent is told.
 - In «Run a command», the working directory is now checked on its machine before it is used; one that does not resolve is said under the box and nothing runs.
-- A Task Group's Export and Import use the file as checked: a path that does not resolve, or a new file not ticked to create, is said instead of used as typed.
+- A Task Group's Export and Import use the file as checked: a typed path that does not resolve, or a missing file to import, is said instead of used as typed.
 - A live view no longer says VibeSpace is not watching a browser it is only reconnecting to; if reconnecting gives up, it says so and offers Retry.
 - «Who may use it…» no longer saves over a change someone made since you opened it: it shows theirs with your own changes kept, to save again.
 - A file written through a folder link into a paired machine's mounted folder is no longer refused as «not mounted».
