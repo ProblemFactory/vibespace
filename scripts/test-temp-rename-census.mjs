@@ -1,15 +1,23 @@
 #!/usr/bin/env node
-// test-temp-rename-census — B-9275 unit 2 (lane lg-store-writes, the coordinator's r1153 / r1200). FAST, PURE (acorn over the
-// tracked src/ files and server.js that name a rename). THE LAW: A STORE'S NEW BYTES ARE ON DISK BEFORE ITS NAME POINTS AT THEM.
-// Every file-system rename of the tree is a ROW: its file, its CLASS (read here), its FAMILY (judged), one scope per site —
+// test-temp-rename-census — B-9275 unit 2 (lane lg-store-writes, the coordinator's r1153 / r1200; round wl2wglpsq's cure, r1346).
+// FAST, PURE (acorn over the tracked src/ files and server.js that name a rename). THE LAW: A STORE'S NEW BYTES ARE ON DISK
+// BEFORE ITS NAME POINTS AT THEM. WHAT IT READS: every MEMBER call `X.rename(` / `X.renameSync(` of tracked src/ and server.js
+// on a file-system object (FS_OBJ), and every call through a BARE name `rename(` / `renameSync(` (red as unknown unless judged
+// by file). WHAT IT DOES NOT JUDGE, by name — two REGIONS, COUNTED BY FILE (a new one is red by name), judged in row B-bcb8:
+// (1) a `mv` inside a command string a child runs (src/: an install step, a device's state over ssh); (2) every rename under
+// data/bin (the wrappers' sidecar, buffer, pid and exit files the hub reads; the CLIs' own files).
+// Every judged rename is a ROW: its file, its CLASS (read here), its FAMILY (judged), one scope per site —
 //   synced    a file written, SYNCED, then renamed over its name (a sync before the rename in the same scope)
 //   unsynced  a file written in its scope, then renamed with no sync between
 //   move      no file written before it in its scope: an existing file or folder moved
 // (the scope read = the enclosing functions out to the one the site's scope names, never another function's text; a write is a
 // writeFile / createWriteStream / an open for writing / a copy INTO the source; an open to append is a log's rotation, not a
 // write). Each FAMILY goes through the store writer, or is named with its reason, or is A CURE OWED with its row (FAMILIES).
-// A NEW site without a row is red by name, a rowed site that is gone is red, a class its family does not admit is red, and
-// OWED_MAX (the sites of the owed families) may only fall: the unit that cures a site lowers it.
+// A NEW site without a row is red by name, a rowed site that is gone is red, a class its family does not admit is red, a family
+// with no row is red; OWED_MAX (the sites of the owed families) is an EQUALITY here — the unit that cures a site lowers it, and
+// a rise above OWED_BASELINE is red by name unless RISES names it. The CLASS is read by TEXT POSITION in the scope, not by data
+// flow: any sync call after the source's last write reads «synced» (a sync of another descriptor, or one whose failure is
+// swallowed, too — the families say which: «self-synced-best-effort»).
 //
 // WHAT A SYNC COSTS ON A NETWORK SHARE (the owner's hub keeps its data folder on one today) — from the filesystem's own words,
 // not a run: nfs(5) «The sync mount option»: the NFS client delays an application's writes and sends them to the server when
@@ -43,6 +51,11 @@ const NOT_FS = new Map([
   ['design', 'the design engine renames a canvas (its own record)'],
   ['R.fs', 'a PAIRED machine\'s file: the remote file road asks the device agent to move it (not a write of the hub)'],
 ]);
+// bare-name rename calls judged by file (their names are not the file system's)
+const BARE_NOT_FS = new Map([
+  ['src/routes/files.js', 'rename(name) makes a free file NAME (a string) for a paste or an upload: no file-system call'],
+  ['src/lib/design-home.js', 'the design home\'s rename(d): a dialog that asks the design engine (a client file): no file here'],
+]);
 // a WRITE of a path (its argument index), a SYNC of a descriptor or a handle
 const WRITE = new Map([['writeFileSync', 0], ['writeFile', 0], ['createWriteStream', 0], ['write', 0], ['openSync', 0], ['open', 0], ['copyFileSync', 1], ['copyFile', 1], ['cpSync', 1], ['cp', 1]]);
 const SYNC = new Set(['fsyncSync', 'fsync', 'fdatasyncSync', 'fdatasync']);
@@ -60,7 +73,14 @@ export function renameSites(rel, src, AC) {
   const text = (n) => code.slice(n.start, n.end).replace(/\s+/g, ' ').trim();
   const sites = [], skipped = [], unknown = [];
   walk(ast, (n, parents) => {
-    if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return;
+    if (n.type !== 'CallExpression') return;
+    // a call through a BARE name (a destructured or aliased rename): unknown — red — unless its file is judged in BARE_NOT_FS
+    if (n.callee.type === 'Identifier' && (n.callee.name === 'rename' || n.callee.name === 'renameSync')) {
+      if (BARE_NOT_FS.has(rel)) skipped.push({ file: rel, line: n.loc.start.line, obj: '(a bare name)' });
+      else unknown.push({ file: rel, line: n.loc.start.line, obj: `(a bare ${n.callee.name})`, scope: scopeOf(parents) });
+      return;
+    }
+    if (n.callee.type !== 'MemberExpression' || n.callee.computed) return;
     const p = n.callee.property && n.callee.property.name;
     if (p !== 'rename' && p !== 'renameSync') return;
     const obj = text(n.callee.object), line = n.loc.start.line, scope = scopeOf(parents);
@@ -92,14 +112,15 @@ export function renameSites(rel, src, AC) {
 // ── THE FAMILIES: each goes THROUGH THE WRITER, or is NAMED with its reason, or is A CURE OWED with its row ─────────────────────
 const FAMILIES = {
   writer: { verdict: 'through the writer', classes: ['synced'], why: 'the store writer\'s thread (src/store-writer-worker.js writeJob): every store the writer holds — the temp synced before the rename since B-9275 unit 1' },
-  'self-synced': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename (a private credential file, the vault\'s files, the device identity, a sealed app secret)' },
-  secret: { verdict: 'cured', row: 'B-dc3f', classes: ['unsynced', 'synced'], why: 'the secret-bearing replace (src/secret-file.js): CURED in the hotfix 2.369.415 by another lane (row B-dc3f: synced, renamed, its folder synced) — it reads unsynced until that hotfix is under this tree, synced after; either is this row' },
+  'self-synced': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename, and a sync that fails fails the write (a private credential file, the device identity, a sealed app secret, a webhook\'s store, the usage ledger\'s rewrite)' },
+  'self-synced-best-effort': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename BEST EFFORT: a sync that FAILS (EIO, ENOSPC) is swallowed and the temp is still renamed — the vault\'s files, its TOTP and run-door stores, the automation store (round wl2wglpsq: rare, said here as it is)' },
+  secret: { verdict: 'cured', row: 'B-dc3f', classes: ['unsynced', 'synced'], why: 'the secret-bearing replace (src/secret-file.js): CURED in the hotfix 2.369.415 by another lane (row B-dc3f: synced, renamed, its folder synced) — it reads unsynced until that hotfix is under this tree, synced after; either is this row UNTIL THEN: once the hotfix is under this tree its classes narrow to synced (one word here), so a regression of the cure is red' },
   store: { verdict: 'owed', row: 'B-574d', classes: ['unsynced', 'move'], why: 'a store or a record of the HUB written by its own temp + rename with no sync: after a power loss its name can point at an empty file, read back as damaged. The cure: through the store writer (synced since B-9275 unit 1) or one shared synced replace' },
   b0248: { verdict: 'owed', row: 'B-0248', classes: ['unsynced'], why: 'a store that moves onto the store writer in row B-0248 (lane bl-loop-b): synced once it is there' },
   spend: { verdict: 'owed', row: 'B-ef83', classes: ['unsynced'], why: 'the spend ledger (data/spend-budget.json): onto the store writer in row B-ef83' },
   person: { verdict: 'owed', row: 'B-ddf3', classes: ['unsynced'], why: 'a file of the PERSON\'s written through the hub (a copy across machines, a DAV upload, a design file, a CLI\'s settings, a rescued transcript, an export, a browser profile\'s preferences): after a power loss its name can point at an empty file — the person\'s own bytes' },
   device: { verdict: 'owed', row: 'B-93e7', classes: ['unsynced', 'move'], why: 'the device agent\'s own state on a paired machine (its dial file, trust / policy / floor pins, orders, cursors, a secret file it is handed, its bundle\'s landing): after a power loss there it can come back unable to dial; its cure changes the device agent (a signed release)' },
-  derived: { verdict: 'named', classes: ['unsynced', 'move', 'synced'], why: 'bytes MADE AGAIN from their source when missing or wrong (a tool copied at every start, a download checked by its digest, an unpacked build, a generated wrapper or shim, a decompressed copy, a cache of a remote file): a lost file costs a remake, never a person\'s data' },
+  derived: { verdict: 'named', classes: ['unsynced', 'move', 'synced'], why: 'bytes MADE AGAIN from a source that stays (a tool copied at every start, a download checked by its digest, an unpacked build, a generated wrapper or shim; a cache of a source still on disk — a torn cached copy may be served until it is pruned): no person\'s data and no source is lost' },
   aside: { verdict: 'named', classes: ['unsynced', 'move'], why: 'a file SET ASIDE, not new bytes put in place (a stale lock moved out of the way)' },
   move: { verdict: 'named', classes: ['move'], why: 'no bytes written before it in its scope: an existing file or folder moved (a rotation, an aside of a damaged copy, a folder swap, a symlink swap) — its bytes were written and closed long before' },
 };
@@ -135,7 +156,7 @@ const ROWS = [
   ["src/agentd/agentd.js", "unsynced", "device", "", "writeDialStatus", "<module>", "<module>", "pinTrust", "writeFloor", "pinHub", "_persist", "serveConnection > onControl > st.commit", "serveConnection > onControl", "onListening", "learnHub"],
   ["src/agentd/agentd.js", "move", "device", "its signed bundle landed (the temp written by the stream or the ssh road), then `current` repointed", "landBundle"],
   ["src/agentd/agentd.js", "move", "device", "the ssh road's staged bundle moved to its temp", "<module>"],
-  ["src/agentd/client.js", "unsynced", "device", "the local device's upgrade proof", "DeviceManager._writeLocalProof"],
+  ["src/agentd/client.js", "unsynced", "store", "the local device's upgrade proof, written by the HUB's DeviceManager (its cure is the hub's, not a device release)", "DeviceManager._writeLocalProof"],
   ["src/agentd/client.js", "move", "move", "", "DeviceManager.installLocal"],
   ["src/agentd/reexec.js", "move", "move", "the `current` symlink swapped (metadata, no file bytes)", "repointCurrent", "repointCurrent"],
   ["src/agentd/self-retire.js", "unsynced", "device", "", "runRetire"],
@@ -148,7 +169,7 @@ const ROWS = [
   ["src/app-system-serve.js", "unsynced", "derived", "the shims, synced again at each start", "create > syncShims"],
   ["src/browser-serve.js", "unsynced", "person", "a browser profile's own preferences file", "planLaunch"],
   ["src/browser-serve.js", "unsynced", "derived", "the build pointer, written again at each launch", "writeBuildView"],
-  ["src/channel-outbox-files.js", "move", "move", "", "commit"],
+  ["src/channel-outbox-files.js", "move", "store", "an approved attachment's folder: its files staged moments before in the same request (stage(), no sync), then renamed into place (round wl2wglpsq's must)", "commit"],
   ["src/channel-store.js", "unsynced", "store", "", "writeJsonAtomic", "createChannelStore > rewriteRecords", "createChannelStore > trim", "createChannelStore > prependRecords", "createChannelStore > trimSide", "createChannelStore > avatarPut", "createChannelStore > attachmentPut"],
   ["src/channel-store.js", "move", "move", "", "createChannelStore > loadJsonFamily > setAside"],
   ["src/channels/webhook.js", "synced", "self-synced", "", "writeJsonAtomic"],
@@ -166,7 +187,7 @@ const ROWS = [
   ["src/exit-proxy.js", "synced", "self-synced", "", "ExitProxyManager._transferHeld"],
   ["src/fixture-ledger-purge.js", "unsynced", "store", "", "_writeAtomic"],
   ["src/gmail-sync.js", "unsynced", "store", "", "GmailSync._saveState"],
-  ["src/gmail-sync.js", "unsynced", "derived", "a mail message copied from the mailbox (fetched again)", "GmailSync._writeMessage"],
+  ["src/gmail-sync.js", "unsynced", "person", "the person's local mail copy: the folder's file NAMES are the seen index — a torn copy is never fetched again (round wl2wglpsq's must)", "GmailSync._writeMessage"],
   ["src/harness-config.js", "unsynced", "person", "a CLI's own settings file (the person's)", "commitWrite", "commitCreate"],
   ["src/harnesses/claude-home.js", "move", "move", "", "moveUser", "moveUser", "relinkLegacy"],
   ["src/harnesses/codex-models.js", "unsynced", "derived", "a cache of the CLI's model list", "models"],
@@ -202,7 +223,7 @@ const ROWS = [
   ["src/server/apps-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/auto-cli-loop.js", "unsynced", "store", "", "saveState"],
   ["src/server/auto-resume.js", "unsynced", "store", "", "writeJsonAtomic"],
-  ["src/server/automation-engine.js", "synced", "self-synced", "", "writeJsonAtomic"],
+  ["src/server/automation-engine.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
   ["src/server/boot-restore.js", "unsynced", "store", "", "writeJsonAtomic", "create > keepEnded"],
   ["src/server/boot-restore.js", "move", "move", "", "create > retireDeadSocket"],
   ["src/server/boot-trace.js", "unsynced", "store", "", "start > close"],
@@ -267,9 +288,9 @@ const ROWS = [
   ["src/server/usage-pool-engine.js", "unsynced", "store", "", "create > persistResetCreditTries"],
   ["src/server/usage-pool-engine.js", "move", "move", "", "create > loadResetCreditTries"],
   ["src/server/usage-probe-log.js", "move", "move", "", "appendProbeLog"],
-  ["src/server/vault-engine.js", "synced", "self-synced", "", "writeAtomic"],
-  ["src/server/vault-run-door.js", "synced", "self-synced", "", "writeJsonAtomic"],
-  ["src/server/vault-totp.js", "synced", "self-synced", "", "writeJsonAtomic"],
+  ["src/server/vault-engine.js", "synced", "self-synced-best-effort", "", "writeAtomic"],
+  ["src/server/vault-run-door.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
+  ["src/server/vault-totp.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
   ["src/server/vault-use-grants.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/window-targets-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/writes-lost.js", "unsynced", "store", "", "writeAtomic"],
@@ -301,7 +322,11 @@ const ROWS = [
   ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
   ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
 ];
-const OWED_MAX = 148;   // the sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+const OWED_MAX = 150;   // the sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+// THE RATCHET (round wl2wglpsq): OWED_MAX is an EQUALITY with the census (a cure lowers it in the cure's own commit). A commit
+// could raise it and stay green here, so a rise above the KEPT baseline is red by name unless RISES names it with its row
+const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)
+const RISES = [];            // [n, row, why] — a named rise of the owed count (none)
 
 const AC = require(path.join(REPO, 'node_modules/acorn'));
 const NAMES = /\brename(?:Sync)?\s*\(/;
@@ -328,6 +353,69 @@ ok(J.noRow.length === 0 && J.extra.length === 0 && J.gone.length === 0, `every r
 ok(J.badFamily.length === 0, 'every site\'s class is one its family admits (the writer\'s and a self-synced family\'s: synced only)');
 ok(ROWS.every((r) => !!FAMILIES[r[2]]) && Object.values(FAMILIES).every((f) => ['through the writer', 'named', 'cured', 'owed'].includes(f.verdict) && ((f.verdict !== 'owed' && f.verdict !== 'cured') || /^B-[0-9a-f]{4}$/.test(f.row))), 'every row names a family, and every family goes through the writer, is named, or is a cure (owed or done elsewhere) WITH its row');
 ok(J.owed === OWED_MAX, `OWED_MAX: ${J.owed} sites of the owed families (stated ${OWED_MAX}) — ${J.owed < OWED_MAX ? `LOWER OWED_MAX to ${J.owed} (a cure: the ratchet falls)` : J.owed > OWED_MAX ? 'a NEW owed site: the ratchet only falls (cure it, or name its family with its reason)' : 'held'}`);
+ok(Object.keys(FAMILIES).every((k) => ROWS.some((r) => r[2] === k)), `every family has its rows (${Object.keys(FAMILIES).filter((k) => !ROWS.some((r) => r[2] === k)).join(', ') || 'none empty'})`);
+ok(OWED_MAX <= OWED_BASELINE + RISES.reduce((a, r) => a + r[0], 0) && RISES.every((r) => Number.isInteger(r[0]) && r[0] > 0 && /^B-[0-9a-f]{4}$/.test(r[1]) && !!r[2]), `the owed count rises only BY NAME: ${OWED_MAX} against the kept baseline ${OWED_BASELINE}${RISES.length ? ` + ${RISES.map((r) => `${r[0]} (${r[1]})`).join(' + ')}` : ''}`, { OWED_MAX, OWED_BASELINE, RISES });
+
+// ── THE TWO REGIONS NOT JUDGED HERE (round wl2wglpsq): COUNTED BY FILE — a new one is red by name; judged in row B-bcb8 ──────
+// (1) data/bin: every member rename on a file-system object (and every bare-name call) of its tracked files; (2) shell: every
+// `mv` inside a string or template a src/ file holds (a command a child runs: an install step, a device's state over ssh)
+const REGION_ROWS = [
+  ["data/bin", "data/bin/acp-wrapper.js", 2],
+  ["data/bin", "data/bin/agy-wrapper.js", 5],
+  ["data/bin", "data/bin/chat-wrapper.js", 3],
+  ["data/bin", "data/bin/codex-chat-wrapper.js", 2],
+  ["data/bin", "data/bin/job-wrapper.js", 5],
+  ["data/bin", "data/bin/pty-wrapper.js", 1],
+  ["data/bin", "data/bin/vibespace-browser", 1],
+  ["data/bin", "data/bin/vibespace-channels", 1],
+  ["data/bin", "data/bin/vibespace-claude-subscription-login.mjs", 1],
+  ["data/bin", "data/bin/vibespace-design", 1],
+  ["data/bin", "data/bin/vibespace-hook-register.mjs", 2],
+  ["data/bin", "data/bin/vibespace-opencode-op", 1],
+  ["data/bin", "data/bin/vibespace-usage", 3],
+  ["data/bin", "data/bin/vibespace-usage-scan", 1],
+  ["shell", "src/app-manifest.js", 8],
+  ["shell", "src/app-system.js", 10],
+  ["shell", "src/desktop-apps.js", 1],
+  ["shell", "src/hosts.js", 4],
+  ["shell", "src/install-slot.js", 2],
+  ["shell", "src/mounts.js", 1],
+  ["shell", "src/remote-fs.js", 2],
+  ["shell", "src/routes/files.js", 1],
+  ["shell", "src/server/design-engine.js", 1],
+  ["shell", "src/spawn/ssh.js", 1],
+];   // [region, file, count] — read on the census's base (round wl2wglpsq's cure): data/bin 29 renames in 14 files, shell 31 «mv» in 10 files
+const regionCount = () => {
+  const out = new Map(), add = (k, n) => { if (n) out.set(k, (out.get(k) || 0) + n); };
+  for (const rel of trackedFiles(REPO, 'data/bin')) {
+    let src = ''; try { src = fs.readFileSync(path.join(REPO, rel), 'utf8'); } catch { continue; }
+    if (!/^#!.*\bnode\b/.test(src) && !/\.(?:c|m)?js$/.test(rel)) continue;   // the JavaScript tools (a shell script has none of these calls)
+    if (!NAMES.test(src)) continue;
+    let r; try { r = renameSites(rel, src, AC); } catch (e) { add(`data/bin | ${rel} | UNPARSED ${e.message}`.slice(0, 160), 1); continue; }
+    add(`data/bin | ${rel}`, r.sites.length + r.unknown.length);
+  }
+  const MV = /(?:^|[\s;&|(])mv\s+(?:-[a-zA-Z]+\s+)*[^\s;&|]/g;
+  for (const rel of trackedFiles(REPO, 'src', 'server.js').filter((f) => /\.(?:c|m)?js$/.test(f))) {
+    const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
+    if (!/\bmv\s/.test(src)) continue;
+    const code = src.replace(/^#!.*/, ''), opts = { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowHashBang: true };
+    let ast; try { ast = AC.parse(code, { ...opts, sourceType: 'script' }); } catch { ast = AC.parse(code, { ...opts, sourceType: 'module', allowReturnOutsideFunction: false }); }
+    let n = 0;
+    walk(ast, (x) => {
+      if (x.type === 'Literal' && typeof x.value === 'string') n += (x.value.match(MV) || []).length;
+      else if (x.type === 'TemplateElement') n += (String(x.value.cooked ?? x.value.raw).match(MV) || []).length;
+    });
+    add(`shell | ${rel}`, n);
+  }
+  return out;
+};
+{
+  const counted = regionCount(), rowed = new Map(REGION_ROWS.map((r) => [`${r[0]} | ${r[1]}`, r[2]]));
+  const off = [...new Set([...counted.keys(), ...rowed.keys()])].filter((k) => counted.get(k) !== rowed.get(k)).sort();
+  for (const k of off) console.error(`  ✗ REGION ROW: ${JSON.stringify([...k.split(' | '), counted.get(k) || 0])} (the row says ${rowed.get(k) ?? 'nothing'})`);
+  const by = (reg) => [...counted].filter(([k]) => k.startsWith(reg + ' |')).reduce((a, [, n]) => a + n, 0);
+  ok(off.length === 0, `the two regions not judged here, counted by file (judged in row B-bcb8): data/bin ${by('data/bin')} renames, shell ${by('shell')} «mv» in command strings — every file's count is its row's`);
+}
 console.log('② the families:');
 for (const [k, f] of Object.entries(FAMILIES)) {
   const rs = ROWS.filter((r) => r[2] === k), n = rs.reduce((a, r) => a + r.length - 4, 0);
@@ -350,6 +438,8 @@ console.log('③ the classifier on planted sources');
   ok(cls(`function c(t, f) { fs.writeFileSync(t, 'x'); setImmediate(() => fs.renameSync(t, f)); }`) === 'unsynced', 'a callback reads the scope that names it: unsynced');
   const u = one(`function z() { thing.rename(1, 2); accounts.rename('a', 'b'); }`);
   ok(u.unknown.length === 1 && u.unknown[0].obj === 'thing' && u.skipped.length === 1 && u.sites.length === 0, 'an object nobody judged is red by name; a NOT_FS object is skipped by name', u);
+  const bare = renameSites('src/zz-plant.js', `function z(a, b) { const { renameSync } = require('fs'); renameSync(a, b); }`, AC), judgedBare = renameSites('src/routes/files.js', `function n() { return rename('a.txt'); }`, AC);
+  ok(bare.unknown.length === 1 && bare.unknown[0].obj === '(a bare renameSync)' && judgedBare.skipped.length === 1 && judgedBare.unknown.length === 0, 'a call through a BARE name (destructured, aliased) is red as unknown; a file judged in BARE_NOT_FS is skipped by name', { bare, judgedBare });
 }
 
 // ── ④ THE WRITER'S LAW, and the census's own controls ───────────────────────────────────────────────────────────────────────
