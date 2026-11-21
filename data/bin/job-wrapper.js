@@ -963,7 +963,7 @@ function escapedOf() { // started after us, outside our group, carrying the job'
   const out = [], kept = keptTest(), anc = keptAncestors();   // B-2c5c: a hub started inside the job carries the job's mark — never an escapee
   let ents = [];
   if (!MARK) return out;
-  try { ents = fs.readdirSync('/proc').filter((e) => /^\d+$/.test(e)).sort((a, b) => Number(b) - Number(a)); } catch { return out; }   // newest pid first: inside the bound on a busy machine
+  try { ents = fs.readdirSync('/proc').filter((e) => /^\d+$/.test(e)).sort((a, b) => Number(b) - Number(a)); } catch { out.none = true; return out; }   // newest pid first: inside the bound on a busy machine; B-d8f4 (10): no process file system — said by the stop
   const t0 = Date.now();
   for (const e of ents) {
     if (!/^\d+$/.test(e) || Number(e) === process.pid) continue;
@@ -979,18 +979,21 @@ async function drainGroup() {
   const left = groupLeft();
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
   if (out.cut) { try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: its scan for what left its group read only part of the processes (past 250 ms) — what it did not read may be left running\n`)); } catch { } }   // B-7ca1 (its round's should 5): a cut scan is said, as the engine's
+  if (out.none && stopping) { try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: this machine has no process file system (/proc) — what left its group cannot be found, and may be left running\n`)); } catch { } }   // B-d8f4 (10): where there is no /proc the sweep cannot run — said, never silent
   // B-7ca1 (the group rung — no scope: a container, a pod): a TASK's stop ends what carries its mark outside its group too — a child that
   // made its own group (setsid, the timeout program) and was re-parented before the stop is neither in the group nor under the tree the
   // stop read; by identity (pid + start), never one that started before us, never a hub started inside the job (keptTest)
   let taskStop = !keeps && !!stopping;   // read again before the kill pass: a stop that lands while a natural end drains is a stop (its read's S2)
   const ours = (p) => !!p[2];   // carries THIS run's mark (an earlier run's leftover, and what it forks, never does)
   // B-c134: a STOP's tree — what of it the stop step read outside our group and is still there is the stop's to end, with the rest
-  { const g = new Set(left.map(termKey)); for (const p of stopping ? stopTree.filter(same) : []) if (!g.has(termKey(p))) { left.push(p); g.add(termKey(p)); } }
+  const outKeys = new Set();   // B-d8f4 (7): every process outside our group that is THIS stop's to end — counted «outside» once the stop reached it, whichever pass found it
+  { const g = new Set(left.map(termKey)); for (const p of stopping ? stopTree.filter(same) : []) if (!g.has(termKey(p))) { left.push(p); g.add(termKey(p)); outKeys.add(termKey(p)); } }
   if (!left.length && !out.length) return {};
   // round 10c: EVERY COUNT IN THE RECORD IS THE SIZE OF ONE SET of processes (`pid:start`) — one both scans saw (it left our group
   // between them) is one process, never two
   const inGroup = new Set(left.map(termKey)), outside = out.filter((p) => !inGroup.has(termKey(p))), runOut = outside.filter(ours);
   for (const [k, p] of stopEsc) if (!inGroup.has(k) && !runOut.some((q) => termKey(q) === k)) runOut.push(p);   // the stop step's, gone before this scan
+  for (const p of runOut) outKeys.add(termKey(p));
   const rows = keeps ? [...left, ...outside] : taskStop ? [...left, ...runOut] : left, n = rows.length;
   const kept = keeps ? { kept: true, pids: rows.slice(0, 64), boot: bootId(), ...(outside.length ? { escaped: outside.length } : {}), ...(n > 64 ? { recorded: 64 } : {}) } : null;
   if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
@@ -1013,19 +1016,23 @@ async function drainGroup() {
   // its SIGTERM leaves no child behind), at most three passes
   if (!taskStop && !keeps && stopping) {   // a stop landed while this drain waited: its stop step SIGTERMed this run's escapees — they are a stop's now,
     taskStop = true;                        // with what is left of THE STOP's grace (its read r2, S2: one clock), never killed at once
-    const seenL = new Set(), lv0 = [...runOut, ...escapedOf().filter(ours), ...stopTree].filter((p) => !seenL.has(termKey(p)) && seenL.add(termKey(p)));   // its read r3: a FRESH scan too — what appeared since the first, and the stop's own tree
+    const fresh = escapedOf().filter(ours); for (const p of fresh) outKeys.add(termKey(p));   // B-d8f4 (7): one the late stop's rescan finds first is the stop's outside its group too
+    const seenL = new Set(), lv0 = [...runOut, ...fresh, ...stopTree].filter((p) => !seenL.has(termKey(p)) && seenL.add(termKey(p)));   // its read r3: a FRESH scan too — what appeared since the first, and the stop's own tree
     let lv = lv0.filter(same); const dl = stopAt + stopMs;
     while (lv.length && Date.now() < dl) { await nap(25); lv = lv.filter(same); }
   }
   const killed = new Set();
   for (let pass = 0; pass < 3; pass++) {
-    const more = [...groupLeft(), ...(mine ? escapedOf() : taskStop ? escapedOf().filter(ours) : []), ...(stopping ? stopTree.filter(same) : [])].filter((p) => !killed.has(termKey(p)));
+    const esc = mine ? escapedOf() : taskStop ? escapedOf().filter(ours) : [];
+    if (taskStop) for (const p of esc) outKeys.add(termKey(p));   // B-d8f4 (7): …and one the kill pass finds first
+    const more = [...groupLeft(), ...esc, ...(stopping ? stopTree.filter(same) : [])].filter((p) => !killed.has(termKey(p)));
     if (!more.length) break;
     for (const p of more) if (killNow(p)) killed.add(termKey(p));
   }
   const still = killed.size;
   if (still && !forced) forced = `${still} process${still === 1 ? '' : 'es'} it left ${still === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its SIGTERM'} — killed`;
   const runStopped = taskStop ? runOut.filter((p) => termed.has(termKey(p)) || killed.has(termKey(p))) : [];   // B-7ca1 (its read r2): what the STOP reached — never one that ended by itself before it
+  const outsideReached = taskStop ? [...outKeys].filter((k) => termed.has(k) || killed.has(k)).length : 0;   // B-d8f4 (7): the count «outside» — never low
   const counted = new Set([...rows.filter((p) => !runOut.includes(p) || runStopped.includes(p)).map(termKey), ...killed, ...runStopped.map(termKey)]), all = counted.size; // forked while it drained: counted with the rest
   // what got less than the full grace — OF WHAT IT LEFT (round 10c: r10 counted every SIGTERM of the run, one that ended before
   // the drain too — 4 of 3). Round 11: what we KILLED that NO step reached with SIGTERM (the stop step's, the drain's — the one
@@ -1035,7 +1042,7 @@ async function drainGroup() {
   // earlier pass (the stop step's, the drain's with grace left) had its grace. A state the table holds — no clock in the count
   const short = stopping ? [...killed].filter((k) => { const t = termed.get(k); return !t || t.pass === 'kill'; }).length : 0;
   if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
-  return { left: { n: all, ...(still ? { force: true } : {}), ...(taskStop ? (() => { const sk = new Set(runStopped.map(termKey)), not = outside.filter((p) => !sk.has(termKey(p)) && same(p)).length;   /* its round's should 6: one that ended by itself is not «not stopped» */ return { ...(runStopped.length ? { outside: runStopped.length } : {}), ...(not ? { escaped: not } : {}) }; })() : outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };   // B-7ca1: a stop's are STOPPED (outside), a natural end's said (escaped)
+  return { left: { n: all, ...(still ? { force: true } : {}), ...(taskStop ? (() => { const sk = new Set(runStopped.map(termKey)), not = outside.filter((p) => !sk.has(termKey(p)) && same(p)).length;   /* its round's should 6: one that ended by itself is not «not stopped» */ return { ...(outsideReached ? { outside: outsideReached } : {}), ...(not ? { escaped: not } : {}) }; })() : outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };   // B-7ca1: a stop's are STOPPED (outside), a natural end's said (escaped)
 }
 
 async function ended(code, signal) {

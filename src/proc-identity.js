@@ -187,7 +187,7 @@ const MEMBERS_ROWS = 4096, MEMBERS_MS = 250;
 function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBERS_ROWS, maxMs = MEMBERS_MS } = {}, opts) {
   const root = rootOf(opts), out = [];
   let ents = [];
-  try { ents = fs.readdirSync(root); } catch { out.scan = { scanned: 0, total: 0, unreadable: 0, others: 0, cut: false }; return out; }
+  try { ents = fs.readdirSync(root); } catch { out.scan = { scanned: 0, total: 0, unreadable: 0, others: 0, cut: false, none: true }; return out; }   // B-d8f4 (10): no process file system — the caller says so
   const bootId = bootIdOf(opts), me = typeof process.getuid === 'function' ? process.getuid() : -1;
   const pids = ents.filter((e) => /^\d+$/.test(e) && Number(e) !== process.pid).map(Number).sort((a, b) => b - a); // newest first
   let scanned = 0, unreadable = 0, others = 0, cut = false;

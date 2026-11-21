@@ -776,6 +776,7 @@ leg('§3 IN-PROCESS ㊽ A COUNT IN THE RECORD IS THE SIZE OF A SET — of what a
   ok(typeof F === 'function' && /short 4 of n 3/.test(F({ n: 3, kept: true, cleared: 1, short: 4 })) && F({ n: 3, short: 3 }) === '' && F({ n: 3 }) === '' && F(null) === ''
     && said(bad).length === 1 && said(sound).length === 0 && (lastRun(bad).left || {}).short === 3 && (lastRun(sound).left || {}).short === 2 && /\(3 processes got less than the full grace\)/.test(words),
     `a record past its set is said once in the hub's log — «${(said(bad)[0] || '').replace(/^\[jobs\] \S+ /, '')}» — and its words say no more than it left: «${words}»; a sound record says nothing (63a311ad0: no such line — clamped in silence)`, { bad: said(bad), sound: said(sound), left: lastRun(bad).left });
+  ok(/outside 4 of n 3/.test(F({ n: 3, force: true, outside: 4 })) && F({ n: 3, outside: 3 }) === '' && F({ n: 3, outside: 0 }) === '', 'B-d8f4 (8): leftRecordFault\'s branch for «outside» over n — a record that counts more stopped outside its group than it left is a fault, said; at n or under it is none', { over: F({ n: 3, outside: 4 }), at: F({ n: 3, outside: 3 }) });
   stopEngine(E);
 });
 
