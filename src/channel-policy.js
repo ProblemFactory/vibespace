@@ -1101,7 +1101,7 @@ function withAddedCc(env, cc) {
  * immutable while it awaits; an agent's replacement is a NEW id (and the
  * arming delay below keeps it from sliding under the pointer).
  */
-function shownFields(p) {
+function shownFields(p, { decision = true } = {}) {   // `decision: false` = the fields as the release before the decision drew them (B-82c2 the second follow)
   const q = p || {};
   const s = (v) => (v === undefined || v === null ? null : String(v));
   const env = q.replyEnvelope && typeof q.replyEnvelope === 'object' ? q.replyEnvelope : null;
@@ -1126,7 +1126,7 @@ function shownFields(p) {
     ...(q.kind === 'recall' && q.recall && typeof q.recall === 'object' ? [['recall', s(q.recall.msg)]] : []),
     // B-82c2 round wfgpbe038 RULE C: WHO IT NOTIFIES is shown on the card — a press from a card drawn before the decision
     // changed is `changed-since-shown` (appended only when there is a decision: every other proposal keeps its digest)
-    ...(q.prepared && typeof q.prepared === 'object' ? [['mentions', decisionSummary(q.prepared)]] : []),
+    ...(decision && q.prepared && typeof q.prepared === 'object' ? [['mentions', decisionSummary(q.prepared)]] : []),
   ];
 }
 /** B-82c2 round wfgpbe038 RULE C — WHAT A MENTION DECISION SHOWS, as one comparable string: who is notified (the ids), everyone,
@@ -1143,8 +1143,8 @@ function fnv32(str, seed) {
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return h.toString(16).padStart(8, '0');
 }
-function shownDigest(p) {
-  const canon = JSON.stringify(shownFields(p));
+function shownDigest(p, opts = {}) {
+  const canon = JSON.stringify(shownFields(p, opts));
   return `v1:${fnv32(canon, 0x811c9dc5)}${fnv32(canon.split('').reverse().join(''), 0x9747b28c)}:${canon.length}`;
 }
 
@@ -1647,12 +1647,15 @@ function receiptFor(p) {
 }
 
 /** B-82c2: a sent proposal's mentions — `{decided, taken}` (the distinct people and everyone decided, the count the channel's
- *  answer took); null when nothing was decided or the channel's answer did not say. */
+ *  answer took); null when nothing was decided or the channel's answer did not say. The follow (r1402 (2)): `unplaced` = the
+ *  decided places that no longer sat on the text at the send (sent as their characters) — said even when the channel's answer
+ *  gave no count (`taken` null then). */
 function notifiedOf(p) {
   if (!p || p.state !== 'sent' || !p.prepared || !Array.isArray(p.prepared.mentions) || !p.prepared.mentions.length) return null;
   const taken = p.result && Number.isInteger(p.result.mentionsTaken) ? p.result.mentionsTaken : null;
-  if (taken === null) return null;
-  return { decided: new Set(p.prepared.mentions.map((m) => m && m.id).filter(Boolean)).size, taken };
+  const unplaced = p.result && Number.isInteger(p.result.mentionsUnplaced) && p.result.mentionsUnplaced > 0 ? p.result.mentionsUnplaced : 0;
+  if (taken === null && !unplaced) return null;
+  return { decided: new Set(p.prepared.mentions.map((m) => m && m.id).filter(Boolean)).size, taken, ...(unplaced ? { unplaced } : {}) };
 }
 /** A reply's place on its receipt: `{placement}` for a quote / thread / thread+chat (+ `inThread` and the thread's key
  *  for the thread ones); nothing for a plain message, a composed one or a reaction. */
@@ -1724,6 +1727,8 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
   if (r.honestyLine) lines.push('a sender honesty line naming you as the drafting agent was appended (the channel\'s option is on)');
   // B-82c2: how many mentions the channel's own answer took, and FEWER than were decided said
   if (r.notified && Number.isInteger(r.notified.decided) && Number.isInteger(r.notified.taken)) lines.push(r.notified.taken < r.notified.decided ? `notified: ${r.notified.taken} of the ${r.notified.decided} mentions decided — the channel took FEWER than were decided (the rest went as plain words)` : `notified: the ${r.notified.decided} mention${r.notified.decided === 1 ? '' : 's'} decided (the channel took ${r.notified.taken})`);
+  // the follow (r1402 (2)): a decided place that no longer sat on the text at the send is SAID (it went as its characters)
+  if (r.notified && Number.isInteger(r.notified.unplaced) && r.notified.unplaced > 0) lines.push(`not placed: ${r.notified.unplaced} decided mention${r.notified.unplaced === 1 ? '' : 's'} no longer sat on the text at the send and went as plain characters — nobody was notified by ${r.notified.unplaced === 1 ? 'it' : 'them'}`);
   if (r.reconciled) lines.push('this outcome was established by a reconcile check after the send\'s result was lost');
   if (r.reason) lines.push(`reason: ${inertFrames(String(r.reason)).slice(0, 400)}`);
   // 2026-09-27: WHAT THE USER CHANGED, not only the final text — a line diff

@@ -1241,14 +1241,21 @@ router.post('/api/channels/:adapterId/:convId/rules/preview', async (req, res) =
 /** A P3 verb's typed answer → status BY CODE. `send-not-available` is 409
  *  (the conversation cannot take a message right now — the reason rides
  *  `error`), `bad-state` 409, `not-found` 404, malformed input 400. */
-function answer3(res, r) {
-  if (r && r.ok) return res.json(r);
+/** The follow (主开发 r1402 (5)): the STATUS a P3 verb's answer gets, by its code — ONE table, read by `answer3` and by the
+ *  page legs that stand in for this route (test-channel-outbox-window ㉖ reads it, never a hand copy). */
+function answer3Status(r) {
+  if (r && r.ok) return 200;
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404
-    : code === 'send-not-available' || code === 'bad-state' || code === 'rest-not-sent' || code === 'rest-already' || code === 'rest-nothing-left' || code === 'rest-files-gone' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'mentions-changed' || code === 'topic-forbidden' || code === 'not-in-effect' || code === 'rule-gone' || code === 'except_conflicts' || code === 'except_unnamed' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer); lane held-except-doors r2: an Approve's grant refused by the ONE writer — by name, never a 500 (r12: these two sit BEFORE `expired` — test-wake-approve-card pins the text from `expired` to the 409 as ONE literal, exactly once, and its RED control cuts it; test-channel-placement pins the last code)
+  return code === 'not-found' ? 404
+    : code === 'send-not-available' || code === 'bad-state' || code === 'rest-not-sent' || code === 'rest-already' || code === 'rest-nothing-left' || code === 'rest-files-gone' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'page-outdated' || code === 'mentions-changed' || code === 'topic-forbidden' || code === 'not-in-effect' || code === 'rule-gone' || code === 'except_conflicts' || code === 'except_unnamed' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer); lane held-except-doors r2: an Approve's grant refused by the ONE writer — by name, never a 500 (r12: these two sit BEFORE `expired` — test-wake-approve-card pins the text from `expired` to the 409 as ONE literal, exactly once, and its RED control cuts it; test-channel-placement pins the last code)
     : code === 'rate-floor' ? 429
     : code === 'bad-proposal' || code === 'bad-policy' || code === 'bad-grant' || code === 'bad-request' ? 400
     : code === 'failed' || code === 'unknown' ? 502 : 500;
+}
+function answer3(res, r) {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  const status = answer3Status(r);
   return res.status(status).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
 }
 /** The OUTBOX — every proposal (newest first, bounded), optionally ONE
@@ -1507,4 +1514,4 @@ router.post('/api/channel-groups/:id/:verb', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, wakeRefused, wakeHeld };   // r5: the webhook path verbs ask the same gate (r6: with this file's engine — the one wiring)
+module.exports = { router, setup, wakeRefused, wakeHeld, answer3Status };   // r5: the webhook path verbs ask the same gate (r6: with this file's engine — the one wiring)

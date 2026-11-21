@@ -152,7 +152,7 @@ const RECEIVE_MODES = Object.freeze(['push', 'poll', 'scan']);
 /** B-82c2 round wn462wr7s: why an OPEN word (its own list: a name the member list was needed for) was not looked up — the read
  *  was refused, the chat dissolved, the channel gave no answer (a back-off, a blip, a rate refusal), the list was not whole (a
  *  page mark left), or the account's sign-in expired. The proposal is created either way: the words go as plain words. */
-const OPEN_WHYS = Object.freeze(['members-unreadable', 'chat-dissolved', 'members-no-answer', 'members-partial', 'members-signed-out', 'not-read']);
+const OPEN_WHYS = Object.freeze(['members-unreadable', 'chat-dissolved', 'members-no-answer', 'members-rate-limited', 'members-partial', 'members-signed-out', 'not-read']);
 // lane webhook-l1-server: HOW a push lane hears its vendor — CLOSED (a long-lived socket, a pull subscription, a long
 // poll, or an HTTP door the vendor calls: `http-inbound`, the webhook adapter's `/hook/<slug>`)
 const PUSH_TRANSPORTS = Object.freeze(['ws-long-conn', 'pubsub-pull', 'long-poll', 'http-inbound']);

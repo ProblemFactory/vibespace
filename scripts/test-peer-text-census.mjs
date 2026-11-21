@@ -1057,7 +1057,7 @@ const PRINTS = {
     'pr.plain': 'judged:agentPrepared — the names sent as plain words, each a line piece through the belt', 'plain': 'judged:agentPrepared — that list (pr.plain)',
     'pr.over': 'judged:agentPrepared — the names past the mark limit, each a line piece through the belt', 'over': 'judged:agentPrepared — that list (pr.over)',
     'pr.open': 'judged:agentPrepared — the names not looked up (round wn462wr7s: their own list), each a line piece through the belt', 'open': 'judged:agentPrepared — that list (pr.open)',
-    'pr.openWhy': `${V}:the why KEY (our enum: members-unreadable / chat-dissolved / members-no-answer / members-partial / members-signed-out / not-read), worded by the CLI's own OPEN_WHY_WORDS`, 'OPEN_WHY_WORDS': `${V}:the CLI's own words for each why key`,
+    'pr.openWhy': `${V}:the why KEY (our enum: members-unreadable / chat-dissolved / members-no-answer / members-rate-limited / members-partial / members-signed-out / not-read), worded by the CLI's own OPEN_WHY_WORDS`, 'OPEN_WHY_WORDS': `${V}:the CLI's own words for each why key`,
     'pr.unchecked': 'judged:agentPrepared — the names decided without the whole member list (round wfgpbe038), each a line piece through the belt', 'unchecked': 'judged:agentPrepared — that list (pr.unchecked)',
     'pr.uncheckedWhy': `${V}:the why KEY (the same enum), worded by the CLI's own OPEN_WHY_WORDS`, 'pr.unread': `${V}:a count (an integer the engine bounds)`,
     'pl.line': 'judged:agentPlaceLine — the parent\'s peerName author + a bounded first line, the line rule (channel-thread.js)', 'pl.tag': 'judged:agentPlaceLine — the thread tag (key + count) under the line rule',

@@ -735,7 +735,7 @@ console.log(`PNGs: ${SHOTS}`);
     return eng;
   };
   // the route's status (answer3): 409 for a refusal the card draws (mentions-changed, changed-since-shown, …), 400 bad-proposal
-  const statusOf = (r) => (r && r.ok ? 200 : (r && r.code) === 'not-found' ? 404 : ['mentions-changed', 'changed-since-shown', 'bad-state', 'send-not-available', 'wake-count-mismatch'].includes(r && r.code) ? 409 : (r && r.code) === 'bad-proposal' ? 400 : 500);
+  const statusOf = R26('src/routes/channels.js').answer3Status;   // the follow (主开发 r1402 (5)): the route's OWN status table, never a hand copy
   const OBW = "[...app.wm.windows.values()].find((x) => x.type === 'channel-outbox')";
   const P26 = R26('src/channel-policy.js');
   // ONE page over ONE engine: the card of proposal `id`, pressed the way a person can (r1065 (4): the arming waited for by what

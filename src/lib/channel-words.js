@@ -112,6 +112,8 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'bad-state': return r.state === 'withdrawn' ? t('The agent withdrew this proposal — there is nothing to decide') : t('This proposal can no longer be decided');
     // r6 verify F6 (2026-09-28): the card's `shown` digest no longer matches the proposal — nothing was sent
     case 'changed-since-shown': return t('This proposal changed since the card was drawn — nothing was sent; read it again, then decide');
+    // B-82c2 the second follow (r1403 (3)): a press from a page opened before an update — the ONE act that ends it, named
+    case 'page-outdated': return t('This page was opened before an update and does not show who this message notifies — nothing was sent; reload this page, then decide');
     // B-82c2 round wke4s5jp9: the press found a mention decision the card had not shown — stored, nothing sent; the card shows it now
     case 'mentions-changed': return t('Who this message notifies changed — nothing was sent; the card shows it now: read it, then approve again');
     case 'not-yours': return t('Only the agent that proposed it can withdraw it');

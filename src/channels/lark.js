@@ -1639,8 +1639,10 @@ function create(record = {}, deps = {}) {
   async function memberListFor(convId) {
     let names;
     try { names = await namesFor(convId, { fresh: true }); }
-    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : 'members-no-answer' }; }   // rate-ok: prepare-members
-    if (names === null) return { list: [], whole: false, why: 'members-no-answer' };   // the adapter's back-off holds: no read now
+    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : e instanceof ChannelError && e.code === 'rate-limited' ? 'members-rate-limited' : 'members-no-answer' }; }   // rate-ok: prepare-members
+    // the follow (r1402 (1)): the back-off that holds is said BY ITS CAUSE — the vendor's rate pause on people reads is «rate
+    // limited», a transport pause on this chat «no answer» (the words were «no answer» for both)
+    if (names === null) return { list: [], whole: false, why: peopleRefusedUntil > now() ? 'members-rate-limited' : 'members-no-answer' };   // the adapter's back-off holds: no read now
     const m = members.get(convId) || {};
     if (m.refused) return { list: [], whole: false, why: m.dissolved ? 'chat-dissolved' : m.until ? 'members-no-answer' : 'members-unreadable' };   // a transport failure is «no answer», never «may not read»
     const list = [...names].map(([id, name]) => ({ id, name }));
@@ -1684,8 +1686,10 @@ function create(record = {}, deps = {}) {
   const canReadDepts = () => (((readToken().token || {}).scopes) || []).some((x) => x === PEOPLE_SCOPE || x === 'contact:contact:readonly');
   let peopleRefusedUntil = 0;
   /** verify r1 F3: how long the account's people lookups pause after a vendor rate refusal / a transport blip — the
-   *  vendor's Retry-After when it gave one, else a minute; never more than five. */
-  const peoplePauseMs = (e) => { const hint = e && e.detail ? Number(e.detail.retryAfterSec) : NaN; return Math.min(300e3, Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000)); };
+   *  vendor's Retry-After when it gave one, else a minute; a transport blip never more than five. B-82c2 the second follow
+   *  (主开发 r1403 (1)): a RATE refusal is never asked again SOONER than the vendor's own word — its hint is kept whole (a
+   *  day at most, a guard against a broken header), and nothing asks on a timer: the next read is a person's or an agent's act. */
+  const peoplePauseMs = (e) => { const hint = e && e.detail ? Number(e.detail.retryAfterSec) : NaN; const ms = Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000); return e instanceof ChannelError && e.code === 'rate-limited' ? Math.min(24 * 3600e3, ms) : Math.min(300e3, ms); };
   let peopleMinute = [];
   const peopleBudget = () => { const t = now(); peopleMinute = peopleMinute.filter((x) => x <= t && t - x < 60e3); return PEOPLE_PER_MIN - peopleMinute.length; };
   /** ONE person's profile (B1/B5): `contact/v3/users/:id` (+ the first department's name, 24 h) — through the gate, at
@@ -2026,8 +2030,10 @@ function create(record = {}, deps = {}) {
     if (held) throw held;
     const files = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
     // B-82c2: each mention decided at the proposal in Lark's own form (`<at user_id="ou_…">Name</at>`); a name not decided stays its characters
-    const wire = LM.wireText(String(text == null ? '' : text), prepared && prepared.places);   // round wfgpbe038 D: the decision's own places
-    if (files.length) return sendWithFiles(convId, { text: wire, replyTo, replyAnchor, idemKey, inThread, placement, files, deadline });
+    const unplaced = [];   // the follow (r1402 (2)): a decided place that no longer sits on this text is SAID — the log and the answer
+    const wire = LM.wireText(String(text == null ? '' : text), prepared && prepared.places, unplaced);   // round wfgpbe038 D: the decision's own places
+    if (unplaced.length) log.warn && log.warn(`[channels] lark ${adapterId}: ${unplaced.length} decided mention place(s) no longer sit on the text sent to ${String(convId).slice(0, 80)} — sent as their characters (${unplaced.map((u) => u.why).join(', ')})`);
+    if (files.length) { const rf = await sendWithFiles(convId, { text: wire, replyTo, replyAnchor, idemKey, inThread, placement, files, deadline }); return unplaced.length && rf && typeof rf === 'object' ? { ...rf, mentionsUnplaced: unplaced.length } : rf; }
     const uuid = uuidFor(idemKey);
     const body = { ...(_body || { msg_type: 'text', content: JSON.stringify({ text: wire }) }), uuid };
     // lane channel-threads (L6): a reply INTO a thread says so — `reply_in_thread` is a PROMISE the composer made
@@ -2065,6 +2071,7 @@ function create(record = {}, deps = {}) {
       ok: true, vendorMessageId: String(m.message_id || ''), at: Number(m.create_time) || now(), sentAs: 'user', uuid,
       observed: { senderType, senderId: m.sender && m.sender.id ? String(m.sender.id) : null, ...(m.thread_id ? { threadKey: String(m.thread_id) } : {}) },
       ...(taken !== null ? { mentionsTaken: taken } : {}),
+      ...(unplaced.length ? { mentionsUnplaced: unplaced.length } : {}),
     };
   }
 

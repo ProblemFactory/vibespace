@@ -51,17 +51,23 @@ const beginsWith = (rest, name) => !!name && rest.length >= name.length && lower
  * thought of — leaves the word open: an unlisted follower fails safe. `tail` = the text right after the name (≥ 8 characters
  * of it, or all that is left).
  */
-const CJK_ENDERS = new Set([...'，。、；：！？）」』】》〉］｝〕']);
-const ASCII_ENDERS = new Set([...',.;:!?)]}"\'”’…']);
+// B-82c2 the follow (主开发 r1402 (4)): the enders are the sentence's CLASSES, never a typed list (a list typed in the module and
+// again in its oracle hid an ender missing from both: «．» «〗» «｡» «､» «‼» «›» were in neither) — «a sentence mark, a closing
+// bracket or quote» = Unicode Terminal_Punctuation, Pe (close), Pf (final quote), «of both scripts»: in the CJK marks and the
+// full-width forms (U+3000–303F, U+FF00–FFEF) ALWAYS; in ASCII and the general punctuation (U+2000–206F) only when no letter or
+// digit follows (J.R., O’Brien) — with them the two ASCII quotes that close as well as open and the ellipsis
+const ENDER_CLASS_RE = /[\p{Terminal_Punctuation}\p{Pe}\p{Pf}]/u;
+const enderAlways = (c) => /[\u3000-\u303f\uff00-\uffef]/.test(c) && ENDER_CLASS_RE.test(c);
+const enderLatin = (c) => /[\u0000-\u007f\u2000-\u206f]/.test(c) && (ENDER_CLASS_RE.test(c) || c === '"' || c === '\'' || c === '\u2026');
 const LINE_ENDS = new Set(['\n', '\r', '\u2028', '\u2029']);
 const SPACE_RE = /^[ \t\u00a0\u3000]/;
 function endsHere(tail) {
   const t = String(tail || '');
   if (!t) return true;
   const c = t[0];
-  if (LINE_ENDS.has(c) || c === '@' || CJK_ENDERS.has(c)) return true;
+  if (LINE_ENDS.has(c) || c === '@' || enderAlways(c)) return true;
   if (/^[ \t\u00a0\u3000]+@/.test(t)) return true;
-  if (ASCII_ENDERS.has(c)) { const n = [...t.slice(1)][0]; return !n || !WORD_RE.test(n); }
+  if (enderLatin(c)) { const n = [...t.slice(1)][0]; return !n || !WORD_RE.test(n); }
   return false;
 }
 /** Over a WHOLE member list a name ALSO ends at a space, and a CJK name may abut CJK text (the whole list shows no longer
@@ -185,32 +191,42 @@ function hasAtWords(text) {
  * `<at user_id="ou_…">typed</at>` (everyone: `<at user_id="all"></at>`), a typed tag at a decided place stays as typed, any other
  * typed tag goes as `@label` (plain words, as the card said). Nothing is matched by name again, so the wire cannot disagree
  * with the card; a place that no longer sits on an at-sign of this text is left as its characters (fail safe).
+ * The follow (主开发 r1402 (2)): such a place is SAID, never dropped in silence — `unplaced` (an array, optional) receives one
+ * `{at, why}` for every decided place that did not reach the wire (`shape` · `overlap` · `not-on-an-at-sign` · `no-such-tag`);
+ * the send says the count in its log and on its answer (the receipt). Unreachable today: the places are stored with the text.
  */
-function wireText(text, places) {
+function wireText(text, places, unplaced = null) {
   const s = String(text == null ? '' : text);
-  const ps = (Array.isArray(places) ? places : []).filter((p) => p && Number.isInteger(p.at) && p.at >= 0 && Number.isInteger(p.len) && p.len > 0 && typeof p.id === 'string' && ID_RE.test(p.id));
+  const all = (Array.isArray(places) ? places : []).filter(Boolean);
+  const ps = all.filter((p) => Number.isInteger(p.at) && p.at >= 0 && Number.isInteger(p.len) && p.len > 0 && typeof p.id === 'string' && ID_RE.test(p.id));
+  const said = (p, why) => { if (Array.isArray(unplaced)) unplaced.push({ at: p && Number.isInteger(p.at) ? p.at : null, why }); };
+  for (const p of all) if (!ps.includes(p)) said(p, 'shape');
+  const used = new Set();
   const tagPlace = new Map(ps.filter((p) => p.tag === true).map((p) => [p.at, p]));
   const events = [];
   // round wke4s5jp9 (5): the typed tags are found in the text WITH its code — Lark's text body has no code form and the vendor parses
   // a tag anywhere: a tag that is not at a decided place goes as its label in plain words, inside a backtick span or a fence too
   for (const m of s.matchAll(TAG_RE)) events.push({ at: m.index, end: m.index + m[0].length, tag: true, id: m[1], label: m[2] });
-  for (const p of ps) if (p.tag !== true) events.push({ at: p.at, end: p.at + 1 + p.len, tag: false, id: p.id });
+  for (const p of ps) if (p.tag !== true) events.push({ at: p.at, end: p.at + 1 + p.len, tag: false, id: p.id, p });
   events.sort((a, b) => a.at - b.at);
   // the follow (r1065): NO TAG OPENER stands on the wire outside a decided place — a typed tag around a typed tag left the outer one a
   // valid tag for a member no card showed once the inner was rewritten; an opener in the words is written with a full-width bracket
   const words = (x) => String(x).replace(/<(\s*at\b)/gi, '\uff1c$1');
   let out = '', from = 0;
   for (const e of events) {
-    if (e.at < from) continue;
+    if (e.at < from) { if (!e.tag) said(e.p, 'overlap'); continue; }
     if (e.tag) {
       const tp = tagPlace.get(e.at);
+      if (tp && tp.id === e.id) used.add(tp);
       out += words(s.slice(from, e.at)) + (tp && tp.id === e.id ? s.slice(e.at, e.end) : `@${String(e.label).trim() || e.id}`);
     } else {
-      if (s[e.at] !== '@' || e.end > s.length || /[\n\r]/.test(s.slice(e.at, e.end))) continue;   // not this text's place: its characters
+      if (s[e.at] !== '@' || e.end > s.length || /[\n\r]/.test(s.slice(e.at, e.end))) { said(e.p, 'not-on-an-at-sign'); continue; }   // not this text's place: its characters
+      used.add(e.p);
       out += words(s.slice(from, e.at)) + (e.id === 'all' ? '<at user_id="all"></at>' : `<at user_id="${e.id}">${s.slice(e.at + 1, e.end)}</at>`);
     }
     from = e.end;
   }
+  for (const p of ps) if (p.tag === true && !used.has(p)) said(p, 'no-such-tag');
   return out + words(s.slice(from));
 }
 

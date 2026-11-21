@@ -1146,7 +1146,11 @@ function create(engineCtx) {
     // from); a proposal that no longer is that record — the text, the conversation, the answered message, the
     // recipients, the identity, the sender line — is refused by name, nothing moves and nothing is sent
     if (shown !== null && shown !== undefined) {
-      const now0 = P.shownDigest(proposalView(p0));
+      const v0 = proposalView(p0), now0 = P.shownDigest(v0);
+      // B-82c2 the second follow (主开发 r1403 (3)): a press from a PAGE OPENED BEFORE THE UPDATE — its bundle's digest has no
+      // decision field, so it is this record's digest without it — is told the ONE act that ends it (reload this page), by a
+      // code that page does not know: it shows these words as they are, never «read the card again», which no read ends
+      if (String(shown) !== now0 && v0.prepared && typeof v0.prepared === 'object' && String(shown) === P.shownDigest(v0, { decision: false })) return { ok: false, code: 'page-outdated', error: 'this page was opened before an update and does not show who this message notifies — nothing was sent; reload this page, then decide', proposal: v0 };
       if (String(shown) !== now0) return { ok: false, code: 'changed-since-shown', error: 'this proposal is not what the card you approved showed — nothing was sent; read the card again, then decide', proposal: proposalView(p0) };
     }
     // r3: approving a send that starts a turn is a wake — the echo first
@@ -1586,7 +1590,7 @@ function create(engineCtx) {
     if (r && r.ok) {
       to = 'sent';
       patch = (q) => {
-        q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null, ...(q.compose ? { threadId: r.threadId || null } : {}), ...(P.sendParts(r.parts) ? { parts: P.sendParts(r.parts) } : {}), ...(Number.isInteger(r.mentionsTaken) && r.mentionsTaken >= 0 ? { mentionsTaken: Math.min(r.mentionsTaken, 100) } : {}) };   // B-82c2: the mentions the channel's answer took
+        q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null, ...(q.compose ? { threadId: r.threadId || null } : {}), ...(P.sendParts(r.parts) ? { parts: P.sendParts(r.parts) } : {}), ...(Number.isInteger(r.mentionsTaken) && r.mentionsTaken >= 0 ? { mentionsTaken: Math.min(r.mentionsTaken, 100) } : {}), ...(Number.isInteger(r.mentionsUnplaced) && r.mentionsUnplaced > 0 ? { mentionsUnplaced: Math.min(r.mentionsUnplaced, 100) } : {}) };   // B-82c2: the mentions the channel's answer took
         // lane channel-threads: the thread the reply LANDED in (the vendor's word, e.g. Lark's `thread_id`) — the receipt names it
         if (q.inThread && r.observed && r.observed.threadKey) q.threadKey = String(r.observed.threadKey);
         q.reason = null;

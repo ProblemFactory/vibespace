@@ -662,7 +662,7 @@ console.log('⑨ r2 MAJOR: the writers that give a member its own entry over its
   const g400 = /^const GRAIN_400 = [^\n]*$/m.exec(RT);
   const statusOf = (fn, r) => { const res = { code: 200, status(s) { this.code = s; return this; }, json(b) { this.body = b; return this; }, setHeader() { } }; fn(res, r); return { status: res.code, code: res.body && res.body.code, error: res.body && res.body.error }; };
   const mk = (src, head, pre = '') => { const t = fnText(src, head); if (!t) return null; try { return new Function(`${pre}\n${t}\nreturn ${/function (\w+)/.exec(t)[1]};`)(); } catch { return null; } };
-  const answer = mk(RT, 'function answer(res, r) {', g400 ? g400[0] : ''), scopeAnswer = mk(RT, 'function scopeAnswer(res, r) {', g400 ? g400[0] : ''), answer3 = mk(RT, 'function answer3(res, r) {');
+  const answer = mk(RT, 'function answer(res, r) {', g400 ? g400[0] : ''), scopeAnswer = mk(RT, 'function scopeAnswer(res, r) {', g400 ? g400[0] : ''), answer3 = mk(RT, 'function answer3(res, r) {', fnText(RT, 'function answer3Status(r) {') || '');   // B-82c2 the second follow: answer3 reads ONE status table (answer3Status) — evaluated with it
   const ca = /const chanAnswer = \(res, r\) => \{[\s\S]*?\n\};\n/.exec(AR);
   let chanAnswer = null; try { chanAnswer = ca ? new Function(`${ca[0]}\nreturn chanAnswer;`)() : null; } catch { chanAnswer = null; }
   const CONFLICT = { ok: false, code: 'except_conflicts', error: 'conversation:m1 is both given and excepted — a member with its own grant here cannot also be left out of it' };

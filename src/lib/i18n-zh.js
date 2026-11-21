@@ -8498,6 +8498,10 @@ export default {
   "{n} more @ words were not read (past the bounds of one message) — sent as plain words, nobody is notified": "还有 {n} 个 @ 词没有读取（超出一条消息的上限）—— 作为普通文字发送，不会通知任何人",   // B-82c2 round wfgpbe038
   "this chat was dissolved": "这个群已解散",   // B-82c2 round wfgpbe038
   "the channel did not answer when its members were looked up": "查找成员时渠道没有响应",   // B-82c2 round wfgpbe038
+  "the channel's rate limit held back the look-up of its members": "渠道的频率限制挡住了成员查找",   // B-82c2 the follow (r1402)
+  "This page was opened before an update and does not show who this message notifies — nothing was sent; reload this page, then decide": "这个页面是在更新之前打开的，没有显示这条消息会通知谁 —— 什么都没有发送；请刷新这个页面，然后再决定",   // B-82c2 the follow (r1403)
+  "Mentions not placed: {n} — they no longer sat on the text at the send and went as plain characters": "未放置的提及：{n} 个 —— 发送时已不在文本中的位置上，作为普通文字发出",   // B-82c2 the follow (r1402)
+  "{names} — sent as plain words, nobody is notified: the channel's rate limit held back the look-up of its members": "{names} —— 作为普通文字发送，不会通知任何人：渠道的频率限制挡住了成员查找",   // B-82c2 the follow (r1402)
   "this account may not read the chat's members": "这个账号无权读取群成员",   // B-82c2 round wfgpbe038
   "the chat has more members than one look-up reads": "群成员多于一次查找能读完的数量",   // B-82c2 round wfgpbe038
   "this account's sign-in has expired": "这个账号的登录已过期",   // B-82c2 round wfgpbe038

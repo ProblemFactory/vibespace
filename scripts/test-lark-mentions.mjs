@@ -58,6 +58,14 @@ const LM_FILTER = MUT.load('src/channels/lark/mentions.js', anchored(anchored(mS
 // RED of small 6: the closed list of characters that may stand before an at-word put back
 const ATRE = "const AT_RE = /(?<![A-Za-z0-9._%+\\-/])@/g;";
 const LM_STARTERS = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, ATRE, "const AT_RE = /(^|[\\s(\\[{,;:!?\"'“‘（「，。、：；！？])@/gu;", 'closed-starters'), 'mentions-closed-starters');   // stale-pins: kept (the RED plants the starters as they were)
+// the follow (r1402 (4)): RED — the TYPED lists of enders put back (the module's list as it was, the oracle's twin)
+const ENDCLS = String.raw`const enderAlways = (c) => /[\u3000-\u303f\uff00-\uffef]/.test(c) && ENDER_CLASS_RE.test(c);
+const enderLatin = (c) => /[\u0000-\u007f\u2000-\u206f]/.test(c) && (ENDER_CLASS_RE.test(c) || c === '"' || c === '\'' || c === '\u2026');
+`;
+const TYPED_ENDERS = String.raw`const enderAlways = (c) => new Set([...'，。、；：！？）」』】》〉］｝〕']).has(c);
+const enderLatin = (c) => new Set([...',.;:!?)]}"\'”’…']).has(c);
+`;
+const LM_ENDLIST = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, ENDCLS, TYPED_ENDERS, 'typed-enders'), 'mentions-typed-enders');
 
 console.log('① the one decision and the wire (PURE, src/channels/lark/mentions.js)');
 {
@@ -177,12 +185,22 @@ console.log('① the one decision and the wire (PURE, src/channels/lark/mentions
   const dd = dec(TD, [A1]);
   const wd = LM.wireText(TD, dd.places);
   ok(J(dd.open) === J(['Ann Lee']) && wd === '<at user_id="ou_ann0000009">Ann</at>, please sync with @Ann Lee, thanks', `RULE D: «@Ann, … @Ann Lee» with Ann known and no list — the first place is Ann, the second OPEN on the card, and the wire tags ONLY the first («${wd}»)`);
-  const PLACES = '  for (const p of ps) if (p.tag !== true) events.push({ at: p.at, end: p.at + 1 + p.len, tag: false, id: p.id });\n';
+  const PLACES = '  for (const p of ps) if (p.tag !== true) events.push({ at: p.at, end: p.at + 1 + p.len, tag: false, id: p.id, p });\n';
   const BY_NAMES = "  { const nm = [...new Map(ps.filter((p) => p.tag !== true).map((p) => [p.id, s.slice(p.at + 1, p.at + 1 + p.len)])).entries()]; for (const mm of s.matchAll(/(^|\\s)@/g)) { const at = mm.index + mm[0].length - 1; let hit = null; for (const [id, n] of nm) if (lower(s.slice(at + 1, at + 1 + n.length)) === lower(n) && !WORD_RE.test(s.charAt(at + 1 + n.length) || '') && (!hit || n.length > hit[1].length)) hit = [id, n]; if (hit) events.push({ at, end: at + 1 + hit[1].length, tag: false, id: hit[0] }); } }\n";
   const LMnamesR = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, PLACES, BY_NAMES, 'wire-by-names'), 'mentions-wire-by-names');
   const wdR = LMnamesR.wireText(TD, dd.places);
   ok((wdR.match(/<at /g) || []).length === 2, `RED CONTROL: the wire matching the decided names again (the round as it was) — a tag where the card said «Not looked up» («${wdR}»)`);
   ok(LM.wireText('@Ann, hi', [{ at: 4, len: 3, id: A1.id }]) === '@Ann, hi', 'a place that does not sit on an at-sign of this text is left as its characters (fail safe)');
+  // the follow (主开发 r1402 (2)): such a place is SAID — every decided place that did not reach the wire, by its reason; a text whose
+  // places all sit says nothing. RED: the drop as it was (silent)
+  const un = [], unOk = [];
+  const wu = LM.wireText('@Ann, hi', [{ at: 4, len: 3, id: A1.id }, { at: 0, len: 3, id: 'not an id' }, { at: 0, len: 3, id: A1.id, tag: true }], un);
+  LM.wireText(T, dw.places, unOk);
+  ok(wu === '@Ann, hi' && J(un.map((u) => u.why).sort()) === J(['no-such-tag', 'not-on-an-at-sign', 'shape']) && unOk.length === 0, `A DECIDED PLACE THAT DID NOT REACH THE WIRE IS SAID, by its reason (${un.map((u) => u.why).join(', ')}); the text whose places all sit says nothing (${unOk.length})`, J({ un, unOk }));
+  const SAID = "  const said = (p, why) => { if (Array.isArray(unplaced)) unplaced.push({ at: p && Number.isInteger(p.at) ? p.at : null, why }); };\n";
+  const LMsilent = MUT.load('src/channels/lark/mentions.js', anchored(mSrc, SAID, '  const said = () => {};\n', 'wire-drop-silent'), 'mentions-wire-drop-silent');
+  const unR = []; LMsilent.wireText('@Ann, hi', [{ at: 4, len: 3, id: A1.id }], unR);
+  ok(unR.length === 0, `RED CONTROL: the drop as it was — the decided place left the wire and nothing said so (${unR.length})`);
   ok(LM.takenOf({ code: 0, data: { mentions: [{ key: '@_user_1', id: ANN.id, id_type: 'open_id', name: 'Ann Lee' }] } }) === 1 && LM.takenOf({ code: 0, data: {} }) === null, 'the receipt\'s count is the mentions Lark\'s own answer lists (`data.mentions`); none listed = not said');
   ok(new RegExp(LM.MENTION_ID).test(ANN.id) && new RegExp(LM.MENTION_ID).test('all') && !new RegExp(LM.MENTION_ID).test('U012ABCDE'), 'Lark\'s id shape: an open_id or all — never Slack\'s');
 }
@@ -273,8 +291,28 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
     const next = await a.prepareSend('oc_x', { text: '@张三 再看', known: [] }).then((r) => r, (e) => ({ threw: (e && e.code) || 'threw' }));
     return { first, next, n0, after: calls.filter(isMembers).length - n0 }; };
   const rl = await rateLeg(lark);
-  ok(!rl.first.threw && J(rl.first.open) === J(['decorator']) && rl.first.openWhy === 'members-no-answer' && !rl.next.threw && rl.after === 0 && rl.next.openWhy === 'members-no-answer', `A READ THAT FAILS NEVER REFUSES: the vendor's rate refusal — the proposal is decided with the word open and said («${rl.first.openWhy}»); the next reads NOTHING while the back-off holds (${rl.after})`, J(rl));
-  const CATCH = "    try { names = await namesFor(convId, { fresh: true }); }\n    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : 'members-no-answer' }; }   // rate-ok: prepare-members\n";
+  ok(!rl.first.threw && J(rl.first.open) === J(['decorator']) && rl.first.openWhy === 'members-rate-limited' && !rl.next.threw && rl.after === 0 && rl.next.openWhy === 'members-rate-limited', `A READ THAT FAILS NEVER REFUSES: the vendor's rate refusal — the proposal is decided with the word open and said BY ITS CAUSE («${rl.first.openWhy}»); the next reads NOTHING while the back-off holds, said the same (${rl.after}, «${rl.next.openWhy}»)`, J(rl));
+  // the follow (r1402 (1)): RED — the words as they were («no answer» for the vendor's rate refusal and its back-off)
+  const RATE_WHY = "    if (names === null) return { list: [], whole: false, why: peopleRefusedUntil > now() ? 'members-rate-limited' : 'members-no-answer' };   // the adapter's back-off holds: no read now\n";
+  const CATCH = "    try { names = await namesFor(convId, { fresh: true }); }\n    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : e instanceof ChannelError && e.code === 'rate-limited' ? 'members-rate-limited' : 'members-no-answer' }; }   // rate-ok: prepare-members\n";
+  const rlW = await rateLeg(MUT.load('src/channels/lark.js', anchored(anchored(larkSrc, CATCH, "    try { names = await namesFor(convId, { fresh: true }); }\n    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : 'members-no-answer' }; }   // rate-ok: prepare-members\n", 'rate-said-no-answer'), RATE_WHY, "    if (names === null) return { list: [], whole: false, why: 'members-no-answer' };\n", 'backoff-said-no-answer'), 'lark-rate-no-answer'));   // stale-pins: kept (the RED: the words as they were)
+  ok(rlW.first.openWhy === 'members-no-answer' && rlW.next.openWhy === 'members-no-answer', `RED CONTROL: the words as they were — the vendor's rate refusal and its back-off are said «${rlW.first.openWhy}» (no answer)`, J(rlW));
+  // the second follow (主开发 r1403 (1)): a RATE refusal is never asked again SOONER than the vendor's own word — a 429 whose
+  // Retry-After says 600 s: a proposal at +301 s reads nothing (said «rate limited»), one at +601 s reads once. RED: the pause as
+  // it was (five minutes at most) — the +301 s proposal asks the vendor again before its word
+  const waitLeg = async (LARK) => {
+    let t = T0, first = true;
+    const { a, calls } = mkLark(LARK, (c) => { if (!isMembers(c)) return jsonRes(200, SENT()); if (first) { first = false; return { ...jsonRes(429, { code: 99991400, msg: 'request trigger frequency limit' }), headers: new Headers({ 'retry-after': '600' }) }; } return jsonRes(200, MEMBERS([ZHANG])); }, () => t);
+    const p1 = await a.prepareSend('oc_x', { text: '@张三 请看', known: [] });
+    t = T0 + 301e3; const p2 = await a.prepareSend('oc_x', { text: '@张三 再看', known: [] }); const at301 = calls.filter(isMembers).length;
+    t = T0 + 601e3; const p3 = await a.prepareSend('oc_x', { text: '@张三 三看', known: [] }); const at601 = calls.filter(isMembers).length;
+    return { why: [p1.openWhy || null, p2.openWhy || null], at301, at601, ids3: ids(p3) };
+  };
+  const wv = await waitLeg(lark);
+  ok(wv.at301 === 1 && wv.why[0] === 'members-rate-limited' && wv.why[1] === 'members-rate-limited' && wv.at601 === 2 && J(wv.ids3) === J([ZHANG.id]), `A RATE REFUSAL WAITS THE VENDOR'S WORD (600 s): at +301 s nothing is asked (${wv.at301} read, said «${wv.why[1]}»); at +601 s one read, 张三 decided`, J(wv));
+  const PAUSE = "const ms = Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000); return e instanceof ChannelError && e.code === 'rate-limited' ? Math.min(24 * 3600e3, ms) : Math.min(300e3, ms); };";
+  const wvR = await waitLeg(MUT.load('src/channels/lark.js', anchored(larkSrc, PAUSE, 'const ms = Math.max(1e3, (Number.isFinite(hint) && hint > 0 ? hint : 60) * 1000); return Math.min(300e3, ms); };', 'rate-pause-capped'), 'lark-rate-pause-capped'));
+  ok(wvR.at301 === 2, `RED CONTROL: the pause as it was (five minutes at most) — a proposal at +301 s asks the vendor again BEFORE its 600 s word (${wvR.at301} reads)`, J(wvR));
   const rlR = await rateLeg(MUT.load('src/channels/lark.js', anchored(larkSrc, CATCH, '    names = await namesFor(convId, { fresh: true });\n', 'read-failure-refuses'), 'lark-read-throws'));
   ok(rlR.first.threw === 'rate-limited', `RED CONTROL: the read's catch cut — the rate refusal refuses the whole proposal (${rlR.first.threw})`, J(rlR));
   { const { a } = mkLark(lark, (c) => (isMembers(c) ? jsonRes(401, { code: 99991668, msg: 'Invalid access token for authorization' }) : jsonRes(200, SENT())));
@@ -299,7 +337,7 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
     ok(re2R.r.landed === false, `RED CONTROL: the scan comparing the plain text with the stored placeholders — «${re2R.r.reason}»: a landed message read as not landed`, J(re2R.r));
     const re3 = await recLeg(lark, msg('paste: @_all is the key', []), past, 'paste: @_all is the key', { mentions: [], places: [] });
     ok(re3.r.landed === true && re3.wire === null, 'the scan: a message whose words hold a typed everyone placeholder (no mention of it) reads LANDED', J(re3)); }
-  const LINE = "    const wire = LM.wireText(String(text == null ? '' : text), prepared && prepared.places);   // round wfgpbe038 D: the decision's own places\n";
+  const LINE = "    const wire = LM.wireText(String(text == null ? '' : text), prepared && prepared.places, unplaced);   // round wfgpbe038 D: the decision's own places\n";
   const RELEASE = MUT.load('src/channels/lark.js', anchored(larkSrc, LINE, "    const wire = String(text == null ? '' : text);\n", 'lark-wire-as-typed'), 'lark-release-wire');
   const sendLeg = async (LARK, attachments = null) => {
     const { a, calls } = mkLark(LARK, (c) => jsonRes(200, c.url.includes('/im/v1/images') ? LF.answers.image : SENT([{ key: '@_user_1', id: ANN.id, id_type: 'open_id', name: 'Ann Lee' }])));
@@ -310,6 +348,15 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
   const s1 = await sendLeg(lark);
   ok(s1.wire === 'Hi <at user_id="ou_ann0000001">Ann Lee</at>, and @Zed' && s1.r.mentionsTaken === 1, `THE SEND: the decided place in Lark's form on the wire, the undecided name its characters; the answer's count (${s1.r.mentionsTaken})`, J(s1));
   const s1R = await sendLeg(RELEASE);
+  // the follow (r1402 (2)): a decided place that no longer sits on the text is SAID on the send's answer (the receipt's count)
+  { const { a } = mkLark(lark, () => jsonRes(200, SENT([])));
+    const r = await a.send('oc_x', { text: 'Hi', idemKey: 'p-u1', as: 'user', prepared: { mentions: [{ name: 'Ann Lee', id: ANN.id }], places: [{ at: 30, len: 7, id: ANN.id }] } });
+    const rc = P.receiptFor({ state: 'sent', prepared: { mentions: [{ name: 'Ann Lee', id: ANN.id }] }, result: { mentionsUnplaced: r.mentionsUnplaced } });
+    ok(r.mentionsUnplaced === 1 && rc && rc.notified && rc.notified.unplaced === 1 && /not placed: 1 decided mention no longer sat on the text at the send/.test(P.renderReceiptBlock(rc)), `THE SEND SAYS A DECIDED PLACE OFF THE TEXT: its answer counts it (${r.mentionsUnplaced}), the receipt says it`, J({ r: { mentionsUnplaced: r.mentionsUnplaced }, notified: rc && rc.notified })); }
+  // the follow (r1402 (5)): THE route's status table is ONE function the page leg ㉖ reads (never a hand copy of it)
+  { const RT = require(path.join(REPO, 'src/routes/channels.js'));
+    const st = ['mentions-changed', 'changed-since-shown', 'not-found', 'bad-proposal'].map((code) => RT.answer3Status({ ok: false, code }));
+    ok(typeof RT.answer3Status === 'function' && RT.answer3Status({ ok: true }) === 200 && J(st) === J([409, 409, 404, 400]), `the route's ONE status table (answer3Status, exported): a changed decision and a changed record 409, not found 404, a bad proposal 400 (${st.join(', ')})`); }
   ok(s1R.wire === 'Hi @Ann Lee, and @Zed', `RED CONTROL: the release's send (the text as typed) — the wire carries «${s1R.wire}»: plain words, nobody notified`);
   const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
   const files = [{ name: 'a.png', mime: 'image/png', kind: 'image', bytes: PNG.length, data: PNG }];
@@ -493,6 +540,21 @@ const ENG_NOKEY = engWithOutbound(anchored(outSrc, KEY_PASS, ' }); }', 'edit-wit
     const old = cardDigest(eng9, r9.proposal.id); await eng9.approve(r9.proposal.id, { text: '@张三 hi, and @Ann Lee' });
     const stale = await eng9.approve(r9.proposal.id, { shown: old });
     ok(stale.ok === false && stale.code === 'changed-since-shown' && D9.log.sends.length === 0, 'a press from a card drawn before the decision changed is refused (changed-since-shown: the decision is part of what the card showed) — nothing sent', J(stale)); eng9.stop(); }
+  // the second follow (主开发 r1403 (3)): a press from a PAGE OPENED BEFORE THE UPDATE (its bundle's digest has no decision field)
+  // is told the ONE act that ends it — reload this page — by a code that page does not know (it shows the words as they are);
+  // RED: that check cut — the old page is answered «changed since shown» at every press, a loop no reading of the card ends
+  const OLD_PAGE = "      if (String(shown) !== now0 && v0.prepared && typeof v0.prepared === 'object' && String(shown) === P.shownDigest(v0, { decision: false })) return { ok: false, code: 'page-outdated', error: 'this page was opened before an update and does not show who this message notifies — nothing was sent; reload this page, then decide', proposal: v0 };\n";
+  const ENG_NOOLDPAGE = engWithOutbound(anchored(outSrc, OLD_PAGE, '', 'old-page-unnamed'), 'old-page-unnamed');
+  const oldPage = async (ENGM) => { const D8 = dressed({ members: [ZHANG] }); const eng8 = await primed(D8.registry, ENGM); const r8 = await eng8.propose(AGENT, A, C, { text: '@张三 hi' });
+    const view8 = eng8.outboxView({ ids: [r8.proposal.id] }).proposals[0];
+    const a8 = await eng8.approve(r8.proposal.id, { shown: P.shownDigest(view8, { decision: false }) });
+    const sentOnRefusal = D8.log.sends.length;
+    const ok8 = await eng8.approve(r8.proposal.id, { shown: P.shownDigest(view8) });
+    const out = { code: a8.code || null, words: a8.error || null, status: require(path.join(REPO, 'src/routes/channels.js')).answer3Status(a8), sentOnRefusal, then: ok8.ok === true };
+    eng8.stop(); return out; };
+  const op = await oldPage(ENG), opR = await oldPage(ENG_NOOLDPAGE);
+  ok(op.code === 'page-outdated' && /reload this page/.test(op.words) && op.status === 409 && op.then === true && op.sentOnRefusal === 0, `A PAGE OPENED BEFORE THE UPDATE is told the one act that ends its refusal («${op.words}», ${op.status}); nothing left on that press, and the same record approved from a page of this release sends once`, J(op));
+  ok(opR.code === 'changed-since-shown', `RED CONTROL: the old page's check cut — that page is answered «${opR.code}», the refusal its own words call «read it again», which no reading ends`, J(opR));
   const D5 = dressed({ members: [ZHANG] });
   const eng5 = await primed(D5.registry);
   const r5 = await eng5.propose(AGENT, A, C, { text: 'hi @Zed and @张三' });
@@ -601,6 +663,7 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
     'abcxyz', 'ABLMZ', 'ДжЯ', 'λΩ', '强花请看', 'のを', 'カスミ', '한국', 'عم', '́', '0279', '０７',
     '-‐–—', '·・‧•', '_', "'’", ',.;:!?…', '，。、；：！？', '()[]{}', '（）「」【】《》', '"“”‘', '#$+=©%&*~^|\\/', '🙂👍', ' ', '　 \t', '\n', '\r\n',
     '​', '‍', '️', '‎‏', '`',   // round wke4s5jp9 (8): a zero-width space, a joiner, a variation selector, the two direction marks, a backtick
+    '\uff0e\u3017\uff61\uff64\uff63\u203c\u2049\u203a\u061f\u0964',   // the follow (r1402 (4)): the class's enders a typed list missed, and two of other scripts (open)
   ];
   const pick = (r, xs) => xs[Math.floor(r() * xs.length)];
   const chr = (r) => { const c = pick(r, CLASSES); const cs = [...c]; return c === '\r\n' ? c : pick(r, cs); };
@@ -627,8 +690,13 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
   //   quote only when no letter or digit follows it — the lane's stated detail); «over a whole list a name ends at an ender or a
   //   space, and a CJK name may abut CJK text»; «the everyone word by the same rule» (over a whole list a space too).
   const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u, CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u, MAILCH = /[A-Za-z0-9._%+\-/]/;   // the follow (r1065): a slash never starts one either
-  const ORACLE_ENDERS_ALWAYS = new Set(['\n', '\r', ' ', ' ', '@', ...'，。、；：！？）」』】》〉］｝〕']);
-  const ORACLE_ENDERS_ASCII = new Set([...',.;:!?)]}"\'”’…']);
+  // the follow (主开发 r1402 (4)): THE ENDERS FROM THE SENTENCE'S CLASSES, never a list typed again (the module's list and this one,
+  // typed twice, hid an ender missing from both): «a sentence mark, a closing bracket or quote» = Unicode Terminal_Punctuation,
+  // Pe, Pf; «of both scripts» = the CJK marks and full-width forms always, ASCII and the general punctuation when no letter or
+  // digit follows; with them the two ASCII quotes that close as well as open and the ellipsis (the lane's stated detail)
+  const ORACLE_CLASS = /[\p{Terminal_Punctuation}\p{Pe}\p{Pf}]/u;
+  const ORACLE_ENDERS_ALWAYS = { has: (c) => ['\n', '\r', '\u2028', '\u2029', '@'].includes(c) || (/[\u3000-\u303f\uff00-\uffef]/.test(c) && ORACLE_CLASS.test(c)) };
+  const ORACLE_ENDERS_ASCII = { has: (c) => /[\u0000-\u007f\u2000-\u206f]/.test(c) && (ORACLE_CLASS.test(c) || c === '"' || c === "'" || c === '\u2026') };
   const ORACLE_SPACES = new Set([' ', '\t', ' ', '　']);
   const endsO = (after) => { const cps = [...after]; if (!cps.length) return true; const c = cps[0]; if (ORACLE_ENDERS_ALWAYS.has(c)) return true; if (ORACLE_SPACES.has(c)) { let i = 0; while (i < cps.length && ORACLE_SPACES.has(cps[i])) i++; return cps[i] === '@'; } if (ORACLE_ENDERS_ASCII.has(c)) return !cps[1] || !LETTER_OR_DIGIT.test(cps[1]); return false; };
   const endsWholeO = (after, typed) => { const c = [...after][0]; return endsO(after) || ORACLE_SPACES.has(c) || (!!c && CJK.test(c) && CJK.test([...typed].pop())); };
@@ -653,7 +721,9 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
       for (const w of EVERY) if (rest.slice(0, w.length).toLowerCase() === w) cands.push({ len: w.length, id: 'all' });
       const longest = cands.reduce((n, c) => Math.max(n, c.len), 0);
       if (!longest) continue;
-      const endsC = (c) => { const after = rest.slice(c.len); return c.id === 'all' ? (endsO(after) || (whole && ORACLE_SPACES.has([...after][0]))) : whole ? endsWholeO(after, rest.slice(0, c.len)) : endsO(after); };
+      // the second follow: «after spaces» is read inside the decision's stated window — the 8 characters after the name
+      // (`endsHere`'s contract); a code span blanked longer than that between a name and an at-sign leaves the name open (said)
+      const endsC = (c) => { const after = rest.slice(c.len, c.len + 8); return c.id === 'all' ? (endsO(after) || (whole && ORACLE_SPACES.has([...after][0]))) : whole ? endsWholeO(after, rest.slice(0, c.len)) : endsO(after); };
       const top = cands.filter((c) => c.len === longest && endsC(c));
       if (!top.length) continue;   // the longest does not end: plain (a whole list) or open (none) — never a shorter name
       const who = new Set(top.map((c) => c.id));
@@ -666,7 +736,7 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
   const asSet = (d) => new Set(d.mentions.map((m) => `${m.name}\n${m.id}`));
   const eqSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
   const wrong = [], tally = { whole: 0, 'not-whole': 0, none: 0, mentions: 0, unresolved: 0, open: 0, plain: 0, unchecked: 0 };
-  let redCallerWhole = 0, redContinuers = 0, redFilter = 0, redStarters = 0;
+  let redCallerWhole = 0, redContinuers = 0, redFilter = 0, redStarters = 0, redEnders = 0;
   for (const seed of SEEDS) {
     const r = rng(seed);
     for (let k = 0; k < 300; k++) {
@@ -680,6 +750,7 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
         if (cond !== 'whole') { const dc = dec(g.text, known, members, LM_CONT); if (!eqSet(asSet(dc), o.mentions)) redContinuers++; }
         if (cond === 'whole') { const df = dec(g.text, known, members, LM_FILTER); if (!eqSet(asSet(df), o.mentions)) redFilter++; }
         { const ds = dec(g.text, known, members, LM_STARTERS); if (!eqSet(asSet(ds), o.mentions) || !eqSet(new Set(ds.unresolved), o.unresolved)) redStarters++; }
+        { const de = dec(g.text, known, members, LM_ENDLIST); if (!eqSet(asSet(de), o.mentions) || !eqSet(new Set(de.unresolved), o.unresolved)) redEnders++; }
       }
     }
   }
@@ -688,11 +759,12 @@ console.log('⑥ THE GENERATED ORACLE of rule A (written from its sentences, nev
   ok(redCallerWhole > 20, `RED CONTROL: whole taken from the caller — the same lists not whole, handed as whole: ${redCallerWhole} decisions name a person the oracle does not`);
   ok(redFilter > 5, `RED CONTROL: the filter put back (the longest name that ENDS, over a whole list) — ${redFilter} decisions name a shorter person the oracle never tries`);
   ok(redStarters > 20, `RED CONTROL: the closed list of starters put back — ${redStarters} decisions miss an at-word the oracle sees (at-signs after every class)`);
+  ok(redEnders > 5, `RED CONTROL: the typed lists of enders put back (the follow, r1402 (4)) — ${redEnders} decisions leave open a name the sentence's classes end (a full-width full stop, a white lenticular bracket, a half-width full stop, a double exclamation …)`);
 
   // THE EDIT ROAD through the real engine: a generated proposal decided under one member fact, edited under another — the
   // stored decision equals deciding the edited text alone (the one call, the earlier mentions as pairs), and it is SENT at that
   // press only when it is the decision the card showed (rule C)
-  const REG_WHYS = new Set(['members-unreadable', 'chat-dissolved', 'members-no-answer', 'members-partial', 'members-signed-out', 'not-read']);
+  const REG_WHYS = new Set(['members-unreadable', 'chat-dissolved', 'members-no-answer', 'members-rate-limited', 'members-partial', 'members-signed-out', 'not-read']);
   const pairsOf = (pr) => (pr && Array.isArray(pr.mentions) ? pr.mentions : []).filter((m) => m && m.id !== 'all').map((m) => ({ id: m.id, name: m.name }));
   // the registry's NAME DOOR bounds every stored name (peerName: invisible characters out, ≤ 100) — the expectation passes through it too
   const { peerName } = require(path.join(REPO, 'src/channel-record.js'));

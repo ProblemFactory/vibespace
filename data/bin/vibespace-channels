@@ -377,7 +377,7 @@ function printRecipients(p) {
   console.log(`    ${e.all ? 'reply all — ' : ''}to: ${e.to}${e.cc ? ` · cc: ${e.cc}` : ''}${Array.isArray(e.added) && e.added.length ? ` (you added: ${e.added.join(', ')})` : ''}`);
 }
 /** B-82c2: WHO THE PROPOSAL NOTIFIES, per name — the server's decision (its names through the belt), said in our words. */
-const OPEN_WHY_WORDS = Object.freeze({ 'members-unreadable': 'this account may not read the chat\'s members', 'chat-dissolved': 'this chat was dissolved', 'members-no-answer': 'the channel did not answer when its members were looked up', 'members-partial': 'the chat has more members than one look-up reads', 'members-signed-out': 'this account\'s sign-in has expired' });
+const OPEN_WHY_WORDS = Object.freeze({ 'members-unreadable': 'this account may not read the chat\'s members', 'chat-dissolved': 'this chat was dissolved', 'members-no-answer': 'the channel did not answer when its members were looked up', 'members-rate-limited': 'the channel\'s rate limit held back the look-up of its members', 'members-partial': 'the chat has more members than one look-up reads', 'members-signed-out': 'this account\'s sign-in has expired' });
 function printMentions(p) {
   const pr = p && p.prepared && typeof p.prepared === 'object' ? p.prepared : null;
   if (!pr) return;

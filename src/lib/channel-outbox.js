@@ -356,6 +356,7 @@ function appendReplyTarget(card, p) {
 function whyWords(why) {
   if (why === 'chat-dissolved') return t('this chat was dissolved');
   if (why === 'members-no-answer') return t('the channel did not answer when its members were looked up');
+  if (why === 'members-rate-limited') return t('the channel\'s rate limit held back the look-up of its members');
   if (why === 'members-unreadable') return t('this account may not read the chat\'s members');
   if (why === 'members-partial') return t('the chat has more members than one look-up reads');
   if (why === 'members-signed-out') return t('this account\'s sign-in has expired');
@@ -365,6 +366,7 @@ function whyWords(why) {
 function openWhyText(names, why) {
   if (why === 'chat-dissolved') return t('{names} — sent as plain words, nobody is notified: this chat was dissolved', { names });
   if (why === 'members-no-answer') return t('{names} — sent as plain words, nobody is notified: the channel did not answer when its members were looked up', { names });
+  if (why === 'members-rate-limited') return t('{names} — sent as plain words, nobody is notified: the channel\'s rate limit held back the look-up of its members', { names });
   if (why === 'members-unreadable') return t('{names} — sent as plain words, nobody is notified: this account may not read the chat\'s members', { names });
   if (why === 'members-partial') return t('{names} — sent as plain words, nobody is notified: the chat has more members than one look-up reads', { names });
   if (why === 'members-signed-out') return t('{names} — sent as plain words, nobody is notified: this account\'s sign-in has expired', { names });
@@ -693,6 +695,8 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   // B-82c2: HOW MANY WERE NOTIFIED, from the channel's own answer — and said when it took fewer than were decided
   const nf = p.state === 'sent' && p.receipt && p.receipt.notified;
   if (nf && Number.isInteger(nf.decided) && Number.isInteger(nf.taken)) card.appendChild(el('div', 'chan-prop-foot chan-prop-notified', nf.taken < nf.decided ? t('Notified {taken} of the {decided} mentions decided — the channel took fewer; the rest went as plain words', { taken: nf.taken, decided: nf.decided }) : t('Notified: {n} mentioned', { n: nf.decided })));
+  // B-82c2 the follow (r1402 (2)): a decided place that no longer sat on the text at the send is said on the sent card
+  if (nf && Number.isInteger(nf.unplaced) && nf.unplaced > 0) card.appendChild(el('div', 'chan-prop-foot chan-prop-unplaced', t('Mentions not placed: {n} — they no longer sat on the text at the send and went as plain characters', { n: nf.unplaced })));
   // THE FATE LINE (2026-09-27): does the drafting agent know yet? Its own
   // element, patched in place when only the fate moved (patchFate)
   const fateText = fateLineText(p);
