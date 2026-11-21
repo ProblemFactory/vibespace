@@ -8620,6 +8620,13 @@ await section(async () => {
     && lthCtl.length === 2 && lthCtl[0].startsWith('const A') && lthCtl[1].startsWith('let B'),
     `§113 (i) THE LINE-1 CENSUS: server.js's FIRST line is the runtime boot; the ${LOAD_TIME_HOME.length} modules that capture a home when they load (${LOAD_TIME_HOME.join(', ')}) are the named list both ways, and none is in runtime-boot's own graph (${bootGraph.length} files, the re-home's among them) — each loads after the first act — CONTROL: a top-level capture is counted; a function's read, a default parameter and an indented line are not`,
     { srv1: srv1.slice(0, 120), found: lth, inBoot: LOAD_TIME_HOME.filter((f) => bootGraph.includes(f)) });
+  // (j) THE HUB'S SEAM (主开发 r1412 road (ii)): VIBESPACE_REHOME_NOT_TEMP is READ by src/server/throwaway-root.js alone (it can only make a
+  // hub re-home more) and SET by the heavy pin alone; its other namers are its rows (test-throwaway-boot ⑥), the derived knob list and
+  // this census — nothing else in the product, data/bin, the wrappers or the runner names it
+  const seamAt = String(spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', 'VIBESPACE_REHOME_NOT_TEMP', '--', 'src', 'server.js', 'data/bin', 'scripts', '.github'], { encoding: 'utf8' }).stdout || '').split('\n').filter(Boolean).sort();
+  const SEAM_OK = ['scripts/test-architecture.mjs', 'scripts/test-throwaway-boot.mjs', 'scripts/test-throwaway-home.mjs', 'src/hub-env-knobs.json', 'src/server/throwaway-root.js'];
+  ok(JSON.stringify(seamAt) === JSON.stringify(SEAM_OK),
+    `§113 (j) THE HUB'S SEAM: VIBESPACE_REHOME_NOT_TEMP is read by src/server/throwaway-root.js alone, set by the heavy pin alone — its rows, the derived knob list and this census name it, nothing else (${seamAt.join(', ')})`, seamAt);
   // (d) ONE VERDICT: scratch.mjs decides by src/home-verdict.js, and no copy of its functions lives anywhere else
   const copies = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => 'src/' + f), ...fs.readdirSync(path.join(REPO, 'scripts')).map((f) => 'scripts/' + f)]
     .filter((f) => /\.(m?js)$/.test(f) && f !== 'src/home-verdict.js' && /\b(?:function\s+|(?:const|let)\s+)(?:suiteRehome|hubRehome|rehomeEnv|namesUnder)\b/.test(read(f)));
