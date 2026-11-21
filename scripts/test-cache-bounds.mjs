@@ -52,7 +52,9 @@ function editAnchor(text, from, to, file, mode = 'one') {
   if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
-const eq = (a, b, m) => { const x = JSON.stringify(a), y = JSON.stringify(b); ok(x === y, m + (x === y ? '' : `\n     got  ${x.slice(0, 300)}\n     want ${y.slice(0, 300)}`)); };
+// a cost to 12 significant digits (B-360d unit 1: the cells sum a price per cell, the row fold per row — equal to 1e-9 relative, the ruling's law 2)
+const COST12 = (k, v) => (k === 'cost' && typeof v === 'number' ? Number(v.toPrecision(12)) : v);
+const eq = (a, b, m) => { const x = JSON.stringify(a, COST12), y = JSON.stringify(b, COST12); let d = 0; while (d < x.length && x[d] === y[d]) d++; const at = Math.max(0, d - 160); ok(x === y, m + (x === y ? '' : `\n     first difference at character ${d}\n     got  …${x.slice(at, d + 140)}\n     want …${y.slice(at, d + 140)}`)); };   // the text around the FIRST difference (B-360d unit 1)
 const DAY = 86400e3, NOW = Date.now();
 /** Every read door counted (verify #5): fs.readSync / readFileSync / promises.readFile / FileHandle.read. */
 function spyReads() {
@@ -443,6 +445,8 @@ console.log('§5b B-360d (A): THE SWEEP — every ceiling the census states is p
   fs.rmSync(edir, { recursive: true, force: true });
 }
 
+// (B-360d unit 1: the Usage window answers from the ledger's CELLS — §6 on prove the ROW road's walk, so each ask names it: `rows: true`,
+// the road a booting / stale cache and the trim's and exit's asks still take)
 console.log('§6–§11 r2: the cold walk off the loop, held, single-flight; the popup reads one line');
 {
   const t = mkUh('w', 40 * DAY, 60 * 1024);
@@ -453,20 +457,20 @@ console.log('§6–§11 r2: the cold walk off the loop, held, single-flight; the
   const parse = JSON.parse; let parses = 0;
   JSON.parse = function (...a) { parses++; return parse.apply(this, a); };
   let viaWorker, sync;
-  try { parses = 0; viaWorker = await t.aggregateAsync(q); var pw = parses; parses = 0; sync = t.aggregate(q); var ps = parses; } finally { JSON.parse = parse; }
+  try { parses = 0; viaWorker = await t.aggregateAsync({ ...q, rows: true }); var pw = parses; parses = 0; sync = t.aggregate(q); var ps = parses; } finally { JSON.parse = parse; }
   eq(viaWorker, sync, '§6 the route\'s fold (worker) answers the sync fold exactly');
   ok(pw === 0 && t._coldWalks >= 1, `§6 no cold line parsed on the main thread during aggregateAsync (${pw} parses, ${t._coldWalks} worker walk)`);
   ok(ps > 1000, `control: the sync fold parses ${ps} cold lines ON the loop ⇒ the same check is RED for it`);
   // §7: a mid-walk append / a due slide / a shrink — the answer = the sync answer after
   const before1 = t.aggregate({});
   const appendHook = () => { t.walkHook = null; writeRows(t.dir, [mkRow(NOW - 3600e3), mkRow(NOW - 120 * DAY)]); t._evCache.checkedAt = 0; t._loadEvents(); };
-  t.walkHook = appendHook; const a1 = await t.aggregateAsync({}); eq(a1.totals, before1.totals, '§7 an append mid-walk (a fresh row + a late OLD row): the answer is AS-OF the walk start (the sync answer at that instant)');
+  t.walkHook = appendHook; const a1 = await t.aggregateAsync({ rows: true }); eq(a1.totals, before1.totals, '§7 an append mid-walk (a fresh row + a late OLD row): the answer is AS-OF the walk start (the sync answer at that instant)');
   ok(t.aggregate({}).totals.requests === before1.totals.requests + 2, '§7 …and the next answer has both rows');
   const before2 = t.aggregate({ from: NOW - 300 * DAY });
   t.walkHook = () => { t.walkHook = null; t.ledgerWindowMs = 20 * DAY; t._evCache.checkedAt = 0; writeRows(t.dir, [mkRow(NOW - 60e3)]); t._loadEvents(); };
-  const a2 = await t.aggregateAsync({ from: NOW - 300 * DAY }); eq(a2.totals, before2.totals, '§7 a slide falling due mid-walk: the walk answers its own plan (as-of its start)');
+  const a2 = await t.aggregateAsync({ rows: true, from: NOW - 300 * DAY }); eq(a2.totals, before2.totals, '§7 a slide falling due mid-walk: the walk answers its own plan (as-of its start)');
   const shrink = () => { t.walkHook = null; const f = path.join(t.dir, fs.readdirSync(t.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); fs.writeFileSync(f, ls.slice(1).join('\n')); t._evCache.checkedAt = 0; t._loadEvents(); };
-  t.walkHook = shrink; const a3 = await t.aggregateAsync({ to: NOW }); eq(a3.totals, t.aggregate({ to: NOW }).totals, '§7 a shard shrink mid-walk: the worker reads STALE places, the cache rebuilds, the worker re-runs — the sync answer');
+  t.walkHook = shrink; const a3 = await t.aggregateAsync({ rows: true, to: NOW }); eq(a3.totals, t.aggregate({ to: NOW }).totals, '§7 a shard shrink mid-walk: the worker reads STALE places, the cache rebuilds, the worker re-runs — the sync answer');
   { // control (no re-run): the fold of a walk planned BEFORE the shrink, answered as is
     t._loadEvents(); const cc = t._evCache, h0 = cc.events.length, tss = new Float64Array(h0), locs = new Float64Array(h0);
     for (let i = 0; i < h0; i++) { tss[i] = cc.events[i].ts || 0; locs[i] = cc.locs[i]; }
@@ -491,8 +495,8 @@ console.log('§6–§11 r2: the cold walk off the loop, held, single-flight; the
   // §8: single-flight + one walk at a time
   let live = 0, peak = 0; const w0 = t._coldWalks;
   t.walkHook = async () => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 20)); live--; };
-  const four = await Promise.all([1, 2, 3, 4].map(() => t.aggregateAsync({ to: NOW - DAY })));
-  const two = await Promise.all([t.aggregateAsync({ to: NOW - 2 * DAY }), t.aggregateAsync({ to: NOW - 3 * DAY, backend: 'claude' })]);
+  const four = await Promise.all([1, 2, 3, 4].map(() => t.aggregateAsync({ rows: true, to: NOW - DAY })));
+  const two = await Promise.all([t.aggregateAsync({ rows: true, to: NOW - 2 * DAY }), t.aggregateAsync({ rows: true, to: NOW - 3 * DAY, backend: 'claude' })]);
   ok(t._coldWalks - w0 === 3 && peak === 1 && four.every((x) => JSON.stringify(x) === JSON.stringify(four[0])) && two[0].totals.requests > 0, `§8 four identical requests = ONE walk, two different = two walks never at once (walks ${t._coldWalks - w0}, peak ${peak})`);
   live = 0; peak = 0;
   await Promise.all([t._aggregateWalk({ to: NOW - 4 * DAY }, 3), t._aggregateWalk({ to: NOW - 5 * DAY }, 3)]);
@@ -525,7 +529,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const append = (u) => { writeRows(u.dir, [mkRow(NOW - 1000)]); u._evCache.checkedAt = 0; u._loadEvents(); };
   let tries13 = 0; t.walkHook = () => { tries13++; append(t); };
   const w13 = t._coldWalks || 0;
-  const a = await t.aggregateAsync(q); t.walkHook = null;
+  const a = await t.aggregateAsync({ ...q, rows: true }); t.walkHook = null;
   const walks13 = (t._coldWalks || 0) - w13;
   eq(a, sync0, '§13 appends on every try: the answer = the sync answer at the walk start');
   ok(allRowsCalls === 0, `§13 no fold of the ledger on the loop (_allRows ×${allRowsCalls})`);
@@ -533,7 +537,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   // rewrites on every try ⇒ the worker re-runs (≤ 3), then an ERROR — still never the loop
   const swapTwo = () => { const f = path.join(t.dir, fs.readdirSync(t.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); t._evCache.checkedAt = 0; t._loadEvents(); };
   t.walkHook = swapTwo; let err13 = null; allRowsCalls = 0;
-  try { await t.aggregateAsync({ to: NOW - 2 }); } catch (e) { err13 = e; } t.walkHook = null;
+  try { await t.aggregateAsync({ rows: true, to: NOW - 2 }); } catch (e) { err13 = e; } t.walkHook = null;
   ok(err13 && err13.code === 'STALE' && allRowsCalls === 0, `§13 a shard rewritten under EVERY try ⇒ ${err13 && err13.code}: "${err13 && err13.message.slice(0, 60)}…", the loop never folded`);
   const M = mutantCopies('cachebounds-uh', REPO);
   const uhSrc = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
@@ -544,7 +548,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const swap = (u) => { const f = path.join(u.dir, fs.readdirSync(u.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); u._evCache.checkedAt = 0; u._loadEvents(); };
   let tries2 = 0; t2.walkHook = () => { tries2++; swap(t2); };
   const w2 = t2._coldWalks || 0;
-  await t2.aggregateAsync({ to: NOW - 3 }).catch(() => null); t2.walkHook = null;
+  await t2.aggregateAsync({ rows: true, to: NOW - 3 }).catch(() => null); t2.walkHook = null;
   const walks2 = (t2._coldWalks || 0) - w2;
   ok(r2rung !== uhSrc && tries2 >= 1 && n2 > 0 && !offLoop(n2, walks2), `control (the r2 last rung): the ledger folded on the loop ×${n2} after ${tries2} tries (worker walks ×${walks2}) ⇒ §13's off-the-loop predicate is RED`);
   // the REPLAY (seam C): the .347 branch run's fast job recorded this control's clock sample as «longest stall 73 ms > its
@@ -559,12 +563,12 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const oom = path.join(tmp, 'oom-worker.js');
   fs.writeFileSync(oom, `const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (!m || m.op !== 'fold') return; const a = []; for (let i = 0; i < 200; i++) a.push(new Array(131072).fill(i)); parentPort.postMessage({ ev: 'done', answer: { totals: { requests: a.length }, groups: {} }, missing: 0, missingShards: [] }); });`);
   t.coldWorkerFile = oom; t.coldWorkerHeapMb = 32; let err14 = null; const t0 = Date.now(); allRowsCalls = 0;
-  try { await t.aggregateAsync({ to: NOW - 4 }); } catch (e) { err14 = e; }
+  try { await t.aggregateAsync({ rows: true, to: NOW - 4 }); } catch (e) { err14 = e; }
   const took14 = Date.now() - t0; t.coldWorkerHeapMb = 0; t.coldWorkerFile = null;
   // "fast" = the worker's own death answers, never the 10-min deadline (the witness: code ≠ DEADLINE); the time is printed
   // beside a same-run control (the next request's NEW worker spawn + fold), and the deaf-walk mutant below reds the witness
   ok(err14 && /memory|exited|failed/.test(err14.message) && err14.code !== 'DEADLINE' && allRowsCalls === 0 && t._evCache.walking === 0, `§14 a worker out of memory ⇒ "${err14 && err14.message}" (${err14 && err14.code}) in ${took14} ms — its own death, not the deadline; no loop fold, the walk released`);
-  const t14n = Date.now(), next14 = await t.aggregateAsync({ to: NOW - 5 }), took14n = Date.now() - t14n;
+  const t14n = Date.now(), next14 = await t.aggregateAsync({ rows: true, to: NOW - 5 }), took14n = Date.now() - t14n;
   ok(JSON.stringify(next14.totals) === JSON.stringify(t.aggregate({ to: NOW - 5 }).totals), '§14 the next request starts a NEW worker and answers');
   boundLine('§14', took14, took14n, 'witness: the error is the worker death (code ≠ DEADLINE)');
   const deaf = editAnchor(editAnchor(uhSrc, "w.on('error', (e) => end(reject,", "w.on('error', (e) => void (reject,", "src/usage-history.js"), "w.on('exit', (code) => end(reject,", "w.on('exit', (code) => void (reject,", "src/usage-history.js");
@@ -573,22 +577,22 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   // lane fast-debt-clear: THE INDEPENDENT DEADLINE LEGS AT ONCE — this control's 1.5 s deadline elapses while the fallback copy,
   // the two children and §15 run: it walks in its OWN patched module (own STUCK / LIVE sets, own queue) and its OOM stub reads
   // no shard (§15 / §16 touch r3's files, never what this walk holds); judged after §15
-  const e14dRun = td.aggregateAsync({ to: NOW - 7 }).then(() => null, (e) => e);
+  const e14dRun = td.aggregateAsync({ rows: true, to: NOW - 7 }).then(() => null, (e) => e);
   // §15 (verify #2): a worker that never answers ⇒ the deadline frees the queue
   // the stub never answers; it leaves at its own 4 s, or as soon as the leg drops the RELEASE file (lane fast-debt-clear: the
   // no-deadline control waited the stub's 4 s out after its 1 s verdict — a wait for nothing the leg asserts)
   const hung = path.join(tmp, 'hung-worker.js'), hungRelease = path.join(tmp, 'hung-worker.release');
   fs.writeFileSync(hung, `const fs = require('fs'); const { parentPort } = require('worker_threads'); parentPort.on('message', () => {}); setTimeout(() => process.exit(0), 4000); setInterval(() => { if (fs.existsSync(${JSON.stringify(hungRelease)})) process.exit(0); }, 10);`);
   t.coldWorkerFile = hung; t.coldFoldDeadlineMs = 300;
-  const p1 = t.aggregateAsync({ to: NOW - 8 }).then(() => 'answered', (e) => e.code);
-  const p2 = t.aggregateAsync({ to: NOW - 9 }).then(() => 'answered', (e) => e.code);
-  const p3 = t.aggregateAsync({ from: NOW - 3600e3 }).then((x) => 'hot ' + x.totals.requests);
+  const p1 = t.aggregateAsync({ rows: true, to: NOW - 8 }).then(() => 'answered', (e) => e.code);
+  const p2 = t.aggregateAsync({ rows: true, to: NOW - 9 }).then(() => 'answered', (e) => e.code);
+  const p3 = t.aggregateAsync({ rows: true, from: NOW - 3600e3 }).then((x) => 'hot ' + x.totals.requests);
   const r15 = await Promise.all([p1, p2, p3]);
   t.coldWorkerFile = null;
   eq(r15.slice(0, 2), ['DEADLINE', 'DEADLINE'], '§15 a hung fold passes its deadline: terminated, every waiter told, the queue moves on');
   ok(/^hot \d+/.test(r15[2]), '§15 a hot-only query is never wedged behind it');
   t.coldFoldDeadlineMs = 1e9; t.coldWorkerFile = hung;
-  const pc = t.aggregateAsync({ to: NOW - 10 }).then(() => 'answered', (e) => e.code);
+  const pc = t.aggregateAsync({ rows: true, to: NOW - 10 }).then(() => 'answered', (e) => e.code);
   const racer = Promise.race([pc, new Promise((r) => setTimeout(() => r('still waiting'), 1000))]);
   // §14's r2 fallback copy and its two children run INSIDE this control's 1 s (lane fast-debt-clear): they share nothing with
   // t's pending walk (the copy is its own patched module; the children their own processes, READING r3), and the verdict
@@ -597,12 +601,12 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const UHf = M.load('src/usage-history.js', fb, 'fallback').UsageHistory;
   const tf = new UHf({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); tf.ledgerWindowMs = 40 * DAY; tf.ledgerHotMaxBytes = 60 * 1024; tf.warm(); tf.coldWorkerHeapMb = 32; tf.coldWorkerFile = oom;
   let nf = 0; const realf = tf._allRows.bind(tf); tf._allRows = function* (...x) { nf++; yield* realf(...x); };
-  await tf.aggregateAsync({ to: NOW - 6 }).catch(() => null);
+  await tf.aggregateAsync({ rows: true, to: NOW - 6 }).catch(() => null);
   ok(fb !== uhSrc && nf > 0, `control (the r2 sync fallback on a worker death): folded on the loop ×${nf} ⇒ RED`);
   // the cap binds under a parent --max-old-space-size (execArgv []) — the two children run at once (each its own process
   // READING r3; spawnSync held the loop for both in turn — lane fast-debt-clear)
   const child = (src) => new Promise((resolve) => execFile(process.execPath, ['--max-old-space-size=4096', '--input-type=module', '-e', src], { encoding: 'utf8', timeout: 60000 }, (_e, stdout, stderr) => resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') })));
-  const body = (file) => `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.join(REPO, 'scripts/x.js'))}); const { UsageHistory } = require(${JSON.stringify(file)}); const u = new UsageHistory({ dataDir: ${JSON.stringify(path.join(tmp, 'r3'))}, homeDir: ${JSON.stringify(tmp)} }); u.ledgerWindowMs = ${40 * DAY}; u.ledgerHotMaxBytes = ${60 * 1024}; u.warm(); u.coldWorkerHeapMb = 1; u.coldWorkerFile = WORKER_FILE; u.aggregateAsync({ to: ${NOW - 7} }).then(() => console.log('ANSWERED'), (e) => console.log('REFUSED ' + e.message));`;
+  const body = (file) => `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.join(REPO, 'scripts/x.js'))}); const { UsageHistory } = require(${JSON.stringify(file)}); const u = new UsageHistory({ dataDir: ${JSON.stringify(path.join(tmp, 'r3'))}, homeDir: ${JSON.stringify(tmp)} }); u.ledgerWindowMs = ${40 * DAY}; u.ledgerHotMaxBytes = ${60 * 1024}; u.warm(); u.coldWorkerHeapMb = 1; u.coldWorkerFile = WORKER_FILE; u.aggregateAsync({ rows: true, to: ${NOW - 7} }).then(() => console.log('ANSWERED'), (e) => console.log('REFUSED ' + e.message));`;
   const wSrc = fs.readFileSync(path.join(REPO, 'src/usage-cold-worker.js'), 'utf8');
   const noSoft = M.write('src/usage-cold-worker.js', editAnchor(wSrc, "if (capBytes && ++n % 2000 === 0 && (over = overCap(capBytes, rule, judge))) throw", "if (false) throw", "src/usage-cold-worker.js"), 'nosoftcap');
   // §30b's control (B-f35e): the READING judged wherever the limit is — what the collector has not taken yet counted as held
@@ -621,9 +625,9 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const shards = fs.readdirSync(t.dir).filter((x) => x.startsWith('events-')).sort();
   const victim = path.join(t.dir, shards[1]), keep = fs.readFileSync(victim);
   t.walkHook = () => { t.walkHook = null; fs.unlinkSync(victim); };
-  const a16 = await t.aggregateAsync({ to: NOW - 11 });
+  const a16 = await t.aggregateAsync({ rows: true, to: NOW - 11 });
   ok(a16.partial && a16.partial.missingRows > 0 && a16.partial.shards[0] === shards[1], `§16 a vanished shard: answered without its ${a16.partial && a16.partial.missingRows} rows, said in the result`);
-  eq((await t.aggregateAsync({ to: NOW - 12 })).totals, t.aggregate({ to: NOW - 12 }).totals, '§16 the next read rebuilt from the directory (no ENOENT loop)');
+  eq((await t.aggregateAsync({ rows: true, to: NOW - 12 })).totals, t.aggregate({ to: NOW - 12 }).totals, '§16 the next read rebuilt from the directory (no ENOENT loop)');
   fs.writeFileSync(victim, keep); t._evCache = null; t.warm();
   const r2walk = fs.readFileSync(path.join(REPO, 'src/usage-cold-walk.js'), 'utf8').replace("try { fd = fs.openSync(fp, 'r'); } catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }", "fd = fs.openSync(fp, 'r');");
   const W16 = mutantCopies('cachebounds-w16', REPO).load('src/usage-cold-walk.js', r2walk, 'enoent');
@@ -636,10 +640,10 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const f17 = path.join(t.dir, shards[0]);
   const ls = fs.readFileSync(f17, 'utf8').split('\n'); [ls[2], ls[3]] = [ls[3], ls[2]]; fs.writeFileSync(f17, ls.join('\n')); // same size, mtime moves
   t._evCache.checkedAt = 0; t._loadEvents();
-  eq([(await t.aggregateAsync({ to: NOW - 13 })).totals, [...t.rows()].length], [t.aggregate({ to: NOW - 13 }).totals, truth()], '§17 a SAME-SIZE rewrite ⇒ rebuilt, the numbers = a fresh cache');
+  eq([(await t.aggregateAsync({ rows: true, to: NOW - 13 })).totals, [...t.rows()].length], [t.aggregate({ to: NOW - 13 }).totals, truth()], '§17 a SAME-SIZE rewrite ⇒ rebuilt, the numbers = a fresh cache');
   fs.writeFileSync(f17, JSON.stringify(mkRow(NOW - 199 * DAY)) + '\n' + fs.readFileSync(f17, 'utf8')); // grown, but not by an append
   t._evCache.checkedAt = 0; t._loadEvents();
-  eq((await t.aggregateAsync({ to: NOW - 14 })).totals, t.aggregate({ to: NOW - 14 }).totals, '§17 a GROWN rewrite (a line put at the top) ⇒ the append-only proof fails, rebuilt');
+  eq((await t.aggregateAsync({ rows: true, to: NOW - 14 })).totals, t.aggregate({ to: NOW - 14 }).totals, '§17 a GROWN rewrite (a line put at the top) ⇒ the append-only proof fails, rebuilt');
   const n17 = [...t.rows()].length;
   fs.appendFileSync(path.join(t.dir, shards[shards.length - 1]), '{"ts":' + (NOW - 100) + ',"rid":"torn');
   t._evCache.checkedAt = 0; t._loadEvents();
@@ -688,7 +692,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   t._loadEvents(); const cut19 = t._evCache.cutoff;
   t.walkHook = async () => { await new Promise((r) => setTimeout(r, 30)); };
   const ac = new AbortController();
-  const six = [1, 2, 3, 4, 5, 6].map((k) => t.aggregateAsync({ to: NOW - 20 - k }, k === 3 ? { signal: ac.signal } : {}).then(() => 'ok', (e) => e.code));
+  const six = [1, 2, 3, 4, 5, 6].map((k) => t.aggregateAsync({ rows: true, to: NOW - 20 - k }, k === 3 ? { signal: ac.signal } : {}).then(() => 'ok', (e) => e.code));
   ac.abort();
   const r19 = await Promise.all(six); t.walkHook = null;
   eq(r19, ['ok', 'ok', 'ABORTED', 'ok', 'BUSY', 'BUSY'], '§19 6 distinct keys: 4 queued (one left before its turn), 2 refused at once');
@@ -697,11 +701,11 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   // §21 (verify #6): a hot-only range: no worker, no disk
   const t21 = mkUh('r3', 40 * DAY, 60 * 1024); t21.warm();
   const dr = spyReads();
-  let a21; try { a21 = await t21.aggregateAsync({ from: NOW - 3600e3 }); } finally { dr.restore(); }
+  let a21; try { a21 = await t21.aggregateAsync({ rows: true, from: NOW - 3600e3 }); } finally { dr.restore(); }
   ok(a21.totals.requests >= 1 && !t21._coldWalks && dr.bytes === 0, `§21 a today query: no worker (${t21._coldWalks || 0}), ${dr.bytes} B read from disk`);
   // §22: a hot row with no place is folded from memory
   const evF = mkRow(NOW - 2 * DAY); t._take(t._evCache, evF, 300, 5, 100, new Set());
-  const a22 = await t.aggregateAsync({ to: NOW }); eq(a22.totals.requests, t.aggregate({ to: NOW }).totals.requests, '§22 a fenced row (shard 300) stays hot, folded from memory by the worker');
+  const a22 = await t.aggregateAsync({ rows: true, to: NOW }); eq(a22.totals.requests, t.aggregate({ to: NOW }).totals.requests, '§22 a fenced row (shard 300) stays hot, folded from memory by the worker');
 }
 console.log('§25–§31 r4: the person is told, stuck workers, the whole-line hash, one rebuild, chunked months');
 {
@@ -715,7 +719,7 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   // §25 (verify #1): a vanished shard ⇒ the Usage window shows a line under the totals
   const sh4 = fs.readdirSync(t4.dir).filter((x) => x.startsWith('events-')).sort(), victim = path.join(t4.dir, sh4[1]), keep = fs.readFileSync(victim);
   t4.walkHook = () => { t4.walkHook = null; fs.unlinkSync(victim); };
-  const a25 = await t4.aggregateAsync({ to: NOW - 31 });
+  const a25 = await t4.aggregateAsync({ rows: true, to: NOW - 31 });
   fs.writeFileSync(victim, keep); t4._evCache = null; t4.warm();
   const el = N.ledgerNoteEl(fakeDoc, a25, tt);
   ok(el && el.className === 'usage-ledger-note' && el.children[0].className === 'usage-ledger-note-partial' && el.children[0].textContent.startsWith(a25.partial.missingRows + ' rows from a missing ledger file'), `§25 the window's element under the totals: "${el && el.children[0].textContent}"`);
@@ -727,7 +731,7 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   ok(Object.values(N.LEDGER_NOTE_WORDS).every((w) => zh.includes(JSON.stringify(w) + ':') && ja.includes(JSON.stringify(w) + ':')), '§25 both words have zh + ja');
   // §31 (verify #6): the as-of answer carries asOf and the window says it when it lags
   t4.walkHook = () => { t4.walkHook = null; writeRows(t4.dir, [mkRow(NOW - 500)]); t4._evCache.checkedAt = 0; t4._loadEvents(); };
-  const a31 = await t4.aggregateAsync({ to: NOW - 32 });
+  const a31 = await t4.aggregateAsync({ rows: true, to: NOW - 32 });
   ok(Number.isFinite(a31._asOf) && a31._asOf <= Date.now(), '§31 a walk answer carries asOf (its plan instant)');
   const lag = N.ledgerNote({ asOf: Date.now() - 5 * 60e3 }), fresh = N.ledgerNote({ asOf: Date.now() - 1000 });
   ok(lag.length === 1 && lag[0].kind === 'asof' && !fresh.length, '§31 the window says "As of hh:mm" past a minute behind, not for a fresh answer');
@@ -735,14 +739,14 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   // §29 (verify #4): rewrites on every try ⇒ ONE rebuild, then the error
   const tries = [];
   t4.walkHook = (k) => { tries.push(k); const f = path.join(t4.dir, sh4[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); t4._evCache.checkedAt = 0; t4._loadEvents(); };
-  let e29 = null; try { await t4.aggregateAsync({ to: NOW - 33 }); } catch (e) { e29 = e; } t4.walkHook = null;
+  let e29 = null; try { await t4.aggregateAsync({ rows: true, to: NOW - 33 }); } catch (e) { e29 = e; } t4.walkHook = null;
   ok(e29 && e29.code === 'STALE' && JSON.stringify(tries) === '[0,1]', `§29 a rewrite on every try: tries ${JSON.stringify(tries)} (one rebuild), then "${e29 && e29.message.slice(0, 50)}…"`);
   const M4 = mutantCopies('cachebounds-r4', REPO), uhSrc4 = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
   const r3ladder = editAnchor(uhSrc4, 'if (tries < 1) return this._aggregateWalk(opts, tries + 1);', 'if (tries < 2) return this._aggregateWalk(opts, tries + 1);', "src/usage-history.js");
   const t3l = new (M4.load('src/usage-history.js', r3ladder, 'r3ladder').UsageHistory)({ dataDir: path.join(tmp, 'r4'), homeDir: tmp }); t3l.ledgerWindowMs = 40 * DAY; t3l.ledgerHotMaxBytes = 60 * 1024; t3l.warm();
   const tries3 = [];
   t3l.walkHook = (k) => { tries3.push(k); const f = path.join(t3l.dir, sh4[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); t3l._evCache.checkedAt = 0; t3l._loadEvents(); };
-  await t3l.aggregateAsync({ to: NOW - 34 }).catch(() => null);
+  await t3l.aggregateAsync({ rows: true, to: NOW - 34 }).catch(() => null);
   ok(r3ladder !== uhSrc4 && tries3.length === 3, `control (the r3 ladder): ${tries3.length} whole-ledger rebuilds for one request ⇒ RED`);
   t4._evCache = null; t4.warm();
   // §27 (verify #0): an in-place same-length edit + an append ⇒ the next fold says STALE, rebuilds, the money readers answer the NEW value
@@ -758,7 +762,7 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   const before27 = t4._evCache; t4._evCache.checkedAt = 0; t4._loadEvents();
   const truth27 = costAt(new UsageHistory({ dataDir: path.join(tmp, 'r4'), homeDir: tmp }));
   ok(t4._evCache === before27 && costAt(t4) === oldCost && oldCost !== truth27, 'control (the append-only proof alone, r3): the edit passes unseen — the money readers still answer the OLD value ⇒ RED');
-  await t4.aggregateAsync({ to: NOW - 35 });
+  await t4.aggregateAsync({ rows: true, to: NOW - 35 });
   ok(t4._evCache !== before27 && costAt(t4) === truth27, `§27 the next fold reads the edited line, its WHOLE-line hash says STALE, the cache rebuilds: the money readers answer the NEW value (${oldCost.toFixed(4)} → ${costAt(t4).toFixed(4)})`);
   // §26 (verify #2): a fold worker blocked in a read is STUCK — counted, said, no second worker, resume on release
   // r5 (lane cache-bounds-stuck-worker-race, B-a568 — the hosted runner: rel282 EPIPE in the r4 release(), rel280 a 300 s hang
@@ -796,11 +800,11 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   };
   t4.coldWorkerFile = blocked; t4.coldFoldDeadlineMs = 300; t4.coldTerminateDeadlineMs = 300;
   const w26 = t4._coldWalks, hold26 = holdDeadline(t4);
-  const tq1 = Date.now(), p1 = t4.aggregateAsync({ to: NOW - 40 }).then(() => null, (e) => e);
+  const tq1 = Date.now(), p1 = t4.aggregateAsync({ rows: true, to: NOW - 40 }).then(() => null, (e) => e);
   const sat26 = await until(() => hold26.fire && fs.existsSync(mark) && (!WCHAN || fifoTid()));
   hold26.restore(); if (hold26.fire) hold26.fire();
   const e1 = await p1, took1 = Date.now() - tq1;
-  const tq = Date.now(); const e2 = await t4.aggregateAsync({ to: NOW - 41 }).then(() => null, (e) => e); const took2 = Date.now() - tq;
+  const tq = Date.now(); const e2 = await t4.aggregateAsync({ rows: true, to: NOW - 41 }).then(() => null, (e) => e); const took2 = Date.now() - tq;
   // "at once" = refused before a worker spawns (the witness: _coldWalks +1 — the r3stuck mutant below spawns ×2); the time is
   // printed beside the same-run control, the first request's deadline wait
   boundLine('§26', took2, took1, 'witness: refused before a worker spawns (_coldWalks +1)');
@@ -809,7 +813,7 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   t4.coldWorkerFile = null;
   const gone26 = await releaseUntil(stuckGone(t4));
   t4.coldFoldDeadlineMs = 0; t4.coldTerminateDeadlineMs = 0; // the real fold below runs on the product's own deadlines (300 ms is the stub's)
-  const a26 = await t4.aggregateAsync({ to: NOW - 42 }).then((x) => x, (e) => e);
+  const a26 = await t4.aggregateAsync({ rows: true, to: NOW - 42 }).then((x) => x, (e) => e);
   ok(gone26 && a26 && a26.totals && stuckGone(t4)(), '§26 released: the stuck worker exited, the count dropped, folds resume');
   const r3stuck = editAnchor(uhSrc4, "if (STUCK.size) return Promise.reject(", "if (false) return Promise.reject(", "src/usage-history.js");
   const ts3 = new (M4.load('src/usage-history.js', r3stuck, 'r3stuck').UsageHistory)({ dataDir: path.join(tmp, 'r4'), homeDir: tmp }); ts3.ledgerWindowMs = 40 * DAY; ts3.ledgerHotMaxBytes = 60 * 1024; ts3.warm();
@@ -817,7 +821,7 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   // lane fast-debt-clear: §30's month builds and folds while this control's two blocked workers wait out their deadlines — the
   // control walks its OWN patched module (own STUCK set), §30 the real one, whose STUCK set is empty from `gone26` on (nothing
   // after it in §26 touches the real module); r4big is §30's own directory
-  const r3stuckRun = (async () => { await ts3.aggregateAsync({ to: NOW - 43 }).catch(() => null); await ts3.aggregateAsync({ to: NOW - 44 }).catch(() => null); })();
+  const r3stuckRun = (async () => { await ts3.aggregateAsync({ rows: true, to: NOW - 43 }).catch(() => null); await ts3.aggregateAsync({ rows: true, to: NOW - 44 }).catch(() => null); })();
   month30Run = fold30(month30Prep);
   await r3stuckRun;
   ok(r3stuck !== uhSrc4 && ts3._coldWalks === 2, `control (no stuck refusal, r3): ${ts3._coldWalks} blocked workers alive at once ⇒ RED`);
@@ -881,11 +885,11 @@ function prep30() {
   return { t5, base5 };
 }
 async function fold30({ t5, base5 }) {
-  t5.coldRowBudget = 5000; const ok5 = await t5.aggregateAsync({ to: NOW - 100 * DAY }).then((x) => x.totals.requests, (e) => e.message);
-  t5.coldRowBudget = 1e9; const bad5 = await t5.aggregateAsync({ to: NOW - 101 * DAY }).then(() => 'answered', (e) => e);
+  t5.coldRowBudget = 5000; const ok5 = await t5.aggregateAsync({ rows: true, to: NOW - 100 * DAY }).then((x) => x.totals.requests, (e) => e.message);
+  t5.coldRowBudget = 1e9; const bad5 = await t5.aggregateAsync({ rows: true, to: NOW - 101 * DAY }).then(() => 'answered', (e) => e);
   // §30b's control (B-f35e): the same chunks with the reading judged wherever the limit is — refused at its first crossing
   t5.coldRowBudget = 5000; t5.coldWorkerFile = readingOnly30;
-  const read5 = await t5.aggregateAsync({ to: NOW - 103 * DAY }).then(() => 'answered', (e) => e);
+  const read5 = await t5.aggregateAsync({ rows: true, to: NOW - 103 * DAY }).then(() => 'answered', (e) => e);
   t5.coldWorkerFile = null;
   return { ok5, bad5, read5, cap: t5.coldWorkerHeapMb, mb: Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576) };
 }
@@ -932,6 +936,31 @@ async function fold30({ t5, base5 }) {
     await bad31.warmStepped({ chunkBytes: 4096, trimBatch: 50 });
     ok(snap31(bad31) !== want31, 'control (a slice that never widens past a line longer than itself — the shard stops there): the same comparison is red');
   } finally { Date.now = realNow; }
+}
+// §L11 EVERY STRUCTURE THE LEDGER HOLDS IS A CENSUS ROW (row B-360d unit 1, the design read w0r2kz4cb law 11): each field of a
+// loaded ledger cache — and the instance's remote per-month id sets — is either COUNTED by a row of cacheCensus() (named here),
+// or DECLARED with why it is no holder (a scalar, a per-shard mark, a set the hot window bounds). A new field with neither is RED.
+// Red at the release: the remote id sets (_ingestIx) had no row.
+console.log('§L11 every structure the ledger holds is a census row with a ceiling');
+{
+  win._loadEvents();
+  const c = win._evCache, rows = new Map(win.cacheCensus().map((r) => [r.name, r]));
+  const COUNTED = { events: 'usage ledger window', hotBytes: 'usage ledger window', cold: 'usage ledger cold columns', cells: 'usage cells', arr: 'usage arrival log', hours: 'usage hour sums', hostAcct: 'usage dark-host index' };
+  const DECLARED = {
+    consumed: 'one offset per shard (≤ a few dozen numbers)', marks: 'one same-file proof per shard', sizes: 'one number per HOT row — bounded by the window row', locs: 'one number per HOT row', hrh: 'one hash per HOT row',
+    rids: 'the HOT rows\' ids — bounded by the window row (the cold ids are in the columns\' row)', mids: 'the HOT rows\' message ids — as rids', srcWm: 'one watermark per source machine', checkedAt: 'a scalar', cutoff: 'a scalar',
+    walking: 'a scalar', shards: 'the shard names (one per month)', shardIx: 'one index per shard name', whole: 'a flag', booting: 'a flag', pending: 'the stepped pass in flight (its own rows are the window\'s)', stale: 'a flag + the rewritten shard\'s name',
+    sortedLen: 'a scalar', sortedOf: 'a reference to the window\'s own rows', hostAcctVer: 'a scalar', hostAcctFloor: 'a scalar', loading: 'the load\'s words', gen: 'a scalar', sorted: 'the window\'s rows in ts order (the same objects)', sortedSz: 'one number per hot row',
+    trim: 'a flag (a stepped trim in flight)', trimAgain: 'a flag', trimOwed: 'a flag', trimP: 'the trim in flight (one promise)', lastTrim: 'the last trim\'s dozen counts', fullSorts: 'a count', stuck: 'two scalars (the cut a trim found nothing coldable below)',
+    hostAcctNewest: 'a scalar', hostAcctRows: 'a count of the dark-host index\'s rows (the index is its own row)', hostAcctDown: 'when the dark-host index was dropped + its count', overWarned: 'a flag', skipped: 'a count of bytes', skipSaid: 'the shard names already said (one per shard)',
+    absorbing: 'the absorb pass in flight (one promise)', absorbAgain: 'a flag', absorbed: 'the absorb pass\'s step counts (one entry a step, the pass\'s own)',
+  };
+  const keys = Object.keys(c), unknown = keys.filter((k) => !(k in COUNTED) && !(k in DECLARED));
+  const missingRows = [...new Set(Object.values(COUNTED))].filter((n) => !rows.has(n));
+  ok(unknown.length === 0, `§L11 every field of the ledger cache is counted or declared (${keys.length} fields)${unknown.length ? ' — RED, no row and no reason: ' + unknown.join(', ') : ''}`);
+  ok(missingRows.length === 0 && rows.has('usage remote id sets') && rows.has('usage cells') && Object.values(COUNTED).every((n) => !rows.has(n) || Number.isFinite(rows.get(n).ceiling)), `§L11 each counted structure is a census row WITH a ceiling — the cells and the remote per-month id sets included (red at the release: no remote id sets row)`, missingRows);
+  const planted = { ...c, newIndex: new Map() };
+  ok(Object.keys(planted).filter((k) => !(k in COUNTED) && !(k in DECLARED)).length === 1, 'CONTROL: a field planted in the cache with no row and no reason is RED by name');
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 

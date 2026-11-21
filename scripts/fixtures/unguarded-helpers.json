@@ -942,7 +942,6 @@
   "test-usage-eta.mjs": 1,
   "test-usage-events-push.mjs": 1,
   "test-usage-exit-hook.mjs": 1,
-  "test-usage-index-owner.mjs": 1,
   "test-usage-index-parity.mjs": 1,
   "test-usage-ledger-perf.mjs": 1,
   "test-usage-ledger-walk.mjs": 1,

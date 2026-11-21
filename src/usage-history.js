@@ -23,11 +23,18 @@ const { maskDefaultKeyName } = require('./key-names.js'); // PURE (B-ba7d): a st
 const { runUsageWalk } = require('./usage-walker.js');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const CB = require('./cache-bounds.js'); // PURE: the ledger's hot window + byte ceiling + the cold columns (B-9428)
-const { coldRows, readLineAt, readLineAtSync } = require('./usage-cold-walk.js'); // the ledger rows read where they live, verified (B-9428 r2/r3)
+const { coldRows, readLineAt, readLineAtSync, verified: verifiedRow } = require('./usage-cold-walk.js'); // the ledger rows read where they live, verified (B-9428 r2/r3)
 const { Worker, isMainThread } = require('worker_threads');
 const v8 = require('v8');
 const { trackWorker } = require('./worker-memory.js');
 const { isThirdPartyAccount } = require('./provider-ids.js'); // PURE (B-d578 P1-b): a `pv-` id that names a third-party provider's record
+// ONE SPELLING of a row's (or a cell's) billing bucket and its machine login's name — aggregate's keyOf and the cells' fold
+// (B-360d unit 1: the cells must give the row fold's labels; test-architecture §78 counts the harness branches)
+const billingKeyOf = (x) => (isThirdPartyAccount(x.acct) ? 'provider' /* B-d578 P1-b: a provider's record — its own billing row, whatever the row stored */ : x.atype === 'api' ? 'api-key' : x.atype === 'subscription' ? 'subscription' : x.atype === 'codex-subscription' ? 'chatgpt' : x.atype === 'host' ? 'remote-host' : (x.acct ? 'unknown-account' : (x.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')));
+const loginNameOf = (x) => (x.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login');
+const CELLS_MAX_BYTES = 160 * 1048576, REMOTE_ID_BYTES = 72, REMOTE_IDS_MAX_BYTES = 360 * 1048576;   // B-360d unit 1 (law 11): the census ceilings of the cells and the remote id sets
+const CELL_UNPRICED = Object.freeze({ unpriced: true });   // B-d578 P1-b in the cells: a cell whose model has NO price (priceUnknown) — counted apart, never $0
+const { UsageCells, SLOT_MS: CELL_SLOT_MS, KEYS: CELL_KEYS, VALS: CELL_VALS } = require('./usage-cells.js'); // PURE (B-360d unit 1): the Usage window's facts as packed counts, built where a row is taken
 const CP = require('./catalog-pricing.js'); // PURE: the price table's three sources — shipped, the installed Claude Code's catalog, the person (lane cli-update-needs-nothing)
 const EH = require('./server/exit-hook.js'); // THE exit hook: a fold worker asleep in a read is never joined (lane usage-fold-worker-exit-hook)
 
@@ -339,7 +346,6 @@ class UsageHistory {
     this.attribFile = path.join(this.dir, 'attribution.ndjson');
     this._resolveAccount = resolveAccount;
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch {}
-    this._index = null; // the usage index's push (design 011 L1) — attached by its owner, src/server/usage-index.js
     this._cursors = timedSync('usage-cursors.read', () => this._loadCursors());
     // Re-read the cursor map from disk (2.369.85): a one-shot migration that
     // PURGES fixture rows also drops their cursors, but this object was built
@@ -356,7 +362,7 @@ class UsageHistory {
     // already-warm cache — and `_evCache.rids` would keep serving the
     // pre-migration objects for the life of the process. Boot re-reads after
     // runLocalMigrations, exactly like reloadCursors.
-    this.reloadEvents = () => { this._rebuildInWorker('a reload after a repair'); if (this._index) this._index.recover(); }; // …and the index re-checks its shard marks (B-748f: rebuilt in the worker, the old cache serving until the swap)
+    this.reloadEvents = () => { this._rebuildInWorker('a reload after a repair'); }; // …and the index re-checks its shard marks (B-748f: rebuilt in the worker, the old cache serving until the swap)
     this._pricing = this._loadPricing();
     this._pricingFile = this._pricing; this._pricing = this._withCatalog(this._pricingFile); PRICED.add(new WeakRef(this)); // the effective table (lane cli-update-needs-nothing)
     this._scanning = false;
@@ -627,7 +633,7 @@ class UsageHistory {
       }
       if (dirty) this._writeAtomic(fp, out.join('\n') + '\n');
     }
-    if (changed) { this._rebuildInWorker('a re-attribution rewrote shards'); if (this._index) this._index.recover(); } // sizes may match — force a clean reload (the index re-checks its marks)
+    if (changed) { this._rebuildInWorker('a re-attribution rewrote shards'); } // sizes may match — force a clean reload (the index re-checks its marks)
     try { fs.writeFileSync(marker, JSON.stringify({ at: Date.now(), changed })); } catch {}
     if (changed) console.log(`[usage-history] re-attributed ${changed} events (pre-binding history → global)`);
   }
@@ -802,7 +808,7 @@ class UsageHistory {
       const landed = [];
       try {
         for (const [shard, lines] of Object.entries(shardBuffers)) {
-          if (lines.length) { appendedNow = true; const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); landed.push(lines); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+          if (lines.length) { appendedNow = true; const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); landed.push(lines); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
         }
       } catch (e) {   // B-6ded list 4: an append failed after others landed — what landed is known to the next walk's filter
         if (landed.length) { const p = this._partialRids || (this._partialRids = new Set()); for (const ls of landed) for (const l of ls) { try { const rid = JSON.parse(l).rid; if (rid) p.add(rid); } catch { } } }
@@ -916,7 +922,7 @@ class UsageHistory {
       }
       if (!keep.length) continue;
       const text = keep.map((e) => e.line).join('\n') + '\n';
-      timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+      timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); if (this._evCache) this._evCache.checkedAt = 0; // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
       for (const e of keep) ix.rids.add(e.rid); ix.rows = (ix.rows || 0) + keep.length; // the index knows what it appended (and where the shard ends now)
       try { const st = fs.statSync(shard); if (!ix.ino) ix.ino = st.ino; if (st.ino === ix.ino) ix.size = st.size; } catch { }
       appended += keep.length;
@@ -957,22 +963,6 @@ class UsageHistory {
       } else step();
     }
     return p;
-  }
-
-  setIndex(index) { this._index = index || null; }
-
-  // THE PUSH (design 011 §2, the invariant "a query sees every append made
-  // before it"): right after a commit point's synchronous append, the same
-  // bytes go to the index worker's FIFO, so a query posted after this append
-  // is answered after it. `offset` is where these bytes START in the shard;
-  // the worker takes them only when that equals its mark (and the inode is the
-  // one it marked), else it re-reads the shard from the mark. Never throws.
-  _pushIndex(shard, text) {
-    if (!this._index) return;
-    try {
-      const st = fs.statSync(shard);
-      this._index.ingest(path.basename(shard), st.size - Buffer.byteLength(text), st.ino, text);
-    } catch {}
   }
 
   // ── L0: the cursor store (design 011) ──────────────────────────────────────
@@ -1140,9 +1130,10 @@ class UsageHistory {
    *  once per model id per instance before the module's once-per-id set (no string built per row). */
   _priced(ev) {
     if (!this.priceUnknown(ev.model, ev.acct)) return this._cost(ev);
-    if (isMainThread) { const seen = this._pvWarned || (this._pvWarned = new Set()); if (!seen.has(ev.model)) { seen.add(ev.model); this._warnUnpriced(ev.model, ev.acct); } }
+    this._sayUnpriced(ev.model, ev.acct);
     return null;
   }
+  _sayUnpriced(model, acct) { if (isMainThread) { const seen = this._pvWarned || (this._pvWarned = new Set()); if (!seen.has(model)) { seen.add(model); this._warnUnpriced(model, acct); } } }   // once per model id, the main thread only (the cells' fold says it as the rows' does)
   // `prompt`: the WHOLE request's input (i + cr + cw5 + cw1) when a caller
   // prices ONE request in parts (the token-class splits) — the long-context
   // rule is decided on the request, never on the part, or the parts stop
@@ -1154,8 +1145,8 @@ class UsageHistory {
     const tier = this._tier(ev.model);
     if (tier === '_default' && this.priceUnknown(ev.model, ev.acct, tier)) return 0;
     if (tier === '_default' && ev.be === 'codex') this._warnUnpriced(ev.model);
-    const p = this._rateFor(ev.acct, tier, ev.ts, prompt != null ? prompt : (ev.i || 0) + (ev.cr || 0) + (ev.cw5 || 0) + (ev.cw1 || 0), ev.model);
-    return (ev.i * p.input + ev.o * p.output + ev.cw5 * p.cacheWrite5m + ev.cw1 * p.cacheWrite1h + ev.cr * p.cacheRead) / 1e6;
+    const p = this._rateFor(ev.acct, tier, ev.ts, prompt != null ? prompt : UsageCells.wholePrompt(ev) /* a NUMBER (B-360d unit 1: string counts concatenated here and priced the row long) */, ev.model);
+    return ((Number(ev.i) || 0) * p.input + (Number(ev.o) || 0) * p.output + (Number(ev.cw5) || 0) * p.cacheWrite5m + (Number(ev.cw1) || 0) * p.cacheWrite1h + (Number(ev.cr) || 0) * p.cacheRead) / 1e6;   // a count is a number, an absent one 0 (B-360d law 2)
   }
   // A codex model id with no key is priced at `_default` — Anthropic Sonnet's
   // rates. That is how gpt-6-astra went unpriced for a month: say it ONCE per
@@ -1229,7 +1220,7 @@ class UsageHistory {
     return this._evCache.events;
   }
   /** An empty cache (the load pass fills it; the boot load's placeholder stays empty until the worker's cache is swapped in). */
-  _newCache() { return { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), hostAcct: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() }; }
+  _newCache() { return { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), hostAcct: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cells: new UsageCells(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() }; }
   /** THE FIRST LOAD IN THE FOLD WORKER (lane ledger-boot-load): an empty placeholder cache marked `booting` (its generation new),
    *  and ONE rebuild job in the worker (usage-cold-worker.js parses and hashes every line off the loop; _stageBuilt hands the
    *  cache over a chunk a turn; _swapCache replaces the placeholder — its checkedAt 0, so the rows appended meanwhile are read
@@ -1517,6 +1508,7 @@ class UsageHistory {
     // rows arrived since it was last asked, whatever their ts (usage-anchors costBetweenMulti).
     if (c.whole && !(ev.host && ev.atype === 'host')) _logArrival(c, ev);
     if (c.hours && typeof c.hours.add === 'function') { try { c.hours.add(ev); } catch { c.hours = null; } } // B3: the hour sums keep up (usage-anchors installs them)
+    if (c.cells) { try { c.cells.add(ev); } catch { c.cells = null; } } // B-360d unit 1: the cells keep up — every row that counts, where it is counted (a failed add stands the cells down: the window folds rows, as before)
     // THE (HOST, ACCOUNT) INDEX (hotfix usage-ledger-walk B2): a remote host's RESOLVED rows (an account, not the host's own
     // bucket) by their ts — the dark-taint question («which accounts did a dark host spend in the last 7 days») answered by
     // binary search (hostAccountsIn), never a 7-day walk. Rows only arrive within a generation; a rewrite is a new cache.
@@ -1677,6 +1669,10 @@ class UsageHistory {
     return [
       CB.cacheRow('usage ledger window', { bytes: c ? c.hotBytes : 0, count: c ? c.events.length : 0, unit: 'rows', ceiling: this._ledgerHotMaxBytes(), kind: 'heap', basis: 'raw line bytes', enforced: { by: ['src/usage-history.js#_trimHot'], when: 'at every load and scan: the hot cutoff (ledgerCutoff) moves the rows past the ceiling to the cold columns' } }),
       CB.cacheRow('usage ledger cold columns', { bytes: c ? c.cold.bytes() : 0, count: c ? c.cold.n : 0, unit: 'rows', ceiling: this._coldMaxBytes(), kind: 'arraybuffers', basis: 'typed arrays', enforced: { not: 'not enforced: past it the rows still load and the census says OVER — lane lg-providers\' unit 3 (the memory bound, B-360d)' } }),
+      // B-360d unit 1 (law 11): the cells (measured 804 k cells ≈ 101 MB packed at 3 M owner-shaped rows — the ceiling 160 MB) and
+      // the remote per-month id sets of the ingest (_ingestIx: every `h:` rid of a month a push touched, kept for the process's life)
+      CB.cacheRow('usage cells', { bytes: c && c.cells ? c.cells.bytes() : 0, count: c && c.cells ? c.cells.n : 0, unit: 'cells (15-min slot × conversation × model × account …)', ceiling: CELLS_MAX_BYTES, kind: 'arraybuffers', enforced: { not: 'not enforced: past it the cells still grow and the census says OVER — lane lg-providers\' unit 3 (the memory bound, B-360d)' }, basis: 'typed columns, 132 bytes a cell + the open-addressing table + interned names' }),
+      (() => { let n = 0; for (const ix of (this._ingestIx ? this._ingestIx.values() : [])) n += ix && ix.rids ? ix.rids.size : 0; return CB.cacheRow('usage remote id sets', { bytes: n * REMOTE_ID_BYTES, count: n, unit: 'remote request ids (per month a push touched)', ceiling: REMOTE_IDS_MAX_BYTES, enforced: { not: 'not enforced: an ingest adds its ids and the census says OVER — the ruling gives them a ceiling in lane lg-providers\' unit 3 (B-360d)' }, kind: 'heap', basis: `≈ ${REMOTE_ID_BYTES} bytes an id (a short string in a Set — estimated; unit 3 bounds it)` }); })(),
       ...(STUCK.size ? [CB.cacheRow('usage fold workers stuck', { count: STUCK.size, unit: 'workers (storage not answering)' })] : []), // r4, verify #2
       // hotfix usage-ledger-walk B (主开发's condition 3): every index the commit keeps, bounded and counted
       ...this._ledgerWalkCensus(c),
@@ -1911,11 +1907,11 @@ class UsageHistory {
     const buf = new Uint8Array(parts.reduce((t, [, b]) => t + b.length, 0)), chunks = [];
     let at = 0;
     for (const [k, b] of parts) { buf.set(b, at); chunks.push({ k, at, len: b.length }); at += b.length; }
-    const sizes = Float64Array.from(c.sizes), locs = Float64Array.from(c.locs), hrh = Float64Array.from(c.hrh), cold = c.cold.parts();
+    const sizes = Float64Array.from(c.sizes), locs = Float64Array.from(c.locs), hrh = Float64Array.from(c.hrh), cold = c.cold.parts(), cells = c.cells ? c.cells.parts() : null;
     const marks = [...c.marks].map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: new Uint8Array(m.probe) }]);
     return {
-      built: { buf, chunks, sizes, locs, hrh, perm, hotBytes: c.hotBytes, cold: cold.parts, consumed: [...c.consumed], marks, srcWm: [...c.srcWm], hostAcct: [...(c.hostAcct || new Map())].map(([h, m]) => [h, [...m].map(([a, l]) => [a, l.ts.slice()])]), hostAcctFloor: c.hostAcctFloor ?? null, hostAcctNewest: c.hostAcctNewest ?? null, cutoff: c.cutoff, shards: c.shards, overWarned: !!c.overWarned },
-      transfer: [buf.buffer, sizes.buffer, locs.buffer, hrh.buffer, perm.buffer, ...cold.transfer],
+      built: { buf, chunks, sizes, locs, hrh, perm, hotBytes: c.hotBytes, cold: cold.parts, cells, consumed: [...c.consumed], marks, srcWm: [...c.srcWm], hostAcct: [...(c.hostAcct || new Map())].map(([h, m]) => [h, [...m].map(([a, l]) => [a, l.ts.slice()])]), hostAcctFloor: c.hostAcctFloor ?? null, hostAcctNewest: c.hostAcctNewest ?? null, cutoff: c.cutoff, shards: c.shards, overWarned: !!c.overWarned },
+      transfer: [buf.buffer, sizes.buffer, locs.buffer, hrh.buffer, perm.buffer, ...cold.transfer, ...(cells ? c.cells.transfer() : [])],
     };
   }
   /** The loop's half: the built cache staged where no reader looks — a chunk of hot rows (or ids) per loop turn, the cold
@@ -1931,7 +1927,7 @@ class UsageHistory {
     const sorted = new Array(events.length), sortedSz = new Array(events.length);
     for (let k = 0; k < sorted.length; k++) { sorted[k] = events[b.perm[k]]; sortedSz[k] = sizes[b.perm[k]]; }
     const marks = new Map(b.marks.map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: Buffer.from(m.probe.buffer, m.probe.byteOffset, m.probe.length) }]));
-    return { consumed: new Map(b.consumed), marks, events, sizes, locs, hrh, hotBytes: b.hotBytes, rids, mids, srcWm: new Map(b.srcWm), hostAcct: new Map((b.hostAcct || []).map(([h, m]) => [h, new Map(m.map(([a, ts]) => [a, { ts, sorted: false }]))])), hostAcctFloor: b.hostAcctFloor ?? undefined, hostAcctNewest: b.hostAcctNewest ?? undefined, checkedAt: 0, cold: CB.ColdSlab.fromParts(b.cold), cutoff: b.cutoff, walking: 0, shards: b.shards, shardIx: new Map(b.shards.map((f, i) => [f, i])), sorted, sortedSz, sortedLen: events.length, sortedOf: events, overWarned: b.overWarned, whole: true };
+    return { consumed: new Map(b.consumed), marks, events, sizes, locs, hrh, hotBytes: b.hotBytes, rids, mids, cells: b.cells ? UsageCells.fromParts(b.cells) : null, srcWm: new Map(b.srcWm), hostAcct: new Map((b.hostAcct || []).map(([h, m]) => [h, new Map(m.map(([a, ts]) => [a, { ts, sorted: false }]))])), hostAcctFloor: b.hostAcctFloor ?? undefined, hostAcctNewest: b.hostAcctNewest ?? undefined, checkedAt: 0, cold: CB.ColdSlab.fromParts(b.cold), cutoff: b.cutoff, walking: 0, shards: b.shards, shardIx: new Map(b.shards.map((f, i) => [f, i])), sorted, sortedSz, sortedLen: events.length, sortedOf: events, overWarned: b.overWarned, whole: true };
   }
   /** THE SWAP: ONE assignment — a reader sees the previous cache or the rebuilt one, each whole — and a new generation for
    *  the cost memos (usage-anchors keys on ledgerGen). The appends since the worker read come in the next pass (checkedAt 0). */
@@ -2136,8 +2132,8 @@ class UsageHistory {
   // `priced` = the row's _priced (its cost, or null when its price is unknown) — _aggRow prices a row ONCE for every bucket it adds to
   _add(b, ev, priced = this._priced(ev)) {
     b.requests++; b.sessions.add(ev.sid);
-    b.input += ev.i; b.cacheWrite5m += ev.cw5; b.cacheWrite1h += ev.cw1; b.cacheRead += ev.cr; b.output += ev.o;
-    if (priced === null) { b.unpricedRequests++; b.unpricedTokens += ev.i + ev.cw5 + ev.cw1 + ev.cr + ev.o; }   // B-d578 P1-b: counted apart, never as $0
+    b.input += Number(ev.i) || 0; b.cacheWrite5m += Number(ev.cw5) || 0; b.cacheWrite1h += Number(ev.cw1) || 0; b.cacheRead += Number(ev.cr) || 0; b.output += Number(ev.o) || 0;   // a count is a NUMBER, an absent one 0 (B-360d law 2 — an absent count made the bucket NaN, a string one concatenated)
+    if (priced === null) { b.unpricedRequests++; b.unpricedTokens += (Number(ev.i) || 0) + (Number(ev.cw5) || 0) + (Number(ev.cw1) || 0) + (Number(ev.cr) || 0) + (Number(ev.o) || 0); }   // B-d578 P1-b: counted apart, never as $0
     else b.cost += priced;
   }
   _finalize(b) {
@@ -2181,6 +2177,10 @@ class UsageHistory {
     if (big) return big.then(() => this.aggregateAsync(opts, { signal }));
     this._loadEvents();
     const c = this._evCache;
+    // B-360d unit 1 (law 4): THE CELLS ANSWER — every range, filter and pivot, folded in slices, reading only an edge's or a
+    // straddling slot's rows. The row fold below is the road only while there are no cells (the boot's placeholder, a stood-down
+    // cells add) or a rewritten shard is being rebuilt.
+    if (c && c.cells && !c.booting && !c.pending && !c.stale && !opts.rows) return this.aggregateCells(opts).catch((e) => { if (e && e.code === 'STALE') return this.aggregateAsync({ ...opts, rows: true }, { signal }); throw e; }); // a place gone stale ⇒ the ROW road, once: its walk rebuilds the cache and re-runs (never the cells road again on the same stale place)
     const hotOnly = !c.cold.n || (opts.from && opts.from >= c.cutoff);
     const key = JSON.stringify([opts.from || null, opts.to || null, opts.backend || null, opts.accounts ? [...opts.accounts].sort() : null, opts.hostFilter || null, opts.pivots || null]);
     if (!this._aggFlights) { this._aggFlights = new Map(); this._queued = 0; }
@@ -2297,7 +2297,7 @@ class UsageHistory {
         model: ev.model || 'unknown',
         account: acctKey,
         // billing = the coarse category, so subscription $ and API $ never merge
-        billing: thirdParty ? 'provider' : ev.atype === 'api' ? 'api-key' : ev.atype === 'subscription' ? 'subscription' : ev.atype === 'codex-subscription' ? 'chatgpt' : ev.atype === 'host' ? 'remote-host' : (ev.acct ? 'unknown-account' : (ev.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
+        billing: billingKeyOf(ev),
         project: ev.cwd || 'unknown',
         mode: ev.mode || 'unknown',
         host: ev.host || 'local',
@@ -2331,7 +2331,7 @@ class UsageHistory {
       if (!dimMeta.account[acctKey]) {
         const live = ev.acct ? this._resolveAccount(ev.acct) : null;
         dimMeta.account[acctKey] = {
-          name: ev.acct ? maskDefaultKeyName(live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),   // B-ba7d: an event stored under the old default name «API key …<tail>» never answers it
+          name: ev.acct ? maskDefaultKeyName(live?.name || ev.aname || ev.acct) : loginNameOf(ev),   // B-ba7d: an event stored under the old default name «API key …<tail>» never answers it
           type: thirdParty ? 'provider' : ev.atype || (ev.acct ? 'unknown' : 'global'),
           be: ev.be || 'claude',
           tail: null,   // B-ba7d: no key tail in a usage row (the page lays the person's read on)
@@ -2384,7 +2384,7 @@ class UsageHistory {
     for (const dim of Object.keys(dims)) {
       groupOut[dim] = Object.entries(dims[dim])
         .map(([key, b]) => ({ key, ...(dimMeta[dim]?.[key] || {}), ...this._finalize(b) }))
-        .sort(SEQ_SORT[dim] || ((a, b) => b.cost - a.cost || b.totalTokens - a.totalTokens));
+        .sort(SEQ_SORT[dim] || ((a, b) => (Math.abs(b.cost - a.cost) <= 1e-9 * Math.max(1, Math.abs(a.cost), Math.abs(b.cost)) ? 0 : b.cost - a.cost) || b.totalTokens - a.totalTokens || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)));   // costs equal to 1e-9 tie (B-360d unit 1: the cells and the rows sum in another order), then tokens, then the key — one order for both folds
     }
     const series = groupOut.day.slice().sort((a, b) => a.key < b.key ? -1 : 1);
     const pivotOut = {};
@@ -2392,7 +2392,7 @@ class UsageHistory {
       pivotOut[pair.join(':')] = Object.entries(pivotAcc[i])
         .map(([key, cells]) => ({
           key,
-          cells: Object.fromEntries(Object.entries(cells).map(([k2, b]) => [k2, this._finalize(b)])),
+          cells: Object.fromEntries(Object.entries(cells).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)).map(([k2, b]) => [k2, this._finalize(b)])),   // keys in ONE order (B-360d unit 1: the cells and the rows meet a cell's keys in another order)
         }))
         .sort((a, b) => (a.key < b.key ? -1 : 1)); // lexicographic; client re-orders seq dims
     });
@@ -2404,6 +2404,150 @@ class UsageHistory {
       groups: groupOut,
       ...(pivotPairs.length ? { pivots: pivotOut } : {}),
     };
+  }
+
+  // ── THE CELLS' FOLD (row B-360d unit 1; the design read w0r2kz4cb, laws 2–4): aggregate()'s answer from the cells — every
+  // range, filter and pivot, the same buckets, labels and range. Two kinds of slot are folded from their ROWS instead (as
+  // aggregate() reads them): a range EDGE off a 15-minute boundary, and a slot holding a cell whose rows straddle a price
+  // boundary (a dated cut between its first and last instant, a long-prompt threshold between its smallest and largest whole
+  // prompt) — never priced on the wrong side. → the answer, or null when this cache keeps no cells (the caller folds rows).
+  async aggregateCells(opts = {}, { sliceMs = 40 } = {}) {
+    const c = this._evCache;
+    if (!c || !c.cells) return null;
+    const U = c.cells, Q = CELL_SLOT_MS, NKEY = CELL_KEYS.length;
+    const from = opts.from || null, to = opts.to || null;
+    const rowSlots = new Set();
+    if (from && from % Q) rowSlots.add(Math.floor(from / Q));
+    if (to && (to + 1) % Q) rowSlots.add(Math.floor(to / Q));
+    const loS = from ? Math.floor(from / Q) : -Infinity, hiS = to ? Math.floor(to / Q) : Infinity;
+    const spec = this._cellSpec();
+    const rates = new Array(U.n);
+    let t0 = Date.now();
+    const breathe = async () => { if (Date.now() - t0 >= sliceMs) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); if (this._evCache !== c) throw Object.assign(new Error('the usage ledger was rebuilt during the read'), { code: 'STALE' }); } };
+    for (let i = 0; i < U.n; i++) {
+      const slot = U.k[i * NKEY];
+      if (slot < loS || slot > hiS || rowSlots.has(slot)) continue;
+      const r = this._cellRate(U, i, spec);
+      if (r === null) rowSlots.add(slot); else rates[i] = r;
+      if ((i & 4095) === 0) await breathe();
+    }
+    const st = this._aggBegin(opts);
+    st.labelTs = new Map();
+    const n = U.n;   // the cells as they were when the read began (a row taken meanwhile is in the next answer)
+    for (let i = 0; i < n; i++) {
+      const slot = U.k[i * NKEY];
+      if (slot < loS || slot > hiS || rowSlots.has(slot) || rates[i] === undefined) continue;
+      this._aggCell(st, U.cell(i), rates[i]);
+      if ((i & 4095) === 0) await breathe();
+    }
+    // the slots read from their ROWS — hot rows from memory, cold rows one line each at their place (async: never a read on the loop)
+    for (const sl of [...rowSlots].sort((a, b) => a - b)) {
+      const a = Math.max(sl * Q, from || -Infinity), b = Math.min((sl + 1) * Q - 1, to || Infinity);
+      if (a > b) continue;
+      for (const ev of await this._slotRows(a, b)) { const cv = this._cellOfRow(ev); this._aggCell(st, cv, this.priceUnknown(ev.model, ev.acct) ? (this._sayUnpriced(ev.model, ev.acct), CELL_UNPRICED) : this._rateFor(ev.acct, this._tier(ev.model), cv.first, cv.pmin, ev.model)); }
+      await breathe();
+    }
+    // a model's provider accounts with an unknown part, in the order the row fold meets them (each account's earliest row)
+    if (st.unpricedAt) for (const [m, by] of st.unpricedAt) if (st.dimMeta.model && st.dimMeta.model[m]) st.dimMeta.model[m].unpricedBy = [...by].sort((x, y) => x[1] - y[1]).map(([a]) => a);
+    const ans = this._aggEnd(st);
+    Object.defineProperty(ans, 'fromCells', { value: { cells: n, rowSlots: rowSlots.size }, enumerable: false });   // a diagnostic: never in the route's JSON
+    return ans;
+  }
+  /** the rows of [a, b] (one slot): the hot rows from memory, the cold rows read one line each at their place */
+  async _slotRows(a, b) {
+    const c = this._evCache, out = [];
+    for (const ev of this._hotEvents(a, b)) if ((ev.ts || 0) >= a) out.push(ev);
+    if (c.cold.n && a < c.cutoff) {
+      const plan = this._coldWalk(a, b);
+      for (const g of plan.groups) for (let j = 0; j < g.off.length; j++) {
+        const line = await readLineAt(path.join(plan.dir, plan.shards[g.sh[j]]), g.off[j]);
+        if (line === null) throw Object.assign(new Error('a kept row could not be read at its place'), { code: 'STALE' });
+        const ev = verifiedRow(line, g.ts[j], g.rh[j], `${plan.shards[g.sh[j]]}@${g.off[j]}`); // the walk's own check: the WHOLE line's hash + its instant, else STALE
+        if ((ev.ts || 0) >= a && (ev.ts || 0) <= b) out.push(ev);
+      }
+    }
+    return out;
+  }
+  /** ONE ROW as a one-row cell (an edge slot's or a straddling slot's row): its own instant and whole prompt price it, exactly
+   *  as _cost prices the row */
+  _cellOfRow(ev) {
+    const prompt = UsageCells.wholePrompt(ev), ts = ev.ts || 0;
+    return { slot: Math.floor(ts / CELL_SLOT_MS), sid: ev.sid, model: ev.model, acct: ev.acct || null, be: ev.be || 'claude', atype: ev.atype, cwd: ev.cwd, mode: ev.mode, host: ev.host, pool: ev.pool, origin: ev.origin, aname: ev.aname, n: 1, i: Number(ev.i) || 0, o: Number(ev.o) || 0, cw5: Number(ev.cw5) || 0, cw1: Number(ev.cw1) || 0, cr: Number(ev.cr) || 0, first: ts, last: ts, pmin: prompt, pmax: prompt };
+  }
+  /** the price boundaries of the table in force: every dated cut and every long-prompt threshold (the index model's own
+   *  priceSpec) — memoized on the table's identity, with the rate of each (account, tier, period, long class) */
+  _cellSpec() {
+    if (this._cellSpecFor === this._pricing && this._cellSpecMemo) return this._cellSpecMemo;
+    const IM = require('./usage-index-model.js');
+    const ps = IM.priceSpec(this._pricing);
+    this._cellSpecFor = this._pricing;
+    return (this._cellSpecMemo = { cuts: ps.priceCuts, longs: ps.priceLongs, rate: new Map() });
+  }
+  /** cell i's rate, or null when its rows straddle a boundary of the table (its slot is then folded from rows) */
+  _cellRate(U, i, spec) {
+    const v = i * CELL_VALS.length, first = U.v[v + 6], last = U.v[v + 7], pmin = U.v[v + 8], pmax = U.v[v + 9];
+    const o = i * CELL_KEYS.length, model = U.name(U.k[o + 2]), acct = U.name(U.k[o + 3]), tier = this._tier(model);
+    if (tier === '_default' && this.priceUnknown(model, acct, tier)) { this._sayUnpriced(model, acct); return CELL_UNPRICED; }   // B-d578 P1-b: no price, whatever its period or class
+    const per = (ts) => { let k = 0; for (const t of spec.cuts) if (ts >= t) k++; return k; };
+    const cls = (p) => { let k = 0; for (const t of spec.longs) if (p > t) k++; return k; };
+    const pa = per(first), la = cls(pmin);
+    if (pa !== per(last) || la !== cls(pmax)) return null;
+    const own = tier === '_default' && isThirdPartyAccount(acct) ? (this._acctTier(acct, model) || '') : '';   // a provider's OWN row is chosen by the model id (P1-b follow): the memo keys it
+    const key = `${acct}\x1f${tier}\x1f${own}\x1f${pa}\x1f${la}`;
+    let r = spec.rate.get(key);
+    if (!r) { r = this._rateFor(acct, tier, first, pmin, model); spec.rate.set(key, r); }
+    return r;
+  }
+  /** _aggRow for ONE CELL: its count, its tokens, its conversation, its cost (counts × the cell's rate); the labels from the
+   *  EARLIEST row any cell of a key holds (aggregate()'s ts order); the range from the cells' first and last instants */
+  _aggCell(st, cv, rate) {
+    const { backend, accounts, hostFilter, dims, dimMeta, pivotPairs, pivotAcc, totals } = st;
+    if (backend && cv.be !== backend) return;
+    const acctKey = cv.acct || globalUsageKeyOf(cv.be);
+    if (accounts && !accounts.has(acctKey)) return;
+    if (hostFilter && (cv.host || 'local') !== hostFilter) return;
+    const unpriced = rate === CELL_UNPRICED;   // B-d578 P1-b: counted apart, as _add counts the row — never $0
+    const cost = unpriced ? 0 : (cv.i * rate.input + cv.o * rate.output + cv.cw5 * rate.cacheWrite5m + cv.cw1 * rate.cacheWrite1h + cv.cr * rate.cacheRead) / 1e6;
+    const tok = unpriced ? cv.i + cv.cw5 + cv.cw1 + cv.cr + cv.o : 0;
+    const addTo = (b) => { b.requests += cv.n; b.sessions.add(cv.sid); b.input += cv.i; b.cacheWrite5m += cv.cw5; b.cacheWrite1h += cv.cw1; b.cacheRead += cv.cr; b.output += cv.o; if (unpriced) { b.unpricedRequests += cv.n; b.unpricedTokens += tok; } else b.cost += cost; };
+    addTo(totals);
+    if (st.firstTs == null || cv.first < st.firstTs) st.firstTs = cv.first;
+    if (st.lastTs == null || cv.last > st.lastTs) st.lastTs = cv.last;
+    const d = new Date(cv.slot * CELL_SLOT_MS);
+    const keyOf = {
+      day: d.toISOString().slice(0, 10), model: cv.model || 'unknown', account: acctKey,
+      billing: billingKeyOf(cv),
+      project: cv.cwd || 'unknown', mode: cv.mode || 'unknown', host: cv.host || 'local', hour: String(d.getHours()), weekday: String(d.getDay()),
+      session: cv.sid, pool: cv.pool || null, origin: cv.origin || 'unknown',
+    };
+    for (const dim of Object.keys(dims)) {
+      const k = keyOf[dim];
+      if (dim === 'pool' && !k) continue;
+      addTo(dims[dim][k] = dims[dim][k] || this._emptyBucket());
+    }
+    for (let i = 0; i < pivotPairs.length; i++) {
+      const ka = keyOf[pivotPairs[i][0]], kb = keyOf[pivotPairs[i][1]];
+      if ((pivotPairs[i][0] === 'pool' && !ka) || (pivotPairs[i][1] === 'pool' && !kb)) continue;
+      const row = (pivotAcc[i][ka] = pivotAcc[i][ka] || {});
+      addTo(row[kb] = row[kb] || this._emptyBucket());
+    }
+    // the labels: the earliest row's (a later cell of the same key with an earlier first instant replaces it)
+    const earliest = (k) => { const t = st.labelTs.get(k); if (t === undefined || cv.first < t) { st.labelTs.set(k, cv.first); return true; } return false; };
+    if (!dimMeta.account) dimMeta.account = {};
+    if (earliest('a\x1f' + acctKey)) {
+      const live = cv.acct ? this._resolveAccount(cv.acct) : null;
+      dimMeta.account[acctKey] = { name: cv.acct ? maskDefaultKeyName(live?.name || cv.aname || cv.acct) : loginNameOf(cv), type: isThirdPartyAccount(cv.acct) ? 'provider' : cv.atype || (cv.acct ? 'unknown' : 'global'), be: cv.be || 'claude', tail: null, deleted: cv.acct ? !live : false };
+    }
+    if (!dimMeta.host) dimMeta.host = { local: { name: 'local' } };
+    const hostKey = cv.host || 'local';
+    if (hostKey !== 'local' && earliest('h\x1f' + hostKey)) dimMeta.host[hostKey] = { name: cv.aname || hostKey };
+    if (!dimMeta.model) dimMeta.model = {};
+    if (earliest('m\x1f' + keyOf.model)) dimMeta.model[keyOf.model] = { be: cv.be || 'claude' };
+    if (unpriced) { const at = st.unpricedAt || (st.unpricedAt = new Map()), by = at.get(keyOf.model) || at.set(keyOf.model, new Map()).get(keyOf.model); if (!(by.get(cv.acct) <= cv.first)) by.set(cv.acct, cv.first); }
+    if (cv.pool) { if (!dimMeta.pool) dimMeta.pool = {}; if (earliest('p\x1f' + cv.pool)) { const pinfo = this._resolveAccount(cv.pool); dimMeta.pool[cv.pool] = { name: pinfo?.name || cv.pool, be: cv.be || 'claude', deleted: !pinfo }; } }   // the earliest row's backend, as the row fold's ts order gives
+    if (!dimMeta.session) dimMeta.session = {};
+    if (earliest('s\x1f' + cv.sid)) { const prev = dimMeta.session[cv.sid]; const sm = this._lastMetaMap ? this._lastMetaMap[cv.sid] : null; dimMeta.session[cv.sid] = { name: sm?.name || null, be: cv.be || 'claude', project: cv.cwd || (prev && prev.project) || null }; }
+    else if (!dimMeta.session[cv.sid].project && cv.cwd) dimMeta.session[cv.sid].project = cv.cwd;
   }
 
   // Attach human names to account/session groups (server enriches with account

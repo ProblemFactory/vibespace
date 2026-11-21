@@ -107,7 +107,7 @@ uh.ledgerWindowMs = 40 * DAY; uh.ledgerHotMaxBytes = 60 * 1024; uh.warm();
 uh.coldWorkerFile = stub;
 if (mode === 'stuck') { uh.coldFoldDeadlineMs = 300; uh.coldTerminateDeadlineMs = 300; }
 process.on('SIGTERM', () => { console.error('FLUSH: the server shutdown'); process.exit(0); }); // server.js: shutdown ends in process.exit
-uh.aggregateAsync({ to: NOW - 40 }).then(() => console.log('FOLDED'), (e) => console.log('FOLD ' + e.code));
+uh.aggregateAsync({ to: NOW - 40, rows: true }).then(() => console.log('FOLDED'), (e) => console.log('FOLD ' + e.code));   // the ROW road: the cold worker's fold is what this suite stops (B-360d unit 1: the window answers from the cells)
 const t = setInterval(() => {
   const row = uh.cacheCensus().find((x) => x.name === 'usage fold workers stuck');
   if (mode === 'stuck' ? !(row && row.count === 1) : uh._coldWalks !== 1) return;

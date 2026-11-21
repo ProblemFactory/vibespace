@@ -282,7 +282,6 @@ const ROWS = [
   ["src/usage-cache-write.js","keepTornAside",1,"durable","—","NOT idempotent: the only copy of an account's torn reading bytes — it must be on disk BEFORE the reading writes the name again (a lost copy is the damaged bytes gone)","r3136 (lane login-request-card): torn bytes kept aside once per content (`wx`, 0600, beside the account's reading file), only on torn bytes; the read-merge-write stays synchronous by the readings' rule"],
   ["src/usage-history.js","*",12,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/usage-hold-road.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/usage-index-worker.js","*",3,"not-main","—","—","the usage index worker thread"],
   ["src/usage-ledger-dedup.js","*",19,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/usage-origin-backfill.js","*",7,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
   ["src/usage-routes.js","*",10,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],

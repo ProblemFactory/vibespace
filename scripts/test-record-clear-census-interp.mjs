@@ -696,10 +696,9 @@ const I_RECV = {
   'src/server/groups-engine.js|r': ['session', 'a resolved member\'s name'], 'src/window-reach.js|probe': ['window', 'an accessibility probe\'s reason'],
   // design 012 (Slack S1): a typed ChannelError of the Slack adapter — its `detail` carries the vendor's error CODE and the closed `why` (src/channels/slack-words.js), never a record's text
   'src/channels/slack.js|e': ['error', 'a typed ChannelError: detail.error is Slack\'s error code, detail.why a closed word'],
-  // design 011 lane 3: the usage index owner's own words — no record text reaches it
+  // design 011 lane 3: the usage index owner's own words — its two rows RETIRED with it (row B-360d unit 1: the Usage window answers from the ledger's cells)
   'src/store-writer.js|s': ['store writer', 'a store\'s queue row — its NAME is store-timing\'s constant («channels-index.write», src/timed-sync.js STORES) or the file\'s base name; never a record\'s text (lane hub-loop-stalls commit 2)'],
   'src/server/search-index.js|m': ['index worker', 'the search index worker\'s own state message (a reason NAME, a SQLite error text)'],
-  'src/server/usage-index.js|m': ['index worker', 'the usage index worker\'s own state message (a reason NAME, a SQLite error text)'], 'src/server/usage-index.js|a': ['index worker', 'the owner\'s own available() verdict (a reason NAME)'],
   // lane stream-p1b-screen: the screen source's journal line names its encoder — a fixed ladder label, never a record's words
   'src/agentd/stream-screen.js|plan.encoder': ['harness', 'the encoder ladder rung\'s fixed label (NVENC / AMF / Quick Sync / x264 — src/stream-plan.js ENCODER_LADDER)'],
   'src/agentd/stream-window-source.js|plan.encoder': ['harness', 'the encoder ladder rung\'s fixed label (NVENC / AMF / Quick Sync / x264 — src/stream-plan.js ENCODER_LADDER), the window source\'s start line (lane stream-p2w-build)'],

@@ -171,7 +171,8 @@ console.log(`② the rebuild in the worker, swapped whole (a real-shape ledger: 
   const coldRid = (() => { const l = fs.readFileSync(path.join(u.dir, shards(u)[1]), 'utf8').split('\n')[3]; return JSON.parse(l).rid; })();
   ok(u.ledgerKnowsId('req_after_swap') && u.ledgerKnowsId(coldRid) && u._evCache === fresh && !fresh.stale, '② after the swap the cache reads the appended tail and finds a cold row by id (the moved indexes)');
   const aRef = new UsageHistory({ dataDir: path.dirname(u.dir), homeDir: tmp }); aRef.ledgerWindowMs = u._ledgerWindowMs();
-  ok(JSON.stringify((await u.aggregateAsync({ to: NOW })).totals) === JSON.stringify(aRef.aggregate({ to: NOW }).totals), '② the route\'s fold over the swapped cache = a fresh instance\'s sync fold');
+  const COST12 = (k, v) => (k === 'cost' && typeof v === 'number' ? Number(v.toPrecision(12)) : v);   // B-360d unit 1: a cost to 12 significant digits (law 2's 1e-9)
+  ok(JSON.stringify((await u.aggregateAsync({ to: NOW })).totals, COST12) === JSON.stringify(aRef.aggregate({ to: NOW }).totals, COST12), '② the route\'s fold over the swapped cache = a fresh instance\'s sync fold (its cost to 12 significant digits)');
 }
 
 console.log('③ asks during a rebuild join it');

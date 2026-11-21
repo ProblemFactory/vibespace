@@ -40,18 +40,9 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   const mounts = mk(getMounts);
   const telemetry = mk(getTelemetry);
   const usageHistory = mk(getUsageHistory);
-  // THE USAGE INDEX SHADOW (design 011 lane 3, L1): a SQLite index of the
-  // ledger, owned by one worker thread (src/server/usage-index.js), that feeds
-  // NOTHING — the Usage-window read below is also asked of the index and the
-  // two answers compared; a difference is a telemetry event, never shown.
-  // Started 30 s after boot, off the boot path: node:sqlite loads only inside
-  // the worker, so an older Node simply has no shadow (said by name), and a
-  // short-lived suite that wires these routes never starts one.
-  const usageIndex = require('./usage-index.js').create({
-    getLedger: () => (typeof getUsageHistory === 'function' ? getUsageHistory() : null),
-    onDiff: (d) => { try { if (typeof telemetry.record === 'function') telemetry.record({ kind: 'event', name: 'usage-index-diff', detail: JSON.stringify(d) }); } catch { } },
-  });
-  setTimeout(() => usageIndex.start(), 30000).unref?.();
+  // THE SHADOW USAGE INDEX IS RETIRED (row B-360d unit 1, the design read w0r2kz4cb law 1): the Usage window answers from the
+  // ledger's own cells (usage-history aggregateCells); one derived store, no second copy of every row on disk.
+  setTimeout(() => { require('./usage-index-retire.js').removeRetiredUsageIndex({ dataDir: path.join(rootDir, 'data') }).catch(() => { }); }, 30000).unref?.();   // its files leave the hub's disk at every start, off the loop (law 1)
   // THE MANUAL RESET-CREDIT USE (design-reset-credits p2): the preview + the
   // POST, thin over the engine (src/routes/reset-credit.js)
   require('../routes/reset-credit.js').registerResetCreditRoutes(app, { engine });
@@ -240,19 +231,16 @@ app.get('/api/usage-stats', async (req, res) => {
     const ac = new AbortController(); // B-9428 r3: a request that went away leaves the fold queue
     req.on?.('close', () => { if (!res.writableEnded) ac.abort(); });
     let answer;
-    try { answer = await usageHistory.aggregateAsync({ from, to, backend, accounts, hostFilter, pivots }, { signal: ac.signal }); } catch (e) {
+    const rows = req.query.road === 'rows';   // B-360d unit 1: ?road=rows folds the ROWS (the release's road — the same answer, read from the ledger: a check, and the suites that drive the cold worker)
+    try { answer = await usageHistory.aggregateAsync({ from, to, backend, accounts, hostFilter, pivots, ...(rows ? { rows: true } : {}) }, { signal: ac.signal }); } catch (e) {
       // ledger-boot-load follow-up: LOADING is a STATE — its words and the time to ask again (the window does, by itself)
       if (e && e.code === 'LOADING') return res.status(503).json({ error: String(e.message || e), code: 'LOADING', nextTryAt: Number.isFinite(e.nextTryAt) ? e.nextTryAt : null, running: !!e.running });
       return res.status(e && e.code === 'BUSY' ? 429 : 503).json({ error: 'usage summary failed — ' + ((e && e.message) || e) + (e && /ABORTED|FOLD_TOO_BIG|STUCK/.test(e.code || '') ? '' : '; retry'), code: (e && e.code) || null });
     }
-    // the shadow comparison (design 011 L1), posted in this same synchronous
-    // step so the index answers over exactly the appends this answer saw; it
-    // settles off the response and feeds nothing
     // lane ledger-dedup-law F4: a machine whose usage is NOT being recorded (its shard out of shape) is said in the window —
     // a state the answer carries, never only a console line
     const paused = usageHistory.ingestPaused?.() || [];
     if (paused.length) answer = { ...answer, ingestPaused: paused };
-    usageIndex.compare(answer, { from, to, backend, accounts, hostFilter, pivots });
     res.json(onlyPivots ? pivotsOnly(answer) : answer);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

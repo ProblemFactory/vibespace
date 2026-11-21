@@ -39,7 +39,7 @@ const judge = (r, sites = SITES, cache = CACHE) => {
 };
 
 console.log('① the 21 readers');
-ok(READERS.length === 21 && READERS.every((x, i) => x.n === i + 1), `21 readers, numbered as the page (${READERS.length})`);
+ok(READERS.length === 20 && new Set(READERS.map((x) => x.n)).size === 20 && READERS.every((x) => x.n >= 1 && x.n <= 21 && x.n !== 10), `20 readers, numbered as the page — #10 (the shadow usage index's recoverAll) RETIRED with the index (B-360d unit 1) (${READERS.length})`);
 const gone = READERS.filter((x) => { try { return !hasFn(read(x.file), x.fn); } catch { return true; } });
 ok(!gone.length, `every reader's function is in its file (${READERS.length - gone.length} of ${READERS.length})`, gone.map((x) => `#${x.n} ${x.file} ${x.fn}`));
 ok(READERS.every((x) => DOORS.has(x.door) && RULES[x.rule]), 'every reader names its door and its rule about a repeated request id', READERS.filter((x) => !DOORS.has(x.door) || !RULES[x.rule]).map((x) => x.n));

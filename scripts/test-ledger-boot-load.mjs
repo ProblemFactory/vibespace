@@ -151,7 +151,8 @@ console.log('② the numbers after the load = a synchronous load\'s');
   ok(markHash(c) === markHash(r) && c.hrh.every((x) => Number.isFinite(x)), `② the whole-line staleness marks equal (hot hrh + cold rh: ${markHash(c)} = ${markHash(r)})`);
   ok(c.rids.size === r.rids.size && idSet(c.rids) === idSet(r.rids) && idSet(c.mids) === idSet(r.mids) && c.rids.size > 0, `② the dedup sets equal: ${c.rids.size} rids (${idSet(c.rids)}), ${c.mids.size} mids (${idSet(c.mids)})`);
   const fresh = base(UsageHistory, d); fresh.ledgerWindowMs = u._ledgerWindowMs();
-  const t1 = JSON.stringify((await u.aggregateAsync({ to: NOW })).totals), t2 = JSON.stringify(fresh.aggregate({ to: NOW }).totals);
+  const COST12 = (k, v) => (k === 'cost' && typeof v === 'number' ? Number(v.toPrecision(12)) : v);   // B-360d unit 1: a cost to 12 significant digits (cells vs rows sum in another order — law 2's 1e-9)
+  const t1 = JSON.stringify((await u.aggregateAsync({ to: NOW })).totals, COST12), t2 = JSON.stringify(fresh.aggregate({ to: NOW }).totals, COST12);
   ok(t1 === t2 && JSON.parse(t1).requests === fx.rows, `② the route's totals = a fresh instance's synchronous fold (${JSON.parse(t1).requests} requests, $${JSON.parse(t1).cost?.toFixed?.(2)})`);
   const acct = aRow.acct || null, s1 = UA.costBetweenMulti(u, [acct], NOW - 30 * 864e5, NOW), s2 = UA.costBetweenMulti(fresh, [acct], NOW - 30 * 864e5, NOW);
   ok(JSON.stringify(s1) === JSON.stringify(s2) && !s1.partial, `② a cost sum equals (${acct}: ${JSON.stringify(s1).slice(0, 120)})`);

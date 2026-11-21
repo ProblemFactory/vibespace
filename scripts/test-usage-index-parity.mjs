@@ -1,314 +1,192 @@
 #!/usr/bin/env node
-// THE USAGE INDEX SHADOW — PARITY (design 011 lane 3: L0 + L1). The index is a
-// SQLite copy of the usage ledger that feeds nothing; this suite proves the
-// REAL worker (src/usage-index-worker.js, on a scratch HOME) answers the Usage
-// window's aggregate exactly as memory does (src/usage-history.js aggregate):
-//  §0 L0 — the walk's cursor writer writes only when a cursor moved and drops
-//     keys whose transcript is gone, only on proof (control: a forgotten
-//     on-disk text rewrites at once)
-//  §1 parity over a ledger with duplicate rids whose rows differ in account, a
-//     rid-less row, an empty shard, a torn last line, every dimension, every
-//     filter the window sends, pivots — hour and weekday in LOCAL time, day in
-//     UTC; then a remote harvest appended into an OLD month, a push after a
-//     torn line, a push that never arrived, a shard rewritten by a repair
-//     (tmp + rename); the comparer's own negative controls
-//  §2 READ-YOUR-WRITES — an append followed AT ONCE by a sum includes it,
-//     through both commit points (the walk, the remote harvest); a CONTROL
-//     worker that only tails the shards misses it (red by construction)
-//  §3 the same parity under a second time zone with a DST change inside the
-//     ledger (America/St_Johns, −03:30/−02:30) — a child of this suite
-import './scratch.mjs';
+// test-usage-index-parity — RE-POINTED (row B-360d unit 1, lane lg-providers; the design read w0r2kz4cb, laws 2 and 3): THE CELLS
+// EQUAL A FRESH FOLD. The shadow usage index (sqlite) is retired; the Usage window answers from the ledger's own cells
+// (src/usage-cells.js, usage-history aggregateCells). For every range, filter and pivot, the cells' answer equals the row fold
+// (aggregate()) over the same events — counts and distinct conversations exactly, cost to 1e-9 relative (compareAggregates),
+// range.from / range.to exactly, every label (an account's and a device's name, type, deleted). In the gate's zone, a
+// 45-minute zone (Asia/Kathmandu) and a DST day (America/Los_Angeles, 2026-03-08). The fixture holds a deleted account, a remote
+// device named only by its aname, an empty edge slot, a range edge inside a slot, a row with no model, a row with an absent
+// count, a codex row, a pool row, a provider-shaped prompt across a long-prompt threshold (gpt-6-astra: 272 000).
+// LAW 3: a changed rate reads NO shard byte before the next answer (a read counter on the ledger folder); a new threshold
+// inside one cell's prompts reads only that slot's rows. CONTROLS: a cells fold that ignores the straddle prices the wrong side;
+// the release's road (no cells) reads the shard bytes. LAW 1's start leg: the retired index's files go at every start, the
+// search index's stay (controls: a folder remove, a run-once remove).
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
-const UI = require(path.join(REPO, 'src/server/usage-index.js'));
 const M = require(path.join(REPO, 'src/usage-index-model.js'));
-const TZ_CHILD = process.env.UIDX_TZ_CHILD === '1';
-
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-uidx-par-'));
-const quiet = { log() { }, error() { } };
-const owners = [];
-const mkOwner = (uh, home, extra = {}) => { const ix = UI.create({ getLedger: () => uh, homeDir: home, log: quiet, ...extra }); owners.push(ix); return ix; };
-async function until(f, what, ms = 20000) { const t = Date.now(); while (!f()) { if (Date.now() - t > ms) throw new Error('timed out waiting for ' + what); await sleep(15); } }
-const readyOf = (ix) => until(() => ix.available().ok, 'the index to be ready (' + JSON.stringify(ix.stats().reason) + ')');
-const T = (y, m, d, h = 0, mi = 0) => Date.UTC(y, m - 1, d, h, mi);
-const totalOf = (folded) => folded.total.cells.reduce((n, c) => n + c.n, 0);
-
-// ── the fixture ledger ─────────────────────────────────────────────────────
-let seed = 11; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-const pick = (a) => a[Math.floor(rnd() * a.length)];
-const WHO = [
-  { acct: 'sub-a', atype: 'subscription', aname: 'Alice' }, { acct: 'sub-b', atype: 'subscription', aname: 'Bob' },
-  { acct: 'acct-k', atype: 'api', aname: 'Key' }, { acct: 'cxs-1', atype: 'codex-subscription', aname: 'Cx', be: 'codex' },
-  { acct: null, atype: 'global' }, { acct: null, atype: 'global', be: 'codex' }, { acct: 'host-9', atype: 'host', aname: 'Nine', host: 'host-9' },
-  { acct: 'gone-1', atype: 'unknown' }, { acct: '', atype: 'global' },
-];
-const SIDS = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(8, '0')}-1111-4222-8333-444455556666`);
-function row(k, ts, over = {}) {
-  const w = pick(WHO);
-  const r = {
-    rid: 'req_' + k, mid: rnd() < 0.8 ? 'msg_' + k : undefined, ts, sid: pick(SIDS), be: w.be || 'claude',
-    model: pick(['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'gpt-5.6-sol', '', null]),
-    acct: w.acct, pool: rnd() < 0.3 ? pick(['pool-1', 'pool-2']) : undefined, atype: w.atype, aname: w.aname || null,
-    mode: pick(['chat', 'terminal', null]), host: w.host || (rnd() < 0.1 ? '' : null), cwd: pick(['/w/p1', '/w/p2', '/w/中文', '']),
-    origin: pick(['main', 'subagent', 'workflow', undefined]), i: Math.floor(rnd() * 900), cw5: rnd() < 0.3 ? 2000 : 0, cw1: rnd() < 0.1 ? 900 : 0,
-    cr: Math.floor(rnd() * 50000), o: Math.floor(rnd() * 3000), tier: 'standard',
-  };
-  return JSON.stringify({ ...r, ...over });
-}
-function buildLedger(dataDir) {
-  const hist = path.join(dataDir, 'usage-history');
-  fs.mkdirSync(hist, { recursive: true });
-  const aug = [], sep = [], nov = [];
-  for (let k = 0; k < 900; k++) aug.push(row(k, T(2026, 8, 1) + Math.floor(rnd() * 31 * 86400000)));
-  // duplicate rids whose two rows differ in ACCOUNT: the first row wins on both sides
-  aug.splice(100, 0, row('dup1', T(2026, 8, 9, 4), { acct: 'sub-a', atype: 'subscription', aname: 'Alice' }));
-  aug.splice(400, 0, row('dup1', T(2026, 8, 9, 4), { acct: 'sub-b', atype: 'subscription', aname: 'Bob', i: 77777 }));
-  aug.push(row('dup2', T(2026, 8, 31, 23), { acct: 'acct-k', atype: 'api' }));
-  // rows without a rid (memory keeps every one) and an unparsable line
-  aug.push(JSON.stringify({ ts: T(2026, 8, 12, 3), sid: SIDS[1], be: 'claude', model: 'claude-opus-5-5', acct: 'sub-a', atype: 'subscription', i: 5, cw5: 0, cw1: 0, cr: 0, o: 5 }));
-  aug.push(JSON.stringify({ ts: T(2026, 8, 12, 4), sid: SIDS[1], be: 'claude', model: 'claude-opus-5-5', acct: 'sub-a', atype: 'subscription', i: 6, cw5: 0, cw1: 0, cr: 0, o: 6 }));
-  aug.push('{"rid":"broken"');
-  for (let k = 900; k < 1700; k++) sep.push(row(k, T(2026, 9, 1) + Math.floor(rnd() * 30 * 86400000)));
-  sep.push(row('dup2', T(2026, 9, 1, 1), { acct: 'sub-b', atype: 'subscription', i: 99999 })); // the cross-shard twin: August's row wins
-  sep.push(row('nullsid', T(2026, 9, 3), { sid: null }));
-  // around a DST end (America/St_Johns 2026-11-01 02:00 local) and a UTC midnight
-  for (let k = 1700; k < 1800; k++) nov.push(row(k, T(2026, 11, 1, 2) + Math.floor(rnd() * 8 * 3600000)));
-  fs.writeFileSync(path.join(hist, 'events-2026-07.ndjson'), ''); // an EMPTY shard
-  fs.writeFileSync(path.join(hist, 'events-2026-08.ndjson'), aug.join('\n') + '\n');
-  fs.writeFileSync(path.join(hist, 'events-2026-09.ndjson'), sep.join('\n') + '\n' + row('torn', T(2026, 9, 20)).slice(0, 40)); // a TORN last line
-  fs.writeFileSync(path.join(hist, 'events-2026-11.ndjson'), nov.join('\n') + '\n');
-  return hist;
-}
-const PIVOTS = [['session', 'origin'], ['project', 'origin'], ['day', 'account'], ['hour', 'model'], ['weekday', 'pool'], ['pool', 'origin'], ['billing', 'host'], ['mode', 'day']];
-const QUERIES = [
-  ['everything', {}], ['every dimension + 8 pivots', { pivots: PIVOTS }],
-  ['from only', { from: T(2026, 8, 20) }], ['to only', { to: T(2026, 9, 5, 12, 30) }], ['a 30-day range', { from: T(2026, 8, 15), to: T(2026, 9, 14) }],
-  ['backend claude', { backend: 'claude' }], ['backend codex', { backend: 'codex' }],
-  ['one account', { accounts: new Set(['sub-a']) }], ['an account + its global', { accounts: new Set(['sub-b', '__global__']) }], ['an EMPTY account set', { accounts: new Set() }],
-  ['device local', { hostFilter: 'local' }], ['device host-9', { hostFilter: 'host-9' }],
-  ['everything at once', { from: T(2026, 8, 5), to: T(2026, 11, 30), backend: 'claude', accounts: new Set(['sub-a', 'sub-b', '__global__']), hostFilter: 'local', pivots: [['day', 'session'], ['hour', 'weekday']] }],
-  ['the DST morning', { from: T(2026, 11, 1), to: T(2026, 11, 2), pivots: [['hour', 'day']] }],
-];
-async function parityAll(uh, ix, tag) {
-  const bad = [];
-  let checked = 0;
-  for (const [name, q] of QUERIES) {
-    const mem = uh.aggregate(q);
-    const idx = M.finalizeAggregate(await ix.queryAggregate(q), (c) => uh._cost(c, c.prompt));
-    const r = M.compareAggregates(mem, idx);
-    checked += r.checked;
-    if (!r.same) bad.push(`${name}: ${JSON.stringify(r.diffs.slice(0, 3))}`);
+const ok = (c, m, d) => { if (typeof m !== 'string') throw new TypeError('ok(cond, name)'); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 600) : '')); } };
+const DAY = 864e5, Q = 9e5, T = (y, mo, d, h = 0, mi = 0, s = 0) => Date.UTC(y, mo - 1, d, h, mi, s);
+const LIVE = new Set(['sub-alice', 'api-beta']);   // sub-gone is a DELETED account (no resolver row)
+function writeLedger(dir) {
+  const hist = path.join(dir, 'usage-history'); fs.mkdirSync(hist, { recursive: true });
+  const rows = []; let k = 0;
+  const ev = (o) => rows.push({ rid: 'req_par_' + (k++), mid: 'msg_par_' + k, be: 'claude', mode: null, host: null, origin: 'main', cw1: 0, tier: 'standard', ...o });
+  // three conversations over three months, a request every ~70 s in bursts
+  for (let d = 0; d < 70; d += 3) for (let j = 0; j < 9; j++) {
+    const ts = T(2026, 1, 5) + d * DAY + j * 70e3 + (d % 7) * 3600e3;
+    ev({ ts, sid: 's-a', model: 'claude-opus-5-5', acct: 'sub-alice', atype: 'subscription', aname: 'Alice', cwd: '/w/a', i: 10 + j, o: 200 + j, cw5: 300, cr: 20000 + j * 1000 });
+    ev({ ts: ts + 20e3, sid: 's-g', model: 'claude-sonnet-5', acct: 'sub-gone', atype: 'subscription', aname: 'Gone account', cwd: '/w/g', origin: j % 2 ? 'subagent' : 'main', i: 5, o: 50, cw5: 0, cr: 9000 });
+    ev({ ts: ts + 40e3, sid: 's-x', model: 'gpt-6-astra', acct: 'api-beta', atype: 'api', aname: 'Beta key', be: 'codex', cwd: '/w/x', i: 100, o: 300, cr: 230000 + j * 9000 });   // codex: no cache-write counts (ABSENT) · prompts across 272 000
   }
-  ok(bad.length === 0 && checked > 5000, `${tag}: memory == index for ${QUERIES.length} query shapes (${checked} numbers compared)`, bad.join(' | '));
+  ev({ ts: T(2026, 2, 2, 12, 7), sid: 's-r', model: 'claude-opus-5-5', acct: null, atype: 'host', aname: 'Workstation', host: 'host-ws', cwd: '/r', i: 3, o: 4, cw5: 5, cr: 6 });   // a remote device named only by aname
+  ev({ ts: T(2026, 2, 3, 9, 1), sid: 's-n', acct: 'sub-alice', atype: 'subscription', aname: 'Alice', cwd: '/w/n', i: 1, o: 2, cw5: 3, cr: 4 });   // a row with NO model
+  ev({ ts: T(2026, 2, 4, 10, 2), sid: 's-p', model: 'claude-fable-5-1', acct: 'sub-alice', pool: 'pool-team', atype: 'subscription', aname: 'Alice', cwd: '/w/p', i: 7, o: 8, cw5: 9, cr: 10 });   // a pool row
+  ev({ ts: T(2026, 2, 4, 10, 3), sid: 's-p', model: 'claude-fable-5-1', acct: 'sub-alice', pool: 'pool-team', atype: 'subscription', aname: 'Alice renamed', cwd: '/w/p', i: 7, o: 8, cr: 10 });   // a later aname (the label stays the earliest) + an absent cw5
+  // B-d578 P1-b in the cells: two third-party providers' models with NO price row — counted apart, never $0, labelled «provider»
+  // (LAW 3 below gives the second its provider's OWN row: the cells' rate memo keys it by the model id)
+  for (let k = 0; k < 6; k++) {
+    ev({ ts: T(2026, 2, 10, 9, 1) + k * 400e3, sid: 's-v', model: 'acme-coder-1', acct: 'pv-fixture-acme', atype: 'api', aname: 'Acme', cwd: '/w/v', i: 40 + k, o: 90, cw5: 0, cr: 5000 });
+    ev({ ts: T(2026, 2, 10, 9, 2) + k * 400e3, sid: 's-w', model: 'beta-chat-2', acct: 'pv-fixture-beta', atype: 'api', aname: 'Beta provider', cwd: '/w/w', i: 30, o: 70 + k, cw5: 0, cr: 4000 });
+  }
+  const shards = new Map();
+  for (const r of rows) { const m = new Date(r.ts).toISOString().slice(0, 7); (shards.get(m) || shards.set(m, []).get(m)).push(JSON.stringify(r)); }
+  for (const [m, lines] of shards) fs.writeFileSync(path.join(hist, `events-${m}.ndjson`), lines.join('\n') + '\n');
+  return rows;
 }
-
-// §3's child: the same parity, under the time zone the parent gave it
-if (TZ_CHILD) {
-  const data = path.join(root, 'data'), home = path.join(root, 'home');
-  buildLedger(data); fs.mkdirSync(home);
-  const uh = new UsageHistory({ dataDir: data, homeDir: home });
-  const ix = mkOwner(uh, home); ix.start();
-  await readyOf(ix);
-  await parityAll(uh, ix, `${process.env.TZ}`);
-  const hours = new Set(uh.aggregate({}).groups.hour.map((g) => g.key));
-  ok(hours.size >= 20, `${process.env.TZ}: the hour dimension is populated (${hours.size} local hours)`);
-  for (const o of owners) await o.close();
-  fs.rmSync(root, { recursive: true, force: true });
-  console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-  process.exit(fail ? 1 : 0);
-}
-
-// ── §0 L0: the cursor store ────────────────────────────────────────────────
-console.log('§0 L0 — the walk writes _cursors.json only when a cursor moved, and drops dead keys only on proof');
-const l0 = path.join(root, 'l0'), l0home = path.join(l0, 'home'), l0data = path.join(l0, 'data');
-const proj = path.join(l0home, '.claude', 'projects', '-w-l0');
-fs.mkdirSync(proj, { recursive: true });
-const tr = (sid) => path.join(proj, sid + '.jsonl');
-const turn = (n, ts) => JSON.stringify({ type: 'assistant', requestId: 'req_l0_' + n, timestamp: new Date(ts).toISOString(), cwd: '/w/l0', message: { id: 'msg_l0_' + n, model: 'claude-opus-5-5', usage: { input_tokens: 10 + n, output_tokens: 5, cache_read_input_tokens: 100 } } }) + '\n';
-fs.writeFileSync(tr(SIDS[0]), turn(1, T(2026, 9, 2, 10)));
-fs.writeFileSync(tr(SIDS[1]), turn(2, T(2026, 9, 2, 11)));
-const uh0 = new UsageHistory({ dataDir: l0data, homeDir: l0home, scanYield: () => Promise.resolve() });
-const curFile = path.join(l0data, 'usage-history', '_cursors.json');
-const inoOf = (f) => fs.statSync(f).ino;
-await uh0.scan(true); uh0.flushCursors();
-const cur1 = JSON.parse(fs.readFileSync(curFile, 'utf8'));
-ok(Object.keys(cur1).length === 2, 'the first walk writes both transcripts\' cursors');
-// the walker's unchanged-file path stamps `sid` into an entry once (parity-pinned with the shipped
-// scanner), so the first idle walk after a scan still changes the bytes; from then on nothing moves
-await uh0.scan(true); uh0.flushCursors();
-const ino1 = inoOf(curFile);
-await uh0.scan(true); uh0.flushCursors();
-ok(inoOf(curFile) === ino1, 'a walk that moved no cursor writes NOTHING (the file is the same inode — every write is tmp + rename)');
-uh0._cursorsJson = null; // CONTROL: forget the on-disk text — the next walk must write
-await uh0.scan(true); uh0.flushCursors();
-ok(inoOf(curFile) !== ino1, 'CONTROL: with the on-disk text forgotten the same walk rewrites the file (the inode check can see a write)');
-const ino2 = inoOf(curFile);
-fs.appendFileSync(tr(SIDS[0]), turn(3, T(2026, 9, 2, 12)));
-await uh0.scan(true); uh0.flushCursors();
-ok(inoOf(curFile) !== ino2 && JSON.parse(fs.readFileSync(curFile, 'utf8'))[tr(SIDS[0])].offset === fs.statSync(tr(SIDS[0])).size, 'a moved cursor is written');
-// dead keys
-fs.unlinkSync(tr(SIDS[1]));
-uh0._cursors['/nonexistent-root-uidx/x/y.jsonl'] = { offset: 9 }; // outside both walk roots: no proof either way
-uh0._cursors[path.join(proj, 'never-there.jsonl')] = { offset: 1 };
-await uh0.scan(true); uh0.flushCursors(); // within the hour of the first prune: nothing is dropped yet
-let cur = JSON.parse(fs.readFileSync(curFile, 'utf8'));
-ok(cur[tr(SIDS[1])] && cur[path.join(proj, 'never-there.jsonl')], 'the dead-key sweep runs at most hourly (a key whose file left an hour-young sweep ago stays)');
-uh0._cursorsPrunedAt = 0;
-await uh0.scan(true); uh0.flushCursors();
-cur = JSON.parse(fs.readFileSync(curFile, 'utf8'));
-ok(!cur[tr(SIDS[1])] && !cur[path.join(proj, 'never-there.jsonl')], 'a key whose transcript is gone (stat ENOENT under a readable root) is dropped by the walk\'s writer');
-ok(cur[tr(SIDS[0])] && cur['/nonexistent-root-uidx/x/y.jsonl'], 'a live key stays; a key outside the walk\'s roots stays');
-// an unreadable root drops nothing
-const moved = path.join(l0home, '.claude', 'projects-away');
-fs.renameSync(path.join(l0home, '.claude', 'projects'), moved);
-uh0._cursorsPrunedAt = 0;
-await uh0.scan(true); uh0.flushCursors();
-cur = JSON.parse(fs.readFileSync(curFile, 'utf8'));
-ok(cur[tr(SIDS[0])], 'with the projects directory missing (an unmounted HOME) NO key is dropped — a dropped live cursor would re-append a whole transcript');
-fs.renameSync(moved, path.join(l0home, '.claude', 'projects'));
-
-// ── §1 parity ──────────────────────────────────────────────────────────────
-console.log('§1 parity — memory == index over every dimension, filter and pivot the Usage window sends');
-const data = path.join(root, 'data'), home = path.join(root, 'home');
-const hist = buildLedger(data); fs.mkdirSync(home);
-const uh = new UsageHistory({ dataDir: data, homeDir: home });
-const ix = mkOwner(uh, home);
-ok(ix.available().reason === UI.REASON.OFF, 'before start the index says why it is not answering: not-started');
-ix.start();
-await readyOf(ix);
-const dir = ix.dir;
-ok(dir.startsWith(path.join(home, '.vibespace', 'db') + path.sep) && fs.existsSync(path.join(dir, 'usage.db')), 'the index lives under the scratch HOME\'s ~/.vibespace/db/<hash>/ — never another home');
-ok(JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8')).dataDir === fs.realpathSync(data), 'owner.json names the data/ (real path) the index belongs to');
-ok(!fs.existsSync(path.join(dir, 'usage.db-shm')), 'EXCLUSIVE + WAL: no -shm file');
-const mem0 = uh.aggregate({});
-for (const d of M.DIMS) ok(mem0.groups[d].length >= 2, `the fixture exercises the ${d} dimension (${mem0.groups[d].length} keys)`);
-const dupRow = mem0.groups.account.find((g) => g.key === 'sub-a');
-ok(uh.aggregate({}).totals.requests === (await ix.queryAggregate({}).then(totalOf)), 'the index holds the same number of unique requests as memory');
-await parityAll(uh, ix, 'the first build');
-const st0 = await ix.workerStats({ check: true });
-ok(st0.integrity === 'ok' && st0.userVersion === M.SCHEMA_VERSION, `the built index is sound (quick_check ${st0.integrity}, user_version ${st0.userVersion})`);
-ok(st0.marks.find((m) => m.shard === 'events-2026-07.ndjson')?.offset === 0, 'the EMPTY shard is marked at 0 (not re-read as new at every recovery)');
-const sepMark = st0.marks.find((m) => m.shard === 'events-2026-09.ndjson');
-ok(sepMark && sepMark.offset < fs.statSync(path.join(hist, 'events-2026-09.ndjson')).size, 'the torn last line is left unconsumed (the mark stops at the last newline, as memory does)');
-void dupRow;
-
-// the comparer's own negative controls
-{
-  const idx = M.finalizeAggregate(await ix.queryAggregate({ pivots: PIVOTS }), (c) => uh._cost(c, c.prompt));
-  const mem = uh.aggregate({ pivots: PIVOTS });
-  const clone = () => JSON.parse(JSON.stringify(idx));
-  const a = clone(); a.groups.model[0].input += 1;
-  const b = clone(); b.groups.session.pop();
-  const c = clone(); c.totals.cost *= 1 + 1e-6;
-  const d = clone(); d.pivots['session:origin'][0].cells[Object.keys(d.pivots['session:origin'][0].cells)[0]].sessions += 1;
-  const e = clone(); e.range.to += 1;
-  const f = clone(); f.totals.cost *= 1 + 1e-12;
-  ok(M.compareAggregates(mem, idx).same && [a, b, c, d, e].every((x) => !M.compareAggregates(mem, x).same) && M.compareAggregates(mem, f).same,
-    'NEGATIVE CONTROLS: one token, a missing session row, a cost 1e-6 off, a pivot cell\'s session count, the range end — each is a difference; a cost 1e-12 off (rounding) is not');
-}
-
-// a remote harvest appended into an OLD month (August) while September is newer
-const remote = (k, ts, sid = SIDS[3]) => JSON.stringify({ rid: 'rr_' + k, ts, sid, model: 'claude-opus-5-5', i: 1000 + k, cw5: 0, cw1: 0, cr: 10, o: 20, origin: 'main', cwd: '/r' });
-uh.ingestRemoteEvents('host-7', 'Seven', [remote(1, T(2026, 8, 3, 5)), remote(2, T(2026, 8, 30, 22)), remote(1, T(2026, 8, 3, 5))].join('\n') + '\n');
-await parityAll(uh, ix, 'after a remote harvest appended into an OLD month (a re-emitted rid inside it)');
-// a push straight after the torn line: the append merges with the fragment, the merged line is lost on BOTH sides
-uh.ingestRemoteEvents('host-7', 'Seven', [remote(3, T(2026, 9, 21)), remote(4, T(2026, 9, 22))].join('\n') + '\n');
-await parityAll(uh, ix, 'after a push that lands on a torn line (the worker re-reads from its mark)');
-{
-  // int382 seam: the rows are asked of the WHOLE ledger — hot or cold (ledgerKnowsId: the hot ids, then the cold rows' hashes,
-  // whatever the row's ts) — never of _loadEvents()'s HOT window, which reaches LEDGER_WINDOW_DAYS (45) back from TODAY: rr_4
-  // (2026-09-22) left that window at 2026-11-06T00:00Z and the leg went red on every tree. No clock in the fixture's answer now.
+const labels = (ans) => {
+  const out = {};
+  for (const dim of ['account', 'host', 'model', 'pool', 'session']) for (const r of (ans.groups[dim] || [])) out[dim + ':' + r.key] = [r.name ?? null, r.type ?? null, r.deleted ?? null, r.be ?? null, r.project ?? null, r.unpricedBy ?? null];
+  return out;
+};
+const sameLabels = (a, b) => { const A = labels(a), B = labels(b), d = []; for (const k of new Set([...Object.keys(A), ...Object.keys(B)])) if (JSON.stringify(A[k]) !== JSON.stringify(B[k])) d.push([k, A[k], B[k]]); return d; };
+const PIVOTS = [['day', 'account'], ['day', 'model'], ['session', 'origin'], ['project', 'origin'], ['hour', 'account'], ['weekday', 'model'], ['day', 'pool'], ['account', 'host']];
+async function zoneLegs(zone) {
+  if (zone) process.env.TZ = zone;
+  const dir = scratchDir('uidx-cells-' + (zone || 'gate').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+  const rows = writeLedger(dir);
+  const uh = new UsageHistory({ dataDir: dir, homeDir: dir, resolveAccount: (id) => (LIVE.has(id) ? { type: id.startsWith('api') ? 'api' : 'subscription', name: id === 'sub-alice' ? 'Alice' : 'Beta key' } : null) });
   uh._loadEvents();
-  const knows = (k) => uh.ledgerKnowsId('h:host-7:rr_' + k);
-  ok(!knows(3) && knows(4), '…and the torn fragment swallowed exactly the first pushed row (memory\'s line rule — the parity above says the index agrees)');
-  // THE CONTROL: the same ledger read with a 1-day window (every fixture row cold) — the OLD read (the hot set) misses rr_4, red by
-  // name; the whole-ledger ask still finds rr_4 and still not rr_3
-  const narrow = new UsageHistory({ dataDir: data, homeDir: home }); narrow.ledgerWindowMs = 864e5;
-  const hotRids = new Set(narrow._loadEvents().map((e) => e.rid));
-  ok(!hotRids.has('h:host-7:rr_4') && narrow.ledgerKnowsId('h:host-7:rr_4') && !narrow.ledgerKnowsId('h:host-7:rr_3'), 'CONTROL (the date-free ask): with a 1-day window every fixture row is cold — the old hot-set read misses rr_4 (the 2026-11-06 red, by name); ledgerKnowsId still finds rr_4 and not rr_3');
+  const c = uh._evCache;
+  ok(!!c.cells && c.cells.n > 0, `[${zone || 'gate zone'}] the load pass built the cells (${c.cells && c.cells.n} cells for ${rows.length} rows)`);
+  const QUERIES = {
+    'all, 8 pivots': { pivots: PIVOTS },
+    'a quarter-hour range': { from: T(2026, 1, 20), to: T(2026, 2, 20) - 1, pivots: PIVOTS },
+    'an edge INSIDE a slot (from and to)': { from: T(2026, 1, 20, 0, 7, 13), to: T(2026, 2, 4, 10, 2, 30), pivots: PIVOTS },
+    'an EMPTY edge slot': { from: T(2026, 3, 30, 3, 5) },
+    'backend codex': { backend: 'codex' },
+    'the deleted account only': { accounts: new Set(['sub-gone']) },
+    'the remote device': { hostFilter: 'host-ws' },
+  };
+  for (const [name, q] of Object.entries(QUERIES)) {
+    const rowsAns = uh.aggregate(q);
+    const cellsAns = await uh.aggregateCells(q);
+    const cmp = M.compareAggregates(rowsAns, cellsAns);
+    const ld = sameLabels(rowsAns, cellsAns);
+    ok(cmp.same && ld.length === 0 && cellsAns.fromCells, `[${zone || 'gate zone'}] ${name}: the cells EQUAL the row fold — ${cmp.checked} numbers, the range, every label (rowSlots ${cellsAns.fromCells && cellsAns.fromCells.rowSlots})`, { diffs: cmp.diffs.slice(0, 3), labels: ld.slice(0, 3) });
+  }
+  return { uh, dir };
 }
-// a push that never arrived (the index detached for one append)
-uh.setIndex(null);
-uh.ingestRemoteEvents('host-7', 'Seven', remote(5, T(2026, 11, 1, 6)) + '\n');
-uh.setIndex(ix);
-uh.ingestRemoteEvents('host-7', 'Seven', remote(6, T(2026, 11, 1, 7)) + '\n');
-await parityAll(uh, ix, 'after a push that never arrived (the next push does not start at the mark ⇒ re-read from the mark)');
-// a shard rewritten by a repair (tmp + rename: a new inode), then reloadEvents (what boot does after runLocalMigrations)
+// the gate's own zone, a 45-minute zone, a DST day
+const gate = await zoneLegs(null);
+await zoneLegs('Asia/Kathmandu');
+{ process.env.TZ = 'America/Los_Angeles'; const dst = await zoneLegs('America/Los_Angeles'); const q = { from: T(2026, 3, 8, 8), to: T(2026, 3, 9, 8) - 1, pivots: [['hour', 'account']] }; const a = dst.uh.aggregate(q), b = await dst.uh.aggregateCells(q); ok(M.compareAggregates(a, b).same, '[America/Los_Angeles] the DST day (2026-03-08): the local hours equal the row fold'); }
+// ── LAW 3: a changed rate reads NO shard byte; a new threshold inside one cell reads only that slot
 {
-  const fp = path.join(hist, 'events-2026-08.ndjson');
-  const lines = fs.readFileSync(fp, 'utf8').split('\n').filter(Boolean);
-  const out = lines.map((l, n) => { if (n === 5) return null; try { const e = JSON.parse(l); if (e.acct === 'sub-a' && n % 2) { e.acct = 'sub-b'; e.aname = 'Bob'; } return JSON.stringify(e); } catch { return l; } }).filter((x) => x !== null);
-  fs.writeFileSync(fp + '.tmp', out.join('\n') + '\n'); fs.renameSync(fp + '.tmp', fp);
-  uh.reloadEvents();
-  await parityAll(uh, ix, 'after a repair rewrote the August shard in place (re-attributed rows, one row gone)');
+  const { uh, dir } = gate;
+  const hist = path.join(dir, 'usage-history');
+  const opened = [];
+  const o0 = fs.promises.open, s0 = fs.openSync;
+  fs.promises.open = (p, ...a) => { if (String(p).startsWith(hist)) opened.push(path.basename(String(p))); return o0.call(fs.promises, p, ...a); };
+  fs.openSync = (p, ...a) => { if (String(p).startsWith(hist)) opened.push(path.basename(String(p))); return s0.call(fs, p, ...a); };
+  try {
+    uh.setPricing({ tiers: { 'claude-opus-5-5': { input: 7, output: 33, cacheWrite5m: 9, cacheWrite1h: 14, cacheRead: 0.7 } } });
+    opened.length = 0;
+    const a = await uh.aggregateCells({ pivots: PIVOTS });
+    const shardReads = opened.filter((f) => /^events-/.test(f)).length;
+    ok(shardReads === 0 && M.compareAggregates(uh.aggregate({ pivots: PIVOTS }), a).same, 'LAW 3: a changed rate (opus 5.5) — the next answer reads NO shard byte and equals a fresh fold under the new table', { shardReads, opened: opened.slice(0, 5) });
+    // a NEW threshold between one cell's smallest and largest prompt: sonnet 5 at long.above 9 500 — the s-g rows (prompt 9 005 … ) straddle
+    const tier = { input: 1, output: 2, cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1, long: { above: 9004, input: 2, output: 4, cacheWrite5m: 2.5, cacheRead: 0.2 } };
+    uh.setPricing({ tiers: { 'claude-sonnet-5': tier } });
+    const b = await uh.aggregateCells({ pivots: PIVOTS });
+    ok(M.compareAggregates(uh.aggregate({ pivots: PIVOTS }), b).same && b.fromCells.rowSlots >= 0, 'LAW 3: a new long-prompt threshold — the answer equals a fresh fold under the new table (a straddling cell priced from its rows, never the wrong side)', b.fromCells);
+    // B-d578 P1-b in the cells: a provider's OWN row («Add a price» writes accounts[<pv id>].tiers[<key>]) prices that provider's
+    // model; the other provider's model stays unknown — counted apart in both folds, named by its account
+    const unk = (x) => (x.groups.model || []).find((r) => r.key === 'acme-coder-1'), own = (x) => (x.groups.model || []).find((r) => r.key === 'beta-chat-2');
+    const pre = await uh.aggregateCells({ pivots: PIVOTS }), preRows = uh.aggregate({ pivots: PIVOTS });   // both under the SAME table (before the provider's row)
+    uh.setPricing({ accounts: { 'pv-fixture-beta': { tiers: { 'beta-chat': { input: 2, output: 6, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2 } } } } });
+    const pv = await uh.aggregateCells({ pivots: PIVOTS }), pvRows = uh.aggregate({ pivots: PIVOTS });
+    ok(unk(pre) && unk(pre).unpricedRequests === 6 && own(pre) && own(pre).unpricedRequests === 6 && own(pre).cost === 0 && pre.totals.unpricedRequests === 12 && M.compareAggregates(preRows, pre).same && sameLabels(preRows, pre).length === 0,
+      'P1-b in the cells: two providers\' models with no price row — every request counted APART (12), none priced as $0, each named by its account', { acme: unk(pre), beta: own(pre) && { r: own(pre).unpricedRequests, c: own(pre).cost } });
+    ok(M.compareAggregates(pvRows, pv).same && sameLabels(pvRows, pv).length === 0 && !own(pv).unpricedRequests && own(pv).cost > 0 && unk(pv).unpricedRequests === 6 && JSON.stringify(unk(pv).unpricedBy) === '["pv-fixture-acme"]',
+      'P1-b in the cells: the provider\'s OWN row prices its model (the rate memo keys the row the model id matched), the other stays unknown — the cells equal the row fold', { diffs: M.compareAggregates(pvRows, pv).diffs.slice(0, 3), beta: own(pv) && own(pv).cost });
+  } finally { fs.promises.open = o0; fs.openSync = s0; }
 }
-
-// ── §2 READ-YOUR-WRITES ────────────────────────────────────────────────────
-console.log('§2 read-your-writes — an append followed at once by a sum includes it; a tail-only worker misses it');
+// A PLACE GONE STALE UNDER AN EDGE SLOT (row B-360d unit 1): a shard edited in place inside the ledger's one-second check
+// throttle (same length: one row's output count 203 → 903) — the edge slot's cold read VERIFIES its line (the walk's own check:
+// the whole line's hash + its instant) and says STALE; the ask goes to the ROW road ONCE, whose walk rebuilds the cache and
+// answers what a fresh ledger answers. Never the cells road again on the same place (an unbounded retry), never the edited
+// line taken as the kept row. CONTROL: the same place read without the check yields the EDITED row — what the cells fold
+// would have mixed into its kept counts silently.
 {
-  const before = await ix.queryAggregate({}).then(totalOf);
-  uh.ingestRemoteEvents('host-8', 'Eight', remote(10, T(2026, 9, 25, 9), SIDS[4]) + '\n');
-  const q = ix.queryAggregate({}); // posted in the same synchronous step as the append
-  const memNow = uh.aggregate({}).totals.requests;
-  const after = await q.then(totalOf);
-  ok(after === before + 1 && after === memNow, `the remote harvest's commit point: the sum asked right after the append includes it (${before} → ${after}, memory ${memNow})`);
-  // the walk's commit point: a transcript grows, the walk appends, the sum follows at once
-  const walkHome = path.join(root, 'walkhome'), wproj = path.join(walkHome, '.claude', 'projects', '-w-rw');
-  fs.mkdirSync(wproj, { recursive: true });
-  const wd = path.join(root, 'walkdata');
-  const uhw = new UsageHistory({ dataDir: wd, homeDir: walkHome, scanYield: () => Promise.resolve() });
-  fs.writeFileSync(path.join(wproj, SIDS[5] + '.jsonl'), turn(50, T(2026, 9, 26, 8)));
-  await uhw.scan(true);
-  const ixw = mkOwner(uhw, walkHome); ixw.start(); await readyOf(ixw);
-  fs.appendFileSync(path.join(wproj, SIDS[5] + '.jsonl'), turn(51, T(2026, 9, 26, 9)) + turn(52, T(2026, 9, 26, 10)));
-  await uhw.scan(true);
-  const n = await ixw.queryAggregate({}).then(totalOf);
-  ok(n === 3 && uhw.aggregate({}).totals.requests === 3, `the walk's commit point: right after the walk, the index sums all 3 requests (${n})`);
-  // CONTROL: the same worker, but pushes are not taken — it only re-reads shards from their marks every 300 ms
-  const ctlFile = path.join(root, 'tail-only-worker.js');
-  fs.writeFileSync(ctlFile, `'use strict';
-// CONTROL (scripts/test-usage-index-parity.mjs §2): the real worker, but a push is acknowledged and DROPPED;
-// the shards are re-read from their marks on a timer instead — the tail-only design design 011 §2 rules out.
-const wt = require('worker_threads');
-let handler = null;
-const realOn = wt.parentPort.on.bind(wt.parentPort);
-wt.parentPort.on = (ev, fn) => (ev !== 'message' ? realOn(ev, fn) : realOn(ev, (handler = fn, (m) => {
-  if (m && m.op === 'ingest') { wt.parentPort.postMessage({ id: m.id, ok: true, result: { mode: 'dropped' } }); return; }
-  fn(m);
-})));
-require(${JSON.stringify(path.join(REPO, 'src/usage-index-worker.js'))});
-setInterval(() => { if (handler) handler({ id: -1, op: 'recover' }); }, 300);
-`);
-  const cd = path.join(root, 'ctldata'), ch = path.join(root, 'ctlhome');
-  buildLedger(cd); fs.mkdirSync(ch);
-  const uhc = new UsageHistory({ dataDir: cd, homeDir: ch });
-  const ixc = mkOwner(uhc, ch, { workerFile: ctlFile }); ixc.start(); await readyOf(ixc);
-  const b0 = await ixc.queryAggregate({}).then(totalOf);
-  uhc.ingestRemoteEvents('host-8', 'Eight', remote(11, T(2026, 8, 25, 9), SIDS[6]) + '\n');
-  const missed = await ixc.queryAggregate({}).then(totalOf);
-  ok(missed === b0 && uhc.aggregate({}).totals.requests === b0 + 1, `CONTROL: a worker that only TAILS answers the same immediate sum WITHOUT the append (${b0} → ${missed}; memory ${b0 + 1}) — the push is what makes the invariant`);
-  await sleep(700);
-  ok(await ixc.queryAggregate({}).then(totalOf) === b0 + 1, 'CONTROL: …and catches up later by its marks (it is a tailer, not a broken worker)');
+  console.log('a place gone stale under an edge slot: verified, then the row road once');
+  const { readLineAt, verified } = require(path.join(REPO, 'src/usage-cold-walk.js'));
+  const dir = scratchDir('uidx-cells-stale'); writeLedger(dir);
+  const uh = new UsageHistory({ dataDir: dir, homeDir: dir, resolveAccount: (id) => (LIVE.has(id) ? { type: 'subscription', name: id } : null) });
+  uh._loadEvents();
+  const hist = path.join(dir, 'usage-history'), shard = path.join(hist, 'events-2026-01.ndjson');
+  const tsEdit = T(2026, 1, 5) + 3 * 70e3, q = { from: T(2026, 1, 5, 0, 3), to: T(2026, 1, 30) - 1 };   // from inside the slot 00:00–00:15 that holds the s-a row at 00:03:30
+  const text = fs.readFileSync(shard, 'utf8'), lines = text.split('\n'), at = lines.findIndex((l) => l.includes(`"ts":${tsEdit},`) && l.includes('"sid":"s-a"'));
+  const edited = at >= 0 && lines[at].includes('"o":203,') ? lines[at].replace('"o":203,', '"o":903,') : null;
+  ok(!!edited && edited.length === lines[at].length, 'the fixture: the edge slot\'s s-a row (output 203) found in the January shard, its edit the same length');
+  const plan = uh._coldWalk(q.from, T(2026, 1, 5, 0, 15) - 1), places = [];
+  for (const g of plan.groups) for (let j = 0; j < g.off.length; j++) places.push({ fp: path.join(plan.dir, plan.shards[g.sh[j]]), off: g.off[j], ts: g.ts[j], rh: g.rh[j] });
+  lines[at] = edited; fs.writeFileSync(shard, lines.join('\n'));
+  uh._evCache.checkedAt = Date.now();   // inside the ledger's one-second check throttle: the cache has not seen the edit
+  const place = places.find((p) => p.ts === tsEdit);
+  const raw = place ? JSON.parse(await readLineAt(place.fp, place.off)) : null;
+  let why = null; try { verified(await readLineAt(place.fp, place.off), place.ts, place.rh, 'the place'); } catch (e) { why = e.code; }
+  ok(!!raw && raw.o === 903 && why === 'STALE', 'CONTROL: read WITHOUT the check, the place yields the EDITED row (output 903); the walk\'s check says STALE', { o: raw && raw.o, why });
+  let cellsCalls = 0; const ac = uh.aggregateCells.bind(uh); uh.aggregateCells = (...a) => { cellsCalls++; return ac(...a); };
+  const ans = await Promise.race([uh.aggregateAsync(q), new Promise((r) => setTimeout(() => r('TIMEOUT'), 20000))]);
+  const fresh = new UsageHistory({ dataDir: dir, homeDir: dir, resolveAccount: (id) => (LIVE.has(id) ? { type: 'subscription', name: id } : null) });
+  fresh._loadEvents();
+  const want = fresh.aggregate(q);
+  ok(ans !== 'TIMEOUT' && cellsCalls === 1 && M.compareAggregates(want, ans).same && ans.totals.output === want.totals.output,
+    `the ask is answered ONCE by the cells road's hand-over to the row road (cells folds ${cellsCalls}), and equals a fresh ledger (the edited count counted, output ${ans && ans.totals && ans.totals.output})`, ans === 'TIMEOUT' ? 'TIMEOUT' : M.compareAggregates(want, ans).diffs.slice(0, 3));
 }
-
-// ── §3 a second time zone ──────────────────────────────────────────────────
-console.log('§3 the same parity in America/St_Johns (−03:30, a DST change inside the ledger)');
+// LAW 1 — ONE DERIVED STORE, ITS START LEG: the retired shadow's three files (usage.db, -wal, -shm) leave the hub's index folder
+// at EVERY start — the one wired call (src/server/usage-index-retire.js; test-architecture §73 pins its one wiring) — and nothing
+// else there is touched: search.db and owner.json stay byte for byte, the folder stays. A rollback's older release re-creates
+// usage.db: the next start removes it again. CONTROLS: a copy that removes the FOLDER (search.db lost) and a copy that removes
+// ONCE (a run-once migration: the re-created usage.db stays) are each red by the same judge.
 {
-  const r = spawnSync(process.execPath, [new URL(import.meta.url).pathname], { env: { ...process.env, TZ: 'America/St_Johns', UIDX_TZ_CHILD: '1' }, encoding: 'utf8', timeout: 120000 });
-  const tail = (r.stdout || '').trim().split('\n').slice(-4).join(' / ');
-  ok(r.status === 0 && /ALL PASS/.test(r.stdout || ''), `the child under TZ=America/St_Johns: ${tail}`, (r.stderr || '').slice(-600));
+  console.log('LAW 1 the retired index\'s files go at every start; search.db and owner.json stay');
+  const R = require(path.join(REPO, 'src/server/usage-index-retire.js'));
+  const { indexDirFor } = require(path.join(REPO, 'src/server/search-index.js'));
+  const rootL1 = scratchDir('usage-index-retire'), quiet = { log() { }, warn() { } };
+  let runL1 = 0;
+  const judgeStarts = async (start) => {
+    const base = path.join(rootL1, 'r' + (runL1++)), home = path.join(base, 'home'), data = path.join(base, 'data');
+    fs.mkdirSync(data, { recursive: true });
+    const dir = indexDirFor(data, home).dir; fs.mkdirSync(dir, { recursive: true });
+    const KEEP = { 'search.db': 'the search index', 'owner.json': '{"pid":0}' };
+    for (const [f, t] of Object.entries(KEEP)) fs.writeFileSync(path.join(dir, f), t);
+    for (const f of R.FILES) fs.writeFileSync(path.join(dir, f), 'the retired index');
+    const bad = [];
+    const look = (when) => {
+      for (const f of R.FILES) if (fs.existsSync(path.join(dir, f))) bad.push(`${when}: ${f} still there`);
+      for (const [f, t] of Object.entries(KEEP)) { let got = null; try { got = fs.readFileSync(path.join(dir, f), 'utf8'); } catch { } if (got !== t) bad.push(`${when}: ${f} ${got === null ? 'gone' : 'changed'}`); }
+    };
+    await start({ dataDir: data, homeDir: home, log: quiet }); look('the first start');
+    fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'usage.db'), 'an older release re-created it after a rollback');   // (its folder too)
+    await start({ dataDir: data, homeDir: home, log: quiet }); look('the start after a rollback');
+    return bad;
+  };
+  const answers = [];
+  const real = await judgeStarts(async (o) => { answers.push(await R.removeRetiredUsageIndex(o)); });
+  ok(real.length === 0 && answers.length === 2 && answers[0].removed.join() === R.FILES.join() && answers[1].removed.join() === 'usage.db',
+    'LAW 1: the first start removes usage.db / -wal / -shm, a rollback\'s re-created usage.db goes at the next start; search.db and owner.json intact', { real, answers });
+  const folder = await judgeStarts(async ({ dataDir, homeDir }) => { await fs.promises.rm(indexDirFor(dataDir, homeDir).dir, { recursive: true, force: true }); });
+  let once = false;
+  const runOnce = await judgeStarts(async (o) => { if (once) return; once = true; await R.removeRetiredUsageIndex(o); });
+  ok(folder.some((b) => /search\.db gone/.test(b)) && runOnce.some((b) => /after a rollback: usage\.db still there/.test(b)),
+    'LAW 1 CONTROLS: a copy removing the folder loses search.db; a copy removing once leaves the re-created usage.db — both red by the same judge', { folder, runOnce });
 }
-
-for (const o of owners) await o.close();
-fs.rmSync(root, { recursive: true, force: true });
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

@@ -295,7 +295,7 @@ try {
     u.ledgerWindowMs = 5 * DAY; // rows go below the cut: a trim to run
     let during = null;
     u.walkHook = async () => { u._trimOwed(c); await settled(c); during = c.lastTrim.end; };
-    const res = await u.aggregateAsync({ from: T - 30 * DAY, to: T + DAY }).catch((e) => ({ error: e.message }));
+    const res = await u.aggregateAsync({ from: T - 30 * DAY, to: T + DAY, rows: true }).catch((e) => ({ error: e.message }));   // the ROW road (B-360d unit 1: the window answers from the cells; the walk under a trim is the row road's)
     u.walkHook = null; await settled(c);
     ok(during === 'a walk is out — owed to its end' && c.lastTrim.end === 'moved' && c.lastTrim.moved > 0 && res && res.totals && res.totals.requests > 2000, `a real walk (aggregateAsync over ${res && res.totals && res.totals.requests} rows): a trim asked inside its plan never starts under it (owed); the walk's end runs it — «${c.lastTrim.end}», ${c.lastTrim.moved} rows`, { during, res: res && (res.error || res.totals) });
     { // r6 (the test machine's number): a STAGED row weighs TRIM_STAGE_COST visits — one step of 16 288 staged rows held 60.7 ms there
@@ -386,7 +386,7 @@ try {
     const rel5 = Object.create(big); rel5._waitBigWarm = function () { if (this._booting()) return this._bootWait(); return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }; // the release's body
     const relLook = await raceOf(rel5._waitBigWarm() || Promise.resolve());
     writeRows(Array.from({ length: 500 }, () => mkRow(T - Math.floor(rnd() * DAY)))); const chained = big._absorbStepped(); // bytes that come mid-absorb
-    const agg = await big.aggregateAsync({ from: T - 20 * DAY, to: T + DAY }); await pb; await chained;
+    const agg = await big.aggregateAsync({ from: T - 20 * DAY, to: T + DAY, rows: true }); await pb; await chained;   // the row road (B-360d unit 1)
     ok(w === big._evCache.absorbing || firstLook === 'waiting', 'an async reader mid-absorb (more than the takeover bound left) gets the absorb to wait for');
     ok(firstLook === 'waiting' && tookBig === 0 && agg && agg.totals && agg.totals.requests === nBig + 12500 && big._evCache.events.length + big._evCache.cold.n === nBig + 12500 && !big._evCache.absorbing,
       `…it waits (${firstLook}), a sync reader takes over nothing past the bound (${tookBig} rows — a stale small reading reset), the bytes that came mid-absorb are taken by the pass it chains: ${agg && agg.totals && agg.totals.requests} rows answered`);

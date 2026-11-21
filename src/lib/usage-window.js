@@ -60,6 +60,7 @@ const RANGES = [
   { key: 'custom', label: () => t('Custom…') },
 ];
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+const QUARTER_MS = 15 * 60 * 1000;   // B-360d unit 1: the ledger's cell slot — a preset's range starts on one
 
 const fmtNum = (n) => {
   n = n || 0;
@@ -128,7 +129,9 @@ export function openUsageWindow(app, opts = {}) {
       if (Number.isFinite(to)) qs.set('to', String(to + DAY - 1)); // inclusive end of day
     } else {
       const r = RANGES.find(x => x.key === state.range);
-      if (r && r.ms) qs.set('from', String(Date.now() - r.ms));
+      // B-360d unit 1 (law 4): a rolling preset asks from a QUARTER-HOUR boundary — the ledger's cells answer it with no row
+      // read; the load's own `from` is kept so its pivots ask describes the SAME range (it was now − N days to the ms, twice)
+      if (r && r.ms) qs.set('from', String(state.loadFrom != null && state.loadFromKey === state.range ? state.loadFrom : Math.floor((Date.now() - r.ms) / QUARTER_MS) * QUARTER_MS));
     }
     if (state.backend) qs.set('backend', state.backend);
     if (state.account) qs.set('account', state.account);
@@ -139,7 +142,9 @@ export function openUsageWindow(app, opts = {}) {
   const load = async () => {
     if (!alive()) return; // a closed window asks nothing (the re-ask, the harvest's reply, a late Retry)
     state.loading = true; state.gen++; render();
+    state.loadFrom = null;   // a load picks its own quarter-hour `from` (law 4), kept for this load's pivots asks
     const qs = filterQuery();
+    if (qs.has('from') && state.range !== 'custom') { state.loadFrom = Number(qs.get('from')); state.loadFromKey = state.range; }
     if (state.attendedRetry) { state.attendedRetry = false; qs.set('retry', '1'); } // a person's Retry: the ledger's first load is tried now (never the unattended backoff)
     clearTimeout(state.reaskT); state.reaskT = null;
     // B-f95d ②: the held pivots + the BOUNDED crosses the dashboard draws — never

@@ -371,7 +371,7 @@ try {
     ok(!ctl.same && ctl.diffs.some((d) => /unpricedRequests/.test(d.at)), 'CONTROL: the twin WITHOUT the unknown-price test reports the difference (the shadow check sees a one-sided edit)', ctl.diffs.slice(0, 2));
     // THE CONTROLS ON THE LEDGER (anchored: a moved product line fails by name)
     {
-      const U1 = M6.load('src/usage-history.js', anchored(UHSRC, "    if (priced === null) { b.unpricedRequests++; b.unpricedTokens += ev.i + ev.cw5 + ev.cw1 + ev.cr + ev.o; }   // B-d578 P1-b: counted apart, never as $0\n    else b.cost += priced;\n", '    b.cost += priced || 0;\n', 'the bucket without its unknown part'), 'no-unknown-part');
+      const U1 = M6.load('src/usage-history.js', anchored(UHSRC, "    if (priced === null) { b.unpricedRequests++; b.unpricedTokens += (Number(ev.i) || 0) + (Number(ev.cw5) || 0) + (Number(ev.cw1) || 0) + (Number(ev.cr) || 0) + (Number(ev.o) || 0); }   // B-d578 P1-b: counted apart, never as $0\n    else b.cost += priced;\n", '    b.cost += priced || 0;\n', 'the bucket without its unknown part'), 'no-unknown-part');
       const t1 = new U1.UsageHistory({ dataDir: d6, homeDir: d6 }).aggregate({}).totals;
       ok(!(t1.unpricedRequests > 0) && Math.abs(t1.cost - pricedUsd) < 1e-12, 'CONTROL: a bucket that only adds a price drops the unknown part — the totals then read as the smaller bill (the leg above is what keeps it)', t1);
       const U2 = M6.load('src/usage-history.js', anchored(UHSRC, "    if (tier !== '_default' || !isThirdPartyAccount(acct)) return false;\n", '    return false;\n', 'the decision answers known'), 'no-decision');
@@ -509,7 +509,7 @@ try {
     // THE WIRING (each surface asks the one rule / the one words module)
     {
       const src = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-      const UW = src('src/lib/usage-window.js'), UD = src('src/lib/usage-dashboard.js'), CSB = src('src/lib/chat-status-bar.js'), SRV = src('server.js'), UIX = src('src/server/usage-index.js'), UIM = src('src/usage-index-model.js');
+      const UW = src('src/lib/usage-window.js'), UD = src('src/lib/usage-dashboard.js'), CSB = src('src/lib/chat-status-bar.js'), SRV = src('server.js'), UH = src('src/usage-history.js'), UIM = src('src/usage-index-model.js');
       const wires = {
         'usage-window imports the words': UW.includes("import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem } from './usage-cost-words.js';"),
         'the cost tile': UW.includes("tile(t('Est. API-equivalent cost'), escHtml(fmtRowCost(T)),"),
@@ -537,7 +537,7 @@ try {
         'the dashboard note (both routes)': (UD.match(/unpricedNote\(card, data, mlist\);/g) || []).length === 2,
         'the chat chip colour': CSB.includes("cw.tone === 'unknown' ? tierOrange"),
         'the hub names a provider\'s record': SRV.includes("return p ? { type: 'provider', name: p.label || id } : null; }"),
-        'the shadow check asks priceUnknown': UIX.includes('(c) => ledger.priceUnknown(c.model, c.acct)'),
+        'the cells fold asks priceUnknown': UH.includes("if (tier === '_default' && this.priceUnknown(model, acct, tier)) { this._sayUnpriced(model, acct); return CELL_UNPRICED; }") && UH.includes('this.priceUnknown(ev.model, ev.acct) ? (this._sayUnpriced(ev.model, ev.acct), CELL_UNPRICED)'),   // B-360d unit 1: the shadow index retired — the window's cells fold asks the one rule (a cell and an edge row)
         'the index twin asks the one rule': UIM.includes("billing: isThirdPartyAccount(r.acct) ? 'provider' :"),
       };
       const bad = Object.entries(wires).filter(([, v]) => !v).map(([k]) => k);

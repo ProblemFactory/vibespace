@@ -727,7 +727,8 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
       ok(settledAt === syncW.events.length, `scanSettled() resolves after the LAST event is in the ledger (${settledAt}/${syncW.events.length})`);
       ok(done && done.added === syncW.events.length && done.filesTouched === syncW.filesTouched, 'scanSettled() carries the scan\'s own answer {added, filesTouched}');
       const post = uhB.aggregate({});
-      ok(answered && JSON.stringify(answered.totals) === JSON.stringify(post.totals) && answered.totals && post.totals && JSON.stringify(post.totals) !== JSON.stringify(new UsageHistory({ dataDir: path.join(bData, 'empty'), homeDir: path.join(bHome, 'nowhere') }).aggregate({}).totals),
+      const COST12 = (k, v) => (k === 'cost' && typeof v === 'number' ? Number(v.toPrecision(12)) : v);   // B-360d unit 1: a cost to 12 significant digits (law 2's 1e-9)
+      ok(answered && JSON.stringify(answered.totals, COST12) === JSON.stringify(post.totals, COST12) && answered.totals && post.totals && JSON.stringify(post.totals) !== JSON.stringify(new UsageHistory({ dataDir: path.join(bData, 'empty'), homeDir: path.join(bHome, 'nowhere') }).aggregate({}).totals),
         'the route\'s totals EQUAL the post-walk totals (and are non-empty) — never a partial answer');
       uhB.flushCursors();   // lane hub-loop-stalls: the cursors go through the store writer — on disk now for the read
       const cur2 = JSON.parse(fs.readFileSync(path.join(bData, 'usage-history', '_cursors.json'), 'utf-8'));

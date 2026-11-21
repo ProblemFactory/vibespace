@@ -10,6 +10,11 @@
    "sha256": "030217ba27774f3e584dbad08c31447ecfd4ef735ca4b290124301cd8e9c44dd",
    "retired": [
     {
+     "head": "e21f17aa03",
+     "why": "row B-360d unit 1 (lane lg-providers, the design read w0r2kz4cb law 1): the SHADOW usage index RETIRED — src/usage-index-worker.js and src/server/usage-index.js DELETED; the Usage window answers from the ledger's own cells (src/usage-cells.js); the index model keeps only the pure fold",
+     "at": "2026-11-21"
+    },
+    {
      "head": "cb286271fe",
      "why": "lane hub-sync-holds rank 12a (2.369.397, the owner «去掉吧»): src/server/auto-update.js DELETED — no boot runs an update; the one update road is scripts/update.sh",
      "at": "2026-11-11"

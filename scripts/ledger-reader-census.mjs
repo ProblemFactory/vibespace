@@ -39,7 +39,6 @@ export const READERS = [
   { n: 7, file: 'src/server/usage-pool-engine.js', fn: 'darkSources', door: 'cache', rule: 'inherits', sees: 'the dark-machine taint in the pool\'s pick (newest times, accounts)' },
   { n: 8, file: 'src/usage-history.js', fn: 'ledgerKnowsId', door: 'cache', rule: 'yes-no', sees: 'the live ring\'s exclusion; the local commit\'s filter' },
   { n: 9, file: 'src/usage-history.js', fn: 'cacheCensus', door: 'cache', rule: 'inherits', sees: 'the memory / Diagnostics census' },
-  { n: 10, file: 'src/usage-index-worker.js', fn: 'recoverAll', door: 'shards', rule: 'first-wins', sees: 'the SQLite shadow index (rid PRIMARY KEY + INSERT OR IGNORE) → telemetry only' },
   { n: 11, file: 'src/usage-origin-backfill.js', fn: 'backfillUsageOrigin', door: 'shards', rule: 'alike', sees: 'stamps origin on every row (a migration)' },
   { n: 12, file: 'src/ledger-slot-backfill.js', fn: 'backfillLedgerBySlot', door: 'shards', rule: 'alike', sees: 're-keys or archives pooled rows (a migration)' },
   { n: 13, file: 'src/usage-history.js', fn: '_maybeRebakeAttribution', door: 'shards', rule: 'alike', sees: 're-attributes rows (once)' },
@@ -68,9 +67,6 @@ export const SITES = [
   ['src/usage-history.js «UsageHistory._walkAndAppend > push»', 1, 'the local commit (a writer): refuses an id the ledger holds (knows) — the same-batch copy is its gap, read-time dedup absorbs it'],
   ['src/usage-history.js «UsageHistory.ingestRemoteEvents»', 1, 20],
   ['src/usage-hold-road.js «UsageHoldRoad.restorePause»', 1, 'a paused shard\'s name checked: no row is read'],
-  ['src/usage-index-model.js «<module>»', 4, 10],
-  ['src/usage-index-worker.js «ingest»', 1, 10],
-  ['src/usage-index-worker.js «recoverAll»', 1, 10],
   ['src/usage-ledger-dedup.js «<module>»', 4, 16],
   ['src/usage-origin-backfill.js «backfillUsageOrigin»', 1, 11],
 ];
