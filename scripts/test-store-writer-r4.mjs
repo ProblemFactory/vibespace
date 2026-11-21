@@ -16,6 +16,10 @@
 //   ⑩ lane lg-store-writes, the moved2 cure 2 — afterLanding (THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING): a landing held past
 //      the reply's bound, then landed ⇒ the step runs once, after it; a REAL kill before the landing ⇒ no step, a start reads the old
 //      record; RED: the step at the act, the bound dropping the step
+//   ⑪ lane lg-store-writes, B-9275 unit 1 — A STORE'S NEW BYTES ARE ON DISK BEFORE ITS NAME POINTS AT THEM: the temp synced before
+//      the close and the rename (a recording stand-in: writeJob, the exit's road, the main-only road); a failed sync a failed
+//      write (the previous version kept, the change retried); the sync off the hub's loop (a gate only the loop releases, and its
+//      control on the main-only road); RED: today's writeJob
 // Run: node scripts/test-store-writer-r4.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -523,6 +527,143 @@ setInterval(() => { }, 1000);
   const b1 = await killed(atOnce, 'at-once');
   ok(b1.sig === 'SIGKILL' && b1.disk === '{"v":"old"}' && b1.stepped, '⑩ (b) CONTROL (a copy running the step at the act): after the same kill the step HAD run over the old record — red', b1);
   fs.rmSync(T10, { recursive: true, force: true });
+})();
+
+// ── ⑪ B-9275 UNIT 1 (lane lg-store-writes, 主开发's r1153): A STORE'S NEW BYTES ARE ON DISK BEFORE ITS NAME POINTS AT THEM ────
+// A whole write's temp is SYNCED before its close and the rename (src/store-writer-worker.js writeJob — the thread's road, the
+// exit's (it waits for the thread) and the writer's main-only road all run it). (a) THE ORDER by a recording stand-in file
+// system: open the temp, every byte, fsync the temp, close, rename — RED: today's writeJob (the sync removed, by anchored());
+// (b) the exit's flush through the thread, (c) the main-only road, the same order; (d) A SYNC THAT FAILS IS A FAILED WRITE: no
+// rename, the temp removed, the store's previous whole version kept, the change still owed (said) and landed by its next write;
+// (e) THE SYNC IS OFF THE HUB'S LOOP: the thread's sync waits for a file only a turn of THIS thread's loop writes —
+// it is released (the loop turned while the sync ran); CONTROL: the same gate on the main-only road is never released (a sync on
+// the main thread holds the loop — the leg can tell). Its cost is the line's measurement (a probe of the real writer, not a leg).
+console.log('⑪ B-9275 — a whole write syncs its temp before the rename (every road); a failed sync is a failed write; the sync runs off the loop');
+await (async () => {
+  const { anchored } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const SW = require(path.join(REPO, 'src/store-writer.js')), WK = require(path.join(REPO, 'src/store-writer-worker.js'));
+  const T11 = fs.mkdtempSync(path.join(os.tmpdir(), 'store-r4-sync-'));
+  const quiet = { warn: () => { }, log: () => { }, error: () => { } };
+  try {
+    // THE SCENE'S FILE SYSTEM (one module: the stand-in thread and this thread require it): the real fs, recording a whole write's
+    // calls by role (temp / file); <dir>/scene.json asks a FAULT (the sync fails once while <dir>/fault stands) or a GATE (the sync
+    // waits — at most gateTurns × 5 ms — until <dir>/release stands: only a turn of the main loop writes it)
+    const SCENE = path.join(T11, 'scene-fs.cjs');
+    fs.writeFileSync(SCENE, `'use strict';
+const fs = require('fs'), P = require('path');
+const nap = new Int32Array(new SharedArrayBuffer(4));
+module.exports = function sceneFs(m) {
+  const dir = P.dirname(m.file); let cfg = null;
+  try { cfg = JSON.parse(fs.readFileSync(P.join(dir, 'scene.json'), 'utf8')); } catch { return { fs, end() { } }; }
+  const order = [], fds = new Map(), role = (p) => (String(p) === m.tmp ? 'temp' : String(p) === m.file ? 'file' : P.basename(String(p)));
+  const f = { ...fs,
+    openSync: (p, ...a) => { const fd = fs.openSync(p, ...a); fds.set(fd, role(p)); order.push('open ' + role(p)); return fd; },
+    writeSync: (fd, ...a) => { const n = fs.writeSync(fd, ...a); if (order[order.length - 1] !== 'write ' + fds.get(fd)) order.push('write ' + fds.get(fd)); return n; },
+    fsyncSync: (fd) => {
+      order.push('fsync ' + fds.get(fd));
+      if (cfg.fault === 'fsync' && fs.existsSync(P.join(dir, 'fault'))) { fs.unlinkSync(P.join(dir, 'fault')); throw Object.assign(new Error('i/o error at the sync'), { code: 'EIO' }); }
+      if (cfg.gateTurns) { fs.writeFileSync(P.join(dir, 'in-sync'), '1'); for (let k = 0; k < cfg.gateTurns && !fs.existsSync(P.join(dir, 'release')); k++) Atomics.wait(nap, 0, 0, 5); order.push(fs.existsSync(P.join(dir, 'release')) ? 'released by the main loop' : 'never released'); }
+      return fs.fsyncSync(fd);
+    },
+    closeSync: (fd) => { order.push('close ' + fds.get(fd)); return fs.closeSync(fd); },
+    renameSync: (a, b) => { order.push('rename ' + role(a) + ' > ' + role(b)); return fs.renameSync(a, b); },
+  };
+  return { fs: f, end(err) { fs.appendFileSync(P.join(dir, 'order.ndjson'), JSON.stringify({ order, err: err ? err.code || err.message : null, fileAfter: fs.existsSync(m.file) ? fs.readFileSync(m.file, 'utf8') : null, tempLeft: fs.existsSync(m.tmp) }) + '\\n'); } };
+};
+`);
+    // the stand-in thread: the product's handler — the REAL writeJob over the scene's fs
+    const STAND = path.join(T11, 'sync-worker.cjs');
+    fs.writeFileSync(STAND, `'use strict';
+const { parentPort, workerData } = require('worker_threads'); const fs = require('fs');
+const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
+const sceneFs = require(${JSON.stringify(SCENE)});
+const S = new Int32Array(workerData.sab);
+parentPort.on('message', (m) => {
+  if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
+  Atomics.store(S, 0, m.id); let err = null, ms = 0;
+  if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
+  else {
+    const sc = sceneFs(m), t0 = process.hrtime.bigint();
+    try { writeJob(m, sc.fs); } catch (e) { err = { code: e.code || null, message: e.message }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } }
+    ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    if (!m.append) sc.end(err);
+  }
+  Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 1);
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+});
+`);
+    const DIE = path.join(T11, 'die-worker.cjs');   // a thread that dies at its first message: the writer's main-only road (restartsMax 0)
+    fs.writeFileSync(DIE, `require('worker_threads').parentPort.on('message', () => process.exit(3));\n`);
+    const sceneFs = require(SCENE);
+    const orders = (dir) => { try { return fs.readFileSync(path.join(dir, 'order.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    const scene = (name, cfg) => { const dir = path.join(T11, name); fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, 'scene.json'), JSON.stringify(cfg)); const file = path.join(dir, 'store.json'); fs.writeFileSync(file, '{"v":1}'); return { dir, file }; };
+    const syncedFirst = (o) => { const ix = (s) => (o ? o.order.indexOf(s) : -1); return ix('open temp') >= 0 && ix('write temp') > ix('open temp') && ix('fsync temp') > ix('write temp') && ix('close temp') > ix('fsync temp') && ix('rename temp > file') > ix('close temp'); };
+    const said = (o) => (o ? o.order.join(' → ') : 'no write recorded');
+    // a main-loop poller: when the scene's sync stands in its gate, release it (this callback runs only when the loop turns)
+    const releaser = (dir) => { let done = false; const iv = setInterval(() => { if (!done && fs.existsSync(path.join(dir, 'in-sync'))) { done = true; fs.writeFileSync(path.join(dir, 'release'), '1'); } }, 2); return () => clearInterval(iv); };
+
+    // (a) THE ORDER — the real writeJob, and today's (the sync removed) as the RED copy
+    const srcW = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf8');
+    const M11 = mutantCopies('store-r4-sync', REPO);
+    const todayPath = M11.write('src/store-writer-worker.js', anchored(srcW, 'try { writeAll(fs, fd, m.parts); fs.fsyncSync(fd); } catch (e) { err = e; }', 'try { writeAll(fs, fd, m.parts); } catch (e) { err = e; }', 'today: a whole write renamed with no sync'), 'no-sync');   // stale-pins: kept (today's line, the RED copy)
+    const direct = (W, name) => { const sc0 = scene(name, {}), m = { file: sc0.file, tmp: sc0.file + '.tmp-a', parts: ['{"v":2}'], mode: 0o600 }; const sc = sceneFs(m); let err = null; try { W.writeJob(m, sc.fs); } catch (e) { err = e; } sc.end(err); return orders(sc0.dir)[0]; };
+    const a = direct(WK, 'a-real'), aRed = direct(require(todayPath), 'a-today');
+    ok(syncedFirst(a) && a.err === null && a.fileAfter === '{"v":2}' && !a.tempLeft, `⑪ (a) THE ORDER (a recording stand-in): a whole write syncs its temp before the close and the rename — ${said(a)}`, a);
+    ok(aRed && !aRed.order.includes('fsync temp') && aRed.fileAfter === '{"v":2}' && !syncedFirst(aRed), `⑪ (a) RED (today's writeJob): the store's name pointed at bytes never synced — ${said(aRed)}`, aRed);
+
+    // (b) the exit's flush (through the thread) · (c) the main-only road + the loop CONTROL · (d) a failed sync · (e) the loop leg —
+    // side by side, each its own folder, writer and thread
+    const exitRoad = async () => {
+      const s = scene('b-exit', {}), warm = path.join(T11, 'b-warm.json');
+      const w = SW.create({ log: quiet, workerPath: STAND });
+      try {
+        w.dirty(warm, { name: 'warm.write', produce: () => '{"w":1}', debounceMs: 0 }); await w.durable(warm, { timeoutMs: 8000 });   // the thread up
+        w.dirty(s.file, { name: 'exit.write', produce: () => '{"v":2}', debounceMs: 60000 });
+        const r = w.exitFlush();
+        return { o: orders(s.dir)[0], written: (r && r.written) || [] };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const mainRoad = async () => {
+      const s = scene('c-main', { gateTurns: 20 }), sc = sceneFs({ file: s.file, tmp: `${s.file}.tmp-${process.pid}` });
+      const w = SW.create({ log: quiet, fs: sc.fs, workerPath: DIE, restartsMax: 0 }), stop = releaser(s.dir);
+      try {
+        w.dirty(s.file, { name: 'main.write', produce: () => '{"v":2}', debounceMs: 0 });
+        const landed = await w.durable(s.file, { timeoutMs: 8000 }); sc.end(null);
+        return { o: orders(s.dir)[0], landed, mode: w.mode ? w.mode() : null };
+      } finally { stop(); try { w.stop(); } catch { } }
+    };
+    const failedSync = async () => {
+      const s = scene('d-fail', { fault: 'fsync' }); fs.writeFileSync(path.join(s.dir, 'fault'), '1');
+      const lines = [], w = SW.create({ log: { warn: (l) => lines.push(String(l)), log: () => { }, error: () => { } }, workerPath: STAND });
+      try {
+        w.dirty(s.file, { name: 'fail.write', produce: () => '{"v":2}', debounceMs: 0 });
+        const first = await w.durable(s.file, { timeoutMs: 8000 });
+        const owed = w.pending(s.file), between = fs.readFileSync(s.file, 'utf8');
+        const again = w.flushSync([s.file]);   // the NEXT write of the owed change (a store's close, the exit, the 1 s retry: one road)
+        return { first, owed, between, again: (again && again.written) || [], after: w.pending(s.file), os: orders(s.dir), bytes: fs.readFileSync(s.file, 'utf8'), lines };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const loopLeg = async () => {
+      const s = scene('e-loop', { gateTurns: 1000 });
+      const w = SW.create({ log: quiet, workerPath: STAND }), stop = releaser(s.dir);
+      try {
+        w.dirty(s.file, { name: 'loop.write', produce: () => '{"v":2}', debounceMs: 0 });
+        const landed = await w.durable(s.file, { timeoutMs: 10000 });
+        return { o: orders(s.dir)[0], landed };
+      } finally { stop(); try { w.stop(); } catch { } }
+    };
+    const [b, c, d, e] = await Promise.all([exitRoad(), mainRoad(), failedSync(), loopLeg()]);
+    ok(syncedFirst(b.o) && b.o.fileAfter === '{"v":2}' && b.written.includes('exit.write'), `⑪ (b) the exit's flush (through the thread): ${said(b.o)}`, b);
+    ok(syncedFirst(c.o) && c.o.fileAfter === '{"v":2}' && c.landed === true && c.mode === 'main', `⑪ (c) the writer's main-only road (its thread gone): ${said(c.o)}`, c);
+    const [d1, d2] = d.os;
+    ok(d.os.length === 2 && d1.err === 'EIO' && d1.order.includes('fsync temp') && !d1.order.some((x) => /^rename/.test(x)) && d1.fileAfter === '{"v":1}' && !d1.tempLeft
+      && d.first === false && d.owed === true && d.between === '{"v":1}' && d.again.includes('fail.write') && d.lines.some((l) => /fail\.write not written \(EIO; attempt 1\) — kept in memory, retrying in 1 s/.test(l))
+      && syncedFirst(d2) && d2.err === null && d.after === false && d.bytes === '{"v":2}',
+      `⑪ (d) A SYNC THAT FAILS IS A FAILED WRITE: nothing renamed (${said(d1)}), the temp removed, the store still its previous whole version (${d1 && d1.fileAfter}); its waiter told «not landed» (${d.first}), the change still owed (${d.owed}) and said («${(d.lines.find((l) => /fail\.write/.test(l)) || '').slice(0, 110)}»); its next write landed it (${d.bytes})`, d);
+    ok(e.landed === true && e.o && e.o.order.includes('released by the main loop') && syncedFirst(e.o), `⑪ (e) THE SYNC IS OFF THE HUB'S LOOP: the thread's sync waited for a file only a turn of the main loop writes, and was released — the loop turned while it synced (${said(e.o)})`, e);
+    ok(c.o && c.o.order.includes('never released'), `⑪ (e) CONTROL: the same gate on the main-only road was never released in its 100 ms — a sync on the main thread holds the loop, the leg above can tell (${said(c.o)})`, c.o);
+  } finally { fs.rmSync(T11, { recursive: true, force: true }); }
 })();
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

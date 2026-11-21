@@ -72,8 +72,8 @@ function linkedHere(fs, tmp, file) {
   dropTemp(fs, tmp);
   return true;
 }
-/** ONE job. A whole-file write: temp, every byte, close (its error is the write's), rename — NOTHING is renamed over the
- *  store unless every byte was written and the temp closed without error. An APPEND (the acts journal): every byte,
+/** ONE job. A whole-file write: temp, every byte, fsync (B-9275), close (its error is the write's), rename — NOTHING is renamed
+ *  over the store unless every byte was written, synced and the temp closed without error. An APPEND (the acts journal): every byte,
  *  fsync, close — a failure truncates back to the size before it (no torn line is left for a promise that resolved). */
 function writeJob(m, fs = FS) {
   if (m.append) {
@@ -116,7 +116,10 @@ function writeJob(m, fs = FS) {
     fd = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode);
   }
   let err = null;
-  try { writeAll(fs, fd, m.parts); } catch (e) { err = e; }
+  // B-9275 — A STORE'S NEW BYTES ARE ON DISK BEFORE ITS NAME POINTS AT THEM: the temp is synced HERE, before its close and the
+  // rename (a power loss or a machine's crash after a rename of unsynced bytes left the name on an empty or half file — the old
+  // whole version gone). A sync that fails is a failed write, as a short write or a close's error is: nothing is renamed.
+  try { writeAll(fs, fd, m.parts); fs.fsyncSync(fd); } catch (e) { err = e; }
   try { fs.closeSync(fd); } catch (e) { if (!err) err = e; }   // an error at close (an NFS server's ENOSPC) is the write's
   if (err) throw err;   // the caller removes the temp: the store keeps its previous whole version
   // `mode` applies when the temp file is CREATED; a leftover temp from a killed write keeps its old bits
