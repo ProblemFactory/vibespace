@@ -221,7 +221,11 @@ const settle = async (id, ms = 10000) => {
     const key = m && m.pic ? JSON.stringify([m.win, m.pane, m.pic, m.stage, m.lock]) : 'x';
     if (key !== last) { last = key; since = Date.now(); } else if (Date.now() - since >= 1500) return m;
   }
-  return ev(MEAS(id));
+  // A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a picture that never held still is SAID here, right above the judge
+  // that reads it, and answered MARKED — so its red reads «the state never came», never a verdict on the product
+  const m = await ev(MEAS(id));
+  console.log(`    (settle: the picture of ${id} did not hold still for 1.5 s within ${ms / 1000} s — THE STATE NEVER CAME; its last read ${JSON.stringify(m && { win: m.win, pic: m.pic }).slice(0, 200)})`);
+  return { ...(m || {}), timedOut: `the picture did not hold still for 1.5 s within ${ms / 1000} s` };
 };
 const ensureActive = async (id) => {
   const seat = () => ev(`(() => { const w = ${FIND(id)}; if (!w) return null; const s = w._desktopSeats || {}; return { known: !!s.known, active: s.active, pane: w._desktopPaneKey }; })()`);
