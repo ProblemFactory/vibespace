@@ -64,6 +64,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const GIT_ENV = gitEnvFrom(process.env); // §2 asks git for the tracked source INSIDE `npm run build`
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
 const cleanup = [];
 process.on('exit', () => { for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
@@ -832,7 +841,7 @@ function trackedServerSource() {
       const from = "const g = spendGuard.authorize({ reason: 'automation-open', identity, sessionName: v.spec.name || null });";
       const mutDir = tmpdir('vs-spend-convops-');
       fs.mkdirSync(path.join(mutDir, 'src', 'server'), { recursive: true });
-      fs.writeFileSync(path.join(mutDir, 'src/server/conversation-ops.js'), csrc.replace(from, 'const g = { ok: true, hold: null };'));
+      fs.writeFileSync(path.join(mutDir, 'src/server/conversation-ops.js'), editAnchor(csrc, from, 'const g = { ok: true, hold: null };', "src/server/conversation-ops.js"));
       const mh = censusOver(mutDir, ['src/server/conversation-ops.js']);
       ok('§2 …MUTANT: the same file without the authorizer call reads its headless open UNWIRED', csrc.includes(from) && mh.length === 1 && mh[0].gated === false, JSON.stringify(mh));
     }
@@ -923,7 +932,7 @@ function trackedServerSource() {
     const scratch2 = tmpdir('vs-spend-groups-');
     fs.mkdirSync(path.join(scratch2, 'src', 'server'), { recursive: true });
     const real = read('src/server/groups-engine.js');
-    fs.writeFileSync(path.join(scratch2, 'src/server/groups-engine.js'), real.replace('deliver.deliverToConversation(', 'peerMsg.postToPeer('));
+    fs.writeFileSync(path.join(scratch2, 'src/server/groups-engine.js'), editAnchor(real, 'deliver.deliverToConversation(', 'peerMsg.postToPeer(', "src/server/groups-engine.js"));
     const gHits = censusOver(scratch2, ['src/server/groups-engine.js']);
     const allowSet2 = new Set(ALLOW.map((a) => a.file + '#' + a.prim));
     const gUnwired = gHits.filter((h) => !h.gated && !allowSet2.has(h.file + '#' + h.prim));
@@ -5664,7 +5673,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   fs.mkdirSync(path.join(mDir, 'src', 'server'), { recursive: true });
   const from = '      v = authorizeSpendBatch\n        ? authorizeSpendBatch(chosen.map(';
   const fromMoved = 'v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null;';   // the per-continue re-ask on the slot that bills (lg-recovery U2 cure: every item, moved or not)
-  fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), arSrc.replace(from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(').replace(fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }], paid.spendReason);'));
+  fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), editAnchor(editAnchor(arSrc, from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(', "src/server/auto-resume.js"), fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }], paid.spendReason);', "src/server/auto-resume.js"));
   const mRows = censusOver(mDir, ['src/server/auto-resume.js']).filter((h) => h.prim === 'continue-send');
   ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
   ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', /authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));

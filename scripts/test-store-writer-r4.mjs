@@ -30,6 +30,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // ── ⑧ ROUND 4 — MUST 1: THE TAIL IS UNKNOWN UNTIL IT ENDS IN A NEWLINE — ALSO AT THE LOAD ────────────────────────────────
 console.log('⑧ round 4 — MUST 1: a journal whose last byte is not a newline is a tail of unknown state at the load');
@@ -241,7 +250,7 @@ console.log('⑧ round 4 — true words 2: the exit hands every moved store to t
   const mp = path.join(T, 'store-writer-mutant.js');   // outside the tree (a census scanning src/ never sees it): its requires and __dirname made absolute
   let mut = null;
   try {
-    if (src.split(FROM).length === 2) { fs.writeFileSync(mp, src.replace(FROM, "const r = writeHere(s, p, since) ? 'ok' : 'failed';").replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`).replace(/__dirname/g, JSON.stringify(path.join(REPO, 'src')))); mut = run(require(mp)); }
+    if (src.split(FROM).length === 2) { fs.writeFileSync(mp, editAnchor(editAnchor(src, FROM, "const r = writeHere(s, p, since) ? 'ok' : 'failed';", "src/store-writer.js").replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`), /__dirname/g, JSON.stringify(path.join(REPO, 'src')), "src/store-writer.js")); mut = run(require(mp)); }
   } finally { }
   ok(live.written.length === 3 && !live.calls.length && mut && mut.calls.some((c) => /^(writeSync|renameSync|openSync)/.test(c)),
     `true words 2: at the exit the three moved stores were written by the THREAD — the main thread's fs saw ${live.calls.length} write calls; the MUTANT that writes them on the main thread is red by name (${mut ? mut.calls.slice(0, 4).join(', ') : 'its anchor is gone'})`, { live, mut });

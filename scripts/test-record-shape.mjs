@@ -41,6 +41,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skipped = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n, why) => { skipped++; console.log('  ○ SKIP ' + n + ' — ' + why); };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const R = require(path.join(REPO, 'src/record-shape.js'));
@@ -1023,7 +1032,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const swlNext = liveSwl(MM, 'e2e00000-0000-4000-8000-0000000003d2', { error_code: 'EIO', lost: ['plugin_cache'] });
     ok('…a code or a kind this release has no word for («More codes may be added») is still the warning, in the general words — no drift card, no unknown card', swlNext.unknown === 0 && swlNext.drift === 0 && swlNext.level === 'warning' && swlNext.params.code === 'EIO' && /a disk write failed \(EIO\)/.test(swlNext.text), swlNext);
     const mmSrc19 = read('src/message-manager.js'), SWL_LINE = mmSrc19.split('\n').filter((l) => l.startsWith("  'session_writes_lost',"));
-    const MMswl = SWL_LINE.length === 1 && mmSrc19.includes("if (raw.subtype === 'session_writes_lost') {") ? require(M19.write('src/message-manager.js', mmSrc19.replace(SWL_LINE[0] + '\n', '').replace("if (raw.subtype === 'session_writes_lost') {", 'if (false) {'), 'no-swl')) : null;
+    const MMswl = SWL_LINE.length === 1 && mmSrc19.includes("if (raw.subtype === 'session_writes_lost') {") ? require(M19.write('src/message-manager.js', editAnchor(editAnchor(mmSrc19, SWL_LINE[0] + '\n', '', "src/message-manager.js"), "if (raw.subtype === 'session_writes_lost') {", 'if (false) {', "src/message-manager.js"), 'no-swl')) : null;
     const ctlSwl = MMswl && liveSwl(MMswl, 'e2e00000-0000-4000-8000-0000000003d3');
     ok('RED CONTROL: the same record on a copy without the row (the 8b3fdb6ab tree on 2.1.319) ⇒ the unknown-record notice — which a person\'s chat never draws (lane door-healthy-chat: only the status chip counts it) — and no warning line: the lost write said nothing', !!ctlSwl && ctlSwl.unknown === 1 && !ctlSwl.say, ctlSwl);
     // the new fields on a live result / init / user / status: declared ⇒ no drift card
@@ -1042,7 +1051,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const rsSrc19 = read('src/record-shape.js'), FILL19 = "for (const [key, fields] of Object.entries(FIELDS_319)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);\n";
     const NEST19 = rsSrc19.split('\n').filter((l) => l.startsWith('    dailyCapPaused: NESTED_NOTE('));
     const REQ19 = "require('./record-shape.js')";
-    const MMno19 = rsSrc19.includes(FILL19) && NEST19.length === 1 && mmSrc19.split(REQ19).length === 2 ? require(M19.write('src/message-manager.js', mmSrc19.replace(REQ19, 'require(' + JSON.stringify(M19.write('src/record-shape.js', rsSrc19.replace(FILL19, '').replace(NEST19[0] + '\n', ''), 'no-fields-319')) + ')'), 'mm-no-fields-319')) : null;
+    const MMno19 = rsSrc19.includes(FILL19) && NEST19.length === 1 && mmSrc19.split(REQ19).length === 2 ? require(M19.write('src/message-manager.js', mmSrc19.replace(REQ19, 'require(' + JSON.stringify(M19.write('src/record-shape.js', editAnchor(editAnchor(rsSrc19, FILL19, '', "src/record-shape.js"), NEST19[0] + '\n', '', "src/record-shape.js"), 'no-fields-319')) + ')'), 'mm-no-fields-319')) : null;
     const ctlF19 = MMno19 && liveF19(MMno19, 'e2e00000-0000-4000-8000-0000000003d5');
     ok('RED CONTROL: the same conversation on a copy without FIELDS_319 + dailyCapPaused (the 8b3fdb6ab tree on 2.1.319) ⇒ the drift cards and the ledger rows are back', !!ctlF19 && ctlF19.drift >= 3 && ctlF19.rows >= 3, ctlF19);
     // LAW 3, FOR THE PERSON (主开发 on the interim): what each new shape DOES show. An unknown record is silence in a person's chat (lane door-healthy-chat), so a
@@ -1249,7 +1258,7 @@ console.log('§5 negative control — a scratch copy with every `ignored` map em
   ok('the scratch mutation targets the ONE line that fills the ignored maps (the control is meaningful only if that line exists)', src.includes(line));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-record-shape-neg-'));
   try {
-    const mutated = src.replace(line, "for (const [key] of Object.entries(CORPUS_KNOWN)) SHAPES[key].ignored.clear(); for (const s of Object.values(SHAPES)) s.ignored.clear(); // NEGATIVE CONTROL");
+    const mutated = editAnchor(src, line, "for (const [key] of Object.entries(CORPUS_KNOWN)) SHAPES[key].ignored.clear(); for (const s of Object.values(SHAPES)) s.ignored.clear(); // NEGATIVE CONTROL", "src/record-shape.js");
     fs.writeFileSync(path.join(dir, 'record-shape.js'), mutated);
     const neg = require(path.join(dir, 'record-shape.js'));
     const emptied = Object.values(neg.SHAPES).every((s) => s.ignored.size === 0);

@@ -74,6 +74,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const express = require('express');
 const oracle = require('content-disposition'); // express's own dependency — an independent parser
@@ -243,7 +252,7 @@ const ZIP_R2 = "const zipName = contentDisposition((base || 'archive') + '.zip',
 const ZIP_PRE = "res.setHeader('Content-Disposition', `attachment; filename=\"${base.replace(/\"/g, '')}.zip\"`);";
 const BELT = "  try { return fn(); }\n  catch (e) {\n    if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.status(502).json({ error: String((e && e.message) || e) }); }\n    else { try { res.end(); } catch { } }\n  }";
 ok(RFS_SRC.includes(ATTACH_R2) && RFS_SRC.includes(ZIP_R2) && FILES_SRC.includes(BELT), 'the r2 lines the controls replace are present verbatim');
-const { RemoteFs: RemoteFsPre } = M.load('src/remote-fs.js', RFS_SRC.replace(ATTACH_R2, ATTACH_PRE).replace(ZIP_R2, ZIP_PRE), 'preattach');
+const { RemoteFs: RemoteFsPre } = M.load('src/remote-fs.js', editAnchor(editAnchor(RFS_SRC, ATTACH_R2, ATTACH_PRE, "src/remote-fs.js"), ZIP_R2, ZIP_PRE, "src/remote-fs.js"), 'preattach');
 const filesNoBelt = M.load('src/routes/files.js', FILES_SRC.replace(BELT, '  return fn();'), 'nobelt');
 // r2 (3) controls: the pre-r2 raw sendFile (send's legacy dotfile rule) and the pre-r2 ssh stream (pipe's default end, no 'error', no kill)
 const filesNoDot = M.load('src/routes/files.js', FILES_SRC.replace(LOCAL_NAMING, "res.sendFile(filePath, named ? { headers: { 'Content-Disposition': named } } : {});"), 'nodotfiles');

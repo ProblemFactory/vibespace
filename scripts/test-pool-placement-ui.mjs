@@ -11,6 +11,15 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const M = await import('../src/lib/pool-priority-model.js');
 const { decidePoolSwitch } = require(path.resolve('src/account-pool-auto.js'));
 const zh = (await import('../src/lib/i18n-zh.js')).default;
@@ -202,7 +211,7 @@ console.log('§r1 the pin\'s resume carrier (the real setSessionConfig)');
   ok(sb.getSessionConfig(key + ':bad') == null, 'a pin without a member id is no pin (kept by shape, never by truthiness)', sb.getSessionConfig(key + ':bad'));
   ok(sb.pushed >= 4, 'every write is pushed to the synced user state (another device\'s resume carries it too)');
   // control: the list as it was (the pin's clause removed) drops the pin — the two assertions above fail on it
-  const pre = src.replace(/    if \(config\?\.poolPin && typeof config\.poolPin === 'object'[\s\S]*?\n    \}\n/, '');
+  const pre = editAnchor(src, /    if \(config\?\.poolPin && typeof config\.poolPin === 'object'[\s\S]*?\n    \}\n/, '', "src/lib/sidebar-state.js");
   ok(pre !== src, 'control: the patch (the pin\'s clause removed) hits');
   const old = await load(pre, 'prefix');
   old.setSessionConfig(key, { model: 'fable', poolPin: pin });

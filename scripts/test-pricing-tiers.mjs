@@ -48,6 +48,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { UsageHistory } = require(path.join(ROOT, 'src/usage-history.js'));
 let pass = 0, fail = 0, skip = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const dir = scratch('pricing'); fs.mkdirSync(path.join(dir, 'usage-history'), { recursive: true });
 const mk = () => new UsageHistory({ dataDir: dir, homeDir: dir });
 try {
@@ -279,7 +288,7 @@ try {
     const mpSrc = fs.readFileSync(path.join(ROOT, 'src/model-providers.js'), 'utf8');
     const NEW_LINE = "return open && k && k.idPattern.test(want.replace(/\\[1m\\]$/i, '')) ? want : null;", OLD_LINE = 'return open && k && k.idPattern.test(want) ? want : null;';
     const cdir = scratch('pricing-mp388'); fs.mkdirSync(cdir, { recursive: true });
-    fs.writeFileSync(path.join(cdir, 'model-providers.js'), mpSrc.replace(NEW_LINE, OLD_LINE));
+    fs.writeFileSync(path.join(cdir, 'model-providers.js'), editAnchor(mpSrc, NEW_LINE, OLD_LINE, "src/model-providers.js"));
     const MP388 = require(path.join(cdir, 'model-providers.js'));
     const sub388 = MP388.withListed(MP388.presetOf('pv-anthropic-subscription'), CAT.harness.claude);
     ok(mpSrc.includes(NEW_LINE) && MP388.resolveModel(sub388, NEXT) === NEXT && MP388.resolveModel(sub388, NEXT + '[1m]') === null, 'CONTROL (a patched copy with the .388 open branch, the f5e087bb5 list): the forward predicate FAILS there — the bare id went through, the [1m] form was REFUSED (a conversation could pick a new model only bare, which an older CLI ran at its unknown-model 200k window)', [MP388.resolveModel(sub388, NEXT), MP388.resolveModel(sub388, NEXT + '[1m]')]);

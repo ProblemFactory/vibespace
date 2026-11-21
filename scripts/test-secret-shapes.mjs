@@ -35,6 +35,15 @@ const spellingsOf = (v) => {
 };
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const { redactSecrets, redactByValue, wordValue, randomRun, REDACTED, INPUT_MAX } = r('src/secret-shapes.js');
 const belt = r('src/agent-output-belt.js');
@@ -344,7 +353,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   const regDM = leaksOf(SS, (text) => DM.scrub(text, 2000));
   ok(Object.values(regDM).every((v) => v.leak === 0), `CENSUS (A) through decision-model's ONE SCRUB (redactSecrets runs:true, the vendor-bound text): leak 0 of ${Object.values(regDM).reduce((a, v) => a + v.n, 0)}`);
   // RED CONTROL: a mutant that re-adds a value floor (keeps a lowercase word under a holder name) — census (A) goes red by name
-  const floorMut = M.load('src/secret-shapes.js', SRC.replace('    n++;\n    out += text.slice(last, headEnd)', '    if (/^[a-z]{4,12}$/.test(inner)) { KV_HEAD.lastIndex = valEnd; continue; }\n    n++;\n    out += text.slice(last, headEnd)').replace('    const keep = queryTail(text, vs, ve, at(text, m.index));', '    if (/^[a-z]{4,12}$/.test(text.slice(vs, ve))) { QUERY_HEAD_RE.lastIndex = ve; continue; }\n    const keep = queryTail(text, vs, ve, at(text, m.index));'), 'valuefloor');
+  const floorMut = M.load('src/secret-shapes.js', editAnchor(editAnchor(SRC, '    n++;\n    out += text.slice(last, headEnd)', '    if (/^[a-z]{4,12}$/.test(inner)) { KV_HEAD.lastIndex = valEnd; continue; }\n    n++;\n    out += text.slice(last, headEnd)', "src/secret-shapes.js"), '    const keep = queryTail(text, vs, ve, at(text, m.index));', '    if (/^[a-z]{4,12}$/.test(text.slice(vs, ve))) { QUERY_HEAD_RE.lastIndex = ve; continue; }\n    const keep = queryTail(text, vs, ve, at(text, m.index));', "src/secret-shapes.js"), 'valuefloor');
   const regMut = leaksOf(floorMut);
   ok(floorMut.redactSecrets('api_key=changeme').text === 'api_key=changeme' && regMut['one dictionary word'].leak > 0, `RED CONTROL (a value floor re-added): api_key=changeme kept, census (A) leaks — one dictionary word ${(100 * regMut['one dictionary word'].leak / regMut['one dictionary word'].n).toFixed(1)} %`);
 
@@ -530,12 +539,12 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   ok(!surfaceOk(tl.replace('maskedNoteOf(note.textContent, t)', "''"), SURFACES['the progress note + its detail (task-log)'][1]), 'CONTROL: a surface copy that draws its words without the rule ⇒ the census is RED');
 
   // RED CONTROLS (patched copies, each run through the SAME legs)
-  const baseRule = M.load('src/secret-shapes.js', SRC.replace('    if (!holderName(m[4])) continue;', '    if (!secretName(m[4])) continue;').replace('let hold = holderName(m[2]), ve = -1;', 'let hold = secretName(m[2]), ve = -1;'), 'baserule');
+  const baseRule = M.load('src/secret-shapes.js', editAnchor(editAnchor(SRC, '    if (!holderName(m[4])) continue;', '    if (!secretName(m[4])) continue;', "src/secret-shapes.js"), 'let hold = holderName(m[2]), ve = -1;', 'let hold = secretName(m[2]), ve = -1;', "src/secret-shapes.js"), 'baserule');
   ok(baseRule.redactSecrets(OWNER).text.includes('token_usage=' + REDACTED) && beltOver(M.files[M.files.length - 1]).maskForSink(OWNER) !== OWNER && baseRule.redactSecrets('TOKEN_TTL=3600').text !== 'TOKEN_TTL=3600',
     'RED CONTROL (the base\'s word test in place of the grammar): token_usage=«redacted» through the belt — census (B) goes red');
   const fySrc = fs.readFileSync(path.join(REPO, 'src/lib/foryou-links.js'), 'utf8');
   ok(fySrc.includes('const mask = marked ? maskedLink(ref) : null;') && fySrc.includes('const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;'), 'the base-card control\'s two patches each find their line');
-  const FY0 = await import(M.write('src/lib/foryou-links.js', fySrc.replace('const mask = marked ? maskedLink(ref) : null;', 'const mask = null;').replace('const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;', 'const mk = null;'), 'nomask', { esm: true }));
+  const FY0 = await import(M.write('src/lib/foryou-links.js', editAnchor(editAnchor(fySrc, 'const mask = marked ? maskedLink(ref) : null;', 'const mask = null;', "src/lib/foryou-links.js"), 'const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;', 'const mk = null;', "src/lib/foryou-links.js"), 'nomask', { esm: true }));
   const s0 = FY0.segmentText(belt.maskForSink(SECRET['a magic sign-in link'][0] + ' and /home/u/out/[vault:secret:run]/report.md'));
   ok(s0.some((g) => g.t === 'link' && g.ref.includes(REDACTED)) && s0.some((g) => g.t === 'link' && g.kind === 'path') && !s0.some((g) => g.t === 'masked'), 'RED CONTROL (the base\'s card): a masked URL and a masked path are whole-looking LINKS — the LAW 2 legs go red');
 }
@@ -754,7 +763,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     console.log('      ' + J({ realPiece: c1, containsFixedWord: c2 }));
   }
   // r5 (the read's F1): a message mode that FAILS is the line rule — never the partial text a throw left (a control throws on purpose)
-  { const TH = M.load('src/secret-shapes.js', SRC.replace('function messageValue(text, s, e, {', 'function messageValue(text, s, e, {') .replace("  let out = '', i = s, first = !later,", "  if (text.includes('THROWME')) throw new Error('control'); let out = '', i = s, first = !later,"), 'throws');
+  { const TH = M.load('src/secret-shapes.js', editAnchor(editAnchor(SRC, 'function messageValue(text, s, e, {', 'function messageValue(text, s, e, {', "src/secret-shapes.js"), "  let out = '', i = s, first = !later,", "  if (text.includes('THROWME')) throw new Error('control'); let out = '', i = s, first = !later,", "src/secret-shapes.js"), 'throws');
     const L = 'session: THROWME ghp_' + 'A'.repeat(36) + ' and Bearer ' + 'b'.repeat(30), a = TH.redactSecrets(L, { message: true }).text, b0 = TH.redactSecrets(L).text;
     ok(a === b0 && !a.includes('A'.repeat(36)), 'a message mode that throws gives the LINE result whole (the token after it hidden, not skipped)', J(a)); }
   // cure 2 (主开发 08:42Z): a mask made by the GAP FILTER is named in the sender's answer — the head whose region it filtered
