@@ -36,6 +36,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { freePorts, scratch, fixtureSid, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { armWatchdog } from './suite-watchdog.mjs';
 import { mintRoot, startHub } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (§57c): the tree and the home live in its root
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -68,7 +69,10 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+const T0 = Date.now();   // (主开发 r1292: where this suite's time goes — its own build first, then each section, printed)
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+console.log(`  (the worktree's own npm run build — i18n check, the bundles, the agentd release, its test scripts: ${Date.now() - T0} ms)`);
+const tPlus = () => `(t+${Math.round((Date.now() - T0) / 1000)} s)`;
 
 // THE FAKE CLAUDE — the real CLI's words at a wall / an overload (2.1.308 shapes), every prompt it got logged per conversation
 const FAKE_BIN = path.join(fakeHome, 'fake-bin'); fs.mkdirSync(FAKE_BIN, { recursive: true });
@@ -134,7 +138,11 @@ const cleanup = () => {
   try { hub.stop(); } catch { }   // the root itself (tree, home, worktree) goes with the helper's own exit hook
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
+const CDP_WAITING = new Map();   // id → { method, at }: the debugging door's commands not answered yet (said at a kill)
+// THE SUITE'S OWN CLOCK (scripts/suite-watchdog.mjs — the two-clock rule, the read's should): it fires before the gate's kill and NAMES the
+// section (WD.section at each header), the last line printed and the debugging door's commands still waiting
+const WD = armWatchdog({ exit: (code) => { cleanup(); process.exit(code); }, pending: () => [...CDP_WAITING.values()].map((w) => `CDP ${w.method} (${((Date.now() - w.at) / 1000).toFixed(1)} s)`) });
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { for (const [, w] of CDP_WAITING) console.log(`    [the debugging door] still waiting at the ${sig}: ${w.method} for ${Math.round((Date.now() - w.at) / 1000)} s`); cleanup(); process.exit(1); });
 const turnsOf = (sid) => { try { return fs.readFileSync(path.join(TURNS, sid), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const tallyOf = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return { stamps: Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length, attended: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && !(Number(x.planned) >= 0)).reduce((n, x) => n + (Number(x.count) || 1), 0), presses: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && Number(x.planned) >= 0).length }; } catch { return { stamps: -1, attended: -1 }; } };
 const stamps = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return Object.values(b.identities || {}).flat().filter((x) => x && x.reason === 'bulk-resume').length; } catch { return -1; } };
@@ -158,7 +166,11 @@ try {
   let seq = 0; const pend = new Map();
   const pageErrors = [];
   cdp.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method === 'Runtime.exceptionThrown') pageErrors.push(JSON.stringify(m.params.exceptionDetails).slice(0, 400)); });
-  const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++seq; pend.set(id, r); cdp.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+  // THE DEBUGGING DOOR'S SEND IS BOUNDED (主开发 r1292 — the hotfix run's try 1 was killed at the row's bound while a CDP reply never came:
+  // the hang report said «idle», no command named): a command not answered in CDP_MS is said BY NAME and rejected (a leg's own bound then
+  // speaks); every command still waiting is said at a kill (the signal handler above)
+  const CDP_MS = 60000;
+  const send = (method, params = {}, sessionId) => new Promise((r, rej) => { const id = ++seq; const t = setTimeout(() => { pend.delete(id); CDP_WAITING.delete(id); console.log(`    [the debugging door] ${method} got no answer in ${CDP_MS / 1000} s ${tPlus()}`); rej(new Error(`the debugging door: ${method} got no answer in ${CDP_MS / 1000} s`)); }, CDP_MS); CDP_WAITING.set(id, { method, at: Date.now() }); pend.set(id, (m) => { clearTimeout(t); CDP_WAITING.delete(id); r(m); }); cdp.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
   const TOASTS = `(() => { window.__toasts = []; new MutationObserver((ms) => { for (const r of ms) for (const n of r.addedNodes) if (n.nodeType === 1 && /toast/.test(n.className || '')) window.__toasts.push(n); }).observe(document, { childList: true, subtree: true }); window.__toastTexts = () => window.__toasts.map((n) => (n.querySelector('.toast-body, .global-toast-text') || n).textContent.trim()); })();`;
   async function newPage(w, h, mobile, lang) {
     const tg = await send('Target.createTarget', { url: 'about:blank', newWindow: true });
@@ -192,14 +204,19 @@ try {
     return { title: (o.querySelector('.dialog-header h3') || {}).textContent, lead: t('.resume-stopped-lead')[0] || '', dollars: t('.resume-stopped-dollars')[0] || '', basis: t('.resume-stopped-basis'), member: t('.resume-stopped-member'), status: t('.resume-stopped-status')[0] || '', empty: t('.resume-stopped-empty')[0] || '', btns, vw: innerWidth, vh: innerHeight, rect: { l: Math.round(d.left), r: Math.round(d.right), t: Math.round(d.top), b: Math.round(d.bottom) } }; })()`;
 
   // ════ desk 1100 (zh) ════
-  console.log('── desk 1100 (zh) ──');
+  WD.section('desk 1100 (zh)'); console.log(`── desk 1100 (zh) ── ${tPlus()}`);
   const D = await newPage(1100, 800, false, 'zh');
   check('desk: the app is up', !!D.ready);
   for (let k = 0; k < 4; k++) await D.ev(`(app.createSession({ cwd: ${JSON.stringify(CWD)}, name: ${JSON.stringify(NAMES[k])}, resumeId: ${JSON.stringify(SIDS[k])}, mode: 'chat', backend: 'claude' }), true)`);
   const live = await until(() => D.ev(`(() => { const rows = app.sidebar._webuiSessions || []; const m = Object.fromEntries(rows.map((s) => [s.backendSessionId, s.id])); return ${JSON.stringify(SIDS)}.every((x) => m[x]) ? m : null; })()`), 60000, 300);
   check('desk: four conversations resumed — all four live on the server', !!live, live);
   if (!live) throw new Error('no live sessions');
-  for (let k = 0; k < 4; k++) { await D.ev(`(app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(live[SIDS[k]])}, text: ${JSON.stringify(ASK[k])} }), true)`); await sleep(400); } // one after the other: the stops have an order
+  // the stops have an ORDER (the leg «the walls' order is the order they happened»): each next input goes only once the previous
+  // conversation's stop is RECORDED on the page (its row's stoppedBy) — what happened, never the 400 ms sleep it had (主开发 r1292)
+  const stopOf = (sid) => `(() => { const r = (app.sidebar._webuiSessions || []).find((s) => s.backendSessionId === ${JSON.stringify(sid)}); return r && r.stoppedBy ? r.stoppedBy.kind : null; })()`;
+  const ordered = [];
+  for (let k = 0; k < 4; k++) { await D.ev(`(app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(live[SIDS[k]])}, text: ${JSON.stringify(ASK[k])} }), true)`); if (k < 3) ordered.push(await until(() => D.ev(stopOf(SIDS[k])), 30000, 100)); }
+  check('desk: each stop RECORDED on the page before the next input went (the walls\' order made by what happened, never a fixed sleep)', ordered.every(Boolean), ordered);
   const facts = await until(() => D.ev(`(() => { const rows = app.sidebar._webuiSessions || []; const f = (sid) => (rows.find((s) => s.backendSessionId === sid) || {}).stoppedBy || null; const out = ${JSON.stringify(SIDS)}.map(f); return out[0] && out[1] && out[2] ? out : null; })()`), 30000, 250);
   check('desk: the REAL stream consumer + wall machine wrote the fact: two quota stops (their stated reset), one overload, the normal turn none', !!facts && facts[0].kind === 'quota' && facts[1].kind === 'quota' && facts[2].kind === 'overload' && facts[3] === null && facts[0].autoResume === false && /hit your limit/.test(facts[0].said) && /529/.test(facts[2].said), { facts, log: hub.log().split('\n').filter((l) => /stopped-by|\[wall\]/.test(l)).slice(-8) });
   await D.ev('(app.sidebar.toggle(true), true)');
@@ -265,7 +282,7 @@ try {
   check('desk: 关闭 ⇒ nothing ran (no continue reached any CLI, no ledger stamp)', (await until(() => D.ev("!document.getElementById('resume-stopped-dialog')"), 3000, 100)) && SIDS.slice(0, 3).every((sid) => turnsOf(sid).length === 1) && stamps() <= 0, { turns: SIDS.map(turnsOf), stamps: stamps() });
 
   // ════ desk 1100 (en) — the confirm in English, from the ⋯ ════
-  console.log('── desk 1100 (en) ──');
+  WD.section('desk 1100 (en)'); console.log(`── desk 1100 (en) ── ${tPlus()}`);
   const E = await newPage(1100, 800, false, 'en');
   check('en: the app is up', !!E.ready);
   await E.ev('(app.sidebar.toggle(true), true)');
@@ -280,7 +297,7 @@ try {
   await press(E.S, E.ev, '#resume-stopped-dialog .btn-cancel');
 
   // ════ phone 390 (zh) ════
-  console.log('── phone 390 (zh) ──');
+  WD.section('phone 390 (zh)'); console.log(`── phone 390 (zh) ── ${tPlus()}`);
   const Ph = await newPage(390, 844, true, 'zh');
   check('phone: the app is up', !!Ph.ready);
   await Ph.ev('(app.sidebar.toggle(true), true)');
@@ -299,7 +316,7 @@ try {
   await tap(Ph.S, Ph.ev, '#resume-stopped-dialog .btn-cancel');
 
   // ════ desk (zh): RESUME ALL ════
-  console.log('── desk (zh): resume all ──');
+  WD.section('desk (zh): resume all'); console.log(`── desk (zh): resume all ── ${tPlus()}`);
   await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
   await press(D.S, D.ev, '.auto-resume-bulk .resume-stopped-open');
   await until(() => D.ev(dialogFacts), 8000, 150);
