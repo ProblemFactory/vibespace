@@ -322,5 +322,37 @@ console.log('— ⑤ the «End them» line after a press (the page): the latest 
     '⑤ the page sets the line from its OWN words + the latest outcome (src/lib/chat-view.js _endLeftBehind) — no `textContent +=` left in the press', { found: at >= 0 });
 }
 
+console.log('— ⑥ a reload draws the line again (B-69a7 remainder (d)): the hub keeps what it said, an attach carries it');
+{
+  const said = [];
+  const bcast = (s, id, m) => said.push(m);
+  const sess = { backend: 'claude', _userInputAt: NOW - TURN_AGE, pty: { pid: 9300 }, _childPid: 9303 };
+  const opts = (at, left) => ({ broadcastToSession: bcast, now: () => at, buffersDir: ROOT, read: async () => ({ left, kept: [], scan: { cut: false } }) });
+  await DOOR.afterStop(sess, 'sess-lb-1', opts(NOW, [{ pid: 9101, comm: 'node', start: AFTER }]));
+  const l1 = DOOR.linesOf(sess);
+  console.log(`    (after a Stop the attach would carry: ${JSON.stringify(l1)})`);
+  ok(l1.length === 1 && l1[0].at === NOW && l1[0].door === true && l1[0].left[0].comm === 'node' && JSON.stringify(l1[0]) === JSON.stringify(said[0].data),
+    '⑥ the line a settled Stop SAID is kept: an attach (a reload) carries it as it was said, with its door while its End list stands', l1);
+  const pressed = await DOOR.endLeft(sess, { by: { kind: 'human' }, at: NOW, still: async (rw) => ({ pid: rw.pid, starttime: rw.start, comm: rw.comm }), end: async (m) => ({ ended: m, left: [], stale: 0 }) });
+  ok(pressed.ok && DOOR.linesOf(sess).length === 0, '⑥ a press that ended everything the line named: the line is no longer kept (a reload has nothing of it left to tell)', DOOR.linesOf(sess));
+  await DOOR.afterStop(sess, 'sess-lb-1', opts(NOW + 1, [{ pid: 9102, comm: 'python3', start: AFTER }]));
+  await DOOR.endLeft(sess, { by: { kind: 'human' }, at: NOW + 1, still: async () => 'unread' });
+  const l2 = DOOR.linesOf(sess);
+  ok(l2.length === 1 && l2[0].door === true, '⑥ a press that could not read a row again keeps the line and its door (press again — after a reload too)', l2);
+  for (let k = 2; k < 7; k++) await DOOR.afterStop(sess, 'sess-lb-1', opts(NOW + k, [{ pid: 9200 + k, comm: 'sleep', start: AFTER }]));
+  const l3 = DOOR.linesOf(sess);
+  ok(l3.length === 4 && l3[0].at === NOW + 3 && l3[3].at === NOW + 6, '⑥ at most four lines are kept, newest last (as the End lists)', l3.map((x) => x.at));
+  const paired = { backend: 'claude', host: 'h-2', _userInputAt: NOW - TURN_AGE };
+  await DOOR.afterStop(paired, 'sess-lb-1', { broadcastToSession: bcast, now: () => NOW, hosts: { get: () => ({ name: 'Studio Mac' }), deviceBounded: async () => ({ leftBehind: async () => ({ left: [{ pid: 4242, comm: 'node', start: 1 }], kept: [], scan: { cut: false } }) }) } });
+  const lp = DOOR.linesOf(paired);
+  ok(lp.length === 1 && lp[0].door === false && lp[0].machine === 'Studio Mac', '⑥ a paired machine\'s line is kept too — named with its machine, no door', lp);
+  // the attach and the page (source: the payload names it; the page draws it after the history, again only when its element is gone)
+  const WH = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), CV = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+  const draws = CV.split("if (Array.isArray(meta.leftBehind)) for (const d of meta.leftBehind) this._sayLeftBehind(d || {});").length - 1;
+  ok(WH.includes("leftBehind: (() => { try { return require('./server/left-behind-door.js').linesOf(session); } catch { return []; } })(),") && draws === 2
+    && CV.includes('const had = d.at ? seen.get(d.at) : null;') && CV.includes('if (had && had.isConnected) return;'),
+    '⑥ the chat attach carries linesOf(session); the page draws them after the history on BOTH of its roads (the identical slab and the full one) and a line again only when its element is gone', { draws });
+}
+
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 report();

@@ -1857,6 +1857,7 @@ function registerWsHandler(wss, ctx) {
                 normEpoch: session._normEpoch || 0,
                 remoteState: session._vaultWait ? { state: 'vault-locked', at: session._vaultWait } : session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),   // lane vault-e2e-password-fix-r2: waiting for the vault
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null,
+                leftBehind: (() => { try { return require('./server/left-behind-door.js').linesOf(session); } catch { return []; } })(),   // B-69a7 (d): a reload draws them again
               };
               // + `opSeq` on both rungs (the capability advert: the last seq this
               // socket is current to), then the replay OR the slab. Written to

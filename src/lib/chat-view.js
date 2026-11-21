@@ -1508,6 +1508,7 @@ class ChatView {
           if (meta.taskState) this._applyTaskState(meta.taskState);
           if (meta.goal != null) { this._onGoalUpdated(meta.goal, meta.goalElapsed); if (meta.goalStatus) this._statusBar.setGoalStatus(meta.goalStatus); }
           this._applyLiveMeta?.(meta);
+          if (Array.isArray(meta.leftBehind)) for (const d of meta.leftBehind) this._sayLeftBehind(d || {});   // B-69a7 (d): drawn once (kept where still on the page)
         }
         if (isStreaming) this._onServerStreamLabel(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
         else this._hideTyping?.();
@@ -1539,6 +1540,7 @@ class ChatView {
       if (meta.chatStatus) this.applyStatus(meta.chatStatus);
       if (meta.taskState) this._applyTaskState(meta.taskState);
       if (meta.goal != null) { this._onGoalUpdated(meta.goal, meta.goalElapsed); if (meta.goalStatus) this._statusBar.setGoalStatus(meta.goalStatus); }
+      if (Array.isArray(meta.leftBehind)) for (const d of meta.leftBehind) this._sayLeftBehind(d || {});   // B-69a7 (d): a reload draws what a Stop left running again, its door while it stands
       // Restore pending permission overlays from server (survived in buffer).
       // Usually redundant — MessageManager attaches `permission` onto the
       // normalized tool message — but covers control_requests the normalizer
@@ -7114,12 +7116,13 @@ class ChatView {
     if (d.unreadable > 0) parts.push(t('{n} process(es) of this user started during the turn could not be read', { n: d.unreadable }));
     if (d.unread) parts.push(t('what its command tool left could not be read'));
     if (!parts.length) return;
-    const seen = this._leftBehindSaid || (this._leftBehindSaid = new Set());
-    if (d.at && seen.has(d.at)) return;   // one line per settled Stop (each its own list on the hub)
-    if (d.at) seen.add(d.at);
+    const seen = this._leftBehindSaid || (this._leftBehindSaid = new Map());
+    const had = d.at ? seen.get(d.at) : null;
+    if (had && had.isConnected) return;   // one line per settled Stop (each its own list on the hub) — drawn again only when gone (a history reload)
     const el = document.createElement('div');
     el.className = 'chat-left-behind';
     this._container.appendChild(el);
+    if (d.at) seen.set(d.at, el);
     const line = document.createElement('div');
     line.className = 'chat-system';
     const words = document.createElement('span');

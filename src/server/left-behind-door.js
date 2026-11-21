@@ -84,8 +84,17 @@ async function afterStop(session, id, { broadcastToSession, hosts = null, read =
   }
   const names = (l) => l.map((x) => ({ pid: x.pid, comm: x.comm }));
   const data = { at, left: names(left), kept: names(kept), jobs: names(jobs), machine: session.host ? nameOfHost(hosts, session.host) : null, door, unread, unreadable };
+  // B-69a7 (d): the said line is KEPT (at most LISTS, newest last) — a page that reloads is sent it again with its attach
+  session._leftBehindLines = (Array.isArray(session._leftBehindLines) ? session._leftBehindLines : []).concat([data]).slice(-LISTS);
   try { broadcastToSession(session, id, { type: 'msg', sessionId: id, op: 'meta', subtype: 'left-behind', data }); } catch { }
   return data;
+}
+/** B-69a7 (d): the lines a page that ATTACHES draws again (a reload) — each as it was said, its door only while its End list is
+ *  still here (a line whose press ended everything it named is no longer kept) */
+function linesOf(session) {
+  const lines = session && Array.isArray(session._leftBehindLines) ? session._leftBehindLines : [];
+  const lists = session && Array.isArray(session._leftBehind) ? session._leftBehind : [];
+  return lines.map((d) => ({ ...d, door: !!d.door && lists.some((l) => l && Number(l.at) === Number(d.at)) }));
 }
 
 /** THE END DOOR: a person's press on the line said at `at` → {ok, ended: [comm], still: [comm], gone: n, unread: n} | {ok: false, reason} */
@@ -119,6 +128,7 @@ async function endLeft(session, { by = null, at = null, end = PI.endTree, still 
     const r = members.length ? await end(members, { graceMs }) : { ended: [], left: [], stale: 0 };
     const names = (l) => (Array.isArray(l) ? l : []).map((x) => (x && typeof x === 'object' ? x.comm : x)).filter(Boolean).map(String);
     setList(unread.length ? unread : []);   // what could not be read again stays listed for another press
+    if (!unread.length && Array.isArray(session._leftBehindLines)) session._leftBehindLines = session._leftBehindLines.filter((d) => Number(d.at) !== Number(lb.at));   // (d) nothing left of it to tell a reload
     return { ok: true, ended: names(r.ended), still: names(r.left), gone: gone + (Number(r.stale) || 0), held, unread: unread.length };
   } catch {
     setList(lb.rows);   // a press that did not finish vouches for nothing: the list is kept (a second press re-checks every row), said
@@ -126,4 +136,4 @@ async function endLeft(session, { by = null, at = null, end = PI.endTree, still 
   } finally { running.delete(lb.at); }
 }
 
-module.exports = { afterStop, endLeft, markOf, startOf };
+module.exports = { afterStop, endLeft, linesOf, markOf, startOf };
