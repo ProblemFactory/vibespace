@@ -268,7 +268,7 @@ jobs:
       - name: Install CJK fonts (the runner measures zh / ja text as users see it)
         run: bash scripts/ci-fonts.sh --system
         timeout-minutes: 6
-      - name: Install claude CLI, the tree's pinned build (B-28b1: scripts/ci-claude.mjs pin, as the fast job)
+      - name: Install claude CLI, the tree's pinned build (B-28b1, scripts/ci-claude.mjs pin, as the fast job)
         run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)
         timeout-minutes: 5
       # the ONE npm door (see the fast job): installs retried, suites never
