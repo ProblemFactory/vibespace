@@ -110,6 +110,9 @@ const R4 = await road('④ the Claude history (the warm, then the reader)', asyn
   return { warmed, records: Array.isArray(m._all) ? m._all.length : null, notLoaded: m.notLoaded || null };
 });
 const CS = require(path.join(REPO, 'src/codex-session-store.js'));
+// the codex rollout's FINDER walk and its head's meta read (extractCodexThreadMeta) run with the pool up too — rows B-a60e and the
+// meta cache, not this row's fallback: made before the road, so the road's reads are its own (the head read then costs one stat)
+C.findCodexSessionJsonlPath(tid); C.extractCodexThreadMeta(codexFp);
 const R5 = await road('⑤ the codex history (rawAsync)', async () => {
   const m = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid, cwd, buffer: '' }, tid, {});
   const all = await m.rawAsync();

@@ -177,11 +177,11 @@ console.log('— ④ the fallbacks, said');
     console.log = (...a) => { logs.push(a.join(' ')); };
     codex._setHistoryHeapMbForTest(1);
     const h0 = codex.mergedReadStats();
-    const bound = await new S.CodexSessionMessages(sess('bound'), 'w-bound', { buffersDir }).rawAsync();
+    const boundReader = new S.CodexSessionMessages(sess('bound'), 'w-bound', { buffersDir }), bound = await boundReader.rawAsync();
     const h1 = codex.mergedReadStats();
     codex._setHistoryHeapMbForTest(768);
     console.log = logWas;
-    ok(h1.failed === h0.failed + 1 && same(bound, syncRecs), 'the worker\'s heap bound refuses the merged read ⇒ the old road reads the same records', { h0, h1 });
+    ok(h1.failed === h0.failed + 1 && bound.length < syncRecs.length && boundReader.notLoaded === 'transcript_reader_restarting', 'the worker\'s heap bound refuses the merged read ⇒ the per-file read is refused by the same bound: «not loaded yet», nothing parsed on the main loop (row B-422c unit 1 — unit 2 reads such a history in bounded slices)', { h0, h1, records: bound.length, notLoaded: boundReader.notLoaded });
     ok(logs.some((l) => /\[codex\] a conversation's merged history read fell back to the paged parse \(\d+\): the history worker's heap bound/.test(l)), 'the give-up is SAID with its reason (the heap bound)', logs.filter((l) => /merged history/.test(l)).slice(0, 2));
   } finally { console.log = logWas; console.warn = warnWas; codex._setHistoryHeapMbForTest(768); }
 }

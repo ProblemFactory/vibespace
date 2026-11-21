@@ -13,7 +13,7 @@
 //      holds the pool — RED CONTROL: L2's road (page 0 and page 2 by the pool's least-busy pick, a PLACED stall on page 0's worker): gone
 //   ⑥ THE CURE ROUND (主开发 23:16Z): (P1 is test-codex-attach-off-loop's) P2 a read waiting its turn is acked (a placed stall holds the line); the wiring;
 //      S3 a person's read before every bulk read queued, the bulk flag's road, one request = one read (RED CONTROL: no memo, three);
-//      S2 a history past the worker's bound — no one-shot read, the parse on the loop counted and said; S5 a page bounded in bytes
+//      S2 a history past the worker's bound — no one-shot read, NO parse on the loop (row B-422c: «not loaded yet», said); S5 a page bounded in bytes
 //      THE ORDERING LAW, driven (主开发 02:22Z): a codex RE-ATTACH's read waits in the line inside the PENDING window — a stamped frame never
 //      reaches the new socket ahead of its `attached` (RED CONTROL: the read after the join); a CLOSED socket's read is dropped before it
 //      starts (RED CONTROL: no `wanted`); 03:16Z: the held frame arrives EXACTLY ONCE, in the verdict's replay (RED: twice); a read whose
@@ -210,14 +210,15 @@ console.log('— ⑥ THE CURE ROUND (主开发 23:16Z): every attach reads off t
   const one = await reads(true), three = await reads(false);
   ok(one === 1 && three === 3, `S3 one request — a page, its status and its turn map — joins the read line ONCE (${one} read); RED CONTROL: without the request's memo, ${three} reads`);
   ok(read('src/routes/sessions.js').split("host: req.query.host, memo: {} }").length === 3, 'S3 (the wiring) both session-messages routes give the request its memo');
-  // S2 — A PARSE THAT GOES BACK ON THE LOOP IS SAID: the history worker's bound refuses (here 1 MB), the read gives up WITHOUT the
-  // one-shot read, and the parse on the loop is counted and logged with its reason
+  // S2 — the history worker's bound refuses (here 1 MB): the read gives up WITHOUT the one-shot read, and (row B-422c unit 1, 主开发
+  // r1006) NOTHING is parsed on the loop — the reader answers «not loaded yet», said once with its reason (unit 2: the sliced read)
   const l0 = onLoopOf().count, o0 = statsOf().oneShot, said2 = [];
   const cw2 = console.warn; console.warn = (...x) => said2.push(x.join(' '));
   setBound(1);
-  try { await new S.CodexSessionMessages(small('hb'), 'w-hb', { buffersDir }).rawAsync(); } finally { setBound(768); console.warn = cw2; }
+  let hb = null;
+  try { hb = new S.CodexSessionMessages(small('hb'), 'w-hb', { buffersDir }); await hb.rawAsync(); } finally { setBound(768); console.warn = cw2; }
   const l1 = onLoopOf();
-  ok(l1.count === l0 + 1 && /heap bound/.test(l1.recent[l1.recent.length - 1].why) && statsOf().oneShot === o0 && said2.some((w) => /ON THE MAIN LOOP/.test(w) && /heap bound/.test(w)), `S2 a history past the worker's bound: no one-shot read, ONE parse on the loop — counted and said: «${(said2.find((w) => /ON THE MAIN LOOP/.test(w)) || '').slice(0, 120)}…»`);
+  ok(l1.count === l0 && statsOf().oneShot === o0 && !!hb && hb.notLoaded === 'transcript_reader_restarting' && said2.some((w) => /not loaded yet/.test(w) && /heap bound/.test(w)), `S2 a history past the worker's bound: no one-shot read, NO parse on the loop — «not loaded yet», said with its reason: «${(said2.find((w) => /not loaded yet/.test(w)) || '').slice(0, 120)}…»`);
   // S5 — A PAGE IS BOUNDED IN BYTES as well as in lines: pages of ≤ 200 000 characters of text, `next` where the next begins, the same records
   const one2 = TW2().runOp('boundedParsed', { fp: SFP, tailOnly: true }).result, got = []; let tok = null, tot = Infinity, at = 0, pages = 0, maxText = 0;
   while (at < tot) { const pg = TW2().runOp('boundedParsedPage', { fp: SFP, tailOnly: true, start: at, count: 8192, maxBytes: 200000, ...(tok ? { token: tok } : {}) }).result; tok = pg.token; tot = pg.total; maxText = Math.max(maxText, (pg.next - at)); got.push(...pg.records); at = pg.next; pages++; }
