@@ -692,6 +692,10 @@ const legTitleMenu = async () => {
   await esc();
   return { at, m };
 };
+// THE BAR'S LAW AT 360 px, ONE predicate (box row 119 at 0cc12963d, 23:58Z: the CONTROL's own copy still read «one row» after
+// 79feb059d «the chat status strip, step two» made the law the strip's SAME two rows — ⑦ was restated, the control was not):
+// ⑦ and the real-bundle CONTROL ask the same function, so the two can never read two laws again
+const barLaw = (n) => !!n && n.rows === 2 && n.bar <= 60 && Array.isArray(n.wrongRow) && n.wrongRow.length === 0;
 const legNarrowChat = async () => {
   await closeAll(); await attach(0);
   await waitFor(`document.querySelectorAll('.window .chat-message-list > .chat-msg-assistant').length >= 1`, 15000);
@@ -779,7 +783,7 @@ const runViewport = async ([VW, VH], font) => {
   console.log(`— ⑦ the chat window (${tag})`);
   await step(`${tag} ⑦ the chat window`, async () => {
     const c = await legNarrowChat();
-    check(`⑦ ${tag}: a ${c.narrow.w} px chat window's status bar is the strip's SAME two rows (${c.narrow.rows} rows, ${c.narrow.bar} px ≤ 60; row 1 «${c.narrow.row1}», row 2 «${c.narrow.row2}») — each mark on the row the table gives it (P2-4)`, c.narrow.rows === 2 && c.narrow.bar <= 60 && c.narrow.wrongRow.length === 0, c.narrow);
+    check(`⑦ ${tag}: a ${c.narrow.w} px chat window's status bar is the strip's SAME two rows (${c.narrow.rows} rows, ${c.narrow.bar} px ≤ 60; row 1 «${c.narrow.row1}», row 2 «${c.narrow.row2}») — each mark on the row the table gives it (P2-4)`, barLaw(c.narrow), c.narrow);
     check(`⑦ ${tag}: nothing behind «show more» — no ⋯, nothing folded, every mark inside the bar (${c.narrow.hidden.length ? 'cut: ' + c.narrow.hidden.join(', ') : 'none cut'})`, !c.narrow.more && c.narrow.folded === 0 && c.narrow.hidden.length === 0 && /\bmodel\b/.test(c.narrow.row1) && /\bsettings\b/.test(c.narrow.row2), c.narrow);
     check(`⑦ ${tag}: a ${c.short.h} px high chat window keeps ≥ 45 % of itself for messages (${Math.round(c.short.share * 100)} %, ${c.short.list} px)`, c.short.share >= 0.45, c.short);
     const over = await hoverWords(c.id);
@@ -1592,7 +1596,7 @@ const acceptanceAndControls = async () => {
     const d2 = await legDragOverTaskbar('RED-back');
     const m2 = await legTitleMenu();
     const c2 = await legNarrowChat();
-    check('CONTROL: the real bundle back — the same legs pass (the release reachable, the menu inside, the bar one row)', reachableBar(d2.after) && !!m2.m && m2.m.firstTop >= 0 && c2.narrow.rows === 1, { d: d2.after, m: m2.m, c: c2.narrow });
+    check('CONTROL: the real bundle back — the same legs pass (the release reachable, the menu inside, the bar the strip\'s same two rows: ⑦\'s own law)', reachableBar(d2.after) && !!m2.m && m2.m.firstTop >= 0 && barLaw(c2.narrow), { d: d2.after, m: m2.m, c: c2.narrow });
   });
 
   // ═════════════════════════════════════════ THE RED CONTROL r2 (951×585) ═════════════════════════════════════════
