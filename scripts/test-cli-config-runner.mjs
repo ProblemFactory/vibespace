@@ -50,10 +50,11 @@ async function queueLegs(R) {
   const first = st.calls.length;
   st.calls[0].finish(okRun); await tick(); await tick();
   const second = st.calls.length, plan2 = st.calls[1] && st.calls[1].o.envAdd.VIBESPACE_CLI_CONFIG;
-  let bDone = false; b.then(() => { bDone = true; });
-  if (st.calls[1]) st.calls[1].finish(okRun);
-  const [la, lb, lc] = await Promise.all([a, b, c]);
-  return { first, second, plan2, most: st.most(), same: lb === lc && la !== lb, bDone };
+  // every run started is finished (a red copy starts one per request), and the wait is bounded: a leg never hangs the suite
+  for (let k = 0; k < 3; k++) { for (const call of st.calls) call.finish(okRun); await tick(); }
+  const all = await Promise.race([Promise.all([a, b, c]), new Promise((r) => setTimeout(() => r(null), 5000))]);
+  const [la, lb, lc] = all || [];
+  return { first, second, plan2, most: st.most(), same: !!all && lb === lc && la !== lb, settled: !!all };
 }
 
 console.log('① one apply in flight, the newest waiting');
