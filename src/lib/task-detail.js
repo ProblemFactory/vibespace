@@ -834,10 +834,13 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // lane path-field: the file field — a relative path resolves, a missing file is made only once ticked, and what does not
     // take is said under the field (「未生效：…」) — the export / import buttons read its resolution
     const repoPf = pathField(repoInput, { kind: 'file', create: 'ask', id: 'task-export-file', createWhen: t('Create this file when exporting') });
-    const repoPath = async () => { const v = await repoPf.commit(); return v ? v.path : repoInput.value.trim(); }; // the field's resolution (a relative one too)
+    // the field's resolution (a relative one too) — B-5736: one that does not take is said under the field and nothing is sent: never the
+    // box's raw text (it skipped the field's judge and its «create» tick)
+    const repoPath = async () => { if (!repoInput.value.trim()) return ''; const v = await repoPf.commit(); if (!v) { const w = repoPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); return null; } return v.path; };
     const exportBtn = document.createElement('button'); exportBtn.className = 'task-detail-btn'; exportBtn.textContent = t('Export');
     exportBtn.onclick = async () => {
       const p = await repoPath();
+      if (p === null) return;   // said under the field (and in the toast)
       if (!p) { showToast(t('Enter a file path first'), { type: 'error' }); return; }
       try {
         const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
@@ -849,6 +852,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     importBtn.title = t('Read a task markdown file back into the store (its frontmatter id/title/status are authoritative; existing sessions/folders/progress are preserved)');
     importBtn.onclick = async () => {
       const p = await repoPath();
+      if (p === null) return;   // said under the field (and in the toast)
       if (!p) { showToast(t('Enter the .md file path first'), { type: 'error' }); return; }
       try {
         const res = await fetch('/api/tasks/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });

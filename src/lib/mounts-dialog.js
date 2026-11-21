@@ -293,13 +293,15 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
     err.textContent = '';
     submit.disabled = true;
     try {
-      for (const el of Object.values(inputs)) {
+      const took = {};   // B-5736: a path field gives its press's own answer — never the box's text
+      for (const [k, el] of Object.entries(inputs)) {
         const pf = el._pathField;
         if (!pf || !el.value.trim() || !pf.el.isConnected || pf.el.offsetParent === null) continue;   // empty / hidden: nothing to take
         const v = await pf.commit();
         if (!v || !(await pf.ensure())) { err.textContent = pf.verdict().text; submit.disabled = false; el.focus(); return; }
+        took[k] = v.path;
       }
-      const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()]));
+      const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, k in took ? took[k] : el.value.trim()]));
       await onSubmit(vals, { close, body, err });
     } catch (e) { const door = e && e.door && typeof e.door.run === 'function' ? e.door : null; err.replaceChildren(e.message || tr('Failed'), ...(door ? [' ', needDoorButton(door)] : [])); submit.disabled = false; } // e.door: lane ui-needs-a-button — the line drawn in ONE call (test-control-says-why ④)
   };

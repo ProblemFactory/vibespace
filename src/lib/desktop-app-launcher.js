@@ -893,7 +893,7 @@ export async function showLaunchDialog(app, opts = {}) {
   const machineOf = (id) => machines.find((m) => m.hostId === id) || { hostId: id, label: id };
   const advToggle = $('.desktop-launch-adv-toggle'), advBody = $('.desktop-launch-adv-body');
   const execIn = $('.desktop-launch-exec'), argsIn = $('.desktop-launch-args'), cwdIn = $('.desktop-launch-cwd'), runBtn = $('.desktop-launch-run');
-  pathField(cwdIn, { host: () => (host && host !== 'local' ? host : null), kind: 'folder', create: 'never', id: 'desktop-launch-cwd', onCommit: (info) => { if (info && info.path && cwdIn.value !== info.path) cwdIn.value = info.path; } }); // lane path-field: the launch's machine
+  const cwdPf = pathField(cwdIn, { host: () => (host && host !== 'local' ? host : null), kind: 'folder', create: 'never', id: 'desktop-launch-cwd', onCommit: (info) => { if (info && info.path && cwdIn.value !== info.path) cwdIn.value = info.path; } }); // lane path-field: the launch's machine
 
   // §7.9 FILE MODE: the intro names the document; browsers + "Advanced" are not for a document (a document is not a command)
   if (doc) {
@@ -1427,11 +1427,23 @@ export async function showLaunchDialog(app, opts = {}) {
   const recheckBtn = $('.desktop-launch-seen-recheck');
   recheckBtn.onclick = async () => { rechecking = true; render({ seenOnly: true }); try { await refresh({ recheck: true }); } finally { rechecking = false; if (live()) render({ seenOnly: true }); } }; // the spinner in the group head, the rest usable
   $('.desktop-launch-seen-show').onclick = () => { showSystem = !showSystem; patchUserState({ [SHOW_SYSTEM_KEY]: showSystem }); render({ seenOnly: true }); };
-  runBtn.onclick = () => {
-    const exec = execIn.value.trim();
+  runBtn.onclick = async () => {
+    if (!execIn.value.trim()) { showToast(t('Type a command to run'), { type: 'error' }); focusQuiet(execIn); return; }
+    // B-5736: the working folder is the FIELD'S judged folder (a relative text or a few letters resolved on the chosen machine), never
+    // the box's raw text; one that does not take stays in the box, says why under it, and nothing is sent
+    let cwd;
+    if (cwdIn.value.trim()) {
+      if (runBtn.dataset.judging) return;
+      const asked = host;
+      runBtn.dataset.judging = '1';
+      let v = null; try { v = await cwdPf.commit(); } finally { delete runBtn.dataset.judging; }
+      if (!live() || host !== asked) return;   // the dialog closed, or another machine was picked, while the folder was judged: that press is over
+      if (!v) { const w = cwdPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); focusQuiet(cwdIn); return; }
+      cwd = v.path;
+    }
+    const exec = execIn.value.trim();   // read AFTER the folder's judge: what the person sees when Run takes
     if (!exec) { showToast(t('Type a command to run'), { type: 'error' }); focusQuiet(execIn); return; }
     const args = splitArgs(argsIn.value);
-    const cwd = cwdIn.value.trim() || undefined;
     launch({ exec, args, cwd }, { exec, args, cwd: cwd || null });
   };
   execIn.addEventListener('keydown', (e) => { if (enterSubmits(e)) runBtn.click(); });

@@ -315,5 +315,14 @@ function step(s0, ev = {}) {
 const ABS_PATH_RE = /^(?:[~/]|[A-Za-z]:[\\/])/;
 function tickKey(text, machine, bases = '') { const t = String(text == null ? '' : text).trim(); return keyOf(t, machine, ABS_PATH_RE.test(t) ? '' : bases); }
 function tickHolds(tick, cur) { return !!(tick && tick.on && tick.key === cur); }
+/* THE FIELD'S VALUE (B-5736): the committed folder only while the PATH's key now (tickKey: its text, its machine and, for a relative
+   text, its bases) is the key the folder came from (the press's own, or the box as its door's onCommit left it: a door may write the folder's path
+   into the box), and nothing since took it back: a press ended with nothing (refused, owed, dropped, moved, quiet), a create that failed,
+   the «create» consent taken off. A box, a machine or a Task Group moved by any road answers nothing: never the last folder under another
+   key. `at` = { keys: [the press's key, the key right after its onCommit], voided } */
+function valueFor(committed, cur, at = null) {
+  if (!committed || typeof committed !== 'object' || !at || at.voided) return null;
+  return Array.isArray(at.keys) && at.keys.includes(String(cur == null ? '' : cur)) ? committed : null;
+}
 
-module.exports = { init, step, view, keyOf, textOf, sameAsk, tickKey, tickHolds, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };
+module.exports = { init, step, view, keyOf, textOf, sameAsk, tickKey, tickHolds, valueFor, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };

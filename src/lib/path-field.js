@@ -39,7 +39,7 @@ import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
 // B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
 // its events and performs its effects; no verdict is decided here
-import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED, tickKey, tickHolds } from '../path-field-model.js';
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED, tickKey, tickHolds, valueFor } from '../path-field-model.js';
 import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips, textCandidates, isPathText } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
@@ -228,7 +228,7 @@ export function pathField(input, opts = {}) {
   // Browse… again raises its own.
   const pickKey = `${fid}#${++pickerSeq}`;
   const call = (fn, dflt) => { try { const v = typeof fn === 'function' ? fn() : fn; return v == null ? dflt : v; } catch { return dflt; } };
-  const st = { open: false, active: -1, err: '', errBest: '', tick: false, tickKey: '', flash: false, committed: null, seq: 0, pctl: null, ctl: null, ctls: new Map(), trace: [], timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
+  const st = { open: false, active: -1, err: '', errBest: '', tick: false, tickKey: '', flash: false, committed: null, valueAt: null, seq: 0, pctl: null, ctl: null, ctls: new Map(), trace: [], timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
 
   /* ── DOM ── */
   const wrap = document.createElement('div');
@@ -347,7 +347,7 @@ export function pathField(input, opts = {}) {
   // bases in it, an absolute one's not); every read goes through tickNow(), which drops it for good the moment that path is another
   // (back to the same text later: asked again)
   const tickKeyNow = (text = textNow()) => tickKey(text, hk(), basesKey());
-  const giveTick = (on, text = textNow()) => { st.tick = !!on; st.tickKey = st.tick ? tickKeyNow(text) : ''; };
+  const giveTick = (on, text = textNow()) => { st.tick = !!on; st.tickKey = st.tick ? tickKeyNow(text) : ''; if (!st.tick && st.committed && st.committed.create && st.valueAt) st.valueAt = { ...st.valueAt, voided: true }; };   // B-5736: the consent taken off takes the value back
   const tickNow = () => { if (st.tick && !tickHolds({ on: st.tick, key: st.tickKey }, tickKeyNow())) { st.tick = false; st.tickKey = ''; } return st.tick; };
   const joinPathOf = (b, t) => { try { return textCandidates(t, [{ path: b }])[0] || ''; } catch { return ''; } };
   const abs = (p) => fromTilde(world(hk()).L.home || LOCAL.home, p);
@@ -373,6 +373,7 @@ export function pathField(input, opts = {}) {
     let env; try { env = envNow(); } finally { incoming = null; }
     const r = pfStep(M, { ...ev, cur: env.cur, now: Date.now(), env });
     M = r.state;
+    if (r.effects.some((e) => e.do === 'settle')) st.valueAt = { ...(st.valueAt || {}), voided: true };   // B-5736: a press answered «nothing» — the field's value is nothing too (never an older folder)
     let painted = false;
     for (const e of r.effects) {
       if (e.do === 'ask') sliceAsk(e.key, !!e.press);
@@ -705,7 +706,7 @@ export function pathField(input, opts = {}) {
   /* the model said «commit»: the info from the ranking's verdict for the text */
   function committed(e) {
     const how = e.how; let info = null;
-    if (e.as === 'empty') st.committed = null;
+    if (e.as === 'empty') { st.committed = null; st.valueAt = null; }
     else {
       const x = target();
       if (e.as === 'ok' && x.ok) { const r = x.r; info = infoOf(r.path, { isFile: !!r.file, via: { base: r.base, relative: !!r.relative, kind: how === 'picker' ? 'picker' : how === 'pick' ? 'pick' : r.kind, alias: '' }, how }); }
@@ -714,6 +715,7 @@ export function pathField(input, opts = {}) {
     if (info) { st.committed = info; paint(); }
     answer(e.doors, info);   // B-225c: the presses hear their own outcome FIRST — an onCommit that destroys the field never turns it into «nothing»
     if (info) try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); }
+    if (info && st.committed === info) st.valueAt = { keys: [tickKeyNow(keyText(e.key)), tickKeyNow()], voided: false };   // B-5736: the PATH's key of the press, and of the box as its door's onCommit left it (an absolute text's bases are not in it: the same folder under any Task Group)
   }
   function set(text, { commit: c = true, how = 'set', derived = null } = {}) {
     if (st.destroyed) return Promise.resolve(null);   // B-225c: a dead field takes no text and makes no door (the model hears nothing after «destroyed»: it would never be answered)
@@ -744,7 +746,7 @@ export function pathField(input, opts = {}) {
     if (!v) return false;
     if (!v.create || kind === 'file') return true;
     const r = await fetchJson('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: v.path, host: v.host || undefined }) });
-    if (!r || r.error) { fire({ type: 'ensureFailed', words: t('Could not create {path}: {err}', { path: v.display, err: (r && r.error) || t('server unreachable') }) }); return false; }
+    if (!r || r.error) { if (st.valueAt) st.valueAt = { ...st.valueAt, voided: true }; fire({ type: 'ensureFailed', words: t('Could not create {path}: {err}', { path: v.display, err: (r && r.error) || t('server unreachable') }) }); return false; }   // B-5736: a create that failed is no value
     st.committed = { ...v, exists: true, create: false };
     const L = world(hk()).L; const par = parentOf(v.display);
     L.dirs[v.display] = { kids: [], fileCount: 0, mtime: Date.now() };
@@ -984,7 +986,7 @@ export function pathField(input, opts = {}) {
   // EMPTY box with its suggestion list open was rebuilt under the person and the list closed). `ae` = the active element as the
   // caller read it before it emptied its body (emptying it moves the focus out of the box)
   const inUse = (ae = document.activeElement) => !st.destroyed && !!(inside(ae) || st.open || input.value.trim() || picking());
-  const handle = { el: wrap, input, trace: () => st.trace.slice(), value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy, picking, inUse };
+  const handle = { el: wrap, input, trace: () => st.trace.slice(), value: () => valueFor(st.committed, tickKeyNow(), st.valueAt), verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy, picking, inUse };
   input._pathField = handle;
   return handle;
 }

@@ -29,6 +29,9 @@
 //      from outside, a refresh after a Task Group change (the bases), another machine, a chip that is not a «new» chip — each with its
 //      RED CONTROL (the key check taken out: the tick carries); the consent made at use holds; the page's WIRING (every read through
 //      tickNow, every give through giveTick with the path it is for); a refresh after a Task Group change asks again
+//   ⑤ THE FIELD'S VALUE ANSWERS WHAT THE BOX AND THE LINE SHOW, OR NOTHING (B-5736): PURE valueFor (the box's text, a press ended with
+//      nothing) with REDs; the page's wiring + RED; THE DOORS take the folder from their press's own answer (a source pin a door, a
+//      planted raw read named) and every page that builds a field is a door of the table
 // Run: node scripts/test-path-field-model.mjs   (PFM_SEED_ONLY=<seed> replays one seed of the law with its whole sequence)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -435,6 +438,73 @@ console.log('\n── ③ the home read · New Session\'s footer ──');
   st = P.step(st, { type: 'reply', key: KB0, kind: 'listing', now: 2, cur: KB0, env: envOf(KB0) }).state;
   const rf = P.step(st, { type: 'refresh', cur: KB1, now: 3, env: envOf(KB1) });
   ok('④ a relative text after a Task Group change, asked before: the refresh ASKS AGAIN for the new bases (an ask or one armed)', rf.effects.some((e) => e.do === 'ask' && e.key === KB1) || rf.effects.some((e) => e.do === 'arm' && e.which === 'soon'), rf.effects);
+}
+
+/* ═══ ⑤ THE FIELD'S VALUE ANSWERS WHAT THE BOX AND THE LINE SHOW, OR NOTHING (B-5736) — PURE valueFor: the committed folder only
+   while the PATH's key now (its text, its machine, a relative text's bases) is the key it came from (the press's own, or the box as its
+   door's onCommit left it) and nothing took it back since (a press ended with nothing, a create that failed, the consent taken off);
+   each with its RED. THE PAGE's wiring. THE DOORS: every door takes the folder from its press's own answer — a source pin a door, two
+   planted raw-box reads named; every file under src/ that builds a field is a door of the table (the walk finds the six; a planted new
+   door is named) ═══ */
+console.log('\n── ⑤ the field\'s value · the doors take the press\'s answer ──');
+{
+  const C = { path: '/home/me/work/a', text: '~/work/a', exists: true };
+  const K = (t, h = null, b = '["~/work"]') => P.tickKey(t, h, b);
+  const at = (keys, voided = false) => ({ keys, voided });
+  const rows = [
+    ['the box holds the press\'s own text', K('~/work/a'), at([K('~/work/a'), K('~/work/a')]), C],
+    ['the door\'s onCommit wrote the folder\'s path into the box', K('/home/me/work/a'), at([K('~/work/a'), K('/home/me/work/a')]), C],
+    ['an absolute text under another Task Group (the same folder)', K('~/work/a', null, '["~/other"]'), at([K('~/work/a'), K('~/work/a')]), C],
+    ['THE SCENE: the box\'s text changed, its press ended with nothing', K('~/work/b'), at([K('~/work/a'), K('~/work/a')], true), null],
+    ['the box\'s text changed, no press yet', K('~/work/b'), at([K('~/work/a'), K('~/work/a')]), null],
+    ['another machine picked, the same text (the line asks it)', K('~/work/a', 'h-mac'), at([K('~/work/a'), K('~/work/a')]), null],
+    ['a relative text after a Task Group change (another folder)', K('./a', null, '["~/other"]'), at([K('./a'), K('./a')]), null],
+    ['a press ended with nothing on the same text, or a failed create, or the consent taken off (the line says it)', K('~/work/a'), at([K('~/work/a'), K('~/work/a')], true), null],
+    ['nothing committed', K('~/work/a'), at([K('~/work/a')]), null, null],
+    ['the box emptied', K(''), at([K('~/work/a'), K('~/work/a')]), null],
+  ];
+  for (const [what, cur, x, want, c = C] of rows) { const got = P.valueFor(c, cur, x); ok(`⑤ value: ${what} ⇒ ${want ? 'the committed folder' : 'nothing'}`, got === want, { got }); }
+  const noKey = load(anchored(SRC, "  return Array.isArray(at.keys) && at.keys.includes(String(cur == null ? '' : cur)) ? committed : null;", '  return committed;', 'B-5736 the key check'));
+  ok('⑤ RED CONTROL: the value without the key check answers the LAST committed folder under a new text and on another machine (the row\'s scene)', noKey.valueFor(C, K('~/work/b'), at([K('~/work/a')])) === C && noKey.valueFor(C, K('~/work/a', 'h-mac'), at([K('~/work/a')])) === C);
+  const noVoid = load(anchored(SRC, "  if (!committed || typeof committed !== 'object' || !at || at.voided) return null;", "  if (!committed || typeof committed !== 'object' || !at) return null;", 'B-5736 a press ended with nothing'));
+  ok('⑤ RED CONTROL: the value that ignores what took it back answers the old folder while the line says it did not take', noVoid.valueFor(C, K('~/work/a'), at([K('~/work/a')], true)) === C);
+  // THE PAGE (src/lib/path-field.js): value() reads valueFor over the path's key NOW; the keys are noted AFTER the door's onCommit; a
+  // settle, a failed create and the consent taken off each take the value back
+  const valueWiring = (w) => ({
+    reads: w.includes('value: () => valueFor(st.committed, tickKeyNow(), st.valueAt),'),
+    noted: (() => { const cm = bodyOf(w, 'function committed(e) {'); const x = cm.indexOf('o.onCommit?.(info)'), y = cm.indexOf('st.valueAt = { keys: [tickKeyNow(keyText(e.key)), tickKeyNow()], voided: false }'); return x >= 0 && y > x; })(),
+    settle: /if \(r\.effects\.some\(\(e\) => e\.do === 'settle'\)\) st\.valueAt = \{ \.\.\.\(st\.valueAt \|\| \{\}\), voided: true \};/.test(w),
+    failedCreate: /if \(!r \|\| r\.error\) \{ if \(st\.valueAt\) st\.valueAt = \{ \.\.\.st\.valueAt, voided: true \}; fire\(\{ type: 'ensureFailed'/.test(w),
+    untick: /const giveTick = \(on, text = textNow\(\)\) => \{[^\n]*if \(!st\.tick && st\.committed && st\.committed\.create && st\.valueAt\) st\.valueAt = \{ \.\.\.st\.valueAt, voided: true \};/.test(w),
+  });
+  const vw = valueWiring(WIRE);
+  ok('⑤ WIRED: value() is valueFor over the path\'s key NOW; the keys are noted after the door\'s onCommit; a press answered «nothing», a failed create and the consent taken off take it back', Object.values(vw).every(Boolean), vw);
+  const vw0 = valueWiring(anchored(WIRE, 'value: () => valueFor(st.committed, tickKeyNow(), st.valueAt),', 'value: () => st.committed,', 'B-5736 the old value'));   // stale-pins: kept (the old line, planted by its RED)
+  ok('⑤ RED CONTROL: the old value() (the last committed folder, whatever the box says) — the pin goes red', !vw0.reads, vw0);
+  // THE DOORS: the folder from the press's own answer (commit()'s info, or onCommit's), never the box's text
+  const DOORS = [
+    ['src/lib/app.js', 'New Session (Create)', [/const picked = await Promise\.resolve\(this\._cwdField\?\.commit\(\)\)[\s\S]{0,240}const cwd = String\(picked\.path \|\| ''\)\.trim\(\);/], []],
+    ['src/lib/setup-flows.js', 'the first chat', [/const v = cwdInput\.value\.trim\(\) \? await cwdPf\.commit\(\) : null;[\s\S]{0,200}const cwd = v \? v\.path : undefined;/], [/cwd: cwdInput\.value/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
+    ['src/lib/mounts-dialog.js', 'the mounts dialog (Save)', [/const v = await pf\.commit\(\);[\s\S]{0,200}took\[k\] = v\.path;/, /\[k, k in took \? took\[k\] : el\.value\.trim\(\)\]/], [/\.map\(\(\[k, el\]\) => \[k, el\.value\.trim\(\)\]\)/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
+    ['src/lib/task-detail.js', 'Task Detail (the export / import file; the context rows act in onCommit)', [/const v = await repoPf\.commit\(\); if \(!v\) \{[^\n]*return null; \} return v\.path;/, /onCommit: \(info\) => bind\.onCommit\(info\)/], [/v \? v\.path : repoInput\.value/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
+    ['src/lib/file-explorer.js', 'the Files window (acts in onCommit)', [/this\._pathField = pathField\(this\.pathInput, \{[\s\S]{0,600}onCommit/], []],
+    ['src/lib/desktop-app-launcher.js', 'the desktop launcher (Run)', [/v = await cwdPf\.commit\(\);[\s\S]{0,400}cwd = v\.path;/, /if \(!live\(\) \|\| host !== asked\) return;/], [/cwdIn\.value\.trim\(\) \|\| undefined/, /cwd: cwdIn\.value/]],   // stale-pins: kept (a deliberate absence check: the raw read must stay gone)
+  ];
+  const doorVerdicts = (read) => DOORS.map(([f, door, must, never]) => { const src = read(f); const miss = must.filter((re) => !re.test(src)).length, raw = never.filter((re) => re.test(src)).length; return { door, ok: miss === 0 && raw === 0, miss, raw }; });
+  const readSrc = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const dv = doorVerdicts(readSrc);
+  ok(`⑤ THE DOORS take the folder from their press's own answer, never the box (${dv.map((d) => d.door).join(' · ')})`, dv.every((d) => d.ok), dv.filter((d) => !d.ok));
+  const planted = doorVerdicts((f) => f === 'src/lib/desktop-app-launcher.js' ? anchored(readSrc(f), '    launch({ exec, args, cwd }, { exec, args, cwd: cwd || null });', '    launch({ exec, args, cwd: cwdIn.value.trim() || undefined }, { exec, args, cwd: cwd || null });', 'B-5736 a raw read planted in the launcher') : readSrc(f));   // stale-pins: kept (the old raw read, planted by its RED)
+  ok('⑤ RED CONTROL: a raw box read planted in the launcher\'s Run — the door is named', planted.filter((d) => !d.ok).map((d) => d.door).join() === 'the desktop launcher (Run)', planted.filter((d) => !d.ok));
+  const oldExport = doorVerdicts((f) => f === 'src/lib/task-detail.js' ? anchored(readSrc(f), "if (!v) { const w = repoPf.verdict()?.text; if (w) showToast(w, { type: 'error' }); return null; } return v.path;", 'return v ? v.path : repoInput.value.trim();', 'B-5736 the export\'s old fallback') : readSrc(f));   // stale-pins: kept (the old line, planted by its RED)
+  ok('⑤ RED CONTROL: Task Detail\'s old export fallback (the box\'s raw text after a press with nothing) — the door is named', oldExport.filter((d) => !d.ok).map((d) => d.door).join().startsWith('Task Detail'), oldExport.filter((d) => !d.ok));
+  // every file under src/ that builds a field is a door of the table: the walk FINDS the six (it can fail), a planted text is named
+  const builds = (text) => /\bpathField\(/.test(text.replace(/^\s*import\s[^\n]*\n/gm, ''));
+  const walkSrc = (extra = {}) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (/\.js$/.test(e.name) && rel !== 'src/lib/path-field.js' && builds(readSrc(rel))) out.push(rel); } }; walk('src'); for (const [f, text] of Object.entries(extra)) if (builds(text)) out.push(f); return out; };
+  const found = walkSrc(), notDoors = found.filter((f) => !DOORS.some(([g]) => g === f));
+  ok(`⑤ the walk over src/ finds every door of the table (${found.length} files build a field) and no file that builds one is missing from it`, DOORS.every(([f]) => found.includes(f)) && notDoors.length === 0, { found, notDoors });
+  const planted2 = walkSrc({ 'src/lib/zz-new-door.js': "import { pathField } from './path-field.js';\nconst pf = pathField(input, { kind: 'folder' });\n" }).filter((f) => !DOORS.some(([g]) => g === f));
+  ok('⑤ RED CONTROL: a planted new page that builds a field (its import line stripped, its call read) is named', planted2.join() === 'src/lib/zz-new-door.js', planted2);
 }
 
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);
