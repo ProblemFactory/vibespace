@@ -85,7 +85,7 @@ function whyText(s) {
   switch (s && s.why) {
     case 'no-descriptor': return `${START_WORD}=${JSON.stringify(s.raw || '')} names no descriptor`;
     case 'not-open': return `the start pipe (fd ${s.fd}) named by ${START_WORD} is not open`;
-    case 'not-a-pipe': return `the start pipe (fd ${s.fd}) named by ${START_WORD} is no pipe or socket`;
+    case 'not-a-pipe': return `the start pipe (fd ${s.fd}) named by ${START_WORD} is no pipe or socket${s.closeCode ? ` (close failed: ${s.closeCode})` : ''}`;   // a failed close of it SAID (hub-port readStartSync's closeCode)
     case 'no-line': return `no line on the start pipe${s.fd ? ` (fd ${s.fd})` : ''} within ${(s.ms || START_LINE_MS) / 1000} s`;
     case 'ended': return `the start pipe${s.fd ? ` (fd ${s.fd})` : ''} ended before its first line`;
     case 'read-fault': return `the start pipe${s.fd ? ` (fd ${s.fd})` : ''} could not be read (${s.code || 'error'})`;

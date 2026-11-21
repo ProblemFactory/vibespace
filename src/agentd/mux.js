@@ -44,7 +44,7 @@ function encodeFrame(type, chan, payload = Buffer.alloc(0)) {
  *                                 data() return may resume). Local only — no
  *                                 wire change.
  *
- * THE STREAM'S BACK-PRESSURE IS HONOURED (cs M1, the link — wire-neutral): a stream whose write() says FALSE is full; from
+ * THE STREAM'S BACK-PRESSURE IS HONOURED (cs M1, the link — the frames' form unchanged): a stream whose write() says FALSE is full; from
  * then every frame waits, IN ORDER, until its 'drain' — so data() says false when the WIRE is full, not only when the
  * channel's window is, and a producer that pauses on it is resumed by onWritable after the drain. Without it a Mux riding
  * a byte channel of another Mux (a link inside a link, src/agentd/chan-duplex.js) told every inner producer «writable»

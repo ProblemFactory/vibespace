@@ -379,7 +379,7 @@ function endAll() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function startHub({ root, tree, port, env = process.env, nodeArgs = [], args = [], log = 'hub', keepLog = null } = {}) {
+export function startHub({ root, tree, port, env = process.env, nodeArgs = [], args = [], log = 'hub', keepLog = null, startLine = null } = {}) {
   if (!root) throw new Error('hub-boot: a minted root is required (mintRoot)');
   const r = ownRoot(root);
   const t = real(String(tree || ''));
@@ -397,8 +397,13 @@ export function startHub({ root, tree, port, env = process.env, nodeArgs = [], a
   const fd = fs.openSync(logFile, 'a');
   const from = fs.fstatSync(fd).size;
   let child;
-  try { child = spawn(process.execPath, [...nodeArgs, 'server.js', ...args], { cwd: t, env: { ...env, PORT: String(port) }, stdio: ['ignore', fd, fd] }); }
+  // A PIPED hub (the separation, 主开发 r1341): `startLine` = the ONE line of its start pipe — handed on fd 3, named by the start
+  // word VIBESPACE_START_FD, written at once (the hub reads it at its line 5 and closes its end); its value is on no argv and in
+  // no environment. Without it the spawn is today's, byte for byte.
+  const piped = startLine != null;
+  try { child = spawn(process.execPath, [...nodeArgs, 'server.js', ...args], { cwd: t, env: { ...env, PORT: String(port), ...(piped ? { VIBESPACE_START_FD: '3' } : {}) }, stdio: piped ? ['ignore', fd, fd, 'pipe'] : ['ignore', fd, fd] }); }
   finally { fs.closeSync(fd); }
+  if (piped && child.stdio[3]) { const line = String(startLine); child.stdio[3].on('error', () => { }); child.stdio[3].write(line.endsWith('\n') ? line : line + '\n'); }
   const hub = {
     pid: child.pid, starttime: child.pid ? starttimeOf(child.pid) : null, port: Number(port), root: r, tree: t, logFile, keepLog: keep, child, stopped: false,
     url: (p = '') => `http://127.0.0.1:${port}${p}`,

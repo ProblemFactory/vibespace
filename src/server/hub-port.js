@@ -21,7 +21,8 @@
 const fs = require('fs');
 const net = require('net');
 const { START_LINE_MS, MAX_START_LINE, takeWord, firstLine, whyText } = require('../start-pipe.js');
-const { digestOf } = require('../link-proof.js');   // PURE, crypto only: the digest every join proves with
+// the interface's modules (the link's proof, the party's join and its channel code) load in the PIPED branch only: a hub with the
+// switch off loads what the release loads (主开发 r1341 6)
 
 let claimed = null;   // the boot's start, TAKEN at server.js line 5 (claim): the word, the one line, the pipe CLOSED
 let claimedDecision = null;   // that start JUDGED, once (decide): its parsed line is dropped there (主开发 r1124 1)
@@ -142,7 +143,7 @@ function plainListen(hub, port, host, cb) { return hub.listen(port, host, cb); }
  *  it joins the link and runs the same callback. → { bound(), form, pushCertificate(pem | null) } — the PIPED form pushes the
  *  hub's live certificate (src/server/tls.js plans and renews it, starting children; the interface starts none) over the
  *  link as {op:'certificate', cert, key}; one that comes before the join waits for it. The PLAIN form serves its own. */
-function wire(decision, { hub, server, join = require('./interface-party.js').join, end = endSelf, log = console, rejoinMs = REJOIN_MS } = {}) {
+function wire(decision, { hub, server, join = null, end = endSelf, log = console, rejoinMs = REJOIN_MS } = {}) {
   let record = { form: decision.form, listened: false }, party = null, pendingPem, lastPem;
   const listenOwn = hub.listen;
   // THE PORT IS DECIDED ONCE (主开发 r1124 4): server.js makes ONE boot call; a second call is refused by name and does nothing
@@ -158,6 +159,7 @@ function wire(decision, { hub, server, join = require('./interface-party.js').jo
       if (!decision.start) { if (!decision.ended) { badStart = true; try { log.error?.(`[hub-port] ${whyText(decision)} — this hub cannot join and ends`); } catch { } end(); } return hub; }   // each bad start BY NAME (never the line), once
       // the start value is held only until its digest is made: every join proves with the digest (src/link-proof.js), and
       // a re-join holds nothing more — the start value is on no link and, from here, in no structure of this module
+      const { digestOf } = require('../link-proof.js'), joinOf = join || require('./interface-party.js').join;   // piped only (r1341 6): the digest every join proves with, the join
       const start = { party: decision.start.party || 'hub', link: decision.start.link, digest: digestOf(decision.start.secret) };
       decision.start = { party: start.party, link: start.link };
       const onDead = () => {   // the interface's link ended: every channel with it; this hub waits for a NEW interface (r1060)
@@ -167,7 +169,7 @@ function wire(decision, { hub, server, join = require('./interface-party.js').jo
         const attempt = () => {
           tries++;
           const answerMs = Math.max(REJOIN_TRY_FLOOR_MS, Math.min(require('./interface-party.js').JOIN_ANSWER_MS, until - monoNow()));   // what is left of the bound, never under the floor
-          join({ start, server, onDead, answerMs }).then((p) => {
+          joinOf({ start, server, onDead, answerMs }).then((p) => {
             party = p;
             try { log.log?.(`[hub-port] a new interface took this hub (try ${tries}) — it goes on: the same process, its vault and conversations kept`); } catch { }
             if (lastPem !== undefined) push(lastPem);   // the new interface has no certificate until this hub pushes it again
@@ -179,7 +181,7 @@ function wire(decision, { hub, server, join = require('./interface-party.js').jo
         };
         setTimeout(attempt, REJOIN_FIRST_MS);
       };
-      join({ start, server, onDead })
+      joinOf({ start, server, onDead })
         .then((p) => { party = p; record = { form: 'piped', listened: false, link: start.link }; try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } if (pendingPem !== undefined) push(pendingPem); cb && cb(); },
           (e) => { try { log.error?.(e && e.code === 'no-answer' ? `[hub-port] ${e.message} — this hub ends` : `[hub-port] the interface refused this hub (${(e && e.message) || 'refused'}) — it ends`); } catch { } end(); });
       return hub;

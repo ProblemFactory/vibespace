@@ -7,7 +7,7 @@
 //   THE BEARERS: a conversation's session token (vsst_), a Background Work job's token (jbt_) and the maintainer key
 //   (vsmk_, POST /api/agent/automation/:verb — an instance's env sha). An automation key's VALUE (vsak_) is never a
 //   bearer: it is a vault entry; a conversation uses a key it was granted by id, with its own vsst_. The census reads
-//   the SIGNED-IN hub (a hub nobody signs in to opens every route to anyone — the `!this.enabled` door, said, not swept),
+//   the SIGNED-IN hub (a hub nobody signs in to opens every route to anyone — the `!enabled` door of src/door.js, said, not swept),
 //   and the gate's doors only (src/door.js's door class and src/auth.js's middleware, since the separation's B3a): the WebSocket upgrade dispatcher and the hub's side listeners (the CDP mediator,
 //   the egress proxy, the metrics port) are other doors, judged by their own code.
 //   ① THE DOORS: every `if` of the door class (src/door.js) and of src/auth.js's middleware whose consequent calls next() (`return next()`, a block around it,
@@ -279,7 +279,24 @@ ok(!C.doorUnclassified.length, 'every door is classified in the table (`bearer` 
 ok(!C.doorDead.length && !C.doorReasonless.length, 'no dead door row, no `other` without its why', [...C.doorDead.map((c) => 'DEAD ' + c), ...C.doorReasonless.map((c) => 'NO WHY ' + c)].join(' | '));
 ok(!C.bearerUnreadable.length && C.bearerDoors.length >= 2, `every bearer door is a path test the census reads (${C.bearerDoors.map((d) => (d.test.kind === 'prefix' ? d.test.path + '*' : d.test.path)).join(', ')})`, C.bearerUnreadable.join(' | '));
 ok(C.bearerDoors.some((d) => d.test.kind === 'prefix' && d.test.path === '/api/agent/'), 'the agent prefix /api/agent/ is a bearer door');
-if (C.doors.some((d) => d.cond === '!this.enabled')) console.log('    said, not swept: on a hub nobody signs in to (`!this.enabled`), every route is open to any caller — this census reads the signed-in hub');
+if (C.doors.some((d) => d.cond === '!enabled')) console.log('    said, not swept: on a hub nobody signs in to (`!enabled`, the door class), every route is open to any caller — this census reads the signed-in hub');
+{
+  // THE CLASSES THE GATE LETS THROUGH ARE PINNED (主开发 r1341 4): src/auth.js PASSES is exactly door / open / login — the three this
+  // census reads in src/door.js (`return next()` = a door, `return OPEN`, `return LOGIN`) — and doorClassOf returns no pass class
+  // any other way (a door written `return DOOR` would pass the census unseen; so would a fourth class added to PASSES)
+  const passPin = (authSrc, doorSrc) => {
+    const passes = ((authSrc.match(/const PASSES = Object\.freeze\(new Set\(\[([^\]]*)\]\)\)/) || [])[1] || '').split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean).sort();
+    const ast = parse(doorSrc); let body = null; const returned = new Set();
+    if (ast) walk(ast, (n) => { if (!body && n.type === 'FunctionDeclaration' && n.id && n.id.name === 'doorClassOf') body = n.body; });
+    if (body) walk(body, (n) => { if (n.type === 'ReturnStatement' && n.argument && n.argument.type === 'Identifier') returned.add(n.argument.name); });
+    return { ok: JSON.stringify(passes) === JSON.stringify(['door', 'login', 'open']) && !!body && [...returned].every((r) => ['OPEN', 'LOGIN', 'PAGE'].includes(r)), passes, returned: [...returned].sort() };
+  };
+  const A = readRepo('src/auth.js'), D = readRepo('src/door.js'), real = passPin(A, D);
+  ok(real.ok, `the gate lets through exactly ${real.passes.join(' / ')} (src/auth.js PASSES), and the door class returns no pass class but through next() / OPEN / LOGIN (it returns ${real.returned.join(', ')})`, real);
+  const fourth = passPin(A.replace("new Set(['door', 'open', 'login'])", "new Set(['door', 'open', 'login', 'page'])"), D);
+  const asDoor = passPin(A, D.replace("if (p.startsWith('/api/agent/')) return next();", "if (p.startsWith('/api/agent/')) return DOOR;"));
+  ok(!fourth.ok && !asDoor.ok, `CONTROLS: a fourth class in PASSES (${fourth.passes.join(', ')}) and a door returned as DOOR (${asDoor.returned.join(', ')}) are each RED`, { fourth, asDoor });
+}
 
 console.log('② the registrations (every app / router route in the hub tree)');
 ok(!C.unparsed.length && C.rows.length > 600, `the hub tree parses and registers ${C.rows.length} route paths across ${new Set(C.rows.map((r) => r.file)).size} files`, C.unparsed.join(' '));

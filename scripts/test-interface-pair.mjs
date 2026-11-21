@@ -22,7 +22,8 @@ import https from 'node:https';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, endRootedProcesses, vncEnv } from './scratch.mjs';
+import { freePorts, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub } from './hub-boot.mjs';   // THE ONE ROOTED END (test-architecture §57c / §57d): the oracle boots through it, and its end reaches every process rooted in the suite's root
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -35,8 +36,11 @@ const [IFACE_PORT, PLAIN_PORT] = await freePorts(2);
 const VNC_PLAIN = await vncEnv();   // each hub its own per-run singleton-Desktop names (test-architecture §57)
 const VNC_PAIR = await vncEnv();
 // two trees and two homes: the pair's hub and the oracle never share a data dir or a HOME
-const wt = scratch('iface-pair-wt'), wtPlain = scratch('iface-pair-plain');
-const fakeHome = scratchHome('iface-pair-home', fs), plainHome = scratchHome('iface-pair-plain-home', fs);
+// THE SUITE'S ONE MINTED ROOT (hub-boot.mjs mintRoot, 0700): both trees, both homes, the CLI stub and the link's folder
+const ROOT = mintRoot('iface-pair');
+const wt = path.join(ROOT, 'wt'), wtPlain = path.join(ROOT, 'wt-plain');
+const homeIn = (n) => { const h = path.join(ROOT, n); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(h, d), { recursive: true }); return h; };
+const fakeHome = homeIn('home'), plainHome = homeIn('home-plain');
 for (const w of [wt, wtPlain]) {
   try { execSync(`git worktree remove --force ${w}`, { cwd: repo, stdio: 'ignore' }); } catch { }
   execSync(`git worktree add --detach ${w} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -44,28 +48,25 @@ for (const w of [wt, wtPlain]) {
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(w, 'node_modules'));
   fs.mkdirSync(path.join(w, 'data'), { recursive: true });
 }
-const stub = `${wt}-claude-stub`;
+const stub = path.join(ROOT, 'claude-stub');
 fs.writeFileSync(stub, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
 const tlsDir = path.join(wt, 'tls-pair'); fs.mkdirSync(tlsDir, { recursive: true });
 execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', path.join(tlsDir, 'key.pem'), '-out', path.join(tlsDir, 'cert.pem'), '-days', '2', '-subj', '/CN=localhost'], { stdio: 'ignore' });
 const hubEnv = (home) => ({ PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: home, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VS_NO_REAL_CLI: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', HOST: '127.0.0.1',
   VIBESPACE_TLS_CERT: path.join(tlsDir, 'cert.pem'), VIBESPACE_TLS_KEY: path.join(tlsDir, 'key.pem') });
-const linkDir = scratch('iface-pair-link'); fs.mkdirSync(linkDir, { recursive: true, mode: 0o700 });   // THE LINK'S FOLDER is this account's alone (r1124 2): the interface refuses /tmp itself, which every account may write
+const linkDir = path.join(ROOT, 'link'); fs.mkdirSync(linkDir, { mode: 0o700 });   // THE LINK'S FOLDER is this account's alone (r1124 2): the interface refuses /tmp itself, which every account may write
 const link = path.join(linkDir, 'link.sock');
 const kids = [], outs = new Map();
 const keep = (name, child) => { kids.push(child); outs.set(name, ''); for (const s of [child.stdout, child.stderr]) s && s.on('data', (b) => outs.set(name, outs.get(name) + b)); return child; };
 const cleanup = () => {
   for (const k of kids) { try { k.kill('SIGKILL'); } catch { } }
-  for (const r of [wt, wtPlain, fakeHome, plainHome]) { try { endRootedProcesses(r); } catch { } }
   for (const w of [wt, wtPlain]) { try { execSync(`git worktree remove --force ${w}`, { cwd: repo, stdio: 'ignore' }); } catch { } }
-  for (const d of [fakeHome, plainHome, stub, linkDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
-};
+};   // the root itself, its homes and every process rooted in it: the boot helper's own end (mintRoot armed it, signals too)
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 
 // THE ORACLE: today's road, no start pipe
 const plainStart = Date.now();
-keep('plain', spawn(process.execPath, ['server.js'], { cwd: wtPlain, env: { ...hubEnv(plainHome), ...VNC_PLAIN, PORT: String(PLAIN_PORT) }, stdio: ['ignore', 'pipe', 'pipe'] }));
+const plainHub = startHub({ root: ROOT, tree: wtPlain, port: PLAIN_PORT, env: { ...hubEnv(plainHome), ...VNC_PLAIN }, log: 'plain' });   // THROUGH THE BOOT HELPER (主开发 r1341 1): no start pipe, a home of its own — its output in the root's plain.log
 // THE PAIR: the interface first (its admit for the hub written BEFORE the hub starts), then the hub
 const ifaceSecret = crypto.randomBytes(32).toString('hex'), hubSecret = crypto.randomBytes(32).toString('hex');
 const hubDigest = crypto.createHash('sha256').update(hubSecret).digest('hex');
@@ -73,19 +74,21 @@ const iface = keep('interface', spawn(process.execPath, [path.join(wt, 'src/inte
 iface.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: ifaceSecret, link }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hubDigest }) + '\n');
 await until(() => /listening on/.test(outs.get('interface')), 20000);
 const pipedStart = Date.now(); let pipedJoined = 0;
-const hub = keep('piped', spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubEnv(fakeHome), ...VNC_PAIR, PORT: String(IFACE_PORT), VIBESPACE_START_FD: '3' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));
-hub.stdio[3].on('error', () => { }); hub.stdio[3].write(JSON.stringify({ op: 'start', party: 'hub', secret: hubSecret, link }) + '\n');   // the hub reads this ONE line at its line 5 and closes its end (the B2b cure 2)
+// THE PIPED HUB THROUGH THE BOOT HELPER too (its start pipe on fd 3, named by the start word: startHub's startLine) — the hub
+// reads this ONE line at its line 5 and closes its end (the B2b cure 2); its output in the root's piped.log
+const pipedHub = startHub({ root: ROOT, tree: wt, port: IFACE_PORT, env: { ...hubEnv(fakeHome), ...VNC_PAIR }, log: 'piped', startLine: JSON.stringify({ op: 'start', party: 'hub', secret: hubSecret, link }) });
+const hub = pipedHub.child;
 
-const record = (name) => { const m = [...outs.get(name).matchAll(/\[hub-port\] (\{[^\n]*\})/g)].pop(); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } };
+const textOf = (name) => (name === 'plain' ? plainHub.log() : name === 'piped' ? pipedHub.log() : outs.get(name));   // the two hubs write the helper's logs, the interface its pipes
+const record = (name) => { const m = [...textOf(name).matchAll(/\[hub-port\] (\{[^\n]*\})/g)].pop(); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } };
 const ready = (port, secure = false) => new Promise((resolve) => { const q = (secure ? https : http).get({ host: '127.0.0.1', port, path: '/api/home', agent: false, rejectUnauthorized: false, timeout: 3000 }, (r) => { r.resume(); resolve(r.statusCode > 0); }); q.on('error', () => resolve(false)); q.on('timeout', () => { q.destroy(); resolve(false); }); });
-for (const s of [hub.stdout, hub.stderr]) s.on('data', () => { if (!pipedJoined && /\[hub-port\] \{/.test(outs.get('piped'))) pipedJoined = Date.now(); });   // the moment the piped hub's own record says it joined
 const upPlain = await until(() => ready(PLAIN_PORT), 90000), plainUp = Date.now();
 // THE PAIR IS READY ONCE ITS HUB HAS JOINED: before it, the interface answers every page itself (503 «no-owner»), and a status
 // is no readiness — a branch table run then reads the interface's own refusal (two reds of 1522499e5's own read: the piped hub
 // joined after the plain hub answered, a race the plain hub's own start time had hidden)
-const upPair = await until(async () => pipedJoined > 0 && await ready(IFACE_PORT), 90000);
+const upPair = await until(async () => { if (!pipedJoined && /\[hub-port\] \{/.test(textOf('piped'))) pipedJoined = Date.now(); return pipedJoined > 0 && await ready(IFACE_PORT); }, 90000);   // the moment the piped hub's own record says it joined (read off its log, every 100 ms)
 console.log(`    (FACT, never judged: the plain hub answered ${plainUp - plainStart} ms after its start; the piped hub joined ${pipedJoined ? pipedJoined - pipedStart : 'never'} ms after its own)`);
-check('the oracle (plain) and the pair (interface + piped hub) both answer', upPlain && upPair, { upPlain, upPair, iface: outs.get('interface').slice(-400), piped: outs.get('piped').slice(-400) });
+check('the oracle (plain) and the pair (interface + piped hub) both answer', upPlain && upPair, { upPlain, upPair, iface: outs.get('interface').slice(-400), piped: textOf('piped').slice(-400) });
 
 console.log('① NEVER TWO OWNERS OF THE PORT — read off the hub\'s own record');
 {
@@ -122,9 +125,9 @@ const TABLE = [
 console.log('③ THE START PIPE\'S SECRETS travel only on fd 3');
 {
   const procOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8') + fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); } catch { return ''; } };
-  const seen = outs.get('interface') + outs.get('piped') + procOf(iface.pid) + procOf(hub.pid);
+  const seen = outs.get('interface') + textOf('piped') + procOf(iface.pid) + procOf(hub.pid);
   const leaks = [ifaceSecret, hubSecret, hubDigest].filter((v) => seen.includes(v));
-  check(`both processes' output (${outs.get('interface').length + outs.get('piped').length} B), argv and environment: ${leaks.length} secrets found`, procOf(hub.pid).length > 0 && leaks.length === 0);
+  check(`both processes' output (${outs.get('interface').length + textOf('piped').length} B), argv and environment: ${leaks.length} secrets found`, procOf(hub.pid).length > 0 && leaks.length === 0);
 }
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

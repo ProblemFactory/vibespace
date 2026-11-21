@@ -57,7 +57,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -279,6 +279,25 @@ HP.claim(); HP.decide().then((d) => { const kept = HP.claim(); console.log(JSON.
   ok(/^form plain/.test(out2), `a child with no fd 3: «${out2.trim()}»`);
 }
 
+{
+  // THE SWITCH OFF LOADS WHAT THE RELEASE LOADS (主开发 r1341 6): a PLAIN hub's wiring never loads the interface's modules — the
+  // link's proof, the party's join, its channel code — they load in the piped branch only. A child wires a plain hub and lists the
+  // tree's modules it holds. RED CONTROL: the join loaded eagerly again (wire's old default) ⇒ a plain hub loads the party.
+  const probePlain = path.join(T, 'probe-plain-loads.cjs');
+  fs.writeFileSync(probePlain, `const FILE = ${JSON.stringify(path.join(REPO, 'src/server/hub-port.js'))}; const fs = require('fs'), Module = require('module');
+const copy = process.argv[2]; let HP; if (copy) { const m = new Module(FILE, null); m.filename = FILE; m.paths = Module._nodeModulePaths(require('path').dirname(FILE)); m._compile(fs.readFileSync(copy, 'utf8'), FILE); HP = m.exports; } else HP = require(FILE);
+HP.decide({ env: {} }).then((d) => { const hub = { listen: (p, h, cb) => { if (cb) cb(); return hub; } }; HP.wire(d, { hub, server: {}, log: { log() { }, error() { } } }); hub.listen(0, '127.0.0.1', () => { });
+  const loaded = Object.keys(require.cache).map((f) => (f.split('/src/')[1] || '')).filter(Boolean).sort(); console.log(JSON.stringify({ form: d.form, loaded })); });\n`);
+  const loadsOf = (copy) => { const r = spawnSync(process.execPath, [probePlain, ...(copy ? [copy] : [])], { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 15000 }); try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return { error: String(r.stderr).slice(0, 300) }; } };
+  const IFACE = /^(?:server\/interface-party|link-proof|agentd\/(?:mux|chan-socket))\.js$/;
+  const now = loadsOf();
+  ok(now.form === 'plain' && Array.isArray(now.loaded) && !now.loaded.some((f) => IFACE.test(f)), `the switch OFF: a plain hub's wiring loads ${JSON.stringify(now.loaded)} — none of the interface's modules`, now);
+  const eagerCopy = path.join(T, 'hub-port-eager.js');
+  fs.writeFileSync(eagerCopy, anchored(read('src/server/hub-port.js'), 'function wire(decision, { hub, server, join = null,', "function wire(decision, { hub, server, join = require('./interface-party.js').join,", 'the eager join'));   // stale-pins: kept — the release-era default, the red's text
+  const eager = loadsOf(eagerCopy);
+  ok(Array.isArray(eager.loaded) && eager.loaded.some((f) => IFACE.test(f)), `RED CONTROL — the join loaded eagerly (wire's old default): a plain hub loads ${JSON.stringify((eager.loaded || []).filter((f) => IFACE.test(f)))}`, eager);
+}
+
 console.log('— ⑥ THE CERTIFICATE: a piped hub pushes its live pair to the interface (which holds the port); the plain form never');
 async function pushes(mod, form) {
   const pushed = [];
@@ -355,6 +374,13 @@ console.log('— ⑧ WITH THE WORD, EVERY BAD START ENDS BY NAME IN BOUNDED TIME
   if (fileStillOpen) { try { fs.closeSync(fileFd); } catch { } }
   ok(!fileStillOpen, `the descriptor the word named (a file, fd ${fileFd}) is CLOSED by the decision too — no child inherits what the word named`);
   ok(dFile.why === 'not-a-pipe' && endedOnly(rFile) && rFile.lines.some((l) => l.includes(`the start pipe (fd ${fileFd}) named by VIBESPACE_START_FD is no pipe or socket`)), `the word naming a FILE: «${rFile.lines.join(' | ').slice(0, 150)}» — it ends, never its own listener, never a join`, { dFile, calls: rFile.calls });
+  // A FAILED CLOSE OF THE DESCRIPTOR THE WORD NAMED IS SAID (主开发 r1341 3): a stand-in close that closes it, then fails —
+  // the judged start keeps the code and the not-a-pipe words carry it (never an object nobody prints)
+  const fd2 = fs.openSync(path.join(T, 'not-a-pipe-2'), 'w+'), closeOwn = fs.closeSync;
+  fs.closeSync = (fd) => { if (fd === fd2) { closeOwn.call(fs, fd); throw Object.assign(new Error('EIO: i/o error, close'), { code: 'EIO' }); } return closeOwn.call(fs, fd); };
+  let dClose; try { dClose = await HP.decide({ env: { [SP.START_WORD]: String(fd2) } }); } finally { fs.closeSync = closeOwn; }
+  const rClose = await bootThrough(HP, dClose);
+  ok(dClose.why === 'not-a-pipe' && dClose.closeCode === 'EIO' && endedOnly(rClose) && rClose.lines.some((l) => l.includes('is no pipe or socket (close failed: EIO)')), `a FAILED close of the descriptor the word named is said, never lost: «${rClose.lines.join(' | ').slice(0, 170)}»`, { dClose, lines: rClose.lines });
   const words = [];
   for (const w of ['x', '1', '-3', '999']) { const d = await HP.decide({ env: { [SP.START_WORD]: w } }); const r = await bootThrough(HP, d); words.push([w, d.why, endedOnly(r), r.lines.join(' ')]); }
   ok(words.every(([w, why, e, l]) => e && (w === '999' ? why === 'not-open' && l.includes('(fd 999) named by VIBESPACE_START_FD is not open') : why === 'no-descriptor' && l.includes('names no descriptor'))), 'the word naming no descriptor (\'x\', a stdio \'1\', \'-3\') or one that is not open (999): each ends by name', words);
