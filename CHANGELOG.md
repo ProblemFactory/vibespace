@@ -75,6 +75,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The usage popup now updates at once when you allow or stop automatic turns, instead of a few seconds later.
 - In Chinese and Japanese, a few messages no longer point to a menu or a control above or below that the English does not name.
 - A usage reading that reaches VibeSpace late no longer makes a newer reading of that limit look older, or mark it as refused.
+- When you hand an agent's browser back, the message now says how many tabs you opened in your takeover stay with the conversation.
+- A tab you open in another window during a takeover no longer goes to the conversation you took over.
 
 ## 2.369.413 — 2026-11-20
 
