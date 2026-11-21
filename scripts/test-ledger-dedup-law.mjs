@@ -21,7 +21,11 @@
 //     open; CONTROL the release's close planted back ⇒ RED on the rename and the split roads
 //   ⑪ (r611) THE THEFT, placed by a stall (never by load): a helper thread opens a file while the rename runs and receives the
 //     number the tmp writer's close freed; afterwards its descriptor is still ITS file; CONTROL the release's close ⇒ closed
-//     under the helper
+//     under the helper (r797: the helper closes only its own number; every wait on it has a bound and an error road)
+//   ⑫ (r797) A FAILED CLOSE, placed once on each road: the rename road (the run throws it named; the shard whole, the tmp gone,
+//     every descriptor closed once, the archive untouched — the writer is closed BEFORE the append; CONTROL the release's order ⇒
+//     the archive already holds the copies), the line reader's handle (alone: thrown named; after a read error: its closeError),
+//     an archive append whose destination cannot open (the source closed, nothing leaks)
 // Sparse files only (fs.truncateSync — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -524,9 +528,16 @@ await leg('⑪ the theft', async () => {
       const cell = new Int32Array(workerData.sab); let fd = -1;
       parentPort.on('message', (m) => {
         if (m === 'open') { fd = fs.openSync(workerData.mine, 'r'); Atomics.store(cell, 1, fd); Atomics.store(cell, 0, 1); Atomics.notify(cell, 0); }
-        if (m === 'check') { let st = null; try { st = fs.fstatSync(fd); } catch { st = null; } const ino = fs.statSync(workerData.mine).ino; parentPort.postMessage({ fd, open: !!st, mine: !!st && st.ino === ino }); try { fs.closeSync(fd); } catch { } }
+        // r797 (1): the helper closes its number ONLY while it is still its own file — in the red control it was closed under it and
+        // may be another open's by now: closing it then would repeat the fault this leg shows
+        if (m === 'check') { let st = null; try { st = fs.fstatSync(fd); } catch { st = null; } const ino = fs.statSync(workerData.mine).ino, mine = !!st && st.ino === ino; parentPort.postMessage({ fd, open: !!st, mine }); if (mine) fs.closeSync(fd); }
       });`, { eval: true, workerData: { sab: cell.buffer, mine } });
-    await new Promise((r) => helper.once('online', r));
+    const answer = (ev, ask) => new Promise((r, j) => {   // r797 (1): every wait on the helper has an error road and a bound
+      const bound = setTimeout(() => j(new Error(`⑪ the helper never answered «${ask || ev}» in 5 s`)), 5000);
+      helper.once(ev, (m) => { clearTimeout(bound); r(m); }); helper.once('error', (e) => { clearTimeout(bound); j(e); });
+      if (ask) helper.postMessage(ask);
+    });
+    await answer('online');
     const realRename = fs.renameSync, realOpen = fs.openSync;
     let stalled = null, tmpFd = null;
     fs.openSync = function (f, ...a) { const fd = realOpen.call(this, f, ...a); if (String(f) === file + L.TMP_SUFFIX) tmpFd = fd; return fd; };   // the tmp writer's number
@@ -536,7 +547,7 @@ await leg('⑪ the theft', async () => {
     };
     let res = null, threw = null;
     try { res = L.runNow(L.dedupSteps(file, {})); } catch (e) { threw = e; } finally { fs.renameSync = realRename; fs.openSync = realOpen; }
-    const seen = await new Promise((r) => { helper.once('message', r); helper.postMessage('check'); });
+    const seen = await answer('message', 'check');
     await helper.terminate();
     return { res, threw, stalled, tmpFd, opened: Atomics.load(cell, 0) === 1, ...seen };
   };
@@ -544,6 +555,67 @@ await leg('⑪ the theft', async () => {
   const say = (x) => `the tmp writer held fd ${x.tmpFd}; the helper opened fd ${x.fd} during the rename (${x.opened ? 'opened' : 'NEVER opened'}, the stall ${x.stalled}: ${x.fd === x.tmpFd ? 'the number the writer\'s close freed' : 'ANOTHER number'}); after the run: ${x.open ? (x.mine ? 'still open, still its file' : 'open but ANOTHER file') : 'CLOSED under it'}; renamed ${x.res && x.res.renamed}${x.threw ? ', threw ' + x.threw.message : ''}`;
   ok(now.opened && now.fd === now.tmpFd && now.open && now.mine && now.res && now.res.renamed && !now.threw, `⑪ another thread's descriptor survives the rewrite — ${say(now)}`);
   ok(rel.opened && rel.fd === rel.tmpFd && !(rel.open && rel.mine), `⑪ RED CONTROL: with the release's close the number the writer's close freed is closed AGAIN — under the helper, which had just been given it — ${say(rel)}`);
+});
+
+await leg('⑫ a failed close', async () => {
+  // r797 (3): a close that FAILS, placed once on each road (Linux releases the number even when close reports an error, so each
+  // stand-in closes for real and THEN throws EIO): the run says it by name, the shard stays whole, the tmp file goes, every
+  // descriptor is still closed exactly once, and the archive is untouched (r797 (2): the writer is closed BEFORE the append)
+  const EIO = (f) => Object.assign(new Error(`EIO: i/o error, close (placed) ${path.basename(String(f))}`), { code: 'EIO' });
+  const archRoad = (d) => ({ file: shardRows(d, [...[1, 2, 3, 4, 5].map((i) => ({ rid: `r${i}`, ts: FDC_T0 + i, n: 1 })), { rid: 'r3', ts: FDC_T0 + 3, n: 2 }, { rid: 'r2', ts: FDC_T0 + 2, n: 1 }]), opts: { archiveDir: path.join(d, 'arch') } });
+  const archOf = (file, opts) => path.join(opts.archiveDir, `usage-ledger-dedup-${path.basename(file).replace(/\.ndjson$/, '')}.ndjson`);
+  const failTmpClose = (L, d) => {
+    const { file, opts } = archRoad(d), before = fs.readFileSync(file);
+    const ro = fs.openSync, rc = fs.closeSync; let tmpFd = null, placed = 0;
+    fs.openSync = function (f, ...a) { const fd = ro.call(this, f, ...a); if (String(f) === file + L.TMP_SUFFIX) tmpFd = fd; return fd; };
+    fs.closeSync = function (fd, ...a) { const r = rc.call(this, fd, ...a); if (fd === tmpFd && !placed++) throw EIO(file + L.TMP_SUFFIX); return r; };
+    let c;
+    try { c = fdCount(() => L.runNow(L.dedupSteps(file, opts))); } finally { fs.openSync = ro; fs.closeSync = rc; }
+    return { ...c, placed, tmpPath: file + L.TMP_SUFFIX, whole: fs.readFileSync(file).equals(before), tmpGone: !fs.existsSync(file + L.TMP_SUFFIX), archived: fs.existsSync(archOf(file, opts)) ? fs.readFileSync(archOf(file, opts), 'utf8').split('\n').filter(Boolean).length : 0 };
+  };
+  const a1 = failTmpClose(LD, path.join(tmp, 'fail-rename'));
+  ok(a1.placed === 1 && !!a1.threw && a1.threw.code === 'EIO' && a1.threw.path === a1.tmpPath,
+    `⑫ the rename road: the tmp writer's close fails — the run THROWS it, said by name («${a1.threw && a1.threw.message}», path ${a1.threw && a1.threw.path})`);
+  ok(a1.whole && a1.tmpGone && a1.archived === 0 && a1.bad.length === 0 && a1.opens === a1.closes,
+    `⑫ …the shard stays whole (${a1.whole}), the tmp file is gone (${a1.tmpGone}), the archive is untouched (${a1.archived} copies), and every descriptor is closed exactly once (${a1.opens} opened / ${a1.closes} closed${a1.bad.length ? ' — ' + a1.bad.join('; ') : ''})`);
+  // RED CONTROL (r797 (2)): the release's order planted back on a copy — the archive appended BEFORE the writer's close
+  const { anchored } = await import('./scratch.mjs'), { mutantCopies } = await import('./mutant-copy.mjs');
+  const NOW_ORDER = "        w.close();   // r797 (2): the writer is closed BEFORE the archive append — a close that now throws ends the run with the archive untouched (else the next run appended the same copies again)\n        if (arch) { arch.flush(); fs.fsyncSync(arch.fd); arch.close(); arch = null; appendFile(archFile, archTmp, step); fs.unlinkSync(archTmp); } // the differing copies are kept BEFORE the rewrite\n";
+  const OLD_ORDER = "        if (arch) { arch.flush(); fs.fsyncSync(arch.fd); arch.close(); arch = null; appendFile(archFile, archTmp, step); fs.unlinkSync(archTmp); } // the differing copies are kept BEFORE the rewrite\n        w.close();\n";   // stale-pins: kept — the release's order, planted back as the RED CONTROL
+  const oldOrder = mutantCopies('ldl-close-order', REPO).load('src/usage-ledger-dedup.js', anchored(DEDUP_SRC, NOW_ORDER, OLD_ORDER, 'test-ledger-dedup-law ⑫ the release order'), 'release-order');
+  const a1r = failTmpClose(oldOrder, path.join(tmp, 'fail-rename-old'));
+  ok(a1r.threw && a1r.whole && a1r.archived > 0, `⑫ RED CONTROL: with the release's order the same failed close leaves the shard whole but the archive already holds ${a1r.archived} copies — the next run appends them again`);
+  // the line reader's handle (eachLineAsync): its close fails alone ⇒ the read throws it by name; it fails AFTER a read error ⇒
+  // it rides that error as closeError (the read's error is the one thrown)
+  const lr = path.join(tmp, 'fail-reader.ndjson'); fs.writeFileSync(lr, '{"rid":"a","ts":1}\n{"rid":"b","ts":2}\n');
+  // a FileHandle's close is an OWN property of each handle (Node defines it per instance), so the placed failure is put on the
+  // handle eachLineAsync opens — through fs.promises.open, the door it opens by; its read is placed the same way
+  const realOpenP = fs.promises.open;
+  const readWith = async ({ readFails }) => {
+    let placed = 0, lines = 0, err = null;
+    fs.promises.open = async function (f, ...a) {
+      const fh = await realOpenP.call(this, f, ...a);
+      if (String(f) === lr) {
+        const close = fh.close.bind(fh), read = fh.read.bind(fh);
+        fh.close = async (...c) => { await close(...c); if (!placed++) throw EIO(lr); };
+        if (readFails) { let once = true; fh.read = async (...r) => { if (once) { once = false; throw Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' }); } return read(...r); }; }
+      }
+      return fh;
+    };
+    try { await LD.eachLineAsync(lr, 0, () => { lines++; }); } catch (e) { err = e; } finally { fs.promises.open = realOpenP; }
+    return { placed, lines, err };
+  };
+  const b1 = await readWith({ readFails: false }), b2 = await readWith({ readFails: true });
+  ok(b1.placed === 1 && b1.lines === 2 && b1.err && b1.err.code === 'EIO' && b1.err.path === lr && /close/.test(b1.err.message),
+    `⑫ the line reader's handle: its close fails after a whole read — the read THROWS it, named (${b1.err && `«${b1.err.message}», path ${path.basename(String(b1.err.path))}`}; ${b1.lines} lines read)`);
+  ok(b2.placed === 1 && b2.err && /read \(placed\)/.test(b2.err.message) && b2.err.closeError && b2.err.closeError.code === 'EIO',
+    `⑫ …and after a READ error the failed close rides it as closeError: the read's own error is the one thrown («${b2.err && b2.err.message}», closeError «${b2.err && b2.err.closeError && b2.err.closeError.message}»)`);
+  // the append whose destination cannot open (the archive's file is a folder): the run throws, the source is closed, nothing leaks
+  const d3 = path.join(tmp, 'fail-append'), { file: f3, opts: o3 } = archRoad(d3), before3 = fs.readFileSync(f3);
+  fs.mkdirSync(archOf(f3, o3), { recursive: true });
+  const c3 = fdCount(() => LD.runNow(LD.dedupSteps(f3, o3)));
+  ok(c3.threw && /EISDIR|EPERM|EACCES/.test(String(c3.threw.code)) && c3.bad.length === 0 && c3.opens === c3.closes && fs.readFileSync(f3).equals(before3) && !fs.existsSync(f3 + LD.TMP_SUFFIX),
+    `⑫ the archive append whose destination cannot open: the run throws (${c3.threw && c3.threw.code}), its source is closed — every descriptor closed exactly once (${c3.opens} / ${c3.closes}${c3.bad.length ? ' — ' + c3.bad.join('; ') : ''}) — and the shard stays whole`);
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

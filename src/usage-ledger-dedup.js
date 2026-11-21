@@ -350,8 +350,8 @@ function* dedupSteps(file, { step = STEP_BYTES, maxIds = MAX_IDS, archiveDir = n
           w.raw(rest);
         }
         fs.fsyncSync(w.fd);
+        w.close();   // r797 (2): the writer is closed BEFORE the archive append — a close that now throws ends the run with the archive untouched (else the next run appended the same copies again)
         if (arch) { arch.flush(); fs.fsyncSync(arch.fd); arch.close(); arch = null; appendFile(archFile, archTmp, step); fs.unlinkSync(archTmp); } // the differing copies are kept BEFORE the rewrite
-        w.close();
         try { fs.chmodSync(tmp, st.mode & 0o777); } catch { }
         fs.renameSync(tmp, file);
         return Object.assign(res, { after: w.bytes, renamed: true, at: now() });
