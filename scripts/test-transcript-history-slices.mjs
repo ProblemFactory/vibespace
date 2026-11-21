@@ -68,7 +68,7 @@ function placeClaude(fp, bytes) {
     let k = 0, n = 0;
     while (n < bytes) {
       const rows = [];
-      for (let i = 0; i < 4096; i++, k++) rows.push(k % 2 ? `{"type":"assistant","uuid":"u${k}","message":{"role":"assistant","content":[{"type":"text","text":"a${k}"}]}}` : `{"type":"user","uuid":"u${k}","message":{"role":"user","content":"q${k}"}}`);
+      for (let i = 0; i < 4096; i++, k++) rows.push(`{"type":"user","uuid":"u${k}","message":{"role":"user","content":"q"}}`);   // the shortest records a history holds: the most of them in the 32 MB tail (the RED's margin)
       const chunk = rows.join('\n') + '\n';
       fs.writeSync(out, chunk); n += Buffer.byteLength(chunk);
     }
@@ -86,7 +86,7 @@ fs.mkdirSync(codexDir, { recursive: true });
     let k = 0, n = 0;
     while (n < BIG) {
       const rows = [];
-      for (let i = 0; i < 4096; i++, k++) rows.push(`{"type":"response_item","payload":{"type":"message","role":"${k % 2 ? 'assistant' : 'user'}","content":[{"type":"${k % 2 ? 'output' : 'input'}_text","text":"m${k}"}]}}`);
+      for (let i = 0; i < 4096; i++, k++) rows.push(k % 2 ? `{"type":"event_msg","payload":{"type":"agent_reasoning","text":"r${k}"}}` : `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"m${k}"}]}}`);   // short rows: the most records in the tail
       const chunk = rows.join('\n') + '\n';
       fs.writeSync(out, chunk); n += Buffer.byteLength(chunk);
     }
@@ -128,16 +128,16 @@ const opens = (r) => r.reads.filter((x) => /^promises\.open /.test(x));
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 const same = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false; return true; };
 
-C._setSlicedForTest({ afterMs: 60 });
+C._setSlicedForTest({ afterMs: 300 });
 console.log('① the Claude history, the pool closed for good');
 {
   const sid = sids[0], fp = claudeFp(sid);
   const R0 = await road('① the first warm after the refusal', () => SS.warmSessionJsonlAsync(sid, cwd));
   ok(R0.out === false && content(R0).length === 0 && opens(R0).length === 0, `${R0.name}: «not loaded yet» — the refusal has not stood the stated time: nothing read, here or anywhere (${opens(R0).length} opens)`, { out: R0.out, reads: R0.reads.slice(0, 4) });
-  await sleep(90);
+  await sleep(400);
   const R1 = await road('① the warm past the stated time', () => SS.warmSessionJsonlAsync(sid, cwd));
   const kept = SS.parseSessionJsonl(sid, cwd);
-  ok(R1.out === true && content(R1).length === 0 && opens(R1).length >= 1 && R1.longest < LAW_MS && Array.isArray(kept) && !kept.notLoaded && kept.length > 100000,
+  ok(R1.out === true && content(R1).length === 0 && opens(R1).length >= 1 && R1.longest < LAW_MS && Array.isArray(kept) && !kept.notLoaded && kept.length > 300000,
     `${R1.name}: LOADED on the main process — ${kept.length} records, every file call async (${opens(R1).length} open, ${content(R1).length} sync reads), the longest turn ${R1.longest} ms < ${LAW_MS} ms (the law)`, { out: R1.out, longest: R1.longest, n: kept.length, notLoaded: kept.notLoaded });
   const t0 = performance.now();
   const sync = C.readJsonlTail(fp, null, { dropSubagent: true, warnLarge: false });
@@ -148,9 +148,18 @@ console.log('① the Claude history, the pool closed for good');
   ok(fields.every((k) => a[k] === b[k]) && a.starts.length === b.starts.length && a.starts.every((v, i) => v === b.starts[i]) && same(a.messages, b.messages),
     `① its entry is the worker's, field for field (readJsonlTail's full read: ${a.messages.length} records, the span ${a.spanStart}…${a.spanEnd})`, { diff: fields.filter((k) => a[k] !== b[k]) });
   ok(syncMs >= LAW_MS, `① RED — the whole-file parse on the loop (the release's road, readJsonlTail): ONE turn of ${syncMs} ms ≥ ${LAW_MS} ms`, { syncMs });
-  // the read's note STAYS (the pool still refuses), marked: a parse with NO warm answers the loaded copy — one stat, never a read
-  const Rp = await road('① a parse after it, no warm (the pool still refusing)', () => { const l = SS.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
-  ok(Rp.out && Rp.out.n === kept.length && !Rp.out.notLoaded && content(Rp).length === 0 && opens(Rp).length === 0, `${Rp.name}: LOADED, untagged — ${content(Rp).length} reads (a stat only)`, { out: Rp.out, reads: Rp.reads.slice(0, 4) });
+  // the read's note STAYS while the pool refuses — through a warm that had no word from the pool («already warm»): the file then
+  // GROWN, a parse with NO warm reads nothing on the loop (the copy tagged, the warm asked again) — RED: the note gone, the parse's
+  // sync append read
+  await SS.warmSessionJsonlAsync(sid, cwd);   // already warm: no word from the pool
+  // grown PAST the warm's inline append (4 MB — a bounded read the warm folds in with the pool up too): the pool's work
+  fs.appendFileSync(fp, Array.from({ length: 80000 }, (_, k) => `{"type":"user","uuid":"g${k}","message":{"role":"user","content":"q"}}`).join('\n') + '\n');
+  const Rp = await road('① a parse of the grown file, no warm (the pool still refusing)', () => { const l = SS.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
+  ok(Rp.out && Rp.out.notLoaded === 'transcript_reader_restarting' && Rp.out.n === kept.length && content(Rp).length === 0, `${Rp.name}: nothing read on the loop (${content(Rp).length} reads) — the loaded copy answered, tagged, the warm asked again`, { out: Rp.out, reads: Rp.reads.slice(0, 4) });
+  await SS.warmSessionJsonlAsync(sid, cwd);   // the warm the parse asked for (or joins it): sliced again, the grown file loaded
+  const Rq = await road('① a parse after the grown file was read again', () => { const l = SS.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
+  const grownN = C.readJsonlTail(fp, null, { dropSubagent: true, warnLarge: false }).entry.messages.length;
+  ok(Rq.out && !Rq.out.notLoaded && Rq.out.n === grownN && content(Rq).length === 0, `${Rq.name}: LOADED (${Rq.out && Rq.out.n} records = the grown file's tail), a stat only (${content(Rq).length} reads)`, { out: Rq.out, grownN });
   const Rm = await road('① the reader\'s consumption of it (printed, not judged — the healthy road\'s cost too)', () => { const m = new SS.SessionMessages({ backend: 'claude', claudeSessionId: sid, cwd, buffer: '' }, sid, {}); m._ensureParsed(); return Array.isArray(m._all) ? m._all.length : null; });
   void Rm;
 }
@@ -163,7 +172,7 @@ console.log('② the codex history, the pool closed for good');
   C.findCodexSessionJsonlPath(tid); C.extractCodexThreadMeta(codexFp);
   const R0 = await road('② the first attach after the refusal', async () => { const m = new CS.CodexSessionMessages(sess, tid, {}); const all = await m.rawAsync(); return { n: all.length, notLoaded: m.notLoaded || null }; });
   ok(R0.out && R0.out.notLoaded === 'transcript_reader_restarting' && content(R0).length === 0 && opens(R0).length === 0, `${R0.name}: «not loaded yet», nothing read (${opens(R0).length} opens)`, { out: R0.out });
-  await sleep(90);
+  await sleep(400);
   const R1 = await road('② the attach past the stated time', async () => { const m = new CS.CodexSessionMessages(sess, tid, {}); const all = await m.rawAsync(); return { n: all.length, notLoaded: m.notLoaded || null }; });
   const t0 = performance.now();
   const sync = C.parseCodexSessionJsonl(tid, { fp: codexFp });
@@ -187,7 +196,7 @@ console.log('③ the storage\'s refusal, ④ the other roads, ⑤ said once');
   // the codex history's storage guard: a hung path ⇒ «not loaded», nothing opened
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' }));
   const Rch = await road('③ the codex history on a hung path', async () => { const m = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid2, cwd, buffer: '' }, tid2, {}); await m.rawAsync(); return m.notLoaded || null; });
-  ok(Rch.out === 'transcript_reader_restarting' && opens(Rch).length === 0, `${Rch.name}: «not loaded», nothing opened on the main process (${opens(Rch).length})`, { out: Rch.out });
+  ok(Rch.out === 'transcript_reader_restarting' && opens(Rch).length === 0, `${Rch.name}: «not loaded», the sliced road opened nothing (${opens(Rch).length}; the codex finder's own head read — row B-a60e's — is printed above)`, { out: Rch.out });
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }));
   const roads = [['the gap read', () => C.jsonlGapInfoAsync(claudeFp(sids[0]))], ['the slab read', () => C.readJsonlLineRangeAsync(claudeFp(sids[0]), 1, 50)], ['the turn map', () => C.scanJsonlUserTurnsAsync(claudeFp(sids[0]), 'claude')]];
   for (const [name, fn] of roads) {
@@ -210,7 +219,7 @@ console.log('⑥ a deadline on the codex merged read');
   const mixed = { calls: [], call(op) { this.calls.push(op); return Promise.reject(Object.assign(new Error(op === 'codexHistoryMergedPage' ? 'Storage not responding (operation timed out).' : 'no worker'), op === 'codexHistoryMergedPage' ? { status: 503, safeFsTimeout: true, deadline: true } : { status: 503, code: 'no-worker' })); } };
   C._setTranscriptPoolForTest(mixed);
   const Rmd = await road('⑥ the codex history after its merged read ran out its deadline', async () => { const m = new CS.CodexSessionMessages({ backend: 'codex', backendSessionId: tid3, cwd, buffer: '' }, tid3, {}); await m.rawAsync(); return m.notLoaded || null; });
-  ok(mixed.calls.includes('codexHistoryMergedPage') && Rmd.out === 'transcript_reader_restarting' && opens(Rmd).length === 0 && /storage hung/.test(C.slicedRoadFor(codexFp3).why), `${Rmd.name}: every file it named is the storage's — the per-file «no worker» after it never opens one on the main process (${opens(Rmd).length} opens; «${C.slicedRoadFor(codexFp3).why}»)`, { out: Rmd.out, calls: mixed.calls.slice(0, 4) });
+  ok(mixed.calls.includes('codexHistoryMergedPage') && Rmd.out === 'transcript_reader_restarting' && opens(Rmd).length === 0 && /storage hung/.test(C.slicedRoadFor(codexFp3).why), `${Rmd.name}: every file it named is the storage's — the per-file «no worker» after it never takes the sliced road (it opened nothing) (${opens(Rmd).length} opens; «${C.slicedRoadFor(codexFp3).why}»)`, { out: Rmd.out, calls: mixed.calls.slice(0, 4) });
 }
 console.log('⑦ the record\'s bounds');
 {
@@ -245,6 +254,7 @@ console.log('⑧ output identity on every small shape');
     'invalid lines': [r(1), '{broken', '', '   ', r(2), 'null', '[1,2]'].join('\n') + '\n',
     'a side-chain record': [r(1), '{"type":"assistant","isSidechain":true,"uuid":"sc"}', '{"type":"user","parent_tool_use_id":"t1","uuid":"pt"}', r(2)].join('\n') + '\n',
     'an empty file': '',
+    'long lines (300 KB each: a step ends at 1 MB)': Array.from({ length: 12 }, (_, k) => `{"type":"user","uuid":"L${k}","message":{"role":"user","content":"${'z'.repeat(300 * 1024)}"}}`).join('\n') + '\n',
   };
   let i = 0;
   for (const [name, text] of Object.entries(SHAPES)) {

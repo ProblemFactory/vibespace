@@ -821,7 +821,7 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
         for (let i = 0; i < r.records.length; i++) { records.push(r.records[i]); threads.push(r.tix[i] >= 0 ? r.tids[r.tix[i]] : ''); }
         start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
       }
-      if (!gone) { _mergedStats.reads++; return { records, threads }; }
+      if (!gone) { _mergedStats.reads++; for (const f of files || []) forgiveFile(f && f.fp); return { records, threads }; }   // unit 2: its answer forgives every file it named
     } catch (e) {
       const code = e && e.code;
       // row B-422c unit 2: the merged call names its files in `files`, never `fp` — a POOL failure of it (a deadline above all: one of
@@ -856,7 +856,8 @@ function noteFileRefusal(fp, refusal) {
   const now = Date.now();
   let rec = _fileRefusals.get(fp);
   if (rec && !rec.storageHung && now - rec.lastAt > STAND_GAP_MS) { rec.firstAt = now; rec.count = 0; }   // not refused for a while: it starts over
-  if (!rec) {
+  if (rec) { _fileRefusals.delete(fp); _fileRefusals.set(fp, rec); }   // the NEWEST place: the bound goes to the files refused longest ago
+  else {
     rec = { firstAt: now, lastAt: now, count: 0, storageHung: false, why: '' };
     _fileRefusals.set(fp, rec);
     if (_fileRefusals.size > FILE_REFUSALS_MAX) {   // the oldest record that is NOT the storage's goes first; past the second bound, the oldest
@@ -870,6 +871,8 @@ function noteFileRefusal(fp, refusal) {
   return rec;
 }
 const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
+/** the storage's, as far as memory knows (its record, the mount door) — never a file call */
+function fileStorageHung(fp) { const r = fp && _fileRefusals.get(fp); if (r && r.storageHung) return true; try { return !!require('../mount-door').blocked(fp); } catch { return false; } }
 /** May this file's history be read on the main process now? → { ok, why } (never a file call: memory only) */
 function slicedRoadFor(fp) {
   const rec = fp && _fileRefusals.get(fp);
@@ -879,7 +882,7 @@ function slicedRoadFor(fp) {
   if (stood < SLICED_AFTER_MS) return { ok: false, why: `refused for ${Math.round(stood / 1000)} s — the main process reads it past ${SLICED_AFTER_MS / 1000} s` };
   let mp = false; try { mp = require('../mount-door').blocked(fp); } catch { mp = false; }
   if (mp) { rec.storageHung = true; return { ok: false, why: 'its mount is blocked' }; }
-  if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', 0)) return { ok: false, why: 'the transcript pool remembers it hung' };   // patience 0: ANY entry for it refuses
+  if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', 0)) return { ok: false, why: 'the transcript pool remembers it hung' };   // patience 0: any entry AT OR ABOVE it refuses (every transcript entry is one)
   if (_slicedParked) return { ok: false, why: 'a read on the main process is still parked in a file that never answered' };
   return { ok: true, why: `the transcript reader refused it for ${Math.round(stood / 1000)} s (${rec.count} refusals: ${rec.why})` };
 }
@@ -1719,7 +1722,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

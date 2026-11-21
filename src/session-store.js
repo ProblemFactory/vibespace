@@ -715,7 +715,7 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
 }
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
-  let tasks = null, refusedNow = false;
+  let tasks = null, refusedNow = false, ownRead = false;   // ownRead: an end with no word from the pool (already warm, an append folded in)
   const bulk = !!(opts && opts.bulk === true);   // r935: a bulk resume's first attach (ws-handler `_bulkRead`); every other ask is a person's
   const hung = _historyRefused.get(claudeSessionId), noteAtStart = hung;
   if (hung && hung.storageHung && hung.fp) {
@@ -740,7 +740,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
     const stat = fs.statSync(fp);
     tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
     const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { ownRead = true; _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
     const { readJsonlTail } = require('./adapters/codex');
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
@@ -749,6 +749,9 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
         if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
         _stampJsonlParse(r.bytes, performance.now() - t0);
         _jsonlCachePut(claudeSessionId, r.entry);
+        ownRead = true;
+        const n0 = _historyRefused.get(claudeSessionId);   // unit 2: a note of a history the main process read moves to the copy it read now
+        if (n0 && n0.sliced) n0.sliced = { mtimeMs: r.entry.mtimeMs, size: r.entry.size, ino: r.entry.ino };
         return true;
       }
     }
@@ -799,7 +802,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
       return false;
     }
     return ok;
-  } catch { return false; } finally { if (!refusedNow && _historyRefused.get(claudeSessionId) === noteAtStart) _historyRefused.delete(claudeSessionId); if (tasks) await tasks; }   // row B-422c: any end but the refusal clears the note it found (the file gone, an op's own error, an append folded in) — never one another warm took meanwhile
+  } catch { return false; } finally { const cur = _historyRefused.get(claudeSessionId); if (!refusedNow && cur === noteAtStart && !(cur && cur.sliced && ownRead)) _historyRefused.delete(claudeSessionId); if (tasks) await tasks; }   // unit 2: a note of a history the main process read ends only on the POOL's word (or the file's end) — never at an end with none   // row B-422c: any end but the refusal clears the note it found (the file gone, an op's own error, an append folded in) — never one another warm took meanwhile
 }
 
 function parseSessionJsonl(claudeSessionId, cwd) {
@@ -807,9 +810,9 @@ function parseSessionJsonl(claudeSessionId, cwd) {
   if (refused) {   // row B-422c: the warm's read was refused — the kept copy or «not loaded yet», never a parse on the loop
     const kept = _jsonlCache.get(claudeSessionId);
     // unit 2: the main process READ it (the sliced road) and the file is still what it read ⇒ loaded (one stat, never a read)
-    if (refused.sliced && kept && Array.isArray(kept.messages) && kept.mtimeMs === refused.sliced.mtimeMs && kept.size === refused.sliced.size) {
-      let st = null; try { st = fs.statSync(refused.fp || findSessionJsonlPath(claudeSessionId, cwd)); } catch { st = null; }
-      if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) return kept.messages;
+    if (refused.sliced && refused.fp && kept && Array.isArray(kept.messages) && kept.mtimeMs === refused.sliced.mtimeMs && kept.size === refused.sliced.size && !C().fileStorageHung(refused.fp)) {
+      let st = null; try { st = fs.statSync(refused.fp); } catch { st = null; }
+      if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) { _jsonlUsed.set(kept, Date.now()); return kept.messages; }   // in use: never idle-evicted under the reader
     }
     if (!refused.storageHung && Date.now() >= refused.retryAt) { refused.retryAt = Date.now() + RETRY_WARM_MS; warmSessionJsonlAsync(claudeSessionId, cwd).catch(() => false); }
     // the kept copy is BEHIND the file (the warm asked for a full read): a copy of its list, tagged — never the cache's own array
