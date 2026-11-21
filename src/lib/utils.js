@@ -1985,8 +1985,8 @@ export function storeHeldWords(held) {
 export function storeUnsavedWords(u) {
   if (Array.isArray(u)) return u.length === 1 ? storeUnsavedWords(u[0]) : t("Changes to {n} of VibeSpace’s saved files are not being saved: the storage refused the writes. They are kept here and written again by themselves (Details names them).", { n: u.length });
   // B-225b's remainder (主开发 r1353 (2)(3)): the rollback points are no change of the person's — their own sentences: REFUSED (let go,
-  // counted) or only LATE (the desktops went on without waiting for them); the desktops themselves are written either way
-  // (主开发 r1387 (4): nothing here says the desktops themselves are saved — that is the desktops' own row's to say, checked)
+  // counted) or only LATE (the desktops went on without waiting for them) — nothing here says anything of the desktops: that is
+  // the desktops' own row's to say (主开发 r1387 (4))
   if (u && u.file === 'layout-history') return u.code === 'queued'
     ? t('The rollback points of your desktops are not saved yet: the storage has not taken the write in time.')
     : t('The rollback points of your desktops are not being saved: the storage refused the write; the points made meanwhile are lost.') + (u.lost > 1 ? ' ' + t('{n} rollback points were lost.', { n: u.lost }) : '');

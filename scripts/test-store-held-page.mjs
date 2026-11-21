@@ -647,9 +647,18 @@ console.log('§8 a write the storage refused: the strip says «not being saved»
   ok(liftClears(SH) === 0, 'the store read again (store-lifted) also takes «not being saved» off: an owed write that ended by name never keeps the strip up until a reconnect');
   const NOLIFT = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), /^ {2}UNSAVED\.delete\(f\);[^\n]*\n[^\n]*\n/m, '', 'lift-keeps-unsaved'), 'lift-keeps-unsaved');
   ok(liftClears(NOLIFT) === 1, 'CONTROL (the lift without the clearing, in a copy): the strip keeps «not being saved» for a store whose owed write ended — red');
-  const CUT = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  const unsavedText = unsaved.length ? storeUnsavedWords(unsaved) : '';", "  const unsavedText = '';   // MUTANT: the unsaved sentence cut", 'unsaved-cut'), 'unsaved-cut');
+  const CUT = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  const unsavedText = [ownRows.length ? storeUnsavedWords(ownRows) : '', ...pointRows.map((u) => storeUnsavedWords(u))].filter(Boolean).join(' ');", "  const unsavedText = '';   // MUTANT: the unsaved sentence cut", 'unsaved-cut'), 'unsaved-cut');
   const cm = CUT.stripModel([], { unsaved: [UNS('layouts.json')] });
   ok(!!cm && cm.unsavedText === '', 'CONTROL (the strip\'s unsaved sentence cut, in a copy): the word arrives and the strip says nothing of it — red', J(cm && cm.unsavedText));
+  // r1595 (the round's should): the desktops' row AND the rollback points' row on the strip — the count sentence («kept here and written
+  // again by themselves») is the stores' own; the points (let go when refused) say their own sentence beside it
+  const PTS = { file: 'layout-history', code: 'EIO', since: 1, rung: 'said', lost: 1 };
+  const two = SH.stripModel([], { unsaved: [UNS('layouts.json'), PTS] }).unsavedText;
+  const twoRight = (x) => typeof x === 'string' && x.includes(U.storeUnsavedWords(UNS('layouts.json'))) && x.includes(U.storeUnsavedWords(PTS)) && !/saved files are not being saved/.test(x);
+  ok(twoRight(two), 'the desktops\' row and the rollback points\' row together: the desktops\' own sentence and the points\' own (let go, counted) — never one count that calls a refused point «kept here and written again»', two);
+  const COUNT = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  const unsavedText = [ownRows.length ? storeUnsavedWords(ownRows) : '', ...pointRows.map((u) => storeUnsavedWords(u))].filter(Boolean).join(' ');", "  const unsavedText = unsaved.length ? storeUnsavedWords(unsaved) : '';   // MUTANT: the tip's count over every row", 'points-counted'), 'points-counted');
+  const twoX = COUNT.stripModel([], { unsaved: [UNS('layouts.json'), PTS] }).unsavedText;
+  ok(!twoRight(twoX) && /saved files are not being saved/.test(twoX), 'CONTROL (the count over every row, in a copy — the line as taken): a refused point is told «kept here and written again by themselves» — red', twoX);
 }
 
 // ── §9 B-225b's REMAINDER (lane login-request-card, 主开发 r1310 / r1318) ── (a) the stamp and the start's verdict, PURE; (b) THE LAST
@@ -789,7 +798,7 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     ok(!!v && v.kind === 'maynot', 'CONTROL (the stop\'s flush not stamped stop:true, in a copy): a CLEAN stop is told «may not» — red', J(v)); }
   { const S = cut('mark-ignored', "  const st = stamp || null, m = mark && typeof mark === 'object' && 'base' in mark ? mark : null;", "  const st = stamp || null, m = null;"); const d = scratch(); await runOne(d, { owe: true, src: S }); const H = hub(d, S); still(() => H.R.readLayouts()); const v = await stopOf(H);
     ok(!!v && v.kind === 'maynot', 'CONTROL (the owed mark not read, in a copy): a KNOWN loss is told only «may not» — red', J(v)); }
-  { const S = cut('maynot-carried', "const unnoted = _stopFact && _stopFact.kind === 'known' ?", 'const unnoted = _stopFact ?'); const d = scratch(); await runOne(d, { src: S }); const H2 = hub(d, S); still(() => H2.R.readLayouts()); await stopOf(H2); still(() => H2.R.flushLayouts({ stop: true })); const H3 = hub(d, S); still(() => H3.R.readLayouts()); const v = await stopOf(H3);
+  { const S = cut('maynot-carried', "_startUnnoted : _stopFact && _stopFact.kind === 'known' ?", '_startUnnoted : _stopFact ?'); const d = scratch(); await runOne(d, { src: S }); const H2 = hub(d, S); still(() => H2.R.readLayouts()); await stopOf(H2); still(() => H2.R.flushLayouts({ stop: true })); const H3 = hub(d, S); still(() => H3.R.readLayouts()); const v = await stopOf(H3);
     ok(!!v, 'CONTROL («may not» carried in the bytes, in a copy): the start after a clean stop still tells a loss — red', J(v)); }
   { const S = cut('sum-unchecked', "  return { stamp: st, trusted: body !== null && typeof st.sum === 'string' && sumOf(body) === st.sum };", '  return { stamp: st, trusted: true };'); const d = scratch(); fs.writeFileSync(path.join(d, 'layouts.json'), relBytes); fs.writeFileSync(path.join(d, 'layouts.owed.json'), J({ run: 'r1', seq: 9, since: 1, base: { run: 'r1', seq: 3 }, code: 'EIO' })); const H = hub(d, S); still(() => H.R.readLayouts()); const v = await stopOf(H);
     ok(!!v && v.kind === 'known', 'CONTROL (the checksum not asked, in a copy): a file the release rewrote is told a KNOWN loss from a stale mark — red', J(v)); }
@@ -950,7 +959,7 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     fs.writeFileSync(path.join(d2, 'layouts.owed.json'), J({ run: 'old', seq: 2, since: 1, base: { run: 'gone-run', seq: 7 }, code: 'EIO' }));
     const D = hub(d2); still(() => D.R.readLayouts());
     ok((await stopOf(D)) === null, '…and a mark whose base is no longer the file\'s own stamp (a later run landed over it) stays SILENT');
-    const S = cut('base-ignored', "  if (m && (m.base == null ? st == null : (!!st && m.base.run === st.run && Number(m.base.seq) === Number(st.seq)))) {", "  if (m && st && m.run === st.run && Number(m.seq) > Number(st.seq) && st.stop !== true) {");
+    const S = cut('base-ignored', "  if (m && markNamesStamp(m, st)) {", "  if (m && st && m.run === st.run && Number(m.seq) > Number(st.seq) && st.stop !== true) {");
     const E = hub(d, S); still(() => E.R.readLayouts());
     const vE = await stopOf(E);
     ok(vE === null, 'CONTROL (the same-run rule the round read, in a copy): the refused run beside the older clean stamp reads «all saved» — red', J(vE));
@@ -965,6 +974,21 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     const words = U.storeStopWords(v, '');
     ok(!!v && v.cause === 'late' && /had not reached the disk in time/.test(words) && !/refused/.test(words) && /⚙ → System → Restore a previous layout…/.test(words),
       '(6) a write only LATE at the stop is told «had not reached the disk in time» (never «refused»), and the words say WHERE the earlier layouts are (⚙ → System → Restore a previous layout…)', words);
+    // r1595 (6), the MUST: THE CARRIED ROAD keeps the cause — nobody presses «Understood», a clean stop, a second restart: still «late»
+    const cc = async (src) => {
+      const dd = scratch(); await runOne(dd, { clean: true });
+      const t0 = fs.readFileSync(path.join(dd, 'layouts.json'), 'utf8'), s0 = PZ.stampOfRead(JSON.parse(t0), t0).stamp;
+      fs.writeFileSync(path.join(dd, 'layouts.owed.json'), J({ run: 'x', seq: 9, since: 1, base: { run: s0.run, seq: s0.seq }, code: 'queued' }));
+      const A = hub(dd, src); still(() => A.R.readLayouts()); const va = await stopOf(A);
+      still(() => A.R.flushLayouts({ stop: true }));   // a clean stop; nobody pressed «Understood»
+      const B = hub(dd); still(() => B.R.readLayouts());
+      return { va, vb: await stopOf(B) };
+    };
+    const C1 = await cc(null);
+    ok(!!C1.va && C1.va.cause === 'late' && !!C1.vb && C1.vb.kind === 'known' && C1.vb.cause === 'late' && !/refused/.test(U.storeStopWords(C1.vb, '')),
+      'r1595 (6), THE CARRIED ROAD: a write only LATE, nobody pressing «Understood», a clean stop, a second restart — still told «had not reached the disk in time», never «refused»', J(C1));
+    const C1x = await cc(cut('carried-cause-dropped', 'savedAt: _stopFact.savedAt, cause: _stopFact.cause }', 'savedAt: _stopFact.savedAt }'));   // stale-pins: kept (the red control puts the line as taken back)
+    ok(!!C1x.vb && C1x.vb.cause === 'refused', 'CONTROL (the carried fact without its cause, in a copy — the line as taken): the second restart tells the late write «refused» — red', J(C1x.vb));
   }
   // (7) a mark that cannot be READ is «unknown» (the journal), never «may not» by itself; a landing before the verdict never removes it
   {
@@ -973,11 +997,52 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     const warned = []; const w0 = console.warn; console.warn = (...a) => { warned.push(a.join(' ')); };
     let vU; try { const H = hub(d); still(() => H.R.readLayouts()); vU = await stopOf(H); } finally { console.warn = w0; }
     ok(vU === null && warned.some((l) => /owed mark could not be read \(EISDIR\)/.test(l) && /UNKNOWN/.test(l)), '(7) a mark that cannot be READ is «unknown» — said in the journal — and the clean stamp alone is judged: nothing is told, never «may not» by default', J({ vU, warned: warned.filter((l) => /mark/.test(l)) }));
-    const d2 = scratch(); await runOne(d2, { owe: true });   // a KNOWN loss waiting in its mark
-    const H2 = hub(d2); still(() => { H2.R.readLayouts(); H2.R.writeLayouts(desk('w3')); H2.R.flushLayouts(); });   // a landing BEFORE the verdict
-    const v2 = await stopOf(H2); await H2.R.layoutsMarkSettled();
-    ok(!!v2 && v2.kind === 'known' && !fs.existsSync(path.join(d2, 'layouts.owed.json')),
-      '…and a first landing BEFORE the verdict never removes the mark it has not judged: the verdict still reads KNOWN, the mark goes only once judged', J(v2));
+    // r1595 (a): bytes made BEFORE the verdict carry no `unnoted` — when they land (before the verdict, or after it), the KNOWN mark
+    // FOLLOWS that landing (its base the file's stamp now) and a kill before the next landing still reads KNOWN; the mark goes only at a
+    // landing of bytes made AFTER the verdict. Both roads: the landing first (judged after it), and the round's: made before, landed after
+    const lateDesk = () => {   // a writer that holds the DESKTOPS' write until released (the points land as ever)
+      const base = landingWriter(); let on = false; const held = [];
+      return { ...base,
+        hold(x) { on = x; if (!x) for (const [f, o, waits] of held.splice(0)) { base.dirty(f, o); for (const w of waits) w(); } },
+        dirty(f, o = {}) { if (on && path.basename(f) === 'layouts.json') { held.push([f, o, []]); return; } return base.dirty(f, o); },
+        durable(f, o = {}) { const h = held.find((x) => x[0] === f); return h ? new Promise((r) => h[2].push(() => r(base.durable(f, o)))) : base.durable(f, o); },
+        pending: (f) => held.some((x) => x[0] === f) || base.pending(f) };
+    };
+    const followScene = async (src, road) => {
+      const dd = scratch(); await runOne(dd, { owe: true });   // a KNOWN loss waiting in its mark
+      const m0 = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8'));
+      const LW = lateDesk(), A = hub(dd, src, LW);
+      still(() => { A.R.readLayouts(); if (road === 'after') LW.hold(true); A.R.writeLayouts(desk('w3')); A.R.flushLayouts(); });   // bytes made BEFORE the verdict
+      const va = await stopOf(A);
+      if (road === 'after') still(() => LW.hold(false));   // …landing AFTER it
+      await settle(4); await A.R.layoutsMarkSettled();
+      const t = fs.readFileSync(path.join(dd, 'layouts.json'), 'utf8'), st = PZ.stampOfRead(JSON.parse(t), t).stamp;
+      let mk = null; try { mk = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8')); } catch { }
+      const B = hub(dd); still(() => B.R.readLayouts()); const vb = await stopOf(B);   // A was KILLED: no stop flush
+      return { va, vb, since0: m0.since, base: mk && mk.base, stamp: st && { run: st.run, seq: st.seq } };
+    };
+    const followRight = (r) => !!r.va && r.va.kind === 'known' && !!r.vb && r.vb.kind === 'known' && r.vb.since === r.since0 && J(r.base) === J(r.stamp);
+    const F1 = await followScene(null, 'first'), F2 = await followScene(null, 'after');
+    ok(followRight(F1) && followRight(F2), '(7) + r1595 (a): bytes made BEFORE the verdict — landing before it, or after it — never remove the KNOWN mark: it FOLLOWS that landing (its base the file\'s stamp now) and a kill before the next landing still reads KNOWN, with the loss\'s own moment', J({ F1, F2 }));
+    const SF = cut('mark-not-followed', '    if (_oldKnown && _producedSeq <= _judgedSeq && _lastLanded && _lastLanded.run === RUN) {', '    if (false) {');
+    const F1x = await followScene(SF, 'first'), F2x = await followScene(SF, 'after');
+    ok(!followRight(F1x) && !followRight(F2x) && !!F2x.vb && F2x.vb.kind === 'maynot', 'CONTROL (the mark removed at that landing, in a copy — the line as taken): the kill turns the KNOWN loss into «may not» — red', J({ F1x: F1x.vb, F2x: F2x.vb }));
+  }
+  // r1595 (b): «Understood» asks a flush — a kill right after the press never tells the noted loss again
+  {
+    const pk = async (src) => {
+      const dd = scratch(); await runOne(dd, { owe: true });
+      const A = hub(dd); still(() => A.R.readLayouts()); await stopOf(A); still(() => A.R.flushLayouts({ stop: true }));   // carried; nobody pressed
+      const B = hub(dd, src); still(() => B.R.readLayouts()); const vb = await stopOf(B);
+      const pr = await still(() => B.call('post', '/api/stores/layouts.json/stop-noted', { headers: { 'sec-fetch-site': 'same-origin' } }));
+      await settle(2); await B.R.layoutsMarkSettled();   // B is KILLED here: no stop flush
+      const C = hub(dd); still(() => C.R.readLayouts());
+      return { vb, noted: pr.body && pr.body.noted, vc: await stopOf(C) };
+    };
+    const P1 = await pk(null);
+    ok(!!P1.vb && P1.vb.kind === 'known' && P1.noted === true && !(P1.vc && P1.vc.kind === 'known'), 'r1595 (b): «Understood» asks a flush — a kill right after the press does not tell the noted loss again (the kill itself is told as one, «may not»)', J(P1));
+    const P1x = await pk(cut('press-no-flush', "    if (was && was.kind === 'known' && _layoutsRead) { try { flushLayouts(); }", '    if (false) { try { flushLayouts(); }'));
+    ok(!!P1x.vc && P1x.vc.kind === 'known', 'CONTROL (the press writes nothing, in a copy — the line as taken): the noted loss is told again after the kill — red', J(P1x.vc));
   }
   // the import's stamp: a layout that arrives WITH a stamp (an import of a file that held one) is written with THIS hub's stamp only
   {
@@ -1009,7 +1074,7 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     ok(mK.stopKind === 'known' && !mK.quiet && /storage refused the write/.test(mK.stopText) && /Restore a previous layout…/.test(mK.stopText)
       && /had not reached the disk in time/.test(mL.stopText) && mM.stopKind === 'maynot' && mM.quiet === true && /may not have been saved/.test(mM.stopText) && mMU.quiet === false && SH.stripModel([], {}) === null
       && /lost\.$/.test(pR1) && !/rollback points were lost/.test(pR1) && /4 rollback points were lost\./.test(pR4) && /not saved yet: the storage has not taken the write in time\.$/.test(pQ)
-      && ![pR1, pR4, pQ].some((x) => /themselves are saved|without waiting/.test(x)),
+      && ![pR1, pR4, pQ].some((x) => /themselves are saved|without waiting/.test(x)),   // stale-pins: kept (a deliberate absence check: no sentence says the desktops are saved)
       '(8) THE STRIP\'S MODEL: KNOWN (refused or late, its own words, WHERE the layouts are), «may not» QUIET when alone and not when another store is unsaved, nothing when nothing; the points\' sentences (refused, lost N, late) — none says the desktops are saved (r1387 (4))', J({ mK: mK.stopText, mL: mL.stopText, mM: mM.stopText, pR4, pQ }));
     // the presses, on a stand-in DOM just wide enough for the strip: «Understood» notes it (POST, then the strip goes), the rollback door opens
     const D0 = globalThis.document, posts = []; let opened = 0, strip = null;

@@ -18,8 +18,8 @@ import { fetchJson, showToast, showConfirmDialog, storeHeldWords, storeWhatOf, s
 import { UI_ICONS } from './icons.js';
 import { stampAt } from './page-time.js';   // the ONE formatter of a time a person reads
 // B-225b's REMAINDER (login-request-card, 主开发 r1310 / r1318): two more facts on the same strip. (1) The ROLLBACK POINTS' save the
-// storage refused rides `store-unsaved` / `store-saved` by its own file name (`layout-history`) with its own sentence (the desktops
-// themselves are saved) and the count it could not keep (`lost`). (2) THE LAST STOP, told at this start (`store-stop-unsaved`;
+// storage refused (or took too late) rides `store-unsaved` / `store-saved` by its own file name (`layout-history`) with its own
+// sentence and the count it could not keep (`lost`) — it says nothing of the desktops, which their own row says (r1387 (4)). (2) THE LAST STOP, told at this start (`store-stop-unsaved`;
 // GET /api/stores/held's `stop` for a page that was away): `known` — a layouts write was owed and did not land — stays until a PERSON
 // presses «Understood» (POST /api/stores/layouts.json/stop-noted; every page told `store-stop-over`); `maynot` — no clean stop, nothing
 // more known — is said QUIETLY (no alert, no press owed) and goes by itself at the hub's first landed layouts write (`store-stop-over`).
@@ -136,7 +136,10 @@ export function stripModel(list, { scratch: sc = null, unsaved: unsavedList = []
     doors: h.kind === 'damaged' ? ['empty', 'import', ...(h.file === 'layouts.json' ? ['rollback'] : [])] : [],
   }));
   for (const u of unsaved) rows.push({ file: u.file, what: storeWhatOf(u.file), kind: 'unsaved', kindWords: KIND_WORDS.unsaved(u.code), code: u.code || null, doors: [] });
-  const unsavedText = unsaved.length ? storeUnsavedWords(unsaved) : '';
+  // r1595 (the round's should): the count sentence («kept here and written again») is the STORES' own — a refused rollback point is
+  // let go, so the points' row says its own sentence beside it, never counted into «kept»
+  const ownRows = unsaved.filter((u) => u.file !== 'layout-history'), pointRows = unsaved.filter((u) => u.file === 'layout-history');
+  const unsavedText = [ownRows.length ? storeUnsavedWords(ownRows) : '', ...pointRows.map((u) => storeUnsavedWords(u))].filter(Boolean).join(' ');
   // the last stop (B-225b's remainder): `known` owes a person's «Understood»; `maynot` is QUIET (no press) — alone it is no alert
   const stopTime = st ? (st.kind === 'known' ? st.since : st.savedAt) : null;
   const stopText = st ? storeStopWords(st, stopTime ? stampAt(stopTime) : '') : '';

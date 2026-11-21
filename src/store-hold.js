@@ -278,11 +278,11 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     try { const made = produce(); if (!made) return { landed: false, nothing: true }; write(made[0], made[1]); return { landed: true }; }
     catch (error) { return { landed: false, error }; }
   }
-  /** the owed chain ENDS without a landing (nothing to write any more, or a refusal by name): no «written again», no onSaved — its
-   *  timer goes with it (round wg2vawd0o: one clearing on every road) */
   /** B-225b's remainder (login-request-card, 主开发 r1353 (6)): an owed episode BEGINS (its first failure on any road — the hold's own
    *  ladder, the writer's refusal, an answer not on disk past the writer's bound) — the caller's mark that a change may not reach the disk */
   function begun() { try { onOwedBegin?.(owedFacts()); } catch { /* the caller's */ } }
+  /** the owed chain ENDS without a landing (nothing to write any more, or a refusal by name): no «written again», no onSaved — its
+   *  timer goes with it (round wg2vawd0o: one clearing on every road) */
   function endOwed(why) {
     if (!owed) return null;
     const was = owedFacts(); owed = null;

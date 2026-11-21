@@ -119,16 +119,19 @@ function stampOfRead(doc, text) {
  *   KNOWN: the last run's own owed mark (`mark` {run, seq, since}: written when a write could not land) is of the SAME run as the
  *     file's stamp and NEWER than it — a write was owed and did not land. Said until a person notes it; carried in the next writes'
  *     stamp (`unnoted`) across a later restart.
- *   MAY NOT: the stamp says no clean stop (stop false) and no such mark — a kill, a power loss, or a disk that refused the mark too:
- *     said once and quietly, gone at this run's first landed write, never carried.
+ *   MAY NOT: the stamp says no clean stop (stop false) and no such mark — a kill, a power loss, or a run whose mark the disk refused
+ *     after it had landed a write: said once and quietly, gone at this run's first landed write, never carried. A run that landed
+ *     NOTHING and whose mark was refused too leaves the older run's clean stamp: nothing is told (no second storage could say it).
  *   Nothing: no stamp (a file this version never wrote), a stamp another reader kept (`trusted` false), a clean stop. */
+/** PURE: the mark names exactly the stamp the file carries (its run's start, or its last landing) — the KNOWN test (r1387 (3)) */
+function markNamesStamp(m, st) { return !!m && (m.base == null ? st == null : (!!st && m.base.run === st.run && Number(m.base.seq) === Number(st.seq))); }
 function stopVerdict({ stamp, trusted, mark }) {
   if (stamp && !trusted) return null;   // another reader rewrote the bytes under the stamp: it says nothing
   const st = stamp || null, m = mark && typeof mark === 'object' && 'base' in mark ? mark : null;
   // KNOWN (主开发 r1387 (3)): the mark names the stamp its run STARTED FROM (the last landing it knew, the start's own stamp at first):
   // when the file still carries exactly that stamp, nothing that run owed ever landed — whatever the stamp's `stop` says (a run whose
   // every write was refused leaves the older run's clean stamp beside its mark); a base that no longer matches is a stale mark: silent
-  if (m && (m.base == null ? st == null : (!!st && m.base.run === st.run && Number(m.base.seq) === Number(st.seq)))) {
+  if (m && markNamesStamp(m, st)) {
     return { kind: 'known', since: Number(m.since) || null, savedAt: st ? Number(st.at) || null : null, cause: m.code === 'queued' ? 'late' : 'refused' };
   }
   if (!st) return null;
@@ -227,24 +230,26 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _lastLanded = null;        // the stamp of the last desktops write that LANDED, as far as this run knows ({run, seq}; the start's own at first)
   let _producedSeq = 0;          // the seq of the bytes the writer took last (its producer is called right before its write)
   let _markJudged = false;       // the last run's mark has been JUDGED (read and weighed) — only then may this run remove it
+  let _judgedSeq = 0;            // r1595 (a): the last seq of bytes made BEFORE the verdict (they carry no `unnoted`)
+  let _oldKnown = null;          // r1595 (a): the last run's mark when it IS the KNOWN verdict — it follows this run's landings of such bytes
+  let _startUnnoted = null;      // a KNOWN loss the start's own stamp carries: bytes made before the verdict carry it on (its road's (a))
   let _judgedResolve = null;
   const _stopJudgedP = new Promise((r) => { _judgedResolve = r; });
   let _markChain = Promise.resolve();
   const stopWord = () => (_stopFact ? { file: 'layouts.json', ..._stopFact } : null);
   /** the episode's mark, written OFF the loop (a temp, then the rename); a failure is the journal's line and is tried again at the next
    *  failed flush — a stop before it lands is told «may not» at the next start (r1318 (b)) */
-  function writeMark() {
-    const m = _mark;
+  function writeMark(m = _mark, live = () => _mark === m) {   // (r1595 (a): also the last run's KNOWN mark, followed — the ONE writer of the mark)
     if (!m || m.written || m.trying) return;
     m.trying = true;
     _markChain = _markChain.then(async () => {
-      if (_mark !== m) { m.trying = false; return; }   // the episode is over already
+      if (!live()) { m.trying = false; return; }   // the episode is over already
       const markTmp = `${OWED_MARK}.${process.pid}.tmp`;
       try {
         await fs.promises.writeFile(markTmp, JSON.stringify({ run: m.run, seq: m.seq, since: m.since, base: m.base, code: m.code }));
         await fs.promises.rename(markTmp, OWED_MARK);
         m.written = true;
-        if (_mark !== m) await fs.promises.unlink(OWED_MARK).catch(() => {});   // over while it was written: the removal is the last word
+        if (!live()) await fs.promises.unlink(OWED_MARK).catch(() => {});   // over while it was written: the removal is the last word
       } catch (e) {
         await fs.promises.unlink(markTmp).catch(() => {});
         console.warn(`[layouts] the owed mark could not be written (${(e && e.code) || (e && e.message) || e}) — a stop before the desktops are written is told «may not have been saved» at the next start`);
@@ -266,9 +271,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     _stopJudged = true;
     _markAtStart.then((r) => {
       if (r.state === 'unknown') console.warn(`[layouts] the last run's owed mark could not be read (${r.code}) — whether its last desktop changes landed is UNKNOWN from the mark; the file's own stamp is judged alone`);
-      const v = stopVerdict({ ...st, mark: r.state === 'read' ? r.mark : null });
-      _markJudged = true;
-      if (_landedThisRun && !_oldMarkGone && !_mark) { _oldMarkGone = true; _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {})); }   // a landing came first: the mark goes only now it is judged
+      const mk = r.state === 'read' && r.mark && r.mark.run !== RUN ? r.mark : null;   // (the round's note) this run's own mark is never the last run's
+      const v = stopVerdict({ ...st, mark: mk });
+      _markJudged = true; _judgedSeq = _vsSeq;
+      _oldKnown = v && v.kind === 'known' && markNamesStamp(mk, (st && st.trusted && st.stamp) || null) ? mk : null;
+      if (_landedThisRun) oldMarkAfterLanding();   // a landing came first: judged only now
       if (v && !(v.kind === 'maynot' && _landedThisRun)) {   // (b) goes by itself at this run's first landing — even one before the verdict
         _stopFact = v;
         const when = (ms) => (ms ? new Date(ms).toISOString() : 'an unknown time');
@@ -303,7 +310,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     onOwedRefused: (e) => { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); },
     // B-225b's remainder: an owed episode's MARK (written off the loop at its first failure, removed when it is over)
     onOwedBegin: (o) => { _mark = { run: RUN, seq: _vsSeq, since: (o && o.since) || Date.now(), base: _lastLanded ? { ..._lastLanded } : null, code: (o && o.code) || null, written: false, trying: false }; writeMark(); },
-    onOwedOver: (o) => { markOver(); if (o && o.landed) layoutsLanded(); },
+    onOwedOver: (o) => { markOver(); if (o && o.landed) { _lastLanded = { run: RUN, seq: _producedSeq }; layoutsLanded(); } },   // (the ladder's landing tells no onLanded: its stamp is the base all the same)
     // r1387 (1): EVERY landing of the desktops — an autosave nobody waits on too (landLayouts keeps no waiter for it) — is told here
     onLanded: () => { _lastLanded = { run: RUN, seq: _producedSeq }; layoutsLanded(); },
     onSaid: (h) => { console.warn(`[layouts] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the desktops are HELD: nothing is written over them, their doors refuse by name until it reads`); storeWord('store-held', h); },
@@ -333,7 +340,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (doc && typeof doc === 'object' && Object.prototype.hasOwnProperty.call(doc, STAMP)) {
       const st = stampOfRead(doc, text);
       delete doc[STAMP];
-      if (!_stopJudged && text != null) { if (st.stamp && st.trusted) _lastLanded = { run: st.stamp.run, seq: st.stamp.seq }; judgeStop(st); }
+      if (!_stopJudged && text != null) {
+        if (st.stamp && st.trusted) { _lastLanded = { run: st.stamp.run, seq: st.stamp.seq }; const u = st.stamp.unnoted; _startUnnoted = u && typeof u === 'object' && u.kind === 'known' ? { ...u } : null; }
+        judgeStop(st);
+      }
     } else if (!_stopJudged && (text != null || doc === undefined)) judgeStop({ stamp: null, trusted: false });   // no stamp (an older build's file) or no file: a mark may still name it
     _layoutsCache = doc === undefined ? LAYOUTS_EMPTY() : doc;   // NOT THERE (R6): the empty layout in memory, nothing written
     // what an older build wrote: a Job input window's title naming its job (the next flush writes the generic title)
@@ -410,7 +420,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const gen = _layoutsGen, doc = _layoutsCache;
     // B-225b's remainder: the bytes carry this run's STAMP (stampedBytes) — the stop's own flush says stop:true; a KNOWN loss not yet
     // noted by a person rides it (`unnoted`) so a second restart still says it (r1318 (a)); a «may not» is never carried (r1318 (b))
-    const unnoted = _stopFact && _stopFact.kind === 'known' ? { kind: 'known', since: _stopFact.since, savedAt: _stopFact.savedAt } : null;
+    // r1595 (6): the carried fact keeps its CAUSE (a write only late stays «late» at a second restart); before the verdict is made, the
+    // start's own carried loss rides on (bytes made then cannot know the verdict — r1595 (a)'s road for a loss carried in the stamp)
+    const unnoted = !_markJudged ? _startUnnoted : _stopFact && _stopFact.kind === 'known' ? { kind: 'known', since: _stopFact.since, savedAt: _stopFact.savedAt, cause: _stopFact.cause } : null;
     const seq = ++_vsSeq, text = doc ? stampedBytes(doc, { run: RUN, seq, at: Date.now(), stop: !!stop, ...(unnoted ? { unnoted } : {}) }) : null;
     const upTo = handPointsOwed();   // (the points' callbacks are the writer's answer road: at the hub's stop they run inside its exit flush)
     const q = _layoutsWaiting;
@@ -449,7 +461,21 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function layoutsLanded() {
     _landedThisRun = true;
     if (_stopFact && _stopFact.kind === 'maynot') { _stopFact = null; storeWord('store-stop-over', { file: 'layouts.json', why: 'written' }); }
-    if (!_oldMarkGone && _markJudged && !_mark) { _oldMarkGone = true; _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {})); }   // (r1387 (7): never a mark not yet judged)
+    oldMarkAfterLanding();   // (r1387 (7): never a mark not yet judged)
+  }
+  /** r1595 (a): the last run's mark after a landing of THIS run. Bytes made AFTER the verdict carry a KNOWN loss (`unnoted`): the mark
+   *  goes. Bytes made BEFORE it carry none: a KNOWN loss's mark FOLLOWS that landing (its base is the file's stamp now — kept as it
+   *  was, it would name a stamp the file no longer has and read «may not»), written off the loop by the mark's one writer, so a kill
+   *  before the next landing still reads KNOWN. Any other verdict: the mark goes. */
+  function oldMarkAfterLanding() {
+    if (_oldMarkGone || !_markJudged || _mark) return;
+    if (_oldKnown && _producedSeq <= _judgedSeq && _lastLanded && _lastLanded.run === RUN) {
+      const m = { run: _oldKnown.run, seq: _oldKnown.seq, since: _oldKnown.since, code: _oldKnown.code, base: { run: _lastLanded.run, seq: _lastLanded.seq }, written: false, trying: false };
+      _oldKnown = m;
+      writeMark(m, () => _oldKnown === m && !_oldMarkGone && !_mark);
+      return;
+    }
+    _oldMarkGone = true; _oldKnown = null; _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {}));
   }
   // ── LAYOUT HISTORY (2.296.0, after a bug flattened a user's whole desktop
   // layout and the only good copy was gone). Layouts are the one piece of
@@ -1988,6 +2014,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const was = _stopFact;
     _stopFact = null;
     if (was) { console.log(`[layouts] the last stop's notice (${was.kind}) was noted by the person`); storeWord('store-stop-over', { file: 'layouts.json', why: 'noted' }); }
+    if (was && was.kind === 'known' && _layoutsRead) { try { flushLayouts(); } catch { /* a held store writes nothing: its own hold says so */ } }   // r1595 (b): the note lands — a kill after the press never tells it again
     res.json({ success: true, noted: !!was });
   });
   // the person's choice of an EMPTY store for a damaged one (R5, beside the rollback point and the import): set aside, then read again

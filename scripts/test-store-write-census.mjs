@@ -2755,7 +2755,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         return out;
       };
       const real = chokeCensus(PSRC);
-      ok(real.bad.length === 0 && real.direct.length === 12 && real.atomic.length === 0,
+      ok(real.bad.length === 0 && real.direct.length === 11 && real.atomic.length === 0,   // (B-225b r1595 (a): the last run's mark has ONE removal now, 12 → 11)
         `⑪ (h) THE ONE CHOKE: every write of a held store's file is its hold's ONE write (${Object.entries(real.holdWrites).map(([h, n]) => `${h} ${n}`).join(', ')}) or the damaged door's setAside; the ${real.direct.length} direct fs writes are the data folder, the rollback points' prune (its two unlinks), the owed mark of the desktops (its pid temp + rename, its removals — B-225b's remainder) and the agent CLIs' credentials — none a store's file (B-0248 (b): the points themselves are the store writer's)`, real);
       const plant = (add, name) => chokeCensus(anchored(PSRC, '  function flushLayouts({ press = false, stop = false } = {}, answer = null) {\n', '  function flushLayouts({ press = false, stop = false } = {}, answer = null) {\n' + add, name)).bad;
       const p1 = plant('    fs.writeFileSync(LAYOUTS_FILE, JSON.stringify(_layoutsCache));\n', 'swc-h-direct');
