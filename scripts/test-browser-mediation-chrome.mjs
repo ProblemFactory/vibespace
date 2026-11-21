@@ -102,6 +102,7 @@ import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const M = require('../src/browser-mediation.js');
@@ -302,6 +303,11 @@ else {
   const c6 = cdpClient(g6.url); await c6.open;
   const s6 = (await c6.call('Target.attachToTarget', { targetId: A, flatten: true })).result.sessionId;
   const rs = (await raw.call('Target.attachToTarget', { targetId: A, flatten: true })).result.sessionId;
+  // A PICTURE IS OF THE PAGE IN FRONT (主开发 r1125; test-ci-gate §2o): tab A was created first, then tab B (Bt) in the same window, so
+  // A sits BEHIND Bt there (B's «bravo-new» opened after). Each of ⑥'s pictures of A goes through frontShot: A activated by the
+  // browser's own door (the raw endpoint — never the lease under test), the capture bounded, one retry said, Bt in front again after
+  const FS6 = frontState(); becameFront(FS6, Bt, () => raw.call('Target.activateTarget', { targetId: Bt }));
+  const frontA = () => raw.call('Target.activateTarget', { targetId: A });
   const oracle = async (expr) => { const r = await raw.call('Runtime.evaluate', { expression: expr, returnByValue: true }, rs); return r.result && r.result.result ? r.result.result.value : undefined; };
   const codeOf = (r) => M.refusalCodeOf(r);
   await c6.call('Page.navigate', { url: 'data:text/html,<title>census</title><input id=i autofocus><p id=mk style="font:24px sans-serif">speling here</p><div id=pop popover>pop</div><button id=pb popovertarget=pop>open</button><div style="height:3000px"></div><p id=fd>findme156</p><script>window.k=0;addEventListener("keydown",()=>{window.k++});</script>' }, s6);
@@ -323,7 +329,7 @@ else {
   const ev = await c6.call('Runtime.evaluate', { expression: 'document.title = "mutated"; document.title', returnByValue: true }, s6);
   ok(codeOf(ev) === 'browser_interrupted' && /took over your window of this browser/.test(ev.error.message) && !/fenceScriptsWhileDriven/.test(ev.error.message) && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Runtime.evaluate is browser_interrupted and did NOT change the page (title still "census") — the stale switch callback reading OFF re-opens nothing', ev.error && ev.error.message);
   // read / session / harmless
-  const shot = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
+  const shot = await frontShot(FS6, A, frontA, () => c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6), { name: '⑥ the paused read\'s picture' });
   ok(shot.result && typeof shot.result.data === 'string' && shot.result.data.length > 100, '⑥ PAUSED · read: Page.captureScreenshot answers with a picture');
   ok((await c6.call('DOM.getDocument', { depth: 1 }, s6)).result !== undefined && (await c6.call('Page.getLayoutMetrics', {}, s6)).result !== undefined, '⑥ PAUSED · read: DOM.getDocument and Page.getLayoutMetrics answer');
   ok(((await c6.call('Target.getTargets')).result || {}).targetInfos.map((t) => t.targetId).join() === A, '⑥ PAUSED · session: Target.getTargets answers (the lease\'s own tab only)');
@@ -356,7 +362,7 @@ else {
     const [P, POP, PB] = [await sel('#mk'), await sel('#pop'), await sel('#pb')];
     const pic = async () => {
       const bm = (await c6.call('DOM.getBoxModel', { nodeId: P }, s6)).result; const q = bm && bm.model.border;
-      const r = q ? await raw.call('Page.captureScreenshot', { format: 'png', clip: { x: q[0], y: q[1], width: q[2] - q[0], height: q[5] - q[1], scale: 1 } }, rs) : null;
+      const r = q ? await frontShot(FS6, A, frontA, () => raw.call('Page.captureScreenshot', { format: 'png', clip: { x: q[0], y: q[1], width: q[2] - q[0], height: q[5] - q[1], scale: 1 } }, rs), { name: '⑥ the marker\'s picture' }) : null;
       return r && r.result ? r.result.data : `no picture (${JSON.stringify(bm || r).slice(0, 120)})`;
     };
     mk155 = { P, pic };
@@ -388,7 +394,7 @@ else {
   } else if (cvMajor >= 156) ok(false, `⑥ Chrome ${cv} (>= 156) lists no FindInPage domain / Page.getSubApps`);
   else console.log(`  · ⑥ Chrome ${cv} predates FindInPage domain / Page.getSubApps (156+)`);
   ok(codeOf(await c6.call('Network.setCookie', { name: 'vs6', value: '1', url: 'https://example.invalid/' }, s6)) === 'browser_interrupted' && codeOf(await c6.call('DOM.setOuterHTML', { nodeId: 1, outerHTML: '<html></html>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Network.setCookie and DOM.setOuterHTML are browser_interrupted too (the whole class) — the page unchanged');
-  const shot2 = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
+  const shot2 = await frontShot(FS6, A, frontA, () => c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6), { name: '⑥ the second paused read\'s picture' });
   ok(shot2.result && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
   // the deaf-page arm: refused on a live lease, paused or not
   ok(codeOf(await c6.call('Input.setIgnoreInputEvents', { ignore: true }, s6)) === 'method_refused', '⑥ Input.setIgnoreInputEvents is method_refused on a live lease while paused…');
