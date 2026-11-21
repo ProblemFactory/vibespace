@@ -12,8 +12,9 @@
 //   FAST   (`npm run ci`, the pre-push gate) — build + every suite that costs
 //          less than ~10 s, PLUS the one real haiku chat turn. Target ≤2 min,
 //          over N parallel lanes + one serial lane (FAST LANES, 2026-10-04).
-//          Fail-fast: the first red stops the run and blocks the push
-//          (`--keep-going`, B-6e71: every suite runs and every red is listed).
+//          Fail-fast by default (a bare run): the first red stops the run.
+//          `--keep-going` (B-6e71) runs every suite and lists every red — the
+//          push hook, the hosted fast jobs and the cut pass it; any red blocks.
 //          A red suite is run ONCE more first (B-3f38): green again = FLAKY,
 //          counted in data/ci-fast/reruns.jsonl; red again = red.
 //   HEAVY  (`npm run ci:heavy`) — headless chrome, real worktree servers, real
@@ -4356,8 +4357,8 @@ function removeScratchWorktree(wt) {
 // suites wait on children and the disk as much as on a cpu, and the clock
 // judges run alone anyway. VIBESPACE_CI_FAST_LANES=<n> overrides it (1 = the
 // sequential tier). Longest first, by each row's own measured `· N s`.
-// FAIL-FAST stays: the first red starts nothing new, SIGTERMs the suites in
-// flight and blocks the push. Each suite's output is buffered and printed
+// FAIL-FAST stays a bare run's default: the first red starts nothing new and
+// SIGTERMs the suites in flight (the push hook passes --keep-going, B-6e71). Each suite's output is buffered and printed
 // whole when it ends, tagged with its lane. KEEP-GOING (`--keep-going`,
 // B-6e71) runs every row instead and lists every red by name — runFastLanes.
 //
@@ -4516,7 +4517,7 @@ function falseRowsVerb() {
  * THE FAST TIER'S LANES — fastGate's loop, exported so test-ci-gate-tiers §8e drives it over planted suites (B-6e71).
  * `plan` = scheduleFastLanes' { parallel, serial }; `run(s, { lane })` → runSuiteAsync's answer; `after(r)` prints the
  * row and sweeps behind it (fastGate's reaper, dir pace and usage-index sweep); `skip(s)` → why a row is not started,
- * or ''; `failDir` keeps a red suite's whole output (writeFailLog). FAIL-FAST (the default — the push gate): the first
+ * or ''; `failDir` keeps a red suite's whole output (writeFailLog). FAIL-FAST (a bare run's default; the push hook passes keep-going): the first
  * red starts nothing new and SIGTERMs `inflight`; a suite that dies of it is said «stopped», never judged (one that ended
  * on its own is judged, even if the stop landed during its sweep). KEEP-GOING
  * (`--keep-going`): every row runs — the serial lane too — and every red is listed by name; nothing is SIGTERMed (the

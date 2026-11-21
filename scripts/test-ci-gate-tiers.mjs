@@ -742,7 +742,7 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   const ff = await drive(ci, 'ff', false);
   ok(ff.reds.join(',') === 'test-kg-red1' && ff.stoppedBy === 'test-kg-red1' && ff.rows.some((l) => /test-kg-slow stopped \[lane 1\] — test-kg-red1 is red/.test(l))
     && !ff.rows.some((l) => /test-kg-red2|test-kg-last/.test(l)) && ff.said.some((l) => /\[ci\] stopping: test-kg-red1 is red — 1 suite\(s\) in flight/.test(l)),
-    'FAIL-FAST stays the default (the push gate): the first red SIGTERMs the slow row («stopped», not judged), red2 and the serial lane never start');
+    'FAIL-FAST stays the default of a bare run: the first red SIGTERMs the slow row («stopped», not judged), red2 and the serial lane never start');
   // the CONTROL: ci.mjs without the keep-going branch — the same keep-going run lists one red and stops
   const M = mutantCopies('ci-keepgoing', REPO);
   const src = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8'), CUT = '      if (!keepGoing && !stoppedBy) {\n';
@@ -799,8 +799,9 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   // red (keep-going or not) returns before it. The control writes it before the closing and is refused by name
   const markerAfterRed = (x) => {
     const g = x.slice(x.indexOf('async function fastGate('), x.indexOf('function writeGreenMarker('));
-    const ret = g.indexOf('if (closing.code === 1) return 1;'), at = g.indexOf('writeGreenMarker()');
-    return ret > 0 && at > ret && x.split('writeGreenMarker()').length - 1 === 1 && g.split('writeGreenMarker()').length - 1 === 1;
+    const calls = (t) => (t.match(/(?<!function )\bwriteGreenMarker\(\)/g) || []).length;   // a CALL — never the definition's own name
+    const ret = g.indexOf('if (closing.code === 1) return 1;'), at = g.search(/(?<!function )\bwriteGreenMarker\(\)/);
+    return ret > 0 && at > ret && calls(x) === 1 && calls(g) === 1 && (x.match(/'ci-green'/g) || []).length === 1;   // and the file is written by ONE literal
   };
   ok(markerAfterRed(src), 'B-6e71: the green marker is written at ONE place, inside fastGate, after `if (closing.code === 1) return 1;` — a run with a red never reaches it');
   const earlyMark = src.replace('    const closing = fastClosing(', '    writeGreenMarker();\n    const closing = fastClosing(');

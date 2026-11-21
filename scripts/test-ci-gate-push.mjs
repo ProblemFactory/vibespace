@@ -80,6 +80,7 @@ import { heavyBlocker } from ${JSON.stringify(realCi)};
 const repo = ${JSON.stringify(repo)};
 const dir = path.join(repo, 'data', 'ci-heavy');
 const argv = process.argv.slice(2);
+const KNOWN = ['keep-going'];   // B-6e71: the real ci.mjs's CI_FLAGS row the hook greps for before it passes the flag
 const note = (o) => fs.appendFileSync(path.join(repo, 'calls.ndjson'), JSON.stringify(o) + '\\n');
 const headArg = (argv.find((a) => a.startsWith('--head=')) || '').slice(7) || null;
 if (argv.includes('--check-heavy')) {
@@ -153,15 +154,24 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   try { fs.unlinkSync(path.join(repo, 'FAST_RED')); } catch { }
   ok(rRed.status === 1 && /GATE RED — push blocked/.test(rRed.out) && fastOf(rRed).length === 1 && fastOf(rRed)[0].keepGoing === true,
     'B-6e71: a red under --keep-going still BLOCKS the push (exit 1, «GATE RED — push blocked») — the mode lists reds, it never passes one', { status: rRed.status });
-  // the STATIC census: every `node scripts/ci.mjs` line of the hook that is a FAST call (no heavy verb) carries --keep-going —
-  // a fourth call added tomorrow without it is red by name; the control drops the flag from one call
-  const fastCallsOf = (src) => src.split('\n').filter((l) => /^\s*node scripts\/ci\.mjs\b/.test(l) && !/--(check-heavy|heavy-launch|heavy)\b/.test(l));
-  const bare = (src) => fastCallsOf(src).filter((l) => !/ --keep-going\b/.test(l));
-  ok(fastCallsOf(hookSrc).length === 3 && bare(hookSrc).length === 0,
-    `B-6e71 census: the hook's fast calls are ${fastCallsOf(hookSrc).length} and each carries --keep-going`, bare(hookSrc));
-  const dropped = hookSrc.replace('node scripts/ci.mjs --isolate --keep-going --sha="$sha"', 'node scripts/ci.mjs --isolate --sha="$sha"');
+  // the STATIC census: every line of the hook that CALLS scripts/ci.mjs (anywhere on a non-comment line — `if node …`, `x=$(node …)`
+  // too) without a heavy verb is a FAST call and carries the flag (`$kg`) in its command, before its `||` — a fourth call added
+  // tomorrow without it is red by name; the control drops the flag from one call
+  const fastCallsOf = (src) => src.split('\n').filter((l) => !/^\s*#/.test(l) && /\bnode scripts\/ci\.mjs\b/.test(l) && !/--(check-heavy|heavy-launch|heavy)\b/.test(l.split('||')[0]));
+  const bare = (src) => fastCallsOf(src).filter((l) => !/ \$kg\b/.test(l.split('||')[0]));
+  ok(fastCallsOf(hookSrc).length === 3 && bare(hookSrc).length === 0 && /\n {2}if grep -qF "'keep-going'" scripts\/ci\.mjs 2>\/dev\/null; then kg="--keep-going"\n/.test(hookSrc),
+    `B-6e71 census: the hook's fast calls are ${fastCallsOf(hookSrc).length}, each carries the flag ($kg — set when this checkout's ci.mjs knows it)`, bare(hookSrc));
+  const dropped = hookSrc.replace('node scripts/ci.mjs --isolate $kg --sha="$sha"', 'node scripts/ci.mjs --isolate --sha="$sha"');
   ok(dropped !== hookSrc && bare(dropped).length === 1 && /--isolate --sha=/.test(bare(dropped)[0]),
     'B-6e71 census CONTROL: the hook with the flag dropped from its isolated call is refused, naming that line');
+  // AN OLDER CHECKOUT (the installed hook is shared by every worktree): its ci.mjs does not know the flag — the hook passes none
+  // (a refused flag would be exit 2, a false GATE RED) and says the tier stops at its first red
+  const stubPath = path.join(repo, 'scripts', 'ci.mjs'), stubSrc = fs.readFileSync(stubPath, 'utf8');
+  fs.writeFileSync(stubPath, stubSrc.replace("const KNOWN = ['keep-going'];", 'const KNOWN = [];'));
+  const rOld = runHook(A);
+  fs.writeFileSync(stubPath, stubSrc);
+  ok(stubSrc.includes("const KNOWN = ['keep-going'];") && rOld.status === 0 && fastOf(rOld).length === 1 && fastOf(rOld)[0].keepGoing === false && /has no --keep-going \(an older tree\) — its fast tier stops at the first red/.test(rOld.out),
+    'B-6e71: a checkout whose ci.mjs predates the flag runs the fast tier WITHOUT it (no false GATE RED) and says so', { status: rOld.status, calls: rOld.calls });
   ok(r1.calls.map((c) => c.mode).join(',') === 'check-heavy,fast,heavy-launch',
     `the hook checks the heavy verdict FIRST, then runs fast, then launches heavy (got: ${r1.calls.map((c) => c.mode).join(',')})`);
   ok(r1.calls.find((c) => c.mode === 'heavy-launch')?.sha === A, 'the heavy run is launched for the sha being PUSHED');
