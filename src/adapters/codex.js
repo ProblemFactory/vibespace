@@ -711,7 +711,9 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  the worker's snapshot slot — '' the history reads' (default), 'helper' the artifact door's (a helper's page 0 never cuts a history read).
  *  B-cd4b unit 2: `entry` — the claude warm's one-shot reply (readJsonlTail's whole entry, `jsonlTail`) in pages, the worker running the
  *  same function once: page 0 carries the entry's facts, every page its messages and their line starts; assembled here → { entry, mode,
- *  bytes }, as `jsonlTail` answers (its one-shot read is the fallback); `dropSubagent` is the worker's own line rule (slot 'warm').
+ *  bytes }, as `jsonlTail` answers; its one-shot read on the general pool is the fallback for EVERY refusal, the heap bound too (a warm
+ *  refused by the history lane is read as before the unit, never parsed on the loop), `onFail` told why; `dropSubagent` is the
+ *  worker's own line rule (slot 'warm').
  *  → the records (or, with `entry`, { entry, mode, bytes }), or null (the caller parses on the loop, said) */
 async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false } = {}) {
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why); } catch { } return null; };
@@ -736,12 +738,13 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       if (!gone) { _pagedStats.reads++; return out; }
     } catch (e) {
       const code = e && e.code;
-      if (code === 'heap_bound') return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
-      why = code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
+      if (code === 'heap_bound' && !entry) return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
+      why = code === 'heap_bound' ? `the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
       break;
     }
   }
   _pagedStats.oneShot++;
+  if (entry) { try { onFail?.(`${why} — the entry read in one piece on the general pool`); } catch { } }   // B-cd4b unit 2: a warm refused by the history lane (its heap bound too) is read as before the unit, never parsed on the loop
   const r = entry ? await readJsonlTailAsync(fp, { dropSubagent }) : await readJsonlBoundedParsedAsync(fp, { tailOnly, dropSubagent });
   return r == null ? said(`${why}; then the one-shot read failed too (both pool workers down, or its own failure)`) : r;
 }

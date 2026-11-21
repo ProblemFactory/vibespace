@@ -595,9 +595,22 @@ function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 // worker's own slot ('warm'): the worker keeps one snapshot a slot, so a second warm's first page would cut the first's; a person's
 // history read ('') and a helper's ('helper') keep their own snapshots beside it
 let _warmLine = Promise.resolve();
-function warmPaged(fp) {
+// its fresh read's MUSTs: ONE warm in flight a file — a second asker (an attach's task-state warm gives up at 10 s, then its transcript
+// warm asks again) joins it, never a second whole read; a warm whose turn comes after the cache was filled for the same file (another
+// road) reads nothing; the read's time is taken from its turn in the line, never the wait before it; a warm that leaves the paged
+// road (the history worker's heap bound, the lane busy, a snapshot gone) is read in one piece on the general pool and SAID, once
+const _warmInFlight = new Map();
+let _warmLeftSaid = false;
+const warmLeft = (why) => { if (_warmLeftSaid) return; _warmLeftSaid = true; console.warn(`[session-store] a claude warm left the paged road: ${why} (said once; the pager's stats count the rest)`); };
+async function warmTurn(fp, fresh) {
+  const t0 = performance.now();
+  if (fresh && fresh()) return { fresh: true };
   const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
-  const run = _warmLine.then(() => readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: 'warm' }));
+  const r = await readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: 'warm', onFail: warmLeft });
+  return r ? { ...r, t0 } : r;
+}
+function warmPaged(fp, { fresh = null } = {}) {
+  const run = _warmLine.then(() => warmTurn(fp, fresh));
   _warmLine = run.then(() => { }, () => { });
   return run;
 }
@@ -621,12 +634,20 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd) {
         return true;
       }
     }
-    const t0 = performance.now();
-    const r = await warmPaged(fp);   // B-cd4b unit 2: the entry in pages (above)
-    if (!r || !r.entry) return false; // worker unavailable — sync path will parse inline
-    _stampJsonlParse(r.bytes, performance.now() - t0);
-    _jsonlCachePut(claudeSessionId, r.entry);
-    return true;
+    let p = _warmInFlight.get(fp);   // one warm in flight a file: a second asker joins it (above)
+    if (!p) {
+      const fresh = () => { const c = _jsonlCache.get(claudeSessionId); return !!c && c.mtimeMs === stat.mtimeMs && c.size === stat.size && c.ino === stat.ino; };
+      p = (async () => {
+        const r = await warmPaged(fp, { fresh });   // B-cd4b unit 2: the entry in pages (above)
+        if (r && r.fresh) return true;   // filled meanwhile: this turn read nothing
+        if (!r || !r.entry) return false; // worker unavailable — sync path will parse inline
+        _stampJsonlParse(r.bytes, performance.now() - (r.t0 || performance.now()));
+        _jsonlCachePut(claudeSessionId, r.entry);
+        return true;
+      })().finally(() => { if (_warmInFlight.get(fp) === p) _warmInFlight.delete(fp); });
+      _warmInFlight.set(fp, p);
+    }
+    return await p;
   } catch { return false; } finally { if (tasks) await tasks; }
 }
 

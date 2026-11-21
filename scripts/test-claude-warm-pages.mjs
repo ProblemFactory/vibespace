@@ -41,7 +41,7 @@ const rec = (k, extra = {}) => JSON.stringify({ type: k % 2 ? 'assistant' : 'use
 const write = (name, lines, { tail = '\n' } = {}) => { const f = path.join(DIR, name); fs.writeFileSync(f, lines.join('\n') + tail); return f; };
 const big = (name, mb) => { const f = path.join(DIR, name); const fd = fs.openSync(f, 'w'); let n = 0, k = 0; while (n < mb * 1048576) { const l = rec(k++, k % 9 === 0 ? { isSidechain: true } : {}) + '\n'; fs.writeSync(fd, l); n += l.length; } fs.closeSync(fd); return f; };
 const FX = {
-  'past the tail bound (its seam)': big('big.jsonl', Math.ceil(codex.JSONL_TAIL_BYTES / 1048576) + 2),
+  'past the tail bound (its seam)': big('big.jsonl', Math.ceil(codex.JSONL_TAIL_BYTES / 1048576) + 4),   // 4 MiB past the tail bound: the seam leg reads a cut read (spanStart > 0, judged in ①)
   'a partial last line': write('partial.jsonl', Array.from({ length: 40 }, (_, k) => rec(k)), { tail: '\n' + rec(40) }),
   'subagent records dropped': write('sub.jsonl', Array.from({ length: 60 }, (_, k) => rec(k, k % 3 === 0 ? { parent_tool_use_id: 'p' + k } : k % 5 === 0 ? { isSidechain: true } : {}))),
   'one under a page': write('small.jsonl', Array.from({ length: 12 }, (_, k) => rec(k))),
@@ -55,8 +55,9 @@ try {
   for (const [what, fp] of Object.entries(FX)) {
     const a = await oneShot(fp), s0 = stats(), b = await paged(fp), s1 = stats();
     const pages = s1.pages - s0.pages;
-    ok(!!a && !!b && isDeepStrictEqual(b.entry, a.entry) && b.mode === a.mode && b.bytes === a.bytes && s1.gone === s0.gone,
-      `${what}: the paged entry is DEEP-EQUAL to the one-shot's (${a && a.entry.messages.length} records, partial ${a && a.entry.partial}, span ${a && a.entry.spanStart}–${a && a.entry.spanEnd}, mode ${a && a.mode}) in ${pages} page(s)`,
+    const seamOk = what !== 'past the tail bound (its seam)' || (!!a && a.entry.spanStart > 0);   // its read really starts past the head (the tail bound cut it)
+    ok(!!a && !!b && isDeepStrictEqual(b.entry, a.entry) && b.mode === a.mode && b.bytes === a.bytes && s1.gone === s0.gone && s1.oneShot === s0.oneShot && s1.failed === s0.failed && pages >= 1 && seamOk,
+      `${what}: the paged entry is DEEP-EQUAL to the one-shot's (${a && a.entry.messages.length} records, partial ${a && a.entry.partial}, span ${a && a.entry.spanStart}–${a && a.entry.spanEnd}, mode ${a && a.mode}) in ${pages} page(s) — by the pages (no one-shot fallback, no failure)`,
       { keysA: a && Object.keys(a.entry), keysB: b && Object.keys(b.entry), pages });
   }
   const sBig = stats(); await paged(FX['past the tail bound (its seam)']); const bigPages = stats().pages - sBig.pages;
@@ -74,7 +75,7 @@ try {
   const pagesG = g.ops.filter((o) => o === 'boundedParsedPage').length, tailG = g.ops.filter((o) => o === 'jsonlTail').length;
   ok(g.r === true && pagesG >= 3 && tailG === 0 && isDeepStrictEqual(msgs, want),
     `the warm asks the pager (${pagesG} pages, ${tailG} one-shot reply) and caches the SAME records (${msgs.length}) — the sync parse after it is a hit, equal`);
-  const oneShotSrc = anchored(ssSrc, '    const r = await warmPaged(fp);', "    const r = await require('./adapters/codex').readJsonlTailAsync(fp, { dropSubagent: true });", 'warm-one-shot');
+  const oneShotSrc = anchored(ssSrc, '        const r = await warmPaged(fp, { fresh });', "        const r = await require('./adapters/codex').readJsonlTailAsync(fp, { dropSubagent: true });", 'warm-one-shot');
   const SR = require(M.write('src/session-store.js', oneShotSrc, 'warm-one-shot'));
   const rr = await warmOf(SR, 'a0b10000-0000-4000-8000-00000000c4d3');
   ok(rr.ops.filter((o) => o === 'jsonlTail').length === 1 && rr.ops.filter((o) => o === 'boundedParsedPage').length === 0,
@@ -94,9 +95,51 @@ try {
   const two = async (SM) => { const s0 = stats(); const sids = ['a0b10000-0000-4000-8000-00000000c4e1', 'a0b10000-0000-4000-8000-00000000c4e2']; for (const sid of sids) fs.copyFileSync(sid.endsWith('1') ? FX['past the tail bound (its seam)'] : hist, path.join(PROJ, sid + '.jsonl')); SM.jsonlCacheClear?.(); const r = await Promise.all(sids.map((sid) => SM.warmSessionJsonlAsync(sid, CWD))); return { r, gone: stats().gone - s0.gone }; };
   const g4 = await two(S);
   ok(g4.r.every((x) => x === true) && g4.gone === 0, `two warms at once: both read through their pages, nothing gone (${g4.gone})`);
-  const noLine = anchored(ssSrc, "  const run = _warmLine.then(() => readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: 'warm' }));", "  const run = readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: 'warm' });", 'warm-no-line');
+  const noLine = anchored(ssSrc, '  const run = _warmLine.then(() => warmTurn(fp, fresh));', '  const run = warmTurn(fp, fresh);', 'warm-no-line');
   const g4r = await two(require(M.write('src/session-store.js', noLine, 'warm-no-line')));
   ok(g4r.gone > 0, `RED: the line taken away — the second warm's first page cuts the first's snapshot (${g4r.gone} gone)`);
+
+  console.log('— ⑤ ONE WARM IN FLIGHT A FILE (its fresh read\'s MUST): a second asker joins the first, never a second whole read');
+  {
+    // A, then B, then A again (an attach's task-state warm gave up at 10 s, its transcript warm asks again): the second A joins the
+    // first and resolves with it, ahead of B — two reads in all. RED: the join taken away ⇒ the second A waits for its own turn after
+    // B. And with the join taken away, the second warm's turn finds the cache filled for the same file and reads nothing; RED: that
+    // check taken away too ⇒ two whole reads of one file
+    const A = 'a0b10000-0000-4000-8000-00000000c5a1', B = 'a0b10000-0000-4000-8000-00000000c5b1';
+    const order5 = async (SM) => {
+      for (const sid of [A, B]) fs.copyFileSync(hist, path.join(PROJ, sid + '.jsonl'));
+      SM.jsonlCacheClear?.(); const done = [], s0 = stats();
+      const r = await Promise.all([[A, 'A'], [B, 'B'], [A, "A'"]].map(([sid, n]) => SM.warmSessionJsonlAsync(sid, CWD).then((x) => { done.push(n); return x; })));
+      return { r, done: done.join(), reads: stats().reads - s0.reads };
+    };
+    const noJoin = anchored(ssSrc, '    let p = _warmInFlight.get(fp);', '    let p = null;', 'warm-no-join');
+    const noFresh = anchored(noJoin, '  if (fresh && fresh()) return { fresh: true };', '  if (false) return { fresh: true };', 'warm-no-fresh');
+    const SJ = require(M.write('src/session-store.js', noJoin, 'warm-no-join')), SF = require(M.write('src/session-store.js', noFresh, 'warm-no-fresh'));
+    const g5 = await order5(S), r5 = await order5(SJ);
+    ok(g5.r.every((x) => x === true) && g5.done === "A,A',B" && g5.reads === 2, `the second A joins the first (resolved: ${g5.done}; ${g5.reads} reads for two files)`, g5);
+    ok(r5.done === "A,B,A'", `RED: the join taken away ⇒ the second A waits its own turn after B (${r5.done})`, r5);
+    const twice = async (SM) => { fs.copyFileSync(hist, path.join(PROJ, A + '.jsonl')); SM.jsonlCacheClear?.(); const s0 = stats(); const r = await Promise.all([SM.warmSessionJsonlAsync(A, CWD), SM.warmSessionJsonlAsync(A, CWD)]); return { r, reads: stats().reads - s0.reads }; };
+    const f5 = await twice(SJ), f5r = await twice(SF);
+    ok(f5.r.every((x) => x === true) && f5.reads === 1, `with the join taken away, the second warm's turn finds the cache filled for the same file: ${f5.reads} read`, f5);
+    ok(f5r.reads === 2, `RED: the fresh check taken away too ⇒ ${f5r.reads} whole reads of one file`, f5r);
+  }
+
+  console.log('— ⑥ THE HEAP BOUND (its fresh read\'s MUST): a warm the history lane refuses is read in one piece on the general pool, said — never parsed on the loop');
+  {
+    // the history worker answers the warm's first page with its heap bound (planted): the pager reads the entry as the warm read it
+    // before the unit (jsonlTail on the general pool) and says why; RED: the bound answered null (the caller then parsed on the loop)
+    const refuse = async (CX) => {
+      const pl = CX.transcriptPool(), call0 = pl.call, said = [];
+      pl.call = function (op, ...a) { if (op === 'boundedParsedPage') { const e = new Error('planted: the heap bound'); e.code = 'heap_bound'; return Promise.reject(e); } return call0.call(this, op, ...a); };
+      try { return { r: await CX.readJsonlBoundedParsedPagedAsync(hist, { entry: true, dropSubagent: true, slot: 'warm', onFail: (w) => said.push(String(w)) }), said }; } finally { pl.call = call0; }
+    };
+    const want6 = (await oneShot(hist)).entry, h6 = await refuse(codex);
+    const cxSrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
+    const h6r = await refuse(require(M.write('src/adapters/codex.js', anchored(cxSrc, "      if (code === 'heap_bound' && !entry) return said(", "      if (code === 'heap_bound') return said(", 'warm-heap-null'), 'warm-heap-null')));
+    ok(!!h6.r && isDeepStrictEqual(h6.r.entry, want6) && h6.said.length === 1 && /heap bound[\s\S]*the entry read in one piece on the general pool/.test(h6.said[0]),
+      `refused by the heap bound: the same entry, read in one piece on the general pool, and said («${h6.said[0] || 'nothing said'}»)`, h6.said);
+    ok(h6r.r === null, 'RED: the heap bound answered null — the warm returned false and the conversation was parsed on the loop', h6r.said);
+  }
 } catch (e) { fail++; console.log('  ✗ threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
