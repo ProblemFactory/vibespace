@@ -77,6 +77,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A click on a taskbar tile no longer does nothing when a window's title changes at that moment, such as an agent's status shown in its title.
 - On a paired machine, «End them» now ends what a stopped turn left running there, if that machine's agent is up to date.
 - An open System panel no longer makes VibeSpace pause every few seconds while it reads the CPU use of each process.
+- A password written inside a web address (user:password@host) is now hidden in messages, job output and job names; the user and the host stay readable.
 
 ## 2.369.415 — 2026-11-21
 
