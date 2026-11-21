@@ -15,7 +15,10 @@
  *   principal = {kind:'everyone'} | {kind:'group', id} | {kind:'conversation', key}
  * A `to` entry may carry the door's OWN per-member setting (an annotation, never an admission input — ENTRY_FIELDS):
  * a channel access row's send `authority`, a raw-API `tier` + `perDay`, a window share's `origin`, a Task Group
- * visibility `level`; every entry may carry a display `name` and its provenance `at` / `by`.
+ * visibility `level`; every entry may carry a display `name` and its provenance `at` / `by`. lane lg-group-parents (B-526c): a
+ * channel WATCH entry carries its watcher's SETTINGS (notify, mode, the pace, the delivery, an inline filter's body) and a channel
+ * row may carry `rule` / `blocks` (ROW_FIELDS) — what the boot needs to complete a person's act whose channel-index half was
+ * still in the index's pace when the process stopped (the act's durable half is THIS record).
  *
  * ONE CONVERSATION-KEY SPELLING: the bare CONVERSATION ID (`cid` — what channels' agent rows, automation's `session:`
  * subjects and the principal picker's `agent:<cid>` rows already carry: 13 of the 15 conversation rows on the owner's
@@ -121,7 +124,60 @@ const ENTRY_FIELDS = Object.freeze({
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
   'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac', commands: 'commands', source: Object.freeze(['owner', 'request', 'card']), scopes: 'scopes' }),   // lane vault-standing-request r4 (THE ROOT MODEL): `scopes` = the member's SCOPES, each with ITS OWN end / tool / writer (scopeListOf) — a member is ONE shape: `scopes`, or the one-end fields before it (read as each scope with the member's end)   // lane vault-standing-request: `commands` = the COMMAND SHAPES a member may run (a program whose destination the hub cannot read — the owner trusts the command itself), `source` = who wrote the member last (the owner's row, an agent's standing request he allowed, a card's «Always»)   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
   'vault-job': Object.freeze({ jobs: 'jobs' }),   // lane vault-job-road: the job ids the member's approval names (src/vault-job.js approvedBy)
+  // lane lg-group-parents (B-526c): a watch row's entry carries its WATCHER's settings — the Access dialog's act is on disk in
+  // this record before its answer (the channel index's copy follows at its pace; the boot completes it — src/server/
+  // channels-access.js completeGrainActs). `notify` marks an entry that carries them: an older record's bare principal reads
+  // exactly as before (the index's watcher row the only settings)
+  'channel-watch': Object.freeze({ notify: Object.freeze(['wake', 'digest']), mode: Object.freeze(['all', 'filtered']), digestMinutes: 'count', dailyWakeCap: 'natural', receiptWake: 'flag', delivery: Object.freeze(['next-turn', 'wake']), origin: Object.freeze(['agent']), via: 'text', filterId: 'text', filter: 'blob' }),
 });
+/** lane lg-group-parents (B-526c): a plain JSON object a channel row CARRIES for the boot's completion (an inline filter's body,
+ *  a rule's pattern) — never read by `admits`; the channel model validates it where it is used. An object (never a list) of
+ *  at most BLOB_MAX bytes as JSON → a copy | null (a bigger one is not carried: its act waits for the index's disk). */
+const BLOB_MAX = 16384;
+const TEXT_MAX = 512;
+const utf8Len = (x) => (typeof TextEncoder === 'function' ? new TextEncoder().encode(x).length : x.length * 3);
+function blobOf(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  let j;
+  try { j = JSON.stringify(v); } catch { return null; }
+  if (typeof j !== 'string' || utf8Len(j) > BLOB_MAX) return null;
+  return JSON.parse(j);
+}
+const textOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= TEXT_MAX && !/[\u0000-\u001f\u007f]/.test(v);
+/**
+ * lane lg-group-parents (B-526c) — THE FIELDS A CHANNEL ROW CARRIES beside its two lists, for the boot's completion of an act
+ * whose index half never landed (never read by `admits`):
+ *   `rule`    a `rule:<id>` row of channel-reach / channel-watch: `{adapterId, pattern, at?}` — the rule's account and its pattern
+ *   `blocks`  a channel-watch row: `[{key, at?, by?}]` — the agents whose OWN watch the person removed at this grain (the mark
+ *             that refuses their own re-watch there)
+ * A row holding only these is a row (the grants store keeps it). → `{fields, bad}` — `bad` names the first field that cannot be
+ * read: the write refuses it (`bad_row`), the read drops THAT field (the lists still read).
+ */
+const BLOCK_KEY_RE = /^(agent|group|everyone):[^\u0000-\u001f\u007f]{1,256}$/;
+function rowFieldsOf(door, resource, src) {
+  const fields = {};
+  let bad = null;
+  const o = src && typeof src === 'object' ? src : {};
+  if (o.rule !== undefined && o.rule !== null) {
+    const r = o.rule && typeof o.rule === 'object' && !Array.isArray(o.rule) ? o.rule : null;
+    const pattern = r ? blobOf(r.pattern) : null;
+    if (!r || !(door === 'channel-reach' || door === 'channel-watch') || !/^rule:/.test(str(resource)) || !textOk(r.adapterId) || !pattern) bad = 'rule';
+    else fields.rule = { adapterId: r.adapterId, pattern, ...(Number(r.at) > 0 && Number(r.at) <= 8.64e15 ? { at: Number(r.at) } : {}) };
+  }
+  if (o.blocks !== undefined && o.blocks !== null) {
+    const list = Array.isArray(o.blocks) ? o.blocks : null, out = [];
+    let readable = door === 'channel-watch' && !!list && list.length <= LIST_MAX;
+    for (const b of readable ? list : []) {
+      const key = b && typeof b === 'object' ? str(b.key) : '';
+      if (!BLOCK_KEY_RE.test(key)) { readable = false; break; }
+      if (out.some((x) => x.key === key)) continue;
+      out.push({ key, ...(Number(b.at) > 0 && Number(b.at) <= 8.64e15 ? { at: Number(b.at) } : {}), ...(typeof b.by === 'string' && b.by ? { by: b.by.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 64) } : {}) });
+    }
+    if (!readable) bad = bad || 'blocks';
+    else if (out.length) fields.blocks = out;
+  }
+  return { fields, bad };
+}
 /** lane vault-use-grants: ONE destination a vault-use entry may name — EVERY shape the run card can name (round 2 MAJOR):
  *  a host name (one label like `router` or many like `api.example.com`), an IPv4 / IPv6 address (IPv6 bracketed or bare),
  *  any of those with a `:port`, or a `*.domain` wildcard over a registrable domain (`*.amazonaws.com`, never `*.com`); or
@@ -303,6 +359,10 @@ function normEntry(e, door) {
     if (allowed === 'toolmap') { const v = e[f]; if (!v || typeof v !== 'object' || Array.isArray(v)) return null; const keys = Object.keys(v); if (keys.length > HOSTS_MAX) return null; const m = {}; for (const k of keys) { const hk = hostTokenOk(String(k).trim().toLowerCase()); const tv = String(v[k]).toLowerCase(); if (hk === null || hk === '@entry' || !/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(tv)) return null; m[hk] = tv; } if (Object.keys(m).length) out[f] = m; continue; }   // lane vault-use-grants round 4 item 3: host → the CLI that minted its wildcard grant
     if (allowed === 'mac') { if (!/^[0-9a-f]{64}$/.test(String(e[f]))) return null; out[f] = String(e[f]); continue; }   // lane vault-use-grants round 3: the vault's HMAC over the canonical member
     if (allowed === 'time') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 8.64e15) return null; out[f] = n; continue; }
+    if (allowed === 'natural') { const n = Number(e[f]); if (!Number.isInteger(n) || n < 0 || n > 100000) return null; out[f] = n; continue; }   // lane lg-group-parents B-526c: a count that may be 0 (a wake's daily cap)
+    if (allowed === 'flag') { if (e[f] === false) continue; if (e[f] !== true) return null; out[f] = true; continue; }   // B-526c: stored only when true
+    if (allowed === 'text') { if (!textOk(e[f])) return null; out[f] = e[f]; continue; }   // B-526c: a filter id, an agent's `via`
+    if (allowed === 'blob') { const b = blobOf(e[f]); if (!b) return null; out[f] = b; continue; }   // B-526c: an inline filter's body
     if (!allowed.includes(e[f])) return null;
     out[f] = e[f];
   }
@@ -358,6 +418,7 @@ function normRow(r) {
   const row = { door: r.door, resource, to, except };
   if (Number.isFinite(Number(r.at)) && r.at !== null && r.at !== undefined) row.at = Number(r.at);
   if (typeof r.by === 'string' && r.by) row.by = r.by.slice(0, 64);
+  Object.assign(row, rowFieldsOf(r.door, resource, r).fields);   // lane lg-group-parents B-526c: what the row carries (a field it cannot read is dropped — the lists still read)
   return { ok: true, row };
 }
 
@@ -367,7 +428,7 @@ function normRow(r) {
  * each (`too_many`), a principal both given and excepted is a contradiction (`except_conflicts` — the picker greys a
  * member with its own row «有自己的授权»). → `{ok:true, row}` | `{ok:false, code, error}`.
  */
-function validateWrite(door, resource, { to = [], except = [] } = {}, { at = null, by = null } = {}) {
+function validateWrite(door, resource, { to = [], except = [], rule = undefined, blocks = undefined } = {}, { at = null, by = null } = {}) {   // lane lg-group-parents B-526c: + what a channel row carries
   const no = (code, error) => ({ ok: false, code, error });
   if (!DOORS.includes(door)) return no('unknown_door', `no door "${str(door).slice(0, 40)}" — one of ${DOORS.join(', ')}`);
   if (!RESOURCE_RE.test(str(resource))) return no('bad_resource', 'a resource is a non-empty id (≤ 400 characters, no control characters)');
@@ -391,7 +452,9 @@ function validateWrite(door, resource, { to = [], except = [] } = {}, { at = nul
     if (seen.has(principalKey(n))) return no('except_conflicts', `${principalKey(n)} is both given and excepted — a member with its own grant here cannot also be left out of it`);
     seenX.add(principalKey(n)); outX.push(n);
   }
-  const row = { door, resource: str(resource), to: outTo, except: outX };
+  const rf = rowFieldsOf(door, resource, { rule, blocks });
+  if (rf.bad) return no('bad_row', rf.bad === 'rule' ? 'a rule\'s carried record is `{adapterId, pattern}` on a rule:<id> row of channel-reach / channel-watch (the pattern an object of at most ' + BLOB_MAX + ' bytes)' : 'blocks are a list of `{key}` (agent:<id> / group:<id>) on a channel-watch row');   // lane lg-group-parents B-526c
+  const row = { door, resource: str(resource), to: outTo, except: outX, ...rf.fields };
   if (Number.isFinite(Number(at)) && at !== null) row.at = Number(at);
   if (typeof by === 'string' && by) row.by = by.slice(0, 64);
   return { ok: true, row };
@@ -919,6 +982,7 @@ const LEGACY = Object.freeze({
 module.exports = {
   LINEAGE_WORDS, lineageWords,   // the chain's cure (B)
   DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, PUBLIC_SUFFIXES, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
+  rowFieldsOf, blobOf, BLOB_MAX,   // lane lg-group-parents B-526c: what a channel row carries
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, onlyCarried, ONLY_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow, specificityOf,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,
