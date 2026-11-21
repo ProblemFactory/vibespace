@@ -618,6 +618,8 @@ try {
     await restartWith([]);
     await phone(...DIMS);
     await cdp('Page.navigate', { url: PREV }); await sleep(300);
+    // a navigation the suite starts, left on the CHECKED settle (the round wes858b0x's note): the page RELOADS ITSELF after its first
+    // boot (the stale bundle), so loadPage would catch only the first document — settle waits for whichever has booted after the 9 s
     await cdp('Page.navigate', { url: `${ORIGIN}/` });
     await sleep(9000); await settle();
     for (let k = 0; k < 2; k++) { await restartWith([]); await sleep(8000); } // two reconnects (a phone's screen waking)

@@ -1362,7 +1362,7 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
 
   // A FAKE PAGE: each document is a node:vm context whose window is itself; `app` appears when the document boots. Every CDP ask is
   // one tick: a navigation commits `commitAfter` ticks after its navigate, its app boots `bootAfter` ticks after the commit.
-  const fakePage = ({ commitAfter = 3, bootAfter = 2, errorText = null, sameDoc = false, neverCommit = false, lyingTree = false, deadAt = 0 } = {}) => {
+  const fakePage = ({ commitAfter = 3, bootAfter = 2, errorText = null, sameDoc = false, neverCommit = false, lyingTree = false, deadAt = 0, markFails = false } = {}) => {
     let ticks = 0, pending = null, newLoader = null;
     const mkDoc = (loader, booted) => { const ctx = vm.createContext({}); ctx.window = ctx; if (booted) ctx.app = { ready: Promise.resolve(true) }; return { loader, ctx, bootsAt: Infinity }; };
     let doc = mkDoc('L-old', true);   // the document before the navigation: its app booted long ago
@@ -1370,6 +1370,7 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
     const call = async (method, params = {}) => {
       ticks++; asked.push(method);
       if (deadAt && ticks >= deadAt) throw new Error(`cdp ${method}: no answer in 45000 ms`);
+      if (markFails && method === 'Runtime.evaluate' && String(params.expression).includes(`window.${LOAD_MARK} = `)) throw new Error('Runtime.evaluate: Execution context was destroyed.');
       if (pending && ticks >= pending.commitAt) { doc = pending.doc; doc.bootsAt = ticks + bootAfter; pending = null; }
       if (doc.bootsAt <= ticks && !doc.ctx.app) doc.ctx.app = { ready: Promise.resolve(true) };
       if (method === 'Page.navigate') {
@@ -1418,6 +1419,13 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
   const r7 = await tryAfter(fakePage({ sameDoc: true }), { bootMs: 1500, what: 'after a hash change (a fake)' });
   ok(!!r7.err && /^afterNavigation: the app never booted in 2 s after a hash change \(a fake\) — last seen: no new document has booted yet \(the old one carries the mark\)/.test(r7.err.message),
     `…an act that makes no new document (a hash, a cache restore) is NAMED at its bound, never taken from the marked one («${r7.err ? r7.err.message.slice(0, 170) : 'no error'}») — such a site keeps its own wait`);
+  // (6b) the round wes858b0x's should: a mark that cannot be set leaves afterNavigation NOTHING to tie its wait to — a named red,
+  // and the act is never started (loadPage keeps the loader, so its mark's failure is not one)
+  const f6b = fakePage({ markFails: true }), r6b = await tryAfter(f6b, { what: 'after location.href (a fake)', fatal: undefined });
+  ok(!!r6b.err && /^afterNavigation: the old document could not be marked after location\.href \(a fake\) — the mark's ask failed: Runtime\.evaluate: Execution context was destroyed/.test(r6b.err.message) && !f6b.asked.includes('Page.navigate'),
+    `afterNavigation: a mark that cannot be set is a NAMED red and the act never runs («${r6b.err ? r6b.err.message.slice(0, 160) : 'no error'}»; asks: ${f6b.asked.join(' ')}) — and an option passed as undefined (fatal) keeps its default`);
+  const r6c = await tryLoad(fakePage({ markFails: true, commitAfter: 2, bootAfter: 2 }));
+  ok(!!r6c.ok, `…loadPage over the same failed mark still loads, tied by the loader alone (${r6c.ok ? r6c.ok.asks + ' ask(s)' : r6c.err.message})`);
   // RED CONTROL (unit 2): the old settle's own steps after a page-led navigation (the act, an unchecked wait, a bare evaluate)
   const fc2 = fakePage({ commitAfter: 2, bootAfter: 3 }), cc2 = clock();
   let red2 = null; try { await fc2.call('Page.navigate', { url: U }); const e1 = await fc2.call('Runtime.evaluate', { expression: APP_BOOTED, returnByValue: true }); const e2 = await fc2.call('Runtime.evaluate', { expression: 'app.ready.then(() => true)', awaitPromise: true, returnByValue: true }); if (e2.exceptionDetails) throw new Error('page threw: ' + e2.exceptionDetails.exception.description); red2 = e1; } catch (e) { red2 = e; }

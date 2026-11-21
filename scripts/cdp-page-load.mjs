@@ -63,17 +63,25 @@ async function untilBooted(call, { mark, loaderId, boot, settle, bootMs, everyMs
 }
 
 const DEFAULTS = { boot: APP_BOOTED, settle: APP_READY, bootMs: 30000, everyMs: 150, fatal: () => false, sleep: realSleep, now: Date.now };
-/** Mark the document that answers now: a property only it carries, so no answer from it ever counts as the new one's. */
+/** Mark the document that answers now: a property only it carries, so no answer from it ever counts as the new one's.
+ *  → { mark, failed } — `failed` = why the mark could not be set (null when it was): loadPage still has the loader to tie its
+ *  wait to, afterNavigation has nothing else (the round wes858b0x's should: there it is a named red, never swallowed). */
 async function markOld(call, o) {
   const mark = `vs-load-${process.pid}-${++marks}-${o.now().toString(36)}`;
-  try { await call('Runtime.evaluate', { expression: `(() => { window.${LOAD_MARK} = ${JSON.stringify(mark)}; return true; })()`, returnByValue: true }); } catch (e) { if (o.fatal(e)) throw e; }   // no document yet: nothing old can answer
-  return mark;
+  let failed = null;
+  try {
+    const r = await call('Runtime.evaluate', { expression: `(() => { window.${LOAD_MARK} = ${JSON.stringify(mark)}; return true; })()`, returnByValue: true });
+    if (r && r.exceptionDetails) failed = `the mark threw (${thrown(r)})`;
+  } catch (e) { if (o.fatal(e)) throw e; failed = `the mark's ask failed: ${String((e && e.message) || e).split('\n')[0].slice(0, 160)}`; }
+  return { mark, failed };
 }
+/** The caller's options over the defaults — a key passed as undefined keeps its default (the round's should). */
+const optsOf = (who, opts) => ({ ...DEFAULTS, who, ...Object.fromEntries(Object.entries(opts || {}).filter(([, v]) => v !== undefined)) });
 
 /** Navigate to `url` and wait for THAT navigation's document to boot (see the head). */
 export async function loadPage(call, url, opts = {}) {
-  const o = { ...DEFAULTS, who: 'loadPage', ...opts };
-  const mark = await markOld(call, o);
+  const o = optsOf('loadPage', opts);
+  const { mark } = await markOld(call, o);   // a failed mark leaves the loader to tie the wait (no document yet: nothing old can answer)
   const nav = (await call('Page.navigate', { url })) || {};
   if (nav.errorText) throw named(`${o.who}: the navigation to ${url} failed (${nav.errorText}) — the app never booted`);
   return untilBooted(call, { ...o, mark, loaderId: nav.loaderId || null, what: `after the navigation to ${url}` });
@@ -85,8 +93,9 @@ export async function loadPage(call, url, opts = {}) {
  *  an act that makes no new document (a hash, pushState, a cache restore of the same document) keeps the marked one and is
  *  named at its bound — such a site keeps its own wait, and the census's debt says why. */
 export async function afterNavigation(call, act, opts = {}) {
-  const o = { ...DEFAULTS, who: 'afterNavigation', what: 'after the page\'s own navigation', ...opts };
-  const mark = await markOld(call, o);
+  const o = optsOf('afterNavigation', { what: 'after the page\'s own navigation', ...opts });
+  const { mark, failed } = await markOld(call, o);
+  if (failed) throw named(`${o.who}: the old document could not be marked ${o.what} — ${failed}; nothing else ties the wait to the new document, so the navigation is not started`);
   await act();
   return untilBooted(call, { ...o, mark, loaderId: null });
 }
