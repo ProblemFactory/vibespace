@@ -1209,8 +1209,9 @@ function registerWsHandler(wss, ctx) {
         case 'rewind-files': {   // B-437e files tier: the confirm's facts (dryRun) or a press with its choice — src/server/rewind-files-door.js; the PERSON only
           const session = activeSessions.get(data.sessionId), D = require('./server/rewind-files-door.js'), by = ws._personPage === true ? byOfWs(ws) : null;
           const job = data.dryRun === true ? D.filesConfirmOf({ session, msgId: data.msgId, by, hosts })
-            : D.pressFiles({ session, msgId: data.msgId, by, hosts, choice: typeof data.choice === 'string' ? data.choice : 'conversation', drawn: data.drawn || null, lastSeenUuid: data.lastSeenUuid, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null, reqId: typeof data.reqId === 'string' ? data.reqId : null });
-          job.then((r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { } }, () => { });
+            : D.pressFiles({ session, msgId: data.msgId, by, hosts, choice: data.choice, drawn: data.drawn || null, lastSeenUuid: data.lastSeenUuid, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null, reqId: typeof data.reqId === 'string' ? data.reqId : null });
+          const reply = (r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { } };
+          job.then(reply, (e) => { console.error('[rewind-files] the door failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });   // a throw is said, never a silent page
           break;
         }
 
@@ -1673,7 +1674,7 @@ function registerWsHandler(wss, ctx) {
                   // transcript worker, the merge in slices — measured 380–880 ms of one sync hold per 120 MB rollout); raw() then reads it.
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
                   await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
-                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null }); // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true }); // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
                 }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)

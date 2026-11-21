@@ -691,6 +691,10 @@ function parseSessionJsonl(claudeSessionId, cwd) {
   } catch { return []; }
 }
 
+/** B-437e files tier (r1247 / r1307): the parse `jsonl` is the WHOLE transcript — the cache entry it came from is that very
+ *  array and its span starts at the file's first byte (a transcript past the tail bound is read from its tail: not whole) */
+function spanFromStart(entry, jsonl) { return !!entry && Array.isArray(jsonl) && entry.messages === jsonl && entry.spanStart === 0; }
+
 // Session metadata cache (cwd + first user message)
 const _sessionMetaCache = new Map();
 // B-891e: the memo's cap is at least the last walk's transcript count (+ room) — a fixed 8 192 under the owner's 12 543 evicted
@@ -1107,6 +1111,9 @@ class SessionMessages {
     const session = this._session;
     const historySessionId = getHistorySessionId(session);
     const jsonl = historySessionId ? parseSessionJsonl(historySessionId, session.cwd) : [];
+    // B-437e files tier (r1247): whether these records reach back to the transcript's FIRST byte — a transcript past the tail
+    // bound is read from its tail only (src/adapters/codex.js readJsonlTail: the span's start); no transcript read: not known
+    this._fromStart = spanFromStart(historySessionId ? _jsonlCache.get(historySessionId) : null, jsonl);
     // THE MERGE MEMO (perf chunk C): the merge below is a pure function of
     // (the jsonl array, the buffer string) and the cache hands back the SAME
     // array until the file changes, so a burst of SessionMessages over one
@@ -1198,6 +1205,8 @@ class SessionMessages {
   slice(offset, limit) { this._ensureParsed(); return this._display.slice(offset, offset + limit); }
   all() { this._ensureParsed(); return this._display; }
   raw() { this._ensureParsed(); return this._all; }
+  /** the records reach back to the transcript's first byte (B-437e files tier: the rebuild says it to the normalizer) */
+  get fromStart() { this._ensureParsed(); return this._fromStart === true; }
   /** THE HELPERS' TOOL_RESULTS (lane S1 verify r3): every sidechain `user` record's
    *  tool_result blocks, as `{toolUseId, text, isError, parentToolUseId}` — the
    *  record list (`raw()`) skips sidechain records, yet a helper's result for an
@@ -1820,7 +1829,7 @@ function dedupWebuiSockets(entries) {
 
 module.exports = { claudeTranscriptIndex, stuckSaid,
   warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
-  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _taskScanCounts, _taskStateCensus: taskStateCensus, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
+  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _taskScanCounts, _taskStateCensus: taskStateCensus, _spanFromStart: spanFromStart, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
   extractSessionMeta,
   SESSIONS_DIR,
   dedupWebuiSockets,

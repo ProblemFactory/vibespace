@@ -1283,7 +1283,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // stream does not use, and the browser / proposal / group cards waited for an attach that never came. A
             // resume, a fork or an adopted keeper session carries history from before this normalizer: the first
             // attach still loads it.
-            if (!(data.resume && data.resumeId) && !data.fork && !data.keeperSid) session._historyLoaded = true;
+            if (!(data.resume && data.resumeId) && !data.fork && !data.keeperSid) { session._historyLoaded = true; session._normalizer.recordsFromStart = true; }   // B-437e: born here — every record seen
             session._normalizer.onOp((op) => {
               broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
             });

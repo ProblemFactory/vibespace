@@ -37,13 +37,20 @@ function personOfUpgrade(req) {
  *  buffer, so a hub restart reads it back) and it holds until the CLI's answer; a new process is a new wrapper whose buffer
  *  starts empty. A press whose record is not read yet (or a wrapper older than the record) holds REWIND_LIFE_MS. The
  *  person's send waits on it too (src/server/user-input.js). ⇒ docs/kb-file-structure.md «rewind-door.js» */
-function rewindOut(session, now = Date.now()) {
+function conversationOut(session, now = Date.now()) {
   const n = session && session._normalizer, o = session && session._rewindOut;
   const said = n && n.rewindAskedOut?.();          // the wrapper's record: it lives until its answer, across a hub restart
   if (said) return said;
   if (!o || (n && n.rewindAnswered?.(o.id))) return null;
   return now - o.at < REWIND_LIFE_MS ? o : null;   // pressed, its record not read yet (or a wrapper that says none): one life
 }
+// THE FILES PRESS OUT (row B-437e, the files tier — src/server/rewind-files-door.js): a `rewind_files` press is a rewind too —
+// while one runs (its re-check, its press, a late answer it still waits for) this door, the confirm and the person's send
+// fence see it exactly as a conversation rewind out. Held in the hub's memory only: a hub restart forgets it (said in the kb).
+const FILES_OUT = new WeakMap();   // conversation → {id, at, files: true}
+function setFilesOut(session, mark) { if (!session) return; if (mark) FILES_OUT.set(session, mark); else FILES_OUT.delete(session); }
+function filesOutOf(session) { return (session && FILES_OUT.get(session)) || null; }
+function rewindOut(session, now = Date.now()) { return filesOutOf(session) || conversationOut(session, now); }
 
 /** WHEN THE REQUEST WENT OUT, by the hub's clock: the press's own mark when it is this request; else the wrapper's stamp,
  *  never later than when the hub read it (`seenAt`). */
@@ -97,4 +104,4 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   return { ok: true, requestId: out.requestId, ...said };
 }
 
-module.exports = { rewindStateOf, requestRewind, personOfUpgrade, rewindOut, rewindFenceLeft };
+module.exports = { rewindStateOf, requestRewind, personOfUpgrade, rewindOut, conversationOut, setFilesOut, filesOutOf, rewindFenceLeft };

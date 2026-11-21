@@ -661,13 +661,14 @@ function artifactDeriveOpts({ backend, cwd, host, sessionId = null } = {}) {
   return typeof of === 'function' ? { artifactsOf: of, cwd: cwd || '', host: host || '', helper: { backend: backend || 'claude', sessionId } } : null;
 }
 const artifactsOptsOf = (session, sessionId) => { const o = artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host, sessionId: session.claudeSessionId || session.backendSessionId || null }); return o && artifactQuoteSource ? { ...o, quoted: artifactQuoteSource(session, sessionId || session.sockName) } : o; }; // r10: + whose item a tray answer quotes
-function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null } = {}) {
+function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null, fromStart = false } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
   // 2.369.402: the conversation's cost fold rides the rebuild — the old normalizer's (the kept fact the boot resumed + every
   // result since) seeds the new one, whose replay passes over the results it already counted (src/cost-segments.js)
   const carriedCost = typeof session._normalizer?.costState === 'function' ? session._normalizer.costState() : null;
   const mm = createMessageManager(session.backend || 'claude', sessionId, { threadId: session.backendSessionId || session.claudeSessionId || null }); // the rendered conversation's id = the codex ledger-key DEFAULT (file-tagged records key by their own file; wrapper_meta re-points it; null before a fresh thread is adopted)
+  mm.recordsFromStart = fromStart === true; // B-437e files tier (r1247): the caller's word that `records` reach the transcript's start
   for (const h of opHandlers) mm.onOp(h);
   if (carriedCost && typeof mm.seedCost === 'function') mm.seedCost(carriedCost, { seek: true });
   if (typeof mm.setHelperAskedAt === 'function') mm.setHelperAskedAt(session._helperAskedAt || null); // verify r3: a rebuilt ask keeps its real arrival (the 60 s inbox clock survives the restart)

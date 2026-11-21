@@ -575,18 +575,22 @@ say('— §6 the claude road');
     && /declares a conversation rewind .* but no rewind\.request road/.test(refused || '') && (() => { try { H.assertRewindContract({ id: 'x', caps: { checkpoints: caps.NO_CHECKPOINTS } }); return true; } catch { return false; } })(),
     `the road is the harness descriptor's: row on ⇔ road (${roads.map(([id, on, rd]) => `${id} ${on ? 'on' : 'off'}/${rd ? 'road' : 'none'}`).join(', ')}); a row on without one is refused at registration`, refused || '');
   // WHO MAY ASK (entry condition 4): the ONE caller is the owner's /ws case with the socket's own person; no automation
-  // verb, no route, no agent door names a rewind
+  // verb, no route, no agent door names a rewind. B-437e files tier: the files door (src/server/rewind-files-door.js) presses
+  // the conversation step of «both» through this door — its one caller is its own /ws case, with the same person
   const callers = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', 'requestRewind(', '--', 'src', 'server.js'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean);
   const wsCase = read('src/ws-handler.js').split("case 'rewind': {")[1]?.split('break;')[0] || '';
+  const filesCase = read('src/ws-handler.js').split("case 'rewind-files': {")[1]?.split('break;')[0] || '';
+  const filesCallers = spawnSync('git', ['-C', REPO, 'grep', '-l', '-E', "require\\(['\"][^'\"]*rewind-files-door(\\.js)?['\"]\\)", '--', 'src', 'server.js'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean);
   const verbs = require(path.join(REPO, 'src/automation-keys.js')).VERBS || [];
   // a road that PRESSES one (the door, its module, the CLI verb, the ws frame) — the For-you reply route only maps the typing
   // path's refusal code `rewind_out` (one life), it presses nothing
   const routeHits = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', '-e', 'requestRewind', '-e', 'rewind-requests', '-e', 'rewind_conversation', '-e', "type: 'rewind'", '-e', 'type: "rewind"', '-e', 'rewindRoad', '-e', 'rewindRequest', '-e', 'buildRewind', '-e', 'REWIND_REQUEST_PREFIX', '--', 'src/routes', 'src/server/automation-engine.js', 'data/bin/vibespace-msg', 'data/bin/vibespace-task'], { encoding: 'utf8' }).stdout.trim();
-  ok(JSON.stringify(callers.sort()) === JSON.stringify(['src/server/rewind-requests.js', 'src/ws-handler.js']) && /by: ws\._personPage === true \? byOfWs\(ws\) : null/.test(wsCase)
+  ok(JSON.stringify(callers.sort()) === JSON.stringify(['src/server/rewind-files-door.js', 'src/server/rewind-requests.js', 'src/ws-handler.js']) && /by: ws\._personPage === true \? byOfWs\(ws\) : null/.test(wsCase)
+    && /by = ws\._personPage === true \? byOfWs\(ws\) : null/.test(filesCase) && JSON.stringify(filesCallers) === '["src/ws-handler.js"]'
     && /reqId: typeof data\.reqId === 'string' \? data\.reqId : null/.test(wsCase)
     && /ws\._personPage = require\('\.\/server\/rewind-requests\.js'\)\.personOfUpgrade\(req\)/.test(read('src/ws-handler.js'))
     && verbs.length > 5 && !verbs.some((v) => /rewind/i.test(v)) && routeHits === '',
-    'the door\'s ONE caller is the owner\'s /ws case with the socket\'s person (byOfWs, only on a socket personOfUpgrade proved at its handshake); no automation verb, no route and no agent CLI names a rewind', `${callers.join(',')} | verbs ${verbs.filter((v) => /rewind/i.test(v))} | ${routeHits}`);
+    'the door\'s ONE caller is the owner\'s /ws case with the socket\'s person (byOfWs, only on a socket personOfUpgrade proved at its handshake) — and the files door, whose one caller is its own /ws case with the same person; no automation verb, no route and no agent CLI names a rewind', `${callers.join(',')} | files door: ${filesCallers.join(',')} | verbs ${verbs.filter((v) => /rewind/i.test(v))} | ${routeHits}`);
 }
 
 ok(/'queue_settle', 'frame_stamp', 'rewind_out',/.test(read('server.js')) && /fail\(res, code, \(r && r\.error\) \|\| 'the reply was not sent', r && r\.i18n \? \{ i18n: r\.i18n \} : null\)/.test(read('src/routes/user-todos-reply.js'))

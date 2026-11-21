@@ -189,7 +189,7 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
   // S5: the three parse pipelines live in src/server/stdout/<protocol>.js — the live-feed sites moved with them
   const stdoutDir = fs.readdirSync(path.join(REPO, 'src/server/stdout')).filter((f) => f.endsWith('.js')).map((f) => 'src/server/stdout/' + f);
   const consumers = stdoutDir.map((f) => fs.readFileSync(path.join(REPO, f), 'utf8')).join('\n');
-  ok(/await rebuildHistory\(session, data\.sessionId, sm\.raw\(\), \{ helperResults: typeof sm\.helperResults === 'function' \? sm\.helperResults\(\) : null \}\)/.test(wsh), 'attach rebuilds through rebuildHistory (time-sliced + gated; lane S1 verify r3: handing it the helpers\' tool_results session-store skipped from the record list)');
+  ok(/await rebuildHistory\(session, data\.sessionId, sm\.raw\(\), \{ helperResults: typeof sm\.helperResults === 'function' \? sm\.helperResults\(\) : null, fromStart: sm\.fromStart === true \}\)/.test(wsh), 'attach rebuilds through rebuildHistory (time-sliced + gated; lane S1 verify r3: handing it the helpers\' tool_results session-store skipped from the record list; B-437e: and whether those records reach the transcript\'s first byte)');
   ok(!/session\._normalizer\.convertHistory\(/.test(wsh), 'no sync session-normalizer convertHistory left in the ws attach path');
   const serverSide = ['server.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agent-routes.js', 'src/routes/sessions.js', ...fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('.js')).map((f) => 'src/server/' + f), ...stdoutDir]
     .map((f) => fs.readFileSync(path.join(REPO, f), 'utf8')).join('\n');
