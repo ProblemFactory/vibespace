@@ -299,9 +299,10 @@ try {
     await sleep(2500); // the app's own snap to its size (~650 ms after the map) and the belt's answer, the repaint
     return P.evalJs(G14(id));
   };
+  let runScale14 = null; // B-92aa: the placed-stall leg below runs it on its own copy
   if (!CALC14) skip('§15 the scale-geometry legs', 'gnome-calculator not on PATH');
   else {
-    const runScale14 = async (origin, dpr, wtree, tag) => {
+    runScale14 = async (origin, dpr, wtree, tag) => {
       const H = await mkPage(origin, { width: 1400, height: 1000, deviceScaleFactor: dpr, mobile: false });
       const out = { steps: [], dpr, tag };
       try {
@@ -579,6 +580,52 @@ try {
     }
     const ended15 = endCopy(sd), left15 = await until(() => { endCopy(sd); return copyLeft(sd).length ? null : 'none'; }, 5000, 100);   // B-92aa, as §14's
     check(`§15/§16 CONTROL's copy ends with its control: ${ended15.length} process(es) rooted in its tree or HOME ended, none left`, left15 === 'none', { ended: ended15, left: copyLeft(sd), roots: sd.roots });
+  }
+
+  // B-92aa (the coordinator's r992): THE RACE PLACED, never by load. §15 F3 reds ~1 in 3 on a loaded box (the 11-18 red at load
+  // 31: a 1.5× relaunch mapped 1634×1232, then the client refit at +152 ms and +1.4 s to 1818×1232), green 3/3 at a normal
+  // load. The relaunch's order is retarget (the NEW connection starts) → fitAfterRelaunch (the window takes its new size).
+  // THE STALL: a copy whose fitAfterRelaunch is HELD until the new connection's main window is mapped (its client's mainWid),
+  // so the fit lands after the map — the order a slow box can give. Then F3 is MEASURED on it: if a relaunch maps at a size
+  // other than its settled main and the client refits it, the order is NAMED (the cure is that order, one unit); if every
+  // map is final anyway, the order is not the cause and the row's flake half closes as not reproduced. Printed whole.
+  if (CALC14 && runScale14) {
+    const wts = scratch('deskxpra-stall');
+    try { execSync(`git worktree remove --force ${wts}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+    execSync(`git worktree add --detach ${wts} HEAD`, { cwd: repo, stdio: 'ignore' }); worktrees.push(wts);
+    for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wts}/${f} && cp -r ${wt}/${f} ${wts}/${f}`);
+    fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wts, 'node_modules'));
+    fs.mkdirSync(path.join(wts, 'data'), { recursive: true });
+    const FROM = "    fitAfterRelaunch(geo, r.app); // lane D (a) F2: the window keeps the app's size at the new scale";
+    const TO = "    { const g9 = geo, a9 = r.app, t9 = Date.now(); const held = () => { const c9 = view && view.client; if ((c9 && c9.mainWid) || Date.now() - t9 > 8000) { winInfo._desktopStallHeldMs = Date.now() - t9; fitAfterRelaunch(g9, a9); } else setTimeout(held, 20); }; setTimeout(held, 20); } // B-92aa PLACED STALL: the relaunch fit held until the new connection's main window is mapped";
+    const wf = path.join(wts, 'src/lib/desktop-app-window.js'); const src9 = fs.readFileSync(wf, 'utf8');
+    check('B-92aa stall: the relaunch fit\'s call is spelled exactly once (the copy holds exactly it)', src9.split(FROM).length === 2);
+    fs.writeFileSync(wf, src9.replace(FROM, TO));
+    rebaseline(wts); execSync('npm run build', { cwd: wts, stdio: 'ignore' });
+    const [PORTS] = await freePorts(1);
+    const homeS = scratchHome('deskxpra-stall-home', fs);
+    const ss = spawnCopy('the stalled-fit copy', wts, { ...srvEnv, PORT: String(PORTS), HOME: homeS }); ctlServers.push(ss);
+    const upS = await bootedCopy(ss, PORTS);
+    check('B-92aa stall: the stalled-fit copy boots', upS, ss.bootWhy);
+    if (upS) {
+      const OS = `http://127.0.0.1:${PORTS}`;
+      try {
+        const o = await runScale14(OS, 1, wts, 'stall');
+        const rows = o.steps.filter((st) => st.tap && st.tap.some((e) => e.ty === 'new-window')).map((st) => {
+          const nw = st.tap.find((e) => e.ty === 'new-window');
+          const map = st.tap.find((e) => e.ty === 'map-window' && nw && e.g[0] === nw.g[0]);
+          const refits = map ? st.tap.filter((e) => e.ty === 'configure-window' && e.g[0] === nw.g[0] && e.at > map.at).map((e) => [e.at - map.at, e.g.slice(3, 5)]) : [];
+          return { label: st.label, map: map && map.g.slice(3, 5), main: st.g && st.g.main && [st.g.main.w, st.g.main.h], refits, held: st.g && st.g.fit ? undefined : undefined };
+        });
+        const stale = rows.filter((x) => x.map && x.main && (x.map[0] !== x.main[0] || x.map[1] !== x.main[1]) && x.refits.length);
+        console.log(`    MEASURE B-92aa (not a proof): the stalled fit at DPR 1 — ${rows.map((x) => `${x.label} map ${x.map} = main ${x.main}${x.refits.length ? ` (the client refit ${JSON.stringify(x.refits)})` : ''}`).join('; ')}`);
+        console.log(`    B-92aa VERDICT: ${stale.length ? `the ORDER IS NAMED — with the relaunch fit landing after the map, ${stale.length} relaunch(es) mapped at a stale size and the client refit them (${stale.map((x) => `${x.label} ${x.map} → ${x.main}`).join(', ')})` : 'the order is NOT the cause — with the fit held past the map every relaunch still mapped its final size (the flake half closes as not reproduced)'}`);
+        check(`B-92aa stall: the stalled-fit copy ran its transitions (${rows.length} connects measured)`, rows.length >= 4, o.steps.map((x) => x.label + (x.err ? ':' + JSON.stringify(x.err) : '')));
+      } catch (e) { threw('B-92aa stall', e); }
+      finally { for (const [o2, id] of ids14.splice(0)) await fetch(`${o2}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); await sleep(1500); }
+    }
+    const endedS = endCopy(ss), leftS = await until(() => { endCopy(ss); return copyLeft(ss).length ? null : 'none'; }, 5000, 100);
+    check(`B-92aa stall copy ends with it: ${endedS.length} process(es) rooted in its tree or HOME ended, none left`, leftS === 'none', { ended: endedS, left: copyLeft(ss), roots: ss.roots });
   }
 } catch (e) {
   crashed(e, p1);
