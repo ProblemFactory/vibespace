@@ -255,10 +255,10 @@ async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFi
   console.log(`  ${label}: loop — longest hold ${h.maxHeld} ms; ${h.over} gaps held ≥ ${HOLD_LAW_MS} ms (${h.sum} ms in all); the top: ${h.top.map((g) => `+${((g.abs - first) / 1000).toFixed(1)} s ${g.ms} ms (cpu ${g.cpu} · wait ${g.wait} · control ${g.ctl} ⇒ held ${g.held})`).join('; ')}`);
   console.log(`  ${label}: boot trace ≥ 100 ms: ${steps.join(' · ') || 'none'}`);
   // THE LISTEN STEP's window (the round's follow): from the listen callback to its last turn's end — server.js runs the restore's
-  // registration ('restore') and the rest of the step ('listen') each in a loop turn of its own, the boot trace's steps — and the
+  // registration ('restore') and the rest of the step ('listen-rest') each in a loop turn of its own, the boot trace's steps — and the
   // longest hold in it: the room under the bound, said in numbers (the law above judges every hold of the window)
   if (trace && trace.listenAt != null && clock && clock.first != null) {
-    const base = trace.startedAt - trace.startAt, turns = (trace.steps || []).filter((x) => x.name === 'restore' || x.name === 'listen');
+    const base = trace.startedAt - trace.startAt, turns = (trace.steps || []).filter((x) => x.name === 'restore' || x.name === 'listen-rest');
     const w0 = base + trace.listenAt, w1 = base + (turns.length ? Math.max(...turns.map((x) => x.at + x.ms)) : trace.listenAt);
     const hw = holdsOver(clock, control, w0 - 2 * 10, w1);   // a hold begins at the clock's tick before it: one tick of slack
     console.log(`  ${label}: the listen step — ${turns.length ? turns.map((x) => `${x.name} ${x.ms} ms`).join(' · ') : 'no turns of its own (one turn)'}; ${Math.round(w1 - w0)} ms from the listen to its last turn's end; the longest hold in it ${hw.maxHeld} ms (${HOLD_LAW_MS - (hw.maxHeld || 0)} ms under the bound)`);
@@ -340,7 +340,7 @@ const PLANTS = {
 // 'restore' turn since the round's follow; the attaches' localAttach); the forking backfill's callback is the planted code in
 // the restore file
 const PLANT_NAMES = {
-  'one-pass-attach': { re: /^(?:listen|restore)\b|session-stdout\.js/, what: 'the restore\'s turn of the listen step (the attaches\' localAttach)' },
+  'one-pass-attach': { re: /^restore\b|session-stdout\.js/, what: 'the restore\'s turn of the listen step (the attaches\' localAttach)' },
   'forking-backfill': { re: null, what: 'the planted backfill\'s own lines in the restore file' },   // its line range is set at the plant (below)
 };
 const plant = (name) => {

@@ -262,7 +262,7 @@ try {
       const lines = [];
       const log0 = console.log, warn0 = console.warn; console.log = console.warn = (...a) => lines.push(a.join(' '));
       const RESTORED = /^\[boot-restore\] 20 survivor\(s\): registered in /;
-      try { const tEnd = Date.now() + 5000; while (!lines.concat(t.lines).some((l) => RESTORED.test(l)) && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 5)); }   // the restore's own last line: its batches are done
+      try { const tEnd = Date.now() + 5000; while (!(lines.concat(t.lines).some((l) => RESTORED.test(l)) && order.includes('step')) && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 5)); }   // the restore's own last line (its batches are done) and the step's turn
       finally { console.log = log0; console.warn = warn0; }
       const si = order.indexOf('step'), early = socks.slice(0, 8).map((x) => x.id), late = socks.slice(8).map((x) => x.id);
       const stepBetween = si > 0 && order.slice(0, si).some((x) => early.includes(x)) && order.slice(0, si).every((x) => early.includes(x) || x === usedId) && order.slice(si + 1).length > 0 && order.slice(si + 1).every((x) => late.includes(x));
@@ -420,10 +420,10 @@ try {
     // survivors); the hub's turns named through the boot trace; the front holds new connections until the last turn (test-tls-demux §6)
     const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
     const lA = srv.indexOf('  migrateLegacyHomeProjects(); hub.turn(() => { //'), lB = srv.indexOf('\n  restoreSessions(); hub.turn(() => { bootBrowserKeeper(); ');
-    const lI = srv.indexOf("try { require('./src/server/local-index.js').configure("), lEnd = srv.indexOf("\n}, 'listen'); }, 'restore'); }));\n");
+    const lI = srv.indexOf("try { require('./src/server/local-index.js').configure("), lEnd = srv.indexOf("\n}, 'listen-rest'); }, 'restore'); }));\n");
     ok(lA > 0 && srv.indexOf('\n', lA) === lB && lI > lB && lEnd > lI && srv.split("require('./src/server/local-index.js').configure(").length === 2
       && /const hub = require\('\.\/src\/server\/tls\.js'\)\.create\(\{[^\n]*, step: \(name, fn\) => bootTrace\.step\(name, fn\) \}\);/.test(srv),
-      'server.js: the restore\'s registration in a loop turn of its own (\'restore\'), the rest of the listen step in the turn after it (\'listen\'), the CLI index configured in that last turn, the turns named in the boot trace');
+      'server.js: the restore\'s registration in a loop turn of its own (\'restore\'), the rest of the listen step in the turn after it (\'listen-rest\'), the CLI index configured in that last turn, the turns named in the boot trace');
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }
 

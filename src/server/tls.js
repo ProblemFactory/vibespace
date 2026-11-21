@@ -159,7 +159,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
         } else { acceptAs(httpServer, socket); httpServer.emit('connection', socket); }
         process.nextTick(() => socket.resume());
       };
-      if (held) held.then(hand).catch((e) => { log.warn?.(`[tls] a connection held through the boot's listen step was not handed over — ${e && e.message}`); socket.destroy(); });
+      if (held) held.then(() => setImmediate(hand));   // a turn after the step's last: the hand-overs never share its hold (a throw in hand reaches the process, as unheld)
       else hand();
     });
   });
@@ -167,18 +167,19 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
   // ── THE BOOT'S LISTEN STEP IN TURNS (B-cd4b, the round's follow) ──
   // server.js's listen callback runs the restore's registration and the rest of its step each in a loop turn of its own
   // (src/server/loop-turns.js: after a timers phase, one job a turn), so the loop turns between them. A connection that
-  // arrives meanwhile is accepted and its first bytes read, and it is handed to the servers only once the step's last turn
-  // has run: nothing asks the hub for a conversation before every survivor is in the live set, and every request sees the
-  // step whole — as when the step was one turn. `step(name, fn)` names the turn's hold in the boot trace (server.js wires
-  // bootTrace.step). Bounded: past holdMaxMs the hold is said and let go (a step that never ends never stops the hub
-  // answering).
+  // arrives meanwhile is accepted and its first bytes read, and it is handed to the servers in the turn after the step's last
+  // has run: nothing asks the hub's PORT for a conversation before every survivor is in the live set, and every request sees the
+  // step whole — as when the step was one turn. (The agent door, src/server/agent-listener.js, is its own loopback port and is
+  // not held here.) `step(name, fn)` names the turn's hold in the boot trace (server.js wires bootTrace.step). Bounded: past
+  // holdMaxMs the hold is said and let go — after a step turn already queued (setImmediate: a stalled poll phase that fires the
+  // bound and the next turn's hop together still runs the turn first); a step that never ends never stops the hub answering.
   let stepTurns = 0, held = null, lift = null, holdTimer = null;
   const letGo = () => { if (holdTimer) { timers.clearTimeout(holdTimer); holdTimer = null; } const l = lift; held = null; lift = null; if (l) l(); };
   function turn(fn, name = 'turn') {
     if (typeof fn !== 'function') throw new TypeError('tls: turn(fn, name) takes a function');
     if (!stepTurns++ && !held) {
       held = new Promise((r) => { lift = r; });
-      holdTimer = timers.setTimeout(() => { holdTimer = null; log.warn?.(`[tls] the boot's listen step held new connections ${holdMaxMs} ms — handed over now (its turns still run)`); letGo(); }, holdMaxMs);
+      holdTimer = timers.setTimeout(() => { holdTimer = null; log.warn?.(`[tls] the boot's listen step held new connections ${holdMaxMs} ms — handed over now (its turns still run)`); setImmediate(letGo); }, holdMaxMs);
       holdTimer.unref?.();
     }
     require('./loop-turns.js').turn(() => { try { step(name, fn); } finally { if (!--stepTurns) letGo(); } });

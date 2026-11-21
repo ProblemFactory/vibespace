@@ -239,7 +239,8 @@ try {
       const port = await listen(r.hub); closers.push(r.hub.front);
       let wrote = false, after = 0, ended = null, answered = null;
       const t0 = Date.now();
-      const keep = () => { ev.push('turn'); if (endAt == null ? wrote && ++after >= 10 : Date.now() >= endAt(t0)) { ev.push('end'); ended = Date.now() - t0; return; } r.hub.turn(keep, 'listen'); };
+      r.httpServer.on('request', () => ev.push('handler'));
+      const keep = () => { ev.push('turn'); if (endAt == null ? wrote && ++after >= 10 : Date.now() >= endAt(t0)) { ev.push('end'); setImmediate(() => ev.push('imm')); ended = Date.now() - t0; return; } r.hub.turn(keep, 'listen'); };
       r.hub.turn(keep, 'restore');
       const holding = r.hub.holding();
       const body = await new Promise((resolve) => {
@@ -253,14 +254,19 @@ try {
     };
     const g6 = await scene(TLS, { tag: 'g' });
     const src = fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8');
-    const from = '      if (held) held.then(hand).catch(';
+    const from = '      if (held) held.then(() => setImmediate(hand));';
     ok(src.split(from).length === 2, 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control-nohold.js');
-    fs.writeFileSync(cp, anchored(anchored(anchored(src, from, '      if (false) held.then(hand).catch(', 'b-cd4b-tls-no-hold'), "require('../tls-plan.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/tls-plan.js')) + ')', 'b-cd4b-tls-plan-path'), "require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')', 'b-cd4b-tls-turns-path'));
+    fs.writeFileSync(cp, anchored(anchored(anchored(src, from, '      if (false) held.then(() => setImmediate(hand));', 'b-cd4b-tls-no-hold'), "require('../tls-plan.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/tls-plan.js')) + ')', 'b-cd4b-tls-plan-path'), "require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')', 'b-cd4b-tls-turns-path'));
     const r6 = await scene(require(cp), { tag: 'r' });
+    const cp2 = path.join(DIR, 'tls-control-inturn.js');
+    fs.writeFileSync(cp2, anchored(anchored(anchored(src, '      if (held) held.then(() => setImmediate(hand));', '      if (held) held.then(hand);', 'b-cd4b-tls-in-turn'), "require('../tls-plan.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/tls-plan.js')) + ')', 'b-cd4b-tls-plan-path2'), "require('./loop-turns.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/server/loop-turns.js')) + ')', 'b-cd4b-tls-turns-path2'));
+    const i6 = await scene(require(cp2), { tag: 'i' });
     ok(g6.ok && g6.holding && !g6.after && g6.ev.indexOf('answer') > g6.ev.indexOf('end') && g6.ev.indexOf('end') > 0 && g6.names[0] === 'restore' && g6.names.length > 2 && g6.names.slice(1).every((n) => n === 'listen'),
       `held: a request written while the step's turns run is answered AFTER its last turn (${g6.ev.join(' → ')}; the step ${g6.ended} ms, the answer at ${g6.answered} ms), each turn named (${g6.names[0]}, then ${g6.names.length - 1} × ${g6.names[1]}); holding while it runs, not after`, g6);
     ok(r6.ok && r6.ev.indexOf('answer') >= 0 && r6.ev.indexOf('answer') < r6.ev.indexOf('end'), `RED the hold taken away: the request answered while the step's turns still run (${r6.ev.join(' → ')})`, r6);
+    ok(g6.ev.indexOf('imm') >= 0 && g6.ev.indexOf('imm') < g6.ev.indexOf('handler') && i6.ok && i6.ev.indexOf('handler') < i6.ev.indexOf('imm'),
+      `the hand-over is a turn after the step's last, never inside its hold: an immediate the last turn asks runs before the held request's handler (${g6.ev.join(' → ')}); RED handed in the last turn's own drain ⇒ the handler first (${i6.ev.join(' → ')})`, { g: g6.ev, i: i6.ev });
     const b6 = await scene(TLS, { tag: 'b', holdMaxMs: 120, endAt: (t) => t + 400 }), c6 = await scene(TLS, { tag: 'c', holdMaxMs: 60000, endAt: (t) => t + 400 });
     ok(b6.ok && b6.answered >= 110 && b6.answered < b6.ended && b6.warns.some((l) => /the boot's listen step held new connections 120 ms — handed over now/.test(l)),
       `THE BOUND: a step that does not end lets go at 120 ms, said (answered at ${b6.answered} ms, the step ended at ${b6.ended} ms: «${b6.warns[0] || 'nothing said'}»)`, b6);
