@@ -41,8 +41,9 @@ const FS_ACTIONS = {
     return { ok: true };
   },
   stat: (m) => {
-    const st = require('fs').statSync(m.path);
-    return { ok: true, stat: { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode } };
+    const f = require('fs'), st = f.statSync(m.path);
+    let link = null; try { link = f.lstatSync(m.path).isSymbolicLink(); } catch { }   // B-437e: whether the path IS a link (the kept copy never keeps one)
+    return { ok: true, stat: { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode, link } };
   },
   list: (m) => {
     const f = require('fs'), pt = require('path');

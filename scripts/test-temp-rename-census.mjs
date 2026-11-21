@@ -280,6 +280,7 @@ const ROWS = [
   ["src/server/published-pages.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/published-pages.js", "unsynced", "person", "a page's published content", "create > publishContent"],
   ["src/server/queued-wakes.js", "move", "move", "", "create"],
+  ["src/server/rewind-keep-worker.js", "synced", "self-synced", "the kept copy (row B-437e): its press's manifest, and a person's file put back from its kept copy — the temp synced before the rename; a sync that fails fails the act", "seal", "putOne"],
   ["src/server/session-stdout.js", "unsynced", "store", "", "create > setupSessionPty > finishTeardown", "create > writeSessionMeta"],
   ["src/server/spend-guard.js", "unsynced", "spend", "data/spend-budget.json", "writeJsonAtomic"],
   ["src/server/spend-guard.js", "unsynced", "aside", "a stale lock set aside", "create > takeLock"],

@@ -2,16 +2,19 @@
 // PURE: THE KEPT COPY (row B-437e, the files tier — 主开发 r1247 (2) the shape, r1304 GO with five additions, r1327 the paired
 // road; lane lg-rewind, 2026-11-21). THE LAW: «NOTHING OF A PERSON'S IS OVERWRITTEN OR REMOVED BY A REWIND WITHOUT A KEPT COPY».
 // Before the files press, every file the CLI's dry run lists is KEPT on the machine its files are on — this hub: the
-// conversation's own folder under the hub's data (data/chat-attachments/<conversation>/rewind-kept/<press>/); a paired machine:
+// hub's own kept folder (data/rewind-kept/<conversation>/<press>/ — beside the dropped files, never inside them); a paired machine:
 // under the agent's own state there (~/.vibespace/agentd/rewind-kept/<conversation>/<press>/) — and the press goes ONLY when
 // every copy is kept and read back. The outcome names where the copies are and offers ONE press, «put my files back as they
 // were»: files only, the conversation untouched, and what stands there now is kept first (the law holds for it too).
 //   BOUNDS (KEEP): 64 files, 32 MiB a file, 256 MiB a press, 1 GiB of kept copies a machine (r1327), 10 s a copy, 60 s all. A file
 //   past a bound, unreadable, a folder or a device: «cannot keep a copy» (KEEP_WHY) — the confirm names it, the default falls to
 //   «the conversation only», and a files press is refused with nothing put back. Nothing is removed early to make room.
-//   LINKS (r1304 (ii)): kept as a link, never followed (its target is what stood there). A path that is a folder or a device:
-//   «cannot keep a copy». On a paired machine the agent's stat follows links: the kind is «not known (a paired machine)», and the
-//   device's own copy keeps a link as a link (r1327).
+//   LINKS (the round wqdnv452s's MUST, over r1304 (ii)): a listed path that IS a link is «cannot keep a copy: a link». A plain write
+//   to a link's path lands in its TARGET (the CLI's rewind is read the same way — its binary not read), so the target's bytes would
+//   be overwritten while a copy of the link holds none of them. This hub
+//   knows a link by its own lstat; a paired machine by its agent's stat answer `link` (an lstat beside the stat) — an agent that
+//   does not say it is «cannot keep a copy: upgrade the agent», and the read-back proves the kept copy is not a link either. A path
+//   that is a folder or a device: «cannot keep a copy».
 //   MODES (r1304 (iii)): the press folder 0700, each kept file 0600 whatever the original's, the original's mode recorded and
 //   restored at a put-back — on THIS hub. On a paired machine the agent has no mode action: its mkdir and copy keep their own
 //   modes, and the copies are private by the agent's root (~/.vibespace/agentd, made 0700 by the agent).
@@ -32,8 +35,9 @@ const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 // a press's own folder name: `kp-` + the press time (base 36) + 8 hex — the sweep reads ONLY this shape
 const PRESS_RE = /^kp-[0-9a-z]{6,12}-[0-9a-f]{8}$/;
-// why a file «cannot keep a copy» (the confirm's words each); `kept-full` names the door that removes old copies
-const KEEP_WHY = Object.freeze(['too-many', 'too-large', 'press-full', 'kept-full', 'unreadable', 'relative-path', 'folder', 'device', 'no-time', 'not-kept', 'agent-too-old', 'files-not-allowed']);
+// why a file «cannot keep a copy» (the confirm's words each); `kept-full`: the machine's kept copies are full — the oldest leave seven
+// days after their press (no door removes them early: the row's remainder)
+const KEEP_WHY = Object.freeze(['too-many', 'too-large', 'press-full', 'kept-full', 'unreadable', 'relative-path', 'link', 'folder', 'device', 'no-time', 'not-kept', 'agent-too-old', 'files-not-allowed']);
 // a path the keep can name for sure: absolute (posix, or a drive). A relative or `~` path would be read against the HUB's own
 // folder — never kept for the person's file
 const isAbsPath = (p) => typeof p === 'string' && (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p));
@@ -43,8 +47,8 @@ const PUT_BACK_ACTS = Object.freeze(['overwrite', 'create', 'remove', 'unchanged
 const pressIdOf = (now, hex8) => (typeof hex8 === 'string' && /^[0-9a-f]{8}$/.test(hex8) ? `kp-${Math.max(0, Math.floor(Number(now) || 0)).toString(36).padStart(6, '0')}-${hex8}` : null);
 const keptName = (n) => `${n}.bin`;
 
-/** a file's kind from its mode (S_IFMT): an lstat's (this hub) — or a stat that follows links (a paired machine: `followed`,
- *  where a regular file may be a link: `file` stays, its kind said «not known» in the manifest) */
+/** a file's kind from its mode (S_IFMT): an lstat's (this hub) — or a stat that follows links (a paired machine, whose agent says
+ *  `link` beside it) */
 function kindOfMode(mode) {
   const t = Number(mode) & 0o170000;
   if (!Number.isFinite(Number(mode)) || t === 0) return 'unknown';
@@ -52,8 +56,9 @@ function kindOfMode(mode) {
 }
 
 /** THE PLAN of one keep, from each listed path's facts (in the dry run's order) → {ok, rows, bytes, refusals: [{path, why}]}.
- *  facts: {path, absent: true} | {path, error} | {path, mode, size, mtimeMs, link?}. `used`: the bytes of the kept copies already
- *  on that machine. `paired`: the facts are a stat that follows links */
+ *  facts: {path, absent: true} | {path, error} | {path, mode, size, mtimeMs, isLink?}. `used`: the bytes of the kept copies already
+ *  on that machine. `paired`: the facts are a stat that follows links, and `isLink` is the agent's own lstat (absent: an agent
+ *  too old to say it) */
 function keepPlanOf(facts, { used = 0, bounds = KEEP, paired = false } = {}) {
   const rows = [], refusals = [];
   let bytes = 0;
@@ -65,15 +70,13 @@ function keepPlanOf(facts, { used = 0, bounds = KEEP, paired = false } = {}) {
     if (!isAbsPath(path)) { refusals.push({ path, why: 'relative-path' }); return; }
     if (f.absent === true) { rows.push({ n, path, kind: 'absent', existed: false }); return; }
     if (f.error) { refusals.push({ path, why: 'unreadable' }); return; }
-    const kind = kindOfMode(f.mode);
+    if (paired && f.isLink === undefined) { refusals.push({ path, why: 'agent-too-old' }); return; }   // its agent cannot say a link
+    if (paired && f.isLink !== false && f.isLink !== true) { refusals.push({ path, why: 'unreadable' }); return; }
+    const kind = f.isLink === true ? 'link' : kindOfMode(f.mode);
+    if (kind === 'link') { refusals.push({ path, why: 'link' }); return; }   // the rewind writes THROUGH it: no copy of a link keeps its bytes
     if (kind === 'folder') { refusals.push({ path, why: 'folder' }); return; }
     if (kind === 'device' || kind === 'other') { refusals.push({ path, why: 'device' }); return; }
     if (kind === 'unknown') { refusals.push({ path, why: 'unreadable' }); return; }
-    if (kind === 'link') {
-      if (paired || typeof f.link !== 'string' || !f.link) { refusals.push({ path, why: 'unreadable' }); return; }
-      rows.push({ n, path, kind, existed: true, link: f.link, mode: Number(f.mode) & 0o7777, mtimeMs: Number(f.mtimeMs) || 0 });
-      return;
-    }
     const size = Number(f.size);
     if (!Number.isFinite(size) || size < 0) { refusals.push({ path, why: 'unreadable' }); return; }
     if (size > bounds.fileMax) { refusals.push({ path, why: 'too-large' }); return; }
@@ -86,8 +89,8 @@ function keepPlanOf(facts, { used = 0, bounds = KEEP, paired = false } = {}) {
 }
 
 /** THE READ-BACK of a keep → {ok, refusals}: each row's copy as the machine reported it after the copy — this hub: `sha256`
- *  equal to `srcSha256` (read in the same pass) and a link's `link` equal to its row's; a paired machine: the copy succeeded and
- *  its `size` equals the original's `srcSize`, both stated after the copy (r1327) */
+ *  equal to `srcSha256` (read in the same pass); a paired machine: the copy succeeded, its `size` equals the original's
+ *  `srcSize`, and NEITHER is a link (`isLink` / `srcIsLink` false: the agent's own lstat), all stated after the copy (r1327) */
 function readBackOf(rows, back, { paired = false } = {}) {
   const refusals = [];
   for (const r of Array.isArray(rows) ? rows : []) {
@@ -95,8 +98,7 @@ function readBackOf(rows, back, { paired = false } = {}) {
     const b = back && back[r.n];
     let ok = false;
     if (b && b.ok === true) {
-      if (r.kind === 'link') ok = b.link === r.link;
-      else if (paired) ok = Number.isFinite(b.size) && b.size === r.size && b.srcSize === r.size;
+      if (paired) ok = Number.isFinite(b.size) && b.size === r.size && b.srcSize === r.size && b.isLink === false && b.srcIsLink === false;
       else ok = typeof b.sha256 === 'string' && /^[0-9a-f]{64}$/.test(b.sha256) && b.sha256 === b.srcSha256 && b.size === r.size;
     }
     if (!ok) refusals.push({ path: r.path, why: b && b.timedOut ? 'no-time' : b && b.notAllowed ? 'files-not-allowed' : 'not-kept' });
@@ -113,7 +115,6 @@ function manifestOf({ conv, press, at, machine = null, paired = false, rows = []
       const out = { n: r.n, path: r.path, kind: r.kind, existed: r.existed };
       if (r.kind === 'absent') return out;
       out.mode = r.mode; out.mtimeMs = r.mtimeMs;
-      if (r.kind === 'link') { out.link = r.link; return out; }
       out.size = r.size;
       if (paired) { out.keptSize = b.size; out.keptMtimeMs = Number(b.mtimeMs) || 0; } else out.sha256 = b.sha256;
       return out;
@@ -136,9 +137,10 @@ function sweepOf(entries, now, { lifeMs = KEEP.lifeMs } = {}) {
 }
 
 /** «PUT MY FILES BACK AS THEY WERE» — what it will do to each path, named BEFORE it does it (r1304 (iv)) → [{n, path, act, why}].
- *  `cur`: {path: what stands there now — {absent: true} | {error} | {mode, size, mtimeMs, link?}}; `kept`: {n: the kept copy's own
- *  facts now — this hub {sha256, link?}; a paired machine {size, mtimeMs}}. A row whose kept copy no longer matches its manifest
- *  (this hub: its hash; a paired machine: its size and time) is REFUSED by name. FILES ONLY: nothing of the conversation */
+ *  `cur`: {path: what stands there now — {absent: true} | {error} | {mode, size, mtimeMs, isLink?}}; `kept`: {n: the kept copy's own
+ *  facts now — this hub {sha256}; a paired machine {size, mtimeMs}}. A row whose kept copy no longer matches its manifest (this
+ *  hub: its hash; a paired machine: its size and time) is REFUSED by name; a LINK standing at the path now is refused by name
+ *  (`link`: a put-back must not write through it). FILES ONLY: nothing of the conversation */
 function putBackPlanOf(manifest, cur = {}, kept = {}) {
   const paired = manifest && manifest.check === 'size';
   return (manifest && Array.isArray(manifest.files) ? manifest.files : []).map((r) => {
@@ -147,13 +149,14 @@ function putBackPlanOf(manifest, cur = {}, kept = {}) {
     if (!now || now.error) return out('refused', 'unreadable');
     if (r.existed === false) return out(now.absent ? 'unchanged' : 'remove');
     const k = kept[r.n];
-    if (r.kind === 'link') { if (!k || k.link !== r.link) return out('refused', 'kept-changed'); }
-    else if (paired) { if (!k || k.size !== r.keptSize || Number(k.mtimeMs) !== r.keptMtimeMs) return out('refused', 'kept-changed'); }
+    if (r.kind !== 'file' && r.kind !== 'not-known') return out('refused', 'kept-changed');   // a manifest row of no kept bytes
+    if (paired) { if (!k || k.size !== r.keptSize || Number(k.mtimeMs) !== r.keptMtimeMs) return out('refused', 'kept-changed'); }
     else if (!k || k.sha256 !== r.sha256) return out('refused', 'kept-changed');
     if (now.absent) return out('create');
-    const nowKind = kindOfMode(now.mode);
+    const nowKind = now.isLink === true ? 'link' : kindOfMode(now.mode);
+    if (nowKind === 'link') return out('refused', 'link');
     if (nowKind === 'folder' || nowKind === 'device' || nowKind === 'other') return out('refused', nowKind === 'folder' ? 'folder' : 'device');
-    const same = r.kind === 'link' ? nowKind === 'link' && now.link === r.link : nowKind !== 'link' && now.size === r.size && Number(now.mtimeMs) === r.mtimeMs && (Number(now.mode) & 0o7777) === r.mode;
+    const same = now.size === r.size && Number(now.mtimeMs) === r.mtimeMs && (Number(now.mode) & 0o7777) === r.mode;
     return out(same ? 'unchanged' : 'overwrite');
   });
 }

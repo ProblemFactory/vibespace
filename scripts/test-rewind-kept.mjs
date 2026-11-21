@@ -1,21 +1,25 @@
 #!/usr/bin/env node
 // test-rewind-kept (fast, in-process — row B-437e, the files tier: THE KEPT COPY; 主开发 r1247 (2), r1304, r1327):
 // src/rewind-kept.js (PURE), src/server/rewind-kept-door.js and its worker src/server/rewind-keep-worker.js (its ops run inline here)
-//   ① THE DECISIONS — the keep's plan and its bounds (64 files, 32 MiB a file, 256 MiB a press, 1 GiB a machine), the kinds (a link
-//      kept as a link; a folder, a device: cannot keep), the read-back (this hub: sha256; a paired machine: the size), the sweep
+//   ① THE DECISIONS — the keep's plan and its bounds (64 files, 32 MiB a file, 256 MiB a press, 1 GiB a machine), the kinds (a link,
+//      a folder, a device: cannot keep — a link because the rewind writes THROUGH it), the read-back (this hub: sha256; a paired machine: the size), the sweep
 //      (only its own mark; the later of the mark's time and the folder's), the put-back's plan (named before it acts; a changed
 //      kept copy refused)
 //   ② THIS HUB — real files in a scratch folder: the press folder 0700, each kept file 0600, the original's mode recorded; a copy
 //      whose read-back differs = no press (and no folder left); the kept copies full = no press; the sweep spares an unmarked folder;
 //      the put-back keeps first, then puts back bytes and mode; a changed kept file refused by name
-//   ③ A PAIRED MACHINE — a stand-in agent with the agent's own file semantics (stat follows links; copy never overwrites; no lstat):
+//   ③ A PAIRED MACHINE — a stand-in agent with the agent's own file semantics (stat follows links and says `link`; copy never overwrites):
 //      the copies on that machine, the manifest at the hub too, «checked by size»; a kept copy shorter than its original = no press;
 //      a kept file changed after the keep = the put-back refuses that row; an agent without fs-portable = «upgrade the agent»
 //   the reader's round: the person's own string stamp on every device act; the total and the sweep are the MACHINE's; the put-back
 //   fenced like a press (and holding its mark); a relative path never kept; the mark first; a temp a cut-short act left removed;
 //   the put-back's own press spared from its sweep; a policy refusal named
+//   the round wqdnv452s: a LINK is never kept (this hub: its lstat; a paired machine: its agent's lstat, the copy's too); the kept
+//   copies in data/rewind-kept, beside the attachments' walk; a paired put-back drops a stale temp first; the manifest by a temp
+//   renamed over; no sweep takes a press being put back; changed-since, no manifest, the mount door, the bounds, the real pool
 //   RED CONTROLS (anchored copies): no hash compare, no size compare, the sweep without its mark, the total bound off, the put-back
-//   without keeping first, the put-back unfenced, relative paths kept
+//   without keeping first, the put-back unfenced, relative paths kept, links planned, a paired copy's link unread, the stale temp
+//   not dropped first, the kept copies inside the attachments' folder, a press being put back swept
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -44,63 +48,79 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 console.log('— ① the decisions');
 {
   const F = (p, mode, size, extra = {}) => ({ path: p, mode, size, mtimeMs: T0, ...extra });
-  const plan = K.keepPlanOf([F('/w/a.js', 0o100644, 10), F('/w/l', 0o120777, 4, { link: 'a.js' }), { path: '/w/gone', absent: true }]);
-  ok(plan.ok && plan.rows.length === 3 && plan.rows[0].kind === 'file' && plan.rows[0].mode === 0o644 && plan.rows[1].kind === 'link' && plan.rows[1].link === 'a.js' && plan.rows[2].kind === 'absent' && plan.rows[2].existed === false && plan.bytes === 10,
-    '① a file (its mode kept to restore), a LINK kept as a link (its target, never followed), a path absent now (put back: removed): one plan', plan);
+  const plan = K.keepPlanOf([F('/w/a.js', 0o100644, 10), { path: '/w/gone', absent: true }]);
+  const linked = K.keepPlanOf([F('/w/a.js', 0o100644, 10), F('/w/l', 0o120777, 4)]);
+  ok(plan.ok && plan.rows.length === 2 && plan.rows[0].kind === 'file' && plan.rows[0].mode === 0o644 && plan.rows[1].kind === 'absent' && plan.rows[1].existed === false && plan.bytes === 10
+    && !linked.ok && JSON.stringify(linked.refusals) === JSON.stringify([{ path: '/w/l', why: 'link' }]),
+    '① a file (its mode kept to restore) and a path absent now (put back: removed): one plan; a LINK is «cannot keep a copy: a link» by name (the round wqdnv452s\'s MUST: the rewind writes THROUGH a link — a copy of the link would hold none of its target\'s bytes)', { plan, linked: linked.refusals });
   const no = (facts, opts) => K.keepPlanOf(facts, opts).refusals.map((r) => r.why);
   const NO = [['a file over 32 MiB', no([F('/w/big', 0o100644, 32 * MiB + 1)]), 'too-large'], ['a folder', no([F('/w/d', 0o040755, 0)]), 'folder'], ['a device', no([F('/dev/x', 0o020644, 0)]), 'device'],
     ['an unreadable path', no([{ path: '/w/x', error: 'EACCES' }]), 'unreadable'], ['a relative path (read against the hub\'s own folder)', no([F('src/a.js', 0o100644, 1)]), 'relative-path'], ['a «~» path', no([F('~/a.js', 0o100644, 1)]), 'relative-path'], ['65 files', no(Array.from({ length: 65 }, (_, i) => F(`/w/f${i}`, 0o100644, 1))), 'too-many'],
     ['nine files of 30 MiB (270 MiB)', no(Array.from({ length: 9 }, (_, i) => F(`/w/m${i}`, 0o100644, 30 * MiB))), 'press-full'], ['2 KiB more than the 1 GiB a machine holds', no([F('/w/a', 0o100644, 2048)], { used: 1024 * MiB - 1024 }), 'kept-full']];
   ok(NO.every(([, got, want]) => got.includes(want)) && K.KEEP.maxFiles === 64 && K.KEEP.fileMax === 32 * MiB && K.KEEP.pressMax === 256 * MiB && K.KEEP.totalMax === 1024 * MiB && K.KEEP.lifeMs === 7 * DAY,
     `① «cannot keep a copy», each by name: ${NO.map(([n, , w]) => `${n} ⇒ ${w}`).join(' · ')} (the bounds: 64 files, 32 MiB, 256 MiB a press, 1 GiB a machine — r1327 — 7 days)`, NO);
-  const pp = K.keepPlanOf([F('/w/a.js', 0o100644, 10)], { paired: true });
-  ok(pp.ok && pp.rows[0].kind === 'not-known', '① a paired machine (its stat follows links): the kind is «not known (a paired machine)» (r1327)', pp.rows);
+  const pp = K.keepPlanOf([F('/w/a.js', 0o100644, 10, { isLink: false })], { paired: true });
+  const pNo = (isLink) => K.keepPlanOf([F('/w/a.js', 0o100644, 10, isLink === 'none' ? {} : { isLink })], { paired: true }).refusals.map((r) => r.why).join();
+  ok(pp.ok && pp.rows[0].kind === 'not-known' && pNo(true) === 'link' && pNo('none') === 'agent-too-old' && pNo(null) === 'unreadable',
+    '① a paired machine (its stat follows links): the kind is «not known (a paired machine)» (r1327); its agent\'s own lstat says a LINK — «cannot keep a copy: a link»; an agent that does not say it: «upgrade the agent»; a link it could not read: unreadable', { pp: pp.rows, link: pNo(true), old: pNo('none') });
   const rows = plan.rows;
-  const good = { 0: { ok: true, sha256: 'a'.repeat(64), srcSha256: 'a'.repeat(64), size: 10 }, 1: { ok: true, link: 'a.js' } };
-  const bad = { ...good, 0: { ...good[0], sha256: 'b'.repeat(64) } }, short = { 0: { ok: true, size: 9, srcSize: 10 } }, same = { 0: { ok: true, size: 10, srcSize: 10 } };
-  ok(K.readBackOf(rows, good).ok && K.readBackOf(rows, bad).refusals[0].why === 'not-kept' && !K.readBackOf(rows, { ...good, 1: { ok: true, link: 'b.js' } }).ok && K.readBackOf(rows, { 0: { ok: false, timedOut: true }, 1: good[1] }).refusals[0].why === 'no-time'
-    && K.readBackOf(pp.rows, same, { paired: true }).ok && !K.readBackOf(pp.rows, short, { paired: true }).ok,
-    '① THE READ-BACK: this hub — the copy\'s sha256 against the original\'s (read in the same pass), a link\'s target; a paired machine — the copy\'s size against the original\'s (r1327: no byte crosses the link); a copy past its bound: no-time');
+  const good = { 0: { ok: true, sha256: 'a'.repeat(64), srcSha256: 'a'.repeat(64), size: 10 } };
+  const bad = { ...good, 0: { ...good[0], sha256: 'b'.repeat(64) } }, short = { 0: { ok: true, size: 9, srcSize: 10, isLink: false, srcIsLink: false } }, same = { 0: { ok: true, size: 10, srcSize: 10, isLink: false, srcIsLink: false } };
+  const copiedLink = { 0: { ...same[0], isLink: true } }, becameLink = { 0: { ...same[0], srcIsLink: true } }, unsaid = { 0: { ok: true, size: 10, srcSize: 10 } };
+  ok(K.readBackOf(rows, good).ok && K.readBackOf(rows, bad).refusals[0].why === 'not-kept' && K.readBackOf(rows, { 0: { ok: false, timedOut: true } }).refusals[0].why === 'no-time'
+    && K.readBackOf(pp.rows, same, { paired: true }).ok && !K.readBackOf(pp.rows, short, { paired: true }).ok && !K.readBackOf(pp.rows, copiedLink, { paired: true }).ok && !K.readBackOf(pp.rows, becameLink, { paired: true }).ok && !K.readBackOf(pp.rows, unsaid, { paired: true }).ok,
+    '① THE READ-BACK: this hub — the copy\'s sha256 against the original\'s (read in the same pass); a paired machine — the copy\'s size against the original\'s (r1327: no byte crosses the link) AND neither the copy nor the original a link by the agent\'s own lstat (a copy that is a link, an original that became one, an agent that did not say: not kept); a copy past its bound: no-time');
   const mark = (name, at) => ({ kind: K.MARK_KIND, press: name, at });
   const old = K.pressIdOf(T0 - 9 * DAY, '0000000a'), young = K.pressIdOf(T0 - 1 * DAY, '0000000b'), back = K.pressIdOf(T0 - 9 * DAY, '0000000c'), foreign = K.pressIdOf(T0 - 9 * DAY, '0000000d'), bare = K.pressIdOf(T0 - 9 * DAY, '0000000e');
   const swept = K.sweepOf([{ name: old, mark: mark(old, T0 - 9 * DAY), folderMtimeMs: T0 - 9 * DAY }, { name: young, mark: mark(young, T0 - DAY), folderMtimeMs: T0 - DAY },
     { name: back, mark: mark(back, T0 - 9 * DAY), folderMtimeMs: T0 - DAY }, { name: foreign, mark: mark(old, T0 - 9 * DAY), folderMtimeMs: T0 - 9 * DAY }, { name: bare, mark: null, folderMtimeMs: T0 - 9 * DAY }, { name: 'notes', mark: mark('notes', 0), folderMtimeMs: 0 }], T0);
   ok(JSON.stringify(swept) === JSON.stringify([old]), '① THE SWEEP (r1304 (v)): only a press folder past seven days carrying ITS OWN mark — counted from the LATER of the mark\'s time and the folder\'s (a folder touched a day ago stays); unmarked, foreign-marked, other names: never', swept);
   const man = K.manifestOf({ conv: 'c1', press: old, at: T0, rows, back: good });
-  const cur = { '/w/a.js': { mode: 0o100644, size: 12, mtimeMs: T0 + 5 }, '/w/l': { mode: 0o120777, link: 'a.js' }, '/w/gone': { mode: 0o100644, size: 3, mtimeMs: T0 + 5 } };
-  const kept = { 0: { sha256: 'a'.repeat(64) }, 1: { link: 'a.js' } };
+  const cur = { '/w/a.js': { mode: 0o100644, size: 12, mtimeMs: T0 + 5 }, '/w/gone': { mode: 0o100644, size: 3, mtimeMs: T0 + 5 } };
+  const kept = { 0: { sha256: 'a'.repeat(64) } };
   const pb = K.putBackPlanOf(man, cur, kept).map((r) => `${r.path}:${r.act}`);
   const pb2 = K.putBackPlanOf(man, { ...cur, '/w/a.js': { absent: true } }, { ...kept, 0: { sha256: 'c'.repeat(64) } }).map((r) => `${r.act}${r.why ? ':' + r.why : ''}`);
   const pman = K.manifestOf({ conv: 'c1', press: old, at: T0, rows: pp.rows, paired: true, back: { 0: { ok: true, size: 10, mtimeMs: T0 + 1, srcSize: 10 } } });
   const pb3 = K.putBackPlanOf(pman, { '/w/a.js': { mode: 0o100644, size: 12, mtimeMs: T0 + 9 } }, { 0: { size: 10, mtimeMs: T0 + 2 } }).map((r) => `${r.act}${r.why ? ':' + r.why : ''}`);
-  console.log(`    (put-back plans: ${JSON.stringify({ pb, pb2, pb3 })})`);
-  ok(JSON.stringify(pb) === '["/w/a.js:overwrite","/w/l:unchanged","/w/gone:remove"]' && JSON.stringify(pb2) === '["refused:kept-changed","unchanged","remove"]' && JSON.stringify(pb3) === '["refused:kept-changed"]' && man.check === 'sha256' && pman.check === 'size',
-    '① THE PUT-BACK names each path\'s act BEFORE it acts (r1304 (iv)): overwritten, unchanged, removed (it did not exist then), created; a kept copy that no longer matches its manifest — this hub by its hash, a paired machine by its size and time — is REFUSED by name');
+  const pb4 = K.putBackPlanOf(man, { ...cur, '/w/a.js': { mode: 0o120777, size: 4, mtimeMs: T0 + 5 } }, kept).map((r) => `${r.act}${r.why ? ':' + r.why : ''}`);
+  console.log(`    (put-back plans: ${JSON.stringify({ pb, pb2, pb3, pb4 })})`);
+  ok(JSON.stringify(pb) === '["/w/a.js:overwrite","/w/gone:remove"]' && JSON.stringify(pb2) === '["refused:kept-changed","remove"]' && JSON.stringify(pb3) === '["refused:kept-changed"]' && JSON.stringify(pb4) === '["refused:link","remove"]' && man.check === 'sha256' && pman.check === 'size',
+    '① THE PUT-BACK names each path\'s act BEFORE it acts (r1304 (iv)): overwritten, removed (it did not exist then), created; a kept copy that no longer matches its manifest — this hub by its hash, a paired machine by its size and time — is REFUSED by name; a LINK standing at a path now is refused by name (a put-back must not write through it)');
   ok([K.KEEP, K.KEEP_WHY, K.PUT_BACK_ACTS].every(Object.isFrozen) && K.DIR_MODE === 0o700 && K.FILE_MODE === 0o600, '① the tables frozen; the modes: the press folder 0700, each kept file 0600 (r1304 (iii))');
 }
 
 console.log('— ② this hub');
 const KA = (root) => ({ dataRoot: root, call });
+const DOOR = require(path.join(REPO, 'src/mount-door.js'));
+const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
 {
   const root = fs.mkdtempSync(path.join(SCRATCH, 'hub-')), work = fs.mkdtempSync(path.join(SCRATCH, 'work-'));
   const a = path.join(work, 'a.txt'), l = path.join(work, 'l.txt'), gone = path.join(work, 'gone.txt');
   fs.writeFileSync(a, 'the person\'s words\n'); fs.chmodSync(a, 0o644); fs.symlinkSync('a.txt', l);
-  const r = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-1', files: [a, l, gone], by: HUMAN, now: T0, hex8: '0000aaaa', ...KA(root) });
+  const r = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-1', files: [a, gone], by: HUMAN, now: T0, hex8: '0000aaaa', ...KA(root) });
   const dir = r.where, man = r.ok ? JSON.parse(fs.readFileSync(path.join(dir, K.MANIFEST_FILE), 'utf8')) : null;
   const st = (p) => fs.lstatSync(p).mode & 0o7777;
   console.log(`    (kept: ${JSON.stringify(r)} · folder ${r.ok ? st(dir).toString(8) : '-'} · file ${r.ok ? st(path.join(dir, '0.bin')).toString(8) : '-'})`);
-  ok(r.ok && dir === path.join(root, 'conv-1', 'rewind-kept', K.pressIdOf(T0, '0000aaaa')) && st(dir) === 0o700 && st(path.join(dir, '0.bin')) === 0o600 && man.files[0].mode === 0o644 && man.files[0].sha256 === sha(fs.readFileSync(a))
-    && fs.lstatSync(path.join(dir, '1.bin')).isSymbolicLink() && fs.readlinkSync(path.join(dir, '1.bin')) === 'a.txt' && man.files[2].existed === false && fs.existsSync(path.join(dir, K.MARK_FILE)) && man.check === 'sha256',
-    '② a keep on this hub: the conversation\'s own folder under the hub\'s data, the press folder 0700, the kept file 0600 (the original\'s 0644 recorded), its sha256 the original\'s; the link kept AS A LINK; the absent path recorded; sealed with its mark');
+  ok(r.ok && dir === path.join(root, 'conv-1', K.pressIdOf(T0, '0000aaaa')) && st(dir) === 0o700 && st(path.join(dir, '0.bin')) === 0o600 && man.files[0].mode === 0o644 && man.files[0].sha256 === sha(fs.readFileSync(a))
+    && man.files[1].existed === false && fs.existsSync(path.join(dir, K.MARK_FILE)) && man.check === 'sha256' && !fs.readdirSync(dir).some((n) => n.endsWith('.tmp')),
+    '② a keep on this hub: the hub\'s own kept folder (data/rewind-kept/<conversation>/<press>), the press folder 0700, the kept file 0600 (the original\'s 0644 recorded), its sha256 the original\'s; the absent path recorded; sealed with its mark, the manifest by a temp name renamed over (none left)');
+  // A LINK (the round wqdnv452s's MUST): the rewind writes THROUGH it, so a copy of the link keeps none of its target's bytes
+  const rl = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-1', files: [a, l], by: HUMAN, now: T0 + 500, hex8: '0000a9a9', ...KA(root) });
+  const cl = await KD.keepableOf({ session: { mode: 'chat' }, conv: 'conv-1', files: [a, l], by: HUMAN, now: T0, ...KA(root) });
+  const tgt = path.join(work, 'target.txt'), via = path.join(work, 'via.txt');
+  fs.writeFileSync(tgt, 'the person\'s target\n'); fs.symlinkSync('target.txt', via); fs.writeFileSync(via, 'what a rewind writes\n');   // the write the CLI makes
+  ok(!rl.ok && JSON.stringify(rl.refusals) === JSON.stringify([{ path: l, why: 'link' }]) && !fs.existsSync(path.join(root, 'conv-1', K.pressIdOf(T0 + 500, '0000a9a9'))) && !cl.ok && cl.refusals[0].why === 'link'
+    && fs.readFileSync(tgt, 'utf8') === 'what a rewind writes\n' && fs.lstatSync(via).isSymbolicLink(),
+    '② A LINK among the listed files: «cannot keep a copy: a link» by name, in the confirm and at the press (nothing kept, the opened folder removed) — because a write to a link\'s path lands in its TARGET (shown: the target\'s bytes replaced, the link still a link)', { rl: rl.refusals, cl: cl.refusals });
   const lying = (op, p) => call(op, p).then((x) => (op === 'keepOne' && x.sha256 ? { ...x, sha256: '0'.repeat(64) } : x));
   const r2 = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-1', files: [a], by: HUMAN, now: T0 + 1000, hex8: '0000bbbb', dataRoot: root, call: lying });
-  ok(!r2.ok && r2.refusals[0].why === 'not-kept' && !fs.existsSync(path.join(root, 'conv-1', 'rewind-kept', K.pressIdOf(T0 + 1000, '0000bbbb'))), '② A COPY WHOSE READ-BACK DIFFERS = NO PRESS, and its unsealed folder is removed', r2);
-  const fullRoot = fs.mkdtempSync(path.join(SCRATCH, 'full-')), fullName = K.pressIdOf(T0 - DAY, '0000cccc'), fullDir = path.join(fullRoot, 'conv-2', 'rewind-kept', fullName);
+  ok(!r2.ok && r2.refusals[0].why === 'not-kept' && !fs.existsSync(path.join(root, 'conv-1', K.pressIdOf(T0 + 1000, '0000bbbb'))), '② A COPY WHOSE READ-BACK DIFFERS = NO PRESS, and its unsealed folder is removed', r2);
+  const fullRoot = fs.mkdtempSync(path.join(SCRATCH, 'full-')), fullName = K.pressIdOf(T0 - DAY, '0000cccc'), fullDir = path.join(fullRoot, 'conv-2', fullName);
   fs.mkdirSync(fullDir, { recursive: true }); fs.writeFileSync(path.join(fullDir, K.MANIFEST_FILE), JSON.stringify({ files: [{ size: 1024 * MiB - 4 }] })); fs.writeFileSync(path.join(fullDir, K.MARK_FILE), JSON.stringify({ kind: K.MARK_KIND, press: fullName, at: T0 - DAY }));
   const r3 = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-2', files: [a], by: HUMAN, now: T0, hex8: '0000dddd', ...KA(fullRoot) });
   const c3 = await KD.keepableOf({ session: { mode: 'chat' }, conv: 'conv-2', files: [a], by: HUMAN, now: T0, ...KA(fullRoot) });
   ok(!r3.ok && r3.refusals.some((x) => x.why === 'kept-full') && !c3.ok && c3.refusals.some((x) => x.why === 'kept-full') && fs.existsSync(fullDir), '② THE KEPT COPIES FULL (1 GiB a machine) = NO PRESS, said in the confirm too; nothing is removed early to make room (r1304 (i))', { r3, c3 });
-  const sw = path.join(root, 'conv-1', 'rewind-kept'), oldM = K.pressIdOf(T0 - 9 * DAY, '0000eeee'), oldU = K.pressIdOf(T0 - 9 * DAY, '0000ffff');
+  const sw = path.join(root, 'conv-1'), oldM = K.pressIdOf(T0 - 9 * DAY, '0000eeee'), oldU = K.pressIdOf(T0 - 9 * DAY, '0000ffff');
   for (const n of [oldM, oldU]) { fs.mkdirSync(path.join(sw, n)); fs.writeFileSync(path.join(sw, n, '0.bin'), 'x'); }
   fs.writeFileSync(path.join(sw, oldM, K.MARK_FILE), JSON.stringify({ kind: K.MARK_KIND, press: oldM, at: T0 - 9 * DAY }));
   for (const n of [oldM, oldU]) fs.utimesSync(path.join(sw, n), new Date(T0 - 9 * DAY), new Date(T0 - 9 * DAY));
@@ -113,21 +133,21 @@ const KA = (root) => ({ dataRoot: root, call });
   const did = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-1', press: r.press, by: HUMAN, expect: plan.rows, now: T0 + 3000, hex8: '00002222', ...KA(root) });
   const firstKept = did.kept ? JSON.parse(fs.readFileSync(path.join(did.kept.where, K.MANIFEST_FILE), 'utf8')) : null;
   console.log(`    (put-back: plan ${JSON.stringify(plan.rows.map((x) => x.act))} · done ${JSON.stringify(did.rows && did.rows.map((x) => [x.act, x.done]))})`);
-  ok(plan.ok && JSON.stringify(plan.rows.map((x) => x.act)) === '["overwrite","unchanged","remove"]' && did.ok && fs.readFileSync(a, 'utf8') === 'the person\'s words\n' && (fs.statSync(a).mode & 0o777) === 0o644 && !fs.existsSync(gone)
+  ok(plan.ok && JSON.stringify(plan.rows.map((x) => x.act)) === '["overwrite","remove"]' && did.ok && fs.readFileSync(a, 'utf8') === 'the person\'s words\n' && (fs.statSync(a).mode & 0o777) === 0o644 && !fs.existsSync(gone)
     && !!firstKept && firstKept.files.some((f) => f.path === a && f.sha256 === sha('the agent\'s words, after the rewind\n')) && !fs.readdirSync(work).some((n) => n.endsWith('.vs-tmp')),
-    '② PUT MY FILES BACK: its plan named first (overwritten, unchanged, removed); what stood there was KEPT FIRST (its own press); then the bytes and the mode put back, the re-created file removed — by a temp name renamed over (none left)');
+    '② PUT MY FILES BACK: its plan named first (overwritten, removed); what stood there was KEPT FIRST (its own press); then the bytes and the mode put back, the re-created file removed — by a temp name renamed over (none left)');
   fs.writeFileSync(path.join(r.where, '0.bin'), 'tampered');
   const ch = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-1', press: r.press, by: HUMAN, dryRun: true, ...KA(root) });
   const who = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-1', press: r.press, by: { kind: 'agent' }, dryRun: true, ...KA(root) });
   ok(ch.ok && ch.rows[0].act === 'refused' && ch.rows[0].why === 'kept-changed' && !who.ok && who.reason === 'not-the-person', '② a kept file changed after the keep: the put-back REFUSES that row by name; anyone but the person: refused', { ch: ch.rows, who });
   // THE MACHINE's total and sweep (the reader's MAJOR 2): every conversation's press folders count, and each keep sweeps them all
-  const other = K.pressIdOf(T0 - 9 * DAY, '0000a1a1'), otherDir = path.join(fullRoot, 'conv-9', 'rewind-kept', other);
+  const other = K.pressIdOf(T0 - 9 * DAY, '0000a1a1'), otherDir = path.join(fullRoot, 'conv-9', other);
   fs.mkdirSync(otherDir, { recursive: true }); fs.writeFileSync(path.join(otherDir, K.MARK_FILE), JSON.stringify({ kind: K.MARK_KIND, press: other, at: T0 - 9 * DAY })); fs.utimesSync(otherDir, new Date(T0 - 9 * DAY), new Date(T0 - 9 * DAY));
   const r5 = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-3', files: [a], by: HUMAN, now: T0, hex8: '0000a2a2', ...KA(fullRoot) });
   ok(!r5.ok && r5.refusals.some((x) => x.why === 'kept-full') && !fs.existsSync(otherDir) && fs.existsSync(fullDir), '② THE TOTAL AND THE SWEEP ARE THE MACHINE\'S: another conversation\'s 1 GiB refuses this one\'s keep; this keep swept another conversation\'s old marked press (its own mark), the young one stays', r5);
   // A RELATIVE PATH is never kept (the reader's MAJOR 4): it would be read against the hub's own folder
   const r6 = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-1', files: ['a.txt'], by: HUMAN, now: T0 + 4000, hex8: '0000a3a3', ...KA(root) });
-  ok(!r6.ok && r6.refusals[0].why === 'relative-path' && !fs.existsSync(path.join(root, 'conv-1', 'rewind-kept', K.pressIdOf(T0 + 4000, '0000a3a3'))), '② a relative listed path: «cannot keep a copy» (relative-path), so the press is refused; the opened folder removed', r6);
+  ok(!r6.ok && r6.refusals[0].why === 'relative-path' && !fs.existsSync(path.join(root, 'conv-1', K.pressIdOf(T0 + 4000, '0000a3a3'))), '② a relative listed path: «cannot keep a copy» (relative-path), so the press is refused; the opened folder removed', r6);
   // THE PUT-BACK IS FENCED (the reader's MAJOR 3): no running turn, no rewind out — and it holds the files mark while it acts
   const RQ = require(path.join(REPO, 'src/server/rewind-requests.js'));
   const plan2 = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-1', press: r4.press, by: HUMAN, dryRun: true, ...KA(root) });
@@ -145,18 +165,72 @@ const KA = (root) => ({ dataRoot: root, call });
   const oldPress = K.pressIdOf(T0 - 9 * DAY, '0000a5a5'), work2 = fs.mkdirSync(path.join(SCRATCH, 'w2'), { recursive: true }) || path.join(SCRATCH, 'w2'), b = path.join(work2, 'b.txt');
   fs.writeFileSync(b, 'b as it was\n');
   const rOld = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-4', files: [b], by: HUMAN, now: T0 - 9 * DAY, hex8: '0000a5a5', ...KA(root) });
-  fs.utimesSync(path.join(root, 'conv-4', 'rewind-kept', oldPress), new Date(T0 - 9 * DAY), new Date(T0 - 9 * DAY));
+  fs.utimesSync(path.join(root, 'conv-4', oldPress), new Date(T0 - 9 * DAY), new Date(T0 - 9 * DAY));
   fs.writeFileSync(b, 'b changed\n');
   const cut = (op, payload) => (op === 'putOne' ? Promise.resolve().then(() => { fs.writeFileSync(`${payload.row.path}.${payload.press}.vs-tmp`, 'half'); throw Object.assign(new Error('the worker was ended at its deadline'), { safeFsTimeout: true }); }) : call(op, payload));
   const planOld = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-4', press: oldPress, by: HUMAN, dryRun: true, dataRoot: root, call: cut });
   const didOld = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-4', press: oldPress, by: HUMAN, expect: planOld.rows, now: T0 + 7000, hex8: '0000a6a6', dataRoot: root, call: cut });
-  ok(rOld.ok && didOld.ok && didOld.rows[0].done === false && fs.existsSync(path.join(root, 'conv-4', 'rewind-kept', oldPress)) && !fs.readdirSync(work2).some((n) => n.endsWith('.vs-tmp')),
+  ok(rOld.ok && didOld.ok && didOld.rows[0].done === false && fs.existsSync(path.join(root, 'conv-4', oldPress)) && !fs.readdirSync(work2).some((n) => n.endsWith('.vs-tmp')),
     '② a put-back of a press nine days old: its keep-first\'s sweep SPARES it; a put-back act cut short (the pool\'s deadline) leaves no temp beside the person\'s file', didOld.rows);
+  // the round wqdnv452s: the walk of the dropped files never meets a kept copy (they live in data/rewind-kept, beside it)
+  const data = fs.mkdtempSync(path.join(SCRATCH, 'data-')), att = path.join(data, 'chat-attachments');
+  fs.mkdirSync(path.join(att, 'c-old', 'files'), { recursive: true }); fs.writeFileSync(path.join(att, 'c-old', 'files', 'drop.png'), 'png');
+  const keptRoot = path.join(data, path.basename(KD.DATA_ROOT)), wa = path.join(work, 'walk.txt');
+  fs.writeFileSync(wa, 'kept beside the attachments\n');
+  const rw = await KD.keepFor({ session: { mode: 'chat' }, conv: 'c-old', files: [wa], by: HUMAN, now: T0, hex8: '0000a7a7', ...KA(keptRoot) });
+  const store = CA.create({ root: att, log: { log() { } } }), orph = await store.orphans(), removedAll = await store.removeOrphans({ files: orph.files, bytes: orph.bytes });
+  ok(rw.ok && path.basename(KD.DATA_ROOT) === 'rewind-kept' && orph.files === 1 && orph.ids.join() === 'c-old' && removedAll.removed === 1 && fs.existsSync(path.join(rw.where, K.MANIFEST_FILE)),
+    '② the kept copies sit in data/rewind-kept, BESIDE the dropped files: the attachments\' «remove what is left» counts one dropped file of a gone conversation (not the kept copies) and removing it leaves the kept press whole', { orph: { files: orph.files, ids: orph.ids }, removedAll });
+  // the put-back read: a plan the person did not read is refused (changed-since); a press with no manifest is no put-back (dark)
+  fs.writeFileSync(a, 'v-after\n');
+  const pc = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-1', press: r4.press, by: HUMAN, dryRun: true, ...KA(root) });
+  const stale = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-1', press: r4.press, by: HUMAN, expect: pc.rows.map((x) => ({ ...x, act: 'unchanged' })), now: T0 + 8000, hex8: '0000a8a8', ...KA(root) });
+  const noMan = K.pressIdOf(T0, '0000b1b1'); fs.mkdirSync(path.join(root, 'conv-1', noMan)); fs.writeFileSync(path.join(root, 'conv-1', noMan, K.MARK_FILE), JSON.stringify({ kind: K.MARK_KIND, press: noMan, at: T0 }));
+  const dark = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-1', press: noMan, by: HUMAN, dryRun: true, ...KA(root) });
+  ok(!stale.ok && stale.reason === 'changed-since' && fs.readFileSync(a, 'utf8') === 'v-after\n' && !dark.ok && dark.reason === 'not-kept',
+    '② a put-back whose plan is not the one the person read: refused changed-since, nothing written; a press folder with no manifest (a keep never sealed): no put-back (not-kept)', { stale: stale.reason, dark: dark.reason });
+  // a seal cut short leaves a temp: the next seal of that press refuses (never a torn manifest), and the keep discards its folder
+  const tornAt = T0 + 9000, torn = K.pressIdOf(tornAt, '0000b2b2'), tornCall = (op, payload) => (op === 'seal' ? Promise.resolve().then(() => { fs.writeFileSync(path.join(payload.dir, K.MANIFEST_FILE + '.tmp'), '{"v":1,"fi'); return W.runOp(op, payload).result; }) : call(op, payload));
+  const rt = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-1', files: [a], by: HUMAN, now: tornAt, hex8: '0000b2b2', dataRoot: root, call: tornCall });
+  ok(!rt.ok && !fs.existsSync(path.join(root, 'conv-1', torn)), '② a manifest temp a cut-short seal left: the seal refuses (it never writes over it, never reads it), the keep is refused and its folder removed', rt);
+  // no keep's sweep removes a press while it is being put back (another conversation's keep runs in the middle of it)
+  const sp = K.pressIdOf(T0 - 9 * DAY, '0000b3b3'), w5 = path.join(SCRATCH, 'w5'); fs.mkdirSync(w5, { recursive: true }); const e5 = path.join(w5, 'e.txt');
+  fs.writeFileSync(e5, 'e as it was\n');
+  const r5k = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-5', files: [e5], by: HUMAN, now: T0 - 9 * DAY, hex8: '0000b3b3', ...KA(root) });
+  fs.utimesSync(path.join(root, 'conv-5', sp), new Date(T0 - 9 * DAY), new Date(T0 - 9 * DAY));
+  fs.writeFileSync(e5, 'e changed\n');
+  let midKeep = null;
+  const mid = (op, payload) => (op === 'putOne' && !midKeep ? Promise.resolve().then(async () => { midKeep = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-6', files: [a], by: HUMAN, now: T0 + 9500, hex8: '0000b4b4', ...KA(root) }); return call(op, payload); }) : call(op, payload));
+  const p5 = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-5', press: sp, by: HUMAN, dryRun: true, dataRoot: root, call: mid });
+  const d5 = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-5', press: sp, by: HUMAN, expect: p5.rows, now: T0 + 9400, hex8: '0000b5b5', dataRoot: root, call: mid });
+  ok(r5k.ok && d5.ok && d5.rows[0].done === true && !!midKeep && midKeep.ok && !midKeep.swept.includes(sp) && fs.existsSync(path.join(root, 'conv-5', sp)) && fs.readFileSync(e5, 'utf8') === 'e as it was\n',
+    '② another conversation\'s keep in the MIDDLE of a put-back: its machine-wide sweep spares the press being put back (nine days old), and the put-back ends whole', { swept: midKeep && midKeep.swept, rows: d5.rows });
+  // the mount door: a listed file on a storage that is not answering is never read — «cannot keep a copy», nothing kept
+  const blockedDir = path.join(SCRATCH, 'blocked'); fs.mkdirSync(blockedDir, { recursive: true }); const bf = path.join(blockedDir, 'f.txt'); fs.writeFileSync(bf, 'on a wedged mount');
+  DOOR.register({ pathBlocked: (q) => (String(q).startsWith(blockedDir + path.sep) ? blockedDir : false) });
+  const rb = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-1', files: [bf], by: HUMAN, now: T0 + 9700, hex8: '0000b6b6', ...KA(root) });
+  DOOR.register(null);
+  ok(!rb.ok && JSON.stringify(rb.refusals) === JSON.stringify([{ path: bf, why: 'unreadable' }]) && !fs.existsSync(path.join(root, 'conv-1', K.pressIdOf(T0 + 9700, '0000b6b6'))),
+    '② the mount door asked first: a listed file on a storage that is not answering is «cannot keep a copy» (unreadable) — never read, nothing kept', rb.refusals);
+  // a temp a cut-short put-back left beside the file goes FIRST on this hub too (its copy is exclusive: it would refuse the row)
+  const w6 = path.join(SCRATCH, 'w6'); fs.mkdirSync(w6, { recursive: true }); const g = path.join(w6, 'g.txt'); fs.writeFileSync(g, 'g as kept\n');
+  const rg = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-7', files: [g], by: HUMAN, now: T0 + 9800, hex8: '0000b8b8', ...KA(root) });
+  fs.writeFileSync(g, 'g after\n'); fs.writeFileSync(`${g}.${rg.press}.vs-tmp`, 'a stale half');
+  const pg = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-7', press: rg.press, by: HUMAN, dryRun: true, ...KA(root) });
+  const dg = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-7', press: rg.press, by: HUMAN, expect: pg.rows, now: T0 + 9900, hex8: '0000b9b9', ...KA(root) });
+  ok(rg.ok && dg.ok && dg.rows[0].done === true && fs.readFileSync(g, 'utf8') === 'g as kept\n' && !fs.existsSync(`${g}.${rg.press}.vs-tmp`),
+    '② a stale temp of an old put-back beside the file: removed FIRST, then the kept bytes put back (the row done, no temp left)', dg.rows);
+  // THE REAL POOL (no `call`): the «rewind-keep» worker thread does the keep and its read-back
+  const poolRoot = fs.mkdtempSync(path.join(SCRATCH, 'pool-'));
+  const rp = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-pool', files: [a], by: HUMAN, now: T0, hex8: '0000b7b7', dataRoot: poolRoot });
+  await KD.closePool();
+  ok(rp.ok && rp.check === 'sha256' && fs.readFileSync(path.join(rp.where, '0.bin'), 'utf8') === fs.readFileSync(a, 'utf8') && JSON.parse(fs.readFileSync(path.join(rp.where, K.MANIFEST_FILE), 'utf8')).files[0].sha256 === sha(fs.readFileSync(a)),
+    '② THE REAL POOL: a keep through the «rewind-keep» SafeFs worker thread itself (its workerPath, its message shape): the copy, its read-back and the manifest', rp);
 }
 
 console.log('— ③ a paired machine (a stand-in agent with the agent\'s own file semantics)');
 /** the agent's file actions over a scratch «device» (src/agentd/agentd.js FS_ACTIONS: stat FOLLOWS links, copy never overwrites) */
-function standIn({ home, shortCopy = false, noPortable = false, deny = null } = {}) {
+function standIn({ home, shortCopy = false, noPortable = false, deny = null, oldStat = false, linkCopy = false, hangCopy = false, hangList = false } = {}) {
   const enoent = (p) => Object.assign(new Error(`ENOENT: no such file or directory, stat '${p}'`), { code: 'ENOENT' });
   const acts = [];
   // the client's ONE send point (src/agentd/client.js _request): an act without a valid string `by` is refused, never sent; a
@@ -165,11 +239,11 @@ function standIn({ home, shortCopy = false, noPortable = false, deny = null } = 
   return {
     acts,
     fsHome: async () => { if (noPortable) throw Object.assign(new Error('daemon lacks fs-portable (capabilities gate) -- upgrade the agent on this machine'), { code: 'host_needs_daemon' }); return { home }; },
-    fsStat: async (p) => { let st; try { st = fs.statSync(p); } catch { throw enoent(p); } return { ok: true, stat: { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode } }; },
-    fsList: async (p) => { let names; try { names = fs.readdirSync(p, { withFileTypes: true }); } catch { throw enoent(p); } return { path: p, entries: names.map((e) => { let st = null; try { st = fs.statSync(path.join(p, e.name)); } catch { } return { name: e.name, isDir: e.isDirectory(), size: st ? st.size : 0, mtimeMs: st ? st.mtimeMs : 0 }; }) }; },
+    fsStat: async (p) => { let st; try { st = fs.statSync(p); } catch { throw enoent(p); } const out = { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode }; if (!oldStat) { let link = null; try { link = fs.lstatSync(p).isSymbolicLink(); } catch { } out.link = link; } return { ok: true, stat: out }; },
+    fsList: async (p) => { if (hangList) return new Promise(() => { }); let names; try { names = fs.readdirSync(p, { withFileTypes: true }); } catch { throw enoent(p); } return { path: p, entries: names.map((e) => { let st = null; try { st = fs.statSync(path.join(p, e.name)); } catch { } return { name: e.name, isDir: e.isDirectory(), size: st ? st.size : 0, mtimeMs: st ? st.mtimeMs : 0 }; }) }; },
     fsMkdir: async (p, { by } = {}) => { act('mkdir', by); fs.mkdirSync(p, { recursive: true }); return { ok: true }; },
     fsWrite: async (p, buf, { by } = {}) => { act('write', by); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, buf); return { ok: true }; },
-    fsCopy: async (p, to, { by } = {}) => { act('copy', by); fs.cpSync(p, to, { recursive: true, force: false, errorOnExist: false }); if (shortCopy && fs.statSync(to).isFile()) fs.truncateSync(to, Math.max(0, fs.statSync(to).size - 1)); return { ok: true }; },
+    fsCopy: async (p, to, { by } = {}) => { act('copy', by); if (hangCopy) return new Promise(() => { }); if (linkCopy && !fs.existsSync(to)) { fs.symlinkSync(p, to); return { ok: true }; } fs.cpSync(p, to, { recursive: true, force: false, errorOnExist: false }); if (shortCopy && fs.statSync(to).isFile()) fs.truncateSync(to, Math.max(0, fs.statSync(to).size - 1)); return { ok: true }; },
     fsRename: async (p, to, { by } = {}) => { act('rename', by); fs.renameSync(p, to); return { ok: true }; },
     fsRm: async (p, recursive = false, { by } = {}) => { act('rm', by); fs.rmSync(p, { recursive: !!recursive, force: true }); return { ok: true }; },
   };
@@ -179,13 +253,13 @@ function standIn({ home, shortCopy = false, noPortable = false, deny = null } = 
   const a = path.join(work, 'a.txt'), l = path.join(work, 'l.txt');
   fs.writeFileSync(a, 'on the paired machine\n'); fs.symlinkSync('a.txt', l);
   const dm = standIn({ home }), session = { mode: 'chat', host: 'h-2' }, BY = { kind: 'human', actBy: 'human:tester' };
-  const r = await KD.keepFor({ session, conv: 'conv-p', files: [a, l], by: BY, now: T0, hex8: '0000a0a0', dataRoot: hubRoot, call, dm });
+  const r = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0, hex8: '0000a0a0', dataRoot: hubRoot, call, dm });
   const where = path.join(home, '.vibespace', 'agentd', 'rewind-kept', 'conv-p', K.pressIdOf(T0, '0000a0a0'));
-  const hubMan = r.ok ? JSON.parse(fs.readFileSync(path.join(hubRoot, 'conv-p', 'rewind-kept', r.press, K.MANIFEST_FILE), 'utf8')) : null;
+  const hubMan = r.ok ? JSON.parse(fs.readFileSync(path.join(hubRoot, 'conv-p', r.press, K.MANIFEST_FILE), 'utf8')) : null;
   console.log(`    (paired keep: ${JSON.stringify(r)} · agent acts ${JSON.stringify(dm.acts.map(([x]) => x))})`);
-  ok(r.ok && r.where === where && r.machine === 'h-2' && r.check === 'size' && fs.readFileSync(path.join(where, '0.bin'), 'utf8') === 'on the paired machine\n' && fs.lstatSync(path.join(where, '1.bin')).isSymbolicLink()
+  ok(r.ok && r.where === where && r.machine === 'h-2' && r.check === 'size' && fs.readFileSync(path.join(where, '0.bin'), 'utf8') === 'on the paired machine\n' && !fs.lstatSync(path.join(where, '0.bin')).isSymbolicLink()
     && !!hubMan && hubMan.check === 'size' && hubMan.files[0].kind === 'not-known' && hubMan.machine === 'h-2' && dm.acts.length > 0 && dm.acts.every(([, by]) => by === 'human:tester'),
-    '③ a keep on a PAIRED machine: the copies ON that machine under the agent\'s own state, by its existing actions (each stamped with the person\'s own string `by` — the client refuses any other, the reader\'s MAJOR 1); «checked by size»; the kind «not known»; the device\'s own copy keeps a link as a link; the manifest sealed at the hub too');
+    '③ a keep on a PAIRED machine: the copies ON that machine under the agent\'s own state, by its existing actions (each stamped with the person\'s own string `by` — the client refuses any other, the reader\'s MAJOR 1); «checked by size» and «not a link» (the agent\'s own lstat, for the original and for the copy); the kind «not known»; the manifest sealed at the hub too');
   const shortDm = standIn({ home, shortCopy: true });
   const r2 = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 1000, hex8: '0000b0b0', dataRoot: hubRoot, call, dm: shortDm });
   ok(!r2.ok && r2.refusals[0].why === 'not-kept' && !fs.existsSync(path.join(home, '.vibespace', 'agentd', 'rewind-kept', 'conv-p', K.pressIdOf(T0 + 1000, '0000b0b0'))), '③ A KEPT COPY SHORTER THAN ITS ORIGINAL = NO PRESS (r1327), its folder removed', r2);
@@ -202,6 +276,36 @@ function standIn({ home, shortCopy = false, noPortable = false, deny = null } = 
   const denied = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9000, hex8: '0000e0e0', dataRoot: hubRoot, call, dm: standIn({ home, deny: 'mkdir' }) });
   const noStamp = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: { kind: 'human', actBy: null }, now: T0 + 9500, hex8: '0000f0f0', dataRoot: hubRoot, call, dm: standIn({ home }) });
   ok(!old.ok && old.refusals[0].why === 'agent-too-old' && !elsewhere.ok && elsewhere.reason === 'stopped' && !denied.ok && denied.refusals[0].why === 'files-not-allowed' && noStamp.ok, '③ an agent without fs-portable: «cannot keep a copy: upgrade the agent»; a machine whose policy does not allow files: «cannot keep a copy: files not allowed»; a socket with no sign-in subject acts as the owner (human:owner); a paired press put back from anywhere but its machine\'s live conversation: refused', { old, elsewhere, denied, noStamp: noStamp.ok });
+  // THE MUST on a paired machine: the agent's own lstat names a link — the original, or a copy that came out a link
+  const lr = await KD.keepFor({ session, conv: 'conv-p', files: [a, l], by: BY, now: T0 + 9600, hex8: '0000c1c1', dataRoot: hubRoot, call, dm: standIn({ home }) });
+  const lc = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9700, hex8: '0000c2c2', dataRoot: hubRoot, call, dm: standIn({ home, linkCopy: true }) });
+  const lo = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9800, hex8: '0000c3c3', dataRoot: hubRoot, call, dm: standIn({ home, oldStat: true }) });
+  const pdir = (t, h) => path.join(home, '.vibespace', 'agentd', 'rewind-kept', 'conv-p', K.pressIdOf(t, h));
+  ok(!lr.ok && JSON.stringify(lr.refusals) === JSON.stringify([{ path: l, why: 'link' }]) && !lc.ok && lc.refusals[0].why === 'not-kept' && !lo.ok && lo.refusals[0].why === 'agent-too-old'
+    && [[T0 + 9600, '0000c1c1'], [T0 + 9700, '0000c2c2'], [T0 + 9800, '0000c3c3']].every(([t, h]) => !fs.existsSync(pdir(t, h))),
+    '③ A LINK ON A PAIRED MACHINE (the round wqdnv452s): its agent\'s own lstat says so — «cannot keep a copy: a link»; a copy that came out a link: not kept; an agent whose stat does not say it: «upgrade the agent» (each folder removed)', { lr: lr.refusals, lc: lc.refusals, lo: lo.refusals });
+  // a temp a cut-short put-back left beside the file goes FIRST (the agent's copy never overwrites: it would be renamed over)
+  fs.writeFileSync(a, 'a as kept for the temp leg\n');
+  const r7 = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9890, hex8: '0000c7c7', dataRoot: hubRoot, call, dm });
+  fs.writeFileSync(a, 'after the rewind, again\n');
+  fs.writeFileSync(`${a}.${r7.press}.vs-tmp`, 'a stale half of an old put-back');
+  const pt = await KD.putBack({ session, conv: 'conv-p', press: r7.press, by: BY, dryRun: true, dataRoot: hubRoot, call, dm });
+  const dt = await KD.putBack({ session, conv: 'conv-p', press: r7.press, by: BY, expect: pt.rows, now: T0 + 9900, hex8: '0000c4c4', dataRoot: hubRoot, call, dm });
+  ok(r7.ok && dt.ok && dt.rows[0].done === true && fs.readFileSync(a, 'utf8') === 'a as kept for the temp leg\n' && !fs.existsSync(`${a}.${r7.press}.vs-tmp`),
+    '③ a stale temp of an old put-back beside the file: removed FIRST, then the kept copy copied and renamed over — the person\'s file holds the kept bytes, never the stale half', dt.rows);
+  // every agent act carries the person's own stamp — the owner's when the socket names no one
+  const ownerDm = standIn({ home });
+  const ro = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: { kind: 'human', actBy: null }, now: T0 + 9950, hex8: '0000c5c5', dataRoot: hubRoot, call, dm: ownerDm });
+  ok(ro.ok && ownerDm.acts.length >= 4 && ownerDm.acts.every(([, by]) => by === 'human:owner'), '③ a socket with no sign-in subject: EVERY agent act stamped human:owner (the person, never another string)', ownerDm.acts);
+  // the bounds: each agent call (here 40 ms) and the walk of the machine's kept copies (here none left) — past them: no-time.
+  // The door's bound timers are unref'd (they never hold the hub open): this ref'd interval holds the suite's loop meanwhile
+  const alive = setInterval(() => { }, 20);
+  const hc = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9960, hex8: '0000c6c6', dataRoot: hubRoot, call, dm: standIn({ home, hangCopy: true }), callMs: 40 });
+  const hl = await KD.keepableOf({ session, conv: 'conv-p', files: [a], by: BY, now: T0, dataRoot: hubRoot, call, dm: standIn({ home }), allMs: -1 });
+  const hw = await KD.keepableOf({ session, conv: 'conv-p', files: [a], by: BY, now: T0, dataRoot: hubRoot, call, dm: standIn({ home, hangList: true }), callMs: 40 });
+  clearInterval(alive);
+  ok(!hc.ok && hc.refusals[0].why === 'no-time' && !hl.ok && hl.refusals[0].why === 'no-time' && !hw.ok && hw.refusals[0].why === 'no-time',
+    '③ THE BOUNDS: an agent copy that never answers ends at its bound (no-time, no press); the walk of the machine\'s kept copies past its one bound, or a listing that never answers: no-time — the total is never guessed', { hc: hc.refusals, hl: hl.refusals, hw: hw.refusals });
 }
 
 console.log('— red controls');
@@ -210,7 +314,7 @@ console.log('— red controls');
   const noHash = M.load('src/rewind-kept.js', anchored(SRC, ' && b.sha256 === b.srcSha256', '', 'kept: no hash compare'), 'no-hash');
   ok(noHash.readBackOf([{ n: 0, path: '/w/a', kind: 'file', size: 1 }], { 0: { ok: true, sha256: 'a'.repeat(64), srcSha256: 'b'.repeat(64), size: 1 } }).ok === true, 'RED CONTROL (no hash compare): a copy whose bytes differ reads kept');
   const noSize = M.load('src/rewind-kept.js', anchored(SRC, 'b.size === r.size && b.srcSize === r.size', 'true', 'kept: no size compare'), 'no-size');
-  ok(noSize.readBackOf([{ n: 0, path: '/w/a', kind: 'not-known', size: 10 }], { 0: { ok: true, size: 9, srcSize: 10 } }, { paired: true }).ok === true, 'RED CONTROL (no size compare — a paired machine): a kept copy shorter than its original reads kept');
+  ok(noSize.readBackOf([{ n: 0, path: '/w/a', kind: 'not-known', size: 10 }], { 0: { ok: true, size: 9, srcSize: 10, isLink: false, srcIsLink: false } }, { paired: true }).ok === true, 'RED CONTROL (no size compare — a paired machine): a kept copy shorter than its original reads kept');
   const noMark = M.load('src/rewind-kept.js', anchored(SRC, ' && e.mark && e.mark.kind === MARK_KIND\n    && e.mark.press === e.name && Number.isFinite(e.mark.at) && Number.isFinite(e.folderMtimeMs) && Number(now) - Math.max(e.mark.at, e.folderMtimeMs) > lifeMs)', ' && Number.isFinite(e.folderMtimeMs) && Number(now) - e.folderMtimeMs > lifeMs)', 'kept: sweep without its mark'), 'no-mark');
   const n = K.pressIdOf(T0 - 9 * DAY, '0000abcd');
   ok(JSON.stringify(noMark.sweepOf([{ name: n, mark: null, folderMtimeMs: T0 - 9 * DAY }], T0)) === JSON.stringify([n]), 'RED CONTROL (the sweep without its mark): an unmarked press folder is removed');
@@ -223,7 +327,7 @@ console.log('— red controls');
   fs.writeFileSync(a, 'v2 — the person\'s later words');
   const plan = await noFirst.putBack({ session: { mode: 'chat' }, conv: 'c-nf', press: r.press, by: HUMAN, dryRun: true, ...KA(root) });
   await noFirst.putBack({ session: { mode: 'chat' }, conv: 'c-nf', press: r.press, by: HUMAN, expect: plan.rows, now: T0 + 1, hex8: '0000ffff', ...KA(root) });
-  const presses = fs.readdirSync(path.join(root, 'c-nf', 'rewind-kept'));
+  const presses = fs.readdirSync(path.join(root, 'c-nf'));
   ok(presses.length === 1 && fs.readFileSync(a, 'utf8') === 'v1', 'RED CONTROL (the put-back without keeping first): the person\'s later words are overwritten with no kept copy (one press folder only)');
   const unfenced = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "  if (session && RQ.rewindStateOf(session).turnRunning) return { ok: false, reason: 'turn-running', cls: 'cannot' };\n", '', 'kept: put-back unfenced'), 'unfenced');
   const root2 = hubAt('uf'), w3 = hubAt('ufw'), c = path.join(w3, 'c.txt');
@@ -235,6 +339,35 @@ console.log('— red controls');
   ok(run.ok === true && fs.readFileSync(c, 'utf8') === 'c1', 'RED CONTROL (the put-back unfenced): during a running turn it writes over the file the agent is writing');
   const relKept = M.load('src/rewind-kept.js', anchored(SRC, "    if (!isAbsPath(path)) { refusals.push({ path, why: 'relative-path' }); return; }\n", '', 'kept: relative paths kept'), 'rel-kept');
   ok(relKept.keepPlanOf([{ path: 'src/a.js', absent: true }]).ok === true, 'RED CONTROL (relative paths kept): a relative listed path is planned (read against the hub\'s own folder)');
+  // the round wqdnv452s's cures, each with its red
+  const linkKept = M.load('src/rewind-kept.js', anchored(SRC, "    if (kind === 'link') { refusals.push({ path, why: 'link' }); return; }   // the rewind writes THROUGH it: no copy of a link keeps its bytes\n", '', 'kept: links planned'), 'link-kept');
+  ok(linkKept.keepPlanOf([{ path: '/w/l', mode: 0o120777, size: 4, mtimeMs: T0 }]).ok === true, 'RED CONTROL (links planned): a listed LINK reads keepable — its copy would hold the link, not the bytes the rewind writes through it');
+  const linkUnread = M.load('src/rewind-kept.js', anchored(SRC, ' && b.isLink === false && b.srcIsLink === false', '', 'kept: the copy\'s link unread'), 'link-unread');
+  ok(linkUnread.readBackOf([{ n: 0, path: '/w/a', kind: 'not-known', size: 10 }], { 0: { ok: true, size: 10, srcSize: 10, isLink: true, srcIsLink: false } }, { paired: true }).ok === true, 'RED CONTROL (a paired copy\'s link unread): a kept copy that came out a link reads kept');
+  const staleKept = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "      await B(dm.fsRm(tmp, false, { by }));   // a temp a cut-short act left goes FIRST: the agent's copy never overwrites, so a stale one would be renamed over\n", '', 'kept: the stale temp not dropped'), 'stale-tmp');
+  const sh = hubAt('sth'), shome = hubAt('std'), sw2 = hubAt('stw'), sa = path.join(sw2, 'a.txt'), sdm = standIn({ home: shome }), sses = { mode: 'chat', host: 'h-2' }, SBY = { kind: 'human', actBy: 'human:tester' };
+  fs.writeFileSync(sa, 'kept bytes\n');
+  const sk = await staleKept.keepFor({ session: sses, conv: 'c-st', files: [sa], by: SBY, now: T0, hex8: '0000d1d1', dataRoot: sh, call, dm: sdm });
+  fs.writeFileSync(sa, 'after\n'); fs.writeFileSync(`${sa}.${sk.press}.vs-tmp`, 'stale half');
+  const spl = await staleKept.putBack({ session: sses, conv: 'c-st', press: sk.press, by: SBY, dryRun: true, dataRoot: sh, call, dm: sdm });
+  await staleKept.putBack({ session: sses, conv: 'c-st', press: sk.press, by: SBY, expect: spl.rows, now: T0 + 1, hex8: '0000d2d2', dataRoot: sh, call, dm: sdm });
+  ok(sk.ok && fs.readFileSync(sa, 'utf8') === 'stale half', 'RED CONTROL (the stale temp not dropped first — a paired machine): the stale half is renamed over the person\'s file and the row reads done');
+  const inAtt = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "const DATA_ROOT = path.join(__dirname, '..', '..', 'data', 'rewind-kept');", "const DATA_ROOT = path.join(__dirname, '..', '..', 'data', 'chat-attachments');", 'kept: inside the attachments'), 'in-att');   // stale-pins: kept — the control PLANTS the old kept root inside the attachments' folder
+  const d2 = hubAt('att'), att2 = path.join(d2, 'chat-attachments'), wa2 = path.join(hubAt('attw'), 'w.txt');
+  fs.mkdirSync(path.join(att2, 'c-old', 'files'), { recursive: true }); fs.writeFileSync(path.join(att2, 'c-old', 'files', 'drop.png'), 'png'); fs.writeFileSync(wa2, 'kept\n');
+  const rk2 = await inAtt.keepFor({ session: { mode: 'chat' }, conv: 'c-old', files: [wa2], by: HUMAN, now: T0, hex8: '0000d3d3', ...KA(path.join(d2, path.basename(inAtt.DATA_ROOT))) });
+  const o2 = await CA.create({ root: att2, log: { log() { } } }).orphans();
+  ok(rk2.ok && o2.files > 1, `RED CONTROL (the kept copies inside the attachments' folder): the «remove what is left» counts the kept copies as dropped files (${o2.files} files)`);
+  const sweepAll = M.load('src/server/rewind-kept-door.js', anchored(DSRC, 'const entries = await road.listAll(), keep = new Set([...spare, ...PUTTING]);', 'const entries = await road.listAll(), keep = new Set(spare);', 'kept: a put-back\'s press swept'), 'sweep-all');   // stale-pins: kept — the control PLANTS the old sweep that spared no put-back
+  const rr = hubAt('swr'), rw2 = hubAt('sww'), ra = path.join(rw2, 'r.txt'), rp9 = K.pressIdOf(T0 - 9 * DAY, '0000d4d4');
+  fs.writeFileSync(ra, 'r as it was\n');
+  await sweepAll.keepFor({ session: { mode: 'chat' }, conv: 'c-r5', files: [ra], by: HUMAN, now: T0 - 9 * DAY, hex8: '0000d4d4', ...KA(rr) });
+  fs.utimesSync(path.join(rr, 'c-r5', rp9), new Date(T0 - 9 * DAY), new Date(T0 - 9 * DAY)); fs.writeFileSync(ra, 'r changed\n');
+  let mk = null;
+  const mid2 = (op, payload) => (op === 'putOne' && !mk ? Promise.resolve().then(async () => { mk = await sweepAll.keepFor({ session: { mode: 'chat' }, conv: 'c-r6', files: [ra], by: HUMAN, now: T0 + 1, hex8: '0000d5d5', ...KA(rr) }); return call(op, payload); }) : call(op, payload));
+  const rpl = await sweepAll.putBack({ session: { mode: 'chat' }, conv: 'c-r5', press: rp9, by: HUMAN, dryRun: true, dataRoot: rr, call: mid2 });
+  await sweepAll.putBack({ session: { mode: 'chat' }, conv: 'c-r5', press: rp9, by: HUMAN, expect: rpl.rows, now: T0 + 2, hex8: '0000d6d6', dataRoot: rr, call: mid2 }).catch(() => null);
+  ok(!!mk && mk.ok && mk.swept.includes(rp9), 'RED CONTROL (a press being put back swept): another conversation\'s keep in the middle of the put-back removes the press it is putting back');
 }
 
 report();

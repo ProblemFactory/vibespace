@@ -1,14 +1,17 @@
 'use strict';
 // ORCH: THE KEPT COPY'S DOOR (row B-437e, the files tier — 主开发 r1247 (2), r1304, r1327; lane lg-rewind, 2026-11-21). The
 // decisions are src/rewind-kept.js (PURE); here are the two ROADS that carry them out, and the put-back:
-//   THIS HUB: the conversation's own folder under the hub's data (data/chat-attachments/<conversation>/rewind-kept/), every
+//   THIS HUB: the hub's own kept folder (data/rewind-kept/<conversation>/ — beside the dropped files of data/chat-attachments,
+//   never inside them: the attachments' «remove what is left» walks only its own root), every
 //   file act on the «rewind-keep» one-worker SafeFs pool (src/server/rewind-keep-worker.js) behind the mount door — a storage
 //   that hangs ends that worker, never the hub's loop. The read-back is each copy's sha256 against the original's.
 //   A PAIRED MACHINE: under the agent's own state ON THAT MACHINE (<its home>/.vibespace/agentd/rewind-kept/<conversation>/), by
 //   the agent's EXISTING file actions only (r1327; no new device op): mkdir, copy (capability `fs-portable` — an older agent is
 //   never asked: «cannot keep a copy: upgrade the agent»), stat, list, write, rename, rm, each stamped `by` and gated by that
 //   machine's own policy flag `files`. The read-back is the copy's own success and the kept file's size equal to the original's
-//   (both stated after the copy); no byte of a person's file crosses the link for a check. The press's manifest is sealed on
+//   (both stated after the copy); no byte of a person's file crosses the link for a check. A LINK is never kept (the round
+//   wqdnv452s's MUST): the agent's stat answer says `link` (its own lstat) for the original and for the copy — an agent that
+//   does not say it is «cannot keep a copy: upgrade the agent». The press's manifest is sealed on
 //   the machine AND at the hub (the put-back reads the hub's). The machine's sweep reads a press folder by its shape, its mark
 //   file's presence and the press time its own name carries.
 // THE TOTAL (1 GiB) and THE SWEEP are the MACHINE's: every conversation's press folders on it count, and each keep sweeps them
@@ -18,7 +21,8 @@
 // sign-in subject, else human:owner) and bounded 10 s. THE PUT-BACK is fenced like a press (no running turn, no rewind out;
 // it holds the files mark while it works), names each path's act before it does it, keeps what stands there now first (the
 // law), asks the mount door before each path, and puts back by a temp name beside the path (the press id in it) renamed over
-// it — a temp a cut-short act left is removed; it spares its own press from the sweep; it touches nothing of the conversation.
+// it — a temp a cut-short act left is removed BEFORE each copy (a paired agent's copy never overwrites: a stale temp would be
+// renamed over the person's file); no sweep removes a press while it is being put back; it touches nothing of the conversation.
 const path = require('path');
 const crypto = require('crypto');
 const DOOR = require('../mount-door');
@@ -27,10 +31,12 @@ const { SafeFs } = require('../safe-fs');
 const K = require('../rewind-kept.js');
 const RQ = require('./rewind-requests.js');
 
-const DATA_ROOT = path.join(__dirname, '..', '..', 'data', 'chat-attachments');
+const DATA_ROOT = path.join(__dirname, '..', '..', 'data', 'rewind-kept');
 const CONV_RE = /^[\w-][\w.-]{0,127}$/;
 const PAIRED_CONVS_MAX = 500;
+const PUTTING = new Set();   // the presses being put back now: no keep's sweep removes one of them (any conversation's)
 let _pool = null;
+const closePool = () => { const p = _pool; _pool = null; return p ? p.close() : undefined; };
 const keepPool = () => _pool || (_pool = new SafeFs({ workerPath: path.join(__dirname, 'rewind-keep-worker.js'), name: 'rewind-keep', poolSize: 1, timeouts: { default: K.KEEP.copyMs } }));
 const nameOf = (e) => String((e && (e.code || e.message)) || e || 'error').slice(0, 120);
 const timedOut = (e) => !!e && (e.safeFsTimeout === true || e.code === 'ETIMEDOUT' || /deadline|timed? ?out/i.test(String(e.message || '')));
@@ -47,7 +53,7 @@ const bounded = (promise, ms = K.KEEP.copyMs) => new Promise((resolve, reject) =
 /** THIS HUB's road: every act on the keep pool (`call` injectable for the suite: the worker's own runOp) */
 function hubRoad(conv, { dataRoot = DATA_ROOT, call = null } = {}) {
   const run = call || ((op, payload) => { const safeFs = keepPool(); return safeFs.call(op, payload, { timeoutMs: K.KEEP.copyMs }); });
-  const rootOf = (c) => path.join(dataRoot, c, 'rewind-kept');
+  const rootOf = (c) => path.join(dataRoot, c);
   const bytesOf = (e) => (e.manifest && e.manifest.machine ? 0 : e.manifest ? K.usedOf([e.manifest]) : Number(e.kept) || 0);   // a paired press's manifest: its bytes are on its machine
   return {
     paired: false, root: rootOf(conv), machine: null, join: (...p) => path.join(...p),
@@ -71,21 +77,23 @@ function hubRoad(conv, { dataRoot = DATA_ROOT, call = null } = {}) {
 }
 
 /** A PAIRED MACHINE's road over its agent (`dm`), the existing actions only (r1327), each bounded and stamped */
-async function pairedRoad(conv, dm, { by: who, host }) {
+async function pairedRoad(conv, dm, { by: who, host, callMs = K.KEEP.copyMs, allMs = K.KEEP.allMs }) {
   const by = stampOf(who);   // the person's own string stamp — written AT each act call (test-architecture §91)
+  const B = (p) => bounded(p, callMs);   // each agent call bounded
   const isAbsent = (e) => /ENOENT|no such file/i.test(nameOf(e));
-  const home = (await bounded(dm.fsHome())).home;   // fs-portable: an older agent throws here (host_needs_daemon) — «upgrade the agent»
+  const home = (await B(dm.fsHome())).home;   // fs-portable: an older agent throws here (host_needs_daemon) — «upgrade the agent»
   const win = /^[A-Za-z]:[\\/]/.test(home), sep = win ? '\\' : '/';
   const join = (...p) => p.map((x, i) => (i ? String(x).replace(/^[\\/]+/, '') : String(x).replace(/[\\/]+$/, ''))).join(sep);
   const base = join(home, '.vibespace', 'agentd', 'rewind-kept');
   const statOf = async (p) => {
     try {
-      const r = await bounded(dm.fsStat(p));
+      const r = await B(dm.fsStat(p));
       if (!r || !r.stat) return { path: p, error: 'unreadable' };
-      return { path: p, mode: r.stat.isDir ? 0o040000 | (Number(r.stat.mode) & 0o7777) : r.stat.mode, size: r.stat.size, mtimeMs: r.stat.mtimeMs };
+      const isLink = r.stat.link === true || r.stat.link === false ? r.stat.link : r.stat.link === undefined ? undefined : null;   // the agent's own lstat (absent: too old to say)
+      return { path: p, mode: r.stat.isDir ? 0o040000 | (Number(r.stat.mode) & 0o7777) : r.stat.mode, size: r.stat.size, mtimeMs: r.stat.mtimeMs, isLink };
     } catch (e) { return isAbsent(e) ? { path: p, absent: true } : { path: p, error: nameOf(e) }; }
   };
-  const listOf = async (p) => { try { return ((await bounded(dm.fsList(p))) || {}).entries || []; } catch (e) { if (isAbsent(e)) return []; throw e; } };
+  const listOf = async (p) => { try { return ((await B(dm.fsList(p))) || {}).entries || []; } catch (e) { if (isAbsent(e)) return []; throw e; } };
   const pressAt = (name) => parseInt(name.slice(3, name.lastIndexOf('-')), 36);
   const pressesOf = async (c) => {
     const out = [];
@@ -101,58 +109,66 @@ async function pairedRoad(conv, dm, { by: who, host }) {
     paired: true, root: join(base, conv), machine: host, join,
     machineNow: async (dir) => { const f = await statOf(dir); return f.error || f.absent ? null : f.mtimeMs; },   // its own clock: the folder it just made
     facts: (paths) => Promise.all(paths.map(statOf)),
-    open: async (dir, mark) => { await bounded(dm.fsMkdir(dir, { by })); await bounded(dm.fsWrite(join(dir, K.MARK_FILE), Buffer.from(JSON.stringify(mark)), { by })); },
+    open: async (dir, mark) => { await B(dm.fsMkdir(dir, { by })); await B(dm.fsWrite(join(dir, K.MARK_FILE), Buffer.from(JSON.stringify(mark)), { by })); },
     keepOne: async (dir, row) => {
       const dest = join(dir, K.keptName(row.n));
-      await bounded(dm.fsCopy(row.path, dest, { by }));
+      await B(dm.fsCopy(row.path, dest, { by }));
       const k = await statOf(dest), s = await statOf(row.path);
-      return { ok: !k.error && !k.absent && !s.error && !s.absent, size: k.size, mtimeMs: k.mtimeMs, srcSize: s.size };
+      return { ok: !k.error && !k.absent && !s.error && !s.absent, size: k.size, mtimeMs: k.mtimeMs, srcSize: s.size, isLink: k.isLink, srcIsLink: s.isLink };
     },
-    seal: (dir, manifest) => bounded(dm.fsWrite(join(dir, K.MANIFEST_FILE), Buffer.from(JSON.stringify(manifest)), { by })),
+    seal: async (dir, manifest) => {   // by a temp name renamed over: never a torn manifest
+      const tmp = join(dir, K.MANIFEST_FILE + '.tmp');
+      await B(dm.fsWrite(tmp, Buffer.from(JSON.stringify(manifest)), { by }));
+      await B(dm.fsRename(tmp, join(dir, K.MANIFEST_FILE), { by }));
+    },
     list: () => pressesOf(conv),
-    listAll: async () => {
-      const out = [];
-      for (const c of (await listOf(base)).filter((e) => e && e.isDir && CONV_RE.test(e.name)).slice(0, PAIRED_CONVS_MAX)) out.push(...(await pressesOf(c.name)));
+    listAll: async () => {   // ONE bound for the whole walk (each call 10 s; all of them `allMs`): past it, the total is not known — no-time
+      const out = [], t0 = Date.now();
+      for (const c of (await listOf(base)).filter((e) => e && e.isDir && CONV_RE.test(e.name)).slice(0, PAIRED_CONVS_MAX)) {
+        if (Date.now() - t0 > allMs) throw Object.assign(new Error('timed out (the machine\'s kept copies not listed within the bound)'), { code: 'ETIMEDOUT' });
+        out.push(...(await pressesOf(c.name)));
+      }
       return out;
     },
     removePress: async (c, name) => {
       if (!K.PRESS_RE.test(name) || !CONV_RE.test(c)) return { ok: false, why: 'not-a-press' };
       if (!(await listOf(join(base, c, name))).some((k) => k && k.name === K.MARK_FILE)) return { ok: false, why: 'no-mark' };
-      await bounded(dm.fsRm(join(base, c, name), true, { by }));
+      await B(dm.fsRm(join(base, c, name), true, { by }));
       return { ok: true };
     },
-    discard: async (dir) => { if (K.PRESS_RE.test(dir.split(/[\\/]/).pop()) && !(await listOf(dir)).some((k) => k && k.name === K.MANIFEST_FILE)) await bounded(dm.fsRm(dir, true, { by })).catch(() => { }); },
+    discard: async (dir) => { if (K.PRESS_RE.test(dir.split(/[\\/]/).pop()) && !(await listOf(dir)).some((k) => k && k.name === K.MANIFEST_FILE)) await B(dm.fsRm(dir, true, { by })).catch(() => { }); },
     keptFacts: async (dir, rows) => {
       const out = {};
       for (const r of rows) if (r.kind !== 'absent') { const f = await statOf(join(dir, K.keptName(r.n))); out[r.n] = f.error || f.absent ? null : { size: f.size, mtimeMs: f.mtimeMs }; }
       return out;
     },
     putOne: async (dir, row, act, press) => {
-      if (act === 'remove') { await bounded(dm.fsRm(row.path, false, { by })); return { ok: true }; }
+      if (act === 'remove') { await B(dm.fsRm(row.path, false, { by })); return { ok: true }; }
       if (act !== 'overwrite' && act !== 'create') return { ok: true, skipped: act };
       const tmp = `${row.path}.${press}.vs-tmp`;
-      await bounded(dm.fsCopy(join(dir, K.keptName(row.n)), tmp, { by }));
-      await bounded(dm.fsRename(tmp, row.path, { by }));
+      await B(dm.fsRm(tmp, false, { by }));   // a temp a cut-short act left goes FIRST: the agent's copy never overwrites, so a stale one would be renamed over
+      await B(dm.fsCopy(join(dir, K.keptName(row.n)), tmp, { by }));
+      await B(dm.fsRename(tmp, row.path, { by }));
       return { ok: true };
     },
-    dropTmp: (file) => bounded(dm.fsRm(file, false, { by })),
+    dropTmp: (file) => B(dm.fsRm(file, false, { by })),
   };
 }
 
 /** the road for a conversation → a road | {ok: false, why} */
-async function roadOf(session, conv, { hosts = null, by = null, dataRoot = DATA_ROOT, call = null, dm = null } = {}) {
+async function roadOf(session, conv, { hosts = null, by = null, dataRoot = DATA_ROOT, call = null, dm = null, callMs = K.KEEP.copyMs, allMs = K.KEEP.allMs } = {}) {
   if (typeof conv !== 'string' || !CONV_RE.test(conv) || conv === '.' || conv === '..') return { ok: false, why: 'unreadable' };
   if (!session || !session.host) return hubRoad(conv, { dataRoot, call });
   let agent = dm;
   try { if (!agent) agent = hosts && typeof hosts.deviceBounded === 'function' ? await hosts.deviceBounded(session.host, 2000) : null; } catch { agent = null; }
   if (!agent || typeof agent.fsStat !== 'function') return { ok: false, why: 'unreadable' };
-  try { return await pairedRoad(conv, agent, { by, host: session.host }); }
+  try { return await pairedRoad(conv, agent, { by, host: session.host, callMs, allMs }); }
   catch (e) { return { ok: false, why: /fs-portable|host_needs_daemon/.test(nameOf(e)) ? 'agent-too-old' : notAllowed(e) ? 'files-not-allowed' : timedOut(e) ? 'no-time' : 'unreadable' }; }
 }
 
 /** THE MACHINE's sweep (all its conversations), by its own clock, sparing `spare` → {used: the bytes left, swept} */
 async function sweptOn(road, now, { spare = [] } = {}) {
-  const entries = await road.listAll(), keep = new Set(spare);
+  const entries = await road.listAll(), keep = new Set([...spare, ...PUTTING]);   // a press being put back is never swept
   const gone = new Set();
   for (const e of entries) {
     if (keep.has(e.name) || !K.sweepOf([e], now).length) continue;
@@ -177,8 +193,8 @@ async function keepableOf({ session, conv, files, hosts = null, by = null, now =
 /** THE KEEP before the files press → {ok, press, where, machine, check, swept} | {ok: false, refusals}. The press folder and its
  *  mark first; the machine's sweep by its own clock (sparing `spare` and this press); the plan; each copy (10 s, 60 s all) and
  *  its read-back; the manifest last. A keep that fails leaves no unsealed folder behind */
-async function keepFor({ session, conv, files, hosts = null, by = null, now = Date.now(), hex8 = crypto.randomBytes(4).toString('hex'), spare = [], ...opts } = {}) {
-  const road = await roadOf(session, conv, { hosts, by, ...opts });
+async function keepFor({ session, conv, files, hosts = null, by = null, now = Date.now(), hex8 = crypto.randomBytes(4).toString('hex'), spare = [], allMs = K.KEEP.allMs, ...opts } = {}) {
+  const road = await roadOf(session, conv, { hosts, by, allMs, ...opts });
   if (road.ok === false) return { ok: false, refusals: [{ path: null, why: road.why }] };
   const press = K.pressIdOf(now, hex8), dir = road.join(road.root, press);
   let opened = false;
@@ -194,14 +210,14 @@ async function keepFor({ session, conv, files, hosts = null, by = null, now = Da
     const back = {}, t0 = Date.now();
     for (const row of plan.rows) {
       if (row.kind === 'absent') continue;
-      if (Date.now() - t0 > K.KEEP.allMs) { back[row.n] = { ok: false, timedOut: true }; break; }
+      if (Date.now() - t0 > allMs) { back[row.n] = { ok: false, timedOut: true }; break; }
       try { back[row.n] = await road.keepOne(dir, row); } catch (e) { back[row.n] = { ok: false, timedOut: timedOut(e), notAllowed: notAllowed(e) }; }
     }
     const rb = K.readBackOf(plan.rows, back, { paired: road.paired });
     if (!rb.ok) return fail(rb.refusals);
     const manifest = K.manifestOf({ conv, press, at: now, machine: road.machine, paired: road.paired, rows: plan.rows, back });
     await road.seal(dir, manifest);
-    if (road.paired) { const hub = hubRoad(conv, opts), hubDir = hub.join(hub.root, press); await hub.open(hubDir, mark); await hub.seal(hubDir, manifest); }   // the hub keeps the manifest
+    if (road.paired) { const hub = hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call }), hubDir = hub.join(hub.root, press); await hub.open(hubDir, mark); await hub.seal(hubDir, manifest); }   // the hub keeps the manifest
     return { ok: true, press, where: dir, machine: road.machine, check: manifest.check, swept };
   } catch (e) {
     return fail([{ path: null, why: timedOut(e) ? 'no-time' : notAllowed(e) ? 'files-not-allowed' : 'not-kept' }]);
@@ -235,8 +251,9 @@ async function putBack({ session, conv, press, by, hosts = null, dryRun = false,
   if (dryRun) return { ok: true, dryRun: true, press, rows: plan };
   const key = (p) => JSON.stringify((p || []).map((r) => [r.path, r.act, r.why || null]));
   if (key(plan) !== key(expect)) return { ok: false, reason: 'changed-since', cls: 'moved', rows: plan };
-  const mark = { id: `put-${press}`, at: Date.now(), files: true };
+  const mark = { id: `put-${press}`, at: Date.now(), files: true, pty: (session && session.pty) || null };   // tied to its CLI process, like a press's
   if (session) RQ.setFilesOut(session, mark);   // ONE AT A TIME: a press, a confirm and the person's send wait on the put-back
+  PUTTING.add(press);
   try {
     const touch = plan.filter((r) => r.act === 'overwrite' || r.act === 'remove').map((r) => r.path);
     let kept = null;
@@ -252,7 +269,7 @@ async function putBack({ session, conv, press, by, hosts = null, dryRun = false,
       catch (e) { if (r.act !== 'remove') { try { await road.dropTmp(`${row.path}.${press}.vs-tmp`); } catch { } } rows.push({ ...r, done: false, why: nameOf(e) }); }
     }
     return { ok: true, press, rows, kept: kept && { press: kept.press, where: kept.where, machine: kept.machine } };
-  } finally { if (session && RQ.filesOutOf(session) === mark) RQ.setFilesOut(session, null); }
+  } finally { PUTTING.delete(press); if (session && RQ.filesOutOf(session) === mark) RQ.setFilesOut(session, null); }
 }
 
-module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, DATA_ROOT };
+module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, closePool, DATA_ROOT };
