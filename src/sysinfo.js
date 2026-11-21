@@ -22,7 +22,9 @@ let _run = null;
 function useStarter(run) { _run = typeof run === 'function' ? run : null; }
 function runProgram(bin, args, { timeout = 8000, maxBuffer = 1024 * 1024 } = {}) {
   if (_run) return _run(bin, args, { timeout, maxBuffer });
-  return new Promise((resolve) => { execFile(bin, args, { timeout, maxBuffer, encoding: 'utf8' }, (err, stdout) => resolve({ err, stdout: String(stdout || '') })); });
+  // r1666 (test-agentd-spawn-hide): the device agent runs console-less — its child is HIDDEN (a program named by a variable is no
+  // POSIX tool the census can read by name; on Windows an unhidden console program opens a window per child)
+  return new Promise((resolve) => { execFile(bin, args, { timeout, maxBuffer, encoding: 'utf8', windowsHide: true }, (err, stdout) => resolve({ err, stdout: String(stdout || '') })); });
 }
 
 // Container-aware memory: cgroup v2 → v1 → host meminfo. /sys reads are
