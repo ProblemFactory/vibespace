@@ -148,6 +148,24 @@ const openWindow = async () => { await evalJs(`app.replayOpenSpec({ action: 'ope
 // lane vault-window-v2: wait until the old window has LEFT the page — openWindow then reads the new one's rail and head (a
 // closing window's rail answered the click and its rows the next read: the new window had not drawn yet)
 const closeWindows = async () => { await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault') app.wm.closeWindow(id); return true; })()`); return until(`!document.querySelector('.vw')`, 5000); };
+// B-1217 (5): THE FOLDER PICKER IS TYPED INTO ONCE IT HAS DRAWN. The limits editor asks its first listing (GET /api/files) when the
+// dialog opens and writes that listing's folder into the path field when the answer COMES — a path typed before it was overwritten
+// under load, 加入 added the listing's folder, and ⑨c's two legs went red together (.391 prep mirror, try 1). A person types into a
+// picker that shows a folder: wait for the field to hold the listing's folder (bounded, said on a line when it never came), then type;
+// the typed folder's chip is judged by name, with what the field held at the press.
+const listed = async (dlg) => {
+  const v = await until(`(document.querySelector(${JSON.stringify(`${dlg} .vw-ak-path`)}) || {}).value || null`, 8000);
+  if (!v) console.log(`    (${dlg}: the folder browser's first listing did not come in 8 s — the path is typed anyway; its last read ${JSON.stringify(v)})`);
+  return v;
+};
+const addFolder = async (dlg, p, what) => {
+  await listed(dlg);
+  await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(`${dlg} .vw-ak-path`)}); i.value = ${JSON.stringify(p)}; return true; })()`);
+  await clickWait(`${dlg} .vw-ak-add-root`);
+  const chip = !!(await until(`!!document.querySelector(${JSON.stringify(`${dlg} .vw-ak-root[data-root="${p}"]`)})`, 8000));
+  check(`${what}: 加入 with a folder typed ⇒ that folder's chip (typed once the browser has listed)`, chip, chip ? undefined : { typed: p, field: await evalJs(`(document.querySelector(${JSON.stringify(`${dlg} .vw-ak-path`)}) || {}).value`), chips: await evalJs(`[...document.querySelectorAll(${JSON.stringify(`${dlg} .vw-ak-root`)})].map((c) => c.dataset.root)`) });
+  return chip;
+};
 const cli = (args, { token }) => new Promise((resolve) => {
   const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-api'), ...args], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });   // rule nine: the root's HOME
   let out = '', err = '';
@@ -343,6 +361,7 @@ try {
   check('铸造…\'s folders: 「所有路径」 (red-tinted, its title «这台 VibeSpace 上的任何文件夹，包括你的主目录») above 「只有这些文件夹（含子文件夹）」 (picked — a fresh key has no folder); the add button says 「加入这个文件夹及其子文件夹」',
     seg && seg.all === '所有路径' && !seg.allOn && seg.title === '这台 VibeSpace 上的任何文件夹，包括你的主目录' && seg.red && seg.some === '只有这些文件夹（含子文件夹）' && seg.someOn && seg.add === '加入这个文件夹及其子文件夹', seg);
   // the folder picker over the hub's file tree: type a path ⇒ its subfolders; open one; ↑ back; 加入这个文件夹及其子文件夹
+  await listed('#vault-ak-mint');   // B-1217 (5): typed once the first listing has come (a late first answer drew its own folder over the typed one)
   await evalJs(`(() => { const i = document.querySelector('#vault-ak-mint .vw-ak-path'); i.value = ${JSON.stringify(CWD)}; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
   const subBtn = `#vault-ak-mint .vw-ak-dir[data-path="${SUB}"]`;
   check('a typed path lists its subfolders (the hub\'s file tree)', !!(await until(visible(subBtn), 8000)));
@@ -375,8 +394,7 @@ try {
   const editDefaultRow = await until(`(() => { const i = document.querySelector('#vault-ak-edit .vw-ak-perms input[value="default"]'); return i ? { words: i.parentNode.textContent, title: i.parentNode.title, now: i.parentNode.dataset.now } : null; })()`, 5000);
   check('编辑…: the `default` row is resolved for the key\'s FIRST folder — its project settings say acceptEdits ⇒ 「CLI 自己的设置（现在是 自动接受编辑）」, the file as its title', editDefaultRow && editDefaultRow.words === 'CLI 自己的设置（现在是 自动接受编辑）' && editDefaultRow.now === 'acceptEdits' && editDefaultRow.title === `设在 ${CWD}/.claude/settings.json`, editDefaultRow);
   await clickWait(`#vault-ak-edit .vw-ak-root[data-root="${CWD}"] .vw-ak-x`); await until(`!document.querySelector('#vault-ak-edit .vw-ak-root[data-root="${CWD}"]')`);
-  await evalJs(`(() => { const i = document.querySelector('#vault-ak-edit .vw-ak-path'); i.value = ${JSON.stringify(SUB)}; return true; })()`);
-  await clickWait('#vault-ak-edit .vw-ak-add-root'); await until(`!!document.querySelector('#vault-ak-edit .vw-ak-root[data-root="${SUB}"]')`);
+  await addFolder('#vault-ak-edit', SUB, '编辑… another folder');
   await clickWait('#vault-ak-edit .vw-ak-modes input[value="terminal"]');
   await clickWait('.vw-ak-edit-save');
   const edited = await (async () => { for (let i = 0; i < 40; i++) { const k = (await keysNow()).find((x) => x.name === 'Opener'); if (k && k.limits && k.limits.cwdRoots[0] === SUB) return k.limits; await sleep(250); } return null; })();
@@ -396,8 +414,7 @@ try {
   await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Legacy'); const b = r && r.querySelector('.vw-ak-edit'); if (!b) return false; b.click(); return true; })()`);
   const legacyLim = ((await keysNow()).find((k) => k.name === 'Legacy') || {}).limits;
   check('its 编辑… says these will be its FIRST limits (nothing changes until 保存)', !!(await until(visible('#vault-ak-edit .vw-ak-first'), 5000)) && legacyLim && legacyLim.cwdRoots.length === 0);
-  await evalJs(`(() => { const i = document.querySelector('#vault-ak-edit .vw-ak-path'); i.value = ${JSON.stringify(CWD)}; return true; })()`);
-  await clickWait('#vault-ak-edit .vw-ak-add-root'); await until(`!!document.querySelector('#vault-ak-edit .vw-ak-root[data-root="${CWD}"]')`);
+  await addFolder('#vault-ak-edit', CWD, 'a key minted before limits, its first 编辑…');
   await clickWait('#vault-ak-edit .vw-ak-acct-any input');
   await clickWait('.vw-ak-edit-save');
   const firstSet = await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => x.querySelector('.vw-label').textContent === 'Legacy'); return r && !r.querySelector('.vw-ak-unbounded') && r.querySelector('.vw-ak-limits-line') ? [...r.querySelectorAll('.vw-ak-limits-line .vw-ak-lim')].map((e) => e.textContent).join(' · ') : null; })()`, 10000);
@@ -449,8 +466,7 @@ try {
   const e1 = await until(`(() => { const d = document.querySelector('#vault-ak-edit'); const a = d && d.querySelector('.vw-ak-allpaths input'); return a ? { all: a.checked, browser: (() => { const x = d.querySelector('.vw-ak-some'); const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0; })() } : null; })()`, 8000);
   check('编辑… opens on 所有路径 (picked, no browser)', e1 && e1.all && !e1.browser, e1);
   await evalJs(`document.querySelector('#vault-ak-edit .vw-ak-somepaths input').click()`);
-  await evalJs(`(() => { const i = document.querySelector('#vault-ak-edit .vw-ak-path'); i.value = ${JSON.stringify(SUB)}; return true; })()`);
-  await clickWait('#vault-ak-edit .vw-ak-add-root'); await until(`!!document.querySelector('#vault-ak-edit .vw-ak-root[data-root="${SUB}"]')`);
+  await addFolder('#vault-ak-edit', SUB, '所有路径 ⇒ 只有这些文件夹');
   await clickWait('.vw-ak-edit-save');
   const toSome = await (async () => { for (let i = 0; i < 40; i++) { const k = (await keysNow()).find((x) => x.name === 'Anywhere'); if (k && k.limits.cwdRoots[0] === SUB) return k.limits.cwdRoots; await sleep(250); } return null; })();
   const someLine = await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Anywhere'); const f = r && r.querySelector('.vw-ak-limits-line .vw-ak-lim'); return f && f.textContent !== '文件夹: 所有路径' ? { text: f.textContent, red: f.classList.contains('vw-ak-allpaths') } : null; })()`, 10000);
