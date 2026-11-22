@@ -40,6 +40,15 @@ const R = require('../src/server/browser-trace.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() { }, warn() { } };
 const MB = 1048576, DAY = 86400000, SEC = 1000;
 const ROOT = scratch('browser-trace');
@@ -248,17 +257,17 @@ console.log('— ⑤ controls: each rule\'s patched copy goes red by name');
 if (built) {
   const src = read('src/browser-trace.js');
   // (a) a verdict blind to the action between
-  const a = src.replace("if (between && between.action !== FIT_ACTION) return { coalesce: false, why: `another action between (${between.action})` };", '');
+  const a = editAnchor(src, "if (between && between.action !== FIT_ACTION) return { coalesce: false, why: `another action between (${between.action})` };", '', "src/browser-trace.js");
   ok(a !== src, 'control (a) patched: the between-action rule removed');
   const Ta = M.load('src/browser-trace.js', a, 'no-between');
   ok(Ta.fitCoalesceVerdict({ id: 'tr-000000000001', action: 'viewer-fit', at: 1000, browserKey: KA, scope: P1 }, { action: 'viewer-fit', at: 3000, browserKey: KA, scope: P1 }, { between: { action: 'click' } }).coalesce === true, 'control (a): the copy coalesces across a click (① would be red)');
   // (b) a fold that never folds
-  const b = src.replace('if (run) { run.entries.push(e);', 'if (false) { run.entries.push(e);');
+  const b = editAnchor(src, 'if (run) { run.entries.push(e);', 'if (false) { run.entries.push(e);', "src/browser-trace.js");
   ok(b !== src, 'control (b) patched: the fold never joins a run');
   const Tb = M.load('src/browser-trace.js', b, 'no-fold');
   ok(Tb.foldFits([{ id: 'tr-0000000000f1', at: 1, action: 'viewer-fit' }, { id: 'tr-0000000000f2', at: 2, action: 'viewer-fit' }]).length === 2, 'control (b): two consecutive fits stay two rows (② would be red)');
   // (c) a plan without the fit-first pass
-  const c = src.replace(/for \(const \{ s, e \} of fitsFirst\) \{[\s\S]*?\n    \}\n/, '');
+  const c = editAnchor(src, /for \(const \{ s, e \} of fitsFirst\) \{[\s\S]*?\n    \}\n/, '', "src/browser-trace.js");
   ok(c !== src, 'control (c) patched: the fit-first pass removed');
   const Tc = M.load('src/browser-trace.js', c, 'no-fit-first');
   const sess = (id, startAt, open, list) => ({ id, startAt, open, entries: list.map(([eid, at, fb, fit]) => ({ id: eid, at, frameBytes: fb, listBytes: 100, fit: !!fit })) });
@@ -266,7 +275,7 @@ if (built) {
   ok(pc.removeFrames.length && pc.removeFrames[0].id === 'tr-0000000000a1', 'control (c): the copy takes the oldest session\'s agent frames before the fit frames (④ would be red)');
   // (d) a recorder that leaves the superseded after frame on disk
   const rsrc = read('src/server/browser-trace.js');
-  const d = rsrc.replace('if (oldAfter && oldAfter !== keepFile) { try { fs.unlinkSync(path.join(dir, oldAfter)); } catch { /* gone already */ } }', '');
+  const d = editAnchor(rsrc, 'if (oldAfter && oldAfter !== keepFile) { try { fs.unlinkSync(path.join(dir, oldAfter)); } catch { /* gone already */ } }', '', "src/server/browser-trace.js");
   ok(d !== rsrc, 'control (d) patched: the superseded after frame is not unlinked');
   const Rd = M.load('src/server/browser-trace.js', d, 'keep-superseded');
   const wd = world('wd');
@@ -363,7 +372,7 @@ console.log('— ⑦ the row census + the agent\'s own set viewport: one agent-v
   ok(bc7.filter((m) => m.type === 'browser-trace-appended' && m.entry && m.entry.action === 'agent-viewport').length === 3, 'each set is broadcast once as an appended row');
   // CONTROL: a copy of the table without the agent's row ⇒ the recorder never sees the set (isTracedCommand false: no row)
   const src7 = read('src/browser-trace.js');
-  const x = src7.replace("  [AGENT_VIEWPORT_ACTION]: 'viewport', // lane browser-viewport-answer: the agent's own set (asked → got, ruled by)\n", '');
+  const x = editAnchor(src7, "  [AGENT_VIEWPORT_ACTION]: 'viewport', // lane browser-viewport-answer: the agent's own set (asked → got, ruled by)\n", '', "src/browser-trace.js");
   ok(x !== src7, 'control (e) patched: the agent-viewport row removed from the table');
   const Tx = M.load('src/browser-trace.js', x, 'no-agent-viewport');
   ok(Tx.classifyAction('agent-viewport') === null && !Tx.isTracedCommand({ type: 'command', id: 'v1', action: 'agent-viewport' }), 'control (e): the copy drops the agent\'s set — ⑦ would be red');

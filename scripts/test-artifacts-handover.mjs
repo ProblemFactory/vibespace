@@ -27,6 +27,15 @@ const C = require(path.join(REPO, 'src/adapters/codex.js'));
 const M = mutantCopies('artifacts-handover', REPO);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() {}, warn() {} };
 
 // ── the fixture: a parent transcript + its subagents (the CLI's own layout and record shapes) ──
@@ -123,7 +132,7 @@ console.log('① a Task subagent\'s writes are the PARENT\'s rows (via.subagent)
   ok(rr && rr.by === 'agent' && AF.intentOf(rr) === 'foryou', 'the rebuild (the same helper door) says the same', rr);
   const hsrc = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
   const STRIP = "    const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)\n    out.push({ ...op, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });"; // B-299b: helperTagged
-  const MH = hsrc.includes(STRIP) ? M.load('src/server/artifact-registry.js', hsrc.replace(STRIP, "    out.push({ ...o, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });"), 'helperby') : null;
+  const MH = hsrc.includes(STRIP) ? M.load('src/server/artifact-registry.js', editAnchor(hsrc, STRIP, "    out.push({ ...o, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });", "src/server/artifact-registry.js"), 'helperby') : null;
   const hm = mk('M6');
   if (ok(MH, 'CONTROL needle present: the helper door\'s strip of the reader\'s tag (r3) — a tree without it has nothing to patch')) { // r4: a control that cannot find its anchor says so by name, never «null»
     MH.configure({ activeSessions: () => new Map([['M6', hm]]), log: quiet }); for (const r of T4) MH.observe(hm, r); await MH.helperSettled(hm); REG.configure({ activeSessions: () => new Map([['L6', hp]]), log: quiet });
@@ -190,17 +199,17 @@ console.log('④ patched-copy controls');
 {
   const src = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
   const REACH = "    if (!reach(cid)) {";
-  const MR = src.includes(REACH) ? M.load('src/server/artifact-registry.js', src.replace(REACH, '    if (false) {'), 'noreach') : null;
+  const MR = src.includes(REACH) ? M.load('src/server/artifact-registry.js', editAnchor(src, REACH, '    if (false) {', "src/server/artifact-registry.js"), 'noreach') : null;
   if (ok(MR, 'CONTROL needle present: the reach check')) { const w = world(MR); const r = MR.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CS], items: ['/opt/demo/helper/report.md'], reach: reachFrom(CH) }); ok(r.ok && Object.keys(w.stranger._artifacts || {}).length === 1, 'CONTROL: without the reach check a stranger\'s registry gets the row (② sees it red)', r); }
   const OWN = "const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '');";
-  const MO = src.includes(OWN) ? M.load('src/server/artifact-registry.js', src.replace(OWN, "const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '') || { key: ':' + it, host: '', path: it, name: it, kind: 'doc' };"), 'noown') : null;
+  const MO = src.includes(OWN) ? M.load('src/server/artifact-registry.js', editAnchor(src, OWN, "const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '') || { key: ':' + it, host: '', path: it, name: it, kind: 'doc' };", "src/server/artifact-registry.js"), 'noown') : null;
   if (ok(MO, 'CONTROL needle present: the ownership check')) { const w = world(MO); const r = MO.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CR], items: ['/opt/demo/elsewhere/secret.md'], reach: reachFrom(CH) }); ok(r.ok && w.recv._artifacts[':/opt/demo/elsewhere/secret.md'], 'CONTROL: without the ownership check a path the helper never wrote lands (② sees it red)', r); }
   const SIDE = "  foldHelpers(session, record, session._helperArtifacts);\n"; // lane agy-subagent-cards: the door asks every record (the descriptor's hook names what ends a helper); B-299b: it folds off the loop
-  const MS = src.includes(SIDE) ? M.load('src/server/artifact-registry.js', src.replace(SIDE, ''), 'noside') : null;
+  const MS = src.includes(SIDE) ? M.load('src/server/artifact-registry.js', editAnchor(src, SIDE, '', "src/server/artifact-registry.js"), 'noside') : null;
   if (ok(MS, 'CONTROL needle present: the live helper door')) { const s = mk('M1'); MS.configure({ activeSessions: () => new Map([['M1', s]]), log: quiet }); MS.observe(s, TASK[1]); await MS.helperSettled(s); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: sidechain not read ⇒ the fixture\'s row is missing live (① sees it red)'); }
   const nsrc = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
   const NSIDE = 'if (helper && artifactHelperSource && raw)'; // lane agy-subagent-cards: the hook decides which record ends a helper
-  const MN = nsrc.includes(NSIDE) ? M.load('src/normalizers.js', nsrc.replace(NSIDE, 'if (false)'), 'nonside') : null;
+  const MN = nsrc.includes(NSIDE) ? M.load('src/normalizers.js', editAnchor(nsrc, NSIDE, 'if (false)', "src/normalizers.js"), 'nonside') : null;
   if (ok(MN, 'CONTROL needle present: the rebuild\'s helper seam')) { MN.setArtifactHelperSource(REG.helperOps, REG.helperPrefetch); const s = mk('M2', { _normalizer: null, _artifacts: null }); await MN.rebuildHistory(s, 'M2', TASK); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: the rebuild without the helper seam derives no row (the parity assert sees it red)'); }
 }
 

@@ -354,18 +354,18 @@ console.log('⑩ controls (patched copies) and the wiring');
   const real = fresh(FS);
   const keep = real.receive(hostileBody, { key: kId });
   const NOBELT = "const value = { text: belt(v.value.text, 2 * M.LIMITS.textMax, 'block'),";
-  const nb = MUT.load('src/server/feedback-store.js', storeSrc.replace(NOBELT, 'const value = { text: v.value.text,'), 'no-belt');
+  const nb = MUT.load('src/server/feedback-store.js', editAnchor(storeSrc, NOBELT, 'const value = { text: v.value.text,', "src/server/feedback-store.js"), 'no-belt');
   const got = fresh(nb).receive(hostileBody, { key: kId });
   ok(storeSrc.includes(NOBELT) && !PT.carriesFrame(keep.report.text) && PT.carriesFrame(got.report.text), 'CONTROL — the receive without the belt stores the live frame (the real one stores it inert)', got.report && got.report.text);
   const DEDUPE = 'if (had) return { ok: true, duplicate: true, report: M.publicRow(had) };';
-  const nd = fresh(MUT.load('src/server/feedback-store.js', storeSrc.replace(DEDUPE, ''), 'no-dedupe'));
+  const nd = fresh(MUT.load('src/server/feedback-store.js', editAnchor(storeSrc, DEDUPE, '', "src/server/feedback-store.js"), 'no-dedupe'));
   nd.receive(hostileBody, { key: kId }); nd.receive(hostileBody, { key: kId });
   const rd = fresh(FS); rd.receive(hostileBody, { key: kId }); rd.receive(hostileBody, { key: kId });
   ok(storeSrc.includes(DEDUPE) && nd.list().reports.length === 2 && rd.list().reports.length === 1, 'CONTROL — without the dedupe a retry is a second record (the real store keeps one)', [nd.list().reports.length, rd.list().reports.length]);
   const KEYF = 'r && r.origin && r.origin.key === keyId && Number(r.markedAt) > s';
   const modelSrc = read('src/feedback-forward-model.js');
   const mm = MUT.write('src/feedback-forward-model.js', editAnchor(modelSrc, KEYF, 'r && r.origin && Number(r.markedAt) > s', "src/feedback-forward-model.js"), 'no-key', { name: 'ffm-no-key' });
-  const nk = fresh(MUT.load('src/server/feedback-store.js', storeSrc.replace("require('../feedback-forward-model.js')", `require(${JSON.stringify(mm)})`), 'no-key'));
+  const nk = fresh(MUT.load('src/server/feedback-store.js', editAnchor(storeSrc, "require('../feedback-forward-model.js')", `require(${JSON.stringify(mm)})`, "src/server/feedback-store.js"), 'no-key'));
   const rk = fresh(FS);
   for (const S of [nk, rk]) { const r = S.receive(hostileBody, { key: kId }); clock += 1000; S.setStatus(r.report.id, 'handled', { version: '2.369.333' }); }
   ok(modelSrc.includes(KEYF) && nk.marks('fedcba9876543210', 0).marks.length === 1 && rk.marks('fedcba9876543210', 0).marks.length === 0 && rk.marks(kId, 0).marks.length === 1, 'CONTROL — marks without the key filter hand one origin\'s marks to another (the real store answers its own only)');
@@ -517,7 +517,7 @@ console.log('⑪ THE NO-DOOR PAUSE (lane feedback-forward-404): the target is a 
     const modelSrc = read('src/feedback-forward-model.js'), fwSrc = read('src/server/feedback-forward.js');
     const NODOOR = "  if (s === 404 || s === 405 || s === 501) return 'no-door';\n";
     const mm = MUT.write('src/feedback-forward-model.js', editAnchor(modelSrc, NODOOR, '', "src/feedback-forward-model.js"), 'no-door', { name: 'ffm-no-door' });
-    const BASE = MUT.load('src/server/feedback-forward.js', fwSrc.replace("require('../feedback-forward-model.js')", `require(${JSON.stringify(mm)})`), 'no-door');
+    const BASE = MUT.load('src/server/feedback-forward.js', editAnchor(fwSrc, "require('../feedback-forward-model.js')", `require(${JSON.stringify(mm)})`, "src/server/feedback-forward.js"), 'no-door');
     const day = async (Mod, tag) => {
       const d = path.join(scratchDir('feedback-forward-ctl-' + tag), 'data');
       fs.mkdirSync(d, { recursive: true }); dirs.push(path.dirname(d));
@@ -602,7 +602,7 @@ console.log('⑫ THE ONE WHO FILED IT IS TOLD (lane fleet-feedback-marks): three
   const mt = rows.map((r) => MX.renderHandledNotice(MX.handledNotice({ ...r, handledVersion: VER, handledNote: NOTE })));
   ok(new Set(mt).size === 2, 'CONTROL RED: a sentence that names WHO marked it makes the hub road and the pod road disagree (the census above would fail)', mt);
   const SSRC = read('src/server/feedback-store.js');
-  const noTell = SSRC.replace('    told(s.record);\n', '');
+  const noTell = editAnchor(SSRC, '    told(s.record);\n', '', "src/server/feedback-store.js");
   ok(noTell !== SSRC, 'ANCHOR: setStatus tells once');
   const silent = roadOf('no-tell', { storeMod: MUT.load('src/server/feedback-store.js', noTell, 'no-tell') });
   const se = ENG.create({ dataDir: silent.d, vault: VE.create({ dataDir: silent.d, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false, register: false }), now: () => clock,

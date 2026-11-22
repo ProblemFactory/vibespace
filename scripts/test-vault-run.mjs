@@ -905,7 +905,7 @@ console.log('⑭ THE RUN OUTPUT IS VALUE-ONLY (lane vault-agent-own r21; fb-9321
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
   const FROM = "const outT = { text: parts.out.join(''), redacted: 0 }, errT = { text: parts.err.join(''), redacted: 0 };";
   const nm = SRC.split(FROM).length - 1;
-  const mod = nm === 1 ? M.load('src/server/vault-run-door.js', SRC.replace(FROM, "const outT = redactLong(parts.out.join('')), errT = redactLong(parts.err.join(''));"), 'nameredact') : null;
+  const mod = nm === 1 ? M.load('src/server/vault-run-door.js', editAnchor(SRC, FROM, "const outT = redactLong(parts.out.join('')), errT = redactLong(parts.err.join(''));", "src/server/vault-run-door.js"), 'nameredact') : null;
   let mout = null;
   if (mod) { const mw = await world({ doorMod: mod }); openRow(mw); const mj = await runAnswered(mw, ENV('json'), { answer: 'once' }); mout = (await mj.r).stdout || ''; }
   ok(nm === 1 && mout && (/"key":"«redacted»"/.test(mout) || !/"ok":true\}/.test(mout)), 'MUTANT «the name-based pass runs over the run output» (the 54f757df behaviour): the patch hits once and the leg goes RED — the tool\'s key field is name-redacted and/or the one-line JSON is swallowed; the shipped door leaves them whole', { keyRedacted: /"key":"«redacted»"/.test(mout || ''), whole: /"ok":true\}/.test(mout || '') });
@@ -1455,7 +1455,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const r8d = await w.door.run({ caller: c8, args: ENV('env'), cwd: w.work });
     ok(r8d.ok && !w.door.usesFor(c8).ended.length && w.door.usesFor(c8).grants.length === 1, 'asked again and allowed ⇒ it runs, and the old end is no longer listed', { ok: r8d.ok, code: r8d.code });
     const SRCd = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), from = '  function noteEnded(g, endedBy, endedAt) {\n';
-    const md = SRCd.split(from).length === 2 ? M.load('src/server/vault-run-door.js', SRCd.replace(from, from + '    return;   // MUTANT: no end is kept\n'), 'endednote') : null;
+    const md = SRCd.split(from).length === 2 ? M.load('src/server/vault-run-door.js', editAnchor(SRCd, from, from + '    return;   // MUTANT: no end is kept\n', "src/server/vault-run-door.js"), 'endednote') : null;
     let mr = null;
     if (md) { const mw = await world({ doorMod: md }); mr = await endedLeg(mw); }
     ok(md && mr && mr.ranFirst && mr.r8b.code === 'entry_not_runnable', 'RED control: a door that keeps no end (the .407 shape) ⇒ the same run reads «the user has not opened that entry» — the misnamed cause the agent reported as a bug', mr && mr.r8b.code);
@@ -1483,7 +1483,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     ok(fe.offList === 0 && fe.offRun === 'entry_not_runnable', 'the owner switched the entry OFF, then the grant\'s 8-hour timer fired ⇒ no «ended» record (the OFF stands: entry_not_runnable, never «the entry was not switched off»)', fe);
     ok(fe.ranOnce && fe.usedBy === 'used', 'a once-grant spent by its run, then its timer fired ⇒ the end stays «its one run was used»', fe);
     const SRCf = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), g0 = '    if (g && g.endedBy) return;\n';
-    const mf = SRCf.split(g0).length === 2 ? M.load('src/server/vault-run-door.js', anchored(SRCf.replace(g0, ''), "grantEnded(g, g && g.spent ? 'used' : 'time')", "grantEnded(g, 'time')", 'test-vault-run B-a14b: the first shape — no guard, the timer says time'), 'firstend') : null;   // B-a14b: a spent once-grant's timer says «used» by itself now — the batch's first shape is BOTH (no guard, the timer's «time»)
+    const mf = SRCf.split(g0).length === 2 ? M.load('src/server/vault-run-door.js', anchored(editAnchor(SRCf, g0, '', "src/server/vault-run-door.js"), "grantEnded(g, g && g.spent ? 'used' : 'time')", "grantEnded(g, 'time')", 'test-vault-run B-a14b: the first shape — no guard, the timer says time'), 'firstend') : null;   // B-a14b: a spent once-grant's timer says «used» by itself now — the batch's first shape is BOTH (no guard, the timer's «time»)
     const fr = mf ? await firstEnd(mf) : null;
     ok(!!(mf && fr && fr.usedBy === 'time'), 'RED control: no first-end guard (the batch\'s first shape) ⇒ the timer writes «its 8 hours ran out» over the spent run', fr);
     // the OFF half takes BOTH guards away: the first-end guard AND the list's «an OFF after the approval is the owner's news» —
@@ -1985,7 +1985,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const offPlant = ', ...(suspended ? { off: true } : {})';
     const offN = SRCf.split(offPlant).length - 1;
     ok(offN === 1, 'the RED control\'s plant is where it claims: the door\'s `off` on the ended fact, once', offN);
-    const mo = offN === 1 ? M.load('src/server/vault-run-door.js', SRCf.replace(offPlant, ''), 'endoff') : null;
+    const mo = offN === 1 ? M.load('src/server/vault-run-door.js', editAnchor(SRCf, offPlant, '', "src/server/vault-run-door.js"), 'endoff') : null;
     const ro2 = mo ? await offFirst(mo) : null;
     ok(!!(mo && ro2 && ro2.code === 'grant_expired' && /the entry was not switched off/.test(ro2.words)), 'RED control: the door without `off` (the batch\'s shape) ⇒ the agent reads «the entry was not switched off» over an entry that IS off', ro2);
   }
@@ -2111,7 +2111,7 @@ console.log('⑩b THE CAP\'S SHAPE (B-4934, q-043 verify L2): 8 open asks per co
     ok(eight.every((r) => r.ok) && ninth.ok && w.door._requests.size === 65, 'eight conversations × 8 open asks (64), then a NINTH conversation\'s first ask is FILED — never refused for the other conversations\' asks', [eight.filter((r) => !r.ok).map((r) => r.code), ninth.code]);
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
     const NEW_CAP = "if (!askers.has(scope) && askers.size >= REQUEST_CALLERS_MAX) return named('too_many_askers');";
-    const mOld = SRC.split(NEW_CAP).length === 2 ? M.load('src/server/vault-run-door.js', SRC.replace(NEW_CAP, "if (requests.size >= 64) return named('too_many_requests');"), 'oldcap') : null;
+    const mOld = SRC.split(NEW_CAP).length === 2 ? M.load('src/server/vault-run-door.js', editAnchor(SRC, NEW_CAP, "if (requests.size >= 64) return named('too_many_requests');", "src/server/vault-run-door.js"), 'oldcap') : null;
     const old = mOld ? await capLeg(mOld) : null;
     ok(old && old.eight.every((r) => r.ok) && old.ninth.code === 'too_many_requests', 'MUTANT «the hub-wide bound counts REQUESTS (64)» — the pre-fix shape: the ninth conversation\'s first ask is refused too_many_requests ⇒ RED; the shipped door files it', old && old.ninth);
     const over = w.door.request({ caller: conv(0, w), entry: capRef(8), purpose: 'one more' });
@@ -2211,7 +2211,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   ok(!!n1.card && n1.r.ok && /node got \[vault:agent:conv-1\/site-pw\]/.test(n1.r.stdout || '') && !!n2.card && n2.r.code === 'ask_denied', 'node -e on a cluster: allowed once ⇒ it ran (scrubbed); the NEXT run asks again', [n1.r.code || n1.r.by, n2.r.code]);
   // RED COPY (round 2): a door that reads the LOCAL rule on a cluster — the remember-until-lock this round removed — runs the same node -e again with NO card
   const SRCD = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), fromD = 'instance: instanceKind(), policy: policy(), passes: passes(), now: now() });';
-  const nD = SRCD.split(fromD).length - 1, modD = nD === 1 ? M.load('src/server/vault-run-door.js', SRCD.replace(fromD, "instance: instanceKind(), policy: 'allow', passes: passes(), now: now() });"), 'cluster-keeps') : null;
+  const nD = SRCD.split(fromD).length - 1, modD = nD === 1 ? M.load('src/server/vault-run-door.js', editAnchor(SRCD, fromD, "instance: instanceKind(), policy: 'allow', passes: passes(), now: now() });", "src/server/vault-run-door.js"), 'cluster-keeps') : null;
   const wr = modD ? await world({ instance: 'cluster', doorMod: modD }) : null;
   const rn1 = wr ? await runAnswered(wr, nodeArgs, { answer: 'once' }) : null, rn2 = wr ? await runAnswered(wr, nodeArgs, { answer: 'deny' }) : null;
   ok(nD === 1 && !!rn1 && rn1.r.ok && !!rn2 && !rn2.card && rn2.r.ok, 'RED COPY (round 2): a door reading the local rule on a cluster runs the SAME node -e again with NO card after one plain 允许 — the shipped door asks (above)', { n: nD, second: rn2 && (rn2.r.by || rn2.r.code), card: rn2 && !!rn2.card });

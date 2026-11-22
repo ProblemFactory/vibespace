@@ -30,6 +30,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -296,12 +305,12 @@ for (const { kind, caps } of REGISTERED) {
   const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf8');
   const KEEP = '(rawOk(x) ? { name: x.name, id: x.id, raw: true } : { name: peerName(x.name, 100), id: x.id })';
   ok(isrc.split(KEEP).length === 2, 'CONTROL setup: the bound keeps the raw mark at ONE site');
-  const lost = await boundBy(M.load('src/channels/index.js', isrc.replace(KEEP, '({ name: peerName(x.name, 100), id: x.id })'), 'a0ae-bound'));   // stale-pins: kept — the RED control puts the base's bound back on purpose
+  const lost = await boundBy(M.load('src/channels/index.js', editAnchor(isrc, KEEP, '({ name: peerName(x.name, 100), id: x.id })', "src/channels/index.js"), 'a0ae-bound'));   // stale-pins: kept — the RED control puts the base's bound back on purpose
   ok(!lost.some((m) => m.raw === true), 'CONTROL the bound without the raw keep (the base): every typed mention loses its mark — the send escapes it (the first real gate\'s red)', lost);
   // the follow-up (verdict 05:26Z): the typed-token CHECK itself — its own-id condition removed ⇒ another member's token passes as raw
   const IDCHK = '(x.name.startsWith(`<@${x.id}>`) || x.name.startsWith(`<@${x.id}|`))';
   ok(isrc.split(IDCHK).length === 2, 'CONTROL setup: the own-id condition is spelled once');
-  const loose = await boundBy(M.load('src/channels/index.js', isrc.replace(IDCHK, 'true'), 'a0ae-any-id'));
+  const loose = await boundBy(M.load('src/channels/index.js', editAnchor(isrc, IDCHK, 'true', "src/channels/index.js"), 'a0ae-any-id'));
   ok(loose.some((m) => m.raw === true && m.name === '<@U0EVE0001>'), 'CONTROL the own-id condition removed: another member\'s token rides as the mention of the id it was filed under (what the check refuses)', loose);
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '⑤b ' })) ok(c.pass, c.name, c.detail);
 }
@@ -569,7 +578,7 @@ for (const { kind, caps } of REGISTERED) {
   const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf8');
   const GATE = '  if (key === undefined || key === null) return;\n';
   ok(isrc.includes(GATE), 'the patch site of the registration control is in index.js');
-  const CHmut = require(MC.write('src/channels/index.js', isrc.replace(GATE, '  return;\n'), 'undeclared'));
+  const CHmut = require(MC.write('src/channels/index.js', editAnchor(isrc, GATE, '  return;\n', "src/channels/index.js"), 'undeclared'));
   ok(J.refused(CHmut).every((x) => !x), 'NEGATIVE CONTROL — an index.js copy without the declaration check registers all three planted adapters (the judge goes red without the rule)');
 
   // the tables themselves
@@ -595,7 +604,7 @@ for (const { kind, caps } of REGISTERED) {
   const csrc = fs.readFileSync(path.join(REPO, 'src/channel-settings.js'), 'utf8');
   const RANGE = '    else if (!(r.min <= r.default && r.default <= r.max)) errs.push';
   ok(csrc.includes(RANGE), 'the patch site of the range control is in channel-settings.js');
-  const CSmut = require(MC.write('src/channel-settings.js', csrc.replace(RANGE, '    else if (false) errs.push'), 'range'));
+  const CSmut = require(MC.write('src/channel-settings.js', editAnchor(csrc, RANGE, '    else if (false) errs.push', "src/channel-settings.js"), 'range'));
   const mutTable = J.table(CSmut);
   ok(!mutTable[1] && !mutTable[2] && mutTable[0], 'NEGATIVE CONTROL — a channel-settings.js copy without the range rule accepts both out-of-range defaults (the other defects still refused)', JSON.stringify(mutTable));
 
@@ -650,7 +659,7 @@ for (const { kind, caps } of REGISTERED) {
   const CLAMP = "    if (!policyModesOf(caps).includes(m)) return { mode: 'review', unknown: false, declared: m, clamped: true };\n";
   ok(psrc.includes(CLAMP), 'the patch site of the clamp control is in channel-policy.js');
   const MC10 = mutantCopies('chan-contract-slack', REPO);
-  const P2 = require(MC10.write('src/channel-policy.js', psrc.replace(CLAMP, ''), 'noclamp'));
+  const P2 = require(MC10.write('src/channel-policy.js', editAnchor(psrc, CLAMP, '', "src/channel-policy.js"), 'noclamp'));
   ok(P2.policyMode({ mode: 'direct' }, slackMod.caps).mode === 'direct', 'NEGATIVE CONTROL — a channel-policy copy without the clamp obeys a stored "direct" on Slack (the rule is what refuses it)');
   // the wrapper: gated by the row, bounded
   const r = CH.createChannelRegistry();

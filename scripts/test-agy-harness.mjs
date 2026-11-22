@@ -449,9 +449,9 @@ const fixes2 = (async () => {
   // ⑯ the HUB's consumer (src/server/stdout/acp-events.js) over the resumed wrapper's own stdout: what the creator's window is told
   const evSrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf8');
   const NOTE = '            noteMode(msg);\n';
-  const baseEvents = evSrc.split(NOTE).length === 3 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', evSrc.split(NOTE).join(''), 'base-events') : null;
+  const baseEvents = evSrc.split(NOTE).length === 3 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', editAnchor(evSrc, NOTE, '', "src/server/stdout/acp-events.js", 'join'), 'base-events') : null;
   const STRIP = ".trim().replace(DTACH_CLEAR_PREAMBLE, '').trim();\n";
-  const noStrip = evSrc.split(STRIP).length === 2 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', evSrc.replace(STRIP, '.trim();\n'), 'no-strip') : null;
+  const noStrip = evSrc.split(STRIP).length === 2 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', editAnchor(evSrc, STRIP, '.trim();\n', "src/server/stdout/acp-events.js"), 'no-strip') : null;
   // lane hub-loop-stalls commit 2 round 2 (law B): the person's permission mode is written as a durable act and the ack
   // goes AFTER the write — so the hub's answer is read after the write settles (a microtask turn here: the stub writes at once)
   const hubOf = async (records, mod = require(path.join(REPO, 'src/server/stdout/acp-events.js'))) => {
@@ -499,10 +499,10 @@ const fixes2 = (async () => {
       const amm = fs.readFileSync(path.join(REPO, 'src/acp-message-manager.js'), 'utf8');
       const NEW = '      permissionModes: st.permissionModes?.length ? st.permissionModes : sidecarModes(meta),\n';
       const OLD = "      permissionModes: st.permissionModes?.length ? st.permissionModes : asArray(meta?.configOptions).filter((o) => o && (o.category === 'mode' || o.id === 'mode')).flatMap((o) => flattenSelect(o).map((v) => String(v.value))),\n";
-      const base = amm.split(NEW).length === 2 ? mutantCopies('agy-harness-ring', REPO).load('src/acp-message-manager.js', amm.replace(NEW, OLD), 'base-list') : null;
+      const base = amm.split(NEW).length === 2 ? mutantCopies('agy-harness-ring', REPO).load('src/acp-message-manager.js', editAnchor(amm, NEW, OLD, "src/acp-message-manager.js"), 'base-list') : null;
       const bst = base ? statusOf(base.AcpSessionMessages, dir) : null;
       const WID = "    const wid = this._sessionId || this._session?._webuiId || null;\n";
-      if (amm.split(WID).length === 2) baseReader = mutantCopies('agy-harness-wid', REPO).load('src/acp-message-manager.js', amm.replace(WID, '    const wid = this._sessionId || null;\n'), 'base-wid').AcpSessionMessages;
+      if (amm.split(WID).length === 2) baseReader = mutantCopies('agy-harness-wid', REPO).load('src/acp-message-manager.js', editAnchor(amm, WID, '    const wid = this._sessionId || null;\n', "src/acp-message-manager.js"), 'base-wid').AcpSessionMessages;
       ck('⑮ RED copy (the base reader): the label survives (meta.agentMode) but the list is EMPTY — the chip opened nothing', !!bst && bst.permissionMode === 'bypassPermissions' && bst.permissionModes.length === 0, bst && { mode: bst.permissionMode, modes: bst.permissionModes });
     } finally { await ended(a); }
     // the hub's teardown (src/server/session-stdout.js cleanupOnExit) deletes the session's journal + sidecar: a Resume is a NEW session

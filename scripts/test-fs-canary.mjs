@@ -187,7 +187,7 @@ const M = mutantCopies('fs-canary', REPO);
 {
   const from = 'const fsMs = Math.max(0, r.fsMs);';
   ok(SRC.split(from).length === 2, 'the patch point is one line of the module');
-  const mut = M.load('src/server/fs-canary.js', SRC.replace(from, 'const fsMs = Math.max(0, gotAt - sentAt);'), 'main-clock');
+  const mut = M.load('src/server/fs-canary.js', editAnchor(SRC, from, 'const fsMs = Math.max(0, gotAt - sentAt);', "src/server/fs-canary.js"), 'main-clock');
   const C = harness(mut.createFsCanary);
   await C.c.tick();
   const p = C.c.tick();
@@ -292,7 +292,7 @@ console.log('§7 the blocked loop names its blocker (lane vault-slow-load)');
   // CONTROL: the base canary (no blame) — the same sync-read block, and the line names nothing
   const from = "log(`[canary] the main loop held the probe's answer ${loopMs}ms (the stat itself took ${fsMs}ms ${r.where === 'worker' ? 'off the main thread' : 'on the main thread'}) — a blocked loop, not a slow mount${by ? `; in that window: ${by}` : ''}`);";
   ok(SRC.split(from).length === 2, 'CONTROL premise: the line\'s patch point is one line of the module');
-  const base = M.load('src/server/fs-canary.js', SRC.replace(from, "log(`[canary] the main loop held the probe's answer ${loopMs}ms (the stat itself took ${fsMs}ms ${r.where === 'worker' ? 'off the main thread' : 'on the main thread'}) — a blocked loop, not a slow mount`);"), 'no-blame');
+  const base = M.load('src/server/fs-canary.js', editAnchor(SRC, from, "log(`[canary] the main loop held the probe's answer ${loopMs}ms (the stat itself took ${fsMs}ms ${r.where === 'worker' ? 'off the main thread' : 'on the main thread'}) — a blocked loop, not a slow mount`);", "src/server/fs-canary.js"), 'no-blame');
   const C = harness(base.createFsCanary);
   await C.c.tick();
   const fifo2 = path.join(ROOT, 'pipe2');
@@ -562,14 +562,14 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     ok(w.counts.refused === refused0, `§10 the guard refused nothing on the way (${w.counts.refused - refused0})`);
     // CONTROLS: the walk as it was — every dir statSync'd on the main thread; the storage dir answered from the async walk
     const ddSrc = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
-    const oldWalk = ddSrc.replace("    if (r && r.kind === 'storage') continue;\n    if (r) { const f = mountFact(dir, name, now); if (!f) { pending = true; continue; } if (f.yes) { found = p; break; } continue; }\n", '');
+    const oldWalk = editAnchor(ddSrc, "    if (r && r.kind === 'storage') continue;\n    if (r) { const f = mountFact(dir, name, now); if (!f) { pending = true; continue; } if (f.yes) { found = p; break; } continue; }\n", '', "src/desktop-display.js");
     const DDo = M.load('src/desktop-display.js', oldWalk, 'b1425-syncwalk');
     const was = spied(() => DDo.binOnPath(TN, { env: env10 }));
     ok(oldWalk !== ddSrc && intoMounts().length === 2 && was === path.join(NB, TN) && w.counts.refused === refused0 + 1,
       `CONTROL (the old walk): ${intoMounts().length} statSync(s) into a mount on the main thread (the rclone's refused: ${w.counts.refused - refused0}) ⇒ RED`);
     const answersStorage = editAnchor(editAnchor(ddSrc, "    if (r && r.kind === 'storage') continue;\n", '', "src/desktop-display.js"), ".filter(([, r]) => r && r.kind !== 'storage');", '.filter(([, r]) => r);', "src/desktop-display.js");
     const ssSrc = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8');
-    const skipAll = ssSrc.replace("    if (r && r.kind === 'storage') continue;   // B-1425: never read from the main thread (the guard refuses it)\n", '    if (r) continue;\n');
+    const skipAll = editAnchor(ssSrc, "    if (r && r.kind === 'storage') continue;   // B-1425: never read from the main thread (the guard refuses it)\n", '    if (r) continue;\n', "src/session-store.js");
     const SSo = M.load('src/session-store.js', skipAll, 'b1425-tmuxskip');
     process.env.PATH = env10.PATH;
     let tmuxOld; try { await SSo.landTmuxMounts(); tmuxOld = SSo.tmuxOnPath(); } finally { process.env.PATH = oldPath; }
@@ -629,7 +629,7 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     // CONTROL: the walk with neither its storage skip nor its per-dir catch — the guard's refusal leaves the walk (its plant
     // proven: the three lines spelled once, and the guard COUNTS the refused stat — the plant was on the road)
     const WALK = "    if (r && r.kind === 'storage') continue;\n    if (r) { const f = mountFact(dir, name, now); if (!f) { pending = true; continue; } if (f.yes) { found = p; break; } continue; }\n    try { const st = fs.statSync(p); if (st.isFile() && (st.mode & 0o111)) { found = p; break; } } catch { /* not here */ }\n";
-    const bare = ddSrc.replace(WALK, "    const st = fs.statSync(p); if (st.isFile() && (st.mode & 0o111)) { found = p; break; }\n");
+    const bare = editAnchor(ddSrc, WALK, "    const st = fs.statSync(p); if (st.isFile() && (st.mode & 0o111)) { found = p; break; }\n", "src/desktop-display.js");
     ok(ddSrc.split(WALK).length === 2 && bare !== ddSrc, 'CONTROL (a refusal that leaves the walk): its plant — the walk\'s three lines — is spelled exactly once');
     const DDb = M.load('src/desktop-display.js', bare, 'b1425-bare');
     const refC = w.counts.refused;

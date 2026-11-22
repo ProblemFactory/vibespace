@@ -241,10 +241,10 @@ const RFS_SRC = fs.readFileSync(path.join(REPO, 'src/remote-fs.js'), 'utf8');
 const LOCAL_NAMING = "res.sendFile(filePath, { dotfiles: 'allow', ...(named ? { headers: { 'Content-Disposition': named } } : {}) });";
 const REMOTE_NAMING = "const inlineName = attachment ? null : contentDisposition(fileNameOf(filePath), 'inline');";
 ok(FILES_SRC.includes(LOCAL_NAMING) && RFS_SRC.includes(REMOTE_NAMING), 'the two naming lines the controls strip are present verbatim (else the controls would judge nothing)');
-const filesCtl = M.load('src/routes/files.js', FILES_SRC.replace(LOCAL_NAMING, "res.sendFile(filePath, { dotfiles: 'allow' });"), 'nolocalname');
+const filesCtl = M.load('src/routes/files.js', editAnchor(FILES_SRC, LOCAL_NAMING, "res.sendFile(filePath, { dotfiles: 'allow' });", "src/routes/files.js"), 'nolocalname');
 const filesCtlPath = M.files[M.files.length - 1]; // a 404's development-mode stack names the module file: compare as if it were the real one
 const asReal = (buf) => buf.toString('utf8').split(filesCtlPath).join(path.join(REPO, 'src/routes/files.js'));
-const { RemoteFs: RemoteFsCtl } = M.load('src/remote-fs.js', RFS_SRC.replace(REMOTE_NAMING, 'const inlineName = null;'), 'noremotename');
+const { RemoteFs: RemoteFsCtl } = M.load('src/remote-fs.js', editAnchor(RFS_SRC, REMOTE_NAMING, 'const inlineName = null;', "src/remote-fs.js"), 'noremotename');
 // r2 controls: the pre-r2 attachment spellings (the raw name in filename="…") and files.js without the remoteStream belt
 const ATTACH_R2 = "const attachName = attachment ? contentDisposition(fileNameOf(filePath), 'attachment') : null;\n    if (attachName) res.setHeader('Content-Disposition', attachName);";
 const ATTACH_PRE = "if (attachment) res.setHeader('Content-Disposition', `attachment; filename=\"${path.basename(filePath).replace(/\"/g, '')}\"`);";
@@ -253,13 +253,13 @@ const ZIP_PRE = "res.setHeader('Content-Disposition', `attachment; filename=\"${
 const BELT = "  try { return fn(); }\n  catch (e) {\n    if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.status(502).json({ error: String((e && e.message) || e) }); }\n    else { try { res.end(); } catch { } }\n  }";
 ok(RFS_SRC.includes(ATTACH_R2) && RFS_SRC.includes(ZIP_R2) && FILES_SRC.includes(BELT), 'the r2 lines the controls replace are present verbatim');
 const { RemoteFs: RemoteFsPre } = M.load('src/remote-fs.js', editAnchor(editAnchor(RFS_SRC, ATTACH_R2, ATTACH_PRE, "src/remote-fs.js"), ZIP_R2, ZIP_PRE, "src/remote-fs.js"), 'preattach');
-const filesNoBelt = M.load('src/routes/files.js', FILES_SRC.replace(BELT, '  return fn();'), 'nobelt');
+const filesNoBelt = M.load('src/routes/files.js', editAnchor(FILES_SRC, BELT, '  return fn();', "src/routes/files.js"), 'nobelt');
 // r2 (3) controls: the pre-r2 raw sendFile (send's legacy dotfile rule) and the pre-r2 ssh stream (pipe's default end, no 'error', no kill)
-const filesNoDot = M.load('src/routes/files.js', FILES_SRC.replace(LOCAL_NAMING, "res.sendFile(filePath, named ? { headers: { 'Content-Disposition': named } } : {});"), 'nodotfiles');
+const filesNoDot = M.load('src/routes/files.js', editAnchor(FILES_SRC, LOCAL_NAMING, "res.sendFile(filePath, named ? { headers: { 'Content-Disposition': named } } : {});", "src/routes/files.js"), 'nodotfiles');
 const STREAM_R2 = "this._streamChild(this._spawn(id, `cat ${shq(filePath)}`), res, { beforeBody: nameIt });";
 const STREAM_PRE = "const child = this._spawn(id, `cat ${shq(filePath)}`);\n    child.stdout.once('data', nameIt);\n    child.stdout.pipe(res);\n    child.stderr.on('data', () => {});\n    child.on('close', (code) => { if (code !== 0 && !res.headersSent) res.status(404).end(); });";
 ok(RFS_SRC.includes(STREAM_R2), 'the r2 (3) stream line the control replaces is present verbatim');
-const { RemoteFs: RemoteFsPreStream } = M.load('src/remote-fs.js', RFS_SRC.replace(STREAM_R2, STREAM_PRE), 'prestream');
+const { RemoteFs: RemoteFsPreStream } = M.load('src/remote-fs.js', editAnchor(RFS_SRC, STREAM_R2, STREAM_PRE, "src/remote-fs.js"), 'prestream');
 // the pre-r2 stream has no child 'error' listener — in the server that is uncaughtException ⇒ exit(1); here it is caught and counted
 const uncaught = [];
 process.on('uncaughtException', (e) => uncaught.push((e && e.code) || String(e)));
@@ -704,7 +704,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         `B-3767 unit 2: the age sweep of the hub's own root — the old upload and the old link go (the link's target stays), the fresh file stays, a planted purpose folder is refused by name and nothing behind it is touched, the shared temp folder is never looked at: ${JSON.stringify({ removed: r.removed.length, kept: r.kept, refused: r.refused })}`);
       const htSrc = fs.readFileSync(path.join(REPO, 'src/server/hub-tmp.js'), 'utf8'), JUDGE = '    if (!(await own(d))) continue;\n';
       const victim2 = mk(path.join(SR, 'victim', 'old-in-victim-2.bin'));
-      const HT0 = M.load('src/server/hub-tmp.js', htSrc.replace(JUDGE, ''), 'nojudge');
+      const HT0 = M.load('src/server/hub-tmp.js', editAnchor(htSrc, JUDGE, '', "src/server/hub-tmp.js"), 'nojudge');
       await HT0.sweepHubTmp({ dataDir: dataX, tmpRoot: SR, uid: uidX });
       ok(htSrc.includes(JUDGE) && !there(victim2), `CONTROL B-3767 unit 2: without the purpose judgment the sweep deletes through the planted link (red): ${there(victim2) ? 'kept' : 'deleted'}`);
       const filesSrc = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');

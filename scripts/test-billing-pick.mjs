@@ -43,6 +43,15 @@ const ok = (c, msg, detail) => {
   if (typeof msg !== 'string' || msg.length === 0) throw new TypeError(`ok(cond, name): the name is a ${typeof msg} — the arguments are swapped`);
   if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const BP = require(path.join(REPO, 'src/billing-pick.js'));
 const H = require(path.join(REPO, 'src/harnesses/index.js'));
@@ -209,7 +218,7 @@ let skipped = 0;
 const skip = (msg) => { skipped++; console.log(`  - SKIP ${msg} (the release ${RELEASE} is not in this clone's history)`); };
 // the release's own create where the clone has it; the flag cut out of THIS create is the red control either way (the release never passed it)
 const release = RELEASE_HERE ? M.load('src/ws-create.js', releaseSrc, 'release-create') : null;
-const flagless = M.load('src/ws-create.js', SRC.replace(FLAG_LINE, ''), 'flag-cut');
+const flagless = M.load('src/ws-create.js', editAnchor(SRC, FLAG_LINE, '', "src/ws-create.js"), 'flag-cut');
 ok(SRC.split(FLAG_LINE).length === 2, 'setup: the create passes the flag on ONE line (the mutants below cut it)');
 
 const PICKS = [['a named subscription', 'sub-a1'], ['a pool of subscriptions', 'pool-p1']];
@@ -469,7 +478,7 @@ console.log('— ⑤ SAID ONCE, where the person looks');
     // RED: the tip before cure 2 (the machine's file alone): a project helper under a pick leaves the person's file whole — the helper bills
     const ONLY = '    const files = [file, ...placed.files];';
     ok(SRC.split(ONLY).length === 2, 'setup: the files the fact reads are ONE list (the control edits it)');
-    const machineOnly = M.load('src/ws-create.js', SRC.replace(ONLY, '    const files = [file];'), 'machine-file-only');
+    const machineOnly = M.load('src/ws-create.js', editAnchor(SRC, ONLY, '    const files = [file];', "src/ws-create.js"), 'machine-file-only');
     fs.writeFileSync(path.join(PROJ, 'settings.json'), JSON.stringify({ apiKeyHelper: '/opt/proj-helper' }));
     const r = await drive(machineOnly, { accountId: 'sub-a1', extraArgs: FILE });
     ok(fileKept(lineOf(r)) && saidKind(r, 'billing') === 0, 'RED CONTROL: the fact read from the machine\'s file alone (the tip before cure 2) leaves the person\'s file whole under a project helper — the pick would bill the helper; the legs above can go red', lineOf(r).line);
@@ -493,7 +502,7 @@ console.log('— ⑤ SAID ONCE, where the person looks');
     ok(j.d2 && j.b.reads.length === 0 && saidKind(j.b, 'billingUnread') === 1, 'a second start against the same stuck files opens NOTHING (it joins the reads in flight) and goes on at its bound, said «billingUnread»', j.b && j.b.reads);
     const JOIN = '    const reads = await Promise.all(files.map((f) => readOneFactOnce(f, row)));';   // B-e7c0: the joined reads now also hand the person's own text to its start
     ok(SRC.split(JOIN).length === 2, 'setup: the fact\'s reads go through ONE joiner (the control edits it)');
-    const jr = await run2(M.load('src/ws-create.js', SRC.replace(JOIN, JOIN.replace('readOneFactOnce(f, row)', 'readOneFact(f, row)')), 'no-join'));
+    const jr = await run2(M.load('src/ws-create.js', editAnchor(SRC, JOIN, JOIN.replace('readOneFactOnce(f, row)', 'readOneFact(f, row)'), "src/ws-create.js"), 'no-join'));
     ok(jr.d2 && jr.b.reads.length > 0, 'RED CONTROL: without the joiner every start opens the stuck files again (one more hung thread each) — the leg above can go red', jr.b && jr.b.reads);
   }
   // SAID ONCE through ONE handler (one hub run): the second start of the same pick on the same machine says nothing and ASKS nothing
@@ -569,7 +578,7 @@ const helperSaid = (x) => x.notices.filter((n) => n.key.startsWith('billing-pick
     'the paired machine\'s FIELD: hosts.backendStatus\'s own answer (the probe op\'s facts, and the ssh probe\'s lines) is read as named / none / cannot be read (an empty answer says nothing of the CLI)', { op: op.claude, ssh: ssh.claude, sshMute });
   const BPSRC = read('src/billing-pick.js'), FIELD = '  if (r.keyHelper === true) return true;';
   ok(BPSRC.split(FIELD).length === 2, 'setup: the paired machine\'s field is read in ONE place');
-  const other = M.load('src/billing-pick.js', BPSRC.replace(FIELD, '  if (r.helper === true) return true;'), 'other-field');
+  const other = M.load('src/billing-pick.js', editAnchor(BPSRC, FIELD, '  if (r.helper === true) return true;', "src/billing-pick.js"), 'other-field');
   ok(other.remoteHelperFact(op, 'claude') === false && other.remoteHelperFact(ssh, 'claude') === false, 'RED CONTROL (a copy of src/billing-pick.js reading another field name): the same answers read «none» where a helper is named — the leg above can go red');
 }
 {
@@ -1156,7 +1165,7 @@ console.log('— ⑥ RED CONTROLS');
   ];
   for (const [name, [from, to], red] of MUT) {
     ok(SRC.split(from).length === 2, `setup: «${name}» edits ONE place`);
-    const mod = M.load('src/ws-create.js', SRC.replace(from, to), name.replace(/\W+/g, '-').slice(0, 40));
+    const mod = M.load('src/ws-create.js', editAnchor(SRC, from, to, "src/ws-create.js"), name.replace(/\W+/g, '-').slice(0, 40));
     ok(await red(mod), `MUTANT ${name} ⇒ the leg it breaks goes RED`);
   }
   // the paired machine's mutants run through the same stood-in ladder

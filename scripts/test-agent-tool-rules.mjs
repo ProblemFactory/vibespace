@@ -411,7 +411,7 @@ console.log('⑬ r3 — the publish ask rule follows the SPAWN mode (our rules n
   if (always !== rsrc) {
     const rp = M3.write('src/agent-tool-rules.js', always, 'r3-always', { esm: false, name: 'agent-tool-rules-r3-always' });
     const asrc = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf8');
-    const apatched = asrc.replace("require('../agent-tool-rules.js')", `require(${JSON.stringify(rp)})`);
+    const apatched = editAnchor(asrc, "require('../agent-tool-rules.js')", `require(${JSON.stringify(rp)})`, "src/adapters/claude-code.js");
     if (apatched !== asrc) bypassOnMutant = bypassLeg(M3.load('src/adapters/claude-code.js', apatched, 'r3-always').ClaudeCodeAdapter);
   }
   ok(bypassOnMutant === false, `r3 CONTROL: a patched copy whose verdict always injects the ask rule (r2's behaviour) FAILS the bypass leg (${bypassOnMutant}) — the r3 pin can go red`);
@@ -578,7 +578,7 @@ console.log('㉒ the third prompt\'s folder offer + a request in a person\'s wor
   const Mf = mutantCopies('agent-tool-rules-folder', REPO);
   const fsrc = fs.readFileSync(path.join(REPO, 'src/agent-tool-rules.js'), 'utf8');
   const fa = "function folderOfferFor(permission) {\n  const p = permission && typeof permission === 'object' ? permission : {};\n  if (hiddenCharsOf(p.input).length) return { updates: [], withheld: WITHHELD_HIDDEN };\n";
-  const cf = fsrc.includes(fa) ? Mf.load('src/agent-tool-rules.js', fsrc.replace(fa, "function folderOfferFor(permission) {\n  const p = permission && typeof permission === 'object' ? permission : {};\n"), 'folder-f7') : null;
+  const cf = fsrc.includes(fa) ? Mf.load('src/agent-tool-rules.js', editAnchor(fsrc, fa, "function folderOfferFor(permission) {\n  const p = permission && typeof permission === 'object' ? permission : {};\n", "src/agent-tool-rules.js"), 'folder-f7') : null;
   ok(!!cf && cf.folderOfferFor({ ...claudeRec, input: { command: 'echo a‮b' } }).updates.length === 1, '㉒ CONTROL: a copy without the folder offer\'s hidden-character screen offers the rules over a hidden-character request — the F7 cell can go red');
   // the card's words: PURE, from the command itself
   const CW = require(path.join(REPO, 'src/command-words.js'));
@@ -711,14 +711,14 @@ console.log('⑬b B-8dcf item two (ruled 2026-11-18 01:19Z): a person\'s own set
   const src = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf8');
   const A1 = "    if (!userSettingsMergeable && neutralizeKeyHelper && keyHelperNamed !== false) {", A2 = "    if (neutralizeKeyHelper && !fileGoverns) mergeSettings({ apiKeyHelper: '' });";
   if (src.split(A1).length === 2 && src.split(A2).length === 2) {
-    const W = M13.load('src/adapters/claude-code.js', src.replace(A1, '    if (false) {'), 'file-wins').ClaudeCodeAdapter;
+    const W = M13.load('src/adapters/claude-code.js', editAnchor(src, A1, '    if (false) {', "src/adapters/claude-code.js"), 'file-wins').ClaudeCodeAdapter;
     const w = run(W, { neutralizeKeyHelper: true, keyHelperNamed: true, extraArgs: file });
     ok(w.flag === FILE && !(w.set && 'apiKeyHelper' in w.set), '⑬b RED control (the billing rule): a copy where the subscription pick stands down like the three leaves the helper NOT neutralized under a file — the billing leg can go red', { flag: w.flag });
     // the unit's tip before its cure: the file set aside at EVERY subscription start, a machine naming no helper too
-    const U = M13.load('src/adapters/claude-code.js', src.replace(A1, '    if (!userSettingsMergeable && neutralizeKeyHelper) {'), 'aside-always').ClaudeCodeAdapter;   // stale-pins: kept — the RED control re-plants the unit's set-aside without the helper fact on purpose
+    const U = M13.load('src/adapters/claude-code.js', editAnchor(src, A1, '    if (!userSettingsMergeable && neutralizeKeyHelper) {', "src/adapters/claude-code.js"), 'aside-always').ClaudeCodeAdapter;   // stale-pins: kept — the RED control re-plants the unit's set-aside without the helper fact on purpose
     const u = run(U, { neutralizeKeyHelper: true, keyHelperNamed: false, extraArgs: file });
     ok(u.flag !== FILE && JSON.stringify(u.notes) !== JSON.stringify([]) && u.notes[0] !== 'outputStyle', '⑬b RED control (the cure): the set-aside without the helper fact (71e7a658e\'s rule) drops the file on a machine that names no helper — the «applies whole» leg can go red', { flag: u.flag, notes: u.notes });
-    const O = M13.load('src/adapters/claude-code.js', src.replace(A2, "    if (neutralizeKeyHelper) mergeSettings({ apiKeyHelper: '' });"), 'override-over-file').ClaudeCodeAdapter;   // stale-pins: kept — the RED control re-plants the override merged over the file on purpose
+    const O = M13.load('src/adapters/claude-code.js', editAnchor(src, A2, "    if (neutralizeKeyHelper) mergeSettings({ apiKeyHelper: '' });", "src/adapters/claude-code.js"), 'override-over-file').ClaudeCodeAdapter;   // stale-pins: kept — the RED control re-plants the override merged over the file on purpose
     const o = run(O, { neutralizeKeyHelper: true, keyHelperNamed: false, extraArgs: file });
     ok(o.flag !== FILE, '⑬b RED control: the override merged without the governs guard writes inline JSON over the person\'s file (the flag names it no more) — the «applies whole» leg can go red', { flag: o.flag });
   } else ok(false, '⑬b control needles exist');

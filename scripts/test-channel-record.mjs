@@ -316,7 +316,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     const FOLD_DECL = /^const FRAME_FOLD = '[^'\n]*';$/m;
     ok((RSRC0.match(new RegExp(FOLD_DECL.source, 'gm')) || []).length === 1, 'CONTROL setup: the folder is declared once');
     const MF = mutantCopies('chan-record-fold', REPO);
-    const cf = splitCensus(MF.load('src/channel-record.js', RSRC0.replace(FOLD_DECL, "const FRAME_FOLD = '';"), 'empty-folder'));
+    const cf = splitCensus(MF.load('src/channel-record.js', editAnchor(RSRC0, FOLD_DECL, "const FRAME_FOLD = '';", "src/channel-record.js"), 'empty-folder'));
     ok(cf.live.length >= covered.length * 4, `CONTROL: the copy with an EMPTY folder (the pre-r3 frame check) leaves ${cf.live.length} split variants live — the leg above would be red`, cf.live.slice(0, 8).join(', '));
     for (const r of copiesCensus(MF.files, MF.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
   }
@@ -405,13 +405,13 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const M7 = mutantCopies('chan-rich-d1', REPO);
   const bsrc = require('node:fs').readFileSync(path.join(REPO, 'src/channels/lark/blocks.js'), 'utf-8');
-  const pre = bsrc.replace("      if (!carriesTag(t)) return finish(sealTags(textToBlocks(t, { ordinals: mentions })), fallback);", "      return textToBlocks(t, { ordinals: mentions });");
+  const pre = editAnchor(bsrc, "      if (!carriesTag(t)) return finish(sealTags(textToBlocks(t, { ordinals: mentions })), fallback);", "      return textToBlocks(t, { ordinals: mentions });", "src/channels/lark/blocks.js");
   const Bm = M7.load('src/channels/lark/blocks.js', pre, 'pre-d1');
   const cl = Bm.larkToBlocks(CENSUS[0][1], [], { text: 'x' });
   ok(pre !== bsrc && codeFree(cl).some((x) => TAG.test(x)), 'CONTROL: the pre-lane text rung in a patched copy leaks the stored "<p>" into a block — the census above would be red on it', J(cl));
   // CONTROL (the re-stated predicate): a copy whose fence quotes nothing leaves the frame the reader assembled LIVE in the
   // text a stored record is read through (larkPlainText — recordView's rung; the tree's own schema pass is a second layer)
-  const unfenced = bsrc.replace("R.foldFrames(String(s == null ? '' : s), ", "((x) => x)(String(s == null ? '' : s), ");   // lane belt-nested-opener: the fence is the belt's fixed point
+  const unfenced = editAnchor(bsrc, "R.foldFrames(String(s == null ? '' : s), ", "((x) => x)(String(s == null ? '' : s), ", "src/channels/lark/blocks.js");   // lane belt-nested-opener: the fence is the belt's fixed point
   const cf = M7.load('src/channels/lark/blocks.js', unfenced, 'no-fence').larkPlainText(JSON.parse(CENSUS.find((c) => c[1].message_id === 'm15')[1].body.content).text);
   ok(unfenced !== bsrc && FRAME.test(cf), 'CONTROL: with the fence taken out of a copy, a frame name survives into the read text — the census above would be red on it', J(cf));
   for (const c of copiesCensus(M7.files, M7.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
@@ -585,7 +585,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const MR = mutantCopies('chan-record-names', REPO);
   const AUTH = "const author = { id: peerText(a.id, 256), name: peerName(a.name, 200) || '', isSelf: !!a.isSelf, isBot: !!a.isBot };";
   ok(RSRC.split(AUTH).length === 2, 'CONTROL setup: the author\'s name is built once');
-  const RX = MR.load('src/channel-record.js', RSRC.replace(AUTH, "const author = { id: peerText(a.id, 256), name: peerText(a.name, 200), isSelf: !!a.isSelf, isBot: !!a.isBot };"), 'author-text-door');
+  const RX = MR.load('src/channel-record.js', editAnchor(RSRC, AUTH, "const author = { id: peerText(a.id, 256), name: peerText(a.name, 200), isSelf: !!a.isSelf, isBot: !!a.isBot };", "src/channel-record.js"), 'author-text-door');
   const fx = fieldsOf(RX);
   const cx = judgeCtor(RSRC.replace(AUTH, "const author = { id: peerText(a.id, 256), name: peerText(a.name, 200), isSelf: !!a.isSelf, isBot: !!a.isBot };"));
   ok(dirty(fx['record.author.name'][0]) && cx.raw.some((x) => /^name: peerText\(a\.name/.test(x)), `CONTROL: the copy whose author name takes only the text door keeps the override and the hidden tag (${JSON.stringify(fx['record.author.name'][0])}) and the constructor census flags it`, cx.raw.join(' | '));
@@ -639,7 +639,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const KIND = "...(m && MENTION_KINDS.includes(m.kind) && m.kind !== 'person' ? { kind: m.kind } : {})";
   ok(src.includes(KIND), 'design 012: the patch site of the mention-kind control is in channel-record.js');
   const MK = mutantCopies('chan-record-slack', REPO);
-  const R2 = require(MK.write('src/channel-record.js', src.replace(KIND, '...(m && m.kind ? { kind: m.kind } : {})'), 'mkind'));
+  const R2 = require(MK.write('src/channel-record.js', editAnchor(src, KIND, '...(m && m.kind ? { kind: m.kind } : {})', "src/channel-record.js"), 'mkind'));
   const r2 = R2.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'v', at: 1, text: 'x', mentions: [{ id: 'U2', name: 'B', kind: 'admin' }] });
   ok(r2.mentions[0].kind === 'admin', 'design 012 NEGATIVE CONTROL: a copy without the closed set stores a peer-chosen kind');
 }

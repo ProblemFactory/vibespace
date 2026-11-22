@@ -485,7 +485,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
       const real = await runBranch(b, realCreate, 'real');
       ok(real.refused && real.said === 1, `B-0528 ${b.label}: the start is refused ${b.code} AND journaled ONCE by name`, real);
       ok(ksrc.split(b.drop[0]).length === 2, `B-0528 ${b.label} control setup: the branch's line is found once in src/server/browser-keeper.js`);
-      const Km = MUTK.load('src/server/browser-keeper.js', ksrc.replace(b.drop[0], b.drop[1]), `quiet-${b.label}`);
+      const Km = MUTK.load('src/server/browser-keeper.js', editAnchor(ksrc, b.drop[0], b.drop[1], "src/server/browser-keeper.js"), `quiet-${b.label}`);
       const quiet = await runBranch(b, Km.create, 'quiet');
       ok(quiet.refused && quiet.said === 0, `CONTROL (B-0528 ${b.label}): a keeper copy without the line still refuses ${b.code} — and says NOTHING (so the pin above is what holds it)`, quiet);
     }
@@ -616,7 +616,7 @@ console.log('— ⑦ lane browser-display-holders: the display record carries it
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const GATE = "    if (userStoppedRec(rec)) { log.log?.(`[browser] ${rec.profileId}: its Chrome exited after the person stopped its display window";
   ok(src.split(GATE).length === 2, 'CONTROL: the heal gate is spelled once in browser-keeper.js');
-  const Kc = MK.load('src/server/browser-keeper.js', src.replace(GATE, '    if (false) { log.log?.(`[browser] ${rec.profileId}: its Chrome exited after the person stopped its display window'), 'nogate');
+  const Kc = MK.load('src/server/browser-keeper.js', editAnchor(src, GATE, '    if (false) { log.log?.(`[browser] ${rec.profileId}: its Chrome exited after the person stopped its display window', "src/server/browser-keeper.js"), 'nogate');
   const C = await replay(Kc, 'ustop-ctl', { settleMs: 3000 });
   ok(C.after !== C.r0 && C.after.state === 'ready' && C.launches === 2 && C.jr.some((l) => /started again on the attach road \(1 in the window\)/.test(l)), `CONTROL: without the gate the person's stop is healed — a new Chrome on a new display ${C.healMs} ms after the tick (the owner's «started again on the attach road»)`, { state: C.after.state, launches: C.launches });
   await C.ku.stop(C.pP.id, { why: 'user' }).catch(() => { });
@@ -763,9 +763,9 @@ console.log('— B-346d: the child url cache key follows the browser\'s run');
   ok(bsrc3.split(keyNeedle).length === 2, 'B-346d control setup: the run in the key is found once in src/browser-profiles.js');
   const brNeedle = "  const br = rec && rec.browser && rec.browser.pid ? ':' + rec.browser.pid + '.' + (rec.browser.starttime == null ? '' : rec.browser.starttime) : '';";
   ok(bsrc3.split(brNeedle).length === 2, 'B-346d control setup: the browser\'s identity in the key is found once');
-  const By = mutantCopies('keeper-b346d-inplace', REPO).load('src/browser-profiles.js', bsrc3.replace(brNeedle, "  const br = '';"), 'no-browser-in-key');
+  const By = mutantCopies('keeper-b346d-inplace', REPO).load('src/browser-profiles.js', editAnchor(bsrc3, brNeedle, "  const br = '';", "src/browser-profiles.js"), 'no-browser-in-key');
   ok(judgeKey(By) && !judgeInPlace(By), 'CONTROL (B-346d, its verdict\'s should: the key without the browser\'s identity) ⇒ an in-place relaunch keeps the old key — RED');
-  const Bx = mutantCopies('keeper-b346d', REPO).load('src/browser-profiles.js', bsrc3.replace(keyNeedle, "  return 'child:' + h;"), 'one-key-per-conversation');
+  const Bx = mutantCopies('keeper-b346d', REPO).load('src/browser-profiles.js', editAnchor(bsrc3, keyNeedle, "  return 'child:' + h;", "src/browser-profiles.js"), 'one-key-per-conversation');
   ok(!judgeKey(Bx), 'CONTROL (B-346d, the release\'s cache: one key per conversation) ⇒ a relaunched daemon is answered with the OLD run\'s port — RED');
 }
 
