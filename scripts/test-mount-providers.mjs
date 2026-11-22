@@ -18,6 +18,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = scratch('mount-providers');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
@@ -358,7 +367,7 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     ok(Object.keys(PLANT).every((k) => process.env[k] === PLANT[k]), '⑦ the planted names reached the hub (the leg is not vacuous)');
     ok(extra.length === 0 && !Object.values(PLANT).some((v) => Object.values(e).includes(v)), '⑦ the rclone env = the service list + RCLONE_ENV_KEEP + egress + its own RCLONE_CONFIG_VS_*: no planted name or value, no stray RCLONE_CONFIG_ remote', JSON.stringify(extra));
     ok(e.RCLONE_CONFIG_VS_SECRET_ACCESS_KEY === 'SK7' && Object.keys(KEPT).every((k) => e[k] === KEPT[k]), "⑦ kept: the record's credential, the egress proxy + trust root, SSH_AUTH_SOCK (an sftp remote through ssh-agent), XDG_CACHE_HOME (rclone's default cache)", JSON.stringify(Object.keys(e)));
-    const mSpread = mountsSrc.replace('const env = rcloneEnv(cfg);', 'const env = { ...process.env, ...cfg };');
+    const mSpread = editAnchor(mountsSrc, 'const env = rcloneEnv(cfg);', 'const env = { ...process.env, ...cfg };', "src/mounts.js");
     const b = env7(MC.load('src/mounts.js', mSpread, 'env-spread').MountManager, 'spread');
     ok(mSpread !== mountsSrc && Object.keys(PLANT).every((k) => b[k] === PLANT[k]), '⑦ CONTROL: the pre-fix `{ ...process.env }` (a patched copy) hands the daemon every planted name ⇒ RED');
   } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }

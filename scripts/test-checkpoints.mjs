@@ -46,6 +46,15 @@ const BASE = 'b06f36e90'; // 2.369.407 — no checkpoints row, no door
 const require = createRequire(import.meta.url);
 let passed = 0, failed = 0, skipped = 0;
 const ok = (c, msg, why = '') => { if (c) { passed++; console.log('  ✓ ' + msg); } else { failed++; console.log('  ✗ ' + msg + (why ? ' — ' + why : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const say = (s) => console.log(s);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
@@ -266,7 +275,7 @@ say('— §5 red controls');
     if (SRC.split(from).length !== 2) { ok(false, `mutant «${name}»: its anchor is in the module exactly once`); continue; }
     const f = path.join(T, `rewind-door-m${++i}.js`);
     if (!fs.existsSync(path.join(T, 'rewind-cut.js'))) fs.copyFileSync(path.join(REPO, 'src/rewind-cut.js'), path.join(T, 'rewind-cut.js'));
-    fs.writeFileSync(f, SRC.split(from).join(to));
+    fs.writeFileSync(f, editAnchor(SRC, from, to, "src/rewind-door.js", 'join'));
     const bad = laws(require(f));
     ok(bad.some((b) => b.startsWith(law)), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
   }

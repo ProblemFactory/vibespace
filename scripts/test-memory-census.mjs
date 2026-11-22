@@ -30,6 +30,15 @@ const MB = 1048576;
 
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 // ── §1 THE ARITHMETIC ──
@@ -170,7 +179,7 @@ console.log('§4 real worker threads answer by name');
   ok(st && pools[0].stats().restarts === 0 && pools[0].stats().inflight === 0, 'the pool\'s own calls are untouched by the answers (no restart, nothing in flight)');
   const M = mutantCopies('memcensus', REPO);
   const src = read('src/safe-fs-worker.js');
-  const cut = src.replace(/\n\s*if \(answerMemory\(msg, parentPort\)\) return;[^\n]*/, '');
+  const cut = editAnchor(src, /\n\s*if \(answerMemory\(msg, parentPort\)\) return;[^\n]*/, '', "src/safe-fs-worker.js");
   const copy = M.write('src/safe-fs-worker.js', cut, 'nohandler');
   const bad = new SafeFs({ workerPath: copy, poolSize: 1, name: 'control' });
   await bad.call('stat', { path: REPO }).catch(() => null);

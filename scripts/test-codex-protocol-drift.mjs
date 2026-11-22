@@ -36,6 +36,15 @@ import { writeStub } from './codex-app-server-stub.mjs';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (cond, name, detail = '') => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail ? ' — ' + String(detail).slice(0, 600) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const SRC = read(WRAPPER);
 const ENGINE = read('src/server/usage-pool-engine.js');
@@ -134,7 +143,7 @@ console.log('— ②b the reset-credit helper (lane reset-path) judged against e
     const f = judge(table, HELPER, RULES);
     ok(f.length === 0, `codex ${version}: the helper is in step (0 findings)`, f.map((x) => `[${x.kind}] ${x.detail}`).join(' | '));
   }
-  const pre = HELPER.replace("request('account/rateLimitResetCredit/consume', { idempotencyKey })", "request('account/rateLimitResetCredit/consume', {})");
+  const pre = editAnchor(HELPER, "request('account/rateLimitResetCredit/consume', { idempotencyKey })", "request('account/rateLimitResetCredit/consume', {})", "src/codex-reset-helper.js");
   ok(pre !== HELPER && judge(NEWEST.table, pre, RULES).some((x) => x.kind === 'missing-required' && x.field === 'idempotencyKey'), 'CONTROL: a helper consume without the key is named — missing-required idempotencyKey');
 }
 console.log('— ② controls: each finding kind is produced when its drift is planted');

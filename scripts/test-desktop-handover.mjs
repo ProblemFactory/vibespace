@@ -380,7 +380,7 @@ console.log('⑦ the routes');
   const from = '  if (!DH.isMachineHandle(h)) return null;';
   ok(src.split(from).length === 2, 'the mutant anchor is the routes\' one md- test');
   const M = mutantCopies('dho', REPO);
-  const WTm = M.load('src/routes/window-targets.js', src.replace(from, '  if (!/^(md|dw)-/.test(h)) return null;'), 'dw-through');
+  const WTm = M.load('src/routes/window-targets.js', editAnchor(src, from, '  if (!/^(md|dw)-/.test(h)) return null;', "src/routes/window-targets.js"), 'dw-through');
   const srvM = await appWith(WTm, null);
   windowEngine.acts.length = 0;
   const rm = await fetch(`http://127.0.0.1:${srvM.address().port}/api/agent/window/act`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...asA }, body: J({ handle: 'dw-4242', verb: 'click', at: '5,5' }) }).then((r) => r.json());

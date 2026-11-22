@@ -438,7 +438,7 @@ console.log('\nbatch 47 cure: a producer\'s cut is a cut — only an agent\'s ow
   ok(!!oldWords && oldWords.endsWith(URL158.slice(0, 119) + '…') && J(oldLinks) === J([URL158.slice(0, 119)]),
     'RED CONTROL (the must\'s exact text): the producer\'s own cut at 119 read by the B-3f50 row (whole) — «…on https://shop.example.com/checkout/confirm?order=a1b2…» draws the TRUNCATED address as a link', { text: oldWords, links: oldLinks });
   ok(J(lk(kept(long), { whole: true })) === J([cutTok]), 'RED CONTROL: the cure\'s own producer read by the B-3f50 row (whole for every plain-words item) — the 300-cut address IS a link: the row\'s isAsk gate is what the MUST leg needs', lk(kept(long), { whole: true }));
-  const oldDetail = fileFrom(MH.load('src/server/browser-handback.js', SRC_HB.replace(NOW_D, OLD_D), 'old-detail'), c400);
+  const oldDetail = fileFrom(MH.load('src/server/browser-handback.js', editAnchor(SRC_HB, NOW_D, OLD_D, "src/server/browser-handback.js"), 'old-detail'), c400);
   ok(!!oldDetail && J(lk(oldDetail.detail, { whole: false })) === J([cutTok]), 'RED CONTROL: the old detail («What it acts on: <target>. Open…») — the cut mark sits before «.», no reading counts it, the cut address is linked on every road', oldDetail && lk(oldDetail.detail, { whole: false }));
   for (const row of copiesCensus(MH.files, MH.dir, REPO, { label: 'batch 47 cure ' })) ok(row.pass, row.name, row.detail);
 }

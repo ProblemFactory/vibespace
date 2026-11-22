@@ -21,6 +21,15 @@ const fs = require('fs');
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() { }, warn() { } };
 
 const calls = [];
@@ -65,7 +74,7 @@ console.log('§2 CONTROL: the forward without its call');
 const LINE = /\n[ \t]*sock\.setNoDelay\(true\);[^\n]*/;
 const src = fs.readFileSync(path.join(REPO, 'src/server/desktop-access.js'), 'utf8');
 ok(LINE.test(src), 'desktop-access.js carries the accept\'s call (the control removes exactly it)');
-const M = mutantCopies('picnodelay', REPO).load('src/server/desktop-access.js', src.replace(LINE, ''), 'bare');
+const M = mutantCopies('picnodelay', REPO).load('src/server/desktop-access.js', editAnchor(src, LINE, '', "src/server/desktop-access.js"), 'bare');
 const c = await run(M);
 ok(c.back && c.relay && !c.accept, 'the copy still forwards, the relay\'s call still shows — and the accept\'s is gone: the spy tells them apart', c);
 

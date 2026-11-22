@@ -14,6 +14,15 @@ const M = require('../src/job-model.js');
 const __dirname_jm = require('path').dirname(new URL(import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const B = (s) => Buffer.byteLength(s, 'utf-8');
 
 // ── permissions: no-oracle trio ──
@@ -1021,7 +1030,7 @@ console.log('B-70f9 ① cure: the folder check driven (the door, a schedule\'s f
     // RED CONTROL from the source itself (never a sha off this branch — test-ci-gate's sha law): cure 1's ask, ONE stat per ask
     const JWSRC = fs.readFileSync(path.join(__dirname_jm, '..', 'src/server/job-where.js'), 'utf8'), ONE_A = '      const r = await statOnce(key, cwd, stat, statMs);';
     ok(JWSRC.split(ONE_A).length === 2, 'control setup: the one-stat-a-mount call is in job-where.js once (the plant the control swaps)');
-    const JO = MJ.load('src/server/job-where.js', JWSRC.replace(ONE_A, '      const r = await within(Promise.resolve().then(() => stat(cwd)).then(classify, classifyErr), statMs);   /* MUTANT: cure 1 — a stat per ask */'), 'cure1');
+    const JO = MJ.load('src/server/job-where.js', editAnchor(JWSRC, ONE_A, '      const r = await within(Promise.resolve().then(() => stat(cwd)).then(classify, classifyErr), statMs);   /* MUTANT: cure 1 — a stat per ask */', "src/server/job-where.js"), 'cure1');
     calls = [];
     await ask(JO, '/mnt/nfs/c2-ca-' + process.pid, hung); await ask(JO, '/mnt/nfs/c2-cb-' + process.pid, hung); await ask(JO, '/mnt/nfs/c2-ca-' + process.pid, hung);
     ok(calls.length === 3, 'CONTROL (cure 1, its 3 s race alone, in a copy): every ask parks ONE MORE stat on the wedged mount (3 asks, 3 threads of the pool)', calls.length);

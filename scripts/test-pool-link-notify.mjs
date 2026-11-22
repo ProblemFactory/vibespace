@@ -28,6 +28,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const tick = () => new Promise((r) => setImmediate(r));
 const ROOT = scratch('badge-link');
 fs.mkdirSync(ROOT, { recursive: true });
@@ -104,7 +113,7 @@ const MUT = mutantCopies('badge-link', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
   const NOTIFY = /\n[ \t]*this\._notifyLinks\(\);[^\n]*(\n[ \t]*return link;)/;
   ok(NOTIFY.test(src) && src.match(/this\._notifyLinks\(\);/g).length === 2, 'the notify is spelled once in ensureSessionPoolLink (+ once in noteDeviceRepoint) — the control patches exactly it');
-  const { AccountManager: Pre } = MUT.load('src/accounts.js', src.replace(NOTIFY, '$1'), 'pre-fix');
+  const { AccountManager: Pre } = MUT.load('src/accounts.js', editAnchor(src, NOTIFY, '$1', "src/accounts.js"), 'pre-fix');
   const { am, B, pool, seen } = mk(Pre);
   await tick();
   seen.links = 0;

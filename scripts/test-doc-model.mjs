@@ -18,6 +18,15 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const M = require('../src/doc-model.js');
 const MD = await import(pathToFileURL(path.join(REPO, 'src/lib/doc-markdown.js')).href);
@@ -367,7 +376,7 @@ const RULES = [
 ];
 for (const [name, from, to, red] of RULES) {
   ok(msrc.includes(from), `control target present: ${name}`);
-  const X = MUT.load('src/doc-model.js', msrc.replace(from, to), name.slice(0, 12));
+  const X = MUT.load('src/doc-model.js', editAnchor(msrc, from, to, "src/doc-model.js"), name.slice(0, 12));
   ok(red(X), `CONTROL: ${name} ⇒ its table goes red`);
 }
 for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: RULES.length })) ok(c.pass, c.name, c.detail);

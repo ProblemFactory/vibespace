@@ -47,6 +47,15 @@ const CLI = path.join(REPO, 'data/bin/vibespace-job');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-jobs-addressed-'));
 const hush = (fn) => { const l = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = l; console.warn = w; } };
 const tick = (ms = 2) => new Promise((r) => setTimeout(r, ms));
@@ -179,7 +188,7 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
   const ARSRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8'), WD = "act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return jobModel.canView(job, a.caller) ? res.status(403)";
   ok(ARSRC.split(WD).length === 2, 'B-8bd5 control setup: the anchor of the control «only the filer withdraws» is in the source');
   const MJW = mutantCopies('jobs-addressed-withdraw', REPO);
-  const ARX = MJW.load('src/agent-routes.js', ARSRC.replace(WD, WD.replace('!jobModel.canEdit(', '/* MUTANT: batch 8\'s first cut — a control grant withdraws */ !jobModel.canControl(')), 'control-gate');
+  const ARX = MJW.load('src/agent-routes.js', editAnchor(ARSRC, WD, WD.replace('!jobModel.canEdit(', '/* MUTANT: batch 8\'s first cut — a control grant withdraws */ !jobModel.canControl('), "src/agent-routes.js"), 'control-gate');
   const routesX = {};
   hush(() => ARX.setupAgentRoutes({ app: { get: (p, h) => { routesX[`GET ${p}`] = h; }, post: (p, h) => { routesX[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } }, ...AR_DEPS }));
   jm.ask(job, PANEL_W);

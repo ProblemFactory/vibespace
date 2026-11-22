@@ -302,7 +302,7 @@ console.log('\n§4 controls');
   if (m3 === CDS) ok(false, '(iii) CONTROL anchor moved');
   else { const CDm = M.load('src/server/conversation-deliver.js', m3, 'cap-counts-maybe'); const ctx = await enter(CDm, 'maybeDelivered'); const got = await fire(ctx, 'cap'); ok(got.state === 'evicted', '(iii) CONTROL: the engine without r3 ④ evicts the may-have-landed entry at the cap — the cell disagrees with the table', JSON.stringify(got)); }
   // (iv) the ENGINE without the may-have-landed-first fall (r1 N2): maybeDelivered × turn-end posts it again
-  const m4 = CDS.replace("    for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !aside(x) && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });\n", "");
+  const m4 = editAnchor(CDS, "    for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !aside(x) && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });\n", "", "src/server/conversation-deliver.js");
   if (m4 === CDS) ok(false, '(iv) CONTROL anchor moved');
   else { const CDm = M.load('src/server/conversation-deliver.js', m4, 'no-maybe-fall'); const ctx = await enter(CDm, 'maybeDelivered'); R_answerOk(ctx.R); const got = await fire(ctx, 'turn-end'); ok(got.posted === true && got.state !== 'stashed', '(iv) CONTROL: the engine without the may-have-landed fall posts the entry again at a turn end (two billed turns) — the cell disagrees', JSON.stringify(got)); }
 }

@@ -20,6 +20,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return Date.now() - t0; await sleep(15); } return -1; };
 
@@ -107,7 +116,7 @@ console.log('§3 the env fallback, unchanged');
   const src = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf-8');
   const anchor = "    const fromFile = clusterPresets.sharedPresets().entries('gdrive');";
   ok(src.includes(anchor), 'the control\'s anchor exists in mounts.js');
-  const old = M.load('src/mounts.js', src.replace(anchor, '    const fromFile = null;'), 'envonly');
+  const old = M.load('src/mounts.js', editAnchor(src, anchor, '    const fromFile = null;', "src/mounts.js"), 'envonly');
   ok(old.MountManager.drivePresets().map((c) => c.key).join() === 'envonly' && MountManager.drivePresets().map((c) => c.key).join() === 'org1', 'CONTROL: the env-only reader serves the env\'s boot-time list while the directory offers org1 — the §1/§2 asserts are red on it');
   delete process.env.VIBESPACE_GDRIVE_CLIENTS;
 }

@@ -490,7 +490,7 @@ async function killedLegs(MM, tag) {   // the merged B-f230: a hung process stop
   const lsrc = fs.readFileSync(path.join(REPO, 'src/mount-liveness.js'), 'utf8');
   const fromC = "  const still = !!(w && w.list && w.list.state === 'hung' && w.list.held);";
   ok(lsrc.includes(fromC), '⑦ the held-chain anchor exists');
-  const LC = require(MC.write('src/mount-liveness.js', lsrc.replace(fromC, '  const still = false;'), 'noheld'));
+  const LC = require(MC.write('src/mount-liveness.js', editAnchor(lsrc, fromC, '  const still = false;', "src/mount-liveness.js"), 'noheld'));
   const hc = heldSeq(LC);
   ok(hc[1].state.wedged === 0 && hc[1].strikes.n === 0 && !hc[3].teardown, '⑦ CONTROL: the held chain removed ⇒ «hung (still)» resets to 0/0 and the wedge never parks (red)', JSON.stringify(hc.map((v) => [v.verdict, v.strikes])));
 }

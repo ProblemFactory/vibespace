@@ -94,7 +94,7 @@ console.log('§1 the verdict — the full matrix (192 rows) against the design\'
   const src = read('src/lib/desktop-seamless.js');
   const pauses = "  if (phone) return { seamless: false, why: 'phone' };\n  if (!connected) return { seamless: false, why: 'disconnected' };\n  if (lease) return { seamless: false, why: 'lease' };\n  if (chain) return { seamless: false, why: 'chain' };\n";
   ok(src.split(pauses).length === 2, 'the four pauses are spelled once, in order (the control removes exactly them)');
-  const Mnaive = await import(pathToFileURL(MUT.write('src/lib/desktop-seamless.js', src.replace(pauses, ''), 'nopause')).href);
+  const Mnaive = await import(pathToFileURL(MUT.write('src/lib/desktop-seamless.js', editAnchor(src, pauses, '', "src/lib/desktop-seamless.js"), 'nopause')).href);
   const badN = judge(Mnaive);
   ok(badN.length > 0 && badN.some((b) => b.r.lease && b.v.seamless), `CONTROL: the pause-less verdict fails the matrix (${badN.length} rows — e.g. an agent lease left seamless)`);
 }

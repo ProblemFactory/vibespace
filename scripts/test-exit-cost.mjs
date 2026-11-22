@@ -441,7 +441,7 @@ console.log('⑥ U3 — the amplifier law: a slow hub is never sent more request
   const NEW = `    const waitNote = setTimeout(() => console.error("# waiting for the user's approval (up to 60 s) if the machine asks… — an approval card in this conversation and in the For-you tray"), 1000);\n`;
   const OLD = "    const waitNote = setTimeout(async () => {\n      try {\n        const res = await CC.call(api + '/api/agent/exit', { headers: { Authorization: 'Bearer ' + token }, onExpiry: 'throw' });\n        const { exits } = res.ok ? await res.json() : { exits: [] };\n        const r0 = String(machine || '').toLowerCase();\n        const hit = (exits || []).filter((e) => !r0 || e.id === machine || String(e.name).toLowerCase().includes(r0));\n        if (hit.some((e) => e.grants && e.grants.runAsk)) console.error(\"# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray\");\n      } catch { }\n    }, 1000);\n";
   if (cliSrc.split(NEW).length !== 2) throw new Error("the control's anchor moved in data/bin/vibespace-exit — update this suite");
-  const copy = M.write('data/bin/vibespace-exit', cliSrc.replace(NEW, OLD), 'oldnote');
+  const copy = M.write('data/bin/vibespace-exit', editAnchor(cliSrc, NEW, OLD, "data/bin/vibespace-exit"), 'oldnote');
   const TA = 'vsst_' + 'a'.repeat(24), TB = 'vsst_' + 'b'.repeat(24);
   const [now, old] = await Promise.all([runCli(path.join(REPO, 'data/bin/vibespace-exit'), TA), runCli(copy, TB)]);   // side by side: one wait, not two
   const nowAsked = logs.get(TA) || [], oldAsked = logs.get(TB) || [];
