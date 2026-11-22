@@ -716,6 +716,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // it parses as, its state is unknown, and an act appended straight onto it would GLUE to it (both gone at the next
     // load). So the next journal write re-establishes a whole tail first — the compaction — before any act is appended.
     const openTail = !!text && text.length > 0 && text[text.length - 1] !== '\n';
+    // 主开发 r2455 (5): this is also what makes a purge's owed compaction survive a restart — the purged rows' older lines are
+    // lines the index holds (seq ≤ actsSeq): skipped here, never read back, and the journal's NEXT write is the compaction that drops them
     if (skippedHeld || unreadable || wrongShape || backwards || openTail || wrongTop) compactOwed = true;   // the next journal write is a compaction (what is not applied is never kept)
     // B-360d unit 1: replayed acts owe NO whole write — the journal holds them (the bound or a stop folds them)
     if (actsReplayed || unreadable || wrongShape || backwards || openTail || partialRows || wrongTop) warn(`[channels] index-acts.ndjson: ${actsReplayed} act${actsReplayed === 1 ? '' : 's'} the index did not hold yet replayed${openTail ? '; its last line had no newline (a write that may not have finished) — the journal is written whole before the next act' : ''}${partialRows ? `; ${partialRows} row${partialRows === 1 ? '' : 's'} not a whole conversation row (no key of its own) applied as written` : ''}${wrongTop ? `; ${wrongTop} top-level table${wrongTop === 1 ? '' : 's'} of another type than the index's own not applied (the index's kept)` : ''}${unreadable ? `; ${unreadable} line${unreadable === 1 ? '' : 's'} not readable dropped (a line cut short — a write that did not finish)` : ''}${wrongShape ? `; ${wrongShape} line${wrongShape === 1 ? '' : 's'} of JSON that is not an act's (no seq, no rows of rows) dropped` : ''}${backwards ? `; ${backwards} out of order dropped` : ''}${skippedHeld ? `; ${skippedHeld} the index already holds skipped` : ''}`);
@@ -1400,6 +1402,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // B-f276 1c (its read r1 M3, the meeting): an index held because a file of its came that is NOT its own answers BY NAME (EEXIST) — never
     // null: a durable act waits on THIS file now, and null would tell it «done»
     if (ixLoad.blocked && ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST' });
+    // 主开发 r2455 (6): no leg reaches this LATER — the index family is big (no adopt): a hold lasts the process's life and is
+    // set at the start (before any waiter) or as «appeared» (answered by name above); no reachable scene queues a waiter, THEN holds
     if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }   // r1763 (2): never «nothing to write» — the writer would read it as settled and tell a waiter done; its waiters wait (the writer's bound answers them «not on disk yet»)   // r1542's law: the journal stands behind the index's hold
     // law 10: NO JOURNAL JOB CARRIES MORE THAN THE BOUND — past it (the storage did not take the lines in time) the index's
     // whole write FOLDS them (its landing drops the lines it holds) and this file waits (LATER: its waiters wait — a job
@@ -2304,6 +2308,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const attDir = (adapterId, convId) => path.join(attRoot, safeSeg(adapterId), safeSeg(convId));
   const lruFile = (adapterId) => path.join(attRoot, safeSeg(adapterId), 'lru.json');
   const lruCache = new Map();   // adapterId -> ledger (read once, written atomically)
+  const purgeSeq = new Map();   // adapterId -> how many times its local copy was purged (主开发 r2557 (2): an async read across a purge answers nothing)
   function lruOf(adapterId) {
     let l = lruCache.get(adapterId);
     if (l) return l;
@@ -2466,19 +2471,23 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  pool, the account's LRU ledger read the same way at its first use. For ingest's road (persistHeldBodies). */
   async function lruOfAsync(adapterId) {
     if (lruCache.has(adapterId)) return lruCache.get(adapterId);
+    const ep = purgeSeq.get(adapterId) || 0;
     let l = null;
     try { l = JSON.parse(await fs.promises.readFile(lruFile(adapterId), 'utf-8')); } catch { l = null; }
+    if ((purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): the account was purged during the read — its ledger is never put back (a hit would make its folder again)
     if (lruCache.has(adapterId)) return lruCache.get(adapterId);   // a synchronous first read won meanwhile
     if (!l || typeof l !== 'object' || !l.items || typeof l.items !== 'object') l = { v: 1, items: {} };
     lruCache.set(adapterId, l);
     return l;
   }
   async function attachmentGetAsync(adapterId, convId, attId, msg = null) {
+    const ep = purgeSeq.get(adapterId) || 0;
     const file = path.join(attDir(adapterId, convId), attSlot(attId, msg));
     let meta;
     try { meta = JSON.parse(await fs.promises.readFile(file + '.json', 'utf-8')); } catch { return null; }
     try { await fs.promises.stat(file); } catch { return null; }
     const l = await lruOfAsync(adapterId);
+    if (!l || (purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): purged during the wait — no answer, no touch
     const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];
     if (hit) { hit.usedAt = now(); lruTouch(adapterId); }   // attachmentGet's touch on the async road, in words of its own (test-channels-images anchors the synchronous one)
     return { file, meta };
@@ -2936,6 +2945,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     for (const k of [...stampMap.keys()]) if (String(k).startsWith(pre)) { stampMap.delete(k); stampsDirty = true; }
     lruCache.delete(adapterId);
     lruDirty.delete(adapterId);
+    purgeSeq.set(adapterId, (purgeSeq.get(adapterId) || 0) + 1);
     const gone = (p) => { const had = fs.existsSync(p); try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* reported below */ } return had && !fs.existsSync(p); };
     return { logs: gone(path.join(msgsDir, seg)), files: gone(path.join(attRoot, seg)) };
   }

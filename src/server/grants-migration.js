@@ -42,7 +42,7 @@ function readStore(dataDir, rel) {
   const file = path.join(dataDir, rel);
   try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch (e) {
     if (e && e.code === 'ENOENT') return null;
-    throw new Error(`data/${rel} is unreadable (${e.message}) — the grants were not carried over; nothing was written`);
+    throw new Error(`data/${rel} is unreadable (${(e && e.code) || 'not a whole JSON document'}) — the grants were not carried over; nothing was written`);
   }
 }
 /** The pre-unify reader of a browser profile's "Who can use it" (2.369.344 `whoMayUse`, kept here for the check). */
@@ -170,7 +170,7 @@ function plan({ dataDir, channelIndex = null, resolveBrowserKey = () => null, li
 
   // ── channels ──
   // B-360d unit 1 (law 8): the index FAMILY (index.json + its journal), never index.json alone (it lags its journal)
-  const ix = channelIndex || (() => { try { return require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch (e) { throw new Error(`data/channels/${(e && e.file) || 'index.json'} is unreadable (${e.message}) — the grants were not carried over; nothing was written`); } })();
+  const ix = channelIndex || (() => { try { return require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch (e) { throw new Error(`data/channels/${(e && e.file) || 'index.json'} is unreadable (${(e && e.code) || 'not a whole JSON document'}) — the grants were not carried over; nothing was written`); } })();
   for (const d of ['channel-reach', 'channel-watch', 'channel-api']) tally(d);
   if (ix && typeof ix === 'object') {
     const ch = ChannelsGrants.rowsOfChannelIndex(ix, { F });

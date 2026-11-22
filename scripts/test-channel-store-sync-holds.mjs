@@ -93,6 +93,25 @@ async function memoLeg(mod, tag) {
   const MS = M.load('src/channel-store.js', anchored(SRC, "    owe(file, { name: 'channels-search-memo.write', produce: memoBytes(file), mode: 0o600, makeDir: true });", "    fs.mkdirSync(path.join(dir, safeSeg(adapterId)), { recursive: true, mode: 0o700 });\n    writeJsonAtomic(file, obj, { mode: 0o600 });", 'the release\'s memo door'), 'memo-sync');
   const red = await memoLeg(MS, 'memo-red');
   ok(red.sync.some((x) => /^mkdirSync/.test(x)) && red.sync.some((x) => /^renameSync/.test(x)), `① RED CONTROL: the release's search-memo door — ${red.sync.length} synchronous calls on the main thread (${red.sync.join(' ')}) — the leg above would go red`, red.sync);
+  // 主开发 r2557 (3): the feed's miss door, a red of its OWN (the release's form: the folder and an atomic write on the main thread)
+  const FMS = M.load('src/channel-store.js', anchored(SRC, "    owe(file, { name: 'channels-feed-miss.write', produce: memoBytes(file), mode: 0o600, makeDir: true });", "    fs.mkdirSync(path.join(dir, safeSeg(adapterId)), { recursive: true, mode: 0o700 });\n    writeJsonAtomic(file, obj, { mode: 0o600 });", 'the release\'s feed-miss door'), 'feed-sync');
+  const fred = await memoLeg(FMS, 'feed-red');
+  ok(fred.sync.some((x) => /^renameSync\(feed-misses\.json/.test(x)), `① RED CONTROL: the release's feed-miss door — ${fred.sync.length} synchronous calls on the main thread (${fred.sync.join(' ')}) — the leg above would go red`, fred.sync);
+  // 主开发 r2557 (3): THE FOLDER IS MADE OFF THE MAIN THREAD — the main thread's mkdirSync of the account's folder counted across the
+  // door AND its landing (the writer's thread is another realm): none, and the folder is there once the write landed
+  const dirLeg = async (mod, tag) => {
+    const dir = tmp(tag), w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+    const f1 = path.join(dir, 'acct2', 'search-memo.json');
+    const c = await syncCalls(async () => { st.searchMemoWrite('acct2', { v: 1, entries: [] }); await w.durable(f1); });
+    const made = fs.existsSync(path.dirname(f1));
+    try { st.close(); } catch { } try { w.stop(); } catch { }
+    return { mk: c.seen.filter((x) => x === 'mkdirSync(acct2)').length, made };
+  };
+  const dl = await dirLeg(CS, 'dir');
+  ok(dl.mk === 0 && dl.made, `① the account's folder is made by the writer's thread: ${dl.mk} mkdirSync of it on the main thread across the door and its landing; the folder there (${dl.made})`, dl);
+  const DM = M.load('src/channel-store.js', anchored(SRC, "    memoHeld.set(file, obj);\n    owe(file, { name: 'channels-search-memo.write'", "    memoHeld.set(file, obj);\n    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });\n    owe(file, { name: 'channels-search-memo.write'", 'the folder made on the main thread'), 'dir-main');
+  const dlr = await dirLeg(DM, 'dir-red');
+  ok(dlr.mk >= 1, `① RED CONTROL: the door that makes the folder on the main thread — ${dlr.mk} mkdirSync — the leg above would go red`, dlr);
 }
 
 // ═══ ③ + ④ INGEST'S QUESTION ═══
@@ -129,9 +148,48 @@ async function attLeg(mod, tag) {
   };
   const lr = await lruLeg(CS, 'lru');
   ok(lr.refreshed, `③ the async road's hit refreshes the LRU entry (usedAt ${lr.used})`, lr);
-  const LM = M.load('src/channel-store.js', anchored(SRC, "    const l = await lruOfAsync(adapterId);\n    const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];\n    if (hit) { hit.usedAt = now(); lruTouch(adapterId); }", "    const l = await lruOfAsync(adapterId);\n    const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];\n    void hit;", 'the async hit touches no LRU'), 'no-lru');
+  const LM = M.load('src/channel-store.js', anchored(SRC, "    const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];\n    if (hit) { hit.usedAt = now(); lruTouch(adapterId); }", "    const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];\n    void hit;", 'the async hit touches no LRU'), 'no-lru');
   const lrr = await lruLeg(LM, 'lru-red');
   ok(!lrr.refreshed, `③ RED CONTROL: an async hit that touches no LRU entry — usedAt stays ${lrr.used} — the leg above would go red`, lrr);
+  // 主开发 r2557 (3): the async question for a meta whose BYTES are missing (null, as attachmentGet), and two questions at once on a
+  // fresh store (the same answers as attachmentGet)
+  const edgeLeg = async (mod, tag) => {
+    const dir = tmp(tag);
+    { const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+      await st.attachmentPut('gmail', 'thr_1', 'part:1', { msg: 'm1', data: Buffer.from('one'), mime: 'text/plain' });
+      const b = await st.attachmentPut('gmail', 'thr_1', 'part:2', { msg: 'm1', data: Buffer.from('two'), mime: 'text/plain' });
+      try { st.close(); } catch { } try { w.stop(); } catch { }
+      fs.rmSync(b.file, { force: true }); }   // part:2 keeps its meta; its bytes are gone
+    const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+    const both = await Promise.all([st.attachmentGetAsync('gmail', 'thr_1', 'part:1', 'm1'), st.attachmentGetAsync('gmail', 'thr_1', 'part:1', 'm1')]);
+    const gone = await st.attachmentGetAsync('gmail', 'thr_1', 'part:2', 'm1');
+    const want = st.attachmentGet('gmail', 'thr_1', 'part:1', 'm1'), wantGone = st.attachmentGet('gmail', 'thr_1', 'part:2', 'm1');
+    try { st.close(); } catch { } try { w.stop(); } catch { }
+    return { same: !!want && both.every((x) => x && x.file === want.file && JSON.stringify(x.meta) === JSON.stringify(want.meta)), gone, wantGone };
+  };
+  const eg = await edgeLeg(CS, 'edges');
+  ok(eg.same && eg.gone === null && eg.wantGone === null, `③ two async questions at once answer as attachmentGet (${eg.same}); a meta whose bytes are gone answers null on both roads (${JSON.stringify(eg.gone)} / ${JSON.stringify(eg.wantGone)})`, eg);
+  const BG = M.load('src/channel-store.js', anchored(SRC, '    try { await fs.promises.stat(file); } catch { return null; }', '    void 0;', 'the async question blind to missing bytes'), 'bytes-blind');
+  const egr = await edgeLeg(BG, 'edges-red');
+  ok(egr.gone !== null, '③ RED CONTROL: the async question that does not look for the bytes — a meta whose bytes are gone answered — the leg above would go red', egr);
+  // 主开发 r2557 (2): a PURGE during the async question's wait (inside the ledger's read) — no answer, no touch, and the purged
+  // account's attachments folder is NOT made again (its ledger never put back)
+  const purgeLeg = async (mod, tag) => {
+    const dir = tmp(tag);
+    { const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+      await st.attachmentPut('gmail', 'thr_1', 'part:1', { msg: 'm1', data: Buffer.from('body'), mime: 'text/plain' }); try { st.close(); } catch { } try { w.stop(); } catch { } }
+    const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+    const r0 = fs.promises.readFile; let purged = false;
+    fs.promises.readFile = async function (f, ...x) { const out = await r0.call(this, f, ...x); if (!purged && path.basename(String(f)) === 'lru.json') { purged = true; st.purgeAccount('gmail'); } return out; };
+    let ans; try { ans = await st.attachmentGetAsync('gmail', 'thr_1', 'part:1', 'm1'); } finally { fs.promises.readFile = r0; }
+    try { st.close(); } catch { } try { w.stop(); } catch { }
+    return { purged, ans, remade: fs.existsSync(path.join(dir, 'attachments', 'gmail')) };
+  };
+  const pg = await purgeLeg(CS, 'purge');
+  ok(pg.purged && pg.ans === null && !pg.remade, `⑤ a purge during the async question's ledger read: answer ${JSON.stringify(pg.ans)}; the purged account's attachments folder made again: ${pg.remade}`, pg);
+  const PM = M.load('src/channel-store.js', anchored(anchored(SRC, "    if ((purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): the account was purged during the read", "    void 0;   // 主开发 r2557 (2): the account was purged during the read", 'the ledger put back'), "    if (!l || (purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): purged during the wait", "    if (!l) return null;   // 主开发 r2557 (2): purged during the wait", 'the answer across a purge'), 'purge-blind');
+  const pgr = await purgeLeg(PM, 'purge-red');
+  ok(pgr.purged && pgr.remade, `⑤ RED CONTROL: the async road blind to a purge during its wait — the purged account's folder made again (${pgr.remade}) — the leg above would go red`, pgr);
   const i = ENGSRC.indexOf('  async function persistHeldBodies('), body = i < 0 ? '' : ENGSRC.slice(i, ENGSRC.indexOf('\n  }\n', i));
   ok(body.includes('await store.attachmentGetAsync(rec.id, convId, a.id, r.vendorId)') && !body.includes('store.attachmentGet('), '④ the engine\'s held-bodies road (persistHeldBodies, at ingest) asks attachmentGetAsync, never the synchronous attachmentGet');
 }

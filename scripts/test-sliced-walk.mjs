@@ -160,7 +160,10 @@ const placedRight = (r) => r.rows['gmail/thr_1'].title === 'changed after its ch
   const r = await layoutLeg(SM, 'b2-red', placeRows);
   ok(!r.same && !placedRight(r), `(b2) RED CONTROL: a layout whose landing forgets the rows touched during it writes a file that is NOT the whole serialization (the placed rows lost) — the leg above would go red`, { same: r.same });
   const SN = M.load('src/channel-store.js', anchored(src, 'return LATER; }', 'return null; }', 'the store answers «equal to the disk» while its layout is built'), 'later-null');
-  const rn = await layoutLeg(SN, 'b3-red');
+  // the smalls unit's gate (box zone): the red raced its own premise — when the sliced warm-up landed before the fold's produce,
+  // the produce wrote whole and the red read as the cure. The warm-up is HELD at its first slice (300 ms) so the fold's produce
+  // always meets the layout still being built
+  const rn = await layoutLeg(SN, 'b3-red', () => new Promise((z) => setTimeout(z, 300)));
   ok(rn.landed === true && rn.rows['gmail/thr_1'].unread !== 9, `(b3) RED CONTROL: a store answering the writer «nothing to write» (null) while its layout is built — durable() resolves TRUE with the changed row NOT on disk — the leg above would go red`, { landed: rn.landed, unread: rn.rows['gmail/thr_1'].unread });
 }
 /** (b4) a laid-out index, then a mass of touched rows (more than the bound): their chunks re-serialized in slices */

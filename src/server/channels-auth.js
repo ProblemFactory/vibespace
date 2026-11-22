@@ -1200,6 +1200,7 @@ function create(engineCtx) {
     notify([]);
     // B-360d unit 1, 主开发 r1542 (1): «forget its data» whose journal could not be rewritten now says so to the PERSON — removed,
     // with bytes of it still in the index's journal on disk until the storage takes the retry (never only a log line and an audit row)
+    // `note`: a LOG-GRADE field, English only (主开发 r2455) — the panel words journalOwed from its own tr() key, in every language
     if (purged && purged.purged && purged.journalClean === false) return { ok: true, removed: true, id: rec.id, journalOwed: true, note: 'removed — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write' };
     return { ok: true, removed: true, id: rec.id };
   }

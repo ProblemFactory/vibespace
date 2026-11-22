@@ -478,20 +478,34 @@ async function heldLeg(mod, tag) {
   const o = open(mod, dir);
   const held = !!o.st.index.blocked();
   const refused = await o.st.index.update(() => { o.st.index.entry('a', 'c2').title = 'during the hold'; }).then(() => 'applied', (e) => e && e.code);
+  // 主开发 r2455 (1): THE OUTSIDE ROAD's own guards — a change outside an update and a whole touch outside one ask the writer
+  // NOTHING while the index is held (the refusal said once): the writer's asks for the family counted across them
+  const asks = [], d0 = o.w.dirty; o.w.dirty = function (file, opts) { asks.push(path.basename(file)); return d0.call(this, file, opts); };
   try { o.st.index.entry('a', 'c3').title = 'outside an update'; } catch { }   // a change outside an update: the index's own write refuses it
+  try { o.st.index.touch('a/no-such-row'); } catch { }   // a whole touch outside an update (a touch of a row not in the map)
   await Promise.resolve(); await new Promise((z) => setImmediate(z));
+  o.w.dirty = d0;
+  const outsideAsks = asks.filter((f) => f === 'index.json' || f === 'index-acts.ndjson').length;
   const js = o.st.index.journalStats();
   const fold = await o.st.index.fold().then(() => 'landed', (e) => e && e.code), jd = await o.st.index.journalDurable().then(() => 'landed', (e) => e && e.code);
   const chunks = o.st.index.flushStats().chunks;
   try { o.st.index.flush(); } catch { }
   shut(o);
-  return { held, refused, lines: js.lines, actSeq: js.actSeq, fold, jd, chunks, ixSame: fs.readFileSync(ixf).equals(ix0), afSame: fs.readFileSync(af).equals(af0) };
+  return { held, refused, lines: js.lines, actSeq: js.actSeq, fold, jd, chunks, outsideAsks, ixSame: fs.readFileSync(ixf).equals(ix0), afSame: fs.readFileSync(af).equals(af0) };
 }
 {
   const r = await heldLeg(CS, 'held');
-  ok(r.held && r.refused === 'store-blocked' && r.lines === 0 && r.fold === 'store-blocked' && r.jd === 'store-blocked' && r.chunks === 0 && r.ixSame && r.afSame,
+  ok(r.held && r.refused === 'store-blocked' && r.lines === 0 && r.fold === 'store-blocked' && r.jd === 'store-blocked' && r.chunks === 0 && r.outsideAsks === 0 && r.ixSame && r.afSame,
     `⑫ THE HOLD: index.json damaged — the family held (${r.held}); an update refused by name (${r.refused}); a change outside an update made no journal line (${r.lines} lines); fold() ${r.fold}, journalDurable() ${r.jd}; no warm-up (${r.chunks} chunks laid out); after the stop index.json and the journal are byte-identical (${r.ixSame} · ${r.afSame})`, r);
   const HM2 = M.load('src/channel-store.js', anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'the journal deaf to the hold'), "if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; }", "if (closed || !o.size) return;", 'the outside road deaf to the hold'), 'held-lines');
+  // 主开发 r2455 (1): a red of their OWN for the outside road's two guards — each cut ALONE (actOf's guard kept): the writer asked
+  ok(r.outsideAsks === 0, `⑫ while held, a change outside an update and a whole touch outside one asked the writer ${r.outsideAsks} time(s) for the family`, r);
+  const OG = M.load('src/channel-store.js', anchored(SRC, 'if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; } ', 'if (closed || !o.size) return; ', 'the outside road deaf to the hold'), 'held-outside');
+  const rog = await heldLeg(OG, 'held-outside-red');
+  ok(rog.outsideAsks >= 1, `⑫ RED CONTROL: the outside road's own guard alone removed — the writer asked ${rog.outsideAsks} time(s) for the held family — the leg above would go red`, rog);
+  const TG = M.load('src/channel-store.js', anchored(SRC, 'if (!closed && !ixLoad.blocked) oweWhole(); } }', 'if (!closed) oweWhole(); } }', 'a whole touch outside an update deaf to the hold'), 'held-touchall');
+  const rtg = await heldLeg(TG, 'held-touchall-red');
+  ok(rtg.outsideAsks >= 1, `⑫ RED CONTROL: the whole touch's hold guard alone removed (touchAll) — the writer asked ${rtg.outsideAsks} time(s) for the held family — the leg above would go red`, rtg);
   // r1763 (3): a red for each guard that can bite on this road — fold() and journalDurable() refused by name
   const FG = M.load('src/channel-store.js', anchored(SRC, 'if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); markDirty(true); return W().durable(indexFile); }', 'markDirty(true); return W().durable(indexFile); }', 'fold deaf to the hold'), 'held-fold');
   const rfg = await heldLeg(FG, 'held-fold-red');
@@ -714,7 +728,7 @@ async function stopLeg(mode, tag) {
   ok(red.ready && red.kept < 10, `⑭ RED CONTROL: an exit after the rank-0 pass alone — ${red.kept} of 10 paced changes on disk (paced lines are rank 1) — the leg above would go red`, red);
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const i0 = srv.indexOf("SW0.beginExit(); SW0.exitFlush({ only: 'rank0' });"), i1 = srv.indexOf("storeWriter().exitFlush({ debtMs: Date.now() - tDebt }); } catch {} process.exit(", i0);
-  ok(i0 > 0 && i1 > i0, '⑭ the hub\'s shutdown (server.js) runs that order: beginExit and the rank-0 pass, then the last pass over every store before its exit');
+  ok(i0 > 0 && i1 > i0, '⑭ the hub\'s shutdown (server.js) runs that order: beginExit and the rank-0 pass, then the last pass over every store before its exit — this leg proves the WRITER\'s two passes (a copy of them in a child), not the hub\'s whole order: server.js runs its other stops between them (channelsWiring.shutdown() closes this store there), which this child does not (主开发 r2455 (3))');
 }
 
 // ═══ ⑯ THE INDEX APPEARS MID-LIFE (主开发 r1763 (3)): the older life's journal stays byte for byte ═══
@@ -911,6 +925,37 @@ async function inRowStampLeg(mod, tag) {
   const BM = M.load('src/channel-store.js', anchored(SRC, '    const healBatch = healing === null; if (healBatch) healing = [];\n', '    const healBatch = false;\n', 'the update\'s heals one append a row'), 'heal-unbatched');
   const b2 = await batchLeg(BM, 'inrow-batch-red');
   ok(b2.appends === 5 && b2.taken, `⑱ RED CONTROL: the update's heals unbatched — ${b2.appends} appends for the same five rows — the leg above would go red`, b2);
+}
+
+// ═══ ⑬ (g) THE PANEL'S WARNING (主开发 r2455 (4)): a removal whose journal is owed is SAID to the person — the dialog's branch ═══
+console.log('⑬ (g) the account dialog says a removal whose journal is owed (its branch, before the plain «Removed»)');
+{
+  const DLG = fs.readFileSync(path.join(REPO, 'src/lib/channel-account-dialogs.js'), 'utf8');
+  const KEY = 'Removed "{name}" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write';
+  const BR = `  if (r && r.journalOwed) { showToast(tr('${KEY}', { name }), { type: 'warn', duration: 9000 }); return true; }\n`;
+  const PLAIN = `  showToast(tr('Removed "{name}"', { name }));\n`;
+  const tables = ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8'));
+  const pin = (src) => src.split(BR).length === 2 && src.indexOf(BR) < src.indexOf(PLAIN) && tables.every((t) => t.includes(JSON.stringify(KEY) + ':'));
+  ok(pin(DLG), '⑬ (g) the dialog answers journalOwed with its own warning (a warn toast, 9 s) BEFORE the plain «Removed», and its words are in the zh and ja tables');
+  ok(!pin(anchored(DLG, BR, '', 'the dialog without its warning')), '⑬ (g) RED CONTROL: the dialog without its journalOwed branch — the pin above would go red');
+}
+
+// ═══ ⑲ THE GRANTS MIGRATION's REFUSAL (主开发 r2455 (2)): the file's NAME and the error's CODE — never an fs error's message,
+// which carries the data folder's absolute path ═══
+console.log('⑲ the grants migration refusing an unreadable index family: its name and its code, no path');
+{
+  const GMSRC = fs.readFileSync(path.join(REPO, 'src/server/grants-migration.js'), 'utf8');
+  const refusal = (mod, tag) => {
+    const dir = tmp(tag); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'channels', 'index.json'), JSON.stringify({ v: 1, conversations: {} }));
+    fs.symlinkSync('index-acts.ndjson', path.join(dir, 'channels', 'index-acts.ndjson'));   // a link to itself: ELOOP at its read (an fs error whose message names the path)
+    try { mod.plan({ dataDir: dir }); return { msg: null, dir }; } catch (e) { return { msg: String((e && e.message) || e), dir }; }
+  };
+  const g = refusal(require(path.join(REPO, 'src/server/grants-migration.js')), 'grants-refusal');
+  ok(!!g.msg && /data\/channels\/index-acts\.ndjson is unreadable \(ELOOP\)/.test(g.msg) && !g.msg.includes(g.dir), `⑲ an unreadable journal refuses the grants migration by the file's name and the error's code, with no path of the data folder («${(g.msg || '').slice(0, 140)}»)`, g);
+  const GR = M.load('src/server/grants-migration.js', anchored(GMSRC, "data/channels/${(e && e.file) || 'index.json'} is unreadable (${(e && e.code) || 'not a whole JSON document'})", "data/channels/${(e && e.file) || 'index.json'} is unreadable (${e.message})", 'the release\'s refusal (the message)'), 'grants-message');   // stale-pins: kept (the red puts the release's refusal back)
+  const gr = refusal(GR, 'grants-refusal-red');
+  ok(!!gr.msg && gr.msg.includes(gr.dir), '⑲ RED CONTROL: the release\'s refusal (the error\'s message) puts the data folder\'s absolute path into the run\'s words — the leg above would go red', gr);
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
