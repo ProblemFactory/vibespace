@@ -1336,7 +1336,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (t.size > BURST_ROWS) { flushStats.bursts = (flushStats.bursts || 0) + 1; return 'whole'; }   // law 4: never even compared
     const conv = ix.conversations, rows = [], fps = [];
     let bytes = 0;
-    for (const k of t) {
+    // 主开发 r2287 (2): the update's heals are ONE append to poll-stamps.log, as the load's (healRow pushes to `healing`) — taken
+    // on every road out of the loop, a burst's included (the rows healed before it keep their stamps in the journal)
+    const healBatch = healing === null; if (healBatch) healing = [];
+    try { for (const k of t) {
       if (String(k).startsWith('_')) continue;
       // ↑ a key beginning with '_' is RUNTIME ONLY: the index file never holds it (rowLine and INDEX_KEYS drop it), so its journal
       // drops it too — the release's durable line wrote one, and its replay brought it back only until the next whole write
@@ -1356,7 +1359,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (bytes > BURST_BYTES) { flushStats.bursts = (flushStats.bursts || 0) + 1; return 'whole'; }   // law 4: a burst is one whole write
       rows.push(`${JSON.stringify(k)}:${s0 === null ? 'null' : s0}`);
       fps.push([k, f]);
-    }
+    } } finally { if (healBatch) { const took = healing; healing = null; if (took.length) journal(took); } }
     if (persistedTop === null) persistedTop = topCmp();   // the top as loaded (base + journal)
     // the top (every top-level table stringified) compared only when the update reached one (its view, table()) or for a
     // durable act (the release's own compare) — never per quiet poll update (the read of c6ec90b73)

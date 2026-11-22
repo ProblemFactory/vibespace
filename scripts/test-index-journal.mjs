@@ -37,7 +37,8 @@
 //   ⑤ LAW 7 — A ROLLBACK FINDS EVERYTHING: the RELEASE'S OWN replay (scripts/fixtures/release-index-replay.cjs, frozen) over
 //      every kill copy equals the new store's map; after close(), index.json alone equals it.
 //   ⑱ AN IN-ROW STAMP (主开发 r2081): a poll stamp written into the row past the door reaches the stamp journal at the
-//      update's end — a kill before any fold keeps it. RED: no heal at the update's end.
+//      update's end — a kill before any fold keeps it; the update's heals are ONE append (r2287). REDs: no heal at the
+//      update's end; the heals unbatched.
 // Run: node scripts/test-index-journal.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -893,6 +894,23 @@ async function inRowStampLeg(mod, tag) {
   const HM = M.load('src/channel-store.js', anchored(SRC, '      if (has) healRow(k, conv[k]);\n', '', 'no heal at the update\'s end'), 'no-heal-end');
   const rr = await inRowStampLeg(HM, 'inrow-red');
   ok(!rr.kept, `⑱ RED CONTROL: the update's end without its heal (line 267 as it stood) — the stamp lost at the kill (${rr.lp}, «never polled») — the leg above would go red`, rr);
+  // 主开发 r2287 (2): the update's heals are ONE append to poll-stamps.log, as the load's — five rows stamped past the door in
+  // one update: one write of five lines (a burst of such rows was one synchronous append a row, up to the burst's bound in a tick)
+  const batchLeg = async (mod, tag) => {
+    const dir = tmp(tag), o = open(mod, dir), T = Date.UTC(2026, 10, 21, 12, 0, 0), ids = ['c1', 'c4', 'c7', 'c9', 'c12'];
+    await seed(o.st, 20);
+    const writes = [], w0 = fs.writeSync;
+    fs.writeSync = function (fd, b, ...a) { const x = Buffer.isBuffer(b) ? b.toString('utf8') : String(b); if (/^\n?\["a\//.test(x)) writes.push((x.match(/\["a\//g) || []).length); return w0.call(this, fd, b, ...a); };
+    try { await o.st.index.update(() => { for (const id of ids) { const en = o.st.index.entry('a', id); en.lane = { ...(en.lane || {}), via: 'poll', lastPollAt: T + 9e3 }; } }); } finally { fs.writeSync = w0; }
+    const taken = ids.every((id) => Number((o.st.stamps.lane(o.st.index.peek('a/' + id)) || {}).lastPollAt) === T + 9e3);
+    shut(o);
+    return { appends: writes.length, lines: writes.reduce((n, x) => n + x, 0), taken };
+  };
+  const b1 = await batchLeg(CS, 'inrow-batch');
+  ok(b1.appends === 1 && b1.lines === 5 && b1.taken, `⑱ five rows stamped past the door in ONE update: ${b1.appends} append(s) to poll-stamps.log carrying ${b1.lines} line(s); every stamp taken into the side map (${b1.taken})`, b1);
+  const BM = M.load('src/channel-store.js', anchored(SRC, '    const healBatch = healing === null; if (healBatch) healing = [];\n', '    const healBatch = false;\n', 'the update\'s heals one append a row'), 'heal-unbatched');
+  const b2 = await batchLeg(BM, 'inrow-batch-red');
+  ok(b2.appends === 5 && b2.taken, `⑱ RED CONTROL: the update's heals unbatched — ${b2.appends} appends for the same five rows — the leg above would go red`, b2);
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
