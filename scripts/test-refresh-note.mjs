@@ -25,6 +25,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const dirs = [];
 process.on('exit', () => { for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
@@ -170,14 +179,14 @@ console.log('④ RED controls (patched copies outside the tree)');
   const src = read('src/refresh-note.js');
   const a1 = '    const live = r.state === LIVE;\n';
   if (!src.includes(a1)) throw new Error('mutation anchor missing: live');
-  const Loose = MUT.load('src/refresh-note.js', src.replace(a1, "    const live = r.state !== 'stopped';\n"), 'not-stopped');
+  const Loose = MUT.load('src/refresh-note.js', editAnchor(src, a1, "    const live = r.state !== 'stopped';\n", "src/refresh-note.js"), 'not-stopped');
   const reds = tableReds(Loose);
   ok(reds.length >= 2 && reds.includes('a read-only history view is skipped'), `CONTROL "not stopped" read as live: the read-only view's conversation is queued — ① goes red on ${reds.length} row(s): ${reds.join(' | ')}`, reds);
   ok(tableReds(RN).length === 0, '…and the shipped rule passes the same table');
   const sh = read('src/server/stash-handover.js');
   const a2 = "      if (old.length) { try { d.drainStash(cid, new Set(old)); replaced++; }";
   if (!sh.includes(a2)) throw new Error('mutation anchor missing: take-back');
-  const NoTake = MUT.load('src/server/stash-handover.js', sh.replace(a2, '      if (false) { try { d.drainStash(cid, new Set(old)); replaced++; }'), 'no-take-back');
+  const NoTake = MUT.load('src/server/stash-handover.js', editAnchor(sh, a2, '      if (false) { try { d.drainStash(cid, new Set(old)); replaced++; }', "src/server/stash-handover.js"), 'no-take-back');
   const R = rig(NoTake);
   R.call({ text: NOTE }); R.call({ text: 'again' });
   ok(R.mine(A).length === 2 && R.mine(B).length === 2, `CONTROL the take-back removed: a second press DOUBLES the note (${R.mine(A).length} waiting) — ② goes red`, R.mine(A).map((e) => e.text));

@@ -26,6 +26,15 @@ const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const express = require(path.join(REPO, 'node_modules/express'));
 const KEY = 'dl_fakekey_0123456789';
 const MARK = 'AUDIOMARK_7f3e9';   // the bytes a leak would print
@@ -251,7 +260,7 @@ console.log('⑦ THE TEACH CALLS\' SHAPES (lane voice-teach-skips — https://dr
   const src = fs.readFileSync(path.join(REPO, 'src/server/dropline-client.js'), 'utf8');
   const anchor = '    const skips = (Array.isArray(j && j.skipped) ? j.skipped : []).map(skipOf).filter((x) => x.term);';
   const MCm = (await import('./mutant-copy.mjs')).mutantCopies('voice-proxy-skips', REPO);
-  const base = require(MCm.write('src/server/dropline-client.js', src.replace(anchor, '    const skips = (Array.isArray(j && j.skipped) ? j.skipped : []).map((x) => ({ term: String((x && x.term) || x), reason: null }));'), 'baseparse'));
+  const base = require(MCm.write('src/server/dropline-client.js', editAnchor(src, anchor, '    const skips = (Array.isArray(j && j.skipped) ? j.skipped : []).map((x) => ({ term: String((x && x.term) || x), reason: null }));', "src/server/dropline-client.js"), 'baseparse'));
   script = [{ status: 200, json: { added: [], skipped: [{ term: '青松', reason: 'review' }], request_id: 'tr_b' } }];
   const b = await mkT(base).terms(['青松']);
   ok('CONTROL RED: the base\'s parse (x.term || x) ⇒ the reason is gone — the reason check above is red on it', src.split(anchor).length === 2 && b.skips[0].reason === null, b);

@@ -35,6 +35,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -355,7 +364,7 @@ console.log('⑧ a Slack account by its parts (user + workspace | org); the org 
   const SRC = fs.readFileSync(path.join(REPO, 'src/channel-identity.js'), 'utf-8');
   const BRANCH = "  if (hs && os) return sameSlackAccount(hs, os) ? null : { key: 'userId', held: joinedSlack(hs), offered: joinedSlack(os) };\n";
   const MC = mutantCopies('chan-identity', REPO);
-  const MUT = require(MC.write('src/channel-identity.js', SRC.replace(BRANCH, ''), 'stringcompare'));
+  const MUT = require(MC.write('src/channel-identity.js', editAnchor(SRC, BRANCH, '', "src/channel-identity.js"), 'stringcompare'));
   const mmR = MUT.identityMismatch(MUT.identityOf(legacy(T1, U1)), MUT.identityOf(tok(E1, T1, U1)));
   ok(SRC.includes(BRANCH) && !!mmR && mmR.key === 'userId' && /is connected as t07\w+\/u08\w+; this sign-in is e0c\w+\/t07\w+\/u08\w+ — a re-authorize must be the same account/.test(MUT.mismatchSentence('acct-slack-1', mmR)), 'RED CONTROL: with the joined-string compare restored the grid re-authorize is REFUSED as another account — the incident\'s sentence');
   // THE LEARN STEP — the one stamp rule

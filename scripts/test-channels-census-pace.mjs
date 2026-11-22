@@ -23,6 +23,15 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = scratch('chan-census-pace');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
@@ -201,7 +210,7 @@ console.log('CONTROLS');
   const got = await viewsPass(ENG, 'paced');
   console.log(`    the pass: ${got.broadcasts} broadcasts in ${got.ms} ms for ${got.okN} answered keys (the per-fetch shape: one per answered key)`);
   ok(got.okN === 200 && got.changed >= 200 && got.broadcasts <= got.bound && got.unsaid === 0 && got.late === 0, `a pass broadcasts its early keys at most once per 250 ms + its end (${got.broadcasts} ≤ ${got.bound}), every changed key named, every answer after its key's broadcast`, got);
-  const ctl = ENG_SRC.includes(PACED) ? await viewsPass(MC.load('src/server/channels-engine.js', ENG_SRC.replace(PACED, '          if (act.waiters.length) { notify([key], { full: false }); early.add(key); }'), 'per-fetch'), 'per-fetch') : null;
+  const ctl = ENG_SRC.includes(PACED) ? await viewsPass(MC.load('src/server/channels-engine.js', editAnchor(ENG_SRC, PACED, '          if (act.waiters.length) { notify([key], { full: false }); early.add(key); }', "src/server/channels-engine.js"), 'per-fetch'), 'per-fetch') : null;
   ok(ctl && ctl.broadcasts > ctl.bound && ctl.broadcasts >= 200, `CONTROL: the per-fetch broadcast restored reads ${ctl && ctl.broadcasts} broadcasts for ${ctl && ctl.okN} answered keys — red`, ctl);
 }
 

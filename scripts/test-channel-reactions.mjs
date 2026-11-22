@@ -55,6 +55,15 @@ const lark = require(path.join(REPO, 'src/channels/lark.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const T0 = 1759000000000;
 const VOC = { keys: lark.LARK_EMOJI };
@@ -323,7 +332,7 @@ const M = mutantCopies('chanrx', REPO);
   ok(/Secret Person/.test(line), 'CONTROL (c): a copy whose agent line reads the raw list prints the reactor\'s name — ⑤\'s assert would be red', line);
   // (d) the key judge with no length check and a nested unbounded quantifier: catastrophic on a failing input
   const recSrc = fs.readFileSync(path.join(REPO, 'src/channel-record.js'), 'utf8');
-  const slowSrc = recSrc.replace('function isReactionKey(k) { return typeof k === \'string\' && k.length > 0 && k.length <= REACTION_KEY_MAX && REACTION_KEY_RE.test(k); }', 'function isReactionKey(k) { return typeof k === \'string\' && /^(?:[A-Za-z0-9_]+)+[:.]$/.test(k); }');
+  const slowSrc = editAnchor(recSrc, 'function isReactionKey(k) { return typeof k === \'string\' && k.length > 0 && k.length <= REACTION_KEY_MAX && REACTION_KEY_RE.test(k); }', 'function isReactionKey(k) { return typeof k === \'string\' && /^(?:[A-Za-z0-9_]+)+[:.]$/.test(k); }', "src/channel-record.js");
   const dPath = M.write('src/channel-record.js', slowSrc, 'slow-key');
   const probe = `const R=require(${JSON.stringify(dPath)});const t=Date.now();R.validateSide({k:'rx',msg:'m',at:1,form:'delta',op:'add',key:'a'.repeat(40)+'!',actor:{id:'u'},src:'event'});console.log('returned in',Date.now()-t);`;
   const run = spawnSync(process.execPath, ['-e', probe], { timeout: 2000, encoding: 'utf8' });

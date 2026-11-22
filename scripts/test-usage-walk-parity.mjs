@@ -1022,7 +1022,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     const mc = await modLegs(walkCtl, 'ctl');
     ok(!mc.stopped, `NEGATIVE CONTROL: the walker advancing the caller's own entry FAILS the module leg (the handed map ${mc.after})`);
     // …and the CODEX half's copy (the readers' list 2): reverted, the codex module leg must see it
-    const mutCx = src0.replace("    const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)\n    if (zst)", "    const cur = cursors[fp] || { offset: 0, lastRid: null };\n    if (zst)");
+    const mutCx = editAnchor(src0, "    const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)\n    if (zst)", "    const cur = cursors[fp] || { offset: 0, lastRid: null };\n    if (zst)", "src/usage-walker.js");
     ok(mutCx !== src0, 'the codex control mutation applies to the shipped source');
     const { runUsageWalk: walkCx } = M.load('src/usage-walker.js', mutCx, 'b6ded-codex-in-place');
     const cc = await codexModLeg(walkCx, 'ctl');
@@ -1083,7 +1083,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     ok(wb && wb.events.length < 20 && rd < 20, `U2 a folder whose mount is blocked mid-walk is left after the yield: ${rd} of its 20 files statted, ${wb && wb.events.length} events (the next walk reads on from the cursors)`);
   }
   const uSrc = fs.readFileSync(path.join(REPO, 'src/usage-walker.js'), 'utf-8');
-  const byteOnly = uSrc.replace('if (++meter.ops < meter.opsBudget) return false;\n    meter.ops = 0; yield;', 'if (true) return false;\n    meter.ops = 0; yield;');
+  const byteOnly = editAnchor(uSrc, 'if (++meter.ops < meter.opsBudget) return false;\n    meter.ops = 0; yield;', 'if (true) return false;\n    meter.ops = 0; yield;', "src/usage-walker.js");
   const { runUsageWalk: walkBytes } = mutantCopies('walkpar-ops', REPO).load('src/usage-walker.js', byteOnly, 'byte-only');
   const rc = await opsBetween(walkBytes, 1000);
   ok(byteOnly !== uSrc && rc.max > 1000 && rc.yields === 0, `control (the release's byte-only yield): ${rc.max} directory reads + stats in ONE turn, ${rc.yields} yields ⇒ RED`);

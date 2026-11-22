@@ -14,6 +14,15 @@ const SW = require('../src/browser-switch.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // ═══ step 2: the sign-in refusal hint ═════════════════════════════════════════
 console.log('— the sign-in refusal HINT (PURE table, navigate result url + title)');
@@ -159,7 +168,7 @@ const M = mutantCopies('bprop-switch', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
   const cut = '    if (host !== row.host) continue;\n';
   ok(src.includes(cut), 'the exact-host rule is where the control cuts it');
-  const m = M.load('src/browser-switch.js', src.replace(cut, ''), 'any-host');
+  const m = M.load('src/browser-switch.js', editAnchor(src, cut, '', "src/browser-switch.js"), 'any-host');
   ok(m.navHint({ url: 'https://example.com/signin/rejected', title: '' }) !== null, 'CONTROL: a table that ignores the host hints on ANY site with the path — the look-alike rows above would be red');
 }
 console.log('— lane dc-browser-providers: a FAKE provider (fakebrowser — headless only, no build choice) — since lane dc-browser-backends its OWN FILE + ONE registration line in a copy of src/browser-backends/index.js');

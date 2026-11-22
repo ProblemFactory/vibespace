@@ -344,7 +344,7 @@ console.log('— §8 negative controls (patched copies, scripts/mutant-copy.mjs)
   const find = '    if (!v.ok) { if (speak) this.sayStageRefusal(v); return v; }';
   ok(DSRC.includes(find), 'control silent-return: the patched line exists in desktop-manager.js');
   if (DSRC.includes(find)) {
-    const f = M.write('src/lib/desktop-manager.js', DSRC.replace(find, '    if (!v.ok) return;'), 'silent-return');
+    const f = M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '    if (!v.ok) return;', "src/lib/desktop-manager.js"), 'silent-return');
     const failed = await dmLegs((await import(f)).DesktopManager, { quiet: true });
     ok(failed.some((n) => /says the refusal in a toast/.test(n)) && failed.some((n) => /TYPED refusal/.test(n)), `control silent-return: the pre-fix silent return turns the typed + spoken legs RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
@@ -354,7 +354,7 @@ console.log('— §8 negative controls (patched copies, scripts/mutant-copy.mjs)
   const tgFind = "    this.setWindowHidden(win, { desktop: !!frame._hiddenByDesktop, stage: !!frame._hiddenByStage });\n";
   ok(TGSRC.includes(tgFind), 'control keeps-inline-hide: the patched line exists in tab-group.js');
   if (TGSRC.includes(tgFind)) {
-    const f = M.write('src/lib/tab-group.js', TGSRC.replace(tgFind, '    win._hiddenByDesktop = !!frame._hiddenByDesktop; win._hiddenByStage = !!frame._hiddenByStage;\n'), 'keeps-inline-hide');
+    const f = M.write('src/lib/tab-group.js', editAnchor(TGSRC, tgFind, '    win._hiddenByDesktop = !!frame._hiddenByDesktop; win._hiddenByStage = !!frame._hiddenByStage;\n', "src/lib/tab-group.js"), 'keeps-inline-hide');
     const failed = await frameLegs((await import(f)).installTabGroupMixin, { quiet: true });
     ok(failed.some((n) => /every mark goes/.test(n)), `control keeps-inline-hide: the torn-off window keeps visibility:hidden ⇒ the §9 leg turns RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
   }

@@ -308,7 +308,7 @@ console.log('— ⑥ MUTANTS: each restores the base shape in a copy ⇒ the leg
   const src = read('src/harness-efforts.js');
   const A = "  return { backend, ...effortAnswerFor(harness, { cliLevels, catalogModels: catalog?.[backend] || [], model }), permissionModes: permissionModes || [] };\n";
   ok(src.split(A).length === 2, 'setup: the answer is ONE identifiable statement in src/harness-efforts.js');
-  const base = M.load('src/harness-efforts.js', src.replace(A, "  return { backend, ...effortAnswerFor(harnessOf('claude'), { cliLevels }), permissionModes: permissionModes || [] }; // the base: claude's answer to every backend\n"), 'claude-for-all');
+  const base = M.load('src/harness-efforts.js', editAnchor(src, A, "  return { backend, ...effortAnswerFor(harnessOf('claude'), { cliLevels }), permissionModes: permissionModes || [] }; // the base: claude's answer to every backend\n", "src/harness-efforts.js"), 'claude-for-all');
   const v = judgeAnswers(base.sessionOptionsAnswer);
   ok(/^antigravity: \[\["low","medium","high","xhigh","max"\],\["ultracode"\]\]/.test(v[0]) && /^opencode: /.test(v[5]),
     'MUTANT the route answering claude\'s rows to every backend (2.369.336) ⇒ ② RED: antigravity gets ultracode, opencode a ladder', v.filter(Boolean));

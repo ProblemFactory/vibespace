@@ -789,7 +789,7 @@ console.log('— ⑬ the whole history: the steps before the journal\'s 800 KB r
   ok(good.bad === 0 && good.len <= 1200000 && good.n > 100, `acp-events: after > 1.2 MB of journal the live buffer starts on a WHOLE line — ${good.n} lines, 0 corrupt`, good);
   const cutLine = "if (session.buffer.length > 1200000) { const cut = session.buffer.indexOf('\\n', session.buffer.length - 800000); session.buffer = cut >= 0 ? session.buffer.slice(cut + 1) : ''; }";
   ok(evSrc.includes(cutLine), 'control anchor: the newline-aligned cut is in acp-events');
-  const bad = feedRing(MUTH.load('src/server/stdout/acp-events.js', evSrc.replace(cutLine, 'if (session.buffer.length > 1200000) session.buffer = session.buffer.slice(-800000);'), 'halfline'));
+  const bad = feedRing(MUTH.load('src/server/stdout/acp-events.js', editAnchor(evSrc, cutLine, 'if (session.buffer.length > 1200000) session.buffer = session.buffer.slice(-800000);', "src/server/stdout/acp-events.js"), 'halfline'));
   ok(bad.bad === 1, 'CONTROL: the byte cut (the pre-fix slice) leaves ONE corrupt half record as the buffer\'s first line', bad);
 }
 

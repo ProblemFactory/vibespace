@@ -56,6 +56,15 @@ const { SPAWN_ORIGINS } = require('../src/resume-continuity.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const REPO = new URL('..', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 8000, step = 25) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(step); } return pred(); };
@@ -408,7 +417,7 @@ const MUT = mutantCopies('browser-pin', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = '        if (lvl.fire) {';
   ok(src.split(needle).length === 2, 'CONTROL setup: the report branch is found exactly once in the shipped keeper');
-  const KM = MUT.load('src/server/browser-keeper.js', src.replace(needle, needle + " stop(rec.profileId, { why: 'resource' }).catch(() => { });"), 'stops-on-over');
+  const KM = MUT.load('src/server/browser-keeper.js', editAnchor(src, needle, needle + " stop(rec.profileId, { why: 'resource' }).catch(() => { });", "src/server/browser-keeper.js"), 'stops-on-over');
   const DATA_C = path.join(ROOT, 'data-ctl'); fs.mkdirSync(DATA_C, { recursive: true });
   const kc = KM.create({ dataDir: DATA_C, homeDir: HOME, env: keeperEnv, broadcast: () => { }, serverSetting: (k) => settings[k], serverNotice: () => { }, getTelemetry: () => null, liveKeys: () => new Set([KEY_A]), limits: { ...LIMITS, CONCURRENT_CAP: 6 }, log: { log() { }, warn() { }, error() { } }, now, tickMs: 3600e3, install: false });
   await kc._facts.probeVersion();

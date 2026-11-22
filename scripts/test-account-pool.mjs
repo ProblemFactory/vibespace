@@ -547,7 +547,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
     const ANCH = "const sameProv = (mid) => goneKey == null || this._providerKeyOf(this.memberProviderOf(mid)) === goneKey;";
     ck('unplaced mutant: the anchor (the heal\'s provider filter) hits once', src.split(ANCH).length === 2);
     if (src.split(ANCH).length === 2) {
-      const { AccountManager: Old } = MU.load('src/accounts.js', src.replace(ANCH, 'const sameProv = () => true; // PATCHED: the old re-point'), 'old-repoint');
+      const { AccountManager: Old } = MU.load('src/accounts.js', editAnchor(src, ANCH, 'const sameProv = () => true; // PATCHED: the old re-point', "src/accounts.js"), 'old-repoint');
       const wm = world(Old);
       quiet(() => { wm.am.remove(wm.one, wm.engineSays(wm.three)); });
       ck('unplaced mutant RED: the old re-point follows the engine\'s pick onto the CLAUDE member — the DeepSeek conversation moved hot, no mark (the silent cross-provider move)', wm.am.poolCurrentFor(wm.pp, 'sa') === wm.three && !wm.am.unplacedOf(wm.pp, 'sa'));

@@ -24,6 +24,15 @@ import { mutantCopies } from './mutant-copy.mjs';
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + J(extra).slice(0, 1500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const DELAY = 420;   // the placed delay of the stand-in hub's answer (> the old 400 ms clock)
 const CID = (i) => `fade0000-0000-4000-8000-00000000000${i}`;
@@ -328,7 +337,7 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
   ok(b1.creates === 2 && b1.said.some((x) => /^1 not resumed: still checking/.test(x)), 'the BOOT\'s «resume all»: the row still being checked is not resumed (2 creates of 3) and it is SAID', b1);
   const LY2 = read('src/lib/layout.js'), fcut = "    const go = (stopped || []).filter((d) => !unknownRowOf(rows, d.opts?.backend, d.opts?.backendSessionId || d.sessionId));\n";
   if (!LY2.includes(fcut)) throw new Error('the anchor of the control «B-f64b cure: the boot filter» is not in the source');
-  const b0 = await bootUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', LY2.replace(fcut, '    const go = stopped || [];\n'), 'rap-unknown-boot', { esm: true })).href)).LayoutManager);
+  const b0 = await bootUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY2, fcut, '    const go = stopped || [];\n', "src/lib/layout.js"), 'rap-unknown-boot', { esm: true })).href)).LayoutManager);
   ok(b0.creates === 2 && !b0.said.some((x) => /^1 not resumed: still checking/.test(x)) && b0.said.some((x) => /could not be resumed: .*still checking/.test(x)), 'CONTROL: a boot «resume all» without the filter — the backstop (resumeSession) still holds the row, and the pace reports it as a FAILURE instead of the skip\'s own words (RED for the leg above\'s «said»)', b0);
   // THE BACKSTOP (resumeSession): unattended or bulk starts nothing; a person's own press asks first — a no starts nothing, a yes starts it
   const lifeUnknown = async (inst) => {
@@ -373,7 +382,7 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
     'cure 2: a PERSON\'S PRESET resumes the two rows it knows and SAYS the one left because it is still being checked, with «Try again»', pr1);
   const LY3 = read('src/lib/layout.js'), tcut = LY3.match(/\n    if \(stillChecking\) showToast\([^\n]*/);
   if (!tcut) throw new Error('the anchor of the control «B-f64b cure 2: the preset\'s words» is not in the source');
-  const pr0 = await presetUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', LY3.replace(tcut[0], ''), 'rap-unknown-preset', { esm: true })).href)).LayoutManager);
+  const pr0 = await presetUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', editAnchor(LY3, tcut[0], '', "src/lib/layout.js"), 'rap-unknown-preset', { esm: true })).href)).LayoutManager);
   ok(pr0.creates === 2 && !pr0.said.some((x) => /still checking/.test(x)), 'CONTROL: a preset without its words leaves the row in silence (RED for the leg above)', pr0);
 }
 

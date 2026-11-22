@@ -197,7 +197,7 @@ wNext.shutdown();
   const sweepNeedle = "try { const n = forYou && typeof forYou.sweepAs === 'function' ? forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart') : 0;";
   ok(dsrc0.split(sweepNeedle).length === 2, 'control setup: the sign-in sweep is found once in src/server/browser-dialogs.js');
   const past = forYou.add(NAMED, { text: 'past', detail: 'past', i18n: { text: { key: 'A page in the agent browser asks you to sign in ({host})', params: { host: 'x' } } }, itemKey: `prompt-auth:${NAMED}:prm-past-1:1` });
-  const Dm = MUTP.load('src/server/browser-dialogs.js', dsrc0.replace(sweepNeedle, 'try { const n = 0;'), 'nosweep');
+  const Dm = MUTP.load('src/server/browser-dialogs.js', editAnchor(dsrc0, sweepNeedle, 'try { const n = 0;', "src/server/browser-dialogs.js"), 'nosweep');
   const wm = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: false }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
   ok(todos.get(past).status === 'open', 'CONTROL (a watch without the sweep): a past hub life\'s sign-in item stays open for good', todos.get(past));
   wm.shutdown();

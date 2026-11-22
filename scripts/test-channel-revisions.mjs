@@ -27,6 +27,15 @@ const R = require(path.join(REPO, 'src/channel-record.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 const H = 3600e3, T = 1_800_000_000_000;
 
@@ -67,7 +76,7 @@ ok(Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 30e3]]), forced:
   const RSRC = fs.readFileSync(path.join(REPO, 'src/channel-revisions.js'), 'utf8');
   const KEYED = " || (b.at - a.at) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));";
   ok(RSRC.split(KEYED).length === 2, 'control setup: the plan\'s key tiebreak is present once');
-  const Old = mutantCopies('rev-tiebreak', REPO).load('src/channel-revisions.js', RSRC.replace(KEYED, ' || (b.at - a.at));'), 'no-tiebreak');   // stale-pins: kept (the old sort, restored by the red control)
+  const Old = mutantCopies('rev-tiebreak', REPO).load('src/channel-revisions.js', editAnchor(RSRC, KEYED, ' || (b.at - a.at));', "src/channel-revisions.js"), 'no-tiebreak');   // stale-pins: kept (the old sort, restored by the red control)
   const of = Old.planRecheck({ now: T, items: tie }), ob = Old.planRecheck({ now: T, items: tie.slice().reverse() });
   ok(of.join() !== ob.join(), 'RED CONTROL: without the key the read order decides the tie — the leg above is red on it', J({ of, ob }));
 }

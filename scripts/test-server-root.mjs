@@ -30,6 +30,15 @@ function ok(cond, name, detail) {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); }
 }
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const TMP = ['/tmp', '/var/tmp'];
 const CO = '/home/u/vibespace';
@@ -117,7 +126,7 @@ const CONTROLS = [
 ];
 for (const c of CONTROLS) {
   ok(src.includes(c.needle), `control "${c.what}": the needle is in the shipped source (a stale control would prove nothing)`);
-  const mod = M.load('src/server-root.js', src.replace(c.needle, c.repl), c.what.replace(/\W+/g, '-').slice(0, 24));
+  const mod = M.load('src/server-root.js', editAnchor(src, c.needle, c.repl, "src/server-root.js"), c.what.replace(/\W+/g, '-').slice(0, 24));
   const red = runTable(mod).filter((r) => !r.good).map((r) => r.name);
   ok(c.reds.every((n) => red.includes(n)), `control "${c.what}": the named rows go RED on the weakened copy (${red.length} red)`, red);
 }
@@ -187,7 +196,7 @@ ok(unlisted.length === 0, 'no writer outside the table', unlisted);
 }
 { // CONTROL (verify r1 ②): a mutant COPY of the REAL cli-config sync with every guard spelling removed is found UNGUARDED by the census
   const syncSrc = fs.readFileSync(path.join(REPO, 'src/server/harness-config-sync.js'), 'utf8');
-  const lost = syncSrc.replace(/refusalNow\(\)|ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|\(refused \? /g, (m) => (m === '(refused ? ' ? '(false ? ' : 'null'));
+  const lost = editAnchor(syncSrc, /refusalNow\(\)|ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|\(refused \? /g, (m) => (m === '(refused ? ' ? '(false ? ' : 'null'), "src/server/harness-config-sync.js");
   const f = M.write('src/server/harness-config-sync.js', lost, 'no-guard');
   const w = writersIn('src/server/harness-config-sync.js', fs.readFileSync(f, 'utf8'));
   ok(lost !== syncSrc && w.length === 1 && !w[0].guarded && /applyConfigPlan\(plan, \{ home \}\)/.test(w[0].text), 'CONTROL: a copy of harness-config-sync.js without its guard is found UNGUARDED (the census goes red on a real file)', w);
