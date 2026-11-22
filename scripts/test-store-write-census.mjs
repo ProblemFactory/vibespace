@@ -304,10 +304,23 @@ const ROWS = [
 // link's multiplexer, loaded by the hub) — no synchronous store write in either today; scanned, a new one is red by name
 const EXTRA_DIRS = ['src/channels', 'src/harnesses', 'src/adapters', 'src/spawn', 'src/plugins', 'src/lib', 'src/app-kinds', 'src/browser-backends', 'src/mount-providers', 'src/agent-routes', 'src/server/stdout'];
 const EXTRA_FILES = ['src/agentd/client.js', 'src/agentd/mux.js'];
+// r2052 (B-7e49 slice 3, lane bl-tests-e): THE TREE ONCE A RUN, ITS PARSES ONCE A TEXT — the profile: acorn 5.0 s, the reads
+// 2.1 s and the listings of this suite's 28.7 s were the SAME work again: censusFiles(REPO) listed the tree at five sites,
+// ixSites() (the census and its 3 controls) and metaSites() (its 6) each read every file from disk and acorn-parsed every
+// match again. Now this tree's list is kept (censusFiles.memo, a copy handed out), its texts are kept (repoText: a failed read
+// throws as before and is not kept) and each script tree is kept per text (scriptAstOf, the two sites' own options — no visitor
+// writes into a tree). A control's overridden text is its own entry; a scratch root is listed and read afresh.
+const REPO_TEXT = new Map();
+function repoText(rel) { let t = REPO_TEXT.get(rel); if (t === undefined) { t = fs.readFileSync(path.join(REPO, rel), 'utf8'); REPO_TEXT.set(rel, t); } return t; }
+const SCRIPT_AST = new Map();
+function scriptAstOf(acorn, src) { let r = SCRIPT_AST.get(src); if (r === undefined) { try { r = { ast: acorn.parse(src.replace(/^#!.*/, ''), { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true, sourceType: 'script' }) }; } catch (e) { r = { e }; } SCRIPT_AST.set(src, r); } if (r.e) throw r.e; return r.ast; }
 function censusFiles(repo) {
+  if (repo === REPO && censusFiles.memo) return censusFiles.memo.slice();
   const walk = (d) => fs.readdirSync(path.join(repo, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : e.name.endsWith('.js') ? [`${d}/${e.name}`] : []));
   const extra = EXTRA_DIRS.filter((d) => fs.existsSync(path.join(repo, d))).flatMap(walk);
-  return [...new Set([...filesOf(repo), ...extra, ...EXTRA_FILES.filter((f) => fs.existsSync(path.join(repo, f)))])].sort();
+  const list = [...new Set([...filesOf(repo), ...extra, ...EXTRA_FILES.filter((f) => fs.existsSync(path.join(repo, f)))])].sort();
+  if (repo === REPO) censusFiles.memo = list.slice();
+  return list;
 }
 const AC = (() => { try { return require(path.join(REPO, 'node_modules/acorn')); } catch { return null; } })();
 const parseOf = (src) => { const o = { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true, allowHashBang: true }; try { return AC.parse(src, { ...o, sourceType: 'script' }); } catch { return AC.parse(src, { ...o, sourceType: 'module', allowReturnOutsideFunction: false }); } };
@@ -353,7 +366,7 @@ const TREE_AST = new Map();   // file → { src, ast } of this tree, filled by s
 function scan(repo) {
   const out = [], files = censusFiles(repo), parsed = new Map(), helperDefs = new Map();
   for (const f of files) {
-    let r, src; try { src = fs.readFileSync(path.join(repo, f), 'utf8'); r = fileSites(src, f); } catch { continue; }
+    let r, src; try { src = repo === REPO ? repoText(f) : fs.readFileSync(path.join(repo, f), 'utf8'); r = fileSites(src, f); } catch { continue; }
     parsed.set(f, r); if (repo === REPO) TREE_AST.set(f, { src, ast: r.ast });   // ⑨ follow (2)'s principal-builder census walks the same trees
     for (const s0 of r.sites) out.push({ file: f, scope: (SCOPED[f] || []).find((x) => s0.scope === x || s0.scope.endsWith(' > ' + x)) || '*', what: `${f}:${s0.line} «${s0.scope}» ${s0.fn}${s0.via ? ` (${s0.via})` : ''}` });
     for (const h of r.helpers) if (!KNOWN_HELPERS.has(h.name) && !GENERIC.has(h.name)) helperDefs.set(`${f}#${h.name}`, h);
@@ -556,7 +569,7 @@ console.log('② the synchronous flushes the main thread waits on — named debt
     ['src/hosts.js', 1, 'flushThrottled() — hosts.json on disk before the shutdown hands over (server.js), before the dial-token migration renames its legacy file (its hashes on disk first: a kill between would lose them) and before a suite reads the file (B-48a4: every save of hosts.json goes through the store writer); one small whole-file write (the machines\' records, KBs), the write in flight first'],
   ];
   const got = new Map();
-  for (const f of censusFiles(REPO)) { if (f === 'src/store-writer.js') continue; const t = fs.readFileSync(path.join(REPO, f), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n'); const n = (t.match(/\.flushSync\(/g) || []).length; if (n) got.set(f, n); }
+  for (const f of censusFiles(REPO)) { if (f === 'src/store-writer.js') continue; const t = repoText(f).split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n'); const n = (t.match(/\.flushSync\(/g) || []).length; if (n) got.set(f, n); }
   const bad = [];
   for (const [f, n] of got) { const r = WAITS.find((w) => w[0] === f); if (!r) bad.push(`UNNAMED: ${f} waits on the main thread (${n} synchronous flush${n === 1 ? '' : 'es'}) — name it with its caller and its cost`); else if (r[1] !== n) bad.push(`${f}: ${n} synchronous flushes, the table says ${r[1]}`); }
   for (const w of WAITS) if (!got.has(w[0])) bad.push(`DEAD: ${w[0]} no longer waits — remove its row`);
@@ -641,10 +654,10 @@ console.log('⑤ the channels index in two columns: a person\'s act / a decision
   const ixSites = (over = {}) => {
     const got = new Map();
     unawaited = [];
-    for (const rel of filesOf(REPO)) {
-      const src = over[rel] !== undefined ? over[rel] : fs.readFileSync(path.join(REPO, rel), 'utf8');
+    for (const rel of (ixSites.files || (ixSites.files = filesOf(REPO)))) {
+      const src = over[rel] !== undefined ? over[rel] : repoText(rel);
       if (!/index\.update\(/.test(src)) continue;
-      const ast = AC.parse(src.replace(/^#!.*/, ''), { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true, sourceType: 'script' });
+      const ast = scriptAstOf(AC, src);
       walk(ast, (n, parents) => {
         if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed || n.callee.property.name !== 'update') return;
         const o = n.callee.object;
@@ -765,9 +778,9 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
   const metaSites = (over = {}) => {
     const got = new Map();
     for (const rel of META_FILES) {
-      const src = over[rel] !== undefined ? over[rel] : fs.readFileSync(path.join(REPO, rel), 'utf8');
+      const src = over[rel] !== undefined ? over[rel] : repoText(rel);
       if (!/writeSessionMeta|patchSessionMeta/.test(src)) continue;
-      let ast; try { ast = AC2.parse(src.replace(/^#!.*/, ''), { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true, sourceType: 'script' }); } catch { continue; }
+      let ast; try { ast = scriptAstOf(AC2, src); } catch { continue; }
       walk(ast, (n, parents) => {
         if (n.type !== 'CallExpression') return;
         const nm = n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' && !n.callee.computed ? n.callee.property.name : null;
@@ -992,7 +1005,7 @@ const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17
 const STATES = new Set(['answer', 'right', 'names', 'debt']);
 const USES_HELPER = /require\(['"](?:\.{1,2}\/)+(?:[\w-]+\/)*store-read(?:\.js)?['"]\)/;
 
-const treeTexts = () => new Map(censusFiles(REPO).map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]));   // the hub's main-process files (①'s list)
+const treeTexts = () => new Map(censusFiles(REPO).map((f) => [f, repoText(f)]));   // the hub's main-process files (①'s list)
 /** the files whose CODE holds a set-aside name (a string or template piece with `.corrupt-` — never a comment) */
 const SET_ASIDE = /\.(corrupt|unreadable)-/, SET_ASIDE_G = /\.(corrupt|unreadable)-/g;   // the two names the tree sets bytes aside under
 // the set-aside names per file, EXACT — a second store with a set-aside in a file that already has a row is red by its count
@@ -1993,7 +2006,7 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
     'src/server/agent-tool-generators.js': [1, 'folder', 'ensureDir(USAGE_CACHE_DIR) at boot — the folder made, never a reading'],
   };
   const RD_FILES = censusFiles(REPO).filter((f) => f !== RD_DOOR);
-  const RD_BASE_SITES = new Map(RD_FILES.map((f) => [f, readsOf(fs.readFileSync(path.join(REPO, f), 'utf8'))]));   // each file read and judged ONCE; a control re-judges only the file it plants in
+  const RD_BASE_SITES = new Map(RD_FILES.map((f) => [f, readsOf(repoText(f))]));   // each file read and judged ONCE; a control re-judges only the file it plants in
   const readingsCensus = (over = {}) => {
     const got = new Map();
     for (const f of RD_FILES) { const r = over[f] !== undefined ? readsOf(over[f]) : RD_BASE_SITES.get(f); if (r && r.length) got.set(f, r); }
