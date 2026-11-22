@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, CHROME_STORE, runFontLegs, runnerFontEnv, drawnFace, CHROME_QUIET } from './scratch.mjs';
-import { bringTab } from './cdp-front-shot.mjs';   // r2062: a page BEHIND paints no frame in the runner's headless browser — ④ brings each page to the front
+import { bringTab, frontState, becameFront } from './cdp-front-shot.mjs';   // r2062: a page BEHIND paints no frame in headless Chrome — page()'s evaluate brings its own page to the front
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -102,9 +102,14 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
+// ONE front state for the suite's tabs (cdp-front-shot.mjs): headless Chrome paints only the tab in front of its window, and a page
+// behind makes no frame — POP's waits and createPopover's own clamp (a requestAnimationFrame) never run in it. Every evaluate brings
+// its page to the front first when another tab is there (box row 224: close() drops only the socket, a control's tab stayed in front)
+const FS = frontState();
 /** one tab at 390 × 844 (touch), the page now or as it was */
 async function page({ old = false } = {}) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+  const bring = bringTab(CDP_PORT, tg.id); becameFront(FS, tg.id, bring);   // a new tab opens IN FRONT of its window
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
   let seq = 0; const pend = new Map();
@@ -114,12 +119,12 @@ async function page({ old = false } = {}) {
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-  const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.exceptionDetails).slice(0, 600)); return r.result?.value; };
+  const ev = async (expr) => { if (!FS.front || FS.front.key !== tg.id) { await bring(); becameFront(FS, tg.id, bring); } const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.exceptionDetails).slice(0, 600)); return r.result?.value; };
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?old=${old === 'roster' ? 'roster' : old === 'right' ? 'right' : old === 'pads' ? 'pads' : old === 'vwall' ? 'vwall' : old ? 1 : 0}` });
   let ready = false;
   for (let i = 0; i < 200 && !ready; i++) { ready = await ev('window.__ready === true').catch(() => false); if (!ready) await sleep(50); }
   await ev('document.fonts.ready.then(() => true)');
-  return { ev, cdp, ready, front: bringTab(CDP_PORT, tg.id), close: () => { try { ws.close(); } catch { } } };
+  return { ev, cdp, ready, close: () => { try { ws.close(); } catch { } } };
 }
 
 // ① the cards: three deliverables in a phone chat column (the column's own padding, the chat's own sheet)
@@ -219,7 +224,7 @@ const POP = (wide, own = '', right = false, edge = false, band = 0) => `(async (
   p.style.padding = '6px 8px'; p.style.border = '1px solid #888'; p.style.background = '#222'; p.style.color = '#eee'; p.style.fontSize = '14px';${own ? ` p.style.maxWidth = '${own}';` : ''}
   const row = document.createElement('div'); row.className = 'fit-pop-row'; row.style.whiteSpace = 'nowrap';
   row.textContent = ${wide ? JSON.stringify('一行永远不会断开的很长很长的文字：' + 'a-path-that-never-breaks/'.repeat(14)) : JSON.stringify('短的一行')}; p.appendChild(row);${edge ? " if (!document.getElementById('fit-edge-css')) { const st = document.createElement('style'); st.id = 'fit-edge-css'; st.textContent = '.fit-pop.fit-pop-edge{left:0!important;right:0;max-width:none}'; document.head.appendChild(st); } p.classList.add('fit-pop-edge'); row.style.whiteSpace = 'normal'; row.textContent = " + JSON.stringify(EDGE_WORDS) + ';' : ''}${band ? " row.textContent = ''; const blk = document.createElement('span'); blk.style.cssText = 'display:inline-block;width:" + band + "px;height:10px'; row.appendChild(blk);" : ''}
-  const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 120))));
+  const frames = () => new Promise((r, j) => { const t = setTimeout(() => j(new Error('no frame in 5 s: the page is ' + document.visibilityState + ' (a page behind another tab paints none)')), 5000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); setTimeout(r, 120); })); });
   await frames();
   const read = () => { const r = p.getBoundingClientRect(); return { left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, w: Math.round(r.width * 10) / 10, maxW: p.style.maxWidth, ox: getComputedStyle(p).overflowX, scrolls: p.scrollWidth > p.clientWidth + 1, rowW: Math.round(row.scrollWidth) }; };   // rowW: the row's WORDS (its box is the popover's width)
   const first = read();
@@ -229,15 +234,14 @@ const POP = (wide, own = '', right = false, edge = false, band = 0) => `(async (
 console.log('④ a popover at 390 — its width held to the screen too (createPopover)');
 {
   // POP awaits two frames, and headless Chrome paints only the tab IN FRONT of its window (cdp-front-shot.mjs's head): the
-  // hosted runner's newer browser never painted «now», opened behind «was», and its first evaluate never answered (r2062) —
-  // each page is brought to the front (the browser's own /json/activate door) before its evaluations
+  // hosted runner's newer browser never painted «now», opened behind «was» (r2062), and the box's never painted «now» behind
+  // the pads control's tab (row 224) — page()'s evaluate brings its own page to the front (the browser's /json/activate door)
   const now = await page(), was = await page({ old: true });
-  await now.front();
   const A = await now.ev(POP(true)), N = await now.ev(POP(false)), O = await now.ev(POP(true, '500px')), RA = await now.ev(POP(false, '', true));
   const E = await now.ev(POP(false, '', false, true));
   ok(!!E.first && E.first.left <= 0.5 && E.first.right >= E.vw - 0.5 && !E.first.maxW, `an EDGE-TO-EDGE popover (its own rule left 0 / right 0, as the phone's link bar) keeps the screen's whole width — no cap of the helper's (${E.first.left}–${E.first.right} of ${E.vw}, max-width ${E.first.maxW || 'none'})`, E);
   if (UTILS_PADS) {
-    const pp = await page({ old: 'pads' }); await pp.front(); const RE = await pp.ev(POP(false, '', false, true)); pp.close();
+    const pp = await page({ old: 'pads' }), RE = await pp.ev(POP(false, '', false, true)); pp.close();
     ok(!!RE.first.maxW && RE.first.right <= RE.vw - 7.5, `CONTROL: the hold capping at the screen less its pads (line 156's) cuts the same edge-to-edge popover 8 px short (${RE.first.left}–${RE.first.right} of ${RE.vw}, max-width ${RE.first.maxW || 'none'})`, RE);
   } else ok(false, 'CONTROL: the hold\'s bound stands in utils.js once («    const bound = atR && atR !== \'auto\' ? across : vw + 0.5;») — the control puts the pads back');
   // r2157: a RIGHT-ANCHORED box (the ⚙'s shape: left '', right 2 px) in the 8 px band — its box 390 px (a 372 px fill + 16 px padding
@@ -245,10 +249,9 @@ console.log('④ a popover at 390 — its width held to the screen too (createPo
   const BD = await now.ev(POP(false, '', true, false, 372));
   ok(!!BD.first.maxW && BD.first.ox === 'auto' && BD.first.left >= -0.5 && BD.first.right <= BD.vw + 0.5, `a right-anchored box in the band between the screen less its pads and the screen is held at that bound (max-width ${BD.first.maxW || 'none'}, overflow-x ${BD.first.ox}, ${BD.first.left}–${BD.first.right} of ${BD.vw}): its fill scrolls inside it`, BD);
   if (UTILS_VWALL) {
-    const vp = await page({ old: 'vwall' }); await vp.front(); const RB = await vp.ev(POP(false, '', true, false, 372)); vp.close();
+    const vp = await page({ old: 'vwall' }), RB = await vp.ev(POP(false, '', true, false, 372)); vp.close();
     ok(!RB.first.maxW && RB.first.ox !== 'auto' && RB.first.w < 389.5, `CONTROL: the screen's bound for every box (r2082's first form) leaves the same box unheld — squeezed by its right anchor to ${RB.first.w} px of its 390, its fill past it with no scroll in it (max-width ${RB.first.maxW || 'none'}, overflow-x ${RB.first.ox})`, RB);
   } else ok(false, 'CONTROL: the band leg\'s bound stands in utils.js once — the control writes the screen\'s bound for every box');
-  await was.front();
   const B = await was.ev(POP(true));
   console.log(`      now: the wide popover ${A.first.left}–${A.first.right} (${A.first.w} px, its row ${A.first.rowW} px, max-width ${A.first.maxW || 'none'}) · shrunk: ${A.shrunk.w} px, max-width ${A.shrunk.maxW || 'none'} · the narrow one ${N.first.left}–${N.first.right} · without the hold: ${B.first.left}–${B.first.right}`);
   ok(A.first.left >= 3.5 && A.first.right <= A.vw - 3.5 && A.first.rowW > A.vw, `a popover holding ${A.first.rowW} px of words that never break stands inside the screen, 4 px off each edge (${A.first.left}–${A.first.right} of ${A.vw})`, A);
@@ -258,14 +261,14 @@ console.log('④ a popover at 390 — its width held to the screen too (createPo
   ok(O.first.right <= O.vw - 3.5 && O.shrunk.maxW === '500px', `a max-width the caller wrote (500px) is capped while the box is wider than the screen, then put back (${O.first.maxW} → ${O.shrunk.maxW})`, O);
   ok(!RA.first.maxW && RA.first.ox === 'visible' && RA.first.right >= RA.vw - 2.5, `a narrow RIGHT-anchored popover (the ⚙'s shape: left '', right 2 px) is measured by its width, not its fill — no style of the helper's, at its right edge (${RA.first.left}–${RA.first.right})`, RA);
   if (UTILS_RIGHT) {
-    const rp = await page({ old: 'right' }); await rp.front(); const RO = await rp.ev(POP(false, '', true)); rp.close();
+    const rp = await page({ old: 'right' }), RO = await rp.ev(POP(false, '', true)); rp.close();
     ok(!!RO.first.maxW && RO.first.ox === 'auto', `CONTROL: the hold measuring a right-anchored box by its fill (unit 1's) caps the same narrow popover (max-width ${RO.first.maxW || 'none'}, overflow-x ${RO.first.ox})`, RO);
   } else ok(false, 'CONTROL: the right anchor\'s fix stands in utils.js once each (" pop.style.right = \'auto\';", " pop.style.right = atR;") — the control takes them out');
   // the desk: nothing moves — a 1280 × 800 page: a narrow popover keeps the release's place and gets no style; the ~2600 px row is held only because it is wider than the screen
   await now.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await was.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-  await now.front(); const DN = await now.ev(POP(false)), DW = await now.ev(POP(true));
-  await was.front(); const WN = await was.ev(POP(false));
+  const DN = await now.ev(POP(false)), DW = await now.ev(POP(true));
+  const WN = await was.ev(POP(false));
   ok(!DN.first.maxW && DN.first.ox === 'visible' && DN.first.left === WN.first.left && DN.first.w === WN.first.w, `the DESK at 1280: a narrow popover stands where the release stood it (left ${DN.first.left}, ${DN.first.w} px) with no style of the helper's`, { DN, WN });
   ok(DW.vw === 1280 && (DW.first.rowW + 18 <= 1280.5 ? !DW.first.maxW : DW.first.right <= 1276.5), `the DESK at 1280: a wide popover is held only if its BOX (its row + 16 px padding + 2 px border, r2157) is wider than the screen (its words ${DW.first.rowW} px; max-width ${DW.first.maxW || 'none'})`, DW);
   ok(B.first.right > B.vw + 0.5, `CONTROL: the helper without the hold — the same popover runs past the screen's right edge (${B.first.left}–${B.first.right} of ${B.vw})`, B);
