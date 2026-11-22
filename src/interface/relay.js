@@ -107,7 +107,13 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     if (!facts.addr) { req.socket.destroy(); return; }   // no address: the page is already gone, and is never stamped (the far side reads a null address as loopback)
     const sock = openChan('exchange', req, facts);
     if (!sock) { stats.noOwner++; answerItself(res, 503, exhausted ? SPENT : NO_OWNER); req.resume(); return; }
-    res.once('close', live.get(keyOf(sock)).done);
+    // THE PAGE SIDE ENDS ONCE, BY EITHER ROAD (主开发 r1980): its response's close, or its page socket's. A PIPELINED response
+    // waiting its turn is closed by Node 24 when its page socket goes, but NOT by Node 22 (test-interface-framing ③ was red on
+    // Node 22 alone: 4 channels → 3), so its channel would wait for ever; the socket's own close ends it on every major
+    const ent = live.get(keyOf(sock));
+    let pageGone = false, gone = () => { };
+    const pageSide = () => { if (pageGone) return; pageGone = true; req.socket.removeListener('close', pageSide); gone(); ent.done(); };
+    res.once('close', pageSide); req.socket.once('close', pageSide);
     let out;
     // NO agent: with `agent: false` Node builds an Agent of its own, which dials TCP and never calls createConnection
     try { out = http.request({ createConnection: () => headsAsLatin1(sock), method: req.method, path: req.url, headers: requestLines(req.rawHeaders), setDefaultHeaders: false }); }
@@ -145,8 +151,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
       if (res.writableEnded || res.destroyed) return;   // the answer was whole (a write after it failed): nothing to undo
       if (!res.headersSent) answerItself(res, 502, { error: 'owner-lost', why: 'the hub\'s channel ended before its answer' }, { close: true }); else res.destroy();
     });
-    const gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };   // the page left mid-answer: the channel goes, and the party's handler sees its socket gone
-    res.on('close', gone);   // Node closes a PIPELINED response that waits its turn too, when its page socket goes (measured: test-interface-framing ③)
+    gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };   // the page left mid-answer: the channel goes, and the party's handler sees its socket gone
     req.pipe(out, { end: false }); tap(req);
     req.on('end', () => { if (req.rawTrailers.length) { try { out.addTrailers(pairsOf(req.rawTrailers)); } catch { } } out.end(); });
   }

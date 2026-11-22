@@ -230,9 +230,13 @@ console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
   }
   const pr = await pipelinedReset();
   ok(pr.before.channels === 4 && pr.channels === 0 && pr.router === 0, `four pipelined requests the hub holds, then the page resets: ${pr.before.channels} channels → ${pr.channels} in the interface, ${pr.router} in the hub's router (the three waiting their turn go with the first)`, pr);
-  // (measured on the first run: Node closes a pipelined response that waits its turn when its page socket goes, so the response's own close is the one road)
-  const GONE = '    const gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };';
-  const prRed = await pipelinedReset(mutant('src/interface/relay.js', GONE, '    const gone = () => { };'), 200);   // read at once: nothing ends them
+  // (measured: Node 24 closes a pipelined response that waits its turn when its page socket goes; Node 22 does NOT — r1980: this leg
+  // was red on Node 22 alone, 4 → 3 — so the relay ends the page side by the response's close OR the page socket's, whichever comes)
+  const GONE = '    gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };';
+  const prRed = await pipelinedReset(mutant('src/interface/relay.js', GONE, '    gone = () => { };'), 200);   // read at once: nothing ends them
+  const ONE_ROAD = "    res.once('close', pageSide); req.socket.once('close', pageSide);";
+  const prOneRoad = await pipelinedReset(mutant('src/interface/relay.js', ONE_ROAD, "    res.once('close', pageSide);"), 500);   // the response's close alone: Node 24's road
+  console.log(`    (this Node, ${process.version}: with the response's close ALONE, ${prOneRoad.channels} of the four channels stay behind — 0 on a major that closes a waiting response, 3 on Node 22)`);
   ok(prRed.channels >= 4, `RED CONTROL — a response's close ends nothing: ${prRed.channels} channels of the four stay behind`, prRed);
   /** the late close of an OLD link's channel never empties the NEW link's entry of the same number (r1057 item 3) */
   const lateClose = (mod) => {

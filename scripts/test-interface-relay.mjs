@@ -620,8 +620,8 @@ async function midUpload(I, bound = null, { hubDestroys = true } = {}) {
   ok(law.channels === 0 && law.routerSize === 0 && law.held.closeAfter === 0 && law.held.sendQ === 0 && law.held.sendWin === 0, `the hub's socket destroyed after 100 KB of a 4 MB upload, then the page reset: no pair here, the hub's router empty (its sink removed by the interface's CLOSE), and the link's frame code holds nothing for the channel (held-close ${law.held.closeAfter}, queue ${law.held.sendQ}, window ${law.held.sendWin})`, law);
   const left = await midUpload(require(path.join(REPO, 'src/interface/index.js')), null, { hubDestroys: false });
   ok(left.channels === 0 && left.routerSize === 0 && left.hubSawGone && left.held.closeAfter === 0 && left.held.sendQ === 0 && left.held.sendWin === 0, `the page resets after 100 KB of a 4 MB upload while the hub still reads: no pair here, the hub's router empty, the hub's handler saw its socket gone (${left.hubSawGone}), the frame code holds nothing (${JSON.stringify(left.held)})`, left);
-  const RLY = 'src/interface/relay.js', GONE = "    const gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };";
-  const leaks = await midUpload(interfaceWith({ relay: mutant(RLY, GONE, '    const gone = () => { };') }), Math.max(50, 4 * Math.max(law.took, left.took)), { hubDestroys: false });
+  const RLY = 'src/interface/relay.js', GONE = "    gone = () => { if (!res.writableFinished) { out.destroy(); sock.destroy(); } };";   // r1980: the page side's one end, by either road
+  const leaks = await midUpload(interfaceWith({ relay: mutant(RLY, GONE, '    gone = () => { };') }), Math.max(50, 4 * Math.max(law.took, left.took)), { hubDestroys: false });
   ok(leaks.routerSize >= 1 && !leaks.hubSawGone, `RED CONTROL — the page's going ends nothing (its answer's close cut): the hub's router keeps the channel (${leaks.routerSize}) and its handler waits on (saw its socket gone: ${leaks.hubSawGone})`, leaks);
 }
 
