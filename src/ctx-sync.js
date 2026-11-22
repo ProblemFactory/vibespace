@@ -38,6 +38,11 @@ const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked
 // Bounds: a sync must stay bounded (this runs on a 60s timer over a mux that
 // also carries live sessions) — but the old 2MB/400 silently ate real files.
 const FILE_CAP = 16 * 1024 * 1024; // per file
+// B-5278 (a): a file over LINE_FILE_MAX rides the agent's byte stream (fs-write-stream: a window of data frames, its size and
+// sha256 checked by the device, renamed into place) — never ONE control line (a 16 MiB file was ≈21 MiB of base64 in one line,
+// a missing bound at this producer). An older agent lacks the stream: the client refuses it BEFORE anything is sent (an unknown
+// op would hang) and the file goes as one line, as before
+const LINE_FILE_MAX = 1024 * 1024;
 const MAX_FILES = 1000;            // per group dir
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -103,7 +108,16 @@ async function syncGroupCtxOverDevice({ hosts, hostId, group, remoteDir, onSkip 
     if (rm && rm.mt > f.mt + 1) continue;      // remote strictly newer — the pull pass owns it
     const dir = path.posix.dirname(`${remoteDir}/${f.r}`);
     if (dir !== remoteDir && !mkdirs.has(dir)) { try { await dm.fsMkdir(dir, { by: BY }); } catch { } mkdirs.add(dir); }
-    try { await dm.fsWrite(`${remoteDir}/${f.r}`, await fsp.readFile(f.p), { by: BY }); pushed++; } catch { }
+    try {
+      const buf = await fsp.readFile(f.p);
+      if (buf.length > LINE_FILE_MAX && typeof dm.fsWriteStream === 'function') {
+        let streamed = false;
+        try { await dm.fsWriteStream(`${remoteDir}/${f.r}`, { source: require('stream').Readable.from([buf]), size: buf.length, overwrite: true, by: BY }); streamed = true; }
+        catch (e) { if (!e || e.code !== 'host_needs_daemon') throw e; }   // no stream on that agent: the one line below; any other refusal skips it, as before
+        if (streamed) { pushed++; continue; }
+      }
+      await dm.fsWrite(`${remoteDir}/${f.r}`, buf, { by: BY }); pushed++;
+    } catch { }
   }
   for (const [rel, rm] of remote) {
     const lf = localByRel.get(rel);
@@ -152,4 +166,4 @@ async function syncGroupCtx({ hosts, host, group, remoteDir, onSkip }) {
   }
 }
 
-module.exports = { syncGroupCtx, syncGroupCtxOverDevice, syncGroupCtxOverRsync, FILE_CAP, MAX_FILES };
+module.exports = { syncGroupCtx, syncGroupCtxOverDevice, syncGroupCtxOverRsync, FILE_CAP, MAX_FILES, LINE_FILE_MAX };

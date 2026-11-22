@@ -8,12 +8,13 @@
 // proves: newer-wins both directions, sha-equal skip (no echo ping-pong),
 // traversal guard, capped skips are REPORTED not silent, and the ssh-only
 // rsync fallback triggers exactly when the device link is down.
-import './scratch.mjs';
+import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const { syncGroupCtx, syncGroupCtxOverDevice, FILE_CAP, MAX_FILES } = require('../src/ctx-sync.js');
 
@@ -101,6 +102,39 @@ const hostsSsh = {
 };
 try { await syncGroupCtx({ hosts: hostsSsh, host: { id: 's', transport: 'ssh' }, group, remoteDir: rdir }); } catch { }
 ok(rsyncTried, 'ssh with a dead link degrades to the legacy rsync pair');
+
+// B-5278 (a): a file over LINE_FILE_MAX rides the agent's byte STREAM (fs-write-stream), never ONE control line (a 16 MiB file
+// was ≈21 MiB of base64 in one line); an older agent — the client refuses the stream BEFORE anything is sent — keeps the one line
+{
+  const CS = require('../src/ctx-sync.js'), { LINE_FILE_MAX } = CS;
+  const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ctx-big-')), g2 = { id: 'g2', title: 'G2', contextDir: d2 };
+  fs.writeFileSync(path.join(d2, 'big.md'), Buffer.alloc(LINE_FILE_MAX + 4096, 0x61)); fs.writeFileSync(path.join(d2, 'small.md'), 'small');
+  const relOf = (p) => p.split('/ctx-remote/')[1];
+  const streamDev = (st2, log) => {
+    const dev = fakeDevice(st2), fw = dev.fsWrite;
+    dev.fsWrite = async (p, buf, o) => { log.push({ road: 'line', rel: relOf(p), bytes: Buffer.byteLength(buf) }); return fw(p, buf, o); };
+    dev.fsWriteStream = async (p, { source, size, overwrite, by } = {}) => {
+      const parts = []; for await (const c of source) parts.push(Buffer.from(c)); const data = Buffer.concat(parts);
+      if (data.length !== size) throw Object.assign(new Error('more or fewer bytes than announced'), { code: 'size_changed' });
+      log.push({ road: 'stream', rel: relOf(p), bytes: size, overwrite: overwrite === true, by });
+      st2.set(relOf(p), { data, mt: Math.floor(Date.now() / 1000) }); return { size, sha256: sha(data) };
+    };
+    return dev;
+  };
+  const oldDev = (st2, log) => { const dev = streamDev(st2, log); dev.fsWriteStream = async () => { throw Object.assign(new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'), { code: 'host_needs_daemon' }); }; return dev; };
+  const run2 = async (Lib, mk) => { const st2 = new Map(), log = []; await Lib.syncGroupCtxOverDevice({ hosts: mkHosts(mk(st2, log)), hostId: 'h2', group: g2, remoteDir: rdir, onSkip: () => { } }); return { st2, log }; };
+  const s = await run2(CS, streamDev), sb = s.log.find((x) => x.rel === 'big.md');
+  ok(sb && sb.road === 'stream' && sb.bytes === LINE_FILE_MAX + 4096 && sb.overwrite && sb.by === 'system:ctx-sync' && s.st2.get('big.md').data.length === LINE_FILE_MAX + 4096 && s.log.some((x) => x.rel === 'small.md' && x.road === 'line'),
+    `B-5278 (a): a file over ${LINE_FILE_MAX} bytes goes through the agent's byte stream (its size announced, overwrite, by system:ctx-sync) — never one control line; a small one keeps the line`);
+  const o2 = await run2(CS, oldDev), ob = o2.log.find((x) => x.rel === 'big.md');
+  ok(ob && ob.road === 'line' && o2.st2.has('big.md'), 'an OLDER agent (no fs-write-stream: refused before anything is sent) — the file goes as one line, as before; the sync never hangs on an op the agent lacks');
+  const M = mutantCopies('ctx-sync', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
+  const CSRC = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'ctx-sync.js'), 'utf8');
+  const noStream = M.load('src/ctx-sync.js', anchored(CSRC, "      if (buf.length > LINE_FILE_MAX && typeof dm.fsWriteStream === 'function') {", "      if (false) {   /* MUTANT: the release's one line */", 'ctx-no-stream'), 'ctx-no-stream');
+  const x = await run2(noStream, streamDev), xb = x.log.find((y) => y.rel === 'big.md');
+  ok(xb && xb.road === 'line', 'CONTROL (the stream road cut, in a copy): the big file rides ONE control line again (red)');
+  fs.rmSync(d2, { recursive: true, force: true });
+}
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

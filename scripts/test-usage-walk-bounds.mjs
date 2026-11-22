@@ -28,6 +28,8 @@
 //     CONTROL: the drop cut, in a copy.
 //   ⑤ THE OLDEST AGENT THAT SAYS usage-scan-hub-cursor (18e7d9436, its walker a fixture checked against the history):
 //     its walker, handed the map without sid, walks exactly as with it — events and cursors.
+//   ⑥ B-5278 (b): ONE RECORD OVER THE LINE (its raw line 64 KiB of text, a 9 KB model and path, over a stand-in 4 KiB line) is pushed,
+//     acked and never walked again — the push goes on. CONTROL: the producer's name cap cut, in a copy: refused at every walk.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -339,4 +341,31 @@ console.log('⑤ the oldest agent that says usage-scan-hub-cursor walks the map 
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
 if (skipped) console.log(`  (${skipped} leg(s) skipped, each said above)`);
 fs.rmSync(tmp, { recursive: true, force: true });
+console.log('⑥ B-5278 (b): ONE usage record over the line can no longer stall a machine\'s push for good');
+{
+  // its RAW line is far over the push's line — here a stand-in bound of 4 KiB (the real one is the link's LINE_MAX): 64 KiB of
+  // text, a 9 KB model and a 9 KB path. The producer's caps (L3) keep its EVENT a few hundred bytes, so its batch goes, the
+  // hub's ack commits the cursor past it, and the next walk reads nothing again. Before L3 the same event rode its 9 KB model:
+  // the batch was refused at every walk (the cursor saved before kept, the record walked again) — the push stalled for good
+  const h = homeOf('overline'), p6 = projOf(h, '-home-u-c'), BOUND = 4096;
+  const big = JSON.stringify({ type: 'assistant', requestId: 'req_big', timestamp: TS, cwd: '/' + 'p'.repeat(9000), message: { id: 'msg_big', model: 'm'.repeat(9000), content: [{ type: 'text', text: 'w'.repeat(64 * 1024) }], usage: { input_tokens: 7, output_tokens: 3 } } }) + '\n';
+  put(path.join(p6, SID1 + '.jsonl'), rec('req_a') + big + rec('req_b'));
+  const pushOnce = (Lib, st, cursors) => {
+    const r = walk(Lib, h, { cursors });
+    const out = r.events.join('\n') + (r.events.length ? '\n' : '') + JSON.stringify({ __cursors__: r.cursors, ...(r.oversize ? { __oversize__: r.oversize } : {}) }) + '\n';
+    let committed = null, longest = 0;
+    const res = AC.usagePushWalked(st, out, (o) => { const n = Buffer.byteLength(JSON.stringify(o)); longest = Math.max(longest, n); return n <= BOUND; }, (c) => { committed = c; });
+    if (res.sent) AC.usagePushAcked(st, res.seq, (c) => { committed = c; }, () => { });
+    return { events: r.events.length, sent: !!res.sent, refusedAt: res.refusedAt, committed, longest };
+  };
+  const st = { seq: 0, pendingCursors: new Map() };
+  const a = pushOnce(W, st, {}), b = pushOnce(W, st, a.committed || {});
+  ok(a.events === 3 && a.sent && a.longest <= BOUND && a.committed && b.events === 0 && !!b.committed,
+    `the record over the line: its event goes within the line (the longest line sent ${a.longest} bytes ≤ ${BOUND}), the ack commits the cursor past it, and the next walk reads nothing again — the push goes on`, { first: a, second: { events: b.events } });
+  const NoCap = M.load('src/usage-walker.js', anchored(WSRC, "  for (const k of ['model', 'tier']) if (badS(ev[k], NAME_MAX)) ev[k] = null;\n", '', 'walk-name-cap'), 'walk-name-cap');
+  const stx = { seq: 0, pendingCursors: new Map() };
+  const ax = pushOnce(NoCap, stx, {}), bx = pushOnce(NoCap, stx, ax.committed || {});
+  ok(!ax.sent && !ax.committed && !bx.sent && !bx.committed && bx.events === 3, 'CONTROL (the producer\'s name cap cut, in a copy): the event rides its 9 KB model, its batch is refused at EVERY walk and the cursor never moves — the stall, for good (red)', { first: ax, second: bx });
+}
+
 report();
