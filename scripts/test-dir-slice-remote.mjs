@@ -3,7 +3,8 @@
 // 主开发 r826 THE SMALLER SHAPE, r880, r949 — moved out of test-dir-complete ⑤b so that suite keeps the fast bound). Fast, in-process:
 //   ① THE TWO ASKS on the field's own road — exit-routes' real GET /api/hosts/:id/dir-complete handler (its create, a recording app) over
 //     the real HostManager, its ssh rung stubbed to run the SAME sh script here under a temp HOME with PLACED stalls (a process that
-//     ignores TERM and sleeps, its pid recorded, ended by this suite): the healthy typed folder listed while a base and a probe hang; a
+//     ignores TERM and sleeps, its pid recorded, ended by this suite): the healthy typed folder listed while a base and a probe hang —
+//     judged by the ORDER (it lands while the hung run is still out, and the next ask serves it; 主开发 r2574: never a wall-clock bound); a
 //     mount point child by name only; links never followed (unchecked); / as /x; one typed ask a folder; the cap; slow is not hung; ten
 //     asks one run; a hung typed folder marked 30 s; the rest's hold doubling; (r949) a child's marker file never read through a link;
 //     THE MOUNT TEST COMPARES REAL PATHS (a typed folder reached through a link whose real child is a mount point lands; the home's walk
@@ -66,14 +67,16 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
   const WAITT = 200, runs = [];
   // the run's own bound there: 800 ms on the machine whose typed folders are SLOW (0.3 s: past the hub's 200 ms wait, inside the bound), 250 ms on
   // the others (their stalls never end: a short bound keeps the suite short)
-  const runtOf = (id) => (id === 'h-99b' ? 800 : 250);
+  // h-99o (主开发 r2574): ① judges the ORDER — the healthy typed folder LANDS while the hung run is still OUT — so its runs carry a NET
+  // of 20 s that judges nothing (a real sh and ls under twelve lanes read past the hub's own 200 ms wait once); the leg ends its own stall
+  const runtOf = (id) => (id === 'h-99o' ? 20e3 : id === 'h-99b' ? 800 : 250);   // h-99o's net twice the leg's 10 s landing wait: the hung rest is surely out then
   const shOf = (script, timeout) => new Promise((resolve, reject) => execFile('sh', ['-c', script], { env: { HOME: MH, PATH: `${FB}:/usr/bin:/bin`, VS_PL: PL }, timeout, maxBuffer: 8 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
   const mkHm = (id) => {
     const hm = new HostManager({ dataDir: path.join(TMP, 'hub-data-' + id) });
     hm._state.hosts.push({ id, name: 'nas-' + id, host: id + '.example.test', user: 'me', port: 22, transport: 'ssh' });
     hm.refuseUnreachable = async () => {};
     hm._clock = 1_800_000_000_000; hm._now = () => hm._clock;
-    hm._ssh = (h, cmd) => { const sc = unwrap(cmd); runs.push({ id: h.id, sc, plain: cmd.startsWith("exec sh -c '") }); return shOf(plant(sc), runtOf(h.id)); };   // the run's own bound there
+    hm._ssh = (h, cmd) => { const sc = unwrap(cmd), r = { id: h.id, sc, plain: cmd.startsWith("exec sh -c '"), settled: false }; runs.push(r); let p; try { p = shOf(plant(sc), runtOf(h.id)); } catch (e) { r.settled = true; throw e; } p.then(() => { r.settled = true; }, () => { r.settled = true; }); return p; };   // the run's own bound there; `settled` — the run ended (r2574: ①'s order)
     return hm;
   };
   const alive = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return !/^\d+ \(.*\) [ZX]/.test(st) && fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('sleep'); } catch { return false; } };
@@ -96,9 +99,20 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
   ok('B-99b9 the field\'s own road: exit-routes\' real GET /api/hosts/:id/dir-complete handler (its create, a recording app)', !roadErr && typeof DC === 'function', roadErr);
   try {
     // 1. THE ROW'S SENTENCE: a healthy TYPED folder with a base and a probe on the placed stall — listed, NOT partial
-    const a1 = await field('h-99a', '~/work/healthy/', ['~/net/a'], ['~/lost']);
-    ok('B-99b9 THE ROW\'S SENTENCE: the healthy typed folder ~/work/healthy is LISTED and the reply is NOT partial while a base (~/net/a) and a probe (~/lost) hang there; the rest is said late (rowsLate, probesLate), never «did not answer»',
-      listed(a1, '~/work/healthy', 'inside') && a1.partial === false && a1.rowsLate === true && (a1.probesLate || []).includes('~/lost') && !a1.error && !a1.verdict, { partial: a1.partial, rowsLate: a1.rowsLate, probesLate: a1.probesLate, dirs: Object.keys((a1.listing || {}).dirs || {}), error: a1.error });
+    // its read: the reply's own judge is the hub's 200 ms wait (both runs raced against it), so the first reply says only what had landed
+    // by then; the leg waits on the healthy run's LANDING (a fact — load decides only how long, a 10 s wait inside the runs' 20 s net), reads the ORDER
+    // there, and asks again: the kept landing is served while the hung run is still out (as ④ «slow is not hung» does)
+    const C1 = () => hmOf('h-99o')._sliceCache.get('h-99o');
+    const a1first = await field('h-99o', '~/work/healthy/', ['~/net/a'], ['~/lost']);
+    const landed1 = await until(() => !!C1() && [...C1().r1.values()].some((e) => e.raw && e.raw.dirs.some((d) => d.path.endsWith('/work/healthy'))), 10e3);
+    const hungOut = landed1 && runs.some((r) => r.id === 'h-99o' && r.sc.includes('lost') && !r.settled);   // THE ORDER: landed while the hung run is still OUT
+    const a1 = await field('h-99o', '~/work/healthy/', ['~/net/a'], ['~/lost']);
+    ok('B-99b9 THE ROW\'S SENTENCE: the healthy typed folder ~/work/healthy is LISTED and the reply is NOT partial while a base (~/net/a) and a probe (~/lost) hang there — the ORDER: it LANDED while the hung run was still out, and the next ask serves it (the hub replies at its own 200 ms wait; the leg waits on the landing, never a wall-clock bound on a real child, r2574); the rest is said late (rowsLate, probesLate), never «did not answer»',
+      listed(a1, '~/work/healthy', 'inside') && a1.partial === false && a1.rowsLate === true && (a1.probesLate || []).includes('~/lost') && !a1.error && !a1.verdict && hungOut, { landed1, hungOut, firstPartial: a1first.partial, partial: a1.partial, rowsLate: a1.rowsLate, probesLate: a1.probesLate, dirs: Object.keys((a1.listing || {}).dirs || {}), error: a1.error });
+    fs.writeFileSync(NOSTALL, '1');   // ①'s own stall ended: no new one, its sleeps by the pids they wrote, every run of that host's end awaited (a fact)
+    const ended1 = await until(() => { for (const pid of planted()) { if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } } return runs.filter((r) => r.id === 'h-99o').every((r) => r.settled); }, 10e3);
+    ok('B-99b9 ① ends its own stall: every run of its host ended before the next leg (no sleep of it left to plant another)', ended1, runs.filter((r) => r.id === 'h-99o' && !r.settled).length);
+    if (ended1) fs.rmSync(NOSTALL, { force: true });   // a run still out keeps the mark: it plants nothing more
     const PC2 = require('../src/path-candidates.js'), ask1 = PC2.sliceAsk('~/work/healthy/', [{ path: '~/net/a' }]);
     const oneScript = plant(DSS.sliceScript({ list: ask1.list, probes: ['~/lost'] }));
     const rel = await shOf(oneScript, 600).then((o) => ({ out: o }), (e) => ({ killed: !!(e && e.killed), out: String((e && e.stdout) || '') }));
@@ -211,6 +225,7 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     // this leg's own stalls, known by their pid file and their sleep — killed at EVERY pass of the wait (B-1217: a stall a late background
     // run plants after a single kill pass lived out the wait on a loaded box; each pass now ends what is planted by then)
     const killPlanted = () => { for (const pid of planted()) { if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } } };
+    fs.writeFileSync(NOSTALL, '1');   // its read: no run still out plants a stall after this wait
     killPlanted();
     const end = Date.now() + 3000; while (planted().some(alive) && Date.now() < end) { await sleep(30); killPlanted(); }
     ok('B-99b9 the leg ends its own planted stalls (none left)', !planted().some(alive), planted().filter(alive));
