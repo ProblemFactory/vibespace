@@ -33,6 +33,9 @@
 //      asks A again once and saves what A's box shows (RED: the tip before the follow, 3ee1ed432, saved A's earlier folder)
 //   ⑰ (B-f3a1, ruled r1279) THE PAGE'S ONE GATE drawn: twelve fields set at once, every check held — the doors never hold more than
 //      three; the person's Enter reaches the machine at once (the kept slot); never more than four (RED: the release had no gate)
+//   ⑱ (r1633 / r1636) THE LATE FACTS DRAWN, on this hub AND on a paired machine (a REAL agent of this tree collecting there): a kid's
+//      own fact lands 300 ms after the page's ONE quiet re-ask arrives — marked late, it waits for it and the badge is drawn (RED: the
+//      same re-ask unmarked answers at once, no badge); past the bound, no third ask, and the fact kept there comes with the next ask
 //   ⑮ 0 page errors
 // Run: node scripts/test-path-field-chrome.mjs   (SKIPs without chrome)
 import fs from 'node:fs';
@@ -98,8 +101,12 @@ app.use((req, res, next) => {
   if (h && (h.text == null || String(req.query.path || '') === h.text)) { h.p.then(() => next()); return; }   // ⑯: a hold may name ONE text
   next();
 });
+// ⑱ (r1633): the page's QUIET re-ask as the machine sees it — a leg hangs a hook on its arrival (its fact lands a set time after), or
+// STRIPS its late mark on the way (the RED: the same re-ask unmarked, as the release sent it)
+const LATE_HOOK = { on: new Map(), strip: false };
+app.use((req, res, next) => { if (/dir-complete$/.test(req.path) && req.query.late === '1') { const k = String(req.query.path || ''), cb = LATE_HOOK.on.get(k); if (cb) { LATE_HOOK.on.delete(k); cb(); } if (LATE_HOOK.strip) delete req.query.late; } next(); });
 const holdPath = (p, text = null) => { let open = null; const h = { p: new Promise((r) => { open = r; }), text }; h.open = () => { HOLD.delete(p); open(); }; HOLD.set(p, h); return h; };
-app.get('/api/hosts/:id/dir-complete', async (req, res) => { try { res.json(await hm.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') })); } catch (e) { res.json({ suggestions: [], error: e.message }); } });
+app.get('/api/hosts/:id/dir-complete', async (req, res) => { const ac = new AbortController(); res.on('close', () => { if (!res.writableEnded) ac.abort(); }); try { res.json(await hm.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), press: req.query.press === '1', late: req.query.late === '1' }, { signal: ac.signal })); } catch (e) { res.json({ suggestions: [], error: e.message }); } });
 const NOW = Date.now();
 app.get('/api/hosts/:id/recent-cwds', (req, res) => res.json({ cwds: [], recent: PC.recentCounts([{ cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 3 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 4 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 5 * 86400 }, { cwd: MAC + '/Downloads', mtime: NOW / 1000 - 7 * 86400 }]) }));
 app.locals.getRemoteFs = () => ({ dirSlice: (id, o) => hm.dirSlice(id, o), mkdir: async (id, p) => { fs.mkdirSync(String(p).replace(/^~/, MAC), { recursive: true }); return { success: true }; } });
@@ -823,6 +830,66 @@ console.log('\n── ⑰ the page\'s one gate: twelve folder fields set at once
   ok(`⑰ the PERSON's check reaches the machine AT ONCE, while the doors' three are still held (4th arrival; in flight then: ${whileHeld.now})`, !!personArrived && whileHeld.arrived === 4 && whileHeld.now === 4, whileHeld);
   ok(`⑰ the page never has more than four checks in flight (most at once: ${DIRQ.max}); field 11's door ask, superseded by the person's, never reaches the machine`, DIRQ.max === 4 && !!all && all.filter((t) => t === '~/work/door-11').length === 0, { max: DIRQ.max, all });
   await ev(`document.getElementById('many')?.remove(); true`);
+}
+
+console.log('\n── ⑱ THE LATE FACTS DRAWN (主开发 r1633 / r1636, both roads): a kid\'s own fact lands after the answer — ONE quiet re-ask, marked late, brings it ──');
+{
+  // the machine's road: the REAL agent of this tree (the built bundle) collects the facts THERE; this hub shapes them (hosts.dirSlice)
+  const { DeviceManager } = require('../src/agentd/client.js');
+  const { endDaemonsAndWait } = await import('./scratch.mjs');
+  process.env.VIBESPACE_AGENTD_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pf-agentd-'));
+  const dmP = new DeviceManager({ dataDir: path.join(TMP, 'pair-data'), bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
+  process.on('exit', () => { try { endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { } });
+  let paired = null; try { await dmP.connect(); paired = dmP; } catch (e) { ok('⑱ the paired machine\'s agent starts (this tree\'s bundle)', false, String(e.message || e)); }
+  hm._devices = new Map([...(hm._devices || []), ['h-pair', paired]]);
+  // a kid whose package.json is a FIFO: its own facts call (on a worker, there) reads it — the fact lands when this suite writes it
+  const slowKid = (dir) => { fs.mkdirSync(path.join(HOME, dir, 'kid', '.git'), { recursive: true }); const f = path.join(HOME, dir, 'kid', 'package.json'); execFileSync('mkfifo', [f]); const old = (Date.now() - 3600e3) / 1000; fs.utimesSync(path.join(HOME, dir, 'kid'), old, old); fs.utimesSync(path.join(HOME, dir), old, old); return f; };
+  const fed = new Set();
+  const land = async (fifo, afterMs = 0) => { if (afterMs) await sleep(afterMs); for (let i = 0; i < 500 && !fed.has(fifo); i++) { try { const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.writeSync(fd, '{"name":"kid"}'); fs.closeSync(fd); fed.add(fifo); } catch { await sleep(10); } } };
+  const asksOf = (dir) => ev(`performance.getEntriesByType('resource').map((e) => e.name).filter((u) => u.includes('dir-complete') && decodeURIComponent(u).includes('path=~/${dir}/'))`);
+  const gitDrawn = (dir) => ev(`(() => { const r = [...document.querySelectorAll('.pf-list .pf-item')].find((x) => x.querySelector('.pf-path').textContent.replace(/^\\u200e/, '') === '~/${dir}/kid'); return r ? (r.querySelector('.pf-chip[title="git"]') ? 'git' : 'row') : 'none'; })()`);
+  const start = async (hostVal, dir) => {
+    await reset();
+    await ev(`(() => { const s = document.getElementById('host'); if (![...s.options].some((o) => o.value === 'h-pair')) s.add(new Option('paired', 'h-pair')); s.value = ${JSON.stringify(hostVal)}; window.pf.refresh(); performance.clearResourceTimings(); document.getElementById('cwd').focus(); return true; })()`);
+    await type(`~/${dir}/`);
+  };
+  for (const [road, hostVal] of [['this hub', ''], ['the paired machine', 'h-pair']]) {
+    if (hostVal && !paired) continue;
+    const tag = hostVal ? 'p' : 'h';
+    const inB = slowKid(`late${tag}`), redF = slowKid(`red${tag}`), pastB = slowKid(`past${tag}`);
+    // INSIDE THE BOUND: the fact lands 300 ms after the quiet re-ask ARRIVED (the machine's view: LATE_HOOK) — the re-ask waits where the
+    // fact lives and the badge is drawn from its ONE reply
+    let lateAt = false; LATE_HOOK.on.set(`~/late${tag}/`, () => { lateAt = true; land(inB, 300); });
+    await start(hostVal, `late${tag}`);
+    const drawn = await until(async () => ((await gitDrawn(`late${tag}`)) === 'git' ? true : null), 6000);
+    const asks = await asksOf(`late${tag}`);
+    ok(`⑱ ${road}: the kid's git badge is DRAWN from the quiet re-ask's one reply (the fact landed 300 ms after the re-ask arrived) — ${asks.length} asks, the second marked late=1, no third`, !!drawn && !!lateAt && asks.length === 2 && !asks[0].includes('late=1') && asks[1].includes('late=1'), { asks, lateAt: !!lateAt, drawn: await gitDrawn(`late${tag}`) });
+    await key('Escape');
+    // THE RED: the SAME re-ask with its late mark stripped on the way (the release's road) — answered at once, the fact still out: no badge,
+    // and the page asks no third time
+    LATE_HOOK.strip = true; LATE_HOOK.on.set(`~/red${tag}/`, () => { land(redF, 300); });
+    await start(hostVal, `red${tag}`);
+    await until(async () => ((await asksOf(`red${tag}`)).length >= 2 ? true : null), 5000);
+    await sleep(1500);
+    const red = { asks: (await asksOf(`red${tag}`)).length, drawn: await gitDrawn(`red${tag}`) };
+    LATE_HOOK.strip = false;
+    ok(`⑱ ${road} RED CONTROL: the same quiet re-ask UNMARKED is answered before the fact — no badge (${red.drawn}), ${red.asks} asks, none more`, red.drawn === 'row' && red.asks === 2, red);
+    await key('Escape');
+    // PAST THE BOUND: the fact lands 1.6 s after the re-ask arrived — the re-ask replies at the bound (no badge yet) and the page asks NO
+    // third time; the fact is kept there and the next ask of the text has it
+    LATE_HOOK.on.set(`~/past${tag}/`, () => { land(pastB, 1600); });
+    await start(hostVal, `past${tag}`);
+    await until(async () => ((await asksOf(`past${tag}`)).length >= 2 ? true : null), 5000);
+    await sleep(1300);
+    const mid = { asks: await asksOf(`past${tag}`), drawn: await gitDrawn(`past${tag}`) };
+    await sleep(1200);
+    await ev(`window.pf.refresh(); true`);
+    const later = await until(async () => ((await gitDrawn(`past${tag}`)) === 'git' ? true : null), 5000);
+    ok(`⑱ ${road}: past the bound the re-ask says the rest is late — no badge, and NO third ask (${mid.asks.length} asks); the fact kept there comes with the next ask`, mid.asks.length === 2 && mid.drawn === 'row' && !!later, { mid, later: await gitDrawn(`past${tag}`) });
+    await key('Escape'); await reset();
+    await land(inB); await land(redF); await land(pastB);
+  }
+  try { endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { }
 }
 
 ok(`⑮ 0 page errors`, errors.length === 0, errors);
