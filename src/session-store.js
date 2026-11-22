@@ -182,7 +182,8 @@ let _tmuxReader = null, _paneNoReply = null;   // { at, waitMs }
 function useTmuxReader(fn) { _tmuxReader = typeof fn === 'function' ? fn : null; _paneMapMemo = null; _paneNoReply = null; }   // a reader handed in starts from no memo (a new road)
 /** r2030 (3a) + r2262 MUST 2: where tmux is when the host has no `which` program — the walk along PATH OFF THE LOOP: every folder
  *  (rooted or not, a storage root never) by an async stat bounded at TMUX_WALK_STAT_MS, one stat in flight per folder (a hung
- *  mount holds one pool thread, never one per ask), PATH order kept: the first folder that answered «an executable tmux».
+ *  mount holds one pool thread, never one per ask), PATH ORDER KEPT (r2489 (3)): a folder's tmux counts only when every earlier
+ *  folder said «none here»; an earlier folder past its bound makes the answer a no-reply (it may hold the tmux the panes run).
  *  → its path; null = every folder answered and none holds tmux; undefined = no answer (a folder past its bound, none found) —
  *  the reader says NO REPLY. No synchronous stat of a PATH folder on this road (the release walked in the sweep's worker). */
 const TMUX_WALK_STAT_MS = 2000;
@@ -192,7 +193,7 @@ async function tmuxPathAsync({ statMs = TMUX_WALK_STAT_MS } = {}) {
   const now = Date.now();
   if (_tmuxWalkMemo && now - _tmuxWalkMemo.at < TMUX_PATH_TTL_MS) return _tmuxWalkMemo.path;
   const dirs = String(process.env.PATH || '').split(path.delimiter).filter((d) => { if (!d) return false; const r = SP.rootOf(d); return !(r && r.kind === 'storage'); });
-  const answers = await Promise.all(dirs.map((d) => {
+  const probes = dirs.map((d) => {
     let p = _tmuxWalkInFlight.get(d);
     if (!p) {
       p = fs.promises.stat(path.join(d, 'tmux')).then((st) => st.isFile() && !!(st.mode & 0o111), () => false).finally(() => { if (_tmuxWalkInFlight.get(d) === p) _tmuxWalkInFlight.delete(d); });
@@ -201,10 +202,12 @@ async function tmuxPathAsync({ statMs = TMUX_WALK_STAT_MS } = {}) {
     let timer = null;
     const late = new Promise((r) => { timer = setTimeout(() => r(undefined), statMs); if (timer.unref) timer.unref(); });
     return Promise.race([p, late]).then((v) => { clearTimeout(timer); return v; });
-  }));
-  const at = answers.indexOf(true);
-  if (at >= 0) { const found = path.join(dirs[at], 'tmux'); _tmuxWalkMemo = { at: Date.now(), path: found }; return found; }
-  if (answers.includes(undefined)) return undefined;
+  });
+  for (let i = 0; i < dirs.length; i++) {   // every folder asked at once; their answers read in PATH order
+    const a = await probes[i];
+    if (a === undefined) return undefined;   // r2489 (3): an earlier folder past its bound — no answer, never a later folder's tmux
+    if (a === true) { const found = path.join(dirs[i], 'tmux'); _tmuxWalkMemo = { at: Date.now(), path: found }; return found; }
+  }
   _tmuxWalkMemo = { at: Date.now(), path: null };
   return null;
 }

@@ -80,10 +80,12 @@ function procStart(pid) {
   } catch { return null; }
 }
 
-/** B-956d: the display recorded for `port` in data/vnc.json, or null (absent, unreadable, another port, not `:N`). */
-function recordedDisplay(file, port) {
+/** B-956d: the display recorded for `port` in data/vnc.json, or null (absent, unreadable, another port, not `:N`).
+ *  `whole` (r2489): the record itself for that port — its X server's identity and a session's no-reply mark — or null. */
+function recordedDisplay(file, port, { whole = false } = {}) {
   try {
     const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (whole) return j && j.port === port ? j : null;
     return j && j.port === port && /^:\d{1,5}$/.test(String(j.display)) ? String(j.display) : null;
   } catch { return null; }
 }
@@ -138,8 +140,10 @@ class VncManager {
   async _ensureRunning() {
     if (await portListening(this.port)) {   // adopt — on the RECORDED display (constructor), B-956d
       // B-323e follow (主开发 r2262 MUST 1): a display OURS whose desktop session was not started for a no-reply — the reopen the
-      // toast names runs the session's lookups again and starts it there (once it starts, never again; a second no-reply is said again)
-      if (this._sessionNoReply && this._own) return this._sessionOn(await this._startSession());
+      // toast names runs the session's lookups again and starts it there (once it starts, never again; a second no-reply is said again).
+      // r2489 (1)+(2): OURS = our X server STILL the same process (the identity stop() checks) — this hub's own spawn, or the one the
+      // display's record names after a restart; the mark is kept beside that record. Anything else is adopted as before.
+      if (this._noReplyMark() && this._ourX()) return this._sessionOn(await this._startSession());
       return this.status();
     }
     const found = await this._findXvnc({ fresh: true });
@@ -173,9 +177,31 @@ class VncManager {
   async _sessionOn(sess) {
     const st = await this.status();
     const noReply = sess && typeof sess === 'object' && Array.isArray(sess.noReply) ? sess.noReply : null;
-    if (noReply && !sess.cmd) { this._sessionNoReply = noReply; return { ...st, session: 'no-reply', sessionNoReply: noReply }; }
+    if (noReply && !sess.cmd) { this._sessionNoReply = noReply; this._markRecord(noReply); return { ...st, session: 'no-reply', sessionNoReply: noReply }; }
+    if (this._noReplyMark()) this._markRecord(null);
     this._sessionNoReply = null;
     return noReply ? { ...st, session: 'partial', sessionNoReply: noReply } : st;
+  }
+
+  /** r2489 (1): our X server, STILL the same process — this hub's own spawn (`_own`), else the one the display's record names
+   *  (after a restart) — its pid's start time still the one recorded (stop()'s check); null = not ours (dead, replaced, adopted) */
+  _ourX() {
+    const live = (o) => !!(o && o.pid > 1 && o.start && procStart(o.pid) === o.start);
+    if (live(this._own)) return this._own;
+    const r = recordedDisplay(this._stateFile, this.port, { whole: true });
+    return r && live(r) && String(r.display) === String(this.display) ? { pid: r.pid, start: r.start } : null;
+  }
+  /** r2489 (2): the session's no-reply mark — this process's, else the one kept beside the display's record (a restart keeps it) */
+  _noReplyMark() {
+    if (this._sessionNoReply) return this._sessionNoReply;
+    const r = recordedDisplay(this._stateFile, this.port, { whole: true });
+    return r && Array.isArray(r.sessionNoReply) && r.sessionNoReply.length ? r.sessionNoReply : null;
+  }
+  /** the mark written beside the display's record (null clears it); the record's X server stays the one it names */
+  _markRecord(list) {
+    const r = recordedDisplay(this._stateFile, this.port, { whole: true });
+    const pid = (this._own && this._own.pid) || (r && r.pid) || null;
+    if (pid) this._record(pid, list);
   }
 
   /** Start Xvnc on `display` (null = the X server picks a free one) with `-displayfd 3`: resolves `{ child, display }`
@@ -216,10 +242,10 @@ class VncManager {
   }
 
   /** B-956d: the display this Desktop took, for the next boot's adoption (tmp + rename: never a half-written file). */
-  _record(pid) {
+  _record(pid, sessionNoReply = null) {
     try {
       const tmp = `${this._stateFile}.tmp-${process.pid}`;
-      fs.writeFileSync(tmp, JSON.stringify({ display: this.display, port: this.port, pid: pid || null, start: pid ? procStart(pid) : null, at: Date.now() }) + '\n');
+      fs.writeFileSync(tmp, JSON.stringify({ display: this.display, port: this.port, pid: pid || null, start: pid ? procStart(pid) : null, at: Date.now(), ...(Array.isArray(sessionNoReply) && sessionNoReply.length ? { sessionNoReply } : {}) }) + '\n');
       fs.renameSync(tmp, this._stateFile);
     } catch (e) { console.warn(`[vnc] could not record the Desktop's display (${e.message}) — a restart adopts ${this._preferred}`); }
   }

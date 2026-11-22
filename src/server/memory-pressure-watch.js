@@ -26,9 +26,9 @@ const TMP_ROOT_RE = /^(vs-|cdp-prof-|agent-browser-chrome-)/;
 const TMPFS_MAGIC = 0x01021994;
 const PS_MAX_BUFFER = 8 * 1024 * 1024;   // r1381 (8): the starter's answer is ONE line the loop parses — 8 MB is ~10× the owner's 2 400-process table
 
+const NOT_READ_MAX = 200;   // r2262: the reason goes into a For-you item whole — bounded
 /** → { rows, notRead } — B-323e follow (r2030 (3c)): a read that failed, ran past its bound or got no reply is `notRead` (its why),
  *  never an empty table: the pressure item then says the table was not read, never «nothing holds the memory» */
-const NOT_READ_MAX = 200;
 function psTable() {
   return new Promise((resolve) => {
     via('ps', ['axo', 'pid=,ppid=,rss=,comm=,args='], { timeout: 15000, maxBuffer: PS_MAX_BUFFER }).then(({ err, stdout: out }) => {

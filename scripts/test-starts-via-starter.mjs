@@ -441,49 +441,94 @@ WD.section('⑧');
     try { sess = await new V.VncManager({ dataDir: TMP, port: 1, display: ':95' })._startSession(); rsess = await new VREL.VncManager({ dataDir: TMP, port: 1, display: ':94' })._startSession(); } finally { console.warn = warnWas; }
     ok(!!sess && Array.isArray(sess.noReply) && sess.noReply.includes('dbus-launch') && sess.noReply.includes('xterm') && warned.filter((w) => /no desktop session was started: the lookup of .+ got no answer in time/.test(w)).length === 1 && rsess === null,
       'a Start whose helper lookups get NO REPLY: said in the journal and answered (session «no-reply», by name) — RED: the build\'s lookup leaves a bare screen without a word', { sess, rsess, warned: warned.length });
-    // (d) 主开发 r2262 MUST 1 — the reopen the toast names runs the session's lookups again on OUR display, and starts it there
+    // (d) 主开发 r2262 MUST 1 + r2489 (1)(2) — the reopen the toast names runs the session's lookups again on OUR display (still the
+    // same X server: this hub's own, or the record's after a restart), and starts it there once; anything else is adopted as before
     WATCH.add('xterm');   // the session's last resort: the spy answers it (nothing real starts)
     const srv = require('net').createServer().listen(0, '127.0.0.1'); await new Promise((r) => srv.once('listening', r)); const vport = srv.address().port;
+    const startOf = (pid) => { try { const t = fs.readFileSync(`/proc/${pid}/stat`, 'latin1'); return t.slice(t.lastIndexOf(')') + 2).split(' ')[19] || null; } catch { return null; } };
+    const NO_PID = 4194000 + (process.pid % 300);   // above every pid_max a box sets: no such process (its start reads null)
+    const noReplyAll = (cmd) => (cmd === 'which' ? { unknown: true } : { started: true, code: 0, stdout: '' });
+    const xtermOnly = (cmd, args) => (cmd === 'which' ? (args[0] === 'xterm' ? { started: true, code: 0, stdout: '/usr/bin/xterm\n' } : { started: true, code: 1, stdout: '' }) : { started: true, code: 0, stdout: '' });
+    let vdirs = 0; const vdir = () => { const d = path.join(TMP, 'vnc-' + (++vdirs)); fs.mkdirSync(d, { recursive: true }); return d; };
+    const firstStart = async (mod, dir, xpid, { real = false } = {}) => {   // a Start whose X server we spawned (recorded as _ensureRunning does) and whose helpers got no reply
+      const m = new mod.VncManager({ dataDir: dir, port: vport, display: ':93' });
+      m._own = { pid: xpid, start: startOf(xpid) }; m._record(xpid);
+      answer = noReplyAll;
+      // real: the lookups themselves get no reply (only while no helper has a kept path: a no-reply serves the last good one, r2030);
+      // else the answer _startSession gives for it, handed to the same _sessionOn
+      const first = await m._sessionOn(real ? await m._startSession() : { noReply: ['dbus-launch', 'xfce4-session', 'startxfce4', 'openbox-session', 'xterm'] });
+      return { m, first: first.session };
+    };
     const reopen = async (mod) => {
-      const m = new mod.VncManager({ dataDir: TMP, port: vport, display: ':93' });
-      answer = (cmd) => (cmd === 'which' ? { unknown: true } : { started: true, code: 0, stdout: '' });
-      const first = await m._sessionOn(await m._startSession());   // the first Start's tail: every helper got no reply
-      m._own = { pid: process.pid, start: 'planted' };                // the display is OURS (this hub started its X server)
-      const again = await m.ensureRunning();                          // a reopen while the lookups still get no reply
-      answer = (cmd, args) => (cmd === 'which' ? (args[0] === 'xterm' ? { started: true, code: 0, stdout: '/usr/bin/xterm\n' } : { started: true, code: 1, stdout: '' }) : { started: true, code: 0, stdout: '' });
-      const x0 = directOf('xterm');
-      const third = await m.ensureRunning(); const started = directOf('xterm') - x0;   // a reopen once they answer
-      const fourth = await m.ensureRunning();                                          // the next open: adopted, nothing more
-      return { first: first.session, again: again.session, third: third.session || null, started, after: directOf('xterm') - x0, mark: m._sessionNoReply, fourth: fourth.session || null };
+      const { m, first } = await firstStart(mod, vdir(), process.pid, { real: true });   // this process stands for our X server: alive, its start known
+      const again = await m.ensureRunning();
+      answer = xtermOnly; const x0 = directOf('xterm');
+      const third = await m.ensureRunning(); const started = directOf('xterm') - x0;
+      const fourth = await m.ensureRunning();
+      return { first, again: again.session, third: third.session || null, started, after: directOf('xterm') - x0, mark: m._sessionNoReply, fourth: fourth.session || null };
     };
     const VSRC2 = read('src/vnc.js');
     const ro = await reopen(V);
-    const roRel = await reopen(require(M.write('src/vnc.js', anchored(VSRC2, "      if (this._sessionNoReply && this._own) return this._sessionOn(await this._startSession());\n", '', 'adopt-bare'), 'adopt-bare')));
-    const part = await new V.VncManager({ dataDir: TMP, port: 1, display: ':92' })._sessionOn({ cmd: 'xterm', noReply: ['dbus-launch'] });
-    srv.close();
+    const roRel = await reopen(require(M.write('src/vnc.js', anchored(VSRC2, "      if (this._noReplyMark() && this._ourX()) return this._sessionOn(await this._startSession());\n", '', 'adopt-bare'), 'adopt-bare')));
+    const part = await new V.VncManager({ dataDir: vdir(), port: 1, display: ':92' })._sessionOn({ cmd: 'xterm', noReply: ['dbus-launch'] });
     ok(ro.first === 'no-reply' && ro.again === 'no-reply' && ro.third === null && ro.started === 1 && ro.after === 1 && ro.mark === null && ro.fourth === null && roRel.again === undefined && roRel.started === 0 && part.session === 'partial' && JSON.stringify(part.sessionNoReply) === '["dbus-launch"]',
       'a Desktop REOPENED on our display whose session got no reply runs the lookups again: a second no-reply is said again, a reply starts the session there (once: the next open adopts it); the bus helper alone is said (`partial`) — RED: today\'s adoption returns the bare display silently, nothing started', { ro, roRel: { again: roRel.again, started: roRel.started }, part: part.session });
+    // (1) our X server DIED (another took the display): adopted as before, no session started on a display not ours
+    const deadRun = async (mod) => { const { m } = await firstStart(mod, vdir(), NO_PID); answer = xtermOnly; const x0 = directOf('xterm'); const r = await m.ensureRunning(); return { session: r.session || null, started: directOf('xterm') - x0 }; };
+    const dead = await deadRun(V);
+    const deadRel = await deadRun(require(M.write('src/vnc.js', anchored(VSRC2, "      if (this._noReplyMark() && this._ourX()) return this._sessionOn(await this._startSession());\n", "      if (this._sessionNoReply && this._own) return this._sessionOn(await this._startSession());   // MUTANT: r2262's check (set once, never alive)\n", 'own-set'), 'own-set')));
+    // (2) A HUB RESTART between the toast and the reopen: the mark is kept beside the display's record, honoured while its X server is still that one
+    const restartRun = async (mod) => {
+      const dir = vdir(); await firstStart(V, dir, process.pid);   // the hub before the restart (the real module) marked the display
+      const after = new mod.VncManager({ dataDir: dir, port: vport, display: ':91' });   // the restarted hub: nothing in memory, its display read from the record
+      answer = xtermOnly; const x0 = directOf('xterm');
+      const r = await after.ensureRunning();
+      const rec = JSON.parse(fs.readFileSync(path.join(dir, 'vnc.json'), 'utf8'));
+      return { display: after.display, started: directOf('xterm') - x0, session: r.session || null, markLeft: !!rec.sessionNoReply };
+    };
+    const rs = await restartRun(V);
+    const rsRel = await restartRun(require(M.write('src/vnc.js', anchored(VSRC2, "    const r = recordedDisplay(this._stateFile, this.port, { whole: true });\n    return r && Array.isArray(r.sessionNoReply) && r.sessionNoReply.length ? r.sessionNoReply : null;\n", '    return null;   // MUTANT: the mark in memory only\n', 'mark-in-memory'), 'mark-in-memory')));
+    srv.close();
+    ok(dead.started === 0 && dead.session === null && deadRel.started === 1 && rs.display === ':93' && rs.started === 1 && rs.markLeft === false && rsRel.started === 0,
+      'the retry asks that our X server is STILL the same process: dead or replaced, the display is adopted as before (nothing started there) — RED: r2262\'s check starts a session on a display not ours; and a HUB RESTART between the toast and the reopen keeps the mark beside the display\'s record: the reopen starts the session, the mark cleared — RED: a mark in memory only adopts the bare display', { dead, deadRel, rs, rsRel });
 
-    // (e) 主开发 r2262 MUST 2 — the fallback's walk along PATH never stats a folder on the hub's loop: a stall placed in one folder
+    // (e) 主开发 r2262 MUST 2 + r2489 (3) — the fallback's walk along PATH never stats a folder on the hub's loop, and keeps PATH order:
+    // a stall placed in one folder
     const STALL = path.join(TMP, 'stall-bin'); fs.mkdirSync(STALL, { recursive: true });
-    process.env.PATH = STALL + path.delimiter + BIN + path.delimiter + pathWas;
     const SPm = require(path.join(ROOT, 'src/storage-path.js')), rootOfWas = SPm.rootOf;
     SPm.rootOf = () => null;   // the scene the round names: no root known for the folder (a boot's first moments, or a mount the witness does not know)
     const statSyncWas = fs.statSync, pstatWas = fs.promises.stat;
     fs.statSync = function (p, ...r) { if (String(p).startsWith(STALL + path.sep)) { const t = nowWas(); while (nowWas() - t < 300) { } throw Object.assign(new Error('planted stall'), { code: 'ENOENT' }); } return statSyncWas.call(this, p, ...r); };
     fs.promises.stat = function (p, ...r) { if (String(p).startsWith(STALL + path.sep)) return new Promise(() => { }); return pstatWas.call(this, p, ...r); };
     const { monitorEventLoopDelay } = require('perf_hooks');
-    const loopMax = async (fn) => { const keep = setInterval(() => { }, 20); const h = monitorEventLoopDelay({ resolution: 10 }); h.enable(); try { await new Promise((r) => setTimeout(r, 40)); const v = await fn();   /* the histogram measures each sample against the one before: a block before its first sample is never recorded */ await new Promise((r) => setTimeout(r, 30)); return { v, maxMs: Math.round(h.max / 1e6) }; } finally { h.disable(); clearInterval(keep); } };   // a ref'd keep-alive: the walk's bound timer is unref'd and the planted stat never answers (rc 13 without it)
-    let walk, oldWalk;
+    const loopMax = async (fn) => { const keep = setInterval(() => { }, 20); const h = monitorEventLoopDelay({ resolution: 10 }); h.enable(); try { await new Promise((r) => setTimeout(r, 40)); const v = await fn(); await new Promise((r) => setTimeout(r, 30)); return { v, maxMs: Math.round(h.max / 1e6) }; } finally { h.disable(); clearInterval(keep); } };   // a ref'd keep-alive (the walk's bound timer is unref'd, the placed stat never answers); the monitor's first samples before the walk (a block before them is never recorded)
+    let walk, walkAfter, oldWalk, orderRel;
     try {
       skew += 61e3;
+      process.env.PATH = STALL + path.delimiter + BIN + path.delimiter + pathWas;   // the stalled folder AHEAD of tmux
       walk = await loopMax(() => SS.tmuxPathAsync({ statMs: 150 }));
       const SSRC2 = read('src/session-store.js');
+      const LATER = require(M.write('src/session-store.js', anchored(SSRC2, "    if (a === undefined) return undefined;   // r2489 (3): an earlier folder past its bound — no answer, never a later folder's tmux\n", '', 'later-folder'), 'later-folder'));
+      orderRel = (await loopMax(() => LATER.tmuxPathAsync({ statMs: 150 }))).v;   // inside the keep-alive too: its bound timer is unref'd
       const OLDW = require(M.write('src/session-store.js', anchored(SSRC2, "async function tmuxPathAsync({ statMs = TMUX_WALK_STAT_MS } = {}) {\n", "async function tmuxPathAsync() { await landTmuxMounts(); return tmuxOnPath(); }   // MUTANT: the build's walk, on the loop\nasync function tmuxPathAsyncOff({ statMs = TMUX_WALK_STAT_MS } = {}) {\n", 'walk-on-loop'), 'walk-on-loop'));
       oldWalk = await loopMax(() => OLDW.tmuxPathAsync());
+      process.env.PATH = BIN + path.delimiter + STALL + path.delimiter + pathWas;   // the stalled folder BEHIND tmux
+      walkAfter = await loopMax(() => SS.tmuxPathAsync({ statMs: 150 }));
     } finally { fs.statSync = statSyncWas; fs.promises.stat = pstatWas; process.env.PATH = pathWas; SPm.rootOf = rootOfWas; }
-    ok(walk.v === path.join(BIN, 'tmux') && walk.maxMs < 100 && oldWalk.v === path.join(BIN, 'tmux') && oldWalk.maxMs >= 250,
-      `the no-\`which\` fallback walks PATH OFF THE LOOP: a folder that never answers (placed) is passed at its bound and tmux found in the next, the loop's longest step ${walk.maxMs} ms — RED: the build's walk stats each folder on the loop (${oldWalk.maxMs} ms held by one stalled folder)`, { walk, oldWalk });
+    ok(walk.v === undefined && walk.maxMs < 100 && walkAfter.v === path.join(BIN, 'tmux') && walkAfter.maxMs < 100 && orderRel === path.join(BIN, 'tmux') && oldWalk.v === path.join(BIN, 'tmux') && oldWalk.maxMs >= 250,
+      `the no-\`which\` fallback walks PATH OFF THE LOOP and in PATH ORDER: a folder that never answers AHEAD of tmux makes the walk a no-reply at its bound (loop's longest step ${walk.maxMs} ms), BEHIND it tmux is found (${walkAfter.maxMs} ms) — REDs: a copy that takes a later folder's tmux past an earlier silent one; the build's walk stats each folder on the loop (${oldWalk.maxMs} ms held by one stalled folder)`, { walk, walkAfter, orderRel, oldWalk });
+
+    // r2489 (4): the memory item's reason is cut at 200 characters (it goes into a For-you item whole)
+    {
+      answer = (cmd) => (cmd === 'ps' ? { started: true, code: 1, error: 'x'.repeat(500), stdout: '' } : { started: true, code: 0, stdout: '' });
+      let item = null;
+      const w = require(path.join(ROOT, 'src/server/memory-pressure-watch.js')).create({ activeSessions: new Map(), BUFFERS_DIR: TMP, getUserTodos: () => ({ add: (k, it) => { item = it; return { id: 'x' }; } }), getSessionStatus: () => null, sessionStatusKey: () => 'k', log: { warn() { }, log() { } } });
+      w.onSample({ used: 99, limit: 100 });
+      for (let i = 0; i < 400 && !item; i++) await new Promise((r) => setTimeout(r, 5));
+      w.stop();
+      const why = item ? (/The process table was not read \((.*)\): which processes hold the memory/.exec(item.detail) || [])[1] : null;
+      ok(typeof why === 'string' && why.length === 200 && why.startsWith('ps: xxx'), 'the memory item\'s reason is CUT at 200 characters (a 500-character error)', { len: why && why.length });
+    }
 
     // the smalls of r2262: a no-reply keeps the «no lookup program» fact; the pane map served old is SAID (first no-reply, the cap)
     answer = (cmd, args) => (cmd === 'which' && args[0] === 'vs-nowhich-cmd' ? { started: false, error: 'ENOENT' } : { started: true, code: 0, stdout: '' });
@@ -504,7 +549,7 @@ WD.section('⑧');
     const loc = DS.pickerRows({ local: { available: true, lookup: 'no-reply' } }).find((r) => r.kind === 'local');
     const APP = read('src/lib/app.js'), PICK = read('src/lib/desktop-picker.js'), DW = read('src/lib/desktop-window.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
     const KEYS = ['Could not check this host for a VNC server just now: the lookup got no answer in time. Opening it looks again.', 'The desktop is up without its session: looking up {names} got no answer in time. Close the Desktop and open it again to retry.', 'The process table was not read ({why}): which processes hold the memory is not known this time.', 'The desktop started, but looking up {names} got no answer in time: it runs without them.'];
-    ok(!!loc && loc.lookup === 'no-reply' && loc.enabled === true && APP.includes("this._vncAvailable = !!d.available || this._vncLookup === 'no-reply';") && PICK.includes("if (r.kind === 'local' && r.lookup === 'no-reply')") && PICK.includes('lookup: app._vncLookup || null') && DW.includes("if (st.session === 'no-reply') showToast(") && DW.includes("else if (st.session === 'partial') showToast(") && VSRC.includes("if (noReply && !sess.cmd) { this._sessionNoReply = noReply; return { ...st, session: 'no-reply', sessionNoReply: noReply }; }") && KEYS.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')),
+    ok(!!loc && loc.lookup === 'no-reply' && loc.enabled === true && APP.includes("this._vncAvailable = !!d.available || this._vncLookup === 'no-reply';") && PICK.includes("if (r.kind === 'local' && r.lookup === 'no-reply')") && PICK.includes('lookup: app._vncLookup || null') && DW.includes("if (st.session === 'no-reply') showToast(") && DW.includes("else if (st.session === 'partial') showToast(") && VSRC.includes("if (noReply && !sess.cmd) { this._sessionNoReply = noReply; this._markRecord(noReply); return { ...st, session: 'no-reply', sessionNoReply: noReply }; }") && KEYS.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')),
       'the status\'s NO REPLY reaches the page\'s words: the Desktop entry stays, the picker\'s local row says it (live, never greyed), a bare Start says why; every new word in zh and ja', { loc });
     const KB = read('docs/kb-api.md'), TS = read('src/plugins/tailscale.js'), WKS = read('src/plugins/which-kept.js');
     const kbLine = (KB.split('\n').find((l) => l.includes('GET /api/jobs-escapes (read-only systemd/crontab listing: ')) || '');
