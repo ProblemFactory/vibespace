@@ -182,6 +182,10 @@ const MUTANT = {};
   sub('src/lib/taskbar.js', 'app.wm.isReachable?.(id) !== false', 'true');
   // P2-2: no «+N», no wheel, no compact switcher
   sub('src/lib/taskbar.js', '  fitTaskbarStrip(app);\n}', '}');
+  // line 302 (B-6cf9 follow 2) added a SECOND fit — the burst's later text paint refits the strip — and the base fitted nothing at
+  // all: without it this mutant drew the «+N» chip on a title burst and wired the wheel (box row 178 at 355d1892c: «RED P2-2 … no
+  // «+N» chip» read «+7» and a scroll 0 → 120). The mutant takes that fit out too, so it is the base's strip again
+  sub('src/lib/taskbar.js', "  fitTaskbarStrip(app);   // the refit (a tile's width follows its title)", "  // (no refit: the base fitted nothing)");
   sub('src/lib/desktop-manager.js', "    if (form === 'compact') { this._renderCompactSwitcher(container); return; }\n", '');
   // P2-3: the base's bottom anchor (no top clamp)
   sub('src/lib/taskbar.js', "  return showContextMenu(x, y, menuItems, 'taskbar-context-menu', { up: y > window.innerHeight / 2 });", "  const menu = showContextMenu(x, y, menuItems, 'taskbar-context-menu');\n  if (y > window.innerHeight / 2) { menu.style.top = ''; menu.style.bottom = (window.innerHeight - y + 4) + 'px'; }\n  return menu;");
