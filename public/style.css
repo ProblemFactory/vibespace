@@ -2277,6 +2277,10 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
    test-settings-row-layout ④b (the phone) + ⑥ (280–1440 px, both faces, en / zh / ja). */
 .settings-row-control { max-width: 100%; min-width: 0; flex-shrink: 1; }
 .settings-row-control > .settings-select, .settings-combobox > .settings-select { flex: 0 1 auto; max-width: 100%; min-width: min(120px, 100%); text-overflow: ellipsis; }
+/* …and a COMBOBOX (a select beside its typed value) shrinks with its control the same way (r1514's cure of the 390 census's
+   one real red, its address r1693: the hub writes Claude's effort list at run time and its last row is a sentence — «Ultracode — xhigh effort + …» —
+   and a flex item keeps its content's width: the box held the sentence's width and Settings › Claude scrolled sideways). */
+.settings-row-control > .settings-combobox { min-width: 0; max-width: 100%; }
 /* end: a control never outgrows its row */
 .btn-create {
   padding: 5px 14px; background: var(--accent); border: 1px solid var(--accent);

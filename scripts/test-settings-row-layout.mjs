@@ -15,7 +15,9 @@
 //   ④b A CONTROL NEVER OUTGROWS ITS ROW (B-0406 — a select is as wide as its longest option: one long option label pushed a
 //     row 48 px past a 390 px phone): the phone with THE RAIL's fixture — every row, its control and every select inside
 //     the window; the fixture's CLOSED select cut (narrower than its longest option), its options whole; CONTROL: the page
-//     without style.css's B-0406 block — the fixture's control runs past the window
+//     without style.css's B-0406 block — the fixture's control runs past the window; and (r1514 / r1693, the 390 census's one
+//     real red) Claude's effort box with the hub's own list — its last row a sentence, written as app.js writes it — inside its
+//     row in en, its closed face cut; CONTROL: the page without B-0406's combobox line, the box runs past its row (two pages)
 //   ⑥ the same law swept: 280 / 360 / 390 / 600 / 1024 / 1440 px × the light and the dark face × en / zh / ja, the fixture on:
 //     no row, no control, no select past its row or the window, the window's content never scrolls sideways
 //   ⑤ CONTROL — the pre-fix page (style.css without the lane's block, the renderer without the stack class): the box
@@ -51,6 +53,11 @@ const CSS_PRE = CSS.replace(LANE_CSS, '');
 const CAP_CSS = /\/\* A CONTROL NEVER OUTGROWS ITS ROW \(B-0406[\s\S]*?\/\* end: a control never outgrows its row \*\/\n?/;
 ok(CAP_CSS.test(CSS), 'style.css carries B-0406\'s block (a control capped at its row, a select that shrinks with it) between its two markers');
 const CSS_NOCAP = CSS.replace(CAP_CSS, '');
+// r1514 / r1693: the COMBOBOX line inside B-0406's block (Settings › Claude's effort box at 390); the page without just that line is the
+// control that proves the line is what holds the box
+const COMBO_LINE = '.settings-row-control > .settings-combobox { min-width: 0; max-width: 100%; }\n';
+ok((CAP_CSS.exec(CSS) || [''])[0].includes(COMBO_LINE) && CSS.indexOf(COMBO_LINE) === CSS.lastIndexOf(COMBO_LINE), 'B-0406\'s block holds the combobox line, once (a combobox shrinks with its control like a select)');
+const CSS_NOCOMBO = CSS.replace(COMBO_LINE, '');
 const UI = path.join(repo, 'src/lib/settings-ui.js');
 const UI_SRC = fs.readFileSync(UI, 'utf8');
 const STACK_LINE = "if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');";
@@ -61,10 +68,15 @@ const dir = path.join(root, 'web');
 fs.mkdirSync(dir, { recursive: true });
 const entry = `import { SettingsUI } from ${JSON.stringify(UI)};
 import { SETTINGS_SCHEMA, registerPluginSettings } from ${JSON.stringify(path.join(repo, 'src/lib/settings-schema.js'))};
+import { effortOptions, BACKEND_META } from ${JSON.stringify(path.join(repo, 'src/lib/agent-meta.js'))};
 // THE RAIL's fixture (a shape, no real plugin): a select whose one long option makes the control wider than 60 % of a 600 px row
 if (new URLSearchParams(location.search).get('fixture')) registerPluginSettings('layout-fixture', 'Layout fixture', [{ key: 'pick', type: 'select', default: 'a',
   options: [{ value: 'a', label: 'Keep each window of this kind on the screen it was last on, across restarts' }, { value: 'b', label: 'Short' }],
   label: 'Where windows open', description: 'A fixture row whose select is wide.' }]);
+// THE HUB's OWN EFFORT LIST (r1514 / r1693): app.js writes claude.defaultEffort's options from /api/session-options — the levels the
+// CLI's help lists, then the declared extras (ultracode, whose words are a sentence); this stub answers {} to every read, so
+// the fixture writes the list as app.js does (agent-meta.js effortOptions over the levels a current CLI lists)
+if (new URLSearchParams(location.search).get('fixture')) SETTINGS_SCHEMA['claude.defaultEffort'].options = effortOptions('claude', ['low', 'medium', 'high', 'xhigh', 'max'], BACKEND_META.claude.ui.effortExtras, { head: { value: '', label: 'Auto (model default)' } }).map((e) => ({ value: e.value, label: e.label }));
 const vals = {}, ls = {};
 const def = (k) => (SETTINGS_SCHEMA[k] ? SETTINGS_SCHEMA[k].default : undefined);
 const settings = {
@@ -88,12 +100,13 @@ const web = express();
 web.get('/style.css', (req, res) => res.type('css').send(CSS));
 web.get('/style-pre.css', (req, res) => res.type('css').send(CSS_PRE));
 web.get('/style-nocap.css', (req, res) => res.type('css').send(CSS_NOCAP));
+web.get('/style-nocombo.css', (req, res) => res.type('css').send(CSS_NOCOMBO));
 web.get('/:b.js', (req, res) => res.type('js').send(fs.readFileSync(path.join(dir, req.params.b + '.js'))));
 web.all(/^\/api\//, (req, res) => res.json({}));
 web.get('/', (req, res) => {
-  const pre = req.query.pre === '1', nocap = req.query.nocap === '1';
+  const pre = req.query.pre === '1', nocap = req.query.nocap === '1', nocombo = req.query.nocombo === '1';
   const lang = ['en', 'zh', 'ja'].includes(req.query.lang) ? req.query.lang : 'zh', theme = req.query.theme === 'dark' ? 'dark' : 'light';
-  res.type('html').send(`<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/${pre ? 'style-pre' : nocap ? 'style-nocap' : 'style'}.css"><style>body{margin:0;background:var(--bg-root)} #win{background:var(--bg-window);width:${Number(req.query.w)}px;height:${Number(req.query.h)}px;overflow:hidden}</style><script>try{localStorage.setItem('vibespace.lang','${lang}');localStorage.setItem('vibespace.settingsAdvanced','1')}catch{}</script></head><body><div id="win"></div><script src="/${pre ? 'pre' : 'ui'}.js"></script></body></html>`);
+  res.type('html').send(`<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/${pre ? 'style-pre' : nocap ? 'style-nocap' : nocombo ? 'style-nocombo' : 'style'}.css"><style>body{margin:0;background:var(--bg-root)} #win{background:var(--bg-window);width:${Number(req.query.w)}px;height:${Number(req.query.h)}px;overflow:hidden}</style><script>try{localStorage.setItem('vibespace.lang','${lang}');localStorage.setItem('vibespace.settingsAdvanced','1')}catch{}</script></head><body><div id="win"></div><script src="/${pre ? 'pre' : 'ui'}.js"></script></body></html>`);
 });
 const PORT = await freePort();
 const srv = await new Promise((r) => { const s = web.listen(PORT, '127.0.0.1', () => r(s)); });
@@ -112,7 +125,7 @@ for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP
 // one retry said by name, the front handed back to the page that had it, so each other leg runs with the page in front it had)
 const FS = frontState();
 /** one tab: viewport vw × vh, the Settings window's content w × h, the page now or pre-fix */
-async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false, nocap = false, lang = 'zh', theme = 'light' }) {
+async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false, nocap = false, nocombo = false, lang = 'zh', theme = 'light' }) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -123,7 +136,7 @@ async function page({ vw, vh, w, h, pre = false, fixture = false, mobile = false
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: 2, mobile });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
-  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?w=${w}&h=${h}${pre ? '&pre=1' : ''}${fixture ? '&fixture=1' : ''}${nocap ? '&nocap=1' : ''}&lang=${lang}&theme=${theme}` });
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?w=${w}&h=${h}${pre ? '&pre=1' : ''}${fixture ? '&fixture=1' : ''}${nocap ? '&nocap=1' : ''}${nocombo ? '&nocombo=1' : ''}&lang=${lang}&theme=${theme}` });
   for (let i = 0; i < 200 && !(await ev('window.__ready === true && document.querySelectorAll(".settings-content .settings-row").length > 20').catch(() => false)); i++) await sleep(50);
   await ev('document.fonts.ready.then(() => true)');
   await sleep(150);   // the facts' {} answers and the rows they redraw settle
@@ -289,8 +302,14 @@ const FIT = (w) => `(() => {
   const sel = fx && fx.querySelector('select'), cs = sel && getComputedStyle(sel);
   const cv = document.createElement('canvas').getContext('2d'); if (cs) cv.font = cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
   const opts = sel ? [...sel.options].map((o) => ({ t: o.textContent, w: Math.round(cv.measureText(o.textContent).width) })) : [];
+  // r1514 / r1693: Claude's effort box (a combobox) with the hub's own list — its row, box and closed select, its longest option
+  const ef = [...document.querySelectorAll('.settings-content .settings-row-path')].find((e) => e.textContent === 'claude.defaultEffort')?.closest('.settings-row');
+  const eb = ef && ef.querySelector('.settings-combobox'), es = eb && eb.querySelector('select'), ecs = es && getComputedStyle(es);
+  const cv2 = document.createElement('canvas').getContext('2d'); if (ecs) cv2.font = ecs.fontWeight + ' ' + ecs.fontSize + ' ' + ecs.fontFamily;
+  const eo = es ? [...es.options].map((o) => ({ t: o.textContent, w: Math.round(cv2.measureText(o.textContent).width) })) : [];
   return { bad: out, sideways: c ? c.scrollWidth - c.clientWidth : null, rows: document.querySelectorAll('.settings-content .settings-row').length,
-    fixture: fx ? { row: Math.round(R(fx).w), ctl: Math.round(R(fx.querySelector(':scope > .settings-row-control')).w), sel: Math.round(R(sel).w), longest: Math.max(...opts.map((o) => o.w)), opts: opts.map((o) => o.t) } : null };
+    fixture: fx ? { row: Math.round(R(fx).w), ctl: Math.round(R(fx.querySelector(':scope > .settings-row-control')).w), sel: Math.round(R(sel).w), longest: Math.max(...opts.map((o) => o.w)), opts: opts.map((o) => o.t) } : null,
+    effort: es ? { row: Math.round(R(ef).w), rowR: Math.round(R(ef).r), boxR: Math.round(R(eb).r), box: Math.round(R(eb).w), sel: Math.round(R(es).w), selR: Math.round(R(es).r), longest: Math.max(...eo.map((o) => o.w)), long: (eo.find((o) => o.t.startsWith('Ultracode')) || {}).t || null } : null };
 })()`;
 const LONG_OPT = 'Keep each window of this kind on the screen it was last on, across restarts';
 
@@ -306,9 +325,22 @@ console.log('④b A CONTROL NEVER OUTGROWS ITS ROW (B-0406) — the phone, 390 p
     `phone: the long option's CLOSED select is cut to its row (${fx(A.fixture)}); the list keeps the option whole («${LONG_OPT.slice(0, 24)}…»)`, A.fixture);
   ok(!!B.fixture && B.bad.some((x) => x.startsWith('plugin.layout-fixture.pick')),
     `CONTROL: without style.css's B-0406 block the same control runs past the window (${B.bad.filter((x) => x.startsWith('plugin.layout-fixture.pick')).join('; ') || 'NOT — the control is vacuous'})`, B);
+  // r1514 / r1693 — THE CENSUS's ONE REAL RED: Claude's effort box with the hub's own list (its last row a sentence) inside its
+  // row — read in en, where the sentence is widest (the census: 144 px past a 390 phone in en, 27 in zh; the zh page above holds every
+  // row inside too); CONTROL: B-0406's block without its combobox line — the box keeps the sentence's width and runs past
+  const ne = await page({ vw: 390, vh: 844, w: 390, h: 844, mobile: true, fixture: true, lang: 'en' });
+  const nc = await page({ vw: 390, vh: 844, w: 390, h: 844, mobile: true, fixture: true, nocombo: true, lang: 'en' });
+  const E = await ne.ev(FIT(390)), D = await nc.ev(FIT(390));
+  const efw = (f) => f ? `row ${f.row} px, the box ${f.box} px, its closed select ${f.sel} px of its longest option's ${f.longest}` : 'no effort row';
+  console.log(`      the effort box (en) now: ${efw(E.effort)} · sideways ${E.sideways} px · without the combobox line: ${efw(D.effort)} · sideways ${D.sideways} px`);
+  ok(!!E.effort && !!E.effort.long && !E.bad.length && E.sideways <= 1 && E.effort.boxR <= E.effort.rowR + 0.5 && E.effort.selR <= E.effort.rowR + 0.5 && E.effort.sel < E.effort.longest,
+    `phone (en): Claude's effort box with the hub's own list («${String(E.effort && E.effort.long).slice(0, 24)}…») stays inside its row, its closed face cut (${efw(E.effort)})`, { effort: E.effort, bad: E.bad });
+  ok(!!D.effort && D.bad.some((x) => x.startsWith('claude.defaultEffort')),
+    `CONTROL: without the combobox line the effort box runs past its row (${D.bad.filter((x) => x.startsWith('claude.defaultEffort')).join('; ') || 'NOT — the control is vacuous'})`, D);
+  ne.close(); nc.close();
   await now.shot('cap-390-after.png', ROW_OF('plugin.layout-fixture.pick'));
   await raw.shot('cap-390-before.png', ROW_OF('plugin.layout-fixture.pick'));
-  RESULT.cap390 = { now: A.fixture, raw: B.fixture, rawPast: B.bad };
+  RESULT.cap390 = { now: A.fixture, raw: B.fixture, rawPast: B.bad, effort: E.effort, effortNoCombo: D.effort };
   now.close(); raw.close();
 }
 

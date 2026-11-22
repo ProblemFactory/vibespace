@@ -576,10 +576,8 @@ export const DECLARED_SCROLLERS = [
  *  #id or two classes — never its words, which move with the language and the fixture). Filled from the first counted run;
  *  it only falls. */
 export const RATCHET = {
-  // THE SETTINGS VIEW's CLAUDE PAGE SCROLLS SIDEWAYS AT 390 (zh and en): its content pane is wider inside than the phone —
-  // found by the lane's own read on the first test machine (2026-11-21, unit 2); a page a phone cannot read is a person's harm:
-  // its CURE is the lane's next unit (主开发 r1514), which lowers this row to nothing
-  'view:settings:Claude': { en: { L3: { 'div.settings-content': 1 } }, zh: { L3: { 'div.settings-content': 1 } } },
+  // (empty since r1514's cure: its one row, view:settings:Claude L3 — the effort box held a sentence's width, the address
+  // r1693 — fell with public/style.css B-0406's combobox line)
 };
 
 const lawNames = (r, law) => (r.names && r.names[law]) || {};
