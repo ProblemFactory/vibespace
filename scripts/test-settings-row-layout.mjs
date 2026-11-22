@@ -17,7 +17,8 @@
 //     the window; the fixture's CLOSED select cut (narrower than its longest option), its options whole; CONTROL: the page
 //     without style.css's B-0406 block — the fixture's control runs past the window; and (r1514 / r1693, the 390 census's one
 //     real red) Claude's effort box with the hub's own list — its last row a sentence, written as app.js writes it — inside its
-//     row in en, its closed face cut; CONTROL: the page without B-0406's combobox line, the box runs past its row (two pages)
+//     row in en, and its closed face cut — judged by a long entry the leg adds itself (r1906: never the hub's list and a font's
+//     luck); CONTROL: the page without B-0406's combobox line, the box runs past its row (two pages)
 //   ⑥ the same law swept: 280 / 360 / 390 / 600 / 1024 / 1440 px × the light and the dark face × en / zh / ja, the fixture on:
 //     no row, no control, no select past its row or the window, the window's content never scrolls sideways
 //   ⑤ CONTROL — the pre-fix page (style.css without the lane's block, the renderer without the stack class): the box
@@ -66,6 +67,9 @@ ok(UI_SRC.includes(STACK_LINE), 'the renderer stamps settings-row-stack from the
 const root = scratch('settings-row-layout');
 const dir = path.join(root, 'web');
 fs.mkdirSync(dir, { recursive: true });
+// r1906: the leg's OWN long effort entry — the «closed face cut» is judged by it, never by the hub's list and a font's luck (the box
+// row 164 at 9c3a59b01: the hub's longest option measured 330 px of text against a 358 px row, its box 368 px without the line)
+const EFFORT_OWN = 'A long effort entry this leg makes itself, wider than any phone row, so the closed box must cut its words';
 const entry = `import { SettingsUI } from ${JSON.stringify(UI)};
 import { SETTINGS_SCHEMA, registerPluginSettings } from ${JSON.stringify(path.join(repo, 'src/lib/settings-schema.js'))};
 import { effortOptions, BACKEND_META } from ${JSON.stringify(path.join(repo, 'src/lib/agent-meta.js'))};
@@ -76,7 +80,7 @@ if (new URLSearchParams(location.search).get('fixture')) registerPluginSettings(
 // THE HUB's OWN EFFORT LIST (r1514 / r1693): app.js writes claude.defaultEffort's options from /api/session-options — the levels the
 // CLI's help lists, then the declared extras (ultracode, whose words are a sentence); this stub answers {} to every read, so
 // the fixture writes the list as app.js does (agent-meta.js effortOptions over the levels a current CLI lists)
-if (new URLSearchParams(location.search).get('fixture')) SETTINGS_SCHEMA['claude.defaultEffort'].options = effortOptions('claude', ['low', 'medium', 'high', 'xhigh', 'max'], BACKEND_META.claude.ui.effortExtras, { head: { value: '', label: 'Auto (model default)' } }).map((e) => ({ value: e.value, label: e.label }));
+if (new URLSearchParams(location.search).get('fixture')) SETTINGS_SCHEMA['claude.defaultEffort'].options = effortOptions('claude', ['low', 'medium', 'high', 'xhigh', 'max'], BACKEND_META.claude.ui.effortExtras, { head: { value: '', label: 'Auto (model default)' } }).map((e) => ({ value: e.value, label: e.label })).concat([{ value: 'fit-own-long', label: ${JSON.stringify(EFFORT_OWN)} }]);
 const vals = {}, ls = {};
 const def = (k) => (SETTINGS_SCHEMA[k] ? SETTINGS_SCHEMA[k].default : undefined);
 const settings = {
@@ -309,7 +313,7 @@ const FIT = (w) => `(() => {
   const eo = es ? [...es.options].map((o) => ({ t: o.textContent, w: Math.round(cv2.measureText(o.textContent).width) })) : [];
   return { bad: out, sideways: c ? c.scrollWidth - c.clientWidth : null, rows: document.querySelectorAll('.settings-content .settings-row').length,
     fixture: fx ? { row: Math.round(R(fx).w), ctl: Math.round(R(fx.querySelector(':scope > .settings-row-control')).w), sel: Math.round(R(sel).w), longest: Math.max(...opts.map((o) => o.w)), opts: opts.map((o) => o.t) } : null,
-    effort: es ? { row: Math.round(R(ef).w), rowR: Math.round(R(ef).r), boxR: Math.round(R(eb).r), box: Math.round(R(eb).w), sel: Math.round(R(es).w), selR: Math.round(R(es).r), longest: Math.max(...eo.map((o) => o.w)), long: (eo.find((o) => o.t.startsWith('Ultracode')) || {}).t || null } : null };
+    effort: es ? { row: Math.round(R(ef).w), rowR: Math.round(R(ef).r), boxR: Math.round(R(eb).r), box: Math.round(R(eb).w), sel: Math.round(R(es).w), selR: Math.round(R(es).r), longest: Math.max(...eo.map((o) => o.w)), long: (eo.find((o) => o.t.startsWith('Ultracode')) || {}).t || null, ownW: (eo.find((o) => o.t === ${JSON.stringify(EFFORT_OWN)}) || {}).w || null } : null };
 })()`;
 const LONG_OPT = 'Keep each window of this kind on the screen it was last on, across restarts';
 
@@ -333,8 +337,12 @@ console.log('④b A CONTROL NEVER OUTGROWS ITS ROW (B-0406) — the phone, 390 p
   const E = await ne.ev(FIT(390)), D = await nc.ev(FIT(390));
   const efw = (f) => f ? `row ${f.row} px, the box ${f.box} px, its closed select ${f.sel} px of its longest option's ${f.longest}` : 'no effort row';
   console.log(`      the effort box (en) now: ${efw(E.effort)} · sideways ${E.sideways} px · without the combobox line: ${efw(D.effort)} · sideways ${D.sideways} px`);
-  ok(!!E.effort && !!E.effort.long && !E.bad.length && E.sideways <= 1 && E.effort.boxR <= E.effort.rowR + 0.5 && E.effort.selR <= E.effort.rowR + 0.5 && E.effort.sel < E.effort.longest,
-    `phone (en): Claude's effort box with the hub's own list («${String(E.effort && E.effort.long).slice(0, 24)}…») stays inside its row, its closed face cut (${efw(E.effort)})`, { effort: E.effort, bad: E.bad });
+  ok(!!E.effort && !!E.effort.long && !E.bad.length && E.sideways <= 1 && E.effort.boxR <= E.effort.rowR + 0.5 && E.effort.selR <= E.effort.rowR + 0.5,
+    `phone (en): Claude's effort box with the hub's own list («${String(E.effort && E.effort.long).slice(0, 24)}…») and the leg's own long entry stays inside its row (${efw(E.effort)})`, { effort: E.effort, bad: E.bad });
+  // r1906: THE CUT, judged where the longest option is really wider than the row — by the leg's own entry (its premise said by name)
+  ok(!!E.effort && E.effort.ownW > E.effort.row && E.effort.sel < E.effort.ownW,
+    E.effort && !(E.effort.ownW > E.effort.row) ? `phone (en): THE PREMISE — the leg's own long entry is not wider than the row (${E.effort && E.effort.ownW} of ${E.effort && E.effort.row} px): it cannot judge a cut`
+      : `phone (en): the box's closed face is cut — its select ${E.effort && E.effort.sel} px against the leg's own entry's ${E.effort && E.effort.ownW} px of words (the open list shows them whole)`, E.effort);
   ok(!!D.effort && D.bad.some((x) => x.startsWith('claude.defaultEffort')),
     `CONTROL: without the combobox line the effort box runs past its row (${D.bad.filter((x) => x.startsWith('claude.defaultEffort')).join('; ') || 'NOT — the control is vacuous'})`, D);
   ne.close(); nc.close();
