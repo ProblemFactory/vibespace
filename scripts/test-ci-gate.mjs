@@ -232,7 +232,7 @@ console.log('\n§2 tier hygiene');
   // From here the count of named debts IS the bound (judged by COUNT, not by name): a NEW over is red until its line moves the
   // row heavy or cuts it; a cut that takes a row off the list is red until ITS OWN LINE appends the lower count to the ratchet; an
   // entry not below the one before it is red (a raise is a ruling's, never a line's arithmetic).
-  const FAST_OVER_RATCHET = [48];   // [r1531's true count at the pick, then each cut's lower count, in order]
+  const FAST_OVER_RATCHET = [48, 45];   // [r1531's true count at the pick, then each cut's lower count, in order] · 45: B-7e49 slice 3 (lane lg-recovery) paid test-channels-agent-cli (its CLI legs to a heavy twin), test-oat-identity (read alone 3.7 s), test-suite-files-parse (9.0 s)
   const overBoundFindings = (count, ratchet) => {
     const bound = ratchet[ratchet.length - 1], out = [];
     if (ratchet.some((b, i) => i > 0 && b >= ratchet[i - 1])) out.push(`the ratchet does not go down: ${ratchet.join(' → ')}`);
