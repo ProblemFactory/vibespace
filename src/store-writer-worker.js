@@ -137,7 +137,7 @@ function rewriteJob(m, fs) {
 function writeJob(m, fs = FS) {
   if (m.rewrite) return rewriteJob(m, fs);
   if (m.append) {
-    sweepTemps(fs, m.file);   // row B-360d: a rewrite killed mid-copy left its temp beside an APPEND store — the first append of the file in this process removes another process's
+    sweepTemps(fs, m.file, m.tmp);   // row B-360d: a rewrite killed mid-copy left its temp beside an APPEND store — the first append of the file in this process removes another process's, and (主开发 r1939 (2)) this road's OWN temp left by an earlier life of the thread: the sweep runs once a file, so an append first must not leave it for the whole write's
     // the ONE open of an append (made again after a ring's rotation); a missing parent directory is made here, on the writer's
     // thread, ONLY for a store that asks (`m.makeDir` — B-48a4: the hub's audit rings, whose old main-thread code made it per line)
     const openA = () => {

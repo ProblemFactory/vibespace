@@ -501,5 +501,40 @@ const PAYLOAD = (recs) => ({
   ok(/this\._truthLookup \? this\._truthLookup\(ev\.rid\)/.test(read('src/usage-history.js')), 'the bake-time seam survives in usage-history (unwired, not deleted — a real per-request identity channel would be strictly better than the walk)');
 }
 
+// ── 5. the writer's thread: the stash's trim (rewriteJob) keeps B-f276 1b's laws (主开发 r1939, round w5daqaxxs) ──
+// (1) a temp whose removal FAILED after an exclusive write's link is a SECOND NAME of the store: the rewrite road refuses it before
+// its only open of it (ETEMPLINKED), the store whole; (2) the append road's first sweep of a file is handed the road's OWN temp, as the
+// whole write's and the rewrite's are (the sweep runs once a file: an append first marked it swept and left an earlier life's temp)
+{
+  const WSRC = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf8');
+  const wkRun = (WK, tag) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-otel-wk-${tag}-`)), out = {};
+    try {
+      const f = path.join(d, 'otel-truth.ndjson'), tmp = f + '.tmp-1-w', BODY = 'a1\nb22\n';
+      let fails = 2;   // the temp's removal after the link fails, and so does the rewrite road's try at it
+      const F = Object.assign(Object.create(fs), { unlinkSync: (p) => { if (p === tmp && fails > 0) { fails--; throw Object.assign(new Error('EIO'), { code: 'EIO' }); } return fs.unlinkSync(p); } });
+      try { WK.writeJob({ file: f, tmp, parts: [BODY], exclusive: true }, F); out.first = 'written'; } catch (e) { out.first = (e && e.code) || 'threw'; }
+      try { out.linked = fs.statSync(tmp).ino === fs.statSync(f).ino; } catch { out.linked = false; }
+      try { WK.writeJob({ file: f, tmp, parts: ['c3\n'], rewrite: { ranges: Float64Array.from([0, 3]), size: BODY.length } }, F); out.rewrite = 'no-throw'; } catch (e) { out.rewrite = (e && e.code) || 'threw'; }
+      try { fs.unlinkSync(tmp); } catch { }
+      out.whole = fs.readFileSync(f, 'utf8') === BODY;
+      const g = path.join(d, 'ap.ndjson'), own = `${g}.tmp-${process.pid}-w`;
+      fs.writeFileSync(g, 'x\n'); fs.writeFileSync(own, 'left by an earlier life of this thread');
+      WK.writeJob({ file: g, tmp: own, parts: ['y\n'], append: true }, fs);
+      out.ownGone = !fs.existsSync(own); out.appended = fs.readFileSync(g, 'utf8') === 'x\ny\n';
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+    return out;
+  };
+  const head = wkRun(require(path.join(REPO, 'src/store-writer-worker.js')), 'head');
+  ok(head.first === 'written' && head.linked && head.rewrite === 'ETEMPLINKED' && head.whole, 'the stash\'s trim refuses a temp that is still a second name of the store (its removal failed after an exclusive write\'s link): ETEMPLINKED, the store whole', JSON.stringify(head));
+  ok(head.ownGone && head.appended, 'an append store\'s first append in a thread\'s life removes the road\'s OWN temp an earlier life of the thread left (the sweep is handed it)', JSON.stringify(head));
+  const cutR = editAnchor(WSRC, "  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) {   // B-f276 1b's law on the rewrite road too", "  if (false) {   // B-f276 1b's law on the rewrite road too", 'src/store-writer-worker.js');
+  const cutA = editAnchor(WSRC, "    sweepTemps(fs, m.file, m.tmp);   // row B-360d", "    sweepTemps(fs, m.file);   // row B-360d", 'src/store-writer-worker.js');   // stale-pins: kept — the line before 主开发 r1939 (2), planted back as the RED control
+  const r = wkRun(mutantCopies('otel-truth-wk-linked', REPO).load('src/store-writer-worker.js', cutR, 'rewrite-opens-second-name'), 'cut-r');
+  const a = wkRun(mutantCopies('otel-truth-wk-sweep', REPO).load('src/store-writer-worker.js', cutA, 'append-sweep-no-own'), 'cut-a');
+  ok(r.linked && r.rewrite !== 'ETEMPLINKED' && !r.whole, `CONTROL (the rewrite road's check cut): the trim opens the second name for a write and truncates the live store through the shared inode (${r.rewrite}) — red`, JSON.stringify(r));
+  ok(a.appended && !a.ownGone, 'CONTROL (the append road\'s sweep not handed its own temp, the moved form\'s line): the earlier life\'s temp stays — red', JSON.stringify(a));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
