@@ -126,6 +126,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   let lockUnmade = null, unmadeTimer = null;
   // r1648 (d): the episode's For-you item is filed ONCE; at boot it is OWED until the guard is built (fileInbox's state is not yet)
   let unlockedFiled = false, unlockedOwed = false, building = true, unlockedCloseOwed = false;
+  let unlockedFailSaid = false;   // round w7yapjt1r: a failed filing of the episode's item is said in the journal ONCE an episode
   // THIS guard's lock: a token of its own (two guards of one process, or two containers whose hubs are both pid 1 with one hostname,
   // never take each other's lock for their own) and its pid space (a pid's identity proves a holder only inside the same one)
   const myToken = require('crypto').randomBytes(9).toString('hex');
@@ -603,7 +604,13 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // zone from its epoch (A.refusalI18n), never a time string this hub rendered
     // B-0a33 round 1: `about` = the conversation waiting frames wait behind — the notice is filed under ITS key, so it opens it
     try { userTodos.add(about && about.key ? about.key : INBOX_KEY, { ...(i18n ? { i18n } : {}), ...(itemKey ? { itemKey } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
-    catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
+    catch (e) {
+      // the episode's item is asked again each minute while its add keeps throwing (a full list): its first failure is said, the rest
+      // are the same episode (round w7yapjt1r) — every other notice says each failure, as before
+      if (itemKey !== UNLOCKED_ITEM || !unlockedFailSaid) log('[spend] could not file the inbox item: ' + e.message);
+      if (itemKey === UNLOCKED_ITEM) unlockedFailSaid = true;
+      return false;
+    }
   }
 
   /** THE GATE. Every producer of a turn nobody typed calls this BEFORE it
@@ -925,9 +932,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if ((!same || unlockedOwed) && !unlockedFiled) { if (building) unlockedOwed = true; else unlockedOwed = !fileUnlocked(error); }   // ONCE an episode; owed until the store answers (r1801's must: the 60 s ask files it)
     armUnmadeRetry();
   }
-  /** → true when the item is FILED (or owed to For you's read, which files it); false while no store answers (still owed) */
-  /** r2047 (1): THREE outcomes — 'filed' (a real add), 'owed' (to For you's read: fileInbox's own owed road files it there), 'failed'
-   *  (no store yet, or the add threw — a full list): only the first two set the filed mark; a failed one is asked again at the next 60 s ask */
+  /** THE EPISODE's ITEM, filed → true when FILED or OWED to For you's read, false when it FAILED. r2047 (1)'s three outcomes:
+   *  'filed' (a real add), 'owed' (to For you's read: fileInbox's own owed road files it there), 'failed' (no store yet, or the add
+   *  threw — a full list; said in the journal once an episode): only the first two set the filed mark; a failed one is asked again
+   *  at the next 60 s ask */
   function fileUnlocked(error) {
     let ut = null; try { ut = getUserTodos(); } catch { ut = null; }
     if (!ut || typeof ut.add !== 'function') return false;   // the store comes later in boot: the 60 s ask files it then
@@ -944,12 +952,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   function closeItemsNow(itemKey) {
     let ut = null; try { ut = getUserTodos(); } catch { ut = null; }
     if (!ut || (typeof ut.isHeldUnread === 'function' && ut.isHeldUnread())) return false;
-    try { if (typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === itemKey && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }
+    // a status write that THROWS closed nothing: said, and → false — the owed close stays, the next beat or retry asks again
+    // (round w7yapjt1r: it answered true, the owed mark cleared and an untrue item stayed open for good)
+    try { if (typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === itemKey && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); }
+    catch (e) { log(`[spend] could not close the inbox item ${itemKey}: ${(e && e.message) || e} — asked again at the next beat`); return false; }
     return true;
   }
   // the episode's notice closes when its state ends — and, For you held unread, at its read (its list reads empty until then)
   function closeItems(itemKey) {
-    const close = () => { try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === itemKey && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { } };
+    const close = () => { try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === itemKey && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch (e) { log(`[spend] could not close the inbox item ${itemKey}: ${(e && e.message) || e}`); } };
     let ut0 = null; try { ut0 = getUserTodos(); } catch { ut0 = null; }
     if (!ut0) return false;   // no store yet: the close stays owed
     if (ut0 && typeof ut0.isHeldUnread === 'function' && ut0.isHeldUnread() && typeof ut0.whenRead === 'function') ut0.whenRead(close, "the spend ledger's unlocked notice"); else close();
@@ -966,10 +977,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (lk.took) {
       const was = lockUnmade; lockUnmade = null; lockOurs = true; releaseAtExit(lockFile, myToken);
       log(`[spend] data/spend-budget.lock is made now (it could not be since ${new Date(was.since).toISOString()}: ${was.error}) — this process keeps the ledger under it`);
-      unlockedFiled = false; unlockedOwed = false; if (!closeItems(UNLOCKED_ITEM)) unlockedCloseOwed = true;   // the episode is over: its notice is no longer true
+      unlockedFiled = false; unlockedOwed = false; unlockedFailSaid = false; if (!closeItems(UNLOCKED_ITEM)) unlockedCloseOwed = true;   // the episode is over: its notice is no longer true
       armBeat(); return;
     }
-    if (lk.holder) { lockUnmade = null; unlockedFiled = false; unlockedOwed = false; if (!closeItems(UNLOCKED_ITEM)) unlockedCloseOwed = true; lockLost(lk.holder); return; }   // another process made it meanwhile: the record is that one's
+    if (lk.holder) { lockUnmade = null; unlockedFiled = false; unlockedOwed = false; unlockedFailSaid = false; if (!closeItems(UNLOCKED_ITEM)) unlockedCloseOwed = true; lockLost(lk.holder); return; }   // another process made it meanwhile: the record is that one's
     keepUnmade(lk.error, now);
   }
   function armLockRetry() {

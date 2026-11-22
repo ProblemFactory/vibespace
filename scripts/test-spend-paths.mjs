@@ -2427,32 +2427,74 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     const redThrow = copyOf("    if (!filed && !owedToRead) return false;   // the add threw: NOT filed — asked again at the next 60 s ask\n", '', "B-ef83 r2047 (1): a thrown add counted as filed"); // stale-pins: kept — the RED takes the third outcome out
     ok('§3h CONTROL: the anchored copy (a thrown add counted as filed) is built', !redThrow.err, redThrow.err || '');
     if (!redThrow.err) { const rt = bootAddThrows(redThrow); ok('§3h CONTROL: in that copy the owner gets NO item (RED: the thrown add marked filed)', rt.open === 0, JSON.stringify(rt)); }
-    // (p2) r2047 (2): a boot that started HELD later takes the lock — an earlier run's «kept without the lock» item closes (the beat)
-    {
+    // (p2) r2047 (2): a boot that started HELD later takes the lock — an earlier run's «kept without the lock» item closes (the beat).
+    // One scene, run on the guard and on its anchored copies (round w7yapjt1r): `beats` beats, each awaited until its own finally ran
+    // (it arms the next beat); `setStatusThrows` = the store's first status writes throw
+    const heldThenTake = async (mod, { beats = 1, setStatusThrows = 0 } = {}) => {
       const dH2 = tmpdir('vs-spend-3h-held-then-take-');
       fs.writeFileSync(LF(dH2, 'spend-budget.lock'), lockOf(4242, null, { host: 'another-machine.example', ns: 'pid:[1]' }));
-      const tH2 = [], inH2 = [{ key: 'accounts', id: 'ut-1', status: 'open', itemKey: 'spend-ledger-unlocked', text: 'an earlier run' }]; let readyH2 = false;
-      const gH2 = mk(guardMod, dH2, inH2, [], { getUserTodos: () => (readyH2 ? store(inH2) : null), lockSchedule: (fn, ms) => { tH2.push({ fn, ms }); return tH2.length; } });
+      const tH2 = [], logsH2 = [], inH2 = [{ key: 'accounts', id: 'ut-1', status: 'open', itemKey: 'spend-ledger-unlocked', text: 'an earlier run' }]; let readyH2 = false, throwsLeft = setStatusThrows;
+      const st = () => { const s0 = store(inH2); return { ...s0, setStatus: (id, s) => { if (throwsLeft > 0) { throwsLeft--; throw new Error('the store refused the write'); } return s0.setStatus(id, s); } }; };
+      const gH2 = mk(mod, dH2, inH2, logsH2, { getUserTodos: () => (readyH2 ? st() : null), lockSchedule: (fn, ms) => { tH2.push({ fn, ms }); return tH2.length; } });
       const heldAtBoot = !!gH2.snapshot().ledgerHeldBy;
       fs.rmSync(LF(dH2, 'spend-budget.lock')); readyH2 = true;
       const tookH2 = gH2.lockAgain(Date.now() + 1000);
-      const beatH2 = tH2.filter((x) => x.ms === guardMod.LOCK_BEAT_MS).pop(); if (beatH2) beatH2.fn();
-      for (let i = 0; i < 200 && inH2[0].status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
-      ok('§3h r2047 (2): a boot that started HELD takes the lock later — an earlier run\'s «kept without the lock» item CLOSES at the next beat', heldAtBoot && tookH2 === true && inH2[0].status !== 'open', JSON.stringify({ heldAtBoot, tookH2, status: inH2[0].status }));
-    }
+      const statuses = [];
+      for (let k = 0; k < beats; k++) {
+        const n0 = tH2.length, beat = tH2.filter((x) => x.ms === mod.LOCK_BEAT_MS).pop();
+        if (beat) beat.fn();
+        for (let i = 0; i < 200 && tH2.length === n0; i++) await new Promise((r) => setTimeout(r, 25));   // its finally armed the next beat
+        statuses.push(inH2[0].status);
+      }
+      return { heldAtBoot, tookH2, statuses, status: inH2[0].status, closeSaid: logsH2.filter((l) => l.includes('could not close the inbox item')).length };
+    };
+    const h2 = await heldThenTake(guardMod);
+    ok('§3h r2047 (2): a boot that started HELD takes the lock later — an earlier run\'s «kept without the lock» item CLOSES at the next beat', h2.heldAtBoot && h2.tookH2 === true && h2.status !== 'open', JSON.stringify(h2));
+    const redTake = copyOf("    unlockedCloseOwed = true;   // r2047 (2): a boot that started HELD takes the lock — an earlier run's «kept without the lock» item is no longer true\n", '', "B-ef83 r2047 (2): the takeover owes no close"); // stale-pins: kept — the RED takes the takeover's owed close out
+    ok('§3h CONTROL: the anchored copy (the takeover owes no close) is built', !redTake.err, redTake.err || '');
+    if (!redTake.err) { const r2 = await heldThenTake(redTake); ok('§3h CONTROL: in that copy the earlier run\'s item stays OPEN after the beat (RED: the takeover\'s owed close taken out)', r2.tookH2 === true && r2.status === 'open', JSON.stringify(r2)); }
+    // round w7yapjt1r: a status write that THROWS closed nothing — said, the close stays owed, the NEXT beat closes it
+    const h2t = await heldThenTake(guardMod, { beats: 2, setStatusThrows: 1 });
+    ok('§3h w7yapjt1r: the close\'s status write THREW — said in the journal, the item still open after that beat, CLOSED at the next (the owed mark kept)', h2t.statuses[0] === 'open' && h2t.statuses[1] !== 'open' && h2t.closeSaid === 1, JSON.stringify(h2t));
+    const redSwallow = copyOf("    catch (e) { log(`[spend] could not close the inbox item ${itemKey}: ${(e && e.message) || e} — asked again at the next beat`); return false; }\n", "    catch { }\n", "B-ef83 w7yapjt1r: a thrown close answered true"); // stale-pins: kept — the RED swallows the thrown write as the release did
+    ok('§3h CONTROL: the anchored copy (a thrown close swallowed, answered true) is built', !redSwallow.err, redSwallow.err || '');
+    if (!redSwallow.err) { const rs = await heldThenTake(redSwallow, { beats: 2, setStatusThrows: 1 }); ok('§3h CONTROL: in that copy the item stays OPEN for good, unsaid (RED: the owed mark cleared by a close that closed nothing)', rs.statuses[1] === 'open' && rs.closeSaid === 0, JSON.stringify(rs)); }
     // (p3) r2047 (2): the lock LOST before the store answered — the held retry closes the earlier item once the store answers
-    {
+    const lostBeforeStore = async (mod) => {
       const dL3 = tmpdir('vs-spend-3h-lost-before-store-');
       const tL3 = [], inL3 = [{ key: 'accounts', id: 'ut-1', status: 'open', itemKey: 'spend-ledger-unlocked', text: 'an earlier run' }]; let readyL3 = false;
-      const gL3 = mk(guardMod, dL3, inL3, [], { getUserTodos: () => (readyL3 ? store(inL3) : null), lockSchedule: (fn, ms) => { tL3.push({ fn, ms }); return tL3.length; } });
+      const gL3 = mk(mod, dL3, inL3, [], { getUserTodos: () => (readyL3 ? store(inL3) : null), lockSchedule: (fn, ms) => { tL3.push({ fn, ms }); return tL3.length; } });
       fs.writeFileSync(LF(dL3, 'spend-budget.lock'), lockOf(4242, null, { host: 'another-machine.example', ns: 'pid:[1]' }));   // another process's lock now
-      const beatL3 = tL3.find((x) => x.ms === guardMod.LOCK_BEAT_MS); if (beatL3) beatL3.fn();
+      const beatL3 = tL3.find((x) => x.ms === mod.LOCK_BEAT_MS); if (beatL3) beatL3.fn();
       for (let i = 0; i < 200 && !gL3.snapshot().ledgerHeldBy; i++) await new Promise((r) => setTimeout(r, 25));
       const heldNow = !!gL3.snapshot().ledgerHeldBy, stillOpen = inL3[0].status === 'open';
       readyL3 = true;
-      const retryL3 = tL3.filter((x) => x.ms === guardMod.LOCK_RETRY_MS).pop(); if (retryL3) retryL3.fn();
-      ok('§3h r2047 (2): the lock LOST before the store answered (another process took it) — the HELD retry closes the earlier run\'s item once the store answers', heldNow && stillOpen && !!retryL3 && inL3[0].status !== 'open', JSON.stringify({ heldNow, stillOpen, retry: !!retryL3, status: inL3[0].status }));
-    }
+      const retryL3 = tL3.filter((x) => x.ms === mod.LOCK_RETRY_MS).pop(); if (retryL3) retryL3.fn();
+      return { heldNow, stillOpen, retry: !!retryL3, status: inL3[0].status };
+    };
+    const l3 = await lostBeforeStore(guardMod);
+    ok('§3h r2047 (2): the lock LOST before the store answered (another process took it) — the HELD retry closes the earlier run\'s item once the store answers', l3.heldNow && l3.stillOpen && l3.retry && l3.status !== 'open', JSON.stringify(l3));
+    const redRetry = copyOf('lockAgain(); if (unlockedCloseOwed && closeItemsNow(UNLOCKED_ITEM)) unlockedCloseOwed = false; if (heldBy) armLockRetry(); }', 'lockAgain(); if (heldBy) armLockRetry(); }', "B-ef83 r2047 (2): the held retry closes nothing"); // stale-pins: kept — the RED takes the held retry's close out
+    ok('§3h CONTROL: the anchored copy (the held retry closes nothing) is built', !redRetry.err, redRetry.err || '');
+    if (!redRetry.err) { const r3 = await lostBeforeStore(redRetry); ok('§3h CONTROL: in that copy the earlier run\'s item stays OPEN after the held retry (RED: the retry\'s close taken out)', r3.heldNow && r3.retry && r3.status === 'open', JSON.stringify(r3)); }
+    // round w7yapjt1r: a list that stays FULL (the add keeps throwing) — the episode's failure said ONCE, however many 60 s asks
+    const addAlwaysThrows = (mod) => {
+      const dF = tmpdir('vs-spend-3h-unmade-full-');
+      const tF = [], inF = [], logsF = [];
+      const st = () => ({ ...store(inF), add: () => { throw new Error('the list is full'); } });
+      const undo = refuseLock(lockTmpIn(dF));
+      try {
+        const gF = mk(mod, dF, inF, logsF, { getUserTodos: st, lockSchedule: (fn, ms) => { tF.push({ fn, ms }); return tF.length; } });
+        let asks = 0;
+        for (let k = 0; k < 3; k++) { const r = tF.filter((x) => x.ms === mod.LOCK_UNMADE_RETRY_MS).pop(); if (r) { asks++; r.fn(); } }
+        return { asks, said: logsF.filter((l) => l.includes('could not file the inbox item')).length, items: inF.length, unmade: !!gF.snapshot().ledgerLockUnmade };
+      } finally { undo(); }
+    };
+    const af = addAlwaysThrows(guardMod);
+    ok('§3h w7yapjt1r: a list that stays FULL — three 60 s asks, the failure said ONCE in the journal (the first of the episode), no item', af.asks === 3 && af.said === 1 && af.items === 0 && af.unmade, JSON.stringify(af));
+    const redSaid = copyOf("      if (itemKey !== UNLOCKED_ITEM || !unlockedFailSaid) log('[spend] could not file the inbox item: ' + e.message);\n", "      log('[spend] could not file the inbox item: ' + e.message);\n", "B-ef83 w7yapjt1r: every failed ask said"); // stale-pins: kept — the RED says every failure, as the release did
+    ok('§3h CONTROL: the anchored copy (every failed ask said) is built', !redSaid.err, redSaid.err || '');
+    if (!redSaid.err) { const rf = addAlwaysThrows(redSaid); ok('§3h CONTROL: in that copy the journal says it at the boot\'s try AND at every ask (RED: one line a minute for the whole episode)', rf.asks === 3 && rf.said >= rf.asks && rf.said > af.said, JSON.stringify({ red: rf, guard: af })); }
     // (s) r2047 (5): THE LOCK REMADE BY ANOTHER PROCESS meanwhile (boot unmade; another hub made it): the 60 s ask finds it — HELD by
     // that process (its name), the ledger no longer kept without a lock, the episode's item closed
     {
