@@ -662,7 +662,7 @@ console.log('①i B-23e5\'s remainder (c), REVERTED (r1396): the folder field\'s
 {
   const ds = fs.readFileSync(path.join(REPO, 'src/server/dir-slice.js'), 'utf8'), src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
   ok(ds.includes("call('dirSlice', { path: a, dirs: [{ path: a, known: base && !base.entry.racy ? base.entry.mtime : undefined }]") && ds.includes("call('dirSlice', { path: a, dirs: [], probes: [a] }, IDLE_ONLY)") && ds.includes("call('dirIndex', { path: root, roots: [root],")
-      && src.includes("const pathsOf = (payload) => [...PATH_KEYS.map((k) => payload[k]), ...(Array.isArray(payload.paths) ? payload.paths : [])]") && !/LIST_KEYS/.test(src) && !SF.WIDE_OPS.has('dirSlice') && !SF.WIDE_OPS.has('dirIndex'),
+      && src.includes("const pathsOf = (payload, keys = PATH_KEYS) => [...keys.map((k) => payload[k]), ...(Array.isArray(payload.paths) ? payload.paths : [])]") && !/LIST_KEYS/.test(src) && !SF.WIDE_OPS.has('dirSlice') && !SF.WIDE_OPS.has('dirIndex'),
     'PIN: the slice and the walk carry `path` (dir-slice.js) — asked and remembered by it as at the release; the first build\'s list keys (dirs / roots / probes) and its listing class are gone (they refused healthy calls)');
 }
 
