@@ -532,6 +532,9 @@ function tabRefusalText(code, f = {}, tIn) {
   const t = f && f.agent ? fill : tOf(tIn);
   switch (code) {
     case 'not_your_tab':
+      // B-19a9 (主开发 r2182 (1)): a tab NO holder is on record for, on a paired machine's shared profile — a tab its own agent opened
+      // there BEFORE the scope road (that road passed straight through, so nothing was recorded) is said by its own words, never «another's»
+      if (f && f.agent && f.unrecorded) return 'that tab is no holder\'s on record — on a paired machine\'s browser, a tab opened before this update was not recorded as anyone\'s, so it is not known as yours; `vibespace-browser tab new <url>` opens one that is (`vibespace-browser tab list` names your tabs)';
       if (f && f.agent) return 'that tab is not yours — it belongs to another holder of this browser (another conversation, or the user); you list, switch to and close only your own tabs (`vibespace-browser tab list`)';
       if (f && f.yours) return t('Switch to your own tab from your browsing window');
       if (f && f.orphan) return t('Nobody’s tab — open Browse yourself on this profile to take it');

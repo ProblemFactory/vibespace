@@ -28,7 +28,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, CHROME_QUIET, CHROME_STORE, endDaemonsAndWait } from './scratch.mjs';
+import { scratch, freePort, CHROME_QUIET, CHROME_STORE, endDaemonsAndWait, DRIVER } from './scratch.mjs';
 import { agentdBundle } from './agentd-bundle.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -83,7 +83,7 @@ for (const sg of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sg, () => process.e
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null;
 try { const h0 = path.join(ROOT, 'v'); fs.mkdirSync(h0, { mode: 0o700 }); ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: { ...BASE_ENV, HOME: h0, TMPDIR: h0 } }).trim() : null; } catch { ver = null; }
-if (!ver) skipWhole(`no real agent-browser resolves on PATH past the shim (the tree's real-driver fence, src/browser-facts.js binaryResolver; PATH=${BASE_ENV.PATH || ''})`);
+if (!ver) skipWhole(`${DRIVER.skip} no real agent-browser resolves on PATH past the shim (the tree's real-driver fence, src/browser-facts.js binaryResolver — the driver's door: ${DRIVER.env}; PATH=${BASE_ENV.PATH || ''})`);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) skipWhole('no Chrome on this machine');
 console.log(`agent-browser: ${REAL_AB} (${ver}) · Chrome ${CHROME} · root ${ROOT} · sessions under ${NS} · ≤ ${TRIALS} trials, capped at ${CAP_MS / 60000} min`);
@@ -105,10 +105,13 @@ const bundle = path.join(ROOT, 'agentd.js');
 await agentdBundle({ version, outfile: bundle });
 const dataDir = path.join(ROOT, 'hubdata'); fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 const { DeviceManager } = require('../src/agentd/client.js');
-process.env.PATH = `${path.dirname(REAL_AB)}:${process.env.PATH || ''}`;   // the machine's agent runs the real driver (browser-serve's `start`)
-process.env.HOME = path.join(ROOT, 'device-home'); fs.mkdirSync(process.env.HOME, { recursive: true, mode: 0o700 });   // its ~/.agent-browser inside this root
+// r2182 (3): the device agent's OWN environment — the real driver on its PATH (browser-serve's `start` runs it) and its home inside this
+// root (its ~/.agent-browser) — handed to its daemon at the FIRST dial only, then this process's own PATH / HOME are put back (a later
+// leg never inherits them; a re-dial joins the running daemon, it spawns none)
+const DEVICE_HOME = path.join(ROOT, 'device-home'); fs.mkdirSync(DEVICE_HOME, { recursive: true, mode: 0o700 });
+const withDeviceEnv = async (fn) => { const keep = { PATH: process.env.PATH, HOME: process.env.HOME }; process.env.PATH = `${path.dirname(REAL_AB)}:${keep.PATH || ''}`; process.env.HOME = DEVICE_HOME; try { return await fn(); } finally { process.env.PATH = keep.PATH; process.env.HOME = keep.HOME; } };
 const dial = async () => { const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => { } }); dm.installLocal(); await dm.connect(); return dm; };
-current = await dial();
+current = await withDeviceEnv(dial);
 const HOST_A = 'h-paired-a', HOST_B = 'h-paired-b';   // two names of the same stand-in machine: two forward listeners (the url change)
 const hosts = { isLocal: () => false, get: (h) => (h === HOST_A || h === HOST_B ? { id: h } : null), deviceBounded: async () => { if (!current) throw new Error('the machine is offline'); return current; } };
 const access = BA.create({ hosts, log: { log() { }, warn() { } }, install: false, connectMs: 3000 });

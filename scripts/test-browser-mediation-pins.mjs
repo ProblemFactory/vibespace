@@ -64,6 +64,15 @@ console.log('— B-19a9 (r1840 / r1846): THE ROAD VERDICT names each raw case by
   const factsLaw = (fn) => { const a = fn({ host: 'h1', provider: 'agent-browser' }, { hostId: 'h1' }), b = fn({ host: 'h1', provider: 'cdp' }, null), c = fn({ provider: 'agent-browser' }, { external: true }), d = fn({ provider: 'agent-browser' }, {}), e = fn({ provider: 'local-window' }, null);
     return a.paired === true && a.external === false && b.external === true && b.paired === false && c.external === true && d.external === false && d.paired === false && e.external === true; };
   const rfBad = rf ? anchored(rf[1], "return { external, paired: !external && !!((p && p.host) || (rec && rec.hostId)) };", "return { external: external || !!(p && p.host), paired: false };", 'b19a9-paired-as-external') : '';
+  // r2182 (1): the keeper says an ORPHAN on a PAIRED profile in its own words — the fence's code unchanged, never widened; (2): no road
+  // verdict works «paired» out by itself (the login road reads roadFactsOf)
+  const unrec = (src) => src.includes("const unrecorded = !av.ok && av.code === 'not_your_tab' && !!targetId && s0.owners instanceof Map && s0.owners.get(String(targetId).toUpperCase()) === 'orphan' && roadFactsOf(p, rec).paired;")
+    && src.includes("throw namedError(av.code, unrecorded ? TBS.tabRefusalText('not_your_tab', { agent: true, unrecorded: true }) : av.error);");
+  const everyOrphan = anchored(kp, " === 'orphan' && roadFactsOf(p, rec).paired;", " === 'orphan';", 'b19a9-every-orphan');
+  ok(unrec(kp) && !unrec(everyOrphan), 'r2182 (1): an orphan on a PAIRED shared profile is refused not_your_tab in its own words (unrecorded before this update) — the code unchanged; CONTROL (RED): the words widened to every orphan');
+  const selfPaired = (src) => !/paired: remote && !external/.test(src) && src.includes('paired: roadFactsOf(p, rec).paired,'); /* stale-pins: kept — the self-computed line must be ABSENT */
+  const oldLogin = anchored(kp, 'paired: roadFactsOf(p, rec).paired,', 'paired: remote && !external,', 'b19a9-login-self-paired'); /* stale-pins: kept — the RED copy restores the self-computed line */
+  ok(selfPaired(kp) && !selfPaired(oldLogin), 'r2182 (2): the login road reads «paired» from the ONE helper (roadFactsOf), never works it out by itself; CONTROL (RED): the self-computed line in a copy');
   ok(!!rf && factsLaw(compileRF(rf[1])) && !factsLaw(compileRF(rfBad)), 'roadFactsOf (compiled from the keeper): a paired machine\'s started profile ⇒ paired; an outside endpoint (a `cdp` profile, a record not started here, a provider that does not start) ⇒ external; a local one ⇒ neither; CONTROL (RED): a copy that calls a paired profile external');
 }
 

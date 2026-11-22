@@ -4533,7 +4533,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // named by the fence), never no_such_tab
     const targetId = w.ref ? (TBS.resolveTabRef(w.ref, s0.rows) || TBS.resolveTabRef(TBS.TARGET_ID_RE.test(String(w.ref)) ? w.ref : '', s0.targets || [])) : null;
     const av = TBS.agentTabVerdict({ act: w.act, ref: w.ref, targetId, own: s0.own, current: s0.active });
-    if (!av.ok) { log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}${w.ref ? ' ' + String(w.ref).slice(0, 40) : ''}\` refused ${av.code} — nothing ran`); throw namedError(av.code, av.error); }
+    // B-19a9 (主开发 r2182 (1)): an ORPHAN on a paired machine's shared profile is refused by the same code in its own words (an update's
+    // edge: its tabs from before the scope road were never recorded) — the fence is never widened for it
+    const unrecorded = !av.ok && av.code === 'not_your_tab' && !!targetId && s0.owners instanceof Map && s0.owners.get(String(targetId).toUpperCase()) === 'orphan' && roadFactsOf(p, rec).paired;
+    if (!av.ok) { log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}${w.ref ? ' ' + String(w.ref).slice(0, 40) : ''}\` refused ${av.code}${unrecorded ? ' (an unrecorded tab on a paired machine)' : ''} — nothing ran`); throw namedError(av.code, unrecorded ? TBS.tabRefusalText('not_your_tab', { agent: true, unrecorded: true }) : av.error); }
     const out = { ok: true, act: w.act, profileId: p.id };
     if (w.act === 'new') {
       // lane browser-windows (U1): the new tab opens in a WINDOW OF ITS OWN (measured: the binary's `tab new` lands in
@@ -8469,7 +8472,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       ephemeral: eph,
       external,
       remoteSession: remSess,
-      paired: remote && !external,   // B-19a9 (r1846 (b)): each by its own reason; the login channel's own law below still refuses a paired machine
+      paired: roadFactsOf(p, rec).paired,   // B-19a9 (r1846 (b), r2182 (2)): the ONE fact helper; the login channel's own law below still refuses a paired machine
       agent,
     });
     return M.loginFillChannelVerdict(road, {

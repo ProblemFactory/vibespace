@@ -880,6 +880,13 @@ console.log('— ④ the words: every new key in zh + ja');
   ok(uniq.length >= 14 && !miss.length, `every key the PURE words ask t() for (${uniq.length}) has a zh and a ja row`, miss);
 }
 
+// B-19a9 (主开发 r2182 (1)): an UNRECORDED tab on a paired machine's shared profile is refused not_your_tab in its OWN words — never
+// «it belongs to another holder» (its own agent opened it before the scope road, which recorded nothing); the plain words stay as they were
+{
+  const un = TB.tabRefusalText('not_your_tab', { agent: true, unrecorded: true }), plain = TB.tabRefusalText('not_your_tab', { agent: true });
+  ok(/no holder's on record/.test(un) && /before this update/.test(un) && /`vibespace-browser tab new <url>`/.test(un) && !/belongs to another holder/.test(un) && /belongs to another holder/.test(plain) && un !== plain,
+    'B-19a9: an unrecorded tab on a paired machine is refused in its own words (no holder on record, opened before this update — `tab new`), never «another holder\'s»; the plain agent words unchanged');
+}
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: '① ' })) ok(r.pass, r.name, r.detail);
 console.log(`\n${fail ? '✗' : '✓'} test-browser-tabs: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
