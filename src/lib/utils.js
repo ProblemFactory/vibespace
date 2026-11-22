@@ -1444,16 +1444,18 @@ export function createPopover(anchor, className, opts = {}) {
     // ITS WIDTH IS HELD TO THE SCREEN TOO (lane bl-phone-ui, the 390 census's first find — 主开发 r1198: the position was held,
     // the width never: a popover wider than a 390 px phone started at 0 and still ran past the right edge). Measured where it
     // has the screen's width (at the left pad — B-16ab (3)'s lesson for menus: at its anchor a fixed box is only as wide as
-    // the room right of it), a box wider than the screen less its two pads is capped there, and what still does not fit
+    // the room right of it), a box wider than the screen is capped at the screen less its two pads, and what still does not fit
     // inside it (a row that never breaks) scrolls sideways IN the box, never off the screen; the clamps below then keep it
-    // inside. A box no wider than the screen less its pads gets no style, so nothing on a desk moves. (Its PLACE is the
+    // inside. A box the screen holds whole gets no style, so nothing on a desk moves and an edge-to-edge sheet keeps its edges. (Its PLACE is the
     // anchor's, as before: one near the right edge still narrows to the room there — a slide like menuPlace's would move
     // desk popovers too.)
     if (pop._heldW) { pop.style.maxWidth = pop._ownMaxW || ''; pop.style.overflowX = pop._ownOverflowX || ''; pop._heldW = false; }   // measured afresh at each clamp (its first frame, its content resized — a turn of the screen alone re-clamps nothing)
     const at = pop.style.left, atR = pop.style.right;
     pop.style.left = (MENU_PAD / Z) + 'px'; pop.style.right = 'auto';   // measured where it has the screen's width (a right-anchored box too: held by its right it would read the fill, not its width)
     const across = vw - 2 * MENU_PAD, natural = pop.getBoundingClientRect().width;
-    if (natural > across) {
+    // only a box WIDER THAN THE SCREEN itself is held (r2082 — the hosted run's test-doc-window ⑬): one the screen holds whole was never
+    // past it — the phone's link bar, edge to edge by its own rule, was capped at the screen less its pads and stood 8 px short
+    if (natural > vw + 0.5) {
       pop._ownMaxW = pop.style.maxWidth; pop._ownOverflowX = pop.style.overflowX;   // what the caller wrote is put back when the box fits again
       pop.style.maxWidth = (across / Z) + 'px';
       pop.style.overflowX = 'auto';

@@ -77,14 +77,18 @@ await build('old.js', [oldUtils]);
 const RIGHT_FIX = [" pop.style.right = 'auto';", ' pop.style.right = atR;'];
 const UTILS_RIGHT = RIGHT_FIX.every((x) => UTILS.split(x).length === 2) ? RIGHT_FIX.reduce((s, x) => s.replace(x, ''), UTILS) : null;
 if (UTILS_RIGHT) await build('right.js', [{ name: 'right-utils', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]utils\.js$/ }, () => ({ contents: UTILS_RIGHT, loader: 'js', resolveDir: path.dirname(UTILS_PATH) })); } }]);
+// ④'s edge-to-edge leg has its own control: the hold capping at the screen LESS ITS PADS (line 156's — r2082: the phone's link bar 8 px short)
+const PADS_NOW = '    if (natural > vw + 0.5) {\n', PADS_OLD = '    if (natural > across) {\n';   // stale-pins: kept — the release's cap, the control's own text
+const UTILS_PADS = UTILS.split(PADS_NOW).length === 2 ? UTILS.replace(PADS_NOW, PADS_OLD) : null;
+if (UTILS_PADS) await build('pads.js', [{ name: 'pads-utils', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]utils\.js$/ }, () => ({ contents: UTILS_PADS, loader: 'js', resolveDir: path.dirname(UTILS_PATH) })); } }]);
 
 const web = express();
 web.get('/style.css', (q, s) => s.type('css').send(q.query.old === '1' ? STYLE_OLD : q.query.old === 'roster' ? STYLE_NOROSTER : STYLE));
 web.get('/chat.css', (q, s) => s.type('css').send(q.query.old === '1' ? CHAT_OLD : CHAT));
 web.get('/:b.js', (q, s) => s.type('js').send(fs.readFileSync(path.join(dir, q.params.b + '.js'))));
 web.get('/', (q, s) => {
-  const old = q.query.old === '1' ? '1' : q.query.old === 'roster' ? 'roster' : q.query.old === 'right' ? 'right' : '0';
-  s.type('html').send(`<!doctype html><html data-theme="dark" lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css?old=${old}"><link rel="stylesheet" href="/chat.css?old=${old}"><script>try{localStorage.setItem('vibespace.lang','zh')}catch{}</script></head><body><div id="stage"></div><script src="/${old === '1' ? 'old' : old === 'right' ? 'right' : 'now'}.js"></script></body></html>`);
+  const old = q.query.old === '1' ? '1' : q.query.old === 'roster' ? 'roster' : q.query.old === 'right' ? 'right' : q.query.old === 'pads' ? 'pads' : '0';
+  s.type('html').send(`<!doctype html><html data-theme="dark" lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css?old=${old}"><link rel="stylesheet" href="/chat.css?old=${old}"><script>try{localStorage.setItem('vibespace.lang','zh')}catch{}</script></head><body><div id="stage"></div><script src="/${old === '1' ? 'old' : old === 'right' ? 'right' : old === 'pads' ? 'pads' : 'now'}.js"></script></body></html>`);
 });
 const [PORT, CDP_PORT] = await freePorts(2);
 const srv = await new Promise((r) => { const x = web.listen(PORT, '127.0.0.1', () => r(x)); });
@@ -108,7 +112,7 @@ async function page({ old = false } = {}) {
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.exceptionDetails).slice(0, 600)); return r.result?.value; };
-  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?old=${old === 'roster' ? 'roster' : old === 'right' ? 'right' : old ? 1 : 0}` });
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?old=${old === 'roster' ? 'roster' : old === 'right' ? 'right' : old === 'pads' ? 'pads' : old ? 1 : 0}` });
   let ready = false;
   for (let i = 0; i < 200 && !ready; i++) { ready = await ev('window.__ready === true').catch(() => false); if (!ready) await sleep(50); }
   await ev('document.fonts.ready.then(() => true)');
@@ -202,13 +206,15 @@ console.log('③ a pop-up at 390 — the screen bounds it with the usual margin 
 }
 
 // ④ createPopover: a popover's width held to the screen (the 390 census's first find)
-const POP = (wide, own = '', right = false) => `(async () => {
+// r2082: `edge` = a popover whose OWN rule spans the screen (left 0 / right 0 — the phone's link bar, doc-window-ui.js), its words wrapping
+const EDGE_WORDS = 'Open this link in a new window, edit its address, copy it or remove it — words that wrap on a phone screen';
+const POP = (wide, own = '', right = false, edge = false) => `(async () => {
   document.querySelectorAll('.fit-pop, #fit-pop-anchor').forEach((e) => e.remove());
   const a = document.createElement('button'); a.id = 'fit-pop-anchor'; a.style.cssText = 'position:fixed;left:205px;top:100px;width:24px;height:24px'; document.body.appendChild(a);
   const p = window.__pop(a, 'fit-pop');${right ? " p.style.left = ''; p.style.right = '2px';" : ''}
   p.style.padding = '6px 8px'; p.style.border = '1px solid #888'; p.style.background = '#222'; p.style.color = '#eee'; p.style.fontSize = '14px';${own ? ` p.style.maxWidth = '${own}';` : ''}
   const row = document.createElement('div'); row.className = 'fit-pop-row'; row.style.whiteSpace = 'nowrap';
-  row.textContent = ${wide ? JSON.stringify('一行永远不会断开的很长很长的文字：' + 'a-path-that-never-breaks/'.repeat(14)) : JSON.stringify('短的一行')}; p.appendChild(row);
+  row.textContent = ${wide ? JSON.stringify('一行永远不会断开的很长很长的文字：' + 'a-path-that-never-breaks/'.repeat(14)) : JSON.stringify('短的一行')}; p.appendChild(row);${edge ? " if (!document.getElementById('fit-edge-css')) { const st = document.createElement('style'); st.id = 'fit-edge-css'; st.textContent = '.fit-pop.fit-pop-edge{left:0!important;right:0;max-width:none}'; document.head.appendChild(st); } p.classList.add('fit-pop-edge'); row.style.whiteSpace = 'normal'; row.textContent = " + JSON.stringify(EDGE_WORDS) + ';' : ''}
   const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 120))));
   await frames();
   const read = () => { const r = p.getBoundingClientRect(); return { left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, w: Math.round(r.width * 10) / 10, maxW: p.style.maxWidth, ox: getComputedStyle(p).overflowX, scrolls: p.scrollWidth > p.clientWidth + 1, rowW: Math.round(row.scrollWidth) }; };   // rowW: the row's WORDS (its box is the popover's width)
@@ -224,6 +230,12 @@ console.log('④ a popover at 390 — its width held to the screen too (createPo
   const now = await page(), was = await page({ old: true });
   await now.front();
   const A = await now.ev(POP(true)), N = await now.ev(POP(false)), O = await now.ev(POP(true, '500px')), RA = await now.ev(POP(false, '', true));
+  const E = await now.ev(POP(false, '', false, true));
+  ok(!!E.first && E.first.left <= 0.5 && E.first.right >= E.vw - 0.5 && !E.first.maxW, `an EDGE-TO-EDGE popover (its own rule left 0 / right 0, as the phone's link bar) keeps the screen's whole width — no cap of the helper's (${E.first.left}–${E.first.right} of ${E.vw}, max-width ${E.first.maxW || 'none'})`, E);
+  if (UTILS_PADS) {
+    const pp = await page({ old: 'pads' }); await pp.front(); const RE = await pp.ev(POP(false, '', false, true)); pp.close();
+    ok(!!RE.first.maxW && RE.first.right <= RE.vw - 7.5, `CONTROL: the hold capping at the screen less its pads (line 156's) cuts the same edge-to-edge popover 8 px short (${RE.first.left}–${RE.first.right} of ${RE.vw}, max-width ${RE.first.maxW || 'none'})`, RE);
+  } else ok(false, 'CONTROL: the hold\'s screen test stands in utils.js once («    if (natural > vw + 0.5) {») — the control puts the pads back');
   await was.front();
   const B = await was.ev(POP(true));
   console.log(`      now: the wide popover ${A.first.left}–${A.first.right} (${A.first.w} px, its row ${A.first.rowW} px, max-width ${A.first.maxW || 'none'}) · shrunk: ${A.shrunk.w} px, max-width ${A.shrunk.maxW || 'none'} · the narrow one ${N.first.left}–${N.first.right} · without the hold: ${B.first.left}–${B.first.right}`);
@@ -243,7 +255,7 @@ console.log('④ a popover at 390 — its width held to the screen too (createPo
   await now.front(); const DN = await now.ev(POP(false)), DW = await now.ev(POP(true));
   await was.front(); const WN = await was.ev(POP(false));
   ok(!DN.first.maxW && DN.first.ox === 'visible' && DN.first.left === WN.first.left && DN.first.w === WN.first.w, `the DESK at 1280: a narrow popover stands where the release stood it (left ${DN.first.left}, ${DN.first.w} px) with no style of the helper's`, { DN, WN });
-  ok(DW.vw === 1280 && (DW.first.rowW <= 1272 ? !DW.first.maxW : DW.first.right <= 1276.5), `the DESK at 1280: a wide popover is held only if it is wider than the screen less its pads (its words ${DW.first.rowW} px; max-width ${DW.first.maxW || 'none'})`, DW);
+  ok(DW.vw === 1280 && (DW.first.rowW <= 1280 ? !DW.first.maxW : DW.first.right <= 1276.5), `the DESK at 1280: a wide popover is held only if it is wider than the screen (its words ${DW.first.rowW} px; max-width ${DW.first.maxW || 'none'})`, DW);
   ok(B.first.right > B.vw + 0.5, `CONTROL: the helper without the hold — the same popover runs past the screen's right edge (${B.first.left}–${B.first.right} of ${B.vw})`, B);
   now.close(); was.close();
 }
