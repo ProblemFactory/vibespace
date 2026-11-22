@@ -210,7 +210,7 @@ console.log('⑤ controls (patched copies)');
 const ECSRC = read('src/encoded-command.js');
 const ecControl = (tag, from, to, why, want) => {
   if (!ECSRC.includes(from)) { ok(false, `CONTROL ${tag}: the anchor is gone`, from); return; }
-  const f = MUT.write('src/encoded-command.js', ECSRC.replace(from, to), tag);
+  const f = MUT.write('src/encoded-command.js', editAnchor(ECSRC, from, to, "src/encoded-command.js"), tag);
   const bad = DECODE(require(f)).filter((r) => !r.good).map((r) => r.name);
   ok(bad.some((n) => n.startsWith(want)), `CONTROL ${tag}: ${why} — ① goes red`, bad);
 };
@@ -224,7 +224,7 @@ ecControl('crlf-only', "const shown = script.replace(/\\r\\n/g, '\\n');", "const
 const RSSRC = read('src/lib/chat-run-summary.js');
 const rsControl = async (tag, from, to, why, want) => {
   if (!RSSRC.includes(from)) { ok(false, `CONTROL ${tag}: the anchor is gone`, from); return; }
-  const f = MUT.write('src/lib/chat-run-summary.js', RSSRC.replace(from, to), tag, { esm: true });
+  const f = MUT.write('src/lib/chat-run-summary.js', editAnchor(RSSRC, from, to, "src/lib/chat-run-summary.js"), tag, { esm: true });
   const mod = await import(pathToFileURL(f).href);
   const bad = [...FOLD(mod), ...LINE(mod)].filter(([, g]) => !g).map(([n]) => n);
   ok(bad.some((n) => n.startsWith(want)), `CONTROL ${tag}: ${why} — ③ goes red`, bad);

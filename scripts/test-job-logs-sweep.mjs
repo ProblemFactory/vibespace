@@ -14,6 +14,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let LS = null; try { LS = require(path.join(ROOT, 'src/job-logs-sweep.js')); } catch { /* the release: no remover — its legs are red by name */ }
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-jls-pure-'));
 const lap = (name) => console.log(name);
 try {
@@ -40,7 +49,7 @@ try {
     const src = fs.readFileSync(path.join(ROOT, 'src/job-logs-sweep.js'), 'utf8');
     const mutant = (label, from, to) => {
       ok(src.includes(from), `mutant «${label}»: its anchor is in the module`);
-      const f = path.join(tmp, `mut-${label.replace(/\W+/g, '-')}.cjs`); fs.writeFileSync(f, src.replace(from, to).replace(/require\('\.\//g, `require('${ROOT}/src/`));
+      const f = path.join(tmp, `mut-${label.replace(/\W+/g, '-')}.cjs`); fs.writeFileSync(f, editAnchor(src, from, to, "src/job-logs-sweep.js").replace(/require\('\.\//g, `require('${ROOT}/src/`));
       const V = require(f).runVerdict; ok(table(V).some((x) => !x), `CONTROL: the verdict with «${label}» fails the table`);
     };
     mutant('alive ignored', "if (alive === true) return 'alive';", '');

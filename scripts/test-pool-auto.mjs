@@ -703,7 +703,7 @@ await (async () => {
     const rel = 'src/server/usage-pool-engine.js';
     const src = fs.readFileSync(path.resolve(rel), 'utf8');
     if (!okAnchor(src.split(from).length - 1, tag, rel, from)) return { hit: false };
-    return { hit: true, mod: ME.load(rel, src.replace(from, to), tag) };
+    return { hit: true, mod: ME.load(rel, editAnchor(src, from, to, "src/server/usage-pool-engine.js"), tag) };
   };
   const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
   const world = (engMod, { burnA = 0.012, extra = [], metaStore = null } = {}) => {
@@ -1759,7 +1759,7 @@ await (async () => {
   }
   // (8) CONTROLS — one patched copy per rule
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-  const ctl = (tag, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return M.load('src/account-pool-auto.js', src.replace(from, to), tag); };
+  const ctl = (tag, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return M.load('src/account-pool-auto.js', editAnchor(src, from, to, "src/account-pool-auto.js"), tag); };
   const noRet = ctl('noreturn', 'if (prioRank && bestSettle && prioRank(bestSettle.id) < prioRank(currentId)) {', 'if (false) { // PATCHED: no priority return');
   ck('priority CONTROL: without the return rule the conversation stays on #2 when #1 can serve again', noRet && noRet.decidePoolSwitch({ currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P }).to === null);
   const noHold = ctl('nohold', "if (warm && warm.inTurn) return none('priority-hold',", "if (false) return none('priority-hold',");
@@ -1794,7 +1794,7 @@ await (async () => {
   const run2 = (mod, caches, fam, opts = {}) => mod.decidePoolSwitch({ currentId: 'a', members: mem, readCache: view(fam, caches), nowSec: NOW, explain: true, hot: true, ...opts });
   const d = (caches, fam, opts) => run2({ decidePoolSwitch }, caches, fam, opts);
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
+  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', editAnchor(src, from, to, "src/account-pool-auto.js"), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const noKey = ctl('nokey', '  const spare = (a.spare ?? 100) - (b.spare ?? 100);\n  if (spare) return spare;\n', '  // PATCHED: no spare key\n');
   ck('spare CONTROL setup: the no-key copy (today\'s order) loaded', !!noKey);
 
@@ -2190,7 +2190,7 @@ await (async () => {
   }
   // CONTROLS — one patched copy per rule
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
+  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', editAnchor(src, from, to, "src/account-pool-auto.js"), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const noStay = ctl('nostay', "if (currentId === pinId) return { to: null, reason: 'pin', held: true, ...base };", 'if (currentId === pinId) return decidePoolSwitch({ ...opts, explain: true }); // PATCHED: the pin has no authority on its own member');
   ck('pin CONTROL: without the stay rule (the automatic rules decide a conversation on its pin) EDF drags it away', noStay && noStay.decidePinnedPlacement({ pin: 'a', currentId: 'a', members: mem, readCache: (id) => good[id], nowSec: NOW, proactive: true, hot: true }).to === 'b');
   const noSettle = ctl('nosettle', 'const settled = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT) && (!readLogin || loginSwitchTarget(li));', 'const settled = true; // PATCHED: no settle bar');
@@ -3067,7 +3067,7 @@ await (async () => {
     const { mutantCopies: mcP, copiesCensus: ccP } = await import('./mutant-copy.mjs');
     const MPC = mcP('proving', path.resolve('.'));
     const psrc = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-    const pctl = (tag, from, to) => (psrc.split(from).length === 2 ? MPC.load('src/account-pool-auto.js', psrc.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${psrc.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
+    const pctl = (tag, from, to) => (psrc.split(from).length === 2 ? MPC.load('src/account-pool-auto.js', editAnchor(psrc, from, to, "src/account-pool-auto.js"), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${psrc.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
     const noHeld = pctl('noheld', '      if (held(r.id)) continue;\n', '');
     ck('proving RED: without the in-flight mark three spawns in a row pile onto one guess (C, C, C)', !!noHeld && noHeld.decidePoolSwitch({ ...base, proving: held('c') }).to === 'c');
     const onMoves = pctl('onmoves', 'const provingOn = !!placing && !pinned && proving != null;', 'const provingOn = !pinned && proving != null; // PATCHED');
@@ -3970,7 +3970,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     const rel = 'src/server/usage-pool-engine.js';
     const src = fs.readFileSync(path.resolve(rel), 'utf8');
     if (!okAnchor(src.split(from).length - 1, tag, rel, from)) return { hit: false };
-    return { hit: true, mod: ME.load(rel, src.replace(from, to), tag) };
+    return { hit: true, mod: ME.load(rel, editAnchor(src, from, to, "src/server/usage-pool-engine.js"), tag) };
   };
   const live = (am, id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
   const wiped = (am, id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });

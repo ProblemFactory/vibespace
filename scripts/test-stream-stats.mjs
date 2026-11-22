@@ -29,11 +29,20 @@ const S = require(path.join(REPO, 'src/stream-series.js'));
 const SM = require(path.join(REPO, 'src/stream-model.js'));
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // a RED CONTROL: src/stream-series.js with ONE line swapped (the anchor must still be there), loaded as its own module
 const SERIES_SRC = read('src/stream-series.js');
-const mutant = (from, to) => { if (!SERIES_SRC.includes(from)) throw new Error('the mutant\'s anchor moved: ' + from); const m = { exports: {} }; new Function('module', 'exports', 'require', SERIES_SRC.replace(from, to))(m, m.exports, require); return m.exports; };
+const mutant = (from, to) => { if (!SERIES_SRC.includes(from)) throw new Error('the mutant\'s anchor moved: ' + from); const m = { exports: {} }; new Function('module', 'exports', 'require', editAnchor(SERIES_SRC, from, to, "src/stream-series.js"))(m, m.exports, require); return m.exports; };
 
 console.log('§1 statsOf: the details\' new page facts');
 {

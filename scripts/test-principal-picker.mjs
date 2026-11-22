@@ -28,6 +28,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const t0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
 const PM = await import(pathToFileURL(path.join(REPO, 'src/lib/principal-picker-model.js')).href);
@@ -214,7 +223,7 @@ console.log('③ controls: a patched copy per rule turns its own leg red');
 {
   const M = mutantCopies('principal-picker', REPO);
   const src = read('src/lib/principal-picker-model.js');
-  const load = async (from, to, tag) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return import(pathToFileURL(M.write('src/lib/principal-picker-model.js', src.replace(from, to), tag, { esm: true })).href); };
+  const load = async (from, to, tag) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return import(pathToFileURL(M.write('src/lib/principal-picker-model.js', editAnchor(src, from, to, "src/lib/principal-picker-model.js"), tag, { esm: true })).href); };
   const a = await load(".normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '')", '', 'nofold');
   ok(!!a && names(a.filterPrincipals(ROSTER, 'elo')).length === 0, 'CONTROL (a): a fold without NFKD misses "Élodie" for "elo" — ① reddens');
   const b = await load('const tgs = [...byTg.values()].sort((a, b) => String(a.title).localeCompare(String(b.title)));', 'const tgs = [...byTg.values()];', 'nosort');

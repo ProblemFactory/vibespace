@@ -2042,10 +2042,10 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   {
     lap('  · ROUND 8 — each road’s fix removed (the shapes that need the page’s own');
     const D8 = read('src/lib/desktop-manager.js'), L8 = read('src/lib/session-lifecycle.js'), T8 = read('src/lib/taskbar.js');
-    const dm8 = async (find, repl, tag) => { ok(D8.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', D8.replace(find, repl), tag, { esm: true })).href)).DesktopManager; };
+    const dm8 = async (find, repl, tag) => { ok(D8.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(D8, find, repl, "src/lib/desktop-manager.js"), tag, { esm: true })).href)).DesktopManager; };
     // a second taskbar module in one process: its top-level registerWindowMenu() would register the window menu's commands again
     // (contributions' registry is the process's, and refuses a duplicate) — the copy leaves that one call out
-    const tb8 = async (find, repl, tag) => { ok(T8.includes(find) && T8.includes('\nregisterWindowMenu();\n'), `mutant ${tag}: the patched lines exist in taskbar.js`); return import(pathToFileURL(M.write('src/lib/taskbar.js', editAnchor(T8.replace(find, repl), '\nregisterWindowMenu();\n', '\n\n', "src/lib/taskbar.js"), tag, { esm: true })).href); };
+    const tb8 = async (find, repl, tag) => { ok(T8.includes(find) && T8.includes('\nregisterWindowMenu();\n'), `mutant ${tag}: the patched lines exist in taskbar.js`); return import(pathToFileURL(M.write('src/lib/taskbar.js', editAnchor(editAnchor(T8, find, repl, "src/lib/taskbar.js"), '\nregisterWindowMenu();\n', '\n\n', "src/lib/taskbar.js"), tag, { esm: true })).href); };
     const heads = (f) => f.map((n) => n.slice(0, 16)).join(' | ');
     const blind = await dm8('    return !!(ask && ask.desk === desktopId) || !!(r && r.desk === desktopId && r.gen === (this._revealGen || 0));', '    return !!(ask && ask.desk === desktopId) || !!(r && r.gen === (this._revealGen || 0));', 'r8-R1-deskblind');
     const fb = await r8Legs({ DM: blind, install: install8, quiet: true, legs: ['R1b', 'R1c'] });

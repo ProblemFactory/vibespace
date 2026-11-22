@@ -929,7 +929,7 @@ await leg(29, async () => {
   const Ms = mutantCopies('pwr', REPO);
   const gePath = 'src/server/groups-engine.js', cdPath = 'src/server/conversation-deliver.js';
   const geSrc = fs.readFileSync(path.join(REPO, gePath), 'utf-8'), cdSrc = fs.readFileSync(path.join(REPO, cdPath), 'utf-8');
-  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return src.replace(a, b); };
+  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return editAnchor(src, a, b, "the text handed to swap()"); };
   const noVerdict = (src) => swap(swap(src, 'if (!stands.length) return {', 'if (false) return {'), 'nowWhy = stands[stands.length - 1].why;', 'nowWhy = (stands[stands.length - 1] || { why }).why;');   // the frame asks no verdict
   { // no park at all = 8b3fdb6ab's stash
     const GEm = Ms.load(gePath, swap(geSrc, "if (!pace || !(Number(pace.retryInMs) > 0) || !deliver || typeof deliver.parkOwedWake !== 'function') return null;", 'return null;'), 'no-park');
@@ -2044,7 +2044,7 @@ await leg(128, async () => { // THE CAUSE CENSUS
 await leg(129, async () => { // the mutants: each law's function taken away, red by name
   const Ms = mutantCopies('pwr-r7', REPO);
   const cdPath = 'src/server/conversation-deliver.js', gePath = 'src/server/groups-engine.js';
-  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return src.replace(a, b); };
+  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return editAnchor(src, a, b, "the text handed to swap()"); };
   { // the gate open: the receipt road's measured shape comes back
     const CDm = Ms.load(cdPath, swap(cdSrc12, 'function wakeBlock(cid) {\n', 'function wakeBlock(cid) { return null;\n'), 'no-gate');
     const R = await receiptRoad('m-gate', { state: 'no-mid-session', DELIVER: CDm });
@@ -2207,7 +2207,7 @@ await leg(134, async () => { // P26: the toast and the card name the same cause,
 await leg(135, async () => { // the mutants: a planted second reading of «reaches», red by name
   const Ms = mutantCopies('pwr-r8', REPO);
   const gePath = 'src/server/groups-engine.js';
-  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return src.replace(a, b); };
+  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return editAnchor(src, a, b, "the text handed to swap()"); };
   { // the wake road reads its own await only (633ea88bc's line)
     const GEm = Ms.load(gePath, swap(geSrc13, 'also: reachFor(g, member, awaitAt != null ? { from: awaitAt, to: rec.at } : null) });', 'also: awaitAt != null ? ((r) => Number(r.at) > Number(awaitAt) && Number(r.at) <= Number(rec.at)) : null });'), 'wake-own-reading');
     const o = await thirdSenderWake('m-reach1', GEm);
@@ -2334,7 +2334,7 @@ await leg(143, async () => { // U1: the strip's memo keyed on the awaits
 await leg(144, async () => { // U2: the acceptance's bypasses, planted in copies — red by name
   const Ms = mutantCopies('pwr-r9', REPO);
   const gePath = 'src/server/groups-engine.js';
-  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return src.replace(a, b); };
+  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return editAnchor(src, a, b, "the text handed to swap()"); };
   const fence = (src) => (src.match(/reachesReport/g) || []).length === 1 && (src.match(/retryTake/g) || []).length === 2 && /if \(rode\.length\) deliver\.retryTake\(member, rode, \{ via: 'prompt' \}\);/.test(src);
   const strip = async (GE) => { let R = null, during = null; R = rig('m9-strip', { GE, post: async (peer, text) => { if (peer.name === D && !during) during = R.eng.reportsForTurn(A, { budget: 4000, preview: true }); R.posts.push({ cid: peer.name, text }); return { ok: true, phase: 'written' }; } }); const g = await R.group('room', A, [B, D]); await R.eng.setNotify({ member: A, group: g, by: A, notify: 'mention' }); await R.eng.setNotify({ member: D, group: g, by: D, notify: 'always' }); await R.at(100); await R.say(g, B, '@alpha hello'); await R.at(1100); await R.say(g, A, 'a question?', { awaitReply: true }); await R.at(2100); await R.say(g, B, 'THE-ANSWER for the strip'); const p = R.eng.reportsForTurn(A, { budget: 4000, preview: true }).pending; R.close(); return p.some((x) => /THE-ANSWER/.test(x.text)); };
   { // the strip off the function, a space before the paren (the acceptance's plant)
@@ -2464,7 +2464,7 @@ await leg(146, async () => { // F3′
 await leg(147, async () => { // the census by behaviour + the plants, in copies — red by name
   const Ms = mutantCopies('pwr-r10', REPO);
   const gePath = 'src/server/groups-engine.js';
-  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return src.replace(a, b); };
+  const swap = (src, a, b) => { if (!src.includes(a)) throw new Error('control anchor moved: ' + a.slice(0, 60)); return editAnchor(src, a, b, "the text handed to swap()"); };
   const bodyOf = (src, a) => between(src, a, '\n  }\n');
   const coverage = (src) => !/j\.handed/.test(bodyOf(src, 'function owedPastMarker(')) && !/j\.handed/.test(bodyOf(src, 'function owedWords(')) && /const carried = whole \? /.test(bodyOf(src, 'function sendersRide(')) && !/\.carried\s*=[^=]/.test(src);
   const oneFilter = (src) => (src.match(/\bisMessage\b/g) || []).length === 2 && /isMessage\(r\)/.test(bodyOf(src, 'function unreceivedFor(')) && ![bodyOf(src, 'function unreadFor('), bodyOf(src, 'async function onConversationEnded('), bodyOf(src, 'function bumpUnread(')].some((b) => /raw\.kind|['"`]message['"`]/.test(b));

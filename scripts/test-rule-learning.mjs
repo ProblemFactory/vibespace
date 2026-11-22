@@ -78,7 +78,7 @@ function editAnchor(text, from, to, file, mode = 'one') {
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const mutant = (needle, to, tag) => { if (!SRC.includes(needle)) throw new Error(`mutant needle missing (${tag}): ${needle}`); return MC.load('src/rule-learning.js', SRC.replace(needle, () => to), tag); };
+const mutant = (needle, to, tag) => { if (!SRC.includes(needle)) throw new Error(`mutant needle missing (${tag}): ${needle}`); return MC.load('src/rule-learning.js', editAnchor(SRC, needle, () => to, "src/rule-learning.js"), tag); };
 // token shapes built at runtime (never a literal — the secret scan reads the tree)
 const TOK = { gh: ['gh', 'p_', 'QRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP'].join(''), ant: ['sk', '-ant-api03-', 'Zy9Xw8Vu7Ts6Rq5Po4Nm3Lk2Jh1Gf0_', 'c'.repeat(20)].join('') };
 const row = (provider, apiKey) => ({ values: { provider, apiKey, model: '' }, source: 'user' });

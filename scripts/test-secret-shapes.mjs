@@ -785,7 +785,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   ok(r2.leaks.length > 0 && /(?:^|[:=] ?)@/.test(r2.leaks[0].L), `RED CONTROL (must 2 — any @ value is a mention): the corpus finds it on an @ value, e.g. ${J(r2.leaks[0] ? r2.leaks[0].L : '')}`);
   // cure 2's RED CONTROLS: each of its rules compiled back out — the corpus finds a leak OF ITS OWN SCENE (a control whose line is gone
   // fails by name, RULES 06:25Z)
-  const c2 = (from, to, name) => { ok(SRC.split(from).length === 2, `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', SRC.replace(from, to), name); };
+  const c2 = (from, to, name) => { ok(SRC.split(from).length === 2, `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', editAnchor(SRC, from, to, "src/secret-shapes.js"), name); };
   const C2 = {
     'an ASCII-only opener (MUST 1)': [c2('      else if (!OPENS_VALUE_RE.test(chunk)) return null;', '      else if (!/^[A-Za-z0-9]/.test(chunk)) return null;', 'c2-ascii'), 'mentions', 'cjk'],
     'the glued rule eats a member (MUST 1)': [c2('const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'const keeps = (c, w) => (!glued && w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'c2-glued'), 'mentions', 'glued'],

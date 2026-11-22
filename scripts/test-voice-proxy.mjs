@@ -223,7 +223,7 @@ console.log('⑥ AUDIO + KEY NEVER IN A LOG, AUDIO NEVER ON DISK (and their RED 
       // as before with once: false, and the control's own row reds too — nothing crashes)
       const n = src.split(anchor).length - 1;
       if (n !== 1) ok(`ANCHOR (${rel}): ${JSON.stringify(anchor).slice(0, 100)} — found ${n} times, one meant: the plant is not the control it says`, false);
-      fs.writeFileSync(path.join(dir, rel), src.replace(anchor, replacement));
+      fs.writeFileSync(path.join(dir, rel), editAnchor(src, anchor, replacement, rel));
       const M = await hub(path.join(dir, 'src/server/dropline-client.js'), path.join(dir, 'src/routes/voice.js'));
       logs.length = 0; fsWrites.length = 0; script = [{ status: 200 }];
       const r = await dictate(M);

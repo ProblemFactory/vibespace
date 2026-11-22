@@ -20,10 +20,19 @@ const RC = require(path.join(repo, 'src/record-clear.js'));
 const MUT = mutantCopies('progress-archive', repo);
 let passed = 0, failed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e).slice(0, 600) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-parch-'));
 let seq = 0;
 const freshDir = () => { const d = path.join(tmpRoot, String(++seq)); fs.mkdirSync(d, { recursive: true }); return d; };
-const patched = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`control anchor gone: ${tag}`); return MUT.load('src/task-groups.js', SRC.replace(from, to), tag); };
+const patched = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`control anchor gone: ${tag}`); return MUT.load('src/task-groups.js', editAnchor(SRC, from, to, "src/task-groups.js"), tag); };
 const REAL = require(path.join(repo, 'src/task-groups.js'));
 const mk = (M = REAL, dir = freshDir()) => { const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {} }); const t = tg.create({ title: 'arch' }); return { tg, id: t.id, dir }; };
 const archDir = (w) => path.join(w.dir, 'task-groups-archive', w.id);

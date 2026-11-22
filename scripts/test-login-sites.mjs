@@ -403,7 +403,7 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const a = UW(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }), b = UW(far, { site: OTHER, login: `${LMS} · jdoe`, t: tr });
     ok(a[0].includes(PORTAL) && a[0].includes(`${LMS} · jdoe`) && /nothing is typed again/.test(a[0]) && a.some((x) => /^Then it may be filled on .* by: .*conv-a/.test(x)) && !a.some((x) => /^Careful/.test(x)) && b.some((x) => /^Careful: lms-school\.example is not the domain of this login's other sites \(school\.test\)/.test(x)),
       'THE WORDS BEFORE THE PRESS on the login card (the page\'s, over the hub\'s real answer): what the press does, BY NAME who may then have it filled on that site (the login\'s own row: conv-a), and a look-alike said', { a, b });
-    const must = (from, to) => (src) => { if (!src.includes(from)) throw new Error(`mutant anchor missing: ${from.slice(0, 80)}`); return src.replace(from, to); };
+    const must = (from, to) => (src) => { if (!src.includes(from)) throw new Error(`mutant anchor missing: ${from.slice(0, 80)}`); return editAnchor(src, from, to, "the text handed to must()"); };
     const PUSH = "    names.push(out2.length ? t('{who} (except {names})', { who: who.join(', '), names: out2.join(', ') }) : who.join(', '));";
     const WHO = "    for (const p of wd[k] || []) { if (!p || typeof p !== 'object') continue; const id = idOf(p); if (seen.has(id)) continue; seen.add(id); who.push(nameOf(p)); }";
     const UWr = await load(must(PUSH, ''));

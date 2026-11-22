@@ -3537,7 +3537,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const D = await prefixScene(CH, nm, u);
       ok(D.p1 === WANT && D.m1 && D.p2 === D.p1, `B-8033 cure 2: a ${nm} new name (${u} — claude encodes it -home-olduser-x) keeps the person's own folders where resume looks; the old ones land there too`, D);
     }
-    const MUT = (from, to, tag, user) => { ok(CHSRC.split(from).length === 2, `ANCHOR (${tag}): spelled once`, from.slice(0, 80)); return prefixScene(MH.load('src/harnesses/claude-home.js', CHSRC.split(from).join(to), tag), tag, user); };
+    const MUT = (from, to, tag, user) => { ok(CHSRC.split(from).length === 2, `ANCHOR (${tag}): spelled once`, from.slice(0, 80)); return prefixScene(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, from, to, "src/harnesses/claude-home.js", 'join'), tag), tag, user); };
     const N1 = await MUT("    if (owners.get(d) !== 'old') continue;", "    if (owners.get(d) === 'own') continue;", 'm-move-unless-own');
     ok(N1.p1 !== WANT && !N1.p1.split(',').includes('-home-olduser-x-zz'), 'MUTANT RED: a folder moved unless it is surely the person\'s own ⇒ the undecided ones are moved on a guess', N1);
     const N2 = await MUT("const ownPrefixOf = (user) => projDirOf(path.posix.join('/home', String(user)));", 'const ownPrefixOf = (user) => `-home-${user}`;', 'm-raw', 'olduser.x');

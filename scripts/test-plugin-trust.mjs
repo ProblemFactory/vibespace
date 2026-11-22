@@ -344,7 +344,7 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   }
   const mutant = async (tag, from, to, check) => {
     if (!SRC.includes(from)) return ok(false, `control ${tag}: its anchor is gone from plugin-install.js`, from);
-    const mod = M.load('src/server/plugin-install.js', SRC.replace(from, to), tag);
+    const mod = M.load('src/server/plugin-install.js', editAnchor(SRC, from, to, "src/server/plugin-install.js"), tag);
     const ins = mod.create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP });
     resetCalls();
     let err = null; try { await ins.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }); } catch (e) { err = e; }
