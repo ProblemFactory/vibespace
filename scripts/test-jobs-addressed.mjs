@@ -35,6 +35,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';
+import { inProcessWalker } from './lib/mark-walk-in-process.mjs';   // B-d8f4 (9)
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -466,7 +467,7 @@ const DRIVERS = {
   '_besideLive#1': async () => { const j = svc('drv-beside'); const un = stub(jm, { _readStamp: () => ({ pid: 4243 }), _verifyAlive: () => true }); jm._besideLive(j, 'manual'); un(); return j; },
   '_doubtBlocks#1': async () => { const j = svc('drv-doubt'), r = run0(j, { endedAt: Date.now() }); const un = stub(jm, { _runDoubt: () => 'its pid.json is unreadable', _runScope: () => SCOPE }); jm._doubtBlocks(j, r, 'manual'); un(); return j; },
   '_stopDoubt#1': async () => { const j = svc('drv-stopdoubt-cut'), r = run0(j, { endedAt: Date.now(), left: { kept: true, cut: { why: 'a search of /proc was cut short' } } }); await jm._stopDoubt(j, r); return j; },
-  '_stopDoubt#2': async () => { const j = svc('drv-stopdoubt'), r = run0(j, { endedAt: Date.now() }); const un = stub(jm, { _runScope: () => null, _graceMs: () => 0 }); const unPI = stub(PI, { membersOf: () => Object.assign([], { scan: {} }) }); await jm._stopDoubt(j, r); un(); unPI(); return j; },
+  '_stopDoubt#2': async () => { const j = svc('drv-stopdoubt'), r = run0(j, { endedAt: Date.now() }); const un = stub(jm, { _runScope: () => null, _graceMs: () => 0 }); const unPI = stub(PI, { membersOf: () => Object.assign([], { scan: {} }) }); const MW = require(path.join(REPO, 'src/server/marked-walk.js')); MW.setRunImpl(inProcessWalker(PI)); try { await jm._stopDoubt(j, r); } finally { MW.setRunImpl(null); } un(); unPI(); return j; },   // B-d8f4 (9): the walk's own seam
   '_clearBefore#1': async () => { const j = svc('drv-clearbefore'), r = run0(j, { endedAt: Date.now() }); const un = stub(jm, { _clearKept: async () => { }, _reapScope: async () => false, _runDoubt: () => '', _graceMs: () => 0 }); await jm._clearBefore(j, r, 'manual'); un(); return j; },
   '_refuseRun#1': async () => { const j = task('drv-refuse'); jm._refuseRun(j, { error: 'refused: a vendor pattern' }, 'manual'); return j; },
   '_hubMainRefusal#1': async () => { const j = task('drv-hubmain'), r = run0(j); jm._hubMainRefusal(j, r, 'its time limit'); return j; },
@@ -1034,7 +1035,9 @@ function staticRed({ routes, jobs, model, others = {} }) {
   // (d) every call of a job-item renderer (a block that shows a job item): a new call site is red by name
   // B-b14a r931 (the coordinator's ruling): +1 renderOwnerNotify — a refused PRESS told to the conversation that PRESSED (addressed by its
   // own act, a caller that may still view the job; _tellRefused), once, naming no holder
-  const RENDER_ROWS = { 'src/jobs.js': { renderJobsUpdate: 2, renderJobsDigest: 1, fitDigest: 1, renderOwnerNotify: 5 }, 'src/agent-routes.js': { renderNotifStash: 1 }, 'src/server/stash-handover.js': { renderNotifStash: 1 } };
+  // B-d8f4 (9) (主开发 r1993): +1 renderOwnerNotify — a press answered «checked and stopped first» (the kept walk off the hub's thread)
+  // whose walk then refused the start, told to the conversation that PRESSED by the same road (_tellNotStarted), once
+  const RENDER_ROWS = { 'src/jobs.js': { renderJobsUpdate: 2, renderJobsDigest: 1, fitDigest: 1, renderOwnerNotify: 6 }, 'src/agent-routes.js': { renderNotifStash: 1 }, 'src/server/stash-handover.js': { renderNotifStash: 1 } };
   const files = { 'src/jobs.js': jobs, 'src/agent-routes.js': routes, ...others };
   for (const [f, s] of Object.entries(files)) {
     for (const r of ['renderJobsUpdate', 'renderJobsDigest', 'fitDigest', 'renderOwnerNotify', 'renderNotifStash', 'jobLine']) {

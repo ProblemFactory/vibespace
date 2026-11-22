@@ -51,6 +51,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { inProcessWalker } from './lib/mark-walk-in-process.mjs';   // B-d8f4 (9): the engine's mark walk left the hub's loop — this suite's membersOf stub answers it in-process
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const M = require('../src/job-model.js');
@@ -377,6 +378,7 @@ const deadJob = (dir, id, { kind = 'task', scope = null, exit = null, state = 'u
 // stub-and-restore races another leg's)
 const PIM = require('../src/proc-identity.js'), MEMBERS = new Map(), realMembers = PIM.membersOf;
 PIM.membersOf = (q = {}, o) => { const id = String(q.mark || '').split('=')[1]; return MEMBERS.has(id) ? MEMBERS.get(id)(q, o) : realMembers(q, o); };
+require('../src/server/marked-walk.js').setRunImpl(inProcessWalker(PIM));   // B-d8f4 (9): the engine's walks reach this stub through the walk's own seam (the child's argv, its one line)
 const legs = [];
 const leg = (title, body) => legs.push({ title, body, rows: [] });
 // the CLI's own memLine (data/bin/vibespace-job — a file that ships alone): its lines, run over the engine's snapshot
@@ -697,15 +699,40 @@ leg('§3 IN-PROCESS ㊳ A CUT SCAN PROVES NOTHING — AND IS AN ANSWER: what a s
   for (const x of [j, k]) MEMBERS.set(x.id, (q) => { walks[x.id]++; if (x === j) asked = q; return Object.assign([], { scan: cut[x.id] ? { scanned: 3000, total: 3100, unreadable: 0, others: 0, cut: true } : { scanned: 3100, total: 3100, unreadable: 3, others: 2, cut: false } }); });
   const notices = (x) => said.filter((n) => n.jobId === x.id && /cannot prove the previous run is gone/.test(n.text || '')).length;
   const doorW = (x) => new RegExp(`^cannot prove the previous run is gone \\(could not check 100 of 3100 processes for what it left running\\) — not restarted; if it is gone: vibespace-job stop ${x.id}, then start it again; if it runs: it keeps running$`);
-  // round 10: AT ONCE is the decision itself — the start's own ANSWER is the refusal (its one walk ran in its own tick), never a
-  // millisecond count (8ad58d8b timed it — a wall-clock bound in a fast suite, test-ci-gate §2e red)
-  const r1 = E.start(j), walked1 = walks[j.id]; E.start(k); await until(() => !j._starting && !k._starting, 1500, 5);
-  const l = j.runs[0].left;
-  ok(walked1 === 1 && doorW(j).test(r1.error || '') && !r1.ok && walks[j.id] === 1 && !l.gone && !l.cleared && l.cut && l.cut.at > 0 && E._pending(j, j.runs[0]) && !E.spawned.length && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1 && notices(j) === 1 && !!asked && JSON.stringify(asked.first) === JSON.stringify([DEAD]),
-    `ONE walk per decision, its answer STAMPED, the start refused in its own answer by the doubt's door — ${walks[j.id]} walk(s), «${r1.error}» — the journal says the same once, ONE For-you notice; the record's own pids asked first (887e8d66: two walks every 50 ms until the grace, then held unsaid by the door; 8ad58d8b: answered «ok»)`, { walks: { ...walks }, r1, left: l, spawned: E.spawned });
-  const r2 = E.start(j), walked2 = walks[j.id]; await until(() => !j._starting, 1500, 5);
-  ok(walked2 === 2 && doorW(j).test(r2.error || '') && !r2.ok && !E.spawned.length && notices(j) === 1 && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1,
-    `a later start is a new decision: ONE walk more — still cut, its answer the refusal («${r2.error}»), nothing said twice, no second notice (8ad58d8b: «ok — it starts only once it is», and nothing walked again)`, { walked2, r2 });
+  // 主开发 r1993 (B-d8f4 (9): what a run KEPT is walked OFF the hub's thread — a start's answer cannot hold the walk's verdict; it
+  // replaces round 10's «the start's own answer is the refusal»): the FIRST start's answer promises no start («checked and stopped
+  // first … else it is not started and you are told why»); the walk's refusal comes ONE BEAT LATER — said once in its journal, the
+  // door's ONE For-you notice, never started — and THE STARTER TOLD by name on the road that tells a job's owner; a LATER start is
+  // refused in its own answer (the cut stamp read at once) and walks once more. RED below: the tell cut from _startAfter leaves the
+  // starter untold. Never a millisecond count (8ad58d8b timed it — a wall-clock bound in a fast suite, test-ci-gate §2e red)
+  const STARTER = { conversationId: owner.conversation.id, sessionId: owner.sessionId, sessionCreatedAt: owner.sessionCreatedAt, groups: new Set() };
+  const told = [], tellRoad = (eng) => { eng._deliverTo = (cid, job, ev, o) => { told.push({ eng, cid, id: job.id, what: String((ev && ev.what) || ''), text: String((o && o.text) || '') }); }; };
+  const KEPT_FIRST = /^what its last run left running is checked and stopped first — it starts once that is proven, else it is not started and you are told why$/;
+  tellRoad(E);
+  const r1 = E.start(j, { caller: STARTER }), walked1 = walks[j.id]; E.start(k); await until(() => !j._starting && !k._starting, 1500, 5);
+  const l = j.runs[0].left, toldJ = told.filter((x) => x.eng === E && x.id === j.id), toldK = told.filter((x) => x.eng === E && x.id === k.id);
+  ok(walked1 === 1 && r1.ok && KEPT_FIRST.test(r1.after || '') && walks[j.id] === 1 && !l.gone && !l.cleared && l.cut && l.cut.at > 0 && E._pending(j, j.runs[0]) && !E.spawned.length && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1 && notices(j) === 1 && !!asked && JSON.stringify(asked.first) === JSON.stringify([DEAD])
+    && toldJ.length === 1 && toldJ[0].cid === STARTER.conversationId && toldJ[0].what.startsWith('not started: ') && doorW(j).test(toldJ[0].what.slice('not started: '.length)) && toldJ[0].text.includes(E.labelOf(j)) && !toldK.length,
+    `ONE walk per decision, its answer STAMPED; the FIRST start's answer promises no start («${r1.after}»); the doubt's door refuses when the walk answers — said once, ONE For-you notice, never started — and THE STARTER IS TOLD by name («${toldJ[0] ? toldJ[0].what : 'nothing'}»; a start nobody pressed tells nobody); the record's own pids asked first (887e8d66: two walks every 50 ms until the grace, then held unsaid by the door; 8ad58d8b: answered «ok»)`, { walks: { ...walks }, r1, left: l, spawned: E.spawned, told: told.map((x) => ({ cid: x.cid, id: x.id, what: x.what })) });
+  {   // RED (r1993): _startAfter's own text with the tell's call cut, on an engine of its own — the same cut walk, the same starter
+    const CALL = ' if (pr && pr.owed) this._tellNotStarted(job, run, pr.owed);', SA = JobManager.prototype._startAfter.toString();
+    if (SA.split(CALL).length !== 2) ok(false, `ANCHOR (src/jobs.js _startAfter): ${JSON.stringify(CALL)} — found ${SA.split(CALL).length - 1} time(s): the control builds nothing`);
+    else {
+      const dir2 = tmp('vs-jobs-mem-'), E2 = engine(dir2, { memorySample: { stopMs: 2000 } });
+      E2._startAfter = new Function('return function ' + SA.replace(CALL, '') + ';')();   // eslint-disable-line no-new-func
+      tellRoad(E2);
+      const c = deadJob(dir2, 'jb-cutscan3', { kind: 'service', state: 'down', desiredUp: false }); Object.assign(c.runs[0], { endedAt: Date.now() - 1000, cause: 'ok', left: { n: 1, kept: true, pids: [[DEAD, 12345]], boot: BOOT } }); E2.jobs.set(c.id, c);
+      MEMBERS.set(c.id, () => Object.assign([], { scan: { scanned: 3000, total: 3100, unreadable: 0, others: 0, cut: true } }));
+      const rc = E2.start(c, { caller: STARTER }); await until(() => !c._starting, 1500, 5);
+      const toldC = told.filter((x) => x.eng === E2);
+      ok(rc.ok && KEPT_FIRST.test(rc.after || '') && !E2.spawned.length && E2.events.filter((e) => e.jobId === c.id && doorW(c).test(e.what || '')).length === 1 && !toldC.length,
+        'CONTROL (the tell cut from _startAfter, its own text in a copy): the same cut walk refuses the start — journal and For-you only — and the STARTER, answered «checked first», is NEVER told (red)', { rc, told: toldC.map((x) => x.what) });
+      MEMBERS.delete(c.id); stopEngine(E2);
+    }
+  }
+  const r2 = E.start(j, { caller: STARTER }), walked2 = walks[j.id]; await until(() => !j._starting, 1500, 5);
+  ok(walked2 === 2 && doorW(j).test(r2.error || '') && !r2.ok && !E.spawned.length && notices(j) === 1 && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1 && told.filter((x) => x.eng === E && x.id === j.id).length === 1,
+    `a later start is a new decision: ONE walk more — still cut, its answer the refusal («${r2.error}»), nothing said twice, no second notice, its starter (answered by the refusal itself) not told again (8ad58d8b: «ok — it starts only once it is», and nothing walked again)`, { walked2, r2 });
   cut[j.id] = false; // the next walk finishes
   E.start(j); await until(() => E.spawned.length, 1500, 5);
   ok(walks[j.id] === 3 && l.gone > 0 && !l.cut && E.spawned.length === 1 && E.spawned[0].id === j.id && journal(E, j, /^what its last run left running had already ended — nothing stopped \(its mark searched in 3100 processes; unreadable: 2 of other users, 1 of ours, not dumpable\)$/),

@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { inProcessWalker } from './lib/mark-walk-in-process.mjs';   // B-d8f4 (9): the engine's mark walk left the hub's loop — this suite's membersOf stub answers it in-process
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
@@ -128,9 +129,9 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
   ok(epx.after && epx.after.left && epx.after.left.outside === kEpx + 1, 'CONTROL (the count by «termed» alone, in a copy): the escapee no signal reached is counted outside (red)', { left: epx.after && epx.after.left, k: kEpx });
   // §2's words control: the engine copy with its failed-listing words cut (§2 below reads it)
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
-  const NW = " + (mscan.unread ? ` — its mark's scan could not list the processes (${mscan.unread}): what left its group may be left` : '');";   // B-d8f4 (10)
+  const NW = " + (mscan.unread ? ` — its mark's scan could not list the processes (${mscan.unread}): what left its group may be left` : '')";   // B-d8f4 (10) — (9) moved the line's end: the ended walk's words follow it
   ok(JSRC.split(NW).length === 2, 'control setup: the engine\'s words for a failed listing are found once in jobs.js');
-  const noMark = MJ.load('src/jobs.js', anchored(JSRC, NW, ";   /* MUTANT: a failed listing unsaid */", 'd8f4-unread-words'), 'd8f4-unread-words');
+  const noMark = MJ.load('src/jobs.js', anchored(JSRC, NW, " + ''   /* MUTANT: a failed listing unsaid */", 'd8f4-unread-words'), 'd8f4-unread-words');
   console.log('§2 B-d8f4 — the engine\'s mark kill (a force stop on the group rung): its exclusions, and its words for a cut scan and a failed listing');
   {
     // the engine's _killTree over a STUBBED scan (the same proc-identity module the engine requires): what it signals is recorded, nothing
@@ -139,7 +140,7 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
     // kernel's limit (4194304): no process can hold them. Each control takes ONE exclusion's input away (no copy loaded)
     const WRAPPER = 4194305, KEPT = 4194306, STR = 4194307;
     let seq12 = 0;
-    const engineKill = (Mod, tag, { members, scan, keptOut = [[KEPT, 1]], stampPid = WRAPPER, hubOff = false }) => {
+    const engineKill = async (Mod, tag, { members, scan, keptOut = [[KEPT, 1]], stampPid = WRAPPER, hubOff = false }) => {
       const dd = path.join(D, tag); fs.mkdirSync(dd, { recursive: true });
       const logs = [];
       const jm = new Mod.JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
@@ -148,26 +149,27 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
       const keep = {}; for (const k of ['treeOf', 'membersOf', 'signalIdentity', 'keptOut', 'pgidOf']) keep[k] = PI[k];
       const sent = [];
       PI.treeOf = () => []; PI.membersOf = () => Object.assign(members.map((pid) => ({ pid, starttime: 5, bootId: 'b' })), { scan }); PI.signalIdentity = (id) => { sent.push(id.pid); return { ok: true }; }; PI.keptOut = () => keptOut; PI.pgidOf = () => 0;
-      try { jm._killTree(job, { pid: stampPid, starttime: 1 }, { group: true }); } finally { Object.assign(PI, keep); }
+      const MW = require(path.join(ROOT, 'src/server/marked-walk.js')); MW.setRunImpl(inProcessWalker(PI));
+      try { jm._killTree(job, { pid: stampPid, starttime: 1 }, { group: true }); if (typeof jm.markWalksSettled === 'function') await jm.markWalksSettled(); } finally { Object.assign(PI, keep); MW.setRunImpl(null); }   // B-d8f4 (9): the mark's kills land when its walk answers
       try { jm.shutdown(); } catch { }
       return { sent, said: logs.join(' | ') };
     };
     const ALL = [WRAPPER, process.pid, KEPT, STR], whole = { scanned: 4, total: 4, cut: false }, real = require(path.join(ROOT, 'src/jobs.js'));
-    const ex = engineKill(real, 'mark-excl', { members: ALL, scan: whole });
+    const ex = await engineKill(real, 'mark-excl', { members: ALL, scan: whole });
     ok(JSON.stringify(ex.sent) === JSON.stringify([STR]) && /1 process carrying its run's mark outside its group \(re-parented\)/.test(ex.said), 'B-d8f4 (8): the engine\'s mark kill signals only the stranger of this run — never its wrapper, the hub, or what another stop keeps out', ex);
-    const exK = engineKill(real, 'mark-excl-ko', { members: ALL, scan: whole, keptOut: [] });
-    const exH = engineKill(real, 'mark-excl-hub', { members: ALL, scan: whole, hubOff: true });
-    const exW = engineKill(real, 'mark-excl-wrap', { members: ALL, scan: whole, stampPid: 4194308 });
+    const exK = await engineKill(real, 'mark-excl-ko', { members: ALL, scan: whole, keptOut: [] });
+    const exH = await engineKill(real, 'mark-excl-hub', { members: ALL, scan: whole, hubOff: true });
+    const exW = await engineKill(real, 'mark-excl-wrap', { members: ALL, scan: whole, stampPid: 4194308 });
     ok(exK.sent.includes(KEPT) && exH.sent.includes(process.pid) && exW.sent.includes(WRAPPER), 'CONTROLS (each exclusion\'s input taken away): no keep-out — the held process is signalled; no hub test — the HUB is signalled; another wrapper stamp — this wrapper is signalled (red, each)', { keptOut: exK.sent, hub: exH.sent, wrapper: exW.sent });
-    const cut = engineKill(real, 'mark-cut', { members: [STR], scan: { scanned: 5, total: 9, cut: true } });
+    const cut = await engineKill(real, 'mark-cut', { members: [STR], scan: { scanned: 5, total: 9, cut: true } });
     ok(/its mark's scan read 5 of 9 processes: what left its group may be left/.test(cut.said), 'B-d8f4 (8): a mark scan cut at its bound is said with its count — «its mark\'s scan read 5 of 9 processes»', cut.said);
-    const unread = engineKill(real, 'mark-unread', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
+    const unread = await engineKill(real, 'mark-unread', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
     const HEAD = "what = [...(n ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])], line = `its forced end${what.length ? ` killed ${what.join(' and ')}` : ''}`";
     const oldHead = MJ.load('src/jobs.js', anchored(JSRC, HEAD, "what = [], line = `its forced end killed ${[...(n || !escaped ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])].join(' and ')}`   /* MUTANT: the old head */", 'd8f4-old-head'), 'd8f4-old-head');
-    const unreadOld = engineKill(oldHead, 'mark-unread-old', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
+    const unreadOld = await engineKill(oldHead, 'mark-unread-old', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
     ok(/its forced end killed 0 processes/.test(unreadOld.said), 'CONTROL (主开发 r1045: the old head, in a copy): a failed listing with nothing killed opens «killed 0 processes …» (red)', unreadOld.said);
     ok(/its forced end — its mark's scan could not list the processes \(EMFILE\): what left its group may be left/.test(unread.said) && !/killed 0/.test(unread.said), 'B-d8f4 (10): a force stop whose mark scan could not list the processes says so with its errno (the hub\'s log); 主开发 r902: nothing killed never opens with «killed 0»', unread.said);
-    const unreadX = engineKill(noMark, 'mark-unread-mut', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
+    const unreadX = await engineKill(noMark, 'mark-unread-mut', { members: [], scan: { scanned: 0, total: 0, cut: false, unread: 'EMFILE' } });
     ok(!/could not list the processes/.test(unreadX.said), 'CONTROL (the words cut, in a copy): a failed listing and nothing said (red)', unreadX.said);
   }
 }

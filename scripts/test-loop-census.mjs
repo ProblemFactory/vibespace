@@ -80,7 +80,8 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
     ['src/peer-text.js', 'channels'],   // not ownerless: it requires src/channel-record.js and runs its frame rule (carriesFrame, inertFrameLine) at every call — the channel record's belt
     ['src/msg-acl.js', 'workspace'],    // the reach between agents' conversations by task group and the grants' admission: agent-to-agent messages are the workspace's (the design's row)
     ['src/server/worker-dispatch.js', 'workspace'], ['src/dispatch-model.js', 'workspace'],   // a brief to a worker = a groups-engine send with the groups store's ledger and pacer
-    ['src/job-logs-sweep.js', 'conversation'], ['src/job-logs-sweep-worker.js', 'conversation'],   // a job's logs on its machine, judged against the wrapper's pid stamp in /proc (the design: the machine agent's)
+    ['src/job-logs-sweep.js', 'conversation'], ['src/job-logs-sweep-worker.js', 'conversation'],
+    ['src/server/marked-walk.js', 'conversation'], ['src/server/marked-walk-child.js', 'conversation'],   // B-d8f4 (9): a job's processes by its mark, walked in a child (the design: the machine's)   // a job's logs on its machine, judged against the wrapper's pid stamp in /proc (the design: the machine agent's)
     ['src/backend-caps.js', 'conversation'],   // the harness capability table — each harness descriptor's caps ARE its row; the pool reads one field through capsOf
     ['src/server/migrations.js', 'split:migrations'],   // the design's own split row: each service migrates its own stores — one registry holds six owners' reshapes
     ['src/server/home-rename.js', 'split:home-rename'],   // B-8033 moved server.js's home-rename body here: claude's project folders AND the recorded paths in four owners' stores

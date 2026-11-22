@@ -994,6 +994,7 @@
 - (2026-11-22) A JOB WITH TWO MINTED ENTRIES ASKED THE PERSON TWICE, AND A LOCKED-VAULT WAIT LEFT NO AUDIT LINE (stage L3's F1 + F3). 不变量 = one card a job, approved once; a set that grows redraws it; every wait writes one line (kb-bugfix-invariants)
 - (2026-11-22) THE JOB ROAD'S WORDS PROMISED MORE, AND SAID LESS, THAN THE DESIGN (stage L3's F2/F4/F5/F8/F12). 不变量 = every sentence the design puts on a surface is ON it; no word promises more than the design (kb-bugfix-invariants)
 - (2026-11-22) A JOB'S VAULT VALUE SPLIT BY A QUIET, OR BY THE MAIN'S EXIT, LANDED WHOLE IN ITS LOG (stage L3's F10 + F11). 不变量 = ONE masker for a pipe's whole life: a quiet releases text, never the tail; it ends once, at the pipes' end (kb-bugfix-invariants)
+- (2026-11-22) THE FORCED END WALKED EVERY PROCESS'S ENVIRONMENT ON THE HUB'S THREAD (B-d8f4 (9)). 不变量 = a mark walk runs in a child through the starter (proc-identity's own membersOf there), ended at a deadline and said; pids and start times only; nothing but the stop waits ⇒ kb-file-structure
 
 ## AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (lane setting-doors, the acceptance's F4, 2026-11-15)
 

@@ -2407,7 +2407,12 @@ class JobManager {
     // started inside the job (B-2c5c) or what another stop keeps out (holders, other jobs' wrappers)
     const inTree = new Set(t.map((m) => `${m.pid}:${m.starttime}`)), run0 = job.runs && job.runs[job.runs.length - 1], sc = run0 ? this._runScope(job, run0) : null;
     const marks = !!(run0 && run0.startedAt) && !(sc && sc.dir), hubs = marks ? this._hubTest(this._runWrapper(job, run0)) : null, ko = marks ? new Set((PI.keptOut([]) || []).map((x) => Number(Array.isArray(x) ? x[0] : x))) : null;
-    const marked = marks ? PI.membersOf({ mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`, since: Number(stamp.starttime) || 0 }) : [], mscan = marked.scan || {};
+    // B-d8f4 (9), 主开发 r1745: the walk for what carries the run's mark runs OFF the hub's main thread (a child through the starter —
+    // _walkMarked); what it finds ends when it answers. The press, the grace's timer and the tick that asked never wait on it: the
+    // tree above is ended NOW, and nothing but this stop waits for the walk
+    const n = killed.length;
+    const finish = (marked) => {   // the mark's kill and the stop's line: when the walk answers (none asked: at once, as before)
+    const mscan = marked.scan || {};
     let escaped = 0;
     for (const id of marked) {
       if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || (!group && PI.pgidOf(id.pid) === Number(stamp.pid)) || hubs(id.pid) || ko.has(id.pid)) continue;   // the group's own die with the group's SIGKILL — unless the hub is in it (never signalled: each one here)
@@ -2415,11 +2420,26 @@ class JobManager {
     }
     // B-c134 cure (MUST B): said where the person reads — the job's OWN log (a force stop's wrapper is dead: nobody else writes it),
     // a refused signal named, a cut walk said; and in the hub's log as before
-    const n = killed.length, es = (k) => (k === 1 ? '' : 'es'), what = [...(n ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])], line = `its forced end${what.length ? ` killed ${what.join(' and ')}` : ''}`   // B-d8f4 (主开发 r902): nothing killed never opens with «killed 0»
-      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '') + (mscan.cut ? ` — its mark's scan read ${mscan.scanned} of ${mscan.total} processes: what left its group may be left` : '') + (mscan.unread ? ` — its mark's scan could not list the processes (${mscan.unread}): what left its group may be left` : '');   // B-d8f4 (10, its read's S1: the errno, never a guess at the machine)
-    if (n || escaped || refused.length || unjudged || t.cut || mscan.cut || mscan.unread) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
+    const es = (k) => (k === 1 ? '' : 'es'), what = [...(n ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])], line = `its forced end${what.length ? ` killed ${what.join(' and ')}` : ''}`   // B-d8f4 (主开发 r902): nothing killed never opens with «killed 0»
+      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '') + (mscan.cut ? ` — its mark's scan read ${mscan.scanned} of ${mscan.total} processes: what left its group may be left` : '') + (mscan.unread ? ` — its mark's scan could not list the processes (${mscan.unread}): what left its group may be left` : '')   // B-d8f4 (10, its read's S1: the errno, never a guess at the machine)
+      + (marked.ended ? ` — ${require('./server/marked-walk.js').endedWords(marked.ended)}: what left its group may be left` : '');   // B-d8f4 (9): an ended walk SAID, the stop going on with what it found
+    if (n || escaped || refused.length || unjudged || t.cut || mscan.cut || mscan.unread || marked.ended) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
     return n + escaped;
+    };
+    const done = marks ? this._walkMarked({ mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`, since: Number(stamp.starttime) || 0 }).then(finish) : Promise.resolve(finish([]));
+    (this._markWalks || (this._markWalks = new Set())).add(done); done.finally(() => this._markWalks.delete(done)).catch(() => { });   // a suite's wait (markWalksSettled)
+    return n;   // the tree's kills now; the mark's when its walk answers (no caller reads this count)
   }
+  /** B-d8f4 (9), 主开发 r1745: what carries a job's mark — walked OFF the hub's main thread and off the shared file threadpool
+   *  (src/server/marked-walk.js: ONE child through the starter running proc-identity's membersOf itself — the same laws: the cut said,
+   *  newest first, a D-state process never read; ended at a deadline). Its rows (pids and start times only) are identities again here,
+   *  this machine's boot id added; `.scan` and `.ended` ride the array as membersOf's `.scan` did. `this.d.markWalk` is a suite's seam */
+  _walkMarked(opts) {
+    const seam = (this.d && this.d.markWalk) || {}, boot = PI.bootIdOf();
+    return require('./server/marked-walk.js').walkMarked({ ...opts, ...seam }).then((w) => { const rows = w.rows.map((r) => ({ pid: r.pid, starttime: r.starttime, bootId: boot })); rows.scan = w.scan; rows.ended = w.ended; return rows; });
+  }
+  /** a suite's wait: every forced end's mark walk answered and acted on */
+  markWalksSettled() { return Promise.all([...(this._markWalks || [])]).then(() => { }); }
   /** B-c134 cure: the latest run's own log file (the path alone) */
   _runLogFile(job) {
     const run = job.runs && job.runs[job.runs.length - 1];
@@ -2820,24 +2840,26 @@ class JobManager {
       // past the record's bound and what left the group carrying the job's mark (a fresh /proc scan of src/proc-identity.js);
       // the group only while a recorded process of it lives (its id is then still that group's — never a recycled leader's)
       const st = this._ctlJson(job, run, 'pid.json');
-      const scan = () => {
+      const scan = async () => {   // B-d8f4 (9): the walk OFF the loop (_walkMarked) — this clear awaits it, nothing else does
         if (!st || st.bootId !== PI.bootIdOf()) return [];
         const anchored = recorded.some((id) => PI.aliveIdentity(id) === true);
         // round 8: the job's own candidates first (what the record names, and their children), the bound on the rest
-        const found = PI.membersOf({ pgid: anchored ? st.pid : 0, since: Number(st.starttime) || 0, mark: `VIBESPACE_JOB_ID=${job.id}`, first: recorded.map((id) => id.pid) });
+        const found = await this._walkMarked({ pgid: anchored ? st.pid : 0, since: Number(st.starttime) || 0, mark: `VIBESPACE_JOB_ID=${job.id}`, first: recorded.map((id) => id.pid) });
         if (found.scan) seen = { ...found.scan, cut: !!(found.scan.cut || (seen && seen.cut)) }; // round 7: what it could not read, said
+        if (found.ended) seen = { scanned: 0, total: 0, ...(seen || {}), cut: true, ended: found.ended };   // B-d8f4 (9): an ended walk proves nothing — said as a cut
         return found;
       };
-      term(recorded); term(scan());
+      term(recorded); term(await scan());
       // round 10: the first walk's answer is known NOW — a cut one stamped at once (the start that asked answers its refusal in
       // its own tick, never «ok»), a finished one lifts an older stamp; the clear's end keeps it (said with what it then knew)
-      if (seen && seen.cut) l.cut = { at: now(), why: `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running${sent.size ? `; ${sent.size} found and stopped` : ''}` };
+      if (seen && seen.cut && seen.ended) l.cut = { at: now(), why: `${require('./server/marked-walk.js').endedWords(seen.ended)}${sent.size ? `; ${sent.size} found and stopped` : ''}` };   // B-d8f4 (9)
+      else if (seen && seen.cut) l.cut = { at: now(), why: `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running${sent.size ? `; ${sent.size} found and stopped` : ''}` };
       else delete l.cut;
       let live = [...sent.values()];
       while (live.length && now() < until) { await pause(50); live = live.filter((id) => PI.aliveIdentity(id) === true); }
       // round 9: the second walk only after a grace something lived through — nothing signalled, nothing could fork since: the
       // first walk's answer stands (never two walks back to back on the event loop)
-      const hubsL = this._hubTest(ownW), late = sent.size ? scan().filter((id) => !sent.has(id.pid) && !hubsL(id.pid)) : []; // forked during the grace: by force with the rest — B-2c5c r1 (S2): never the hub's
+      const hubsL = this._hubTest(ownW), late = sent.size ? (await scan()).filter((id) => !sent.has(id.pid) && !hubsL(id.pid)) : []; // forked during the grace: by force with the rest — B-2c5c r1 (S2): never the hub's
       for (const id of late) sent.set(id.pid, id);
       live.push(...late.filter((id) => PI.aliveIdentity(id) === true));
       n = sent.size;
@@ -2890,7 +2912,7 @@ class JobManager {
     // counts on the service's ladder (over the restored supervision)
     const p = job._starting = this._clearBefore(job, run, trigger).then((clear) => {
       delete job._starting;
-      if (!clear) { delete job._press; return; }
+      if (!clear) { const pr = job._press; delete job._press; if (pr && pr.owed) this._tellNotStarted(job, run, pr.owed); return; }   // B-d8f4 (9): each presser answered «checked first» hears the refusal
       try { go(); delete job._press; } catch (e) {
         if (e && e.code === 'memory-budget') {
           const pr = this._undoRefusedPress(job);
@@ -2963,7 +2985,7 @@ class JobManager {
     const scope = this._runScope(job, run);
     const ownW = this._runWrapper(job, run);   // B-2c5c r2: the run's own wrapper ends the hub test's walk
     const killed = scope && scope.dir ? await this._within(this._killScope(scope, {}, ownW), this.d.reapReadMs ?? REAP_READ_MS) : null;
-    const marked = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = marked.scan || {}, hubs = this._hubTest(ownW), found = marked.filter((id) => !hubs(id.pid));   // B-2c5c: a hub started inside the job carries its mark
+    const marked = await this._walkMarked({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = marked.scan || {}, hubs = this._hubTest(ownW), found = marked.filter((id) => !hubs(id.pid));   // B-2c5c: a hub started inside the job carries its mark
     for (const id of found) PI.signalIdentity(id, 'SIGTERM');
     const until = now() + this._graceMs();
     let live = [...found];
@@ -2974,7 +2996,7 @@ class JobManager {
     // round 9 (the ruling of choice 5): the person's word ends it — a cut scan is said, never a doubt with no way out (the
     // notice tells them «stop it, then start it again»)
     run.doubtOver = { by: 'stop', at: now() }; this._dirty = true;
-    const what = `stopped by its owner — the previous run was not proven gone: ${did}${scan.cut ? `; could not check ${scan.total - scan.scanned} of ${scan.total} processes` : ''}; it may start again`;
+    const what = `stopped by its owner — the previous run was not proven gone: ${did}${scan.cut ? `; could not check ${scan.total - scan.scanned} of ${scan.total} processes` : ''}${marked.ended ? `; ${require('./server/marked-walk.js').endedWords(marked.ended)}` : ''}; it may start again`;   // B-d8f4 (9): an ended walk said
     this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
   }
   /** what a service's next start waits for (round 6): processes its last run KEPT and not yet stopped; a reap of its scope in
@@ -3974,6 +3996,25 @@ class JobManager {
     if (p.was.hubMainDown) job.hubMainDown = p.was.hubMainDown;   // B-2c5c r1263: the card's «not restarted by itself» comes back with the refused press
     this._touch(job); this._save();
     return p;
+  }
+  /** B-d8f4 (9), 主开发 r1993: presses answered «checked and stopped first» (what its last run kept, walked off the hub's thread) whose
+   *  walk then REFUSED the start (the doubt's door: a cut walk) — each AGENT presser told ONCE, by the job's name, on the road that tells
+   *  a job's owner (as _tellRefused): the refusal the answer could not carry, one beat later. A PERSON is told by the doubt's door's own
+   *  For-you notice (filed once a run) — no new producer of For-you items. Answers how many conversations were told */
+  _tellNotStarted(job, run, owed) {
+    const why = this._runDoubt(job, run), told = new Set();
+    const what = `not started: ${why ? this._doorWords(job, run, why) : `what its last run left running was not proven stopped in ${this._graceMs() / 1000} s — start it again`}`;
+    for (const c of owed || []) {
+      try {
+        if (!c || c.isUser) continue;   // the person: the doubt's door's For-you notice
+        const cid = c.conversationId;
+        if (!cid || told.has(cid) || !M.canView(job, c)) continue;   // the presser must still VIEW the job
+        told.add(cid);
+        const owner = M.isOwner(job, c), ev = { what, wake: 'result', at: now() };
+        this._deliverTo(cid, job, ev, { subscriber: !owner, text: M.renderOwnerNotify(job, ev, { name: this.labelOf(job), ...(owner ? {} : { context: '' }) }) });
+      } catch (err) { this.d.log(`[jobs] ${job.id}: the refusal's word to its starter failed:`, err && err.message); }
+    }
+    return told.size;
   }
   /** B-b14a round wh9e7xe8i + r931: presses answered «it starts once its last run is stopped», refused by the budget LATER — each
    *  presser told ONCE where it looks: a PERSON in the For-you tray (the person views every job: the holders by name); an AGENT
@@ -4980,7 +5021,12 @@ class JobManager {
       // it is», and nothing walked again: the service stayed down for good)
       const cut = this._cutOf(last), doubt = this._runDoubt(job, last);
       if (cut) return { error: this._doorWords(job, last, cut) };
-      const after = doubt ? `its previous run cannot be proven gone (${doubt}) — it starts if that is proven within ${this._graceMs() / 1000} s, else it is not started (its events say)` : 'what its last run left running is stopped first';
+      // B-d8f4 (9), 主开发 r1993: what its last run KEPT is walked OFF the hub's thread — this answer cannot hold the walk's verdict, so
+      // it promises no start: checked first, started once proven, else not started — and THIS presser is told the refusal by name
+      // when the walk answers (_tellNotStarted): a start that will not happen is still answered by its refusal, one beat later
+      const lk = last && last.left, keptWalk = !doubt && !!(lk && lk.kept && !lk.cleared && !lk.gone);
+      if (keptWalk && caller && job._press) { const ow = job._press.owed || (job._press.owed = []); if (!ow.some((c) => c === caller || (c.isUser && caller.isUser) || (c.conversationId && c.conversationId === caller.conversationId))) ow.push(caller); }
+      const after = doubt ? `its previous run cannot be proven gone (${doubt}) — it starts if that is proven within ${this._graceMs() / 1000} s, else it is not started (its events say)` : keptWalk ? 'what its last run left running is checked and stopped first — it starts once that is proven, else it is not started and you are told why' : 'what its last run left running is stopped first';
       // lane vault-job-road r2 (the review): a start DEFERRED behind its last run whose values would wait now is a wait, said as
       // one — never «started» for a run the gate will park
       const vw = this._vaultWaitOf(job);
