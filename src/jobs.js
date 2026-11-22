@@ -938,14 +938,35 @@ class JobManager {
     // B-f276: THE STORE READ (src/store-read.js), as the store's — a failed read is kept and written by nothing (the release set
     // the live archive aside when its stat answered, else started it empty under a write of the next sweep's records over it)
     // B-0248 step 3: an archive write this PROCESS still owes (an engine's own, or the last engine's in this process) is never read
-    // past — landed first, else the archive is held UNREAD (its read again, off the loop, reads it once nothing is owed)
+    // past — the archive is held UNREAD (_archiveOwedHold: none of a failed read's notes), read again off the loop at that write's landing
     let owedStill = null;
-    try { const W = this._writer(); if (typeof W.pending === 'function' && W.pending(this.archiveFile)) { const r = W.flushSync([this.archiveFile]); if (r.deferred) owedStill = 'the hub is exiting'; else { const m = (r.left || []).find((x) => x.file === this.archiveFile); if (m) owedStill = m.why; } } } catch { /* no writer: nothing owed */ }
+    // …never flushed here (r1908 (5): no synchronous write on the loop): the read again (_unreadRetry) waits for the landing itself
+    try { const W = this._writer(); if (typeof W.pending === 'function' && W.pending(this.archiveFile)) owedStill = 'its write has not landed yet'; } catch { /* no writer: nothing owed */ }
+    if (owedStill) return this._archiveOwedHold(owedStill);
+    if (this._unread.archive && this._unread.archive.owed) return [];   // held until ITS read again lifts it (never a read on the loop past the hold)
     let read;
-    if (owedStill) read = { error: Object.assign(new Error(`the last write of ${path.basename(this.archiveFile)} is still owed (${owedStill}) — read again once it lands`), { code: 'EOWED' }) };
-    else { try { read = { text: fs.readFileSync(this.archiveFile, 'utf-8') }; } catch (error) { read = { error }; } }
+    try { read = { text: fs.readFileSync(this.archiveFile, 'utf-8') }; } catch (error) { read = { error }; }
     this._archiveAnswer(SR.storeAnswer(read, { valid: Array.isArray }));
     return this.archive;
+  }
+  /** B-0248 step 3 (r1908 (5), its fresh read's should): an archive write this PROCESS still owes (a second engine in one process) holds
+   *  the archive UNREAD — refused to every writer, «not reached» to a clear, none of its records in memory (the clean-up reads the file
+   *  itself) — with NONE of a failed read's notes or items (nothing failed), and it is read again OFF the loop at THAT write's landing
+   *  (never a flush on the loop, never the unread backoff). → [] while held */
+  _archiveOwedHold(why) {
+    if (this._unread.archive && this._unread.archive.owed) return [];
+    const base = path.basename(this.archiveFile);
+    const hold = this._unread.archive = { code: 'EOWED', why: `the last write of ${base} is still owed (${why})`, at: now(), owed: true };
+    this.d.log(`[jobs] ${base}: a write this process still owes has not landed — held unread until it lands, then read again off the loop`);
+    this._ride(this.archiveFile, 'the owed archive read again', () => {
+      fs.promises.readFile(this.archiveFile, 'utf-8').then((text) => ({ text }), (error) => ({ error })).then((read) => {
+        if (this._unread.archive !== hold || this._archiveDisarmed) return;
+        this._unread.archive = null; this.archive = null;
+        const late = SR.storeAnswer(read, { valid: Array.isArray }); this._archiveAnswer(late);   // a read that FAILS now is a failed read: its own road
+        try { this.d.broadcast('jobs-updated', { archived: [] }); } catch { }
+      });
+    });
+    return [];
   }
   _archiveAnswer(a, pre = null) {
     if (a.state === 'data') {
@@ -982,7 +1003,7 @@ class JobManager {
    *  NOTHING in memory — every caller mutates the store only after ok (verifier 2026-09-16: the sweep used to release records
    *  FIRST, so one swallowed ENOSPC/EACCES/EROFS deleted them for good under a log line that said "archived"); the writer keeps it
    *  and writes it again, and what lands later is what every reader sees (`_archiveWritten`) */
-  _writeArchive(next, { onLanded = null, answer = null, replyMs = null } = {}) {
+  _writeArchive(next, { onLanded = null, answer = null, replyMs = null, ended = null } = {}) {
     if (this.readOnly) return { ok: false, error: 'read-only' };
     // B-f276: an UNREAD archive is never written over — its records are on disk, not in memory (every caller keeps its records)
     if (this._unread.archive) return { ok: false, error: `${path.basename(this.archiveFile)} could not be read (${this._unread.archive.code}) — it is not written over until a read answers` };
@@ -995,7 +1016,7 @@ class JobManager {
     // THE STEP RIDES THE REAL LANDING (the writer's afterLanding — its read's MUST: a write the storage refuses is the writer's to
     // write again, one held past a bound is not a failed one): the records' release, a removal's end, run only once the archive that
     // holds it is on disk, however late; never at a bound. Only the REPLY (a door's) has a bound of its own
-    const step = () => { if (this._archiveDisarmed) return null; this._archiveWritten(true); return onLanded ? onLanded() : null; };
+    const step = () => { if (this._archiveDisarmed) { if (ended) { try { ended(); } catch { } } return null; } this._archiveWritten(true); return onLanded ? onLanded() : null; };   // r1908: what an ENDED engine leaves undone is said (`ended`)
     const reply = (landed) => { if (!answer) return; try { answer(landed ? { ok: true } : { ok: false, notDurable: true, error: 'its write is not on disk yet (queued or refused by the storage) — it lands by itself' }); } catch (e) { this.d.log('[jobs] an archive answer failed:', (e && e.message) || e); } };
     this._ride(this.archiveFile, 'the archive', step, { timeoutMs: replyMs, answer: reply });
     return { ok: true, handed: true, seq };
@@ -1038,7 +1059,10 @@ class JobManager {
    *  broadcast per sweep, never per record — IN THAT ORDER: the store is
    *  flushed only after the archive copy is durable. `now` is injectable. */
   archiveSweep({ now: at = now(), why = 'tick', answer = null } = {}) {
-    if (this.readOnly) return { archived: [], skipped: 'read-only' };
+    // r1908 (4): `answer` hears EVERY end — at the landing when records were handed, at once on each early return (nothing moved, all
+    // handed already, a refusal)
+    const early = (x) => { if (answer) { try { answer(x); } catch (e) { this.d.log('[jobs] a sweep answer failed:', (e && e.message) || e); } } return x; };
+    if (this.readOnly) return early({ archived: [], skipped: 'read-only' });
     this._lastArchiveSweep = at;
     const pol = this._archivePolicy();
     const moved = [];
@@ -1052,7 +1076,7 @@ class JobManager {
       rec.archivedAt = at; rec.archivedWhy = v.why;
       moved.push(rec); // NOT released yet — the archive copy must be durable first
     }
-    if (!moved.length) return { archived: [] };
+    if (!moved.length) return early({ archived: [] });
     // THE ORDER IS THE INVARIANT (verifier 2026-09-16): the archive is written
     // BEFORE a single record leaves the store. The old order — delete, then
     // write behind a catch that only logged, then flush jobs.json — turned one
@@ -1070,7 +1094,7 @@ class JobManager {
       else if (!this.jobs.has(id)) moved.splice(i, 1);
       else if (this._archiveHandedIds.has(id)) moved.splice(i, 1);   // B-0248 step 3: handed by a sweep whose archive has not landed — released at ITS landing, whatever the landed archive holds (never handed twice)
     }
-    if (!moved.length) return { archived: [] };
+    if (!moved.length) return early({ archived: [] });
     const movedIds = new Set(moved.map((m) => m.id));
     const next = [...moved, ...arch.filter((r) => !movedIds.has(r.id))];
     next.sort(archiveOrder);
@@ -1081,14 +1105,14 @@ class JobManager {
     // B-0248 step 3: THE RECORDS ARE RELEASED AT THE ARCHIVE's LANDING (r1478/r1506): until then a reader sees the archive that
     // LANDED and the store as it was — a record moving out is listed ONCE, as a live job; never twice, never in neither
     const handedSigs = new Map(moved.map((m) => [m.id, storeBytes(this.jobs.get(m.id))]));   // what each live record WAS at the hand-off (the store's own serializer)
-    const w = this._writeArchive(next, { onLanded: () => this._sweepLanded({ moved, dropped, why, answer, handedSigs }) });
+    const w = this._writeArchive(next, { onLanded: () => this._sweepLanded({ moved, dropped, why, answer, handedSigs }), ended: () => early({ archived: [], ended: true }), answer: (r) => { if (!r.ok) early({ archived: [], notLanded: true, error: r.error }); } });   // its fresh read's should: the stop answers too
     if (!w.ok && this._unread.archive) {   // cure r2: an UNREAD archive refuses every sweep — said once a hold, never every tick
       if (!this._unreadSweepSaid) { this._unreadSweepSaid = true; this.d.log(`[jobs] archive sweep (${why}): ${moved.length} record(s) released but NOT archived — the store keeps them while ${path.basename(this.archiveFile)} cannot be read (said once until it reads)`); }
-      return { archived: [], failed: 'archive-unread', kept: moved.length, error: w.error };
+      return early({ archived: [], failed: 'archive-unread', kept: moved.length, error: w.error });
     }
     if (!w.ok) {
       this.d.log(`[jobs] archive sweep (${why}): ${moved.length} record(s) released but NOT archived — the store keeps them (${w.error})`);
-      return { archived: [], failed: 'archive-write', kept: moved.length, error: w.error };
+      return early({ archived: [], failed: 'archive-write', kept: moved.length, error: w.error });
     }
     for (const m of moved) this._archiveHandedIds.add(m.id);
     return { archived: [], handed: moved.map((m) => m.id) };
@@ -1164,6 +1188,8 @@ class JobManager {
     const seen = new Set();
     // 1) decide every record first (nothing written yet)
     const liveHits = [...this.jobs.values()].filter(family);
+    let clearLanded = false, clearMade = false;   // r1908 (1): the archive's landing and the end of this call, whichever comes last, tells
+    const tellCleared = () => { if (out.cleared.length) { try { this.d.broadcast('jobs-updated', { cleared: out.cleared }); } catch { } } };
     const archHits = arch.filter(family);
     // the names every derived copy is FILED UNDER (the ladder's stash heads a job's message
     // 'Background Work · <name>') — read before the record loses them
@@ -1195,7 +1221,10 @@ class JobManager {
       return r;
     });
     if (archChanged) {
-      const w = this._writeArchive(next);
+      // r1908 (1): EVERY CLIENT SEES THE LANDING — an archived record's clear is told when the archive holding it lands (a page that
+      // refetched at the hand-off read the landed archive, the old words, and heard nothing again); a live one's at once (memory is its)
+      // ONE broadcast naming every cleared record (the clear's own law) — at the archive's landing when the clear touched an archived one
+      const w = this._writeArchive(next, { onLanded: () => { clearLanded = true; if (clearMade) tellCleared(); } });
       if (!w.ok) return { error: 'archive write failed: ' + w.error };
       out.archiveSeq = w.seq;   // B-0248 step 3: its door (record-clear) waits for THIS archive write too — persisted({ archiveSeq })
     }
@@ -1279,7 +1308,7 @@ class JobManager {
     // landing like the cleared asks (a kill first: the record comes back whole, its approval kept)
     const vaultCleared = [...liveHits, ...archHits].filter((j) => gone.has(j.id) && VJ.refsOf(j).length);
     if (vaultCleared.length) this._ride(this.file, 'the cleared approvals', () => this._vaultGone(vaultCleared));
-    if (out.cleared.length) { try { this.d.broadcast('jobs-updated', { cleared: out.cleared }); } catch { } }
+    clearMade = true; if (!archChanged || clearLanded) tellCleared();   // r1908 (1): an archived record's clear is told at its archive's landing
     return out;
   }
   /**
@@ -1355,7 +1384,9 @@ class JobManager {
     // handed yet (the landing's step hands it, and its promise is what this one becomes)
     let atLanding = null; const handed = new Promise((r) => { atLanding = r; });
     this._logsGone.set(id, handed); handed.then(() => { if (this._logsGone.get(id) === handed) this._logsGone.delete(id); });
-    const w = this._writeArchive(arch.filter((r) => r.id !== id), { onLanded: () => atLanding(this._rmLanded(id)), replyMs: 15000, answer: (r) => tell(r.ok ? { ok: true } : { error: 'archive write not on disk yet: ' + r.error, notDurable: true }) });
+    const replyMs = Number(this.d.rmReplyMs) > 0 ? Number(this.d.rmReplyMs) : 15000;   // the deps knob = a fast suite's seam only
+    const ended = () => { this.d.log(`[jobs] ${id}: its removal landed after the jobs engine ended — its log folder is left to the log clean-up's own pass (a folder no record names goes once it ages past the retention)`); atLanding({ pending: true }); this._logsGone.set(id, Promise.resolve({ pending: true })); };   // r1908 (the round's lens 1): said, and logsGone answers «still being deleted» whenever it is asked (r2001: never the map's default once settled)
+    const w = this._writeArchive(arch.filter((r) => r.id !== id), { onLanded: () => atLanding(this._rmLanded(id)), replyMs, ended, answer: (r) => { if (!r.ok && this._logsGone.get(id) === handed) this._logsGone.set(id, Promise.resolve({ pending: true })); tell(r.ok ? { ok: true } : { error: 'archive write not on disk yet: ' + r.error, notDurable: true }); } });   // r1963: past the ✕'s bound a later logsGone() says «pending» at once (never a wait with a write that may never land); the landing replaces it
     if (!w.ok) { atLanding({ pending: true }); return { error: 'archive write failed: ' + w.error }; } // the row stays until its removal is durable
     return { ok: true, pending: true };
   }
@@ -5180,7 +5211,15 @@ class JobManager {
     this.jobs.delete(job.id); this._dirty = true; this._save();
     try { this.d.onRunEnded?.(job, null); } catch { }   // round wxzvih2as's MUST (1): A PERSON's REMOVAL BEATS THE COPIES: the person's removal releases the job's browser handle BY ID (a kept copy never keeps it)
     // B-0248 step 3: a stale archived copy of this live record (a crash between an archive's landing and jobs.json's) goes with it
-    if (!this._archiveHandedIds.has(job.id) && !this._unread.archive && (this._archiveNext() || []).some((r) => r && r.id === job.id)) this._writeArchive(this._archiveNext().filter((r) => r.id !== job.id));
+    // …HIDDEN while it is taken out (r1908 (2): it showed as an archived row until that write landed — the job just removed)
+    if (!this._archiveHandedIds.has(job.id) && !this._unread.archive && (this._archiveNext() || []).some((r) => r && r.id === job.id)) {
+      this._archiveTakingOut.add(job.id);
+      const w = this._writeArchive(this._archiveNext().filter((r) => r.id !== job.id), { onLanded: () => this._archiveTakingOut.delete(job.id) });
+      if (!w.ok) this._archiveTakingOut.delete(job.id);
+    } else if (!this._archiveHandedIds.has(job.id) && this._archivePending && (this.archive || []).some((r) => r && r.id === job.id)) {   // (a handed id is its sweep's: _sweepLanded hides it)   // its fresh read: the write in flight already lacks it, the landed archive still lists it
+      this._archiveTakingOut.add(job.id);
+      this._ride(this.archiveFile, 'the stale copy hidden', () => this._archiveTakingOut.delete(job.id));
+    }
     (this._removalOwed || (this._removalOwed = new Map())).set(job.id, job);   // its logs stay in the sweep's keep set until the landing
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): what cannot be undone — its kept processes
     // ended, its For-you items resolved — runs once jobs.json holds the removal; a kill first brings the job back whole. The

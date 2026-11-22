@@ -15352,4 +15352,7 @@ export default {
   "Remove this old key?": "この古いキーを削除しますか？", // lane lg-providers B-f276 family follow (r3106)
   "The damaged list still names this key's provider. A provider added again has a new key, so this old key is no longer used by any provider in the list. Remove it?": "壊れた一覧にはまだこのキーのプロバイダーが書かれています。もう一度追加したプロバイダーには新しいキーがあるので、一覧のどのプロバイダーもこの古いキーを使っていません。削除しますか？", // lane lg-providers B-f276 family follow (r3106)
   "Some stored values cannot be listed right now: {what}. Nothing is lost — their file could not be read, and VibeSpace reads it again by itself.": "保存された値の一部をいま一覧にできません：{what}。失われてはいません — ファイルを読み込めず、VibeSpace が自動で再読み込みします。",
+  "Being removed: its removal is not saved yet. It finishes by itself, and the row goes once it is saved.": "削除中です：この削除はまだ保存されていません。自動的に完了し、保存されるとこの行は消えます。",
+  "This job is in the jobs list now, not the archive: remove it there.": "このジョブは今アーカイブではなくジョブ一覧にあります：そちらで削除してください。",
+  "Not removed yet: the storage has not saved the removal in time. It finishes by itself once the storage answers.": "まだ削除されていません：ストレージが削除を時間内に保存しませんでした。ストレージが応答すると自動的に完了します。",
 };

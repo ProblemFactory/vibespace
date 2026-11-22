@@ -15353,4 +15353,7 @@ export default {
   "Remove this old key?": "删除这个旧密钥？", // lane lg-providers B-f276 family follow (r3106)
   "The damaged list still names this key's provider. A provider added again has a new key, so this old key is no longer used by any provider in the list. Remove it?": "损坏的列表里仍写着这个密钥的提供方。重新添加的提供方有新的密钥，所以列表里已经没有提供方在用这个旧密钥。要删除它吗？", // lane lg-providers B-f276 family follow (r3106)
   "Some stored values cannot be listed right now: {what}. Nothing is lost — their file could not be read, and VibeSpace reads it again by itself.": "有些已保存的值暂时无法列出：{what}。没有丢失 — 它们的文件读不到，VibeSpace 会自己再读一次。",
+  "Being removed: its removal is not saved yet. It finishes by itself, and the row goes once it is saved.": "正在移除：这次移除还没有保存。它会自行完成，保存后这一行就会消失。",
+  "This job is in the jobs list now, not the archive: remove it there.": "这个任务现在在任务列表里，不在归档里：请在那里移除它。",
+  "Not removed yet: the storage has not saved the removal in time. It finishes by itself once the storage answers.": "还没有移除：存储没有及时保存这次移除。存储恢复后它会自行完成。",
 };

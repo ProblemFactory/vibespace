@@ -159,6 +159,10 @@ async function jobAction(app, j, act, refresh) {
   if (r?.code === 'hub-is-main') r.error = t('This job is the running VibeSpace: it is not stopped here');   // B-2c5c: the job IS this VibeSpace — its stop refused by name, in the reader's language
   if (r?.error && r.code === 'memory-budget' && r.budget) r.error = budgetRefusalPersonWords(r.budget, t);   // B-b14a: the press is attended — who uses what, and the recipe
   if (r?.error && r.code === 'not-on-disk') r.error = t('Not started: its run could not be saved first (the storage is slow or failing) — nothing was started. Start it again once the storage answers.');   // by its code (lane lg-store-writes, the moved2 cure 2): a start refused because its run could not be saved first
+  // B-0248 step 3 (r1908 (3)): the ✕ of an archived row answers at its landing — its three refusals by code, in the reader's language
+  if (act === 'rm' && r?.error && r.code === 'being-removed') r.error = t('Being removed: its removal is not saved yet. It finishes by itself, and the row goes once it is saved.');
+  if (act === 'rm' && r?.error && r.code === 'live') r.error = t('This job is in the jobs list now, not the archive: remove it there.');
+  if (act === 'rm' && r?.error && r.code === 'not-durable') r.error = t('Not removed yet: the storage has not saved the removal in time. It finishes by itself once the storage answers.');
   if (r?.error) showToast(r.error, { type: 'error' });
   refresh?.();
 }

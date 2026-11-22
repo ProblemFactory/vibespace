@@ -2362,21 +2362,38 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   ok(RM.inFlight.sync && !RM.inFlight.answered && RM.inFlight.listed && RM.answered && RM.answered.ok === true && !RM.listed, 'a person\'s ✕ on an archived row: no answer while its removal is in flight (the row still listed); at the landing it is answered and the row is gone', RM);
   const RMX = rmScene(atOnce, 'atonce');
   ok(RMX.inFlight.answered === true && RMX.inFlight.listed === true, 'CONTROL (answered at the hand-off, in a copy): the ✕ is answered «gone» while the row is still on disk and listed (red)', RMX.inFlight);
-  // (4) AN ARCHIVE WRITE THIS PROCESS STILL OWES IS NEVER READ PAST: a second engine on the same folder (and writer) lands it first
-  const owedScene = (Mod2, tag) => {
-    const g = gatedJobsWriter(); const { d, J } = scene({ JobManager }, tag, g);
+  // (4) AN ARCHIVE WRITE THIS PROCESS STILL OWES IS NEVER READ PAST — AND NEVER FLUSHED ON THE LOOP (r1908 (5)): a second engine on the
+  // same folder (and writer) holds the archive UNREAD (EOWED) while the write is owed, then its read again (off the loop) reads what landed
+  const owedScene = async (Mod2, tag) => {
+    const g = gatedJobsWriter(); const { d, J, AF } = scene({ JobManager }, tag, g);
     J.archiveSweep({ now: T0 + 25 * H });   // handed, not landed
-    const J2 = new Mod2.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 } });
-    const n = J2.archivedCount();
+    let flushes = 0; const fs0 = g.W.flushSync; g.W.flushSync = (files) => { if (!files || files.includes(AF)) flushes++; return fs0(files); };
+    const logs2 = [];   // the unread backoff set past the leg (60 s): the read again must come from the LANDING itself
+    const J2 = new Mod2.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: (...a) => logs2.push(a.join(' ')), archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 }, unreadRetry: { firstMs: 60e3, maxMs: 60e3 } });
+    const n0 = J2.archivedCount(), held = (J2._unread.archive && J2._unread.archive.code) || null, flushed = flushes;
+    g.W.flushSync = fs0;
+    g.land(AF);                                                   // the first engine's write lands
+    for (let i = 0; i < 200 && J2._unread.archive; i++) await new Promise((r) => setTimeout(r, 10));
+    const n = J2.archivedCount(), noted = !!(J2._logsNoteOwed && J2._logsNoteOwed.archive), saidFailed = logs2.some((l) => /could not be read/.test(l));
     try { J.shutdown(); } catch { } try { J2.shutdown(); } catch { }
-    return { n };
+    return { n0, held, flushed, n, readAgain: !J2._unread.archive, noted, saidFailed };
   };
-  const OW = owedScene({ JobManager }, 'owed');
-  ok(OW.n > 0, 'an archive write this process still owes is never read past: a second engine\'s first read lands it first and reads what it holds', OW);
-  const OWED_A = "if (typeof W.pending === 'function' && W.pending(this.archiveFile)) {";
+  const OW = await owedScene({ JobManager }, 'owed');
+  ok(OW.n0 === 0 && OW.held === 'EOWED' && OW.flushed === 0 && OW.readAgain && OW.n > 0 && !OW.noted && !OW.saidFailed, 'an archive write this process still owes is never read past and never flushed on the loop: a second engine holds the archive unread (EOWED) — none of a failed read\'s notes — and reads it again off the loop at THAT write\'s landing', OW);
+  const OWED_A = "if (typeof W.pending === 'function' && W.pending(this.archiveFile)) owedStill = 'its write has not landed yet';";
   ok(JSRC.split(OWED_A).length === 2, 'control setup: the archive load\'s owed check is found once');
-  const OWX = owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWED_A, "if (false) {   /* MUTANT: the owed write read past */", 'archive-read-past'), 'archive-read-past'), 'owedx');
-  ok(OWX.n === 0, 'CONTROL (the owed check cut, in a copy): the second engine reads the older file past the write still owed (red)', OWX);
+  const OWX = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWED_A, "if (false) owedStill = 'x';   /* MUTANT: the owed write read past */", 'archive-read-past'), 'archive-read-past'), 'owedx');
+  ok(OWX.held === null && OWX.n === 0, 'CONTROL (the owed check cut, in a copy): the second engine reads the older file past the write still owed, and never again (red)', OWX);
+  const OWF = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWED_A, "if (typeof W.pending === 'function' && W.pending(this.archiveFile)) { const r = W.flushSync([this.archiveFile]); if (r.deferred) owedStill = 'x'; }   /* MUTANT: the owed write flushed on the loop (eed25565e) */", 'archive-owed-flushed'), 'archive-owed-flushed'), 'owedf');
+  ok(OWF.flushed === 1, 'CONTROL (the owed write flushed at the read, in a copy — the unit as it was): a synchronous flush on the loop (red)', OWF);
+  const OWH_A = "    if (owedStill) return this._archiveOwedHold(owedStill);\n";
+  ok(JSRC.split(OWH_A).length === 2, 'control setup: the owed write\'s light hold is found once');
+  const OWM = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWH_A, "    if (owedStill) { this._archiveAnswer(SR.storeAnswer({ error: Object.assign(new Error('owed'), { code: 'EOWED' }) }, { valid: Array.isArray })); return this.archive; }   /* MUTANT: a failed read's machinery */\n", 'archive-owed-as-failed'), 'archive-owed-as-failed'), 'owedm');
+  ok(OWM.noted === true || OWM.saidFailed === true, 'CONTROL (the owed write held as a FAILED read, in a copy — the follow as first built): «could not be read» (and its notes) for a write that only had not landed (red)', OWM);
+  const OWR_A = "    this._ride(this.archiveFile, 'the owed archive read again', () => {\n";
+  ok(JSRC.split(OWR_A).length === 2, 'control setup: the owed archive\'s read again at the landing is found once');
+  const OWR = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWR_A, "    void (0, () => {   /* MUTANT: not read again at the landing */\n", 'archive-owed-never-read'), 'archive-owed-never-read'), 'owedr');
+  ok(OWR.readAgain === false && OWR.n === 0, 'CONTROL (not read again at the landing, in a copy): the second engine stays held past the write\'s landing — its archive empty until the backoff (red)', OWR);
   // (6) A RECORD CHANGED IN THE WINDOW STAYS THE STORE's (the read's MUST): ran again, removed or edited between the hand-off and the
   // landing — kept live, its handed copy taken out of the archive again by a follow-up write; never listed twice. RED: the as-handed check cut
   const changedScene = (Mod, tag) => {
@@ -2549,6 +2566,247 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   console.log(`  ⊙ the red's own figure: the release's write at the call ${ALX.gap} ms; the tree ${AL.gap} ms`);
   ok(AL.onDisk > 0 && AL.gap * 2 < ALX.gap, `the loop no longer waits for the archive: the longest turn ${AL.gap} ms — under half of the red's own ${ALX.gap} ms; the archive on disk`, { tree: AL, atCall: ALX });
   ok(ALX.gap >= STALL && ALX.onDisk > 0, `CONTROL (the release's write at the call, in a copy): the loop is held ${ALX.gap} ms (≥ ${STALL}) by the archive's rename (red)`, ALX);
+  // ── r1908's FOLLOW (round wwe6mu63f): every client sees the landing; a stale copy hidden while it is taken out; the panel's own words;
+  // the sweep's answer on every return; the two holds, the clear door and the ✕'s bound; an ended engine's landing said ──
+  // (12) EVERY CLIENT SEES THE LANDING: a clear of an ARCHIVED record is told when the archive holding it lands — never at the hand-off
+  // (a page that refetched then read the landed archive, the old words, and nothing told it again). RED: told at the hand-off
+  const clearScene = (Mod, tag) => {
+    const { g, J, bcs } = scene(Mod, tag);
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
+    const id = J.archivedList()[0].id, b0 = bcs.length;
+    const told = () => bcs.slice(b0).filter((b) => b.t === 'jobs-updated' && b.p && (b.p.cleared || []).includes(id)).length;
+    const out = J.clearJobs([id], { by: 'owner' });
+    const atHandOff = { told: told(), clearedOnDisk: !!(J.archivedById(id) || {}).clearedAt };
+    g.landAll();
+    const atLanding = { told: told(), clearedOnDisk: !!(J.archivedById(id) || {}).clearedAt };
+    try { J.shutdown(); } catch { }
+    return { cleared: (out.cleared || []).includes(id), atHandOff, atLanding };
+  };
+  const CL = clearScene({ JobManager }, 'clear-told');
+  ok(CL.cleared && CL.atHandOff.told === 0 && !CL.atHandOff.clearedOnDisk && CL.atLanding.told === 1 && CL.atLanding.clearedOnDisk, 'a clear of an ARCHIVED record is told to every page when the archive holding it lands (once) — never at the hand-off, while the landed archive still reads the old words', CL);
+  const CLT_A = "    clearMade = true; if (!archChanged || clearLanded) tellCleared();";
+  ok(JSRC.split(CLT_A).length === 2, 'control setup: the clear\'s one broadcast, at the archive\'s landing, is found once');
+  const CLX = clearScene(MJb.load('src/jobs.js', anchored(JSRC, CLT_A, "    clearMade = true; tellCleared();   /* MUTANT: told at the hand-off */", 'archive-clear-told-early'), 'archive-clear-told-early'), 'cleartoldx');
+  ok(CLX.atHandOff.told >= 1 && !CLX.atHandOff.clearedOnDisk, 'CONTROL (told at the hand-off, in a copy): the pages are told «cleared» while the archive on disk still holds the old words (red)', CLX.atHandOff);
+  // (13) A LIVE JOB REMOVED WHOSE STALE ARCHIVED COPY A CRASH LEFT: the copy is hidden while it is taken out — never an archived row for
+  // the job just removed. RED: not hidden
+  const staleScene = (Mod, tag) => {
+    const g = gatedJobsWriter();
+    const d = mkDir('jobs-archive-stale-' + tag); const recs = seedDone();
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify(recs)); fs.writeFileSync(path.join(d, 'job-notifications.json'), '{}');
+    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify([{ ...recs[0], archivedAt: 1, archivedWhy: 'done' }]));   // the crash's state: one record in both files
+    const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init(); g.landAll();
+    const AF = path.join(d, 'jobs-archive.json'), id = recs[0].id;
+    const r = J.rm(J.jobs.get(id));
+    const inFlight = { removed: !!(r && r.ok) && !J.jobs.has(id), byId: !!J.archivedById(id), inList: J.archivedList().some((x) => x.id === id) };
+    g.landAll();
+    let inFile = null; try { inFile = JSON.parse(fs.readFileSync(AF, 'utf8')).some((x) => x.id === id); } catch { }
+    const after = !!J.archivedById(id);
+    try { J.shutdown(); } catch { }
+    return { inFlight, inFile, after };
+  };
+  const ST = staleScene({ JobManager }, 'stale');
+  ok(ST.inFlight.removed && !ST.inFlight.byId && !ST.inFlight.inList && ST.inFile === false && !ST.after, 'a live job removed whose stale archived copy a crash left: that copy is hidden while it is taken out (never an archived row for the job just removed), and out of the file at its landing', ST);
+  const STK_A = "      this._archiveTakingOut.add(job.id);\n      const w = this._writeArchive(";
+  ok(JSRC.split(STK_A).length === 2, 'control setup: the removal\'s hiding of its stale copy is found once');
+  const STX = staleScene(MJb.load('src/jobs.js', anchored(JSRC, STK_A, "      /* MUTANT: the stale copy not hidden */\n      const w = this._writeArchive(", 'archive-stale-shown'), 'archive-stale-shown'), 'stalex');
+  ok(STX.inFlight.byId === true, 'CONTROL (not hidden, in a copy): the job just removed shows as an archived row until the take-out lands (red)', STX.inFlight);
+  // (14) THE ✕'s THREE NEW REFUSALS REACH THE PANEL AS ITS OWN WORDS: being removed (409), live (409), not durable (503) — each by its
+  // code to t() words with zh and ja, never the server's English (jobAction EVALUATED). RED: a mapping cut
+  const PANEL = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf8');
+  const I18N = { zh: fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja: fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8') };
+  const jobActionOf = (src) => { const at = src.indexOf('\nasync function jobAction('); return at < 0 ? '' : src.slice(at + 1, src.indexOf('\n}\n', at + 1) + 2); };
+  const toastsFor = async (src) => {
+    const body = jobActionOf(src); if (!body) return null;
+    const out = {};
+    for (const [code, status] of [['being-removed', 409], ['live', 409], ['not-durable', 503]]) {
+      const toasts = [];
+      const f = new Function('t', 'fetchJson', 'showToast', 'showConfirmDialog', 'openInteractWindow', 'isCleared', 'clearedText', 'budgetRefusalPersonWords', `${body}; return jobAction;`)(
+        (k) => k, async () => ({ error: `the server's own English (${code})`, code, status }), (m) => toasts.push(m), async () => true, () => { }, () => false, () => '', () => '');
+      await f({}, { id: 'jb-0000aaaa', name: 'x' }, 'rm', () => { });
+      out[code] = toasts[0] || null;
+    }
+    return out;
+  };
+  const inLang = (lang, k) => { const at = I18N[lang].indexOf(JSON.stringify(k) + ': "'); if (at < 0) return false; const v = I18N[lang].slice(at + JSON.stringify(k).length + 3, I18N[lang].indexOf('"', at + JSON.stringify(k).length + 3)); return /[぀-ヿ一-鿿]/.test(v); };
+  const PW = await toastsFor(PANEL);
+  ok(PW && Object.values(PW).every((w) => w && !/the server's own English/.test(w) && inLang('zh', w) && inLang('ja', w)), 'the ✕\'s three new refusals (being removed, live, not durable) reach the panel as its own words, each with zh and ja — never the server\'s English', PW);
+  for (const code of ['being-removed', 'live', 'not-durable']) {
+    const MAP = `  if (act === 'rm' && r?.error && r.code === '${code}') r.error = t(`;
+    ok(PANEL.split(MAP).length === 2, `control setup: the panel's «${code}» words are found once`);
+    const PWX = await toastsFor(PANEL.replace(MAP, "  if (false) r.error = t("));
+    ok(PWX && /the server's own English/.test(PWX[code] || ''), `CONTROL (the «${code}» mapping cut, in a copy): the panel shows the server's English (red)`, PWX);
+  }
+  // (15) THE SWEEP's ANSWER ON ITS EARLY RETURNS TOO: nothing due, every due record already handed — answered at once, never left to a
+  // caller's bound. RED: the early answer cut
+  const earlyScene = (Mod, tag) => {
+    const { g, J } = scene(Mod, tag);
+    let a1 = null; J.archiveSweep({ now: T0, answer: (x) => { a1 = x; } });                     // nothing due yet
+    J._unread.archive = { code: 'EIO', why: 'a stand-in', at: Date.now() };
+    let a3 = null; J.archiveSweep({ now: T0 + 25 * H, answer: (x) => { a3 = x; } });             // a refusal: the archive unread
+    J._unread.archive = null;
+    J.archiveSweep({ now: T0 + 25 * H });                                                        // hands every due record
+    let a2 = null; J.archiveSweep({ now: T0 + 25 * H + 1, answer: (x) => { a2 = x; } });          // every due record handed already
+    g.landAll(); try { J.shutdown(); } catch { }
+    return { a1, a2, a3 };
+  };
+  const EA = earlyScene({ JobManager }, 'early');
+  ok(EA.a1 && Array.isArray(EA.a1.archived) && EA.a1.archived.length === 0 && EA.a2 && Array.isArray(EA.a2.archived) && EA.a2.archived.length === 0 && EA.a3 && EA.a3.failed === 'archive-unread', 'the sweep answers its early returns at once (nothing due; every due record already handed; a refusal) — never left to a caller\'s bound', EA);
+  const EA_A = "    const early = (x) => { if (answer) {";
+  ok(JSRC.split(EA_A).length === 2, 'control setup: the sweep\'s early answer is found once');
+  const EAX = earlyScene(MJb.load('src/jobs.js', anchored(JSRC, EA_A, "    const early = (x) => { if (false) {   /* MUTANT: the early answer cut */", 'archive-early-unanswered'), 'archive-early-unanswered'), 'earlyx');
+  ok(EAX.a1 === null && EAX.a2 === null && EAX.a3 === null, 'CONTROL (the early answer cut, in a copy): a sweep that moves nothing never answers — its caller waits out its own bound (red)', EAX);
+  // (15b) …and at the stop: a sweep whose archive lands after the engine ended answers «ended» (its records stay the store's). RED: cut
+  const sweepEnded = (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag);
+    let a = null; J.archiveSweep({ now: T0 + 25 * H, answer: (x) => { a = x; } });
+    J.shutdown(); g.land(AF);
+    return { a };
+  };
+  const SE = sweepEnded({ JobManager }, 'sweep-ended');
+  ok(SE.a && SE.a.ended === true && SE.a.archived.length === 0, 'a sweep whose archive lands after the engine ended still answers — «ended», nothing released', SE);
+  const SE_A = "ended: () => early({ archived: [], ended: true }), ";
+  ok(JSRC.split(SE_A).length === 2, 'control setup: the sweep\'s ended answer is found once');
+  const SEX = sweepEnded(MJb.load('src/jobs.js', anchored(JSRC, SE_A, "/* MUTANT: the ended answer cut */ ", 'archive-sweep-ended-unanswered'), 'archive-sweep-ended-unanswered'), 'sweependedx');
+  ok(SEX.a === null, 'CONTROL (the ended answer cut, in a copy): the sweep\'s caller is never answered (red)', SEX);
+  // (16) HOLD ONE, ITS ORDER: the cap's dropped records' log folders go only once the archive that no longer names them landed AND
+  // jobs.json's save after it — the remover is asked at THAT landing, never at the archive's. RED: asked at the archive's landing
+  const CAP = Number((JSRC.match(/const ARCHIVE_CAP = (\d+)/) || [])[1]) || 2000;
+  const capScene = (Mod, tag) => {
+    const g = gatedJobsWriter();
+    const d = mkDir('jobs-archive-cap-' + tag);
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify(seedDone())); fs.writeFileSync(path.join(d, 'job-notifications.json'), '{}');
+    const own = fx.jobs[0];
+    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify(Array.from({ length: CAP }, (_, i) => ({ id: 'jb-c' + String(i).padStart(7, '0'), kind: 'task', name: 'old-' + i, state: 'done', owner: own.owner, access: own.access, runs: [{ startedAt: 1000 + i, endedAt: 2000 + i }], archivedAt: 3000 + i, archivedWhy: 'done' }))));   // full: the next sweep's records push the oldest out
+    const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init(); g.landAll();
+    const asked = []; J._logsWhole = (ids) => { asked.push(ids.slice()); return Promise.resolve({ gone: ids }); };   // the remover, asked
+    const AF = path.join(d, 'jobs-archive.json'), JF = path.join(d, 'jobs.json');
+    let ans = null; J.archiveSweep({ now: T0 + 25 * H, answer: (x) => { ans = x; } });
+    g.land(AF);                                                   // the archive lands — jobs.json's save not yet
+    const atArchive = { asked: asked.length, dropped: ans ? ans.dropped : null };
+    g.land(JF);                                                   // jobs.json's save lands
+    const atStore = { asked: asked.flat().length };
+    try { J.shutdown(); } catch { }
+    return { atArchive, atStore };
+  };
+  const CP = capScene({ JobManager }, 'cap');
+  ok(CP.atArchive.dropped > 0 && CP.atArchive.asked === 0 && CP.atStore.asked === CP.atArchive.dropped, `the cap's ${CP.atArchive.dropped} dropped records' log folders are handed to the remover only once jobs.json's save landed after the archive — none at the archive's landing`, CP);
+  const CAP_A = "this._ride(this.file, 'the archive cap\\'s dropped records', () => this._logsWhole(ids));";
+  ok(JSRC.split(CAP_A).length === 2, 'control setup: the dropped folders riding jobs.json\'s landing are found once');
+  const CPX = capScene(MJb.load('src/jobs.js', anchored(JSRC, CAP_A, "this._logsWhole(ids);   /* MUTANT: at the archive's landing */", 'archive-cap-early'), 'archive-cap-early'), 'capx');
+  ok(CPX.atArchive.asked === 1, 'CONTROL (asked at the archive\'s landing, in a copy): the folders go while jobs.json still lists their records — a crash then leaves records without their logs (red)', CPX.atArchive);
+  // (17) HOLD TWO: the hub's stop with an archive HANDED and not landed (the REAL store writer, the stop's own order) — the exit's rank-0
+  // pass lands it whole with its step inside (the records' release), jobs.json's save goes in the last pass: after the stop each record is
+  // in ONE file. RED: the release on a later turn — after the stop the records are in both
+  const stopScene = (Mod, tag) => {
+    const d = mkDir('jobs-archive-stop-' + tag);
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify(seedDone())); fs.writeFileSync(path.join(d, 'job-notifications.json'), '{}');
+    const w = SWr.create({ log: { warn() { }, log() { }, error() { } }, graceMs: 5000 });
+    const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: w, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init(); w.flushSync();
+    const h = J.archiveSweep({ now: T0 + 25 * H }); const ids = h.handed || [];
+    // server.js's stop, in one synchronous run: beginExit, the rank-0 flush, the engines' shutdown, the last exit flush
+    w.beginExit(); w.exitFlush({ only: 'rank0' }); try { J.shutdown(); } catch { } w.exitFlush();
+    const list = (f) => { try { const v = JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')); return Array.isArray(v) ? v : (v && v.jobs) || []; } catch { return null; } };
+    const A = list('jobs-archive.json'), S = list('jobs.json');
+    try { w.stop(); } catch { }
+    return { handed: ids.length, inArch: A ? ids.filter((id) => A.some((r) => r.id === id)).length : null, inStore: S ? ids.filter((id) => S.some((r) => r.id === id)).length : null };
+  };
+  const SP = stopScene({ JobManager }, 'stop');
+  ok(SP.handed > 0 && SP.inArch === SP.handed && SP.inStore === 0, `the hub's stop with an archive handed and not landed: the exit lands it whole, its records released inside it and jobs.json saved after — each of the ${SP.handed} in ONE file`, SP);
+  const SPX = stopScene(MJb.load('src/jobs.js', anchored(JSRC, NOW_A, "    this._ride(this.archiveFile, 'the archive', () => { setImmediate(step); }, { timeoutMs: replyMs, answer: reply });   // MUTANT: the release on a later turn\n", 'archive-release-later'), 'archive-release-later'), 'stopx');
+  ok(SPX.inArch === SPX.handed && SPX.inStore === SPX.handed, 'CONTROL (the release on a later turn, in a copy): the stop lands the archive but its records are never released — in BOTH files after it (red)', SPX);
+  // (18) THE CLEAR DOOR WAITS FOR ITS OWN ARCHIVE WRITE: «Clear content…» of an archived job through record-clear — no answer while the
+  // archive holding the clear is not on disk (jobs.json and the notices landed), answered at its landing. RED: the archive's sequence not
+  // passed (record-clear, in a copy) — answered «cleared» before the words left the disk
+  const RCSRC = fs.readFileSync(path.join(ROOT, 'src/server/record-clear.js'), 'utf8');
+  const doorScene = async (RCmod, tag) => {
+    const { g, J, d, AF } = scene({ JobManager }, tag);
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
+    const id = J.archivedList()[0].id;
+    const RCs = RCmod.create({ getJobs: () => J, log: () => { } });
+    let ans = null; RCs.clearMany([{ kind: 'job', id }], { caller: { role: 'owner' }, answer: (r) => { ans = r; } });
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));   // the clear's own awaits
+    g.land(path.join(d, 'jobs.json')); g.land(path.join(d, 'job-notifications.json'));
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    const beforeArchive = ans;
+    g.land(AF);
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    try { J.shutdown(); } catch { }
+    return { beforeArchive, atLanding: ans && { ok: ans.ok, cleared: ans.cleared, notOnDisk: !!ans.notOnDisk } };
+  };
+  const DR = await doorScene(require(path.join(ROOT, 'src/server/record-clear.js')), 'door');
+  ok(DR.beforeArchive === null && DR.atLanding && DR.atLanding.ok && DR.atLanding.cleared === 1 && !DR.atLanding.notOnDisk, 'a person\'s «Clear content…» of an ARCHIVED job is answered only once the archive holding the clear landed — not when jobs.json and the notices did', DR);
+  const DOOR_A = "name === 'jobs' && touched.archiveSeq ? { archiveSeq: touched.archiveSeq } : undefined";
+  ok(RCSRC.split(DOOR_A).length === 2, 'control setup: record-clear passing the archive\'s sequence is found once');
+  const DRX = await doorScene(MJb.load('src/server/record-clear.js', anchored(RCSRC, DOOR_A, "undefined /* MUTANT: the archive's sequence not passed */", 'record-clear-no-archive-seq'), 'record-clear-no-archive-seq'), 'doorx');
+  ok(DRX.beforeArchive !== null, 'CONTROL (the archive\'s sequence not passed, in a copy of record-clear): «cleared» is answered while the archive on disk still holds the words (red)', DRX);
+  // (19) THE ✕ PAST THE LANDING's BOUND: through the route, 503 «not-durable» at its bound while the archive is not on disk; a repeat
+  // meanwhile 409 «being-removed»; and the removal still lands by itself (the row gone, the pages told). RED: the bound cut (in a copy)
+  const routeScene = async (mod, tag) => {
+    const bd = mkDir('jobs-archive-bound-' + tag), own = fx.jobs[0];
+    const arc = { id: 'jb-b0d0e001', kind: 'task', name: 'bound-one', state: 'done', owner: own.owner, access: own.access, runs: [{ startedAt: T0 - 3 * H, endedAt: T0 - 2 * H }], archivedAt: T0 - H, archivedWhy: 'done' };
+    fs.writeFileSync(path.join(bd, 'jobs.json'), '[]'); fs.writeFileSync(path.join(bd, 'job-notifications.json'), '{}'); fs.writeFileSync(path.join(bd, 'jobs-archive.json'), JSON.stringify([arc]));
+    const broadcasts = []; const B = boot(bd, { broadcasts, mod });
+    const g = gatedJobsWriter(); B.jm.d.writer = g.W; B.jm.d.rmReplyMs = 60;
+    const r1 = await B.call('POST', '/api/jobs/:id/:act', { params: { id: arc.id, act: 'rm' } });
+    const r2 = await B.call('POST', '/api/jobs/:id/:act', { params: { id: arc.id, act: 'rm' } });
+    const listedMeanwhile = !!B.jm.archivedById(arc.id);
+    g.land(path.join(bd, 'jobs-archive.json'));
+    const gone = !B.jm.archivedById(arc.id), told = broadcasts.some((m) => JSON.stringify(m).includes(arc.id) && /removed/.test(JSON.stringify(m)));
+    try { B.jm.shutdown(); } catch { }
+    return { r1: { status: r1.status, code: r1.body && r1.body.code }, r2: { status: r2.status, code: r2.body && r2.body.code }, listedMeanwhile, gone, told };
+  };
+  const RO = await routeScene(wiring, 'route');
+  ok(RO.r1.status === 503 && RO.r1.code === 'not-durable' && RO.r2.status === 409 && RO.r2.code === 'being-removed' && RO.listedMeanwhile && RO.gone && RO.told, 'the ✕ past its landing\'s bound, through the route: 503 «not-durable» while the archive is not on disk, a repeat 409 «being-removed», and the removal still lands by itself — the row gone, the pages told', RO);
+  const WSRC19 = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');
+  const RO_A = "const r = jm.rmArchived(rec.id, (x) => { if (x.error) return res.status(x.notDurable ? 503 : 400).json({ error: x.error, ...(x.notDurable ? { code: 'not-durable' } : {}) });";
+  ok(WSRC19.split(RO_A).length === 2, 'control setup: the route\'s «not durable» answer is found once');
+  const ROX = await routeScene(MJb.load('src/server/jobs-wiring.js', anchored(WSRC19, RO_A, "const r = jm.rmArchived(rec.id, (x) => { if (x.error) return res.status(400).json({ error: x.error });   /* MUTANT: the route's not-durable cut */", 'wiring-not-durable-cut'), 'wiring-not-durable-cut'), 'routex');
+  ok(ROX.r1.status === 400 && !ROX.r1.code, 'CONTROL (the route\'s «not durable» cut, in a copy of the wiring): the person reads a plain failure for a removal that still lands (red)', ROX.r1);
+  const boundScene = async (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag); J.d.rmReplyMs = 60;
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
+    const id = J.archivedList()[0].id; let ans = null;
+    J.rmArchived(id, (x) => { ans = x; });
+    await new Promise((r) => setTimeout(r, 300));
+    const atBound = ans;
+    let later = null; J.logsGone(id, 60e3).then((x) => { later = x; });   // r1963: a later ask, the write still not landed
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));   // answered AT ONCE (a few turns), or it waits with the write
+    const laterAtOnce = later;
+    g.land(AF); try { J.shutdown(); } catch { }
+    return { atBound, later: laterAtOnce };
+  };
+  const BD_A = "{ onLanded: () => atLanding(this._rmLanded(id)), replyMs, ended,";
+  ok(JSRC.split(BD_A).length === 2, 'control setup: the ✕\'s reply bound is found once');
+  const BD = await boundScene({ JobManager }, 'bound');
+  ok(BD.atBound && BD.atBound.notDurable === true && BD.later && BD.later.pending === true, 'the ✕\'s reply comes at its bound while the archive is not on disk — «not durable», never a wait for ever; and a later logsGone() for it says «pending» at once (r1963)', BD);
+  const BDP_A = "if (!r.ok && this._logsGone.get(id) === handed) this._logsGone.set(id, Promise.resolve({ pending: true })); ";
+  ok(JSRC.split(BDP_A).length === 2, 'control setup: the ✕\'s bound turning logsGone «pending» is found once');
+  const BDP = await boundScene(MJb.load('src/jobs.js', anchored(JSRC, BDP_A, "/* MUTANT: logsGone waits with the write */ ", 'archive-gone-waits'), 'archive-gone-waits'), 'gonewaitsx');
+  ok(BDP.later === null, 'CONTROL (the bound\'s «pending» cut, in a copy): a later logsGone() waits with a write that has not landed — no answer (red)', BDP);
+  const BDX = await boundScene(MJb.load('src/jobs.js', anchored(JSRC, BD_A, "{ onLanded: () => atLanding(this._rmLanded(id)), replyMs: null /* MUTANT: no bound */, ended,", 'archive-rm-unbounded'), 'archive-rm-unbounded'), 'boundx');
+  ok(BDX.atBound === null, 'CONTROL (the bound cut, in a copy): the person\'s ✕ is not answered while the storage holds the write (red)', BDX);
+  // (20) A ✕ WHOSE REMOVAL LANDS AFTER THE ENGINE ENDED (the round's lens 1): its log folder is left to the clean-up's own pass — SAID,
+  // and logsGone answers «still being deleted». RED: unsaid
+  const endedScene = async (Mod, tag) => {
+    const { g, J, AF, logs } = scene(Mod, tag);
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
+    const id = J.archivedList()[0].id;
+    J.rmArchived(id, () => { }); J.shutdown(); g.land(AF);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));   // r2001: asked LATE, after every promise of the landing settled
+    let lg = null; J.logsGone(id, 60e3).then((x) => { lg = x; });
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));   // answered at once, never a wait
+    return { said: logs.filter((l) => l.includes(id) && /its removal landed after the jobs engine ended/.test(l)).length, logsGone: lg };
+  };
+  const EN = await endedScene({ JobManager }, 'ended');
+  ok(EN.said === 1 && EN.logsGone && EN.logsGone.pending === true, 'a ✕ whose removal lands after the engine ended is SAID once — its log folder left to the clean-up\'s own pass — and logsGone answers «still being deleted» at once', EN);
+  const END_A = "replyMs, ended, answer:";
+  ok(JSRC.split(END_A).length === 2, 'control setup: the ✕\'s ended words are found once');
+  const ENX = await endedScene(MJb.load('src/jobs.js', anchored(JSRC, END_A, "replyMs, /* MUTANT: unsaid */ answer:", 'archive-ended-unsaid'), 'archive-ended-unsaid'), 'endedx');
+  ok(ENX.said === 0, 'CONTROL (unsaid, in a copy): the folder is left with no word (red)', ENX);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
