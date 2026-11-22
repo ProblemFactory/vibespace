@@ -221,47 +221,26 @@ function setup(ctx) {
     res.json({ subagents: list });
   });
 
-  // Subagent messages for a given session + agentId
-  router.get('/api/subagent-messages', (req, res) => {
+  // Subagent messages for a given session + agentId — lane lg-recovery (主开发 r2350 / r2374): the SAME helper as the viewer's attach
+  // (src/server/subagent-transcript.js: the place kept, the exact folder first, the other folders walked asynchronously; the transcript
+  // pool's paged parse, the file whole), the history converted in paced slices (convertHistoryAsync) — the release listed the projects
+  // root and every folder's workflows, read the whole file and converted every record at once HERE, on the hub's loop (1.4 s at 20 MB).
+  // The candidate order is the release's: the cwd's folder first when given (its workflows next), then every project folder. A pool
+  // that refuses answers 503 BY NAME (`refused`) — never a read on the loop.
+  router.get('/api/subagent-messages', async (req, res) => {
     const { claudeSessionId, cwd, agentId } = req.query;
     if (!claudeSessionId || !agentId) return res.status(400).json({ error: 'claudeSessionId and agentId required' });
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-    const projDir = cwdToProjectDir(cwd || '');
-    // Try exact project dir, then scan all. Workflow agents live one level
-    // deeper (subagents/workflows/wf_*/agent-<id>.jsonl) — include those too so
-    // a workflow phase's agent opens in the SAME viewer with zero client change.
-    const subDirs = [];
-    if (cwd) subDirs.push(path.join(projectsDir, projDir, claudeSessionId, 'subagents'));
     try {
-      for (const dir of fs.readdirSync(projectsDir)) {
-        const sd = path.join(projectsDir, dir, claudeSessionId, 'subagents');
-        if (!subDirs.includes(sd)) subDirs.push(sd);
-      }
-    } catch {}
-    const candidates = [];
-    for (const sd of subDirs) {
-      candidates.push(path.join(sd, `agent-${agentId}.jsonl`));
-      let wfRuns = []; try { wfRuns = fs.readdirSync(path.join(sd, 'workflows')); } catch {}
-      for (const wf of wfRuns) candidates.push(path.join(sd, 'workflows', wf, `agent-${agentId}.jsonl`));
+      const got = await require('../server/subagent-transcript').agentTranscript({ claudeSessionId: String(claudeSessionId), agentId: String(agentId), exactDir: cwd ? path.join(projectsDir, cwdToProjectDir(String(cwd))) : null, root: projectsDir });
+      if (got.refused) return res.status(503).json({ error: `this agent's transcript could not be read here: ${got.refused}`, refused: got.refused, messages: [], total: 0, meta: {} });
+      if (!got.fp) return res.json({ messages: [], total: 0, meta: {} });
+      const mm = createMessageManager('claude', `sub-agent-${agentId}`);
+      await mm.convertHistoryAsync(got.records);
+      return res.json({ messages: mm.messages, total: mm.total, meta: got.meta || {} });
+    } catch (e) {
+      return res.status(500).json({ error: `this agent's transcript read failed: ${(e && e.message) || e}` });
     }
-    for (const filePath of candidates) {
-      try {
-        if (!fs.existsSync(filePath)) continue;
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const rawMsgs = [];
-        for (const line of content.split('\n')) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try { const msg = JSON.parse(trimmed); rawMsgs.push(msg); } catch {}
-        }
-        let meta = {};
-        try { meta = JSON.parse(fs.readFileSync(filePath.replace('.jsonl', '.meta.json'), 'utf-8')); } catch {}
-        const mm = createMessageManager('claude', `sub-agent-${agentId}`);
-        mm.convertHistory(rawMsgs);
-        return res.json({ messages: mm.messages, total: mm.total, meta });
-      } catch {}
-    }
-    res.json({ messages: [], total: 0, meta: {} });
   });
 
   // ── Dynamic-workflow (ultracode) POST-HOC detail ────────────────────────

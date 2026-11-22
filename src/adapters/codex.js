@@ -374,7 +374,9 @@ const JSONL_TAIL_BYTES = 32 * 1024 * 1024;
 function readJsonlBounded(fp, opts = {}) {
   fp = plainJsonlPath(fp); // zstd rollouts read through their materialized twin (S3)
   const stat = fs.statSync(fp);
-  if (stat.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES) return fs.readFileSync(fp, 'utf-8');
+  // `whole` (lane lg-recovery, 主开发 r2374 — only the transcript worker's ops pass it, for the sub-agent viewer): the file ENTIRE,
+  // never the head + tail bound below (the viewer showed every line of a finished agent; the bound is the histories')
+  if (opts.whole || stat.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES) return fs.readFileSync(fp, 'utf-8');
   const fd = fs.openSync(fp, 'r');
   try {
     const tailBuf = Buffer.alloc(JSONL_TAIL_BYTES);
@@ -769,8 +771,10 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  worker's own line rule (slot 'warm').
  *  Row B-422c: `onFail(why, refusal)` — `refusal` = the reader's refusal by name when the POOL failed (closed, no worker, a deadline,
  *  a hung path, the lane's bound or wait; never on the device's in-place road), null when the op itself failed (the caller's own road).
+ *  `whole` (lane lg-recovery, 主开发 r2374): the file ENTIRE, its one-shot too — the sub-agent viewer's read (slot 'subagent',
+ *  src/server/subagent-transcript.js: a null is its refusal, never a read on the loop).
  *  → the records (or, with `entry`, { entry, mode, bytes }), or null */
-async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false, note = true } = {}) {   // note: false — a caller whose refusals say nothing of the file's history (the artifact pass's whole-file read)
+async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false, note = true, whole = false } = {}) {   // note: false — a caller whose refusals say nothing of the file's history (the artifact pass's whole-file read)
   let refusal = null;   // the LAST pool failure on this road (a later op error clears it: then the op's failure is the answer)
   // ownCall: page 0 (it reads the FILE — later pages parse its snapshot in memory) is the history lane's own call; the one-shot runs in
   // the main pool. A pool refusal STAYS the road's answer through a later op error (never a sync parse of a refused file after it)
@@ -791,7 +795,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       const out = [], startsOut = [];
       let total = Infinity, start = 0, gone = false, head = null;
       while (start < total) {
-        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK && !pool.inPlace ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}), ...(entry ? { entry: true } : {}), ...(dropSubagent ? { dropSubagent: true } : {}) });
+        const r = await pool.call('boundedParsedPage', { fp, tailOnly, ...(whole ? { whole: true } : {}), start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK && !pool.inPlace ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}), ...(entry ? { entry: true } : {}), ...(dropSubagent ? { dropSubagent: true } : {}) });
         if (!r || r.gone) { gone = true; _pagedStats.gone++; why = 'its snapshot was gone twice (another read replaced it)'; break; }
         _pagedStats.pages++;
         token = r.token; total = r.total;
@@ -818,7 +822,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   // refuses BY NAME, thrown: the warm notes it), the records through the pool's own op (its failure seen: the refusal by name)
   if (entry) { const e1 = await readJsonlTailAsync(fp, { dropSubagent }); return e1 == null ? said(`${why}; then the one-shot read answered nothing`) : e1; }
   let r = null;
-  try { r = await pool.call('boundedParsed', { fp, tailOnly, dropSubagent: !!dropSubagent }); } catch (e) { seen(e, false); why = `${why}; then the one-shot read failed too (${(e && e.message) || e})`; return said(why); }
+  try { r = await pool.call('boundedParsed', { fp, tailOnly, dropSubagent: !!dropSubagent, ...(whole ? { whole: true } : {}) }); } catch (e) { seen(e, false); why = `${why}; then the one-shot read failed too (${(e && e.message) || e})`; return said(why); }
   if (r == null) return said(`${why}; then the one-shot read answered nothing`);
   poolAnswered(fp, 'boundedParsed');
   return r;

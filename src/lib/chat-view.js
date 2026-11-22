@@ -6627,7 +6627,8 @@ class ChatView {
           // an empty reply. Say so instead of rendering an empty window. The
           // server now distinguishes the two: msg.loadError carries the real
           // machine-side failure (2.272.1) instead of implying an empty log.
-          view._renderers.appendSystem(msg.loadError || t('No transcript found for this agent.'));
+          // lane lg-recovery (r2374): `loadRefused` = the hub's transcript pool refused the read (never done on the hub's loop instead)
+          view._renderers.appendSystem(msg.loadRefused ? t('This agent’s log could not be read here: {why}', { why: String(msg.loadRefused) }) : (msg.loadError || t('No transcript found for this agent.')));
         }
       }
     };

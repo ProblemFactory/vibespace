@@ -1612,23 +1612,23 @@ function registerWsHandler(wss, ctx) {
               const parentSession = parentId ? activeSessions.get(parentId) : null;
               const claudeId = parentSession?.backendSessionId || parentSession?.claudeSessionId || data.backendSessionId || data.claudeSessionId || '';
               const cwd = parentSession?.cwd || data.cwd || '';
+              // lane lg-recovery (主开发 r2350 / r2374): found and read OFF THE LOOP through ONE helper (src/server/subagent-transcript.js —
+              // the place kept, the exact folder first, the other folders walked asynchronously; the transcript pool's paged parse, the
+              // file whole, ONE read at a time and asks of one file sharing its read: a reconnect's storm of agent windows queues, each
+              // acked already and keeping what it shows). The release listed the projects root and every folder's workflows and read,
+              // split and parsed the whole file HERE, on the hub's loop (11–119 ms an open at the stand-in's sizes). A pool that
+              // refuses is SAID in the window (`loadRefused`) — never a read on the loop.
               const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-              const projDir = cwdToProjectDir(cwd);
-              let rawMsgs = [], meta = {}, subFetchErr = null;
-              const subDirs = [path.join(projectsDir, projDir, claudeId, 'subagents')];
-              try { for (const dir of fs.readdirSync(projectsDir)) { const fp = path.join(projectsDir, dir, claudeId, 'subagents'); if (!subDirs.includes(fp)) subDirs.push(fp); } } catch {}
-              // Direct subagent files first, then workflow-nested ones
-              // (subagents/workflows/wf_*/agent-<id>.jsonl) so a workflow phase's
-              // agent opens in this same viewer.
-              const fileCandidates = [];
+              let rawMsgs = [], meta = {}, subFetchErr = null, refused = null;
+              const pulled = [];   // a remote parent's agent transcript, pulled into the local cache: asked first
               // REMOTE parent (2.191.0, remote workflow viewer's View Log):
               // pull the agent transcript into the local cache first — the
-              // local scan below then finds it like any other candidate.
+              // helper then reads it like any other place.
               const subHost = data.hostId || parentSession?.host || null;
               if (subHost && hosts && /^[\w-]+$/.test(agentId)) {
                 try {
                   const p = await hosts.fetchAgentJsonl(String(subHost), agentId, { claudeSessionId: claudeId });
-                  if (p) fileCandidates.push(p);
+                  if (p) pulled.push(p);
                 } catch (e) {
                   // Remote pull failed (host lag/down): the viewer used to fall
                   // through and render an EMPTY log, indistinguishable from "the
@@ -1637,28 +1637,17 @@ function registerWsHandler(wss, ctx) {
                   subFetchErr = e.message;
                 }
               }
-              for (const subDir of subDirs) {
-                fileCandidates.push(path.join(subDir, `agent-${agentId}.jsonl`));
-                let wfRuns = []; try { wfRuns = fs.readdirSync(path.join(subDir, 'workflows')); } catch {}
-                for (const wf of wfRuns) fileCandidates.push(path.join(subDir, 'workflows', wf, `agent-${agentId}.jsonl`));
-              }
-              for (const fp of fileCandidates) {
-                try {
-                  if (!fs.existsSync(fp)) continue;
-                  for (const line of fs.readFileSync(fp, 'utf-8').split('\n')) {
-                    try { const m = JSON.parse(line.trim()); if (m.type === 'user' || m.type === 'assistant' || m.type === 'result') rawMsgs.push(m); } catch {}
-                  }
-                  try { meta = JSON.parse(fs.readFileSync(fp.replace('.jsonl', '.meta.json'), 'utf-8')); } catch {}
-                  break;
-                } catch {}
-              }
+              const got = await require('./server/subagent-transcript').agentTranscript({ claudeSessionId: claudeId, agentId, exactDir: path.join(projectsDir, cwdToProjectDir(cwd)), first: pulled, root: projectsDir });
+              if (got.refused) refused = got.refused;
+              else if (got.fp) { rawMsgs = got.records.filter((m) => m && (m.type === 'user' || m.type === 'assistant' || m.type === 'result')); meta = got.meta || {}; }
               const subMM = new MessageManager(subId);
               await subMM.convertHistoryAsync(rawMsgs);
               // An empty log after a FAILED remote pull is a lie — tell the
               // client so the viewer can show "couldn't load from <host>"
               // with a retry instead of a blank read-only window.
               ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total, meta,
-                ...(rawMsgs.length === 0 && subFetchErr ? { loadError: `Couldn’t load this agent’s log from the machine: ${subFetchErr}` } : {}) }));
+                ...(rawMsgs.length === 0 && subFetchErr ? { loadError: `Couldn’t load this agent’s log from the machine: ${subFetchErr}` } : {}),
+                ...(refused ? { loadRefused: refused } : {}) }));
             } else if (!found) ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: [], totalCount: 0 }));
             break;
           }

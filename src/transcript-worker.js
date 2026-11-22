@@ -35,7 +35,9 @@ function _codex() { return require('./adapters/codex'); }
 // B-299b (主开发 r604): ONE snapshot per SLOT — '' (the history reads, as before) and 'helper' (the artifact door's helper transcripts,
 // read one at a time by the registry): a helper's first page never replaces the snapshot a person's paged read is reading
 // B-cd4b unit 2: 'warm' — the claude transcript warm's ENTRY in pages (`entry`, below), one warm at a time (src/session-store.js)
-const PAGE_SLOTS = new Set(['', 'helper', 'warm']);
+// lane lg-recovery (主开发 r2374): 'subagent' — a finished agent's transcript for the sub-agent viewer (src/server/subagent-transcript.js,
+// one read at a time), read WHOLE (`whole`: the viewer shows every line; the head + tail bound is the histories')
+const PAGE_SLOTS = new Set(['', 'helper', 'warm', 'subagent']);
 const _pageSnaps = new Map();   // slot → snapshot
 const slotOf = (payload) => (payload && PAGE_SLOTS.has(payload.slot) ? payload.slot : '');
 // B-f3f9: the merged history of ONE conversation, kept for its pages (codexHistoryMergedPage) — its own snapshot beside the lines'
@@ -86,7 +88,7 @@ function runOp(op, payload = {}) {
           const t = _codex().readJsonlTail(payload.fp, null, { dropSubagent: !!payload.dropSubagent });
           snap = { token, fp: payload.fp, slot, entry: t.entry, mode: t.mode, bytes: t.bytes, lines: null, timer: null };
         } else {
-          const content = _codex().readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false });
+          const content = _codex().readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false, whole: !!payload.whole });   // `whole`: the sub-agent viewer's read, the file entire
           snap = { token, fp: payload.fp, slot, lines: content.split('\n'), timer: null };
         }
         _pageSnaps.set(slot, snap);
@@ -208,7 +210,7 @@ function runOp(op, payload = {}) {
       // filtering here would ship less across the thread boundary — the caller
       // passes dropSubagent to keep the wire payload minimal.
       const { readJsonlBounded } = _codex();
-      const content = readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false });
+      const content = readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false, whole: !!payload.whole });
       const records = [];
       const dropSub = !!payload.dropSubagent;
       for (const line of content.split('\n')) { const msg = parseTailLine(line, dropSub); if (msg !== undefined) records.push(msg); }

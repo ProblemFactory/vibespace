@@ -3316,6 +3316,7 @@ export default {
   "The API refused {model} — pick another model": "API が {model} を拒否しました——別のモデルを選んでください",
   "The API refused {model} — the lock still asks for it; unlock or pick another": "API が {model} を拒否しました——ロックは引き続きこのモデルを求めます。ロックを解除するか、別のモデルを選んでください",
   "No transcript found for this agent.": "このエージェントのトランスクリプトが見つかりません。",
+  "This agent’s log could not be read here: {why}": "このエージェントのログをここで読み込めませんでした：{why}",
   "Nothing to apply — {n} marked session(s) could no longer be found": "適用対象がありません — マークした {n} 件のセッションが見つかりませんでした",
   "Notify when a machine opens a new port": "マシンが新しいポートを開いたら通知する",
   "One-shot scan — click ⟳ to re-scan this host.": "一回限りのスキャン — ⟳ をクリックしてこのホストを再スキャン。",

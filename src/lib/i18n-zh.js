@@ -3316,6 +3316,7 @@ export default {
   "The API refused {model} — pick another model": "API 拒绝了 {model}——请选择其他模型",
   "The API refused {model} — the lock still asks for it; unlock or pick another": "API 拒绝了 {model}——锁仍在要求它；请解锁或选择其他模型",
   "No transcript found for this agent.": "未找到该 agent 的转录。",
+  "This agent’s log could not be read here: {why}": "这里无法读取该 agent 的日志：{why}",
   "Nothing to apply — {n} marked session(s) could no longer be found": "没有可应用的操作 — 已标记的 {n} 个会话已不存在",
   "Notify when a machine opens a new port": "机器新开放端口时通知我",
   "One-shot scan — click ⟳ to re-scan this host.": "一次性扫描 — 点击 ⟳ 重新扫描此主机。",

@@ -7,6 +7,8 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 scripts/test-channel-store-heap.mjs (NEW, fast — B-360d r2542) — the channel store keeps no start-read text: a stand-in index of 8 000 rows (a title outside Latin-1), the store in a child (--expose-gc), its settled heap a row under twice the file's bytes a row; RED: the takeText line removed
 scripts/fixtures/channel-store-heap-child.cjs (NEW — B-360d r2542) — test-channel-store-heap's child: one store over a stand-in, its settled heap after the open's layout warm-up landed
+src/server/subagent-transcript.js (NEW — 主开发 r2374) — a finished agent's transcript found (kept place, cwd's folder first, async walk) and read by the transcript pool's pages, whole, one read at a time; the sub-agent attach + GET /api/subagent-messages; a pool refusal said ⇒ kb-file-structure
+scripts/test-subagent-transcript.mjs (NEW, fast) — the sub-agent viewer's attach and route off the loop: zero sync listings / whole reads counted, the place kept, ten windows at once, the pool refusing, 37 MB whole; a red copy each
 scripts/test-channels-agent-cli-verbs.mjs (NEW, heavy — B-7e49) — test-channels-agent-cli's legs that run the shipped CLI as a child moved verbatim with the stub: the verbs, the attachment verb, ⑳–㉔; the table (CLI presence, refused-set census) stays fast + a pin
 
 ```
@@ -2333,6 +2335,37 @@ The owner's Mac (2.369.358, 2026-10-26): «leg up» at the offer, 45 s black, `c
 - **The class is the law.** `chat-msg-system chat-conn-notice`, never `chat-msg`: `_trimEdge`, the index landings of search and jumpToIndex, and the timestamp walks all select `.chat-msg`, and a card with no record moved `_trimEdge`'s bounds. Every rebuild's sweep selects `.chat-msg, .chat-msg-system`, so it still goes. `kindOf` reads a non-card as null: it breaks a fold run exactly as the old row did. The fold observer watches `childList` only, so a patch costs no pass.
 - **src/lib/chat-view.js.** The notice's `clock` is `timeOn` (src/lib/owner-facts.js: the owner's clock, 24-hour, the page's zone; the notice first printed the browser's locale, «02:05 PM» in a Chinese sentence). `_stateHandler`: `_connNotice.down()` / `.up()` where the two appendSystem calls were; `onPaint` follows the row when pinned (appendSystem never scrolled: a second notice sat cut off under the composer, caught on a shot, not by a leg, then pinned); the order `up()` then `_reconnectAttach()` is pinned by test-hidden-view-suspend §6. `_reattach`'s handler computes `missedFrames` = it asked with `sinceSeq` and no `slab:'held'` came back; on the rebuild road (`epochChanged` or `_resetPending`) a miss is `_connNoticeOwed`, paid after `_fullViewReset`'s slab and drain, because its sweep would take the row. `_trimEdge` calls `_connNotice?.dropStranded(side)` after its cut (optional: test-chat-trim-guard drives it over a stub view). chat-view-seek's teleport trim does not: that window is rebuilt at every jump and only its gap cards are cut.
 - **src/lib/chat-search.js** `applyHighlightLayer` skips a text node inside `.chat-conn-notice`. **public/chat.css** `.chat-conn-notice`: never shrunk in the flex column, no card's containment. It reads as a centred pill where the old row, a `.chat-msg`, drew a full-width band.
+
+### src/server/subagent-transcript.js — A FINISHED AGENT'S TRANSCRIPT, FOUND AND READ OFF THE HUB'S LOOP (lane lg-recovery, 主开发 r2350 / r2374)
+- **Why:** the sub-agent viewer (the chat's helper card and the workflow window both open a `viewSubagent` window) attaches `sub-agent-<agentId>` over the WebSocket. src/ws-handler.js answered that attach by doing all of this on the hub's main loop, at every open and every re-attach (a reconnect re-attaches every open window in one turn):
+  - listing the projects root;
+  - trying `<dir>/<conversation>/subagents/workflows` in every project folder;
+  - `existsSync` on every candidate;
+  - reading, splitting and parsing the whole transcript.
+  GET /api/subagent-messages did the same and converted every record at once. Measured on a stand-in, at 300 / 1000 project folders and 1 / 5 / 20 MB transcripts: the attach 11–119 ms an open, the route 24 ms – 1.7 s an ask. No client asks the route; it stays for the API reference.
+- **FIND (`findAgentTranscript`), in the release's candidate order, never a `*Sync` call:**
+  1. a path the caller already holds (a remote parent's pulled copy);
+  2. the place KEPT for this conversation and agent (one stat; bounded to 256, the oldest dropped);
+  3. the cwd's folder: its direct `agent-<id>.jsonl`, then its `workflows/<run>/`;
+  4. every other project folder, asynchronously (`fs.promises`).
+  The place found is kept.
+- **READ (`readAgentTranscript`):** `readJsonlBoundedParsedPagedAsync` (src/adapters/codex.js) on the transcript worker's slot `subagent`, with `whole: true`.
+  - The worker reads the file ENTIRE: `readJsonlBounded`'s `whole` takes its small-file branch, so past the 2 MB + 32 MB head + tail bound no middle is hidden. A 37 MB agent comes back whole.
+  - It parses in pages from a line offset, and the main thread takes the records page by page, the loop free between them.
+  - Its `.meta.json` is read asynchronously.
+- **THE STORM BOUND:** ONE read at a time, in the order asked: the history lane is one worker, with one snapshot per slot. Asks of the SAME file while its read waits or runs share it. A reconnect with N agent windows open makes one queue of at most N distinct reads. Each window is acked at once (`attach-ack`) and keeps what it shows until its answer. A first open that waits 20 s says «Still loading this agent's transcript» (chat-view's attach watchdog).
+- **A REFUSAL BY NAME, never a read on the loop.** A refusal is: no pool on the process, its heap bound, its lane busy, or its workers down.
+  - The attach says it as `loadRefused`. The viewer words it: «This agent's log could not be read here: {why}» (zh / ja).
+  - The route answers 503 `{ error, refused }`.
+- **The conversion:** the attach kept user / assistant / result records and converts with `convertHistoryAsync`, as it did. The route now converts with `convertHistoryAsync` too (paced 25 ms slices), never one hold.
+- **Gated by** scripts/test-subagent-transcript.mjs (fast), each leg with a red copy:
+  - ① zero synchronous listings and whole reads on the loop, counted, against the release's cards;
+  - ② the place kept;
+  - ③ ten windows at once;
+  - ④ the pool refusing;
+  - ⑤ the route;
+  - ⑥ whole.
+- **Census:** scripts/test-sync-fs-census.mjs dropped the route's row (4 → 0) and the attach's sub-agent sites from handleMessage's row (6 → 2: the chat wrapper's sidecar only).
 
 ### src/server/ws-heartbeat.js + src/ws-keepalive.js `drainMark` — A SLOW CLIENT IS NOT A DEAD ONE (lane connection-notice-once)
 - **One rule, one measurement (round 3).** The rule is src/ws-keepalive.js `livenessVerdict`, the measurement `drainMark` beside it; `armKeepalive` reads them directly, the heartbeat through `drainVerdict` (round 4). The keepalive's old measurement (`bytesWritten − writableLength`, `bufferedAmount`) carried no ghost but held a frame whole: real sockets, one 12 MiB frame at 400 KB/s, 2 s rounds ⇒ cut at round 2, never landed. Now landed, never cut. Per caller, on purpose: the cadence (20 s / 30 s), and the heartbeat's grace round (the keepalive has none: on the same probe it did not need one at 400 KB/s).
