@@ -926,10 +926,15 @@ console.log('⑮ (lane vault-standing-request r11, MINOR 2) THE «谁可以用�
   // wrFiles through this suite's own memo (each read it from disk again); a control still plants its ONE file over it
   const WR_TEXT = new Map();
   const wrText = (f) => { let t = WR_TEXT.get(f); if (t === undefined) { try { t = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { t = ''; } WR_TEXT.set(f, t); } return t; };
+  // r1708 (B-7e49 slice 2, lane bl-tests-e): THE WRITE LINES ONCE A TEXT — the census and its two RED controls tested WRITE_RE
+  // (no /g: stateless) on every line of every file; each text's matching lines are found once here and the census judges only
+  // those, its every condition as before
+  const WRITE_LINES = new Map();
+  const writeLinesOf = (text) => { let r = WRITE_LINES.get(text); if (r === undefined) { r = []; text.split('\n').forEach((l, i) => { if (WRITE_RE.test(l)) r.push([l, i]); }); WRITE_LINES.set(text, r); } return r; };
   const censusOf = (textOf) => {
     const unnamed = [], noStamp = [], counts = new Map(WHOLE_ROW.map((w) => [w, 0]));
     for (const f of wrFiles) {
-      String(textOf(f) || '').split('\n').forEach((l, i) => {
+      writeLinesOf(String(textOf(f) || '')).forEach(([l, i]) => {
         const tl = l.trim();
         if (!WRITE_RE.test(l) || /^(\/\/|\*|\/\*)/.test(tl) || /^(async )?function (setRow|saveRow|restoreRow|carry|carryWildcards)\(/.test(tl)) return;
         if (f === 'src/server/vault-use-grants.js' && /\.(set|remove)\(U\.DOOR/.test(l) && !/\b(setRow|saveRow|rawSetRow|restoreRow|carryWildcards)\(|\.carry\(/.test(l)) return;   // the one writer's own store writes (each inside a named function above)

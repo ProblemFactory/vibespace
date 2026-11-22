@@ -64,7 +64,10 @@ const TEXTS = new Map();
 const read = (rel) => { let t = TEXTS.get(rel); if (t === undefined) TEXTS.set(rel, t = fs.readFileSync(path.join(REPO, rel), 'utf8')); return t; };
 const DIRENTS = new Map();
 const direntsOf = (d) => { let es = DIRENTS.get(d); if (es === undefined) DIRENTS.set(d, es = fs.readdirSync(path.join(REPO, d), { withFileTypes: true })); return es; };
-const stripComments = (src) => src.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n');
+// r1708 (B-7e49 slice 2, lane bl-tests-e): stripComments ONCE A TEXT — §②'s two walks and the single-file reads stripped the same
+// texts again; the answer is kept per text (a control's text is its own entry)
+const STRIPPED = new Map();
+const stripComments = (src) => { let r = STRIPPED.get(src); if (r === undefined) STRIPPED.set(src, r = src.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n')); return r; };
 
 const ROOT = scratch('browser-idcensus');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });

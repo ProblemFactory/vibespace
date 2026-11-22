@@ -91,6 +91,11 @@ const readSrc = (f) => { let t = SRC_TEXT.get(f); if (t === undefined) { try { t
 // r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — 5c and 5d's own scope (src/ minus every public/ folder, .js) is
 // LISTED once (three passes walked it afresh), and every whole-tree pass reads its text through readSrc above (four passes
 // bypassed it: 5c's users, §10's read census, §14's others, §15's texts0). A mutant copy is still read from disk.
+// r1708 (B-7e49 slice 2, lane bl-tests-e): THE COMMENT STRIP ONCE A TEXT — five passes (5d's door census, §8's, §10's read
+// census, §12's, §13's) stripped every file with the SAME three expressions; the profile put ~5 s of the suite's 15.8 in them.
+// One memo of this suite's own: text → its stripped form (each pass's own `strip` is this one, unchanged in what it returns).
+const STRIP3 = new Map();
+const strip3 = (src) => { let r = STRIP3.get(src); if (r === undefined) { r = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1'); STRIP3.set(src, r); } return r; };
 const SRC_LISTS = new Map();
 const srcListedNoPublic = (dir) => { if (!SRC_LISTS.has(dir)) { const walkNP = (d0) => fs.readdirSync(path.join(REPO, d0), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : walkNP(path.join(d0, d.name))) : /\.js$/.test(d.name) ? [path.join(d0, d.name)] : []); SRC_LISTS.set(dir, walkNP(dir)); } return SRC_LISTS.get(dir); };
 
@@ -887,7 +892,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 //                  through `vendor(rec, e, …)`, where the adapter's meter charges the account's minute.
 {
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
-  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const strip = strip3;   // the one strip, memoised (r1708)
   /** THE CENSUS: rows [name, pass, detail] over the engine's + the routes' + every server file's text.
    *  lane channel-attach-read (B-d6b9, design 005 §4): the AGENT's route is the second caller, admitted ONLY behind its
    *  two conditions — the read route's REACH asked first inside attachment() (before the cache: a cached picture of a
@@ -1168,7 +1173,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 //            (BYID_MEMORY_MS) — `fetchMissing` is invoked only from the change feed's page (`feedPage`).
 {
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
-  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const strip = strip3;   // the one strip, memoised (r1708)
   const bodyOf = (E, head) => { const at = E.indexOf(head); if (at < 0) return ''; const end = E.indexOf('\n  }\n', at); return end < 0 ? '' : E.slice(at, end); };
   const census = (engineSrc, serverTexts) => {
     const rows = [];
@@ -1225,7 +1230,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 //   MEASURED      MEASURED_CONNECTS: our own process 0 internet-family calls, the app-server's startup set recorded;
 //   LIVE (strace) the helper over the STUB app-server with an EMPTY CODEX_HOME opens ZERO internet connections.
 {
-  const strip8 = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const strip8 = strip3;   // the one strip, memoised (r1708)
   const APP_SERVER = /\[\s*['"]app-server['"]/g;
   const ALLOW_APP_SERVER = {
     'src/codex-thread-read.js': 'B-21e4: the thread/read fallback for a thread with no rollout (navigation-triggered; parked as B-af31)',
@@ -1518,7 +1523,7 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
 //              `signing_secret` / `oauth_authorize_url` are never read on this (http) path.
 {
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
-  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const strip = strip3;   // the one strip, memoised (r1708)
   const bodyOf = (S, head) => { const at = S.indexOf(head); if (at < 0) return ''; const end = S.indexOf('\n  }\n', at); return end < 0 ? '' : S.slice(at, end); };
   const census = (slackSrc, serverTexts) => {
     const rows = [];
@@ -1651,7 +1656,7 @@ console.log('§14 the Channels raw API: ONE fetch site, the host table, the gran
 console.log('§15 the listed-provider refresh: a person\'s press · the vault · once a minute · cached');
 {
   const MOD = 'src/server/provider-models.js', DOOR = 'src/routes/provider-models.js', WIRE = 'src/server/account-usage-routes.js';
-  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const strip = strip3;   // the one strip, memoised (r1708)
   const TIMER = /\b(?:setTimeout|setInterval|setImmediate|cron|schedule)\s*\(/;
   const texts0 = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), readSrc(f)]; } catch { return [path.relative(REPO, f), '']; } }));
   // → the census's findings (an empty list = green)

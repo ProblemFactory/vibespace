@@ -83,6 +83,11 @@ function editAnchor(text, from, to, file, mode = 'one') {
 const TEXT = new Map();
 const textOf = (f) => { let r = TEXT.get(f); if (!r) { try { r = { t: fs.readFileSync(path.join(REPO, f), 'utf8') }; } catch (e) { r = { e }; } TEXT.set(f, r); } return r; };
 const read = (f) => { const r = textOf(f); return r.e ? '' : r.t; };
+// r1708 (B-7e49 slice 2, lane bl-tests-e): THE DICTIONARY PARSE ONCE A TEXT — six legs parsed zh / ja again through
+// i18n-extract's dictEntries, whose decodeLit compiles a Function per literal (the profile: ~2.2 s of the suite's 18); the
+// entries are kept per text here (the callers only spread and map them)
+const DICT_ENTRIES = new Map();
+const dictEntriesOnce = (dictEntries, text) => { let r = DICT_ENTRIES.get(text); if (r === undefined) DICT_ENTRIES.set(text, r = dictEntries(text)); return r; };
 /** a file's text under `root`: the repo's through the memo (a failed read throws again), any other root's from disk */
 const textAt = (root, f) => { if (root !== REPO) return fs.readFileSync(path.join(root, f), 'utf8'); const r = textOf(f); if (r.e) throw r.e; return r.t; };
 const cleanup = [];
@@ -1169,8 +1174,11 @@ const ATT = Object.keys(A.SPEND_REASONS).filter((r) => A.SPEND_REASONS[r].attend
 const PRESS_FILE_RE = new RegExp("\\bpressed\\b(?=\\s*(?:[,:})=?]|\\)|&&|\\|\\|))|\\bpressOf\\(|\\bisPress\\(|spendReason: '(?:" + Object.keys(A.SPEND_REASONS).filter((r) => A.SPEND_REASONS[r].attended === true).join('|') + ")'");
 const astCache = new Map();
 function collect(f, src) {
-  const c = astCache.get(f);
-  if (c && c.src === src) return c;
+  // r1708: the cache keeps EVERY text it parsed for a file (a mutant's text no longer evicts the real one, which the next census
+  // then parsed again)
+  let byText = astCache.get(f); if (!byText) astCache.set(f, byText = new Map());
+  const c = byText.get(src);
+  if (c) return c;
   const ast = parseAst(src);
   const out = { src, ok: !!ast, funcs: [], calls: [], sites: [], props: [], decls: [], mints: [], assigns: [], aliases: [] };
   if (ast) astVisit(ast, (n, parents) => {
@@ -1184,7 +1192,7 @@ function collect(f, src) {
     } else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === 'press') out.decls.push({ f, n });
     else if (n.type === 'AssignmentExpression' && n.left.type === 'MemberExpression' && kname(n.left.property) === 'pressed') out.assigns.push({ f, n });
   });
-  astCache.set(f, out);
+  byText.set(src, out);
   return out;
 }
 let PRESS_FILES = null;
@@ -1924,7 +1932,7 @@ console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn b
   {
     const LY = await import(path.join(REPO, 'src/lib/user-todos-layout.js'));
     const { dictEntries } = await import('./i18n-extract.mjs');
-    const dict = (f) => new Map([...dictEntries(read(f))].map((e) => [e.key, e.value]));
+    const dict = (f) => new Map([...dictEntriesOnce(dictEntries, read(f))].map((e) => [e.key, e.value]));
     const ZH = dict('src/lib/i18n-zh.js'), JA = dict('src/lib/i18n-ja.js');
     const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));
     const T = { en: (k, p) => fill(k, p), zh: (k, p) => fill(ZH.has(k) ? ZH.get(k) : `«MISSING ${k}»`, p), ja: (k, p) => fill(JA.has(k) ? JA.get(k) : `«MISSING ${k}»`, p) };
@@ -3791,7 +3799,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const vi = A.authorizeUnattendedSpend({ reason: 'peer-message', identity: IDg, state: A.emptyBudget(), limits: Li });
     ok('§5g (3) a blank INSTANCE cap: refused, «on this instance»', vi.why === 'instance-cap' && /on this instance — set a number/.test(A.refusalI18n(vi, {}).text.key));
     const { dictEntries } = await import('./i18n-extract.mjs');
-    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    const ZH = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
     const SSm = require(path.join(REPO, 'src/stash-summary.js'));
     const toast = SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, capUnset: true, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {});
     ok('§5g (3) the hand-over toast says it (no limit is set — set a number) with the Spending door; a 0 cap still says «switched off»',
@@ -4018,7 +4026,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       W.stash.length === 0 && W.counts().promisedHour === 3 && W.logs.filter((l) => /could not be asked back out now/.test(l)).length === 2 && unheld.length === 2 && unheld.every((x) => /past the limit/.test(x.i18n.text.key)), JSON.stringify({ logs: W.logs, inbox: W.inbox.map((x) => x.text) }));
     ok('§5g (2) PACED: five sweeps ask each frame ONCE (2 asks — never one sidecar read per frame per sweep)', W.pulls.length === 2, JSON.stringify(W.pulls));
     const { dictEntries } = await import('./i18n-extract.mjs');
-    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    const ZH = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
     const UK = [...A.UNHELD_WORDS.cap, ...A.UNHELD_WORDS.ledger, A.UNHELD_WORDS.door];
     ok('§5g (2) …the For-you line\'s words are in zh and ja', UK.every((k) => ZH.has(k) && JA.has(k)), UK.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
   }
@@ -4141,7 +4149,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const SSh = require(path.join(REPO, 'src/stash-summary.js'));
     const k = SSh.heldKeyOf({ kind: 'spend-cap', why: 'ledger-unreadable', capHeld: true }), kc = SSh.heldKeyOf({ kind: 'spend-cap', why: 'cap-lowered', capHeld: true });
     const { dictEntries } = await import('./i18n-extract.mjs');
-    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    const ZH = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
     ok('§5g (2) r2 THE RIGHT REASON ON THE CARD: what the ledger held says «the record of turns nobody typed could not be read» (zh/ja); a lowered cap keeps «the spending ceiling held them»',
       k === 'spend-ledger' && /record of turns nobody typed could not be read/.test(SSh.HELD_WHY[k]) && SSh.HELD_WHY[kc] === 'the spending ceiling held them' && ZH.has(SSh.HELD_WHY[k]) && JA.has(SSh.HELD_WHY[k]), JSON.stringify({ k, kc }));
     // B-ef83 smalls: what a restart's overlap held (another process kept the ledger) says THAT, never the cap's words
@@ -4260,7 +4268,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
   {
     const JL = await import(path.join(REPO, 'src/lib/jobs-layout.js'));
     const { dictEntries } = await import('./i18n-extract.mjs');
-    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    const ZH = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntriesOnce(dictEntries, read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
     const fill = (str, p) => String(str).replace(/\{(\w+)\}/g, (mm, x) => (p && p[x] !== undefined ? String(p[x]) : mm));
     const words = JL.heldText({ total: 2, byConversation: { c: { count: 2, reason: { kind: 'spend-cap', why: 'hour-cap', cap: 0, capUnset: true, identity: 'G' }, kinds: { 'spend-cap': 2 } } } }, { t: fill, cid: 'c' });
     const zero = JL.heldText({ total: 2, byConversation: { c: { count: 2, reason: { kind: 'spend-cap', why: 'hour-cap', cap: 0, identity: 'G' }, kinds: { 'spend-cap': 2 } } } }, { t: fill, cid: 'c' });
@@ -5311,7 +5319,7 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
 {
   const LY = await import(path.join(REPO, 'src/lib/user-todos-layout.js'));
   const { dictEntries } = await import('./i18n-extract.mjs');   // THE one dictionary entry parser (scripts/i18n-check.mjs's)
-  const dict = (f) => new Map([...dictEntries(read(f))].map((e) => [e.key, e.value]));
+  const dict = (f) => new Map([...dictEntriesOnce(dictEntries, read(f))].map((e) => [e.key, e.value]));
   const ZH = dict('src/lib/i18n-zh.js'), JA = dict('src/lib/i18n-ja.js');
   const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));
   const T = { en: (k, p) => fill(k, p), zh: (k, p) => fill(ZH.has(k) ? ZH.get(k) : `«MISSING ${k}»`, p), ja: (k, p) => fill(JA.has(k) ? JA.get(k) : `«MISSING ${k}»`, p) };

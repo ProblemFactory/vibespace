@@ -61,6 +61,11 @@ function codeOf(text) {
   for (const [a, b] of spans) s = s.slice(0, a) + s.slice(a, b).replace(/[^\n]/g, ' ') + s.slice(b);
   return s;
 }
+// r1708 (B-7e49 slice 2, lane bl-tests-e): A FILE'S CODE ONCE A TEXT — census() parsed (acorn) and blanked the comments of
+// every hit file again for the base and each of its six mutants and controls (the profile: codeOf ~3.75 s of the suite's 6.3);
+// codeOf is pure, so its answer is kept per text (a mutant's text is its own entry)
+const CODE_OF = new Map();
+const codeOfOnce = (text) => { if (!CODE_OF.has(text)) CODE_OF.set(text, codeOf(text)); return CODE_OF.get(text); };
 const anyToken = new RegExp(TOKENS.map(([, re]) => re.source).join('|'));
 /** THE CENSUS over src/ (+ `overrides`: rel → text, a text of null removes the file). → { rows, problems } */
 function census(overrides = {}) {
@@ -69,7 +74,7 @@ function census(overrides = {}) {
   for (const rel of files) {
     const text = Object.prototype.hasOwnProperty.call(overrides, rel) ? overrides[rel] : tree().get(rel);
     if (text == null || !anyToken.test(text)) continue; // the prefilter: most files name none of them, even in a comment
-    const code = codeOf(text);
+    const code = codeOfOnce(text);
     if (code == null) { problems.push(`${rel}: acorn cannot read it — the census cannot see its code`); continue; }
     const sites = [];
     for (const [name, re] of TOKENS) for (const m of code.matchAll(re)) sites.push({ name, line: code.slice(0, m.index).split('\n').length, text: m[0] });
