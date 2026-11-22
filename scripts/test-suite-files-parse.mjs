@@ -22,6 +22,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies, unanchoredEdits, anchorHelpers, scriptCensus } from './mutant-copy.mjs';
+import { paramTextEdits, censusAll } from './lib/param-text-census.mjs';   // B-0d3e slice 8: the second list (a module only this suite imports)
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const acorn = createRequire(path.join(REPO, 'package.json'))('acorn');
@@ -93,10 +94,12 @@ console.log('§1 THE TREE — every file under scripts/ that Node would load as 
   // B-7e49 (主开发 r2206): both of §3's censuses over ONE walk an AST (scripts/mutant-copy.mjs scriptCensus): the parse is the
   // law's own and serves both laws; no other reader in this process parses these files, and nothing is kept across runs
   const self = path.basename(fileURLToPath(import.meta.url));
-  var EDITS = {}, HELPERS = {};   // eslint-disable-line no-var — §3 reads them
+  var EDITS = {}, HELPERS = {}, PARAMS = {};   // eslint-disable-line no-var — §3 reads them (PARAMS: the second list, B-0d3e slice 8)
   // B-0d3e (主开发 r2677): the PLANTED site, met by this same walk and asked of the same censuses — kept apart from both lists
-  var PLANT_REL = 'scripts/fixtures/census-plant.mjs', PLANT = null;   // eslint-disable-line no-var — §3 reads them
-  const r = unparseable(REPO, { visit: (rel, src, ast) => { if (rel === PLANT_REL) { PLANT = { src, ...scriptCensus(src, { ast }) }; return; } const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel); if (!m || m[1] === self) return; const { edits: e, helpers: h } = scriptCensus(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; } });
+  // it rides the SAME branch as every script (a key of its own in the same maps; §3 takes it out before judging): a broken filter
+  // or collection empties the lists AND the plant, so the plant legs go red with them
+  var PLANT_REL = 'scripts/fixtures/census-plant.mjs', PLANT_KEY = 'fixtures/census-plant.mjs', PLANT_SRC = null, PLANT = null;   // eslint-disable-line no-var — §3 reads them
+  const r = unparseable(REPO, { visit: (rel, src, ast) => { const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel) || (rel === PLANT_REL ? [rel, PLANT_KEY] : null); if (!m || m[1] === self) return; if (m[1] === PLANT_KEY) PLANT_SRC = src; const { edits: e, helpers: h, paramEdits: pe } = censusAll(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; if (pe.length) PARAMS[m[1]] = pe; } });
   const ms = Math.round(performance.now() - t0);
   ok(r.files.length >= 1000 && r.files.includes('scripts/ci.mjs') && r.files.includes('scripts/test-suite-files-parse.mjs'),
     `the walk met ${r.files.length} files (${(r.bytes / 1e6).toFixed(1)} MB: ${r.kinds.module} ES modules, ${r.kinds.commonjs} CommonJS, ${r.kinds.detect} by Node's detection), this suite and scripts/ci.mjs among them`);
@@ -189,6 +192,9 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const UFX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unanchored-controls.json'), 'utf-8'));
   const { caps: LISTED, bad: UBAD } = capsOf(UFX, PINS['unanchored-controls']);
   ok(!UBAD.length, `every count of scripts/fixtures/unanchored-controls.json stands under a backlog row's id (${Object.keys(UFX.rows || {}).join(', ')})${UBAD.length ? ` — NO ROW ID: ${UBAD.join(' | ')}` : ''}`);
+  // the PLANT out of the maps before any list is judged (it stands outside every list)
+  if (PLANT_SRC !== null) PLANT = { src: PLANT_SRC, edits: EDITS[PLANT_KEY] || [], helpers: HELPERS[PLANT_KEY] || [], paramEdits: PARAMS[PLANT_KEY] || [] };
+  delete EDITS[PLANT_KEY]; delete HELPERS[PLANT_KEY]; delete PARAMS[PLANT_KEY];
   const per = Object.fromEntries(Object.entries(EDITS).map(([f, e]) => [f, e.length]));
   const total = Object.values(per).reduce((a, b) => a + b, 0);
   const judge = (p, listed) => ({ added: Object.entries(p).filter(([f, n]) => n > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (p[f] || 0) < listed[f]) });
@@ -202,13 +208,34 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   // shape»; the floor it replaces asked the live count to hold half of the list, so the row's own fall would have reddened it).
   // §1's walk parsed scripts/fixtures/census-plant.mjs like every file under scripts/ and both censuses answered there: its one
   // planted helper — its own parameter the anchor of a product edit that reaches a loader and fails by no name — is ONE edit and
-  // ONE anchor helper. A walk, or a census, that read nothing finds nothing there. The plant stands outside both lists.
+  // ONE anchor helper. A walk, or a census, that read nothing finds nothing there. The plants stand outside every list.
   const plantSaid = (c) => (c ? `${c.edits.length} edit(s)${c.edits.length ? ' at line ' + c.edits.map((e) => e.line).join(', ') : ''}, ${c.helpers.length} helper(s)${c.helpers.length ? ' ' + c.helpers.map((h) => h.name).join(', ') : ''}` : 'the walk did not meet it');
   const plantFound = (c) => !!c && c.edits.length === 1 && c.helpers.length === 1 && c.helpers[0].name === 'plantedCut' && c.edits[0].line === c.helpers[0].line;
   ok(plantFound(PLANT), `the walk finds the PLANTED site in ${PLANT_REL} (${plantSaid(PLANT)}) — the census can see: non-vacuous by a plant, not by the list's debt (the live list: ${total} edits in ${Object.keys(per).length} scripts)`);
+  const censusOf = (t) => { let ast = null; try { ast = acorn.parse(t, OPTS.module); } catch { return null; } return censusAll(t, { ast }); };   // a copy that does not parse: null, a red by name
   const unplanted = PLANT ? PLANT.src.split('\n').filter((l) => !l.startsWith('export const plantedCut')).join('\n') : '';
-  const UNP = PLANT ? scriptCensus(unplanted, { ast: acorn.parse(unplanted, OPTS.module) }) : null;
-  ok(!!PLANT && unplanted !== PLANT.src && !plantFound(UNP) && !UNP.edits.length && !UNP.helpers.length, `RED CONTROL: the same censuses over a copy of the plant with its site taken out find ${plantSaid(UNP)} — the leg above would go red`);
+  const UNP = PLANT ? censusOf(unplanted) : null;
+  ok(!!UNP && unplanted !== PLANT.src && !plantFound(UNP) && !UNP.edits.length && !UNP.helpers.length && UNP.paramEdits.length === 1, `RED CONTROL: the same censuses over a copy of the plant with plantedCut taken out find ${plantSaid(UNP)} — the leg above would go red — and still the other plant (${UNP ? UNP.paramEdits.length : '?'} of the second list: the census answered on the copy)`);
+  // THE SECOND LIST (B-0d3e slice 8, 主开发 r2678: «the new kind is counted APART: a second list of the same census with its own
+  // fixture and its own founding pin, its one row B-0d3e … born with the planted control and no count floor»): scripts/lib/param-text-census.mjs
+  // paramTextEdits — a plain edit whose TEXT is a helper's parameter or a loop's variable (no name bound to a product read: those
+  // are the first list's), whose result is the text a loader runs or writes. One-way as the first list: a file over its row's count
+  // is red by name, a count that falls is said; the founding row is pinned («param-text-edits») and only falls.
+  const PFX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'param-text-edits.json'), 'utf-8'));
+  const { caps: PLISTED, bad: PBAD } = capsOf(PFX, PINS['param-text-edits']);
+  ok(!PBAD.length && !!PINS['param-text-edits'], `every count of scripts/fixtures/param-text-edits.json stands under a backlog row's id (${Object.keys(PFX.rows || {}).join(', ')}), its founding row pinned${PBAD.length ? ` — NO ROW ID: ${PBAD.join(' | ')}` : ''}`);
+  const pper = Object.fromEntries(Object.entries(PARAMS).map(([f, e]) => [f, e.length]));
+  const pj = judge(pper, PLISTED);
+  const overP = overLines(pj.added, pper, PLISTED, PARAMS, (e) => `line ${e.line} ${e.text}`);
+  ok(!overP.length, `the second list's edits (a text HANDED by a parameter or a loop, then loaded) never rise without a row's id beside it (the list ${Object.values(PLISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(PLISTED).length} files; live ${Object.values(pper).reduce((a, b) => a + b, 0)} in ${Object.keys(pper).length})${overP.length ? ` — ${overP.length} file(s) over their count, EVERY ONE on its own line below (to admit one on purpose: a row under YOUR backlog id in scripts/fixtures/param-text-edits.json)` : ''}`);
+  sayOver(overP);
+  if (pj.fell.length) console.log(`    (${pj.fell.length} file(s) of the second list now carry fewer — not red; lower their rows when convenient: ${pj.fell.slice(0, 8).join(', ')}${pj.fell.length > 8 ? ', …' : ''})`);
+  // ITS PLANT and ITS RED: plantedHandedText in the same fixture — one edit of this list, none of the first's
+  const plant2 = (c) => !!c && c.paramEdits.length === 1 && c.paramEdits[0].text === "text.replace('const ', 'let ')";
+  ok(plant2(PLANT) && plantFound(PLANT), `the walk finds the second list's PLANTED site in ${PLANT_REL} (plantedHandedText: ${PLANT ? PLANT.paramEdits.map((e) => `line ${e.line} ${e.text}`).join(', ') || 'none' : 'the walk did not meet it'}), and the first list's plant is unchanged by it (${plantSaid(PLANT)})`);
+  const unplanted2 = PLANT ? PLANT.src.split('\n').filter((l) => !l.startsWith('export const plantedHandedText')).join('\n') : '';
+  const UNP2 = PLANT ? censusOf(unplanted2) : null;
+  ok(!!UNP2 && unplanted2 !== PLANT.src && !plant2(UNP2) && !UNP2.paramEdits.length && plantFound(UNP2), `RED CONTROL: the same census over a copy of the plant with plantedHandedText taken out finds ${UNP2 ? UNP2.paramEdits.length : '?'} edit(s) of the second list — the leg above would go red — and still the first plant (${plantSaid(UNP2)}: the census answered on the copy)`);
   const overE = overLines(j.added, per, LISTED, EDITS, (e) => `line ${e.line} ${e.text}`);
   ok(!overE.length, `the unanchored control edits never rise without a row's id beside it (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)${overE.length ? ` — ${overE.length} file(s) over their count, EVERY ONE on its own line below with all its edits: build the new edit with anchored() from scripts/scratch.mjs, or raise the file's count under YOUR backlog row's id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)` : ''}`);
   sayOver(overE);
@@ -229,6 +256,36 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   ok(/^CONTROL BUILT NOTHING: the copy of src\/pairing-token\.js \(«gone-anchor»\)/.test(threw(() => MUT.write('src/pairing-token.js', real.replace('a line no file has', ''), 'gone-anchor')) || ''), 'CONTROL: a mutant copy byte-identical to its file (its edit found no anchor) FAILS BY NAME in scripts/mutant-copy.mjs');
   ok(!threw(() => MUT.write('src/pairing-token.js', real, 'deliberate', { same: true })) && !threw(() => MUT.write('src/pairing-token.js', real, null, { name: 'closed-world-copy' })) && !threw(() => MUT.write('src/pairing-token.js', real + '\n// planted', 'edited')), 'a deliberate unpatched copy says so ({ same: true }, or a closed world\'s name); a real edit writes');
   const P = (body) => `import fs from 'node:fs';\nconst src = fs.readFileSync(path.join(REPO, 'src/x.js'), 'utf8');\n${body}\n`;
+  // THE SECOND LIST'S RULES (B-0d3e slice 8), each pinned by a planted script (P builds it: a product read, then the body; `true` = the body alone)
+  const CASES2 = [
+    ["const cut = (s, a, b) => MUT.load('src/x.js', s.replace(a, b), 't');", 1, "a helper HANDED the text: its edit is the text a copy loads"],
+    ["const m = MUT.load('src/x.js', [['a', 'b']].reduce((t, [a, b]) => t.replace(a, b), src), 't');", 1, "a fold's step: the fold's answer is the copy's text"],
+    ["const f = (s) => { for (const [a, b] of [['a', 'b']]) s = s.replace(a, b); return s; }; const m = MUT.load('src/x.js', f(src), 't');", 1, "a loop's edit in a helper whose call is a copy's text"],
+    ["const sw = (s, a, b) => s.replace(a, b); const m = MUT.load('src/x.js', sw(src, 'a', 'b'), 't');", 1, "a helper that returns its edit, its call a copy's text"],
+    ["const g = (s) => { const out = s.replace('a', 'b'); return MUT.load('src/x.js', out, 't'); };", 1, "held in a name the copy's text names"],
+    ["const w = (s) => fs.writeFileSync('/tmp/x.js', s.replace('a', 'b'));", 1, "writeFileSync's data"],
+    ["const nf = (s) => new Function('x', s.replace('a', 'b'));", 1, "new Function's body (its last argument)"],
+    ["const g = (name) => MUT.load('src/x.js', src, name.replace(/\\W+/g, '-'));", 0, "a copy's NAME edited is no control"],
+    ["const g = (k) => fs.writeFileSync('/tmp/x', JSON.stringify({ k: k.replace(/x/g, 'y') }));", 0, "an edit nested in written data hands nothing on whole"],
+    ["function editAnchor(text, from, to) { return text.replace(from, to); } const m = MUT.load('src/x.js', editAnchor(src, 'a', 'b'), 't');", 0, "the edit inside editAnchor itself"],
+    ["const g = (s) => MUT.load('src/x.js', s.replace(\"require('./y.js')\", 'z'), 't');", 0, "a module path re-bound (a literal naming require)"],
+    ["const g = (s) => MUT.load('src/x.js', s.replace('a', 'b'), 't');\n", 0, "a script that reads no product file (the door)", true],
+    ["const g = (src) => MUT.load('src/x.js', src.replace('a', 'b'), 't');", 0, "a parameter that shares a product binding's name is the first list's"],
+    ["const c = editAnchor(src, 'q', 'r', 'f'); const g = (c) => MUT.load('src/x.js', c.replace('a', 'b'), 't');", 0, "a name bound to a cured link is the first list's"],
+    ["const g = (s) => MUT.load('src/x.js', s.replace('a', 'b').replace('c', 'd'), 't');", 2, "each link of a chain the copy loads (the chain step)"],
+    ["const sw = (s, a, b) => { return s.replace(a, b); }; const m = MUT.load('src/x.js', sw(src, 'a', 'b'), 't');", 1, "a helper's return in a block body"],
+    ["for (const t of [src]) MUT.load('src/x.js', t.replace('a', 'b'), 't');", 1, "a loop's variable as the text"],
+    ["const g = (s) => MUT.load('src/x.js', editAnchor(s.replace('a', 'b'), 'c', 'd', 'f'), 't');", 1, "an edit handed on through a cure's text argument"],
+    ["const pre = [['a', 'b']].reduce((x, [a, b]) => x.replace(a, b), src); fs.writeFileSync('/tmp/x.js', pre);", 1, "a fold's answer held in a name the data is"],
+    ["const f = (s) => [['a', 'b']].reduce((t, [a, b]) => t.replace(a, b), s); const m = MUT.load('src/x.js', f(src), 't');", 1, "a helper whose body is a fold"],
+    ["const m = MUT.load('src/x.js', [['a', 'b']].reduce((t, [a, b]) => { return t.replace(a, b); }, src), 't');", 1, "a fold's step with a block body"],
+    ["const r = (s) => vm.runInContext(s.replace('a', 'b'), {});", 1, "a vm run in a context (its first argument)"],
+    ["const g = (k) => { const v = k.replace('a', 'b'); return MUT.load('src/x.js', src.replace('A', v), 't'); };", 0, "a name only PART of a copy's text (a replacement value) hands nothing on whole"],
+    ["const sw = (s) => s.replace('a', 'b'); const m = MUT.load('src/x.js', src.replace('A', sw('x')), 't');", 0, "a helper's call only PART of a copy's text hands nothing on whole"],
+    ["const editAnchor = (t, f, to) => t.replace(f, to); const m = MUT.load('src/x.js', editAnchor(src, 'a', 'b'), 't');", 0, "the cure bound as an arrow"],
+  ];
+  const miss2 = CASES2.map(([body, want, why, raw]) => { const t = raw ? body : P(body); const got = paramTextEdits(t).length, viaWalk = censusAll(t, { ast: acorn.parse(t, OPTS.module) }).paramEdits.length; return [got, viaWalk, want, why]; }).filter(([g, v, w]) => g !== w || v !== w);
+  ok(!miss2.length, `CONTROL: the second list's ${CASES2.length} rules each answer as planted, alone and through the one walk${miss2.length ? ' — ' + miss2.map(([g, v, w, why]) => `«${why}»: ${g} alone / ${v} by the walk, ${w} meant`).join(' | ') : ''}`);
   const nA = unanchoredEdits(P("const m = MUT.load('src/x.js', src.replace('a', 'b'), 't');")).length;
   const nB = unanchoredEdits(P("const m = MUT.load('src/x.js', anchored(src, 'a', 'b', 't'), 't');")).length;
   const nC = unanchoredEdits(P("const code = src.replace(/\\/\\/.*$/gm, ''); ok(code.includes('x'), 'read'); const real = MUT.load('src/x.js', src, 'as-is', { same: true });")).length;
