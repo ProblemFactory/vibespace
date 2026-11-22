@@ -146,6 +146,9 @@ console.log('— B-19a9 (r1846 (e)): the «tab gone» note says what ONE bounded
   const LINE = `tab_gone: bound tab is gone (target ${ID}, last url https://example.org/p1b). Run \`agent-browser tab new <url>\` to bind a new tab, or \`agent-browser tab list\` to pick an existing one`;
   ok(ST.tabGoneTargetOf(LINE) === ID && ST.tabGoneTargetOf(LINE.replace(ID, ID.toLowerCase())) === ID && ST.tabGoneTargetOf('bound tab is gone (target ' + ID + ')') === null && ST.tabGoneTargetOf('tab_gone: bound tab is gone') === null && ST.tabGoneTargetOf(LINE.replace(ID, ID.slice(1))) === null,
     'the target a `tab_gone` answer names: its 32 hex (upper-case); no `tab_gone` word, no target, or 31 hex ⇒ null');
+  const OTHER = 'C'.repeat(32);
+  ok(ST.tabGoneTargetOf(LINE + '\n' + LINE.replace(ID, OTHER)) === null && ST.tabGoneTargetOf(LINE + '\n' + LINE) === ID && ST.tabGoneNoteText(ST.tabGoneTargetOf(LINE + '\n' + LINE.replace(ID, OTHER)) ? true : null) === ST.tabGoneNoteText(null),
+    'round wbhiosqcb (1): two `tab_gone` lines naming two DIFFERENT targets ⇒ no id ⇒ neither claim (never «still open» said of the pair); the same target twice ⇒ that id');
   const gone = ST.tabGoneNoteText(false), lives = ST.tabGoneNoteText(true), unread = [null, undefined, 'x'].map((v) => ST.tabGoneNoteText(v));
   const waysOk = (s) => /\[tab_gone\]$/.test(s) && /`vibespace-browser tab list`/.test(s) && /`vibespace-browser tab <id>`/.test(s);
   const livesLaw = (s) => /still open/.test(s) && !/closed/.test(s.replace(/whether it was closed/, '')) && waysOk(s);
@@ -178,20 +181,29 @@ console.log('— B-19a9 (r1846 (e)): the «tab gone» note says what ONE bounded
   const offs = await Promise.all([mk(off.W).fn('ws://192.0.2.1:9222/devtools/browser/x', ID, 1000), mk(off.W).fn('wss://example.org/x', ID, 1000), mk(off.W).fn('', ID, 1000), mk(off.W).fn(URL0, null, 1000), mk(undefined).fn(URL0, ID, 1000)]);
   ok(offs.every((x) => x === null) && off.made.length === 0, 'it DIALS NOTHING but a loopback url: off the loopback (a documentation address), wss, no url, no target id, or no WebSocket in this Node ⇒ null with no socket made', offs);
 
-  // THE WIRING: the look starts ONLY on a `tab_gone` answer, with the conversation's OWN url (the driver's env), BEFORE the audit's
-  // hub call (beside it, never after); the note says the look's verdict; the bound is one second at most; the release's sentence is gone
+  // THE WIRING, AN ORDER PIN (round wbhiosqcb (4): never a character distance): inside the CLI's ONE exit handler, in this order —
+  // the look starts ONLY on a `tab_gone` answer with the conversation's OWN url (the driver's env); then the handler's own audit call
+  // (the look runs beside it); then the note, which says the look's verdict. The bound is one second at most; the release's sentence is gone
+  const LOOK_START = "const tabGoneLook = code !== 0 && /\\btab_gone\\b/.test(outText + errText) && DS && typeof DS.tabGoneTargetOf === 'function' ? targetLives(env && env.AGENT_BROWSER_CDP, DS.tabGoneTargetOf(outText + '\\n' + errText), TAB_LOOK_MS) : null;";
+  const NOTE_CALL = 'DS.tabGoneNoteText(tabGoneLook ? await tabGoneLook : null)';
   const wired = (src) => {
-    const start = src.indexOf("const tabGoneLook = code !== 0 && /\\btab_gone\\b/.test(outText + errText) && DS && typeof DS.tabGoneTargetOf === 'function' ? targetLives(env && env.AGENT_BROWSER_CDP, DS.tabGoneTargetOf(outText + '\\n' + errText), TAB_LOOK_MS) : null;");
-    const audit = src.indexOf("await call('POST', '/api/agent/browser/audit'", start > 0 ? start : 0); // the exit handler's OWN audit call, after the look (the CLI holds others before it)
+    const handler = src.indexOf("child.on('exit', async (code) => {");
+    const start = handler >= 0 ? src.indexOf(LOOK_START, handler) : -1;
+    const audit = start >= 0 ? src.indexOf("await call('POST', '/api/agent/browser/audit'", start) : -1;
+    const note = audit >= 0 ? src.indexOf(NOTE_CALL, audit) : -1;
     const bound = /\nconst TAB_LOOK_MS = (\d+);/.exec(src);
-    return start > 0 && audit > start && audit - start < 4000 && !!bound && Number(bound[1]) > 0 && Number(bound[1]) <= 1000
-      && src.includes('DS.tabGoneNoteText(tabGoneLook ? await tabGoneLook : null)') && !src.includes("console.error('note: your tab is gone (it was closed)"); /* stale-pins: kept — the release's sentence must be ABSENT */
+    return src.split("child.on('exit', async (code) => {").length === 2 && handler >= 0 && start > handler && audit > start && note > audit
+      && !!bound && Number(bound[1]) > 0 && Number(bound[1]) <= 1000 && !src.includes("console.error('note: your tab is gone (it was closed)"); /* stale-pins: kept — the release's sentence must be ABSENT */
   };
   ok(wired(cli), 'the CLI: the look starts only on a `tab_gone` answer, with the driver\'s own AGENT_BROWSER_CDP, before the audit\'s hub call; the note says its verdict; its bound ≤ 1 s; the release\'s sentence is gone');
-  const NOTE_NOW = "console.error(`note: ${DS && typeof DS.tabGoneNoteText === 'function' ? DS.tabGoneNoteText(tabGoneLook ? await tabGoneLook : null) : TAB_GONE_FALLBACK}`);";
-  const rel = anchored(cli, NOTE_NOW, "console.error('note: " + RELEASE + "');", 'b19a9-release-note'); /* stale-pins: kept — the RED copy restores the release's note */
+  // each control RED for ONE reason (round wbhiosqcb (4)): the note's call keeps its shape but ignores the look (always «closed», as
+  // the release said); the look bounded at 5 s; the look started AFTER the audit call (moved below it)
+  const deaf = anchored(cli, NOTE_CALL, 'DS.tabGoneNoteText(false)', 'b19a9-note-ignores-look');
   const late = anchored(cli, 'const TAB_LOOK_MS = 1000;', 'const TAB_LOOK_MS = 5000;', 'b19a9-long-look');
-  ok(!wired(rel) && !wired(late), 'CONTROL (RED): the release\'s note in a copy, and a look bounded at 5 s, each fail the wiring');
+  const lookOut = anchored(cli, '    ' + LOOK_START + '\n', '', 'b19a9-look-out');
+  const NOTE_HEAD = "    if (code !== 0 && /\\btab_gone\\b/.test(outText + errText)) console.error(`note:";
+  const after = anchored(lookOut, NOTE_HEAD, '    ' + LOOK_START + '\n' + NOTE_HEAD, 'b19a9-look-after-audit');
+  ok(!wired(deaf) && !wired(late) && !wired(after) && after.includes(LOOK_START), 'CONTROL (RED), each for ONE reason: the note ignores the look (the release\'s «closed» always), a look bounded at 5 s, the look started after the audit call');
   ok(!/it was closed|still open/.test(cli.match(/const TAB_GONE_FALLBACK = '([^']*)';/)?.[1] || 'it was closed'), 'an install without the words file says neither claim (the CLI\'s own fallback)');
 }
 

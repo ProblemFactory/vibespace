@@ -1158,10 +1158,12 @@ function printWords(tIn) { const t = typeof tIn === 'function' ? (s, q) => tIn(s
  *  binding (a raw CDP url — box row 124: four navigates said it of living tabs). The CLI looks ONCE, bounded, at the conversation's
  *  own url; these say what that look found. PURE. */
 const TAB_GONE_WAYS = '`vibespace-browser tab list` names your tabs; `vibespace-browser tab <id>` switches to one, `vibespace-browser tab new <url>` opens one';
-/** The target id a `tab_gone` answer names (upper-case, 32 hex), else null. */
+/** The target id a `tab_gone` answer names (upper-case, 32 hex), else null. Round wbhiosqcb (1): an answer whose `tab_gone`
+ *  lines name two DIFFERENT targets (a batch) ⇒ null — one look cannot speak for both, so neither claim is made. */
 function tabGoneTargetOf(text) {
-  const m = /\btab_gone\b[^\n]*?\btarget\s+([0-9A-Fa-f]{32})\b/.exec(String(text || ''));
-  return m ? m[1].toUpperCase() : null;
+  const ids = new Set();
+  for (const m of String(text || '').matchAll(/\btab_gone\b[^\n]*?\btarget\s+([0-9A-Fa-f]{32})\b/g)) ids.add(m[1].toUpperCase());
+  return ids.size === 1 ? [...ids][0] : null;
 }
 /** The note for what the look found: false ⇒ it was closed; true ⇒ it is still open (the driver lost it); anything else ⇒ neither claim. */
 function tabGoneNoteText(lives) {

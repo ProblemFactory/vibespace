@@ -63,7 +63,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const V = require('../src/browser-verbs.js');
 
@@ -1430,7 +1430,10 @@ try {
   // ═══ lane browser-resume C (§3.9, the owner's ruling 3): on a SHARED profile's browser the `tab` verbs are the SERVER's ═══
   {
     const KX = path.join(ROOT, 'keeper-xdg-tabs'); fs.mkdirSync(path.join(KX, 'agent-browser'), { recursive: true, mode: 0o700 });
-    const att = (x = {}) => ({ ok: true, kind: 'attachment', mediated: false, handle: 'work', env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a', 'AGENT_BROWSER_NAMESPACE=vs-bp-00000001', 'AGENT_BROWSER_CDP=ws://127.0.0.1:4444/devtools/browser/x'], socketDir: path.join(KX, 'agent-browser'), runtimeDir: KX, profile: { id: 'bp-00000001', label: 'Work' }, lease: { since: Date.now() }, others: 1, handles: [], isDefault: true, pinTab: true, ...x });
+    // B-19a9 (round wbhiosqcb, the line-309 heavies): the attachment's CDP url names a DEAD port — the CLI's tab_gone look dials the
+    // url it is handed, so a fixed fixture port would ask whatever listens there on the test machine (refused here ⇒ «could not be read»)
+    const DEAD_CDP = await deadPort();
+    const att = (x = {}) => ({ ok: true, kind: 'attachment', mediated: false, handle: 'work', env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a', 'AGENT_BROWSER_NAMESPACE=vs-bp-00000001', `AGENT_BROWSER_CDP=ws://127.0.0.1:${DEAD_CDP}/devtools/browser/x`], socketDir: path.join(KX, 'agent-browser'), runtimeDir: KX, profile: { id: 'bp-00000001', label: 'Work' }, lease: { since: Date.now() }, others: 1, handles: [], isDefault: true, pinTab: true, ...x });
     const tabCalls = () => calls.filter((x) => x.path === '/api/agent/browser/tab');
     resolveAnswer = att();
     tabAnswer = { ok: true, act: 'list', view: { tabs: [{ id: 't3', targetId: 'A'.repeat(32), title: 'Mine', url: 'https://a.example/', current: true }], others: 2 }, lines: ['t3  Mine — https://a.example/  [current]', '2 other tabs in this browser are not yours (another conversation\'s, or the user\'s) — never listed, switched to or closed from here'] };
