@@ -13672,6 +13672,7 @@ export default {
   "reset · unconfirmed": "已重置 · 未证实",
   "no reading yet — confirms when a session uses it": "还没有用量读数——有会话用到它时确认",
   "Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it": "它的读数指向「{other}」的每周窗口——在它自己的读取证实之前，这个账号自己的窗口未知",
+  "This account’s weekly window is the same as {other}’s to the second, so it is shown as unknown until this account’s own usage is read — press the refresh": "这个账号的每周窗口与「{other}」的完全相同（精确到秒），因此在读取这个账号自己的用量之前显示为未知——请按刷新",
   "another account": "另一个账号",
   "Open this browser's display in Desktop to act on Chrome's own window": "在「桌面」打开这个浏览器的显示，就能操作 Chrome 自己的窗口",
   "Open in Desktop": "在桌面中打开",

@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
-import { endScratchAtExit } from './scratch.mjs';
+import { endScratchAtExit, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -546,11 +546,14 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   // RED CONTROL: the ring that weighs a phase alone (the hold removed) — Vela re-anchored onto Orin's window, Orin's numbers filed on Vela
   const src = read(ENG);
   const HOLD = "      if (moved && heldBy.length) {\n";
-  const mRed = src.includes(HOLD) ? require(MUT.write(ENG, src.split(HOLD).join("      if (false) {\n"), 'b6a92-no-hold')) : null;
+  // r2619: since the standing check (r2543) a re-anchor onto Orin's instant is held at its stamp's write too — a second barrier, so
+  // this control cuts BOTH (the ring's hold and the check) and says so in its name
+  const SI_FN = 'function holdSameInstants(why, fresh = null) {\n  try {\n';
+  const mRed = src.includes(HOLD) ? require(MUT.write(ENG, anchored(src.split(HOLD).join("      if (false) {\n"), SI_FN, 'function holdSameInstants(why, fresh = null) {\n  return;\n  try {\n', 'b6a92-no-standing-check'), 'b6a92-no-hold')) : null;
   const R = mRed ? held(mRed) : null;
   if (R) await run6(R);
   const rOwn = R && R.own(), rSt = R && R.stamp();
-  ok('B-6a92 RED CONTROL (the hold removed): Vela re-anchored onto Orin\'s window and Orin\'s numbers filed on Vela\'s row — the row\'s harm', !!R && rSt && rSt.sevenDay === R.RO && rOwn && rOwn.sevenDay && rOwn.sevenDay.utilization === 0.81, { rSt, rOwn: rOwn && rOwn.sevenDay });
+  ok('B-6a92 RED CONTROL (TWO BARRIERS CUT: the hold removed and the standing check removed): Vela re-anchored onto Orin\'s window and Orin\'s numbers filed on Vela\'s row — the row\'s harm', !!R && rSt && rSt.sevenDay === R.RO && rOwn && rOwn.sevenDay && rOwn.sevenDay.utilization === 0.81, { rSt, rOwn: rOwn && rOwn.sevenDay });
   // ── r5 (主开发 r677) ─────────────────────────────────────────────────────────────────────────────────────────────────────
   const sideOf = (u, id) => (u && u.accounts && u.accounts[id] && u.accounts[id].windowUnknown) || null;
   // THE STANDING IDENTITY REPAIR OVER THE HELD SCENE (THE MUST): it runs at the start, every hour and on its own route — the REAL
@@ -572,12 +575,15 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const RREL = 'src/reading-repair.js', rsrc = read(RREL);
   const SKIP1 = "    if (namedOthers(x, key, own).length) { sources.named++; continue; }\n";
   const SKIP2 = "        if (namedOthers(x, key, own).length) return false;   // B-6a92 r5: another known account's reading is never written back on this row\n";
-  const mRep = rsrc.includes(SKIP1) && rsrc.includes(SKIP2) ? require(MUT.write(RREL, rsrc.split(SKIP1).join('').split(SKIP2).join(''), 'b6a92-release-repair')) : null;
+  // r2619: since r2543 the repair never restamps a row onto another identity group's instant — a second barrier, so this control
+  // cuts BOTH (the two skips and that guard) and says so in its name
+  const NORESTAMP = "      if (apiShared.length) { sameInstantSkip(`not restamped: the phase its readings name is ${apiShared.map(nameOf).join(', ')}'s to the second`); continue; }\n";
+  const mRep = rsrc.includes(SKIP1) && rsrc.includes(SKIP2) ? require(MUT.write(RREL, anchored(rsrc.split(SKIP1).join('').split(SKIP2).join(''), NORESTAMP, '', 'b6a92-release-repair-guard'), 'b6a92-release-repair')) : null;
   const GR = held();
   await run6(GR);
   if (mRep) repairOver(GR, mRep);
   const grSt = GR.stamp(), grOwn = GR.own();
-  ok('B-6a92 RED CONTROL (the release\'s repair): Vela restamped onto Orin\'s window and Orin\'s numbers written back on Vela\'s row — the hold undone within the hour', !!mRep && !!(grSt && grSt.sevenDay === GR.RO && grOwn && grOwn.sevenDay && grOwn.sevenDay.utilization === 0.81), { grSt, own: grOwn && grOwn.sevenDay });
+  ok('B-6a92 RED CONTROL (TWO BARRIERS CUT: the release\'s repair and the repair\'s same-instant guard): Vela restamped onto Orin\'s window and Orin\'s numbers written back on Vela\'s row — the hold undone within the hour', !!mRep && !!(grSt && grSt.sevenDay === GR.RO && grOwn && grOwn.sevenDay && grOwn.sevenDay.utilization === 0.81), { grSt, own: grOwn && grOwn.sevenDay });
   // THE HELD ROW'S DOOR (ruled in 1): the person's ⟳ on Vela — the /usage panel through Vela's OWN credential (a stand-in CLI that
   // prints a panel) — answering in the window its readings were held on (an honest shared window) is the row's proven read
   const hush = async (fn) => { const o = console.log, w = console.warn, said = []; console.log = (...a) => said.push(a.join(' ')); console.warn = () => { }; try { return { v: await fn(), said }; } finally { console.log = o; console.warn = w; } };
@@ -954,6 +960,113 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const vS = readingLag.windowSidecarName(T.V), oS = readingLag.windowSidecarName(T.O);
   const pollReads = seen.filter((x) => x.startsWith('poll ')), vReads = seen.filter((x) => x === 'list ' + vS), crossed = seen.filter((x) => x === 'list ' + oS).length;
   ok('B-6a92 NO FILE READ ON A POLL: after a restart warmed at its start, ten polls read no stamp and no witness sidecar, the stamp-only member\'s stamp is never re-read across the 5 s memo, and the row still says Orin (premises: the counter sees a sidecar read; the memo was crossed — a cache-file member\'s stamp re-read)', premise > 0 && crossed > 0 && pollReads.length === 0 && vReads.length === 0 && !!(tWu && tWu.otherNames[0] === 'Orin'), { premise, crossed, pollReads: pollReads.slice(0, 6), vReads: vReads.length, tWu });
+  // ═══ B-6a92 (主开发 r2540 / r2543 / r2561) — A ROW THAT ARRIVES ALREADY ON ANOTHER ACCOUNT'S INSTANT ═══
+  // An older version re-anchored Vela onto Orin's window and dropped the hold from its kept file (or the hourly repair seeded it from
+  // readings that were Orin's); back on the train Vela's readings agree with the wrong anchor and nothing moves. THE STANDING CHECK
+  // holds it at the start — on the SAME INSTANT only (to the second, never the reading-match tolerance); a proven row never; of two
+  // unproven rows BOTH, each naming the other; it starts no read; the row's own proven read lifts it, once a pair
+  {
+    const stampOf = (sevenDay, ageMs, proven) => J({ sevenDay, fiveHour: null, scoped: {}, at: Date.now() - ageMs, source: 'api', verifiedAt: Date.now() - ageMs, verifiedBy: proven ? 'own-panel' : 'rate-limit-events', n: 3, producer: 'login' });
+    const witOf = (sevenDay, ageMs) => J({ sevenDay, scoped: {}, at: Date.now() - ageMs, sessionId: null, source: 'rate-limit-events', n: 3, ring: [] });
+    const asks = path.join(binDir, 'si-panel-asks.log');   // every own read the hub asks runs this stand-in once
+    const binCount = path.join(binDir, 'claude-panel-si.sh'); fs.writeFileSync(binCount, `#!/bin/sh\necho ask >> '${asks}'\ncat <<'PANEL'\n${tP}PANEL\n`, { mode: 0o755 });
+    const asked = () => { try { return fs.readFileSync(asks, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+    // THE OLDER RECORD AS IT ARRIVES: Vela's anchor and witness on `v` with NO hold in its kept file; Orin's on roP — then THE START
+    const arrive = (engMod, { v, vProven = false, oProven = false, logins = null, vNone = false } = {}) => {
+      const A0 = held(realEng, { ro: roP, logins });
+      const d = A0.cacheDir;
+      if (vNone) for (const f of [readingLag.windowSidecarName(A0.V), readingLag.apiWindowSidecarName(A0.V)]) fs.rmSync(path.join(d, f), { force: true });
+      else { fs.writeFileSync(path.join(d, readingLag.windowSidecarName(A0.V)), stampOf(v, 60e3, vProven)); fs.writeFileSync(path.join(d, readingLag.apiWindowSidecarName(A0.V)), witOf(v, 60e3)); }
+      fs.writeFileSync(path.join(d, readingLag.windowSidecarName(A0.O)), stampOf(roP, 3600e3, oProven));
+      fs.writeFileSync(path.join(d, readingLag.apiWindowSidecarName(A0.O)), witOf(roP, 3600e3));
+      const A = held(engMod, { again: A0, cli: binCount });
+      const said = [], o = console.log, w = console.warn; console.log = (...a) => said.push(a.join(' ')); console.warn = () => { };
+      try { A.eng.repairIdentityAnchors('boot'); } finally { console.log = o; console.warn = w; }
+      A.saidHeld = said.filter((l) => /window held \(the start\)/.test(l));
+      return A;
+    };
+    const witO = (X) => { try { return JSON.parse(fs.readFileSync(path.join(X.cacheDir, readingLag.apiWindowSidecarName(X.O)), 'utf8')); } catch { return null; } };
+    const heldOn = async (X) => { const u = await X.usage(); return { v: (X.wit() || {}).foreign || null, o: (witO(X) || {}).foreign || null, vu: sideOf(u, X.V), ou: sideOf(u, X.O) }; };
+    // (1) HONEST NEIGHBOURS — seconds apart, and inside the reading-match tolerance: NOBODY held (this leg keeps the check from
+    // growing back into «agrees»)
+    const N1 = arrive(realEng, { v: roP + 7 }), N2 = arrive(realEng, { v: roP + 90 });
+    const n1 = await heldOn(N1), n2 = await heldOn(N2);
+    ok('B-6a92 r2543 HONEST NEIGHBOURS: two accounts\' weekly windows 7 s apart, and 90 s apart (inside the 120 s a reading is matched with), hold NOBODY at the start — nearness is not the fault', !n1.v && !n1.o && !n1.vu && !n1.ou && !n2.v && !n2.o && !n2.vu && !n2.ou, { n1, n2 });
+    const SI_BODY = '  return Math.min(d, WEEK_SEC - d) < SAME_INSTANT_SEC;\n', rlsrcSI = read('src/reading-lag.js');
+    const rlTol = MUT.write('src/reading-lag.js', anchored(rlsrcSI, SI_BODY, '  return Math.min(d, WEEK_SEC - d) <= JITTER_SEC;\n', 'b6a92-si-tolerance'), 'b6a92-si-tolerance');
+    const engTol = require(MUT.write(ENG, anchored(esrc, "const readingLag = require('../reading-lag.js');", `const readingLag = require(${J(rlTol)});`, 'b6a92-si-tol-eng'), 'b6a92-si-tol-eng'));
+    const N2x = engTol ? arrive(engTol, { v: roP + 90 }) : null, n2x = N2x ? await heldOn(N2x) : null;
+    ok('B-6a92 RED CONTROL (the check by the reading-match tolerance, in a copy): the honest neighbour 90 s apart IS held — the leg above can fail', !!n2x && !!n2x.v && n2x.v.by === 'same-instant', n2x);
+    // (2) THE SAME INSTANT, NEITHER PROVEN (r2561): BOTH held, each naming the other; the route says it on both rows; said ONCE
+    const P2 = arrive(realEng, { v: roP }), p2 = await heldOn(P2);
+    ok('B-6a92 r2561 THE SAME INSTANT, NEITHER PROVEN: an older record arriving with no hold in its kept file — at the start BOTH rows are held, each naming the other (no clock tells which copied); the sidecars carry it and the usage route says it on both rows',
+      !!p2.v && p2.v.by === 'same-instant' && p2.v.names[0] === P2.O && !!p2.o && p2.o.by === 'same-instant' && p2.o.names[0] === P2.V && !!p2.vu && p2.vu.otherNames[0] === 'Orin' && p2.vu.by === 'same-instant' && !!p2.ou && p2.ou.otherNames[0] === 'Vela', p2);
+    ok('B-6a92 r2561 SAID ONCE, NAMES ONLY: the start\'s journal names the pair in ONE line, no address', P2.saidHeld.length === 1 && /Vela/.test(P2.saidHeld[0]) && /Orin/.test(P2.saidHeld[0]) && !P2.saidHeld[0].includes('@'), P2.saidHeld);
+    ok('B-6a92 r2561 THE CHECK STARTS NO READ: held pairs at every start above, and the own read the hub would run was asked ZERO times', asked() === 0, asked());
+    const NOCHECK = "  holdSameInstants('the start');   // B-6a92 (r2543): a row that ARRIVED on another account's instant is held here\n";
+    const engNo = require(MUT.write(ENG, anchored(esrc, NOCHECK, '', 'b6a92-si-nocheck'), 'b6a92-si-nocheck'));
+    const P2x = engNo ? arrive(engNo, { v: roP }) : null, p2x = P2x ? await heldOn(P2x) : null;
+    ok('B-6a92 RED CONTROL (no standing check, in a copy — the train before this unit): the copied row stays on the other account\'s instant, wrong and silent', !!p2x && !p2x.v && !p2x.vu && !p2x.o, p2x);
+    // (3) A PROVEN ROW IS NEVER HELD; the unproven one on its instant is; two proven rows: nobody
+    const Q1 = arrive(realEng, { v: roP, oProven: true }), q1 = await heldOn(Q1);
+    const Q2 = arrive(realEng, { v: roP, vProven: true, oProven: true }), q2 = await heldOn(Q2);
+    ok('B-6a92 r2543 A PROVEN ROW IS NEVER HELD: Orin stamped by its own proven read keeps its window and Vela (unproven, on its instant) is held naming Orin; two proven rows on one instant: nobody',
+      !!q1.v && q1.v.names[0] === Q1.O && !q1.o && !q1.ou && !q2.v && !q2.o && !q2.vu && !q2.ou, { q1, q2 });
+    // (4) AGREEING READINGS NEVER LIFT IT, and its numbers are not filed
+    await run6(Q1);
+    const q1b = await heldOn(Q1), q1own = Q1.own();
+    ok('B-6a92 r2543 AGREEING READINGS NEVER LIFT IT, NOTHING FILED: six readings on the held instant — the hold stands and Vela\'s file keeps its OWN last reading',
+      !!q1b.v && q1b.v.by === 'same-instant' && !!q1b.vu && !!q1own && !!q1own.sevenDay && q1own.sevenDay.utilization === 0.2 && q1own.sevenDay.resetsAt === Q1.RV, { q1b, own: q1own && q1own.sevenDay });
+    const KEEP = "      const keepSame = !!(next.foreign && next.foreign.by === 'same-instant' && readingLag.weeklyNear(next.foreign.phase, entry.resetsAt) === true);\n";
+    const engKeep = require(MUT.write(ENG, anchored(esrc, KEEP, '      const keepSame = false;\n', 'b6a92-si-nokeep'), 'b6a92-si-nokeep'));
+    const Q1x = engKeep ? arrive(engKeep, { v: roP, oProven: true }) : null;
+    if (Q1x) await run6(Q1x);
+    const q1x = Q1x ? await heldOn(Q1x) : null;
+    ok('B-6a92 RED CONTROL (the ring ends the hold on a run that agrees with the held anchor, in a copy): six readings on the held instant lift it — the leg above can fail', !!q1x && !q1x.v, q1x);
+    // (5) AN ANCHOR JUST WRITTEN onto another account's instant is held at once (the stamp writer's hearer): Vela with NO window of its
+    // own, six readings in Orin's window — the ring stamps it there, and the check holds it
+    const W5 = arrive(realEng, { vNone: true, oProven: true });
+    await run6(W5); await sleep(5);
+    const w5 = await heldOn(W5), w5st = W5.stamp();
+    ok('B-6a92 r2543 AN ANCHOR WRITTEN ONTO ANOTHER ACCOUNT\'S INSTANT IS HELD AT ONCE: the ring stamps Vela (no window of its own) on Orin\'s window to the second, and the check holds it naming Orin', !!w5st && readingLag.sameInstant(w5st.sevenDay, roP) && !!w5.v && w5.v.by === 'same-instant' && w5.v.names[0] === W5.O, { w5, st: w5st });
+    // (6) THE ROW'S OWN PROVEN READ LIFTS IT, ONCE A PAIR: its folder holds its own login; the next start holds it no more
+    const L = arrive(realEng, { v: roP, oProven: true, logins: { V: TEAMV, O: TEAMO } });
+    const lBefore = await heldOn(L);
+    const lr = await hush(() => L.api.refreshViaCliPanel(L.V));
+    const lAfter = await heldOn(L), lSt = L.stamp();
+    const L2 = held(realEng, { again: L, cli: binCount }); quiet(() => L2.eng.repairIdentityAnchors('boot'));
+    const l2 = await heldOn(L2);
+    ok('B-6a92 r2561 THE ROW\'S OWN PROVEN READ LIFTS IT, ONCE A PAIR: Vela held at the start; its own /usage read (its folder holds its own login) lifts it, stamped by its own read; the next start holds it no more against Orin',
+      !!lBefore.v && lr.v === true && !lAfter.v && !!lSt && lSt.verifiedBy === 'own-panel' && !l2.v && !l2.vu, { lBefore, v: lr.v, lAfter, st: lSt, l2 });
+    // (7) THE REPAIR never seeds a second row onto an instant, and never confirms an anchor on another account's instant from the
+    // row's own readings (it may still restamp a row AWAY onto its own different phase — test-readings-attribution §20)
+    {
+      const RRm = require(path.join(REPO, 'src/reading-repair.js'));
+      const plant = ({ velaStamp = null } = {}) => {
+        const dd = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-si-rep-')));
+        const cache = path.join(dd, 'usage-cache'), anchors = path.join(dd, 'usage-anchors'); fs.mkdirSync(cache, { recursive: true }); fs.mkdirSync(anchors, { recursive: true });
+        const nowMs = Date.now(), WO = Math.floor(nowMs / 1000) + 4 * 86400 + 7 * 3600 + 17;   // Orin's instant, to the second
+        fs.writeFileSync(path.join(cache, readingLag.windowSidecarName('acct-orin')), J({ sevenDay: WO, fiveHour: null, scoped: {}, at: nowMs - 3600e3, source: 'api', verifiedAt: nowMs - 3600e3, producer: 'login' }));
+        if (velaStamp) fs.writeFileSync(path.join(cache, readingLag.windowSidecarName('acct-vela')), J(velaStamp(WO, nowMs)));
+        // Vela's WRITTEN readings were Orin's (filed while it had no window to contradict): five rate-limit moves on Orin's instant
+        const rows = Array.from({ length: 5 }, (_, i) => ({ ts: nowMs - (20 - i * 3) * 3600e3, fetchedAt: nowMs - (20 - i * 3) * 3600e3, source: 'rate-limit-event', accountId: 'acct-vela', identityKey: 'id-vela', buckets: { sevenDay: { u: 0.3 + i * 0.05, resetsAt: WO } } }));
+        fs.writeFileSync(path.join(anchors, 'anchors-id-vela.ndjson'), rows.map((r) => J(r)).join('\n') + '\n');
+        return { dd, cache, WO };
+      };
+      const repOf = (mod, P) => quiet(() => mod.repairSidecarsByApiPhase({ dataDir: P.dd, roster: ['acct-vela', 'acct-orin'], id: 'si-T', ownIdsOf: (k) => [k] }));
+      const stampV = (P) => { try { return JSON.parse(fs.readFileSync(path.join(P.cache, readingLag.windowSidecarName('acct-vela')), 'utf8')); } catch { return null; } };
+      const S1 = plant(), r1 = repOf(RRm, S1), s1 = stampV(S1), row1 = r1.identities.find((x) => x.key === 'acct-vela');
+      ok('B-6a92 r2543 THE REPAIR SEEDS NO SECOND ROW ONTO AN INSTANT: Vela\'s written readings name Orin\'s instant to the second — nothing is seeded, the row is said', !s1 && !!row1 && /^not seeded/.test(row1.sidecar) && r1.counts.sameInstant >= 1, { row1, s1 });
+      const S2 = plant({ velaStamp: (WO, nowMs) => ({ sevenDay: WO, fiveHour: null, scoped: {}, at: nowMs - 600e3, source: 'on-demand' }) });
+      const before2 = fs.readFileSync(path.join(S2.cache, readingLag.windowSidecarName('acct-vela')), 'utf8');
+      const r2 = repOf(RRm, S2), row2 = r2.identities.find((x) => x.key === 'acct-vela');
+      ok('B-6a92 r2543 …AND NEVER CONFIRMS AN ANCHOR ON ANOTHER ACCOUNT\'S INSTANT FROM ITS OWN READINGS: Vela\'s unproven anchor on Orin\'s instant stays as it was, byte for byte', !!row2 && /^not confirmed/.test(row2.sidecar) && fs.readFileSync(path.join(S2.cache, readingLag.windowSidecarName('acct-vela')), 'utf8') === before2, row2);
+      const rrsrc = read('src/reading-repair.js'), SEED = "      if (apiShared.length) { sameInstantSkip(`not seeded: the phase its readings name is ${apiShared.map(nameOf).join(', ')}'s to the second`); continue; }\n";
+      const RRx = require(MUT.write('src/reading-repair.js', anchored(rrsrc, SEED, '', 'b6a92-si-seed'), 'b6a92-si-seed'));
+      const S3 = RRx ? plant() : null, s3 = S3 ? (repOf(RRx, S3), stampV(S3)) : null;
+      ok('B-6a92 RED CONTROL (the repair seeding from its own readings, in a copy — the train before this unit): Vela is seeded onto Orin\'s instant to the second', !!s3 && s3.sevenDay === S3.WO && s3.seededBy === 'si-T', s3);
+    }
+  }
   // A MOVE ONTO A PHASE NO KNOWN ACCOUNT HOLDS is as today: K readings re-anchor it
   const X = held();
   for (let i = 0; i < 4; i++) { X.reading(0.33, X.RX); await sleep(3); }

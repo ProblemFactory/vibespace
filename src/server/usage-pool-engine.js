@@ -1499,6 +1499,8 @@ let _ownWinAt = 0, _ownWin = null;
 const _stampOnly = new Map();
 const holdStamp = (key, w) => { _stampOnly.delete(key); _stampOnly.set(key, w && typeof w === 'object' ? w : null); if (_stampOnly.size > 512) _stampOnly.delete(_stampOnly.keys().next().value); };
 windowStamp.onStampWritten((dir, key, w) => { try { if (_stampOnly.has(key) && path.resolve(dir) === path.resolve(USAGE_CACHE_DIR)) holdStamp(key, w); } catch { } });
+// B-6a92 (r2543): an anchor just written (any road: the ring, the panel, the repair's seed) is checked against the others' instants
+windowStamp.onStampWritten((dir, key, w) => { try { if (path.resolve(dir) === path.resolve(USAGE_CACHE_DIR)) queueMicrotask(() => holdSameInstants('an anchor written', { [key]: w })); } catch { } });
 function establishedWindows() {
   const now = Date.now();
   if (_ownWin && now - _ownWinAt < OWN_WINDOW_TTL_MS) return _ownWin;
@@ -1585,7 +1587,11 @@ const HELD_MAX = 4096;   // r6: far past any roster; the oldest key is dropped b
 const labelOf = (id) => { const n = nameOf(id); return typeof n === 'string' && n && !n.includes('@') ? n : String(id || '?'); };
 const ownGroupOf = (key) => { try { return new Set(usageIdentityAccountIds(key)); } catch { return new Set([key]); } };
 const othersOf = (key, names) => { const own = ownGroupOf(key); return (Array.isArray(names) ? names : []).filter((k) => typeof k === 'string' && k && !own.has(k)); };
-const heldFactOf = (key, f) => { if (!(f && Array.isArray(f.names) && Number(f.phase) > 0)) return null; const names = othersOf(key, f.names).slice(0, 4); return names.length ? { names, phase: Number(f.phase), at: Number(f.at) || null } : null; };
+const heldFactOf = (key, f) => { if (!(f && Array.isArray(f.names) && Number(f.phase) > 0)) return null; const names = othersOf(key, f.names).slice(0, 4); return names.length ? { names, phase: Number(f.phase), at: Number(f.at) || null, ...(f.by === 'same-instant' ? { by: 'same-instant' } : {}) } : null; };
+// B-6a92 (主开发 r2543) — EACH ROW'S WITNESS INSTANT IN MEMORY (its `.apiwin-` sevenDay and when it was established), as the start's warm
+// read it and the writers here last wrote it: the standing check reads memory only (no poll reads a file)
+const _witnessInst = new Map();
+function noteWitnessInstant(key, w) { if (!key) return; _witnessInst.delete(key); if (w && Number(w.sevenDay) > 0) _witnessInst.set(key, { sevenDay: Number(w.sevenDay), at: Number(w.at) || 0 }); if (_witnessInst.size > HELD_MAX) _witnessInst.delete(_witnessInst.keys().next().value); }
 function noteHeldWindow(key, f) { _heldWin.delete(key); _heldWin.set(key, heldFactOf(key, f)); if (_heldWin.size > HELD_MAX) _heldWin.delete(_heldWin.keys().next().value); }
 /** r6 (主开发 r814, ruled 3) — WARMED AT THE START, OFF THE POLL: every roster account's and every cache key's held window, and the
  *  stamp-only members' stamps (the window list), read once by the identity repair's run (the boot's, then hourly and the route's,
@@ -1594,9 +1600,36 @@ function warmHeldWindows(list) {
   const keys = new Set();
   for (const a of (list || [])) if (a && typeof a.id === 'string' && a.id) keys.add(a.id);
   try { for (const fn of usageWrite.listCacheDir(USAGE_CACHE_DIR)) if (fn.endsWith('.json') && !fn.startsWith('__models__') && !fn.startsWith('.')) keys.add(fn.slice(0, -5)); } catch { }
-  for (const k of keys) { try { const w = readApiWitnessFile(k); noteHeldWindow(k, w && w.foreign); } catch { } }
+  for (const k of keys) { try { const w = readApiWitnessFile(k); noteHeldWindow(k, w && w.foreign); noteWitnessInstant(k, w); } catch { } }
   try { _ownWin = null; _ownWinAt = 0; establishedWindows(); } catch { }
+  holdSameInstants('the start');   // B-6a92 (r2543): a row that ARRIVED on another account's instant is held here
   return keys.size;
+}
+/** B-6a92 (主开发 r2540 / r2543) — THE STANDING CHECK: a row whose ANCHOR stands on another known account's instant, to the second
+ *  (reading-lag sameInstantHolds: never by nearness; never a proven anchor; the later of two unproven), is HELD — its own window
+ *  unknown by that account's name, exactly as the witness ring's hold: nothing re-anchored, nothing filed (the guard archives its
+ *  readings on that instant), the pool reads its own last reading with its age, its own proven read the one door out. Run at the
+ *  start's warm (the boot's, the hourly run's) and at every anchor write; memory only, but the held row's own sidecar, read once
+ *  to carry its fields. A row already held is left as it is. `fresh`: a stamp just written (the memo may not have it yet). */
+function holdSameInstants(why, fresh = null) {
+  try {
+    const wins = { ...establishedWindows(), ...(fresh || {}) };
+    const keys = new Set([...Object.keys(wins), ..._witnessInst.keys()]);
+    const rows = [...keys].map((k) => { const a = wins[k]; return { key: k, own: [...ownGroupOf(k)], anchor: a && Number(a.sevenDay) > 0 ? { sevenDay: Number(a.sevenDay), at: Number(a.at) || 0, proven: readingLag.provenOwnStamp(a) } : null, witness: _witnessInst.get(k) || null }; });
+    const saidPairs = new Set();   // r2561: the journal says it ONCE a pair — two rows held against each other make one line
+    for (const h of readingLag.sameInstantHolds(rows)) {
+      if (_heldWin.get(h.key)) continue;
+      const raw = readApiWitnessFile(h.key) || {};
+      if (heldFactOf(h.key, raw.foreign)) { noteHeldWindow(h.key, raw.foreign); continue; }
+      const foreign = { names: othersOf(h.key, h.names).slice(0, 4), phase: h.phase, at: Date.now(), n: 0, by: 'same-instant' };
+      if (!foreign.names.length) continue;
+      if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(h.key), { sevenDay: null, scoped: {}, ring: [], ...raw, foreign })) continue;
+      noteHeldWindow(h.key, foreign);
+      const pair = [h.key, ...foreign.names].sort().join('|');
+      if (!saidPairs.has(pair)) { saidPairs.add(pair); console.log(`[usage] window held (${why}): ${labelOf(h.key)} and ${foreign.names.map(labelOf).join(', ')} stand on one weekly instant to the second — ${labelOf(h.key)} is held (its own read has not proven it): not re-anchored, nothing filed, its own window unknown until its own read proves it; nothing here asks for that read`); }
+      try { global.__vsEvent?.('usage-window-held-same-instant', `${h.key}:${foreign.names.join(',')}`); } catch { }
+    }
+  } catch (e) { console.warn('[usage] window hold: the same-instant check failed:', (e && e.message) || e); }
 }
 function heldWindowOf(key, w0) {
   if (!key) return null;
@@ -1674,7 +1707,9 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
         if (ok0) noteHeldWindow(key, next.foreign);
         return ok0 ? res : null;
       }
-      delete next.foreign;   // the run agrees with the row's own window, or moves onto a phase no known account holds: no longer unknown
+      // B-6a92 (r2543): a run ON a same-instant hold's instant agrees with the very anchor that is held — it never ends that hold
+      const keepSame = !!(next.foreign && next.foreign.by === 'same-instant' && readingLag.weeklyNear(next.foreign.phase, entry.resetsAt) === true);
+      if (!keepSame) delete next.foreign;   // the run agrees with the row's own window, or moves onto a phase no known account holds: no longer unknown
       const w = moved ? { sevenDay: null, scoped: {} } : { sevenDay: next.sevenDay, scoped: { ...next.scoped } };
       for (const e of agreeing) { if (e.kind === 'sevenDay') w.sevenDay = e.resetsAt; else if (e.name) w.scoped[e.name] = e.resetsAt; }
       next.sevenDay = w.sevenDay; next.scoped = w.scoped; next.at = entry.at; next.sessionId = entry.sid; next.source = 'rate-limit-events'; next.n = run;
@@ -1712,7 +1747,7 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
       }
     }
     const ok = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next);
-    if (ok) noteHeldWindow(key, next.foreign);
+    if (ok) { noteHeldWindow(key, next.foreign); noteWitnessInstant(key, next); }
     return ok ? res : null;
   } catch { return null; }
 }
@@ -1805,7 +1840,15 @@ function guardReadingTarget(key, readingWindow, { session = null, what = 'readin
   try {
     d = readingLag.decideReadingTarget({ key, readingWindow, windows: establishedWindows(), groupOf: windowGroupOf });
   } catch (e) { console.warn('[usage] window guard failed (writing as asked):', e.message); return key; }
-  if (d.action === 'write') return key;
+  if (d.action === 'write') {
+    // B-6a92 (r2543): a row HELD on another account's instant (the standing check) agrees with its own anchor — the anchor that is held:
+    // its readings on that instant are archived by name, never filed (memory only: the held fact, no file read on the reading's road)
+    const h0 = _heldWin.get(key);
+    let w0 = null; try { w0 = readingWindow && readingWindow.scoped ? readingWindow : readingLag.windowOf(readingWindow); } catch { w0 = null; }
+    const r7 = w0 && (Number(w0.sevenDay) > 0 ? Number(w0.sevenDay) : Number(Object.values(w0.scoped || {})[0]) || null);
+    if (!(h0 && h0.by === 'same-instant' && Number(r7) > 0 && readingLag.weeklyNear(h0.phase, r7) === true)) return key;
+    d = { action: 'archive', key: null, matched: h0.names.slice(), reason: `${nameOf(key)} is held: its weekly window is ${h0.names.map(nameOf).join(', ')}'s to the second and its own read has not proven it` };
+  }
   // A READING WHOSE REQUEST IS KNOWN (P1, law 1: «on a mismatch the reading is HELD or ARCHIVED BY NAME, never re-filed by
   // guess onto another account»): the account its request went out on is a fact; a window that says otherwise is a second
   // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
@@ -7262,6 +7305,7 @@ function liftHeldWindow(key, idv) {
       // was empty, the hold memory still holds), a failed put-back said once
       const raw0 = readApiWitnessFile(key);
       if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'own-panel', n: 1, ring: [], ringAt: now })) return { act: 'none' };
+      noteWitnessInstant(key, { sevenDay, at: now });   // B-6a92 (r2543): the witness instant follows the row's own read
       if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) {
         const back = raw0 || { sevenDay: null, scoped: {}, at: h.at, sessionId: null, source: null, ring: [], foreign: { names: h.names.slice(), phase: h.phase, at: h.at } };
         if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), back)) console.warn(`[usage] window hold: ${labelOf(key)}'s stamp could not be written and its witness could not be put back — the hold stands in memory only until the next start`);

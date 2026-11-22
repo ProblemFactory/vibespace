@@ -602,6 +602,8 @@ export function machineLoginLinkHint(name, vendor = 'Anthropic') {
 // or was filed. The other account is named as the person named it (never an address; «another account» when it has no name).
 export function windowUnknownHtml(wu) {
   const other = (Array.isArray(wu && wu.otherNames) ? wu.otherNames : []).find((n) => typeof n === 'string' && n) || t('another account');
+  // B-6a92 (主开发 r2561): held by the standing check — the row's window is ANOTHER account's to the second; said where a person looks
+  if (wu && wu.by === 'same-instant') return `<span class="acct-key-foreign acct-usage-foreign">${escHtml(t('This account’s weekly window is the same as {other}’s to the second, so it is shown as unknown until this account’s own usage is read — press the refresh', { other }))}</span>`;
   return `<span class="acct-key-foreign acct-usage-foreign">${escHtml(t('Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it', { other }))}</span>`;
 }
 export function unreadUsageHtml() {

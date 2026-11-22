@@ -416,9 +416,59 @@ function heldLiftVerdict({ rowKey = null, held = [], answer = null, onHeld = fal
   return { act: 'refuse', code: 'other-answered', names };
 }
 
+// B-6a92 (主开发 r2540 / r2543) — A ROW ALREADY ON ANOTHER ACCOUNT'S INSTANT. The guard above acts at a NEW move; a row that ARRIVES
+// on a window another known account holds (an older version re-anchored it; the standing repair seeded it from readings that were
+// another account's) passes every door, because its own readings then agree with the wrong anchor. Honest accounts' weekly windows
+// often sit close together — inside the tolerance a reading is matched with (JITTER_SEC: two ROADS stating ONE window) — so
+// nearness holds nobody. What a row that adopted another account's window carries is that window's INSTANT: the vendor states a
+// weekly reset with sub-second digits and every road here keeps it to the whole second (the panel's time floored, the event's own
+// second), so a copied window is equal to that second, and two accounts' own windows are not.
+const SAME_INSTANT_SEC = 1;   // the bound: one second of the week (a roll adds exactly WEEK_SEC) — NOT JITTER_SEC
+/** two weekly resets on the SAME instant of the week, to the second — never the reading-match tolerance */
+function sameInstant(a, b) {
+  const p = weeklyPhase(Math.floor(Number(a))), q = weeklyPhase(Math.floor(Number(b)));
+  if (p == null || q == null) return false;
+  const d = Math.abs(p - q) % WEEK_SEC;
+  return Math.min(d, WEEK_SEC - d) < SAME_INSTANT_SEC;
+}
+/** a window stamp (windowSidecarName) its row's OWN proven read wrote: the held door's lift (verifiedBy 'own-panel' — written only once the login
+ *  that answered IS the row's identity, heldLiftVerdict) or the row's own long-lived token (`oat:<gen>`: the token's identity check
+ *  marks a token that is another account's). An organisation agreeing proves no account (several seats share one); a run of the
+ *  sign-in folder's readings proves nothing about whose login the folder holds. */
+function provenOwnStamp(st) {
+  return !!st && typeof st === 'object' && (st.verifiedBy === 'own-panel' || (typeof st.producer === 'string' && st.producer.startsWith('oat:')));
+}
+/** THE STANDING CHECK (PURE). rows: [{ key, own: [the ids of its identity group], anchor: { sevenDay, at, proven } | null,
+ *  witness: { sevenDay, at } | null }] — the anchor is the row's window stamp, the witness its API-derived window (the event
+ *  stream's statement: the panel and the events may state one window a minute apart, so the other row is read on both).
+ *  → [{ key, names, phase, at }]: every row to HOLD — its ANCHOR unproven and on the same instant as another identity group's anchor
+ *  or witness. A proven anchor is never held. Of two unproven rows on one instant NEITHER is believed: both are held, each naming the
+ *  other (主开发 r2561: a stamp's time is when it was last WRITTEN — every honest re-stamp moves it — so no clock tells which row
+ *  copied; each row's own proven read sorts them: the owner's lifts it, the copy's answers as the other account and is refused). */
+function sameInstantHolds(rows) {
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.key === 'string' && r.key);
+  const groupOf = new Map(list.map((r) => [r.key, new Set([r.key, ...(Array.isArray(r.own) ? r.own : [])])]));
+  const apart = (a, b) => !(groupOf.get(a) || new Set([a])).has(b) && !(groupOf.get(b) || new Set([b])).has(a);
+  const occ = [];
+  for (const r of list) {
+    if (r.anchor && Number(r.anchor.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.anchor.sevenDay), at: Number(r.anchor.at) || 0, proven: !!r.anchor.proven, anchor: true });
+    if (r.witness && Number(r.witness.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.witness.sevenDay), at: Number(r.witness.at) || 0, proven: false, anchor: false });
+  }
+  const out = [];
+  for (const a of occ) {
+    if (!a.anchor || a.proven) continue;
+    const others = occ.filter((o) => apart(a.key, o.key) && sameInstant(o.instant, a.instant));
+    if (!others.length) continue;
+    const names = [...new Set(others.slice().sort((x, y) => (y.proven - x.proven) || (x.at - y.at)).map((o) => o.key))].slice(0, 4);
+    out.push({ key: a.key, names, phase: a.instant, at: a.at });
+  }
+  return out;
+}
+
 module.exports = {
   WEEK_SEC, JITTER_SEC, SHADOW_MS,
   weeklyPhase, weeklyNear, windowOf, windowFingerprint, windowSidecarName, apiWindowSidecarName, compareWindows,
   decideLagShadow, decideReadingTarget, isolatedPanelAnchorVerdict,
   heldLiftVerdict, HELD_REFUSALS,
+  SAME_INSTANT_SEC, sameInstant, provenOwnStamp, sameInstantHolds,
 };
