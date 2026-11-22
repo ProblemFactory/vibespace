@@ -1380,6 +1380,21 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-phone-ui — line 271's follow: the layout leg's «cut» judged by an entry of its own (主开发 r1906)
 - THE RED (box row 164, test-settings-row-layout alone at 9c3a59b01, 35 of 36): ④b's «phone (en): the effort box … stays inside its row, its closed face cut» — row 358 px, the box and its closed select 358 px, nothing past the row; what failed is the «cut» clause: it compared the select's width with its longest option's TEXT width (330 px, the select's padding and arrow left out). The box was cut, by 10 px (368 px without the line), but the premise rested on the hub's list and the box's fonts.
 - THE CURE (tests only): the leg's law stays «inside its row»; the cut is judged by a long effort entry the leg adds itself after the hub's list (EFFORT_OWN, wider than any phone row by construction), its premise said by name when it does not hold; CONTROL unchanged: B-0406's block without the combobox line — the box runs past its row.
+- ROUND wozbllctj (r1730): two takes, the must closed; the chain TAKEN as block line 261. The small follow, one commit:
+  - (1) «gone» by the store's TYPED code: src/hosts.js get now throws code host_not_found (mount-error-words' own, so no page's words move), and pairingOf matches the code;
+  - (2) a HELD list ends nothing on every road: judgeAway returns at the hold, including for an owner no one machine can be named for;
+  - (3) the wordless mark is set only for a machine whose item was filed;
+  - (4) an unknown outage start (0, after a restart) never closes the item.
+  - Legs: test-peer-state ⑯ ((1) the real store's code; (2) with its RED); test-jobs-triage ((3) and (4) with their REDs).
+- r1732: the four commits MOVED onto the train's tip 7b23daa71, both sides' census rows kept (test-user-todos-layout: 119 sites — line 58's vault job approval and this unit's machine item); the follow is the fifth commit.
+- ROUND wooyvc2sj (r1861) on the follow: one must, cured in the same commit:
+  - after a restart the item an earlier run filed counts as filed: the wordless road takes the one look at the stored open items (_machineAwayFiled, the settle's too) before it decides;
+  - a release that came while For you could not be read is decided again at that look;
+  - (a) the outage's start is unknown after a restart: a person's close of the item found open is filed again once a machine (the refile's own instant is kept), said in kb-features;
+  - (b) the dead half of the condition after the skip went;
+  - (c) kb-api: the routes that copy a refusal's code now answer host_not_found; no status moves;
+  - ALSO CURED: kb-features' stale «an older agent stays as today» went.
+  - Legs: test-jobs-triage, three restarts over one folder: the must (RED: the look removed; RED: the look and the replay removed), the held tray (RED: the replay removed), the one refile (RED: the start kept as 0).
 
 ## 2.369.415 — 2026-11-21
 
