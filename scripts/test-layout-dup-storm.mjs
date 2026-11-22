@@ -721,6 +721,25 @@ async function b1d87Legs({ DM = RealDM, LM = RealLM, install = null, legs = null
     leg(order.aAcked && order.bRefused && J(atRefusal) === J([a1]) && pend === 1 && second.includes(a1) && !second.includes(b1) && J(sWins(A)) === J([a1]) && J(sWins(B)) === J([a1]) && J(onHub(H)) === J([a1]),
       `§1D87 (c) TWO PAGES WRITE THEIR OWN AT ONCE (r1303 (4)): the hub accepts the first (${a1}) and refuses B's (${b1}) as stale — B takes the kept record on the REFUSAL road and its window takes ${a1} there, before A's relayed record is applied; B's second write lists ${a1} alone; one id on both pages, one row`, { a1, b1, order, atRefusal, pend, second, A: sWins(A), B: sWins(B), hubRows: onHub(H) });
   })());
+  if (want('crev')) scenes.push((async () => {
+    const { H, A, B } = pair();
+    open(A); open(B); await tick(40);
+    const [a1] = sWins(A), [b1] = sWins(B);
+    // (c) WITH THE IDS REVERSED (r1783 (2), r1802 (B)): the page with the LARGER id writes first and is acked; the other's write, from
+    // an older base, is refused as stale — and on the refusal road its window (on the wire through that refused write) still takes the
+    // FIRST writer's id: the hub's order, whatever the ids. The scene where the follow's tie rule decided (the smaller id stood): its red
+    const [F, Sx, fId, sId] = a1 > b1 ? [A, B, a1, b1] : [B, A, b1, a1];
+    const rekeys = new Map([[F, []], [Sx, []]]);
+    for (const P of [F, Sx]) { const was = P.app.wm.rekeyWindow; P.app.wm.rekeyWindow = function (x, y, o) { rekeys.get(P).push(x + '→' + y); return was.call(this, x, y, o); }; }
+    save(F); save(Sx); Sx.lm._restoring = true;
+    await tick(30);
+    const order = { fAcked: F.sock().frames.some((f) => f.type === 'layout-sync-ack'), sRefused: Sx.sock().frames.some((f) => f.type === 'layout-sync-refused' && f.reason === 'stale') };
+    save(Sx); Sx.lm._restoring = true; // the refused page's second write
+    const second = ids((Sx.syncs('desk-x').slice(-1)[0] || {}).state?.windows);
+    await drain(Sx); await tick(100); await drain(F); await tick(1300);
+    leg(order.fAcked && order.sRefused && second.includes(fId) && !second.includes(sId) && J(sWins(A)) === J([fId]) && J(sWins(B)) === J([fId]) && J(onHub(H)) === J([fId]) && rekeys.get(F).length === 0 && J(rekeys.get(Sx)) === J([sId + '→' + fId]),
+      `§1D87 (crev) (c) WITH THE IDS REVERSED (r1783 (2)): the larger id writes first (${fId}, acked ${order.fAcked}); the smaller (${sId}) is refused as stale (${order.sRefused}) and on the refusal road its window takes ${fId} (${rekeys.get(Sx).join(' ')}); the first page never re-keys (${rekeys.get(F).length}×) — the hub's order, one id, one row`, { a1, b1, order, second, A: sWins(A), B: sWins(B), hubRows: onHub(H), rekeysF: rekeys.get(F), rekeysS: rekeys.get(Sx) });
+  })());
   if (want('c2')) scenes.push((async () => {
     const { A, B } = pair();
     open(A); open(B); await tick(40);
@@ -735,19 +754,23 @@ async function b1d87Legs({ DM = RealDM, LM = RealLM, install = null, legs = null
       `§1D87 (c2) a HELD act on the refusal road (r1377 (4)): B's window (${b1}) stands under its own id — its second write carries it IN the kept row's place (${a1} left, evidence 'replaced')`, { a1, b1, atRefusal, second });
   })());
   if (want('g')) scenes.push((async () => {
-    const r = recs(); delete r['desk-x']; // a FRESH desktop: no stored record — the hub judges neither write (no base, nothing stored)
+    const r = recs(); delete r['desk-x']; // a FRESH desktop: no stored record — a page that saw none writes with NO base (the staleness gate passes it)
     const { H, A, B } = pair(r);
     open(A); open(B); await tick(40);
-    const [a1] = sWins(A), [b1] = sWins(B), win = [a1, b1].sort()[0];
-    // every re-key each page makes (the swap is a re-key on BOTH pages, each onto the other's id — later writes can still end on
-    // one id, so the end state alone cannot see it)
-    const rekeys = { A: [], B: [] };
-    for (const [k, P] of [['A', A], ['B', B]]) { const was = P.app.wm.rekeyWindow; P.app.wm.rekeyWindow = function (x, y, o) { rekeys[k].push(x + '→' + y); return was.call(this, x, y, o); }; }
-    save(A); save(B); // both first writes stand; each page then applies the other's
-    await tick(2600); // the page whose own id is the smaller stands and re-sends after the apply's gate; the other re-keys onto it
-    const winner = a1 === win ? 'A' : 'B', loser = winner === 'A' ? 'B' : 'A', lost = winner === 'A' ? b1 : a1;
-    leg(J(sWins(A)) === J([win]) && J(sWins(B)) === J([win]) && J(onHub(H)) === J([win]) && rekeys[winner].length === 0 && J(rekeys[loser]) === J([lost + '→' + win]),
-      `§1D87 (g) THE TIE THE HUB DOES NOT JUDGE (r1377 (1)): a fresh desktop, both pages' first writes (${a1}, ${b1}) stand — the rule both compute alike (an own window already sent keeps the smaller id; plain string order): one id on both pages (${win}), one row, never a swap (the smaller's page re-keyed ${rekeys[winner].length}×, the other once: ${rekeys[loser].join(' ')})`, { a1, b1, A: sWins(A), B: sWins(B), hubRows: onHub(H), rekeys });
+    const [a1] = sWins(A), [b1] = sWins(B);
+    // TWO FIRST WRITES CROSS (r1802 (B), the hub's own route): the page with the LARGER id writes first, the other's write leaves before
+    // the first's relayed record reaches it. The hub REFUSES the second (the shrink belt: it drops a window another client added lately,
+    // with no evidence — «one of them is enough»), and that page takes the kept record on the refusal road: ONE re-key, onto the first
+    // writer's id, whatever the ids; the first page never re-keys. (The ids so arranged that the follow's tie rule — the smaller id stands —
+    // would have broken this order: its red)
+    const [F, Sx, fId, sId] = a1 > b1 ? [A, B, a1, b1] : [B, A, b1, a1];
+    const rekeys = new Map([[F, []], [Sx, []]]);
+    for (const P of [F, Sx]) { const was = P.app.wm.rekeyWindow; P.app.wm.rekeyWindow = function (x, y, o) { rekeys.get(P).push(x + '→' + y); return was.call(this, x, y, o); }; }
+    save(F); save(Sx); // both first writes, crossing
+    await tick(2600);
+    const refusedS = Sx.sock().frames.some((f) => f.type === 'layout-sync-refused'), ackedF = F.sock().frames.some((f) => f.type === 'layout-sync-ack');
+    leg(refusedS && ackedF && J(sWins(A)) === J([fId]) && J(sWins(B)) === J([fId]) && J(onHub(H)) === J([fId]) && rekeys.get(F).length === 0 && J(rekeys.get(Sx)) === J([sId + '→' + fId]),
+      `§1D87 (g) TWO FIRST WRITES CROSS ON A FRESH DESKTOP (r1802 (B)): the hub takes the first (${fId}, acked ${ackedF}) and refuses the second (${sId}, the smaller id: ${refusedS}); its page re-keys ONCE onto ${fId} (${rekeys.get(Sx).join(' ')}), the first never (${rekeys.get(F).length}×) — the hub's order, one id on both pages, one row`, { a1, b1, A: sWins(A), B: sWins(B), hubRows: onHub(H), refusedS, ackedF, rekeysF: rekeys.get(F), rekeysS: rekeys.get(Sx) });
   })());
   if (want('d')) scenes.push((async () => {
     const { A, B } = pair({ ...recs(), 'desk-x': [files('x-1', 0), chat('x-t', T, 1)] });
@@ -784,13 +807,12 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
   const LSRC = read('src/lib/layout.js'), DSRC = read('src/lib/desktop-manager.js'), WSRC = read('src/lib/window.js');
   const apply = 'const shownBy = this.app.desktopManager?.takeRowsShown?.(';
   const refusal = 'if (d === this._activeId) this.takeRowsShown(d, rec, {';
-  const rekey = 'if (!held(w) && !mineWins && wm.rekeyWindow(was, id, { inChain: true })) {';
+  const rekey = 'if (!held(w) && wm.rekeyWindow(was, id, { inChain: true })) {';
   const stands = '      this.noteStands(desk, was, id);\n';
-  const tie = 'const mineWins = this.wireListed(desk, was) && was < id;';
   const refusalStands = '    if (this._standsNow?.get(d)?.length) this._setRecord(d, this._standsInto(d, this._savedStates.get(d)));';
   const resend = '    if (standing.size && !keptShown) setTimeout(() => this.resendKeptShown(), 1000);';
-  const set = ok([LSRC.includes(apply), DSRC.includes(refusal), DSRC.includes(rekey), DSRC.includes(stands), DSRC.includes(tie), DSRC.includes(refusalStands), LSRC.includes(resend)].every(Boolean),
-    '§1D87 CONTROL setup: the apply\'s and the refusal road\'s calls, the re-key, the stand, the tie rule, the refusal road\'s stand and the stand\'s re-send exist (layout.js, desktop-manager.js)');
+  const set = ok([LSRC.includes(apply), DSRC.includes(refusal), DSRC.includes(rekey), DSRC.includes(stands), !DSRC.includes('mineWins'), DSRC.includes(refusalStands), LSRC.includes(resend)].every(Boolean),
+    '§1D87 CONTROL setup: the apply\'s and the refusal road\'s calls, the re-key, the stand (and NO tie rule: r1802 (B)), the refusal road\'s stand and the stand\'s re-send exist (layout.js, desktop-manager.js)');
   const M = mutantCopies('ldup-1d87', REPO);
   const lm = async (src, name) => (await import(pathToFileURL(M.write('src/lib/layout.js', src, name, { esm: true })).href)).LayoutManager;
   const dm = async (src, name) => (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', src, name, { esm: true })).href)).DesktopManager;
@@ -802,9 +824,9 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
     run(dm, DSRC.replace(refusal, 'if (false) this.takeRowsShown(d, rec, {'), '1d87-refusal-road', ['c'], 'DM'),
     run(dm, DSRC.replace(rekey, 'if (false) {').replace(stands, ''), '1d87-keep-only', ['a'], 'DM'),
     run(dm, DSRC.replace(refusalStands, ''), '1d87-refusal-no-stand', ['c2'], 'DM'),
-    run(dm, DSRC.replace(tie, 'const mineWins = false;'), '1d87-no-tie-rule', ['g'], 'DM'),
+    run(dm, DSRC.replace(rekey, 'const mineWins = this.wireListed(desk, was) && was < id; if (!held(w) && !mineWins && wm.rekeyWindow(was, id, { inChain: true })) {'), '1d87-tie-rule', ['g', 'crev'], 'DM'),
     run(lm, LSRC.replace(resend, ''), '1d87-stand-not-resent', ['f'], 'LM'),
-    run(dm, DSRC.replace(rekey, 'if (!mineWins && wm.rekeyWindow(was, id, { inChain: true })) {'), '1d87-held-ignored', ['f'], 'DM'),
+    run(dm, DSRC.replace(rekey, 'if (wm.rekeyWindow(was, id, { inChain: true })) {'), '1d87-held-ignored', ['f'], 'DM'),
   ]);
   for (const [c, n, e] of real.said) ok(c, n, e);
   if (!set) return;
@@ -813,7 +835,7 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
   ok(red(refused, 'c'), `§1D87 RED CONTROL — the refusal road takes nothing: the refused page's window keeps its own id over the kept record, its second write lists both (${red(refused, 'c')} red)`, refused.failed);
   ok(red(keep, 'a'), `§1D87 RED CONTROL — the keep alone (r1297's first form: the window kept, never re-keyed, never in the row's place): two rows of S — the close no longer travels (${red(keep, 'a')} red)`, keep.failed);
   ok(red(noStand, 'c2'), `§1D87 RED CONTROL — the refusal road's stand not read into the record: the held window's second write lists the kept row beside it (${red(noStand, 'c2')} red)`, noStand.failed);
-  ok(red(noTie, 'g'), `§1D87 RED CONTROL — no tie rule where the hub judges nothing (2d2eedc39's rule): the two pages swap ids (${red(noTie, 'g')} red)`, noTie.failed);
+  ok(red(noTie, 'crev'), `§1D87 RED CONTROL — the follow's tie rule put back (r1802 (B): the smaller id stands): on the refusal road (c with the ids reversed) the refused page keeps its own id and the first page re-keys onto it — the hub's order broken (${red(noTie, 'crev')} red; the crossing on a fresh desktop, (g), never reaches the rule: ${red(noTie, 'g') ? 'red' : 'green'} — the belt refuses the second write)`, noTie.failed);
   ok(red(noResend, 'f'), `§1D87 RED CONTROL — a standing window never re-sent: the other page keeps its own id (${red(noResend, 'f')} red)`, noResend.failed);
   ok(red(heldIgnored, 'f'), `§1D87 RED CONTROL — a held act ignored: the moved window is re-keyed under the person's hand (${red(heldIgnored, 'f')} red)`, heldIgnored.failed);
   // rekeyWindow (window.js, ITS OWN TEXT): the focus and a resume's fence mark follow the window to its new id — RED: the release's text

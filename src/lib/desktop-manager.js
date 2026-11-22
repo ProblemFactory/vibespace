@@ -710,13 +710,14 @@ export class DesktopManager {
    *  places it like any window it lists). Under a held act of that window (`held(w)`: a move, a resize, a chain act no save carried)
    *  it STANDS under its own id in the row's place instead (noteStands — the record read so, its next write carrying it; the other page
    *  takes that id). A row this page closed and no save has carried (`rowHeld`) is left as today. One window for one row.
-   *  WHICH ID WINS when two pages each opened the conversation: the HUB's order where it judges — the staleness gate (§6b guard 11)
-   *  accepts only a write made from the newest record of the desktop, the other page's write is refused and that page takes the kept
-   *  record on the refusal road (this method too). Where the hub judges NOTHING (B-1d87's follow, r1377 (1): a desktop with no stored
-   *  record yet, a write with no base — both pages' first writes stand), A RULE BOTH PAGES COMPUTE ALIKE: a page whose own window is
-   *  already on the wire (it sent it — both pages wrote their own) keeps its own id when it is the smaller (plain string order) and
-   *  STANDS in the row's place (its next write carries it), and re-keys onto the row's when that one is the smaller; a window never
-   *  sent re-keys. Never a swap, one id on every page.
+   *  WHICH ID WINS when two pages each opened the conversation: the HUB's order — the first write the hub accepts; the other page's
+   *  write is refused and that page takes the kept record on the refusal road (this method too), whatever the two ids. TWO FIRST
+   *  WRITES NEVER BOTH STAND (the coordinator's r1802, read in the hub's route): a write naming a base is judged by the staleness gate
+   *  (§6b guard 11, desktop-record.js staleVerdict); one naming none (a desktop this page never saw a record of) passes that gate, but
+   *  it drops the first page's window, which ANOTHER client added lately — the shrink belt refuses such a drop with no evidence, «one
+   *  of them is enough» (desktop-record.js shrinkVerdict; ws-handler.js ARRIVAL_TTL_MS, 10 min), and a page applies a relayed record
+   *  in far less. So no page ever applies the other's record while its own window is on the wire: never a swap, one id on every
+   *  page.
    *  → { rekeyed: [[from, to]], stands: [[win, row]] } */
   takeRowsShown(desk, state, { held = () => false, rowHeld = () => false } = {}) {
     const out = { rekeyed: [], stands: [] }, wm = this.app.wm;
@@ -729,8 +730,7 @@ export class DesktopManager {
       if (!w) continue;
       const was = String(w.id);
       taken.add(was);
-      const mineWins = this.wireListed(desk, was) && was < id; // the tie where the hub judged nothing: both pages wrote their own (above)
-      if (!held(w) && !mineWins && wm.rekeyWindow(was, id, { inChain: true })) {
+      if (!held(w) && wm.rekeyWindow(was, id, { inChain: true })) {
         taken.add(id);
         if (this.wireListed(desk, was)) this._noteDeparted(was, 'replaced', id); // the hub held it: its drop is explained
         this._buildAttempts.delete(id);
@@ -756,8 +756,7 @@ export class DesktopManager {
     if (windowIds(state).includes(id)) return null;
     return w;
   }
-  /** B-1d87: window `winId` STANDS under its own id in the place of the record's row `rowId` (no re-key: a held act, or its own id wins
-   *  the tie) — read once */
+  /** B-1d87: window `winId` STANDS under its own id in the place of the record's row `rowId` (no re-key: a held act) — read once */
   noteStands(desk, winId, rowId) { const m = this._standsNow || (this._standsNow = new Map()); if (!m.has(desk)) m.set(desk, []); m.get(desk).push([String(winId), String(rowId)]); }
   _takeStands(desk) { const l = this._standsNow?.get(desk); if (l) this._standsNow.delete(desk); return l || []; }
   /** `state` with each window standing for a row (noteStands) in that row's place and seat — the row leaves with evidence
