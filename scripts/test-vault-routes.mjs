@@ -465,7 +465,7 @@ const hit0 = hit, PAGE0 = PAGE;
   app2.use(auth.middleware());
   app2.use(express.json());
   // lane vault-job-approval: a Background job's approval card's door, recorded (the door's own rules are test-vault-job's) — the ROUTE's law here
-  const jobAsks = { calls: [], revokes: [], answer(id, o) { this.calls.push({ id, ...o }); return { ok: true, outcome: o.answer === 'deny' ? 'denied' : 'allowed', job: 'jb-0000aaaa' }; }, revoke(entry, job, o) { this.revokes.push({ entry, job, ...o }); return { ok: true, outcome: 'revoked', job, stopped: true }; } };
+  const jobAsks = { calls: [], revokes: [], alls: [], answer(id, o) { this.calls.push({ id, ...o }); return { ok: true, outcome: o.answer === 'deny' ? 'denied' : 'allowed', job: 'jb-0000aaaa' }; }, revoke(entry, job, o) { this.revokes.push({ entry, job, ...o }); return { ok: true, outcome: 'revoked', job, stopped: true }; }, revokeAll(job, o) { this.alls.push({ job, ...o }); return { ok: true, outcome: 'revoked', job, stopped: true, entries: 2 }; } };   // stage L3's F1: + revokeAll (the job card's ✕)
   registerVaultRoutes(app2, { vault: vault2, activeSessions: sessions2, getJobs: () => ({ jobByToken: (t) => (t === 'jbt_live' ? { id: 'j1' } : null) }), contents, run: runDoor, jobAsks });
   const srv2 = await new Promise((r) => { const x = app2.listen(0, '127.0.0.1', () => r(x)); });
   const P2 = srv2.address().port, OWN2 = `http://127.0.0.1:${P2}`;
@@ -552,9 +552,10 @@ const hit0 = hit, PAGE0 = PAGE;
     const jaJ = await hit(VJA, { headers: { ...PAGE, authorization: 'Bearer jbt_live' }, body: { answer: 'allow', page } });
     const n0 = jobAsks.calls.length;
     const ja0 = await hit(VJA, { body: { answer: 'allow' } });
-    const ja1 = await hit(VJA, { body: { answer: 'allow', page } });
-    const jaD = await hit(VJA, { body: { answer: 'deny' } });
+    const ja1 = await hit(VJA, { body: { answer: 'allow', page, rev: 2 } });
+    const jaD = await hit(VJA, { body: { answer: 'deny', rev: 1 } });
     const cs = jobAsks.calls;
+    ok(cs.length === 3 && cs[0].rev === null && cs[1].rev === 2 && cs[2].rev === 1, 'stage L3\'s F1: the press carries the card\'s revision it drew to the door (`rev`; none ⇒ null — the door refuses it ask_changed, nothing written)', cs.map((c) => c.rev));
     ok(jaB.status === 403 && jaB.json.code === 'human_only' && jaJ.status === 403 && jaJ.json.code === 'human_only' && n0 === 0, 'a Background job\'s approval card: a session bearer and a job token are refused human_only — its door is never asked', [jaB.json.code, jaJ.json.code, n0]);
     ok(ja0.status === 200 && ja1.status === 200 && jaD.status === 200 && cs.length === 3 && cs[0].reauthed === false && cs[1].reauthed === true && cs[2].answer === 'deny' && cs[2].reauthed === false && cs.every((c) => c.person === true && c.by === 'user' && c.id === 'vj-' + '0'.repeat(16)),
       'a PERSON\'s 允许 reaches the door with reauthed = this page\'s 验证是你 window (none on the page ⇒ false — the door refuses it); 拒绝 never needs it; every answer is the person\'s', cs);
@@ -581,6 +582,8 @@ const hit0 = hit, PAGE0 = PAGE;
     const rvJ = await hit('/api/vault/job/revoke', { headers: { ...PAGE, authorization: 'Bearer jbt_live' }, body: RV });
     const r0 = jobAsks.revokes.length;
     const rvP = await hit('/api/vault/job/revoke', { body: RV });
+    const rvA = await hit('/api/vault/job/revoke', { body: { job: 'jb-0000aaaa', all: true } });
+    ok(rvA.status === 200 && rvA.json.outcome === 'revoked' && rvA.json.entries === 2 && jobAsks.alls.length === 1 && jobAsks.alls[0].job === 'jb-0000aaaa' && jobAsks.alls[0].by === 'user' && jobAsks.revokes.length === 1, 'stage L3\'s F1 (d): the JOB CARD\'s ✕ (`all: true`) reaches the door\'s take-back of ALL the job\'s approvals — a person\'s click, the same person() door', jobAsks.alls);
     ok(rvB.status === 403 && rvB.json.code === 'human_only' && rvJ.status === 403 && rvJ.json.code === 'human_only' && r0 === 0 && rvP.status === 200 && rvP.json.outcome === 'revoked' && jobAsks.revokes.length === 1 && jobAsks.revokes[0].entry === RV.entry && jobAsks.revokes[0].job === RV.job && jobAsks.revokes[0].by === 'user',
       'the ✕ on a job\'s vault use (POST /api/vault/job/revoke): a session bearer and a job token are refused human_only; a person\'s click reaches the door with the entry and the job', [rvB.json.code, rvJ.json.code, jobAsks.revokes]);
     // MUTANT (round w6tezed7d): the TAKE-BACK route without person() ⇒ a bearer's ✕ reaches the door — its own control, RED on the copy

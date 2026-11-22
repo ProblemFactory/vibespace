@@ -14,10 +14,10 @@ const STATES = Object.keys(STATE_CLS);
 const stateWord = (s) => (s === 'running' ? t('running') : s === 'waiting-vault' ? t('waiting for the unlock') : s === 'waiting-approval' ? t('waiting for your approval') : s === 'scheduled' ? t('scheduled') : t('stopped'));
 /** the ✕: confirm (what it does, what it cannot undo), then the hub's take-back — the entry and the job captured BEFORE the
  *  dialog opens (the approval census's capture rule: a broadcast redraws the row while it is open) */
-export async function takeBackJob(entry, job, name, refresh) {   // + the job card's ✕ (src/lib/jobs-panel.js)
-  const ok = await showConfirmDialog({ title: t('Take it back from «{name}»?', { name }), message: t('It stops the job now. A value it already read cannot be taken back — rotate the key at its provider to end it.'), confirmText: t('Take back and stop'), danger: true });
+export async function takeBackJob(entry, job, name, refresh) {   // + the job card's ✕ (src/lib/jobs-panel.js): `entry` null = ALL of the job's (stage L3's F1, 主开发 r2528 (d))
+  const ok = await showConfirmDialog({ title: entry ? t('Take it back from «{name}»?', { name }) : t('Take back every secret of «{name}»?', { name }), message: t('It stops the job now. A value it already read cannot be taken back — rotate the key at its provider to end it.'), confirmText: t('Take back and stop'), danger: true });
   if (!ok) return;
-  const r = await fetchJson('/api/vault/job/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entry, job }) });
+  const r = await fetchJson('/api/vault/job/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(entry ? { entry, job } : { job, all: true }) });
   if (r && r.ok) { showToast(r.stopped ? t('Taken back — the job is stopped') : t('Taken back — its next start asks you again')); if (typeof refresh === 'function') refresh(); return; }
   // the approvals' store unreadable (主开发 r850 item 4): the job DID stop and nothing was written — said in the person's language, never the bare code
   if (r && r.code === 'store_unreadable') { showToast(r.stopped ? t('The job is stopped — but the approvals could not be read, so nothing was written; its next start asks you again') : t('The approvals could not be read — nothing was written; try again in a moment'), { type: 'warn', duration: 9000 }); if (typeof refresh === 'function') refresh(); return; }

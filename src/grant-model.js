@@ -123,7 +123,7 @@ const ENTRY_FIELDS = Object.freeze({
   window: Object.freeze({ origin: Object.freeze(['user', 'request', 'self-open']) }),
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
   'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac', commands: 'commands', source: Object.freeze(['owner', 'request', 'card']), scopes: 'scopes' }),   // lane vault-standing-request r4 (THE ROOT MODEL): `scopes` = the member's SCOPES, each with ITS OWN end / tool / writer (scopeListOf) — a member is ONE shape: `scopes`, or the one-end fields before it (read as each scope with the member's end)   // lane vault-standing-request: `commands` = the COMMAND SHAPES a member may run (a program whose destination the hub cannot read — the owner trusts the command itself), `source` = who wrote the member last (the owner's row, an agent's standing request he allowed, a card's «Always»)   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
-  'vault-job': Object.freeze({ jobs: 'jobs' }),   // lane vault-job-road: the job ids the member's approval names (src/vault-job.js approvedBy)
+  'vault-job': Object.freeze({ jobs: 'jobs', since: 'jobtimes' }),   // lane vault-job-road: the job ids the member's approval names (src/vault-job.js approvedBy); stage L3's F1 (主开发 r2528): `since` — when each was approved (the card says what stands, since when)
   // lane lg-group-parents (B-526c): a watch row's entry carries its WATCHER's settings — the Access dialog's act is on disk in
   // this record before its answer (the channel index's copy follows at its pace; the boot completes it — src/server/
   // channels-access.js completeGrainActs). `notify` marks an entry that carries them: an older record's bare principal reads
@@ -367,6 +367,12 @@ function normEntry(e, door) {
     if (allowed === 'toolmap') { const v = e[f]; if (!v || typeof v !== 'object' || Array.isArray(v)) return null; const keys = Object.keys(v); if (keys.length > HOSTS_MAX) return null; const m = {}; for (const k of keys) { const hk = hostTokenOk(String(k).trim().toLowerCase()); const tv = String(v[k]).toLowerCase(); if (hk === null || hk === '@entry' || !/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(tv)) return null; m[hk] = tv; } if (Object.keys(m).length) out[f] = m; continue; }   // lane vault-use-grants round 4 item 3: host → the CLI that minted its wildcard grant
     if (allowed === 'mac') { if (!/^[0-9a-f]{64}$/.test(String(e[f]))) return null; out[f] = String(e[f]); continue; }   // lane vault-use-grants round 3: the vault's HMAC over the canonical member
     if (allowed === 'time') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 8.64e15) return null; out[f] = n; continue; }
+    if (allowed === 'jobtimes') {   // stage L3's F1: { <job id>: <instant in ms> } — a job id each key, at most JOBS_MAX
+      const v = e[f]; if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+      const keys = Object.keys(v); if (keys.length > JOBS_MAX) return null;
+      const m = {}; for (const k of keys) { const n = Math.floor(Number(v[k])); if (!JOB_ID_RE.test(k) || !(n > 0) || n > 8.64e15) return null; m[k] = n; }
+      out[f] = m; continue;
+    }
     if (allowed === 'natural') { const n = Number(e[f]); if (!Number.isInteger(n) || n < 0 || n > 100000) return null; out[f] = n; continue; }   // lane lg-group-parents B-526c: a count that may be 0 (a wake's daily cap)
     if (allowed === 'flag') { if (e[f] === false) continue; if (e[f] !== true) return null; out[f] = true; continue; }   // B-526c: stored only when true
     if (allowed === 'text') { if (!textOk(e[f])) return null; out[f] = e[f]; continue; }   // B-526c: a filter id, an agent's `via`
@@ -377,6 +383,8 @@ function normEntry(e, door) {
   // lane vault-standing-request r4: a vault-use member is ONE shape — `scopes` (each its own end), or the one-end fields it
   // replaces. Both at once is refused at a write and dropped at a read (never one read as the other: narrowing, never wider)
   if (door === 'vault-use' && out.scopes && ['hosts', 'commands', 'until', 'tool', 'toolFor', 'source'].some((f) => out[f] !== undefined)) return null;
+  // stage L3's F1: a vault-job member's `since` names only the jobs it approves (a time of a job it no longer names is dropped)
+  if (door === 'vault-job' && out.since) { for (const k of Object.keys(out.since)) if (!(out.jobs || []).includes(k)) delete out.since[k]; if (!Object.keys(out.since).length) delete out.since; }
   return out;
 }
 /** An `except` entry: a conversation or a Task Group — never everyone, never annotated beyond a display name (a group

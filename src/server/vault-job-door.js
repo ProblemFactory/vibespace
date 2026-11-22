@@ -19,24 +19,31 @@
  *   · `blocked(actor)` — the lock's ONE helper (`vault.blocked`): the lock's one For-you item names the job (never a new item).
  *   · `onChange(fn)` — fn(why) after an unlock (`vault-unlocked`) and after a `vault-job` row changed (`vault-approved`): the
  *     engine re-judges every waiting job (src/jobs.js vaultChanged).
- *   · THE APPROVAL CARD (lane vault-job-approval, design-vault-service-secret L1b — the owner's decisions ① ②): `ask(job, v)` —
- *     the engine's wait for `approval` files ONE For-you item per job × entry (action `vault-job-ask`, NO expiry: a job is
- *     asynchronous; the facts of PURE `askCardOf` — the program's real path and whether an agent can change it, the folder, the
- *     command, the entry's Vault name and reference, the destination unknown; never a value); an open card is never filed
- *     again; ≤ 4 open per conversation and 64 on the hub, a Deny quiets that conversation × entry 10 minutes — each a refusal
- *     by name the engine says (never a silent wait). The item IS the ask: `index` re-reads the open ones from the store, so a
+ *   · THE APPROVAL CARD (lane vault-job-approval, design-vault-service-secret L1b — the owner's decisions ① ②; stage L3's F1,
+ *     主开发 r2528: «每个用 key 的后台工作一张卡，你批一次» — ONE card a JOB): `ask(job, v)` — the engine's wait for `approval` files
+ *     ONE For-you item per job naming every entry it waits for (action `vault-job-ask`: the job, the conversation, the card's
+ *     revision `rev` and the entries' ids e0…e7; NO expiry: a job is asynchronous; the facts of PURE `askCardOf` — the job's
+ *     name first, its entries' Vault names, those approved before said with their time, the program's real path and whether an
+ *     agent can change it, the folder, the command, the destination unknown; never a value, never an internal id); an open
+ *     card is never filed again — a job whose set GROWS while its card is open (another entry's approval taken back) has the
+ *     SAME card redrawn (what is new marked, `rev` + 1); ≤ 4 open per conversation and 64 on the hub, a Deny quiets that
+ *     conversation × each of its entries 10 minutes — each a refusal by name the engine says (never a silent wait). The item IS the ask: `index` re-reads the open ones from the store, so a
  *     card filed before a restart is answered after it. `answer(askId, …)` — a PERSON only (src/routes/vault.js `person`, a
- *     bearer is refused human_only): 允许 needs this page's 验证是你 (`reauthed`) and adds the job to the owner conversation's
- *     member of the entry's `vault-job` row through the grants store's ONE writer (the row's change starts the job: onChange);
+ *     bearer is refused human_only) carrying the `rev` it drew (an earlier one ⇒ `ask_changed`, nothing written): 允许 needs this
+ *     page's 验证是你 (`reauthed`, once a card) and adds the job to the owner conversation's member of EVERY entry's `vault-job`
+ *     row through the grants store's ONE writer, all or nothing (a full row refuses the press naming its entry and what to do;
+ *     a write that fails takes back what the press wrote) — the last row's change starts the job (onChange);
  *     拒绝 is a click — the job is refused `vault_denied` (the engine's vaultRefused — whatever its wait reads now: a locked
  *     boot turns an approval wait into a vault wait, the Deny still refuses it). `askOver(jobId)` — the job removed, stopped,
  *     refused, settled or started by another road — closes its cards `ask-over` (a card being answered is never closed under
  *     its own answer). A card closed by any other door would refuse its job `ask_closed` (none exists today: a decision row
  *     refuses every close that is not one of its ends — the listener is the belt). ONE `vault-job` audit line per ask /
- *     allow / deny / over — ids and references only.
+ *     allow / deny / over and per ENTRY, each with the card's one askId; ONE `wait` line when a start enters its wait for a
+ *     locked vault (`waited` — stage L3's F3: once a wait, never a sweep) — ids and references only.
  *   · TAKEN BACK = STOPPED (decision ④; a LOCK stops nothing — decision ③: this file has no lock road): `revoke(entry, job)` (a
- *     person's ✕ — the route's person()) takes the job out of the entry's row through the ONE writer and STOPS it (the engine's
- *     vaultRevoked: desiredUp false, its owner told once); `dropRow` + `entryGone` — an entry deleted (the paste door's
+ *     person's ✕ on the entry's Vault row — the route's person()) takes the job out of THAT entry's row through the ONE writer
+ *     and STOPS it (the engine's vaultRevoked: desiredUp false, its owner told once); `revokeAll(job)` — the job card's ✕ —
+ *     takes it out of every row that approves it, one stop, one notice; `dropRow` + `entryGone` — an entry deleted (the paste door's
  *     dropEntry, and an agent's own entry's dropAgentEntry): its row goes first (a write that fails refuses the delete), then every job naming it stops (a waiting one is
  *     refused entry_unknown); `jobGone(job)` — a job removed or its content cleared: its id leaves every row.
  * Nothing here returns a value to a caller but the frame to the spawner; nothing is logged but codes and ids.
@@ -255,6 +262,14 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   }
 
   function blocked(actor) { try { return vault.blocked(actor, 'start'); } catch { return false; } }
+  /** stage L3's F3 (design D9: «批准、拒绝、撤销、等待各记一条 vault-job 审计行»): a start that ENTERS its wait for a locked vault —
+   *  ONE `wait` line (the job, the references it waits with) — once a wait (the engine calls it at the wait's start), never a sweep */
+  function waited(job, why = 'vault') {
+    if (why !== 'vault') return;
+    const entries = [...new Set(VJ.refsOf(job).map((r) => (VR.parseRef(r.ref) || {}).ref).filter(Boolean))];
+    const jid = VJ.askJobIdOf(job), run = String((job && job.id) || '');
+    audit({ op: 'wait', job: jid, ...(run && run !== jid ? { run } : {}), entries, waitFor: 'vault' });   // a scheduled run: its cron's id (as every vault-job line), the run beside it
+  }
 
   const changeFns = [];   // the engine's re-judge (vaultChanged) — also run once For you has READ after a hold (B-44f3, below)
   function onChange(fn) {
@@ -265,7 +280,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   }
 
   // ── THE APPROVAL CARD (lane vault-job-approval) ───────────────────────────────────────────────────────────────────────────
-  const asks = new Map();        // askId → { askId, todoId, jobId, entry (the entry id), ref, name (the --vault NAME), conv (the member key) }
+  const asks = new Map();        // askId → { askId, todoId, jobId, conv (the member key), rev (the card's revision), entries: [entry ids] } — ONE card a job (stage L3's F1)
   const answering = new Set();   // askIds whose answer is being written (the row's write starts the job synchronously — its start must not close the card under its own answer)
   const settled = new Set();     // ids answered or over (a second answer ⇒ ask_settled), bounded
   const quiet = new Map();       // `${conv}\n${entry}` → until — a Deny's ten minutes (memory only: a restart forgets it)
@@ -273,11 +288,21 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   let jm = null;                 // the engine (bindJobs): a Deny refuses its job; an answer reads the job
   const named = (code, extra = {}) => ({ ok: false, code, words: VJ.WORDS[code] || code, ...extra });
   const audit = (line) => { try { vault.audit('vault-job', line); } catch (e) { log(`[vault-job] the audit line could not be written (${(e && e.code) || 'error'})`); } };
+  const ENTRY_KEYS = Array.from({ length: VJ.MAX }, (_, i) => `e${i}`);   // the card's entries in its action: e0…e7 (the store keeps 12 plain fields)
+  const fieldsOf = ({ askId, jobId, conv, rev, ids }) => { const a = { askId, jobId, conv, rev }; ids.slice(0, VJ.MAX).forEach((id, i) => { a[ENTRY_KEYS[i]] = id; }); return a; };   // the card's action fields beside its type — ids only
   const recordOf = (it) => {
     const a = it && it.action;
     if (!a || a.type !== VJ.ASK_TYPE || !VJ.ASK_ID_RE.test(String(a.askId || ''))) return null;
-    return { askId: String(a.askId), todoId: it.id, jobId: String(a.jobId || ''), entry: String(a.entry || ''), ref: String(a.ref || ''), name: String(a.name || ''), conv: String(a.conv || '') };
+    const entries = ENTRY_KEYS.map((k) => a[k]).filter((x) => typeof x === 'string' && x);
+    return { askId: String(a.askId), todoId: it.id, jobId: String(a.jobId || ''), conv: String(a.conv || ''), rev: Number(a.rev) || 1, entries };
   };
+  /** an entry id of a card → its --vault NAME and reference, read off the job's own declaration (the card holds ids only) */
+  const refOf = (jobId, id) => {
+    const job = jm ? jm.jobs.get(jobId) : null;
+    for (const r of job ? VJ.refsOf(job) : []) { const p = VR.parseRef(r.ref); if (p && p.id === id) return { name: r.name, ref: p.ref, entry: p.entry }; }
+    return { name: '', ref: id, entry: VJ.entryOfRow(id) || id };
+  };
+  const keysOf = (q) => q.entries.map((id) => refOf(q.jobId, id).name).filter(Boolean).join(', ');   // the --vault NAMEs a refusal names
   /** the open cards, re-read from the For-you store — the item IS the ask (one filed before a restart is answered after it) */
   function index() {
     if (!userTodos || typeof userTodos.snapshot !== 'function') return;
@@ -308,9 +333,10 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   };
   const whoOf = (conv) => { let n = null; try { n = nameOf(conv); } catch { n = null; } return String(n || '').slice(0, 80); };   // '' = unknown: the card says «a conversation» in the viewer's language
 
-  /** A WAIT FOR `approval` (the engine, at a spawn — every re-judge of a waiting job asks here): ONE card per job × entry the
-   *  verdict misses (`v.missing`), an open one never filed again. → `{ok:true, filed}` | a refusal by name (the caps, a Deny's
-   *  quiet, the tray refused it — the engine refuses the job in these words) */
+  /** A WAIT FOR `approval` (the engine, at a spawn — every re-judge of a waiting job asks here): ONE card per JOB naming the
+   *  entries the verdict misses (`v.missing`); an open card naming them all is never filed again, one that misses some is drawn
+   *  again (at its facts' landing). → `{ok:true, filed}` | a refusal by name (the caps, a Deny's quiet, the tray refused it —
+   *  the engine refuses the job in these words) */
   let heldAsk = false;   // ONE waiter while For you is held (every re-judge of every waiting job asks here)
   function ask(job, v = {}) {
     if (!userTodos || typeof userTodos.add !== 'function') { log(`[vault-job] no For-you store is wired — the approval card of ${VJ.askJobIdOf(job)} is not filed (the job waits)`); return { ok: true, filed: 0 }; }   // a door built without the tray (a scripted engine): the L1a wait, said in the journal
@@ -325,21 +351,19 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const o = VJ.ownerOf(job), conv = o.conv || o.scope, jobId = VJ.askJobIdOf(job);
     if (!jobId) return named('ask_unfiled');
     if (!conv) return named('no_owner_conversation');   // a person-created job names no conversation an approval could name
-    const missing = new Set(Array.isArray(v.missing) ? v.missing : []);
-    const need = [];
-    for (const r of VJ.refsOf(job)) {
-      if (!missing.has(r.name)) continue;
-      const ref = VR.parseRef(r.ref);
-      if (ref && !need.some((x) => x.id === ref.id)) need.push({ name: r.name, ref: ref.ref, id: ref.id, entry: ref.entry });   // ONE card per job × ENTRY (two NAMEs on one entry: one card)
-    }
+    const need = needOf(job, v.missing);
     const open = [...asks.values()], pending = [...pend.values()];
-    // a job × entry whose card is open, or whose facts are being read for its card (`pend`), is never asked twice
-    const fresh = need.filter((r) => !open.some((q) => q.jobId === jobId && q.entry === r.id) && !pend.has(`${jobId}\n${r.id}`));
+    // a job whose card names every entry it waits for, or whose card's facts are being read (`pend` — the landing judges the set
+    // again), is never asked twice
+    const mineOpen = open.find((q) => q.jobId === jobId) || null;
+    const fresh = need.filter((r) => !(mineOpen && mineOpen.entries.includes(r.id)));
     if (!fresh.length) return { ok: true, filed: 0 };
     if (fresh.some((r) => r.id.length > 200 || r.ref.length > 200)) { log(`[vault-job] ${jobId}: an entry reference past the tray's 200-character field — its card is not filed`); return named('ask_unfiled'); }   // the store cuts an action's field at 200 (src/user-todos.js normalizeAction): a cut id would approve another entry
     const t = now();
     for (const [k, u] of quiet) if (!(u > t)) quiet.delete(k);
     for (const r of fresh) { const qu = quiet.get(`${conv}\n${r.id}`); if (qu) return named('ask_quiet', { key: r.name, until: new Date(qu).toISOString() }); }
+    const reading = pend.get(jobId);
+    if (reading) { for (const r of need) reading.missing.add(r.name); return { ok: true, filed: 0 }; }   // its card's facts are being read: the landing files (or draws again) the set it knows by then (a Deny's quiet asked first)
     // THE CAPS COUNT JOBS (the adversarial read: by cards, a job with five entries could never start): 4 jobs waiting on cards per
     // conversation, 64 on the hub — this job's own open cards count it once
     const jobsOf = (list) => new Set(list.map((q) => q.jobId));
@@ -355,51 +379,91 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     // THE CARD IS FILED WHEN ITS FILE FACTS LAND (主开发 r850 item 2): the job waits meanwhile, its job × entries reserved; at the
     // landing it is judged again (still this engine's, still waiting for an approval) and a card that cannot be filed then refuses
     // it by name, as a refusal here would have
-    const keys = fresh.map((r) => `${jobId}\n${r.id}`);
-    for (const [i, r] of fresh.entries()) pend.set(keys[i], { jobId, conv, entry: r.id });
+    pend.set(jobId, { jobId, conv, missing: new Set(need.map((r) => r.name)) });
     const work = programFacts(cmd, { fsp, ms: factsMs, state: readState, log })
-      .then((p) => fileCards({ job, jobId, o, conv, who, label, head, fresh, p }))
+      .then((p) => fileCards({ job, jobId, o, conv, who, label, head, p }))
       .catch((e) => { log(`[vault-job] the approval card of ${jobId} could not be filed (${(e && e.message) || e})`); refuseLater(jobId, named('ask_unfiled')); })
-      .finally(() => { for (const k of keys) pend.delete(k); });
+      .finally(() => { pend.delete(jobId); });
     inflight.add(work); work.finally(() => inflight.delete(work));
     return { ok: true, filed: 0, reading: fresh.length };
   }
-  const pend = new Map();   // `${jobId}\n${entry id}` → { jobId, conv, entry } — a card whose file facts are being read
+  /** the entries a job waits for its approval of → [{name, ref, id, entry}] (two NAMEs on one entry: one entry) */
+  function needOf(job, missing0) {
+    const missing = new Set(Array.isArray(missing0) ? missing0 : []);
+    const need = [];
+    for (const r of VJ.refsOf(job)) {
+      if (!missing.has(r.name)) continue;
+      const ref = VR.parseRef(r.ref);
+      if (ref && !need.some((x) => x.id === ref.id)) need.push({ name: r.name, ref: ref.ref, id: ref.id, entry: ref.entry });
+    }
+    return need.slice(0, VJ.MAX);
+  }
+  /** does the entry's row approve the job for the conversation (its member names the job)? */
+  function approvedHere(jobId, conv, id) {
+    const row = rowsFor(id)[0] || null;
+    return (Array.isArray(row && row.to) ? row.to : []).some((x) => x && x.kind === 'conversation' && x.key === conv && Array.isArray(x.jobs) && x.jobs.map(String).includes(jobId));
+  }
+  /** the job's entries ALREADY approved for it (its card says them: which, since when — 主开发 r2528 (a)) → [{label, since}] */
+  function standingOf(job, jobId, conv, waiting) {
+    const out = [];
+    for (const r of VJ.refsOf(job)) {
+      const p = VR.parseRef(r.ref);
+      if (!p || waiting.includes(p.id) || out.some((x) => x.id === p.id)) continue;
+      const row = rowsFor(p.id)[0] || null;
+      const m = (Array.isArray(row && row.to) ? row.to : []).find((x) => x && x.kind === 'conversation' && x.key === conv && Array.isArray(x.jobs) && x.jobs.map(String).includes(jobId));
+      if (m) out.push({ id: p.id, label: entryLabelOf(p.entry), since: m.since && Number(m.since[jobId]) > 0 ? Number(m.since[jobId]) : null });
+    }
+    return out;
+  }
+  const pend = new Map();   // job id → { jobId, conv, missing (the --vault NAMEs its asks named) } — a card whose file facts are being read
   const inflight = new Set(), readState = newReadState();
   /** → a promise that resolves once no card's file facts are being read (the suites wait on it — never a fixed sleep) */
   function factsLanded() { return inflight.size ? Promise.allSettled([...inflight]).then(() => factsLanded()) : Promise.resolve(); }
   const refuseLater = (jobId, v) => { try { if (jm && typeof jm.vaultRefused === 'function') jm.vaultRefused(jobId, v, 'vault-card-unfiled'); } catch (e) { log(`[vault-job] ${jobId}: its card could not be filed and the job could not be refused (${(e && e.message) || e})`); } };
-  function fileCards({ job, jobId, o, conv, who, label, head, fresh, p }) {
+  function fileCards({ job, jobId, o, conv, who, label, head, p }) {
     const now0 = jm ? jm.jobs.get(job.id) : job;
     if (jm && (now0 !== job || job.state !== 'waiting' || job.waitFor !== 'approval')) return;   // it left its wait meanwhile (started, stopped, removed)
-    if (userTodos.isHeldUnread?.()) return void ask(job, { missing: fresh.map((r) => r.name) });   // held meanwhile: the held road (the job waits, judged at the read)
+    const missing = [...((pend.get(jobId) || {}).missing || [])];   // the set the asks named while its facts were read (a later ask's growth included)
+    if (userTodos.isHeldUnread?.()) return void ask(job, { missing });   // held meanwhile: the held road (the job waits, judged at the read)
     if (stateOf() === 'locked') return;   // r1874 (the round's should): a lock landed while its facts were read — no card over a locked vault (a lock ends every ask); the unlock's re-judge files it
     index();
-    let filed = 0;
-    for (const r of fresh) {
-      if ([...asks.values()].some((q) => q.jobId === jobId && q.entry === r.id)) continue;
-      const askId = `vj-${crypto.randomBytes(8).toString('hex')}`;
-      const card = VJ.askCardOf({ who, job: { id: jobId, label, kind: head.kind, restart: head.restart }, entry: { id: r.id, ref: r.ref, name: r.name, label: entryLabelOf(r.entry) }, ...p });
-      let it = null;
-      try {
-        it = userTodos.add(o.conv ? `claude:${o.conv}` : 'vault', {
-          origin: 'vault', kind: 'action', urgency: 'normal', by: 'agent', sessionName: who || null, jobId,   // NO expiresAt: a job waits for its owner (design D1); jobId: the job's Clear content clears this card's words too (src/server/record-clear.js — its cascade finds a job's items by it; resolveByJob never closes a decision row)
-          text: card.text, detail: card.detail, i18n: card.i18n, facts: card.facts,
-          action: { type: 'vault-job-ask', askId, jobId, entry: r.id, ref: r.ref, name: r.name, conv },   // = VJ.ASK_TYPE (spelled for the approval census's grep) — ids and references only
-        });
-      } catch (e) { log(`[vault-job] the approval card of ${jobId} could not be filed (${(e && e.message) || e})`); }
-      if (!it || !it.id) { if (!filed) refuseLater(jobId, named('ask_unfiled')); return; }
-      asks.set(askId, { askId, todoId: it.id, jobId, entry: r.id, ref: r.ref, name: r.name, conv });
-      audit({ op: 'ask', job: jobId, entry: r.ref, conv, askId });
-      filed++;
+    // what a press approved while the facts were read is no longer waited for: it STANDS (the review — never «will use» twice)
+    const need = needOf(job, missing).filter((r) => !approvedHere(jobId, conv, r.id)), ids = need.map((r) => r.id);
+    if (!ids.length) return;
+    const open = [...asks.values()].find((q) => q.jobId === jobId) || null;
+    if (open && ids.length === open.entries.length && ids.every((id) => open.entries.includes(id))) return;   // its card names them already
+    const isNew = (id) => !!open && !open.entries.includes(id);
+    const card = VJ.askCardOf({ who, job: { label, kind: head.kind, restart: head.restart }, entries: need.map((r) => ({ name: r.name, label: entryLabelOf(r.entry), isNew: isNew(r.id) })), standing: standingOf(job, jobId, conv, ids), ...p });
+    if (open) {   // THE SAME CARD DRAWN AGAIN (主开发 r2528 (e)): what is new marked; its revision moves — a press of the earlier set is refused
+      const rev = open.rev + 1;
+      let r = null;
+      try { r = userTodos.redrawItem((it) => it.id === open.todoId, { text: card.text, detail: card.detail, i18n: card.i18n, facts: card.facts, action: { type: 'vault-job-ask', ...fieldsOf({ askId: open.askId, jobId, conv, rev, ids }) } }); } catch (e) { r = { ok: false, code: (e && e.message) || 'error' }; }
+      if (!r || !r.ok) { log(`[vault-job] the approval card of ${jobId} could not be drawn again (${(r && r.code) || 'error'}) — it names its earlier secrets; the job waits`); return; }
+      const added = need.filter((x) => !open.entries.includes(x.id));
+      open.rev = rev; open.entries = ids;
+      for (const x of added) audit({ op: 'ask', job: jobId, entry: x.ref, conv, askId: open.askId, rev });
+      return;
     }
+    const askId = `vj-${crypto.randomBytes(8).toString('hex')}`;
+    let it = null;
+    try {
+      it = userTodos.add(o.conv ? `claude:${o.conv}` : 'vault', {
+        origin: 'vault', kind: 'action', urgency: 'normal', by: 'agent', sessionName: who || null, jobId,   // NO expiresAt: a job waits for its owner (design D1); jobId: the job's Clear content clears this card's words too (src/server/record-clear.js — its cascade finds a job's items by it; resolveByJob never closes a decision row: its ask-over is the door's own)
+        text: card.text, detail: card.detail, i18n: card.i18n, facts: card.facts,
+        action: { type: 'vault-job-ask', ...fieldsOf({ askId, jobId, conv, rev: 1, ids }) },   // = VJ.ASK_TYPE (spelled for the approval census's grep) — ids and the revision only
+      });
+    } catch (e) { log(`[vault-job] the approval card of ${jobId} could not be filed (${(e && e.message) || e})`); }
+    if (!it || !it.id) { refuseLater(jobId, named('ask_unfiled')); return; }
+    asks.set(askId, { askId, todoId: it.id, jobId, conv, rev: 1, entries: ids });
+    for (const x of need) audit({ op: 'ask', job: jobId, entry: x.ref, conv, askId });
   }
 
-  /** THE PERSON ANSWERS a card (src/routes/vault.js — `person`: a bearer never reaches here). allow ⇒ `reauthed` (this page's
-   *  验证是你) or nothing; the job's id joins the owner conversation's member of the entry's row (the ONE writer) and the card
-   *  closes `allowed` · deny ⇒ the card closes `denied`, the conversation × entry is quiet 10 minutes, the job is refused.
-   *  → { ok: true, outcome, job } | a refusal by name. */
-  function answer(askId, { answer: a, reauthed = false, by = 'user', person = false } = {}) {
+  /** THE PERSON ANSWERS a card (src/routes/vault.js — `person`: a bearer never reaches here), carrying the card's revision it
+   *  drew (`rev` — an earlier one ⇒ `ask_changed`, nothing written: no one approves a secret they did not see). allow ⇒
+   *  `reauthed` (this page's 验证是你 — once a card) or nothing; the job's id joins the owner conversation's member of EVERY
+   *  entry's row (the ONE writer), all or nothing, and the card closes `allowed` · deny ⇒ the card closes `denied`, the
+   *  conversation × each entry is quiet 10 minutes, the job is refused. → { ok: true, outcome, job } | a refusal by name. */
+  function answer(askId, { answer: a, reauthed = false, by = 'user', person = false, rev = null } = {}) {
     const id = String(askId || '');
     if (!VJ.ASK_ID_RE.test(id)) return named('ask_unknown');
     // B-44f3: the held store — never «that request is gone» over an unread list: refused by name (503), try once it reads
@@ -410,16 +474,18 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const it = userTodos && typeof userTodos.get === 'function' ? userTodos.get(q.todoId) : null;
     if (!it || it.status !== 'open' || !it.action || it.action.type !== VJ.ASK_TYPE || it.action.askId !== id) { forget(q); return named('ask_settled'); }   // the belt: still open, still this card's
     if (a !== 'allow' && a !== 'deny') return named('bad_job_answer');
+    if (Number(rev) !== q.rev) return named('ask_changed', { rev: q.rev });   // 主开发 r2528 (e): the card drawn again since — nothing written
     const job = jm ? jm.jobs.get(q.jobId) : null;
-    const over = (code) => { settle(q, 'ask-over'); audit({ op: 'over', job: q.jobId, entry: q.ref, askId: id }); return named(code); };
+    const lines = (op, extra = {}) => { for (const e of q.entries) audit({ op, job: q.jobId, entry: refOf(q.jobId, e).ref, ...extra, askId: id }); };   // ONE line an entry, the card's one askId
+    const over = (code) => { const keys = keysOf(q); settle(q, 'ask-over'); lines('over'); return named(code, keys ? { key: keys } : {}); };
     if (!job) return over('ask_over');
     const fact = person ? { decidedBy: 'person', decidedAt: now() } : null;
     const who = String(by || 'user').slice(0, 40);
     if (a === 'deny') {
       settle(q, 'denied', fact);
-      quiet.set(`${q.conv}\n${q.entry}`, now() + VJ.DENY_QUIET_MS);
-      audit({ op: 'deny', job: q.jobId, entry: q.ref, conv: q.conv, askId: id, by: who });
-      try { jm.vaultRefused(q.jobId, named('vault_denied', { key: q.name })); } catch (e) { log(`[vault-job] the denial of ${q.jobId} could not refuse it (${(e && e.message) || e})`); }
+      for (const e of q.entries) quiet.set(`${q.conv}\n${e}`, now() + VJ.DENY_QUIET_MS);
+      lines('deny', { conv: q.conv, by: who });
+      try { jm.vaultRefused(q.jobId, named('vault_denied', { key: keysOf(q) })); } catch (e) { log(`[vault-job] the denial of ${q.jobId} could not refuse it (${(e && e.message) || e})`); }
       return { ok: true, outcome: 'denied', job: q.jobId };
     }
     if (reauthed !== true) return named('reveal_needs_password');
@@ -428,21 +494,37 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     // entry of the same name would inherit it)
     const waits = (j) => j && j.state === 'waiting';
     if (!(waits(job) || (job.kind === 'cron' && job.desiredUp !== false && job.state !== 'failed'))) return over('ask_over');
-    if (!entryOf({ store: 'secrets', field: 'secret', entry: (VR.parseRef(q.ref) || {}).entry })) return over('entry_unknown');
+    for (const e of q.entries) if (!entryOf({ store: 'secrets', field: 'secret', entry: refOf(q.jobId, e).entry })) return over('entry_unknown');
     const g = store();
     if (!g || typeof g.set !== 'function') return named('not_written');
-    const next = VJ.memberWith(rowsFor(q.entry)[0] || null, q.conv, q.jobId, { keep: (x) => !!(jm && jm.jobs.has(x)) });   // the ids of jobs gone (archived, collected) leave as it is written
-    if (!next) return named('too_many_jobs');
-    answering.add(id);   // the row's write starts the job synchronously (onChange): its start closes the job's OTHER cards, never this one
+    // ALL OR NOTHING (主开发 r2528 (b)): every entry's row takes the job, or nothing is written — a full row refuses the press naming
+    // its entry and what to do in the same sentence (the recipe, not only the refusal)
+    const at = now(), plan = [];
+    for (const e of q.entries) {
+      const row0 = rowsFor(e)[0] || null;
+      const next = VJ.memberWith(row0, q.conv, q.jobId, { keep: (x) => !!(jm && jm.jobs.has(x)), at });   // the ids of jobs gone (archived, collected) leave as it is written
+      if (!next) { const label = entryLabelOf(refOf(q.jobId, e).entry); return { ok: false, code: 'too_many_jobs', words: VJ.fullRowWords(label), entry: label }; }
+      plan.push({ e, row0, next });
+    }
+    answering.add(id);   // the ONE re-judge after the writes starts the job synchronously: its start closes the job's OTHER cards, never this one
     try {
-      if (!next.same) {
+      const done = [];
+      for (const x of plan) {
+        if (x.next.same) continue;
         let w = null;
-        try { w = g.set(VJ.DOOR, q.entry, { to: next.to, except: next.except }, 'user'); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
-        if (!w || !w.ok) return { ok: false, code: (w && w.code) || 'not_written', error: (w && w.error) || 'the approval could not be saved — nothing changed' };
+        // each write NARROWED (no re-judge between them — the review: a job started by the first row and then a failed second one
+        // would have run on a half approval); ONE re-judge once every row landed, below
+        try { w = narrow(() => g.set(VJ.DOOR, x.e, { to: x.next.to, except: x.next.except }, 'user')); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
+        if (!w || !w.ok) {   // what this press wrote is taken back (narrowing: no re-judge) — nothing stays half-approved
+          for (const d of done.reverse()) { try { narrow(() => (d.row0 ? g.set(VJ.DOOR, d.e, { to: d.row0.to || [], except: d.row0.except || [] }, 'user') : g.remove(VJ.DOOR, d.e, 'user'))); } catch (e2) { log(`[vault-job] ${q.jobId}: a half-written approval could not be taken back (${(e2 && e2.message) || e2})`); } }
+          return { ok: false, code: (w && w.code) || 'not_written', error: (w && w.error) || 'the approval could not be saved — nothing changed' };
+        }
+        done.push(x);
       }
+      if (done.length) for (const fn of changeFns) { try { fn('vault-approved'); } catch (e) { log(`[vault-job] ${q.jobId}: the re-judge after its approval failed (${(e && e.message) || e})`); } }
       settle(q, 'allowed', fact);
     } finally { answering.delete(id); }
-    audit({ op: 'allow', job: q.jobId, entry: q.ref, conv: q.conv, askId: id, by: who });
+    lines('allow', { conv: q.conv, by: who });
     // what the press did, said (the adversarial read: «starts» for a job whose start was refused): the job's state after the
     // row's change — running, still waiting (another entry's approval, the unlock) or refused at its start (its card says why)
     return { ok: true, outcome: 'allowed', job: q.jobId, state: String(job.state || ''), waitFor: job.state === 'waiting' ? job.waitFor || null : null };
@@ -454,7 +536,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     if (!j) return 0;
     index();
     let n = 0;
-    for (const q of [...asks.values()]) if (q.jobId === j && !answering.has(q.askId)) { settle(q, 'ask-over'); audit({ op: 'over', job: j, entry: q.ref, askId: q.askId }); n++; }
+    for (const q of [...asks.values()]) if (q.jobId === j && !answering.has(q.askId)) { settle(q, 'ask-over'); for (const e of q.entries) audit({ op: 'over', job: j, entry: refOf(j, e).ref, askId: q.askId }); n++; }
     return n;
   }
 
@@ -466,8 +548,8 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
       const q = asks.get(q0.askId);
       if (!q || q.todoId !== it.id) return;
       forget(q);
-      audit({ op: 'over', job: q.jobId, entry: q.ref, askId: q.askId, closed: String(status || '').slice(0, 20) });
-      try { if (jm) jm.vaultRefused(q.jobId, named('ask_closed', { key: q.name })); } catch { }
+      for (const e of q.entries) audit({ op: 'over', job: q.jobId, entry: refOf(q.jobId, e).ref, askId: q.askId, closed: String(status || '').slice(0, 20) });
+      try { if (jm) jm.vaultRefused(q.jobId, named('ask_closed', { key: keysOf(q) })); } catch { }
     });
   }
 
@@ -483,7 +565,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   const withdrawAll = () => {
     if (stateOf() !== 'locked') return;
     index();
-    for (const q of [...asks.values()]) if (!answering.has(q.askId)) { settle(q, 'vault_locked'); audit({ op: 'over', job: q.jobId, entry: q.ref, askId: q.askId, why: 'locked' }); }
+    for (const q of [...asks.values()]) if (!answering.has(q.askId)) { settle(q, 'vault_locked'); for (const e of q.entries) audit({ op: 'over', job: q.jobId, entry: refOf(q.jobId, e).ref, askId: q.askId, why: 'locked' }); }
   };
   if (typeof vault.onLock === 'function') vault.onLock(() => {
     if (userTodos && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') { if (!lockAtRead) { lockAtRead = true; userTodos.whenRead(() => { lockAtRead = false; withdrawAll(); }, "the vault lock's withdraw of the Background jobs' approval cards"); } return; }
@@ -522,6 +604,39 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     let stopped = false;
     try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', entryLabelOf(VJ.entryOfRow(id))))); } catch (e) { log(`[vault-job] the revoke of ${j} could not stop it (${(e && e.message) || e})`); }
     return { ok: true, outcome: 'revoked', job: j, stopped };
+  }
+  /** THE JOB CARD'S ✕ (主开发 r2528 (d)): it takes back ALL of the job's approvals — the job leaves every row that names it
+   *  (each through the ONE writer, narrowing), ONE stop, ONE notice naming them. → {ok, outcome, job, stopped, entries} */
+  function revokeAll(jobId, { by = 'user' } = {}) {
+    const j = String(jobId || '');
+    const job = jm && JOB_RE.test(j) ? jm.jobs.get(j) : null;
+    if (!job) return named('bad_revoke');
+    const ids = [...new Set(VJ.refsOf(job).map((r) => VR.parseRef(r.ref)).filter(Boolean).map((p) => p.id))];
+    const who = String(by || 'user').slice(0, 40), labels = [];
+    let n = 0;
+    for (const id of ids) {
+      const row0 = rowsFor(id)[0] || null;
+      if (row0 && !Array.isArray(row0.to)) {   // an unreadable grants store: nothing written — the ✕ still STOPS the job (decision ④), said
+        let stopped = false;
+        try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', entryLabelOf(VJ.entryOfRow(id))))); } catch { }
+        return { ok: false, code: 'store_unreadable', stopped, error: 'the approvals could not be read (data/grants.json) — the job was stopped; nothing was written' };
+      }
+      const next = VJ.memberWithout(row0, j);
+      if (!next.changed) continue;
+      const w = write(id, next, who);
+      if (!w.ok) {   // the review: a part taken back is a take-back — the job STOPS (decision ④), and the answer says how much was written
+        if (!n) return w;
+        let stopped = false;
+        try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', labels.length > 1 ? `${labels[0]} and ${labels.length - 1} more` : labels[0]))); } catch { }
+        return { ok: false, code: w.code || 'not_written', stopped, entries: n, error: `${n} of its approvals were taken back and the job was stopped; the rest could not be written — press ✕ again` };
+      }
+      audit({ op: 'revoke', job: j, entry: id, by: who, all: true });
+      labels.push(entryLabelOf(VJ.entryOfRow(id))); n++;
+    }
+    if (!n) return named('not_approved');
+    let stopped = false;
+    try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', labels.length > 1 ? `${labels[0]} and ${labels.length - 1} more` : labels[0]))); } catch (e) { log(`[vault-job] the revoke of ${j} could not stop it (${(e && e.message) || e})`); }
+    return { ok: true, outcome: 'revoked', job: j, stopped, entries: n };
   }
   /** AN ENTRY IS DELETED (the Vault window's 删除 — src/server/vault-paste-door.js dropEntry / dropAgentEntry), in two steps around the engine's
    *  secretDrop: `dropRow(id)` FIRST — the entry's vault-job row is removed (a delete never leaves an approval dangling; a write
@@ -616,13 +731,13 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
       const p = VR.parseRef(x.ref);
       const row = p ? rowsFor(p.id)[0] || null : null;
       const approved = (Array.isArray(row && row.to) ? row.to : []).some((m) => m && Array.isArray(m.jobs) && m.jobs.map(String).includes(jid));
-      const q = p ? open.find((c) => c.entry === p.id) : null;   // its OPEN approval card (the job card's «Open For you» opens THAT item — 主开发 r850 item 4)
+      const q = p ? open.find((c) => c.entries.includes(p.id)) : null;   // its OPEN approval card (the job card's «Open For you» opens THAT item — 主开发 r850 item 4)
       return { name: x.name, ref: x.ref, id: p ? p.id : null, label: p ? entryLabelOf(p.entry) : x.ref, approved, ...(q ? { card: q.todoId } : {}) };
     });
   }
 
   const bindJobs = (engine) => { jm = engine || null; };
-  return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, revoke, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs, factsLanded };
+  return { gate, payload, noteUses, blocked, waited, onChange, ask, answer, askOver, revoke, revokeAll, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs, factsLanded };
 }
 
 module.exports = { create, programFacts, pastWrapper, newReadState, FACTS_MS, WRAP_GRAMMAR };

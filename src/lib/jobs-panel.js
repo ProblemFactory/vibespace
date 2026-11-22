@@ -383,14 +383,16 @@ function vaultLine(app, j, { compact = false } = {}) {
       const u = document.createElement('span'); u.className = 'jobs-chip jobs-chip-vault';
       const label = String(x.label || x.name || '');
       u.textContent = label; u.title = `${String(x.name || '')} ← ${String(x.ref || '')}`;
-      if (x.approved === true && typeof x.id === 'string' && !j.cronParent) {   // its approval — the ✕ takes it back and stops the job (a schedule's run: its schedule's card has it)
-        const b = document.createElement('button'); b.type = 'button'; b.className = 'jobs-vault-x'; b.textContent = '✕';
-        b.title = t('Take it back — the job stops now'); b.setAttribute('aria-label', b.title);
-        const entry = x.id, id = String(j.id);
-        b.onclick = (ev) => { ev.stopPropagation(); takeBackJob(entry, id, label, null); };
-        u.appendChild(b);
-      }
       row.appendChild(u);
+    }
+    // THE JOB CARD'S ✕ (stage L3's F1, 主开发 r2528 (d)): ONE, after its secrets — it takes back ALL of the job's approvals and stops it
+    // (one secret's own ✕ is on its Vault row); a schedule's run: its schedule's card has it
+    if (uses.some((x) => x.approved === true && typeof x.id === 'string') && !j.cronParent) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'jobs-vault-x'; b.textContent = '✕';
+      b.title = t('Take back all its secrets — the job stops now'); b.setAttribute('aria-label', b.title);
+      const id = String(j.id), name = isCleared(j) ? clearedText() : String(j.name || j.id);
+      b.onclick = (ev) => { ev.stopPropagation(); takeBackJob(null, id, name, null); };
+      row.appendChild(b);
     }
   }
   if (waits) {

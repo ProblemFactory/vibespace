@@ -143,7 +143,7 @@ const ROWS = Object.freeze([
   { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation', decide: 'person', ends: ['stored', 'denied', 'vault_locked', 'ask-over', 'expired'], stamp: 'store' },
   // lane vault-entry-description: an agent's proposal of an entry's new name / description — 允许 / 拒绝 (it waits for the owner; a lock withdraws it)
   { type: 'vault-words-ask', identity: 'askId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'describe <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['allowed', 'denied', 'vault_locked', 'ask-over'], stamp: 'allow' },
-  // lane vault-job-approval (design-vault-service-secret L1b): a Background job's use of a stored secret — ONE card per job × entry,
+  // lane vault-job-approval (design-vault-service-secret L1b): a Background job's use of stored secrets — ONE card per JOB naming its entries (stage L3's F1),
   // no expiry; 允许 (the second password) / 拒绝 are its two verbs; ask-over = the job was removed, stopped or refused meanwhile
   { type: 'vault-job-ask', identity: 'askId', producer: 'src/server/vault-job-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-job', 'run … --vault NAME=vault://…', 'own'), scope: 'conversation', decide: 'person', ends: ['allowed', 'denied', 'ask-over', 'vault_locked'], stamp: 'allow' },   // + vault_locked (主开发 r1665): a lock withdraws the card, its job waits and asks again at the unlock
   { type: 'vault-unlock', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
@@ -1143,7 +1143,7 @@ const STANDING_ENDS_WORDS = i18nKey('Until you revoke it — the same as «Who m
 // script's real paths — «an agent can change it» a PLAIN line (design D1: a fact, never an alarm — no warn accent), the folder,
 // where it sends (unknown), what a lock does; the command in its mono box (`cmd`); the reference under the fold. No «Always»:
 // 允许 / 拒绝 are its two verbs (user-todos-row heldAnswers). A record without facts v1 draws its prose (null).
-const JOB_LABEL = Object.freeze({ job: i18nKey('Background job'), secret: i18nKey('Secret'), program: i18nKey('Program'), folder: i18nKey('Working folder'), hosts: i18nKey('Sends to'), lock: i18nKey('When the vault locks') });
+const JOB_LABEL = Object.freeze({ job: i18nKey('Background job'), secret: i18nKey('Will use'), standing: i18nKey('Already allowed'), program: i18nKey('Program'), folder: i18nKey('Working folder'), hosts: i18nKey('Sends to'), lock: i18nKey('When the vault locks') });
 const JOB_KIND_WORDS = Object.freeze({
   service: i18nKey('a service — it starts again by itself when it stops, and after a VibeSpace restart once the vault is unlocked; each start gets the secret'),
   'service-never': i18nKey('a service that is not restarted by itself — each start gets the secret'),   // the facts' restart policy (src/vault-job.js askCardOf): every other policy restarts it at any exit
@@ -1151,30 +1151,37 @@ const JOB_KIND_WORDS = Object.freeze({
   task: i18nKey('a task — it runs once and gets the secret once'),
 });
 function jobCardOf(item, { t = fmt } = {}) {
-  const f = item && item.facts && typeof item.facts === 'object' && item.facts.v === 1 ? item.facts : null;
+  // stage L3's F1 (主开发 r2528): ONE card a JOB — the facts' v 2 (src/vault-job.js askCardOf): the job's own name first, what it will
+  // use (each entry's Vault name; what is new since the person last saw the card marked) and what for, the entries that stand
+  // already (which, since when); no value, no internal id (no job id, no vault reference — nothing under a fold)
+  const f = item && item.facts && typeof item.facts === 'object' && item.facts.v === 2 ? item.facts : null;
   if (!f) return null;
   const str = (x) => (typeof x === 'string' ? x : '');
   const o = (x) => (x && typeof x === 'object' ? x : {});
   // §93: the facts' job words are the door's — its name came through the engine's ONE accessor (labelOf) when the card was filed
-  const said = o(f.job), entry = o(f.entry), prog = o(f.program), script = f.script && typeof f.script === 'object' && str(f.script.path) ? f.script : null;
+  const said = o(f.job), prog = o(f.program), script = f.script && typeof f.script === 'object' && str(f.script.path) ? f.script : null;
+  const entries = (Array.isArray(f.entries) ? f.entries : []).filter((e) => e && typeof e === 'object' && str(e.label));
+  const standing = (Array.isArray(f.standing) ? f.standing : []).filter((e) => e && typeof e === 'object' && str(e.label));
   const kind0 = ['service', 'cron', 'task'].includes(said.kind) ? said.kind : 'task';
   const kind = kind0 === 'service' && said.restart === 'never' ? 'service-never' : kind0;
-  const title = str(said.name) || str(said.id), who = str(f.who);   // an unknown asker: its own headline (a sentence that starts with it)
+  const title = str(said.name), who = str(f.who);   // an unknown asker: its own headline (a sentence without it)
+  const names = entries.map((e) => `«${str(e.label)}»`).join(', ');
+  const vars = entries.map((e) => str(e.var)).filter(Boolean).join(', ');
+  const whenOf = (ms) => { const d = new Date(Number(ms)); return Number.isFinite(d.getTime()) ? `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''; };   // the instant as the card's prose says it (UTC) — no clock built by hand in the bundle (test-ui-language ⑦)
   const rows = [
-    { key: 'job', lines: [[{ text: title }, ...(str(said.id) && str(said.id) !== title ? [{ text: ' ' }, { aside: `(${str(said.id)})` }] : [])], [{ text: t(JOB_KIND_WORDS[kind]) }]] },
-    // `strip` (the second adversarial read): the conversation's dock draws a card's strip — the secret and the program ride it too
-    // (n = its first n lines), so Allow is never offered there without naming what and who
-    { key: 'secret', strip: 1, lines: [[{ text: str(entry.label) || str(entry.ref) }], [{ text: t('its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file', { var: str(entry.var) }) }]] },
-    // `unread` (主开发 r850 item 2): the file facts were not read in time — said, and counted as one an agent can change
+    { key: 'job', lines: [[{ text: title }], [{ text: t(JOB_KIND_WORDS[kind]) }]] },
+    // `strip` (the second adversarial read): the conversation's dock draws a card's strip — every secret and the program ride it
+    // too (n = its first n lines), so Allow is never offered there without naming what and who
+    { key: 'secret', strip: entries.length, lines: [...entries.map((e) => [{ text: str(e.label) }, ...(e.new === true ? [{ text: ' ' }, { aside: t('new since you last saw this card') }] : [])]), [{ text: t('its program reads each once from the descriptor its variable names ({vars}) — never from its environment, its command line or a file', { vars }) }]] },
+    ...(standing.length ? [{ key: 'standing', lines: standing.map((e) => [{ text: str(e.label) }, ...(Number(e.since) > 0 && whenOf(e.since) ? [{ text: ' ' }, { aside: t('since {when}', { when: whenOf(e.since) }) }] : [])]) }] : []),
     { key: 'program', strip: 4, lines: [[{ mono: str(prog.path) }], ...(prog.unread === true ? [[{ text: t('Its file facts could not be read in time — counted as a program an agent can change.') }]] : prog.unparsed === true ? [[{ text: t("The program it starts could not be read from the command's words — counted as one an agent can change.") }]] : prog.writable === true ? [[{ text: t('An agent can change this program.') }]] : []),
       ...(script ? [[{ mono: str(script.path) }], ...(script.unread === true ? [[{ text: t('Its file facts could not be read in time — counted as a script an agent can change.') }]] : script.writable === true ? [[{ text: t('An agent can change this script.') }]] : [])] : []),
       ...(f.held === true ? [[{ text: t('A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.') }]] : [])] },   // r1042 item 3: an earlier read holds the door's one slot
     { key: 'folder', lines: [[{ mono: str(f.folder) }]] },
     { key: 'hosts', lines: [[{ text: t('unknown — VibeSpace cannot read where a program connects') }]] },
-    { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }], [{ text: t('Taking it back — ✕ on its Vault row or on the job card — stops it at once.') }]] },
+    { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }], [{ text: t("Taking it back — ✕ on a secret's Vault row, or on the job card for all of them — stops it at once.") }]] },
   ].map((r) => ({ key: r.key, label: t(JOB_LABEL[r.key]), lines: r.lines, warn: false, ...(r.strip ? { strip: r.strip } : {}) }));
-  const fold = [...(str(entry.ref) ? [{ label: t('Reference'), lines: [[{ code: str(entry.ref) }]] }] : [])];   // a vault reference is never a link: code, under the fold
-  return { headline: who ? t('{who} asks to let the Background job «{name}» use a stored secret', { who, name: title }) : t('A conversation asks to let the Background job «{name}» use a stored secret', { name: title }), cmd: str(f.command), cut: null, again: null, rows, changes: null, always: { offered: false, hint: null }, fold };
+  return { headline: who ? t('Background job «{name}» asks to use {secrets} — set up by {who}', { name: title, secrets: names, who }) : t('Background job «{name}» asks to use {secrets}', { name: title, secrets: names }), cmd: str(f.command), cut: null, again: null, rows, changes: null, always: { offered: false, hint: null }, fold: [] };
 }
 function standingCardOf(item, { t = fmt } = {}) {
   const f = item && item.action && item.action.type === 'vault-grant-ask' && item.facts && typeof item.facts === 'object' && item.facts.v === 1 && item.facts.kind === 'standing' ? item.facts : null;

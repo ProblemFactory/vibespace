@@ -50,7 +50,7 @@ const STATUS = Object.freeze({
   hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, not_written: 500, store_unreadable: 503, no_use_grants: 404,   // lane vault-use-grants: «谁可以用…»
   bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
   bad_grant_answer: 400, // lane vault-manual-and-lock: the answer to an agent's request
-  bad_job_answer: 400, ask_over: 410, too_many_jobs: 409, bad_revoke: 400, not_approved: 404, // lane vault-job-approval: the answer to a Background job's approval card · its ✕
+  bad_job_answer: 400, ask_over: 410, too_many_jobs: 409, bad_revoke: 400, not_approved: 404, ask_changed: 409, // lane vault-job-approval: the answer to a Background job's approval card · its ✕ · stage L3's F1: a press of the card's earlier set
   // lane vault-paste-request: a paste request's answer / a free entry (src/server/vault-paste-door.js)
   invalid_value: 400, store_failed: 500, value_too_long: 400, unfiled: 503, request_quiet: 429, too_many_requests: 429, value_in_request: 400, job_no_use: 403,
   name_required: 400, name_too_long: 400, note_too_long: 400, bad_kind: 400, hidden_chars: 400, entry_unknown_id: 404,
@@ -117,6 +117,7 @@ const WORDS = Object.freeze({
   value_in_argv: 'the value must not ride the URL (it is logged like a command line) — put it in the request body via --from-file or --stdin',
   bad_grant_answer: 'the answer is once, 8h or deny',
   bad_job_answer: 'the answer is allow or deny', ask_over: 'the job that asked is gone — nothing was written', too_many_jobs: 'that conversation already has 64 approved jobs on this secret — remove one of them, then allow this one', bad_revoke: 'name the entry (secrets:…#secret) and the job (jb-…) to take back', not_approved: 'that job holds no approval on that entry — nothing to take back',   // lane vault-job-approval
+  ask_changed: 'the card changed since you saw it (another of the job\'s secrets waits too) — nothing was written; read it again and answer it',   // stage L3's F1 (主开发 r2528 (e))
   // lane vault-paste-request
   invalid_value: 'that value is not accepted by the field — nothing was saved',
   store_failed: 'the value could not be saved — nothing changed',
@@ -185,7 +186,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
-    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence
+    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || (code === 'too_many_jobs' && r && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence · stage L3's F1: a full row's recipe names its entry
   };
   /** The request's password field(s), taken OFF the request (no later reader sees them). */
   const take = (req, ...names) => {
@@ -662,10 +663,12 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   app.post('/api/vault/request/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.answerRequest(String(req.params.askId), { answer: b.answer, reauthed: b.answer !== 'deny' && reauthedOf(req, page), by: 'user', person: true }); }));   // r4: `person` — the record says «allowed by you for 8 h · HH:MM»   // lane vault-manual-and-lock: once | 8h need this page's 验证是你 (a grant opens the entry as the switch does); deny is a click
   // lane vault-job-approval (L1b — design D1): THE person's answer to a Background job's approval card (src/server/vault-job-door.js
   // answer) — 允许 needs THIS page's 验证是你 (it lets a program hold the value for as long as it runs), 拒绝 is a click
-  if (jobAsks) app.post('/api/vault/job/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return jobAsks.answer(String(req.params.askId), { answer: b.answer, reauthed: b.answer === 'allow' && reauthedOf(req, page), by: 'user', person: true }); }));
+  // stage L3's F1 (主开发 r2528): ONE card a job — the press carries the card's revision it drew (`rev`); an earlier one is refused
+  if (jobAsks) app.post('/api/vault/job/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return jobAsks.answer(String(req.params.askId), { answer: b.answer, reauthed: b.answer === 'allow' && reauthedOf(req, page), by: 'user', person: true, rev: Number(b.rev) || null }); }));
   // lane vault-job-approval (decision ④ — REVOKE = STOP): the ✕ on a job's use of an entry (the Vault row's job chip, the job card) —
   // a person's click (narrowing needs no second password); the job leaves the entry's row and is stopped at once, its owner told once
-  if (jobAsks) app.post('/api/vault/job/revoke', person((req) => { const b = req.body || {}; return jobAsks.revoke(String(b.entry || ''), String(b.job || ''), { by: 'user' }); }));
+  // …and the JOB CARD's ✕ (stage L3's F1, 主开发 r2528 (d)): `all` — every approval of the job taken back, one stop
+  if (jobAsks) app.post('/api/vault/job/revoke', person((req) => { const b = req.body || {}; return b.all === true && typeof jobAsks.revokeAll === 'function' ? jobAsks.revokeAll(String(b.job || ''), { by: 'user' }) : jobAsks.revoke(String(b.entry || ''), String(b.job || ''), { by: 'user' }); }));
 }
 
 /** A page's reveal secret off a GET (X-Vault-Page) — the POST doors take it off the body. */

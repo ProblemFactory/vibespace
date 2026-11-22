@@ -3064,7 +3064,7 @@ class JobManager {
     let v = door ? door.gate(job) : { wait: 'vault' };
     if (v.go) { const p = door.payload(v); if (p.ok) { p.frame.fill(0); this._vaultAskOver(job); return { ...v, door }; } v = p; } // every value opened and checked — the frame itself is built where it is handed (_spawn); lane vault-job-approval: a job that STARTS (by any road) leaves no open card
     if (v.wait) {
-      // lane vault-job-approval (L1b): a wait for the person's approval files its CARD (ONE per job × entry — the door's); a card
+      // lane vault-job-approval (L1b): a wait for the person's approval files its CARD (ONE per job, naming its entries — the door's); a card
       // that cannot be filed (the caps, a Deny's ten minutes, the tray refused it) is a refusal by name — never a silent wait
       const a = v.wait === 'approval' && door && typeof door.ask === 'function' ? door.ask(job, v) : null;
       if (!(a && a.ok === false)) { this._waitFor(job, v.wait, door); return false; }
@@ -3166,7 +3166,7 @@ class JobManager {
   _waitFor(job, why, door) {
     const again = job.state === 'waiting' && job.waitFor === why;
     job.state = 'waiting'; job.waitFor = why; job.proc = null;
-    if (why === 'vault' && door) door.blocked(`Background job ${this.labelOf(job)}`);
+    if (why === 'vault' && door) { door.blocked(`Background job ${this.labelOf(job)}`); if (!again && typeof door.waited === 'function') door.waited(job, why); }   // stage L3's F3: the wait's ONE audit line — at its start, never a sweep
     this._touch(job, again ? undefined : { what: VJ.waitWords(why) });
     this._save();
   }

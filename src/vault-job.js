@@ -20,13 +20,17 @@
  *     scheduled run's: its cron), else WAIT `approval`. Round 2 (the acceptance's MAJOR — «no silent failures; every refusal
  *     names a door»): the wait's words name the door that works; the lock's name where a person unlocks it. The CLI's first line
  *     is the wait (never «started») — data/bin/vibespace-job.
- *   · THE APPROVAL (lane vault-job-approval, L1b — design D1, D9): a wait for `approval` files ONE For-you card per job × entry
+ *   · THE APPROVAL (lane vault-job-approval, L1b — design D1, D9; stage L3's F1, 主开发 r2528 — the owner's decided ①: «每个用
+ *     key 的后台工作一张卡，你批一次»): a wait for `approval` files ONE For-you card per JOB, naming every entry it waits for
  *     (`askCardOf` — the facts, never a value; no expiry; ≤ ASKS_PER_CONV open per conversation, ≤ ASKS_MAX on the hub; a Deny
- *     quiets that conversation × entry DENY_QUIET_MS). 允许 (a person, the second password) adds the job to the owner
- *     conversation's member of the entry's `vault-job` row (`memberWith` — through the grants store's ONE writer: the I/O is
- *     src/server/vault-job-door.js); 拒绝 refuses the job (`vault_denied`). TAKEN BACK (decision ④): the ✕ — `memberWithout`
- *     — or the entry deleted STOPS the job (`stopWords` say it to its owner once); a job removed or cleared leaves the row too;
- *     a lock stops nothing that runs (decision ③ — no lock road exists).
+ *     quiets that conversation × each entry on the card DENY_QUIET_MS); the entries approved before are SAID on it (which,
+ *     since when). 允许 (a person, the second password — once a card) adds the job to the owner conversation's member of EVERY
+ *     entry's `vault-job` row, all or nothing (`memberWith` — through the grants store's ONE writer: the I/O is
+ *     src/server/vault-job-door.js); 拒绝 refuses the job (`vault_denied`). A card whose set grows while it is open is the SAME
+ *     card redrawn (what is new marked); a press carrying its earlier set is refused (`ask_changed`), nothing written. TAKEN
+ *     BACK (decision ④): one entry's ✕ on its Vault row — `memberWithout` — takes back that entry and stops the job; the job
+ *     card's ✕ takes back all of them; an entry deleted STOPS the job (`stopWords` say it to its owner once); a job removed or
+ *     cleared leaves the rows too; a lock stops nothing that runs (decision ③ — no lock road exists).
  *   · THE HAND-OFF (`fdPlan`, `envOf`, `specOf`, `encodeFrame` / `decodeFrame`): the hub writes ONE frame to the wrapper's fd 3
  *     — the names and lengths in its head, the bytes raw (never a JSON string of a value: every copy can be zeroed); the wrapper
  *     gives NAME the job's fd FD_BASE + i (fd 3 is the memory gate's — data/bin/job-wrapper.js GATE_EXEC) and the env only
@@ -50,15 +54,13 @@ const ACK = 0x06;                       // round 2: the wrapper's ONE byte back 
 const REFUSED_RE = /^[a-z][a-z0-9_]{0,40}$/;   // the wrapper's refusal code (its exit.json `refused`)
 const RESERVED_RE = /^VIBESPACE_/;      // the hub's own env names
 const WAITS = Object.freeze(['vault', 'approval']);
-// lane vault-job-approval (L1b, design D1 + D9): THE APPROVAL CARD — one For-you item per job × entry, no expiry, 允许 (the second
-// password) writes the job's id into the entry's `vault-job` grant row, 拒绝 refuses the job
+// lane vault-job-approval (L1b, design D1 + D9; stage L3's F1): THE APPROVAL CARD — one For-you item per JOB naming its entries, no
+// expiry, 允许 (the second password, once a card) writes the job's id into every entry's `vault-job` grant row, 拒绝 refuses the job
 const ASK_TYPE = 'vault-job-ask';       // the card's For-you action type (src/foryou-actions.js row)
 const ASK_ID_RE = /^vj-[0-9a-f]{16}$/;  // a card's id (`askId`)
-const ASKS_PER_CONV = 4;                // JOBS waiting on open cards per conversation (the paste request's number — design D9; a job with
-                                        // several entries holds one card each, counted as ONE job — the adversarial read: a 5-entry job
-                                        // counted by cards could never start)
+const ASKS_PER_CONV = 4;                // JOBS waiting on open cards per conversation (the paste request's number — design D9; one card a job)
 const ASKS_MAX = 64;                    // …and on the whole hub (jobs)
-const DENY_QUIET_MS = 10 * 60 * 1000;   // a Deny quiets the same conversation × entry this long (request_quiet's ten minutes)
+const DENY_QUIET_MS = 10 * 60 * 1000;   // a Deny quiets the same conversation × each entry on its card this long (request_quiet's ten minutes)
 const MEMBER_JOBS_MAX = 64;             // = src/grant-model.js JOBS_MAX: the job ids one member's approval names
 const CARD_LINE_MAX = 400;              // a path, a folder or a command on the card, cut with its mark (never a value — a reference)
 
@@ -79,15 +81,20 @@ const WORDS = Object.freeze({
   wait_vault: VB.agentWords('the job waits (a wait, never a failure) and starts by itself once a person unlocks it on this instance\'s page (⚙ System ▸ Vault…)'),
   // lane vault-job-approval (L1b): THE CARD EXISTS — the wait names it, and what each answer does (round 2's law: never a promise of
   // a door that is not there, and the door that is)
-  wait_approval: 'waiting for the user\'s approval of this job\'s vault values (a key the user stored, or a value the hub minted) — at its start ONE card per entry asks the user in their For-you tray (a schedule: at its first fire); the job starts by itself once they allow it, and is refused if they deny it; a value this conversation PUT itself needs no approval (vibespace-vault put <name> --stdin, then --vault NAME=vault://agent:<this conversation>/<name>)',
-  vault_denied: 'the user denied this job the use of that vault entry — it was not started; `vibespace-job start` asks again (not within 10 minutes of the denial)',
+  wait_approval: 'waiting for the user\'s approval of this job\'s vault values (a key the user stored, or a value the hub minted) — at its start ONE card naming its entries asks the user in their For-you tray (a schedule: at its first fire); the job starts by itself once they allow it, and is refused if they deny it; a value this conversation PUT itself needs no approval (vibespace-vault put <name> --stdin, then --vault NAME=vault://agent:<this conversation>/<name>)',
+  vault_denied: 'the user denied this job the use of its vault entries — it was not started; `vibespace-job start` asks again (not within 10 minutes of the denial)',
   ask_quiet: 'the user denied this conversation that vault entry less than 10 minutes ago — the job was not started; start it again later to ask again',
   too_many_asks: `this conversation already has ${ASKS_PER_CONV} Background Work jobs waiting for the user's approval — the job was not started; wait for an answer (or rm a waiting job), then start it again`,
   too_many_asks_hub: `${ASKS_MAX} Background Work jobs on this instance are waiting for the user's approval — the job was not started; start it again later`,
   no_owner_conversation: 'a job with no owner conversation cannot be approved to use a vault value (an approval names its conversation) — the job was not started; create it from a conversation',
   ask_unfiled: 'the approval card could not be filed in the user\'s For-you tray — the job was not started',
   ask_closed: 'the approval card was closed without an answer — the job was not started; `vibespace-job start` asks again',
+  // stage L3's F1 (主开发 r2528): the person's press — refused by name, never a greyed button; the recipe in the same sentence
+  ask_changed: 'the card changed since it was drawn (another of the job\'s secrets now waits too) — nothing was written; read the card again and answer it',
 });
+/** stage L3's F1 (b): an Allow that a full row refuses — the entry named and what to do, in one sentence (the recipe, not only the
+ *  refusal) */
+const fullRowWords = (label) => `«${String(label || 'a secret')}» already has ${MEMBER_JOBS_MAX} Background jobs of this conversation allowed — nothing was written; take one back (✕ on its row in the Vault window), then press Allow again`;
 
 const refuse = (code, extra = {}) => ({ ok: false, code, words: WORDS[code] || code, ...extra });
 const own = Object.prototype.hasOwnProperty;
@@ -239,11 +246,14 @@ function decodeFrame(buf, plan) {
 /** The job id an approval names: a scheduled run's is its cron's (every fire reads the cron's approval — D4), else the job's. */
 const askJobIdOf = (job) => String((job && (job.cronParent || job.id)) || '');
 
-/** THE APPROVAL CARD (lane vault-job-approval, design D1) — the facts of ONE job × entry → `{text, detail, i18n, facts}`: who asks,
- *  the job (its name, its kind and what that means), the entry (its Vault name, its reference, the fd the program reads), the
- *  program (its real path — and, a PLAIN fact, that an agent can change it: design D1's risk, never an alarm), the script an
- *  interpreter runs, the folder, the command, the destination (unknown — a program), what a lock does. Names, paths and
- *  references only — never a value (the card is an accident road). `facts` = the closed codes a client draws in its language. */
+/** THE APPROVAL CARD (lane vault-job-approval, design D1; stage L3's F1, 主开发 r2528 — ONE card a job) — the facts of ONE job and
+ *  the entries it waits for → `{text, detail, i18n, facts}`: the job's own name FIRST, what it will use (each entry's Vault name;
+ *  what is NEW since the person last saw the card marked) and what for (its kind and what that means, its program, folder and
+ *  command); the entries approved before, SAID (which, since when) — the person sees the whole of what the job will use; who
+ *  asks; the program (its real path — and, a PLAIN fact, that an agent can change it: design D1's risk, never an alarm), the
+ *  script an interpreter runs, the destination (unknown — a program), what a lock does. Names and paths only — never a value,
+ *  never an internal id (no job id, no vault reference: the card is an accident road and a person's words). `facts` = the
+ *  closed codes a client draws in its language. */
 const i18nKey = (s) => s;   // the extractor's marker (scripts/i18n-extract.mjs): a declared human-visible string — the card's lines are t()'d by the client
 const KIND_LINES = Object.freeze({
   service: i18nKey('A service: it starts again by itself when it stops, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.'),
@@ -258,23 +268,30 @@ const kindKeyOf = (kind, restart) => (kind === 'service' ? (restart === 'never' 
 // agent's — a reordering / invisible character is SHOWN as ⟦U+XXXX⟧ (never drawn), a line break or a tab becomes a space
 const cardClip = (s) => { const t = HC.revealHidden(String(s == null ? '' : s)).replace(/[\u0000-\u001f\u007f]/g, ' '); return t.length > CARD_LINE_MAX ? `${t.slice(0, CARD_LINE_MAX - 1)}…` : t; };
 const fillLine = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
-function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null, folder = '', command = '', held = false } = {}) {
+function askCardOf({ who = '', job = {}, entries = [], standing = [], program = {}, script = null, folder = '', command = '', held = false } = {}) {
   const kind = ['service', 'cron', 'task'].includes(job.kind) ? job.kind : 'task';
   const restart = kind === 'service' && ['always', 'on-failure', 'never'].includes(job.restart) ? job.restart : null;
+  const list = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e === 'object').slice(0, MAX);
+  const stood = (Array.isArray(standing) ? standing : []).filter((e) => e && typeof e === 'object').slice(0, MAX);
   const f = {
-    v: 1, who: cardClip(who).slice(0, 80), job: { id: String(job.id || ''), name: cardClip(job.label || job.id || ''), kind, ...(restart ? { restart } : {}) },   // who '' = unknown (the client says «a conversation» in its language)   // `label` = the engine's belted name (labelOf — §93), never the record's raw one
-    entry: { label: cardClip(entry.label || entry.id || ''), ref: cardClip(entry.ref || ''), var: `${entry.name || ''}_FD` },
-    program: { path: cardClip(program.path || ''), writable: program.writable === true, ...(program.unread === true ? { unread: true } : {}), ...(program.unparsed === true ? { unparsed: true } : {}) },   // unparsed: a wrapper named — what it starts not read from its words   // unread: its file facts were not read in time (counted writable)
+    v: 2, who: cardClip(who).slice(0, 80), job: { name: cardClip(job.label || ''), kind, ...(restart ? { restart } : {}) },   // who '' = unknown (the client says «a conversation» in its language); `label` = the engine's ONE accessor's (§93)
+    entries: list.map((e) => ({ label: cardClip(e.label || ''), var: `${e.name || ''}_FD`, ...(e.isNew === true ? { new: true } : {}) })),
+    ...(stood.length ? { standing: stood.map((e) => ({ label: cardClip(e.label || ''), ...(Number(e.since) > 0 ? { since: Math.floor(Number(e.since)) } : {}) })) } : {}),
+    program: { path: cardClip(program.path || ''), writable: program.writable === true, ...(program.unread === true ? { unread: true } : {}), ...(program.unparsed === true ? { unparsed: true } : {}) },   // unparsed: a wrapper named — what it starts not read from the command's words
     ...(script && script.path ? { script: { path: cardClip(script.path), writable: script.writable === true, ...(script.unread === true ? { unread: true } : {}) } } : {}),
     folder: cardClip(folder), command: cardClip(command), dest: 'unknown', lock: 'runs-on', ...(held === true ? { held: true } : {}),   // held: an earlier read holds the door's one slot (it never replied)
   };
+  const names = (xs) => xs.map((e) => `«${e.label}»`).join(', ');
+  const fresh = f.entries.filter((e) => e.new);
+  const sinceOf = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
   // ≤ 12 lines whatever the facts (the store keeps an item's first 12 i18n lines — src/user-todos.js normalizeI18n): «an agent
-  // can change it» rides its path's own line
+  // can change it» rides its path's own line; what is new, what stands and an earlier read held are said only when they are
   const lines = [
-    { key: i18nKey('Job: {name} ({id})'), params: { name: f.job.name, id: f.job.id } },
     { key: KIND_LINES[kindKeyOf(kind, restart)] },
-    { key: i18nKey('Secret: {label} — {ref}'), params: { label: f.entry.label, ref: f.entry.ref } },
-    { key: i18nKey('The program reads it once from the descriptor ${var} names — never from its environment, its command line or a file.'), params: { var: f.entry.var } },
+    { key: i18nKey('It will use: {secrets}'), params: { secrets: names(f.entries) } },
+    ...(fresh.length && fresh.length < f.entries.length ? [{ key: i18nKey('New on this card since it was first drawn: {secrets}'), params: { secrets: names(fresh) } }] : []),
+    ...(f.standing ? [{ key: i18nKey('Already allowed for this job (they stand): {secrets}'), params: { secrets: f.standing.map((e) => (e.since ? `«${e.label}» (${sinceOf(e.since)})` : `«${e.label}»`)).join(', ') } }] : []),   // the time as digits only — no English word inside a translated sentence's param
+    { key: i18nKey('The program reads each once from the descriptor its variable names ({vars}) — never from its environment, its command line or a file.'), params: { vars: f.entries.map((e) => e.var).join(', ') } },
     f.program.unread ? { key: i18nKey('Program: {path} — its file facts could not be read in time; counted as one an agent can change.'), params: { path: f.program.path } }
       : f.program.unparsed ? { key: i18nKey("Program: {path} — the program it starts could not be read from the command's words; counted as one an agent can change."), params: { path: f.program.path } }
       : f.program.writable ? { key: i18nKey('Program: {path} — an agent can change this program.'), params: { path: f.program.path } } : { key: i18nKey('Program: {path}'), params: { path: f.program.path } },
@@ -283,12 +300,12 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
     ...(f.held ? [{ key: i18nKey('A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.') }] : []),   // 主开发 r1042 item 3: said to the person — it lasts until that read replies or the hub restarts
     { key: i18nKey('Folder: {folder}'), params: { folder: f.folder } },
     { key: i18nKey('Command: {command}'), params: { command: f.command } },
-    { key: i18nKey('Where it sends the secret: unknown — VibeSpace cannot read where a program connects.') },
-    { key: i18nKey('Locking the vault stops nothing that runs; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it.') },
-    { key: i18nKey('Taking it back — ✕ on its Vault row or on the job card — stops it at once.') },   // lane vault-job-approval L2: the ✕ exists (both surfaces)
+    { key: i18nKey('Where it sends the secrets: unknown — VibeSpace cannot read where a program connects.') },
+    { key: i18nKey("Locking the vault stops nothing that runs (a new start waits for the unlock); taking it back — ✕ on a secret's Vault row, or on the job card for all of them — stops it at once. A value the program has read cannot be taken back — rotate the key at its provider to end it.") },
   ];
-  // an unknown asker has its own key (never an English «a conversation» param inside a translated sentence)
-  const text = f.who ? { key: i18nKey('{who} asks to let the Background job «{name}» use a stored secret'), params: { who: f.who, name: f.job.name } } : { key: i18nKey('A conversation asks to let the Background job «{name}» use a stored secret'), params: { name: f.job.name } };
+  // the job's own name first; an unknown asker has its own key (never an English «a conversation» param inside a translated sentence)
+  const text = f.who ? { key: i18nKey('Background job «{name}» asks to use {secrets} — set up by {who}'), params: { name: f.job.name, secrets: names(f.entries), who: f.who } }
+    : { key: i18nKey('Background job «{name}» asks to use {secrets}'), params: { name: f.job.name, secrets: names(f.entries) } };
   return { text: fillLine(text), detail: lines.map(fillLine).join('\n'), i18n: { text, detail: lines }, facts: f };
 }
 
@@ -296,19 +313,21 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
  *  owner conversation (`key`) gains `jobId`; every other member and every exception is kept as it is. `row` = the entry's
  *  `vault-job` row | null. → `{to, except, same}` (`same`: the member names the job already — nothing to write) | null (the
  *  member names MEMBER_JOBS_MAX jobs already). */
-function memberWith(row, key, jobId, { keep = null } = {}) {
-  const to = Array.isArray(row && row.to) ? row.to.map((m) => (m && typeof m === 'object' ? { ...m } : m)) : [];
+function memberWith(row, key, jobId, { keep = null, at = null } = {}) {
+  const to = Array.isArray(row && row.to) ? row.to.map((m) => (m && typeof m === 'object' ? { ...m, ...(m.since && typeof m.since === 'object' ? { since: { ...m.since } } : {}) } : m)) : [];
   const except = Array.isArray(row && row.except) ? row.except.slice() : [];
+  const when = Number(at) > 0 ? Math.floor(Number(at)) : null;   // stage L3's F1: when it was approved — the card says what stands, since when
   const m = to.find((x) => x && typeof x === 'object' && x.kind === 'conversation' && x.key === key);
-  if (!m) { to.push({ kind: 'conversation', key, jobs: [jobId] }); return { to, except, same: false }; }
+  if (!m) { to.push({ kind: 'conversation', key, jobs: [jobId], ...(when ? { since: { [jobId]: when } } : {}) }); return { to, except, same: false }; }
   // `keep(id)`: the ids of jobs that still exist (the adversarial read: an archived or collected job's id would hold one of the 64
-  // places for ever) — the member is pruned as it is written
+  // places for ever) — the member is pruned as it is written (its times with it)
   const all = Array.isArray(m.jobs) ? m.jobs.map(String) : [];
   const jobs = typeof keep === 'function' ? all.filter((id) => id === jobId || keep(id)) : all;
-  if (jobs.length !== all.length) m.jobs = jobs;
+  if (jobs.length !== all.length) { m.jobs = jobs; if (m.since) for (const k of Object.keys(m.since)) if (!jobs.includes(k)) delete m.since[k]; }
   if (jobs.includes(jobId)) return { to, except, same: jobs.length === all.length };
   if (jobs.length >= MEMBER_JOBS_MAX) return null;
   m.jobs = [...jobs, jobId];
+  if (when) m.since = { ...(m.since || {}), [jobId]: when };
   return { to, except, same: false };
 }
 
@@ -322,7 +341,8 @@ function memberWithout(row, jobId) {
     if (!m || typeof m !== 'object' || !Array.isArray(m.jobs) || !m.jobs.map(String).includes(jobId)) { to.push(m && typeof m === 'object' ? { ...m } : m); continue; }
     changed = true;
     const jobs = m.jobs.map(String).filter((x) => x !== jobId);
-    if (jobs.length) to.push({ ...m, jobs });
+    const since = m.since && typeof m.since === 'object' ? Object.fromEntries(Object.entries(m.since).filter(([k]) => k !== jobId)) : null;
+    if (jobs.length) { const { since: _s, ...rest } = m; to.push({ ...rest, jobs, ...(since && Object.keys(since).length ? { since } : {}) }); }
   }
   return { to, except: Array.isArray(row && row.except) ? row.except.slice() : [], changed };
 }
@@ -350,7 +370,7 @@ function refusedOutcome(exit) {
 
 module.exports = {
   MAX, NAME_RE, FD_BASE, PAYLOAD_MAX, DRAIN_MS, DOOR, USE_DOOR, MAGIC, ACK, WAITS, WORDS,
-  ASK_TYPE, ASK_ID_RE, ASKS_PER_CONV, ASKS_MAX, DENY_QUIET_MS, askJobIdOf, askCardOf, memberWith, memberWithout, entryOfRow, stopWords,
+  ASK_TYPE, ASK_ID_RE, ASKS_PER_CONV, ASKS_MAX, DENY_QUIET_MS, askJobIdOf, askCardOf, memberWith, memberWithout, entryOfRow, stopWords, fullRowWords,
   refsOf, parseVault, ownerOf, ownerKeysOf, jobIdsOf, familyOf, approvedBy, verdictOf,
   fdPlan, envOf, specOf, planOfSpec, encodeFrame, decodeFrame, waitWords, refusedOutcome,
 };
