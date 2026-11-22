@@ -1216,6 +1216,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     return settled;
   }
 
+  let noUtf8Said = false;   // B-34bc: a walk that finds no UTF-8 locale is said ONCE a run of the hub (the machine's fact, the same at every launch)
   async function bringUp(rec, f) {
     const id = rec.id;
     const dir = appDir(id);
@@ -1239,7 +1240,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const start = await (display.appStartEnv || displayFacts.appStartEnv)(base, { bins: f.bins });
       if (gone()) return;
       base = start.env;
-      if (!start.added && start.why !== 'named') log.warn?.(`[desktop] ${id}: no UTF-8 character type for its window (${start.why}) — text typed through an input method may arrive broken`);
+      if (!start.added && start.why !== 'named' && !noUtf8Said) { noUtf8Said = true; log.warn?.(`[desktop] ${id}: no UTF-8 character type for its window (${start.why}) — text typed through an input method may arrive broken; said once a run of the hub`); }
       const cookie = display.newCookie();
       const authFile = path.join(dir, 'Xauthority');
       display.writeXauthority(authFile, [{ display: '0', cookieHex: cookie }]);
@@ -1859,9 +1860,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     return { ok: false, why };
   }
   /** The x11 env a process ADDRESSING record `id`'s display gets (P9 window
-   *  targets: xdotool / the screenshot helper) — the same rule as the app's
-   *  own env (`x11Env` over the sanitised base, the per-app Xauthority for an
-   *  owned display, the singleton's cookie file for a shared one). null when
+   *  targets: xdotool / the screenshot helper; the browser keeper takes its
+   *  display and cookie) — the same X addressing as the app's own env (`x11Env`
+   *  over the sanitised base, the per-app Xauthority for an owned display, the
+   *  singleton's cookie file for a shared one). It is built from the hub's env
+   *  AS IT IS: it carries no added character type (B-34bc's start environment
+   *  is the window's own children's); a helper that moves text applies its own
+   *  UTF-8 rule (injectType's utf8LocaleEnv, xwininfo's utf8Env). null when
    *  the record has no display yet. */
   function x11EnvFor(id) {
     const rec = store.apps[id];

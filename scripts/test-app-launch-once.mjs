@@ -36,8 +36,8 @@
 //      body's `pin`) — the record is BORN pinned through the one stamp; a keeper-fixed rung (Xvfb+x11vnc's fit cell) starts
 //      its X server AT the pin; a bad size is refused in parsePin's words; a rung that cannot hold a pin (this suite's own
 //      rung has no fit cell; a 'shared' one; Xvnc's 'follows') refuses `pin_unsupported` BY NAME — no record, nothing run.
-//   ⑫ B-34bc (主开发 r2362 / r2375): a hub env that names NO locale ⇒ the application, its display server and the helpers'
-//      road (ctx.x11Env: the window manager, the portal bus) start with a UTF-8 character type (LC_CTYPE only,
+//   ⑫ B-34bc (主开发 r2362 / r2375 / r2425): a hub env that names NO locale ⇒ the application, its display server and a helper
+//      (a real child started from ctx.x11Env, the window manager's and the portal bus's road) start with a UTF-8 character type (LC_CTYPE only,
 //      display.appStartEnv); a person's own locale (here a non-UTF-8 LANG) is never replaced. RED CONTROL: bringUp without its
 //      start environment (a copy) ⇒ all three start in the C locale.
 // ~3 s.
@@ -474,15 +474,20 @@ await leg('⑫', async () => {
   const pairs = (text, sep) => Object.fromEntries(text.split(sep).filter(Boolean).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]));
   const environOf = (pid) => { try { return pairs(fs.readFileSync(`/proc/${pid}/environ`, 'utf8'), '\0'); } catch { return null; } };
   const three = (e) => e && { LC_ALL: e.LC_ALL || '', LC_CTYPE: e.LC_CTYPE || '', LANG: e.LANG || '' };
-  // the HELPERS' road: the window manager and the portal bus start from ctx.x11Env(...) — recorded by the leg's own recipe
-  const helperEnvs = [];
-  const disp = { ...fakeDisplay, RECIPES: Object.freeze({ 'fake-x': async (ctx) => { helperEnvs.push(three(ctx.x11Env(FAKE_DISPLAY))); return fakeDisplay.RECIPES['fake-x'](ctx); } }) };
+  // the HELPERS' road: the window manager and the portal bus start from ctx.x11Env(...) — the leg's own recipe starts a REAL helper
+  // child from it (the locale app itself: it writes the three names it was born with to its file at once, then sleeps), so what
+  // it started with is read whatever the keeper does with an unrecorded member of the session afterwards
+  let helperOut = null;
+  const disp = { ...fakeDisplay, RECIPES: Object.freeze({ 'fake-x': async (ctx) => {
+    if (helperOut) { const h = await D.spawnDetached(LOC, [helperOut], { env: ctx.x11Env(FAKE_DISPLAY), logFd: ctx.logFd, name: 'fake-helper' }).spawned; kids.push(h.pid); }
+    return fakeDisplay.RECIPES['fake-x'](ctx);
+  } }) };
   /** one launch of the locale app on `mod` under the hub env `envFn` ⇒ what the APPLICATION, the DISPLAY SERVER and the HELPERS' road started with */
   const run = async (mod, tag, envFn) => {
     const out = path.join(root, `locale-${tag}`); fs.rmSync(out, { force: true });
     const ROW = { id: 'locale', label: 'Locale App', exec: LOC, args: [out], category: 'app' };
     const ds = mod.install({ dataDir: path.join(root, `ds-loc-${tag}`), env: envFn, display: disp, backends: BACKENDS, registryRows: [ROW], log, now, tickMs: 3600e3, apps: noApps });
-    const h0 = helperEnvs.length;
+    helperOut = `${out}-helper`; fs.rmSync(helperOut, { force: true });
     try {
       const id = (await ds.launch({ appId: 'locale' }, {})).id;
       const r = await until(() => { const x = ds.get(id); return x && x.state !== 'launching' ? x : null; });
@@ -490,19 +495,21 @@ await leg('⑫', async () => {
       const app = fs.existsSync(out) ? three(pairs(fs.readFileSync(out, 'utf8').trim(), '\n')) : null;
       const server = r && r.pids && r.pids.x ? three(environOf(r.pids.x)) : null;
       try { await ds.stop(id, { why: 'user' }); } catch { }
-      return { state: r && r.state, app, server, helpers: helperEnvs[h0] || null };
+      await until(() => fs.existsSync(helperOut) && fs.readFileSync(helperOut, 'utf8').includes('LANG='));
+      const helpers = fs.existsSync(helperOut) ? three(pairs(fs.readFileSync(helperOut, 'utf8').trim(), '\n')) : null;
+      return { state: r && r.state, app, server, helpers };
     } finally { ds.shutdown?.(); }
   };
   const bare = await run(DS, 'bare', env);   // this suite's hub env: PATH and HOME, no locale
   ok(bare.state === 'ready' && !!bare.app && UTF8.test(bare.app.LC_CTYPE) && !bare.app.LC_ALL && !bare.app.LANG && !!bare.server && bare.server.LC_CTYPE === bare.app.LC_CTYPE && !!bare.helpers && bare.helpers.LC_CTYPE === bare.app.LC_CTYPE,
-    `⑫ a hub env that names no locale ⇒ the APPLICATION, its DISPLAY SERVER and the HELPERS' road (ctx.x11Env) all start with LC_CTYPE ${bare.app && bare.app.LC_CTYPE} (a UTF-8 character type), and no other locale name`, bare);
+    `⑫ a hub env that names no locale ⇒ the APPLICATION, its DISPLAY SERVER and a HELPER (a real child started from ctx.x11Env) all start with LC_CTYPE ${bare.app && bare.app.LC_CTYPE} (a UTF-8 character type), and no other locale name`, bare);
   const own = await run(DS, 'own', () => ({ ...env(), LANG: 'fr_FR.ISO-8859-1' }));
   ok(own.state === 'ready' && !!own.app && own.app.LANG === 'fr_FR.ISO-8859-1' && !own.app.LC_CTYPE && !own.app.LC_ALL && !!own.server && own.server.LANG === 'fr_FR.ISO-8859-1' && !own.server.LC_CTYPE && !!own.helpers && own.helpers.LANG === 'fr_FR.ISO-8859-1' && !own.helpers.LC_CTYPE,
-    '⑫ a person\'s OWN locale (LANG=fr_FR.ISO-8859-1, not UTF-8) is never replaced: the app, its display server and the helpers\' road start with it, no LC_CTYPE added', own);
+    '⑫ a person\'s OWN locale (LANG=fr_FR.ISO-8859-1, not UTF-8) is never replaced: the app, its display server and the helper start with it, no LC_CTYPE added', own);
   const MX = mutantCopies('alo-locale', repo).load('src/desktop-serve.js', anchored(DSRC, '      base = start.env;\n', '', 'alo-no-locale'), 'alo-no-locale');
   const red = await run(MX, 'red', env);
   ok(red.state === 'ready' && !!red.app && !red.app.LC_CTYPE && !red.app.LC_ALL && !red.app.LANG && !!red.server && !red.server.LC_CTYPE && !!red.helpers && !red.helpers.LC_CTYPE,
-    '⑫ RED CONTROL: bringUp without its start environment (a copy of desktop-serve) ⇒ the app, its display server and the helpers\' road start with NO locale at all — the C locale', red);
+    '⑫ RED CONTROL: bringUp without its start environment (a copy of desktop-serve) ⇒ the app, its display server and the helper start with NO locale at all — the C locale', red);
 });
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);
