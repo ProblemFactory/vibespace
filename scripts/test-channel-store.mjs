@@ -1361,12 +1361,15 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     return r;
   };
   const head = await quietRun(S, 'head', false);
-  ok(head.writes === 0 && head.sameFile && head.skipped >= 10 && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal took one line per stamp (${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
+  // B-360d unit 1 (line 267, 主开发 r2081): a quiet pass makes no journal line and owes the index nothing, so flush() asks no write
+  // at all — the law judged: no index write, the inode kept, the stamp journal's lines (the equal-bytes skip is not met on this road — its own scene below)
+  ok(head.writes === 0 && head.sameFile && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal took one line per stamp (${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
   const headRow = await quietRun(S, 'head-inrow', true);
   ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && headRow.disk, `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized: ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
   const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
   const HEAL = ['      healRow(k, conv[k]);\n', ''];
   const SKIP = ['    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return null; }\n', ''];
+  const QUIET = ['      if (prev !== undefined && prev === f) continue;', '      void 0;'];   // B-360d unit 1: the journal's compare — the first wall a quiet pass meets
   const CLOSE = ['    flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache\n    stampsFlush();\n', '    flush({ full: true });\n'];
   // channel-store-off-loop (.407 cure): THE ORDER LAW kept, its carrier changed — a healed stamp reaches the disk in the
   // JOURNAL (one synchronous append on the main thread, at the heal), before the index that no longer holds it is handed
@@ -1379,9 +1382,9 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const JOURNAL = ['    journal(k);\n    armStamps();\n', '    armStamps();\n'];
   const REPLAY = ['      if (Object.keys(st).length) stampMap.set(a[0], st); else stampMap.delete(a[0]);\n', ''];
   const FOLD = ['    try { if (journalFd !== null) fs.ftruncateSync(journalFd, 0); else fs.truncateSync(stampsLog, 0); journalTorn = false; }', '    try { journalTorn = false; }'];   // the fold runs in the side file's LANDED callback (stampsWritten)
-  const cuts = { KEEP, HEAL, SKIP, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
+  const cuts = { KEEP, HEAL, SKIP, QUIET, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
   const missing = Object.entries(cuts).filter(([, [from]]) => src.split(from).length !== 2).map(([k]) => k);
-  ok(!missing.length, `⑭ CONTROL setup: the twelve rules are where the controls cut them (missing: ${missing.join(', ') || 'none'})`);
+  ok(!missing.length, `⑭ CONTROL setup: the thirteen rules are where the controls cut them (missing: ${missing.join(', ') || 'none'})`);
   const cutFile = (tag, ...cs) => MUTCS.write('src/channel-store.js', cs.reduce((s, [from, to]) => s.replace(from, to), src), tag);
   const cut = (tag, ...cs) => require(cutFile(tag, ...cs));
   const c1 = await quietRun(cut('qs-inrow', KEEP, HEAL), 'c-inrow', true);
@@ -1391,8 +1394,28 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   // 8783115, 8783114, … 8783114 = i0), so `!sameFile` read "never rewritten" there; tmpfs (this machine's /tmp) never
   // reuses one. (`sameFile` stays the witness of NO write above: no rename, no new inode, on any filesystem.)
   ok(c1.writes === 10 && c1.lastOnDisk, `⑭ CONTROL: the stamp back in the row (kept by the serializer, never healed) — each of the ten quiet passes rewrites the index (${c1.writes} writes, the tenth pass's stamp in the file on disk) — red`, JSON.stringify(c1));
-  const c2 = await quietRun(cut('qs-noskip', SKIP), 'c-noskip', false);
-  ok(c2.writes === 10, `⑭ CONTROL: without the equal-bytes skip the same quiet passes write ${c2.writes} times (the touched chunk re-serializes to equal bytes; nothing else stops the write) — red`);
+  // B-360d unit 1 (the r2061 chain's fresh read): the journal's compare is the ONE wall a quiet pass meets — cut, each pass
+  // makes a journal line, the flush after it writes the index whole, and the line's seq moves the index's actsSeq (a
+  // top-level field), so the equal-bytes skip never matches here
+  const c2 = await quietRun(cut('qs-nocmp', QUIET), 'c-nocmp', false);
+  ok(c2.writes === 10, `⑭ CONTROL: without the journal's compare the same quiet passes write ${c2.writes} times (each makes a journal line; the flush after it writes the index whole) — red`);
+  // THE EQUAL-BYTES SKIP, its own scene: an update that reaches the whole map and changes nothing owes a whole write whose
+  // bytes equal the last write's — skipped (QUIET IS FREE), ten times; the control cuts the skip
+  const wholeQuiet = async (M, tag) => {
+    const dir = path.join(ROOT, `qw-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const st = M.createChannelStore({ dir, log: slog });
+    await seed(st);
+    const f0 = st.index.flushStats(), i0 = ino(st.indexFile);
+    for (let p = 0; p < 10; p++) { await st.index.update((v) => { void v.conversations; }); st.index.flush(); }
+    const f1 = st.index.flushStats();
+    const r = { writes: f1.writes - f0.writes, skipped: (f1.skipped || 0) - (f0.skipped || 0), sameFile: ino(st.indexFile) === i0 };
+    st.close();
+    return r;
+  };
+  const wq = await wholeQuiet(S, 'head');
+  ok(wq.writes === 0 && wq.skipped >= 10 && wq.sameFile, `⑭ ten updates that reach the whole map and change nothing: ${wq.writes} index writes, ${wq.skipped} skipped as equal bytes, the same file (inode kept)`, JSON.stringify(wq));
+  const c3 = await wholeQuiet(cut('qw-noskip', SKIP), 'c-noskip');
+  ok(c3.writes === 10, `⑭ CONTROL: without the equal-bytes skip the same ten updates write the index ${c3.writes} times — red`, JSON.stringify(c3));
 
   // the stamps survive a restart; the side file is not written per stamp — close() writes it
   const restartRun = async (M, tag) => {
