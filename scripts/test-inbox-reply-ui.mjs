@@ -125,6 +125,15 @@ const FLOOD_SID = 'f01d0000-0000-4000-8000-0000000ab30f'; // a second stopped fi
 const FLOOD_N = 30;
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── fixtures: a stopped conversation + its HOSTILE item, seeded in the store's own shape ──
@@ -645,7 +654,7 @@ try {
     // relative imports (inbox-reply.js, inbox-origin.js) are rewritten to the real files' URLs
     const MUT = mutantCopies('inbox-reply-ui-14', repo);
     const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real', { same: true });
-    const patchedF = MUT.write('src/lib/user-todos-layout.js', src.split(FILTER).join('true'), 'patched');
+    const patchedF = MUT.write('src/lib/user-todos-layout.js', editAnchor(src, FILTER, 'true', "src/lib/user-todos-layout.js", 'join'), 'patched');
     for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑭ ' })) check(row.name, row.pass, row.detail);
     {
       const real = await import(realF);
@@ -936,7 +945,7 @@ try {
     check('the PURE module carries the filter the panel hides by', src.includes(FILTER) && fs.readFileSync(path.join(repo, 'src/lib/user-todos-panel.js'), 'utf8').includes("const disp = g.shown ? '' : 'none';"));
     const MUT = mutantCopies('inbox-reply-ui-19', repo); // outside the checkout (§51), as ⑭
     const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real', { same: true });
-    const patchedF = MUT.write('src/lib/user-todos-layout.js', src.split(FILTER).join('shown: true'), 'patched');
+    const patchedF = MUT.write('src/lib/user-todos-layout.js', editAnchor(src, FILTER, 'shown: true', "src/lib/user-todos-layout.js", 'join'), 'patched');
     for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑲ ' })) check(row.name, row.pass, row.detail);
     {
       const real = await import(realF);

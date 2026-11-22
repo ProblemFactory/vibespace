@@ -35,6 +35,15 @@ const T0 = Date.now();
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms = 20000, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch { } await sleep(step); } return null; };
 
@@ -227,7 +236,7 @@ console.log('--no-check writes them; the right token installs and dials in');
       const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
       const M = mutantCopies('installreexec', REPO);
       const asrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-      const unguarded = asrc.replace('    if (cfg.token) { try { const tmp = DIAL_FILE', '    if (true) { try { const tmp = DIAL_FILE');
+      const unguarded = editAnchor(asrc, '    if (cfg.token) { try { const tmp = DIAL_FILE', '    if (true) { try { const tmp = DIAL_FILE', "src/agentd/agentd.js");
       ok(unguarded !== asrc, '(o) the patch applies');
       const cp = M.write('src/agentd/agentd.js', unguarded, 'unguarded');
       const cd = reexecShape(cp);
@@ -373,7 +382,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
     const M = mutantCopies('installlearn', REPO);
     const asrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-    const deaf = asrc.replace("serveConnection(ws, { dialed: true, onAuthed: (m) => learnHub(m && m.hub, via) });", 'serveConnection(ws, { dialed: true });');
+    const deaf = editAnchor(asrc, "serveConnection(ws, { dialed: true, onAuthed: (m) => learnHub(m && m.hub, via) });", 'serveConnection(ws, { dialed: true });', "src/agentd/agentd.js");
     ok(deaf !== asrc, '(p) the patch applies');
     const L2 = await learn(M.write('src/agentd/agentd.js', deaf, 'nolearn'));
     ok(L2.up && L2.hello && L2.hub === null, 'CONTROL (p): a daemon that does not keep the hello\'s hub never learns it — R-12 goes red', L2);

@@ -425,7 +425,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const clSrc = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
   const fixLine = "              for (const r of pending.values()) { try { r({ error: 'device link lost', linkLost: true }); } catch { } }\n              pending.clear();\n";
   ok(clSrc.split(fixLine).length === 2, 'CONTROL setup: the in-flight reject is spelled once');
-  const { DeviceManager: DMpre } = MUT.load('src/agentd/client.js', clSrc.replace(fixLine, '\n\n'), 'nopendingreject');
+  const { DeviceManager: DMpre } = MUT.load('src/agentd/client.js', editAnchor(clSrc, fixLine, '\n\n', "src/agentd/client.js"), 'nopendingreject');
   process.env.HOME = home3; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home3);
   const dmPre = new DMpre({ dataDir: path.join(home3, 'hub-data'), bundlePath: BUNDLE, version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
   const rc = await midOp(dmPre, () => dmPre._request({ op: 'desktop-serve', action: 'windows', params: { id: 'da-nope' }, timeoutMs: 2500 }));
@@ -473,7 +473,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const accSrc5 = fs.readFileSync(path.join(REPO, 'src/server/desktop-access.js'), 'utf8');
   const launchLine5 = '    const launch = SLOT.installLauncherArgv(argv, { stateDir, mode });\n'; // lane dc-apps-rows: the slot's own module
   ok(accSrc5.split(launchLine5).length === 2, 'CONTROL setup: the launcher wrap is spelled once');
-  const AccPre5 = MUT.load('src/server/desktop-access.js', accSrc5.replace(launchLine5, '    const launch = argv;\n'), 'nolauncher5');
+  const AccPre5 = MUT.load('src/server/desktop-access.js', editAnchor(accSrc5, launchLine5, '    const launch = argv;\n', "src/server/desktop-access.js"), 'nolauncher5');
   const accPre5 = AccPre5.create({ hosts: hostsFor({ 'dev-m': dm5 }), install: false, log: { log() { }, warn() { } }, installMs: 10000, holdMs: 15000 });
   const d6pre = await daemonDies(accPre5, 'pre');
   ok(!d6pre.landed, 'CONTROL: the pre-fix rung (the install a child on the daemon\'s pipe) dies with the daemon — SIGPIPE at its next line, the marker never lands', d6pre);

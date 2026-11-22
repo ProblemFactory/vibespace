@@ -40,6 +40,15 @@ const { PluginManager } = require(path.join(repo, 'src/plugins.js'));
 const DP = require(path.join(repo, 'src/plugins/llm.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SHOTS = process.env.DECISION_RULE_PNG_DIR || '';
 
@@ -253,7 +262,7 @@ console.log('G a judged rule that cannot run is SAID and never a "no" (lane judg
   const esrc = fs.readFileSync(path.join(repo, 'src/server/channels-engine.js'), 'utf8');
   const A0 = '    if (!skips.length) return;\n';
   ok(esrc.split(A0).length === 2, 'control anchor present (the skip doors\' entry)');
-  const SILENT = MC.load('src/server/channels-engine.js', esrc.replace(A0, '    return;\n'), 'silent');
+  const SILENT = MC.load('src/server/channels-engine.js', editAnchor(esrc, A0, '    return;\n', "src/server/channels-engine.js"), 'silent');
   D.pm.setConfig('llm', { rules: false });
   const wc = await world('gc', { watchers: [W(AG3, [PRED])], ENGM: SILENT });
   await wc.ingest('dr-gc1', 'Invoice 41 is overdue.');

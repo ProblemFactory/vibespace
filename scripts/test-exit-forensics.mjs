@@ -597,7 +597,7 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
     SLOW[kind] = M.write(REL[kind], slow, 'slow');
   }
   const stdoutSrc2 = read('src/server/session-stdout.js');
-  const noWait = stdoutSrc2.replace('settleWrapperMeta(wrapperMetaPath, WRAPPER_SETTLE_MS, finishTeardown);', 'settleWrapperMeta(wrapperMetaPath, 0, finishTeardown);');
+  const noWait = editAnchor(stdoutSrc2, 'settleWrapperMeta(wrapperMetaPath, WRAPPER_SETTLE_MS, finishTeardown);', 'settleWrapperMeta(wrapperMetaPath, 0, finishTeardown);', "src/server/session-stdout.js");
   ok(noWait !== stdoutSrc2, 'control (no wait): the patch applies (the teardown reads at once, as r1–r3 did)');
   const noWaitEng = makeEngine(M.write('src/server/session-stdout.js', noWait, 'nowait'));
   for (const kind of KINDS) {
@@ -638,12 +638,12 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
     await within(k.exited); await killChild(k.childPid);
     for (const f of ['.json', '.buf']) { try { fs.unlinkSync(path.join(BUF, k.id + f)); } catch { } }
     // CONTROLS: identity by pid alone / no ownership re-check after the wait.
-    const byPid = stdoutSrc2.replace('  if (!HAS_PROC) { try { process.kill(pid, 0); return true; } catch { return false; } }', '  { try { process.kill(pid, 0); return true; } catch { return false; } }');
+    const byPid = editAnchor(stdoutSrc2, '  if (!HAS_PROC) { try { process.kill(pid, 0); return true; } catch { return false; } }', '  { try { process.kill(pid, 0); return true; } catch { return false; } }', "src/server/session-stdout.js");
     ok(byPid !== stdoutSrc2, 'control (pid identity): the patch applies');
     fs.writeFileSync(path.join(BUF, idN + '-c.json'), JSON.stringify({ pid: process.pid }));
     const bl = await teardownAsync(makeEngine(M.write('src/server/session-stdout.js', byPid, 'bypid')), idN + '-c');
     ok(bl.endsWith(' wrapper=running socket=none'), 'control (pid identity): a copy that trusts a bare live pid waits on a stranger and names it "running"', bl);
-    const noOwn = stdoutSrc2.replace('    if (activeSessions.get(id) !== session) return;\n', '');
+    const noOwn = editAnchor(stdoutSrc2, '    if (activeSessions.get(id) !== session) return;\n', '', "src/server/session-stdout.js");
     ok(noOwn !== stdoutSrc2, 'control (ownership): the patch applies');
     const k2 = await runWrapper('chat', CHAT);
     const kp2 = teardownAsync(makeEngine(M.write('src/server/session-stdout.js', noOwn, 'noown')), k2.id, { waitMs: 800 });
@@ -914,7 +914,7 @@ async function sentinelRun(wrapperPath, sentinel, kind = 'chat') {
   // daemon role back to the real, fixed file and judge it instead).
   const KEEPER = path.join(REPO, 'data/bin/vibespace-remote-keeper');
   const keeperSrc = read('data/bin/vibespace-remote-keeper');
-  const keeperR1 = keeperSrc.replace("child.on('exit', (code, signal) => finalize(code, signal));", "child.on('exit', (code) => finalize(code));");
+  const keeperR1 = editAnchor(keeperSrc, "child.on('exit', (code, signal) => finalize(code, signal));", "child.on('exit', (code) => finalize(code));", "data/bin/vibespace-remote-keeper");
   ok(keeperR1 !== keeperSrc, 'control (keeper r1): the patch applies (the waiter drops node\'s signal again)');
   const KEEPER_R1 = M.write('data/bin/vibespace-remote-keeper', keeperR1, 'r1', { esm: false, selfPath: true });
   const cli = path.join(ROOT, 'self-term-cli.js');
@@ -1030,16 +1030,16 @@ function tombTeardown(eng, id, metaObj) {
       'control (no-buf): a copy with both back inside the .buf try FAILS both no-.buf assertions (no tomb, no sweep)');
     for (const f of pair) { try { fs.unlinkSync(f); } catch { } }
   }
-  const noTomb = stdoutSrc.replace('fs.writeFileSync(tmp, JSON.stringify(tomb)); fs.renameSync(tmp, tombPath);', '');
+  const noTomb = editAnchor(stdoutSrc, 'fs.writeFileSync(tmp, JSON.stringify(tomb)); fs.renameSync(tmp, tombPath);', '', "src/server/session-stdout.js");
   ok(noTomb !== stdoutSrc, 'control (tomb): the patch applies');
   tombTeardown(makeEngine(M.write('src/server/session-stdout.js', noTomb, 'notomb')), 'sess-xf-tomb-ctl', { pid: 44, childExitCode: 0 });
   ok(!fs.existsSync(path.join(TOMBS, 'sess-xf-tomb-ctl.meta.json')), 'control (tomb): a copy without the meta tomb write FAILS the tomb assertion');
-  const noSweep = stdoutSrc.replace('if (tombExpired(s.mtimeMs, now)) fs.unlinkSync', 'if (false) fs.unlinkSync');
+  const noSweep = editAnchor(stdoutSrc, 'if (tombExpired(s.mtimeMs, now)) fs.unlinkSync', 'if (false) fs.unlinkSync', "src/server/session-stdout.js");
   ok(noSweep !== stdoutSrc, 'control (sweep): the patch applies');
   for (const ext of ['.tail', '.meta.json']) fs.utimesSync(path.join(TOMBS, 'sess-xf-tomb-2' + ext), old, old);
   tombTeardown(makeEngine(M.write('src/server/session-stdout.js', noSweep, 'nosweep')), 'sess-xf-tomb-ctl2', { pid: 45 });
   ok(fs.existsSync(path.join(TOMBS, 'sess-xf-tomb-2.meta.json')), 'control (sweep): a copy without the sweep rule FAILS the removal assertion');
-  const noSuffix = stdoutSrc.replace("${exitReason ? ' reason=' + exitReason : ''}${facts.suffix}`", "${exitReason ? ' reason=' + exitReason : ''}`");
+  const noSuffix = editAnchor(stdoutSrc, "${exitReason ? ' reason=' + exitReason : ''}${facts.suffix}`", "${exitReason ? ' reason=' + exitReason : ''}`", "src/server/session-stdout.js");
   ok(noSuffix !== stdoutSrc, 'control (line): the patch applies');
   fs.writeFileSync(path.join(BUF, 'sess-xf-line-ctl.json'), JSON.stringify({ childExitSignal: 'SIGTERM' }));
   const ctlLine = teardown(makeEngine(M.write('src/server/session-stdout.js', noSuffix, 'nosuffix')), 'sess-xf-line-ctl');
@@ -1182,16 +1182,16 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   const ss = read('src/server/session-stdout.js');
   const CALL = "try { require('./unexpected-exit').onExit(session, id, facts, { midTurn }); }";
   ok(ss.includes(CALL) && ss.includes('let midTurn = !!session._isStreaming;'), 'controls setup: the call and the capture exist verbatim');
-  const noCall = makeEngine(M.write('src/server/session-stdout.js', ss.replace(CALL, 'try { }'), 'ue-nocall'));
+  const noCall = makeEngine(M.write('src/server/session-stdout.js', editAnchor(ss, CALL, 'try { }', "src/server/session-stdout.js"), 'ue-nocall'));
   const C1 = await runLegs(noCall, 'nocall');
   ok(C1.r1.asked === 0 && !C1.r1.item, 'NEGATIVE CONTROL: the teardown without the call (the base) asks nobody and files nothing', C1.r1);
-  const late2 = makeEngine(M.write('src/server/session-stdout.js', ss.replace(CALL, "try { require('./unexpected-exit').onExit(session, id, facts, { midTurn: !!session._isStreaming }); }"), 'ue-lateread'));
+  const late2 = makeEngine(M.write('src/server/session-stdout.js', editAnchor(ss, CALL, "try { require('./unexpected-exit').onExit(session, id, facts, { midTurn: !!session._isStreaming }); }", "src/server/session-stdout.js"), 'ue-lateread'));
   const C2 = await runLegs(late2, 'lateread');
   ok(C2.r1.asked === 0 && C2.r5.asks === 0, 'NEGATIVE CONTROL: "working" read AFTER the teardown cleared it never respawns (① and ⑤ red)', { r1: C2.r1.asked, r5: C2.r5.asks });
   const cc = read('src/adapters/claude-code.js');
   const MARK = "      session._exitAsked = { by: 'interrupt', at: Date.now() };\n";
   ok(cc.includes(MARK), 'controls setup: the Stop\'s mark exists verbatim');
-  const { ClaudeCodeAdapter: Unmarked } = require(M.write('src/adapters/claude-code.js', cc.replace(MARK, ''), 'ue-nomark'));
+  const { ClaudeCodeAdapter: Unmarked } = require(M.write('src/adapters/claude-code.js', editAnchor(cc, MARK, '', "src/adapters/claude-code.js"), 'ue-nomark'));
   const st2 = await stopLeg(Unmarked);
   ok(!st2.exitAsked && st2.exit.code === 130, 'NEGATIVE CONTROL: without the mark the Stop\'s SIGINT exit carries no actor (it would read as unexpected)', st2);
   // (the unexpected-exit WIRING PINS (server.js, app.js, session-lifecycle.js): MOVED to the fast scripts/test-exit-forensics-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -1228,7 +1228,7 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   ok(GUARDS.every((g) => xfSrc.includes(g)) && xfSrc.includes(LOOP), 'r1 controls setup: the two guards and the startup rule exist verbatim');
   const cg = r1Table(require(M.write('src/exit-facts.js', GUARDS.reduce((s, g) => s.replace(g, ''), xfSrc), 'ue-r1-noguard')));
   ok(cg.codex === 'respawn/first' && cg.remote === 'respawn/first', 'r1 NEGATIVE CONTROL: without the two guards a codex and a remote conversation are respawned (the r1 finding)', cg);
-  const cl = r1Table(require(M.write('src/exit-facts.js', xfSrc.replace(LOOP, "  if (!midTurn) return no('idle');\n"), 'ue-r1-noloop')));
+  const cl = r1Table(require(M.write('src/exit-facts.js', editAnchor(xfSrc, LOOP, "  if (!midTurn) return no('idle');\n", "src/exit-facts.js"), 'ue-r1-noloop')));
   ok(cl.loop === 'null/idle', 'r1 NEGATIVE CONTROL: without the startup rule the crash loop is silent (the r1 finding)', cl);
   reinstall({ userTodos: null }); others = [];
 }

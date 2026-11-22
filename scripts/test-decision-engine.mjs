@@ -42,6 +42,15 @@ const { PluginManager } = require(path.join(repo, 'src/plugins.js'));
 const DP = require(path.join(repo, 'src/plugins/llm.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SHOTS = process.env.DECISION_PNG_DIR || '';
 
@@ -413,7 +422,7 @@ console.log('L THE JUDGED ROAD\'S FACTS + THE OWNER IS TOLD ONCE A DAY (lane jud
   const esrc = fs.readFileSync(path.join(repo, 'src/server/decision-engine.js'), 'utf8');
   const GUARD = "      if (!it || it.status !== 'open') return paused.id;   // handled or dismissed: never repeated that day\n";
   ok(esrc.split(GUARD).length === 2, 'control anchor present (the dismissed guard)');
-  const EM = MD.load('src/server/decision-engine.js', esrc.replace(GUARD, ''), 'noguard');
+  const EM = MD.load('src/server/decision-engine.js', editAnchor(esrc, GUARD, '', "src/server/decision-engine.js"), 'noguard');
   const t2 = new UserTodoManager({ dataDir: path.join(root, 'todos-road-m'), now: () => T });
   fs.mkdirSync(path.join(root, 'todos-road-m'), { recursive: true });
   const eM = EM.create({ dataDir: path.join(root, 'data-road-m'), integrations: store, baseUrlFor: BASE, now: () => T, tzOffset: () => 0, log: { warn() {} } });

@@ -108,6 +108,15 @@ const { agentTokens, bin, bootedCopy, CDP_PORT, check, crashed, ctlServers, D, d
   finish, HOSTNAME, hostResolves, keyOf, launchOn, measurePane, mkPage, newPage, openPage, page, PORT, R2, readyOn, repo, RUNTIME, SEAT,
   SETTLE_DEADLINE_MS, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, TITLE_DEADLINE_MS, trustedClickAt, typedFile, until, VNC_ENV,
   WebSocket, WIN, worktrees, wt, XAGREE_DEADLINE_MS, XCLIP, xclipKids, XDOTOOL, xenvFor, XTERM } = await bootXpraWindow('test-desktop-xpra-window-open');
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 let p1 = await page(target);
 let appId = null, rec = null;
 try {
@@ -569,7 +578,7 @@ try {
     const wiring = fs.readFileSync(path.join(wtc, 'src/server/window-live-wiring.js'), 'utf8');
     const seatsAt = '    viewerSeats: { // x5:';
     check('CONTROL: the wiring hands the bridge its seats exactly once (the control removes exactly that)', wiring.split(seatsAt).length === 2);
-    fs.writeFileSync(path.join(wtc, 'src/server/window-live-wiring.js'), wiring.replace(seatsAt, '    viewerSeatsPreX5: { // pre-x5 CONTROL:'));
+    fs.writeFileSync(path.join(wtc, 'src/server/window-live-wiring.js'), editAnchor(wiring, seatsAt, '    viewerSeatsPreX5: { // pre-x5 CONTROL:', "src/server/window-live-wiring.js"));
     const [PORTC] = await freePorts(1);
     const homeC = scratchHome('deskxpra-x5ctl-home', fs);
     const sc = spawnCopy('the pre-x5 copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }); ctlServers.push(sc);

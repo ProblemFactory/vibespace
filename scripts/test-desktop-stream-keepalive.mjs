@@ -28,6 +28,15 @@ const WebSocket = require(path.join(repo, 'node_modules/ws'));
 const DS = { ...require(path.join(repo, 'src/server/desktop-stream.js')), ...require(path.join(repo, 'src/server/stream-relay-rfb.js')), ...require(path.join(repo, 'src/server/stream-relay-xpra.js')) } /* F-B4: the relays' classifiers live in their own modules */;
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // a "VNC server": accepts and holds every socket, sends one greeting byte-string
@@ -162,8 +171,8 @@ console.log('§6 lane desktop-keepalive (userW inc-muoshmqn-dect, "no pong for 4
   const needle = "  if (pong || Number(inbound) > 0) return 'alive';\n  if (Number(queuedBefore) > 0 && Number(wroteNow) > Number(wroteBefore)) return 'draining';";
   const kaReq = "require('../ws-keepalive.js')";
   ok('control: the liveness rule\'s needle is in the shipped source (src/ws-keepalive.js), and the bridge requires it once', kaSrc.includes(needle) && src.split(kaReq).length === 2);
-  const kaOld = MUTK.write('src/ws-keepalive.js', kaSrc.replace(needle, "  if (pong) return 'alive';"), 'pong-only-ka');
-  const OLD = MUTK.load('src/server/desktop-stream.js', src.replace(kaReq, `require(${JSON.stringify(kaOld)})`), 'pong-only');
+  const kaOld = MUTK.write('src/ws-keepalive.js', editAnchor(kaSrc, needle, "  if (pong) return 'alive';", "src/ws-keepalive.js"), 'pong-only-ka');
+  const OLD = MUTK.load('src/server/desktop-stream.js', editAnchor(src, kaReq, `require(${JSON.stringify(kaOld)})`, "src/server/desktop-stream.js"), 'pong-only');
   const rc = await slowReaderLeg(OLD);
   ok('CONTROL: the pong-only rule (2.369.118\'s) CUTS the same live reader — the 40 s cuts of the incident, reproduced', rc.live.cut, rc.live);
   // the rule as a table
@@ -256,9 +265,9 @@ console.log('§5 the HELD-BYTES CAP (2026-09-22, hole A of the r6 verify): a vie
   const srcX = fs.readFileSync(path.join(repo, 'src/server/stream-relay-xpra.js'), 'utf8'), srcR = fs.readFileSync(path.join(repo, 'src/server/stream-relay-rfb.js'), 'utf8');
   const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;', reg = "require('./stream-relays.js')";
   ok('each cap is spelled once (the control patches exactly them)', srcX.split(from1).length === 2 && srcR.split(from2).length === 2 && src.split(reg).length === 2);
-  const xfile = MUTK.write('src/server/stream-relay-xpra.js', srcX.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix'), 'kacap-x');
-  const rfile = MUTK.write('src/server/stream-relay-rfb.js', srcR.replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'kacap-r');
-  const mfile = MUTK.write('src/server/desktop-stream.js', src.replace(reg, `{ rfb: require(${JSON.stringify(rfile)}), xpra: require(${JSON.stringify(xfile)}) }`), 'kacap');
+  const xfile = MUTK.write('src/server/stream-relay-xpra.js', editAnchor(srcX, from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix', "src/server/stream-relay-xpra.js"), 'kacap-x');
+  const rfile = MUTK.write('src/server/stream-relay-rfb.js', editAnchor(srcR, from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix', "src/server/stream-relay-rfb.js"), 'kacap-r');
+  const mfile = MUTK.write('src/server/desktop-stream.js', editAnchor(src, reg, `{ rfb: require(${JSON.stringify(rfile)}), xpra: require(${JSON.stringify(xfile)}) }`, "src/server/desktop-stream.js"), 'kacap');
   try {
     const Rc = await rig(require(mfile));
     const Ac = await viewer(Rc.port, '/api/desktop/xp/stream', 'v-a');
@@ -414,7 +423,7 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   ok('CONTROL: the same upgrade with the cookie only is relayed (the first two windows above)', c1.ws.readyState === 1 && c2.ws.readyState === 1);
   const dsSrc = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
   const humanLine = dsSrc.split('\n').find((l) => l.includes('if (target.humanOnly && bearerOf(req))'));
-  const noHuman = MUTK.load('src/server/desktop-stream.js', dsSrc.replace(humanLine, '    // (pre-fix: no human_only rule)'), 'nohuman');
+  const noHuman = MUTK.load('src/server/desktop-stream.js', editAnchor(dsSrc, humanLine, '    // (pre-fix: no human_only rule)', "src/server/desktop-stream.js"), 'nohuman');
   cur = mkBridge(noHuman);
   const leak = client('machine-desktop.win-a', { headers: { Authorization: 'Bearer vsst_abc123' } });
   ok('CONTROL: a bridge copy without the human_only line relays the agent\'s socket (the rule above is what refuses it)', !!humanLine && await until(() => leak.got().length >= 12));
@@ -430,7 +439,7 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
     // CONTROL: an access-layer copy without the `end` line keeps the machine-side connection of a closed window open
     const accSrc = fs.readFileSync(path.join(repo, 'src/server/desktop-access.js'), 'utf8');
     const endLine = accSrc.split('\n').find((l) => l.includes("sock.on('end', () => { try { h.close(); }"));
-    const ACC0 = MUTK.load('src/server/desktop-access.js', accSrc.replace(endLine, '        // (pre-fix: half-open until the last viewer)'), 'noend');
+    const ACC0 = MUTK.load('src/server/desktop-access.js', editAnchor(accSrc, endLine, '        // (pre-fix: half-open until the last viewer)', "src/server/desktop-access.js"), 'noend');
     const w0 = fakeDevice('win32');
     const acc0 = ACC0.create({ hosts: hosts({ 'win-c': w0 }), install: false, log: aLog, vncPort: vncSrv.port, probeMs: 1500 });
     await acc0.openMachineDesktop('win-c');

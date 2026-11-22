@@ -48,6 +48,15 @@ const DS = { ...require(path.join(repo, 'src/server/desktop-stream.js')), ...req
 const K = require(path.join(repo, 'src/server/desktop-app-keeper.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 3000, step = 10) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
@@ -275,10 +284,10 @@ async function xpraScenario(Smod, label) {
   const src = read('src/server/desktop-stream.js');
   const from = "    if (!viewerSeats || !seat) return 'free';";
   ok(src.split(from).length === 2, 'the seat gate is spelled once in the bridge (the control patches exactly it)');
-  const mfile = MUTV.write('src/server/desktop-stream.js', src.replace(from, "    return 'free'; // pre-x5: every socket relayed"), 'stream');
+  const mfile = MUTV.write('src/server/desktop-stream.js', editAnchor(src, from, "    return 'free'; // pre-x5: every socket relayed", "src/server/desktop-stream.js"), 'stream');
   const skipLine = "if (typeof c.reconcile !== 'function') continue; ";
   ok(src.split(skipLine).length === 2, 'LOW-1: the refresh skip is spelled once (the control removes exactly it)');
-  const lfile = MUTV.write('src/server/desktop-stream.js', src.replace(skipLine, ''), 'low1');
+  const lfile = MUTV.write('src/server/desktop-stream.js', editAnchor(src, skipLine, '', "src/server/desktop-stream.js"), 'low1');
   const L1 = await xpraScenario(require(lfile), 'CONTROL LOW-1 (no skip)');
   const l1w = L1.log.filter((l) => /^W .*reconcile failed — c\.reconcile is not a function/.test(l));
   ok(l1w.length >= 5, `CONTROL: without the skip every join logs the false "reconcile failed — c.reconcile is not a function" warn (${l1w.length} over 5 joins)`, L1.log.filter((l) => l.startsWith('W ')).slice(0, 3));
@@ -387,7 +396,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   const ksrc = read('src/server/desktop-app-keeper.js');
   const low4 = 'if (cur && cur.pane === p && s.active !== v) {';
   ok(ksrc.split(low4).length === 2, 'LOW-4: the seat move is spelled once in the keeper (the control disables exactly it)');
-  const kfile = MUTV.write('src/server/desktop-app-keeper.js', ksrc.replace(low4, 'if (false && cur && cur.pane === p && s.active !== v) {'), 'keeper');
+  const kfile = MUTV.write('src/server/desktop-app-keeper.js', editAnchor(ksrc, low4, 'if (false && cur && cur.pane === p && s.active !== v) {', "src/server/desktop-app-keeper.js"), 'keeper');
   const low4Leg = async (Kmod) => {
     const up = await fakeXpra();
     const R = await rig(DS, { kind: 'xpra', upstreamPort: up.port, Kmod });
@@ -453,7 +462,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   ok(N3.active === 'v-a' && N3.aTypes.join() === 'hello,key-action' && N3.panes.join() === 'pa' && N3.afterA === null && N3.log.length === 1, 'LOW-3: …it is never elected — the first NAMED pane is active and drives, the broadcast lists only named panes, and when that pane leaves nobody (not the anonymous socket) is active; the bridge names it once', N3);
   const seatAt = 'const seat = viewerSeats ? (viewerId || ANON) : null;';
   ok(src.split(seatAt).length === 2, 'LOW-3: the anonymous seat is spelled once (the control restores the old `anon-<n>` seating)');
-  const afile = MUTV.write('src/server/desktop-stream.js', src.replace(seatAt, "const seat = viewerSeats ? (viewerId || 'anon-1') : null;"), 'anon');
+  const afile = MUTV.write('src/server/desktop-stream.js', editAnchor(src, seatAt, "const seat = viewerSeats ? (viewerId || 'anon-1') : null;", "src/server/desktop-stream.js"), 'anon');
   const N3c = await anonLeg(require(afile));
   ok(N3c.anonTypes.includes('key-action') && N3c.anonTypes.includes('configure-window') && N3c.active === 'anon-1', `CONTROL: seated as anon-<n> (the pre-fix bridge) the anonymous socket TAKES the active seat and its keys + geometry reach xpra (${N3c.anonTypes.join(', ')}; active ${N3c.active})`, N3c);
 
@@ -488,7 +497,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   // CONTROL: the keeper before LOW-2 (the join's read removed) — the xpra record never learns the title, so a blocked pane's overlay could only name the label
   const joinRead = "if (s.active !== v) refreshAppTitle(id, 'blocked-join');";
   ok(ksrc.split(joinRead).length === 2, 'LOW-2: the blocked join\'s title read is spelled once (the control removes exactly it)');
-  const tfile = MUTV.write('src/server/desktop-app-keeper.js', ksrc.replace(joinRead, ''), 'title');
+  const tfile = MUTV.write('src/server/desktop-app-keeper.js', editAnchor(ksrc, joinRead, '', "src/server/desktop-app-keeper.js"), 'title');
   reads = 0;
   const kc = require(tfile).create({ dataDir: path.join(root, 'tc'), env: () => ({ PATH: process.env.PATH }), broadcast: () => {}, display: fakeDisplay, viewerGraceMs: 0, log: { log() {}, warn() {} } });
   kc._store().apps['da-t'] = { id: 'da-t', state: 'ready', backend: 'xpra', display: ':93', label: 'the launch label', pids: {}, starts: {} };

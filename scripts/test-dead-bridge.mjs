@@ -287,8 +287,8 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
   const UI_SRC = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
   const preSS = editAnchor(editAnchor(SS_SRC, "function reattachLocalPty(id, session, why, { kind = 'reattach' } = {}) {", "function reattachLocalPty(id, session, why, { kind = 'reattach', resend = null } = {}) {", "src/server/session-stdout.js"),
     'const replay = takeHeldInputs(session);', 'const replay = resend != null ? [resend] : [];', "src/server/session-stdout.js");
-  const preUI = UI_SRC.replace(/(Broken pty stdin detected \(\$\{neverSpoke[^\n]*?\}\))`\);/, '$1`, { resend: neverSpoke ? payloadLine : null });');
-  const noPaint = SS_SRC.replace(/^\s*repaintFromBuf\(id, session\);[^\n]*\n/m, '');
+  const preUI = editAnchor(UI_SRC, /(Broken pty stdin detected \(\$\{neverSpoke[^\n]*?\}\))`\);/, '$1`, { resend: neverSpoke ? payloadLine : null });', "src/server/user-input.js");
+  const noPaint = editAnchor(SS_SRC, /^\s*repaintFromBuf\(id, session\);[^\n]*\n/m, '', "src/server/session-stdout.js");
   ok(/resend != null \? \[resend\]/.test(preSS) && /\{ resend: neverSpoke \? payloadLine : null \}/.test(preUI) && noPaint !== SS_SRC, 'control setup: the pre-fix copies re-send the detector\'s OWN input only (b924041f\'s rule), the no-repaint copy lost exactly the healer\'s repaint line');
   const BUFS = path.join(ROOT, 'c20d-bufs'); fs.mkdirSync(BUFS, { recursive: true });
   const makeEng = (mod) => {

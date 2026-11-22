@@ -38,6 +38,15 @@ import { bootXpraWindow } from './xpra-window-boot.mjs';
 const { agentTokens, bin, bootedCopy, check, copyBack7, crashed, ctlServers, DIGITS7, dropPage, ensureActive, FAKE_CLAUDE, fakeHome, finish, HOSTNAME,
   hostResolves, keySeen7, launchOn, measurePane, mkPage, openPage, page, PORT, R2, reach7, readyOn, repo, sizeWinOn, skip, sleep, spawnCopy, srvEnv,
   target, threw, trustedClickAt, until, VNC_ENV, WebSocket, worktrees, wt, XCLIP, xclipKids, xenvFor, XTERM } = await bootXpraWindow('test-desktop-xpra-window-seamless');
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 let p1 = await page(target);
 try {
   await openPage(p1, `http://127.0.0.1:${PORT}`);
@@ -371,7 +380,7 @@ try {
       const vSrc = fs.readFileSync(path.join(wtc, 'src/lib/desktop-seamless.js'), 'utf8');
       const vLine = "  return { seamless: true, why: wantWhy };";
       check('CONTROL: the verdict\'s one seamless answer is spelled exactly once (the control replaces exactly it)', vSrc.split(vLine).length === 2);
-      fs.writeFileSync(path.join(wtc, 'src/lib/desktop-seamless.js'), vSrc.replace(vLine, "  return { seamless: false, why: 'ssd' }; // CONTROL: the pre-lane look"));
+      fs.writeFileSync(path.join(wtc, 'src/lib/desktop-seamless.js'), editAnchor(vSrc, vLine, "  return { seamless: false, why: 'ssd' }; // CONTROL: the pre-lane look", "src/lib/desktop-seamless.js"));
       execFileSync(path.join(repo, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wtc, stdio: 'ignore' });
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-seamctl-home', fs);
@@ -597,7 +606,7 @@ try {
       const EV = "document.addEventListener('pointerdown', (e) => {\n    const opening = began(e) === 'before';";
       const OPTS = 'const o = { capture: true, passive: true, signal: ctl.signal };';
       check('CONTROL: the helper\'s event and phase are each spelled exactly once (the control replaces exactly them)', uSrc.split(EV).length === 2 && uSrc.split(OPTS).length === 2);
-      fs.writeFileSync(path.join(wtm, 'src/lib/utils.js'), uSrc.replace(EV, EV.replace("'pointerdown'", "'mousedown'")).replace(OPTS, 'const o = { capture: false, passive: true, signal: ctl.signal }; // CONTROL: the pre-lane closer'));
+      fs.writeFileSync(path.join(wtm, 'src/lib/utils.js'), editAnchor(editAnchor(uSrc, EV, EV.replace("'pointerdown'", "'mousedown'"), "src/lib/utils.js"), OPTS, 'const o = { capture: false, passive: true, signal: ctl.signal }; // CONTROL: the pre-lane closer', "src/lib/utils.js"));
       execFileSync(path.join(repo, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wtm, stdio: 'ignore' });
       const [PORTM] = await freePorts(1);
       const homeM = scratchHome('deskxpra-mctl-home', fs);

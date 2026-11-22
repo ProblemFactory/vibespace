@@ -112,11 +112,11 @@ async function storeWalk(S, tag) {
   const SRC = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
   const HOOK = "    if (byAcct) { if (key === null) byAcct = null; else acctPlace(key); }";
   ok(SRC.split(HOOK).length === 2, 'control setup: the touch signal\'s line that moves a key is present once');
-  const S2 = MC.load('src/channel-store.js', SRC.replace(HOOK, '    // (the mutant: the touch signal never moves a key)'), 'no-move');
+  const S2 = MC.load('src/channel-store.js', editAnchor(SRC, HOOK, '    // (the mutant: the touch signal never moves a key)', "src/channel-store.js"), 'no-move');
   const c = await storeWalk(S2, 'no-move');
   const cbad = c.filter((s) => !s.same).map((s) => s.why);
   ok(cbad.includes('a birth after the sets were kept') && cbad.includes('a removal (a whole-map touch)'), `CONTROL: a store whose touch signal never moves a key is wrong after a birth and a removal — red (${[...new Set(cbad)].length} steps wrong)`, [...new Set(cbad)]);
-  const S3 = MC.load('src/channel-store.js', SRC.replace(HOOK, '    byAcct = null;   // (the mutant: every touch drops the kept sets — a rebuild at every read)'), 'drop-each');
+  const S3 = MC.load('src/channel-store.js', editAnchor(SRC, HOOK, '    byAcct = null;   // (the mutant: every touch drops the kept sets — a rebuild at every read)', "src/channel-store.js"), 'drop-each');
   const d = await storeWalk(S3, 'drop-each');
   ok(d.builds >= 10 && !d.filter((x) => !x.same).length, `CONTROL: a store that drops the kept sets at every touch answers the same keys but builds them ${d.builds} times for the ten births — red against the price`, d.builds);
 }
@@ -267,13 +267,13 @@ async function pricedRun(E, tag) {
   const REJUDGE = '      for (const k of kr.dirty) { if (judge(k, live[k])) kr.set.add(k); else kr.set.delete(k); }\n';
   const BACKCLK = ' || !(t >= kr.at)) {\n';
   ok(SRC.split(REJUDGE).length === 2 && SRC.split(BACKCLK).length === 2, 'control setup: the written rows\' re-judge and the clock-gone-back rebuild are present once');
-  const nr = await pricedRun(MC.load('src/server/channels-engine.js', SRC.replace(REJUDGE, '      // (the mutant: a write re-judges nothing)\n'), 'no-rejudge'), 'no-rejudge');
+  const nr = await pricedRun(MC.load('src/server/channels-engine.js', editAnchor(SRC, REJUDGE, '      // (the mutant: a write re-judges nothing)\n', "src/server/channels-engine.js"), 'no-rejudge'), 'no-rejudge');
   ok(nr.wrong.some((w) => w.why === 'a turn after a row that was no candidate became one') && nr.revRows2 === nr.FRESH, `CONTROL: a write that re-judges nothing — the row that became a candidate is missing from the answer, the row made fresh is not read (${nr.wrong.length} answers wrong, revisions read ${nr.revRows2}) — red`, nr.wrong.slice(0, 2));
-  const nb = await pricedRun(MC.load('src/server/channels-engine.js', SRC.replace(BACKCLK, ') {\n'), 'no-backclock'), 'no-backclock');
+  const nb = await pricedRun(MC.load('src/server/channels-engine.js', editAnchor(SRC, BACKCLK, ') {\n', "src/server/channels-engine.js"), 'no-backclock'), 'no-backclock');
   ok(nb.wrong.some((w) => w.why === 'a turn after the clock went back'), `CONTROL: a clock gone back that rebuilds nothing — the row the clock took out stays out — red`, nb.wrong.slice(0, 2));
   const FRESHOBJ = '{ walkCost.recheckKept++; return kr.memo.due.map((d) => ({ ...d })); }';
   ok(SRC.split(FRESHOBJ).length === 2, 'control setup: the kept answer is handed out as fresh objects once');
-  const sh = await pricedRun(MC.load('src/server/channels-engine.js', SRC.replace(FRESHOBJ, '{ walkCost.recheckKept++; return kr.memo.due.slice(); }'), 'shared-due'), 'shared-due');   // stale-pins: kept (the old hand-out, restored by the red control)
+  const sh = await pricedRun(MC.load('src/server/channels-engine.js', editAnchor(SRC, FRESHOBJ, '{ walkCost.recheckKept++; return kr.memo.due.slice(); }', "src/server/channels-engine.js"), 'shared-due'), 'shared-due');   // stale-pins: kept (the old hand-out, restored by the red control)
   ok(!sh.freshObjects, 'RED CONTROL: the kept answer handed out as the same objects — a caller\'s edit reaches the next turn', sh.freshObjects);
 }
 

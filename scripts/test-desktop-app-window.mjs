@@ -92,6 +92,15 @@ const wt = scratch('deskapp-smoke');
 const home = scratchHome('deskapp-home', fs);
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
 
@@ -834,7 +843,7 @@ try {
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const MC = mutantCopies('deskapp-vnc', wt);
     const srvSrc = fs.readFileSync(path.join(wt, 'server.js'), 'utf8');
-    const noHook = srvSrc.replace('try { vnc.shutdown(); } catch {} ', '');
+    const noHook = editAnchor(srvSrc, 'try { vnc.shutdown(); } catch {} ', '', "server.js");
     check('CONTROL: the patched copy really drops the shutdown hook', noHook !== srvSrc && !/vnc\.shutdown\(\)/.test(noHook));
     // its port is taken NOW, not at the suite's start: ~80 s of CDP/fetch/ws traffic later a pre-picked ephemeral
     // port can be some outgoing socket's source port; its output is kept so a control that never answers says why

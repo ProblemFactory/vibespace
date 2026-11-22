@@ -25,6 +25,15 @@ import { bootXpraWindow } from './xpra-window-boot.mjs';
 const { bin, bootedCopy, CALC6, check, crashed, ctlServers, D, dropPage, ensureActive, fakeHome, finish, identity7, launchOn, mkPage, openPage, page,
   PORT, readyOn, rebaseline, repo, revealBars, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, trustedClickAt, until, VNC_ENV, worktrees,
   wt, XDOTOOL, xenvFor, xq, XTERM } = await bootXpraWindow('test-desktop-xpra-window-hidpi');
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 let p1 = await page(target);
 try {
   await openPage(p1, `http://127.0.0.1:${PORT}`);
@@ -362,7 +371,7 @@ try {
       const kSrc = fs.readFileSync(path.join(wtc, 'src/desktop-serve.js'), 'utf8'); // lane C1: the launch is the machine half's
       const pickLine = "const pick = M.scalePick({ choice: opts.scaleChoice, appDefault: v.launch.scaleChoice, setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });";
       check('CONTROL: the keeper\'s scale pick is spelled exactly once (the control replaces exactly it)', kSrc.split(pickLine).length === 2);
-      fs.writeFileSync(path.join(wtc, 'src/desktop-serve.js'), kSrc.replace(pickLine, "const pick = { scale: M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr), origin: null, from: null }; // pre-A3 CONTROL: dpr only"));
+      fs.writeFileSync(path.join(wtc, 'src/desktop-serve.js'), editAnchor(kSrc, pickLine, "const pick = { scale: M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr), origin: null, from: null }; // pre-A3 CONTROL: dpr only", "src/desktop-serve.js"));
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-a3ctl-home', fs);
       const sc = spawnCopy('the pre-A3 copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }); ctlServers.push(sc);

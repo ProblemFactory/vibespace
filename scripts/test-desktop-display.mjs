@@ -800,7 +800,7 @@ console.log('§8 (2026-09-25) memory is a FOOTPRINT: ΣPss over the set, one met
   const src = fs.readFileSync(path.join(repo, 'src/runaway-guard.js'), 'utf8');
   const needle = "memGuard !== 'unavailable' && sample.memBytes > L.GUARD_MEM_BYTES";
   ok(src.split(needle).length === 2, 'CONTROL setup: the verdict\'s memory comparison is found exactly once');
-  const RGm = MUTDD.load('src/runaway-guard.js', src.replace(needle, 'sample.rssBytes > L.GUARD_MEM_BYTES'), 'rss-sum');
+  const RGm = MUTDD.load('src/runaway-guard.js', editAnchor(src, needle, 'sample.rssBytes > L.GUARD_MEM_BYTES', "src/runaway-guard.js"), 'rss-sum');
   ok(RGm.resourceVerdict(inc, null, 0, 1000).over !== null, 'CONTROL: a verdict comparing rssBytes calls the incident fixture OVER (the Chrome incident, reproduced) — the shipped one does not');
 }
 

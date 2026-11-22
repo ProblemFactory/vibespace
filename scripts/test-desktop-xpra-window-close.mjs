@@ -29,6 +29,15 @@ import { bootXpraWindow } from './xpra-window-boot.mjs';
 const { agentTokens, bin, bootedCopy, CDP_PORT, check, crashed, ctlServers, D, dropPage, ensureActive, FAKE_CLAUDE, fakeHome, finish, launchOn, mkPage, openPage, page, PORT,
   R2, reach7, readyOn, rebaseline, repo, revealBars, SEAT, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, trustedClickAt, until, VNC_ENV,
   WebSocket, WIN, worktrees, wt, XTERM } = await bootXpraWindow('test-desktop-xpra-window-close');
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 let p1 = await page(target);
 try {
   await openPage(p1, `http://127.0.0.1:${PORT}`);
@@ -280,7 +289,7 @@ try {
       const winSrc = fs.readFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), 'utf8');
       const closeLine = '    if (!v.close) return false;';
       check('CONTROL: the window\'s close decision is spelled exactly once (the control pulls exactly it back)', winSrc.split(closeLine).length === 2);
-      fs.writeFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), winSrc.replace(closeLine, '    return false; // pre-A2 CONTROL: the window never closes itself'));
+      fs.writeFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), editAnchor(winSrc, closeLine, '    return false; // pre-A2 CONTROL: the window never closes itself', "src/lib/desktop-app-window.js"));
       rebaseline(wtc); execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
       const [PORTA] = await freePorts(1);
       const homeA = scratchHome('deskxpra-a2ctl-home', fs);
