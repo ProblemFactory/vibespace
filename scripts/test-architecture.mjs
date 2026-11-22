@@ -8268,6 +8268,7 @@ await section(async () => {
     'src/server/boot-restore.js': 'the boot’s re-adopt (the sixth site the row did not count)', 'src/hosts.js': 'the remote hook-register run (its CLI config)',
     'src/server/otel-ingest.js': 'the telemetry pair (envFor: the hub’s receiver address + the credential it minted; the create merges it into every local claude conversation)',
     'src/claude-oat-probe.js': 'the oat probe’s own CLI (a probe child, never a conversation): its telemetry to this hub’s receiver',
+    'src/server/cli-config-runner.js': 'the hook-register run for THIS machine (B-ddf3: the shipped helper through the starter, the plan in VIBESPACE_CLI_CONFIG)',
   });
   const FAMILY_DIRS112 = ['src/adapters/', 'src/harnesses/'];
   // the hub's OWN knobs a site hands a child (not the conversation's identity, route or credential), each named with its reason
@@ -8362,6 +8363,7 @@ await section(async () => {
     'src/server/boot-restore.js': ['src/server/boot-restore.js', null],
     'src/hosts.js': [null, 'the remote hook-register run: an install command, no conversation runs in it'],
     'src/claude-oat-probe.js': [null, 'the oat probe’s own CLI: a probe child, no conversation runs in it'],
+    'src/server/cli-config-runner.js': [null, 'the hook-register run for this machine: the shipped helper writes the CLI config and exits, no conversation runs in it'],
   });
   const roads112 = (files, roads = ROADS112, siteRoad = SITE_ROAD112) => {
     const red = [];
