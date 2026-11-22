@@ -287,6 +287,8 @@ console.log('⑪ the words: the one act and its full path, en / zh / ja (laws 1,
     ok(why.includes(it.data) && fix.includes(wf), `${lang}: the folder's held words name the folder and the ONE act on its full path`);
   }
   ok(r.lines.filter((l) => /SIGN-IN HELD/.test(l)).length === 1 && r.lines.some((l) => l.includes(wf)), 'the journal says the hold ONCE at the start, the witness\'s full path in it', r.lines);
+  const T = require(path.join(REPO, 'src/signin-table.js'));
+  ok(T.heldJson({ why: 'x' }, 'en', T.heldWords('en', false)).reason === 'file' && T.heldJson(h, 'en', T.heldWords('en', false, h)).reason === 'folder', 'r2436 (1): both holders answer through the shared heldJson — the piped form\'s held reply carries `reason` too (file), the plain one its kind');
   ok(h.kind === 'folder' && h.witness === wf && h.dir === it.data, 'the held state carries its own reason word and both paths', h);
   const res = api(r.v);
   ok(res.code === 503 && res.body && res.body.reason === 'folder' && String(res.body.fix).includes(wf), 'an API on the held instance: 503 with its reason and the act', res.body);
@@ -344,8 +346,32 @@ console.log('⑬b a home on a network mount, LATE at one start (r2269 (1)): the 
   const g = nfsLate('nfs-late');
   ok(g.was && g.both, 'the home a network mount: the witness on var-tmp; at a start where the mount is late, a copy written underneath AND the var-tmp copy kept');
   ok(!!g.next.held && g.next.held.kind === 'folder' && g.next.held.witness === varWitness(g.it), '…the mount back and the data folder missing: the var-tmp copy names it — HELD, never open', g.next.held);
-  const r = nfsLate('nfs-late-red', authCut("      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.map((w) => w.file)])];   // the ladder's place + every copy found\n", "      const files = f.place && f.place.dir ? [f.file] : []; for (const w of found) if (w.file !== f.file) SW.removeWitness({ file: w.file });\n", 'remove-the-other-copy'));
+  const r = nfsLate('nfs-late-red', authCut("      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.filter((w) => w.writable !== false).map((w) => w.file)])];   // the ladder's place + every copy found whose folder takes a write (r2436 (3))\n", "      const files = f.place && f.place.dir ? [f.file] : []; for (const w of found) if (w.file !== f.file) SW.removeWitness({ file: w.file });\n", 'remove-the-other-copy'));
   ok(!r.both && !r.next.held && !r.next.passwordEnabled, 'RED CONTROL: the other place\'s copy removed once one is written (the first form) — the next start comes up OPEN');
+}
+
+console.log('⑬c a copy in a folder the read allows and the write refuses (r2436 (3)): kept as it is, never rewritten nor warned about at each start');
+{
+  const run = (name, A = Auth) => {
+    const it = install(name);
+    quiet(() => start(it).v.setPassword('pw-refused-0001', { userSet: true }));   // the home rung 0700: the copy written there
+    fs.writeFileSync(witnessFile(it), J({ ...JSON.parse(fs.readFileSync(witnessFile(it), 'utf-8')), setAt: 1 }));
+    fs.chmodSync(path.dirname(witnessFile(it)), 0o755);   // later the folder is open to others: the read allows it, the write refuses it
+    const r = start(it, {}, A);
+    const kept = JSON.parse(fs.readFileSync(witnessFile(it), 'utf-8')).setAt === 1;
+    fs.chmodSync(path.dirname(witnessFile(it)), 0o700);
+    return { kept, said: r.lines.filter((l) => /witness .* could not be written/.test(l)).length, held: !!r.v.held, varCopy: fs.existsSync(varWitness(it)) };
+  };
+  const g = run('refused');
+  ok(g.kept && g.said === 0 && !g.held && g.varCopy, 'the copy in the refused folder is kept as it is (not rewritten) and nothing is said; the witness is written where the ladder lands (var-tmp)', g);
+  const r = run('refused-red', authCut("      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.filter((w) => w.writable !== false).map((w) => w.file)])];   // the ladder's place + every copy found whose folder takes a write (r2436 (3))\n", "      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.map((w) => w.file)])];\n", 'refused-rewritten'));
+  ok(r.said === 1 && r.kept, 'RED CONTROL: every copy found rewritten (the follow\'s form) — the refused folder\'s write fails and is said at this start (and at every start after)', r);
+  // r2436 (4): THE BOOT's SYNCED WRITES, measured — printed, never a bound (§2e): the id file and two witness copies, this machine's disk
+  const m = install('measure'), d1 = path.join(m.home, '.vibespace', 'local'), d2 = path.join(m.base, 'vartmp', `vibespace-${UID}`);
+  const t0 = process.hrtime.bigint();
+  const inst = SW.ensureInstance(m.data, null);
+  for (const dir of [d1, d2]) SW.writeWitness({ place: { dir }, file: path.join(dir, SW.witnessFileOf(m.root)), root: m.root, dataDir: m.data, id: inst.id, uid: UID });
+  console.log(`  · MEASURE (r2436 (4)): the start's synced writes — the id file and two witness copies — took ${(Number(process.hrtime.bigint() - t0) / 1e6).toFixed(1)} ms on this machine (the boot's rule: no step holds the loop 250 ms)`);
 }
 
 console.log('⑭ a witness THERE and unreadable holds (r2152 (a)): a missing one is «none», every other read is a hold');

@@ -134,7 +134,10 @@ function startFactsSync({ dataDir, root = path.dirname(dataDir), home = os.homed
   const ask = { root, home, uid, mountinfo: mi, xdgRuntimeDir, varTmp, throwaway: tw, lstat, readlink: (p) => fs.readlinkSync(p), facts };
   const place = placeOf(ask);
   const file = place.dir ? path.join(place.dir, witnessFileOf(root)) : null;   // where the one writer writes
-  const found = readPlacesOf(ask).map((d) => witnessAt(path.join(d, witnessFileOf(root)), { root, dataDir })).filter(Boolean);   // r2152 (b): both read
+  // r2152 (b): both read; r2436 (3): each copy says whether its folder takes a WRITE (the rung law, unmasked) — a folder the read
+  // allows and the write refuses keeps its copy as it is (read, and named by the act), never rewritten nor warned about at each start
+  const found = readPlacesOf(ask).map((d) => witnessAt(path.join(d, witnessFileOf(root)), { root, dataDir })).filter(Boolean)
+    .map((w) => ({ ...w, writable: LI.rungFolderOf(facts(path.dirname(w.file)), { uid, dir: path.dirname(w.file) }).ok }));
   const own = found.find((w) => w.file === file && w.doc) || found.find((w) => w.doc);
   return { root, dataDir, dataLink, instance, throwaway: tw, place, file, witness: own ? own.doc : null, found, declared: declaredOf(env), uid };
 }

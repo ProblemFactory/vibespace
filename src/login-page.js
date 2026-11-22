@@ -1,6 +1,7 @@
 'use strict';
 // THE SIGN-IN PAGE (moved verbatim out of src/auth.js by the separation's B3b-1, 主开发 r1517): ONE page for both holders of the
-// sign-in table — the plain form's hub and the piped form's interface serve the same words. PURE but for the words module.
+// sign-in table — the plain form's hub and the piped form's interface serve the same words. PURE but for the words module and the
+// table's held words (src/signin-table.js heldWords: a folder / link / declared hold's sentences, B-dc3f (1)).
 const { LOGIN_WORDS, loginWords } = require('./login-words.js'); // lane ui-language: the sign-in page's words, whole in en / zh / ja
 const { heldWords } = require('./signin-table.js');   // B-dc3f (1): a folder / link / declared hold's words, its paths filled in
 

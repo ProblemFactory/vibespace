@@ -104,7 +104,7 @@ class Auth {
     const set = !!(this._state && this._state.passwordHash), found = f.found || [];
     const each = (file, act, fn) => { try { fn(); } catch (e) { this._sayOnce('witness', `[auth] the sign-in witness ${file} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start`); } };
     if (set) {
-      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.map((w) => w.file)])];   // the ladder's place + every copy found
+      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.filter((w) => w.writable !== false).map((w) => w.file)])];   // the ladder's place + every copy found whose folder takes a write (r2436 (3))
       for (const file of files) each(file, 'written', () => SW.writeWitness({ place: { dir: path.dirname(file) }, file, root: f.root, dataDir: f.dataDir, id: f.instance.id, uid: f.uid }));
       f.witness = { id: f.instance.id }; f.found = files.map((file) => ({ file, doc: { id: f.instance.id } }));
     } else {
