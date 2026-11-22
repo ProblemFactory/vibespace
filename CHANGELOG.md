@@ -146,6 +146,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a server without the which command, tmux conversations keep their window targets, and a lookup that stops answering no longer slows every refresh.
 - When VibeSpace cannot check for a desktop server in time, the Desktop says so and stays available, instead of vanishing or opening an empty screen.
 - A memory warning now says when the process list could not be read, instead of listing no processes at all.
+- Removing an account that forgets its data now says so when some of that data is still on disk for a while, instead of a plain «Removed».
 
 ## 2.369.415 — 2026-11-21
 
