@@ -432,6 +432,14 @@ async function surviveShape(tag, { red = null, scene = null } = {}) {
   // once nothing writes them (the stand-in says nothing until it is asked), so the file stays as written across the restart
   // <id>.buf for EVERY live id: a wrapper the page never attached wrote none yet, and the restore reads that name whether the
   // wrapper made it or not
+  // box row 127 (主开发 r1487's re-run): THE WRAPPER'S OWN REWRITE, LEFT TO LAND FIRST. Since the wrapper's hold, a restore's fence rides
+  // each wrapper's ring FENCE_KEEP_MS (10 s) and LEAVES it by a whole rewrite of the file — a buffer planted before that rewrite is
+  // overwritten by it (the red-attach scene began within 10 s of the ring scene's attaches: its registration read the wrappers' own
+  // small rings, 0 of 80 billing sources). So the plant waits until no live buffer holds a fence (each keep ended, its rewrite
+  // landed) — bounded, the ones still fenced named
+  const fenced = () => [...liveIds].filter((id) => { try { return fs.readFileSync(path.join(BUF, id + '.buf'), 'latin1').includes('"type":"_fence"'); } catch { return false; } });
+  { const tF = Date.now(); let still = fenced(); while (still.length && Date.now() - tF < 30000) { await sleep(250); still = fenced(); }
+    check(`${label}: every survivor's fence left its ring before the plant (its own rewrite landed${still.length ? ` — ${still.length} STILL FENCED after 30 s: ${still.slice(0, 3).join(', ')}` : `, ${((Date.now() - tF) / 1000).toFixed(1)} s`})`, !still.length); }
   check(`${label}: the live buffers settled (each size read the same twice)`, await settled(liveIds));
   fs.mkdirSync(BUF, { recursive: true });
   const bufs = [...liveIds].map((id) => id + '.buf');
