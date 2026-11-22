@@ -1827,6 +1827,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - (6) legs: a codex row through the decision road and the leak search (its finalize answer too); malformed files and tokens ⇒ null, no throw; a planted «one address is the same account» copy breaks «never a false merge»; the census's doors-found red control runs the drift comparison itself; the identity suite sets a home of its own.
 - scripts/test-account-identity.mjs gains the folder's read: both harnesses' readers over folders written as their CLIs write them (one person in two organisations = two seats), the decision road through a real AccountManager, and THE IDS STAY IN MEMORY (no list row, decision row, signinFacts / finalize answer, kept-facts answer or accounts push carries one).
 - scripts/test-identity-census.mjs judges sameAccount (the 5th door, NO debt row) and takes round wzkgs3nol's shoulds: right answers pinned per door and kind; mutant doors (always «same» / always «unproven») prove both legs can fail; the doors found in the tree by fixed strings (a new caller shows by name); every usage cache through the product's writer; each AccountManager closed; the no-op engine stop removed, its self-measure off.
+- ITS FOLLOW (the coordinator's r2594):
+  - a stop that lands while the watcher's finder looks still gets its one last read when the look returns;
+  - the agent's .meta.json read is bounded inside the one chain (2 s, then refused by name);
+  - leg ③'s sharing is forced by a held first read, not timed.
+  - New legs, each with its red copy where it has one: the stop in the look, the meta bound, a kept place whose file is gone, the listing read again after its age.
 
 ## 2.369.415 — 2026-11-21
 
