@@ -185,8 +185,22 @@ const click = async (sel) => {
 // The page's instrumentation (re-installed after a reload): every `active-sessions` frame and every identity sync
 const INSTRUMENT = `(() => {
   if (window.__bb) return true;
-  const B = window.__bb = { frames: 0, syncs: 0 };
-  app.ws.onGlobal((m) => { if (m.type === 'active-sessions') B.frames++; });
+  // r2072 (the block's hosted run 44980743210: the control VOID three times of three, one frame each 12 s window, both majors):
+  // every frame also records WHAT CHANGED in it against the one before — per session, the payload's fields that moved (or a
+  // session new / gone) — so a void attempt names the frame it met (which road sent it), never only its count
+  const B = window.__bb = { frames: 0, syncs: 0, last: null, diffs: [] };
+  app.ws.onGlobal((m) => {
+    if (m.type !== 'active-sessions') return;
+    B.frames++;
+    try {
+      const now = new Map((m.sessions || []).map((x) => [String(x.id || ''), x])), ch = [];
+      if (B.last) {
+        for (const [id, x] of now) { const p = B.last.get(id); if (!p) { ch.push(id.slice(0, 8) + ':new'); continue; } for (const k of new Set([...Object.keys(x), ...Object.keys(p)])) if (JSON.stringify(x[k]) !== JSON.stringify(p[k])) ch.push(id.slice(0, 8) + '.' + k); }
+        for (const id of B.last.keys()) if (!now.has(id)) ch.push(id.slice(0, 8) + ':gone');
+      }
+      B.last = now; B.diffs.push({ at: Date.now(), n: now.size, changed: ch.slice(0, 16) }); if (B.diffs.length > 40) B.diffs.shift();
+    } catch (e) { B.diffs.push({ at: Date.now(), error: String((e && e.message) || e) }); }
+  });
   const o = app.syncSessionIdentity.bind(app);
   app.syncSessionIdentity = (all) => { B.syncs++; return o(all); };
   return true;
@@ -357,7 +371,7 @@ try {
       await sleep(12000);
       const c1 = await evalJs(chipExpr(S1));
       const frames = (await evalJs('__bb.frames')) - f0, syncs = (await evalJs('__bb.syncs')) - s0;
-      if (frames > 0) { console.log(`  · control attempt ${attempt} void: ${frames} unrelated frame(s) reached the page`); continue; }
+      if (frames > 0) { const what = await evalJs(`JSON.stringify(__bb.diffs.slice(-${frames}).map((d) => d.error ? 'error: ' + d.error : (d.changed.length ? d.changed.join(' ') : 'nothing changed') + ' (' + d.n + ' sessions)'))`); console.log(`  · control attempt ${attempt} void: ${frames} unrelated frame(s) reached the page — what changed in it: ${what}`); continue; }
       judged = { from, to, r, serverSays, c0, c1, frames, syncs };
     }
     check('the control ran over a window with no unrelated frame (≤ 3 attempts)', !!judged);
