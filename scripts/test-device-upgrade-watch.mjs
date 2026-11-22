@@ -17,6 +17,15 @@ const { UserTodoManager } = require('../src/user-todos.js');
 const { INBOX_ORIGINS } = require('../src/inbox-origin.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const SCR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dus-'));
 const WIN = { platform: 'win32', capabilities: ['probe', 'sysinfo'] };
 const world = (Watch = DW, dir = fs.mkdtempSync(path.join(SCR, 'w-'))) => {
@@ -86,13 +95,13 @@ console.log('— controls (patched copies) —');
 {
   const M = mutantCopies('dus', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
-  const mutA = src.replace('if (prev && prev.to === t) {', 'if (false) {');
+  const mutA = editAnchor(src, 'if (prev && prev.to === t) {', 'if (false) {', "src/server/device-upgrade-watch.js");
   ok(mutA !== src, '(a) the patch applies');
   const A = world(M.load('src/server/device-upgrade-watch.js', mutA, 'nodedupe'));
   A.w.stuck({ hostKey: 'k', machine: 'm', from: '1.0.0', to: '1.0.1', ...WIN }); A.todos.setStatus(A.open()[0].id, 'dismissed', 'user');
   A.w.stuck({ hostKey: 'k', machine: 'm', from: '1.0.0', to: '1.0.1', ...WIN });
   ok(A.open().length === 1, 'CONTROL (a): without the (machine, version) rule a dismissed item comes back at every give-up — DUS-W4 goes red');
-  const mutB = src.replace('    retract(rec); delete ledger[key]; save();', '    delete ledger[key]; save();');
+  const mutB = editAnchor(src, '    retract(rec); delete ledger[key]; save();', '    delete ledger[key]; save();', "src/server/device-upgrade-watch.js");
   ok(mutB !== src, '(b) the patch applies');
   const B = world(M.load('src/server/device-upgrade-watch.js', mutB, 'noretract'));
   B.w.stuck({ hostKey: 'k', machine: 'm', from: '1.0.0', to: '1.0.1', ...WIN }); B.w.matched({ hostKey: 'k', version: '1.0.1' });
@@ -137,9 +146,9 @@ console.log('— lane win-upgrade-pipe: a device that never dials back after its
   // CONTROLS (patched copies)
   const M = mutantCopies('dusg', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
-  const mC = src.replace('    const had = !!g.itemId;\n    retract(g);', '    const had = !!g.itemId;');
-  const mD = src.replace("if (g.filedFor === g.to) {", 'if (false) {');
-  const mE = src.replace("event === 'begun' ? begun(facts) : ", '');
+  const mC = editAnchor(src, '    const had = !!g.itemId;\n    retract(g);', '    const had = !!g.itemId;', "src/server/device-upgrade-watch.js");
+  const mD = editAnchor(src, "if (g.filedFor === g.to) {", 'if (false) {', "src/server/device-upgrade-watch.js");
+  const mE = editAnchor(src, "event === 'begun' ? begun(facts) : ", '', "src/server/device-upgrade-watch.js");
   ok(mC !== src && mD !== src && mE !== src, '(c/d/e) the patches apply');
   const C = gw(M.load('src/server/device-upgrade-watch.js', mC, 'noresolve')); C.w.begun({ hostKey: 'k', machine: 'm', from: '1', to: '2' }); clock += DW.GONE_AFTER_MS + 1; C.w.sweep(); C.w.answered({ hostKey: 'k' });
   ok(C.open().length === 1, 'CONTROL (c): an answer that does not retract leaves the item open after the device came back — GONE-5 red');
@@ -165,7 +174,7 @@ console.log('— a REFUSED upgrade: one urgent item per (device, version, code);
   const u = R.w.onAgentUpgrade('refused', { hostKey: 'host-dial-U', machine: 'Box', from: '1.0.0', to: '1.0.1', code: 'unsigned-local-build' });
   ok(!u.filed && R.open().length === 2 && R.w.rowOf('host-dial-U').unsigned === true, 'REF-4: this hub\'s own unsigned build — the machine row says so, no item');
   const src = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
-  const mR = src.replace("event === 'refused' ? refused(facts) : ", '');
+  const mR = editAnchor(src, "event === 'refused' ? refused(facts) : ", '', "src/server/device-upgrade-watch.js");
   ok(mR !== src, '(r) the patch applies');
   const MR = mutantCopies('dus-ref', REPO);
   const X = world(MR.load('src/server/device-upgrade-watch.js', mR, 'norefused'));

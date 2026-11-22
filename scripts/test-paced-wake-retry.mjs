@@ -43,6 +43,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const G = require(path.join(REPO, 'src/channel-groups.js'));
 const M = require(path.join(REPO, 'src/dispatch-model.js'));
@@ -1567,7 +1576,7 @@ await leg(106, async () => { // P15
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const anchor = "first.meta = h && typeof h.merge === 'function' ? h.merge(first.meta, e.meta) : e.meta;";
   if (!src.includes(anchor)) throw new Error('control anchor moved: the fold');
-  const CDm = Ms2.load('src/server/conversation-deliver.js', src.replace(anchor, 'first.meta = e.meta;'), 'no-merge-in-fold');
+  const CDm = Ms2.load('src/server/conversation-deliver.js', editAnchor(src, anchor, 'first.meta = e.meta;', "src/server/conversation-deliver.js"), 'no-merge-in-fold');
   const m = await awaitTwin('p15m', CDm);
   ok(m.why !== 'await' && !/^\[await\]/.test(m.frame) && m.state !== 'woke', '(xvii) CONTROL: without the producer\'s merge the frame says «@mentioned» and the record stays «held»', m);
 });

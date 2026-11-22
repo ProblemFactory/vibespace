@@ -390,14 +390,14 @@ console.log('— ④ a v2 sub-agent is NEVER listed as the owner\'s own conversa
   const TS_LEG = "if (p.thread_source === 'subagent' || subAgent) {";
   const SPAWN_LEG = 'if (spawn) {';
   ok(dfSrc.includes(TS_LEG) && dfSrc.includes(SPAWN_LEG), 'the mutated legs exist verbatim in the classifier (else the controls judge nothing)');
-  const dfTs = M.write('src/discovery-facts.js', dfSrc.replace(TS_LEG, 'if (subAgent) {'), 'ignore-thread-source');
+  const dfTs = M.write('src/discovery-facts.js', editAnchor(dfSrc, TS_LEG, 'if (subAgent) {', "src/discovery-facts.js"), 'ignore-thread-source');
   const dfNone = M.write('src/discovery-facts.js', editAnchor(editAnchor(dfSrc, SPAWN_LEG, 'if (false && spawn) {', "src/discovery-facts.js"), TS_LEG, 'if (false) {', "src/discovery-facts.js"), 'no-subagents');
   const mTs = require(dfTs);
   ok(mTs.classifyCodexThread(topOnly).agentKind === 'primary', 'NEGATIVE CONTROL: a classifier that ignores thread_source lists the top-level-only child as PRIMARY (the leg above is load-bearing)');
   const cxSrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
-  const cxNone = M.write('src/adapters/codex.js', cxSrc.replace("require('../discovery-facts')", `require(${JSON.stringify(dfNone)})`), 'no-subagents');
+  const cxNone = M.write('src/adapters/codex.js', editAnchor(cxSrc, "require('../discovery-facts')", `require(${JSON.stringify(dfNone)})`, "src/adapters/codex.js"), 'no-subagents');
   const stSrc = fs.readFileSync(path.join(REPO, 'src/codex-session-store.js'), 'utf8');
-  const stNone = M.write('src/codex-session-store.js', stSrc.replace("require('./adapters/codex')", `require(${JSON.stringify(cxNone)})`), 'no-subagents');
+  const stNone = M.write('src/codex-session-store.js', editAnchor(stSrc, "require('./adapters/codex')", `require(${JSON.stringify(cxNone)})`, "src/codex-session-store.js", 'first'), 'no-subagents');
 
   const probe = `
 const path = require('path');
@@ -526,7 +526,7 @@ const out = {};
     const agSrcBig = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
     const SC_ALL = 'codexRollouts.forEach((r, i) => {';
     ok(agSrcBig.includes(SC_ALL), 'the daemon SC leg walks every listed rollout (the mutated line exists verbatim)');
-    const devCap = snapOf(M.write('src/agentd/agentd.js', agSrcBig.replace(SC_ALL, 'codexRollouts.slice(0, 30).forEach((r, i) => {'), 'sc-cap-30'));
+    const devCap = snapOf(M.write('src/agentd/agentd.js', editAnchor(agSrcBig, SC_ALL, 'codexRollouts.slice(0, 30).forEach((r, i) => {', "src/agentd/agentd.js"), 'sc-cap-30'));
     const capMiss = miss(devCap);
     ok(devCap.length > 0 && capMiss.length >= 10 && capMiss.every((x) => /:subagent$/.test(x)), 'NEGATIVE CONTROL: a daemon whose SC leg is re-capped at 30 lists the older children as PRIMARY (the uncapped leg is load-bearing)', `${capMiss.length} wrong: ${capMiss.join(' ')}`);
     // ssh rung (real composed script + a mutant that re-caps the SC leg at 30)
@@ -546,7 +546,7 @@ const out = {};
     const hsSrcBig = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
     const SSH_SC = `[ -n "$TID" ] && printf '%s\\\\n' "$HD" | grep '"type":"session_meta"'`;
     ok(hsSrcBig.includes(SSH_SC), 'the ssh SC leg exists verbatim (else the ssh control judges nothing)');
-    const hsCap = M.write('src/hosts.js', hsSrcBig.replace(SSH_SC, `[ "$i" -le 30 ] && ${SSH_SC}`), 'sc-cap-30');
+    const hsCap = M.write('src/hosts.js', editAnchor(hsSrcBig, SSH_SC, `[ "$i" -le 30 ] && ${SSH_SC}`, "src/hosts.js"), 'sc-cap-30');
     const sshCap = await sshOf(require(hsCap).HostManager);
     const sshCapMiss = miss(sshCap);
     ok(sshCap.length === 45 && sshCapMiss.length >= 10 && sshCapMiss.every((x) => /:subagent$/.test(x)), 'NEGATIVE CONTROL: an ssh script whose SC leg is re-capped at 30 lists the older children as PRIMARY', `${sshCap.length} cards, ${sshCapMiss.length} wrong`);
@@ -621,7 +621,7 @@ const out = {};
     const sbSrcUi = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
     const UNION = 'for (const st of this._wbRemoteHosts?.values() || []) if (st?.sessions) lists.push(st.sessions);';
     ok(sbSrcUi.includes(UNION), 'the union line exists verbatim (else the control judges nothing)');
-    const { Sidebar: SbLocal } = await import(M.write('src/lib/sidebar.js', sbSrcUi.replace(UNION, '/* local only */'), 'kinds-local-only', { esm: true }));
+    const { Sidebar: SbLocal } = await import(M.write('src/lib/sidebar.js', editAnchor(sbSrcUi, UNION, '/* local only */', "src/lib/sidebar.js"), 'kinds-local-only', { esm: true }));
     const mut = await drive(SbLocal);
     ok(!mut.subTab && !mut.hint, 'NEGATIVE CONTROL: a census that reads `_allSessions` alone draws no ↳ tab and no hint — the remote-only sub-agent is unreachable (the verifier\'s repro)', JSON.stringify(mut));
     ok((read('src/lib/sidebar-workbench.js').match(/^\s*this\._renderAgentKindQuickTabs\?\.\(\); \/\/ the kind census spans remote lists/mg) || []).length === 2,

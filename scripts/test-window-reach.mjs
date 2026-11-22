@@ -439,43 +439,43 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   const file = path.join(REPO, 'src/window-reach.js');
   const src = fs.readFileSync(file, 'utf8');
   // (a) reachFor ignores group rows
-  const a = src.replace("groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], inheritedGroupIds: Array.isArray(ctx.inheritedGroupIds) ? ctx.inheritedGroupIds : [], groupsUnreadable: !!ctx.unreadable });", "groupIds: [], inheritedGroupIds: [], groupsUnreadable: !!ctx.unreadable });");   // lane lg-group-parents U3a: + the lineage beside the groups   // lane grants-unify: the door no longer hands the model the caller's groups
+  const a = editAnchor(src, "groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], inheritedGroupIds: Array.isArray(ctx.inheritedGroupIds) ? ctx.inheritedGroupIds : [], groupsUnreadable: !!ctx.unreadable });", "groupIds: [], inheritedGroupIds: [], groupsUnreadable: !!ctx.unreadable });", "src/window-reach.js");   // lane lg-group-parents U3a: + the lineage beside the groups   // lane grants-unify: the door no longer hands the model the caller's groups
   ok(a !== src, 'control (a): the patch applies (reachFor ignoring group rows)');
   const Ra = MUT.load('src/window-reach.js', a, 'nogroups');
   const ta = runTable(Ra);
   ok(ta.miss.length > 0 && ta.miss.some((x) => /group/.test(x)), `control (a) FAILS the §2 table (${ta.miss.length} cells wrong) — the table is what catches it`);
   // (b) revoke drops every row of the principal's kind
-  const b = src.replace("const i = rec.rows.findIndex((r) => principalKey(r.principal) === principalKey(p));\n  if (i < 0) return { ok: true, record: rec, changed: false, row: null };\n  const [row] = rec.rows.splice(i, 1);", "const i = rec.rows.findIndex((r) => principalKey(r.principal) === principalKey(p));\n  if (i < 0) return { ok: true, record: rec, changed: false, row: null };\n  const row = rec.rows[i]; rec.rows = rec.rows.filter((r) => r.principal.kind !== p.kind);");
+  const b = editAnchor(src, "const i = rec.rows.findIndex((r) => principalKey(r.principal) === principalKey(p));\n  if (i < 0) return { ok: true, record: rec, changed: false, row: null };\n  const [row] = rec.rows.splice(i, 1);", "const i = rec.rows.findIndex((r) => principalKey(r.principal) === principalKey(p));\n  if (i < 0) return { ok: true, record: rec, changed: false, row: null };\n  const row = rec.rows[i]; rec.rows = rec.rows.filter((r) => r.principal.kind !== p.kind);", "src/window-reach.js");
   ok(b !== src, 'control (b): the patch applies (a revoke dropping every row of that kind)');
   const Rb = MUT.load('src/window-reach.js', b, 'kindrevoke');
   let rb = Rb.emptyRecord('x'); rb = Rb.grant(rb, { kind: 'session', id: S_KEY }).record; rb = Rb.grant(rb, { kind: 'session', id: 'codex:beta' }).record;
   const after = Rb.revoke(rb, { kind: 'session', id: S_KEY }).record;
   ok(after.rows.length === 0, 'control (b) FAILS "revoke drops ONLY its own row" (the other session lost its row too) — the §3 leg is what catches it');
   // (c) pixel mode lets the tree through
-  const c = src.replace("if (mode === 'pixels') return { ...refuse('mode_pixels', PIXELS_SENTENCE), probe: false };", "if (mode === 'pixels') return { ok: true, code: null, why: null, probe: false };");
+  const c = editAnchor(src, "if (mode === 'pixels') return { ...refuse('mode_pixels', PIXELS_SENTENCE), probe: false };", "if (mode === 'pixels') return { ok: true, code: null, why: null, probe: false };", "src/window-reach.js");
   ok(c !== src, 'control (c): the patch applies (pixel mode not refusing the tree)');
   const Rc = MUT.load('src/window-reach.js', c, 'pixelsopen');
   ok(globalThis.__tableMiss(Rc).length > 0, `control (c) FAILS the §5 mode table (${globalThis.__tableMiss(Rc).length} cells wrong)`);
   // (d) the pre-fix words: an untouched row always says "hidden" (lane E verify — the verifier's major)
-  const d = src.replace("const kind = touched && choice ? 'chosen' : (s.principals.length || s.mode !== 'auto') ? 'remembered' : 'hidden';", "const kind = touched && choice ? 'chosen' : 'hidden';");
+  const d = editAnchor(src, "const kind = touched && choice ? 'chosen' : (s.principals.length || s.mode !== 'auto') ? 'remembered' : 'hidden';", "const kind = touched && choice ? 'chosen' : 'hidden';", "src/window-reach.js");
   ok(d !== src, 'control (d): the patch applies (launchSummary saying "hidden" whenever the row is untouched)');
   const Rd = MUT.load('src/window-reach.js', d, 'untouchedhidden');
   const td = summaryMiss(Rd);
   ok(td.miss.length > 0 && td.miss.some((x) => /want remembered/.test(x)), `control (d) FAILS the §7b table (${td.miss.length} cells wrong — the untouched row stating the opposite of the click)`);
   // (e) lane E verify r2 (M2): launchSummary ignoring the roster — the pre-fix names straight from the memory
-  const e = src.replace('principals: roster ? principalsNow(s.principals, roster) : s.principals,', 'principals: s.principals,');
+  const e = editAnchor(src, 'principals: roster ? principalsNow(s.principals, roster) : s.principals,', 'principals: s.principals,', "src/window-reach.js");
   ok(e !== src, 'control (e): the patch applies (launchSummary ignoring the roster)');
   const Re = MUT.load('src/window-reach.js', e, 'noroster');
   const te = rosterMiss(Re);
   ok(te.length > 0, `control (e) FAILS the §7b roster leg (${te.length} checks wrong — the remembered names stated as if present)`);
   // (f) lane E verify r2 (L4): reachFor forgetting `unreadable` (the store fault folded into "no groups")
-  const f = src.replace("groupsUnreadable: !!ctx.unreadable });", "groupsUnreadable: false });");   // lane grants-unify: the door forgets to tell the model the store was unreadable
+  const f = editAnchor(src, "groupsUnreadable: !!ctx.unreadable });", "groupsUnreadable: false });", "src/window-reach.js");   // lane grants-unify: the door forgets to tell the model the store was unreadable
   ok(f !== src, 'control (f): the patch applies (reachFor without `unreadable`)');
   const Rf = MUT.load('src/window-reach.js', f, 'nounreadable');
   const tf = unreadableMiss(Rf);
   ok(tf.length > 0 && tf.some((x) => /group: got hidden, want hidden \+ unreadable/.test(x)), `control (f) FAILS §2b (${tf.length} cell(s) wrong — an unreadable store reads as "not a member")`);
   // (g) lane E verify r3 (F5): reachedState folding a fault into "nobody" (the r2 count)
-  const g = src.replace("return h > 0 ? 'matched' : u > 0 ? 'undecided' : 'unmatched';", "return h > 0 ? 'matched' : 'unmatched';");
+  const g = editAnchor(src, "return h > 0 ? 'matched' : u > 0 ? 'undecided' : 'unmatched';", "return h > 0 ? 'matched' : 'unmatched';", "src/window-reach.js");
   ok(g !== src, 'control (g): the patch applies (reachedState without `undecided`)');
   const Rg = MUT.load('src/window-reach.js', g, 'noundecided');
   const tg = reachedMiss(Rg);

@@ -49,6 +49,15 @@ const express = require('express');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() {}, warn() {}, error() {} };
 
 // ── the scratch world ──
@@ -304,14 +313,14 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 { // c1 — no digest check
   const cut = "    if (shown !== p.digest) return refuse('proposal_changed', 'the card you pressed is not this proposal as it stands — nothing ran; read it again');\n";
   ok(swSrc.includes(cut), 'c1: the digest check is where the control cuts it');
-  const m = M.load('src/browser-switch.js', swSrc.replace(cut, ''), 'no-digest');
+  const m = M.load('src/browser-switch.js', editAnchor(swSrc, cut, '', "src/browser-switch.js"), 'no-digest');
   const v = m.proposalStep(openP, { event: 'approve', by: 'user', shown: 'pd-00000000' });
   ok(v.ok === true, 'CONTROL c1: without the digest check an Approve naming another card RUNS — ② "proposal_changed" would be red');
 }
 { // c2 — no actor check
   const cut = "  if (human && by !== 'user') return refuse('agent_forbidden', 'approving or rejecting a proposal is the user\\'s act — an agent cannot decide its own proposal');\n";
   ok(swSrc.includes(cut), 'c2: the actor check is where the control cuts it');
-  const m = M.load('src/browser-switch.js', swSrc.replace(cut, ''), 'no-actor');
+  const m = M.load('src/browser-switch.js', editAnchor(swSrc, cut, '', "src/browser-switch.js"), 'no-actor');
   const v = m.proposalStep(openP, { event: 'approve', by: 'agent', shown: openP.digest });
   ok(v.ok === true, 'CONTROL c2: without the actor check an AGENT\'s approve is a transition — the PURE refusal behind ② would be gone');
 }
@@ -319,7 +328,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const cut = "    const cv = SW.claimVerdict({ existing: prior, tier: v.value.tier });";
   ok(kSrc.includes(cut), 'c3: the keeper asks claimVerdict where the control cuts it');
-  const Km = M.load('src/server/browser-keeper.js', kSrc.replace(cut, "    const cv = v.value.tier === 2 ? 'new' : 'claim-only';"), 'always-new');
+  const Km = M.load('src/server/browser-keeper.js', editAnchor(kSrc, cut, "    const cv = v.value.tier === 2 ? 'new' : 'claim-only';", "src/server/browser-keeper.js"), 'always-new');
   const d3 = path.join(ROOT, 'data-c3'); fs.mkdirSync(d3, { recursive: true });
   const k3 = Km.create({ dataDir: d3, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB }), serverSetting: () => undefined, liveKeys: () => new Set(['bk-000c3c30']), install: false, log: quiet, hostKnown: () => false });
   k3.blocked({ url: 'https://dup.example/x', tier: 2, browserKey: 'bk-000c3c30', sessionId: 's' });
@@ -329,7 +338,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 { // c6 — the Approve route without the agent-bearer refusal
   const cut = "  if (refuseAgentBearer(req, res, PROPOSAL_IS_USERS)) return;\n  const pr = proposalsOr503(res); if (!pr) return;\n  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });\n  const shown";
   ok(rsrc.includes(cut), 'c6: the Approve route refuses an agent\'s bearer where the control cuts it');
-  const Rm = M.load('src/routes/browser.js', rsrc.replace(cut, "  const pr = proposalsOr503(res); if (!pr) return;\n  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });\n  const shown"), 'no-bearer-refusal');
+  const Rm = M.load('src/routes/browser.js', editAnchor(rsrc, cut, "  const pr = proposalsOr503(res); if (!pr) return;\n  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });\n  const shown", "src/routes/browser.js"), 'no-bearer-refusal');
   const app6 = express(); app6.use(express.json());
   Rm.setup({ keeper, activeSessions: active, proposals: { approve: () => ({ ok: true, started: true }) } });
   app6.use(Rm.router);
@@ -341,7 +350,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 { // c8 — verify r1 V1: the audit answer without the lease check tells ANOTHER conversation what this browser was refused
   const cut = " && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)";
   ok(rsrc.includes(cut), 'c8: the audit answer asks for a lease where the control cuts it');
-  const Rm = M.load('src/routes/browser.js', rsrc.replace(cut, ''), 'no-lease-check');
+  const Rm = M.load('src/routes/browser.js', editAnchor(rsrc, cut, '', "src/routes/browser.js"), 'no-lease-check');
   const app8 = express(); app8.use(express.json());
   const pE = globalThis.__pE;
   const k8 = Object.assign(Object.create(keeper), keeper, { egressRefusals: (pid) => (pid === pE.id ? ['cdn.unknown-vendor.example'] : []) }); // the same stubbed answer as ③
@@ -356,7 +365,7 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const cut = "    const kept = SW.blockedKeep([...reg.blocked.filter((b) => !(mineOn(b) && !b.proposal)), entry]);";
   ok(kSrc.includes(cut), 'c11: the keeper bounds its claims through blockedKeep where the control cuts it');
-  const Km = M.load('src/server/browser-keeper.js', kSrc.replace(cut, "    const kept = { keep: [...reg.blocked.filter((b) => !(mineOn(b) && !b.proposal)), entry].slice(-50), dropped: [] };"), 'slice-50');
+  const Km = M.load('src/server/browser-keeper.js', editAnchor(kSrc, cut, "    const kept = { keep: [...reg.blocked.filter((b) => !(mineOn(b) && !b.proposal)), entry].slice(-50), dropped: [] };", "src/server/browser-keeper.js"), 'slice-50');
   const d11 = path.join(ROOT, 'data-c11'); fs.mkdirSync(d11, { recursive: true });
   const k11 = Km.create({ dataDir: d11, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB }), serverSetting: () => undefined, liveKeys: () => new Set(['bk-000c1111', 'bk-000c2222']), install: false, log: quiet, hostKnown: () => false });
   const y = k11.blocked({ url: 'https://payroll.example/in', tier: 2, browserKey: 'bk-000c1111', sessionId: 'y' });

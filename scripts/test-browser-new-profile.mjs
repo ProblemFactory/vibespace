@@ -23,6 +23,15 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const M = await import('../src/lib/browser-new-profile-model.js');
 const zh = (await import('../src/lib/i18n-zh.js')).default;
@@ -341,11 +350,11 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
 {
   const MUT = mutantCopies('badm-newprof', REPO);
   const src = read('src/lib/browser-new-profile-model.js');
-  const hide = src.replace("    out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer, need });", "    if (PICKABLE.includes(state)) out.push({ id, name, blurb, state, pickable: true, note, offer, need });");
+  const hide = editAnchor(src, "    out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer, need });", "    if (PICKABLE.includes(state)) out.push({ id, name, blurb, state, pickable: true, note, offer, need });", "src/lib/browser-new-profile-model.js");
   ok(hide !== src, 'control (a): the patch (a model that HIDES the rows it cannot pick) applies');
   const Mh = await import(MUT.write('src/lib/browser-new-profile-model.js', hide, 'hide'));
   ok(judgeProviders(Mh).length > 0, 'control (a): …and ① goes red on it (rows hidden)', judgeProviders(Mh));
-  const allList = src.replace("  if (mode === 'only') {", "  if (mode === 'only' || mode === 'all') {");
+  const allList = editAnchor(src, "  if (mode === 'only') {", "  if (mode === 'only' || mode === 'all') {", "src/lib/browser-new-profile-model.js");
   const Ma = await import(MUT.write('src/lib/browser-new-profile-model.js', allList, 'all-list'));
   const ba = Ma.createBody({ label: 'x', mode: 'all', who: [{ kind: 'task', id: 'T-1' }] });
   ok(allList !== src && (!ba.ok || 'use' in ba.body), 'control (b): a body that sends a list for "All my conversations" is caught by ①\'s body assertion', ba);
@@ -363,7 +372,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(threw && threw.code === 'unknown_task' && kl.list().profiles.some((p) => p.label === 'Late'), 'control (c): …the refusal still comes, but the record was written first — exactly what ②\'s "a refusal writes NOTHING" catches');
   // verify r1 (F6): a create that takes an agent's list
   const rs = read('src/routes/browser.js');
-  const open = rs.replace("  if (use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;\n", '');
+  const open = editAnchor(rs, "  if (use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;\n", '', "src/routes/browser.js");
   ok(open !== rs, 'control (d): the patch (a create that takes an agent\'s who-list) applies');
   const Ro = MUT.load('src/routes/browser.js', open, 'use-open');
   const { k: ko } = mkKeeper(path.join(ROOT, 'data-co'));
@@ -374,17 +383,17 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(ro.status === 200 && ko.list().profiles.some((p) => p.label === 'Opened'), 'control (d): …the agent\'s token wrote a who-list — exactly what ③ catches', ro.status);
   await new Promise((r) => so.close(r));
   // verify r1 (F7): the adopt door that keeps a directory and drops the dialog's browser / build in silence (the pre-fix shape)
-  const silent = rs.replace("      const kr = adoptKeepRefusal(req.body); // verify r1 (F7): the dialog's browser / machine / build are never dropped in silence\n      if (kr) return res.status(409).json({ error: kr.error, code: kr.code, asks: kr.asks });\n", '');
+  const silent = editAnchor(rs, "      const kr = adoptKeepRefusal(req.body); // verify r1 (F7): the dialog's browser / machine / build are never dropped in silence\n      if (kr) return res.status(409).json({ error: kr.error, code: kr.code, asks: kr.asks });\n", '', "src/routes/browser.js");
   ok(silent !== rs, 'control (e): the patch (a kept directory adopted with the dialog\'s browser / build dropped) applies');
   const ce = await adoptKeepLeg(MUT.load('src/routes/browser.js', silent, 'keep-silent'));
   ok(ce.refused.some((x) => x.status === 200 && x.json && x.json.adopted === true), 'control (e): …the kept browser is adopted with the build / CloakBrowser the user picked dropped — exactly what ③\'s keep leg catches', ce.refused.map((x) => [x.status, x.json && (x.json.code || x.json.adopted)]));
   // verify r2 (B4): an adopt door that never re-judges the form it was shown (the pre-fix shape) applies the other form
-  const blindForm = rs.replace("    if (form && (form === 'keep') !== !!(plan.keep && be)) return res.status(409)", "    if (false) return res.status(409)");
+  const blindForm = editAnchor(rs, "    if (form && (form === 'keep') !== !!(plan.keep && be)) return res.status(409)", "    if (false) return res.status(409)", "src/routes/browser.js");
   ok(blindForm !== rs, 'control (f): the patch (an adopt that ignores the form the dialog drew) applies');
   const cf = await adoptFlipLeg(MUT.load('src/routes/browser.js', blindForm, 'blind-form'));
   ok(cf.keepThenEmpty.status === 200 && cf.keepThenEmpty.json.adopted === false && cf.emptyThenKeep.status === 200 && cf.emptyThenKeep.json.adopted === true && !cf.dirsStill[1], 'control (f): …"keeps its logins" made an EMPTY profile and "empty" took the conversation\'s kept directory — exactly what ③\'s flip leg catches', { k: cf.keepThenEmpty.json && cf.keepThenEmpty.json.adopted, e: cf.emptyThenKeep.json && cf.emptyThenKeep.json.adopted });
   // verify r3 (Y4): the adopt door with verify r1 (F6)'s CONDITIONAL agent gate (the pre-fix shape): a bare body passes
-  const bareAgent = rs.replace("  if (refuseAgentBearer(req, res, ADOPT_IS_USERS)) return;\n", "  if (req.body && req.body.browser != null && refuseAgentBearer(req, res, BUILD_IS_USERS)) return;\n  if (req.body && req.body.use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;\n");
+  const bareAgent = editAnchor(rs, "  if (refuseAgentBearer(req, res, ADOPT_IS_USERS)) return;\n", "  if (req.body && req.body.browser != null && refuseAgentBearer(req, res, BUILD_IS_USERS)) return;\n  if (req.body && req.body.use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;\n", "src/routes/browser.js");
   ok(bareAgent !== rs, 'control (g): the patch (an agent token refused only with a who-list or a build) applies');
   const cg = await agentAdoptLeg(MUT.load('src/routes/browser.js', bareAgent, 'bare-agent'));
   ok(cg.own.status === 200 && cg.own.adopted === true && cg.other.status === 200 && cg.other.adopted === true && !cg.keptStill[0] && !cg.keptStill[1], 'control (g): …an agent\'s bare adopt took its own AND another conversation\'s kept browser (the logins moved) — exactly what the r3 (Y4) leg catches', cg);

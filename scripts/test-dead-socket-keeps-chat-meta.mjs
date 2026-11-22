@@ -46,6 +46,15 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const J = JSON.stringify;
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 /** server.js's turn-end entry (`const noteTurnEnd = …` at its top level) as a function over STAND-INS: its own source, cut out by
@@ -609,11 +618,11 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
         broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, sbNoteServerOp: () => {}, getHosts: () => null, getDialBridge: () => null, getExitProxy: () => null, note: () => {} });
       put(3, { claudeSessionId: CID(7) });
       const s3 = { backend: 'claude', claudeSessionId: CID(7), backendSessionId: CID(7) };
-      const gu = await mk(MM.load('src/server/boot-restore.js', BS2.replace(GUARD, ''), 'turn-end-unguarded'), new Map()).consumeKeptOf(s3, { ...FAILED, errors: ['No conversation found with session ID: ' + CID(7)] });
+      const gu = await mk(MM.load('src/server/boot-restore.js', editAnchor(BS2, GUARD, '', "src/server/boot-restore.js"), 'turn-end-unguarded'), new Map()).consumeKeptOf(s3, { ...FAILED, errors: ['No conversation found with session ID: ' + CID(7)] });
       const afterU = await nextBoot();
       ok(gu === 'cw-2-3' && !afterU.some((x) => x.backendSessionId === CID(7)), 'MUTANT RED: a consume without the turnRan guard takes a FAILED resume\'s copy (r1\'s loss again: its name and account gone)', { gu, rows: afterU.map((x) => x.name) });
       put(3, { claudeSessionId: CID(7) });
-      const gm = await mk(MM.load('src/server/boot-restore.js', BS2.replace(TAKE, '  return null;\n'), 'turn-end-takes-nothing'), new Map()).consumeKeptOf(s3, { ...RAN, session_id: CID(7) });
+      const gm = await mk(MM.load('src/server/boot-restore.js', editAnchor(BS2, TAKE, '  return null;\n', "src/server/boot-restore.js"), 'turn-end-takes-nothing'), new Map()).consumeKeptOf(s3, { ...RAN, session_id: CID(7) });
       const afterM = await nextBoot();
       ok(gm === null && afterM.some((x) => x.backendSessionId === CID(7) && x.accountId === 'sub-old-3'), 'MUTANT RED: a boot-restore whose turn end takes nothing leaves the ended resume\'s stale row (and its old account) for the next boot', afterM.map((x) => x.name));
     }
@@ -666,7 +675,7 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   const s4 = await RS.heldAccountOfNow('claude', CID(7), { stopped: async () => keptNow });
   const SWM = '  _heldRows = rows; _sweptStopped = discovered;';
   ok(RSRC.split(SWM).length === 2, 'ANCHOR: what the sweep hands the seam, spelled once');
-  const Mw = M.load('src/routes/sessions.js', RSRC.replace(SWM, '  _heldRows = rows; _sweptStopped = rows;'), 'swept-merged');
+  const Mw = M.load('src/routes/sessions.js', editAnchor(RSRC, SWM, '  _heldRows = rows; _sweptStopped = rows;', "src/routes/sessions.js"), 'swept-merged');
   Mw.sweepMerge(discovered.map((r) => ({ ...r })), [kr('sub-bbbbbbbbbbbb')]);
   const s4m = await Mw.heldAccountOfNow('claude', CID(7), { stopped: async () => keptNow });
   ok(s4 && s4.accountId === 'sub-aaaaaaaaaaaa' && s4m && s4m.accountId === 'sub-bbbbbbbbbbbb', '§11 (1) r3: THE SWEEP DRIVEN — after a sweep that merged an older copy (B), the seam takes the copy kept now (A); MUTANT RED: the sweep handing its MERGED rows ⇒ B (the delta read\'s scene)', { s4, s4m });
@@ -678,7 +687,7 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   ok(s2 && s2.accountId === 'agy-aaaaaaaaaaaa', '§11 (1) …a stale snapshot\'s LIVE row is no fact about now: the kept copy answers (the page shows the conversation live — no Resume there)', s2);
   const MERGE = '  return heldAccountOf(backend, id, mergeKeptStopped(stoppedRows, Array.isArray(kept) ? kept : []));';
   ok(RSRC.split(MERGE).length === 2, 'ANCHOR: the seam\'s merge, spelled once');
-  const m1 = await seamOf(M.load('src/routes/sessions.js', RSRC.replace(MERGE, '  return heldAccountOf(backend, id, [...(Array.isArray(kept) ? kept : []), ...(rows || [])]);'), 'kept-first'), sweep);
+  const m1 = await seamOf(M.load('src/routes/sessions.js', editAnchor(RSRC, MERGE, '  return heldAccountOf(backend, id, [...(Array.isArray(kept) ? kept : []), ...(rows || [])]);', "src/routes/sessions.js"), 'kept-first'), sweep);
   ok(m1 && m1.accountId === 'agy-aaaaaaaaaaaa', 'MUTANT RED: the kept rows first (the tip\'s) ⇒ the seam bills A while the page names B', m1);
   // (2) the refusal NAMES the account that holds it — its row's name; the machine's own login in the harness's billing word
   const kg = { backend: 'antigravity', sessionId: UUID(8), backendSessionId: UUID(8), status: 'stopped', accountId: 'agy-e0e0e0e0e0e0', kept: 'cw-8-x' };
@@ -733,13 +742,13 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
     'WIRING (cure 3): the bar draws the switch door only when the words say so (one append), and no empty door row');
   const SD = '    switchDoor: !(v.held && empty),\n';
   ok(RASRC0.split(SD).length === 2, 'ANCHOR: the switch door\'s decision, spelled once');
-  const MD = doorsOf(M.load('src/resume-account.js', RASRC0.replace(SD, '    switchDoor: true,\n'), 'door-always'));
+  const MD = doorsOf(M.load('src/resume-account.js', editAnchor(RASRC0, SD, '    switchDoor: true,\n', "src/resume-account.js"), 'door-always'));
   ok(MD.held === true && MD.gone === true, 'MUTANT RED: the switch door always drawn (the release\'s) ⇒ a held conversation gets a door that always refuses', MD);
   ok(free.includes('agy-bbbbbbbbbbbb') && free.includes('subscription') && held === '' && stale === 'agy-bbbbbbbbbbbb',
     '§11 (2) the switch: a harness that is not account-bound offers the others (as before); held by the pinned account ⇒ nothing to switch to (its re-login door stays); a stale on-resume account ⇒ ONLY the account that holds it', { free, held, stale });
   const RASRC = read('src/resume-account.js'), HB = '(heldBy && a.id !== heldBy) || ';
   ok(RASRC.split(HB).length === 2, 'ANCHOR: the switch\'s held-by filter, spelled once');
-  const mh = sw(M.load('src/resume-account.js', RASRC.replace(HB, ''), 'switch-any'), 'agy-aaaaaaaaaaaa');
+  const mh = sw(M.load('src/resume-account.js', editAnchor(RASRC, HB, '', "src/resume-account.js"), 'switch-any'), 'agy-aaaaaaaaaaaa');
   ok(mh.includes('agy-bbbbbbbbbbbb'), 'MUTANT RED: no held-by filter ⇒ the switch offers B to a conversation A holds (a door the server always refuses)', mh);
   // the page passes heldBy for an account-bound harness alone — the caps row the page reads IS the descriptor's fact
   const CAPS = require(path.join(REPO, 'src/backend-caps.js'));

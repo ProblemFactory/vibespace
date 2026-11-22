@@ -34,6 +34,15 @@ const FO = require(path.join(REPO, 'src/channel-focus.js'));
 const M = require(path.join(REPO, 'src/decision-model.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quiet = { log() { }, warn() { }, error() { } };
 const ROOT = scratch('decision-attention');
@@ -217,9 +226,9 @@ const MUT = mutantCopies('decision-attention', REPO);
 const attSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-attention.js'), 'utf8');
 const anchor = "const FO = require('../channel-focus.js');";
 ok(attSrc.includes(anchor) && (attSrc.match(/FO\.judgeCandidate\(/g) || []).length === 2, 'ANCHOR: the scan asks judgeCandidate twice — as it queues a row and again right before its call');
-const attMut = MUT.write('src/server/channels-attention.js', attSrc.replace(anchor, "const FO = { ...require('../channel-focus.js'), judgeCandidate: () => true };"), 'no-filter');
+const attMut = MUT.write('src/server/channels-attention.js', editAnchor(attSrc, anchor, "const FO = { ...require('../channel-focus.js'), judgeCandidate: () => true };", "src/server/channels-attention.js"), 'no-filter');
 const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-const engMut = MUT.load('src/server/channels-engine.js', engSrc.replace("require('./channels-attention.js')", `require(${JSON.stringify(attMut)})`), 'mut-attention');
+const engMut = MUT.load('src/server/channels-engine.js', editAnchor(engSrc, "require('./channels-attention.js')", `require(${JSON.stringify(attMut)})`, "src/server/channels-engine.js"), 'mut-attention');
 n = got.length;
 const C = await engines('control', world(), engMut);
 C.eng.digest();
@@ -227,8 +236,8 @@ await idle(C.eng);
 ok(factNamed(got.slice(n)).length >= 1, `CONTROL: with the filter bypassed the fact-tagged rows ARE sent (${factNamed(got.slice(n)).length}) — leg ② would be red`);
 const anchor2 = "const v = typeof viewNow === 'function' ? viewNow(queued.key) : queued;";
 ok(attSrc.includes(anchor2), 'ANCHOR: each call reads the row as it is now');
-const attMut2 = MUT.write('src/server/channels-attention.js', attSrc.replace(anchor2, 'const v = queued;'), 'stale-row');
-const engMut2 = MUT.load('src/server/channels-engine.js', engSrc.replace("require('./channels-attention.js')", `require(${JSON.stringify(attMut2)})`), 'mut-stale');
+const attMut2 = MUT.write('src/server/channels-attention.js', editAnchor(attSrc, anchor2, 'const v = queued;', "src/server/channels-attention.js"), 'stale-row');
+const engMut2 = MUT.load('src/server/channels-engine.js', editAnchor(engSrc, "require('./channels-attention.js')", `require(${JSON.stringify(attMut2)})`, "src/server/channels-engine.js"), 'mut-stale');
 n = got.length;
 const C2 = await engines('control-stale', world(), engMut2);
 C2.eng.digest();
@@ -403,7 +412,7 @@ console.log('⑫ B-dfa4: the judge\'s switch is read ONCE PER WALK — a walk ov
   const ON = '  function on() { return walkRead().on; }\n';
   ok(SRC.split(ON).length === 2, 'control setup: the walk-kept on() is present once');
   const MW = mutantCopies('att-walk', REPO);
-  const Pre = MW.load('src/server/channels-attention.js', SRC.replace(ON, '  function on() { return onNow(); }\n'), 'per-row-on');
+  const Pre = MW.load('src/server/channels-attention.js', editAnchor(SRC, ON, '  function on() { return onNow(); }\n', "src/server/channels-attention.js"), 'per-row-on');
   const P = walkRig(Pre);
   const p0 = P.counted.calls;
   walk(P.a);
@@ -435,7 +444,7 @@ console.log('⑬ B-dfa4 (verdict): the law through the engine\'s OWN roads — a
   const WRAPS = [['digest', "  function digest(...args) { return attention.walk(() => digestWalk(...args)); }", "  function digest(...args) { return digestWalk(...args); }"], ['rows', "  function rows(...args) { return attention.walk(() => rowsWalk(...args)); }", "  function rows(...args) { return rowsWalk(...args); }"]];
   for (const [road, wrap, bare] of WRAPS) {
     ok(ESRC.split(wrap).length === 2, `control setup: ${road}'s walk wrapper is present once`);
-    const c = await roadRig(MR.load('src/server/channels-engine.js', ESRC.replace(wrap, bare), `no-${road}-walk`), `no-${road}`);
+    const c = await roadRig(MR.load('src/server/channels-engine.js', editAnchor(ESRC, wrap, bare, "src/server/channels-engine.js"), `no-${road}-walk`), `no-${road}`);
     const n = road === 'digest' ? c.digest : c.focus;
     // B-dfa4 cut 2: a digest's first read is KEPT — it judges the kept candidates and the judge's own rows, never every row —
     // so unwrapped it reads the settings once per row it JUDGES (more than once), where rows() still judges every row

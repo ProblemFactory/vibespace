@@ -21,6 +21,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(50); } return !!(await fn()); };
 
@@ -212,28 +221,28 @@ try {
   const MC = mutantCopies('vfs-cache-place', REPO);
   const psrc = fs.readFileSync(path.join(REPO, 'src/vfs-cache-place.js'), 'utf8');
   const grepFrom = 'function metaVerdict(text) {\n', grepTo = 'function metaVerdict(text) { return /"Dirty":true/.test(text) ? \'dirty\' : \'clean\';\n';
-  ok(psrc.includes(grepFrom) && !judgeMeta(MC.load('src/vfs-cache-place.js', psrc.replace(grepFrom, grepTo), 'grep')), '⑤ NEGATIVE CONTROL: a grep-for-a-spelling witness reads the real dirty file CLEAN (red)');
+  ok(psrc.includes(grepFrom) && !judgeMeta(MC.load('src/vfs-cache-place.js', editAnchor(psrc, grepFrom, grepTo, "src/vfs-cache-place.js"), 'grep')), '⑤ NEGATIVE CONTROL: a grep-for-a-spelling witness reads the real dirty file CLEAN (red)');
   const dirtyFrom = '  if (witness.dirty) return stay(';
-  ok(psrc.includes(dirtyFrom) && !judgePlace(MC.load('src/vfs-cache-place.js', psrc.replace(dirtyFrom, '  if (false) return stay('), 'movedirty')), '⑤ NEGATIVE CONTROL: a move while dirty (red)');
+  ok(psrc.includes(dirtyFrom) && !judgePlace(MC.load('src/vfs-cache-place.js', editAnchor(psrc, dirtyFrom, '  if (false) return stay(', "src/vfs-cache-place.js"), 'movedirty')), '⑤ NEGATIVE CONTROL: a move while dirty (red)');
   const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8');
   const cpFrom = '      m.cacheDir = p.dir;\n      if (p.from) m.cacheOld = p.from;\n';
   ok(msrc.includes(cpFrom), '⑤ the copy control anchors on the real switch');
-  const gm = mk(MC.load('src/mounts.js', msrc.replace(cpFrom, '      if (p.from) fs.cpSync(p.from, p.dir, { recursive: true });\n' + cpFrom), 'copy').MountManager, true, 'mut');
+  const gm = mk(MC.load('src/mounts.js', editAnchor(msrc, cpFrom, '      if (p.from) fs.cpSync(p.from, p.dir, { recursive: true });\n' + cpFrom, "src/mounts.js"), 'copy').MountManager, true, 'mut');
   const AM = seed(gm, 'AM', [META_CLEAN]);
   const toM = await gm._placeCache(AM.m);
   ok(fs.readdirSync(toM).length > 0, '⑤ NEGATIVE CONTROL: a copy instead of a switch fills the new dir (the switch leg above would be red)');
   // r2 controls (verify r1 #0 #1 #2 #3)
   const statFrom = msrc.slice(msrc.indexOf('try { const st = fs.statSync(dir); out.exists'), msrc.indexOf("out.error = 'ENOENT-root'; } }\n}\n") + "out.error = 'ENOENT-root'; } }\n}\n".length);
   ok(statFrom.length > 100, '⑤ the #0 control anchors on the real stat block');
-  const MM0 = MC.load('src/mounts.js', msrc.replace(statFrom, 'try { out.exists = fs.statSync(dir).isDirectory(); } catch {}\n'), 'catchall').MountManager;
+  const MM0 = MC.load('src/mounts.js', editAnchor(msrc, statFrom, 'try { out.exists = fs.statSync(dir).isDirectory(); } catch {}\n', "src/mounts.js"), 'catchall').MountManager;
   const e0 = await errnoRun(MM0, 'EACCES', 'mut');
   ok(e0.to === e0.local, '⑤ NEGATIVE CONTROL #0: the old catch{} shape ⇒ an EACCES dirty cache moves "fresh" and is orphaned (red)', JSON.stringify(e0));
   const ovFrom = "    if (!ov.writable) return stay('override-refused',";
-  ok(psrc.includes(ovFrom) && MC.load('src/vfs-cache-place.js', psrc.replace(ovFrom, "    if (false) return stay('override-refused',"), 'ovw').cachePlacement({ ...net, candidates: [{ dir: '/ro/A', fs: 'local', writable: false, override: true }], witness: clean6 }).move, '⑤ NEGATIVE CONTROL #1: an override obeyed without its writable check ⇒ moves onto the dead dir (red)');
+  ok(psrc.includes(ovFrom) && MC.load('src/vfs-cache-place.js', editAnchor(psrc, ovFrom, "    if (false) return stay('override-refused',", "src/vfs-cache-place.js"), 'ovw').cachePlacement({ ...net, candidates: [{ dir: '/ro/A', fs: 'local', writable: false, override: true }], witness: clean6 }).move, '⑤ NEGATIVE CONTROL #1: an override obeyed without its writable check ⇒ moves onto the dead dir (red)');
   const durFrom = " : NON_DURABLE_FS_MAGIC.includes(t) ? 'ephemeral'";
-  ok(psrc.includes(durFrom) && !judgeDurable(MC.load('src/vfs-cache-place.js', psrc.replace(durFrom, ''), 'netonly')), '⑤ NEGATIVE CONTROL #3: the old NETWORK_FS_MAGIC alone ⇒ a tmpfs home is "local" ⇒ the cache moves onto it (red)');
+  ok(psrc.includes(durFrom) && !judgeDurable(MC.load('src/vfs-cache-place.js', editAnchor(psrc, durFrom, '', "src/vfs-cache-place.js"), 'netonly')), '⑤ NEGATIVE CONTROL #3: the old NETWORK_FS_MAGIC alone ⇒ a tmpfs home is "local" ⇒ the cache moves onto it (red)');
   const memoFrom = 'if (meta && meta.timedOut) memo.set(m.id, Date.now());';
-  const mm2 = msrc.includes(memoFrom) && await memoRun(MC.load('src/mounts.js', msrc.replace(memoFrom, 'if (meta && meta.timedOut && !memo.get(m.id)) memo.set(m.id, Date.now());'), 'memo1').MountManager, 'mut');
+  const mm2 = msrc.includes(memoFrom) && await memoRun(MC.load('src/mounts.js', editAnchor(msrc, memoFrom, 'if (meta && meta.timedOut && !memo.get(m.id)) memo.set(m.id, Date.now());', "src/mounts.js"), 'memo1').MountManager, 'mut');
   ok(mm2 && mm2.w2 === 3, '⑤ NEGATIVE CONTROL #2: the memo armed only once ⇒ every reconnect after the window walks again (red)', JSON.stringify(mm2));
 } finally {
   await sleep(200);

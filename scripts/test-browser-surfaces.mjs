@@ -38,6 +38,15 @@ const { startFakeKernel, jsDialogSpec, KINDS: FAKE_KINDS, ERROR_CODES } = await 
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms = 3000, step = 10) { const t0 = Date.now(); for (;;) { let v; try { v = fn(); } catch { v = false; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } }
@@ -461,7 +470,7 @@ const tidOf = (k) => k.targets()[0].targetId;
   const good = await run(D);
   ok(good.opens === 1 && good.nativeIgnored === 1, 'THE BELT: a kernel that ALSO sends Page.javascriptDialogOpening on a session with surfaces on ⇒ exactly ONE open (the surface); the native event ignored by name — both paths never fire', good);
   const needle = "    if (w.kernel && NATIVE_ON_KERNEL.has(m.method)) {";
-  const Dm = DSRC.includes(needle) ? MUT.load('src/server/browser-dialogs.js', DSRC.replace(needle, '    if (false) {'), 'no-belt') : null;
+  const Dm = DSRC.includes(needle) ? MUT.load('src/server/browser-dialogs.js', editAnchor(DSRC, needle, '    if (false) {', "src/server/browser-dialogs.js"), 'no-belt') : null;
   const bad = Dm ? await run(Dm) : null;
   ok(bad && bad.opens === 2, 'CONTROL: a watch copy without the belt opens the same prompt TWICE (RED on the leg above)', bad);
 }
@@ -499,7 +508,7 @@ const tidOf = (k) => k.targets()[0].targetId;
   ok(hNs.length === 1 && hNs[0].why === 'no-surfaces' && JSON.stringify(hNs[0].live) === JSON.stringify(['credentials', 'webauthn']) && BEk.kernelLiveVerdict(hNs[0]).why === 'features',
     'B-cf42 (the review): a kernel that answered WITHOUT `surfaces` hands what it DID offer (never «none», never «standard Chrome»)', hNs);
   const hNeedle = "      if (w.kernelWhy !== 'timeout' && w.kernelWhy !== 'error' && typeof keeper.noteEngineLive === 'function') keeper.noteEngineLive(";
-  const Dh = DSRC.includes(hNeedle) ? MUT.load('src/server/browser-dialogs.js', DSRC.replace(hNeedle, '      if (false) keeper.noteEngineLive('), 'no-hand') : null;
+  const Dh = DSRC.includes(hNeedle) ? MUT.load('src/server/browser-dialogs.js', editAnchor(DSRC, hNeedle, '      if (false) keeper.noteEngineLive(', "src/server/browser-dialogs.js"), 'no-hand') : null;
   const hBad = Dh ? await handed(Dh, ALL3, { standard: true }) : null;
   ok(hBad && hBad.length === 0, 'CONTROL (B-cf42): a watch copy that keeps the answer to its journal hands nothing — the owner\'s case stays a journal line (RED on the leg above)', hBad);
   ok(same.length === 0 && diff.length === 1 && /probe says features \[surfaces\] and 19 kinds, its live kernel \[credentials, surfaces, webauthn\] and 20 — the live answer rules/.test(diff[0]), 'an ENGINE profile: the engine\'s own probe and the live VibeSpace.getVersion are compared — ONE journal line when they differ (the live answer rules), none when they agree', diff);
@@ -517,7 +526,7 @@ const tidOf = (k) => k.targets()[0].targetId;
     return !!(hit && hit.dialog);
   };
   const armNeedle = '    if (w.kernel) await armSurfaces(w, e);';
-  const noArm = DSRC.includes(armNeedle) ? MUT.load('src/server/browser-dialogs.js', DSRC.replace(armNeedle, '    if (false) await armSurfaces(w, e);'), 'no-arm') : null;
+  const noArm = DSRC.includes(armNeedle) ? MUT.load('src/server/browser-dialogs.js', editAnchor(DSRC, armNeedle, '    if (false) await armSurfaces(w, e);', "src/server/browser-dialogs.js"), 'no-arm') : null;
   ok(await heldLeg(D) && noArm && !(await heldLeg(noArm)), 'CONTROL: a watch copy without the three-touch arm never hears the kernel\'s surfaces at all (the kernel sends them only to a session that enabled them; the belt drops the native face) — RED on the HELD leg');
   const alignLeg = async (Dmod) => {
     const k = await startFakeKernel({ firstUrl: 'https://example.test/' });
@@ -532,7 +541,7 @@ const tidOf = (k) => k.targets()[0].targetId;
     return !!goneOk;
   };
   const alignNeedle = "    for (const rec of [...w.surf.values()]) if (rec.targetId === tid && !listed.has(rec.id)) onSurfaceClosed(w, tid, { surfaceId: rec.id, how: 'navigated', by: 'kernel' });";
-  const noAlign = DSRC.includes(alignNeedle) ? MUT.load('src/server/browser-dialogs.js', DSRC.replace(alignNeedle, ''), 'no-align') : null;
+  const noAlign = DSRC.includes(alignNeedle) ? MUT.load('src/server/browser-dialogs.js', editAnchor(DSRC, alignNeedle, '', "src/server/browser-dialogs.js"), 'no-align') : null;
   ok(noAlign && !(await alignLeg(noAlign)), 'CONTROL: a watch copy without the alignment keeps a surface the kernel dropped quietly — RED on the `navigated` close above');
 }
 {
@@ -716,7 +725,7 @@ console.log('⑥ the real bridge: a kernel prompt in the live view\'s bar, the u
   ok(o.after && o.after.code !== 'surface_blocking', 'answered ⇒ the holder\'s input reaches the page again', o.after);
   const SSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   const dropNeedle = "if (blk) { receipt({ ok: false, code: 'surface_blocking',";
-  const BSm = SSRC.includes(dropNeedle) ? MUT.load('src/server/browser-stream.js', SSRC.replace(dropNeedle, "if (false) { receipt({ ok: false, code: 'surface_blocking',"), 'no-drop') : null;
+  const BSm = SSRC.includes(dropNeedle) ? MUT.load('src/server/browser-stream.js', editAnchor(SSRC, dropNeedle, "if (false) { receipt({ ok: false, code: 'surface_blocking',", "src/server/browser-stream.js"), 'no-drop') : null;
   const om = BSm ? await run(BSm) : null;
   ok(om && om.blocked && om.blocked.code !== 'surface_blocking', 'CONTROL: a bridge copy without the drop forwards the holder\'s click to a page a blocking prompt holds (RED on the leg above)', om && om.blocked);
 }

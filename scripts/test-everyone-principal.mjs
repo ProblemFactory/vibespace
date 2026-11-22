@@ -35,6 +35,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const t0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
 const tracked = execFileSync('git', ['ls-files', 'src'], { cwd: REPO, encoding: 'utf-8', env: gitEnvFrom(process.env) }).split('\n').filter((f) => f.endsWith('.js'));
@@ -206,12 +215,12 @@ console.log('  · [inherits] the raw-API tier rows (SharedContext/vibespace-chan
   ok(!unlistedOf(realTexts).length && J(unlistedOf({ ...realTexts, 'src/planted-thing.js': "const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);\n" })) === J(['src/planted-thing.js']), 'CONTROL (2a): a planted model declaring PRINCIPAL_KINDS (without a census row) is RED');
   const aclSrc = read('src/channel-acl.js');
   const LINE = "const PRINCIPAL_KINDS = Object.freeze(['agent', 'group', 'everyone']);";
-  const noAll = aclSrc.includes(LINE) ? M.load('src/channel-acl.js', aclSrc.replace(LINE, "const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);"), 'no-everyone') : null;
+  const noAll = aclSrc.includes(LINE) ? M.load('src/channel-acl.js', editAnchor(aclSrc, LINE, "const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);", "src/channel-acl.js"), 'no-everyone') : null;
   let spelled = true; try { spelled = !!MODELS.find((m) => m.file === 'src/channel-acl.js').check(noAll); } catch { spelled = false; }
   ok(!!noAll && !spelled, 'CONTROL (2b): channel-acl with `everyone` dropped from its kinds fails its census spelling check — RED');
   const apiSrc = read('src/channel-api.js');
   const RULE = " && TIERS.indexOf(tier) > TIERS.indexOf(EVERYONE_TIER) && allWrite !== true) throw";
-  const noRule = apiSrc.includes(RULE) ? M.load('src/channel-api.js', apiSrc.replace(RULE, ' && false) throw'), 'no-everyone-rule') : null;
+  const noRule = apiSrc.includes(RULE) ? M.load('src/channel-api.js', editAnchor(apiSrc, RULE, ' && false) throw', "src/channel-api.js"), 'no-everyone-rule') : null;
   let ruled = true; try { ruled = everyoneRule(noRule); } catch { ruled = false; }
   ok(!!noRule && !ruled, 'CONTROL (2c): src/channel-api.js without the `everyone` rule (All agents at write with no tick) fails the rule — RED');
 }
@@ -495,7 +504,7 @@ async function moneyLeg(ENGmod, name) {
   const FSRC = read('src/channel-filter.js');
   const FAN_READ = '  return { ...root, principal: { kind: \'everyone\', id: EVERYONE_ID, target: str(cid), name: name || null }, stats: fanStatsOf(root, cid) };';
   ok(FSRC.split(FAN_READ).length === 2, 'CONTROL setup: the fan-out target\'s ledger read');
-  const fCopy = M.write('src/channel-filter.js', FSRC.replace(FAN_READ, FAN_READ.replace('stats: fanStatsOf(root, cid)', 'stats: root.stats || { wakes: [], hits: [] }')), 'shared-f', { esm: false });
+  const fCopy = M.write('src/channel-filter.js', editAnchor(FSRC, FAN_READ, FAN_READ.replace('stats: fanStatsOf(root, cid)', 'stats: root.stats || { wakes: [], hits: [] }'), "src/channel-filter.js"), 'shared-f', { esm: false });
   const shared = M.load('src/server/channels-engine.js', ENGINE_SRC.replace(SHARED, SHARED.replace('if (!w || !fan) return w;', 'if (!w || fan || !fan) return w;')).replaceAll("const F = require('../channel-filter.js');", `const F = require(${JSON.stringify(fCopy)});`), 'shared');
   const c1 = await moneyLeg(shared, 'ctl-shared');
   const tot1 = Object.values(c1.counts).reduce((x, y) => x + y, 0);
@@ -643,7 +652,7 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
     const wrSrc = read('src/window-reach.js');
     // lane grants-unify: window-reach hands the model its All row — the mutant hands it a row that names nobody instead
     const WR_LINE = "p.kind === 'group' ? { kind: 'group', id: p.id, ...(p.only === true ? { only: true } : {}) } : { kind: 'everyone' });";   // lane lg-group-parents U3a: a group keeps «仅本组»
-    const wrMut = wrSrc.includes(WR_LINE) ? M.load('src/window-reach.js', wrSrc.replace(WR_LINE, "p.kind === 'group' ? { kind: 'group', id: p.id, ...(p.only === true ? { only: true } : {}) } : { kind: 'group', id: 'nobody' });"), 'all-names-nobody') : null;
+    const wrMut = wrSrc.includes(WR_LINE) ? M.load('src/window-reach.js', editAnchor(wrSrc, WR_LINE, "p.kind === 'group' ? { kind: 'group', id: p.id, ...(p.only === true ? { only: true } : {}) } : { kind: 'group', id: 'nobody' });", "src/window-reach.js"), 'all-names-nobody') : null;
     const rec = wrMut ? wrMut.grant(wrMut.emptyRecord('w1'), ALL, { by: 'user', at: 1 }).record : null;
     ok(!!wrMut && wrMut.reachFor(rec, { sessionKeys: [`claude:${A9}`] }).level === 'hidden', 'CONTROL (7a): window-reach whose All row names nobody ⇒ the born-after cell reads hidden — RED');
     const cfSrc = read('src/channel-filter.js');
@@ -651,12 +660,12 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
     // lane grants-read-is-a-lookup: rowNames asks namedRowOf for the row it hands the model (the principal's one-entry row,
     // prepared once) — the plant goes where the principal is now mapped, the same mutant
     const CF_LINE = "  const e = GM.fromChannelPrincipal(p);\n  const n = e ? GM.prepareRow(";
-    const cfMut = cfSrc.includes(CF_LINE) ? M.load('src/channel-filter.js', cfSrc.replace(CF_LINE, "  const e = p.kind === 'everyone' ? { kind: 'group', id: 'nobody' } : GM.fromChannelPrincipal(p);\n  const n = e ? GM.prepareRow("), 'all-names-nobody', { esm: false }) : null;
+    const cfMut = cfSrc.includes(CF_LINE) ? M.load('src/channel-filter.js', editAnchor(cfSrc, CF_LINE, "  const e = p.kind === 'everyone' ? { kind: 'group', id: 'nobody' } : GM.fromChannelPrincipal(p);\n  const n = e ? GM.prepareRow(", "src/channel-filter.js"), 'all-names-nobody', { esm: false }) : null;
     ok(!!cfMut && !cfMut.rowNames({ principal: ALL }, { kind: 'agent', id: A9 }), 'CONTROL (7b): channel-filter whose All row names nobody ⇒ the be-woken / act cells read false — RED');
     const aclSrc = read('src/channel-acl.js');
     // lane grants-unify: principalApplies hands THE model the grant's principal — the mutant turns All into the one conversation that existed
     const ACL_LINE = "  const e = GM.fromChannelPrincipal(p);";
-    const aclMut = aclSrc.includes(ACL_LINE) ? M.load('src/channel-acl.js', aclSrc.replace(ACL_LINE, "  const e = p.kind === 'everyone' ? { kind: 'conversation', key: 'cid-a1' } : GM.fromChannelPrincipal(p);"), 'all-names-the-first') : null;
+    const aclMut = aclSrc.includes(ACL_LINE) ? M.load('src/channel-acl.js', editAnchor(aclSrc, ACL_LINE, "  const e = p.kind === 'everyone' ? { kind: 'conversation', key: 'cid-a1' } : GM.fromChannelPrincipal(p);", "src/channel-acl.js"), 'all-names-the-first') : null;
     const g = aclMut ? aclMut.validateGrant({ principal: ALL, scope: { kind: 'conversation', id: 'lark-1/c1' }, level: 'visible', origin: 'user' }).grant : null;
     ok(!!aclMut && aclMut.effective({ kind: 'agent', id: A1 }, { key: 'lark-1/c1', adapterId: 'lark-1' }, [g]).level === 'visible' && aclMut.effective({ kind: 'agent', id: A9 }, { key: 'lark-1/c1', adapterId: 'lark-1' }, [g]).level === 'hidden', 'CONTROL (7c): channel-acl whose All row names only the conversations that existed ⇒ the born-after cell reads hidden — RED (that is the point of the row)');
   }

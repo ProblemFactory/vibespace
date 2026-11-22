@@ -53,6 +53,15 @@ const { WebSocket } = require('ws');
 const MUT = mutantCopies('dsi', repo);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const section = async (title, fn) => { console.log(title); try { await fn(); } catch (e) { ok(false, `${title.split(' ')[0]} threw — ${(e && e.message) || e}`, String((e && e.stack) || '').split('\n').slice(1, 4).map((x) => x.trim()).join(' | ')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 8000, step = 30) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
@@ -338,7 +347,7 @@ await section('CONTROLS — the census can see', async () => {
   const accSrc = fs.readFileSync(path.join(repo, 'src/server/desktop-access.js'), 'utf8');
   const anchor = "    signinRefused.delete(hostId);\n    auditSignin(hostId, 'desktop-signin-remember', { ok: true, auth });\n";
   ok(accSrc.includes(anchor), 'the planted-log anchor is in desktop-access.js');
-  const leakAcc = MUT.load('src/server/desktop-access.js', accSrc.replace(anchor, "    log.log?.('remembered ' + password);\n" + anchor), 'leaklog');
+  const leakAcc = MUT.load('src/server/desktop-access.js', editAnchor(accSrc, anchor, "    log.log?.('remembered ' + password);\n" + anchor, "src/server/desktop-access.js"), 'leaklog');
   const lLogs = [];
   const dir2 = path.join(root, 'data-c1'); fs.mkdirSync(dir2, { recursive: true });
   const store2 = IS.create({ dataDir: dir2, env: {}, broadcast: () => { }, log: quiet });
@@ -351,9 +360,9 @@ await section('CONTROLS — the census can see', async () => {
   const regSrc = fs.readFileSync(path.join(repo, 'src/integration-registry.js'), 'utf8');
   const pwField = "      { key: 'password', label: i18nKey('Password'), secret: true, required: true, placeholder: '',\n        help: i18nKey('Sealed on this VibeSpace server; the hub signs in with it while the vault is unlocked.')";
   ok(regSrc.includes(pwField), 'the row\'s password field is `secret: true` (the seal\'s one switch)');
-  const regCopy = MUT.write('src/integration-registry.js', regSrc.replace(pwField, pwField.replace('secret: true', 'secret: false')), 'plain');
+  const regCopy = MUT.write('src/integration-registry.js', editAnchor(regSrc, pwField, pwField.replace('secret: true', 'secret: false'), "src/integration-registry.js"), 'plain');
   const isSrc = fs.readFileSync(path.join(repo, 'src/server/integration-store.js'), 'utf8');
-  const plainStore = MUT.load('src/server/integration-store.js', isSrc.replace("require('../integration-registry.js')", `require(${JSON.stringify(regCopy)})`), 'plain');
+  const plainStore = MUT.load('src/server/integration-store.js', editAnchor(isSrc, "require('../integration-registry.js')", `require(${JSON.stringify(regCopy)})`, "src/server/integration-store.js"), 'plain');
   const dir3 = path.join(root, 'data-c2'); fs.mkdirSync(dir3, { recursive: true });
   const store3 = plainStore.create({ dataDir: dir3, env: {}, broadcast: () => { }, log: quiet });
   const acc3 = A.create({ hosts: { ...hosts, onRemoved: undefined }, install: false, integrations: store3, log: quiet, probeMs: 3000 });
@@ -365,11 +374,11 @@ await section('CONTROLS — the census can see', async () => {
   const relaySrc = fs.readFileSync(path.join(repo, 'src/server/stream-relay-rfb.js'), 'utf8');
   const pass1 = '  return (a) => bridgeRfb(a.ws, a.id, a.port, a.viewerId, a.req, a.signIn || null);\n';
   ok(relaySrc.includes(pass1), 'the relay\'s signIn hand-over line');
-  const blindRelay = MUT.write('src/server/stream-relay-rfb.js', relaySrc.replace(pass1, pass1.replace('a.signIn || null', 'null')), 'blind');
+  const blindRelay = MUT.write('src/server/stream-relay-rfb.js', editAnchor(relaySrc, pass1, pass1.replace('a.signIn || null', 'null'), "src/server/stream-relay-rfb.js"), 'blind');
   const regsSrc = fs.readFileSync(path.join(repo, 'src/server/stream-relays.js'), 'utf8');
-  const regs = MUT.write('src/server/stream-relays.js', regsSrc.replace("require('./stream-relay-rfb.js')", `require(${JSON.stringify(blindRelay)})`), 'blind');
+  const regs = MUT.write('src/server/stream-relays.js', editAnchor(regsSrc, "require('./stream-relay-rfb.js')", `require(${JSON.stringify(blindRelay)})`, "src/server/stream-relays.js"), 'blind');
   const dsSrc = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
-  const DSb = MUT.load('src/server/desktop-stream.js', dsSrc.replace("require('./stream-relays.js')", `require(${JSON.stringify(regs)})`), 'blind');
+  const DSb = MUT.load('src/server/desktop-stream.js', editAnchor(dsSrc, "require('./stream-relays.js')", `require(${JSON.stringify(regs)})`, "src/server/desktop-stream.js"), 'blind');
   await api('POST', '/api/desktop/machine-desktop/signin', { host: HOST, password: PW });
   const real = bridge;
   bridge = DSb.create({ auth: { requestAuthed: () => true }, log: quiet, pingMs: 5000, resolveTarget: (id) => access.machineDesktopTarget(id), forwardPort: (h, p) => access.forwardPort(h, p) });
