@@ -138,6 +138,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace's transcript reader cannot come back, a conversation's history still loads after a few seconds, a little at a time, without freezing VibeSpace.
 - When a conversation's file stops answering, its history now says so and when it tries again, and fills in by itself once it can, without reopening the window.
 - With «Actively poll subscription usage» on, a usage repair no longer puts this machine's older reading back over a newer one.
+- On a machine whose environment names no language, letters typed into an app window with an input method (é, Chinese) no longer arrive as replacement marks.
 
 ## 2.369.415 — 2026-11-21
 

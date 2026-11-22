@@ -1665,6 +1665,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE (one line): the reload keeps memory while `pending(USAGE_CACHE_FILE)`; with nothing owed it reads the file as before (the repair that judges the copy flushes it first). test-readings-attribution §16c lands the re-seeded copy before it reads it (box row 298's red: the leg read before the owed write landed).
 - LEGS: test-usage-copy-writes ⑤ (a reload while the copy's write is owed: the newer reading lands). RED CONTROL: the release's reload (the older file lands).
 
+### bl-msg B-34bc (b) — an application's start environment names a UTF-8 character type (主开发 r2358 / r2362)
+- THE FIND: box row 302 (test-desktop-xpra-window-open at b77c3e6e2) read a replacement mark where the inserted é / 中文 and the é key should be. Since r2203 a box row's environment is built from a short list that names no locale, so the application the hub started ran in the C locale. A fleet pod's image sets none either: on such a machine, text a person types through an input method into an application window arrived broken. Only the hub's own helpers had the UTF-8 rule.
+- THE LAW: desktop-display.js `appStartEnv(env, {bins, now})`. When the env names NO locale (no LC_ALL, LC_CTYPE or LANG), it adds `LC_CTYPE` only, from the UTF-8 rule's own walk (C.UTF-8, the env's own UTF-8 locale, what `locale -a` lists). A person's own locale is never replaced; a walk that finds none is said once in the journal.
+- desktop-serve.js `bringUp` builds `base` through it before anything starts, so EVERY child of an application window starts from it: the display server (xpra and its X server), the helpers on its display, and the application.
+- Legs: test-app-launch-once ⑫, over the real keeper: a hub env with no locale ⇒ the application, its display server and the helpers' road (ctx.x11Env: the window manager, the portal bus) all start with a UTF-8 LC_CTYPE; a person's own non-UTF-8 LANG ⇒ unchanged, nothing added. RED: bringUp without the step (a copy) ⇒ all three start in the C locale. THE WITNESS: the box row as it is (its environment stays without a locale), whose two text legs then prove the product's own default.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
