@@ -57,7 +57,13 @@ const STUB_SLICE = 'test-eml';   // a name the table puts in the HEAVY tier (ci-
 // list. The hand list this suite had (3a6176298) lacked src/temp-sweepers.js, which scratch.mjs requires since r1213 (cced038ce). On
 // the root every stub's ci.mjs then died at import, before any stall, and no scene formed. Every relative `from` / `import '…'` /
 // `import(` / `require(` / `createRequire(…)(` specifier on a non-comment line, followed from scripts/ci.mjs; one that names no file is MISSING.
+// RESOLVED AS NODE RESOLVES IT (the coordinator's r2225): a require may name a module without its extension — src/home-links.js
+// (879a61a38, B-ba47 shape H) has `require('./home-verdict')` — so a specifier is the file itself, else it with .js / .json / .mjs /
+// .cjs, else its folder's index.js; it is MISSING only when none of them is there (the literal rule named src/home-verdict missing).
+const RESOLVE_TRIES = ['', '.js', '.json', '.mjs', '.cjs', '/index.js'];
+function resolveSpec(rel, has) { for (const t of RESOLVE_TRIES) if (has(rel + t)) return rel + t; return rel; }
 function closureOf(over = {}) {
+  const has = (q) => over[q] !== undefined || (() => { try { return fs.statSync(path.join(REPO, q)).isFile(); } catch { return false; } })();
   const SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*|\)\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\1/g;
   const files = [], missing = [], seen = new Set(), todo = ['scripts/ci.mjs'];
   while (todo.length) {
@@ -69,7 +75,7 @@ function closureOf(over = {}) {
     files.push(f);
     for (const line of text.split('\n')) {
       if (/^\s*(?:\/\/|\/?\*)/.test(line)) continue;
-      for (const m of line.matchAll(SPEC)) todo.push(path.posix.normalize(path.posix.join(path.posix.dirname(f), m[2])));
+      for (const m of line.matchAll(SPEC)) todo.push(resolveSpec(path.posix.normalize(path.posix.join(path.posix.dirname(f), m[2])), has));
     }
   }
   return { files: files.sort(), missing: missing.sort() };
@@ -154,6 +160,12 @@ console.log('⓪ the stub repository: ci.mjs and its whole static closure');
   const planted = closureOf({ 'scripts/ci.mjs': fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8') + "\nimport { z } from './zz-planted-sibling.mjs';\n// import './zz-in-a-comment.mjs';\n" });
   ok(planted.missing.join() === 'scripts/zz-planted-sibling.mjs',
     '…and a sibling a future ci.mjs adds is FOLLOWED: a planted import is named missing (one in a comment is not)', planted.missing);
+  // r2225: a require WITHOUT its extension is the file Node loads, followed — never «missing»; the literal rule (rebuilt) named it missing
+  const ext = closureOf({ 'scripts/ci.mjs': "const x = require('./zz-sib');\nconst y = require('./zz-dir');\n", 'scripts/zz-sib.js': '', 'scripts/zz-dir/index.js': '' });
+  // stale-pins: kept — the e2e5adfed rule, the specifier taken literally, rebuilt for the control
+  const literal = ['./zz-sib', './zz-dir'].map((sp) => path.posix.normalize(path.posix.join('scripts', sp))).filter((q) => !['scripts/zz-sib.js', 'scripts/zz-dir/index.js'].includes(q));
+  ok(ext.missing.length === 0 && ext.files.includes('scripts/zz-sib.js') && ext.files.includes('scripts/zz-dir/index.js') && literal.length === 2,
+    `…a require WITHOUT its extension is the file Node loads (./zz-sib → .js, ./zz-dir → its index.js), followed and never missing — RED CONTROL: the literal rule names ${literal.join(', ')} missing (the root's red: src/home-links.js's require('./home-verdict'))`, { ext, literal });
 }
 
 console.log('the scenes, side by side (each stall or step said when reached):');
