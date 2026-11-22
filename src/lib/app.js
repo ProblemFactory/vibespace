@@ -2558,8 +2558,12 @@ class App {
       // fetchJson resolves null/undefined on HTTP errors — treat as a failed
       // probe (retry), not as "server says unavailable".
       if (d == null) throw new Error('probe failed');
-      this._vncAvailable = !!d.available;
+      // B-323e follow (r2030 (3c)): a lookup that got NO REPLY is not «not installed» — the Desktop entry stays (opening it looks
+      // again and says why), the picker's local row says it, and the probe asks again on the same back-off as a failed one
+      this._vncLookup = d.lookup === 'no-reply' ? 'no-reply' : null;
+      this._vncAvailable = !!d.available || this._vncLookup === 'no-reply';
       this._vncSeat = d.seat || null; // lane desktop-v2-entry (D4): the Desktop picker's local row says a Wayland seat's words
+      if (this._vncLookup && attempt < 5) setTimeout(() => this._probeVncAvailability(attempt + 1), [3000, 8000, 20000, 45000, 90000][attempt]);
       const b = document.getElementById('btn-desktop');
       if (b) b.style.display = (this._vncAvailable && this.settings.get('toolbar.showDesktopButton') !== false) ? '' : 'none';
     }).catch(() => {

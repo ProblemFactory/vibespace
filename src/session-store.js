@@ -174,8 +174,15 @@ function setTmuxPanes(entries) { _handedPanes = new Map(Array.isArray(entries) ?
 // Its answer: the pane list's text ('' = no tmux, no server), or undefined = NO REPLY — never kept as a reply (nothing memoised;
 // the next sweep asks again). A process that hands nothing (a scratch tool) keeps the release's road.
 const TMUX_PANE_ARGS = Object.freeze(['list-panes', '-a', '-F', '#{pane_pid}||#{session_name}:#{window_index}.#{pane_index}']);
-let _tmuxReader = null;
-function useTmuxReader(fn) { _tmuxReader = typeof fn === 'function' ? fn : null; _paneMapMemo = null; }   // a reader handed in starts from no memo (a new road)
+// r2030 (3b): A NO-REPLY BACKS OFF — after the reader's no-reply the next ask waits TMUX_NO_REPLY_MS, doubled at each no-reply in a
+// row up to TMUX_NO_REPLY_MAX_MS; meanwhile (and for the no-reply's own sweep) the pane map of the LAST GOOD read serves
+const TMUX_NO_REPLY_MS = 5000;
+const TMUX_NO_REPLY_MAX_MS = 5 * 60 * 1000;
+let _tmuxReader = null, _paneNoReply = null;   // { at, waitMs }
+function useTmuxReader(fn) { _tmuxReader = typeof fn === 'function' ? fn : null; _paneMapMemo = null; _paneNoReply = null; }   // a reader handed in starts from no memo (a new road)
+/** r2030 (3a): where tmux is, the release's own look (B-1425's guarded PATH walk, its mount dirs by their async stat) — the hub's
+ *  reader asks it when the host has no `which` program */
+async function tmuxPathAsync() { await landTmuxMounts(); return tmuxOnPath(); }
 async function getTmuxPaneMapAsync() {
   const now = Date.now();
   if (!require('worker_threads').isMainThread) return _handedPanes || new Map();   // B-323e: a worker never starts it
@@ -183,8 +190,13 @@ async function getTmuxPaneMapAsync() {
   const map = new Map();
   let out;
   if (_tmuxReader) {
+    if (_paneNoReply && now - _paneNoReply.at < _paneNoReply.waitMs) return _paneMapMemo ? _paneMapMemo.map : map;   // waiting after a no-reply: the last good map
     out = await Promise.resolve().then(() => _tmuxReader(TMUX_PANE_ARGS)).catch(() => undefined);
-    if (out === undefined) return map;   // no reply: never kept as a reply
+    if (out === undefined) {   // no reply: never kept as a reply — the last good map serves this sweep, the next ask waits
+      _paneNoReply = { at: Date.now(), waitMs: Math.min(_paneNoReply ? _paneNoReply.waitMs * 2 : TMUX_NO_REPLY_MS, TMUX_NO_REPLY_MAX_MS) };
+      return _paneMapMemo ? _paneMapMemo.map : map;
+    }
+    _paneNoReply = null;
   } else {
     await landTmuxMounts();   // B-1425: a tmux on an NFS / home PATH dir is seen — off the main thread
     if (!tmuxOnPath()) { _paneMapMemo = { at: now, map }; return map; } // no binary ⇒ no spawn
@@ -2041,7 +2053,7 @@ module.exports = { setJsonlHeld, noteJsonlView, dropJsonlView, dropJsonlViews, j
   cwdToProjectDir,
   transcriptPathOf,
   recoverCwdFromProjDir,
-  getTmuxPaneMapAsync, setTmuxPanes, useTmuxReader, TMUX_PANE_ARGS,
+  getTmuxPaneMapAsync, setTmuxPanes, useTmuxReader, TMUX_PANE_ARGS, tmuxPathAsync, TMUX_NO_REPLY_MS, TMUX_NO_REPLY_MAX_MS,
   tmuxOnPath,
   landTmuxMounts,   // B-1425 (cure): the async landing of a tmux on an NFS / home PATH dir
   findTmuxTargetAsync,

@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { fetchJson } from './utils.js';
+import { fetchJson, showToast } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 
@@ -45,6 +45,8 @@ export function openDesktop(app, { syncId } = {}) {
       let st = null;
       try { st = await fetchJson('/api/vnc/start', { method: 'POST' }); } catch {}
       if (!st || st.error || !st.running) return { ok: false, error: st?.error || null };
+      // B-323e follow (r2030 (3c)): the server started but its desktop session's lookups got no reply — said, never a silent bare screen
+      if (st.session === 'no-reply') showToast(t('The desktop is up without its session: looking up {names} got no answer in time. Close the Desktop and open it again to retry.', { names: (st.sessionNoReply || []).join(', ') }), { type: 'warn' });
       return { ok: true };
     },
   });

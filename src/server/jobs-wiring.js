@@ -21,12 +21,26 @@ const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loa
 // fresh (`fresh`), past the 30 s; a read in flight answers every ask. ESCAPES_MAX bounds what the loop parses of either answer.
 const ESCAPES_FRESH_MS = 30000;
 const ESCAPES_MAX = 256 * 1024;
+// B-323e follow (主开发 r2030 (3c)): A NO-REPLY BACKS OFF — after a read with an unread part, no new read for ESCAPES_NO_REPLY_MS,
+// doubled at each such read in a row up to ESCAPES_NO_REPLY_MAX_MS (a person's Refresh still reads at once); an unread part is
+// served from the LAST read that answered it (`keptAt`: when), so the page keeps the list it had and says it was not read now
+const ESCAPES_NO_REPLY_MS = 5000;
+const ESCAPES_NO_REPLY_MAX_MS = 5 * 60 * 1000;
 const ESCAPES_SYSTEMD = ['--user', 'list-units', '--type=service,timer', '--state=running,active', '--no-legend', '--plain'];
 function escapesReader({ starter = () => require('./child-starter').childStarter(), now = () => Date.now(), freshMs = ESCAPES_FRESH_MS } = {}) {
   let last = null;   // { at (0 while in flight), p }
+  let back = null;   // { at, waitMs, r } — the last read with an unread part (r2030): the next one waits
+  const good = { systemd: null, crontab: null };   // part → { list, at }: the last read that ANSWERED it
+  const keptOf = (r) => {
+    if (!r.unread) return r;
+    const out = { ...r }, at = [];
+    for (const k of r.unread) if (good[k]) { out[k] = good[k].list; at.push(good[k].at); }
+    return at.length ? { ...out, keptAt: Math.min(...at) } : out;
+  };
   return function read({ fresh = false } = {}) {
     if (last && last.at === 0) return last.p;
     if (!fresh && last && now() - last.at < freshMs) return last.p;
+    if (!fresh && back && now() - back.at < back.waitMs) return Promise.resolve(back.r);   // waiting after a no-reply: what was served then
     const one = last = { at: 0, p: null };
     const ask = (bin, args) => Promise.resolve().then(() => starter().run(bin, args, { timeoutMs: 5000, maxBuffer: ESCAPES_MAX, capture: true, envAdd: {} })).catch(() => null);
     const said = (r) => (!r || r.unknown || r.timedOut || r.overflow ? null : r.started === false ? '' : r.code === 0 ? String(r.stdout || '') : '');   // null = no reply; '' = none (no program, no crontab)
@@ -36,9 +50,13 @@ function escapesReader({ starter = () => require('./child-starter').childStarter
       if (a === null) unread.push('systemd'); else out.systemd = a.split('\n').filter((l) => l.trim() && !/^(vibespace|dbus|pipewire|wireplumber|gvfs|xdg|gnome|tracker|at-spi|pulse)/.test(l.trim())).map((l) => l.trim().split(/\s+/)[0]).slice(0, 40);
       const b = said(await ask('crontab', ['-l']));
       if (b === null) unread.push('crontab'); else out.crontab = b.split('\n').filter((l) => l.trim() && !l.startsWith('#')).slice(0, 40);
-      return unread.length ? { ...out, unread } : out;
-    })();
-    one.p.then((r) => { if (r.unread) { if (last === one) last = null; } else one.at = now(); });
+      for (const k of ['systemd', 'crontab']) if (!unread.includes(k)) good[k] = { list: out[k], at: now() };
+      return unread.length ? keptOf({ ...out, unread }) : out;
+    })().catch(() => keptOf({ systemd: [], crontab: [], unread: ['systemd', 'crontab'] }));   // r2030 (3c): the read never rejects
+    one.p.then((r) => {
+      if (r.unread) { if (last === one) last = null; back = { at: now(), waitMs: Math.min(back ? back.waitMs * 2 : ESCAPES_NO_REPLY_MS, ESCAPES_NO_REPLY_MAX_MS), r }; }
+      else { one.at = now(); back = null; }
+    }).catch(() => { });
     return one.p;
   };
 }
@@ -505,4 +523,4 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   };
 }
 
-module.exports = { create, escapesReader, ESCAPES_FRESH_MS, ESCAPES_MAX };
+module.exports = { create, escapesReader, ESCAPES_FRESH_MS, ESCAPES_MAX, ESCAPES_NO_REPLY_MS, ESCAPES_NO_REPLY_MAX_MS };

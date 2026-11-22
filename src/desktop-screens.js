@@ -137,7 +137,7 @@ function rowState(m) {
  */
 function pickerRows({ local = null, machines = [], recent = null } = {}) {
   const rows = [];
-  const loc = { group: 'local', kind: 'local', hostId: 'local', display: null, state: local && local.available === false ? 'offline' : 'ready', enabled: !(local && local.available === false), seat: local && local.seat === 'wayland' ? 'wayland' : null, machine: null };
+  const loc = { group: 'local', kind: 'local', hostId: 'local', display: null, state: local && local.available === false ? 'offline' : 'ready', enabled: !(local && local.available === false), seat: local && local.seat === 'wayland' ? 'wayland' : null, lookup: local && local.lookup === 'no-reply' ? 'no-reply' : null, machine: null };
   const remote = (Array.isArray(machines) ? machines : []).filter((m) => m && m.hostId && m.hostId !== 'local' && m.desktop === 'vnc-native')
     .map((m) => ({ group: 'remote', kind: 'machine', hostId: String(m.hostId), display: null, state: rowState(m), enabled: rowState(m) !== 'offline' && rowState(m) !== 'checking', machine: m }));
   const r = recent && typeof recent === 'object' && recent.hostId ? recent : null;

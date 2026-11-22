@@ -17,6 +17,10 @@
 //   ⑦ a FAILED copy of the rclone binary is remembered for its bound (15 min), then tried again (RED: the release; a copy kept for ever)
 // r1381 (6): every moved reader is also read with a starter that gives NO REPLY (what it then says), and the env + the bound each
 // site hands are pinned.
+//   ⑧ (主开发 r2030) a host with NO `which` program finds tmux the release's way (RED: the reader without the fallback); a NO-REPLY
+//      BACKS OFF — the lookup, the pane list and the Jobs list's read serve their last good answer and ask nothing inside a growing
+//      wait (REDs: a copy without the wait; the build's empty map); the read never rejects; the process table past its bound is
+//      «not read»; a thrown stat memo is retried; a Start's helper lookups with no reply are said; the page's words; kb-api
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -90,9 +94,9 @@ WD.section('①');
   ok(reqs.length === 2 && reqs.every((q) => JSON.stringify(q.o.envAdd) === '{}' && q.o.maxBuffer === JW.ESCAPES_MAX && JW.ESCAPES_MAX === 256 * 1024 && q.o.timeoutMs === 5000), 'THE ENV AND THE BOUND it hands: the service env alone (no name added), 5 s, an answer of at most 256 KB for the loop to parse', reqs.map((q) => q.o));
   { let T = 5e6; const r = JW.escapesReader({ now: () => T });
     answer = (cmd) => (cmd === 'systemctl' ? { unknown: true } : OK_ANSWER(cmd));
-    const A1 = asked.length; const one = await r(); const two = await r();
-    answer = OK_ANSWER; T += 1e3; const three = await r(); const n = asked.length - A1;
-    ok(JSON.stringify(one.unread) === '["systemd"]' && one.crontab.length === 1 && n === 6 && !three.unread, `a NO-REPLY is never kept as a reply: the read says what it could not read (unread: systemd), stamps nothing — the next two reads ask again (${n} starts for three reads)`, { one, three, n }); }
+    const A1 = asked.length; const one = await r(); const two = await r(); const n2 = asked.length - A1;
+    answer = OK_ANSWER; T += JW.ESCAPES_NO_REPLY_MS + 1; const three = await r(); const n = asked.length - A1;
+    ok(JSON.stringify(one.unread) === '["systemd"]' && one.crontab.length === 1 && two === one && n2 === 2 && n === 4 && !three.unread, `a NO-REPLY is never kept as a reply: the read says what it could not read (unread: systemd), stamps nothing — inside the wait (r2030) the next read is served that same answer, nothing asked; past it the read asks again (${n} starts for three reads)`, { one, three, n, n2 }); }
   { let T = 9e6; const r = JW.escapesReader({ now: () => T });
     const A1 = asked.length; await r(); T += 5e3; await r({ fresh: true }); T += 5e3; await r(); const n = asked.length - A1;
     ok(n === 4, `a PERSON'S REFRESH (fresh) reads past the 30 s once — then the answer stands again (${n} starts for read, Refresh, read)`, { n }); }
@@ -120,10 +124,13 @@ WD.section('②');
   const a0 = askedOf('tmux').length;
   const m1 = await SS.getTmuxPaneMapAsync();   // the starter gives NO REPLY to the pane list
   tmuxAns = { started: true, code: 0, stdout: '4242||work:1.0\n' };
+  const mWait = await SS.getTmuxPaneMapAsync();   // r2030 (3b): inside the wait after a no-reply — nothing asked, the last good map (none yet)
+  const clockWas = Date.now; Date.now = () => clockWas() + SS.TMUX_NO_REPLY_MS + 1;   // past the wait (read, never slept)
   const map = await SS.getTmuxPaneMapAsync(); const again = await SS.getTmuxPaneMapAsync();
+  Date.now = clockWas;
   fs.statSync = statWas;
   const req = askedOf('tmux')[a0 + 1];
-  ok(m1.size === 0 && askedOf('tmux').length - a0 === 2, 'a NO-REPLY is never kept as a reply: an empty map for that sweep, nothing memoised — the next sweep asks again', { m1: m1.size, asked: askedOf('tmux').length - a0 });
+  ok(m1.size === 0 && mWait.size === 0 && askedOf('tmux').length - a0 === 2, 'a NO-REPLY is never kept as a reply: an empty map for that sweep (no good read yet), nothing memoised — the next sweep inside the wait asks nothing, after it asks again', { m1: m1.size, mWait: mWait.size, asked: askedOf('tmux').length - a0 });
   ok(typeof RS.tmuxReaderVia === 'function' && map.get(4242) === 'work:1.0' && again === map && directOf('tmux') === 0 && tmuxStats === 0 && !!req && req.o.envAdd && req.o.envAdd.PATH === process.env.PATH && req.o.maxBuffer === 1024 * 1024,
     'the main thread: tmux found by the KEPT lookup (no stat of a PATH folder on the loop), `tmux list-panes` asked of the starter (the PATH it had, 1 MB), its answer memoised, none from the hub\'s process', { direct: directOf('tmux'), tmuxStats, env: req && req.o.envAdd });
   {
@@ -272,7 +279,7 @@ WD.section('⑦');
   m._fastBinMemo.failedAt -= 16 * 60e3; m._fastBin(bin); await turn(); await turn();   // past FASTBIN_RETRY_MS (15 min)
   const later = directOf('sh') - D0 - mine;
   const D1 = directOf('sh');
-  const REL = require(M.write('src/mounts.js', anchored(SRC, "          if (err) this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };   // B-323e: a FAILED copy is remembered FASTBIN_RETRY_MS (the network path stands meanwhile) — never redone at every rcloneBin()\n", '', 'release'), 'release'));
+  const REL = require(M.write('src/mounts.js', anchored(anchored(SRC, "          if (err) this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };   // B-323e: a FAILED copy is remembered FASTBIN_RETRY_MS (the network path stands meanwhile) — never redone at every rcloneBin()\n", '', 'release'), "        // B-323e follow (r2030 (3c)): the copy's own retry stamp — while it runs (≤ 180 s) every rcloneBin() answers the network\n        // path from this memo (no realpath + /proc/mounts + stat on the loop at each call); its end replaces it\n        this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };\n", '', 'release'), 'release'));   // the release: no memo of a failed copy, no stamp at its start
   await run3(fresh(REL));
   const rel = directOf('sh') - D1, D2 = directOf('sh');
   const EVER = require(M.write('src/mounts.js', anchored(SRC, "    if (this._fastBinMemo?.src === binPath && !(this._fastBinMemo.failedAt && Date.now() - this._fastBinMemo.failedAt > FASTBIN_RETRY_MS)) return this._fastBinMemo.use;",
@@ -282,7 +289,145 @@ WD.section('⑦');
   process.env.HOME = homeWas;
   ok(mine === 1 && later === 1 && rel === 3 && ever === 1, `three asks after a failed copy: ${mine} copy started (the failure remembered); past its 15 min bound: ${later} more (tried again) — RED: the release starts ${rel}; a copy kept for the process's life never tries again (${ever})`, { mine, later, rel, ever });
 }
-for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 9, label: 'B-323e starts ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+say('⑧ (主开发 r2030) A HOST WITH NO `which`; A NO-REPLY BACKS OFF; THE SMALLS');
+WD.section('⑧');
+{
+  const RS = require(path.join(ROOT, 'src/routes/sessions.js'));
+  const SS = require(path.join(ROOT, 'src/session-store.js'));
+  const WK = require(path.join(ROOT, 'src/plugins/which-kept.js'));
+  const nowWas = Date.now; let skew = 0; Date.now = () => nowWas() + skew;   // the legs' clock: every wait is READ, never slept
+  const pathWas = process.env.PATH;
+  try {
+    // (a) THE LOOKUP PROGRAM ITSELF ABSENT: the release's own look along PATH finds tmux — never «no tmux» for that reason
+    answer = (cmd) => (cmd === 'which' ? { started: false, error: 'ENOENT' } : cmd === 'tmux' ? { started: true, code: 0, stdout: '5151||nowhich:0.0\n' } : { started: true, code: 0, stdout: '' });
+    const BIN = path.join(TMP, 'bin');   // leg ②'s tmux: an executable file on PATH
+    process.env.PATH = BIN + path.delimiter + pathWas;
+    skew += 61e3;   // the kept answer of `tmux` is old: the reader looks again
+    const a0 = askedOf('tmux').length;
+    const out = await RS.tmuxReaderVia()(SS.TMUX_PANE_ARGS);
+    const fa = await WK.whichFreshAnswer('tmux');
+    const req = askedOf('tmux')[a0], looked = await SS.tmuxPathAsync();
+    ok(out === '5151||nowhich:0.0\n' && fa.noLookup === true && fa.known === true && !!req && req.cmd === 'tmux' && looked === path.join(BIN, 'tmux') && askedOf('tmux').length - a0 === 1,
+      'a host with NO `which` program (its own ENOENT, kept as `noLookup`): tmux found the release\'s way (session-store\'s guarded look along PATH) and its pane list asked of the starter', { out, fa, looked, req: req && req.cmd });
+    const RSRC = read('src/routes/sessions.js');
+    const RELR = require(M.write('src/routes/sessions.js', anchored(RSRC, "    if (found && found.noLookup) bin = await releaseLook();\n    else if (!found || (!found.known && !bin)) return undefined;\n", "    if (!found || !found.known) return undefined;   // MUTANT: no fallback (the build's reader)\n", 'no-fallback'), 'no-fallback'));
+    const relOut = await RELR.tmuxReaderVia(() => fake, (n) => WK.whichFreshAnswer(n))(SS.TMUX_PANE_ARGS);
+    SS.useTmuxReader(RS.tmuxReaderVia());   // the mutant's load handed ITS reader: the hub's again
+    ok(relOut === '', 'RED: the reader without the fallback — «no tmux» on a host with no `which` (tmux conversations lose their targets)', { relOut });
+    process.env.PATH = pathWas;
+
+    // (b) A NO-REPLY BACKS OFF — the lookup: the last good path served (not fresh), no new lookup until the wait (5 s, doubled) ends
+    let hang = false, runs = 0;
+    answer = (cmd, args) => { if (cmd === 'which' && args[0] === 'vs-hang-cmd') { runs++; return hang ? { unknown: true } : { started: true, code: 0, stdout: '/x/vs-hang-cmd\n' }; } return cmd === 'which' && args[0] === 'tmux' ? { started: true, code: 0, stdout: '/opt/vs/bin/tmux\n' } : { started: true, code: 0, stdout: '' }; };
+    const g1 = await WK.whichFreshAnswer('vs-hang-cmd');
+    hang = true; skew += 61e3;
+    const n1 = await WK.whichFreshAnswer('vs-hang-cmd'), n2 = await WK.whichFreshAnswer('vs-hang-cmd'); const r2 = runs;
+    skew += WK.NO_REPLY_WAIT_MS + 1; await WK.whichFreshAnswer('vs-hang-cmd'); const r3 = runs;
+    skew += WK.NO_REPLY_WAIT_MS + 1; await WK.whichFreshAnswer('vs-hang-cmd'); const r4 = runs;   // inside the DOUBLED wait
+    skew += WK.NO_REPLY_WAIT_MS; await WK.whichFreshAnswer('vs-hang-cmd'); const r5 = runs;
+    const press = await WK.whichFreshAnswer('vs-hang-cmd', { maxAgeMs: 0 }); const r6 = runs;
+    ok(g1.path === '/x/vs-hang-cmd' && g1.known === true && n1.path === '/x/vs-hang-cmd' && n1.known === false && n1.keptAt > 0 && n2.path === '/x/vs-hang-cmd' && n2.known === false && r2 === 2 && r3 === 3 && r4 === 3 && r5 === 4 && r6 === 5 && press.known === false && WK.NO_REPLY_WAIT_MAX_MS >= WK.NO_REPLY_WAIT_MS,
+      `a lookup with NO REPLY: the last good path served said not fresh (known false, keptAt); no new lookup inside the wait (${WK.NO_REPLY_WAIT_MS} ms, doubled at the next no-reply, up to ${WK.NO_REPLY_WAIT_MAX_MS} ms); a person's press looks at once`, { runs: [r2, r3, r4, r5, r6], n1, n2 });
+    const WSRC = read('src/plugins/which-kept.js');
+    const WK2 = require(M.write('src/plugins/which-kept.js', anchored(WSRC, "  if (!press && backingOff(k)) return Promise.resolve(k.at ? k.path : null);   // r2030 (3b): waiting after a no-reply — the last good answer, no new child\n", '', 'no-backoff'), 'no-backoff'));
+    hang = false; runs = 0; await WK2.whichFreshAnswer('vs-hang-cmd'); hang = true; skew += 61e3;
+    for (let i = 0; i < 3; i++) await WK2.whichFreshAnswer('vs-hang-cmd');
+    ok(runs === 4, 'RED: a copy without the wait — a new lookup at every ask while the lookup gets no reply (a `which` stuck on a hung mount each time)', { runs });
+
+    // the pane map: after a good read, a no-reply serves the LAST GOOD map for its sweep and the next ask waits
+    let paneAns = { started: true, code: 0, stdout: '6161||good:0.0\n' };
+    const prevAnswer = answer;
+    answer = (cmd, args) => (cmd === 'tmux' ? paneAns : prevAnswer(cmd, args));
+    const paneDrive = async (S) => {
+      S.useTmuxReader(RS.tmuxReaderVia()); paneAns = { started: true, code: 0, stdout: '6161||good:0.0\n' }; skew += 61e3;
+      const t0 = askedOf('tmux').length;
+      const good = await S.getTmuxPaneMapAsync();
+      paneAns = { unknown: true }; skew += 5e3;   // past the memo's 4 s
+      const k1 = await S.getTmuxPaneMapAsync(), k2 = await S.getTmuxPaneMapAsync();
+      return { good, k1, k2, asks: askedOf('tmux').length - t0 };
+    };
+    const pm = await paneDrive(SS);
+    SS.useTmuxReader(RS.tmuxReaderVia());
+    ok(pm.good.get(6161) === 'good:0.0' && pm.k1.get(6161) === 'good:0.0' && pm.k2.get(6161) === 'good:0.0' && pm.asks === 2 && SS.TMUX_NO_REPLY_MS > 0 && SS.TMUX_NO_REPLY_MAX_MS >= SS.TMUX_NO_REPLY_MS,
+      'the pane list with NO REPLY after a good read: the last good map serves that sweep (tmux conversations keep their targets) and the next sweep asks nothing inside the wait', { asks: pm.asks, k1: pm.k1.size });
+    const SSRC = read('src/session-store.js');
+    const relSS = anchored(anchored(SSRC, "    if (_paneNoReply && now - _paneNoReply.at < _paneNoReply.waitMs) return _paneMapMemo ? _paneMapMemo.map : map;   // waiting after a no-reply: the last good map\n", '', 'pane-release'),
+      "      _paneNoReply = { at: Date.now(), waitMs: Math.min(_paneNoReply ? _paneNoReply.waitMs * 2 : TMUX_NO_REPLY_MS, TMUX_NO_REPLY_MAX_MS) };\n      return _paneMapMemo ? _paneMapMemo.map : map;\n", '      return map;   // MUTANT: the build\'s no-reply (an empty map, asked again at once)\n', 'pane-release');
+    const SS2 = require(M.write('src/session-store.js', relSS, 'pane-release'));
+    const pr = await paneDrive(SS2);
+    ok(pr.k1.size === 0 && pr.asks === 3, 'RED: the build\'s no-reply — an EMPTY map for that sweep and a new ask at every sweep', { asks: pr.asks, k1: pr.k1.size });
+    answer = prevAnswer;
+
+    // (c) THE SMALLS — the Jobs list's reader backs off the same way, serves its last good list, and never rejects
+    const JW = require(path.join(ROOT, 'src/server/jobs-wiring.js'));
+    let T = 5e6, sysAns = { started: true, code: 0, stdout: 'backup.timer loaded active waiting x\n' };
+    answer = (cmd) => (cmd === 'systemctl' ? sysAns : cmd === 'crontab' ? { started: true, code: 0, stdout: '0 3 * * * /usr/local/bin/nightly\n' } : { started: true, code: 0, stdout: '' });
+    const er = JW.escapesReader({ now: () => T });
+    const j1 = await er();
+    sysAns = { unknown: true }; T += 31e3;
+    const s0 = askedOf('systemctl').length;
+    const j2 = await er(), j3 = await er(); const s1 = askedOf('systemctl').length - s0;
+    T += JW.ESCAPES_NO_REPLY_MS + 1; await er(); const s2 = askedOf('systemctl').length - s0;
+    await er({ fresh: true }); const s3 = askedOf('systemctl').length - s0;
+    ok(j1.systemd[0] === 'backup.timer' && Array.isArray(j2.unread) && j2.unread.includes('systemd') && j2.systemd[0] === 'backup.timer' && j2.keptAt > 0 && j2.crontab.length === 1 && j3 === j2 && s1 === 1 && s2 === 2 && s3 === 3 && JW.ESCAPES_NO_REPLY_MAX_MS >= JW.ESCAPES_NO_REPLY_MS,
+      'the Jobs list\'s read with NO REPLY: the last list that answered served (said unread, keptAt), no new read inside the wait, a person\'s Refresh reads at once', { s: [s1, s2, s3], j2 });
+    answer = () => ({ get unknown() { throw new Error('planted'); } });
+    let rej = null; const jc = await JW.escapesReader({ now: () => T })().catch((e) => { rej = e.message; return null; });
+    const JSRC = read('src/server/jobs-wiring.js');
+    const JW2 = require(M.write('src/server/jobs-wiring.js', anchored(JSRC, "    })().catch(() => keptOf({ systemd: [], crontab: [], unread: ['systemd', 'crontab'] }));   // r2030 (3c): the read never rejects\n", '    })();   // MUTANT: no catch\n', 'no-catch'), 'no-catch'));
+    let rej2 = null; await JW2.escapesReader({ now: () => T })().catch((e) => { rej2 = e.message; });
+    ok(rej === null && !!jc && jc.unread.length === 2 && rej2 === 'planted', 'the read NEVER rejects: a throw inside it is a read with both parts unread — RED: a copy without the catch rejects', { rej, jc, rej2 });
+
+    // the process table read past its bound says «not read» — never an empty report
+    const MPW_SRC = read('src/server/memory-pressure-watch.js');
+    const pressureOf = async (mod) => {
+      answer = (cmd) => (cmd === 'ps' ? { started: true, overflow: true, code: null, stdout: '' } : { started: true, code: 0, stdout: '' });
+      let item = null;
+      const w = mod.create({ activeSessions: new Map(), BUFFERS_DIR: TMP, getUserTodos: () => ({ add: (k, it) => { item = it; return { id: 'x' }; } }), getSessionStatus: () => null, sessionStatusKey: () => 'k', log: { warn() { }, log() { } } });
+      w.onSample({ used: 99, limit: 100 });
+      for (let i = 0; i < 400 && !item; i++) await new Promise((r) => setTimeout(r, 5));
+      w.stop();
+      return item;
+    };
+    const it = await pressureOf(require(path.join(ROOT, 'src/server/memory-pressure-watch.js')));
+    const itRel = await pressureOf(require(M.write('src/server/memory-pressure-watch.js', anchored(MPW_SRC, "      if (err) return resolve({ rows: [], notRead: String((err && err.message) || err || 'not read') });", "      if (err) return resolve({ rows: [], notRead: null });   // MUTANT: the build's empty table", 'empty-table'), 'empty-table')));
+    ok(!!it && /The process table was not read \(ps: its output passed \d+ bytes\)/.test(it.detail) && !/The largest process groups/.test(it.detail) && !!itRel && !/not read/.test(itRel.detail) && /The largest process groups/.test(itRel.detail),
+      'the memory item when the process table ran past its bound: «The process table was not read (…)» — RED: the build\'s empty table reads as no group at all', { detail: it && it.detail.split('\n')[0] });
+
+    // the mount program's THROWN stat memo gets its retry stamp
+    const rbin = path.join(TMP, 'data', 'bin', 'rclone'); fs.mkdirSync(path.dirname(rbin), { recursive: true }); fs.writeFileSync(rbin, 'x');
+    const mk = (mod) => { const m = Object.create(mod.MountManager.prototype); m.dataDir = path.join(TMP, 'data'); m._onNetworkFs = () => true; return m; };
+    const statWas2 = fs.statSync; let binStats = 0;
+    fs.statSync = function (p, ...r) { if (String(p) === rbin) { binStats++; throw Object.assign(new Error('planted'), { code: 'EIO' }); } return statWas2.call(this, p, ...r); };
+    const thrown = (mod) => { const m = mk(mod); const b0 = binStats; for (let i = 0; i < 3; i++) m._fastBin(rbin); const first = binStats - b0; skew += 16 * 60e3; m._fastBin(rbin); return { first, later: binStats - b0 - first }; };
+    const MSRC = read('src/mounts.js');
+    const th = thrown(require(path.join(ROOT, 'src/mounts.js')));
+    const thRel = thrown(require(M.write('src/mounts.js', anchored(MSRC, "      this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };   // B-323e follow (r2030 (3c)): a thrown stat / mkdir is retried after FASTBIN_RETRY_MS too", "      this._fastBinMemo = { src: binPath, use: binPath };   // MUTANT: the build's thrown memo (kept for ever)", 'thrown-for-ever'), 'thrown-for-ever')));
+    fs.statSync = statWas2;
+    ok(th.first === 1 && th.later === 1 && thRel.first === 1 && thRel.later === 0, `a THROWN stat of the rclone binary: remembered (${th.first} stat for three asks), tried again past its 15 min (${th.later}) — RED: the build's memo keeps the network path for the process's life (${thRel.later})`, { th, thRel });
+
+    // the Desktop's Start: helper lookups with no reply are SAID — never a silent bare screen
+    answer = (cmd) => (cmd === 'which' ? { unknown: true } : { started: true, code: 0, stdout: '' });
+    const V = require(path.join(ROOT, 'src/vnc.js'));
+    const VSRC = read('src/vnc.js');
+    const VREL = require(M.write('src/vnc.js', anchored(VSRC, "    const helper = async (cmd) => { const f = await lookup(cmd, { maxAgeMs: 0 }); if (!f.known && !f.path) noReply.push(cmd); return f.path; };\n", "    const helper = async (cmd) => (await lookup(cmd)).path;   // MUTANT: the build's silent kept lookup\n", 'silent-start'), 'silent-start'));
+    const warnWas = console.warn; const warned = []; console.warn = (...a) => { warned.push(a.join(' ')); };
+    let sess, rsess;
+    try { sess = await new V.VncManager({ dataDir: TMP, port: 1, display: ':95' })._startSession(); rsess = await new VREL.VncManager({ dataDir: TMP, port: 1, display: ':94' })._startSession(); } finally { console.warn = warnWas; }
+    ok(!!sess && Array.isArray(sess.noReply) && sess.noReply.includes('dbus-launch') && sess.noReply.includes('xterm') && warned.filter((w) => /no desktop session was started: the lookup of .+ got no answer in time/.test(w)).length === 1 && rsess === null,
+      'a Start whose helper lookups get NO REPLY: said in the journal and answered (session «no-reply», by name) — RED: the build\'s lookup leaves a bare screen without a word', { sess, rsess, warned: warned.length });
+    const DS = require(path.join(ROOT, 'src/desktop-screens.js'));
+    const loc = DS.pickerRows({ local: { available: true, lookup: 'no-reply' } }).find((r) => r.kind === 'local');
+    const APP = read('src/lib/app.js'), PICK = read('src/lib/desktop-picker.js'), DW = read('src/lib/desktop-window.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
+    const KEYS = ['Could not check this host for a VNC server just now: the lookup got no answer in time. Opening it looks again.', 'The desktop is up without its session: looking up {names} got no answer in time. Close the Desktop and open it again to retry.', 'The process table was not read ({why}): which processes hold the memory is not known this time.'];
+    ok(!!loc && loc.lookup === 'no-reply' && loc.enabled === true && APP.includes("this._vncAvailable = !!d.available || this._vncLookup === 'no-reply';") && PICK.includes("if (r.kind === 'local' && r.lookup === 'no-reply')") && PICK.includes('lookup: app._vncLookup || null') && DW.includes("if (st.session === 'no-reply') showToast(") && VSRC.includes("return sess && sess.noReply ? { ...st, session: 'no-reply', sessionNoReply: sess.noReply } : st;") && KEYS.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')),
+      'the status\'s NO REPLY reaches the page\'s words: the Desktop entry stays, the picker\'s local row says it (live, never greyed), a bare Start says why; every new word in zh and ja', { loc });
+    const KB = read('docs/kb-api.md'), TS = read('src/plugins/tailscale.js'), WKS = read('src/plugins/which-kept.js');
+    const kbLine = (KB.split('\n').find((l) => l.includes('GET /api/jobs-escapes (read-only systemd/crontab listing: ')) || '');
+    ok(kbLine.includes('`?fresh=1`') && kbLine.includes('`unread`') && kbLine.includes('`keptAt`') && !/graceKill|GRACE_MS/.test(TS) && !/graceKill|GRACE_MS/.test(WKS), 'kb-api names the fresh read, `unread` and `keptAt`; the proxy plugin\'s dead import (graceKill, GRACE_MS) and the lookup\'s unused kill are gone');
+  } finally { Date.now = nowWas; process.env.PATH = pathWas; }
+}
+for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 16, label: 'B-323e starts ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
 say(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

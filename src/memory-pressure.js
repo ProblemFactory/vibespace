@@ -128,13 +128,16 @@ function whoOf(g) {
  * The For-you item. `tmpfs` = { mount, used, size } | null (the RAM-backed /tmp); `roots` = [{ path, bytes }] (the
  * largest /tmp/vs-* / cdp-prof-* / agent-browser-chrome-* roots). → { text, detail, i18n }.
  */
-function pressureItem({ pct, used, limit, groups = [], tmpfs = null, roots = [] } = {}) {
+function pressureItem({ pct, used, limit, groups = [], tmpfs = null, roots = [], notRead = null } = {}) {
   const top = (Array.isArray(groups) ? groups : []).slice(0, TOP_GROUPS);
   const P = Math.round(Number(pct) || 0);
   const first = top.length ? whoOf(top[0]) : null;
   const head = { text: `Memory is ${P}% full (${gb(used)} of ${gb(limit)} GB)` + (first ? ` — the most is held by ${first.text}` : ''), key: first ? i18nKey('Memory is {pct}% full ({used} of {limit} GB) — the most is held by {who}') : i18nKey('Memory is {pct}% full ({used} of {limit} GB)'), params: { pct: P, used: gb(used), limit: gb(limit), ...(first ? { who: first.text } : {}) } };
   const lines = [], rows = [];
-  lines.push('The largest process groups (PSS, each page counted once):'); rows.push({ key: i18nKey('The largest process groups (PSS, each page counted once):') });
+  if (notRead) {   // B-323e follow (r2030 (3c)): the table was not read — said, never an empty list of groups
+    lines.push(`The process table was not read (${notRead}): which processes hold the memory is not known this time.`);
+    rows.push({ key: i18nKey('The process table was not read ({why}): which processes hold the memory is not known this time.'), params: { why: String(notRead) } });
+  } else { lines.push('The largest process groups (PSS, each page counted once):'); rows.push({ key: i18nKey('The largest process groups (PSS, each page counted once):') }); }
   for (const g of top) {
     const w = whoOf(g);
     const size = `${gb(g.pss)} GB${g.approx ? ' (RSS)' : ''}`;

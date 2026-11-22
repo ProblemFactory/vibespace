@@ -379,13 +379,17 @@ class MountManager {
       // This call still returns the network path (one slow exec); the next
       // resolution finds the cache.
       if (!this._fastBinCopying) {
+        fs.mkdirSync(cacheDir, { recursive: true });   // before the flag: a throw here leaves no copy «in flight» for ever
         this._fastBinCopying = true;
-        fs.mkdirSync(cacheDir, { recursive: true });
+        // B-323e follow (r2030 (3c)): the copy's own retry stamp — while it runs (≤ 180 s) every rcloneBin() answers the network
+        // path from this memo (no realpath + /proc/mounts + stat on the loop at each call); its end replaces it
+        this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };
         const tmp = `${cached}.tmp-${process.pid}`;
         execFile('sh', ['-c', `cp "${binPath}" "${tmp}" && chmod 755 "${tmp}" && mv "${tmp}" "${cached}"`], { timeout: 180000 }, (err) => {
           this._fastBinCopying = false;
           if (err) this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };   // B-323e: a FAILED copy is remembered FASTBIN_RETRY_MS (the network path stands meanwhile) — never redone at every rcloneBin()
           if (!err) {
+            this._fastBinMemo = { src: binPath, use: cached };   // the copy landed: the next call execs it (the settled state)
             try {
               for (const f of fs.readdirSync(cacheDir)) { // prune superseded copies
                 if (f.startsWith('rclone-') && f !== path.basename(cached)) fs.unlinkSync(path.join(cacheDir, f));
@@ -396,7 +400,7 @@ class MountManager {
       }
       return binPath;
     } catch {
-      this._fastBinMemo = { src: binPath, use: binPath };
+      this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };   // B-323e follow (r2030 (3c)): a thrown stat / mkdir is retried after FASTBIN_RETRY_MS too — never the network path for the process's life
       return binPath;
     }
   }

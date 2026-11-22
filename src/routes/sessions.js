@@ -15,13 +15,18 @@ const router = express.Router();
 /** B-323e (r1381 (2) + (5)): THE HUB'S pane-map reader, handed to src/session-store.js (a device bundle input — it carries none of
  *  the starter's words). tmux is found by the KEPT lookup (src/plugins/which-kept.js, itself through the starter: never a stat walk
  *  of PATH on the loop) and its pane list asked of the starter. → the list's text ('' = no tmux, or no tmux server), or undefined:
- *  NO REPLY (the lookup or the list did not answer — never kept as a reply). `starter` / `lookup` are getters (a suite hands its own). */
-function tmuxReaderVia(starter = () => require('../server/child-starter').childStarter(), lookup = (n) => require('../plugins/which-kept.js').whichFreshAnswer(n)) {
+ *  NO REPLY (the lookup or the list did not answer — never kept as a reply). `starter` / `lookup` are getters (a suite hands its own).
+ *  r2030 (3a): a host with NO `which` program (the lookup's own ENOENT: `noLookup`) finds tmux the release's way — session-store's
+ *  own look along PATH (`releaseLook`: B-1425's guarded walk) — never «no tmux» for that reason. r2030 (3b): a lookup with no reply
+ *  serves its LAST GOOD path (known false, a path kept): the pane list is still asked with it. */
+function tmuxReaderVia(starter = () => require('../server/child-starter').childStarter(), lookup = (n) => require('../plugins/which-kept.js').whichFreshAnswer(n), releaseLook = () => require('../session-store').tmuxPathAsync()) {
   return async (args) => {
     const found = await lookup('tmux');
-    if (!found || !found.known) return undefined;
-    if (!found.path) return '';
-    const r = await starter().run(found.path, args, { timeoutMs: 3000, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: process.env.PATH || '', ...(process.env.TMUX_TMPDIR ? { TMUX_TMPDIR: process.env.TMUX_TMPDIR } : {}) } });
+    let bin = found && found.path;
+    if (found && found.noLookup) bin = await releaseLook();
+    else if (!found || (!found.known && !bin)) return undefined;
+    if (!bin) return '';
+    const r = await starter().run(bin, args, { timeoutMs: 3000, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: process.env.PATH || '', ...(process.env.TMUX_TMPDIR ? { TMUX_TMPDIR: process.env.TMUX_TMPDIR } : {}) } });
     if (!r || r.unknown || r.timedOut || r.overflow) return undefined;
     if (r.started === false) return r.error === 'ENOENT' ? '' : undefined;
     return r.code === 0 ? String(r.stdout || '') : '';   // tmux answered: no server is no pane

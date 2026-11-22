@@ -27,7 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
-const { whichKept, whichNow, graceKill, GRACE_MS } = require('./which-kept.js'); // lane hub-sync-holds: where a command lives, KEPT — never a synchronous child on the loop's turn
+const { whichKept, whichNow } = require('./which-kept.js'); // lane hub-sync-holds: where a command lives, KEPT — never a synchronous child on the loop's turn
 // ONE async child with a timeout → {code, out} (code null on spawn failure / timeout) — never a sync child on the hub's loop (rank 13)
 // an async child with its timeout — it NEVER throws or rejects (rank 13 round 2: a probe with nothing to run answers what it
 // knows): no program ⇒ {code: null}; an aborted ask (`signal`, the manager's bound) starts nothing and kills the child it holds

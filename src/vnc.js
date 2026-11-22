@@ -59,7 +59,6 @@ const VNC_GEOMETRY = process.env.VIBESPACE_VNC_GEOMETRY || '1920x1080';
 // missing answer kept 60 s), asked of the hub's starter; never a SYNCHRONOUS child (status() runs on the belt's 60 s facts
 // refresh: a box with no Xvnc paid two synchronous forks of the hub a minute)
 const lookup = (cmd, o) => require('./plugins/which-kept.js').whichFreshAnswer(cmd, o);   // {path, known} — known false: no reply
-const which = async (cmd) => (await lookup(cmd)).path;
 
 function portListening(port, timeoutMs = 700) {
   return new Promise((resolve) => {
@@ -117,8 +116,8 @@ class VncManager {
   async _findXvnc({ fresh = false } = {}) {
     if (this._xvncBin) return { path: this._xvncBin, known: true };
     const o = fresh ? { maxAgeMs: 0 } : undefined;
-    const a = await lookup('Xtigervnc', o); if (a.path) { this._xvncBin = a.path; return a; }
-    const b = await lookup('Xvnc', o); if (b.path) { this._xvncBin = b.path; return b; }
+    const a = await lookup('Xtigervnc', o); if (a.path) { this._xvncBin = a.path; return { path: a.path, known: true }; }   // r2030: a kept path served at a no-reply is a path
+    const b = await lookup('Xvnc', o); if (b.path) { this._xvncBin = b.path; return { path: b.path, known: true }; }
     return { path: null, known: !!(a.known && b.known) };
   }
 
@@ -160,8 +159,9 @@ class VncManager {
       await new Promise((r) => setTimeout(r, 100));
     }
     if (!(await portListening(this.port))) throw new Error('VNC server failed to start');
-    await this._startSession();
-    return this.status();
+    const sess = await this._startSession();
+    const st = await this.status();
+    return sess && sess.noReply ? { ...st, session: 'no-reply', sessionNoReply: sess.noReply } : st;   // r2030 (3c): a bare screen says why
   }
 
   /** Start Xvnc on `display` (null = the X server picks a free one) with `-displayfd 3`: resolves `{ child, display }`
@@ -216,7 +216,10 @@ class VncManager {
     // allowlist deploy/sysroot/vs-sysroot-enter hands a user's shell) + DISPLAY; no XAUTHORITY (our Xvnc runs without an
     // auth cookie file) and no bus of the hub's (dbus-launch starts the session's own)
     const env = serviceEnv(process.env, { keep: ['USER', 'LOGNAME', 'SHELL'], add: { DISPLAY: this.display } });
-    const dbusLaunch = await which('dbus-launch');
+    // r2030 (3c): a person's Start — each helper looked up afresh (maxAgeMs 0); a lookup with no reply is SAID, never a silent bare screen
+    const noReply = [];
+    const helper = async (cmd) => { const f = await lookup(cmd, { maxAgeMs: 0 }); if (!f.known && !f.path) noReply.push(cmd); return f.path; };
+    const dbusLaunch = await helper('dbus-launch');
     const candidates = [
       ['xfce4-session', []],
       ['startxfce4', []],
@@ -224,7 +227,7 @@ class VncManager {
       ['xterm', []], // last resort: at least a usable terminal appears
     ];
     for (const [cmd, args] of candidates) {
-      const bin = await which(cmd);
+      const bin = await helper(cmd);
       if (!bin) continue;
       const [c, a] = dbusLaunch && cmd !== 'xterm'
         ? [dbusLaunch, ['--exit-with-session', bin, ...args]]
@@ -232,8 +235,10 @@ class VncManager {
       const p = spawn(c, a, { detached: true, stdio: 'ignore', env });
       p.on('error', (e) => console.warn(`[vnc] the desktop session's ${cmd} could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
       p.unref();
+      if (noReply.length) console.warn(`[vnc] the desktop session ${cmd} was started, but the lookup of ${noReply.join(', ')} got no answer in time`);
       return cmd;
     }
+    if (noReply.length) { console.warn(`[vnc] no desktop session was started: the lookup of ${noReply.join(', ')} got no answer in time — the display stays bare until the Desktop is opened again`); return { noReply }; }
     return null; // bare X — the viewer still connects, just empty
   }
 

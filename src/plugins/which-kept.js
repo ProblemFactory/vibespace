@@ -13,22 +13,21 @@ let runWhich = (name) => require('../server/child-starter').childStarter().run('
 
 const TIMEOUT_MS = 5000;
 const MAX_AGE_MS = 60000;
-const GRACE_MS = 1000;
-const kept = new Map(); // name → { path, at, pending }
+// B-323e follow (主开发 r2030 (3b)): A NO-REPLY BACKS OFF — a lookup the starter did not answer (its bound, its fault, a `which`
+// walking a hung mount ahead on PATH; never a start that failed: no child runs then) starts no new lookup of that name for NO_REPLY_WAIT_MS, doubled at each no-reply in a row up
+// to NO_REPLY_WAIT_MAX_MS; meanwhile every ask is served the LAST GOOD answer, said as not fresh (whichFreshAnswer: known false +
+// keptAt). An answer ends the wait. A person's press (maxAgeMs 0) looks again at once — one lookup in flight per name still.
+const NO_REPLY_WAIT_MS = 5000;
+const NO_REPLY_WAIT_MAX_MS = 5 * 60 * 1000;
+const kept = new Map(); // name → { path, at, pending, noLookup, noReplyAt, waitMs }
 const seam = { get: () => runWhich, set: (fn) => { runWhich = fn; } }; // a suite's stand-in for the run (round 3: a run that throws)
-/** round 3: a child still alive `after` ms on — past its timeout, or after its ask was aborted — ignores SIGTERM: SIGKILL it.
- *  Only OUR child, by its own handle. (B-323e: this file's own lookup no longer holds a child — the starter does; kept for the
- *  plugins' children that are still the hub's own.) */
-function graceKill(c, after) {
-  const t = setTimeout(() => { if (c && c.exitCode === null && c.signalCode === null) { try { c.kill('SIGKILL'); } catch { } } }, after);
-  if (t.unref) t.unref();
-  return t;
-}
+const backingOff = (k, now = Date.now()) => !!(k && k.noReplyAt && now - k.noReplyAt < k.waitMs);
 
-function refresh(name, signal) {
-  const k = kept.get(name) || { path: null, at: 0, pending: null };
+function refresh(name, signal, { press = false } = {}) {
+  const k = kept.get(name) || { path: null, at: 0, pending: null, noLookup: false, noReplyAt: 0, waitMs: 0 };
   kept.set(name, k);
   if (k.pending) return k.pending;
+  if (!press && backingOff(k)) return Promise.resolve(k.at ? k.path : null);   // r2030 (3b): waiting after a no-reply — the last good answer, no new child
   const p = new Promise((resolve) => {
     const done = () => resolve(k.at ? k.path : null);
     if (signal && signal.aborted) return done();
@@ -37,10 +36,14 @@ function refresh(name, signal) {
     if (signal) signal.addEventListener('abort', end, { once: true });
     Promise.resolve().then(() => runWhich(name)).then((r) => {
       // only a `which` that RAN to its answer is kept: aborted, the starter's no answer, timed out or killed ⇒ the last answer
-      // stands (never «not found»); no `which` program at all (ENOENT) is an answer: not found
-      if (!over && r && ((r.started !== false && !r.unknown && !r.timedOut && !r.signal) || (r.started === false && r.error === 'ENOENT'))) { k.path = r.code === 0 ? (String(r.stdout || '').trim().split('\n')[0] || null) : null; k.at = Date.now(); }
+      // stands (never «not found») and the next lookup waits (r2030 (3b)); no `which` program at all (ENOENT) is kept as THAT fact
+      // (`noLookup`, r2030 (3a)): a caller that had its own look before (the tmux road) looks its own way — never «not found» for it
+      const ran = !!(r && r.started !== false && !r.unknown && !r.timedOut && !r.signal), noWhich = !!(r && r.started === false && r.error === 'ENOENT');
+      if (!over && (ran || noWhich)) { k.noLookup = noWhich; k.noReplyAt = 0; k.waitMs = 0; }
+      else if (!over && r && (r.unknown || r.timedOut || r.signal)) { k.noReplyAt = Date.now(); k.waitMs = Math.min(k.waitMs ? k.waitMs * 2 : NO_REPLY_WAIT_MS, NO_REPLY_WAIT_MAX_MS); }   // a NO-REPLY (a child may still run): wait; a start that failed (no child) asks again next time
+      if (!over && (ran || noWhich)) { k.path = r.code === 0 ? (String(r.stdout || '').trim().split('\n')[0] || null) : null; k.at = Date.now(); }
       end();
-    }, end);   // a `which` that could not be STARTED: still unknown — the next ask tries again; never a rejection
+    }, end);   // a `which` that could not be STARTED: still unknown — the next ask tries again (no child runs: nothing to wait for); never a rejection
   });
   // the memo is set BEFORE it can be cleared: a lookup that ends at once (a spawn that threw) must never stay «pending» for the
   // process's life (round 3 — it poisoned that name)
@@ -59,14 +62,21 @@ function whichKept(name, { maxAgeMs = MAX_AGE_MS } = {}) {
  *  child runs to the starter's bound (TIMEOUT_MS, SIGKILL there), nothing started beside it. */
 function whichNow(name, { signal } = {}) { return refresh(name, signal); }
 /** B-323e (r1381): the kept answer when fresh, else a fresh one, SAID WITH whether it is known: {path, known} — known false = the
- *  lookup got no reply (the starter's no answer, its bound): never «not found». maxAgeMs 0 = a person's press: always looks again. */
+ *  lookup got no reply (the starter's no answer, its bound): never «not found». maxAgeMs 0 = a person's press: always looks again.
+ *  r2030: a no-reply serves the LAST GOOD path with known false and `keptAt` (when it was read), and the next lookup waits
+ *  (NO_REPLY_WAIT_MS, growing); `noLookup` true = this host has no `which` program (its path then says nothing). */
 function whichFreshAnswer(name, { maxAgeMs = MAX_AGE_MS } = {}) {
   const k = kept.get(name);
-  if (k && k.at && Date.now() - k.at <= maxAgeMs) return Promise.resolve({ path: k.path, known: true });
+  const said = (x) => ({ path: x.path, known: true, ...(x.noLookup ? { noLookup: true } : {}) });
+  if (k && k.at && Date.now() - k.at <= maxAgeMs) return Promise.resolve(said(k));
   const at0 = k ? k.at : 0;
-  return refresh(name).then(() => { const k2 = kept.get(name); return { path: k2 && k2.at !== at0 ? k2.path : null, known: !!(k2 && k2.at && k2.at !== at0) }; });
+  return refresh(name, null, { press: maxAgeMs === 0 }).then(() => {
+    const k2 = kept.get(name);
+    if (k2 && k2.at && k2.at !== at0) return said(k2);
+    return { path: k2 && k2.at ? k2.path : null, known: false, ...(k2 && k2.at ? { keptAt: k2.at } : {}) };
+  });
 }
 /** has a lookup of this name FINISHED once? Before it, a caller says «checking» — never «not found» (rank 13 round 2) */
 function whichKnown(name) { const k = kept.get(name); return !!(k && k.at); }
 
-module.exports = { whichKept, whichNow, whichFreshAnswer, whichKnown, graceKill, TIMEOUT_MS, MAX_AGE_MS, GRACE_MS, _seam: seam };
+module.exports = { whichKept, whichNow, whichFreshAnswer, whichKnown, TIMEOUT_MS, MAX_AGE_MS, NO_REPLY_WAIT_MS, NO_REPLY_WAIT_MAX_MS, _seam: seam };

@@ -26,16 +26,18 @@ const TMP_ROOT_RE = /^(vs-|cdp-prof-|agent-browser-chrome-)/;
 const TMPFS_MAGIC = 0x01021994;
 const PS_MAX_BUFFER = 8 * 1024 * 1024;   // r1381 (8): the starter's answer is ONE line the loop parses — 8 MB is ~10× the owner's 2 400-process table
 
+/** → { rows, notRead } — B-323e follow (r2030 (3c)): a read that failed, ran past its bound or got no reply is `notRead` (its why),
+ *  never an empty table: the pressure item then says the table was not read, never «nothing holds the memory» */
 function psTable() {
   return new Promise((resolve) => {
     via('ps', ['axo', 'pid=,ppid=,rss=,comm=,args='], { timeout: 15000, maxBuffer: PS_MAX_BUFFER }).then(({ err, stdout: out }) => {
-      if (err) return resolve([]);
+      if (err) return resolve({ rows: [], notRead: String((err && err.message) || err || 'not read') });
       const rows = [];
       for (const ln of String(out).split('\n')) {
         const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(ln);
         if (m) rows.push({ pid: +m[1], ppid: +m[2], rss: +m[3] * 1024, pss: +m[3] * 1024, approx: true, comm: m[4], args: m[5].slice(0, 4000) });
       }
-      resolve(rows);
+      resolve({ rows, notRead: null });
     });
   });
 }
@@ -112,10 +114,11 @@ function create({ activeSessions, BUFFERS_DIR, getUserTodos, getSessionStatus, s
     return groups;
   }
   async function groupsNow({ pss = true } = {}) {
-    let procs = await psTable();
+    const table = await psTable();
+    let procs = table.rows;
     if (pss) procs = await withPss(procs);
     const ids = await ownerIds(procs, { files: true });
-    return { procs, sessions: ids.sessions, groups: MP.attribute(procs, ids) };
+    return { procs, sessions: ids.sessions, groups: MP.attribute(procs, ids), notRead: table.notRead };
   }
   /** WHO started what — attribute()'s owner roots. `files: false` (lane fuse-canary-notice) reads no session meta file:
    *  a wedged mount's episode must not queue behind the pool it is reporting. */
@@ -124,9 +127,9 @@ function create({ activeSessions, BUFFERS_DIR, getUserTodos, getSessionStatus, s
   }
 
   async function open(pct, mem) {
-    const [{ groups }, tmpfs, roots] = await Promise.all([groupsNow(), tmpfsOf('/tmp'), tmpRoots('/tmp')]);
+    const [{ groups, notRead }, tmpfs, roots] = await Promise.all([groupsNow(), tmpfsOf('/tmp'), tmpRoots('/tmp')]);
     await nameStrangers(groups);
-    const it = MP.pressureItem({ pct, used: mem.used, limit: mem.limit, groups, tmpfs, roots });
+    const it = MP.pressureItem({ pct, used: mem.used, limit: mem.limit, groups, tmpfs, roots, notRead });
     const todos = getUserTodos && getUserTodos();
     if (todos) {
       try { const r = todos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Memory', text: it.text, detail: it.detail, i18n: it.i18n }); itemId = (r && (r.id || (r.item && r.item.id))) || null; }
@@ -168,7 +171,8 @@ function create({ activeSessions, BUFFERS_DIR, getUserTodos, getSessionStatus, s
     return true;
   }
   async function scanOwnChrome() {
-    const { groups } = await groupsNow({ pss: false });
+    const { groups, notRead } = await groupsNow({ pss: false });
+    if (notRead) log.warn?.(`[sysinfo] the own-Chrome scan read no process table (${notRead}) — no one told this round`);
     let n = 0;
     for (const g of groups) if (g.kind === 'own-chrome' && await tell(g)) n++;
     return n;

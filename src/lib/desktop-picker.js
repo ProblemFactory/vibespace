@@ -104,7 +104,7 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
   document.body.append(box);
   let machines = null, loading = true, rows = [], moved = false; // `moved`: the person moved the focus (arrows / a press) — keep it
   let apps = []; // lane app-launch-singleton: every live desktop app (an agent-started one too) — GET /api/desktop/apps?records=1, then the broadcast
-  const local = { available: app._vncAvailable !== false, seat: app._vncSeat || null };
+  const local = { available: app._vncAvailable !== false, seat: app._vncSeat || null, lookup: app._vncLookup || null };
   // lane desktop-picker-instant: every node is KEYED and re-used — a late probe patches its row in place (the focused row is never
   // rebuilt or detached); `keep` = key → node, `seen` = the keys this draw used
   const keep = new Map();
@@ -124,6 +124,7 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
       const ds = r.kind === 'machine' ? knownDisplays(r.hostId) : [];
       const onDisplay = r.display != null ? ds.find((d) => d.key === r.display) : null;
       const parts = [el('span', 'desktop-picker-name', r.display != null ? `${name} · ${onDisplay ? displayWord(onDisplay) : t('Display {n}', { n: r.display })}` : name), el('span', 'desktop-picker-state', STATE_WORDS[r.state]())];
+      if (r.kind === 'local' && r.lookup === 'no-reply') parts.push(el('span', 'desktop-picker-note', t('Could not check this host for a VNC server just now: the lookup got no answer in time. Opening it looks again.'))); // B-323e follow (r2030 (3c))
       if (r.kind === 'local' && r.seat === 'wayland') parts.push(el('span', 'desktop-picker-note', t('This host’s own screen is a Wayland session and cannot be shown yet — click here for the virtual desktop.'))); // a whole sentence that says the row is the door (lane desktop-small P3-1: it stopped at «the virtual desktop can»)
       if (r.kind === 'machine' && r.group === 'remote' && ds.length > 1) parts.push(el('span', 'desktop-picker-chips', ds.map(displayWord).join(' · ')));
       b.replaceChildren(...parts);
