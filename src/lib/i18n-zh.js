@@ -1063,6 +1063,9 @@ export default {
   "The server’s own — lowering it is off in Settings": "与服务器相同——设置中已关闭降低优先级",
   "The server’s own — this machine has no nice program": "与服务器相同——这台机器没有 nice 程序",
   "Set by its own machine — not lowered from here": "由它所在的机器决定——不从这里降低",
+  "Its machine’s own — lowering it is off in Settings": "它所在机器自己的——设置中已关闭降低",   // B-460d smalls (login-request-card)
+  "Its machine’s own when this terminal started its shell — lowering it is off in Settings; a terminal that joined a shell already running keeps that shell’s": "这个终端启动自己的 shell 时为它所在机器自己的——设置中已关闭降低；接入一个已在运行的 shell 的终端保持那个 shell 的优先级",   // B-460d smalls (login-request-card)
+  "Set by its own machine when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s": "这个终端启动自己的 shell 时由它所在的机器决定——接入一个已在运行的 shell 的终端保持那个 shell 的优先级",   // B-460d smalls (login-request-card)
   "Layout presets": "布局预设",
   "Layouts & desktops": "布局与桌面",
   "Link folder to a task": "将文件夹关联到任务",

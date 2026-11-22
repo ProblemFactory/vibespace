@@ -12,8 +12,10 @@ export function cpuPriorityWords(fact, t, { remote = false } = {}) {
   // have JOINED a shell already running (`join`), which keeps its own priority — said, never claimed
   if (fact.by > 0 && fact.of === 'login') return fact.join ? t('Below its ssh login on that machine (nice +{n}) when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s', { n: String(fact.by) }) : t('Below its ssh login on that machine (nice +{n}), and everything it starts', { n: String(fact.by) });
   if (fact.by > 0) return remote ? t('Below its machine’s agent (nice +{n}), and everything it starts', { n: String(fact.by) }) : t('Below the server (nice +{n}) — and everything it starts', { n: String(fact.by) });
-  if (fact.why === 'off') return t('The server’s own — lowering it is off in Settings');
+  // r1911: a conversation on ANOTHER machine with the setting off runs at THAT machine's own priority — never «the server's own»; the
+  // ssh terminal's `join` holds for an unlowered start too (it may have joined a shell another start lowered)
+  if (fact.why === 'off') return remote ? (fact.join ? t('Its machine’s own when this terminal started its shell — lowering it is off in Settings; a terminal that joined a shell already running keeps that shell’s') : t('Its machine’s own — lowering it is off in Settings')) : t('The server’s own — lowering it is off in Settings');
   if (fact.why === 'no-nice') return t('The server’s own — this machine has no nice program');
-  if (fact.why === 'remote') return t('Set by its own machine — not lowered from here');
+  if (fact.why === 'remote') return fact.join ? t('Set by its own machine when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s') : t('Set by its own machine — not lowered from here');
   return null;
 }

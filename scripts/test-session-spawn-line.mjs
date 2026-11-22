@@ -570,8 +570,14 @@ console.log('\n── B-460d follow: the ssh roads\' facts say what they are bel
     const br = read('src/server/boot-restore.js'), body = (br.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0];
     if (!body) return false;
     const sfm = new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', `${body}\nreturn sessionFromMeta;`)(os, () => null, () => ({}), '');
-    const shapes = [{ by: 5, of: 'login', join: true }, { by: 5, of: 'login' }, { by: 5 }, { by: 5, of: 'agent' }, { by: 5, join: true }, { by: 0, why: 'remote', of: 'login' }, { by: 0, why: 'other' }, { by: 30 }, null, 'x', [5]];
-    return shapes.every((c) => { let got; try { got = sfm({ id: 'x', cwd: '/w', cpuNice: c }, {})._cpuNice; } catch { return false; } return J(got === undefined ? null : got) === J(SPRI.factOf(c)); });
+    // r1911: the shapes are the PRODUCERS' own output (every fact a start can write), each held to a ROUND TRIP — a field a producer adds
+    // and the restore drops is red here — beside hand-made junk the restore must read as factOf reads it
+    const q = { warn() { } }, offS = (k) => (k === SPRI.SETTING ? false : undefined);
+    const base = [SPRI.priorityFor({ log: q }).fact, SPRI.priorityFor({ serverSetting: offS, log: q }).fact, SPRI.priorityFor({ nice: () => null, log: q }).fact, SPRI.priorityFor({ local: false }).fact];
+    const produced = [...base, ...base.flatMap((f) => [SPRI.sshFactOf(f), SPRI.sshFactOf(f, { join: true })])];
+    const junk = [{ by: 5, of: 'agent' }, { by: 5, join: true }, { by: 0, why: 'remote', of: 'login' }, { by: 0, why: 'other' }, { by: 30 }, null, 'x', [5]];
+    const restore = (c) => { try { const got = sfm({ id: 'x', cwd: '/w', cpuNice: c }, {})._cpuNice; return got === undefined ? null : got; } catch { return { threw: true }; } };
+    return produced.length >= 12 && produced.every((p) => J(restore(p)) === J(p) && J(SPRI.factOf(p)) === J(p)) && junk.every((c) => J(restore(c)) === J(SPRI.factOf(c)));
   };
   const kept = [{ by: 5, of: 'login', join: true }, { by: 5, of: 'login' }, { by: 5 }, { by: 5, of: 'agent' }, { by: 5, join: true }, { by: 0, why: 'remote', of: 'login' }].map((x) => SPRI.factOf(x));
   ok(J(kept) === J([{ by: 5, of: 'login', join: true }, { by: 5, of: 'login' }, { by: 5 }, { by: 5 }, { by: 5 }, { by: 0, why: 'remote' }])
@@ -588,12 +594,21 @@ console.log('\n── B-460d follow: the ssh roads\' facts say what they are bel
     return got;
   };
   const NL = noAnswerLines(SPRI);
-  ok(NL.length === 2 && /desk one: no answer it can use from its agent/.test(NL[0]) && /desk two/.test(NL[1]) && !NL.some((l) => /evil|desk three|desk four/.test(l)),
+  ok(NL.length === 2 && /desk one: no answer it can use from its agent at this start/.test(NL[0]) && /this start runs at that machine's own priority/.test(NL[0]) && !NL.some((l) => /its conversations start at/.test(l)) && /desk two/.test(NL[1]) && !NL.some((l) => /evil|desk three|desk four/.test(l)),
     'AN ssh-ONLY MACHINE WITH NO ANSWER IT CAN USE is said ONCE a machine in the journal (no link up, another path named), as a paired machine\'s is; never the path it named; a listed answer and the setting off say nothing', NL);
   const SPSRC = read('src/server/spawn-priority.js');
   const SPX = MF.load('src/server/spawn-priority.js', anchored(SPSRC, '  if (id && !saidNoSsh.has(id) && saidNoSsh.size < 256) {', '  if (false) {', 'the ssh no-answer line cut'), 'ssh-no-line');
   const NLX = SPX ? noAnswerLines(SPX) : null;
   ok(!!NLX && NLX.length === 0, 'RED CONTROL (the line cut, in a copy): a machine with no answer starts at its own priority and the journal never says why — the check above is red on it', NLX);
+  // r1911 (3)(4): a terminal with NO usable reply may still have JOINED a shell another start lowered — its fact says `join` too; and a
+  // conversation on another machine with the setting off is THAT machine's own priority, never «the server's own»
+  const tNo = await driveF('terminal', { hosts: { connectedDevice: () => null } });
+  const wNoJ = cpuPriorityWords(tNo.session._cpuNice, tt, { remote: true }), wOffR = cpuPriorityWords({ by: 0, why: 'off' }, tt, { remote: true }), wOffRJ = cpuPriorityWords({ by: 0, why: 'off', join: true }, tt, { remote: true }), wOffL = cpuPriorityWords({ by: 0, why: 'off' }, tt);
+  const NEWK = ['Its machine’s own — lowering it is off in Settings', 'Its machine’s own when this terminal started its shell — lowering it is off in Settings; a terminal that joined a shell already running keeps that shell’s', 'Set by its own machine when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s'];
+  ok(J(tNo.session._cpuNice) === J({ by: 0, why: 'remote', join: true }) && wNoJ === NEWK[2] && wOffR === NEWK[0] && wOffRJ === NEWK[1] && /^The server’s own — lowering it is off in Settings$/.test(wOffL) && NEWK.every((k) => ZH.includes(J(k) + ': ') && JA.includes(J(k) + ': ')),
+    'r1911: a terminal with no usable reply says it may have joined a running shell («Set by its own machine when this terminal started its shell — …»); the setting off on ANOTHER machine reads «Its machine’s own — lowering it is off in Settings» (a joined terminal says so too), never «the server’s own» (en, zh, ja)', { fact: tNo.session._cpuNice, wNoJ, wOffR, wOffRJ, wOffL });
+  const SPX2 = MF.load('src/server/spawn-priority.js', anchored(SPSRC, '  if (!(fact.by > 0)) return join ? { ...fact, join: true } : fact;', '  if (!(fact.by > 0)) return fact;', 'unlowered-join-cut'), 'ssh-unlowered-join');
+  ok(!!SPX2 && J(SPX2.sshFactOf({ by: 0, why: 'remote' }, { join: true })) === J({ by: 0, why: 'remote' }), 'CONTROL (the unlowered start without `join`, in a copy — the line as taken): a terminal that joined a lowered shell is told «set by its own machine» as if it started one — red');
   // (5) the serve's start reads server.js's ONE serverSetting (lens 1): handed in, no second reader in cli-env
   const CLI = read('src/server/cli-env.js'), SRV = read('server.js');
   ok(CLI.split("priorityFor({ serverSetting });").length === 2 && !CLI.includes('readSettings()[k]') && /getHeldPtyIds = \(\) => \[\], serverSetting = \(\) => undefined \}\) \{/.test(CLI)   // stale-pins: kept (a deliberate absence check: no second settings reader)

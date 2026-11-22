@@ -1062,6 +1062,9 @@ export default {
   "The server’s own — lowering it is off in Settings": "サーバーと同じ——設定で引き下げがオフ",
   "The server’s own — this machine has no nice program": "サーバーと同じ——このマシンには nice プログラムがない",
   "Set by its own machine — not lowered from here": "そのマシンが決める——ここからは下げない",
+  "Its machine’s own — lowering it is off in Settings": "そのマシン自身のもの——設定で下げる機能がオフです",   // B-460d smalls (login-request-card)
+  "Its machine’s own when this terminal started its shell — lowering it is off in Settings; a terminal that joined a shell already running keeps that shell’s": "この端末がシェルを起動したときはそのマシン自身のもの——設定で下げる機能がオフです；すでに動いているシェルに接続した端末はそのシェルの優先度のまま",   // B-460d smalls (login-request-card)
+  "Set by its own machine when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s": "この端末がシェルを起動したときはそのマシンが決める——すでに動いているシェルに接続した端末はそのシェルの優先度のまま",   // B-460d smalls (login-request-card)
   "Layout presets": "レイアウトプリセット",
   "Layouts & desktops": "レイアウトとデスクトップ",
   "Link folder to a task": "フォルダをタスクにリンク",

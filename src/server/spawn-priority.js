@@ -86,7 +86,7 @@ function sshPriorityFor({ serverSetting = () => undefined, hello = null, machine
   if (id && !saidNoSsh.has(id) && saidNoSsh.size < 256) {
     saidNoSsh.add(id);
     const name = String(machine.name || id).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 64);
-    try { log.warn?.(`[spawn-priority] ${name}: no answer it can use from its agent (no link up now, an older agent, or a nice program not on this server's list) — its conversations start at that machine's own priority`); } catch { }
+    try { log.warn?.(`[spawn-priority] ${name}: no answer it can use from its agent at this start (no link up yet — the first start after this server's own start —, an older agent, or a nice program not on this server's list) — this start runs at that machine's own priority (said once a machine; a later start with an answer is lowered)`); } catch { }
   }
   return priorityFor({ local: false });
 }
@@ -94,7 +94,8 @@ function sshPriorityFor({ serverSetting = () => undefined, hello = null, machine
  *  'login'`: the keeper road and the terminal road start under the ssh session, not under the machine's agent); `join`: the
  *  terminal road's `dtach -A` may JOIN a shell already running, which keeps its own priority (the road cannot tell which) */
 function sshFactOf(fact, { join = false } = {}) {
-  if (!fact || !(fact.by > 0)) return fact;
+  if (!fact) return fact;
+  if (!(fact.by > 0)) return join ? { ...fact, join: true } : fact;   // r1911: a terminal that may have joined a LOWERED shell says so too
   return { ...fact, of: 'login', ...(join ? { join: true } : {}) };
 }
 /** the hello of a machine's agent on a link that is UP NOW — memory only (hosts.connectedDevice), or null; never dials */
@@ -110,7 +111,7 @@ function linkedHello(hosts, id) {
 function factOf(x) {
   if (!x || typeof x !== 'object' || Array.isArray(x) || !Number.isInteger(x.by) || x.by < 0 || x.by > 19) return null;
   if (x.by > 0) return { by: x.by, ...(x.of === 'login' ? { of: 'login' } : {}), ...(x.of === 'login' && x.join === true ? { join: true } : {}) };
-  return FACT_WHY.includes(x.why) ? { by: 0, why: x.why } : null;
+  return FACT_WHY.includes(x.why) ? { by: 0, why: x.why, ...(x.join === true ? { join: true } : {}) } : null;
 }
 
 /** a suite's seam: forget the one look and the said line */
