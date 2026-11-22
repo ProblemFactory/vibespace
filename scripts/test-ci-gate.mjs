@@ -52,6 +52,11 @@ import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, s
 // the suite's cost is read by section, not guessed.
 const PROFILE = [['(start → the first section: the imports)', 0]];
 { const log = console.log.bind(console); console.log = (...a) => { if (typeof a[0] === 'string' && a[0].startsWith('\n§')) PROFILE.push([a[0].slice(1, 90), performance.now()]); return log(...a); }; }
+// B-54a9 (主开发 r2572 (2)): THE HEAVY TWIN. The legs whose seconds are real children (§2f's stalled apt stubs, §2n's egress
+// children) run only under CI_GATE_DEEP=1, which scripts/test-ci-gate-deep.mjs (a HEAVY row) sets before it runs this WHOLE file.
+// Their tables stay here, and the fast run says, at each place, where they run.
+const DEEP = process.env.CI_GATE_DEEP === '1';
+const inTwin = (what) => console.log(`    (${what}: in the heavy twin test-ci-gate-deep — B-54a9)`);
 const printProfile = () => {
   const marks = [...PROFILE, ['(end)', performance.now()]];
   const rows = marks.slice(0, -1).map(([name, t], k) => [name, Math.round(marks[k + 1][1] - t)]).sort((x, y) => y[1] - x[1]);
@@ -711,6 +716,8 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
   okd(r.stdout.includes(`\ntimeout 40 apt-get ${OPTS} --error-on=any update\nci-apt: the index is the runner's mirror's\n`) && r.stdout.endsWith(`timeout 80 apt-get ${OPTS} install -y --no-install-recommends dtach\n`), 'then update + install of exactly the named package, IPv4 forced, each call bounded', r.stdout);
   const noUpd = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'dtach'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1', CI_APT_BOUND: '200' , ...AENV } });
   ok(noUpd.status === 0 && !/ update\n/.test(noUpd.stdout) && /^timeout 200 apt-get .* install -y --no-install-recommends dtach$/m.test(noUpd.stdout), '--no-update installs on the index the first step fetched; CI_APT_BOUND sizes the bound for a larger package');
+  if (!DEEP) inTwin('the stalled-mirror, second-mirror and install-retry legs over stub apt-gets (each bound is a real wait)');
+  else {
   // the bound itself, over a stub apt-get that never answers (a stalled mirror): the call is killed, the step red BY NAME
   const stub = path.join(mktmp('aptstub'), 'bin');
   fs.mkdirSync(stub);
@@ -767,6 +774,11 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
     const c3 = fs.readFileSync(log2, 'utf-8').trim().split('\n').slice(1);
     ok(fresh.status === 0 && c3.length === 2 && !fs.existsSync(aptState) && !c3.some((l) => l.includes('sourcelist')) && !/second mirror/.test(fresh.stdout),
       'an update that the runner\'s mirror answers clears an earlier job\'s second-mirror list (the index is decided anew)'); }
+  }
+  // THE TWIN ITSELF (B-54a9, 主开发 r2572 (2)): a HEAVY row that runs this whole file at depth
+  { const twin = SUITES.find((r) => r.name === 'test-ci-gate-deep'); let src = ''; try { src = fs.readFileSync(path.join(REPO, 'scripts', 'test-ci-gate-deep.mjs'), 'utf8'); } catch { /* none */ }
+    ok(!!twin && twin.tier === 'heavy' && /\nprocess\.env\.CI_GATE_DEEP = '1';\nawait import\('\.\/test-ci-gate\.mjs'\);\n/.test(src) && ['scripts/ci-apt.sh', 'scripts/egress-sampler.cjs'].every((f) => (twin.reads || []).includes(f)),
+      `the heavy twin test-ci-gate-deep exists (a HEAVY row reading scripts/ci-apt.sh and scripts/egress-sampler.cjs) and runs this whole file with CI_GATE_DEEP=1 — §2f's stub legs and §2n's egress children run there`); }
 }
 
 // ── §2g AN INSTALL MAY BE RETRIED, A SUITE NEVER (lane ci-npm-retry, B-fa5e: .330's heavy 6/6 — run 39462417012 — died in
@@ -1124,35 +1136,38 @@ console.log('\n§2n B-9dd0: a fast suite\'s sockets past the loopback are a red 
   // an own-properties-only copy would lose the host, and the lookup would be asked for «localhost»
   plant('test-planted-proto', `const seen = [];\nconst look = (h, o, cb) => { seen.push(h); process.nextTick(() => (o && o.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4))); };\nconst opts = Object.create({ host: 'vendor.example', port: 9, lookup: look });\nconst done = () => { console.log('the suite\\'s own lookup was asked for: ' + (seen.join(', ') || 'nothing')); if (seen[0] !== 'vendor.example') { console.log('  ✗ the reader\\'s copy lost the options\\' prototype'); process.exit(1); } ${PASS} };\nconst s = net.connect(opts);\ns.on('error', done);\ns.on('connect', () => { s.destroy(); done(); });`);
   const F = (name, lane, o = {}) => CI.runSuiteAsync({ name, tier: o.tier || 'fast', budgetMs: 8000 }, { root, sha, lane, ...(o.egress === false ? { egress: false } : {}) });
-  const [vend, lit, refused, loop, stand, unl, lost, failed, reuse, proto] = await Promise.all([
-    F('test-planted-egress', 1), F('test-planted-literal', 2), F('test-planted-refused', 3), F('test-planted-loopback', 4), F('test-planted-standin', 5),
-    F('test-planted-unloaded', 6), F('test-planted-lost', 7), F('test-planted-failed', 8), F('test-planted-reuse', 9), F('test-planted-proto', 10),
-  ]);
-  const [offV, offL, heavyV] = await Promise.all([F('test-planted-egress', 1, { egress: false }), F('test-planted-literal', 2, { egress: false }), F('test-planted-egress', 3, { tier: 'heavy' })]);
-  const said = (n, r) => console.log(`      ${n}: ${r.ok ? 'green' : 'RED'} · egress ${r.egress ? CI.egressWords(r.egress) : '(none)'} · ${String(r.lines[0] || '').trim().slice(0, 260)}`);
-  for (const [n, r] of [['egress (own lookup → 192.0.2.1)', vend], ['literal 192.0.2.1', lit], ['refused (own lookup errs)', refused], ['loopback', loop], ['stand-in (own lookup → 127.0.0.1)', stand], ['unloaded', unl], ['lost line', lost], ['failed + dialed', failed], ['options reused', reuse], ['options by prototype', proto], ['egress, reader off', offV], ['literal, reader off', offL], ['egress, heavy row', heavyV]]) said(n, r);
   okd(fs.existsSync(CI.EGRESS_SAMPLER) && CI.egressArgv().join(' ') === `--require ${CI.EGRESS_SAMPLER}`, 'the reader rides the suite\'s OWN argv (`--require` scripts/egress-sampler.cjs) — never NODE_OPTIONS', CI.egressArgv().join(' '));
-  okd(!vend.ok && /it opened sockets past the loopback .*: vendor\.example=192\.0\.2\.1:443 ×1/.test(vend.lines[0]) && vend.egress[0].host === 'vendor.example=192.0.2.1', 'a GREEN suite whose OWN lookup answered an address past the loopback is a RED row naming the name, the address and the count (no packet left: the socket was destroyed first)', vend.lines[0]);
-  okd(!lit.ok && /: 192\.0\.2\.1:443 ×1/.test(lit.lines[0]), 'a GREEN suite that dialed an address LITERAL past the loopback is a RED row (judged as it stands; destroyed before net connects it)', lit.lines[0]);
-  okd(/a name ending «\.localhost»/.test(vend.lines[0]) && /a bare DNS ask/.test(vend.lines[0]), 'the red words name the loopback names and the bare DNS ask as NOT watched (r528: the clause itself, not the constant against itself)', vend.lines[0]);
-  okd(vend.lines[0].includes(CI.EGRESS_NOT_WATCHED), `the red words say what the reader does NOT watch («${CI.EGRESS_NOT_WATCHED}»)`, vend.lines[0]);
-  okd(refused.ok && !refused.egress, 'THE MUST (r321): a name the suite\'s OWN lookup refuses never left the box — not counted, the row stays green (test-tailnet-browsers\' shape)', refused.lines[0]);
-  okd(loop.ok && !loop.egress, 'a suite that reached only the loopback stays green', loop.lines[0]);
-  okd(stand.ok && !stand.egress, 'a vendor\'s NAME the suite\'s own lookup maps to the loopback (its stand-in) stays green — the address the lookup answers is judged', stand.lines[0]);
-  okd(offV.ok && offL.ok, 'CONTROL: the same planted suites WITHOUT the reader (egress: false) stay green — the red is the reader\'s', `${offV.lines[0]} | ${offL.lines[0]}`);
-  okd(!heavyV.ok && /: vendor\.example=192\.0\.2\.1:443 ×1/.test(heavyV.lines[0]), 'B-9dd0\'s remainder: a HEAVY row is read the same way (its own process; the heavy tier was unread until now)', heavyV.lines[0]);
-  okd(!unl.ok && /its egress reader did not load/.test(unl.lines[0]), 'a suite whose egress file lost the sampler\'s sentinel is RED by name (the reader did not load: its sockets were never counted)', unl.lines[0]);
-  okd(!lost.ok && /its egress reader LOST 1 host line/.test(lost.lines[0]) && lost.egress.some((x) => x.host === CI.EGRESS_LOST), 'a host line the sampler could not WRITE (its file gone after the sentinel) is a RED row — never a green whose count went missing', lost.lines[0]);
-  okd(!failed.ok && Array.isArray(failed.egress) && failed.egress.some((x) => x.host === '192.0.2.1') && /: 192\.0\.2\.1:443 ×1/.test(failed.lines[0]), 'a suite that FAILED and dialed past the loopback keeps its hosts in the result and its ✗ line', failed.lines[0]);
-  okd(proto.ok && !proto.egress, 'the reader\'s COPY keeps the caller\'s prototype: options that inherit host, port and lookup are dialed as asked (the suite\'s lookup is asked for vendor.example, and answers the loopback)', proto.lines[0]);
-  okd(reuse.ok && !reuse.egress, 'the reader wraps a COPY of the options: one options object reused for three connects keeps the suite\'s own lookup', reuse.lines[0]);
+  const said = (n, r) => console.log(`      ${n}: ${r.ok ? 'green' : 'RED'} · egress ${r.egress ? CI.egressWords(r.egress) : '(none)'} · ${String(r.lines[0] || '').trim().slice(0, 260)}`);
   const rows = CI.egressOf((() => { const f = path.join(root, 'egress.ndjson'); fs.writeFileSync(f, '{"host":"a.example","port":443}\n{"host":"a.example","port":443}\nnot json\n{"host":"b.example","port":80}\n'); return f; })());
   okd(CI.egressWords(rows) === 'a.example:443 ×2, (an unreadable line):0 ×1, b.example:80 ×1', 'the count by host: two sockets to one host are ×2, an unreadable line is a row of its own (never dropped)', CI.egressWords(rows));
-  // the retry refusals: each names its cause (an egress, the reader not loaded, a lost line)
-  const why = (r) => CI.fastRetryRefusal({ name: 'test-planted', tier: 'fast' }, r);
-  console.log(`      the retry refusals: «${why(vend)}» · «${why(unl)}» · «${why(lost)}» · «${why(failed)}»`);
-  okd(/sockets past the loopback/.test(why(vend) || '') && /sockets past the loopback/.test(why(failed) || ''), 'an egress red is never retried as a flake — a green one, and a FAILED one that dialed (fastRetryRefusal names it)', `${why(vend)} | ${why(failed)}`);
-  okd(/egress reader did not load/.test(why(unl) || '') && /lost a host line/.test(why(lost) || ''), 'the refusal names the READER when it did not load, and a lost line as a lost line (never «it opened sockets»)', `${why(unl)} | ${why(lost)}`);
+  if (!DEEP) inTwin('the ten planted suites run through the runner with and without the egress reader, their verdicts and the retry refusals over them');
+  else {
+    const [vend, lit, refused, loop, stand, unl, lost, failed, reuse, proto] = await Promise.all([
+      F('test-planted-egress', 1), F('test-planted-literal', 2), F('test-planted-refused', 3), F('test-planted-loopback', 4), F('test-planted-standin', 5),
+      F('test-planted-unloaded', 6), F('test-planted-lost', 7), F('test-planted-failed', 8), F('test-planted-reuse', 9), F('test-planted-proto', 10),
+    ]);
+    const [offV, offL, heavyV] = await Promise.all([F('test-planted-egress', 1, { egress: false }), F('test-planted-literal', 2, { egress: false }), F('test-planted-egress', 3, { tier: 'heavy' })]);
+    for (const [n, r] of [['egress (own lookup → 192.0.2.1)', vend], ['literal 192.0.2.1', lit], ['refused (own lookup errs)', refused], ['loopback', loop], ['stand-in (own lookup → 127.0.0.1)', stand], ['unloaded', unl], ['lost line', lost], ['failed + dialed', failed], ['options reused', reuse], ['options by prototype', proto], ['egress, reader off', offV], ['literal, reader off', offL], ['egress, heavy row', heavyV]]) said(n, r);
+    okd(!vend.ok && /it opened sockets past the loopback .*: vendor\.example=192\.0\.2\.1:443 ×1/.test(vend.lines[0]) && vend.egress[0].host === 'vendor.example=192.0.2.1', 'a GREEN suite whose OWN lookup answered an address past the loopback is a RED row naming the name, the address and the count (no packet left: the socket was destroyed first)', vend.lines[0]);
+    okd(!lit.ok && /: 192\.0\.2\.1:443 ×1/.test(lit.lines[0]), 'a GREEN suite that dialed an address LITERAL past the loopback is a RED row (judged as it stands; destroyed before net connects it)', lit.lines[0]);
+    okd(/a name ending «\.localhost»/.test(vend.lines[0]) && /a bare DNS ask/.test(vend.lines[0]), 'the red words name the loopback names and the bare DNS ask as NOT watched (r528: the clause itself, not the constant against itself)', vend.lines[0]);
+    okd(vend.lines[0].includes(CI.EGRESS_NOT_WATCHED), `the red words say what the reader does NOT watch («${CI.EGRESS_NOT_WATCHED}»)`, vend.lines[0]);
+    okd(refused.ok && !refused.egress, 'THE MUST (r321): a name the suite\'s OWN lookup refuses never left the box — not counted, the row stays green (test-tailnet-browsers\' shape)', refused.lines[0]);
+    okd(loop.ok && !loop.egress, 'a suite that reached only the loopback stays green', loop.lines[0]);
+    okd(stand.ok && !stand.egress, 'a vendor\'s NAME the suite\'s own lookup maps to the loopback (its stand-in) stays green — the address the lookup answers is judged', stand.lines[0]);
+    okd(offV.ok && offL.ok, 'CONTROL: the same planted suites WITHOUT the reader (egress: false) stay green — the red is the reader\'s', `${offV.lines[0]} | ${offL.lines[0]}`);
+    okd(!heavyV.ok && /: vendor\.example=192\.0\.2\.1:443 ×1/.test(heavyV.lines[0]), 'B-9dd0\'s remainder: a HEAVY row is read the same way (its own process; the heavy tier was unread until now)', heavyV.lines[0]);
+    okd(!unl.ok && /its egress reader did not load/.test(unl.lines[0]), 'a suite whose egress file lost the sampler\'s sentinel is RED by name (the reader did not load: its sockets were never counted)', unl.lines[0]);
+    okd(!lost.ok && /its egress reader LOST 1 host line/.test(lost.lines[0]) && lost.egress.some((x) => x.host === CI.EGRESS_LOST), 'a host line the sampler could not WRITE (its file gone after the sentinel) is a RED row — never a green whose count went missing', lost.lines[0]);
+    okd(!failed.ok && Array.isArray(failed.egress) && failed.egress.some((x) => x.host === '192.0.2.1') && /: 192\.0\.2\.1:443 ×1/.test(failed.lines[0]), 'a suite that FAILED and dialed past the loopback keeps its hosts in the result and its ✗ line', failed.lines[0]);
+    okd(proto.ok && !proto.egress, 'the reader\'s COPY keeps the caller\'s prototype: options that inherit host, port and lookup are dialed as asked (the suite\'s lookup is asked for vendor.example, and answers the loopback)', proto.lines[0]);
+    okd(reuse.ok && !reuse.egress, 'the reader wraps a COPY of the options: one options object reused for three connects keeps the suite\'s own lookup', reuse.lines[0]);
+    // the retry refusals: each names its cause (an egress, the reader not loaded, a lost line)
+    const why = (r) => CI.fastRetryRefusal({ name: 'test-planted', tier: 'fast' }, r);
+    console.log(`      the retry refusals: «${why(vend)}» · «${why(unl)}» · «${why(lost)}» · «${why(failed)}»`);
+    okd(/sockets past the loopback/.test(why(vend) || '') && /sockets past the loopback/.test(why(failed) || ''), 'an egress red is never retried as a flake — a green one, and a FAILED one that dialed (fastRetryRefusal names it)', `${why(vend)} | ${why(failed)}`);
+    okd(/egress reader did not load/.test(why(unl) || '') && /lost a host line/.test(why(lost) || ''), 'the refusal names the READER when it did not load, and a lost line as a lost line (never «it opened sockets»)', `${why(unl)} | ${why(lost)}`);
+  }
   // THE VERDICT, pure (the branches a plant cannot reach without a packet: a NAME with no lookup of its own would ask the box's
   // resolver) + the loopback table + one spelling of the lost marker
   const S = createRequire(import.meta.url)(CI.EGRESS_SAMPLER);
@@ -1192,32 +1207,35 @@ console.log('\n§2n B-9dd0: a fast suite\'s sockets past the loopback are a red 
   plant('test-planted-fork', `import { fork } from 'node:child_process';\nconst c = fork(${J(forkDial)}, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });\nc.on('exit', () => { ${PASS} });`);
   plant('test-planted-shell', `import { exec, execSync } from 'node:child_process';\nexecSync(${J(`${process.execPath} -e "process.exit(0)"`)}, { stdio: 'ignore' });\nexec(${J(`${process.execPath} -e "process.exit(0)"`)}, () => { ${PASS} });`);
   const KIDS = ['test-planted-child', 'test-planted-child-sync', 'test-planted-grandchild', 'test-planted-child-unread', 'test-planted-fork-own', 'test-planted-fork', 'test-planted-shell'];
-  // (1) A CARRIED ROW: a COPY of the reader beside a list that names the plants as carried (the tree's own list names no plant)
-  const readerDir = (name, src, carried) => { const d = path.join(root, name); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'egress-sampler.cjs'), src); fs.writeFileSync(path.join(d, 'egress-carried-rows.json'), J({ carried })); return path.join(d, 'egress-sampler.cjs'); };
-  const SRC = fs.readFileSync(CI.EGRESS_SAMPLER, 'utf8');
-  const carriedReader = readerDir('reader-carried', SRC, KIDS);
-  const P = (reader, name) => { const f = path.join(root, `${name}.${path.basename(path.dirname(reader))}.ndjson`); fs.rmSync(f, { force: true }); fs.rmSync(argvFile, { force: true }); const r = spawnSync(process.execPath, ['--require', reader, path.join(root, 'scripts', name + '.mjs')], { env: { ...process.env, VIBESPACE_SUITE_EGRESS_FILE: f }, encoding: 'utf8', timeout: 8000 }); const rows = CI.egressOf(f); let fa = null; try { fa = JSON.parse(fs.readFileSync(argvFile, 'utf8')); } catch { } return { rc: r.status, rows, words: CI.egressWords(rows), unread: CI.egressUnreadTail(rows), stderr: String(r.stderr || ''), forkArgv: fa }; };
-  const C = Object.fromEntries(KIDS.map((n) => [n, P(carriedReader, n)]));
-  for (const n of KIDS) console.log(`      carried · ${n}: rc ${C[n].rc} · egress ${C[n].words || '(none)'}${C[n].unread}`);
-  okd(/192\.0\.2\.1:443 ×1/.test(C['test-planted-child'].words), 'a CARRIED row: a node CHILD the suite spawns is read too — its dial past the loopback is the row\'s, by host', C['test-planted-child'].words);
-  okd(/192\.0\.2\.1:444 ×1/.test(C['test-planted-child-sync'].words) && /192\.0\.2\.1:445 ×1/.test(C['test-planted-grandchild'].words), '…a SYNC child given a SCRUBBED env too (the shim names the file; nothing is added to its env), and a GRANDCHILD', `${C['test-planted-child-sync'].words} | ${C['test-planted-grandchild'].words}`);
-  okd(/192\.0\.2\.1:448 ×1/.test(C['test-planted-fork'].words) && Array.isArray(C['test-planted-fork'].forkArgv) && C['test-planted-fork'].forkArgv.some((a) => /egress-sampler\.cjs$/.test(a)), '…and a fork() that names no execArgv inherits the reader (counted by host)', { words: C['test-planted-fork'].words, argv: C['test-planted-fork'].forkArgv });
-  okd(!C['test-planted-child-unread'].words && /unread-on-purpose ×1/.test(C['test-planted-child-unread'].unread) && !C['test-planted-fork-own'].words && /own-flags ×1/.test(C['test-planted-fork-own'].unread) && /shell ×2/.test(C['test-planted-shell'].unread),
-    'NOT FOLLOWED, AND COUNTED (never silent): a child whose env names an EMPTY file (unread-on-purpose), a fork naming its OWN execArgv (own-flags), a shell command naming node, async and sync (shell ×2) — each a reason on the row', `${C['test-planted-child-unread'].unread} | ${C['test-planted-fork-own'].unread} | ${C['test-planted-shell'].unread}`);
-  okd(/\[egress-sampler\] \d+ child(ren)? not read by the egress reader/.test(C['test-planted-fork-own'].stderr), '…and the suite\'s OWN process says them on its stderr at its exit (any runner\'s log carries it)', C['test-planted-fork-own'].stderr.slice(0, 300));
-  // (2) A CENSUS ROW (the default: the tree's own list names no plant) — its children carry NO reader, each counted; a fork gets the
-  // execArgv it would have with no reader: the product under test sees the same command lines as with the reader off
-  const [cKid, cFork, cSync] = await Promise.all([F('test-planted-child', 11), F('test-planted-fork', 12), F('test-planted-child-sync', 13)]);
-  let cForkArgv = null; try { cForkArgv = JSON.parse(fs.readFileSync(argvFile, 'utf8')); } catch { }
-  for (const [n, r] of [['census · a child', cKid], ['census · a default fork', cFork], ['census · a sync child', cSync]]) said(n, r);
-  okd(cKid.ok && !cKid.egress && /not read by the egress reader \(census ×1\)/.test(cKid.lines[0]) && cSync.ok && !cSync.egress && /census ×1/.test(cSync.lines[0]),
-    'THE MUST (r1246): in a CENSUS row the reader stays in the suite\'s own process — a node child is handed NO shim (its argv is as with the reader off), and it is COUNTED on the green row («census ×1»)', `${cKid.lines[0]} | ${cSync.lines[0]}`);
-  okd(cFork.ok && !cFork.egress && /census ×1/.test(cFork.lines[0]) && Array.isArray(cForkArgv) && !cForkArgv.some((a) => /egress-sampler\.cjs$|\.child\.cjs$/.test(a)),
-    '…and a census row\'s default fork() is handed the execArgv it would have with NO reader (none of the reader\'s words), counted', { line: cFork.lines[0], forkArgv: cForkArgv });
-  // RED CONTROL: a COPY of the reader without its child hook, in a carried row, counts NOTHING of the same child (the release's road)
-  okd(SRC.split('\ninstallChildren();\n').length === 2, 'CONTROL anchor: the reader installs its child hook once');
-  const noKids = P(readerDir('reader-no-children', SRC.replace('\ninstallChildren();\n', '\n'), KIDS), 'test-planted-child');
-  okd(noKids.rows.loaded && !noKids.words && !noKids.unread, 'CONTROL: a reader without its child hook counts NOTHING of the same child\'s dial — neither a host nor a reason (the release\'s road: the child legs above would be RED)', noKids);
+  if (!DEEP) inTwin('B-9dd0\'s remainder: the planted children, carried and census rows, and the reader-without-its-child-hook control');
+  else {
+    // (1) A CARRIED ROW: a COPY of the reader beside a list that names the plants as carried (the tree's own list names no plant)
+    const readerDir = (name, src, carried) => { const d = path.join(root, name); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'egress-sampler.cjs'), src); fs.writeFileSync(path.join(d, 'egress-carried-rows.json'), J({ carried })); return path.join(d, 'egress-sampler.cjs'); };
+    const SRC = fs.readFileSync(CI.EGRESS_SAMPLER, 'utf8');
+    const carriedReader = readerDir('reader-carried', SRC, KIDS);
+    const P = (reader, name) => { const f = path.join(root, `${name}.${path.basename(path.dirname(reader))}.ndjson`); fs.rmSync(f, { force: true }); fs.rmSync(argvFile, { force: true }); const r = spawnSync(process.execPath, ['--require', reader, path.join(root, 'scripts', name + '.mjs')], { env: { ...process.env, VIBESPACE_SUITE_EGRESS_FILE: f }, encoding: 'utf8', timeout: 8000 }); const rows = CI.egressOf(f); let fa = null; try { fa = JSON.parse(fs.readFileSync(argvFile, 'utf8')); } catch { } return { rc: r.status, rows, words: CI.egressWords(rows), unread: CI.egressUnreadTail(rows), stderr: String(r.stderr || ''), forkArgv: fa }; };
+    const C = Object.fromEntries(KIDS.map((n) => [n, P(carriedReader, n)]));
+    for (const n of KIDS) console.log(`      carried · ${n}: rc ${C[n].rc} · egress ${C[n].words || '(none)'}${C[n].unread}`);
+    okd(/192\.0\.2\.1:443 ×1/.test(C['test-planted-child'].words), 'a CARRIED row: a node CHILD the suite spawns is read too — its dial past the loopback is the row\'s, by host', C['test-planted-child'].words);
+    okd(/192\.0\.2\.1:444 ×1/.test(C['test-planted-child-sync'].words) && /192\.0\.2\.1:445 ×1/.test(C['test-planted-grandchild'].words), '…a SYNC child given a SCRUBBED env too (the shim names the file; nothing is added to its env), and a GRANDCHILD', `${C['test-planted-child-sync'].words} | ${C['test-planted-grandchild'].words}`);
+    okd(/192\.0\.2\.1:448 ×1/.test(C['test-planted-fork'].words) && Array.isArray(C['test-planted-fork'].forkArgv) && C['test-planted-fork'].forkArgv.some((a) => /egress-sampler\.cjs$/.test(a)), '…and a fork() that names no execArgv inherits the reader (counted by host)', { words: C['test-planted-fork'].words, argv: C['test-planted-fork'].forkArgv });
+    okd(!C['test-planted-child-unread'].words && /unread-on-purpose ×1/.test(C['test-planted-child-unread'].unread) && !C['test-planted-fork-own'].words && /own-flags ×1/.test(C['test-planted-fork-own'].unread) && /shell ×2/.test(C['test-planted-shell'].unread),
+      'NOT FOLLOWED, AND COUNTED (never silent): a child whose env names an EMPTY file (unread-on-purpose), a fork naming its OWN execArgv (own-flags), a shell command naming node, async and sync (shell ×2) — each a reason on the row', `${C['test-planted-child-unread'].unread} | ${C['test-planted-fork-own'].unread} | ${C['test-planted-shell'].unread}`);
+    okd(/\[egress-sampler\] \d+ child(ren)? not read by the egress reader/.test(C['test-planted-fork-own'].stderr), '…and the suite\'s OWN process says them on its stderr at its exit (any runner\'s log carries it)', C['test-planted-fork-own'].stderr.slice(0, 300));
+    // (2) A CENSUS ROW (the default: the tree's own list names no plant) — its children carry NO reader, each counted; a fork gets the
+    // execArgv it would have with no reader: the product under test sees the same command lines as with the reader off
+    const [cKid, cFork, cSync] = await Promise.all([F('test-planted-child', 11), F('test-planted-fork', 12), F('test-planted-child-sync', 13)]);
+    let cForkArgv = null; try { cForkArgv = JSON.parse(fs.readFileSync(argvFile, 'utf8')); } catch { }
+    for (const [n, r] of [['census · a child', cKid], ['census · a default fork', cFork], ['census · a sync child', cSync]]) said(n, r);
+    okd(cKid.ok && !cKid.egress && /not read by the egress reader \(census ×1\)/.test(cKid.lines[0]) && cSync.ok && !cSync.egress && /census ×1/.test(cSync.lines[0]),
+      'THE MUST (r1246): in a CENSUS row the reader stays in the suite\'s own process — a node child is handed NO shim (its argv is as with the reader off), and it is COUNTED on the green row («census ×1»)', `${cKid.lines[0]} | ${cSync.lines[0]}`);
+    okd(cFork.ok && !cFork.egress && /census ×1/.test(cFork.lines[0]) && Array.isArray(cForkArgv) && !cForkArgv.some((a) => /egress-sampler\.cjs$|\.child\.cjs$/.test(a)),
+      '…and a census row\'s default fork() is handed the execArgv it would have with NO reader (none of the reader\'s words), counted', { line: cFork.lines[0], forkArgv: cForkArgv });
+    // RED CONTROL: a COPY of the reader without its child hook, in a carried row, counts NOTHING of the same child (the release's road)
+    okd(SRC.split('\ninstallChildren();\n').length === 2, 'CONTROL anchor: the reader installs its child hook once');
+    const noKids = P(readerDir('reader-no-children', SRC.replace('\ninstallChildren();\n', '\n'), KIDS), 'test-planted-child');
+    okd(noKids.rows.loaded && !noKids.words && !noKids.unread, 'CONTROL: a reader without its child hook counts NOTHING of the same child\'s dial — neither a host nor a reason (the release\'s road: the child legs above would be RED)', noKids);
+  }
   // NODE_BIN: the RUNNING node only — a stand-in `node` (a shell script answering by its first word: the first gate's red in
   // test-node-runtime / test-update-road) and a bare name that is not on the PATH are left alone
   const sbin = path.join(root, 'standin-bin'); fs.mkdirSync(sbin, { recursive: true }); fs.writeFileSync(path.join(sbin, 'node'), '#!/bin/sh\necho stand-in\n', { mode: 0o755 });
