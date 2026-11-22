@@ -178,13 +178,16 @@ function startWrapper({ env = {}, wrapper = WRAPPER, dir: inDir = null } = {}) {
   child.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) !== -1) { const l = lb.slice(0, i).trim(); lb = lb.slice(i + 1); if (!l) continue; try { const r = JSON.parse(l); if (r.type !== '_stdin_ack') h.records.push(r); } catch { } } });
   child.stderr.setEncoding('utf8'); child.stderr.on('data', (d) => { h.stderr += d; });
   child.on('exit', (code) => { h.exited = { code, at: Date.now() }; });
+  child.on('close', () => { h.closed = true; });   // B-7e49: every stdio stream ended — the records are whole
   h.send = (o) => { try { child.stdin.write(JSON.stringify(o) + '\n'); } catch { } };
   h.find = (kind, pred = () => true) => h.records.find((r) => r.type === 'acp' && r.kind === kind && pred(r));
   h.all = (kind, pred = () => true) => h.records.filter((r) => r.type === 'acp' && r.kind === kind && pred(r));
   h.stub = () => { try { return fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   h.until = async (pred, ms = 8000, what = 'condition') => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = pred(); if (v) return v; await sleep(20); } throw new Error(`timeout: ${what} (records ${h.records.map((r) => r.kind).join(',')}; ${h.stderr.slice(-300)})`); };
   h.text = () => h.all('update', (r) => r.update?.sessionUpdate === 'agent_message_chunk').map((r) => r.update.content.text).join('');
-  h.stop = async () => { try { child.kill('SIGTERM'); } catch { } await sleep(150); };
+  // B-7e49 (bl-vault's slice, r2173): the stop waits for the child's own CLOSE (it exited and every stream ended: the records it
+  // wrote are read) — never longer than the 150 ms it slept, never past the end it waits for; 39 stops slept 5.9 s of the suite
+  h.stop = async () => { try { child.kill('SIGTERM'); } catch { } const t0 = Date.now(); while (!h.closed && Date.now() - t0 < 150) await sleep(5); };
   return h;
 }
 
