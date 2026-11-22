@@ -555,6 +555,37 @@ async function legLockWithdraw(doorSrc = null) {
   W.end();
   return rows;
 }
+// 主开发 r1874 (round w7w1lo9et's MUST): THE WITHDRAW IS THE LOCK'S — owed to For you's read, it withdraws ONLY if the vault is locked
+// THEN. The scene: a card open in the file from before a restart; For you HELD unread at the boot; a re-judge owes the ask to the read;
+// the vault LOCKS (the withdraw owed); it UNLOCKS (nothing more owed); the store READS: the owed re-judge finds the file's open card and
+// files nothing — and the owed withdraw, asked the state, leaves it: ONE open card, the job waiting on it. RED: the state not asked
+async function legHeldWithdraw(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(doorSrc ? 'hwdm' : 'hwd');
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({ name: 'hwd' }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
+  const a = (cards(W).find((i) => i.action.jobId === job.id) || {}).action || {};
+  W.end(); W.vault.close();   // the restart: this world's door and its hooks go with its vault engine (a quiet lock: no hook runs)
+  const f = path.join(W.dd, 'user-todos.json'); fs.renameSync(f, f + '.kept');   // the file kept aside; the boot meets a read that fails (held)
+  const v2 = VE.create({ dataDir: W.dd, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { } }, idleTimer: false, register: false });
+  await v2.unlock(PW);
+  const W2 = await world(doorSrc ? 'hwdm' : 'hwd', { dataDir: W.dd, vault: v2, grants: W.grants, held: true, doorSrc });
+  const j2 = W2.jm.jobs.get(job.id);
+  const waited = await W2.untilMs(() => !!j2 && j2.state === 'waiting' && j2.waitFor === 'approval', 8000);
+  W2.jm.vaultChanged('vault-approved');   // a re-judge while held: the ask is OWED to the read (the door's held road)
+  W2.vault.lock('door');                  // the lock: its withdraw OWED to the read (For you is held)
+  await W2.vault.unlock(PW);              // the unlock: its re-judge finds the ask owed already — nothing more is queued
+  fs.rmdirSync(f); fs.renameSync(f + '.kept', f);
+  const lifted = await W2.todos.readAgain();
+  await W2.door.factsLanded();
+  const open = cards(W2).filter((i) => i.action.jobId === job.id), res = resolvedOf(W2, a.askId);
+  rows.after = { open: open.length, same: open.length === 1 && open[0].action.askId === a.askId, closedBy: res.resolvedBy || null, state: j2 && j2.state, waitFor: j2 && j2.waitFor };
+  row(!!a.askId && waited.ok && lifted === true && W2.vault.state() === 'unlocked' && rows.after.same && !res.resolvedBy && j2.state === 'waiting' && j2.waitFor === 'approval',
+    'HELD → the ask owed → the LOCK (its withdraw owed) → the UNLOCK → the READ: the withdraw asks the vault, finds it OPEN and closes nothing — the file\'s ONE card stays open, the job waiting on it', rows.after);
+  W2.end();
+  return rows;
+}
 // the REAL road of a delete: the Vault window's 删除 of a free entry (src/server/vault-paste-door.js dropEntry) over the real job door
 const PASTE_PATH = path.join(REPO, 'src/server/vault-paste-door.js'), PASTE_SRC = fs.readFileSync(PASTE_PATH, 'utf8');
 const pasteOf = (src) => { if (!src) return R('src/server/vault-paste-door.js'); const m = new Module(PASTE_PATH, null); m.filename = PASTE_PATH; m.paths = Module._nodeModulePaths(path.dirname(PASTE_PATH)); m._compile(src, PASTE_PATH); return m.exports; };
@@ -1142,6 +1173,8 @@ const MUT_PASTE = pmut('    if (vaultJob) { try { vaultJob.entryGone(rowId, { la
 const MUT_AGENT_DEL = pmut('    if (vaultJob) { try { vaultJob.entryGone(id, { label }); }', '    if (false) { try { vaultJob.entryGone(id, { label }); }');
 const MUT_NOWITHDRAW = dmut("  if (typeof vault.onLock === 'function') vault.onLock(() => {\n", "  if (false) vault.onLock(() => {\n");   // B-a08e's control: the door without its lock road
 const [lockWithdraw, lockWithdrawMut] = await Promise.all([legLockWithdraw(), MUT_NOWITHDRAW ? legLockWithdraw(MUT_NOWITHDRAW) : {}]);
+const MUT_NOSTATE = dmut("    if (stateOf() !== 'locked') return;\n    index();", '    index();');   // r1874's control: the owed withdraw not asking the vault's state
+const [heldWithdraw, heldWithdrawMut] = await Promise.all([legHeldWithdraw(), MUT_NOSTATE ? legHeldWithdraw(MUT_NOSTATE) : {}]);
 const [revoke, gone, jgone, lockRuns, pdel, adel, revokeMut, goneMut, lockMut, pdelMut, adelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(), legAgentDelete(),
   MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}, MUT_AGENT_DEL ? legAgentDelete(MUT_AGENT_DEL) : {}]);
 const MUT_HELD = (() => { try { return swap(swap(DOOR_SRC, '    if (userTodos.isHeldUnread?.()) {\n', '    if (false) {\n'), '    if (userTodos.isHeldUnread?.()) return void ask(', '    if (false) return void ask('); } catch { return null; } })();   // ⑩d's control: the door files over a held tray (both held branches cut)
@@ -1186,6 +1219,8 @@ ok(!!MUT_CAP && capsMut.n === 5, 'CONTROL — no per-conversation bound: a fifth
 print('⑩ TAKEN BACK = STOPPED · A LOCK STOPS NOTHING (lane vault-job-approval — decisions ④ ③)', [...revoke, ...gone, ...jgone, ...lockRuns, ...pdel, ...adel]);
 print('⑩e A LOCK WITHDRAWS THE CARDS (B-a08e, 主开发 r1665) — the job waits, the unlock asks again', lockWithdraw);
 ok(!!MUT_NOWITHDRAW && !!lockWithdrawMut.locked && lockWithdrawMut.locked.open === 1, 'CONTROL — the door without its lock road: the card stays OPEN over a locked vault — RED on the copy', MUT_NOWITHDRAW ? lockWithdrawMut.locked : 'the copy could not be built (its anchor is missing)');
+print('⑩f THE WITHDRAW IS THE LOCK\'S (主开发 r1874) — owed to a held read, it withdraws only over a vault locked THEN', heldWithdraw);
+ok(!!MUT_NOSTATE && !!heldWithdrawMut.after && heldWithdrawMut.after.open === 0 && heldWithdrawMut.after.closedBy === 'vault_locked', 'CONTROL — the owed withdraw not asking the state: the card is closed «vault_locked» over an OPEN vault and the job waits with no card — RED on the copy', MUT_NOSTATE ? heldWithdrawMut.after : 'the copy could not be built (its anchor is missing)');
 console.log('⑩b MUTANTS (each a copy of the door — RED)');
 ok(!!MUT_REVOKE && revokeMut.desired === true, 'CONTROL — a ✕ that leaves the job running (the stop removed): still meant to run (desiredUp) — RED on the copy', MUT_REVOKE ? revokeMut.desired : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_GONE && goneMut.desired === true, 'CONTROL — a deleted entry that leaves its job running (the stop removed): still meant to run — RED on the copy', MUT_GONE ? goneMut.desired : 'the copy could not be built (its anchor is missing)');

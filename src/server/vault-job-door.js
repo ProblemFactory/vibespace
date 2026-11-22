@@ -373,6 +373,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const now0 = jm ? jm.jobs.get(job.id) : job;
     if (jm && (now0 !== job || job.state !== 'waiting' || job.waitFor !== 'approval')) return;   // it left its wait meanwhile (started, stopped, removed)
     if (userTodos.isHeldUnread?.()) return void ask(job, { missing: fresh.map((r) => r.name) });   // held meanwhile: the held road (the job waits, judged at the read)
+    if (stateOf() === 'locked') return;   // r1874 (the round's should): a lock landed while its facts were read — no card over a locked vault (a lock ends every ask); the unlock's re-judge files it
     index();
     let filed = 0;
     for (const r of fresh) {
@@ -474,9 +475,13 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   // test-vault-engine's census): each open approval card closes «vault_locked» by THIS door (its own close: never «closed elsewhere»,
   // so its job is not refused); the job keeps WAITING — a lock stops no job (decision ④) — and at the unlock the engine judges it
   // again (onChange's 'vault-unlocked') and files ONE new card. A card being answered finishes its answer. While For you is held
-  // unread the withdraw is OWED to its read (one, in memory: a restart is no lock act — the paste door's rule)
+  // unread the withdraw is OWED to its read (one, in memory: a restart is no lock act — the paste door's rule). THE WITHDRAW IS THE
+  // LOCK'S (主开发 r1874, round w7w1lo9et's MUST): when its moment comes — at once, or at the read it was owed to — it withdraws ONLY
+  // if the vault is locked THEN: an unlock before the read leaves every card as the file holds it (closing one over an open vault
+  // left its job waiting with no card to press — the owed re-judge had already run against that open card)
   let lockAtRead = false;
   const withdrawAll = () => {
+    if (stateOf() !== 'locked') return;
     index();
     for (const q of [...asks.values()]) if (!answering.has(q.askId)) { settle(q, 'vault_locked'); audit({ op: 'over', job: q.jobId, entry: q.ref, askId: q.askId, why: 'locked' }); }
   };
