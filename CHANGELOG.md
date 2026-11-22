@@ -104,6 +104,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Background Work results for a shut or offline paired machine now wait in order and go out when it is back; after an hour, For you shows one item for it.
 - What you type in a Task Group's Backlog (the add box, open edits) now stays when the list redraws for someone else's change.
 - Disconnecting a storage now says «Disconnecting…» while it waits, and says so when the storage did not disconnect.
+- On an ssh machine, Session Properties now says the CPU priority is below its ssh login, and no longer claims it for a terminal that joined a running shell.
 
 ## 2.369.415 — 2026-11-21
 
