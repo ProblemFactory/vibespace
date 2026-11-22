@@ -1800,10 +1800,18 @@ console.log('⑦ THE RELEASE FACTS (verifier #4 / #5)');
   // verifier #4: the ci.mjs row states this suite's cost truly — never less than what the suite WAITS on purpose (the FIFO read's bound)
   const CI = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
   // the time fastRuleFindings reads: the FIRST «· n ms|s» of the row's why (a restated row carries its runs and readings after it)
-  const rowLine = CI.split('\n').find((l) => l.includes("{ name: 'test-needs-doors', tier: 'fast',"));
-  const whyM = rowLine && /why: '((?:[^'\\]|\\.)*)'/.exec(rowLine);
-  const rowM = whyM && /·\s*(\d+(?:\.\d+)?)\s*(ms|s)\b/.exec(whyM[1]);
-  const statedMs = rowM ? Number(rowM[1]) * (rowM[2] === 's' ? 1000 : 1) : null;
+  const rowOf = (text) => text.split('\n').find((l) => l.includes("{ name: 'test-needs-doors', tier: 'fast',"));
+  const timeOf = (line) => { const w = line && /why: '((?:[^'\\]|\\.)*)'/.exec(line); return w && /·\s*(\d+(?:\.\d+)?)\s*(ms|s)\b/.exec(w[1]); };
+  const msOf = (m) => (m ? Number(m[1]) * (m[2] === 's' ? 1000 : 1) : null);
+  const rowLine = rowOf(CI);
+  const rowM = timeOf(rowLine);
+  const statedMs = msOf(rowM);
+  // PLANTED (主开发 r2048): the parse is pinned on both forms a row takes — the bare one and a restated one whose why carries its runs
+  // and readings (a second «· n s» and an escaped quote after the first) — and a why with no time reads none
+  ok(msOf(timeOf("  { name: 'test-needs-doors', tier: 'fast', why: 'in-process · 6.2 s' },")) === 6200
+    && msOf(timeOf("  { name: 'test-needs-doors', tier: 'fast', why: 'in-process · 17.1 s (restated 2026-11-22, lane bl-release — stated 6.2 s, read 14.1 s: ALONE, 12710 / 17055 ms; the suite\\'s own · 400 ms bound)' },")) === 17100
+    && msOf(timeOf("  { name: 'test-needs-doors', tier: 'fast', why: 'in-process, no time stated' },")) === null,
+    'verifier #4 CONTROLS: its parse reads the FIRST time of a bare row (6.2 s) and of a restated row (17.1 s, never a later «· n» or one past an escaped quote), and none where none is stated');
   ok(statedMs !== null && statedMs > FIFO_BOUND_MS, `verifier #4: scripts/ci.mjs's test-needs-doors row states a cost above the ${FIFO_BOUND_MS} ms this suite waits on purpose (the FIFO read's bound) — it states ${rowM ? rowM[1] + ' ' + rowM[2] : 'no time'}`, rowLine && rowLine.slice(0, 200));
   // verifier #5: the user CHANGELOG's newest «Fixed» is what a user of the RELEASE notices — none of its bullets names a door the same
   // version ADDS (a defect of a door the release never had is the engineering log's); the three languages keep one bullet count.
