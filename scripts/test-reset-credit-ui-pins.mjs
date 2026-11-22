@@ -114,7 +114,7 @@ console.log('\n§4 THE three entry points open ONE dialog');
     ok('NEGATIVE CONTROL: the pre-r2 ws relay is what the case census reports, and the writer grep alone would have missed it', CASE.test(preFix) && !WRITE.test(preFix));
   }
   ok('NEGATIVE CONTROL: a caller that bypasses the dialog is what the census reports', /type: 'codex-reset-credit'/.test("app.ws.send({ type: 'codex-reset-credit', sessionId })") && !(/openResetCreditDialog\(app, \{ accountKey: rec\.action\.accountKey/.test('openResetCredit(app, rec)')));
-  ok('the wall card and the arm card carry the account the credits belong to (offer.accountKey)', /return n !== null && n > 0 \? \{ available: n, mode, accountKey: key \} : null;/.test(read('src/server/usage-pool-engine.js')) && /resetCredit: \{ available: n, mode, accountKey: key, \.\.\.\(R \? \{ resetsAtSec: R \} : \{\}\) \}/.test(read('src/server/usage-pool-engine.js')));
+  ok('the wall card and the arm card carry the account the credits belong to (offer.accountKey)', /return n !== null && n > 0 \? \{ available: n, mode, accountKey: key \} : null;/.test(read('src/server/usage-pool-engine.js')) && /resetCredit: \{ available: n, mode, accountKey: key, \.\.\.\(R \? \{ resetsAtSec: R \} : \{\}\)(, \.\.\.\(refusedCode \? \{ refused: refusedCode \} : \{\}\))? \}/.test(read('src/server/usage-pool-engine.js')));
 }
 
 console.log('\n§5 i18n');

@@ -270,7 +270,7 @@ function refusalLine(code, { until = null, why = null, member = null } = {}) {
   switch (code) {
     case 'not_supported': return { key: i18nKey('This agent offers no reset-credit interface VibeSpace can use.'), params: {} };
     // B-f276's remainder (主开发 r1694): data/reset-credit-tries.json could not be read — held, read again; no credit until it reads
-    case 'attempts_unread': return { key: i18nKey('The reset-credit attempt records could not be read — no reset credit is used until they read again: a request made before the restart may have gone out, and a second one could spend a second credit. This heals by itself when they read.'), params: {} };
+    case 'attempts_unread': return { key: i18nKey('The reset-credit attempt records could not be read — no reset credit is used until the file can be read: a request made before the restart may have gone out, and a second one could spend a second credit. It is read again at each press; if this stays, check the reset-credit attempts file in VibeSpace’s data folder and its access.'), params: {} };
     case 'no_live_session': return { key: i18nKey('Needs a running chat session on this account — the credit is spent through that session’s own CLI. Start one, then try again.'), params: {} };
     case 'no_credits': return { key: i18nKey('This account has no stored reset credits.'), params: {} };
     // lane reset-path: a request was handed to codex and has not been SENT yet (≤ RESET_CREDIT_ACK_MS) —

@@ -4232,9 +4232,24 @@ function fileResetCreditTriesLost() {
 // were READ and do not parse are set aside, as before — and a set-aside that fails leaves them HELD (their only copy).
 const SR = require('../store-read.js');
 const TRIES_VALID = (d) => !!d && typeof d === 'object' && d.v === 1 && Array.isArray(d.tries);
-let _resetCreditTriesHeld = null;   // { code, why, at, tries, filed, todoId, saidPersist } while the file could not be read
-let _resetCreditTriesReading = null;   // the held file's ONE read again in flight (a promise), or null
+let _resetCreditTriesHeld = null;   // { code, why, at, tries, filed, todoId, saidPersist, lasting, asideFailed } while the file could not be read
+let _resetCreditTriesReading = null;   // the held file's read again in flight (a promise), or null
+// line 429's follow (主开发 r2413, smalls): A READ AGAIN THAT NEVER SETTLES (a dead mount) keeps no later one from starting for good: past
+// the bound a PERSON's press may read again (still held until one answers) — never the pool's round, and never more than two at
+// once (a hung read holds one of the few threads every file read of the hub shares)
+let _resetCreditTriesReads = 0, _resetCreditTriesReadAt = 0, _resetCreditTriesStuckSaid = false, _resetCreditTriesAsiding = false;
+const RESET_CREDIT_REREAD_BOUND_MS = 30_000, RESET_CREDIT_REREADS_MAX = 2;
 const RESET_CREDIT_TRIES_HELD_TEXT = 'The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do';
+// line 429's follow (r2413 (3)): A CAUSE THAT DOES NOT PASS BY ITSELF (a permission, a folder in its place, torn bytes that could not be
+// moved) never says «heals by itself»: until the file can be read — and what a person can do: the file and its access
+const RESET_CREDIT_TRIES_LASTING_TEXT = 'The reset-credit attempt records cannot be read — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder and its access';
+const RESET_CREDIT_TRIES_LASTING = new Set(['EACCES', 'EPERM', 'EISDIR', 'ENOTDIR', 'ELOOP', 'set-aside failed']);
+/** the held file's words for a refusal (the writers, the preview) */
+function resetCreditTriesHeldWords(H) {
+  return H.lasting
+    ? `the reset-credit attempt records cannot be read (${H.code}) — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder (reset-credit-tries.json) and its access (its owner and permissions)`
+    : `the reset-credit attempt records could not be read (${H.code}) — no reset credit is used until they read again (they are read again at the next press and at the pool's next pass; a passing fault heals by itself)`;
+}
 function fileResetCreditTriesHeld() {
   const H = _resetCreditTriesHeld;
   if (!H || H.filed) return false;
@@ -4244,10 +4259,10 @@ function fileResetCreditTriesHeld() {
   try {
     const item = todos.add('webui:reset-credit', {
       origin: 'pool',
-      text: RESET_CREDIT_TRIES_HELD_TEXT,
-      detail: `${path.basename(RESET_CREDIT_TRIES_FILE)} could not be read (${H.code}). It is kept as it is: nothing is written over it, and it is read again at the next reset-credit press and at the pool's next evaluation. Until it reads, every reset-credit use — a press and the automatic one — is refused: a request made before the restart may have gone out, and a second one could spend a second credit.`,
+      text: H.lasting ? RESET_CREDIT_TRIES_LASTING_TEXT : RESET_CREDIT_TRIES_HELD_TEXT,
+      detail: `${path.basename(RESET_CREDIT_TRIES_FILE)} could not be read (${H.code}). It is kept as it is: nothing is written over it, and it is read again at the next reset-credit press${H.asideFailed ? '' : ' and at the pool\'s next evaluation'}. Until it reads, every reset-credit use — a press and the automatic one — is refused: a request made before the restart may have gone out, and a second one could spend a second credit.${H.lasting ? ' This cause does not pass by itself: check the file and its access (its owner and permissions, the folder it is in) — or, for bytes that could not be moved aside, move it aside yourself.' : ''}`,
       urgency: 'normal', kind: 'notice',
-      i18n: { text: { key: i18nKey('The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do'), params: {} } },
+      i18n: { text: { key: H.lasting ? i18nKey('The reset-credit attempt records cannot be read — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder and its access') : i18nKey('The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do'), params: {} } },
     });
     H.filed = !!(item && item.id); H.todoId = (item && item.id) || null;
   } catch (e) { console.warn('[reset-credit] could not file the For-you notice about the held attempts file:', e.message); }
@@ -4255,20 +4270,29 @@ function fileResetCreditTriesHeld() {
 }
 function holdResetCreditTries(a) {
   const was = _resetCreditTriesHeld;
-  _resetCreditTriesHeld = { code: String(a.code || 'unreadable'), why: String(a.why || 'the read failed'), at: was ? was.at : Date.now(), tries: (was ? was.tries : 0) + 1, filed: !!(was && was.filed), todoId: was ? was.todoId : null, saidPersist: !!(was && was.saidPersist) };
-  if (!was) console.warn(`[reset-credit] data/reset-credit-tries.json could not be read (${_resetCreditTriesHeld.code}) — HELD: kept as it is, nothing is written over it, and no reset credit is used until it reads (an attempt made before this start may have gone out); read again every few minutes`);
+  const code = String(a.code || 'unreadable');
+  _resetCreditTriesHeld = { code, why: String(a.why || 'the read failed'), at: was ? was.at : Date.now(), tries: (was ? was.tries : 0) + 1, filed: !!(was && was.filed), todoId: was ? was.todoId : null, saidPersist: !!(was && was.saidPersist), lasting: RESET_CREDIT_TRIES_LASTING.has(code), asideFailed: !!a.asideFailed || !!(was && was.asideFailed) };
+  // line 429's follow (r2413 (3)): no timer — said as it is: read again at a press and at the pool's pass (a failed set-aside: a press alone)
+  if (!was) console.warn(`[reset-credit] data/reset-credit-tries.json could not be read (${code}) — HELD: kept as it is, nothing is written over it, and no reset credit is used until it reads (an attempt made before this start may have gone out); read again at the next reset-credit press${_resetCreditTriesHeld.asideFailed ? '' : ' and at the pool\'s next pass'}, never on a timer${_resetCreditTriesHeld.lasting ? ' — a cause that does not pass by itself: check the file and its access' : ''}`);
   fileResetCreditTriesHeld();
 }
 /** the held file READ AGAIN — once at a time, off the loop (the next press, the pool's pass); its answer goes where the start's goes.
  *  → the read's promise (null when nothing is held) */
-function rereadResetCreditTries() {
-  if (!_resetCreditTriesHeld) return null;
-  if (_resetCreditTriesReading) return _resetCreditTriesReading;
-  _resetCreditTriesReading = fs.promises.readFile(RESET_CREDIT_TRIES_FILE, 'utf8').then((text) => ({ text }), (error) => ({ error }))
-    .then((read) => { if (_resetCreditTriesHeld) applyResetCreditTriesRead(read); })
+function rereadResetCreditTries(by = 'press') {
+  const H = _resetCreditTriesHeld;
+  if (!H) return null;
+  if (by !== 'press' && H.asideFailed) return null;   // line 429's follow (r2413 (1)): a set-aside that failed is tried again by a person's press alone, never the pool's round
+  if (_resetCreditTriesReading) {
+    if (by !== 'press' || Date.now() - _resetCreditTriesReadAt < RESET_CREDIT_REREAD_BOUND_MS || _resetCreditTriesReads >= RESET_CREDIT_REREADS_MAX) return _resetCreditTriesReading;
+    if (!_resetCreditTriesStuckSaid) { _resetCreditTriesStuckSaid = true; console.warn(`[reset-credit] the held attempts file's read again has not answered in ${RESET_CREDIT_REREAD_BOUND_MS / 1000} s — still held; this press reads it again (at most ${RESET_CREDIT_REREADS_MAX} reads at once)`); }
+  }
+  _resetCreditTriesReads++; _resetCreditTriesReadAt = Date.now();
+  const p = fs.promises.readFile(RESET_CREDIT_TRIES_FILE, 'utf8').then((text) => ({ text }), (error) => ({ error }))
+    .then((read) => { _resetCreditTriesReads--; return _resetCreditTriesHeld ? applyResetCreditTriesRead(read, { aside: 'async' }) : 0; })   // the first answer while held wins
     .catch((e) => console.warn('[reset-credit] the held attempts file\'s read again failed:', e.message))
-    .finally(() => { _resetCreditTriesReading = null; });
-  return _resetCreditTriesReading;
+    .finally(() => { if (_resetCreditTriesReading === p) { _resetCreditTriesReading = null; _resetCreditTriesStuckSaid = false; } });
+  _resetCreditTriesReading = p;
+  return p;
 }
 function liftResetCreditTriesHold(how) {
   const H = _resetCreditTriesHeld;
@@ -4280,15 +4304,34 @@ function liftResetCreditTriesHold(how) {
 /** a reset-credit use refused while the attempts are held → {ok:false, code, why} | null (the ONE writer of the verb asks it) */
 function resetCreditTriesRefusal() {
   const H = _resetCreditTriesHeld;
-  return H ? { ok: false, code: 'attempts_unread', why: `the reset-credit attempt records could not be read (${H.code}) — no reset credit is used until they read again (it heals by itself when they do)`, detail: null } : null;
+  return H ? { ok: false, code: 'attempts_unread', why: resetCreditTriesHeldWords(H), detail: null } : null;
 }
 function loadResetCreditTries() {
   let read;
   try { read = { text: fs.readFileSync(RESET_CREDIT_TRIES_FILE, 'utf8') }; } catch (e) { read = { error: e }; }
   return applyResetCreditTriesRead(read);
 }
+/** line 429's follow (主开发 r2413 (1)): torn bytes found by a READ AGAIN are set aside OFF the hub's loop (the data folder can sit on a
+ *  network mount: a rename that hangs there must never hold the hub) — one at a time; → a promise of how many came back (0) */
+function asideTornTriesAsync(a, why, asideAs) {
+  if (_resetCreditTriesAsiding) return Promise.resolve(0);   // one set-aside in flight: a second answer of the same bytes waits for it
+  _resetCreditTriesAsiding = true;
+  return fs.promises.rename(RESET_CREDIT_TRIES_FILE, asideAs).then(() => true, (e) => { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); return false; })
+    .then((ok) => { _resetCreditTriesAsiding = false; return _resetCreditTriesHeld ? settleTornTries(a, why, asideAs, ok) : 0; });
+}
+/** torn bytes after their set-aside: moved ⇒ the release's «set aside» (the attempts open before are unknown); not moved ⇒ their only
+ *  copy, HELD (`asideFailed`: tried again by a person's press alone) */
+function settleTornTries(a, why, asideAs, asideOk) {
+  a = SR.afterSetAside(a, asideOk ? path.basename(asideAs) : null);
+  if (a.state === 'unreadable') { holdResetCreditTries({ code: 'set-aside failed', why: 'its bytes did not parse and could not be set aside', asideFailed: true }); return 0; }   // their only copy: HELD, never written over
+  liftResetCreditTriesHold('did not parse — set aside');
+  console.warn(`[reset-credit] data/reset-credit-tries.json is unreadable (${why}) — set aside as ${path.basename(asideAs)}; every reset-credit request open before this start is UNKNOWN now (a press on a codex account should refresh it first)`);
+  _resetCreditTriesLost = { file: RESET_CREDIT_TRIES_FILE, asideAs, at: Date.now(), why, filed: false };
+  fileResetCreditTriesLost();
+  return 0;
+}
 /** ONE read's outcome → the attempts it brings back (the load, and the held file's read again). → how many */
-function applyResetCreditTriesRead(read) {
+function applyResetCreditTriesRead(read, { aside = 'sync' } = {}) {
   let a = SR.storeAnswer(read, { valid: TRIES_VALID });
   if (a.state === 'missing') { liftResetCreditTriesHold('is not there (no attempts on file)'); return 0; }   // no file = no attempts (the common first boot)
   if (a.state === 'unreadable') { holdResetCreditTries(a); return 0; }
@@ -4296,15 +4339,10 @@ function applyResetCreditTriesRead(read) {
   let why = a.state === 'corrupt' ? (a.code === 'did not parse' ? 'not JSON: ' + String((a.error && a.error.message) || '').slice(0, 80) : 'not the attempts shape (v 1, tries[])') : null;
   if (why) {
     const asideAs = `${RESET_CREDIT_TRIES_FILE}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    if (aside === 'async') return asideTornTriesAsync(a, why, asideAs);   // line 429's follow (r2413 (1)): the READ-AGAIN road never renames on the loop
     let asideOk = false;
-    try { fs.renameSync(RESET_CREDIT_TRIES_FILE, asideAs); asideOk = true; } catch (e) { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); }
-    a = SR.afterSetAside(a, asideOk ? path.basename(asideAs) : null);
-    if (a.state === 'unreadable') { holdResetCreditTries({ code: 'set-aside failed', why: 'its bytes did not parse and could not be set aside' }); return 0; }   // their only copy: HELD, never written over
-    liftResetCreditTriesHold('did not parse — set aside');
-    console.warn(`[reset-credit] data/reset-credit-tries.json is unreadable (${why}) — set aside as ${path.basename(asideAs)}; every reset-credit request open before this start is UNKNOWN now (a press on a codex account should refresh it first)`);
-    _resetCreditTriesLost = { file: RESET_CREDIT_TRIES_FILE, asideAs, at: Date.now(), why, filed: false };
-    fileResetCreditTriesLost();
-    return 0;
+    try { fs.renameSync(RESET_CREDIT_TRIES_FILE, asideAs); asideOk = true; } catch (e) { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); }   // the boot's own road (before the first loop turn)
+    return settleTornTries(a, why, asideAs, asideOk);
   }
   liftResetCreditTriesHold('reads again — its attempts are back');   // before the revive: a charged revive persists below
   const revive = (r) => {
@@ -4535,10 +4573,13 @@ function sweepResetCreditAsks() {
   if (!_resetCreditAsksSeeded && todos && typeof todos.snapshot === 'function' && !(typeof todos.isHeldUnread === 'function' && todos.isHeldUnread())) {   // B-44f3: never seeded once from a held (unread) list
     _resetCreditAsksSeeded = true;
     try {
+      const staleHeld = [];   // line 429's follow (r2413 smalls): the last run's held-attempts notice — its id lived in that run's memory
       for (const it of todos.snapshot().open || []) {
+        if (!_resetCreditTriesHeld && it && it.origin === 'pool' && (it.text === RESET_CREDIT_TRIES_HELD_TEXT || it.text === RESET_CREDIT_TRIES_LASTING_TEXT)) staleHeld.push(it.id);
         const act = it && it.action;
         if (act && act.type === 'reset-credit' && act.accountKey && !_resetCreditAsks.has(it.id)) _resetCreditAsks.set(it.id, { key: String(act.accountKey), sid: act.sessionId || '?' });
       }
+      try { for (const id of staleHeld) if (typeof todos.setStatus === 'function') { todos.setStatus(id, 'done', 'the attempt records read at this start'); console.log(`[reset-credit] the last run's «attempt records could not be read» notice ${id} is resolved: this start read the file`); } } catch (e) { console.warn('[reset-credit] the last run\'s held-attempts notice could not be resolved:', e.message); }
     } catch { }
   }
   if (!_resetCreditAsks.size) return 0;
@@ -5212,7 +5253,7 @@ function spentWindowOf(snap) {
  */
 function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = {}) {
   try { fileResetCreditTriesLost(); } catch { } // verify r2: the boot's unreadable-file notice, filed once the inbox exists
-  try { fileResetCreditTriesHeld(); rereadResetCreditTries(); } catch { } // B-f276's remainder: the held file's notice (filed once the inbox exists) and its read again at the press
+  try { fileResetCreditTriesHeld(); rereadResetCreditTries('press'); } catch { } // B-f276's remainder: the held file's notice (filed once the inbox exists) and its read again at the press
   key = String(key || '');
   try { const a = accounts.get(key); if (a && a.type === 'pooled') key = accounts.poolCurrent(key) || key; } catch { }
   const backend = quotaBackendFor(key);
@@ -5221,7 +5262,7 @@ function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = 
   // name null = the machine's own login (the client says so in its own words)
   const base = { key, name: recName, backend, vendor, creditsLeft: null, resetsAtSec: null, periodSec: null, remainingPct: null, sessionId: null, cooldownUntilSec: null };
   if (capsOf(backend).resetCredit !== true) return { ...base, code: 'not_supported', error: 'this agent has no reset-credit interface (Claude Code offers only the interactive /limit-reset)' };
-  if (_resetCreditTriesHeld) return { ...base, code: 'attempts_unread', error: `the reset-credit attempt records could not be read (${_resetCreditTriesHeld.code}) — no reset credit is used until they read again (it heals by itself: they are read again at this press): a request made before the restart may have gone out` };   // B-f276's remainder (主开发 r1694, r1702)
+  if (_resetCreditTriesHeld) return { ...base, code: 'attempts_unread', error: `${resetCreditTriesHeldWords(_resetCreditTriesHeld)}: a request made before the restart may have gone out` };   // B-f276's remainder (主开发 r1694, r1702)
   // ONLY A WRAPPER THAT SENDS THE KEY carries a person's press (lane reset-path): an older one would
   // be refused by codex (the key is required on every measured CLI), so the press goes to the HELPER
   // (one bounded codex app-server child on this account's own login) — never a greyed button
@@ -5294,7 +5335,7 @@ function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now(), 
   // verify r8 T0: a person's press READS FIRST through the conversation's own wrapper (`readFirst` on the verb) — unless the
   // route just read the account for an unsettled prior (`afterRead`: one read per press, never two)
   const wr = writeResetCredit(session, { resetsAtSec: p.resetsAtSec || 0, lane: null, origin: 'user', now, key: p.key, readFirst: !afterRead });
-  if (!wr.ok) return { ok: false, code: 'spend_refused', error: wr.why ? `${wr.why}${wr.detail ? ': ' + wr.detail : ''}` : 'the spend authorizer failed', preview: p };
+  if (!wr.ok) return { ok: false, code: wr.code || 'spend_refused', error: wr.why ? `${wr.why}${wr.detail ? ': ' + wr.detail : ''}` : 'the spend authorizer failed', preview: p };   // line 429's follow: the writer's own code (attempts_unread) passed through
   console.log(`[reset-credit] ${session._webuiId}: a person asked for a reset credit on ${nameOf(p.key)} (credits=${p.creditsLeft ?? '?'}${wr.readFirst ? ', the wrapper reads the account first' : ''})`);
   global.__vsEvent?.('codex-reset-credit-user', session._accountId || 'global');
   return { ok: true, sessionId: session._webuiId, via: 'session', preview: p };
@@ -5613,13 +5654,13 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
     });
     if (speak) console.log(`[reset-credit] ${session._webuiId}: ${v.use ? 'worth it' : 'kept'} (${v.reason} — ${resetCredit.reasonText(v.reason)}) mode=${mode} ${warmth.inTurn ? 'in-turn' : warmth.warm ? 'warm' : 'cold'} poolAlternative=${poolAlternative}${ladderPosition !== 'wall' ? ' ' + ladderPosition : ''} credits=${creditsLeft ?? '?'} on ${nameOf(key)}`);
     const desc = resetCredit.describeUse(vendor, v, { nowSec, resetsAtSec: R || null, periodSec, creditsLeft });
-    const wallCard = (refusedBy = null) => {
+    const wallCard = (refusedBy = null, refusedCode = null) => {   // refusedCode (line 429's follow): the writer's own refusal code, on the card
       // OFF / ASK / a refused verdict: the wall card NAMES the credits (§3) and
       // carries the offer for the button; only when the count is KNOWN and > 0
       if (!firstOfEvent || !(creditsLeft > 0)) return;
       const n = creditsLeft;
       const why = refusedBy ? ` Not used automatically: ${refusedBy}.` : v.use || mode === 'off' ? '' : ` Not used automatically: ${resetCredit.reasonText(v.reason)}.`;
-      try { feedPeerCard(session, { fromName: 'VibeSpace', kind: 'notification', text: `Usage limit hit on ${nameOf(key)} — ${n} stored reset credit${n === 1 ? '' : 's'} available. ${desc.text}${why}`, resetCredit: { available: n, mode, accountKey: key, ...(R ? { resetsAtSec: R } : {}) } }); } catch { }
+      try { feedPeerCard(session, { fromName: 'VibeSpace', kind: 'notification', text: `Usage limit hit on ${nameOf(key)} — ${n} stored reset credit${n === 1 ? '' : 's'} available. ${desc.text}${why}`, resetCredit: { available: n, mode, accountKey: key, ...(R ? { resetsAtSec: R } : {}), ...(refusedCode ? { refused: refusedCode } : {}) } }); } catch { }
     };
     if (!v.use || mode === 'off') { wallCard(); return v.reason === 'cold-switch-first' ? 'switch-first' : 'skipped'; }
     if (mode === 'ask') {
@@ -5661,7 +5702,7 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
     const wr = writeResetCredit(session, { resetsAtSec: R, lane, origin: 'auto', now, key });
     // the card NAMES the account the ceiling refused (r3 — the code alone said
     // "hour-cap" and only the journal said whose hour it was)
-    if (!wr.ok) { if (wr.code === 'attempts_unread') { wallCard(wr.why); return 'skipped'; } if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
+    if (!wr.ok) { if (wr.code === 'attempts_unread') { wallCard(wr.why, wr.code); return 'skipped'; } if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
     const saved = v.waitSavedSec ? ` — saves a wait of ${resetCredit.fmtWait(v.waitSavedSec)}` : '';
     const leftTxt = creditsLeft > 0 ? `; ${creditsLeft - 1} left after this one` : '';
     serverNotice(`codex-reset-${session._webuiId}-${now}`, `Usage limit hit on ${nameOf(key)} — using a stored reset credit${saved}${leftTxt} (${warmth.inTurn || warmth.warm ? 'warm conversation: before switching accounts' : 'no pool member can take it'}).`, { i18n: { key: warmth.inTurn || warmth.warm ? i18nKey('Usage limit hit on {account} — using a stored reset credit (warm conversation: before switching accounts).') : i18nKey('Usage limit hit on {account} — using a stored reset credit (no pool member can take it).'), params: { account: nameOf(key) }, ...(v.waitSavedSec ? { then: { key: i18nKey('Saves a wait of {wait}.'), params: { wait: resetCredit.fmtWait(v.waitSavedSec) } } } : creditsLeft > 0 ? { then: creditsLeft - 1 === 1 ? { key: i18nKey('1 reset credit left after this one.'), params: {} } : { key: i18nKey('{n} reset credits left after this one.'), params: { n: creditsLeft - 1 } } } : {}) } });
@@ -6699,7 +6740,7 @@ function kickPoolEval({ kick = true } = {}) {
       }
     } catch { }
     try { sweepResetCreditAsks(); } catch { } // an ask item whose carrier is gone (r3)
-    try { rereadResetCreditTries(); } catch { } // B-f276's remainder (r1702 (2)): a held attempts file read again at the pool's own pass
+    try { rereadResetCreditTries('pass'); } catch { } // B-f276's remainder (r1702 (2)): a held attempts file read again at the pool's own pass
   });
 }
 // WORKFLOW usage tailer (2.266.0, user question "不能拦截workflow agents吗"):
@@ -8657,7 +8698,7 @@ function maybeStopOnFallback(session, id, from, to) {
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
-    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, _resetCreditTriesHeld: () => _resetCreditTriesHeld, _resetCreditTriesReading: () => _resetCreditTriesReading, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
+    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, _resetCreditTriesHeld: () => _resetCreditTriesHeld, _resetCreditTriesReading: () => _resetCreditTriesReading, _writeResetCreditViaHelper: writeResetCreditViaHelper, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test
