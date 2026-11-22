@@ -1799,9 +1799,12 @@ console.log('⑦ THE RELEASE FACTS (verifier #4 / #5)');
 {
   // verifier #4: the ci.mjs row states this suite's cost truly — never less than what the suite WAITS on purpose (the FIFO read's bound)
   const CI = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
-  const rowM = /\{ name: 'test-needs-doors', tier: 'fast', why: 'in-process · ([\d.]+) (ms|s)' \}/.exec(CI);
+  // the time fastRuleFindings reads: the FIRST «· n ms|s» of the row's why (a restated row carries its runs and readings after it)
+  const rowLine = CI.split('\n').find((l) => l.includes("{ name: 'test-needs-doors', tier: 'fast',"));
+  const whyM = rowLine && /why: '((?:[^'\\]|\\.)*)'/.exec(rowLine);
+  const rowM = whyM && /·\s*(\d+(?:\.\d+)?)\s*(ms|s)\b/.exec(whyM[1]);
   const statedMs = rowM ? Number(rowM[1]) * (rowM[2] === 's' ? 1000 : 1) : null;
-  ok(statedMs !== null && statedMs > FIFO_BOUND_MS, `verifier #4: scripts/ci.mjs's test-needs-doors row states a cost above the ${FIFO_BOUND_MS} ms this suite waits on purpose (the FIFO read's bound) — it states ${rowM ? rowM[1] + ' ' + rowM[2] : 'no time'}`, rowM && rowM[0]);
+  ok(statedMs !== null && statedMs > FIFO_BOUND_MS, `verifier #4: scripts/ci.mjs's test-needs-doors row states a cost above the ${FIFO_BOUND_MS} ms this suite waits on purpose (the FIFO read's bound) — it states ${rowM ? rowM[1] + ' ' + rowM[2] : 'no time'}`, rowLine && rowLine.slice(0, 200));
   // verifier #5: the user CHANGELOG's newest «Fixed» is what a user of the RELEASE notices — none of its bullets names a door the same
   // version ADDS (a defect of a door the release never had is the engineering log's); the three languages keep one bullet count.
   // A head may hold no «Fixed» at all (a version of changes only, as a lane's tip on a release is before its block gathers): then

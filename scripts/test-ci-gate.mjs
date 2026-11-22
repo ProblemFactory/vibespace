@@ -225,8 +225,28 @@ console.log('\n§2 tier hygiene');
   // and lane bl-mail (B-360d unit 1, moved onto the train, 主开发 r1542 / r1765): 17 → 18 — test-sliced-walk restated 9.2 → 13.1 s by the
   // unit (the journal's per-update compare and the open's sliced warm-up under its legs) with its named debt (B-fbd6 item 7)
   // and B-23e5 line 262's follow (主开发 r1733 (7)): 17 → 18 — test-safe-fs-path-memory restated 9.0 → 13.0 s (its remainder's legs) with its named debt B-4b9a
-  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 19,
-    `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept`);
+  // THE BOUND IS THE TRUE COUNT, A RATCHET THAT ONLY GOES DOWN (主开发 r1531, lane bl-release's restating line, 2026-11-22): the
+  // fast tier's false rows restated at what they read ALONE, each ≥ 10 s with its named debt (family B-7e49, the fast tier's time) —
+  // 18 → 48 by that arithmetic (the train's 18 + this line's new overs). Its first entry is PINNED below (a raise is a ruling's: it edits that pin with its words).
+  // From here the count of named debts IS the bound (judged by COUNT, not by name): a NEW over is red until its line moves the
+  // row heavy or cuts it; a cut that takes a row off the list is red until ITS OWN LINE appends the lower count to the ratchet; an
+  // entry not below the one before it is red (a raise is a ruling's, never a line's arithmetic).
+  const FAST_OVER_RATCHET = [48];   // [r1531's true count, then each cut's lower count, in order]
+  const overBoundFindings = (count, ratchet) => {
+    const bound = ratchet[ratchet.length - 1], out = [];
+    if (ratchet.some((b, i) => i > 0 && b >= ratchet[i - 1])) out.push(`the ratchet does not go down: ${ratchet.join(' → ')}`);
+    if (count > bound) out.push(`${count} named debts over the bound ${bound}: a new over waits for its row to move heavy or be cut`);
+    if (count < bound) out.push(`${count} named debts under the bound ${bound}: the cut's own line appends ${count} to FAST_OVER_RATCHET`);
+    return out;
+  };
+  ok(overBoundFindings(FAST_OVER_RATCHET[0], [FAST_OVER_RATCHET[0]]).length === 0 && /over the bound/.test(overBoundFindings(FAST_OVER_RATCHET[0] + 1, [FAST_OVER_RATCHET[0]]).join())
+    && /appends/.test(overBoundFindings(FAST_OVER_RATCHET[0] - 1, [FAST_OVER_RATCHET[0]]).join()) && /does not go down/.test(overBoundFindings(FAST_OVER_RATCHET[0] - 1, [FAST_OVER_RATCHET[0], FAST_OVER_RATCHET[0] - 2, FAST_OVER_RATCHET[0] - 1]).join())
+    && /does not go down/.test(overBoundFindings(FAST_OVER_RATCHET[0] - 3, [FAST_OVER_RATCHET[0], FAST_OVER_RATCHET[0] - 2, FAST_OVER_RATCHET[0] - 1, FAST_OVER_RATCHET[0] - 3]).join()) && /does not go down/.test(overBoundFindings(FAST_OVER_RATCHET[0] - 2, [FAST_OVER_RATCHET[0], FAST_OVER_RATCHET[0] - 2, FAST_OVER_RATCHET[0] - 2]).join())
+    && overBoundFindings(FAST_OVER_RATCHET[0] - 2, [FAST_OVER_RATCHET[0], FAST_OVER_RATCHET[0] - 2]).length === 0,
+    'CONTROLS: the bound on the count is green, a lowered ratchet on its count is green; one over too many, one under (a cut not yet appended), a ratchet that rises at its end, in its middle, or stays level are each red');
+  ok(FAST_OVER_RATCHET[0] === 48, `the ratchet's first entry is r1531's true count, 48 (a raise is a ruling's: its words edit this pin)`);
+  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overBoundFindings(overRows.length, FAST_OVER_RATCHET).length === 0,
+    `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept; the bound ON the true count (${overBoundFindings(overRows.length, FAST_OVER_RATCHET).join('; ') || FAST_OVER_RATCHET.join(' → ')})`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
   // MEASURED AGAINST STATED (B-eedd): the rule above judges the STATED time, so a whole green tier records its readings
   // (<git dir>/ci-fast-times.json, fastTimesPath) and a row READ ≥ 10 s at ≥ ×1.5 its statement in BOTH newest whole tiers is a false
