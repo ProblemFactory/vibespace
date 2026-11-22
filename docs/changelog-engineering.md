@@ -1737,6 +1737,11 @@ This file is the engineers' record of every release: the lanes, the verification
   - leg ⑫ reads the helper's environment from a REAL child started from ctx.x11Env, as it reads the application's and the display server's;
   - the three Fixed rows name the window's title too.
 
+### lg-providers B-d578 pool unit (b) — a provider member names its own provider (ruling r1516: (b) before any provider id reaches a decision)
+- WHY: accounts.memberProviderOf asked `this.get(id)`; a `pv-…` id is a provider record, not an account ⇒ null ⇒ the pool's reader (poolProviderOf) fell to the POOL's own first-party provider — a provider member would have been a same-provider (hot, unasked) move.
+- accounts `_providerMemberOf`: a `pv-` id (not a built-in record) answers the provider store's record (providerRecordOf), and one the store does not hold an «unknown» provider of its own with no models (never null). LEGS (test-pool-auto): the record, the «unknown» one (not the pool's, serves nothing), account members as before; RED: a copy of the release's accounts answers null and the pool's reader agrees it with its own provider.
+- r2238's owed comment, as code: the resume's carry check judges a HINTED family (a resume naming no model) under every bucket; leg (the hinted scene drops the carry).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
