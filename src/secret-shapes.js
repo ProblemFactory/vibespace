@@ -625,13 +625,17 @@ function holderVerdict(k) {
 // quantifier — r2's `[closers]+$` over a 64 KiB value backtracked: 1.9 s at 60 000 dots, verify r4 F1's shape); a HOLDER's value is
 // read by a code scan to the next `& # ; ' " < >` or blank and masked, a PUBLIC name's value is walked ON (the scan resumes right after
 // its `=`), so a holder nested in it (`?password_reset_url=https://app/reset?token=…`) is masked and the public name stays (r3 C)
-// r1554 / r1658 (主开发, a find of paced-wake-retry's generator — beside line 246's stretch law, R9 before R7): on a FREE TEXT a
-// query VALUE ends where the stretch ends — a blank, `& # ;`, a quote, `< >`, a backtick, and EVERY character outside ASCII (every
-// MESSAGE_STOPS member is one): a value glued to unspaced Chinese prose is the value alone, never the prose after it, a mail
-// address in it or a second URL. A URL carries its own non-ASCII percent-encoded (ASCII), so an encoded value is read whole as
-// before; a value a person QUOTES in guillemets (`?password=«Summer1!»`, the name rule's head) is read from its « to its »; a
-// head whose value starts with any other character outside ASCII is no head (no empty mark before the prose)
-const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=«|[^&#;\s"'<>`\u0080-\uffff])/g;
+// r1554 → r2209 (主开发's law, restated: it replaces r1554's «every character outside ASCII ends a value», which hid too little):
+// on a FREE TEXT a query value is read as line 246 read it (to the next `& # ;`, a quote, `< >` or a blank) with ONE new stop —
+// AFTER an ASCII first character, a character of the CJK kind ends it (the ideographs, kana, hangul, the CJK punctuation and the
+// full-width forms; every MESSAGE_STOPS member is one): an ASCII value glued to unspaced Chinese prose is the value alone, never the
+// prose after it, a mail address in it or a second URL. Every OTHER character outside ASCII (an accented letter, Greek, Cyrillic…)
+// is PART of the value and hidden with it. Inside such a value a backtick (a code span's end) and a « or » that is not the belts'
+// own mark end it too: the two things line 246 hid that this shows, as ruled (no credential carries either raw). A value that
+// STARTS outside ASCII, or with a backtick, is read exactly as line 246 read it, hidden whole (a little prose hidden is the safe
+// side). THE ONE LIMIT: a pass-phrase that turns from ASCII to CJK in its middle, raw in a query on a free text, is hidden up to
+// the turn. A URL carries its own non-ASCII percent-encoded, so an encoded value is ASCII and read whole. The head is line 246's
+const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=[^&#;\s"'<>])/g;
 const isBlankCode = (c) => (c >= 9 && c <= 13) || c === 32 || c === 0xA0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200A) || c === 0x2028 || c === 0x2029 || c === 0x202F || c === 0x205F || c === 0x3000 || c === 0xFEFF;   // `\s`'s set
 // r3 (G): what the PROSE opened before the head (in its blank-free run) — a closer that ends a holder's value goes outside the mask
 // ONLY when it closes one of these (the `)` of `[label](` / `(`, the `」` of `「`), or as ONE sentence-final `.` / `,` before a blank or
@@ -662,12 +666,13 @@ function queryTail(text, vs, ve, opens) {
   for (; j > i; j--) { const c = CLOSE_AT.get(text.charCodeAt(j)); if (c === undefined || opens[c] <= 0) break; opens[c]--; k++; }   // the prose's own wrapper
   return k;
 }
-// …and as the stretch reads it, the belts' own mark «redacted» is read WHOLE inside a value (R9 runs first: a nested address whose
-// pass-phrase R9 already masked stays ONE value for hidesHolder to judge, masked whole as r5 has it); any other « or » ends it
-const QUERY_VALUE_RE = /«[^&#;\s"'<>`«»\u0080-\uffff]{1,65536}»?|(?:[^&#;\s"'<>`\u0080-\uffff]|«redacted»){1,65536}/y;   // one class run (the mark one unit; or one value quoted in « »), nothing after it: each unit's first character decides its branch — linear, no backtracking; r1554: ASCII and the mark
+// …and the belts' own mark «redacted» is ONE unit of a value on both branches (R9 runs first, and its mark is nine characters longer
+// than what it hides: counted by characters, a value R9 marked passed line 246's bound and was read CUT, its rest never hidden as one
+// value — test-exit-run's hosted red, r2106; a nested address whose pass-phrase R9 masked stays ONE value for hidesHolder)
+const QUERY_VALUE_RE = /[^&#;\s"'<>`\u0080-\uffff](?:[^&#;\s"'<>`«»\u1100-\u11ff\u2e80-\u2fdf\u2ff0-\u303f\u3040-\u31ff\u3200-\u4dbf\u4e00-\u9fff\ua960-\ua97f\uac00-\ud7ff\ud840-\ud8bf\uf900-\ufaff\ufe10-\ufe1f\ufe30-\ufe6f\uff00-\uffef]|«redacted»){0,65535}|(?:«redacted»|[^&#;\s"'<>]){1,65536}/y;   // the FIRST character decides the branch (ASCII: the CJK stop; else line 246's run); each branch a run with nothing after it — linear, no backtracking
 /** r4: does a PUBLIC value hide a holder — a nested `?name=` / `&name=` whose name HOLDS, or a userinfo — once percent-decoded?
  *  r5: a userinfo WITH A PASSWORD, anywhere in the decoded value; a nested holder head anywhere in it (the whole value read). */
-const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=«|[^&#;\s"'<>`\u0080-\uffff])/g;   // r1554: as QUERY_HEAD_RE
+const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=[^&#;\s"'<>])/g;   // r2209 (c): a DECODED address is not a free text — line 246's own head, no new stop
 const ENC_HEAD_RE = /%(?:3F|26|3B|23)/i;   // an encoded `? & ; #` — the only escapes that can open a nested head once decoded
 const AT_RE = /@|%40/i;                    // r5: a userinfo needs an `@`, raw or encoded — no `@`, no userinfo (and no decode for it)
 function hidesHolder(value) {
@@ -855,6 +860,10 @@ function nameBlanksEnd(text, i) { NAME_BLANK_Y.lastIndex = i; NAME_BLANK_Y.exec(
 const NAME_BLANKS = (re) => { const src = re.source.replace('([ \\t]{1,3})', '(' + NAME_BLANK_CLASS + '{1,16})'); if (src === re.source) throw new Error('secret-shapes: a word row lost its blank run'); return new RegExp(src.replace('(?!«)', ''), re.flags); };
 const WORD_NEXT_NAME_RE = NAME_BLANKS(WORD_NEXT_RE), WORD_RUN_NAME_RE = NAME_BLANKS(WORD_RUN_RE);
 const HTTP_NAME_RE = (() => { const src = HTTP_RE.source.split('[ \\t]+').join(NAME_BLANK_CLASS + '{1,16}'); if (src === HTTP_RE.source) throw new Error('secret-shapes: the bearer row lost its blank run'); return new RegExp(src, HTTP_RE.flags); })();   // `bearer`␣(any blank)…
+// r2209 (d): at a NAME a value is read as line 246 read it (a name is not a free text: no CJK stop, no backtick or guillemet stop), and
+// a value a person QUOTES in guillemets is hidden from its « to its », whatever is inside (`?password=«密码»`, `«Grüße»`); a « with no
+// » on its line before the next « is line 246's run. The mark is one unit here too
+const NAME_QUERY_VALUE_RE = /«[^«»\r\n]{1,65536}»|(?:«redacted»|[^&#;\s"'<>]){1,65536}/y;   // an unclosed « gives its run back a step a character, to the next « or line end, once: linear
 const NAME_QUERY_HEAD_RE = new RegExp(QUERY_HEAD_RE.source.replace('(?!«)', ''), 'g');
 function nameQuery(text) {
   let n = 0, out = '', last = 0, m, judgedTo = 0;
@@ -866,13 +875,13 @@ function nameQuery(text) {
     // a nested holder or a password-carrying userinfo, once decoded); the walk goes ON inside it, so a raw nested holder is still found
     if (!holds) {
       if (vs < judgedTo) continue;
-      QUERY_VALUE_RE.lastIndex = vs; const pv = QUERY_VALUE_RE.exec(text); if (!pv) continue;
+      NAME_QUERY_VALUE_RE.lastIndex = vs; const pv = NAME_QUERY_VALUE_RE.exec(text); if (!pv) continue;
       judgedTo = vs + pv[0].length;
       if (!hidesHolder(pv[0])) continue;
       n++; out += text.slice(last, vs) + REDACTED; last = judgedTo; NAME_QUERY_HEAD_RE.lastIndex = last; continue;
     }
-    QUERY_VALUE_RE.lastIndex = vs;
-    const v = QUERY_VALUE_RE.exec(text);
+    NAME_QUERY_VALUE_RE.lastIndex = vs;
+    const v = NAME_QUERY_VALUE_RE.exec(text);
     if (!v || !anyValue(v[0])) continue;                               // r253: a holder parameter's value is hidden whatever its shape (the release's R7)
     n++; out += text.slice(last, vs) + REDACTED; last = vs + v[0].length; NAME_QUERY_HEAD_RE.lastIndex = last;
   }

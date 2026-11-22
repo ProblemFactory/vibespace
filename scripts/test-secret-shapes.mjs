@@ -902,6 +902,26 @@ console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the
 // goes — the scheme, the user and the host stay; only after a scheme and `://`; a bare user (ssh / scp / a mail address / a git
 // remote) is kept; a port is no password; a percent-encoded one still is; an empty one hides nothing; the mark is the belts' own;
 // OVER-MASKING IS A DEFECT — each shape that must stay is a leg, beside the six that must go and the red control (the release's rows)
+// r2209 (主开发): the R7 expressions of LINE 246 (fa0a6c1a5, this follow's base) and of the ROUND's tip (e06c2a0e9), planted by the
+// legs below — line 246's masker = this tree with line 246's value expressions (free text and name); the round's tip = its four
+const R7_L246 = {
+  head: "const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=[^&#;\\s\"'<>])/g;",   // stale-pins: kept (line 246's R7 head, compared)
+  value: "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;",   // stale-pins: kept (line 246's value class, planted to compare)
+  nested: "const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=[^&#;\\s\"'<>])/g;",   // stale-pins: kept (line 246's nested head, compared)
+};
+const R7_E06 = {
+  head: "const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=«|[^&#;\\s\"'<>`\\u0080-\\uffff])/g;",   // stale-pins: kept (the round's tip, a red control)
+  value: "const QUERY_VALUE_RE = /«[^&#;\\s\"'<>`«»\\u0080-\\uffff]{1,65536}»?|(?:[^&#;\\s\"'<>`\\u0080-\\uffff]|«redacted»){1,65536}/y;",   // stale-pins: kept (the round's tip, a red control)
+  nested: "const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=«|[^&#;\\s\"'<>`\\u0080-\\uffff])/g;",   // stale-pins: kept (the round's tip, a red control)
+};
+const R7_KINDS = ['accented', 'startsOutside', 'guillemetName', 'encodedNested', 'rawNested', 'backtick', 'guillemet', 'turnToCjk'];
+const r7Plant = (src, which) => {
+  const lineOf = (s, k) => s.split('\n').find((l) => l.startsWith(k)).split('   //')[0], asName = (l) => 'const NAME_QUERY_VALUE_RE = ' + l.slice('const QUERY_VALUE_RE = '.length);
+  const P = which === 'l246' ? [['const QUERY_VALUE_RE = ', R7_L246.value], ['const NAME_QUERY_VALUE_RE = ', asName(R7_L246.value)]]
+    : [['const QUERY_HEAD_RE = ', R7_E06.head], ['const QUERY_VALUE_RE = ', R7_E06.value], ['const NESTED_HEAD_RE = ', R7_E06.nested], ['const NAME_QUERY_VALUE_RE = ', asName(R7_E06.value)]];
+  let s = src; for (const [k, v] of P) s = anchored(s, lineOf(s, k), v, `r2209 ${which} ${k.trim()}`); return s;
+};
+
 console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes (a message, an output head, a job\'s name); every kept shape kept');
 {
   const SS = r('src/secret-shapes.js'), J = JSON.stringify, M = r('src/job-model.js');
@@ -1018,7 +1038,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   // over-mask (r1510) are drawn on purpose, each with what it hides BY CONSTRUCTION, and counted: (A) a host and port glued to a later
   // at-sign with no blank (the port and the glued word hidden; the mention after stays whole); (B) an image reference's tag; (C) a raw
   // at-sign's widening (a pass-phrase URL glued to a later at-sign: the host and the glued word hidden with it)
-  const genDraws = (S, { seed = 0x5eed1504, draws = 2400, onDraw = null } = {}) => {   // onDraw(text, its secrets hidden by construction): a second judge of the same draws (r2106)
+  const genDraws = (S, { seed = 0x5eed1504, draws = 2400, onDraw = null, r7 = false } = {}) => {   // onDraw(text, its secrets hidden by construction, its named exceptions, its R7 kind): a second judge of the same draws (r2106); r7: the R7 kinds drawn too (r2209)
     let st = seed >>> 0;
     const rnd = () => { st = (st + 0x6D2B79F5) >>> 0; let t = st; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
     const pick = (a) => a[Math.floor(rnd() * a.length)];
@@ -1042,6 +1062,28 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
       let t = '', want = '', qAt = -1, laterAt = false;
       const passes = [], secrets = [];
       const put = (x) => { if (qAt >= 0 && x.includes('@')) laterAt = true; t += x; want += x; }, hide = (x) => { secrets.push(x); if (qAt >= 0 && x.includes('@')) laterAt = true; t += x; want += REDACTED; };
+      if (r7 && rnd() < 0.45) {   // r2209 (主开发): THE R7 KINDS — a holder's query value as the restated law reads it, each secret known
+        const HOLD = ['password', 'token', 'access_token', 'api_key', 'client_secret', 'passwd', 'auth_token'];
+        const UP = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789-._~!$*+', CJKS = '密码钥匙令牌鉴权凭证パスワード비밀번호';
+        const OTHER = ['ÄÖÜßÉÈÇÑØÅäöüéèçñøå', 'ΑΒΓΔΛΜΠΣΩαβγδλμπσω', 'ЖЗИЛПФЦШЯДжзилпфцшяд'];
+        const runOf = (a, n) => { const c = [...a]; let s = ''; for (let i = 0; i < n; i++) s += pick(c); return s; };
+        const mixed = () => { let s = runOf(UP, 2 + Math.floor(rnd() * 4)); for (let i = 1 + Math.floor(rnd() * 3); i > 0; i--) s += runOf(pick(OTHER), 1 + Math.floor(rnd() * 3)) + runOf(UP, 1 + Math.floor(rnd() * 4)); return s; };
+        const outside = () => runOf(pick([...OTHER, CJKS]), 1 + Math.floor(rnd() * 2)) + mixed();
+        const zh = rnd() < 0.5, name = pick(HOLD), kind = pick(R7_KINDS), ex = [];
+        const end = (glued) => { const e = rnd(); if (e < 0.4) put(' ' + pick(LA)); else if (e < 0.65) put('&lang=en ' + pick(LA)); else if (glued && zh) put(pick(ZH)); };
+        put(zh ? pick(ZH) : pick(LA) + ' ');
+        if (kind === 'accented') { put('https://app.example/login?' + name + '='); hide(mixed()); end(true); }
+        else if (kind === 'startsOutside') { put('https://app.example/login?' + name + '='); hide(outside()); end(true); }
+        else if (kind === 'guillemetName') { put('https://app.example/x?' + name + '=«'); hide(rnd() < 0.5 ? runOf(CJKS, 2 + Math.floor(rnd() * 3)) : mixed()); put('»'); end(false); }
+        else if (kind === 'encodedNested') { const s = encodeURIComponent(outside()), u = encodeURIComponent('https://b.example/cb?' + name + '=') + s; put('https://a.example/login?next=' + u.slice(0, u.length - s.length)); hide(s); end(true); }
+        else if (kind === 'rawNested') { put('https://a.example/login?next=https://b.example/cb?' + name + '='); hide(outside()); end(true); }
+        else {   // (e) / (f): the named exceptions — hidden up to the stop, shown from it on (on a free text only)
+          const pre = runOf(UP, 6 + Math.floor(rnd() * 6)), stop = kind === 'backtick' ? '`' : kind === 'guillemet' ? '«' : runOf(CJKS, 2 + Math.floor(rnd() * 2)), shown = stop + runOf(UP, 2 + Math.floor(rnd() * 5));
+          put('https://app.example/login?' + name + '=' + pre + shown); ex.push({ kind, hidden: pre, shown }); put(' ' + pick(LA));
+        }
+        if (onDraw) onDraw(t, secrets, ex, kind);
+        continue;
+      }
       const r = rnd();
       if (r < 0.06) {   // (A) a host and port glued to a later at-sign, no blank — the port and the glued word hidden by construction
         classes.A++;
@@ -1079,7 +1121,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
       // (D, the coordinator's r1553): a query value glued to unspaced Chinese prose with a later at-sign in the same run is
       // R7's to read (the release's r5: its value runs to the next & # ; or blank and hides it whole when the prose holds a userinfo). Its
       // check is weaker: no byte of any pass-phrase in the output, and nothing before that query value differs
-      if (onDraw) onDraw(t, secrets);
+      if (onDraw) onDraw(t, secrets, [], null);
       const classD = qAt >= 0 && laterAt;
       let fired = false;
       for (const [road, f] of [['head', (x) => S.redactSecrets(x).text], ['message', (x) => S.redactSecrets(x, { message: true }).text], ['name', (x) => S.redactByValue(x).text]]) {
@@ -1148,31 +1190,56 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   const leakBad = LEAKS.filter(([, t, frags]) => { const pre = t.slice(0, t.indexOf('?')).split(frags[0]).join(REDACTED);
     return [SS.redactSecrets(t).text, SS.redactSecrets(t, { message: true }).text, SS.redactByValue(t).text, SS.redactByValue(t, { typed: true }).text, belt.maskForSink(t, { message: true })].some((o) => frags.some((f) => o.includes(f)) || !o.startsWith(pre)); });
   ok(!leakBad.length, `R9 BEFORE R7 — the generator's leak, named: an address with a query glued to unspaced Chinese prose that later holds a URL with a userinfo — on five roads no byte of either pass-phrase is out, and nothing before the query value differs${leakBad.length ? ' — wrong: ' + leakBad.map(([w]) => w).join(' · ') : ''}`);
-  // r1554 / r1658 (lane mask-value-shape): R7's value now ends where the stretch ends (a character outside ASCII ends it), so the ORDER
+  // r1554 / r1658 (lane mask-value-shape): R7's value now ends at the prose (r2209: after an ASCII first character a CJK one ends it), so the ORDER
   // alone no longer leaks this text: the control plants the order of 4e85efb11 WITH the release's value class (the two together were
   // the leak); the order alone under today's value class is checked to leak nothing (a second fence, not a red)
   const VAL_NOW = SRC.split('\n').find((l) => l.startsWith('const QUERY_VALUE_RE = ')).split('   //')[0];
   const R7ORDER = anchored(SRC, R9S + Q7, Q7 + R9S, 'R7 before R9 (the order of the tip before)');
-  // r2106 (主开发: the R7 follow takes test-exit-run's hosted red): NOTHING THIS FOLLOW LETS THROUGH THAT LINE 246 HIDES. The
-  // generator's draws through line 246's masker (this tree with R7's three expressions as the train's tip had them: an anchored copy)
-  // and through this tree's, on three roads: every secret the generator hides by construction that line 246 does not show, this tree
-  // does not show either (the follow shows MORE prose after a query value, never a secret). RED: this tree without R9's two calls
-  // (line 246's own rule gone) shows the pass-phrases line 246 hides
+  // r2106 → r2209 (主开发): NOTHING THE R7 FOLLOW LETS THROUGH THAT LINE 246 HIDES, judged by a PARTIAL show. The generator, the R7
+  // kinds drawn too (a holder's value with an accented letter; one that starts outside ASCII; a CJK or accented one in guillemets at a
+  // name; an encoded and a raw nested holder whose value starts outside ASCII), runs through line 246's masker (this tree with line 246's
+  // two value expressions planted: an anchored copy) and through this tree's, on three roads: ANY FOUR CHARACTERS IN A ROW of a secret
+  // that this tree shows more often than line 246 does is red. The only named exceptions, each counted, on the two free-text roads:
+  // (e) a backtick or a « that is not the mark inside an ASCII-led value (shown from it on) and (f) a pass-phrase turning from ASCII to
+  // CJK (hidden up to the turn); at a name they are secrets like every other. REDS: the round's tip e06c2a0e9 (its four expressions
+  // planted) shows each kind the round's musts named; this tree without R9's two calls shows the pass-phrases line 246 hides
   {
     const lineOf = (src, k) => src.split('\n').find((l) => l.startsWith(k)).split('   //')[0];
-    const TIP3 = [['const QUERY_HEAD_RE = ', "const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=[^&#;\\s\"'<>])/g;"],   // stale-pins: kept (line 246's masker: the tip's expressions, planted to compare)
-      ['const QUERY_VALUE_RE = ', "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;"],   // stale-pins: kept (line 246's masker: the tip's expressions, planted to compare)
-      ['const NESTED_HEAD_RE = ', "const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=[^&#;\\s\"'<>])/g;"]];   // stale-pins: kept (line 246's masker: the tip's expressions, planted to compare)
-    let s246 = SRC; for (const [k, v] of TIP3) s246 = anchored(s246, lineOf(s246, k), v, 'line 246 ' + k.trim());
-    const L246 = mutantCopies('r2106-line246', REPO).load('src/secret-shapes.js', s246, 'line246');
+    ok(lineOf(SRC, 'const QUERY_HEAD_RE = ') === R7_L246.head && lineOf(SRC, 'const NESTED_HEAD_RE = ') === R7_L246.nested,
+      'r2209 (c): the free text\'s head and the DECODED address\'s nested head are line 246\'s own, character for character');
+    const L246 = mutantCopies('r2106-line246', REPO).load('src/secret-shapes.js', r7Plant(SRC, 'l246'), 'line246');
+    const TIPE06 = mutantCopies('r2209-tip-e06c', REPO).load('src/secret-shapes.js', r7Plant(SRC, 'e06'), 'tip-e06c');
     const R9_CALLS = SRC.split('\n').filter((l) => l.trim().startsWith('text = redactUserinfo(text,'));
     let noR9 = SRC; for (const l of R9_CALLS) noR9 = anchored(noR9, l + '\n', '', 'no R9 ' + l.trim().slice(0, 40));
     const NO_R9 = mutantCopies('r2106-no-r9', REPO).load('src/secret-shapes.js', noR9, 'no-r9');
-    const ROADS = [(S, t) => S.redactSecrets(t).text, (S, t) => S.redactSecrets(t, { message: true }).text, (S, t) => S.redactByValue(t).text];
-    const judge = (M) => { let draws = 0, secrets = 0; const shown = []; genDraws(SS, { onDraw: (t, sec) => { draws++; secrets += sec.length; for (const f of ROADS) { const a = f(L246, t), b = f(M, t); for (const x of sec) if (!a.includes(x) && b.includes(x)) shown.push({ t, x }); } } }); return { draws, secrets, shown }; };
-    const nl = judge(SS), nlr = judge(NO_R9);
-    ok(R9_CALLS.length === 2 && nl.draws >= 2000 && nl.secrets > 500 && nl.shown.length === 0 && nlr.shown.length > 10,
-      `NOTHING THE R7 FOLLOW LETS THROUGH THAT LINE 246 HIDES: ${nl.draws} draws, ${nl.secrets} secrets hidden by construction × 3 roads — ${nl.shown.length} shown here that line 246 hides${nl.shown.length ? ' — ' + nl.shown.slice(0, 3).map((x) => J(x.x)).join(' · ') : ''}; RED (no R9: line 246's rule gone): ${nlr.shown.length} shown`);
+    const ROADS = [(S, x) => S.redactSecrets(x).text, (S, x) => S.redactSecrets(x, { message: true }).text, (S, x) => S.redactByValue(x).text];
+    const grams = (x) => { const c = [...x]; if (c.length < 4) return [x]; const g = []; for (let i = 0; i + 4 <= c.length; i++) g.push(c.slice(i, i + 4).join('')); return g; };
+    const occ = (s, g) => s.split(g).length - 1;
+    const more = (a, b, x) => grams(x).some((g) => occ(b, g) > occ(a, g));   // shown HERE more often than line 246 shows it
+    const judge = (M, draws = 2400) => {
+      let n = 0, secrets = 0; const shown = [], kinds = {}, exc = { backtick: 0, guillemet: 0, turnToCjk: 0 }, odd = [];
+      genDraws(SS, { r7: true, draws, onDraw: (x, sec, ex, kind) => {
+        n++; secrets += sec.length + ex.length; if (kind) kinds[kind] = (kinds[kind] || 0) + 1;
+        ROADS.forEach((f, road) => {
+          const a = f(L246, x), b = f(M, x);
+          for (const s of sec) if (more(a, b, s)) shown.push({ x, s, kind: kind || 'R9', road });
+          for (const e of ex) {
+            if (road === 2) { if (more(a, b, e.hidden + e.shown)) shown.push({ x, s: e.hidden + e.shown, kind: e.kind, road }); continue; }   // at a name: a secret like every other
+            if (more(a, b, e.hidden)) shown.push({ x, s: e.hidden, kind: e.kind, road });
+            else if (b.includes(e.shown) && !a.includes(e.shown)) exc[e.kind]++;   // the named exception, as named: hidden up to it, shown from it on
+            else odd.push({ x, b, kind: e.kind });
+          }
+        });
+      } });
+      return { draws: n, secrets, shown, kinds, exc, odd };
+    };
+    const byKind = (r) => r.shown.reduce((o, s) => ({ ...o, [s.kind]: (o[s.kind] || 0) + 1 }), {});
+    const nl = judge(SS), nlr = judge(NO_R9), nle = judge(TIPE06, 800), ek = byKind(nle);
+    const MUST_KINDS = ['accented', 'startsOutside', 'guillemetName', 'encodedNested'];
+    for (const s of nl.shown.slice(0, 3)) console.log(`      ✗ ${s.kind} on road ${s.road}: ${J(s.x)} shows ${J(s.s)}`);
+    ok(R9_CALLS.length === 2 && nl.draws >= 2000 && nl.secrets > 1000 && R7_KINDS.every((k) => nl.kinds[k] > 30) && nl.shown.length === 0 && nl.odd.length === 0
+      && nl.exc.backtick > 0 && nl.exc.guillemet > 0 && nl.exc.turnToCjk > 0 && nlr.shown.length > 10 && MUST_KINDS.every((k) => ek[k] > 0),
+      `NOTHING THE R7 FOLLOW LETS THROUGH THAT LINE 246 HIDES, judged by a PARTIAL show (any four characters in a row): ${nl.draws} draws (the R7 kinds ${J(nl.kinds)}), ${nl.secrets} secrets × 3 roads — ${nl.shown.length} shown here that line 246 hides; the named exceptions, counted on the two free-text roads: (e) a backtick ${nl.exc.backtick}, a « not the mark ${nl.exc.guillemet}, (f) ASCII turning to CJK ${nl.exc.turnToCjk}${nl.odd.length ? ' — ' + nl.odd.length + ' not as named' : ''}; RED the round's tip e06c2a0e9: ${J(ek)}; RED no R9: ${nlr.shown.length} shown`);
   }
   const R7FIRST = mutantCopies('da2d-r7first', REPO).load('src/secret-shapes.js', anchored(R7ORDER, VAL_NOW, "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;", 'the release value class beside the old order'), 'r7first');   // stale-pins: kept (the red control plants the release's value class back)
   const ORDER_ONLY = mutantCopies('da2d-order-only', REPO).load('src/secret-shapes.js', R7ORDER, 'order-only');
@@ -1183,11 +1250,12 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   ok(NOMARK.redactSecrets(MUSER).text.includes(pw), 'RED CONTROL — THE MARK ENDS THE WALK (« outside the alphabet): a user masked before lets its password through (' + J(NOMARK.redactSecrets(MUSER).text.replace(pw, '<the password>')) + ')');
 }
 
-console.log('r1554 / r1658 (a find of paced-wake-retry\'s generator; beside line 246\'s stretch law): a query value on a FREE TEXT ends where the stretch ends — a blank, a quote, < >, a backtick, any character outside ASCII');
+console.log('r1554 → r2209 (主开发\'s law, restated; beside line 246\'s stretch law): a query value on a FREE TEXT is read as line 246 read it with ONE new stop — after an ASCII first character, a character of the CJK kind ends it');
 {
   const SS = r('src/secret-shapes.js'), J = JSON.stringify;
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const lineOf = (src, k) => src.split('\n').find((l) => l.startsWith(k)).split('   //')[0];
   const T = crypto.randomBytes(9).toString('hex'), PW = crypto.randomBytes(6).toString('hex');
   // the find's shapes: a holder's value glued to unspaced Chinese prose that later holds a mail address, a userinfo (and an EMPTY
   // user before an at-sign) and a second URL; a public value glued the same way with a password userinfo after it
@@ -1208,14 +1276,49 @@ console.log('r1554 / r1658 (a find of paced-wake-retry\'s generator; beside line
   const ENC = `https://a.example/?token=${T}%E5%AF%86%E7%A0%81&lang=zh`;
   ok(SS.redactSecrets(`https://a.example/?token=${T}&x=1`).text === `https://a.example/?token=${REDACTED}&x=1` && SS.redactSecrets(ENC).text === `https://a.example/?token=${REDACTED}&lang=zh`,
     'an ASCII URL is read as before: its holder value masked whole (a percent-encoded non-ASCII value too), its neighbour kept');
-  // a head whose value starts outside ASCII is no head (no empty mark is ever written before the prose)
-  ok(SS.redactSecrets('设置 ?token=密码在这里').text === '设置 ?token=密码在这里', 'a head whose value starts outside ASCII is no head: no empty mark before the prose');
+  // r2209: what a holder's value hides, on every kind the round named — a free text (the line and the message mode) or a name
+  const grams = (x) => { const c = [...x]; if (c.length < 4) return [x]; const g = []; for (let i = 0; i + 4 <= c.length; i++) g.push(c.slice(i, i + 4).join('')); return g; };
+  const outs = (S, t, w) => (w === 'name' ? [S.redactByValue(t).text] : [S.redactSecrets(t).text, S.redactSecrets(t, { message: true }).text]);
+  const hides = (S, [, t, x, w]) => outs(S, t, w).every((o) => o.includes(REDACTED) && !grams(x).some((g) => o.includes(g)));
+  const ROWS = [   // [what, the text, the secret, the road]
+    ['(a) an accented letter inside', 'login https://h.example/login?password=Müller2024 next', 'Müller2024', 'free'],
+    ['(a) Greek inside', 'see ?token=AB12λμ34xy ok', 'AB12λμ34xy', 'free'],
+    ['(a) Cyrillic inside, glued to Chinese prose after', '登录?access_token=QW9жз77再试', 'QW9жз77', 'free'],
+    ['(b) a value that starts with an accented letter', 'login ?password=Ärger99 next', 'Ärger99', 'free'],
+    ['(b) a value that starts with CJK', '设置 ?token=密码在这里', '密码在这里', 'free'],
+    ['(b) a value that starts with a backtick (a code span opened at the value)', 'use ?token=`QW12ER34` here', 'QW12ER34', 'free'],
+    ['(c) an encoded nested holder whose value starts outside ASCII', 'open https://a.example/login?next=https%3A%2F%2Fb.example%2Fcb%3Fpassword%3D%C3%84rger2024 now', '%C3%84rger2024', 'free'],
+    ['(c) a raw nested holder whose value starts outside ASCII', 'open https://a.example/login?next=https://b.example/cb?password=Ärger2024 now', 'Ärger2024', 'free'],
+    ['(d) at a name: a CJK value in guillemets', 'nightly?password=«密码»', '密码', 'name'],
+    ['(d) at a name: an accented value in guillemets', 'nightly?password=«Grüße2024»', 'Grüße2024', 'name'],
+    ['(d) at a name: a value in guillemets with a blank inside', 'nightly?password=«Kenn wort9»', 'Kenn wort9', 'name'],
+    ['at a name: an accented value', 'nightly?password=Kücheñ42x', 'Kücheñ42x', 'name'],
+  ];
+  const rowBad = ROWS.filter((row) => !hides(SS, row));
+  ok(!rowBad.length, `r2209 (a)–(d): a holder's value hidden WHOLE on every kind the round named (${ROWS.length}: an accented, a Greek, a Cyrillic letter inside — part of the value; a value that starts outside ASCII or with a backtick — line 246's run; an encoded and a raw nested holder — line 246's own nested head; at a name a value in guillemets from its « to its », and an accented one)${rowBad.length ? ' — wrong: ' + rowBad.map((row) => row[0] + ' → ' + J(outs(SS, row[1], row[3]))).join(' · ') : ''}`);
+  console.log(`  · judged: ${J(ROWS.map((row) => outs(SS, row[1], row[3])[0]))}`);
+  // r2209 (e) / (f), NAMED: the two things this shows that line 246 hid, and THE ONE LIMIT — [what, the text, hidden, shown]
+  const NAMED = [
+    ['(e) a backtick inside (a code span\'s end)', 'run ?token=QW12ER34`ZX9 now', 'QW12ER34', '`ZX9'],
+    ['(e) a « that is not the mark inside', 'run ?token=QW12ER34«ZX9 now', 'QW12ER34', '«ZX9'],
+    ['(f) a pass-phrase turning from ASCII to CJK', 'run ?password=QW12ER34密码ZX9 now', 'QW12ER34', '密码ZX9'],
+  ];
+  const namedOk = NAMED.every(([, t, h, s]) => outs(SS, t, 'free').every((o) => o.includes(REDACTED + s) && !grams(h).some((g) => o.includes(g))) && outs(SS, t, 'name').every((o) => !grams(h + s).some((g) => o.includes(g))));
+  ok(namedOk, `r2209 (e) / (f), NAMED: on a free text a backtick and a « that is not the mark end an ASCII-led value (shown from it on — no credential carries either raw), and a pass-phrase turning from ASCII to CJK is hidden up to the turn (THE ONE LIMIT); at a name all three are hidden whole — ${J(NAMED.map(([, t]) => SS.redactSecrets(t).text))}`);
+  // (a): every MESSAGE_STOPS member is of the CJK kind — it ends an ASCII-led value
+  const STOPS = [...((SRC.match(/const MESSAGE_STOPS = new Set\(\[\.\.\.'([^']+)'\]/) || [])[1] || '')];
+  const stopBad = STOPS.filter((ch) => SS.redactSecrets('x ?token=QW12ER34' + ch + '之后').text !== 'x ?token=' + REDACTED + ch + '之后');
+  ok(STOPS.length >= 10 && !stopBad.length, `(a) every MESSAGE_STOPS member (${STOPS.length}) ends an ASCII-led value${stopBad.length ? ' — not: ' + stopBad.join(' ') : ''}`);
+  ok(ROWS.every(([, t, , w]) => w === 'name' || SS.redactSecrets(SS.redactSecrets(t).text).text === SS.redactSecrets(t).text), 'idempotent on the rows');
   ok(SS.redactSecrets(SS.redactSecrets(CASES[0].t).text).text === SS.redactSecrets(CASES[0].t).text, 'idempotent');
   // RED CONTROL: the release's value class (up to the next & # ; ' " < > or blank) — the prose, the mail and the second URL masked
-  const VAL = "const QUERY_VALUE_RE = /«[^&#;\\s\"'<>`«»\\u0080-\\uffff]{1,65536}»?|(?:[^&#;\\s\"'<>`\\u0080-\\uffff]|«redacted»){1,65536}/y;";
-  const rel = mutantCopies('r1554-r7', REPO).load('src/secret-shapes.js', anchored(SRC, VAL, "const QUERY_VALUE_RE = /[^&#;\\s\"'<>]{1,65536}/y;", 'r1554-release-value'), 'release-value');   // stale-pins: kept (the red control plants the release's value class back)
+  const rel = mutantCopies('r1554-r7', REPO).load('src/secret-shapes.js', anchored(SRC, lineOf(SRC, 'const QUERY_VALUE_RE = '), R7_L246.value, 'r1554-release-value'), 'release-value');
   const redRows = judge(rel, {});
   ok(redRows.filter((x) => !x.ok).length >= 4, `RED CONTROL (the release's value class): ${redRows.filter((x) => !x.ok).length} of ${CASES.length} cases mask the prose after the value — ${J(redRows[0].out.slice(0, 90))}`);
+  // RED CONTROL (r2209): the round's tip e06c2a0e9, its four expressions planted — the musts' rows show a holder's value in part or whole
+  const E06 = mutantCopies('r2209-rows-e06c', REPO).load('src/secret-shapes.js', r7Plant(SRC, 'e06'), 'rows-e06c');
+  const e06Bad = ROWS.filter((row) => !hides(E06, row));
+  ok(e06Bad.length >= 8, `RED CONTROL (r2209, the round's tip e06c2a0e9 planted): ${e06Bad.length} of ${ROWS.length} rows show a holder's value in part or whole — ${J(e06Bad.slice(0, 3).map((row) => outs(E06, row[1], row[3])[0]))}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
