@@ -116,10 +116,9 @@ function statementOf(anc) {
   for (let i = anc.length - 1; i >= 0; i--) if (/(?:Statement|Declaration)$/.test(anc[i].type) && anc[i].type !== 'BlockStatement' && anc[i].type !== 'Program') return anc[i];
   return null;
 }
-function countPins(src, anc, n) {
-  const st = statementOf(anc);
+function countPins(src, st, n) {
   if (!st) return [];
-  const t = src.slice(st.start, st.end);
+  const t = src.slice(st[0], st[1]);
   const pins = [];
   for (const m of t.matchAll(/(\.length\s*)?(===|==)\s*(\d+)\b/g)) if (Number(m[3]) === n) pins.push({ n, text: m[0].replace(/\s+/g, ' ') });
   return pins;
@@ -134,6 +133,37 @@ function readCached(abs) {
   return text;
 }
 const MEMO = new Map(); // text → Map<keysSig, sites>
+const CANDS = new Map(); // text → the walk's candidates of that source, as plain facts (B-7e49: read once, judged per name set)
+/** Every node of one source a table can be: its shape and the tokens a name set is matched against, and what a site says of it
+ *  whatever the names (its lines, its start, the name it is declared under, its statement's range for the count pins) — plain
+ *  facts, no node and no ancestors kept, so the parsed tree is let go after the one walk. An object's keys; an array's literals
+ *  AND its rows' id fields (a list when ≥ MIN_IDS of its literals are ids, else its rows); a regex's words; a string's `|`
+ *  alternation; a switch's cases. */
+function candidatesOf(text) {
+  const hit = CANDS.get(text);
+  if (hit) return hit;
+  const c = [];
+  const add = (node, anc, shape, toks, rowKeys) => {
+    const st = statementOf(anc);
+    c.push({ line: node.loc.start.line, endLine: node.loc.end.line, start: node.start, decl: declOf(text, anc), st: st ? [st.start, st.end] : null, shape, toks, rowKeys });
+  };
+  walk(parse(text), (node, anc) => {
+    if (node.type === 'ObjectExpression') add(node, anc, 'object', node.properties.map(keyName));
+    else if (node.type === 'ArrayExpression') {
+      const rowKeys = node.elements.map((e) => {
+        if (!e) return null;
+        if (e.type === 'ObjectExpression') { for (const p of e.properties) { const k = keyName(p); if (k && ID_FIELDS.has(k) && litStr(p.value) != null) return litStr(p.value); } return null; }
+        if (e.type === 'ArrayExpression' && e.elements[0]) return litStr(e.elements[0]);
+        return null;
+      });
+      add(node, anc, 'list-or-rows', node.elements.map(litStr), rowKeys);
+    } else if (node.type === 'Literal' && node.regex) add(node, anc, 'regex', node.regex.pattern.match(WORD) || []);
+    else if (node.type === 'Literal' && typeof node.value === 'string' && node.value.includes('|')) add(node, anc, 'alternation', node.value.split('|').map((x) => x.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, '')));
+    else if (node.type === 'SwitchStatement') add(node, anc, 'switch', node.cases.map((cs) => litStr(cs.test)));
+  });
+  CANDS.set(text, c);
+  return c;
+}
 /** Every harness-keyed table site in one file's source. `names` = harnessNames() rows. */
 export function tableSites(rel, text, names) {
   const byKey = new Map();
@@ -150,36 +180,18 @@ export function tableSites(rel, text, names) {
   const literal = new Set();
   if (quick.size >= MIN_IDS) for (const m of text.matchAll(LITERAL)) { const id = byKey.get(m[1] || m[2] || m[3] || m[4]); if (id) literal.add(id); }
   if (literal.size >= MIN_IDS) {
-    const ast = parse(text);
-    const push = (node, anc, shape, found, keysSeen) => {
+    const push = (k, shape, found, keysSeen) => {
       if (found.length < MIN_IDS) return;
-      sites.push({ file: rel, line: node.loc.start.line, endLine: node.loc.end.line, shape, decl: declOf(text, anc), head: text.slice(node.start, node.start + 160).replace(/\s+/g, ' '), found, keysSeen, countPins: countPins(text, anc, found.length) });
+      sites.push({ file: rel, line: k.line, endLine: k.endLine, shape, decl: k.decl, head: text.slice(k.start, k.start + 160).replace(/\s+/g, ' '), found, keysSeen, countPins: countPins(text, k.st, found.length) });
     };
-    walk(ast, (node, anc) => {
-      if (node.type === 'ObjectExpression') {
-        const keys = node.properties.map(keyName);
-        push(node, anc, 'object', matchKeys(keys, byKey), keys.filter((k) => byKey.has(k)));
-      } else if (node.type === 'ArrayExpression') {
-        const strs = node.elements.map(litStr);
-        if (matchKeys(strs, byKey).length >= MIN_IDS) { push(node, anc, 'list', matchKeys(strs, byKey), strs.filter((s) => byKey.has(s))); return; }
-        const rowKeys = node.elements.map((e) => {
-          if (!e) return null;
-          if (e.type === 'ObjectExpression') { for (const p of e.properties) { const k = keyName(p); if (k && ID_FIELDS.has(k) && litStr(p.value) != null) return litStr(p.value); } return null; }
-          if (e.type === 'ArrayExpression' && e.elements[0]) return litStr(e.elements[0]);
-          return null;
-        });
-        push(node, anc, 'rows', matchKeys(rowKeys, byKey), rowKeys.filter((s) => byKey.has(s)));
-      } else if (node.type === 'Literal' && node.regex) {
-        const toks = node.regex.pattern.match(WORD) || [];
-        push(node, anc, 'regex', matchKeys(toks, byKey), toks.filter((s) => byKey.has(s)));
-      } else if (node.type === 'Literal' && typeof node.value === 'string' && node.value.includes('|')) {
-        const toks = node.value.split('|').map((s) => s.replace(/^[^A-Za-z0-9_-]+|[^A-Za-z0-9_-]+$/g, ''));
-        push(node, anc, 'alternation', matchKeys(toks, byKey), toks.filter((s) => byKey.has(s)));
-      } else if (node.type === 'SwitchStatement') {
-        const cs = node.cases.map((c) => litStr(c.test));
-        push(node, anc, 'switch', matchKeys(cs, byKey), cs.filter((s) => byKey.has(s)));
-      }
-    });
+    // the file's candidate nodes, parsed and walked ONCE whatever the harness names (B-7e49): a census over another name set
+    // filters them, in the walk's own order — never a second parse or walk of the same text
+    for (const k of candidatesOf(text)) {
+      if (k.shape === 'list-or-rows') {
+        if (matchKeys(k.toks, byKey).length >= MIN_IDS) { push(k, 'list', matchKeys(k.toks, byKey), k.toks.filter((s) => byKey.has(s))); continue; }
+        push(k, 'rows', matchKeys(k.rowKeys, byKey), k.rowKeys.filter((s) => byKey.has(s)));
+      } else push(k, k.shape, matchKeys(k.toks, byKey), k.toks.filter((x) => byKey.has(x)));
+    }
   }
   perText.set(sig, sites.map((s) => { const { file, ...rest } = s; return rest; }));
   return sites;
