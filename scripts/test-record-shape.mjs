@@ -137,7 +137,7 @@ function oracleRoad({ hosted, noRealCli, pinned = null }) {
   if (noRealCli) return { open: false, handed: false, pinned: null, why: 'VS_NO_REAL_CLI=1 — no real install is read here (r2084)' };
   if (hosted) return { open: true, handed: true, pinned, why: '' };
   if (pinned) return { open: true, handed: false, pinned, why: '' };
-  return { open: false, handed: false, pinned: null, why: "not the hosted runner (no GITHUB_ACTIONS=true) — a person's installed claude is never read (r2084); VIBESPACE_ORACLE_BINARY names a file by hand" };
+  return { open: false, handed: false, pinned: null, why: "not the hosted runner (no GITHUB_ACTIONS=true) — a person's installed claude is never read (r2084); a file named by a person's own hand (VIBESPACE_ORACLE_BINARY) is read only where this suite is not re-homed: on a person's machine the re-home drops that name (r2225)" };
 }
 /** PURE: the file the oracle reads on its road — the hand-named file first, then the handed candidates — or null. */
 function oracleBinary(road, candidates = [], isFileAt = (c) => { try { const real = fs.realpathSync(c); return fs.statSync(real).isFile() ? real : null; } catch { return null; } }) {
@@ -499,8 +499,11 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   // suite's PATH is BUILT — nothing of the handed PATH carried — and an agent CLI is reached ONLY through scripts/scratch.mjs
   // REAL_CLI_ALLOW: the oracle had run nowhere since. This suite is a row, FENCED: it reads the bytes ONLY of the program the hosted
   // runner's pin step installed (the runner's own mark, GITHUB_ACTIONS=true; the handed env's candidates). On a person's machine and
-  // under VS_NO_REAL_CLI=1 it reads NO real install — a named skip. VIBESPACE_ORACLE_BINARY (a file named BY HAND: a 0644 copy of a
-  // build, the kb's registration road) is read off the runner too, never under the switch; no gate sets it.
+  // under VS_NO_REAL_CLI=1 it reads NO real install — a named skip. VIBESPACE_ORACLE_BINARY is a file named BY HAND (a 0644 copy of a
+  // build, the kb's registration road): ONLY A PERSON'S OWN HAND SETS IT — no gate, kit or script does (the coordinator's r2215). It is
+  // read with the switch off, and only where this suite is NOT re-homed (a home under a temp root, as a lane env's): on a person's
+  // machine the re-home drops the name before this line reads it (scratch.mjs; its stderr line names it), so the road says so (r2225).
+  // THE BINDING (r2225, the round's nice-to-have): the road is computed from exactly these three names — pinned below by a leg.
   const road = oracleRoad({ hosted: process.env.GITHUB_ACTIONS === 'true', noRealCli: process.env.VS_NO_REAL_CLI === '1', pinned: process.env.VIBESPACE_ORACLE_BINARY || null });
   const findBinary = () => oracleBinary(road, road.handed ? handedCliCandidates('claude') : []);
   // §4d THE CORRECTION'S CALL-SITE READER on made-up bundles — needs no binary (B-28b1's side run, the coordinator's r1543)
@@ -568,6 +571,10 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
         underSwitch === null && offRunner === null && byHandSwitch === null && byHand === fs.realpathSync(planted), { underSwitch, offRunner, byHand, byHandSwitch });
       ok('§4 …CONTROL: on the hosted runner, with the switch off, the SAME planted program IS read (so the nulls above are the fence\'s, not a file that could not be read)', onRunner === fs.realpathSync(planted), { onRunner });
       ok('§4 …and the road says why it is shut, by name (the switch; a person\'s machine)', /VS_NO_REAL_CLI=1/.test(oracleRoad({ hosted: true, noRealCli: true }).why) && /never read/.test(oracleRoad({ hosted: false, noRealCli: false }).why));
+      // THE BINDING (r2225): the live road is computed from EXACTLY the runner's mark, the switch and the by-hand name — an edit such as
+      // `hosted: !!process.env.CI` is red here (the needle in two pieces: this pin's own line never matches itself)
+      const me = fs.readFileSync(new URL(import.meta.url), 'utf8');
+      ok('§4 …the live road reads exactly GITHUB_ACTIONS === \'true\', VS_NO_REAL_CLI === \'1\' and VIBESPACE_ORACLE_BINARY (one binding, in this file)', me.split('const road = oracle' + "Road({ hosted: process.env.GITHUB_ACTIONS === 'true', noRealCli: process.env.VS_NO_REAL_CLI === '1', pinned: process.env.VIBESPACE_ORACLE_BINARY || null });").length === 2);
     } finally { fs.rmSync(plantDir, { recursive: true, force: true }); }
   }
   {

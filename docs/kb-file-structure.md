@@ -3672,7 +3672,7 @@ PURE, shared by the route and the suites.
   - Dump it STATIC: `npm install --prefix <scratch> @anthropic-ai/claude-code@<v> --no-save --ignore-scripts`, then `node scripts/claude-cli-dump.mjs <scratch>/node_modules/@anthropic-ai/claude-code-linux-x64/claude scripts/fixtures/claude-cli/<prev>.json > scripts/fixtures/claude-cli/<v>.json`. The `claude-code/bin/claude.exe` file is a 500-byte launcher, not the binary.
   - Add `<v>` to SCHEMA_CLI_VERSIONS, decide every new subtype and field on its zod literal (FIELDS_<v>), and move PERMISSION_OUTCOME_CLI_VERSION (test-helper-ask ⑱b pins it).
   - Never hide the card: registering the build is what makes it go quiet.
-- **Run the binary oracle on a build without executing it:** a copy named `<v>` with mode 0644, through `VIBESPACE_ORACLE_BINARY`. The basename gives the version and `strings` reads the file.
+- **Run the binary oracle on a build without executing it:** a copy named `<v>` with mode 0644, through `VIBESPACE_ORACLE_BINARY`. The basename gives the version and `strings` reads the file. Only a person's own hand sets it. It is read with `VS_NO_REAL_CLI` unset (under the switch, which every lane and acceptance run sets, the road gives the named skip), and only where the suite is not re-homed: on a person's machine the re-home drops the name (r2225).
 - **The sentence extractor resolves a name on its DECLARATION:**
   - The declaration is the strings line, plus, for a template literal still open at the line's end, the line its closing backtick is on.
   - 2.1.306 moved the feedback sentence (`D0`) to open its own line. On the line alone it declared no other member, so it went unresolved and the Dx row read «GHOST: Dx (Gd)».
