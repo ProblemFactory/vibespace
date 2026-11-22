@@ -52,11 +52,14 @@ const NOT_FS = new Map([
   ['design', 'the design engine renames a canvas (its own record)'],
   ['R.fs', 'a PAIRED machine\'s file: the remote file road asks the device agent to move it (not a write of the hub)'],
 ]);
-// bare-name rename calls judged by file (their names are not the file system's)
-const BARE_NOT_FS = new Map([
-  ['src/routes/files.js', 'rename(name) makes a free file NAME (a string) for a paste or an upload: no file-system call'],
-  ['src/lib/design-home.js', 'the design home\'s rename(d): a dialog that asks the design engine (a client file): no file here'],
-]);
+// bare-name rename calls judged BY THEIR SCOPE (r1365: a whole file is never excused — a real bare file-system rename added in
+// another scope of that file is red), counted: [file, scope, n, why]
+const BARE_NOT_FS = [
+  ['src/routes/files.js', 'route:POST /api/upload', 2, 'rename(name) makes a free file NAME (a string) for an upload: no file-system call'],
+  ['src/lib/design-home.js', 'openDesignHome > menu > action', 1, 'the design home\'s menu calls its own rename(d): a dialog that asks the design engine (a client file): no file here'],
+];
+const bareKey = (file, scope) => `${file} | ${scope}`;
+const BARE_JUDGED = new Map(BARE_NOT_FS.map((r) => [bareKey(r[0], r[1]), r]));
 // a WRITE of a path (its argument index), a SYNC of a descriptor or a handle
 const WRITE = new Map([['writeFileSync', 0], ['writeFile', 0], ['createWriteStream', 0], ['write', 0], ['openSync', 0], ['open', 0], ['copyFileSync', 1], ['copyFile', 1], ['cpSync', 1], ['cp', 1]]);
 const SYNC = new Set(['fsyncSync', 'fsync', 'fdatasyncSync', 'fdatasync']);
@@ -77,8 +80,9 @@ export function renameSites(rel, src, AC) {
     if (n.type !== 'CallExpression') return;
     // a call through a BARE name (a destructured or aliased rename): unknown — red — unless its file is judged in BARE_NOT_FS
     if (n.callee.type === 'Identifier' && (n.callee.name === 'rename' || n.callee.name === 'renameSync')) {
-      if (BARE_NOT_FS.has(rel)) skipped.push({ file: rel, line: n.loc.start.line, obj: '(a bare name)' });
-      else unknown.push({ file: rel, line: n.loc.start.line, obj: `(a bare ${n.callee.name})`, scope: scopeOf(parents) });
+      const scope = scopeOf(parents);
+      if (BARE_JUDGED.has(bareKey(rel, scope))) skipped.push({ file: rel, line: n.loc.start.line, obj: '(a bare name)', scope });
+      else unknown.push({ file: rel, line: n.loc.start.line, obj: `(a bare ${n.callee.name})`, scope });
       return;
     }
     if (n.callee.type !== 'MemberExpression' || n.callee.computed) return;
@@ -336,7 +340,7 @@ const ROWS = [
   ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
   ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
 ];
-const OWED_MAX = 145;   // lane lg-vault-env (r3002 (d)): the grant ends' set-aside rename is gone into the store-read hold (its row dropped) — a «move» row, not an owed family: the owed count is not moved by it. lane bl-windows (r3154 (4)): 146 → 145 — the reset-credit attempts' save syncs its copy before the rename (self-synced). r3200 (lane login-request-card): 146 → 147 — the reading file's set-aside puts its new file in place by its own temp + rename (the writer's own family, B-574d). B-0248's next part (lane lg-vault-env, r2417): 146 → 145 — the decision journal's trim through the store writer (its temp + rename on the loop gone). Before: B-360d part 3 U2 (lane lg-group-parents): 147 → 146 — data/usage-cache.json through the store writer (writeUsageCache's own temp + rename gone). Before: the live-tip census cure (lane lg-store-writes, r1790): 147 stays, each step by name — −1 the layouts and settings (src/routes/persistence.js writeJsonAtomic: the store writer's since B-0248 step 2), +1 the layouts' owed mark (setup > writeMark: new, unsynced, B-574d owes it); the remover's count is the old site renamed (orphaned → countWrite). Before: row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+const OWED_MAX = 145;   // lane lg-vault-env (r3002 (d)): the grant ends' set-aside rename is gone into the store-read hold (its row dropped) — a «move» row, not an owed family: the owed count is not moved by it. lane bl-windows (r3154 (4)): 146 → 145 — the reset-credit attempts' save syncs its copy before the rename (self-synced). r3200 (lane login-request-card): 146 → 147 — the reading file's set-aside puts its new file in place by its own temp + rename (the writer's own family, B-574d). B-0248's next part (lane lg-vault-env, r2417): 146 → 145 — the decision journal's trim through the store writer (its temp + rename on the loop gone). Before: B-360d part 3 U2 (lane lg-group-parents): 147 → 146 — data/usage-cache.json through the store writer (writeUsageCache's own temp + rename gone). Before: the live-tip census cure (lane lg-store-writes, r1790): 147 stays, each step by name — −1 the layouts and settings (src/routes/persistence.js writeJsonAtomic: the store writer's since B-0248 step 2), +1 the layouts' owed mark (setup > writeMark: new, unsynced, B-574d owes it); the remover's count is the old site renamed (orphaned → countWrite). Before: row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall: an EQUALITY with the census — a cure lowers it in its own commit; a rise above OWED_BASELINE is red unless RISES names it
 // THE RATCHET (round wl2wglpsq): OWED_MAX is an EQUALITY with the census (a cure lowers it in the cure's own commit). A commit
 // could raise it and stay green here, so a rise above the KEPT baseline is red by name unless RISES names it with its row
 const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)
@@ -357,7 +361,12 @@ const sitesOfTree = (repo) => {
 const all = sitesOfTree(REPO);
 const say = (s) => `${s.file}:${s.line} ${s.scope} (${s.cls}) ${s.from} → ${s.to}`;
 console.log(`① every file-system rename of src/ and server.js: ${all.sites.length} sites in ${new Set(all.sites.map((s) => s.file)).size} files (${['synced', 'unsynced', 'move'].map((c) => `${all.sites.filter((s) => s.cls === c).length} ${c}`).join(', ')}); ${all.skipped.length} renames of other objects`);
-ok(all.unknown.length === 0, 'every rename is on a judged object (the file system, or NOT_FS by name)', all.unknown);
+ok(all.unknown.length === 0, 'every rename is on a judged object (the file system, NOT_FS by name, or a bare call judged by its scope)', all.unknown);
+{
+  const seenBare = new Map(); for (const x of all.skipped.filter((k) => k.obj === '(a bare name)')) seenBare.set(bareKey(x.file, x.scope), (seenBare.get(bareKey(x.file, x.scope)) || 0) + 1);
+  const offBare = BARE_NOT_FS.filter((r) => (seenBare.get(bareKey(r[0], r[1])) || 0) !== r[2]);
+  ok(offBare.length === 0, `every judged bare call's scope holds its stated count (${BARE_NOT_FS.map((r) => `${r[0]} ${r[1]} ×${r[2]}`).join(' · ')})`, offBare.map((r) => ({ row: r, seen: seenBare.get(bareKey(r[0], r[1])) || 0 })));
+}
 const J = judge(all.sites, ROWS);
 for (const s of J.noRow) console.error(`  ✗ NO ROW (a new rename: give it its family): ${say(s)}`);
 for (const s of J.extra) console.error(`  ✗ ONE MORE SITE than its row says: ${say(s)}`);
@@ -393,12 +402,33 @@ const REGION_ROWS = [
   ["shell", "src/desktop-apps.js", 1],
   ["shell", "src/hosts.js", 4],
   ["shell", "src/install-slot.js", 2],
-  ["shell", "src/mounts.js", 1],
+  ["shell", "src/mounts.js", 3],
   ["shell", "src/remote-fs.js", 2],
-  ["shell", "src/routes/files.js", 1],
+  ["shell", "src/routes/files.js", 3],
   ["shell", "src/server/design-engine.js", 1],
   ["shell", "src/spawn/ssh.js", 1],
-];   // [region, file, count] — read on the census's base (round wl2wglpsq's cure): data/bin 30 renames in 14 files (B-cd4b's said journal +1 in the codex wrapper, at the live-tip cure), shell 31 «mv» in 10 files
+];   // [region, file, count] — read on the census's base (round wl2wglpsq's cure): data/bin 30 renames in 14 files (B-cd4b's said journal +1 in the codex wrapper, at the live-tip cure), shell 35 «mv» in 10 files (the writer unit's cure: + the two at a template piece's end in src/routes/files.js, + «mv» as a program twice — mvCount)
+/** the `mv` a src/ file hands a child: in a string or a template piece, with its operands or at a piece's END before ${…} (the
+ *  round's B-bcb8 read: «&& mv ${a} ${b}»), and 'mv' alone AS A PROGRAM — a call's first argument followed by its argv array
+ *  (execFile('mv', [a, b])), or an argv element after flags only (['-n', 'mv', a, b]); never 'mv' as a word (a pointer event's
+ *  type, a command-word table, an allow list) */
+const MV = /(?:^|[\s;&|(])mv(?=\s|$)/g;
+function mvCount(src) {
+  const code = src.replace(/^#!.*/, ''), opts = { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowHashBang: true };
+  let ast; try { ast = AC.parse(code, { ...opts, sourceType: 'script' }); } catch { ast = AC.parse(code, { ...opts, sourceType: 'module', allowReturnOutsideFunction: false }); }
+  let n = 0;
+  const isProgram = (x, parents) => {
+    const up = parents[parents.length - 1], up2 = parents[parents.length - 2];
+    if (up && up.type === 'CallExpression' && up.arguments[0] === x) return !!(up.arguments[1] && up.arguments[1].type === 'ArrayExpression');
+    if (up && up.type === 'ArrayExpression' && up2 && up2.type === 'CallExpression' && up2.arguments.includes(up)) { const i = up.elements.indexOf(x); return up.elements.slice(0, i).every((e) => e && e.type === 'Literal' && typeof e.value === 'string' && e.value.startsWith('-')); }
+    return false;
+  };
+  walk(ast, (x, parents) => {
+    if (x.type === 'Literal' && typeof x.value === 'string') n += x.value === 'mv' ? (isProgram(x, parents) ? 1 : 0) : (x.value.match(MV) || []).length;
+    else if (x.type === 'TemplateElement') n += (String(x.value.cooked ?? x.value.raw).match(MV) || []).length;
+  });
+  return n;
+}
 const regionCount = () => {
   const out = new Map(), add = (k, n) => { if (n) out.set(k, (out.get(k) || 0) + n); };
   for (const rel of trackedFiles(REPO, 'data/bin')) {
@@ -408,18 +438,10 @@ const regionCount = () => {
     let r; try { r = renameSites(rel, src, AC); } catch (e) { add(`data/bin | ${rel} | UNPARSED ${e.message}`.slice(0, 160), 1); continue; }
     add(`data/bin | ${rel}`, r.sites.length + r.unknown.length);
   }
-  const MV = /(?:^|[\s;&|(])mv\s+(?:-[a-zA-Z]+\s+)*[^\s;&|]/g;
   for (const rel of trackedFiles(REPO, 'src', 'server.js').filter((f) => /\.(?:c|m)?js$/.test(f))) {
     const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
-    if (!/\bmv\s/.test(src)) continue;
-    const code = src.replace(/^#!.*/, ''), opts = { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowHashBang: true };
-    let ast; try { ast = AC.parse(code, { ...opts, sourceType: 'script' }); } catch { ast = AC.parse(code, { ...opts, sourceType: 'module', allowReturnOutsideFunction: false }); }
-    let n = 0;
-    walk(ast, (x) => {
-      if (x.type === 'Literal' && typeof x.value === 'string') n += (x.value.match(MV) || []).length;
-      else if (x.type === 'TemplateElement') n += (String(x.value.cooked ?? x.value.raw).match(MV) || []).length;
-    });
-    add(`shell | ${rel}`, n);
+    if (!/\bmv\b/.test(src)) continue;
+    add(`shell | ${rel}`, mvCount(src));
   }
   return out;
 };
@@ -452,8 +474,10 @@ console.log('③ the classifier on planted sources');
   ok(cls(`function c(t, f) { fs.writeFileSync(t, 'x'); setImmediate(() => fs.renameSync(t, f)); }`) === 'unsynced', 'a callback reads the scope that names it: unsynced');
   const u = one(`function z() { thing.rename(1, 2); accounts.rename('a', 'b'); }`);
   ok(u.unknown.length === 1 && u.unknown[0].obj === 'thing' && u.skipped.length === 1 && u.sites.length === 0, 'an object nobody judged is red by name; a NOT_FS object is skipped by name', u);
-  const bare = renameSites('src/zz-plant.js', `function z(a, b) { const { renameSync } = require('fs'); renameSync(a, b); }`, AC), judgedBare = renameSites('src/routes/files.js', `function n() { return rename('a.txt'); }`, AC);
-  ok(bare.unknown.length === 1 && bare.unknown[0].obj === '(a bare renameSync)' && judgedBare.skipped.length === 1 && judgedBare.unknown.length === 0, 'a call through a BARE name (destructured, aliased) is red as unknown; a file judged in BARE_NOT_FS is skipped by name', { bare, judgedBare });
+  const mvs = [mvCount('const c = `mkdir -p ${d} && mv ${a} ${b}`;'), mvCount("execFile('mv', [a, b]); run('sudo', ['-n', 'mv', a, b]);"), mvCount("const c = 'cat > a.tmp && mv -f a.tmp a';"), mvCount("const t = 'a movie, a move'; const m = `remove ${x}`; const e = { t: 'mv' }; pointerMessage('mv', ev); const ok = Object.freeze(['ls', 'mv']); if (head === 'mv') { }")];
+  ok(mvs.join() === '1,2,1,0', `the region's «mv» count: one at a template piece's end before \${…} (${mvs[0]}), «mv» as a program name (${mvs[1]}), one with its operands (${mvs[2]}), none in prose nor as a word (a pointer event's type, a command-word table, an allow list: ${mvs[3]})`, mvs);
+  const bare = renameSites('src/zz-plant.js', `function z(a, b) { const { renameSync } = require('fs'); renameSync(a, b); }`, AC), judgedBare = renameSites('src/zz-plant.js', `function n() { return rename('a.txt'); }`, AC);
+  ok(bare.unknown.length === 1 && bare.unknown[0].obj === '(a bare renameSync)' && judgedBare.unknown.length === 1 && judgedBare.unknown[0].scope === 'n', 'a call through a BARE name (destructured, aliased) is red as unknown, with its scope — only a judged SCOPE is skipped, never a whole file', { bare, judgedBare });
   // an open's flags through a CONST of its function (line 349's `fl`): every leaf an append — the rotation after it reads «move»;
   // CONTROLS: one leaf that writes ('w'), and a flag bound by let, read as a write before the rename («unsynced»)
   const flagOf = (decl) => renameSites('src/zz-plant.js', `function z(f, g, c) { const fs = require('fs'); ${decl} const fd = fs.openSync(f, fl); fs.closeSync(fd); fs.renameSync(f, g); }`, AC).sites.map((s) => s.cls).join(',');

@@ -276,9 +276,16 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (to !== l && (to.inflight || to.parked.length)) { to.parked.push({ s, p, since }); return; }
     post(to, s, p, since);
   }
+  /** a job's bytes for the main-only road: a list by reference is written whole or NOT AT ALL (a fed list has copied entries let
+   *  go: never written short and renamed — the round wyjiekiey) */
+  function mainParts(s, p, since) {
+    if (!p.pieces) return p;
+    if (p.pieces.some((x) => !x)) { fail(s, since, Object.assign(new Error('its list handed by reference was already partly sent'), { code: 'EPIECE' })); return null; }
+    return { ...p, parts: p.pieces };
+  }
   /** hand ONE job to a lane's thread — or, its thread gone for good (said), write it here */
   function post(l, s, p, since) {
-    if (l.mainOnly || !startWorker(l)) { writeHere(s, p.pieces ? { ...p, parts: p.pieces.filter(Boolean) } : p, since); return; }
+    if (l.mainOnly || !startWorker(l)) { const wp = mainParts(s, p, since); if (wp) writeHere(s, wp, since); return; }
     const id = ++seq;
     l.inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, as: p.as || null };   // line 42: a rewrite keeps the store an append store (its pace, never unlinked as a forgotten whole file)
     l.posted++;
@@ -306,22 +313,35 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function sendPiece(f) {
     const l = f.l;
     if (f.done || l.feed !== f || !l.worker) return;
-    const take = [];
-    let bytes = 0, bad = null;
-    while (f.i < f.list.length && bytes < PIECE_BYTES) {
-      const b = f.list[f.i];
-      if (f.sums && f.off === 0 && sumOf(b) !== f.sums[f.i]) { bad = f.i; break; }
-      const n = Math.min(b.byteLength - f.off, PIECE_BYTES - bytes);
-      take.push(Buffer.from(b.buffer, b.byteOffset + f.off, n)); bytes += n; f.off += n;
-      if (f.off >= b.byteLength) { f.list[f.i] = null; f.i++; f.off = 0; }   // copied: the snapshot lets it go
-    }
-    const last = bad !== null || f.i >= f.list.length;
     let msg, transfer = [];
-    if (bad !== null) msg = { ...f.msg, ev: 'piece', parts: [], first: f.first, last: true, abort: true, code: 'EBYREF', why: `a buffer it handed by reference (#${bad}) was written into before its write ended` };
-    else {
-      const one = Buffer.concat(take, bytes), ab = one.byteOffset === 0 && one.byteLength === one.buffer.byteLength ? one.buffer : one.buffer.slice(one.byteOffset, one.byteOffset + one.byteLength);
-      msg = { ...f.msg, ev: 'piece', parts: [ab], first: f.first, last }; transfer = [ab];
+    // THE PIECE'S MAKING IS INSIDE THE TRY (the round wyjiekiey, r1388 (3)): a handed buffer detached or shrunk, a sum that
+    // differs, a 4 MB allocation that fails — the store's write FAILS BY NAME (an abort piece: the thread drops its temp, the
+    // store stays owed), never an exception out of an immediate (a dead hub)
+    try {
+      const take = [];
+      let bytes = 0, bad = null;
+      while (f.i < f.list.length && bytes < PIECE_BYTES) {
+        const b = f.list[f.i];
+        if (f.sums && f.off === 0 && sumOf(b) !== f.sums[f.i]) { bad = f.i; break; }
+        const n = Math.min(b.byteLength - f.off, PIECE_BYTES - bytes);
+        if (!(n > 0)) throw Object.assign(new Error(`a buffer it handed by reference (#${f.i}) is shorter than when it was handed`), { code: 'EBYREF' });
+        take.push(Buffer.from(b.buffer, b.byteOffset + f.off, n)); bytes += n; f.off += n;
+        if (f.off >= b.byteLength) {
+          // a buffer that SPANNED pieces is summed again at its last slice: bytes written into its later part are seen (r1388 (7))
+          if (f.sums && n < b.byteLength && sumOf(b) !== f.sums[f.i]) { bad = f.i; break; }
+          f.list[f.i] = null; f.i++; f.off = 0;   // copied: the snapshot lets it go
+        }
+      }
+      const last = bad !== null || f.i >= f.list.length;
+      if (bad !== null) msg = { ...f.msg, ev: 'piece', parts: [], first: f.first, last: true, abort: true, code: 'EBYREF', why: `a buffer it handed by reference (#${bad}) was written into before its write ended` };
+      else {
+        const one = Buffer.concat(take, bytes), ab = one.byteOffset === 0 && one.byteLength === one.buffer.byteLength ? one.buffer : one.buffer.slice(one.byteOffset, one.byteOffset + one.byteLength);
+        msg = { ...f.msg, ev: 'piece', parts: [ab], first: f.first, last }; transfer = [ab];
+      }
+    } catch (e) {
+      msg = { ...f.msg, ev: 'piece', parts: [], first: f.first, last: true, abort: true, code: (e && e.code) || 'EBYREF', why: `its bytes handed by reference could not be read (${(e && e.message) || e})` }; transfer = [];
     }
+    const last = !!msg.last;
     f.first = false;
     if (last) { f.done = true; l.feed = null; }
     try { l.worker.postMessage(msg, transfer); }
@@ -481,7 +501,8 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
    *  another store + the urgent stores DUE NOW (not in their failure backoff) whose place in the urgent order comes first
    *  (store-pace placeOf: a failed store by the time it failed). The paced turns between them only add to it. */
   function aheadOf(s) {
-    const t = now(), mine = P.placeOf(rowOf(s)), l = s.appends ? LA : LW, onL = (x) => (x.appends ? LA : LW) === l;   // its own lane's writes only
+    const laneOfStore = (x) => holder(x.file) || (x.lane === 'A' ? LA : LW);   // the lane its job is on, or goes to next (r1388 (8))
+    const t = now(), mine = P.placeOf(rowOf(s)), l = laneOfStore(s), onL = (x) => laneOfStore(x) === l;   // its own lane's writes only
     let n = l.inflight && l.inflight.name !== s.file ? 1 : 0;
     for (const x of stores.values()) if (x !== s && x.dirty && x.urgent && x.produce && !holder(x.file) && onL(x) && backoffEnd(x) <= t && P.placeOf(rowOf(x)) < mine) n++;
     return n;
@@ -539,6 +560,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const S = l.S;
     if (!S) return false;
     if (l.feed) drainPieces(l);   // a whole write mid-pieces: the rest goes out NOW, in this call, in order (r1328 (2))
+    if (!l.inflight) return true;   // the drain's post threw: the job is over, its failure said (fail) — the flush and the EXIT go on (r1388 (2))
     while (Atomics.load(S, 1) < l.posted) {
       const rest = deadline - now();
       if (rest <= 0) return false;
@@ -558,7 +580,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const l = laneOf(p);
     s.lane = l.name; if (p.append) s.appends = true;
     if (l.inflight && !settleInflight(l, deadline, waitedBy)) return 'held';   // its OWN lane's job first (an append never waits on W)
-    if (l.mainOnly || !startWorker(l) || !l.S) return writeHere(s, p.pieces ? { ...p, parts: p.pieces.filter(Boolean) } : p, since) ? 'ok' : 'failed';
+    if (l.mainOnly || !startWorker(l) || !l.S) { const wp = mainParts(s, p, since); return wp && writeHere(s, wp, since) ? 'ok' : 'failed'; }
     const f0 = s.failures;
     post(l, s, p, since);
     if (!l.inflight) return s.failures > f0 ? 'failed' : 'ok';   // the bytes could not go: failed, said
@@ -607,7 +629,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       if (!settleInflight(l, deadline, waitedBy)) { held.add(l); const s0 = stores.get(busy.name); left.push({ name: s0 ? s0.name : busy.name, file: busy.name, why: `its write was still held by the storage after ${((now() - busy.startedAt) / 1000).toFixed(1)} s` }); }
     }
     // the jobs MADE and waiting for a lane (their bytes are this turn's or older): written next, in the order they were made
-    for (const l of LANES) for (const j of l.parked.filter((x) => !names || names.includes(x.s.file))) {
+    for (const l of LANES) for (const j of l.parked.filter((x) => (!names || names.includes(x.s.file)) && (!only || only(x.s)))) {   // the exit's rank-0 pass: its own list only (r1388 (5))
       l.parked.splice(l.parked.indexOf(j), 1);
       if (held.has(l) || now() >= deadline) { j.s.dirty = true; j.s.dirtySince = j.since; left.push({ name: j.s.name, file: j.s.file, why: held.has(l) ? `the ${threadWord(l)} was still held by the storage` : 'the bound was spent' }); continue; }
       land(j.s, j.p, j.since);
