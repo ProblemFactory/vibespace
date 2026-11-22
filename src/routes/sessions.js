@@ -266,75 +266,118 @@ function setup(ctx) {
   const keptWhere = (key) => { if (!_wfWhere.has(key)) return null; const p = _wfWhere.get(key); _wfWhere.delete(key); _wfWhere.set(key, p); return p; };   // a USE keeps it: the least recent use leaves first
   // THE HUB's LOOK: ONE asynchronous pass over the projects folder for every run a poll could not place (its run dir or its
   // snapshot), the runs wanted together riding one look (debounced), never more than one start a WF_LOOK_EVERY_MS. It lists the
-  // root, each project folder, and each conversation's `subagents/workflows` and `workflows` — off the main loop, WF_LOOK_LANES at
-  // a time — and answers per run with every place it found; a poll takes the ASKER's own conversation first (a run id under two
-  // conversations is answered from the asker's own, as the release's order did), else the first.
-  const WF_LOOK_EVERY_MS = 60 * 1000, WF_LOOK_LANES = 8, WF_WANT_TTL_MS = 5 * 60 * 1000;
-  const _wfWant = new Map();    // runId → { polled, dirAt, snapAt } — what a poll could not place, and since when
-  const _wfFound = new Map();   // runId → { dirs: [{ sid, path }], snaps: [{ sid, path }], at } — the last look's answer
-  let _wfLook = null, _wfLookStart = 0, _wfLookTimer = null;
+  // root, each project folder, and each conversation's `subagents/workflows` and `workflows` — off the main loop — and answers per
+  // run with every place it found; a poll takes the ASKER's own conversation first (a run id under two conversations is answered
+  // from the asker's own, as the release's order did), else the first. ITS BOUNDS (round w7o3p5msx, 主开发 r2443): a look that
+  // runs past WF_LOOK_DEADLINE_MS ends with what it found (a run it did not place keeps «locating»; only a WHOLE look answers
+  // «nowhere»); the hub's reads OUT never pass WF_LOOK_LANES across looks — a read that never comes back keeps its lane, a later
+  // look uses only the lanes that came back, and with none back it starts nothing and says so once in the journal.
+  const WF_LOOK_EVERY_MS = 60 * 1000, WF_LOOK_LANES = 8, WF_LOOK_DEADLINE_MS = 30 * 1000, WF_WANT_TTL_MS = 5 * 60 * 1000, WF_WANT_MAX = 256;
+  const _wfWant = new Map();    // runId → { askedAt, dirs: Map(asker → since), snaps: Map(asker → since) } — who could not place it, since when (the least recent ask leaves first past WF_WANT_MAX)
+  const _wfFound = new Map();   // runId → { dirs: [{ sid, path }], snaps: [{ sid, path }], at, kinds: { dirs, snaps }, whole } — the last look's answer
+  const _wfOut = { root: 0, project: 0, conversation: 0 };   // the look's reads OUT for the hub, by the folder's class
+  let _wfLook = null, _wfLookStart = 0, _wfLookTimer = null, _wfStrandSaid = false;
+  const wfNow = () => (_wfLookTest.now ? _wfLookTest.now() : Date.now());
+  const wfTimer = (fn, ms) => { const t = (_wfLookTest.setTimer || setTimeout)(fn, ms); if (t && t.unref) t.unref(); return t; };
+  const wfOut = () => _wfOut.root + _wfOut.project + _wfOut.conversation;
   function runWorkflowLook() {
-    for (const [id, w] of _wfWant) if (Date.now() - w.polled > WF_WANT_TTL_MS) { _wfWant.delete(id); _wfFound.delete(id); }   // nobody polls it now
+    const now = wfNow();
+    for (const [id, w] of _wfWant) if (now - w.askedAt > WF_WANT_TTL_MS) { _wfWant.delete(id); _wfFound.delete(id); }   // nobody polls it now
     if (!_wfWant.size) return;
-    const startedAt = Date.now(); _wfLookStart = startedAt;
-    const want = new Map([..._wfWant].map(([id, w]) => [id, { dir: !!w.dirAt, snap: !!w.snapAt }]));
+    const lanes = WF_LOOK_LANES - wfOut();
+    _wfLookStart = now;   // the minute's start is spent whether a look starts or not
+    if (lanes < 1) {
+      if (!_wfStrandSaid) { _wfStrandSaid = true; console.warn(`[workflow] the hub's look starts nothing: ${wfOut()} reads of the projects folder are out and none came back (the root ${_wfOut.root}, project folders ${_wfOut.project}, conversation folders ${_wfOut.conversation}); a run not placed keeps «locating»`); }
+      if (_wfLookTest.onLook) _wfLookTest.onLook({ started: false });
+      return;
+    }
+    const startedAt = now, found = new Map();
+    const want = new Map([..._wfWant].map(([id, w]) => [id, { dirs: w.dirs.size > 0, snaps: w.snaps.size > 0 }]));
+    let ended = false, whole = false, timer = null;
+    const read = async (p, cls) => {   // ONE read of the look, counted out until it returns; none starts once the look has ended
+      if (ended) return null;
+      _wfOut[cls]++;
+      let names = [];
+      try { names = await fs.promises.readdir(p); } catch { } finally { _wfOut[cls]--; if (wfOut() < WF_LOOK_LANES) _wfStrandSaid = false; }
+      return ended ? null : names;   // a read back after the deadline is not the ended look's answer
+    };
     _wfLook = (async () => {
-      const fsp = fs.promises, root = path.join(os.homedir(), '.claude', 'projects'), found = new Map();
+      const root = path.join(os.homedir(), '.claude', 'projects');
       const note = (id, kind, sid, p) => { let f = found.get(id); if (!f) { f = { dirs: [], snaps: [] }; found.set(id, f); } f[kind].push({ sid, path: p }); };
-      const needDir = [...want.values()].some((w) => w.dir), needSnap = [...want.values()].some((w) => w.snap);
-      let projects = []; try { projects = await fsp.readdir(root); } catch { }
-      const convs = [];
-      for (const dir of projects) { let names = []; try { names = await fsp.readdir(path.join(root, dir)); } catch { } for (const sid of names) if (!sid.endsWith('.jsonl')) convs.push([dir, sid]); }
-      let next = 0;
-      const lane = async () => {
-        while (next < convs.length) {
-          const [dir, sid] = convs[next++], base = path.join(root, dir, sid);
-          if (needDir) { let names = []; try { names = await fsp.readdir(path.join(base, 'subagents', 'workflows')); } catch { } for (const n of names) if (want.get(n)?.dir) note(n, 'dirs', sid, path.join(base, 'subagents', 'workflows', n)); }
-          if (needSnap) { let names = []; try { names = await fsp.readdir(path.join(base, 'workflows')); } catch { } for (const n of names) { const id = n.endsWith('.json') ? n.slice(0, -5) : ''; if (want.get(id)?.snap) note(id, 'snaps', sid, path.join(base, 'workflows', n)); } }
-        }
-      };
-      await Promise.all(Array.from({ length: WF_LOOK_LANES }, lane));
-      for (const id of want.keys()) if (_wfWant.has(id)) _wfFound.set(id, { ...(found.get(id) || { dirs: [], snaps: [] }), at: startedAt });
-    })().catch(() => { }).finally(() => { _wfLook = null; if ([..._wfWant.values()].some((w) => (w.dirAt || 0) > startedAt || (w.snapAt || 0) > startedAt)) scheduleWorkflowLook(); });
+      const needDir = [...want.values()].some((w) => w.dirs), needSnap = [...want.values()].some((w) => w.snaps);
+      const work = (async () => {
+        const projects = (await read(root, 'root')) || [];
+        const convs = [];
+        for (const dir of projects) { const names = (await read(path.join(root, dir), 'project')) || []; for (const sid of names) if (!sid.endsWith('.jsonl')) convs.push([dir, sid]); }
+        let next = 0;
+        const lane = async () => {
+          while (!ended && next < convs.length) {
+            const [dir, sid] = convs[next++], base = path.join(root, dir, sid);
+            if (needDir) for (const n of (await read(path.join(base, 'subagents', 'workflows'), 'conversation')) || []) if (want.get(n)?.dirs) note(n, 'dirs', sid, path.join(base, 'subagents', 'workflows', n));
+            if (needSnap) for (const n of (await read(path.join(base, 'workflows'), 'conversation')) || []) { const id = n.endsWith('.json') ? n.slice(0, -5) : ''; if (want.get(id)?.snaps) note(id, 'snaps', sid, path.join(base, 'workflows', n)); }
+          }
+        };
+        await Promise.all(Array.from({ length: lanes }, lane));
+      })();
+      whole = await Promise.race([work.then(() => true, () => true), new Promise((r) => { timer = wfTimer(() => r(false), _wfLookTest.deadlineMs || WF_LOOK_DEADLINE_MS); })]);
+      ended = true; (_wfLookTest.clearTimer || clearTimeout)(timer);
+      for (const [id, kinds] of want) if (_wfWant.has(id)) _wfFound.set(id, { ...(found.get(id) || { dirs: [], snaps: [] }), at: startedAt, kinds, whole });
+    })().catch(() => { }).finally(() => {
+      _wfLook = null;
+      if (_wfLookTest.onLook) _wfLookTest.onLook({ started: true, whole });
+      if ([..._wfWant.values()].some((w) => w.askedAt > startedAt)) scheduleWorkflowLook();
+    });
   }
   function scheduleWorkflowLook() {
     if (_wfLook || _wfLookTimer) return;
-    const wait = Math.max(50, _wfLookStart ? _wfLookStart + WF_LOOK_EVERY_MS - Date.now() : 50);   // the runs wanted together ride ONE look
-    _wfLookTimer = setTimeout(() => { _wfLookTimer = null; runWorkflowLook(); }, wait);
-    if (_wfLookTimer.unref) _wfLookTimer.unref();
+    const wait = Math.max(50, _wfLookStart ? _wfLookStart + WF_LOOK_EVERY_MS - wfNow() : 50);   // the runs wanted together ride ONE look
+    _wfLookTimer = wfTimer(() => { _wfLookTimer = null; runWorkflowLook(); }, wait);
   }
-  function wantWorkflow(runId, kind) {
-    const now = Date.now();
-    let w = _wfWant.get(runId); if (!w) { w = { polled: now, dirAt: 0, snapAt: 0 }; _wfWant.set(runId, w); }
-    w.polled = now;
-    if (kind === 'dirs' && !w.dirAt) w.dirAt = now;
-    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;
+  // an ASK: a poll of this asker that could not place the run; its time is this asker's first such poll since its last answer
+  function wantWorkflow(runId, kind, asker) {
+    const now = wfNow();
+    let w = _wfWant.get(runId);
+    if (w) _wfWant.delete(runId); else w = { askedAt: now, dirs: new Map(), snaps: new Map() };
+    _wfWant.set(runId, w); w.askedAt = now;   // re-set: the least recent ask leaves first
+    if (!w[kind].has(asker)) w[kind].set(asker, now);
+    while (_wfWant.size > WF_WANT_MAX) { const old = _wfWant.keys().next().value; _wfWant.delete(old); _wfFound.delete(old); }
     scheduleWorkflowLook();
   }
-  // what the hub's look answered for this run and asker (the asker's own conversation first); `answered` false while no look
-  // that began after the run was wanted has ended
+  // the asker's ask is ANSWERED — placed, or «nowhere» (the 404): the look no longer lists for it (a placed fork kept the
+  // second listing on for every conversation, each minute)
+  function answeredWorkflow(runId, kind, asker) {
+    const w = _wfWant.get(runId); if (!w) return;
+    w[kind].delete(asker);
+    if (!w.dirs.size && !w.snaps.size) { _wfWant.delete(runId); _wfFound.delete(runId); }
+  }
+  // what the hub's look answered for this run and asker (the asker's own conversation first). A place found is an answer from
+  // any look; «nowhere» only from a WHOLE look that looked for this kind and BEGAN AFTER THE LATEST ASK for the run — a run asked
+  // under another folder before its own was written is not answered by a look that began before that ask
   function lookedPlace(runId, asker, kind) {
-    const f = _wfFound.get(runId), w = _wfWant.get(runId), since = w ? (kind === 'dirs' ? w.dirAt : w.snapAt) : 0;
-    if (!f || !since || f.at < since) return { answered: false, path: null };
+    const f = _wfFound.get(runId), w = _wfWant.get(runId);
+    if (!f || !f.kinds[kind]) return { answered: false, path: null };
     const list = f[kind] || [], own = list.find((x) => x.sid === asker) || list[0] || null;
-    return { answered: true, path: own ? own.path : null };
+    if (own) return { answered: true, path: own.path };
+    let latest = 0; if (w) for (const m of [w.dirs, w.snaps]) for (const at of m.values()) if (at > latest) latest = at;
+    return { answered: !!(f.whole && f.at > latest), path: null };
   }
   function findWorkflowSnapshot(runId, claudeSessionId, cwd, runDir = null) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const tryPath = (p) => { try { return fs.existsSync(p) ? p : null; } catch { return null; } };
+    const placedSnap = (p) => { answeredWorkflow(runId, 'snaps', claudeSessionId || ''); return p; };   // placed: this asker's ask for the look is cleared
     // 1) targeted: exact project dir for the cwd
     if (claudeSessionId && cwd) {
       const hit = tryPath(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId, 'workflows', `${runId}.json`));
-      if (hit) return hit;
+      if (hit) return placedSnap(hit);
     }
     // THE RUN IS FOUND: its snapshot, when written, is the one beside its run dir
-    if (runDir) { const beside = tryPath(path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', `${runId}.json`)); if (beside) return beside; }
+    if (runDir) { const beside = tryPath(path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', `${runId}.json`)); if (beside) return placedSnap(beside); }
     // the place kept for THIS asker and run, then the hub's look (the asker's own first) — never a listing on this road
     const key = 'snap:' + (claudeSessionId || '') + ':' + runId;
-    { const kept = keptWhere(key); if (kept) { if (tryPath(kept)) return kept; _wfWhere.delete(key); } }
+    { const kept = keptWhere(key); if (kept) { if (tryPath(kept)) return placedSnap(kept); _wfWhere.delete(key); } }
     const look = lookedPlace(runId, claudeSessionId || '', 'snaps');
-    if (look.path && tryPath(look.path)) return keepWhere(key, look.path);
-    wantWorkflow(runId, 'snaps');   // not placed: the hub's look names it (asynchronous, shared, at most once a minute)
+    if (look.path && tryPath(look.path)) return placedSnap(keepWhere(key, look.path));
+    wantWorkflow(runId, 'snaps', claudeSessionId || '');   // not placed: the hub's look names it (asynchronous, shared, at most once a minute)
     return null;
   }
 
@@ -395,13 +438,14 @@ function setup(ctx) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const sub = (base) => path.join(base, 'subagents', 'workflows', runId);
     const tryDir = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory() ? p : null; } catch { return null; } };
-    if (claudeSessionId && cwd) { const h = tryDir(sub(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId))); if (h) return h; }
+    const placedDir = (p) => { answeredWorkflow(runId, 'dirs', claudeSessionId || ''); return p; };   // placed: this asker's ask for the look is cleared
+    if (claudeSessionId && cwd) { const h = tryDir(sub(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId))); if (h) return placedDir(h); }
     // the place kept for THIS asker and run (a fork's view of its parent's run), then the hub's look — never a listing here
     const key = 'dir:' + (claudeSessionId || '') + ':' + runId;
-    { const kept = keptWhere(key); if (kept) { if (tryDir(kept)) return kept; _wfWhere.delete(key); } }
+    { const kept = keptWhere(key); if (kept) { if (tryDir(kept)) return placedDir(kept); _wfWhere.delete(key); } }
     const look = lookedPlace(runId, claudeSessionId || '', 'dirs');
-    if (look.path && tryDir(look.path)) return keepWhere(key, look.path);
-    wantWorkflow(runId, 'dirs');
+    if (look.path && tryDir(look.path)) return placedDir(keepWhere(key, look.path));
+    wantWorkflow(runId, 'dirs', claudeSessionId || '');
     return null;
   }
 
@@ -631,10 +675,12 @@ function setup(ctx) {
     if (runDir) return res.json(liveView(await readRunDirParts(runDir, runId), { runId }));
     // NOT PLACED YET (B-360d part 2, r2339): the hub's look has not answered for this run — it is asynchronous and starts at most
     // once a minute — so the poll says what it knows: «locating», a running view with no agents (the window keeps polling a
-    // running run); a look that answered «nowhere» for both is the release's 404
+    // running run); a WHOLE look begun after the run's latest ask that answered «nowhere» for both is the release's 404, and it
+    // answers this asker's ask (a later poll asks again)
     if (!lookedPlace(runId, claudeSessionId || '', 'dirs').answered || !lookedPlace(runId, claudeSessionId || '', 'snaps').answered) {
       return res.json({ ...liveView({ attempts: journalAttemptsOf(journalFold(null, '')), metas: {}, agentFiles: [], scriptName: '', newestMtime: 0 }, { runId }), locating: true });
     }
+    answeredWorkflow(runId, 'dirs', claudeSessionId || ''); answeredWorkflow(runId, 'snaps', claudeSessionId || '');
     return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
 
@@ -974,6 +1020,7 @@ const SWEEP_STALE_SAY_AFTER = 2;     // (B) failed rebuilds in a row before ever
 const SWEEP_LATE_SAY_MS = 15000;     // the chain's -cure (2): a sweep in flight this long is said while it runs (a deadline: at once)
 const SWEEP_ANSWER_MAX_BYTES = 64 * 1024 * 1024;   // the chain's -cure (a): the answer's bytes the worker hands back, at most (about 140 000 rows)
 const SWEEP_ROWS_IN_MAX = 200000;    // …and the rows handed in (the other harnesses' + the kept metas), at most
+const _wfLookTest = {};              // the suite's seam for the hub's workflow look (test-workflow-disk §9 (e)): its clock, its timers, its deadline, a word at each look's end
 const _sweepTest = {};               // the suite's seam: a stand-in worker script (a wedged / throwing / slow one), the sweep's deadline, a lookup's clock, a poll's wait, the cache's 4.5 s
 let _sweepPool = null, _sweepRoad = 'worker', _sweepStats = null, _warmthTag = 0, _sweepFailsOf = null;
 let _sweepTriedAt = 0;   // the -cure's read (S7): the end of the LAST sweep ATTEMPT, good or failed, list or none — what a lookup's sweep is spaced by
@@ -1129,4 +1176,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { tmuxReaderVia, SWEEP_LATE_SAY_MS, SWEEP_ANSWER_MAX_BYTES, SWEEP_ROWS_IN_MAX, router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, sweepFails: () => (_sweepFailsOf ? _sweepFailsOf() : null), POLL_WAIT_MS, SWEEP_STALE_SAY_AFTER, _sweepTestSeam: (o) => { Object.assign(_sweepTest, o || {}); if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { tmuxReaderVia, SWEEP_LATE_SAY_MS, SWEEP_ANSWER_MAX_BYTES, SWEEP_ROWS_IN_MAX, router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, sweepFails: () => (_sweepFailsOf ? _sweepFailsOf() : null), POLL_WAIT_MS, SWEEP_STALE_SAY_AFTER, _wfLookTestSeam: (o) => { Object.assign(_wfLookTest, o || {}); }, _sweepTestSeam: (o) => { Object.assign(_sweepTest, o || {}); if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

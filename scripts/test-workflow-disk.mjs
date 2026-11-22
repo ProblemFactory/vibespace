@@ -21,7 +21,8 @@
 //   §8 wiring pins (window, card, status bar, ci tier, docs)
 //   §9 B-360d part 2: a found run is not walked for (control = the release's walk), a fork's view of its parent's run is found
 //      and its place kept, the journal is folded as it grows (appends, a rewrite in place, a line longer than a slice, cuts inside
-//      a multi-byte character, pollers sharing one read)
+//      a multi-byte character, pollers sharing one read); the hub's look's bounds — a second root listing only after the minute,
+//      a read that never returns (its deadline, at most eight reads out across looks), each by the look's seam (round w7o3p5msx)
 // Run: node scripts/test-workflow-disk.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -580,7 +581,7 @@ console.log('§8 wiring pins (the 2.355.0 lesson: a pure fix with no call site i
     && /the run dir is the truth when the stream is gone/.test(read('docs/kb-bugfix-invariants.md')));
 }
 
-console.log('§9 a found run is not walked for, a fork finds its parent\'s run, the journal is folded as it grows (B-360d part 2, lane chrome-157)');
+console.log('§9 a found run is not walked for, a fork finds its parent\'s run, the journal is folded as it grows, the hub\'s look is bounded (B-360d part 2, lane chrome-157)');
 {
   // a running workflow has no snapshot yet and its card / window polls it every 2.5 s. (a) the release's last resort walked EVERY
   // session entry under ~/.claude/projects at each poll though the call names its session — judged by the PATHS one poll touches:
@@ -595,10 +596,11 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   // the copies (rounds w5daqaxxs / w5hvsu2v5): FRESH = the route as it is, its own look clock (a look starts at most once a
   // minute per instance); WALK = the release's road, a synchronous walk of the projects folder put back on the poll; NOLOOK = the
   // look never scheduled; PERPOLL = a look started by every poll that could not place its run (no sharing, no minute's bound)
-  const wantSnapAnchor = "    wantWorkflow(runId, 'snaps');   // not placed: the hub's look names it (asynchronous, shared, at most once a minute)\n    return null;\n";
+  const wantSnapAnchor = "    wantWorkflow(runId, 'snaps', claudeSessionId || '');   // not placed: the hub's look names it (asynchronous, shared, at most once a minute)\n    return null;\n";
+  const wantAnchor = "    while (_wfWant.size > WF_WANT_MAX) { const old = _wfWant.keys().next().value; _wfWant.delete(old); _wfFound.delete(old); }\n    scheduleWorkflowLook();\n";
   const release = M9.write('src/routes/sessions.js', cut9(route, wantSnapAnchor, "    try { for (const dir of fs.readdirSync(projectsDir)) for (const sid of fs.readdirSync(path.join(projectsDir, dir))) { const hit = tryPath(path.join(projectsDir, dir, sid, 'workflows', `${runId}.json`)); if (hit) return hit; } } catch { }\n    return null;\n"), 'release-walk');
-  const noLook = M9.write('src/routes/sessions.js', cut9(route, "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n    scheduleWorkflowLook();\n", "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n"), 'no-look');
-  const perPoll = M9.write('src/routes/sessions.js', cut9(route, "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n    scheduleWorkflowLook();\n", "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n    runWorkflowLook();\n"), 'per-poll-look');
+  const noLook = M9.write('src/routes/sessions.js', cut9(route, wantAnchor, wantAnchor.replace("    scheduleWorkflowLook();\n", '')), 'no-look');
+  const perPoll = M9.write('src/routes/sessions.js', cut9(route, wantAnchor, wantAnchor.replace("    scheduleWorkflowLook();\n", "    runWorkflowLook();\n")), 'per-poll-look');
   let freshN = 0; const fresh = () => M9.write('src/routes/sessions.js', route, 'fresh-' + (++freshN), { same: true });   // a deliberate unpatched copy: its own look clock
   const express = require(path.join(REPO, 'node_modules/express'));
   const W9 = ['existsSync', 'statSync', 'lstatSync', 'readdirSync'];
@@ -746,6 +748,86 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
     d1 && d1.status === 200 && d1.body.status === 'completed' && d20.status === 200 && d20.body.status === 'completed' && d20.listings === 0, { status: [d1 && d1.status, d20.status], view: [d1 && d1.body && d1.body.status, d20.body && d20.body.status], listings: d20.listings });
   for (const m of [mC, mNoLook, mWalkC, mS, mP, mN, mD]) await m.close();
   await mCure.close(); await mWalk.close();
+  // THE LOOK's BOUNDS (round w7o3p5msx, 主开发 r2443), driven through the look's own seam: a clock and timers the leg moves, a
+  // word at each look's end. (e) the minute: a running run's window wants its snapshot at every poll (the standing cost), and a
+  // second root listing comes only after the minute. (f) a stand-in read that NEVER returns: every conversation folder of one
+  // project holds the read it is asked for
+  const minuteCut = M9.write('src/routes/sessions.js', cut9(route, 'const WF_LOOK_EVERY_MS = 60 * 1000,', 'const WF_LOOK_EVERY_MS = 0,'), 'look-minute-cut');
+  const noDeadline = M9.write('src/routes/sessions.js', cut9(route, 'new Promise((r) => { timer = wfTimer(() => r(false), _wfLookTest.deadlineMs || WF_LOOK_DEADLINE_MS); })', 'new Promise(() => { })'), 'look-no-deadline');
+  const lanesAll = M9.write('src/routes/sessions.js', cut9(route, 'const lanes = WF_LOOK_LANES - wfOut();', 'const lanes = WF_LOOK_LANES;'), 'look-lanes-not-shared');
+  const ranOutNowhere = M9.write('src/routes/sessions.js', cut9(route, 'answered: !!(f.whole && f.at > latest)', 'answered: !!(f.at > latest)'), 'look-ran-out-nowhere');
+  const ticks = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const waitFor = async (cond, ms, what) => { const t = Date.now() + ms; while (!cond() && Date.now() < t) await new Promise((r) => setTimeout(r, 5)); return cond() ? true : markTimedOut(false, ms, what); };
+  const seamed = async (file) => {
+    const mod = require(file), q = [], ends = []; let T = 1e12;
+    mod._wfLookTestSeam({ now: () => T, setTimer: (fn, ms) => { const h = { fn, due: T + ms, off: false }; q.push(h); return h; }, clearTimer: (h) => { if (h) h.off = true; }, onLook: (x) => ends.push(x) });
+    const m = await mount9(file), T0 = T;
+    const to = (t) => { T = t; for (let h; (h = q.filter((x) => !x.off && x.due <= T).sort((a, b) => a.due - b.due)[0]);) { h.off = true; h.fn(); } };
+    return { ...m, T0, to, ends };
+  };
+  const boundRun = async (file) => {
+    const m = await seamed(file), o = fs.promises.readdir; let n = 0; const seen = {};
+    fs.promises.readdir = function (p, ...a) { if (String(p) === projects) n++; return o.call(this, p, ...a); };
+    try {
+      await m.get(RG); m.to(m.T0 + 50); seen.first = n;
+      await waitFor(() => m.ends.length >= 1, 4000, 'the first look to end');
+      m.to(m.T0 + 30000); await m.get(RG); m.to(m.T0 + 30100); seen.s30 = n;
+      await waitFor(() => m.ends.length >= n, 4000, 'every look started to end');
+      m.to(m.T0 + 60000); seen.s60 = n;
+      m.to(m.T0 + 60100); seen.s61 = n;
+      await waitFor(() => m.ends.length >= n, 4000, 'every look started to end');
+    } finally { fs.promises.readdir = o; await m.close(); }
+    return seen;
+  };
+  const eCure = await boundRun(fresh()), eCut = await boundRun(minuteCut);
+  const judgeE = (x) => x.first === 1 && x.s30 === 1 && x.s60 === 1 && x.s61 === 2;
+  ok(`(e) THE MINUTE (an injected clock): a running run's window wants its snapshot at every poll; the projects root is listed once by the first look, still once at +30 s and +60 s, a second time only after the minute (${[eCure.first, eCure.s30, eCure.s60, eCure.s61].join(' → ')})`, judgeE(eCure), eCure);
+  ok(`(e) CONTROL — the copy without the minute lists the root again at +30 s (${[eCut.first, eCut.s30, eCut.s60, eCut.s61].join(' → ')}): the judge reads it as red`, !judgeE(eCut) && eCut.s30 === 2, eCut);
+  const stallDir = path.join(projects, '-b360d-stall');
+  for (let i = 0; i < 10; i++) for (const sub of [['subagents', 'workflows'], ['workflows']]) fs.mkdirSync(path.join(stallDir, `stall-${i}`, ...sub), { recursive: true });
+  const isLookRead = (p) => { const rel = path.relative(projects, p); if (rel.startsWith('..') || path.isAbsolute(rel)) return false; const s = rel ? rel.split(path.sep) : []; return s.length <= 1 || (s.length === 3 && s[2] === 'workflows') || (s.length === 4 && s[2] === 'subagents' && s[3] === 'workflows'); };
+  const RN = 'wf_b360dstrand';
+  const strandRun = async (file) => {
+    const m = await seamed(file), o = fs.promises.readdir, held = [], st = { out: 0, max: 0, roots: 0 }, said = [], ow = console.warn, x = {};
+    let stallOn = true;
+    fs.promises.readdir = function (p, ...a) {
+      const s = String(p); if (!isLookRead(s)) return o.call(this, p, ...a);
+      st.out++; st.max = Math.max(st.max, st.out); if (s === projects) st.roots++; const back = (v) => { st.out--; return v; };
+      if (stallOn && s.startsWith(stallDir + path.sep)) return new Promise((res) => held.push(() => res(back([]))));   // the stand-in read that never returns (until the leg ends)
+      return o.call(this, p, ...a).then(back, (e) => { back(); throw e; });
+    };
+    console.warn = (...a) => { const t = a.map(String).join(' '); if (t.startsWith('[workflow] the hub')) said.push(t); else ow.apply(console, a); };
+    const quiet = () => st.out === held.length;   // no read in flight but the held ones
+    try {
+      await m.get(RN); m.to(m.T0 + 50);
+      x.stuck1 = await waitFor(() => held.length >= 8 && quiet(), 4000, 'the first look\'s eight lanes held');
+      m.to(m.T0 + 1000); x.during = await m.get(RN);
+      m.to(m.T0 + 50 + 30000); await ticks(); x.end1 = m.ends[0];
+      x.after = await m.get(RN);
+      m.to(m.T0 + 60050); await ticks(); await waitFor(quiet, 4000, 'the second look\'s reads held or back'); x.end2 = m.ends[1]; x.held2 = held.length;
+      m.to(m.T0 + 61000); await m.get(RN); m.to(m.T0 + 120050); await ticks(); await waitFor(quiet, 4000, 'the third look\'s reads held or back'); x.end3 = m.ends[2];
+      x.said = said.slice();
+      for (const r of held.splice(0, 3)) r();   // three reads come back
+      await ticks(); await waitFor(quiet, 4000, 'the three reads back'); x.back = held.length;
+      m.to(m.T0 + 121000); await m.get(RN); const r4 = st.roots; m.to(m.T0 + 180050);
+      x.stuck4 = st.roots > r4 ? await waitFor(() => held.length >= 8 && quiet(), 4000, 'a later look\'s lanes held') : 'no look started'; x.held4 = held.length;
+      x.max = st.max;
+    } finally {   // nothing of this copy's looks reads on into the next copy's counts: no more stalls, the held reads back, every look ended
+      stallOn = false; for (const r of held.splice(0)) r(); m.to(m.T0 + 1e9);
+      await waitFor(() => st.out === 0, 4000, 'every read of the copy\'s looks back');
+      fs.promises.readdir = o; console.warn = ow; await m.close();
+    }
+    return x;
+  };
+  const fCure = await strandRun(fresh()), fNoDeadline = await strandRun(noDeadline), fLanes = await strandRun(lanesAll), fNowhere = await strandRun(ranOutNowhere);
+  fs.rmSync(stallDir, { recursive: true, force: true });
+  const locating = (r) => !!(r && r.status === 200 && r.body && r.body.locating === true);
+  const judgeF1 = (x) => x.stuck1 === true && locating(x.during) && !!x.end1 && x.end1.started === true && x.end1.whole === false && locating(x.after);
+  const judgeF2 = (x) => !!x.end2 && x.end2.started === false && !!x.end3 && x.end3.started === false && (x.said || []).length === 1 && !x.said[0].includes(path.sep) && !x.said[0].includes(HOME) && x.back === 5 && x.held4 === 8 && x.max === 8;
+  ok(`(f) LAW 1, a read that never returns: the look ends at its deadline with what it found (${JSON.stringify(fCure.end1)}); the run it did not place keeps «locating» before and after (${fCure.during && fCure.during.status}, ${fCure.after && fCure.after.status}) — never a 404 from a look that ran out`, judgeF1(fCure), { end1: fCure.end1, during: fCure.during && fCure.during.status, after: [fCure.after && fCure.after.status, fCure.after && fCure.after.body && fCure.after.body.locating] });
+  ok(`(f) LAW 2: the hub's reads out never pass eight across looks (at most ${fCure.max}); with none back the next two looks start nothing and the journal says so ONCE, with no path (${(fCure.said || []).length}: «${((fCure.said || [])[0] || '').slice(0, 120)}…»); three reads back ⇒ a later look uses those three lanes only (${fCure.back} held, then ${fCure.held4})`, judgeF2(fCure), { max: fCure.max, said: (fCure.said || []).length, end2: fCure.end2, end3: fCure.end3, back: fCure.back, held4: fCure.held4 });
+  ok(`(f) CONTROLS, the legs' red copies: with no deadline the look never ends (${JSON.stringify(fNoDeadline.end1 || null)}); a look that ran out answering «nowhere» gives the 404 (${fNowhere.after && fNowhere.after.status}); lanes not shared across looks put ${fLanes.max} reads out — the judges read all three as red`,
+    !judgeF1(fNoDeadline) && !fNoDeadline.end1 && !judgeF1(fNowhere) && !!(fNowhere.after && fNowhere.after.status === 404) && !judgeF2(fLanes) && fLanes.max > 8, { noDeadline: fNoDeadline.end1 || null, nowhere: fNowhere.after && fNowhere.after.status, lanes: fLanes.max });
   for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 5, label: '§9 ' })) ok(r.name, r.pass, r.detail);
 }
 
