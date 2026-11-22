@@ -8274,6 +8274,7 @@ await section(async () => {
     'src/server/otel-ingest.js': 'the telemetry pair (envFor: the hub’s receiver address + the credential it minted; the create merges it into every local claude conversation)',
     'src/claude-oat-probe.js': 'the oat probe’s own CLI (a probe child, never a conversation): its telemetry to this hub’s receiver',
     'src/server/cli-config-runner.js': 'the hook-register run for THIS machine (B-ddf3: the shipped helper through the starter, the plan in VIBESPACE_CLI_CONFIG)',
+    'src/desktop-serve.js': 'a desktop app’s env (r2505: the road joined here — it finishes the app’s env and writes its handed mark: ROADS112 / SITE_ROAD112 below)',
   });
   const FAMILY_DIRS112 = ['src/adapters/', 'src/harnesses/'];
   // the hub's OWN knobs a site hands a child (not the conversation's identity, route or credential), each named with its reason
@@ -8356,6 +8357,7 @@ await section(async () => {
     'src/remote-shell.js': /\$\{HANDED_MARK\}=\$\{shq\(markOf\(remoteWrittenNames\(\{ parts, tokenAssign, acctEnv, browser \}\)\)\)\} `\s*\n\s*\+ 'exec env '/,
     'src/jobs.js': /withHandedMark\(jobEnv\(\{ \.\.\.own, \.\.\.handed \}, base\), jobEnv\(own, base\), \{ familyToo: false \}\)/,
     'src/server/boot-restore.js': /readoptEnv\[HANDED_MARK\] = markOf\(handedNames\(readoptEnv, agentEnv\(\)\)\)/,
+    'src/desktop-serve.js': /appEnv\[CE\.HANDED_MARK\] = CE\.markOf\(CE\.handedNames\(appEnv, env\(\)\)\)/,   // r2505: a desktop app's env (joined)
   });
   const SITE_ROAD112 = Object.freeze({
     'src/ws-create.js': ['src/spawn/line.js', /sessionSpawnLine\(\{[^}]*\n[^}]*\n\s*handedFrom: agentEnv\(\)/],
@@ -8366,6 +8368,7 @@ await section(async () => {
     'src/remote-shell.js': ['src/remote-shell.js', null],
     'src/jobs.js': ['src/jobs.js', /env: jobRunEnv\(\{ own: /],
     'src/server/boot-restore.js': ['src/server/boot-restore.js', null],
+    'src/desktop-serve.js': ['src/desktop-serve.js', null],   // r2505: the app's env is finished there and marked there
     'src/hosts.js': [null, 'the remote hook-register run: an install command, no conversation runs in it'],
     'src/claude-oat-probe.js': [null, 'the oat probe’s own CLI: a probe child, no conversation runs in it'],
     'src/server/cli-config-runner.js': [null, 'the hook-register run for this machine: the shipped helper writes the CLI config and exits, no conversation runs in it'],
@@ -8384,7 +8387,7 @@ await section(async () => {
     return red;
   };
   const rr112 = roads112(files112);
-  ok(Object.keys(ROADS112).length >= 4 && !rr112.length, `§112 the computed mark: the ${Object.keys(ROADS112).length} roads that finish a child's env (the local line, the remote command, a job's run, the boot's re-adopt) each write VIBESPACE_HANDED, and each of the ${Object.keys(SITES112).length} injector sites reaches one or is named${rr112.length ? ' — RED: ' + rr112.join(' | ') : ''}`, rr112);
+  ok(Object.keys(ROADS112).length >= 4 && !rr112.length, `§112 the computed mark: the ${Object.keys(ROADS112).length} roads that finish a child's env (the local line, the remote command, a job's run, the boot's re-adopt, a desktop app's env) each write VIBESPACE_HANDED, and each of the ${Object.keys(SITES112).length} injector sites reaches one or is named${rr112.length ? ' — RED: ' + rr112.join(' | ') : ''}`, rr112);
   ok(roads112({ ...files112, 'src/remote-shell.js': (files112['src/remote-shell.js'] || '').replace('${HANDED_MARK}=', '${HANDED}=') }).some((r) => /remote-shell\.js finishes a child's env and no longer writes the mark/.test(r))
     && roads112(files112, ROADS112, { ...SITE_ROAD112, 'src/spawn/dial.js': undefined }).some((r) => /dial\.js writes a conversation's names and reaches NO road/.test(r))
     && roads112({ ...files112, 'src/spawn/ssh.js': (files112['src/spawn/ssh.js'] || '').split('buildRemoteExec(').join('buildRemote(') }).some((r) => /ssh\.js no longer reaches src\/remote-shell\.js/.test(r)),
