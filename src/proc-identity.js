@@ -181,7 +181,7 @@ function signalIdentity(identity, signal, opts = {}) {
  * Round 8: A CUT SCAN PROVES NOTHING (the caller never reads «none found» off one as «none left»), and the bound is spent where it
  * matters: the job's OWN candidates first — `first` (the pids its record names) and their children (/proc/<pid>/task/<pid>/
  * children), at most 256, outside the bound — then the rest, newest pid first. An unreadable environ is told by its OWNER (the
- * real uid of /proc/<pid>/status): `others` of other users (never ours to read), the rest ours (not dumpable).
+ * real uid of /proc/<pid>/status): `others` of other users (never ours to read), the rest ours (not dumpable, in uninterruptible sleep, or inside an exec — B-d8f4 r2215).
  */
 const MEMBERS_ROWS = 4096, MEMBERS_MS = 250;
 function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBERS_ROWS, maxMs = MEMBERS_MS } = {}, opts) {

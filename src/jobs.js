@@ -2422,9 +2422,9 @@ class JobManager {
     // a refused signal named, a cut walk said; and in the hub's log as before
     const es = (k) => (k === 1 ? '' : 'es'), what = [...(n ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])], line = `its forced end${what.length ? ` killed ${what.join(' and ')}` : ''}`   // B-d8f4 (主开发 r902): nothing killed never opens with «killed 0»
       + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '') + (mscan.cut ? ` — its mark's scan read ${mscan.scanned} of ${mscan.total} processes: what left its group may be left` : '') + (mscan.unread ? ` — its mark's scan could not list the processes (${mscan.unread}): what left its group may be left` : '')   // B-d8f4 (10, its read's S1: the errno, never a guess at the machine)
-      + (mscan.unreadable > 0 ? ` — its mark searched in ${mscan.scanned} processes; unreadable: ${[mscan.others ? `${mscan.others} of other users` : '', mscan.unreadable - (mscan.others || 0) > 0 ? `${mscan.unreadable - (mscan.others || 0)} of ours, not dumpable` : ''].filter(Boolean).join(', ')}: what carries its mark there may be left` : '')   // B-d8f4 (主开发 r2215): a still-unread member SAID here too, in the clear's words
+      + ((mscan.unreadable || 0) - (mscan.others || 0) > 0 ? ` — its mark could not be read in ${(mscan.unreadable || 0) - (mscan.others || 0)} process${(mscan.unreadable || 0) - (mscan.others || 0) === 1 ? '' : 'es'} of ours (in uninterruptible sleep, inside an exec, or not dumpable): what carries its mark there may be left` : '')   // B-d8f4 (主开发 r2215): a still-unread member SAID here too, in the clear's words
       + (marked.ended ? ` — ${require('./server/marked-walk.js').endedWords(marked.ended)}: what left its group may be left` : '');   // B-d8f4 (9): an ended walk SAID, the stop going on with what it found
-    if (n || escaped || refused.length || unjudged || t.cut || mscan.cut || mscan.unread || mscan.unreadable > 0 || marked.ended) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
+    if (n || escaped || refused.length || unjudged || t.cut || mscan.cut || mscan.unread || (mscan.unreadable || 0) - (mscan.others || 0) > 0 || marked.ended) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
     return n + escaped;
     };
     const done = marks ? this._walkMarked({ mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`, since: Number(stamp.starttime) || 0 }).then(finish) : Promise.resolve(finish([]));
@@ -2881,7 +2881,7 @@ class JobManager {
     }
     delete l.cut;
     const others = (seen && seen.others) || 0, ours = seen ? Math.max(0, (seen.unreadable || 0) - others) : 0;
-    const scanned = others || ours ? ` (its mark searched in ${seen.scanned} processes; unreadable: ${[others ? `${others} of other users` : '', ours ? `${ours} of ours, not dumpable` : ''].filter(Boolean).join(', ')})` : '';
+    const scanned = others || ours ? ` (its mark searched in ${seen.scanned} processes; unreadable: ${[others ? `${others} of other users` : '', ours ? `${ours} of ours (in uninterruptible sleep, inside an exec, or not dumpable)` : ''].filter(Boolean).join(', ')})` : '';
     this._dirty = true;
     if (!n) {
       l.gone = now();

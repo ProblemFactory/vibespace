@@ -228,7 +228,7 @@ try {
     const escText = cutOut(WT, 'function escapedOf() {', '\nasync function drainGroup() {'), envText = cutOut(WT, 'function envOf(root, pid, rest) {', '\n// ── SHIPPED TWIN (B-c134) END ──');
     const pfs = { readdirSync: (p, ...a) => fs.readdirSync(String(p).replace(/^\/proc/, root2), ...a), readFileSync: (p, ...a) => fs.readFileSync(String(p).replace(/^\/proc/, root2), ...a) };
     const statOfP = (pid) => { try { const s = pfs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
-    const wrapScan = (envSrc) => new Function('fs', 'statOf', 'envOf', 'keptTest', 'keptAncestors', 'MARK', 'MARK_RUN', 'stamp', `return ${escText}`)(pfs, statOfP, new Function('fs', `return ${envSrc}`)(pfs), () => null, () => new Set(), MARK, '', { starttime: 1000 })();   // eslint-disable-line no-new-func
+    const wrapScan = (envSrc, { esc = escText, keptT = () => null } = {}) => new Function('fs', 'statOf', 'envOf', 'keptTest', 'keptAncestors', 'MARK', 'MARK_RUN', 'stamp', `return ${esc}`)(pfs, statOfP, new Function('fs', `return ${envSrc}`)(pfs), keptT, () => new Set(), MARK, '', { starttime: 1000 })();   // eslint-disable-line no-new-func
     if (!escText || !envText) ok(false, 'ANCHOR (data/bin/job-wrapper.js): escapedOf / envOf not found — the parity leg reads nothing');
     else {
       const w = wrapScan(envText);
@@ -245,16 +245,51 @@ try {
     const noSecond = MC.load('src/proc-identity.js', anchored(PISRC, '  for (const e of again) { if (Date.now() - t1 > maxMs) unread(e); else check(e, true); }\n', '  /* MUTANT: no second read */\n', 'red-no-second-read'), 'red-no-second-read');
     const m2x = twice(noSecond);
     okP(!pids(m2x).includes(7206) && k6 === 1, 'RED: no second read — the member read inside its exec is missed (and the unread go uncounted)', { rows: pids(m2x), reads: k6, scan: m2x.scan });
+    // round whnhv7lcb (b): a pid REUSED between the two reads — the second stat shows a new start time; the row carries IT (the start time
+    // comes from the same read as the mark), never the first read's
+    put2(7207, {});
+    const at7s = `${root2}/7207/stat`, at7e = `${root2}/7207/environ`; let k7s = 0, k7e = 0;
+    const reused = (Mod) => { k7s = 0; k7e = 0; fs.readFileSync = function (p, ...a) { if (p === at7s) { k7s++; const f = ['S', '1', '7207', ...Array(16).fill('0'), k7s === 1 ? '2000' : '2500', '0', '0']; return `7207 (x) ${f.join(' ')}`; } if (p === at7e) { k7e++; return k7e === 1 ? '' : ['PATH=/usr/bin', MARK].join('\0'); } return rf.call(fs, p, ...a); }; try { return Mod.membersOf({ mark: MARK, since: 1000 }, { procRoot: root2 }); } finally { fs.readFileSync = rf; } };
+    const mr = reused(PI), row7 = mr.find((r) => Number(r.pid) === 7207);
+    okP(!!row7 && row7.starttime === 2500 && k7s === 2, 'round whnhv7lcb (b): a pid REUSED between the two reads (a new start time at the second) — the row carries the SECOND read\'s start time, the one its mark was read with; the signal\'s identity check then judges the process that is there', { row: row7, stats: k7s });
+    const firstSt = MC.load('src/proc-identity.js', anchored(anchored(anchored(PISRC, '  const again = [];', '  const again = [], firstSt = new Map();', 'red-first-start-1'), 'else again.push(e); }', 'else { again.push(e); firstSt.set(e, Number(r[19])); } }', 'red-first-start-2'), '    if (hit) out.push({ pid: e, starttime: Number(r[19]), bootId });', '    if (hit) out.push({ pid: e, starttime: firstSt.has(e) ? firstSt.get(e) : Number(r[19]), bootId });   /* MUTANT: the first read\'s start time */', 'red-first-start-3'), 'red-first-start');
+    const mrx = reused(firstSt), row7x = mrx.find((r) => Number(r.pid) === 7207);
+    okP(!!row7x && row7x.starttime === 2000, 'RED: the first read\'s start time handed back — a row naming another process than the one whose mark was read', { row: row7x });
+    if (escText && envText) {
+      // round whnhv7lcb (c): the WRAPPER's second read FINDS a member (7206: inside its exec at the first look, carrying the mark at the second)
+      const wTwice = (esc) => { k6 = 0; fs.readFileSync = function (p, ...a) { if (p === at6) { k6++; return k6 === 1 ? '' : ['PATH=/usr/bin', MARK].join('\0'); } return rf.call(fs, p, ...a); }; try { return wrapScan(envText, { esc }); } finally { fs.readFileSync = rf; } };
+      const wf = wTwice(escText);
+      okP(wf.some((x) => x[0] === 7206) && k6 === 2, 'round whnhv7lcb (c): the wrapper\'s second read FINDS the member read inside its exec at the first look — the same answer as membersOf\'s', { found: wf.map((x) => x[0]), reads: k6 });
+      const pushCut = escText.replace('anc2.has(Number(e))) continue; look(e, r, true); }', 'anc2.has(Number(e))) continue; }');
+      const wfx = pushCut !== escText ? wTwice(pushCut) : null;
+      okP(!!wfx && !wfx.some((x) => x[0] === 7206), 'RED: the wrapper\'s second read cut — the member read inside its exec is missed', { found: wfx && wfx.map((x) => x[0]) });
+      // round whnhv7lcb (a): a HUB caught inside its exec — its command line read empty at the first pass (its hub test said «not kept»),
+      // a hub's at the second: the second pass's FRESH test keeps it — the stop never signals it
+      put2(7208, {});
+      const a8c = `${root2}/7208/cmdline`, a8e = `${root2}/7208/environ`; let k8c = 0, k8e = 0;
+      const keptT = () => { const memo = new Map(); return (pid) => { if (!memo.has(Number(pid))) { let c = ''; try { c = pfs.readFileSync(`/proc/${pid}/cmdline`, 'latin1'); } catch { } memo.set(Number(pid), /server\.js/.test(c)); } return memo.get(Number(pid)); }; };
+      const hubMid = (esc) => { k8c = 0; k8e = 0; fs.readFileSync = function (p, ...a) { if (p === a8c) { k8c++; return k8c <= 2 ? '' : 'node\0server.js\0'; } if (p === a8e) { k8e++; return k8e === 1 ? '' : ['PATH=/usr/bin', MARK].join('\0'); } return rf.call(fs, p, ...a); }; try { return wrapScan(envText, { esc, keptT }); } finally { fs.readFileSync = rf; } };
+      const wh = hubMid(escText);
+      okP(!wh.some((x) => x[0] === 7208), 'round whnhv7lcb (a): a hub inside its exec at the first pass is KEPT at the second by a fresh test (its group, its ancestors and the hub test asked again on the fresh stat) — never on the stop\'s list', { found: wh.map((x) => x[0]), cmdlineReads: k8c });
+      const OLD_AGAIN = "  for (const e of again) { if (Date.now() - t0 > 250) { out.unread = (out.unread || 0) + 1; continue; } const r = statOf(e); if (r && r[0] !== 'Z' && Number(r[19]) >= stamp.starttime) look(e, r, true); }";   // stale-pins: kept — the red writes the round's loop back into a copy of the scan
+      const NEW_AGAIN = escText.slice(escText.indexOf('  for (const e of again) {'), escText.indexOf('\n', escText.indexOf('  for (const e of again) {')));
+      const oldLoop = NEW_AGAIN ? escText.replace(NEW_AGAIN, OLD_AGAIN) : escText;
+      const whx = oldLoop !== escText ? hubMid(oldLoop) : null;
+      okP(!!whx && whx.some((x) => x[0] === 7208), 'RED: the round\'s second read (no skips asked again) — the hub caught inside its exec is put on the stop\'s list', { found: whx && whx.map((x) => x[0]) });
+    }
   }
 
   console.log('§9 a still-unread member is SAID by the forced end too, in the clear\'s words');
   {
     const UNR = { started: true, code: 0, signal: null, stdout: JSON.stringify({ rows: [], scan: { scanned: 9, total: 9, unreadable: 2, others: 1, cut: false } }) + '\n', stderr: '' };
     const u = await forced(realJM, 'unread-said', UNR);
-    okP(/its mark searched in 9 processes; unreadable: 1 of other users, 1 of ours, not dumpable: what carries its mark there may be left/.test(u.said), 'the forced end says what its walk could not read — counted and said, as the clear says it', { said: u.said });
-    const mute = MC.load('src/jobs.js', anchored(JSRC, '      + (mscan.unreadable > 0 ? ', '      + (false && mscan.unreadable > 0 ? ', 'red-unread-unsaid'), 'red-unread-unsaid');
+    okP(/its mark could not be read in 1 process of ours \(in uninterruptible sleep, inside an exec, or not dumpable\): what carries its mark there may be left/.test(u.said) && !/of other users/.test(u.said), 'the forced end says what its walk could not read of OURS, by its true causes (round whnhv7lcb (d)/(e): never «not dumpable» alone, never another user\'s refusals)', { said: u.said });
+    const OTH = { started: true, code: 0, signal: null, stdout: JSON.stringify({ rows: [], scan: { scanned: 9, total: 9, unreadable: 2, others: 2, cut: false } }) + '\n', stderr: '' };
+    const uo = await forced(realJM, 'unread-others', OTH);
+    okP(!/could not be read|unreadable|of other users/.test(uo.said), 'round whnhv7lcb (e): unread rows that are all OTHER users\' (refused reads) — the forced end says nothing of them (on a shared machine every forced end would say it)', { said: uo.said });
+    const mute = MC.load('src/jobs.js', anchored(JSRC, '      + ((mscan.unreadable || 0) - (mscan.others || 0) > 0 ? ', '      + (false && (mscan.unreadable || 0) - (mscan.others || 0) > 0 ? ', 'red-unread-unsaid'), 'red-unread-unsaid');
     const ux = await forced(mute, 'unread-said-red', UNR);
-    okP(!/unreadable/.test(ux.said), 'RED: the words cut — the forced end silent about what it could not read (the release\'s)', { said: ux.said });
+    okP(!/could not be read/.test(ux.said), 'RED: the words cut — the forced end silent about what it could not read (the release\'s)', { said: ux.said });
   }
 } catch (e) {
   fail++; console.error('  ✗ the suite threw: ' + ((e && e.stack) || e));

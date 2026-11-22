@@ -1101,7 +1101,10 @@ function escapedOf() { // started after us, outside our group, carrying the job'
     if ((kept && kept(e)) || anc.has(Number(e))) continue;
     look(e, r, false);
   }
-  for (const e of again) { if (Date.now() - t0 > 250) { out.unread = (out.unread || 0) + 1; continue; } const r = statOf(e); if (r && r[0] !== 'Z' && Number(r[19]) >= stamp.starttime) look(e, r, true); }
+  // round whnhv7lcb (a): the second read repeats the FIRST pass's skips on its fresh stat — its own group, an ancestor of a kept hub,
+  // and a kept hub by a FRESH test (the first pass's memo was made from a command line read empty inside the exec: a hub mid-exec passed)
+  const kept2 = again.length ? keptTest() : null, anc2 = again.length ? keptAncestors() : null;
+  for (const e of again) { if (Date.now() - t0 > 250) { out.unread = (out.unread || 0) + 1; continue; } const r = statOf(e); if (!r || r[0] === 'Z' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime || (kept2 && kept2(e)) || anc2.has(Number(e))) continue; look(e, r, true); }
   return out;
 }
 async function drainGroup() {
