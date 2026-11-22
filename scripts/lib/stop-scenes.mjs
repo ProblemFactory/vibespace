@@ -42,6 +42,9 @@ const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAl
     await until(async () => { await jm._sweep(); return ['interrupted', 'failed', 'done'].includes(job.state); }, 8000);
     const kept = (m) => !!(pre && pre.keep && pre.keep.has(m.pid));   // what the scene expects to live on (never waited for)
     await until(() => tree.filter((m) => !kept(m)).every((m) => PI.aliveIdentity(m) === false), 4000);
+    // B-d8f4 (9): the forced end's mark kill lands when its walk ANSWERS (a child through the starter, off the hub's thread) — the scene
+    // judges after that answer, never inside it (a wait on the engine's own state: markWalksSettled; the release's copies have none)
+    if (typeof jm.markWalksSettled === 'function') await jm.markWalksSettled();
   }
   const after = pre && pre.after ? await pre.after() : null;   // read before this scene ends what is left
   const left = tree.filter((m) => PI.aliveIdentity(m) === true);
