@@ -36,6 +36,7 @@ import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -258,7 +259,7 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
 {
   let ab = null;
   try { ab = require('../src/browser-facts.js').binaryResolver('agent-browser', process.env)() || null; } catch { ab = null; } // the REAL binary (data/bin's is VibeSpace's refusing shim)
-  if (!ab) skip('no real agent-browser installed (the driver\'s road)');
+  if (!ab) skip(`${DRIVER.skip} no real agent-browser installed (the driver's road)`);
   else {
     reach = { ...UP, mode: 'userspace' };
     const door = DOOR.create({ dataDir: null, reach: () => reach, cacheMs: 0, log: quietLog });

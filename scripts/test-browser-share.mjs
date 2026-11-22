@@ -40,6 +40,7 @@ import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const REPO = new URL('..', import.meta.url).pathname;
@@ -85,7 +86,7 @@ const facts = F.createBrowserFacts({ env: kenv });
 let ver = null; try { ver = await facts.probeVersion(); } catch { ver = null; }
 const version = typeof ver === 'string' ? ver : (ver && ver.version) || facts.lastVersion() || null;
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
-if (!version) { skip(`the real agent-browser is not on PATH (only the VibeSpace shim, or nothing) — every leg needs it (probe: ${JSON.stringify(ver)})`); }
+if (!version) { skip(`${DRIVER.skip} the real agent-browser is not on PATH (only the VibeSpace shim, or nothing) — every leg needs it (probe: ${JSON.stringify(ver)})`); }
 else if (!CHROME) { skip('no chrome on this box'); }
 else await (async () => {
   const conv = {}; // browserKey → { turn, name }

@@ -31,6 +31,7 @@ import http from 'node:http';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -59,7 +60,7 @@ const skipWhole = (why) => { console.log(`\nSKIP: ${why} — no leg ran on this 
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null;
 try { const h0 = path.join(ROOT, 'v'); fs.mkdirSync(h0, { mode: 0o700 }); ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: { ...BASE_ENV, HOME: h0, TMPDIR: h0 } }).trim() : null; } catch { ver = null; }
-if (!ver) skipWhole(`no real agent-browser resolves on PATH past the shim (the tree's real-driver fence, src/browser-facts.js binaryResolver; PATH=${BASE_ENV.PATH || ''})`);
+if (!ver) skipWhole(`${DRIVER.skip} no real agent-browser resolves on PATH past the shim (the tree's real-driver fence, src/browser-facts.js binaryResolver; PATH=${BASE_ENV.PATH || ''})`);
 if (!String(BASE_ENV.PATH || '').split(':').some((d) => d && fs.existsSync(path.join(d, 'Xvfb')))) skipWhole('no Xvfb on PATH — the no-desktop road is the browser CLI\'s own Xvfb');
 console.log(`agent-browser: ${REAL_AB} (${ver}) · root ${ROOT} · watch ${WATCH_MS / 1000} s, law ≥ ${LAW_MS / 1000} s, census every ${CENSUS_MS / 1000} s, losses at ${FAST_MS} ms`);
 

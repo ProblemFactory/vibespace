@@ -31,6 +31,7 @@ import crypto from 'node:crypto';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, endRootedProcesses, freeDisplay } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
@@ -63,7 +64,7 @@ let VER = null; try { VER = REAL ? execFileSync(REAL, ['--version'], { encoding:
 // read (Chrome/154) is the CDP census's.
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; } }) || null;
 console.log(`— the installed browser CLI: ${REAL || 'none'} (${VER || '?'}), chrome: ${CHROME || 'none'}`);
-if (!REAL || !VER) { skip(`no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); done(); }
+if (!REAL || !VER) { skip(`${DRIVER.skip} no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); done(); }
 if (!CHROME) { skip('no system Chrome or Chromium (/usr/bin/google-chrome, /usr/bin/chromium) — the launch needs one'); done(); }
 
 const ROOT = scratch('bdisp-chrome'); // short: the daemon's socket path lives under it

@@ -276,7 +276,9 @@ const HV = require('../src/home-verdict.js');
 const HOME_COMPARED = (() => { const h = os.homedir(); return h && h.startsWith('/') ? h : os.userInfo().homedir; })();
 const HANDED = Object.freeze({ HOME: HOME_COMPARED, PATH: process.env.PATH || '', EXEC: process.execPath,
   // the agent CLI PINS as handed (VS_<CLI>_BIN) — the real-CLI accessor's alone: the built environment carries none of them
-  ...Object.fromEntries(HV.AGENT_CLIS.map((c) => `VS_${c.toUpperCase().replace(/-/g, '_')}_BIN`).map((k) => [k, process.env[k] || ''])) });
+  ...Object.fromEntries(HV.AGENT_CLIS.map((c) => `VS_${c.toUpperCase().replace(/-/g, '_')}_BIN`).map((k) => [k, process.env[k] || ''])),
+  // the browser DRIVER's pin as handed (主开发 r2068): the driver's door below reads it alone
+  VS_AGENT_BROWSER_BIN: process.env.VS_AGENT_BROWSER_BIN || '' });
 /** THE ENVIRONMENT THIS PROCESS WAS STARTED WITH (B-ba47 B2, 主开发 2026-11-15 11:17Z item 3): the kernel's copy of the
  *  exec-time block, which no setenv changes (measured: a planted name, a changed one, a removed one, a long title set on the process
  *  leave it as it was) — what tells a name the suite set ITSELF from one it was handed (rehomeEnv `handed`: its own is kept
@@ -318,6 +320,23 @@ const REHOMES = (() => {
 // src/home-links.js, shared with the hub's boot re-home (src/server/throwaway-root.js, B-ba47 shape H): one copy, both callers
 const HL = require('../src/home-links.js');
 export const linkTools = HL.linkTools;
+/** THE DRIVER'S DOOR (主开发 r2068 / r2095): the real browser driver a RE-HOMED suite runs. The re-home BUILDS its PATH (its own
+ *  .vs-bin + the system's folders), so a driver the run hands on PATH (npm -g puts it in node's own folder, never carried, r1083
+ *  V1) no longer reaches the suites' fence (src/browser-facts.js binaryResolver over the suite's own PATH): every real-driver suite
+ *  skipped whole. THE VARIABLE ONLY (r2095): a real browser's driver runs only where a runner NAMES it, on purpose — the program
+ *  VS_AGENT_BROWSER_BIN names (as handed) is linked into the suite's own .vs-bin; named and unusable (gone, not executable, or
+ *  VibeSpace's own shim by its marker) is none, said by name; with no name, none — the fence skips in its own words, and no driver
+ *  standing on a person's PATH is ever picked up. PURE over its probes (`usable`, `isShim`). */
+// `skip`: THE ONE SENTENCE every real-driver suite's driver-less skip begins with (主开发 r2095), whole or a leg — the integrator's runner finds
+// a skipped driver leg in any row's output by this fixed string and reports it NO READING / PARTIAL, never a plain green
+export const DRIVER = Object.freeze({ name: 'agent-browser', env: 'VS_AGENT_BROWSER_BIN', shimMarker: 'VIBESPACE-AGENT-BROWSER-SHIM',   // test-home-verdict pins name + marker to src/browser-verbs.js
+  skip: 'NO REAL DRIVER (VS_AGENT_BROWSER_BIN names none usable here):' });
+export function driverDoor({ named = '', usable = () => false, isShim = () => false } = {}) {
+  if (!named) return { path: null, named: false };
+  return named.startsWith('/') && usable(named) && !isShim(named) ? { path: named, named: true } : { path: null, named: true, why: `${DRIVER.env} names ${named}: no usable ${DRIVER.name} there` };
+}
+const isExecFile = (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } };
+const isDriverShim = (p) => { try { const fd = fs.openSync(p, 'r'); try { const b = Buffer.alloc(512); const n = fs.readSync(fd, b, 0, 512, 0); return b.subarray(0, n).toString('utf8').includes(DRIVER.shimMarker); } finally { fs.closeSync(fd); } } catch { return false; } };
 export const makeResolver = HL.makeResolver;
 export const resolveFs = HL.resolveFs;
 const isFile = HL.isFile;
@@ -426,6 +445,10 @@ export const REHOMED = (() => {
   const dropped = notCarriedNames.map((x) => x.name);
   const runs = node ? node.file : src;
   const linked = linkTools(binDir, HV.binLinks({ execPath: runs, nodeInstall: path.dirname(src), handedPath, home: HANDED.HOME, exists: isFile, resolve, platform: process.platform }));
+  // THE DRIVER'S DOOR (主开发 r2068 / r2095, above): the one program the run NAMES, linked as agent-browser into this home's own folder
+  const drv = driverDoor({ named: HANDED[DRIVER.env], usable: isExecFile, isShim: isDriverShim });
+  if (drv.path) { let real = drv.path; try { real = fs.realpathSync(drv.path); } catch { } linked.push(...linkTools(binDir, [{ name: DRIVER.name, target: real }])); }
+  else if (drv.named) process.stderr.write(`[scratch] ${me}: ${drv.why} — its real-driver legs cannot run\n`);
   for (const k of Object.keys(process.env)) if (!Object.prototype.hasOwnProperty.call(env, k)) delete process.env[k];
   Object.assign(process.env, env);
   let initPaths = null;

@@ -844,5 +844,60 @@ console.log('— the judge reads CHANGED names too; the NAMED path itself; the o
     'the ONE hand-off, driven: a stand-in suite handed an unruled name is REFUSED by name and never spawned; the same stand-in handed nothing new runs', { refused: said.slice(0, 300), plainOk: plain.ok, ranBefore });
 }
 
+// THE DRIVER'S DOOR (主开发 r2068 / r2095): the re-home builds the suite's PATH, so the browser driver a run hands on PATH (npm -g
+// puts it in node's own folder, never carried) reached no real-driver suite: each skipped whole. THE VARIABLE ONLY: the program
+// VS_AGENT_BROWSER_BIN names is linked into the suite's own .vs-bin — that ONE program; named and unusable (gone, or the shim) is
+// none, said by name; NO NAME, NO DRIVER: one standing on the handed PATH is never picked up. CONTROL: a copy with the link cut.
+console.log('— the driver\'s door: the one real driver the run NAMES reaches a re-homed suite (主开发 r2068 / r2095)');
+{
+  const VERBS = require(path.join(REPO, 'src/browser-verbs.js'));
+  ok(SM.DRIVER.name === VERBS.REAL_BINARY && SM.DRIVER.shimMarker === VERBS.SHIM_MARKER, "the door's driver name and shim marker are the product's own (src/browser-verbs.js REAL_BINARY / SHIM_MARKER)", SM.DRIVER);
+  const U = new Set(['/n/agent-browser', '/s/agent-browser']), SH = new Set(['/s/agent-browser']);
+  const door = (o) => SM.driverDoor({ usable: (f) => U.has(f), isShim: (f) => SH.has(f), ...o });
+  const tbl = [
+    [door({}).path, null], [door({ named: '/n/agent-browser' }).path, '/n/agent-browser'], [door({ named: '/none/agent-browser' }).path, null],
+    [door({ named: '/s/agent-browser' }).path, null], [door({ named: 'agent-browser' }).path, null],
+  ];
+  ok(tbl.every(([a, b]) => a === b) && door({}).named === false && /VS_AGENT_BROWSER_BIN names \/none\/agent-browser/.test(door({ named: '/none/agent-browser' }).why || ''),
+    'PURE: NO NAME, NO DRIVER; a NAMED program is it alone — named and unusable, the shim or a bare word is none, said by name', tbl);
+  // THE ONE SENTENCE (主开发 r2095): every skip whose words say the real driver is absent begins with DRIVER.skip, whole or a leg —
+  // the integrator's runner finds a skipped driver leg in any row's output by that fixed string (NO READING / PARTIAL). Held over
+  // every suite's skip calls; a SECOND (older) driver named by VIBESPACE_TEST_PREV_CLI is no «run named none». CONTROL: a bare one
+  const ABSENT = /agent-browser[^`'\n]{0,40}?(?:is )?not (?:resolvable|runnable|on PATH|installed)|no (?:real )?agent-browser|real agent-browser here is|real agent-browser[^`'\n]{0,30}not resolvable/;
+  const CALL = /\b(?:skip|skipWhole|console\.error)\(\s*(`|')((?:\\.|(?!\1)[^\\])*)\1/g;
+  const sitesOf = (t) => [...t.matchAll(CALL)].filter((m) => ABSENT.test(m[2]) && !/VIBESPACE_TEST_PREV_CLI/.test(m[2])).map((m) => ({ at: t.slice(0, m.index).split('\n').length, said: m[2].includes('${DRIVER.skip}') }));
+  const sentenceSites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-home-verdict.mjs')
+    .flatMap((f) => sitesOf(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')).map((s) => ({ f, ...s })));
+  const bareSites = sentenceSites.filter((s) => !s.said), suitesSaid = new Set(sentenceSites.map((s) => s.f));
+  const ctlSites = sitesOf("if (!ab) skip('no real agent-browser installed');\nif (!x) skip(`${DRIVER.skip} the real agent-browser is not resolvable`);\nif (!y) skip('no chrome for the agent-browser legs');");
+  ok(bareSites.length === 0 && sentenceSites.length >= 33 && suitesSaid.size >= 22 && ctlSites.length === 2 && ctlSites.filter((s) => !s.said).length === 1 && SM.DRIVER.skip.length > 20 && !/SKIP/.test(SM.DRIVER.skip),
+    `THE ONE SENTENCE (r2095): every skip whose words say the real driver is absent begins «${SM.DRIVER.skip}» — ${sentenceSites.length} sites in ${suitesSaid.size} suites, none bare; it holds no skip word of its own (the line's own skip word stays first); CONTROL: a planted bare one is found, a Chrome-absent one is none`, bareSites.map((s) => `${s.f}:${s.at}`));
+  const PROBE_DRV = (url) => `import fs from 'node:fs'; import path from 'node:path';
+const S = await import(${JSON.stringify(url)});
+const on = (n) => { for (const d of String(process.env.PATH || '').split(':')) { const f = path.join(d, n); try { fs.accessSync(f, fs.constants.X_OK); return f; } catch { } } return null; };
+const ab = on('agent-browser'); let real = null; try { real = ab && fs.realpathSync(ab); } catch { }
+console.log(JSON.stringify({ home: S.REHOMED && S.REHOMED.home, linked: (S.REHOMED && S.REHOMED.linked) || [], ab, real, other: on('vs-hv-other-tool') }));`;
+  const fake = (f, body) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body, { mode: 0o755 }); return fs.realpathSync(f); };
+  const REAL_BODY = '#!/bin/sh\necho 0.38.2\n', SHIM_BODY = `#!/bin/sh\n# ${VERBS.SHIM_MARKER}\nexit 2\n`;
+  const scene = (tag, plant) => { const s = standin(`drv-${tag}`, { small: true }); return { s, ...plant(s) }; };
+  const D1 = scene('noname', (s) => ({ onPath: fake(path.join(s.home, '.nvm/bin/agent-browser'), REAL_BODY) }));
+  const D2 = scene('named', (s) => { fake(path.join(s.home, '.nvm/bin/agent-browser'), REAL_BODY); const named = path.join(s.seam, 'named/agent-browser'); fake(path.join(s.seam, 'named/vs-hv-other-tool'), REAL_BODY); return { want: fake(named, REAL_BODY), env: { VS_AGENT_BROWSER_BIN: named } }; });
+  const D3 = scene('gone', (s) => ({ onPath: fake(path.join(s.home, '.nvm/bin/agent-browser'), REAL_BODY), env: { VS_AGENT_BROWSER_BIN: path.join(s.seam, 'none/agent-browser') } }));
+  const D4 = scene('shim', (s) => { const shim = path.join(s.seam, 'shim/agent-browser'); fake(shim, SHIM_BODY); return { env: { VS_AGENT_BROWSER_BIN: shim } }; });
+  const CUT = mutant('drvcut', '  if (drv.path) {', '  if (false && drv.path) {');
+  const go = (d, tag, url = SCRATCH_URL, dir = DIR) => start(path.join(dir, `test-hv-drv-${tag}.mjs`), { ...d.s.env, ...(d.env || {}) }, PROBE_DRV(url));
+  const [r1, r2, r3, r4, rc] = await Promise.all([go(D1, 'noname'), go(D2, 'named'), go(D3, 'gone'), go(D4, 'shim'), go(D2, 'cut', CUT.url, path.dirname(CUT.probe))]);
+  const own = (r) => !!(r.j && r.j.home && r.j.ab === path.join(r.j.home, '.vs-bin', 'agent-browser') && r.j.linked.includes('agent-browser'));
+  ok(own(r2) && r2.j.real === D2.want && r2.j.other === null,
+    'THROUGH THE IMPORT: the program VS_AGENT_BROWSER_BIN names reaches the re-homed suite in its OWN .vs-bin — that one program, never the PATH\'s driver, and nothing of its folder beside it', { j: r2.j, err: r2.err.slice(-300) });
+  ok(!!r1.j && !r1.j.linked.includes('agent-browser') && r1.j.real !== D1.onPath && !/VS_AGENT_BROWSER_BIN names/.test(r1.err),
+    'NO NAME, NO DRIVER (r2095): a driver standing on the handed PATH (node\'s own folder) is never picked up — the fence skips in its own words', { j: r1.j, err: r1.err.slice(-300) });
+  ok(!!r3.j && !r3.j.linked.includes('agent-browser') && r3.j.real !== D3.onPath && /VS_AGENT_BROWSER_BIN names .*none\/agent-browser: no usable agent-browser there/.test(r3.err),
+    'a NAMED program that is not there is none — said by name on stderr; the PATH\'s driver never stands in for it', { j: r3.j, err: r3.err.slice(-300) });
+  ok(!!r4.j && !r4.j.linked.includes('agent-browser') && /VS_AGENT_BROWSER_BIN names .*shim\/agent-browser: no usable agent-browser there/.test(r4.err),
+    'a NAMED program that is VibeSpace\'s own shim (its marker) is not the driver: none, said by name', { j: r4.j, err: r4.err.slice(-300) });
+  ok(CUT.present && !!rc.j && !rc.j.linked.includes('agent-browser') && rc.j.real !== D2.want, 'CONTROL: the named scene through a copy with the link cut — no driver reaches the suite (the skip whole the box read)', { j: rc.j, err: rc.err.slice(-300) });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

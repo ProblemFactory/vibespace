@@ -46,6 +46,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { gitEnvFrom } from './git-env.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -73,7 +74,7 @@ const realBrowsers = path.join(os.homedir(), '.agent-browser', 'browsers');
 let dtachOk = false; try { execFileSync('which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
 if (!CHROME) { skip('no chrome/chromium for the client'); done(); }
 if (!dtachOk) { skip('dtach is not installed — a local session cannot be created here'); done(); }
-if (!REAL_AB || !abVer) { skip(`the real agent-browser is not resolvable here (${REAL_AB || 'only the VibeSpace shim / nothing on PATH'})`); done(); }
+if (!REAL_AB || !abVer) { skip(`${DRIVER.skip} the real agent-browser is not resolvable here (${REAL_AB || 'only the VibeSpace shim / nothing on PATH'})`); done(); }
 if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`agent-browser ${abVer} is below 0.32 — no stream server`); done(); }
 if (!fs.existsSync(realBrowsers)) { skip(`the real agent-browser has no installed browser under ${realBrowsers} (the leg never downloads one)`); done(); }
 { // r1100 CONTROL: the mark can be read — a wait that times out is named by the next red judge

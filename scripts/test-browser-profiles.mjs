@@ -60,6 +60,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
@@ -1383,7 +1384,7 @@ console.log('\n⑨ the installed binary (skips with evidence when absent)');
   const AB9 = (() => { try { return require('../src/browser-facts.js').binaryResolver('agent-browser', process.env)(); } catch { return null; } })() || 'agent-browser';
   const v = spawnSync(AB9, ['--version'], { encoding: 'utf8', timeout: 10000 });
   if (v.error || v.status !== 0) {
-    skip(`agent-browser not runnable here (${v.error ? v.error.code || v.error.message : 'exit ' + v.status}) — the floor verdict and the four variable NAMES are asserted above against a fake binary; what cannot be checked without it is that this build still accepts these names, and that its own socket-root reader honours AGENT_BROWSER_SOCKET_DIR`);
+    skip(`${DRIVER.skip} agent-browser not runnable here (${v.error ? v.error.code || v.error.message : 'exit ' + v.status}) — the floor verdict and the four variable NAMES are asserted above against a fake binary; what cannot be checked without it is that this build still accepts these names, and that its own socket-root reader honours AGENT_BROWSER_SOCKET_DIR`);
   } else {
     const out = String(v.stdout || '').trim();
     ok(/\d+\.\d+\.\d+/.test(out), `installed: ${out}`);

@@ -29,6 +29,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { startLoginPages } from './fixtures/login-pages.mjs';
 
@@ -92,7 +93,7 @@ const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_EN
 let ver = null;
 try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
 if (!ver) {
-  console.error(`SKIPPED: no agent-browser on PATH (PATH=${BASE_ENV.PATH || ''})`);
+  console.error(`SKIPPED: ${DRIVER.skip} no agent-browser on PATH (PATH=${BASE_ENV.PATH || ''})`);
   process.exit(2);
 }
 

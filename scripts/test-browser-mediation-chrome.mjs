@@ -101,6 +101,7 @@ import crypto from 'node:crypto';   // lane browser-login: ⑩'s fixture passwor
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
 const require = createRequire(import.meta.url);
@@ -778,7 +779,7 @@ if (AB) {
   ok(nc && nc.includes('--r3-named-arg') && !argsOf('user-chrome') && !argsOf('project-chrome'), 'r3: an answer naming a config ⇒ exactly that file runs the launch — neither ~/.agent-browser/config.json nor ./agent-browser.json is read', JSON.stringify({ nc, se: vc.se.slice(0, 300) }));
   stub.close();
   reapDaemons();
-} else skip('no agent-browser for the config-file legs');
+} else skip(`${DRIVER.skip} no agent-browser for the config-file legs`);
 
 // ═══ ③ r4 (takeover findings 1 + 3): the NAVIGATION road and the stdin batch, on the real binary + a real chrome ═══
 // Measured by the verifier: 0.32.0 launches EVERY browser with --remote-debugging-port=0 (whatever the config
@@ -916,7 +917,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
 {
   const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), Ss = require('../src/browser-stream.js'), Bp = require('../src/browser-profiles.js');
   let ver4 = null; try { ver4 = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim(); } catch { }
-  if (!ver4) skip('④ agent-browser is not runnable here (put the real binary first on PATH) — the keeper-launcher leg needs it');
+  if (!ver4) skip(`${DRIVER.skip} ④ agent-browser is not runnable here (put the real binary first on PATH) — the keeper-launcher leg needs it`);
   else if (!CHROME) skip('④ no chrome on this box for the keeper-launcher leg');
   else await (async () => {
     const KR = scratch('mc4'); fs.rmSync(KR, { recursive: true, force: true });
@@ -1165,7 +1166,7 @@ console.log('— ⑧ lane engine-plugin: the real agent-browser launches the FAK
 {
   const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), Bp = require('../src/browser-profiles.js');
   let ver8 = null; try { ver8 = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim(); } catch { }
-  if (!ver8) skip('⑧ agent-browser is not runnable here (put the real binary first on PATH) — the fake-kernel leg needs it');
+  if (!ver8) skip(`${DRIVER.skip} ⑧ agent-browser is not runnable here (put the real binary first on PATH) — the fake-kernel leg needs it`);
   else await (async () => {
     const KR = scratch('mc8'); fs.rmSync(KR, { recursive: true, force: true });
     const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
@@ -1225,7 +1226,7 @@ console.log('— ⑧b lane engine-args-string: a conversation\'s browser born on
 {
   const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), Bp = require('../src/browser-profiles.js');
   let verB = null; try { verB = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim(); } catch { }
-  if (!verB) skip('⑧b agent-browser is not runnable here (put the real binary first on PATH) — the conversation-browser leg needs it');
+  if (!verB) skip(`${DRIVER.skip} ⑧b agent-browser is not runnable here (put the real binary first on PATH) — the conversation-browser leg needs it`);
   else await (async () => {
     const KR = scratch('mc8b'); fs.rmSync(KR, { recursive: true, force: true });
     const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
@@ -1306,7 +1307,7 @@ console.log('— ⑨ lane browser-surfaces: the real agent-browser on the FAKE K
   // the product's own resolver (past the VibeSpace shim — the push shell's PATH has data/bin first)
   const REAL9 = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
   let ver9 = null; try { ver9 = REAL9 ? execFileSync(REAL9, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
-  if (!ver9) skip(`⑨ no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the surfaces leg needs it`);
+  if (!ver9) skip(`${DRIVER.skip} ⑨ no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the surfaces leg needs it`);
   else await (async () => {
     const KR = scratch('mc9'); fs.rmSync(KR, { recursive: true, force: true });
     const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
@@ -1392,7 +1393,7 @@ console.log('— ⑨b lane engine-spi-egress: the real agent-browser on the fake
   const D9 = require('../src/server/browser-dialogs.js');
   const REALg = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
   let verg = null; try { verg = REALg ? execFileSync(REALg, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
-  if (!verg) skip(`⑨b no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the egress leg needs it`);
+  if (!verg) skip(`${DRIVER.skip} ⑨b no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the egress leg needs it`);
   else await (async () => {
     const KR = scratch('mc9g'); fs.rmSync(KR, { recursive: true, force: true });
     const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
@@ -1484,7 +1485,7 @@ console.log('— ⑩ lane browser-login (r22): the real agent-browser on the FAK
   const D10 = require('../src/server/browser-dialogs.js'), BL10 = require('../src/browser-login.js'), VE10 = require('../src/server/vault-engine.js');
   const REAL10 = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
   let ver10 = null; try { ver10 = REAL10 ? execFileSync(REAL10, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
-  if (!ver10) skip(`⑩ no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the login leg needs it`);
+  if (!ver10) skip(`${DRIVER.skip} ⑩ no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the login leg needs it`);
   else await (async () => {
     const KR = scratch('mc10'); fs.rmSync(KR, { recursive: true, force: true });
     const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p'), VD = path.join(KR, 'vault');

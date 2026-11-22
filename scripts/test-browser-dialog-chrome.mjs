@@ -21,6 +21,7 @@ import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies } from './mutant-copy.mjs';
 // 2.369.200 integration (lane hooks-create H5 × this suite): with no desktop and Xvfb on the keeper's PATH an UNSET window
 // preference launches the hidden-window rung once H5's switch is on (OFF in 2.369.200 and 2.369.202 — red on that rung at the 2.369.202 integration; a headed Chrome); this suite's subject is the dialog / loop watch on the
@@ -61,7 +62,7 @@ for (const sg of ['SIGINT', 'SIGTERM']) process.on(sg, () => { cleanup(); proces
 // whole suite on every post-push heavy run while the keeper under test resolved the real CLI itself
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
-if (!ver) { skip(`no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); console.log(`\nALL PASS (${pass}, ${skipped} skipped)`); process.exit(0); }
+if (!ver) { skip(`${DRIVER.skip} no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); console.log(`\nALL PASS (${pass}, ${skipped} skipped)`); process.exit(0); }
 console.log(`agent-browser: ${REAL_AB} (${ver})`);
 
 // the pages (loopback)

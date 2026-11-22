@@ -42,6 +42,7 @@ import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop names for the server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -636,9 +637,9 @@ await (async () => {
   const B = require('../src/browser-builds.js');
   const L = B.listBuilds({ homeDir: os.homedir() });
   const usable = L.ok ? L.builds.filter((b) => b.usable) : [];
-  if (!real.ok) { skip('no real agent-browser on PATH (beside the shim) — the real-binary leg needs one'); return; }
+  if (!real.ok) { skip(`${DRIVER.skip} no real agent-browser on PATH (beside the shim) — the real-binary leg needs one`); return; }
   let ver = ''; try { ver = execFileSync(real.path, ['--version'], { encoding: 'utf8', env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_'))) }); } catch { ver = ''; }
-  if (V.versionDrift(ver)) { skip(`the real agent-browser here is ${ver.trim() || 'unknown'}, not the measured ${V.TABLE_VERSION}`); return; }
+  if (V.versionDrift(ver)) { skip(`${DRIVER.skip} the real agent-browser here is ${ver.trim() || 'unknown'}, not the measured ${V.TABLE_VERSION}`); return; }
   if (usable.length < 2) { skip(`fewer than two runnable Chrome builds in ${ACCOUNT_BROWSERS} (${usable.map((b) => b.version).join(', ') || 'none'}) — the leg pins an OLDER one than the CLI's default`); return; }
   const older = usable[usable.length - 1]; // the oldest; the CLI's own default is the newest it has
   const HOME_R = path.join(ROOT, 'real-home');
@@ -680,7 +681,7 @@ await (async () => {
   const real = V.resolveRealBinary({ PATH: process.env.PATH || '', shimDirs: [path.join(repo, 'data', 'bin'), path.join(os.homedir(), '.vibespace', 'bin')], exists: (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } }, isShim });
   const noAB = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_')));
   const verOf = (bin) => { try { return (execFileSync(bin, ['--version'], { encoding: 'utf8', env: noAB }).match(/(\d+\.\d+\.\d+)/) || [])[1] || null; } catch { return null; } };
-  if (!real.ok) { skip('no real agent-browser on PATH (beside the shim)'); return; }
+  if (!real.ok) { skip(`${DRIVER.skip} no real agent-browser on PATH (beside the shim)`); return; }
   const cur = verOf(real.path);
   const PREV = process.env.VIBESPACE_TEST_PREV_CLI || '';
   if (!PREV) { skip(`VIBESPACE_TEST_PREV_CLI is unset — this leg needs a SECOND agent-browser version beside the one on PATH (${cur}): an npm prefix, e.g. \`npm install --prefix <dir> --no-save --ignore-scripts agent-browser@0.38.0\``); return; }
@@ -768,7 +769,7 @@ await (async () => {
   const V = require('../src/browser-verbs.js');
   const isShim = (p) => { try { return fs.readFileSync(p, 'utf8').slice(0, 512).includes(V.SHIM_MARKER); } catch { return false; } };
   const real = V.resolveRealBinary({ PATH: process.env.PATH || '', shimDirs: [path.join(repo, 'data', 'bin'), path.join(os.homedir(), '.vibespace', 'bin')], exists: (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } }, isShim });
-  if (!real.ok) { skip('no real agent-browser on PATH (beside the shim)'); return; }
+  if (!real.ok) { skip(`${DRIVER.skip} no real agent-browser on PATH (beside the shim)`); return; }
   const BBm = require('../src/browser-builds.js');
   const L = BBm.listBuilds({ homeDir: os.homedir() });
   const usable = L.ok ? L.builds.filter((b) => b.usable) : [];

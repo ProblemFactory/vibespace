@@ -102,6 +102,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
@@ -1672,7 +1673,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     const B = require('../src/browser-profiles.js');
     const envBase = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) envBase[k] = v;
     const realBin = F.binaryResolver('agent-browser', envBase)();
-    if (!realBin) { skip('F2 real leg: no real agent-browser binary resolves on PATH (only a shim)'); return; }
+    if (!realBin) { skip(`${DRIVER.skip} F2 real leg: no real agent-browser binary resolves on PATH (only a shim)`); return; }
     const exeName = path.basename(fs.realpathSync(realBin));
     const MKL = mutantCopies('browser-live-r2', repo);
     const ksrc = fs.readFileSync(path.join(repo, 'src/server/browser-keeper.js'), 'utf8');
@@ -1727,7 +1728,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     }
     for (const c of copiesCensus(MKL.files, MKL.dir, repo, { label: 'browser-live r2 controls: ' })) ok(c.pass, c.name, c.detail);
   })().catch((e) => ok(false, 'the F2 real leg threw', e && (e.stack || e.message)));
-  if (!ver) skip('agent-browser is not on PATH');
+  if (!ver) skip(`${DRIVER.skip} agent-browser is not on PATH`);
   else if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(ver)) skip(`agent-browser ${ver} is below 0.32 — no stream server`);
   else if (!CHROME_ANY) skip('no chrome on this box for a real headless chromium');
   else await (async () => {
@@ -1849,7 +1850,7 @@ await (async () => {
   const realBrowsers = path.join(os.homedir(), '.agent-browser', 'browsers');
   if (!CHROME) return skip('⑤ no chrome/chromium for the client');
   if (!dtachOk) return skip('⑤ dtach is not installed — a local session cannot be created here');
-  if (!REAL_AB || !abVer) return skip(`⑤ the real agent-browser is not resolvable here (${REAL_AB || 'only the VibeSpace shim / nothing on PATH'})`);
+  if (!REAL_AB || !abVer) return skip(`${DRIVER.skip} ⑤ the real agent-browser is not resolvable here (${REAL_AB || 'only the VibeSpace shim / nothing on PATH'})`);
   if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) return skip(`⑤ agent-browser ${abVer} is below 0.32 — no stream server`);
   // lane fleet-image-2 (the fleet image bakes agent-browser 0.38.1 and no ~/.agent-browser/browsers): with no browser
   // installed under its home, agent-browser launches the system Chrome / Chromium it finds (measured on 0.38.1: the

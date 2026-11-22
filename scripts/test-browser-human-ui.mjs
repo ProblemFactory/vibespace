@@ -49,6 +49,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const F = require('../src/browser-facts.js');
@@ -95,7 +96,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 const dtachOk = (() => { try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); return true; } catch (e) { return e && e.status !== undefined && e.code !== 'ENOENT'; } })();
 if (!CHROME) { skip('no viewer chrome (google-chrome / chromium) — the suite never downloads one'); await done(); }
 if (!dtachOk) { skip('dtach is not installed — a local session cannot be created'); await done(); }
-if (!REAL_AB || !abVer || !/\b0\.(3[7-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`the real agent-browser ≥ 0.37 is not resolvable (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
+if (!REAL_AB || !abVer || !/\b0\.(3[7-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`${DRIVER.skip} the real agent-browser ≥ 0.37 is not resolvable (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
 
 /** A throwaway headless Chrome (the VIEWER) with its own profile under ROOT; → { port, close }. */
 async function launchChrome(bin, { name, args = [], url = 'about:blank' } = {}) {

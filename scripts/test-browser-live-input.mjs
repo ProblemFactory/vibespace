@@ -41,6 +41,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -200,7 +201,7 @@ const M = mutantCopies('bli', REPO);
 }
 if (!CHROME) { skip('② – ⑤: no viewer chrome (google-chrome / chromium)'); await done(); }
 if (!dtachOk) { skip('② – ⑤: dtach is not installed — a local session cannot be created'); await done(); }
-if (!REAL_AB || !abVer || !/\b0\.(3[7-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`② – ⑤: the real agent-browser ≥ 0.37 is not resolvable (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
+if (!REAL_AB || !abVer || !/\b0\.(3[7-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`${DRIVER.skip} ② – ⑤: the real agent-browser ≥ 0.37 is not resolvable (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
 if (!LAN_IP) console.log('  (no non-loopback IPv4 on this machine — the viewer uses 127.0.0.1, a SECURE context; the plain-http leg is then the API path)');
 
 // ═══ THE WORLD ═══════════════════════════════════════════════════════════════

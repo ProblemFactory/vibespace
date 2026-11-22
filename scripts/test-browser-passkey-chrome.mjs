@@ -29,6 +29,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -554,7 +555,7 @@ async function kernelLegs(Dm, tag) {
 
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
-if (!ver || !/\b0\.38\.1\b/.test(ver)) { skip(`test-browser-passkey-chrome: no real agent-browser 0.38.1 resolves past the shim (${REAL_AB || 'none'}: ${ver || 'no version'})`); done(); }
+if (!ver || !/\b0\.38\.1\b/.test(ver)) { skip(`${DRIVER.skip} test-browser-passkey-chrome: no real agent-browser 0.38.1 resolves past the shim (${REAL_AB || 'none'}: ${ver || 'no version'})`); done(); }
 const XVFB = String(BASE_ENV.PATH || '').split(':').map((d) => path.join(d, 'Xvfb')).find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
 if (!XVFB) { skip('test-browser-passkey-chrome: no Xvfb on the PATH — the hidden-window rung (where Chrome\'s own passkey window opens) needs one'); done(); }
 console.log(`agent-browser: ${REAL_AB} (${ver}); Xvfb: ${XVFB}`);

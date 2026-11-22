@@ -38,6 +38,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 // the suite's own copy of its WHOLE output (VIBESPACE_XPIC_LOG=<file>): ci.mjs keeps a GREEN suite's output nowhere, and the hotfix's
 // step seven is READ by its lines at the cut — every console line is also appended there
@@ -93,7 +94,7 @@ const verAtLeast = (v, min) => { const a = String(v || '').match(/(\d+)\.(\d+)\.
 if (!CHROME) { skip('no Google Chrome — the attach road and the viewer both need it'); await done(); }
 if (!dtachOk) { skip('dtach is not installed — a local session cannot be created'); await done(); }
 if (!binOf('xpra') || !binOf('xauth')) { skip('xpra / xauth not on PATH — no display session, no X picture (the screencast stays, as before)'); await done(); }
-if (!REAL_AB || !verAtLeast(abVer, '0.38.2')) { skip(`the real agent-browser ≥ 0.38.2 is not resolvable (${REAL_AB || 'none'} ${abVer || ''}) — the attach road needs it`); await done(); }
+if (!REAL_AB || !verAtLeast(abVer, '0.38.2')) { skip(`${DRIVER.skip} the real agent-browser ≥ 0.38.2 is not resolvable (${REAL_AB || 'none'} ${abVer || ''}) — the attach road needs it`); await done(); }
 console.log(`box: ${abVer}, ${execFileSync(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--version'], { encoding: 'utf8' }).trim()}, ${execFileSync(binOf('xpra'), ['--version'], { encoding: 'utf8' }).trim()}`);
 
 /** A throwaway headless Chrome (the VIEWER) with its own profile under ROOT; → { port, close }. */

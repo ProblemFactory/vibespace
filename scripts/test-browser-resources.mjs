@@ -50,6 +50,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
@@ -78,7 +79,7 @@ const done = () => {
 const v = spawnSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 15000 });
 if (v.error || v.status !== 0) {
   console.log('\nagent-browser (real binary)');
-  skip(`agent-browser is not runnable here — \`agent-browser --version\` ${v.error ? 'failed: ' + (v.error.code || v.error.message) : 'exited ' + v.status}. `
+  skip(`${DRIVER.skip} agent-browser is not runnable here — \`agent-browser --version\` ${v.error ? 'failed: ' + (v.error.code || v.error.message) : 'exited ' + v.status}. `
     + 'The environment half (which variables, which resolved directory, the ladder, the floor) is asserted without it in test-browser-profiles; '
     + 'what CANNOT be checked without it is whether two real browsers actually stop seeing each other, and what k=1/4/12 cost on this box.');
   done();
