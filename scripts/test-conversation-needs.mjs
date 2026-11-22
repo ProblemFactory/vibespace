@@ -25,7 +25,7 @@
 //     key is a SURFACES row saying whether it reads `about`; the deferred ones are rows (the title-bar badge, the mini inbox,
 //     the session row's marker); RED: a surface dropped, a deferred one claimed as done, a deferred one that starts reading it
 // Run: node scripts/test-conversation-needs.mjs
-import './scratch.mjs';
+import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -390,6 +390,10 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
   const conv = (n, askAt = []) => Array.from({ length: n }, (_, k) => (askAt.includes(k) ? tool(k, NOW - (n - k) * M, `vibespace-ask "the ask at ${k}"`) : text(k, NOW - (n - k) * M)));
   const askOf = (C, k, o = {}) => ({ id: `ut-ask${String(k).padStart(7, '0')}`, status: 'open', kind: 'action', urgency: 'normal', sessionKey: ME10, origin: 'agent', by: 'agent', text: `the ask at ${k}`, createdAt: C[k].ts + 1200, ...o });
   const deferred = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };
+  // B-43f3 / r2579: the view's ONE hold question (chat-view.js _readerActedSince — the needs landing's gone() and the jump hold's
+  // letGo ask it), read out of the source to its own close and run over each fake view's own stamps
+  const READER_ACTED = (() => { const s = read('src/lib/chat-view.js'), a = s.indexOf('  _readerActedSince(since) {'), e = a < 0 ? -1 : s.indexOf('\n  }\n', a); try { return a < 0 || e < 0 ? null : new Function(`return (function ${s.slice(a + 2, e + 4).trim()});`)(); } catch { return null; } })();
+  ok(typeof READER_ACTED === 'function', 'B-43f3 / r2579: the view\'s ONE hold question (_readerActedSince) is read out of chat-view.js');
   function fakeView(C, items, s, e, { hidden = new Set(), resolved = [] } = {}) {
     const list = new El(); DOC.children.push(list); list.parentNode = DOC;
     const v = { _messageList: list, _elements: new Map(), _messages: [], _total: C.length, _teleported: false, _pinned: true, log: [], chip: null, gate: null, _lastNavAt: 0, _lastPositionAt: 0 };
@@ -403,6 +407,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
     v.jumpToBottom = async () => { v.log.push('jumpToBottom'); v._lastNavAt = Date.now(); v.setWindow(C.length - 50, C.length); };
     v._noteUserNav = () => { v._lastNavAt = Date.now(); };
     v._navigatedSince = (t) => Math.max(v._lastNavAt || 0, v._lastPositionAt || 0) > t;
+    v._readerActedSince = READER_ACTED;   // (B-43f3 / r2579) the REAL hold question over this view's stamps and its scrollbar facts
     v._setPinned = (p) => { v._pinned = !!p; };
     v._scrollElStable = (el) => v.log.push(`show(${(el.closest('chat-msg') || {}).dataset?.msgId}${el.getClientRects().length ? '' : ' — NO BOX'})`);
     v._scrollToBottom = () => v.log.push('scrollToBottom');
@@ -476,7 +481,27 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       v3._lastPositionAt = 0;
       const v4 = fakeView(C, [A10, A290], 260, 310), nc4 = cardsFor(v4); v4._lastPositionAt = Date.now();
       const r4 = await nc4.land(A10.id, { since: Date.now() - 1000 });
-      ok(r3 === 'card' && r4 === null && !v4.log.length, '…a For-you door\'s press time: a move the reader made after it (while the window opened) cancels the landing before it starts', { r3, r4, log: v4.log }); }
+      ok(r3 === 'card' && r4 === null && !v4.log.length, '…a For-you door\'s press time: a move the reader made after it (while the window opened) cancels the landing before it starts', { r3, r4, log: v4.log });
+      // B-43f3 / r2579 (its drag term): the reader's own SCROLLBAR — pressed while the read is out, or held as the landing starts —
+      // cancels it the same way. A drag's scrolls are not stamped while a hold's programmatic-scroll guard stands, so the press is the
+      // act (the view's ONE hold question, _readerActedSince; the jump hold's letGo asks it too). RED: the release's gone() (only
+      // _navigatedSince), its own bundle — the landing goes on under the person's drag
+      const sbScene = async (NC) => {
+        const a = fakeView(C, [A10, A290], 260, 310), na = cardsFor(a, NC), ga = deferred(); a.gate = ga;
+        const pa = na.land(A10.id);
+        await new Promise((r) => setTimeout(r, 5));
+        a._gutterPressAt = Date.now() + 5;   // the person presses the list's scrollbar while the read is out (no stamp of _readerActs)
+        ga.open(); a.gate = null;
+        const pressed = await pa;
+        const h = fakeView(C, [A10, A290], 260, 310), nh = cardsFor(h, NC); h._pointerDownOnScrollbar = true;   // a press made before, still held
+        const held = await nh.land(A10.id);
+        return { pressed, held, jumpedP: a.log.includes('jumpToIndex(10)'), jumpedH: h.log.includes('jumpToIndex(10)'), atP: a._windowStart };
+      };
+      const sb = await sbScene(NeedsCards);
+      ok(sb.pressed === null && sb.held === null && !sb.jumpedP && !sb.jumpedH && sb.atP === 260, 'B-43f3 / r2579: …and the reader\'s own SCROLLBAR — pressed while the read is out, or held as the landing starts — cancels it the same way (a drag\'s scrolls are not stamped under a hold\'s guard: the press is the act — the view\'s ONE hold question, _readerActedSince)', sb);
+      let NCsb = null; try { NCsb = await bundleCards(anchored(read('src/lib/chat-needs-card.js'), '!!view._readerActedSince?.(mark);', '!!view._navigatedSince?.(mark);', 'the needs landing\'s gone() on the release\'s question')); } catch (e) { console.log('    (mutant bundle: ' + (e && e.message) + ')'); }   // stale-pins: kept (the red control's replacement is the release's gone())
+      const sbR = NCsb ? await sbScene(NCsb) : null;
+      ok(!!sbR && sbR.pressed === 'card' && sbR.held === 'card' && sbR.jumpedP && sbR.jumpedH, 'B-43f3 / r2579 RED CONTROL: the release\'s gone() (only _navigatedSince) — a scrollbar pressed or held is no act, and the landing goes on under the person\'s drag (both land their card)', sbR); }
     // A LANDING UNFOLDS WHAT IT LANDS ON (the r1 reviewer's resolved door): the quiet record of an answered ask, its record
     // folded in a closed run (no box)
     { const C = conv(300, [280]), done = { ...askOf(C, 280), status: 'done', resolvedBy: 'allowed' };
@@ -772,7 +797,8 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
     };
     const REAL5 = { _setStableHeights: methodOf(SEEKS, '    _setStableHeights(stable, ', '    _maybeSeekLater() {'), _scrollElStable: methodOf(SEEKS, '    _scrollElStable(el, ', '    async _seekTeleport(line) {'),
       _scrollToRange: methodOf(SRCH, '  _scrollToRange(range', '  /** Open every collapsed'), _noteUserNav: method('  _noteUserNav(via) {', '  /** Did the READER position'),
-      _navigatedSince: method('  _navigatedSince(since) {', '  /** '), _notePositioning: methodTo(CVS, '  _notePositioning(via) {') };
+      _navigatedSince: method('  _navigatedSince(since) {', '  /** '), _notePositioning: methodTo(CVS, '  _notePositioning(via) {'),
+      _readerActedSince: methodTo(CVS, '  _readerActedSince(since) {') };   // (B-43f3 / r2579: the jump hold's letGo asks the view's ONE hold question)
     ok(Object.values(REAL5).every((f) => typeof f === 'function'), 'the REAL _setStableHeights / _scrollElStable (chat-view-seek.js), _scrollToRange (chat-search.js), _noteUserNav / _navigatedSince / _notePositioning (chat-view.js) are read out of the sources', Object.keys(REAL5).filter((k) => typeof REAL5[k] !== 'function'));
     /** a teleported search slab: the REAL stamp writers and the REAL tail jump over a fake list (the tail page held by `tailGate`) */
     const replayView = (C) => {
@@ -784,7 +810,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
         _beginHistoryLoad: () => () => { }, _showHistoryStatus(m) { log.push(`status:${m}`); }, _onCreateMessage(m) { v._messages.push(m); }, _onOp() { }, _resetGapAfterJump() { v._teleported = false; },
         _fetchMessagePage: async (o, l) => { log.push(`fetchPage(${o},${l})`); if (v.tailGate) await v.tailGate.p; return { messages: C.slice(o, o + l), total: C.length }; },
         _setPinned(p, why) { v._pinned = !!p; log.push(`pinned=${!!p}(${why})`); }, _forceScrollToBottom() { log.push('forceScrollToBottom'); } };
-      Object.assign(v, { jumpToBottom: REAL.jumpToBottom, _releaseTailHold: REAL._releaseTailHold, _noteUserNav: REAL5._noteUserNav, _navigatedSince: REAL5._navigatedSince, _setStableHeights: REAL5._setStableHeights, _scrollElStable: REAL5._scrollElStable });
+      Object.assign(v, { jumpToBottom: REAL.jumpToBottom, _releaseTailHold: REAL._releaseTailHold, _noteUserNav: REAL5._noteUserNav, _navigatedSince: REAL5._navigatedSince, _readerActedSince: REAL5._readerActedSince, _setStableHeights: REAL5._setStableHeights, _scrollElStable: REAL5._scrollElStable });
       if (ACTS) v._readerActs = ACTS;
       const node = { nodeType: 1, isConnected: true, closest: () => null, parentElement: null };
       v._search = { _messageList: list, hasHighlight: false, _onNav: () => v._noteUserNav('search-reveal'), _onReveal() { }, _expandRangeAncestors() { }, _scrollNestedIntoView() { }, _flashRange() { }, applyHighlightLayer() { }, _setCurrentHighlight() { }, _scrollToRange: REAL5._scrollToRange }; // wired as chat-view.js wires it

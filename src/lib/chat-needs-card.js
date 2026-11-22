@@ -969,7 +969,9 @@ export class NeedsCards {
     // window to the resume's own displacement while its read was out (3637 px up, for good when the landing moved nothing)
     view._noteTailPress?.('needsLand');
     let mark = Date.now();
-    const gone = () => gen !== this._landGen || !!view._disposed || !!view._navigatedSince?.(mark);
+    // the reader's own act since this landing's mark ends it — the view's ONE question for every hold (chat-view _readerActedSince,
+    // B-43f3 / r2579: its put-back hold below was fought by a scrollbar drag, whose scrolls the hold's guard leaves unstamped)
+    const gone = () => gen !== this._landGen || !!view._disposed || !!view._readerActedSince?.(mark);
     const ours = (p) => { mark = Date.now(); return p; }; // this landing's own jump stamps the view's navigation as it starts
     const keys = this.keys() || [];
     const isCard = item.status === 'open' && needsOf([item], keys).length > 0;

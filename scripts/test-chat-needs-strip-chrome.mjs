@@ -39,6 +39,7 @@ import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { chatNeedsKit, loadDesk } from './chat-needs-kit.mjs';
 import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
+import { gutterDragger } from './gutter-drag.mjs';   // THE scrollbar's door (r1175): (d5) presses the list's own gutter and checks where the press landed
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -602,6 +603,47 @@ try {
       check(`(d4) B-43f3: the same row grows AFTER the put-back's anchor (held until the anchor was taken — the hosted red's order): the reader is HELD at the record they were reading while the heights resolve — ${pbA.p0.id} at ${pbA.p1.at} (read at ${pbA.p0.top})`, pbA.p1.grown && pbA.p1.calls >= 2 && pbA.moved != null && Math.abs(pbA.moved) <= 4 && pbA.rd.includes('landed:' + ids[0] + '=null'), pbA);
       const pbR = await putBackScene('after', { holdOut: true });
       check(`(d4) RED CONTROL: the same order with the hold taken out (the one shot alone, as on the release) — the reader is MOVED off the record they were reading, ${pbR.moved} px (the hosted red moved it +58; with nothing anchoring the rows' own late heights move it too): the leg reads where the reader went and can fail`, pbR.p1.grown && pbR.p1.calls >= 2 && pbR.moved != null && Math.abs(pbR.moved) >= 40, pbR);
+      // (d5) B-43f3's DRAG TERM (the coordinator's r2579 — A PERSON'S OWN SCROLL IS NEVER FOUGHT): the put-back's hold lets go at the
+      //     person's own SCROLLBAR drag. The scene DEFERS the hold: its call is kept, and the guard it raises first is raised as the real
+      //     hold raises it (a drag under it stamps no reader act — the hole); the person drags the list's scrollbar for real
+      //     (scripts/gutter-drag.mjs: a press the page sees land on the list's own gutter); THEN the hold runs, each stop() it asks counted.
+      //     The reader stays where they dragged. RED: the release's hold question (only _navigatedSince) — the hold pulls the reader back to
+      //     the put-back's place. Held by states: the hold asked, the press landed, the stop asked as often as the hold's steps ask it.
+      const gutterDrag = gutterDragger({ evalJs: A.evalJs, cdp: A.cdp, sleep });
+      const atOf = (id) => A.evalJs(`(() => { const l = ${VIEW}._messageList, m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(id)}); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`);
+      const dragScene = async ({ release = false } = {}) => {
+        await choose(ids[1], 82); await sleep(3000);
+        const p0 = await A.evalJs(READ16);
+        await A.evalJs(`(() => { const v = ${VIEW}; window.__d5 = { asked: false, stops: [], release: ${release ? 'true' : 'false'} };
+          if (window.__d5.release) v._readerActedSince = function (since) { return !!this._navigatedSince(since); };   // THE RELEASE'S QUESTION (the red control)
+          v._holdReaderTop = function (el, top, o = {}) {   // DEFERRED: kept, its guard raised as the real hold raises it first
+            clearTimeout(v._jumpGuardTimer); v._programmaticScroll = true; window.__d5.asked = true; window.__d5.t0 = Date.now(); window.__d5.top = top;
+            window.__d5.run = () => { delete v._holdReaderTop; v._holdReaderTop(el, top, { ...o, stop: () => { const r = !!(o.stop && o.stop()); window.__d5.stops.push(r); return r; } }); };
+          };
+          return 1; })()`);
+        await pick(ids[0]);
+        const asked = await A.waitFor('!!(window.__d5 && window.__d5.asked)', 15000).catch(() => false);
+        // the list's own scrollbar, shown for the act (as test-minimap-jump's bare prep does): this suite's Chrome hides scrollbars
+        // (--hide-scrollbars — undone for this page by CDP while the scene runs) and the minimap hides the native one (its class)
+        await A.cdp('Emulation.setScrollbarsHidden', { hidden: false }).catch(() => null);
+        await A.evalJs(`(() => { ${VIEW}._messageList.classList.remove('chat-minimap-active'); return 1; })()`);
+        await sleep(200);   // the list re-lays out around its scrollbar (its records' tops are read after it)
+        const before = await atOf(p0.id);
+        const dr = asked ? await gutterDrag(`${VIEW}._messageList`, { dy: -24, steps: 4 }) : { ok: false, why: 'the put-back never asked its hold' };
+        const dragged = await atOf(p0.id);
+        const stamped = await A.evalJs(`!!${VIEW}._navigatedSince(window.__d5.t0 || 0)`);   // the premise: the drag under the guard stamped no reader act
+        await A.evalJs('(window.__d5.run && window.__d5.run(), 1)');
+        // the hold's steps, each asking its stop: let go at once ⇒ its first frame + the three re-anchors (4); held ⇒ twelve frames + three (15)
+        await A.waitFor(`(window.__d5.stops || []).length >= ${release ? 15 : 4}`, 5000).catch(() => false);
+        const after = await atOf(p0.id), stops = await A.evalJs('(window.__d5.stops || []).slice()'), aim = await A.evalJs('window.__d5.top');
+        await A.evalJs(`(() => { const v = ${VIEW}; delete v._holdReaderTop; if (window.__d5.release) delete v._readerActedSince; if (v._minimap && !v._minimap.classList.contains('hidden')) v._messageList.classList.add('chat-minimap-active'); return 1; })()`);
+        await A.cdp('Emulation.setScrollbarsHidden', { hidden: true }).catch(() => null);
+        return { asked, p0, aim: aim == null ? null : Math.round(aim), before, dr, dragged, stamped, after, stops, movedByDrag: before != null && dragged != null ? dragged - before : null };
+      };
+      const dg = await dragScene();
+      check(`(d5) B-43f3 / r2579: the person drags the list's scrollbar while the put-back's hold is due — its stop is asked (${dg.stops.length}×: ${dg.stops.join(',')}) and it lets go at once: the reader stays where they dragged (${dg.p0.id} at ${dg.after}, dragged to ${dg.dragged}, put back at ${dg.before})`, dg.asked === true && dg.dr.ok === true && !dg.stamped && dg.stops.length >= 1 && dg.stops.every((r) => r === true) && dg.movedByDrag != null && Math.abs(dg.movedByDrag) >= 20 && dg.after != null && Math.abs(dg.after - dg.dragged) <= 4, dg);
+      const dgR = await dragScene({ release: true });
+      check(`(d5) RED CONTROL: the release's hold question (only _navigatedSince) — the drag under the guard is no act, the hold's stop says no (${dgR.stops.length}×) and it pulls the reader back to the put-back's place (${dgR.p0.id} at ${dgR.after}, the put-back's aim ${dgR.aim}, dragged to ${dgR.dragged})`, dgR.asked === true && dgR.dr.ok === true && !dgR.stamped && dgR.stops.length >= 12 && dgR.stops.every((r) => r === false) && dgR.movedByDrag != null && Math.abs(dgR.movedByDrag) >= 20 && dgR.after != null && dgR.aim != null && Math.abs(dgR.after - dgR.aim) <= 4 && Math.abs(dgR.dragged - dgR.aim) >= 20, dgR);
       await A.evalJs(`(() => { document.getElementById('hide16')?.remove(); return 1; })()`);
       await TAIL16(null);
     }

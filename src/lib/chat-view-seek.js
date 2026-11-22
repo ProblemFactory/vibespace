@@ -476,13 +476,14 @@ export function installChatSeek(ChatView) {
     const list = this._messageList;
     this._trace?.('landStable', { st: Math.round(list.scrollTop), sh: list.scrollHeight });
     // THE HOLD LETS GO AT THE READER'S OWN ACT SINCE THIS LANDING (r1175: it had no stop — a person who scrolled within a
-    // second of a jump was put back on its target by the frames and the three re-centres below): the needs card put-back's
-    // stop (_navigatedSince: a wheel, a touch, a paging key, a navigation, a search reveal), and a press on the list's
-    // scrollbar (`_gutterPressAt`, or one held now: a drag's scrolls are not stamped while the guard above stands). The
-    // landing itself (the first centring, in this task) always runs; once let go, the hold stays let go.
+    // second of a jump was put back on its target by the frames and the three re-centres below): the view's ONE question for
+    // every hold (chat-view _readerActedSince, B-43f3 / r2579 — the needs landing's gone() asks it too): a wheel, a touch, a
+    // paging key, a navigation, a search reveal, and a press on the list's scrollbar (pressed since, or held now: a drag's
+    // scrolls are not stamped while the guard above stands). The landing itself (the first centring, in this task) always
+    // runs; once let go, the hold stays let go.
     const since = Date.now();
     let gone = false;
-    const letGo = () => gone || (gone = !!this._disposed || !!this._pointerDownOnScrollbar || (this._gutterPressAt || 0) > since || !!this._navigatedSince?.(since));
+    const letGo = () => gone || (gone = !!this._disposed || !!this._readerActedSince?.(since));
     const center = () => {
       if (!el.isConnected) return;
       const lr = list.getBoundingClientRect();

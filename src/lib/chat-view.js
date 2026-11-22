@@ -3151,6 +3151,16 @@ class ChatView {
     return !this._positionedSince(at);
   }
 
+  /** THE HOLDS' QUESTION (B-43f3's drag term, the coordinator's r2579 — A PERSON'S OWN SCROLL IS NEVER FOUGHT): has the reader
+   *  acted on this view since `since`? Every stamp of _readerActs (_navigatedSince: a wheel, a touch, a paging key, a navigation,
+   *  a search reveal) AND the list's scrollbar: pressed since (`_gutterPressAt`) or held now (`_pointerDownOnScrollbar`). A drag's
+   *  scrolls are not stamped while a hold's programmatic-scroll guard stands, so its press is the act. ONE question for every
+   *  hold that keeps the reader somewhere — chat-view-seek _scrollElStable's letGo, and the needs landing's gone() with its
+   *  put-back hold (chat-needs-card.js): a reader act added later reaches them all from here */
+  _readerActedSince(since) {
+    return !!this._pointerDownOnScrollbar || (this._gutterPressAt || 0) > since || !!this._navigatedSince(since);
+  }
+
   /** Is an AUTOMATIC (observer- or geometry-driven) upward page allowed right
    *  now? ONE predicate for every such trigger — the gap sentinel's
    *  IntersectionObserver and the scroll/wheel-driven `_maybeSeekEarlier` —
