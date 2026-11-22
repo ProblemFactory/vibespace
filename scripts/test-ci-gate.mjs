@@ -47,6 +47,17 @@ import { anchored, relayBroadcastJs } from './scratch.mjs';
 import { callArgs } from './lib/check.mjs'; // B-1388: a helper's Nth argument (the swap census's argument scanner)
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
+// B-54a9 (主开发 r2462): THE SECTION PROFILE — PRINTED, never judged. Each «\n§…» header this file prints opens a section; the
+// end prints every section's own milliseconds (the process's start to the first header = the imports), the largest first, so
+// the suite's cost is read by section, not guessed.
+const PROFILE = [['(start → the first section: the imports)', 0]];
+{ const log = console.log.bind(console); console.log = (...a) => { if (typeof a[0] === 'string' && a[0].startsWith('\n§')) PROFILE.push([a[0].slice(1, 90), performance.now()]); return log(...a); }; }
+const printProfile = () => {
+  const marks = [...PROFILE, ['(end)', performance.now()]];
+  const rows = marks.slice(0, -1).map(([name, t], k) => [name, Math.round(marks[k + 1][1] - t)]).sort((x, y) => y[1] - x[1]);
+  console.log(`\nTHE SECTION PROFILE (B-54a9; printed, never judged): ${rows.length} part(s), ${Math.round(performance.now())} ms from the process's start`);
+  for (const [name, ms] of rows) console.log(`  · ${String(ms).padStart(6)} ms  ${name}`);
+};
 
 try {
 // ── §1 THE CENSUS ────────────────────────────────────────────────────────
@@ -2152,4 +2163,5 @@ console.log('\n§2q one suite-built client bundle: a suite builds src/client.js 
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
 
+printProfile();
 report();
