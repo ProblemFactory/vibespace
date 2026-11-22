@@ -14,6 +14,9 @@
 //     RED: a reader that empties its reply on a failed read.
 //  THE LEGS' HOLD (r2405): a leg that holds a read at its file waits for the hold itself (bounded, and said), over a listing
 //     slowed by SLOW_LIST loop turns. RED: the release's twenty-turn wait over that listing finds no hold.
+//  r2249: a skipped file that is GONE ends its episode (back and still unreadable, it is said again); two hub writes inside one
+//     read — a repair's replace, then an ordinary write — the later own write stands outright. REDS: the gone file's skip kept;
+//     the second write forgetting the replace.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -402,5 +405,46 @@ async function bootSkipLeg(mod) {
   const FillThrows = M.load('src/usage-cache-folder.js', anchored(F_SRC, "catch (e) { if (!e || e.code !== 'ENOENT') skip(n, e); } }   // r2120 (2)", "catch (e) { if (!e || e.code !== 'ENOENT') throw e; } }   // r2120 (2)", 'the fill throws on one file'), 'fill-throws');
   const b2 = await bootSkipLeg(FillThrows);
   ok(!!(b2.held === true), 'CONTROL (the boot\'s fill throws on one unreadable file): the folder is held from the boot — red', b2);
+}
+// r2249 (the part-3 smalls): A SKIP'S EPISODE ENDS WHEN ITS FILE IS GONE · TWO HUB WRITES INSIDE ONE READ
+async function goneSkipLeg(mod) {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'goneskip-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 1 }));
+  fs.mkdirSync(path.join(dir, 'b.json'));                              // a «.json» that cannot be read (a folder)
+  const said = [];
+  const r = mod.create(dir, { log: (m) => said.push(m), fillSync: false });
+  await r.refresh();                                                    // skipped: said once
+  fs.rmSync(path.join(dir, 'b.json'), { recursive: true });
+  await r.refresh();                                                    // GONE: its episode ends, silently
+  fs.mkdirSync(path.join(dir, 'b.json'));
+  await r.refresh();                                                    // back and still unreadable: a NEW episode
+  return { skipSaid: said.filter((m) => /cannot be read/.test(m)).length, againSaid: said.filter((m) => /: reads again$/.test(m)).length };
+}
+{
+  const g = await goneSkipLeg(F);
+  ok(!!(g.skipSaid === 2 && g.againSaid === 0), `r2249 a skipped file that is GONE ends its episode silently: back and still unreadable, it is said again (${g.skipSaid} «cannot be read», ${g.againSaid} «reads again»)`, g);
+  const KeepGone = M.load('src/usage-cache-folder.js', anchored(F_SRC, "    for (const n of [...skipped.keys()]) if (!names.includes(n)) skipped.delete(n);", '', 'the reader keeping a gone file\'s skip'), 'keep-gone');
+  const g2 = await goneSkipLeg(KeepGone);
+  ok(!!(g2.skipSaid === 1), `CONTROL (a gone file's skip kept): the file back and still unreadable is never said again (${g2.skipSaid}) — red`, g2);
+}
+async function twoWritesLeg(mod) {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'twowrites-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 5, foreign: true }));   // a foreign reading on disk (newer)
+  const h = heldReads();
+  const r = mod.create(dir, { fsp: h.fsp, fillSync: false });
+  const pr = r.refresh();
+  const how = await untilHeld(h, pr); if (how !== 'held') return { noHold: how };
+  h.held.shift()();                                                                                // the read takes the foreign text …
+  r.noteWritten('a.json', JSON.stringify({ fetchedAt: 3, own: 'repair' }), { replace: true });   // … a repair REPLACES it …
+  r.noteWritten('a.json', JSON.stringify({ fetchedAt: 4, own: 'reading' }));                     // … then the hub writes a reading onto the repaired file (an older stamp than the foreign one)
+  await pr;
+  return JSON.parse(r.via.readText(path.join(dir, 'a.json')));
+}
+{
+  const t = await twoWritesLeg(F);
+  ok(!!(t.own === 'reading' && t.fetchedAt === 4), `r2249 two hub writes inside one read — a repair's replace, then an ordinary write: the later own write stands OUTRIGHT, the file holds its text (${t.noHold || JSON.stringify(t)})`, t);
+  const Forget = M.load('src/usage-cache-folder.js', anchored(F_SRC, "    if (own) { const was = own.get(name); own.set(name, { text, replace: !!replace || !!(was && was.replace) }); }", '    if (own) own.set(name, { text, replace: !!replace });', 'the second write forgetting the replace'), 'forget-replace');   // stale-pins: kept (r2120's line, the red control)
+  const t2 = await twoWritesLeg(Forget);
+  ok(!!(t2.foreign === true), 'CONTROL (the second write forgets the replace — r2120\'s line): the foreign reading the repair replaced comes back for one refresh — red', t2);
 }
 report();

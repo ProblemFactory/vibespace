@@ -66,6 +66,7 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
     let all;
     try { all = await fsp.readdir(DIR); } catch (e) { if (e && e.code === 'ENOENT') return new Map(); throw e; }   // no folder yet (a fresh install): no readings, truthfully — not a held read
     const names = jsonOnly(all);
+    for (const n of [...skipped.keys()]) if (!names.includes(n)) skipped.delete(n);   // r2249: a skipped file that is GONE ends its episode, silently — back and still unreadable, it is said again
     const texts = new Map();
     for (const n of names) {
       // a file that cannot be read now (removed after the list, unreadable, a folder named .json) is SKIPPED, as the release skipped it
@@ -110,7 +111,7 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
   function noteWritten(name, text, { replace = false } = {}) {
     if (typeof name !== 'string' || !name.endsWith('.json') || typeof text !== 'string') return;
     if (reply) reply.texts.set(name, text);
-    if (own) own.set(name, { text, replace: !!replace });   // r2120 (1): a repair's replace stands over a read in flight; a reading keeps the later one
+    if (own) { const was = own.get(name); own.set(name, { text, replace: !!replace || !!(was && was.replace) }); }   // r2120 (1): a repair's replace stands over a read in flight; a reading keeps the later one — r2249: once a replace is noted in this read, a later own write for that name stands OUTRIGHT (the file holds its text)
   }
   function state() {
     const t = now();
