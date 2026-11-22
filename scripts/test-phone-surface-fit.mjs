@@ -13,11 +13,12 @@
 //     back exactly the reds it was given
 //   ⑥ THE MEASURE AND THE OPENERS PARSE: MEASURE_SOURCE is a function of (root, declared); every opener is an async body;
 //     every module an opener names is a file of the tree
-//     and every opener's TARGET exists (an export of its module, a method of the app, its list, its nav)
+//     and every opener's TARGET exists (an export of its module, a method of the app, its list, its nav, and every class and
+//     id it presses spelled by a src/lib script or a public page — 主开发 r1693: the strip's step two took the marks two draws pressed)
 // RED CONTROLS (each a planted copy, judged by the same check): a new createModalShell site with no row · an opener taken
 // out · a file-worded excuse not listed by name · a listed name that is opened now · a ratchet row for a surface with no
 // opener · a ratchet higher than the run (a cure the table still lists) · an opener for a key that is gone · an opener whose
-// function was renamed away.
+// function was renamed away · an opener pressing a class renamed away.
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,7 +76,7 @@ let draws = 0;
 for (const s of list) for (const d of C.drawsOf(s)) { draws++; try { new AsyncFn('app', 'M', 'FX', 'anchor', d.open); if (d.close) new AsyncFn('app', 'M', 'FX', 'anchor', d.close); } catch (e) { bad.push(d.key + ': ' + e.message); } }
 ok(bad.length === 0, `every draw's opener (and its close) is an async body that parses (${draws} draws)`, bad.slice(0, 6));
 const targets = C.openerTargetProblems(list, repo);
-ok(targets.length === 0, 'every opener\'s target exists: each M[\'file\'].name an export of that file, each app / sidebar / nav method defined in src/lib', targets.slice(0, 8));
+ok(targets.length === 0, 'every opener\'s target exists: each M[\'file\'].name an export of that file, each app / sidebar / nav method defined in src/lib, each class and id it presses spelled by a src/lib script or a public page', targets.slice(0, 8));
 const mods = C.openerModules(list), missing = mods.filter((m) => !fs.existsSync(path.join(repo, m)));
 ok(mods.length > 10 && missing.length === 0, `every module an opener names is a file of the tree (${mods.length})`, missing);
 
@@ -106,6 +107,10 @@ const firstM = Object.keys(C.OPENERS).find((k) => /M\['/.test(C.OPENERS[k].open)
 const saved = C.OPENERS[firstM]; C.OPENERS[firstM] = { ...saved, open: renamed };
 const p7 = C.openerTargetProblems(list, repo); C.OPENERS[firstM] = saved;
 ok(p7.some((x) => x.key === firstM && /RenamedAway/.test(x.target)), `CONTROL: an opener whose function was renamed away (${firstM}) is red by its target`, p7.slice(0, 2));
+const firstQ = Object.keys(C.OPENERS).find((k) => /querySelector\('[^']*\.[A-Za-z]/.test(C.OPENERS[k].open)), savedQ = C.OPENERS[firstQ];
+C.OPENERS[firstQ] = { ...savedQ, open: savedQ.open.replace(/(querySelector\('[^']*\.)([A-Za-z][\w-]*)/, '$1$2-renamed-away') };
+const p8 = C.openerTargetProblems(list, repo); C.OPENERS[firstQ] = savedQ;
+ok(p8.some((x) => x.key === firstQ && /-renamed-away/.test(x.target)), `CONTROL: an opener pressing a class renamed away (${firstQ}) is red by that name — the strip's step two took the fold rows two draws pressed (r1693)`, p8.slice(0, 2));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

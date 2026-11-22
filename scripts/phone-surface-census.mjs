@@ -198,12 +198,15 @@ export const OPENERS = {
   // UNIT 2 (主开发 r1349): THE CONVERSATION'S SURFACES — `chat()` opens the seeded conversation (the tree's stand-in agent) on the
   // phone and waits for its first answer; `FX.todo` is the For-you item its turn filed
   'menu:chat-input:constructor>plusBtn.onclick': { open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-plus-btn').click()` },
-  // the status strip's dropdowns: ONE hand-built float (chat-status-bar.js showDropdown) — the model's, then the effort's and the permission mode's as its draws
+  // the status strip's dropdowns: ONE hand-built float (chat-status-bar.js showDropdown) — the model's, then the effort's, the ⚙
+  // door's list and the output style's as its draws
   'popover:hand:chat-status-bar:_onClick>showDropdown': { open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-status-model').click()`,
-    // on a phone effort and output style fold into the model chip's sheet: their draws go through its rows, as a finger does
-    // (a folded chip pressed directly anchors its dropdown on a hidden box — above the screen)
-    also: [{ label: 'effort', open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-status-model').click(); for (let i = 0; i < 40 && document.querySelectorAll('.chat-status-fold-row').length < 1; i++) await new Promise((r) => setTimeout(r, 100)); document.querySelectorAll('.chat-status-fold-row')[0].click()` },
-      { label: 'style', open: `await chat(); document.querySelector('.window[class~="window-active"] .chat-status-model').click(); for (let i = 0; i < 40 && document.querySelectorAll('.chat-status-fold-row').length < 2; i++) await new Promise((r) => setTimeout(r, 100)); document.querySelectorAll('.chat-status-fold-row')[1].click()` }] },
+    // SINCE THE STRIP's STEP TWO (79feb059d) NOTHING FOLDS on a phone (the model sheet's fold rows are gone): the thinking level
+    // is a part of the model chip with a press of its own, the output style a row of the ⚙ door's list (strip-table.js: effort
+    // in:model, style in:settings) — the draws press them as a finger does; a mark that is not there fails the draw by name
+    also: [{ label: 'effort', open: `await chat(); const e = document.querySelector('.window[class~="window-active"] .chat-status-model .chat-status-effort'); if (!e) throw new Error('no effort part in the model chip'); e.click()` },
+      { label: 'settings', open: `await chat(); const g = document.querySelector('.window[class~="window-active"] .chat-status-settings'); if (!g) throw new Error('no settings door on the strip'); g.click()` },
+      { label: 'style', open: `await chat(); const g = document.querySelector('.window[class~="window-active"] .chat-status-settings'); if (!g) throw new Error('no settings door on the strip'); g.click(); let r = null; for (let i = 0; i < 40 && !(r = document.querySelector('.chat-status-settings-row[data-row="style"]')); i++) await new Promise((q) => setTimeout(q, 100)); if (!r) throw new Error('no output style row in the settings door list'); r.click()` }] },
   'menu:session-card:renderSessionCard>(on contextmenu)': { open: `await chat(); const c = [...document.querySelectorAll('.session-item-card')].find((x) => x.getClientRects().length) || document.querySelector('.session-item-card'); c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 300 }))` },
   'menu:chat-view:_showMsgMenu': { open: `await chat(); const cv = [...app.sessions.values()].find((v) => v && v.sessionId === FX.sid); const m = [...document.querySelectorAll('.window[class~="window-active"] .chat-msg')].find((x) => x._rawMsg && x._rawMsg.role === 'assistant'); cv._showMsgMenu(m._rawMsg, 120, 300)` },
   'menu:taskbar:showWindowContextMenu': { open: `await chat(); M['taskbar'].showWindowContextMenu(app, app.wm.activeWindowId, 120, 120)`, mods: ['src/lib/taskbar.js'] },
@@ -721,12 +724,22 @@ export function checkTables(list, t = { OPENERS, EXCUSES, EXCUSE_BY_FILE, RATCHE
 /** THE OPENERS' TARGETS EXIST (the reader's 12): every `M['file'].name(` is an export of src/lib/<file>.js, every
  *  `app.name(` / `app.sidebar.name(` / `app._settingsUI.name(` / `app._mobileNav.name(` a method some src/lib file defines —
  *  read in-process: the files that name a surface helper first (the app, its list, its nav and the dialogs' modules are
- *  among them), every src/lib file only when a name is still not found. → [{ key, target }] missing (empty = whole). */
+ *  among them), every src/lib file only when a name is still not found. AND EVERY CLASS AND ID A DRAW PRESSES (主开发 r1693 —
+ *  the strip's step two, 79feb059d, took the model sheet's fold rows away: the effort / style draws pressed
+ *  `.chat-status-fold-row` and threw only at the heavy run, this check green): each must be spelled, as a whole word, by a
+ *  src/lib script or a public page (pageNamesOf) — so a mark whose name the tree's code no longer spells is red HERE, by its
+ *  name, at the renaming unit's own fast gate. A FLOOR, not the browser's read: a stylesheet's rule draws no mark and does not
+ *  count, but a word left in a comment or in dead code does; a selector is read only as a draw's root or in single quotes
+ *  inside a querySelector / closest / getElementById call (a template's or a matches() selector is not).
+ *  → [{ key, target }] missing (empty = whole). */
 export function openerTargetProblems(list, repo) {
   const want = [];
-  for (const s of list) for (const d of drawsOf(s)) for (const x of [d.open, d.close].filter(Boolean)) {
-    for (const m of x.matchAll(/M\['([\w-]+)'\]\.(\w+)\(/g)) want.push({ key: d.key, file: `src/lib/${m[1]}.js`, name: m[2], kind: 'export' });
-    for (const m of x.matchAll(/\bapp\.(?:(?:sidebar|_settingsUI|_mobileNav)\.)?(\w+)\(/g)) want.push({ key: d.key, name: m[1], kind: 'method' });
+  for (const s of list) for (const d of drawsOf(s)) {
+    for (const x of [d.open, d.close].filter(Boolean)) {
+      for (const m of x.matchAll(/M\['([\w-]+)'\]\.(\w+)\(/g)) want.push({ key: d.key, file: `src/lib/${m[1]}.js`, name: m[2], kind: 'export' });
+      for (const m of x.matchAll(/\bapp\.(?:(?:sidebar|_settingsUI|_mobileNav)\.)?(\w+)\(/g)) want.push({ key: d.key, name: m[1], kind: 'method' });
+    }
+    for (const n of pageNamesOf([d.open, d.close, d.ready].filter((x) => typeof x === 'string').join('\n'), d.root)) want.push({ key: d.key, name: n, kind: 'page' });
   }
   const text = new Map();
   const readF = (f) => { if (!text.has(f)) { try { text.set(f, fs.readFileSync(path.join(repo, f), 'utf8')); } catch { text.set(f, ''); } } return text.get(f); };
@@ -737,8 +750,33 @@ export function openerTargetProblems(list, repo) {
     scan(srcFiles(repo).filter((f) => f.startsWith('src/lib/')));
     if (names.some((n) => !found.has(n))) scan(fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => `src/lib/${f}`));
   }
-  const has = (w) => (w.kind === 'export' ? new RegExp(`^export (async )?(function|const) ${w.name}\\b`, 'm').test(readF(w.file)) : found.has(w.name));
-  return want.filter((w) => !has(w)).map((w) => ({ key: w.key, target: w.kind === 'export' ? `${w.file} export ${w.name}` : `a method ${w.name}` }));
+  // the page names: the scripts already read first (a mark is mostly in its own surface's file), then public/'s pages, then
+  // every src/lib script — only while a name is still not found; a whole word, never a part of a longer name; never a sheet
+  const pages = [...new Set(want.filter((w) => w.kind === 'page').map((w) => w.name.slice(1)))], seen = new Set();
+  if (pages.length) {
+    const pub = fs.readdirSync(path.join(repo, 'public')).filter((f) => f.endsWith('.html')).map((f) => `public/${f}`);
+    const lib = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => `src/lib/${f}`);
+    for (const f of [...new Set([...[...text.keys()].filter((f) => f.endsWith('.js')), ...pub, ...lib])]) {
+      const left = pages.filter((n) => !seen.has(n));
+      if (!left.length) break;
+      const s = readF(f);
+      for (const n of left) if (s.includes(n) && new RegExp(`(?<![\\w-])${n}(?![\\w-])`).test(s)) seen.add(n);
+    }
+  }
+  const has = (w) => (w.kind === 'export' ? new RegExp(`^export (async )?(function|const) ${w.name}\\b`, 'm').test(readF(w.file)) : w.kind === 'page' ? seen.has(w.name.slice(1)) : found.has(w.name));
+  return want.filter((w) => !has(w)).map((w) => ({ key: w.key, target: w.kind === 'export' ? `${w.file} export ${w.name}` : w.kind === 'page' ? `the page name ${w.name} (no src/lib script or public page spells it)` : `a method ${w.name}` }));
+}
+
+/** The classes and ids a draw presses: the selectors of its querySelector(All) / closest calls (single-quoted, as the openers
+ *  write them), the ids of its getElementById calls, and its `root` — `[class~="x"]` read as the class x, any other attribute
+ *  test dropped. → ['.class', '#id', …] */
+export function pageNamesOf(code, root = null) {
+  const src = String(code || ''), out = new Set();
+  const sels = [...src.matchAll(/(?:querySelector(?:All)?|closest)\('([^']+)'\)/g)].map((m) => m[1]);
+  if (typeof root === 'string') sels.push(root);
+  for (const sel of sels) for (const m of sel.replace(/\[class~="([\w-]+)"\]/g, '.$1').replace(/\[[^\]]*\]/g, '').matchAll(/[.#][A-Za-z][\w-]*/g)) out.add(m[0]);
+  for (const m of src.matchAll(/getElementById\('([\w-]+)'\)/g)) out.add('#' + m[1]);
+  return [...out];
 }
 
 /** The modules the openers name (the browser suite's probe bundle imports each beside src/client.js). */
