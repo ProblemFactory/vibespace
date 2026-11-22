@@ -146,7 +146,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/plugins/which-kept.js': [1, 'not a conversation: plugins (its own which lookup child, killed by the handle it holds after its grace — hub-sync-holds, 2.369.397)'],
     'src/server/plugin-loader.js': [2, 'not a conversation: plugin children'],
     'src/port-forward.js': [1, 'not a conversation: port forwards'],
-    'src/remote-fs.js': [2, 'not a conversation: file transfers'],
+    'src/remote-fs.js': [3, 'not a conversation: file transfers; B-23e5 r2411 (3): an ssh write past the device road\'s 30 s bound'],
     'src/routes/files.js': [6, 'not a conversation: file transfers (ckpt61 cure 3: + a failed folder copy ends whichever side still runs)'],
     'src/server/browser-keeper.js': [5, 'not a conversation: agent browsers and their stale holders (the 2.369.202 integration: lanes browser-windows / jobs-browser / browser-admin added four; rv-browser F7 moved the install children out — the two rows below; lane one-browser-b1 added the fifth: attachStart SIGKILLs the Chrome it just spawned when its starttime cannot be read)'],
     'src/server/browser-attach-launch.js': [2, "not a conversation: agent browsers — the attach road's Chrome that the launch itself spawned (our child handle), ended by endChild (SIGTERM, a grace, then SIGKILL) when its DevToolsActivePort never appeared (lane one-browser-b1)"],

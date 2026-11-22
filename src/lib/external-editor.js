@@ -329,10 +329,11 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         let saved = false, ctl = endAt();
         say(t('Saving…'));
         try {
-          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }), signal: ctl.signal });   // B-23e5: a person's save, marked
+          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }), signal: ctl.signal }).catch((e) => { throw Object.assign(e && typeof e === 'object' ? e : new Error(String(e)), { noReply: true }); });   // B-23e5: a person's save, marked; r2411 (2): died in transit = no reply
           const data = await res.json().catch(() => ({}));
           // r2198 law 3: «still trying» — another press on this file or its folder holds it (this pane's own saves never overlap): NOT saved
           if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));
+          if (!res.ok && !(data && typeof data.error === 'string')) throw Object.assign(new Error('no reply'), { noReply: true });   // r2411 (2): a reply that is not the hub's own is no reply
           if (data && data.code === 'write_unknown') throw Object.assign(new Error('unknown'), { noReply: true });   // r2299 A1/A3: the hub could not know — said as unknown
           if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);   // B-3b03 follow-up: a refusal in the reader's language
           if (!namesText(data, newContent)) throw Object.assign(new Error('no reply'), { noReply: true });   // r2221 item 6: «saved» names the text it saved; a body that does not is no reply
@@ -346,8 +347,8 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
           handing = true; editorView.dispatch({ effects: lockComp.reconfigure(EditorState.readOnly.of(true)) });
           say('✓ ' + t('{name} is saved — handing it back to the terminal…', { name }), 'var(--green)');
           clearTimeout(ctl.timer); ctl = endAt();   // the telling is its own request, with its own 45 s
-          const sig = await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }), signal: ctl.signal });
-          if (!sig.ok) { const sd = await sig.json().catch(() => ({})); throw Object.assign(new Error(sd.error || `HTTP ${sig.status}`), { code: sd.code }); }   // the hub's refusal is read and said
+          const sig = await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }), signal: ctl.signal }).catch((e) => { throw Object.assign(e && typeof e === 'object' ? e : new Error(String(e)), { noReply: true }); });   // r2411 (2): a telling that died in transit — «not told yet, it may still arrive»
+          if (!sig.ok) { const sd = await sig.json().catch(() => ({})); throw Object.assign(new Error(sd.error || `HTTP ${sig.status}`), typeof sd.error === 'string' ? { code: sd.code } : { noReply: true }); }   // the hub's refusal is read and said
         } catch (err) {
           const noReply = ctl.signal.aborted || !!(err && err.noReply), why = noReply ? t('no reply — it may still have been saved') : (err.message || t('Error'));
           handing = false; editorView.dispatch({ effects: lockComp.reconfigure([]) });

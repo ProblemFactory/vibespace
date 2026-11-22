@@ -77,7 +77,10 @@ const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // another road may be tried), UNKNOWN (sent, then the hub's own timer or a lost link ended its wait — it may still land), else the
 // machine's own error for THIS write (FAILED). The client marks its never-sent refusals (src/agentd/client.js `stage`, its codes).
 const writeNotSent = (e) => !!e && (e.stage === 'connect' || e.stage === 'gate' || e.code === 'request-not-sent' || e.code === 'control-line-too-large');
-const writeMarked = (e) => { if (e && typeof e === 'object' && !writeNotSent(e) && (/ timeout$/.test(String(e.message)) || /^device link lost/.test(String(e.message)))) { try { e.writeUnknown = true; } catch { } } return e; };
+// r2411 (THE MUST): the machine's OWN storage pool's deadline (src/agentd/worker-pool.js «fs deadline (write)») stopped a write that was
+// RUNNING — it may still land: UNKNOWN; its «… never started» form never ran: FAILED, never started
+const writeMarked = (e) => { if (e && typeof e === 'object' && !writeNotSent(e)) { const m = String(e.message); try { if (/^fs deadline \(write\): never started/.test(m)) e.neverStarted = true; else if (/ timeout$/.test(m) || /^device link lost/.test(m) || /^fs deadline \(write\)$/.test(m)) e.writeUnknown = true; } catch { } } return e; };
+const SSH_WRITE_MS = 30000;   // r2411 (3): the device road's bound (src/agentd/client.js _request: 30 s) — an ssh write past it ends UNKNOWN, the file released
 // shq for PATHS: a quoted `~` never expands ('~/Downloads/x' landed in a
 // literal ./~ directory on the remote — audit 2.192.0), so emit the tilde
 // prefix as an unquoted "$HOME" and quote only the rest. The dial fast path
@@ -420,12 +423,13 @@ class RemoteFs {
     const { feedStdin, sshRefusal } = require('./hosts.js'); // THE ONE STDIN FEED (lane hub-dies-dead-ssh-host): a dead machine's EPIPE is an answer, never the hub's death
     await new Promise((resolve, reject) => {
       const child = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', `mkdir -p "$(dirname ${shqp(filePath)})" && cat > ${shqp(filePath)}`], { env: this.hosts.sshEnv() });
-      let err = '';
+      let err = '', ended = false;
+      const bound = setTimeout(() => { ended = true; try { child.kill('SIGTERM'); } catch { } }, SSH_WRITE_MS);   // r2411 (3): no write holds its file's queue without end
       child.stderr.on('data', d => { err += d; });
-      child.on('error', reject);
+      child.on('error', (e) => { clearTimeout(bound); reject(e); });
       // r2299 A1: ssh's own failure (255) that is not a refusal before the command ran (sshRefusal) is a link that broke during the
       // write — UNKNOWN; the command's own error (cat / mkdir) is FAILED
-      child.on('close', (code) => { if (code === 0) return resolve(); const said = sshRefusal(h, { code }, err, fed); reject(said || Object.assign(new Error(err.trim() || `write failed (${code})`), code === 255 ? { writeUnknown: true } : {})); });
+      child.on('close', (code) => { clearTimeout(bound); if (code === 0 && !ended) return resolve(); if (ended) return reject(Object.assign(new Error(`the write over ssh did not answer in ${SSH_WRITE_MS / 1000} s`), { writeUnknown: true })); const said = sshRefusal(h, { code }, err, fed); reject(said || Object.assign(new Error(err.trim() || `write failed (${code})`), code === 255 ? { writeUnknown: true } : {})); });
       const fed = feedStdin(child, contentBuffer);
     });
     return { success: true };

@@ -639,10 +639,11 @@ class CodeEditor {
       // (permission denied, read-only fs) return 400 with {error} and used to
       // show "✓ Saved" while silently dropping the edits
       // B-23e5: a save is a person's press (the button, Mod-s, save-and-close) — marked: tried once despite the pool's memory
-      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}), signal: ctl.signal });
+      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}), signal: ctl.signal }).catch((e) => { throw Object.assign(e && typeof e === 'object' ? e : new Error(String(e)), { noReply: true }); });   // r2411 (2): a request that died in transit (the hub restarted, the link dropped) is NO REPLY
       const data = await res.json().catch(() => ({}));
       // r2198 law 3: «still trying» — another press on this file or its folder holds it (this editor's own saves never overlap): NOT saved
       if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));
+      if (!res.ok && !(data && typeof data.error === 'string')) throw Object.assign(new Error('no reply'), { noReply: true });   // r2411 (2): a reply that is not the hub's own (a proxy's page) is no reply
       if (data && data.code === 'write_unknown') throw Object.assign(new Error('unknown'), { noReply: true });   // r2299 A1/A3: the hub could not know — said as unknown
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       if (!namesText(data, content)) throw Object.assign(new Error('no reply'), { noReply: true });   // r2221 item 6: «saved» names the text it saved; a body that does not is no reply

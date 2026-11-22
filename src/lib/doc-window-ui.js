@@ -925,9 +925,9 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
         S.confirmed = disk;
       }
       const ctl = new AbortController(); endTimer = setTimeout(() => ctl.abort(), 45000);   // r2221 (item 12): the page's last guard — the hub orders this file's writes (law A)
-      const res = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json', ...ATTENDED_HEADERS }, body: JSON.stringify({ path, content: text, host: host || undefined }), signal: ctl.signal });   // B-23e5: a person's save, marked
+      const res = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json', ...ATTENDED_HEADERS }, body: JSON.stringify({ path, content: text, host: host || undefined }), signal: ctl.signal }).catch(() => { throw Object.assign(new Error('no reply'), { name: 'AbortError' }); });   // r2411 (2): died in transit = no reply   // B-23e5: a person's save, marked
       const data = await res.json().catch(() => ({}));
-      if (data && data.code === 'write_unknown') throw Object.assign(new Error('unknown'), { name: 'AbortError' });   // r2299 A1/A3: the hub could not know — said as unknown
+      if ((!res.ok && !(data && typeof data.error === 'string')) || (data && data.code === 'write_unknown')) throw Object.assign(new Error('unknown'), { name: 'AbortError' });   // r2411 (2): not the hub's own reply = no reply   // r2299 A1/A3: the hub could not know — said as unknown
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       const before = S.source;
       S.source = text; S.loaded = loadDoc(text); S.base = await info(); S.kept = 0; S.confirmed = 0; conflict.hidden = true;

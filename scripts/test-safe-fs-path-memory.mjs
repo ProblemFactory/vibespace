@@ -1243,6 +1243,10 @@ console.log('①p r2006 / r2198 / r2221 / r2222 (the save\'s laws): A one write 
     const out = await new Function('writeNotSent', 'writeMarked', `return async function (id, filePath, contentBuffer) {\n${body}\n};`)(writeNotSent, writeMarked).call(self, 'm1', '/scratch-b23e5/dead/notes.md', Buffer.from('x')).then(() => 'answered', (e) => FW.outcomeOf(e));
     return { roads: roads.join('+'), out }; };
   const A4 = '        if (abs !== null && !writeNotSent(e)) throw writeMarked(e);';
+  const WM_4a94 = "(e) => { if (e && typeof e === 'object' && !writeNotSent(e) && (/ timeout$/.test(String(e.message)) || /^device link lost/.test(String(e.message)))) { try { e.writeUnknown = true; } catch { } } return e; }";   // stale-pins: kept (4a94eb1a4's mark, planted in the RED)
+  const writeMarked4a94 = writeNotSent ? new Function('writeNotSent', `return ${WM_4a94};`)(writeNotSent) : null;
+  const devAnswer = (mark, msg) => { const e = mark(new Error(msg)); const a = FW.answerOf(e, 'm1'); return a ? `${a.status} ${a.body.code}` : `failed: ${e.message}`; };
+  const DEADLINE = 'fs deadline (write)', NEVER = 'fs deadline (write): never started — 1 worker(s) busy, 0 wedged in the kernel';
   const [dTimer, dLost, dNotSent, dOwn, dTimerR] = await Promise.all([
     WRITE ? devWrite(WRITE, new Error('fs-op timeout')) : null, WRITE ? devWrite(WRITE, new Error('device link lost')) : null,
     WRITE ? devWrite(WRITE, Object.assign(new Error('not connected'), { stage: 'connect' })) : null, WRITE ? devWrite(WRITE, new Error('EACCES: permission denied, open \'/scratch-b23e5/dead/notes.md\'')) : null,
@@ -1255,7 +1259,11 @@ console.log('①p r2006 / r2198 / r2221 / r2222 (the save\'s laws): A one write 
   const capped = Array.from({ length: 5000 }, (_, i) => ({ name: `f-${i}` }));
   const [ntGone, ntThere, ntHiccup, ntR] = await Promise.all([NT0 ? notThere(NT0, new Error('ENOENT: no such file or directory, stat \'/scratch-b23e5/tmp/prompt.md\'')) : null, NT0 ? notThere(NT0, null, capped) : null,
     NT0 ? notThere(NT0, new Error('fs-op timeout')) : null, NT0 && STATLINE ? notThere(NT0.replace(STATLINE, LISTING), null, capped) : null]);   // stale-pins: kept (RED: 767bde791's capped listing)
-  console.log('    a paired machine: ' + JSON.stringify({ dTimer, dLost, dNotSent, dOwn, dTimerR, ntGone, ntThere, ntHiccup, ntR }));
+  const dDead = writeMarked ? devAnswer(writeMarked, DEADLINE) : null, dNever = writeMarked ? devAnswer(writeMarked, NEVER) : null, dDeadR = writeMarked4a94 ? devAnswer(writeMarked4a94, DEADLINE) : null;
+  console.log('    a paired machine: ' + JSON.stringify({ dTimer, dLost, dNotSent, dOwn, dTimerR, ntGone, ntThere, ntHiccup, ntR, dDead, dNever, dDeadR }));
+  ok(dDead === '503 write_unknown' && dNever === '503 write_never_started' && dDeadR === 'failed: fs deadline (write)'
+      && rfsSrc.includes("const bound = setTimeout(() => { ended = true; try { child.kill('SIGTERM'); } catch { } }, SSH_WRITE_MS);") && rfsSrc.includes("if (ended) return reject(Object.assign(new Error(`the write over ssh did not answer in ${SSH_WRITE_MS / 1000} s`), { writeUnknown: true }));"),
+    `r2411 THE MUST (A1 on the device road): the machine's OWN storage pool's deadline on a RUNNING write («${DEADLINE}») is UNKNOWN (${dDead}) — the page's unknown words and standing line, never «not saved»; its never-started form stays FAILED (${dNever} «not saved: it never started»); (3) an ssh write past the device road's 30 s ends UNKNOWN and releases its file; RED (4a94eb1a4's mark): the deadline read «${dDeadR}» — «not saved» over a write that may still land`, { dDead, dNever, dDeadR });
   ok(!!dTimer && dTimer.roads === 'device' && dTimer.out === 'unknown' && !!dLost && dLost.roads === 'device' && dLost.out === 'unknown' && !!dNotSent && dNotSent.roads === 'device+ssh' && dNotSent.out === 'answered'
       && !!dOwn && dOwn.roads === 'device' && dOwn.out === 'failed' && !!dTimerR && dTimerR.roads === 'device+ssh'
       && ntGone === true && ntThere === false && ntHiccup === false && ntR === true
@@ -1276,8 +1284,10 @@ console.log('①p r2006 / r2198 / r2221 / r2222 (the save\'s laws): A one write 
       const answer = () => done(a.endsWith('refuse') ? { ok: false, status: 503, json: async () => ({ error: 'still tried', code: 'storage_path_trying' }) }
         : a.endsWith('unknown') ? { ok: false, status: 503, json: async () => ({ error: 'the write to this machine did not answer — it may have been saved', code: 'write_unknown', params: { machine: 'this machine' } }) }
         : a.endsWith('unnamed') ? { ok: true, status: 200, json: async () => { throw new Error('the body could not be read'); } }
-        : a.endsWith('fail') ? { ok: false, status: 500, json: async () => ({ error: 'EIO: i/o error' }) } : named(content));
+        : a.endsWith('fail') ? { ok: false, status: 500, json: async () => ({ error: 'EIO: i/o error' }) }
+        : a.endsWith('proxy') ? { ok: false, status: 502, json: async () => { throw new Error('a proxy\'s page, not JSON'); } } : named(content));
       if (a === 'never') return;
+      if (a === 'rejected') return done(new TypeError('Failed to fetch'), true);   // the hub restarted / the link dropped mid-request
       if (a.startsWith('hold')) gates.push(answer); else answer();
     });
     return { q, writes, write, release: () => { const g = gates.shift(); if (g) g(); }, overlap: () => overlap };
@@ -1296,6 +1306,9 @@ console.log('①p r2006 / r2198 / r2221 / r2222 (the save\'s laws): A one write 
   const ceEnded = async (body) => { const w = edWorld(body); w.h.q.push('never'); const p = w.press(); await tick(); fire(w.timers, 45000); const o = await stuck(p); const words1 = w.words(), mark1 = w.ed.modified; await stuck(w.press()); return { o, words1, mark1, writes: w.h.writes.length, words2: w.words() }; };
   const ceUnknown = async (body) => { const w = edWorld(body); w.h.q.push('unknown'); const out = await w.press(); return { out, words: w.words(), modified: w.ed.modified, color: w.ed.saveIndicator.style.color, standing: w.ed._unknownLine.style.display, unknown: !!w.ed._saveUnknown }; };
   const ceLanded = async (body) => { const w = edWorld(body); await w.press(); return { words: w.words(), modified: w.ed.modified }; };
+  const ceAnswer = async (body, kind) => { const w = edWorld(body); w.h.q.push(kind); await w.press(); return { words: w.words(), modified: w.ed.modified, standing: w.ed._unknownLine.style.display }; };
+  const TRANSIT = ".catch((e) => { throw Object.assign(e && typeof e === 'object' ? e : new Error(String(e)), { noReply: true }); })";
+  const FOREIGN = "      if (!res.ok && !(data && typeof data.error === 'string')) throw Object.assign(new Error('no reply'), { noReply: true });   // r2411 (2): a reply that is not the hub's own (a proxy's page) is no reply\n";
   const LAW1 = (saveBody || '').split('\n').find((l) => l.startsWith('    if (this._saveOut) {')) || '';
   const NAMED = '      if (!namesText(data, content)) throw Object.assign(new Error(\'no reply\'), { noReply: true });';
   const OTHER = "      if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));";
@@ -1315,6 +1328,15 @@ console.log('①p r2006 / r2198 / r2221 / r2222 (the save\'s laws): A one write 
       && !!cRT && cRT.modified === true && cRT.words === '✕ notes.md is not saved — ' + ANOTHER && !!cRTR && cRTR.modified === false
       && !!cEA && cEA.out === false && cEA.words === NOREPLY && cEA.color === 'var(--yellow)' && cEA.modified === true && cEA.standing === '' && cEA.unknown && !!cEAR && /^✕ notes\.md is not saved — /.test(cEAR.words) && !!cLA && cLA.words === '✓ Saved' && cLA.modified === false,
     `LAWS 1–3 (the code editor, lifted): a press while its save is out sends nothing — «${c2 && c2.during}»; a refusal keeps the mark over a word typed meanwhile; the hub's UNKNOWN is said as unknown («${cEA && cEA.words}», its own colour, the mark kept) with the standing line (A3); a reply naming its text is «${cLA && cLA.words}»; REDs: law 1's line cut (two writes out); 929f015a5's captured-box test (the mark cleared over typing); the UNKNOWN line cut («not saved» over a save that may have landed)`, { c2, c2R, cRT, cRTR, cEA, cEAR, cLA });
+  const [cTr, cPx, cOwn, cTrR, cPxR] = await Promise.all([saveBody ? ceAnswer(saveBody, 'rejected') : null, saveBody ? ceAnswer(saveBody, 'proxy') : null, saveBody ? ceAnswer(saveBody, 'fail') : null,
+    cut(saveBody, TRANSIT, '') ? ceAnswer(cut(saveBody, TRANSIT, ''), 'rejected') : null,   // stale-pins: kept (RED: a request that died in transit said «not saved»)
+    cut(saveBody, FOREIGN, '') ? ceAnswer(cut(saveBody, FOREIGN, ''), 'proxy') : null]);   // stale-pins: kept (RED: a proxy's page said «not saved — HTTP 502»)
+  console.log('    the page\'s no-reply class: ' + JSON.stringify({ cTr, cPx, cOwn, cTrR, cPxR }));
+  ok(!!cTr && cTr.words === NOREPLY && cTr.standing === '' && cTr.modified && !!cPx && cPx.words === NOREPLY && cPx.standing === '' && !!cOwn && cOwn.words === '✕ notes.md is not saved — EIO: i/o error' && cOwn.standing === 'none'
+      && !!cTrR && cTrR.words === '✕ notes.md is not saved — Failed to fetch' && !!cPxR && cPxR.words === '✕ notes.md is not saved — HTTP 502'
+      && ee.includes("signal: ctl.signal })" + TRANSIT + ";   // B-23e5") && ee.includes("if (!res.ok && !(data && typeof data.error === 'string')) throw Object.assign(new Error('no reply'), { noReply: true });   // r2411 (2): a reply that is not the hub's own is no reply")
+      && rd('src/lib/doc-window-ui.js').includes("signal: ctl.signal }).catch(() => { throw Object.assign(new Error('no reply'), { name: 'AbortError' }); });   // r2411 (2): died in transit = no reply"),
+    `r2411 (2), A1 at the PAGE (lifted): a save whose request died in transit («${cTr && cTr.words}») or met a page that is not the hub's own (a proxy's 502) is NO REPLY — the unknown words and the standing line, on the code editor, the pane and the document window; CONTROL: the hub's own refusal still says «${cOwn && cOwn.words}»; REDs (each line cut): «not saved — Failed to fetch», «not saved — HTTP 502»`, { cTr, cPx, cOwn, cTrR, cPxR });
   ok(!!cUN && cUN.words === NOREPLY && cUN.modified === true && cUN.toasts === 0 && cUN.standing === '' && !!cUNR && cUNR.words === '✓ Saved' && cUNR.modified === false
       && !!cEN && cEN.o === false && cEN.words1 === NOREPLY && cEN.mark1 === true && cEN.writes === 2 && cEN.words2 === '✓ Saved' && !!cENR && cENR.o === 'stuck' && cENR.writes === 1,
     `ITEM 6 + THE PAGE's LAST GUARD (lifted): a 2xx whose body names no text is no reply — «${cUN && cUN.words}», the mark kept; a request with no reply is ended at 45 s, said the same, and the next press is sent; REDs: the reply test cut (an unread body taken as «✓ Saved», the mark cleared); no end (presses dead behind it)`, { cUN, cUNR, cEN, cENR });
