@@ -456,10 +456,10 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     };
     const real = await turnsOf(REG, 'BJ');
     const HOP2 = 'const loopTurn = () => new Promise((r) => setImmediate(() => { queueReset(); setImmediate(r); }));', HOP1 = 'const loopTurn = () => new Promise((r) => setImmediate(r));';
-    const Y1 = "  const out = [], pace = pacer();\n  await pace.turn();\n", Y2 = "      const pace = pacer();\n      await pace.turn();\n";
+    const Y1 = "  try {\n    await pace.turn();\n    for (let i = 0; i < recs.length; i++) {\n", Y2 = "      const pace = pacer();\n      await pace.turn();\n";   // r1384: the hook's first turn now sits inside the read's try (its pacer ended in a finally)
     const MH = M.load('src/server/artifact-registry.js', anchored(RSRC, HOP2, HOP1, 'B-360d one hop'), 'b360d-onehop');
     const hop = MH ? await turnsOf(MH, 'BJh') : null;
-    const MJ = M.load('src/server/artifact-registry.js', anchored(anchored(RSRC, Y1, "  const out = [], pace = pacer();\n", 'B-360d the hook\'s yield'), Y2, "      const pace = pacer();\n", 'B-360d the rows\' yield'), 'b360d-noyield');
+    const MJ = M.load('src/server/artifact-registry.js', anchored(anchored(RSRC, Y1, "  try {\n    for (let i = 0; i < recs.length; i++) {\n", 'B-360d the hook\'s yield'), Y2, "      const pace = pacer();\n", 'B-360d the rows\' yield'), 'b360d-noyield');
     const ctl = MJ ? await turnsOf(MJ, 'BJm') : null;
     REG.configure({ activeSessions: () => new Map(), log: quiet });   // the copies' configure pointed the seams at themselves — the real one again
     ok(real.read != null && real.firstHook - real.read >= 2 && real.firstApply - real.lastHook >= 1 && real.rows === 40,
@@ -561,6 +561,30 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     const fg3c = MPW ? await fgOf(MPW, 3) : null;
     ok(fg3.firstTen >= 50 && fg3.maxTotal <= 23, 'B-360d: THREE walks beside the twenty folds share ONE foreground share — ≥ 50 walk units in their first ten iterations, and no iteration over one budget (≤ 20 ms + one unit of each)', fg3);
     ok(!!fg3c && fg3c.maxTotal >= 30, 'RED — a share per walk: three walks hold ≥ 30 ms of one iteration beside the background — the leg above goes red there', fg3c);
+  }
+  // (l2) r1384 (1) — THE PREFETCH's READS RIDE THE PERSON's SHARE: a history open awaits them (inside its 2 s bound), so once a helper's
+  // read is in, its slices run as FOREGROUND — the person's share is live while they run (never a crawl behind two live folds);
+  // RED: the reads in the background's share (the tip before this small)
+  {
+    const readShareOf = async (reg, aid) => {
+      reg.configure({ activeSessions: () => new Map(), log: quiet });
+      helper(aid, 'toolu_' + aid, 'Prefetch ' + aid, { mb: 0.2, writes: [{ atMb: 0.1, file: CWD + '/pf/' + aid + '.md' }] });
+      const s = mk('PF' + aid), realRead = C.readJsonlBoundedParsedPagedAsync, seen = [];
+      let after = false, on = true;
+      C.readJsonlBoundedParsedPagedAsync = function (...x) { return realRead.apply(this, x).then((v) => { after = true; return v; }); };
+      const spin = () => { if (!on) return; if (after) seen.push(reg._helperShareForTest().fgLive); setImmediate(spin); };
+      let r = null;
+      try { setImmediate(spin); r = await reg.helperPrefetch(s, [agentUse('toolu_' + aid, 'Prefetch ' + aid, 140), ends('toolu_' + aid, aid, 141)]); if (r && r.done) await r.done; }
+      finally { on = false; C.readJsonlBoundedParsedPagedAsync = realRead; }
+      return { read: !!(r && r.ops && r.ops.size === 1), fgSeen: seen.some((x) => x > 0), samples: seen.length };
+    };
+    const rs = await readShareOf(REG, 'pf1');
+    const READ_FG = "  const out = [], pace = pacer({ foreground: !!(fg && fg.on) });";
+    const MBG = M.load('src/server/artifact-registry.js', anchored(RSRC, READ_FG, '  const out = [], pace = pacer();', 'r1384 the reads in the background share'), 'r1384-read-bg');   // the control writes the reads' old pacer back on purpose — stale-pins: kept
+    const rsc = MBG ? await readShareOf(MBG, 'pf2') : null;
+    REG.configure({ activeSessions: () => new Map(), log: quiet });
+    ok(rs.read && rs.fgSeen && rs.samples > 0, 'r1384 (1): the rebuild\'s prefetch READS a helper and its slices take the PERSON\'s share (the foreground share is live while they run)', rs);
+    ok(!!rsc && rsc.read && !rsc.fgSeen, 'CONTROL the reads in the background\'s share (the tip before): no foreground share while they run — the leg above can tell', rsc);
   }
   // (m) THE ROWS' ORDER AND THE LAST ROW = the unpaced fold's (the round: counted, never compared) — 600 writes past the 500-row cap,
   // every row's fields but its instants; CONTROL a copy that tags each chunk backwards ⇒ the order differs (the compare can fail)

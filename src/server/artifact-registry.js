@@ -170,7 +170,11 @@ function turnBegins() { if (_turnOpen) return; _turnOpen = true; _turnT0 = _help
 // history open awaits it, outside the prefetch's 2 s bound) is FOREGROUND: the walks share FG_TURN_MS of EVERY iteration (ONE share,
 // however many walks: its reset is the background's), never behind the background folds; while a walk is alive — or one ran in this
 // iteration — the background folds share the rest of HELPER_TURN_MS, so an iteration's total stays one budget (its read's must: a share
-// per walk gave three walks 30 ms beside the background's 10)
+// per walk gave three walks 30 ms beside the background's 10). SAID (r1384 (2) + (3)): in the rare order where a walk's last slice runs
+// ahead of a reset still pending in that check phase, the reset clears the walk's mark and the background takes its whole budget on
+// top in that ONE iteration (about 30 ms, under the law; the next iteration is one budget again); and of three or more background
+// folds, two take the iterations in turn and a third waits at zero until one of them ends (a long pair delays a third
+// conversation's Artifacts list by their length — the price of no forced unit)
 const FG_TURN_MS = 10;
 let _fgLive = 0, _fgT0 = 0, _fgOpen = false;
 function fgBegins() { if (_fgOpen) return; _fgOpen = true; _fgT0 = _helperClock(); queueReset(); }
@@ -215,7 +219,7 @@ function pacer({ foreground = false } = {}) {
         if (!due()) return;   // an iteration whose share another stretch already spent: no unit here — wait again
       }
     },
-    end: () => { },
+    end: () => { },   // r1384 (4): kept on purpose — a reader ends its pacer whichever kind it took (helperFileRead); a background one holds no share to give back
   };
 }
 function harnessHooks(session) {
@@ -230,8 +234,10 @@ function helperFilesOf(session, record, state) {
   if (!h) return [];
   try { return h.helperTranscriptsOf(record, { sessionId: session.claudeSessionId || session.backendSessionId || null, cwd: session.cwd || '', runs: state.runs }) || []; } catch { return []; }
 }
-/** ONE helper transcript → its ops [{o, cwd}] (the hook's own ops of each record, untagged), read off the loop; null = not read. */
-async function helperFileOps(of, file) {
+/** ONE helper transcript → its ops [{o, cwd}] (the hook's own ops of each record, untagged), read off the loop; null = not read.
+ *  `fg` (r1384 (1)): {on} — while on, the read's slices take the person's FOREGROUND share (the rebuild's prefetch: a history open
+ *  awaits it inside its bound); the prefetch turns it off when its bound is over (the rest is read in the background's share) */
+async function helperFileOps(of, file, fg = null) {
   const keptOf = async () => {
     let st = null;
     try { st = await require('fs').promises.stat(file); } catch { return { st: null, ops: [] }; } // gone: nothing to fold (the release's reader read nothing either)
@@ -241,9 +247,9 @@ async function helperFileOps(of, file) {
   };
   const first = await keptOf();
   if (first.ops) return first.ops;
-  return oneHelperRead(async () => { const k = await keptOf(); return k.ops || helperFileRead(of, file, k.st); }); // asked again in its turn: a read ahead of it may have kept it
+  return oneHelperRead(async () => { const k = await keptOf(); return k.ops || helperFileRead(of, file, k.st, fg); }); // asked again in its turn: a read ahead of it may have kept it
 }
-async function helperFileRead(of, file, st) {
+async function helperFileRead(of, file, st, fg = null) {
   let why = null;
   const recs = await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, slot: 'helper', note: false, onFail: (w) => { why = w; } });   // row B-422c: its refusals carry no history weight (a page past its deadline on a big healthy file never marks the person's history «not loaded»)
   if (!recs) {
@@ -256,15 +262,17 @@ async function helperFileRead(of, file, st) {
   // in THIS iteration — the hook's slices start on the next one (a turn hops twice: see loopTurn), so no iteration holds a page's
   // receive AND a full slice (one dense 34 MB
   // helper held the loop 71 ms in one turn; a workflow of 10 × 8.5 MB 62 ms)
-  const out = [], pace = pacer();
-  await pace.turn();
-  for (let i = 0; i < recs.length; i++) {
-    if (pace.due()) await pace.turn();
-    const rec = recs[i];
-    let ops = [];
-    try { ops = of(rec) || []; } catch { ops = []; }
-    for (const o of ops) out.push({ o, cwd: rec && rec.cwd });
-  }
+  const out = [], pace = pacer({ foreground: !!(fg && fg.on) });   // r1384 (1): a read a person's open awaits rides the person's share
+  try {
+    await pace.turn();
+    for (let i = 0; i < recs.length; i++) {
+      if (pace.due()) await pace.turn();
+      const rec = recs[i];
+      let ops = [];
+      try { ops = of(rec) || []; } catch { ops = []; }
+      for (const o of ops) out.push({ o, cwd: rec && rec.cwd });
+    }
+  } finally { pace.end(); }
   const old = _helperOps.get(file);
   if (old) { _helperOps.delete(file); _helperOpsN -= old.ops.length; }
   _helperOps.set(file, { size: st.size, mtimeMs: st.mtimeMs, ops: out }); _helperOpsN += out.length;
@@ -345,10 +353,13 @@ async function helperPrefetch(session, records) {
   } finally { pace.end(); }
   const names = [...ops.keys()], got = new Map();
   if (!names.length) return { files, ops: got, left: 0, done: Promise.resolve() };
-  const done = (async () => { for (const file of names) got.set(file, await helperFileOps(h.artifactsOf, file)); })().catch(() => { });
+  // r1384 (1): the reads a history open awaits take the person's share too (never a crawl behind two live folds); once the open's
+  // bound is over nobody waits on them: the rest is read in the background's share
+  const fg = { on: true };
+  const done = (async () => { for (const file of names) got.set(file, await helperFileOps(h.artifactsOf, file, fg)); })().catch(() => { });
   let timer = null;
   const late = await Promise.race([done.then(() => false), new Promise((r) => { timer = setTimeout(() => r(true), HELPER_PREFETCH_MS); })]);
-  clearTimeout(timer);
+  clearTimeout(timer); fg.on = false;
   const now = late ? new Map(got) : got, left = names.length - now.size;
   if (left) {
     _helperStats.left += left;
@@ -645,5 +656,5 @@ function hostNamesOf(ids) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, helperOps, helperPrefetch, helperSettled, helperReadStats, _setHelperPrefetchMsForTest, _setHelperClockForTest, _pacerForTest: pacer, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, helperOps, helperPrefetch, helperSettled, helperReadStats, _setHelperPrefetchMsForTest, _setHelperClockForTest, _pacerForTest: pacer, _helperShareForTest: () => ({ fgLive: _fgLive, fgOpen: _fgOpen, bgBudget: bgBudget() }), handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
 module.exports = api;
