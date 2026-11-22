@@ -149,13 +149,26 @@ const UNMOUNT_MS = 10000;
 // children: ended 0 = 'ok', another end = 'no', not on PATH = 'missing'; killed at its bound, NO ANSWER from the starter or never
 // started = 'hung' (no verdict: nothing is mounted over a folder still held). A child that may still run keeps the mount point
 // STUCK while it lives — released at its late end, or once its end is asked and it is gone (`held`: the caller's witness —
-// machine-mounts' heldChild, /proc by its pid or the kernel by signal 0 —; without one, its late end alone)
+// machine-mounts' heldChild, /proc by its pid or the kernel by signal 0 —; without one, its own life by its pid and start: lifeOf)
 const unmountStuck = new Map();   // mount point → the stuck child's witness ({ gone() })
+/** its follow (主开发 r1782 (3)): a stuck child's witness when its caller gives none — its own life, as machine-mounts' heldChild reads
+ *  it (that file requires this one: a twin, said in the kb): /proc by its pid and its start (ended, a zombie, or that pid now another
+ *  process's ⇒ gone), the kernel by signal 0 with no /proc or when /proc says nothing for it — never «hung» until a restart (its late
+ *  end may never come once the starter faulted). A child no pid was named for (a stand-in's) keeps its late end alone */
+const lifeOf = (pid) => {
+  if (!pid) return { pid: 0, gone: () => false };
+  const kernel = () => { try { process.kill(pid, 0); return false; } catch { return true; } };   // signal 0: a syscall, no child started
+  if (!PI.hasProc()) return { pid, gone: kernel };
+  const st0 = PI.statOf(pid);
+  if (st0 === null || (st0 && st0[0] === 'Z')) return { pid, gone: () => true };
+  const start = st0 ? st0[1] : null;
+  return { pid, gone() { const st = PI.statOf(pid); if (st === undefined) return kernel(); return st === null || (!!st && (st[0] === 'Z' || (start != null && st[1] !== start))); } };
+};
 const stuckAt = (mp) => { const h = unmountStuck.get(mp); if (h && h.gone()) { unmountStuck.delete(mp); return false; } return !!h; };
 function lazyUnmount(mountpoint, { say = null, ms = UNMOUNT_MS, held = null } = {}) {
   if (stuckAt(mountpoint)) return Promise.resolve('hung');
   const S = require('./server/child-starter').childStarter(), envAdd = { PATH: process.env.PATH || '' };
-  const keep = (pid) => { const h = (typeof held === 'function' && pid ? held(pid) : null) || { pid, gone: () => false }; unmountStuck.set(mountpoint, h); return h; };
+  const keep = (pid) => { const h = (typeof held === 'function' && pid ? held(pid) : null) || lifeOf(pid); unmountStuck.set(mountpoint, h); return h; };
   const ask = (cmd) => {
     let h = null;
     return S.run(cmd, ['-uz', mountpoint], { timeoutMs: ms, envAdd, onTimeout: (pid) => { h = keep(pid); }, onLateExit: () => { if (h && unmountStuck.get(mountpoint) === h) unmountStuck.delete(mountpoint); } })

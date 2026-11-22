@@ -39,6 +39,10 @@ const notOurs = (e) => !!e && ['ENOENT', 'ESRCH', 'EACCES', 'EPERM'].includes(e.
 const READ_MS = 2000;   // B-e783: one /proc read that has not answered — the walk gives up («can't tell») and never asks that process again
 const CANT_TELL_GAP_MS = 30 * 60e3;   // r9: a «can't tell» entry this old is an episode long over — the next one waits again
 const DAEMON_ASK_MS = 15000;   // B-323e (主开发 r1299): the detached start's answer (its spawn) is awaited this long; past it: no verdict, no start said
+const LSTART_MON = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+/** its follow: `ps -o lstart` («Sat Nov 21 18:22:11 2026», local time) → ms, NaN when it is not that shape (never a guess) */
+const lstartMs = (s) => { const f = String(s || '').trim().split(/\s+/), t = f.length === 5 ? f[3].split(':').map(Number) : []; return f.length === 5 && f[1] in LSTART_MON && t.length === 3 ? new Date(Number(f[4]), LSTART_MON[f[1]], Number(f[2]), t[0], t[1], t[2]).getTime() : NaN; };
+const unasked = (st) => !!st && !!st.unknown && (st.why === 'no starter' || st.why === 'the starter could not be started');   // its follow: a starter that never ran asked nothing
 const CANT_TELL_MS = 60000;   // B-e783 r8: a connect waits at most this long on «can't tell» (a sleeper it cannot read may be ANY rclone: a pull mount's, another instance's) — then it connects, said
 const hasProcMemo = new Map();   // no /proc (a hub on macOS): «can't tell» — the walks' callers keep their old answer; asked once per root
 const hasProc = (opts) => { const k = (opts && opts.procRoot) || ''; if (!hasProcMemo.has(k)) hasProcMemo.set(k, PI.hasProc(opts)); return hasProcMemo.get(k); };
@@ -1233,12 +1237,16 @@ class MountManager {
     // mountpoint — it used to answer false, which the client called a failure).
     this._connecting = this._connecting || new Set();
     this._joins = this._joins || new Map();
-    if (this._connecting.has(id)) return this._joins.get(id) || false;
-    this._connecting.add(id);
+    if (this._connecting.has(id)) {
+      const j = this._joins.get(id), w = this._word?.get(id) || 0;
+      if (j && (this._connWord?.get(id) || 0) !== w) return j.catch(() => { }).then(() => ((this._word?.get(id) || 0) !== w || !this._state.mounts.some((x) => x.id === id) ? false : this.mount(id)));   // its follow: an Unmount since that connect began — this Connect is the last word: once that one ends, a connect anew, unless a later Unmount or a removal came
+      return j || false;
+    }
+    this._connecting.add(id); (this._connWord || (this._connWord = new Map())).set(id, this._word?.get(id) || 0);   // its follow: the person's word this connect began under
     this._notify(); // every client shows "Connecting…" for the whole window
     const p = (async () => {
       try { return await this._mountInner(id); }
-      finally { this._connecting.delete(id); this._joins.delete(id); this._notify(); }
+      finally { this._connecting.delete(id); this._joins.delete(id); this._connWord?.delete(id); this._notify(); }
     })();
     this._joins.set(id, p);
     return p;
@@ -1265,7 +1273,9 @@ class MountManager {
       m.desired = 'mounted'; this._save();   // re-authorize's bounce unmounted first, so the sweep's backoff must ask again
       const ct = (this._cantTell && this._cantTell.get(this.pathOf(m))) || {};
       console.warn(`[mounts] mount ${id}: «can't tell» — process ${(ct.pids || []).join(', ') || '(a read that stalled)'} did not answer; waiting, at most ${Math.round(CANT_TELL_MS / 1000)} s from the first`);   // the pids here, never in the row's words (the backoff's auth test reads digits)
-      this._errors.set(id, 'could not tell whether this storage’s previous connection still runs (a process did not answer) — it is tried again by itself');
+      const lostAt = hasProc(this._procOpts) ? undefined : this._lostStart?.get(this.pathOf(m));   // its follow (r1782 (4)): the hold after a lost reply says so, and what is left of it
+      const leftMin = lostAt == null ? 0 : Math.max(1, Math.ceil(((this._startingT || MountManager.STARTING).ceilingMs - (Date.now() - lostAt)) / 60e3));
+      this._errors.set(id, lostAt != null ? this._sayW(id, 'start_lost_wait', { min: String(leftMin) }) : 'could not tell whether this storage’s previous connection still runs (a process did not answer) — it is tried again by itself');
       this._notify(); return false;
     }
     if (pid0) { m.desired = 'mounted'; this._save(); return this._watchStart(m, this.pathOf(m), pid0, opts); }
@@ -1361,16 +1371,29 @@ class MountManager {
     // next start on its mount point as «can't tell» does (bounded, CANT_TELL_MS), the rest as before (a connect starts one)
     const log = this._openMountLog(m.id), logPath = this._mountLogFile(m.id);
     fs.closeSync(log);
+    const askAt = Date.now();   // its follow: with no /proc a daemon is proven ours by a start not before this ask
     const st = await require('./server/child-starter').childStarter().run(this.rcloneBin(), args, { detach: { log: logPath }, wholeEnv: true, env, timeoutMs: DAEMON_ASK_MS })
       .catch((e) => ({ started: false, error: String((e && e.message) || e) }));
+    // its follow (主开发 r1782 (1)): A PERSON's DISCONNECT DURING THE START — the starter's answer may take DAEMON_ASK_MS: the mount's own
+    // generation is read again; moved (an Unmount, a removal) ⇒ nothing is set wanted again, and a daemon that started meanwhile is
+    // ended by its recorded identity (the person's word stands)
+    if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) {
+      if (st && st.started && st.pid) this._endStartedDaemon(mp, st, askAt);
+      else if (st && st.unknown && !unasked(st)) {   // its read (MUST 1): a LOST answer may have started one — with /proc its walk ends it; with none the next start on that mount point waits for it
+        if (hasProc(this._procOpts)) await this._killMountDaemon(mp).catch(() => []);
+        else (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());
+      }
+      if (this._state.mounts.some((x) => x.id === id) && this.isMounted(m)) await Promise.resolve(this.unmount(id, { internal: true })).catch(() => { });   // its read (S2): it mounted before it was ended — the dead endpoint released, the person's word unchanged
+      return false;
+    }
     m.desired = 'mounted';
     if (!st || !st.started || !st.pid) {
       // NO REPLY IS NO VERDICT (law 5): «could not be started», never «died» — the person's words are today's for a start that never ran;
       // and A REPLY LOST IS NOT «NO START» (law 2): the next turn's own adoption look (the recorded identity, else the argv walk, above)
       // finds a daemon that lives before any new start — one daemon a mount point, whatever is lost
-      console.warn(`[mounts] mount ${id}: the rclone daemon could not be started: ${(st && (st.error || (st.unknown ? 'no answer from the starter' : ''))) || 'not started'}`);
-      if (st && st.unknown && st.why !== 'no starter') (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());   // an ask that may have started it: no /proc ⇒ the next look waits (_adoptable)
-      this._errors.set(id, this._sayW(id, st && st.unknown ? 'start_unanswered' : 'start_exited'));   // no reply: no verdict — never «exited»
+      console.warn(`[mounts] mount ${id}: the rclone daemon could not be started: ${(st && (st.error || (st.unknown ? (unasked(st) ? 'the starter could not be started' : 'no answer from the starter') : ''))) || 'not started'}`);
+      if (st && st.unknown && !unasked(st) && !hasProc(this._procOpts)) (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());   // an ask that may have started it: no /proc ⇒ the next look waits (_adoptable); with /proc its walk finds it
+      this._errors.set(id, this._sayW(id, st && st.unknown && !unasked(st) ? 'start_unanswered' : 'start_exited'));   // no reply: no verdict — never «exited»; no starter at all: nothing was asked (its follow: the could-not-be-started words)
       this._save(); this._notify();
       return false;
     }
@@ -1695,6 +1718,8 @@ class MountManager {
    *  is not connected") — isMounted() lies, so recovery must key off the
    *  PROCESS (same exact-argv /proc scan as _killMountDaemon). */
   _bumpGen(id) { (this._mountGen || (this._mountGen = new Map())).set(id, ((this._mountGen.get(id)) || 0) + 1); }
+  /** its follow: the person's Unmounts of a record, counted — moved by nothing else (a connect bumps its generation, never this) */
+  _bumpWord(id) { (this._word || (this._word = new Map())).set(id, ((this._word.get(id)) || 0) + 1); }
 
   /** Is a daemon serving this mount point? B-e783: «not found» means «dead» in this manager, so the walk's «can't tell» (a
    *  process it could not read, a read that did not answer) is never «dead» by itself: the sweep (`witness`) then asks the mount
@@ -1746,24 +1771,51 @@ class MountManager {
     if (st != null) this._record(mp, { pid, starttime: st });
   }
 
+  /** its follow (主开发 r1782 (1)): a daemon THIS connect started for a mount the person disconnected meanwhile — ended by the
+   *  identity its starter ANSWERED (the pid and the start time read at its spawn) and by nothing else: a record or an identity read
+   *  NOW may name a pid the person's Unmount already ended and the kernel gave to another process (its read's MUST 2). Ended already
+   *  (the Unmount's walk) or gone: nothing to do. NO /proc (its second read): no start time came back — the identity is read by `ps`
+   *  (the watch's own road there, a start from the hub: LEFT as before) and is ours only when that process started no earlier than
+   *  this ask (`askAt`); not provable ⇒ the next start on that mount point waits for it, said */
+  _endStartedDaemon(mp, st, askAt = 0) {
+    const o = this._procOpts || {}, popts = { ...(o.procRoot ? { procRoot: o.procRoot } : {}), ...(o.kill ? { kill: o.kill } : {}), ...(o.ps ? { ps: o.ps } : {}), what: 'the daemon of a storage mount point' };
+    const ident = { pid: Number(st.pid), starttime: st.starttime == null ? null : st.starttime }, key = ident.pid + ':' + ident.starttime;
+    if (this._killed && this._killed.has(key)) return true;
+    const proc = hasProc(this._procOpts);
+    let target = ident;
+    if (!proc) {   // no /proc: ONE ps read — its start proves it began around this ask (lstart = the boot time + its ticks: a clock stepped or
+      // slewed since the boot moves it by seconds — two minutes either way), and the signal's own judge reads THAT answer (a second ps
+      // may say another second: procps reads the boot time anew each call, and our own daemon would read «recycled», never ended)
+      const now = PI.identityOf(ident.pid, popts), at = now && now.lstart ? lstartMs(now.lstart) : NaN;
+      target = Number.isFinite(at) && Math.abs(at - askAt) <= 120000 ? now : null;
+      if (target && !o.ps) popts.ps = (p) => (Number(p) === ident.pid ? { ran: true, state: 'S', lstart: target.lstart } : { ran: true, state: null, lstart: null });
+    }
+    const r = target ? PI.signalIdentity(target, 'SIGKILL', popts) : { ok: false, why: 'unknown-identity' };
+    if (r.ok) { (this._killed || (this._killed = new Map())).set(key, Date.now()); const rec = this._daemonIds?.get(mp); if (rec && Number(rec.pid) === ident.pid) this._daemonIds.delete(mp); return true; }
+    if (r.why === 'gone' || r.why === 'pid-recycled') return true;   // ours ended (its pid another's now: never signalled)
+    if (!proc) (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());   // only where no walk can look (with /proc the next connect's walk finds it)
+    console.warn(`[mounts] the daemon started for a mount disconnected meanwhile was not ended (${r.why})${proc ? '' : ' — the next start on that mount point waits for it'}`);
+    return false;
+  }
+
   /** B-e783: the daemon a connect ADOPTS — its pid, 0 (none: spawn; no /proc: spawn, as the release), or null («can't tell»: a
    *  process the walk could not read, a read that stalled before it named one — neither adopt nor spawn, for CANT_TELL_MS at most:
    *  the sleeper may be any rclone, a pull mount's or another instance's, so the wait ends and the connect goes on, said). */
   async _adoptable(mp, id = '') {
     const ct = this._cantTell || (this._cantTell = new Map());
-    let pids;
+    let pids, noProc = false;
     try { const p = (await this._daemonPids(mp, { strict: true }))[0] || 0; ct.delete(mp); return p; }
     catch (e) {
       // B-323e (主开发 r1299, law 2 with NO /proc): a detached start whose ANSWER WAS LOST may live, and no walk can say so — the
       // connect waits on it as on «can't tell» (bounded; the mount table shows it if it mounts meanwhile), never a second daemon at once
-      if (e && e.code === 'no_proc') { if (!this._lostStart?.has(mp)) return 0; pids = ['(a start whose answer was lost)']; }
+      if (e && e.code === 'no_proc') { if (!this._lostStart?.has(mp)) return 0; noProc = true; pids = ['(a start whose answer was lost)']; }
       else pids = (e && e.unreadPids) || [];
     }
     const was = ct.get(mp), now = Date.now();   // r8: «can't tell» may be ANY rclone asleep (a pull mount's, another instance's) — bounded
     const since = was && now - was.at < CANT_TELL_GAP_MS ? was.since : now;   // r9: from the FIRST refusal of this episode
     ct.set(mp, { since, at: now, pids });
     const lost = this._lostStart?.get(mp);   // (no /proc) a lost start is held as long as a start may take — its ceiling — never «can't tell»'s 60 s
-    if (lost != null && now - lost < (this._startingT || MountManager.STARTING).ceilingMs) return null;
+    if (noProc && lost != null && now - lost < (this._startingT || MountManager.STARTING).ceilingMs) return null;   // its follow (r1782 (2)): only where no walk can look
     if (now - since < (this._cantTellMs ?? CANT_TELL_MS)) return null;
     ct.delete(mp); this._lostStart?.delete(mp);
     console.warn(`[mounts] mount ${id}: «can't tell» for ${Math.round((Date.now() - since) / 1000)} s (unread: ${pids.join(', ') || 'a read that stalled'}) — connecting`);   // the record id, never its name
@@ -2648,6 +2700,7 @@ class MountManager {
     if (!opts.internal) {
       m.desired = 'unmounted';
       this._reconnects?.delete(id);
+      this._bumpWord(id);   // its follow: the person's word — a Connect that joined a connect in flight reads it again before it connects anew
       if (m.parked) this._unpark(m, 'unmounted');   // B-5ce7: the person ended supervision — its For-you item resolves
       this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }   // …and a stopped-process notice with it (r1 #9: even one a hub before this one filed)
       this._save();

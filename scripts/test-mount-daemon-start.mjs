@@ -13,12 +13,17 @@
 //  ③ adopted by a FRESH manager (a restart): its own look finds it by the argv walk
 //  ④ LAW 2: a reply LOST (the starter started it, no answer reached the hub): the next turn's look finds it — ONE daemon a mount point,
 //     never two — RED the look cut ⇒ a second daemon on the same mount point
-//  ④b LAW 2 with NO /proc: a lost reply holds the next start on that mount point as «can't tell» (bounded) — RED the lost start unmarked
+//  ④b LAW 2 with NO /proc: a lost reply holds the next start on that mount point as «can't tell» (bounded) — RED the lost start unmarked;
+//     its row says what it waits for and how long (start_lost_wait); ④c WITH /proc that hold is never taken (its follow, r1782 (2))
 //  ⑤ LAW 3: the env is the child's alone — the record's secret in the daemon's env; never in its argv, the starter's own env, a LATER
 //     child of the starter, nor this process's journal — RED a starter that keeps the request's env for later children
 //  ⑥ LAW 4: the log path is the hub's own — an id that would leave the mount logs folder is refused before any ask — RED the judge cut
 //  ⑦ LAW 5: a start that could not be made (no such program) or that got no answer reads «could not be started» — the person's words
-//     today's («rclone exited before mounting»), never «died», nothing watched
+//     today's («rclone exited before mounting»), never «died», nothing watched; a starter that never ran asked nothing (its words)
+//  ⑧ (its follow, r1782) a person's Disconnect while the start waits on its starter's answer: nothing wanted again, the daemon ended by
+//     the identity its starter answered — RED the generation not read again; ⑧b its answer lost; ⑧s it mounted meanwhile; ⑧c a Connect
+//     after that Disconnect; ⑧d a pid given away; ⑧e the last word a Disconnect; ⑧n no /proc — each RED; ⑨ the old road's detached start after two starter faults (its own
+//     session, its log, alive after the starter is let go) — RED its branch cut
 // Run: node scripts/test-mount-daemon-start.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -70,7 +75,7 @@ const MOUNTS = require(path.join(REPO, 'src/mounts.js'));
 const MC = mutantCopies('mount-daemon-start', REPO);
 const alive = (pid) => { const st = pid ? PI.statOf(pid) : null; return !!st && st[0] !== 'Z'; };
 const daemons = new Set(), daemonStarts = new Map();   // every daemon this suite started, with the start it had: ended at every exit
-const ownDaemon = (pid) => { if (!pid) return; const s0 = PI.starttimeOf(pid); if (s0 == null) return; daemons.add(pid); daemonStarts.set(pid, s0); };   // none read: gone already
+const ownDaemon = (pid, start) => { if (!pid) return; const s0 = start != null ? start : PI.starttimeOf(pid); if (s0 == null) return; daemons.add(pid); daemonStarts.set(pid, s0); };   // ours only with its start: the answered one, else read now (none: gone already)
 const sameStart = (pid) => daemonStarts.has(pid) && PI.starttimeOf(pid) === daemonStarts.get(pid);   // the pid this suite holds, still that process
 const endOwn = () => { for (const pid of daemons) { if (sameStart(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } } };
 process.on('exit', endOwn);   // its end, a throw that ends it
@@ -78,7 +83,8 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { end
 const recEnv = () => ({ ...serviceEnv(process.env), RCLONE_CONFIG_VS_TYPE: 's3', RCLONE_CONFIG_VS_SECRET_ACCESS_KEY: SEC });
 const held = [], con = { log: console.log, warn: console.warn };   // this process's journal while the legs run
 console.warn = (...a) => { held.push(a.map(String).join(' ')); con.warn(...a); };
-let S = CS.createChildStarter({ log: { warn: () => { } } }); CS.setChildStarter(S);
+const slog = [], capLog = { warn: (...a) => { slog.push(a.map(String).join(' ')); } };   // the starters' own journal (its follow: read too)
+let S = CS.createChildStarter({ log: capLog }); CS.setChildStarter(S);
 const mmOf = (M, tag, rec) => {
   const D = path.join(T, 'data-' + tag); fs.mkdirSync(D, { recursive: true });
   const mm = new M.MountManager({ dataDir: D });
@@ -95,18 +101,20 @@ try {
   console.log('① the daemon\'s start: no program from the hub\'s main process; its log');
   const R1 = { id: 'mds-a', name: 'mds a', type: 'sftp', desired: 'mounted' };
   const mm1 = mmOf(MOUNTS, 'a', R1), mp1 = mm1.pathOf(R1);
-  const s0 = mainStarts.length;
-  await mm1.mount(R1.id);
+  const s0 = mainStarts.length; let ans1 = null;
+  CS.setChildStarter({ stats: () => S.stats(), run: (c, a, o) => S.run(c, a, o).then((r) => { if (o && o.detach) ans1 = r; return r; }) });   // its read (NIT 1): the answer itself
+  try { await mm1.mount(R1.id); } finally { CS.setChildStarter(S); }
   const d1 = (mm1._daemonIds && mm1._daemonIds.get(mp1) || {}).pid || (mm1._starting && (mm1._starting.get(R1.id) || {}).pid) || 0;
-  if (d1) ownDaemon(d1);
+  if (d1) ownDaemon(d1, PI.starttimeOf(d1));
+  const seeded1 = (mm1._daemonIds && mm1._daemonIds.get(mp1)) || {};
   const fromMain = mainStarts.slice(s0);
   await until(() => fs.existsSync(path.join(T, 'data-a', 'mount-logs', 'mds-a.log')) && /standin daemon up/.test(fs.readFileSync(path.join(T, 'data-a', 'mount-logs', 'mds-a.log'), 'utf8')));
   const log1 = fs.readFileSync(path.join(T, 'data-a', 'mount-logs', 'mds-a.log'), 'utf8');
-  ok(d1 > 0 && alive(d1) && fromMain.length === 0 && log1.indexOf(MOUNTS.MountManager.LOG_MARK) >= 0 && log1.indexOf(MOUNTS.MountManager.LOG_MARK) < log1.indexOf('standin daemon up'),
-    `① the daemon (pid ${d1}) started with NO program from the hub's main process (${fromMain.length}: ${fromMain.join(', ')}); its log holds the hub's marker, then the daemon's own lines`, { d1, fromMain, log: log1.slice(0, 200) });
+  ok(d1 > 0 && alive(d1) && fromMain.length === 0 && log1.indexOf(MOUNTS.MountManager.LOG_MARK) >= 0 && log1.indexOf(MOUNTS.MountManager.LOG_MARK) < log1.indexOf('standin daemon up') && seeded1.starttime != null && seeded1.starttime === PI.starttimeOf(d1) && !!ans1 && ans1.starttime === PI.starttimeOf(d1),
+    `① the daemon (pid ${d1}) started with NO program from the hub's main process (${fromMain.length}: ${fromMain.join(', ')}); its log holds the hub's marker, then the daemon's own lines; the start time its starter handed back is the process table's (${ans1 && ans1.starttime} = ${PI.starttimeOf(d1)}, recorded ${seeded1.starttime})`, { d1, fromMain, log: log1.slice(0, 200) });
 
   console.log('② law 1: it outlives its starter');
-  const startVia = async (st, tag) => { const mp = path.join(T, 'mp-' + tag); const logP = path.join(T, 'log-' + tag + '.log'); const r = await st.run('rclone', ['mount', 'VS:', mp, '--vfs-cache-mode', 'full'], { detach: { log: logP }, wholeEnv: true, env: recEnv(), timeoutMs: 10000 }); if (r && r.pid) ownDaemon(r.pid); return r; };
+  const startVia = async (st, tag) => { const mp = path.join(T, 'mp-' + tag); const logP = path.join(T, 'log-' + tag + '.log'); const r = await st.run('rclone', ['mount', 'VS:', mp, '--vfs-cache-mode', 'full'], { detach: { log: logP }, wholeEnv: true, env: recEnv(), timeoutMs: 10000 }); if (r && r.pid) ownDaemon(r.pid, r.starttime); return r; };
   const outlive = async (script, tag, how) => {
     const st = CS.createChildStarter({ ...(script ? { script } : {}), log: { warn: () => { } } });
     const r = await startVia(st, tag); const sp = st._proc(); const spid = sp && sp.pid;
@@ -131,9 +139,9 @@ try {
   const lostReply = async (M, tag) => {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R), mp = mm.pathOf(R); let asks = 0, lost = true;
-    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return r; }); } };
+    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); return r; }); } };
     CS.setChildStarter(W);
-    try { const first = await mm.mount(R.id); const second = await mm.mount(R.id); await sleep(150); return { first, second, asks, live: await walkCount(mm, mp) }; } finally { CS.setChildStarter(S); }
+    try { const first = await mm.mount(R.id); const second = await mm.mount(R.id); let live = 0; for (let k = 0; k < 80; k++) { live = await walkCount(mm, mp); if (live >= asks) break; await sleep(50); } return { first, second, asks, live }; } finally { CS.setChildStarter(S); }   // its follow: a wait on the count (a loaded box)
   };
   const lr = await lostReply(MOUNTS, 'lost');
   const MSRC = read('src/mounts.js');
@@ -148,17 +156,34 @@ try {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R); mm._procOpts = { procRoot: path.join(T, 'no-proc-' + tag) }; mm._cantTellMs = 50;   // a /proc root that is not there; «can't tell»'s own bound tiny
     let asks = 0, lost = true;
-    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return r; }); } };
+    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); return r; }); } };
     CS.setChildStarter(W);
-    try { const first = await mm.mount(R.id); const second = await mm.mount(R.id); await sleep(150); const third = await mm.mount(R.id); await sleep(150); return { first, second, third, asks, waiting: !!(mm._cantTell && mm._cantTell.has(mm.pathOf(R))) }; } finally { CS.setChildStarter(S); }   // the third connect: past «can't tell»'s own bound (its clock starts at the second)
+    try { const first = await mm.mount(R.id); const second = await mm.mount(R.id); await sleep(150); const third = await mm.mount(R.id); await sleep(150); return { first, second, third, asks, waiting: !!(mm._cantTell && mm._cantTell.has(mm.pathOf(R))), words: String(mm._errors.get(R.id) || '') }; } finally { CS.setChildStarter(S); }   // the third connect: past «can't tell»'s own bound (its clock starts at the second)
   };
   const ln = await lostNoProc(MOUNTS, 'lost-np');
-  const NOMARK = MC.load('src/mounts.js', anchored(MSRC, "      if (st && st.unknown && st.why !== 'no starter') (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());", '      if (false) (this._lostStart = new Map());', 'B-323e the lost start unmarked'), 'no-mark');
+  const NOMARK = MC.load('src/mounts.js', anchored(MSRC, "      if (st && st.unknown && !unasked(st) && !hasProc(this._procOpts)) (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());", '      if (false) (this._lostStart = new Map());', 'B-323e the lost start unmarked'), 'no-mark');
   const lnR = await lostNoProc(NOMARK, 'lost-np-red');
-  const NOCEIL = MC.load('src/mounts.js', anchored(MSRC, '    if (lost != null && now - lost < (this._startingT || MountManager.STARTING).ceilingMs) return null;\n', '', 'B-323e the lost start held by «can\'t tell»\'s bound'), 'no-ceil');
+  const NOCEIL = MC.load('src/mounts.js', anchored(MSRC, '    if (noProc && lost != null && now - lost < (this._startingT || MountManager.STARTING).ceilingMs) return null;', '', 'B-323e the lost start held by «can\'t tell»\'s bound'), 'no-ceil');
   const lnC = await lostNoProc(NOCEIL, 'lost-np-ceil');
-  ok(ln.first === false && ln.second === false && ln.third === false && ln.asks === 1 && ln.waiting && lnR.asks === 2 && lnC.asks === 2,
+  const LOSTW = require(path.join(REPO, 'src/mount-error-words.js')).wordsFor('start_lost_wait', { min: '20' });
+  ok(ln.first === false && ln.second === false && ln.third === false && ln.asks === 1 && ln.waiting && ln.words === LOSTW && lnR.asks === 2 && lnC.asks === 2,
     `④b LAW 2 with NO /proc: the start's reply LOST, no walk to look — the next connect WAITS on it as on «can't tell» (${ln.asks} start; waiting: ${ln.waiting}), held for as long as a START may take (its ceiling), past «can't tell»'s own bound — RED the lost start unmarked: ${lnR.asks} starts on one mount point at once; RED held by «can't tell»'s bound: ${lnC.asks} starts once it passed (the lost daemon may still be scanning)`, { ln, lnR, lnC });
+
+  // ④c its follow (主开发 r1782 (2)): THE HOLD ONLY WHERE NO WALK CAN LOOK — on a hub WITH /proc a lost start then a «can't tell»
+  // episode on that mount point waits «can't tell»'s own bound, never the start's ceiling — RED the hold on every road (the unit's form)
+  const lostWithProc = async (M, tag) => {
+    const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
+    const mm = mmOf(M, tag, R), mp = mm.pathOf(R); mm._cantTellMs = 50;   // «can't tell»'s own bound tiny
+    (mm._lostStart = new Map()).set(mp, Date.now());   // a start whose reply was lost, just now
+    mm._daemonPids = async () => { throw Object.assign(new Error('a process could not be read'), { code: 'walk_unknown', partial: [], unreadPids: [process.pid] }); };   // the walk can look, and cannot tell
+    const first = await mm._adoptable(mp, R.id); await sleep(80); const later = await mm._adoptable(mp, R.id);   // past «can't tell»'s bound
+    return { first, later };
+  };
+  const lw = await lostWithProc(MOUNTS, 'lost-wp');
+  const EVERYROAD = MC.load('src/mounts.js', anchored(MSRC, '    if (noProc && lost != null && now - lost <', '    if (lost != null && now - lost <', 'B-323e the lost start held where a walk can look'), 'every-road');   // stale-pins: kept (a red control plants the old road back)
+  const lwR = await lostWithProc(EVERYROAD, 'lost-wp-red');
+  ok(lw.first === null && lw.later === 0 && lwR.first === null && lwR.later === null,
+    `④c the lost start's hold only where no walk can look: on a hub WITH /proc a «can't tell» after a lost start waits its own bound, then connects (${lw.first} → ${lw.later}) — RED the hold on every road: still held past it (${lwR.later})`, { lw, lwR });
 
   console.log('⑤ law 3: the env is the child\'s alone');
   const environ = (pid) => { try { return fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); } catch { return null; } };
@@ -166,12 +191,12 @@ try {
   const laterOf = async (st) => { const r = await st.run('env', [], { timeoutMs: 10000, capture: true }); return String((r && r.stdout) || ''); };
   const s5 = S._proc() && S._proc().pid;
   const later = await laterOf(S);
-  const env5 = { daemon: (environ(d1) || '').includes(SEC), argv: (cmdline(d1) || '').includes(SEC), starter: (environ(s5) || '').includes(SEC), later: later.includes(SEC), journal: held.some((l) => l.includes(SEC)) };
+  const env5 = { daemon: (environ(d1) || '').includes(SEC), argv: (cmdline(d1) || '').includes(SEC), starter: (environ(s5) || '').includes(SEC), later: later.includes(SEC), journal: held.some((l) => l.includes(SEC)) || slog.some((l) => l.includes(SEC)) };
   const KEEP = MC.write('src/server/child-starter-proc.js', anchored(PSRC, "  m.env = null;   // the request keeps no sign-in material once its child's env is built\n", "  m.env = null; Object.assign(process.env, env);\n", 'B-323e a starter that keeps the request env'), 'keep-env');
-  const SK = CS.createChildStarter({ script: KEEP, log: { warn: () => { } } });
+  const SK = CS.createChildStarter({ script: KEEP, log: capLog });
   await startVia(SK, 'keep'); const laterR = await laterOf(SK); SK.closePipe();
   ok(environ(d1) !== null && env5.daemon && !env5.argv && !env5.starter && !env5.later && !env5.journal && laterR.includes(SEC),
-    `⑤ LAW 3: the record's sign-in material is in the daemon's env (${env5.daemon}) and nowhere else — not its argv, not the starter's own env, not a LATER child of the starter, not this process's journal — RED a starter that keeps the request's env: its later child has it (${laterR.includes(SEC)})`, env5);
+    `⑤ LAW 3: the record's sign-in material is in the daemon's env (${env5.daemon}) and nowhere else — not its argv, not the starter's exec-time env (its /proc environ — what it was started with; its env in memory is the LATER child's check and its red), not a LATER child of the starter, not this process's journal nor the starters' own — RED a starter that keeps the request's env: its later child has it (${laterR.includes(SEC)})`, env5);
 
   console.log('⑥ law 4: the log path is the hub\'s own');
   const judged = (mm, id) => { try { return mm._mountLogFile(id); } catch (e) { return (e && e.code) || String(e); } };
@@ -192,15 +217,125 @@ try {
     return { r, words: mm._errors.get(R.id) || '', watched: !!(mm._starting && mm._starting.has(R.id)), couldNot: /could not be started/.test(said), died: /\bdied\b/.test(said) };
   };
   const NOANS = { stats: () => S.stats(), run: (cmd, args, o) => (o && o.detach ? Promise.resolve({ unknown: true, why: 'no answer' }) : S.run(cmd, args, o)) };
+  const NOSTARTER = { stats: () => S.stats(), run: (cmd, args, o) => (o && o.detach ? Promise.resolve({ unknown: true, why: 'no starter' }) : S.run(cmd, args, o)) };
+  const NOSPAWN = { stats: () => S.stats(), run: (cmd, args, o) => (o && o.detach ? Promise.resolve({ unknown: true, why: 'the starter could not be started' }) : S.run(cmd, args, o)) };   // its read (NIT 3): its own start failed
   const nb = await noStart('nobin', null, MOUNTS, { nobin: true }), na = await noStart('noanswer', NOANS);
   const UNANS = require(path.join(REPO, 'src/mount-error-words.js')).wordsFor('start_unanswered');
   // RED the no answer read as «exited» (this unit's first form); RED the failure branch cut (the release's road: a watch over no pid)
-  const EXITED = MC.load('src/mounts.js', anchored(MSRC, "this._sayW(id, st && st.unknown ? 'start_unanswered' : 'start_exited')", "this._sayW(id, 'start_exited')", 'B-323e no answer read as exited'), 'no-answer-exited');
+  const EXITED = MC.load('src/mounts.js', anchored(MSRC, "this._sayW(id, st && st.unknown && !unasked(st) ? 'start_unanswered' : 'start_exited')", "this._sayW(id, 'start_exited')", 'B-323e no answer read as exited'), 'no-answer-exited');
   const NOBRANCH = MC.load('src/mounts.js', anchored(MSRC, '    if (!st || !st.started || !st.pid) {\n', '    if (false) {\n', 'B-323e the no-start branch cut'), 'no-branch');
   const naR = await noStart('noanswer-red', NOANS, EXITED), nbR = await noStart('nobin-red', null, NOBRANCH, { nobin: true });
+  const nst = await noStart('nostarter', NOSTARTER), nsp = await noStart('nospawn', NOSPAWN);
+  const NSW = MC.load('src/mounts.js', anchored(MSRC, "st && st.unknown && !unasked(st) ? 'start_unanswered'", "st && st.unknown ? 'start_unanswered'", 'B-323e no starter read as no answer'), 'no-starter-words');   // stale-pins: kept (a red control plants the old road back)
+  const nstR = await noStart('nostarter-red', NOSTARTER, NSW);
   const quiet = (x) => x.r === false && !x.watched && x.couldNot && !x.died;
-  ok(quiet(nb) && quiet(na) && nb.words === 'rclone exited before mounting' && na.words === UNANS && naR.words === 'rclone exited before mounting' && !quiet(nbR),
+  ok(quiet(nb) && quiet(na) && nb.words === 'rclone exited before mounting' && na.words === UNANS && naR.words === 'rclone exited before mounting' && !quiet(nbR) && quiet(nst) && nst.words === 'rclone exited before mounting' && quiet(nsp) && nsp.words === 'rclone exited before mounting' && nstR.words === UNANS,
     `⑦ LAW 5: a start that could not be made (no such program) and one with NO ANSWER read «could not be started» in the journal, never «died», nothing watched; the person's words: no such program «${nb.words}» (the release's), no answer «${na.words}» (no verdict) — RED the no answer read as «exited» («${naR.words}»); RED the no-start branch cut: the release's road, a watch over no pid (${JSON.stringify({ r: nbR.r, watched: nbR.watched, died: nbR.died })})`, { nb, na, naR, nbR });
+  console.log('⑧ a person\'s Disconnect during the start (its follow, 主开发 r1782 (1), with its read\'s cures)');
+  // the starter's answer HELD (a placed stall) while the daemon already runs; the person's Disconnect comes meanwhile: nothing is set
+  // wanted again and that daemon is ended by the identity its starter answered — RED the generation not read again (wanted again,
+  // alive). ⑧b its answer LOST (it started; no answer reached the hub): with /proc its walk ends it, with none the next start on that
+  // mount point waits for it — RED the lost answer not read there. ⑧s it MOUNTED before it was ended: the dead endpoint is released
+  // (an internal unmount, the person's word unchanged) — RED that release cut. ⑧c a Connect AFTER that Disconnect (it joins the
+  // connect in flight) is the person's last word: a connect anew — RED the join read as before
+  const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false } = {}) => {
+    const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
+    const mm = mmOf(M, tag, R), mp = mm.pathOf(R); let release; const gate = new Promise((r) => { release = r; });
+    const started = [], after = []; let released = false, mountedNow = false;
+    if (noProc) mm._procOpts = { procRoot: path.join(T, 'no-proc-' + tag) };
+    if (mounted) mm.isMounted = () => mountedNow;
+    mm._adoptable = async () => 0;   // ⑧ reads the re-check after the answer, never the adoption look (each look walks /proc: seconds on a loaded box)
+    mm._ensureMountpointDir = async () => null; mm._rcloneFlagsHelp = '--vfs-cache-mode --rc-addr'; mm._countCacheFiles = async () => ({ n: 0, capped: false });   // …nor the connect's side children (the mount point's helper, the help probes, the cache count: each a start on a loaded box)
+    mm._startingT = { ...mm._startingT, quickMs: 50 };   // a fresh connect's quick look (⑧c), short
+    const W = { stats: () => S.stats(), run: (cmd, args, o) => {
+      if (released) after.push(path.basename(String(cmd)));
+      const p = S.run(cmd, args, o); if (!(o && o.detach)) return p;
+      return p.then(async (r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); started.push(r); if (started.length === 1) { await gate; if (lost) return { unknown: true, why: 'its reply lost' }; } return r; });
+    } };
+    CS.setChildStarter(W);
+    try {
+      const conn = mm.mount(R.id);
+      await until(() => started.length >= 1, 5000);   // the daemon runs; its starter's answer not yet heard
+      if (mounted) mountedNow = true;                 // …and it mounted meanwhile
+      await mm.unmount(R.id);                         // the person's Disconnect, meanwhile
+      const conn2 = again ? mm.mount(R.id) : null;    // …then the person's Connect again: it joins the connect in flight
+      if (twice) await mm.unmount(R.id);              // …and a Disconnect again: the last word
+      released = true; release(); const r = await conn; const r2 = conn2 ? await conn2 : null;
+      const d0 = started[0] && started[0].pid;
+      if (M === MOUNTS) await until(() => !(d0 && alive(d0)), 2000);   // its end waited on; a red's daemon lives (nothing ends it): read at once
+      const rec = mm._state.mounts.find((x) => x.id === R.id) || {};
+      return { r, r2, desired: rec.desired, alive: !!(d0 && alive(d0)), starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
+        lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length };
+    } finally { release(); CS.setChildStarter(S); }
+  };
+  const dd = await discDuring(MOUNTS, 'disc-during');
+  const NORECHECK = MC.load('src/mounts.js', anchored(MSRC, "    if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) {\n      if (st && st.started && st.pid) this._endStartedDaemon(mp, st, askAt);\n", "    if (false) {\n      if (st && st.started && st.pid) this._endStartedDaemon(mp, st, askAt);\n", 'B-323e the generation not read again after the start'), 'no-recheck');
+  const ddR = await discDuring(NORECHECK, 'disc-during-red');
+  ok(dd.r === false && dd.desired === 'unmounted' && !dd.alive && ddR.desired === 'mounted' && ddR.alive,
+    `⑧ a person's Disconnect while the start waits on its starter's answer: the connect ends with nothing wanted again (${dd.desired}) and the daemon that started meanwhile is ended (${!dd.alive}) — RED the generation not read again: wanted again (${ddR.desired}), the daemon left running (${ddR.alive})`, { dd, ddR });
+  const dl = await discDuring(MOUNTS, 'disc-lost', { lost: true }), dlN = await discDuring(MOUNTS, 'disc-lost-np', { lost: true, noProc: true });
+  const NOLOSTEND = MC.load('src/mounts.js', anchored(MSRC, '      else if (st && st.unknown && !unasked(st)) {', '      else if (false) {', 'B-323e a lost answer not read after a Disconnect'), 'no-lost-end');
+  const dlR = await discDuring(NOLOSTEND, 'disc-lost-red', { lost: true }), dlNR = await discDuring(NOLOSTEND, 'disc-lost-np-red', { lost: true, noProc: true });
+  ok(dl.r === false && dl.desired === 'unmounted' && !dl.alive && dlN.desired === 'unmounted' && dlN.lostMark && dlR.alive && !dlNR.lostMark,
+    `⑧b its answer LOST, the person's Disconnect meanwhile: with /proc its walk ends the daemon (${!dl.alive}); with none the next start on that mount point waits for it (${dlN.lostMark}) — RED the lost answer not read there: the daemon left running (${dlR.alive}), nothing held (${!dlNR.lostMark})`, { dl, dlN, dlR, dlNR });
+  const dm = await discDuring(MOUNTS, 'disc-mounted', { mounted: true });
+  const NORELEASE = MC.load('src/mounts.js', anchored(MSRC, '      if (this._state.mounts.some((x) => x.id === id) && this.isMounted(m)) await Promise.resolve(this.unmount(id, { internal: true })).catch(() => { });', '', 'B-323e the dead endpoint left'), 'no-release');
+  const dmR = await discDuring(NORELEASE, 'disc-mounted-red', { mounted: true });
+  ok(dm.r === false && !dm.alive && dm.desired === 'unmounted' && dm.unmountAsked >= 1 && dmR.unmountAsked === 0,
+    `⑧s it MOUNTED before it was ended: its dead endpoint released by an internal unmount (${dm.unmountAsked} asked), the person's word unchanged (${dm.desired}) — RED that release cut: ${dmR.unmountAsked}`, { dm, dmR });
+  const dc = await discDuring(MOUNTS, 'disc-again', { again: true });
+  const NOAGAIN = MC.load('src/mounts.js', anchored(MSRC, "      if (j && (this._connWord?.get(id) || 0) !== w) return j.catch(() => { }).then(() => ((this._word?.get(id) || 0) !== w || !this._state.mounts.some((x) => x.id === id) ? false : this.mount(id)));", '      if (false) return j;', 'B-323e a Connect after the Disconnect read as a join'), 'no-again');   // stale-pins: kept (a red control plants the old road back)
+  const dcR = await discDuring(NOAGAIN, 'disc-again-red', { again: true });
+  ok(dc.r === false && dc.desired === 'mounted' && dc.starts === 2 && !dc.alive && dc.second && dcR.r2 === false && dcR.desired === 'unmounted' && dcR.starts === 1,
+    `⑧c Connect → Disconnect → Connect during one start: the last word stands — the first start ended (${!dc.alive}), a connect anew (${dc.starts} starts, the second alive: ${dc.second}, wanted: ${dc.desired}) — RED the join read as before: ${dcR.r2}, ${dcR.desired}, ${dcR.starts} start`, { dc, dcR });
+  // ⑧e its second read (MUST): Connect → Disconnect → Connect → Disconnect during one start — the LAST word stands: no connect anew —
+  // RED the person's word not read again before the connect anew (a Disconnect overridden)
+  const de = await discDuring(MOUNTS, 'disc-twice', { again: true, twice: true });
+  const NOWORD = MC.load('src/mounts.js', anchored(MSRC, "((this._word?.get(id) || 0) !== w || !this._state.mounts.some((x) => x.id === id) ? false : this.mount(id))", '(this.mount(id))', 'B-323e the later Disconnect not read'), 'no-word');
+  const deR = await discDuring(NOWORD, 'disc-twice-red', { again: true, twice: true });
+  ok(de.r2 === false && de.desired === 'unmounted' && de.starts === 1 && !de.alive && deR.desired === 'mounted' && deR.starts === 2,
+    `⑧e Connect → Disconnect → Connect → Disconnect during one start: the last word stands — no connect anew (${de.starts} start, ${de.desired}) — RED the later Disconnect not read: ${deR.starts} starts, ${deR.desired}`, { de, deR });
+  // ⑧n its second read (SHOULD): with NO /proc the answered daemon is ended by its ps identity, proven ours by a start no earlier than
+  // the ask — RED that proof cut (never ended; the next start held for it)
+  const dn = await discDuring(MOUNTS, 'disc-np', { noProc: true });
+  const NOPS = MC.load('src/mounts.js', anchored(MSRC, 'target = Number.isFinite(at) && Math.abs(at - askAt) <= 120000 ? now : null;', 'target = null;', 'B-323e no /proc: no end by ps'), 'no-ps');
+  const dnR = await discDuring(NOPS, 'disc-np-red', { noProc: true });
+  ok(dn.r === false && dn.desired === 'unmounted' && !dn.alive && !dn.lostMark && dnR.alive && dnR.lostMark,
+    `⑧n with NO /proc the daemon started for a mount disconnected meanwhile is ended by its ps identity (${!dn.alive}), nothing held (${!dn.lostMark}) — RED that proof cut: left running (${dnR.alive}), the next start held for it (${dnR.lostMark})`, { dn, dnR });
+  // ⑧d its read (MUST 2): ended by the ANSWERED identity alone — the person's Unmount ended it first (its walk's mark) and the kernel gave
+  // its pid away (a stranger, this suite's own sleeper): never signalled — RED the record, else the identity read NOW (the stranger killed)
+  const stranger = CP.spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((r) => stranger.once('spawn', r));
+  const wasStart = PI.starttimeOf(stranger.pid) - 1;   // the ended daemon's start: not the stranger's
+  const endOver = (M, tag) => { const mmS = mmOf(M, tag, null); (mmS._killed = new Map()).set(stranger.pid + ':' + wasStart, Date.now()); return mmS._endStartedDaemon(path.join(T, 'mp-' + tag), { started: true, pid: stranger.pid, starttime: wasStart }); };
+  const e1 = endOver(MOUNTS, 'stranger'), eLives = alive(stranger.pid);
+  const OLDEND = MC.load('src/mounts.js', anchored(MSRC, "    const ident = { pid: Number(st.pid), starttime: st.starttime == null ? null : st.starttime }, key = ident.pid + ':' + ident.starttime;\n    if (this._killed && this._killed.has(key)) return true;\n",
+    "    this._seedDaemonId(mp, st.pid, st.starttime);\n    const ident = (this._daemonIds && this._daemonIds.get(mp)) || PI.identityOf(st.pid, popts), key = ident ? ident.pid + ':' + ident.starttime : '';\n", 'B-323e the identity read now'), 'old-end');   // stale-pins: kept (a red control plants the old road back)
+  endOver(OLDEND, 'stranger-red'); await until(() => !alive(stranger.pid), 1000); const eLivesR = alive(stranger.pid);
+  try { stranger.kill('SIGKILL'); } catch { }
+  ok(e1 === true && eLives && !eLivesR, `⑧d the daemon the person's Unmount already ended, its pid now another process's: never signalled (that process lives: ${eLives}) — RED the identity read now: it is killed (${!eLivesR})`, { e1, eLives, eLivesR });
+
+  console.log('⑨ the old road\'s detached start (after two starter faults)');
+  // the starter faulted twice (a starter that cannot run): the old road starts the daemon the same way — its own session, its log,
+  // answered at its spawn, alive after the starter is let go — RED the old road's detached branch cut (a child of this process, held)
+  const sidOf = (pid) => { try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(s.slice(s.lastIndexOf(')') + 2).split(' ')[3]); } catch { return null; } };
+  const oldRoad = async (CSM, tag) => {
+    const k0 = slog.length; const FS = path.join(T, 'fault-starter-' + tag + '.js'); fs.writeFileSync(FS, 'process.exit(3);\n');   // a starter that ends at once: each ask is its fault
+    const SO = CSM.createChildStarter({ script: FS, log: capLog });
+    for (let k = 0; k < 2; k++) await SO.run(process.execPath, ['-e', '0'], { timeoutMs: 3000 }).catch(() => null);   // two faults: the old road
+    const mpO = path.join(T, 'mp-old-' + tag), logO = path.join(T, 'log-old-' + tag + '.log'); fs.mkdirSync(mpO, { recursive: true }); fs.writeFileSync(logO, '');
+    const r = await SO.run('rclone', ['mount', 'VS:', mpO, '--vfs-cache-mode', 'off'], { detach: { log: logO }, wholeEnv: true, env: recEnv(), timeoutMs: 300 }).catch(() => null);
+    if (r && r.pid) ownDaemon(r.pid, r.starttime);
+    try { SO.closePipe(); } catch { }
+    await sleep(50);
+    return { started: !!(r && r.started), detached: !!(r && r.detached), own: !!(r && r.pid) && sidOf(r.pid) !== null && sidOf(r.pid) !== sidOf(process.pid), lives: !!(r && r.pid && alive(r.pid)), direct: SO.stats().direct === true, said: slog.slice(k0).some((l) => /the starter failed twice/.test(l)) };
+  };
+  const od = await oldRoad(CS, 'old');
+  const CSRC = read('src/server/child-starter.js');
+  const NODETACH = MC.load('src/server/child-starter.js', anchored(CSRC, '    if (o.detach) return new Promise((resolve) => {   // B-323e: the detached start, as the starter makes it (its own session, the log, the answer at its spawn)\n', '    if (false) return new Promise((resolve) => {\n', 'B-323e the old road\'s detached branch cut'), 'no-detach-old');
+  const odR = await oldRoad(NODETACH, 'old-red');
+  ok(od.direct && od.said && od.started && od.detached && od.own && od.lives && !(odR.detached && odR.own && odR.lives),
+    `⑨ after two starter faults the OLD ROAD starts the daemon detached: answered at its spawn (${od.started}), its own session (${od.own}), alive once the starter is let go (${od.lives}) — RED the old road's detached branch cut: ${JSON.stringify(odR)}`, { od, odR });
+
 } finally {
   endOwn();   // this suite's own daemons, by the pid and start it holds
   // …and by their program: any process running THIS suite's own stand-in (its temp folder's rclone link) — a start no leg recorded

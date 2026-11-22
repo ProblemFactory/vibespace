@@ -2898,6 +2898,7 @@ export default {
   "still not mounted after {min} min of starting — stopped it; will retry": "启动 {min} 分钟后仍未挂载——已停止它；将重试",
   "rclone exited before mounting": "rclone 在挂载前退出了",
   "Could not tell whether the storage’s connection started — VibeSpace got no answer; it is tried again by itself": "无法确定存储的连接是否已启动——VibeSpace 没有得到回应；会自动重试",   // B-323e (lane bl-machines-b)
+  "Waiting for an earlier start of this storage that may still run — up to {min} min, then it connects again by itself": "正在等待这个存储之前的一次启动（它可能仍在运行）——最多 {min} 分钟，之后会自动重新连接",   // B-323e (lane bl-machines-b)
   "connected but access denied — this share credential has expired": "已连接但访问被拒绝——这个共享凭据已过期",
   "connected but access denied — the share may have been revoked or its credentials changed": "已连接但访问被拒绝——该共享可能已被撤销或其凭据已更改",
   "connected but the sign-in has expired or been revoked — listings come from cache while every file read fails; re-authorize to fix": "已连接但登录已过期或被撤销——目录列表来自缓存，而每次读取文件都会失败；请重新授权来修复",

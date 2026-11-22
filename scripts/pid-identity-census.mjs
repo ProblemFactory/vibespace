@@ -71,6 +71,7 @@ export const ROWS = [
   ['src/desktop-serve.js', "if (leaderPid) { try { process.kill(-leaderPid, 'SIGTERM')", 'starttime', 'partIsOurs|leaderPid = ', 'the proven leader\'s group', 24],
   ['src/desktop-serve.js', "if (leaderPid) { try { process.kill(-leaderPid, 'SIGKILL')", 'starttime', 'partIsOurs|leaderPid = ', 'the proven leader\'s group', 28],
   ['src/device-mount.js', "process.kill(-rc.pid, 'SIGKILL')", 'handle', '-rc.pid', 'its own rclone'],
+  ['src/device-mount.js', 'const kernel = () => { try { process.kill(pid, 0); return false; }', 'probe', 'B-323e its follow (主开发 r1782 (3)): lifeOf, a stuck unmount child\'s witness when its caller gives none, with no /proc or for a pid /proc says nothing of — a recycled pid reads ALIVE, which keeps that mount point «hung» for that process\'s life', 'nothing'],
   ['src/device-mount.js', "process.kill(rc.pid, 'SIGTERM')", 'handle', 'rc.pid', 'its own rclone'],
   ['src/harnesses/claude.js', 'kill -TERM "$1" 2>/dev/null && echo "SWEPT:$1"', 'scan', 'vs_is_cli "\\$1"', 'a transcript writer (fd scan + vs_is_cli, same pass)', 3],
   ['src/harnesses/claude.js', 'kill -0 "$pid" 2>/dev/null || continue', 'probe', 'lock liveness in the sweep', 'nothing'],
