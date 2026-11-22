@@ -88,6 +88,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When VibeSpace runs as a Background Work job and restarts by itself, its conversations are no longer stopped with the job.
 - When VibeSpace runs as a Background Work service, a second copy of it is no longer started beside the running one when the job's helper process is killed.
 - A Background Work job running VibeSpace itself now says on its card why it was not restarted and that its memory bound ends VibeSpace with its conversations.
+- On slow storage, a save in a channel's Grant access… or Notify… dialog now applies at once instead of «Saving…» for seconds; a restart right after keeps it.
 
 ## 2.369.415 — 2026-11-21
 
