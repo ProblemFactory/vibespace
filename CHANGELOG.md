@@ -128,6 +128,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Pairing with a VibeSpace whose channels are paused now says so, and the same code still works once it reads again.
 - A VibeSpace started from another VibeSpace's terminal, with VibeSpace integration off, no longer gives its conversations the other VibeSpace's address.
 - An agent whose window read stops at the time limit on a busy machine is now told that, instead of being told the page was too large.
+- VibeSpace no longer pauses while it sets aside a full archive of refused usage readings, or saves the machine login's usage copy.
+- Usage estimates no longer pause VibeSpace every minute to reread each account's whole usage history file.
+- VibeSpace no longer pauses to reread the usage folder at each panel refresh; if the folder stops answering, the panel keeps its last readings and their age.
 
 ## 2.369.415 — 2026-11-21
 
