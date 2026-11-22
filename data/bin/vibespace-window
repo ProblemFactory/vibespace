@@ -369,7 +369,7 @@ function printNode(n) {
     if (r.head) console.log(r.head); // lane window-dialog-member: a dialog the app opened is named first
     for (const n of r.nodes) printNode(n);
     const c = r.census;
-    console.log(`— ${c.nodes} nodes in ${r.ms} ms${r.truncated ? ` (TRUNCATED at the ${r.budget}-node budget — --budget N up to 3000)` : ''}; interfaces: Action ${c.action}/${c.nodes}, EditableText ${c.editableText}/${c.nodes}, Text ${c.text}/${c.nodes}; buttons with Action ${c.buttonsWithAction}/${c.buttons}${r.unreadable.length ? `; ${r.unreadable.length} unreadable subtree(s)` : ''}`);
+    console.log(`— ${c.nodes} nodes in ${r.ms} ms${r.truncated ? ` (${r.truncatedSays || `TRUNCATED at the ${r.budget}-node budget — --budget N up to 3000`})` : ''}; interfaces: Action ${c.action}/${c.nodes}, EditableText ${c.editableText}/${c.nodes}, Text ${c.text}/${c.nodes}; buttons with Action ${c.buttonsWithAction}/${c.buttons}${r.unreadable.length ? `; ${r.unreadable.length} unreadable subtree(s)` : ''}`);
     if (r.unreadable.length) for (const u of r.unreadable.slice(0, 5)) console.log(`  unreadable: ${u.ref || '(root)'} — ${u.why}`);
     return;
   }

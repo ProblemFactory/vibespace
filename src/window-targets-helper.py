@@ -211,12 +211,15 @@ def walk(app, budget, max_depth, want_text, deadline, base_path=None):
               "byRole": {}, "actionNames": {}}
     queue = [(app, list(base_path or []), 0, None)]
     truncated = False
+    cut = set()   # fb-4d25432476: WHICH bound ended the walk — "budget" (the node budget) or "deadline" (the traversal deadline)
     while queue:
         if len(nodes) >= budget:
             truncated = True
+            cut.add("budget")
             break
         if time.time() > deadline:
             truncated = True
+            cut.add("deadline")
             unreadable.append({"path": None, "why": "traversal deadline"})
             break
         acc, path, depth, parent_ref = queue.pop(0)
@@ -275,13 +278,14 @@ def walk(app, budget, max_depth, want_text, deadline, base_path=None):
         for i in range(cnt):
             if len(queue) + len(nodes) >= budget:
                 truncated = True
+                cut.add("budget")
                 break
             ch = safe(lambda i=i: acc.get_child_at_index(i))
             if ch is None:
                 unreadable.append({"ref": ref, "path": path + [i], "why": "get_child_at_index failed"})
                 continue
             queue.append((ch, path + [i], depth + 1, ref))
-    return nodes, census, unreadable, truncated
+    return nodes, census, unreadable, truncated, cut
 
 
 def op_snapshot(req):
@@ -315,9 +319,10 @@ def op_snapshot(req):
             return {"ok": False, "code": "ref_stale", "why": "the node at that path is now %r %r, the ref named %r %r — take a new snapshot" % (rrole, rname, expect.get("role"), expect.get("name"))}
         mine = [{"pid": rpid, "name": next((a["name"] for a in apps if a["pid"] == rpid), ""), "acc": acc, "path": rpath}]
         root_view = {"pid": rpid, "path": rpath, "role": rrole, "name": rname[:NAME_CUT]}
-    all_nodes, unread, census, trunc = [], [], None, False
+    all_nodes, unread, census, trunc, cuts = [], [], None, False, set()
     for a in mine:
-        n, c, u, t = walk(a["acc"], budget - len(all_nodes), max_depth, want_text, deadline, a.get("path"))
+        n, c, u, t, k = walk(a["acc"], budget - len(all_nodes), max_depth, want_text, deadline, a.get("path"))
+        cuts |= k
         # re-number refs so they stay unique across applications
         base = len(all_nodes)
         remap = {}
@@ -346,12 +351,13 @@ def op_snapshot(req):
                 census["actionNames"][k] = census["actionNames"].get(k, 0) + v
         if len(all_nodes) >= budget:
             trunc = True
+            cuts.add("budget")
             break
     ms = round((time.time() - t0) * 1000, 1)
     if census is None:
         census = {"nodes": 0, "component": 0, "action": 0, "editableText": 0, "text": 0, "buttons": 0, "buttonsWithAction": 0, "byRole": {}, "actionNames": {}}
     return {"ok": True, "v": REPLY_VERSION, "apps": [{"pid": a["pid"], "name": a["name"]} for a in mine], "nodes": all_nodes, "root": root_view,
-            "census": census, "unreadable": unread, "truncated": trunc, "budget": budget, "callTimeoutMs": call_ms,
+            "census": census, "unreadable": unread, "truncated": trunc, "truncatedBy": sorted(cuts), "budget": budget, "wallMs": wall_ms, "callTimeoutMs": call_ms,
             "ms": ms, "nodesPerSec": round(len(all_nodes) / (ms / 1000.0), 0) if ms > 0 else None}
 
 

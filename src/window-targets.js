@@ -706,7 +706,20 @@ function nodeView(n) {
   return v;
 }
 
+/** PURE (fb-4d25432476): the summary's words for a snapshot cut short — it names the bound that cut it: the TRAVERSAL DEADLINE
+ *  (the helper's wall time; a busy machine answers slowly — read one part with --under) and/or the NODE BUDGET (--budget). A reply
+ *  that names no cause (an older helper) is the budget's, as its words always said; not truncated ⇒ null */
+function truncationSays(s) {
+  if (!s || !s.truncated) return null;
+  const by = Array.isArray(s.truncatedBy) && s.truncatedBy.length ? s.truncatedBy : ['budget'];
+  const parts = [];
+  if (by.includes('deadline')) parts.push(`at the traversal deadline (${Math.round((Number(s.wallMs) || TRAVERSAL_LIMITS.WALL_MS) / 1000)} s: the machine answered slowly — read one part at a time with --under @ref)`);
+  if (by.includes('budget')) parts.push(`at the ${s.budget}-node budget — --budget N up to ${TRAVERSAL_LIMITS.SNAPSHOT_MAX_BUDGET}`);
+  return 'TRUNCATED ' + parts.join('; and ');
+}
+
 module.exports = {
+  truncationSays, // fb-4d25432476: the summary names the bound that cut a snapshot
   treeEnvOf, a11yBusesOf, // lane app-display-a11y-bus
   HELPER_PATH, HELPER_FILE, TRAVERSAL_LIMITS, REFUSALS, refuse,
   // mirror red on 2.369.181: the failures that mean "no tree here" (an auto share folds them into mode_pixels)

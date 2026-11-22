@@ -699,7 +699,10 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
     '    def get_character_count(t): return len(t.d.get("text", ""))',
     '    @staticmethod',
     '    def get_text(t, a, b): return t.d.get("text", "")[a:b]',
-    'def get_desktop(i): return _Acc({"children": TREE["apps"]})',
+    'def get_desktop(i):',
+    '    import time',
+    '    time.sleep(float(os.environ.get("VS_FAKE_ATSPI_SLOW_S", "0")))   # fb-4d25432476: a busy machine — the walk meets its deadline',
+    '    return _Acc({"children": TREE["apps"]})',
   ].join('\n') + '\n');
   const SECRET = ['hun', 'ter', '2-', 'not-a-real-one'].join('');   // invented; built so no literal reads as a credential
   const LONG = 'https://example.test/report?id=1&' + 'é'.repeat(40000);   // 2 bytes a character past the prefix
@@ -715,7 +718,7 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
       { role: 'panel', name: LONGNAME, children: [{ role: 'label', name: 'inside' }] },
     ] }] }] };
   const treeFile = path.join(dir, 'tree.json'); fs.writeFileSync(treeFile, J(tree));
-  const runPy = (helperFile, req) => { const r = spawnSync('python3', ['-I', helperFile], { input: J(req), encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONPATH: giDir, VS_FAKE_ATSPI_TREE: treeFile } }); try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { ok: false, code: 'unparsed', why: (r.stdout || '') + (r.stderr || '') }; } };
+  const runPy = (helperFile, req0) => { const { _env = {}, ...req } = req0; const r = spawnSync('python3', ['-I', helperFile], { input: J(req), encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONPATH: giDir, VS_FAKE_ATSPI_TREE: treeFile, ..._env } }); try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { ok: false, code: 'unparsed', why: (r.stdout || '') + (r.stderr || '') }; } };
   // the -I flag drops PYTHONPATH, so the stand-in rides a copy of the helper beside a path insert (the helper itself unchanged)
   const asRun = (src, tag) => { const f = path.join(dir, `helper-${tag}.py`); fs.writeFileSync(f, `import sys\nsys.path.insert(0, ${J(giDir)})\n` + src); return f; };
   const HSRC = read('src/window-targets-helper.py');
@@ -736,6 +739,9 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
       longSub: { op: 'snapshot', pids: [4242], budget: 600, root: { pid: 4242, path: [0, 5], expect: { role: 'panel', name: cut } } },
       urTx: { op: 'act', pid: 4242, path: [0, 4], expect: { role: 'unknown', name: 'unreadable role' }, verb: 'text', maxBytes: 1000 },
       urRd: { op: 'act', pid: 4242, path: [0, 4], expect: { role: 'unknown', name: 'unreadable role' }, verb: 'read' },
+      // fb-4d25432476: a snapshot cut by the NODE BUDGET, and one cut by the TRAVERSAL DEADLINE (the machine slow past a 1 ms wall)
+      bud: { op: 'snapshot', pids: [4242], budget: 3 },
+      dl: { op: 'snapshot', pids: [4242], budget: 600, wallMs: 1, _env: { VS_FAKE_ATSPI_SLOW_S: '0.05' } },
     };
     const out = {};
     for (const k of only || Object.keys(asks)) out[k] = runPy(f, asks[k]);
@@ -759,6 +765,15 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
   ok(!!ur && ur.role === 'unknown' && ur.text === undefined, 'r2: a node whose role did not answer carries no text in the snapshot (it may be a hidden field: fail closed)', ur);
   ok(!P.urTx.ok && P.urTx.code === 'text_hidden' && P.urRd.ok && P.urRd.did.text === null && !J([P.urTx, P.urRd]).includes('hidden field could hold'), '…and the text verb refuses it text_hidden, the read verb answers no text (the act fails closed the same way)', { text: P.urTx.code || 'read', read: P.urRd.ok && P.urRd.did.text });
   // CONTROLS (RED), each a copy of the helper with ONE edit
+  // fb-4d25432476 (主开发 r2243): THE SUMMARY NAMES THE BOUND THAT CUT IT — the helper says which (`truncatedBy`), the ONE sentence
+  // (src/window-targets.js truncationSays) words it, the engine hands it on, the CLI prints it
+  ok(P.bud.ok && P.bud.truncated === true && J(P.bud.truncatedBy) === J(['budget']) && P.dl.ok && P.dl.truncated === true && J(P.dl.truncatedBy) === J(['deadline']) && P.dl.wallMs === 1 && (P.dl.unreadable || []).some((u) => u.why === 'traversal deadline') && P.whole.truncated === false && J(P.whole.truncatedBy) === '[]',
+    'fb-4d25432476: the helper says WHICH bound cut a snapshot — the node budget (3 nodes) or the traversal deadline (a busy machine past its wall), and nothing when nothing cut it', { bud: P.bud.truncatedBy, dl: P.dl.truncatedBy, whole: P.whole.truncatedBy });
+  { const WTm = require(path.join(REPO, 'src/window-targets.js')), says = (x) => WTm.truncationSays(x);
+    const dlS = says(P.dl), budS = says(P.bud), both = says({ truncated: true, truncatedBy: ['budget', 'deadline'], budget: 600, wallMs: 20000 }), old = says({ truncated: true, budget: 600 });
+    ok(/^TRUNCATED at the traversal deadline \(0 s: the machine answered slowly — read one part at a time with --under @ref\)$/.test(dlS) && !/budget/.test(dlS) && budS === 'TRUNCATED at the 3-node budget — --budget N up to 3000' && /traversal deadline \(20 s/.test(both) && /600-node budget/.test(both) && old === 'TRUNCATED at the 600-node budget — --budget N up to 3000' && says({ truncated: false }) === null
+      && read('src/server/window-targets-engine.js').split('truncatedSays: WT.truncationSays(s)').length === 2 && read('data/bin/vibespace-window').split('${r.truncatedSays || `TRUNCATED at the ${r.budget}-node budget').length === 2,
+      'fb-4d25432476: the summary says «TRUNCATED at the traversal deadline (N s: the machine answered slowly — read one part at a time with --under @ref)» when the deadline cut it and «at the N-node budget» when the budget did (both when both; an older helper\'s reply, naming no cause, keeps the budget\'s words); the engine hands the sentence on and the CLI prints it', { dlS, budS, both, old }); }
   const plantH = (from, to, tag, only) => { assert1(HSRC.includes(from), `B-4be3 helper control ${tag} planted`); return helperChecks(HSRC.replace(from, to), tag, only); };
   { const C = plantH('    queue = [(app, list(base_path or []), 0, None)]', '    queue = [(app, [], 0, None)]', 'relpath', ['sub']); ok(C.sub.ok && J(C.sub.nodes.map((n) => n.path)) !== '[[0,0],[0,0,0],[0,0,1],[0,0,2]]', 'CONTROL (paths relative to the subtree): an act would re-resolve the wrong node — the leg above can fail', C.sub.ok && C.sub.nodes.map((n) => n.path)); }   // stale-pins: kept (the control puts the old text back)
   { const C = plantH('            return b[:cap].decode("utf-8", "ignore"), True', '            return s, True', 'nobound', ['tx']); ok(C.tx.ok && Buffer.byteLength(C.tx.did.text) > 1000, 'CONTROL (the bound not applied): the whole value comes back past the asked bytes'); }
@@ -766,6 +781,7 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
   { const C = plantH('            if role_raw is None:\n                pass', '            if False:\n                pass', 'roleopen', ['whole']); const u2 = (C.whole.nodes || []).find((n) => n.name === 'unreadable role'); ok(!!u2 && u2.text === 'what a hidden field could hold', 'CONTROL (a role that did not answer read anyway): its text is handed out', u2); }
   { const C = plantH('    hidden = role_raw is None or text_hidden(role)', '    hidden = text_hidden(role)', 'actopen', ['urTx', 'urRd']); ok(C.urTx.ok && C.urRd.ok && C.urRd.did.text === 'what a hidden field could hold', 'CONTROL (the act reads a role that did not answer): the text and read verbs hand its text out', { text: C.urTx.ok ? 'read' : C.urTx.code }); }
   { const C = plantH('        if not same_node(expect, rrole, rname):', '        if False:', 'nostale', ['stale']); ok(C.stale.ok, 'CONTROL (no root check): a subtree whose node moved is read as if it were the one named — the ref_stale leg can fail', C.stale.ok ? 'read' : C.stale.code); }
+  { const C = plantH('            cut.add("deadline")\n', '            cut.add("budget")\n', 'deadline-as-budget', ['dl']); ok(C.dl.ok && C.dl.truncated === true && J(C.dl.truncatedBy) === J(['budget']), 'CONTROL (the deadline\'s cut said as the budget\'s, in a copy — the release\'s summary): a busy machine\'s snapshot is told it hit the node budget — the leg above is red on it', C.dl.truncatedBy); }
   { const C = plantH('HIDDEN_TEXT_ROLES = ("password text",)', 'HIDDEN_TEXT_ROLES = ()', 'nohide', ['whole', 'hid', 'rd']); ok(J(C.whole).includes(SECRET) && C.hid.ok && J(C.hid).includes(SECRET) && J(C.rd).includes(SECRET), 'CONTROL (no hidden-text rule — r1179\'s find): the snapshot, the text verb AND the read verb hand the password field\'s value out'); }
 }
 

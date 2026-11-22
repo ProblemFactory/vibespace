@@ -1310,7 +1310,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const subtree = root ? { of: root.ref, role: root.role, name: root.name, refs: s.nodes.length ? `${s.nodes[0].ref}–${s.nodes[s.nodes.length - 1].ref}` : null,
       note: `a subtree of ${root.ref} (${root.role}${root.name ? ' ' + JSON.stringify(root.name) : ''}): these refs REPLACE the last snapshot's — every older ref is gone (acting on one is refused ref_unknown; a ref is good only against the last snapshot you took); \`vibespace-window snapshot ${rec.id}\` reads the whole window again` } : null;
     return { handle: rec.id, label: rec.label, origin: rec.origin || ORIGIN, yourDesktop: rec.origin === 'desktop', apps: s.apps, nodes: dl.nodes.map(wt.nodeView), census: s.census, subtree,
-      dialog: dl.dialog ? { ref: dl.dialog.ref, role: dl.dialog.role, name: dl.dialog.name, field: dl.dialog.field } : null, head: WT.dialogHead(dl.dialog), unreadable: s.unreadable, truncated: s.truncated, budget: s.budget, callTimeoutMs: s.callTimeoutMs, ms: s.ms, nodesPerSec: s.nodesPerSec,
+      dialog: dl.dialog ? { ref: dl.dialog.ref, role: dl.dialog.role, name: dl.dialog.name, field: dl.dialog.field } : null, head: WT.dialogHead(dl.dialog), unreadable: s.unreadable, truncated: s.truncated, truncatedBy: Array.isArray(s.truncatedBy) ? s.truncatedBy : [], truncatedSays: WT.truncationSays(s), budget: s.budget, callTimeoutMs: s.callTimeoutMs, ms: s.ms, nodesPerSec: s.nodesPerSec,
       ...(rec.origin !== 'desktop' ? { mode: modeInfo(rec.id) } : {}),
       empty: s.nodes.length === 0 ? `no application of ${rec.label} is on the accessibility bus yet (pids ${pids.join(',')}) — it may still be starting, or its toolkit exports no tree` : null };
   }
