@@ -51,6 +51,7 @@ const REFUSALS = () => ({
   busy: t('a draft is already being made — wait for it'),
   'not-openrouter': t('the drafter needs an OpenRouter key on the Language model card'), 'no-key': t('the drafter needs an OpenRouter key on the Language model card'),
   'plugin-off': t('the LLM plugin is off'),
+  'reservation-unwritten': t('the draft was not sent: its spending line could not be written to the data folder — nothing was charged; try again once the storage writes'),   // B-0248's next part (r2417 law 2): no reservation on disk, no ask
   'learn-off': t('the drafter is switched off'),   // its door: the toast's «Turn on…» (mountLearnDraft openRow)
 });
 /** A refusal's words (the POST's `why`) — null for a why the card has no words for (a server error). */

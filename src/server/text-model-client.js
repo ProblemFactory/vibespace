@@ -90,9 +90,17 @@ function create({ integrations = null, ledger = null, fetchImpl = (...a) => glob
     const key = String(row.values.apiKey).trim();
     const estUsd = RL.learnCost(tier.key, est, outMax);
     // RESERVE — the verdict and the hold in ONE synchronous step (no await between them)
-    const v = M.budgetVerdict({ pluginOn: s.pluginOn, featureOn: true, keyPresent: !!key, now: now(), spentUsd: ledger.spentUsd(), estUsd, ceilingCents: s.dailyBudgetCents, useSpentUsd: ledger.useUsd(use), useCeilingCents: RL.USE_CAP_CENTS[use] });
+    // `mine` (B-0248): judged AGAIN once the hold's reservation landed — its own estimate is not counted against itself
+    const decide = (s1, mine) => { const v = M.budgetVerdict({ pluginOn: s1.pluginOn, featureOn: true, keyPresent: !!key, now: now(), spentUsd: ledger.spentUsd() - (mine ? estUsd : 0), estUsd, ceilingCents: s1.dailyBudgetCents, useSpentUsd: ledger.useUsd(use) - (mine ? estUsd : 0), useCeilingCents: RL.USE_CAP_CENTS[use] }); return v; };   // the ONE verdict (test-vendor-whitelist's money gate)
+    const v = decide(s, false);
     if (!v.ok) { ledger.journal({ use, model: tier.id, outcome: 'refused', why: v.why, zdr: true }); return { ok: false, why: v.why }; }
-    const hold = ledger.hold(use, estUsd);
+    const hold = ledger.hold(use, estUsd, { model: tier.id, est, zdr: true, keyFp: sha6(key) });
+    // B-0248 (r2417 laws 1–3): the hold's RESERVATION line is ON DISK before the request is built — or this completion is refused by
+    // name (the ledger gave the slot back); then the owner's gates again, as they stand now (a switch, a budget, the drafter's own)
+    { const landed = typeof ledger.landed === 'function' ? await ledger.landed(hold, use) : { ok: false, why: 'reservation-unwritten' };
+      if (!landed.ok) return { ok: false, why: landed.why };
+      const s2 = settings(), a2 = RL.availability({ integrationRow: credential(), pluginOn: s2.pluginOn, learnOn: s2.learnOn !== false }), v2 = a2.exists ? decide(s2, true) : { ok: false, why: a2.why };
+      if (!v2.ok) { await ledger.settle(hold, use, { inputTokens: 0, outputTokens: 0 }, 0, 0); ledger.journal({ use, hold, model: tier.id, outcome: 'released', why: v2.why, zdr: true }); return { ok: false, why: v2.why }; } }
     const body = Object.freeze({
       model: tier.id, messages, temperature: 0, max_tokens: outMax,
       response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
@@ -115,17 +123,17 @@ function create({ integrations = null, ledger = null, fetchImpl = (...a) => glob
     const u = json ? usageOf(json) : { inputTokens: 0, outputTokens: 0, costUsd: null };
     const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: tier.inPerMtok, failed });
     await ledger.settle(hold, use, u, usd, est);   // lane lg-store-writes (B-0248 U1): the answer waits until the day's counter holding it is on disk (the loop never waits)
-    const base = { use, model: tier.id, est, reserved: Math.round(estUsd * 1e8) / 1e8, status, zdr: true, keyFp: sha6(key) };
+    const base = { use, hold, model: tier.id, est, reserved: Math.round(estUsd * 1e8) / 1e8, status, zdr: true, keyFp: sha6(key) };   // `hold`: this call's result, paired with its reservation
     const answer = json ? answerOf(json) : null;
     if (answer === null) {
       const why = failed === 'redirect' ? 'redirect' : status >= 200 && status < 300 ? 'bad-answer' : refusalOf(status, message);
       say(why, why === 'no-zdr' ? `${tier.id} has no zero-data-retention endpoint (HTTP ${status}) — refused, never sent without it`
         : why === 'redirect' ? 'the provider answered a redirect — not followed (never a request to another origin)' : `the provider answered ${status ? `HTTP ${status}` : 'nothing'} (${why})`);
-      ledger.journal({ ...base, usd, outcome: why });
+      await ledger.journal({ ...base, usd, outcome: why });   // B-0248: its result line on disk before the answer (bounded)
       return { ok: false, why, status };
     }
     say(null, '');
-    ledger.journal({ ...base, outcome: 'ok', inputTokens: u.inputTokens, outputTokens: u.outputTokens, usd });
+    await ledger.journal({ ...base, outcome: 'ok', inputTokens: u.inputTokens, outputTokens: u.outputTokens, usd });   // B-0248: on disk before the answer (bounded)
     return { ok: true, answer, usage: u, usd, model: tier.id, label: tier.label, status };
   }
 

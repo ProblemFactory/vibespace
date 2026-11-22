@@ -279,7 +279,7 @@ const ROWS = [
   ["src/server/conversation-deliver.js", "*", 1, "local-only", "retryFile = <dataDir>/msg-retry.json and its .corrupt- aside; dataDir = server.js <checkout>/data"],
   ["src/server/csp-reports.js", "*", 7, "local-only", "file = <checkout>/data/csp-reports.jsonl (+ .1) or VIBESPACE_CSP_REPORTS_FILE, a chrome suite's scratch file (server.js create); lane csp-mermaid-sites r2 +2: the boot's re-judge writes the same file's .rejudge beside it and renames it over (a line the sanitizer explains; its read is the boot's own textOf)"],
   ["src/server/static-public.js", "stampOf", 1, "local-only", "<checkout>/public/<script> — the build stamp of the checkout's own served script (lane csp-mermaid-sites r2: a stale ?v= redirected to it)"],
-  ["src/server/decision-engine.js", "*", 7, "local-only", "F.memo / F.usage / F.journal = <dataDir>/decision-memo.json, decision-usage.json, decision-journal.jsonl"],
+  ["src/server/decision-engine.js", "*", 2, "local-only", "F.memo / F.usage / F.journal = <dataDir>/decision-memo.json, decision-usage.json, decision-journal.jsonl"],
   ["src/server/delivery-wake.js", "*", 3, "local-only", "place-8 (piece 7): socketAlive statSync = the resumed session's own attach socket (VibeSpace's wrapper); readRegistryIds readdirSync + readFileSync = REGISTRY_DIR ~/.claude/sessions/<pid>.json (src/peer-messaging.js's folder), ONE shared read a tick"],
   ["src/server/desktop-access.js", "*", 1, "local-only", "knownFile = <dataDir>/desktop-machines.json (server.js passes <checkout>/data)"],
   ["src/server/desktop-app-keeper.js", "*", 2, "local-only", "remoteFile = <dataDir>/desktop-apps-hosts.json (server.js passes <checkout>/data)"],

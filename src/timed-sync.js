@@ -65,6 +65,7 @@ const STORES = Object.freeze({
   'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),
   'decision-memo.write': row('write', 'decision-memo', 'src/server/decision-engine.js', ['saveMemo']),   // through the store writer (lane lg-store-writes, B-0248 U1: the judge's memo — paced, the hub's own cache)
   'decision-usage.write': row('write', 'decision-usage', 'src/server/decision-engine.js', ['saveUsage']),   // through the store writer (lane lg-store-writes, B-0248 U1: the day's counter — money, an act)
+  'decision-journal.write': row('write', 'decision-journal', 'src/server/decision-engine.js', ['journal']),   // B-0248's next part (r2417): the decision journal's lines and its trim, through the store writer (money: rank 0, urgent; a call's reservation lands before its ask)
   'desktop-apps.write': row('write', 'desktop-apps', 'src/desktop-serve.js', ['save']),   // through the store writer on the hub (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the desktop app records — an act; the device agent writes at the call)
   'device-alerts.write': row('write', 'device-alerts', 'src/server/device-alerts.js', ['save']),   // through the store writer (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the device alerts' dedup ledger)
   'vault-grant-ends.write': row('write', 'vault-grant-ends', 'src/server/vault-run-door.js', ['endsSave']),   // through the store writer (bl-vault B-a14b, 主开发 r542: the grants that ended — kept across a restart, paced, 0600)

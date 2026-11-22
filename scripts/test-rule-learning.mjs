@@ -494,7 +494,10 @@ async function wireLaw(client, e, cases = CASES) {
   const tc = TMC.create({ integrations: ROW, ledger: e.ledger, baseUrl: `http://127.0.0.1:${OR}`, timeoutMs: 250, log: quiet });
   const hang = await wireLaw(tc, e, [['hang', 'vendor-busy']]);
   ok(hang.length === 0, 'a vendor that never answers (the 250 ms timeout) ⇒ one request with the routing, vendor-busy — never a second one', hang);
-  const jl = e.journalRows().filter((x) => x.use === 'learn');
+  const jl = e.journalRows().filter((x) => x.use === 'learn' && x.outcome !== 'reserved');   // B-0248's next part: the RESULT lines — each call's reservation is its own line (paired below)
+  const jr = new Set(e.journalRows().filter((x) => x.use === 'learn' && x.outcome === 'reserved').map((x) => x.call));
+  { const asked = jl.filter((x) => x.reserved !== undefined);   // the calls that reached the vendor (a refusal before the hold has no reservation)
+    ok(asked.length > 0 && asked.every((x) => typeof x.call === 'string' && jr.has(x.call)) && jr.size === asked.length, `each of the ${asked.length} learn calls that reached the vendor left its RESERVATION line before its result (paired by call, B-0248)`, { asked: asked.length, reservations: jr.size }); }
   ok(jl.length === CASES.length + 1 && jl.every((x) => x.zdr === true) && !JSON.stringify(jl).includes(KEYW) && jl.filter((x) => x.outcome === 'redirect').length === 3, `the journal: ${jl.length} learn lines, zdr true on each, no key; the three 3xx are \`redirect\``, jl.slice(-3));
   ok(wire.filter((q) => q.srv === 'other').length === 0, 'L2: no request ever reached the redirect\'s other origin (redirect: \'error\' — never followed)');
   // RED CONTROLS — the census-mutants of verify r1 as copies of the client over the same ledger: each breaks the wire law

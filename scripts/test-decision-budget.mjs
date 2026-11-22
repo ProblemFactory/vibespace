@@ -88,7 +88,7 @@ console.log(`① the race — 6 in flight, room for one (estimate ${EST} tokens 
 {
   const w = world('race', { cents: roomForOne, hold: true, answer: () => ({ status: 200, body: okBody({ input_tokens: EST }) }) });
   const all = Array.from({ length: 6 }, () => w.judge());
-  await new Promise((r) => setImmediate(r));
+  for (let k = 0; k < 600 && w.fetches < 1; k++) await new Promise((r) => setTimeout(r, 5));   // B-0248's next part: a call is asked once its reservation line is on disk (the writer's thread) — waited for, bounded
   const st = w.eng.status();
   ok(w.fetches === 1 && st.today.inFlight === 1 && st.today.reserved > 0 && st.today.total.usd === 0, 'in flight: ONE fetch, one open reservation (the card counts it: settled 0 + reserved)', { fetches: w.fetches, today: st.today });
   w.release();
@@ -154,7 +154,7 @@ console.log('⑥ the per-hour guard rides the same reservation');
 {
   const w = world('hour', { hold: true, answer: () => ({ status: 200, body: okBody({ input_tokens: 9 }) }) });
   const all = Array.from({ length: 6 }, () => w.judge({ perHour: 1 }));
-  await new Promise((r) => setImmediate(r));
+  for (let k = 0; k < 600 && w.fetches < 1; k++) await new Promise((r) => setTimeout(r, 5));   // B-0248's next part: a call is asked once its reservation line is on disk (the writer's thread) — waited for, bounded
   w.release();
   const rs = await Promise.all(all);
   ok(w.fetches === 1 && rs.filter((r) => r.why === 'per-hour').length === 5, '6 in flight, perHour 1 ⇒ 1 fetch + 5 per-hour', rs.map((r) => r.why || 'ok'));
@@ -174,7 +174,7 @@ console.log('⑦ RED CONTROLS — the old shapes in scratch copies');
   const NoReserve = MUT.load('src/server/decision-engine.js', editAnchor(engSrc, a1, '\n', "src/server/decision-engine.js"), 'no-reserve');
   const w = world('ctl-race', { Engine: NoReserve, cents: roomForOne, hold: true, answer: () => ({ status: 200, body: okBody({ input_tokens: EST }) }) });
   const all = Array.from({ length: 6 }, () => w.judge());
-  await new Promise((r) => setImmediate(r));
+  for (let k = 0; k < 600 && w.fetches < 6; k++) await new Promise((r) => setTimeout(r, 5));   // B-0248's next part: a call is asked once its reservation line is on disk (the writer's thread) — waited for, bounded
   w.release(); await Promise.all(all);
   ok(w.fetches === 6, `CONTROL: read-then-write (no reservation) ⇒ ${w.fetches} fetches — leg ① would be red`);
   const a2 = 'const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: M.PRICE_PER_MTOK_USD[cred.provider], failed });';
@@ -255,9 +255,12 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
 {
   /** a store writer stand-in: it lands NOTHING until told (land), fails a write when told (failNow), answers durable() then */
   const standIn = () => {
-    const r = { dirties: [], durables: [], flushes: [], owed: new Map(), cbs: new Map(), waiters: [] };
-    r.dirty = (file, o) => { r.dirties.push({ file, name: o.name, rank: o.rank, mode: o.mode }); r.owed.set(file, o.produce); if (o.onWritten) r.cbs.set(file, o.onWritten); };
-    r.durable = (file) => { r.durables.push(file); return new Promise((res) => r.waiters.push({ file, res })); };
+    const r = { dirties: [], durables: [], flushes: [], owed: new Map(), cbs: new Map(), waiters: [], journal: 0 };
+    // B-0248's next part: the decision JOURNAL is a store of the writer too — in this stand-in it lands AT ONCE (its own laws, the
+    // reservation before the ask, are test-decision-journal's); the counter and the memo keep this stand-in's held landing
+    const JOURNAL = 'decision-journal.jsonl';
+    r.dirty = (file, o) => { if (path.basename(file) === JOURNAL) { r.journal++; const b = o.produce({}); if (b && b.append !== undefined) fs.appendFileSync(file, b.append); else if (b != null) throw new Error('the journal stand-in writes appends only'); if (o.onWritten) o.onWritten(true, null); return; } r.dirties.push({ file, name: o.name, rank: o.rank, mode: o.mode }); r.owed.set(file, o.produce); if (o.onWritten) r.cbs.set(file, o.onWritten); };
+    r.durable = (file) => { if (path.basename(file) === JOURNAL) return Promise.resolve(true); r.durables.push(file); return new Promise((res) => r.waiters.push({ file, res })); };
     r.whyNotDurable = () => ({ why: 'failed' });
     r.pending = (file) => r.owed.has(file);
     r.answer = (file, v) => { r.waiters = r.waiters.filter((w) => (w.file === file ? (w.res(v), false) : true)); };
@@ -345,14 +348,16 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
 }
 
 // ── B-a85f: THE DAY'S COUNTER IS REBUILT FROM THE JOURNAL AT BOOT (the money crash window of B-0248 U1) ────────────────────
-// A billed call's journal line is appended in its own run; its counter goes through the store writer. A stop before that write
-// lands (here: a writer that never writes) left the counter short — the next calls could spend past the daily budget by that
+// A billed call's journal lines (its reservation, then its result — B-0248's next part) land through the writer; its counter goes
+// through it too. A stop before the COUNTER's write lands (here: a writer that writes the journal and never the counter) left it short — the next calls could spend past the daily budget by that
 // much. The next engine raises each use to at least the journal's sum for today (never lowers it). RED (anchored): a copy
 // without the rebuild starts the day at 0.
 console.log('B-a85f — a stop before the counter landed: the next boot raises the day\'s counter to the journal\'s sum');
 {
   const { anchored } = await import('./scratch.mjs');
-  const never = { dirty() { }, durable: () => Promise.resolve(false), pending: () => false, flushSync: () => ({ written: [], left: [], ms: 0 }), stats: () => [] };
+  const JN = 'decision-journal.jsonl';
+  const never = { dirty(f, o) { if (path.basename(f) !== JN) return; const b = o.produce({}); if (b && b.append !== undefined) fs.appendFileSync(f, b.append); if (o.onWritten) o.onWritten(true, null); },   // the journal lands, the counter never
+    durable: (f) => Promise.resolve(path.basename(f) === JN), whyNotDurable: () => null, pending: () => false, flushSync: () => ({ written: [], left: [], ms: 0 }), stats: () => [] };
   const scene = async (Engine, name) => {
     const w = world(name, { writer: never, answer: () => ({ status: 200, body: okBody({ input_tokens: 9 }) }) });
     const r1 = await w.judge(); const r2 = await w.judge({ memo: false });

@@ -74,6 +74,8 @@ const ROW_ID = 'llm';   // lane llm-plugin-rename: the Language model row (the k
 const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', 'reply-infer': 'rules', 'vault-use-policy': null, test: null });   // + reply-infer (lane dm-reply-infers): a reply rule's judgment rides the Rules switch; + vault-use-policy (lane vault-use-grants): its switch is the vault's own (vault.policyJudge, default OFF) — the plugin, the key and the money still gate it
 const JOURNAL_MAX = 5000;
 const JOURNAL_DAYS = 30;
+// B-0248 (r2417 law 2): a call's RESERVATION line is on disk within this bound, or the judgment is refused by name (nothing is asked)
+const RESERVE_LAND_MS = 20000;
 const QUIET_MS = 5 * 60 * 1000;
 const TEST_SENTENCE = 'The invoice for the March order is due tomorrow — please confirm you will pay it.';
 const TEST_QUESTION = Object.freeze({ type: 'predicate', name: 'deadline_or_money', instructions: 'Does the text mention a deadline or money the reader owes?' });
@@ -83,7 +85,7 @@ function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file
 
 function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis.fetch(...a), now = () => Date.now(),
   tzOffset = (ms) => new Date(ms).getTimezoneOffset(), serverNotice = null, log = console, baseUrlFor = null, timeoutMs = 15000, writer = null,
-  settingsHeld = () => null } = {}) {
+  settingsHeld = () => null, reserveLandMs = RESERVE_LAND_MS } = {}) {
   // B-225b R3/R11 (the persistence holds): data/settings.json HELD — the plugin's rows (its daily dollar cap among them) read their
   // DEFAULTS, so no billed call may lean on them: NOT NOW by name ('settings-unread'), nothing reserved, nothing spent
   const settingsUnread = () => { try { return !!settingsHeld(); } catch { return false; } };
@@ -99,9 +101,27 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // counter's landing — the write in flight, at most one paced write (the writer alternates acts and paced stores;
   // 2K + 1 writes for K acts owed), then its own: ms on a local disk; on the measured slow mount about 1.5 s with the
   // writer idle and up to about 5 s behind the channels index's write (renames there took 1.3–2.6 s) — forgets that one
-  // call — B-a85f: THE BOOT REBUILDS IT (below: each use raised to at least today's journal sum; the journal line is appended
-  // in the call's own run, so it holds every billed call). The journal stays a named row.
+  // call — B-a85f: THE BOOT REBUILDS IT (below: each use raised to at least today's journal sum). Since B-0248's next part the
+  // journal's money line is the call's RESERVATION, on disk BEFORE the vendor is asked (a reservation with no result line counts
+  // as spent, once), so the journal holds every billed call. The journal stays a named row.
   const W = () => writer || require('../store-writer.js').storeWriter();
+  // ── THE JOURNAL THROUGH THE STORE WRITER (B-0248's next part, the coordinator's r2403 / r2417 — measured: a judgment held the loop
+  // with its line's synchronous append, the first after a start re-read the whole file to count it, the 6 000th rewrote it). Its
+  // lines are ONE store's appends on the writer's thread (rank 0, urgent: money); its trim is a REWRITE job of that store from its
+  // own byte ranges, in order with every append (src/store-writer-worker.js rewriteJob — the OTel stash's road). A billed call's
+  // money belt (B-a85f) is its RESERVATION line, ON DISK before the vendor request is built (law 1); a reservation with no result
+  // line is counted SPENT, once, by the boot's rebuild (law 4, decision-model daySpendByUse). The index: every whole line the
+  // boot's tail read saw and every line written since, by its byte offset (the count and the trim come from it — law 6).
+  let jIdx = [];          // [{off, len, at, call, out}] the file's known lines, in its order (len: bytes without the newline)
+  let jSize = 0;          // the file's bytes as the index knows them
+  let jWhole = true;      // the boot's tail read reached the file's start
+  let jTorn = false;      // the file may end without its newline: the next append starts on a new line
+  let jKnown = false;     // the index matches the file (false after a write the writer never confirmed, or a failed append: no trim until the next start)
+  let jOwed = [];         // lines not handed to a write yet (each ends with its newline)
+  let jWriting = null;    // {lines, lead, trim} the write in flight
+  let jTrimDue = false, jFailSaid = false, jSeq = 0;
+  const CALL_TAG = crypto.randomBytes(3).toString('hex');   // this engine's calls: «<tag>.<seq>» on the reservation and its result
+  const callOf = (id) => `${CALL_TAG}.${id}`;
   /** the journal's rows from a BOUNDED tail (≤ 2 MB: the journal itself is cut at 5 000 lines / 30 days) — the month's readout and
    *  the boot's rebuild of the day's counter (B-a85f) */
   function journalTail() {
@@ -110,19 +130,31 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       try {
         const size = fs.fstatSync(fd).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
         fs.readSync(fd, buf, 0, n, size - n);
-        return buf.toString('utf8').split('\n').slice(n < size ? 1 : 0).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+        // the index (law 6: the count comes from this read — no second whole read): each whole line by its byte offset; a tail that
+        // starts inside a line skips it, as the rows always did
+        const base = size - n, idx = [], rows = [];
+        let i = 0;
+        if (n < size) { const nl = buf.indexOf(0x0a); i = nl < 0 ? n : nl + 1; }
+        while (i < n) {
+          let e = buf.indexOf(0x0a, i); if (e < 0) e = n;
+          if (e > i) { let r = null; try { r = JSON.parse(buf.toString('utf8', i, e)); } catch { } if (!r || typeof r !== 'object') r = null; rows.push(r); idx.push(idxOf(base + i, e - i, r)); }
+          i = e + 1;
+        }
+        jIdx = idx; jSize = size; jWhole = n === size; jTorn = n > 0 && buf[n - 1] !== 0x0a; jKnown = true;
+        return rows;
       } finally { fs.closeSync(fd); }
-    } catch { return []; }
+    } catch (e) { if (e && e.code === 'ENOENT') { jIdx = []; jSize = 0; jWhole = true; jTorn = false; jKnown = true; } return []; }   // unread for another reason: no trim this start
   }
+  const idxOf = (off, len, r) => ({ off, len, at: r ? Number(r.at) : NaN, call: r && typeof r.call === 'string' ? r.call : null, out: r && typeof r.outcome === 'string' ? r.outcome : null });
   let rebuiltAtBoot = false;   // B-a85f: the boot raised the day's counter from the journal — written once saveUsage exists
   // A LOAD READS WHAT THIS PROCESS STILL OWES: an engine made again in the same process (a suite's restart) lands the
   // write the last one handed the writer BEFORE it reads the files — a hub's boot owes nothing (no wait)
-  { const owed = [F.memo, F.usage].filter((f) => W().pending(f)); if (owed.length) W().flushSync(owed); }
+  { const owed = [F.memo, F.usage, F.journal].filter((f) => W().pending(f)); if (owed.length) W().flushSync(owed); }
   let plugin = null;                                   // {peek} — the plugin row's own record (enabled + config)
   const memo = new Map((readJson(F.memo, {}).entries || []).filter((e) => Array.isArray(e) && e.length === 2).slice(-M.MEMO_MAX));
   let usage = readJson(F.usage, null) || { day: null, byUse: {} };
   // B-a85f — THE DAY'S COUNTER IS REBUILT FROM THE JOURNAL AT BOOT (the money crash window of B-0248 U1): a kill between a billed
-  // call's journal line (appended synchronously in its own run) and its counter's landing left the counter short — the next
+  // call's journal line and its counter's landing left the counter short (its reservation line is on disk before the ask) — the next
   // calls would spend past the daily budget by that much. Each use is raised to AT LEAST the journal's sum for today, never
   // lowered (a counter ahead of its journal — a trimmed journal — keeps its own); a raise is written (an act) and said once.
   {
@@ -150,7 +182,6 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const quietAt = new Map();                           // why → last journalled at
   let noticedDay = null;
   const hourCalls = [];                                // call times, the per-hour window
-  let journalLines = null;
 
   const attachPlugin = (h) => { plugin = h && typeof h.peek === 'function' ? h : null; };
   function settings() {
@@ -194,21 +225,26 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   /** RESERVE — the verdict and the write in ONE synchronous step (no await between them): the ceiling sees every
    *  call in flight. → {v, id?}. */
   function reserve(use, { s, cred, accountNever, est, perHour, t }) {
-    const feature = FEATURE_OF[use];
     const rate = cred ? M.rateOf((usage.rate || {})[rateKey(cred)], M.PRICE_PER_MTOK_USD[cred.provider]) : 0;
     const estUsd = est * rate;
-    while (hourCalls.length && hourCalls[0] <= t - 3600e3) hourCalls.shift();
-    const held = use === 'test' ? null : stopOf(cred);   // the owner's Test always calls: it is how a fixed plan is seen
-    const v = M.budgetVerdict({
-      pluginOn: use === 'test' || s.pluginOn, featureOn: feature === null || s.features[feature] === true, keyPresent: !!cred, accountNever,
-      reconnect: held === 'reconnect', plan: held === 'plan', shape: held === 'shape', backoffUntil: backoff.until, now: t,
-      spentUsd: totalOf(today()).usd + reservedUsd(), estUsd, ceilingCents: s.dailyBudgetCents, hourCount: hourCalls.length, perHour,
-    });
+    const v = verdictOf(use, { s, cred, accountNever, estUsd, perHour, t });
     if (!v.ok) return { v };
     const id = ++openSeq;
     open.set(id, { use, usd: estUsd });
     hourCalls.push(t);
     return { v, id, estUsd };
+  }
+  /** the owner's gates and the ceiling, as they stand at `t` → budgetVerdict's answer. `mine` (B-0248): judged AGAIN for a call whose
+   *  reservation just landed — its own slot (estimate and hour) is not counted against itself; every other call in flight is */
+  function verdictOf(use, { s, cred, accountNever, estUsd, perHour, t, mine = false }) {
+    const feature = FEATURE_OF[use];
+    while (hourCalls.length && hourCalls[0] <= t - 3600e3) hourCalls.shift();
+    const held = use === 'test' ? null : stopOf(cred);   // the owner's Test always calls: it is how a fixed plan is seen
+    return M.budgetVerdict({
+      pluginOn: use === 'test' || s.pluginOn, featureOn: feature === null || s.features[feature] === true, keyPresent: !!cred, accountNever,
+      reconnect: held === 'reconnect', plan: held === 'plan', shape: held === 'shape', backoffUntil: backoff.until, now: t,
+      spentUsd: totalOf(today()).usd + reservedUsd() - (mine ? estUsd : 0), estUsd, ceilingCents: s.dailyBudgetCents, hourCount: hourCalls.length - (mine ? 1 : 0), perHour,
+    });
   }
   /** SETTLE — the reservation leaves; what the call cost lands in the day's counter (a 0-cost error counts nothing).
    *  → the counter's durable() promise (true once on disk), or null when nothing changed */
@@ -235,22 +271,87 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       return W().durable(F.usage).catch(() => false);
     } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); return Promise.resolve(false); }
   }
+  /** ONE journal line: handed to the store writer (an append of this store, rank 0 — money), never written on the loop. → this
+   *  line's seq (a caller that must see it on disk awaits W().durable(F.journal)) */
   function journal(o) {
     const row = M.journalRow({ at: now(), rubric: M.RUBRIC.version, ...o });
-    try {
-      fs.appendFileSync(F.journal, JSON.stringify(row) + '\n', { mode: 0o600 });
-      journalLines = journalLines === null ? countLines() : journalLines + 1;
-      if (journalLines > JOURNAL_MAX * 1.2) trimJournal();
-    } catch (e) { log.warn?.(`[decision] journal: ${e.message}`); }
+    jOwed.push(JSON.stringify(row) + '\n'); jSeq++;
+    if (jKnown && (!jWhole || jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > JOURNAL_MAX * 1.2)) jTrimDue = true;   // law 6: the count from the index (+ the lines on their way)
+    try { W().dirty(F.journal, { name: 'decision-journal.write', rank: 0, urgent: true, mode: 0o600, produce: produceJournal, onWritten: journalWritten }); }
+    catch (e) { log.warn?.(`[decision] journal: ${e.message}`); }
+    return jSeq;
   }
-  function countLines() { try { return fs.readFileSync(F.journal, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } }
-  function trimJournal() {
-    const cut = now() - JOURNAL_DAYS * 86400e3;
-    const keep = fs.readFileSync(F.journal, 'utf8').split('\n').filter(Boolean).filter((l) => { try { return JSON.parse(l).at >= cut; } catch { return false; } }).slice(-JOURNAL_MAX);
-    const tmp = `${F.journal}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, keep.join('\n') + (keep.length ? '\n' : ''), { mode: 0o600 });
-    fs.renameSync(tmp, F.journal);
-    journalLines = keep.length;
+  /** the bytes of the journal's next write, made when it is due: the owed lines as ONE append — or, when a trim is owed and the
+   *  index matches the file, ONE rewrite of the file from the byte ranges it keeps, then those lines (law 5: in order with every
+   *  append; a synchronous flush — the exit — never rewrites: the next write trims) */
+  function produceJournal(o) {
+    if (jWriting) {   // the writer never confirmed the last write (its thread restarted and asks again): offered again on a new line —
+      // the file holds it or not; the boot's pairing counts a line written twice once — and the index no longer knows the file
+      if (jWriting.trim) log.warn?.('[decision] the journal\'s trim was not confirmed (the store writer\'s thread restarted) — the file is the trimmed one or the old one, whole; the next start trims');
+      jOwed = jWriting.lines.concat(jOwed); jTorn = true; jKnown = false; jWriting = null;
+    }
+    if (!jOwed.length) return null;
+    const lines = jOwed; jOwed = [];
+    const trim = jTrimDue && jKnown && !(o && o.sync) ? keptRanges() : null;
+    const lead = !trim && jTorn ? '\n' : '';   // a rewrite ends every kept line with its newline itself
+    jWriting = { lines, lead, trim };
+    if (!trim) return { append: lead + lines.join('') };
+    jTrimDue = false;
+    return { rewrite: { ranges: trim.ranges, size: trim.size }, then: lines.join(''), as: 'decision-journal.write' };
+  }
+  /** law 5: the byte ranges a trim keeps (decision-model journalKeep: the belt's day, every reservation with no result line, the
+   *  newest inside JOURNAL_DAYS up to JOURNAL_MAX); a line the index does not hold (before the boot's tail) is not kept */
+  function keptRanges() {
+    const keepI = M.journalKeep(jIdx.map((x) => ({ at: x.at, call: x.call, outcome: x.out })), { day: M.dayOf(now(), tzOffset(now())), offsetMinOf: tzOffset, now: now(), max: JOURNAL_MAX, days: JOURNAL_DAYS });
+    const keep = keepI.map((k) => jIdx[k]), ranges = new Float64Array(keep.length * 2);
+    keep.forEach((x, k) => { ranges[2 * k] = x.off; ranges[2 * k + 1] = x.off + x.len + 1; });   // each with its newline (one the file lacks: size + 1)
+    return { ranges, size: jSize, keep, dropped: jIdx.length - keep.length };
+  }
+  /** the write's outcome — the index follows the file: an append's lines at its end, a trim's kept lines and then its own */
+  function journalWritten(ok, err) {
+    const w = jWriting; jWriting = null;
+    if (!w) return;
+    const renamed = !ok && w.trim && err && err.code === 'ERENAMEDNOSYNC';   // the trim landed, its directory's fsync did not: the file is the trimmed one
+    if (!ok && !renamed) {
+      jOwed = w.lines.concat(jOwed);   // nothing of this write is on disk as written: owed again, first
+      if (w.trim) jTrimDue = true;     // a failed TRIM leaves the file whole as it was (the job copies, then renames)
+      else { jTorn = true; jKnown = false; }   // a failed APPEND is truncated back by the writer, at best: the index is not trusted until the next start
+      if (!jFailSaid) { jFailSaid = true; log.warn?.(`[decision] the journal was not written (${(err && (err.code || err.message)) || 'an error'}) — its lines are kept in memory and the store writer retries`); }
+      return;
+    }
+    if (jFailSaid) { jFailSaid = false; log.warn?.('[decision] the journal is written again'); }
+    if (w.trim) {
+      let off = 0; const kept = [];
+      for (const x of w.trim.keep) { kept.push({ ...x, off }); off += x.len + 1; }
+      jIdx = kept; jSize = off; jWhole = true; jTorn = false;
+      log.log?.(`[decision] the journal trimmed by its writer: ${w.trim.size} → ${off} B (${w.trim.dropped} line(s) dropped; kept the day's, every reservation with no result, the newest inside ${JOURNAL_DAYS} days)${renamed ? ' — but its folder\'s fsync failed' : ''}`);
+    }
+    if (jKnown) {
+      let off = jSize + Buffer.byteLength(w.lead);
+      for (const l of w.lines) { const len = Buffer.byteLength(l) - 1; let r = null; try { r = JSON.parse(l); } catch { } jIdx.push(idxOf(off, len, r)); off += len + 1; }
+      jSize = off;
+    }
+    jTorn = false;
+  }
+  /** law 1 + 2: a reservation line ON DISK (the writer's own durable answer) before the vendor request is built → {ok: true}; else the
+   *  judgment is REFUSED BY NAME: its slot given back in memory (law 3), and a 'released' line paired with the reservation, so a
+   *  reservation that lands late is never counted (nothing twice when it is asked again) */
+  async function reservationLanded(id, use, t = null) {
+    let ok = false;
+    try { ok = (await W().durable(F.journal, { timeoutMs: reserveLandMs })) === true; } catch { ok = false; }
+    if (ok) return { ok: true };
+    let nd = null; try { nd = W().whyNotDurable(F.journal); } catch { }
+    giveBack(id, t);
+    journal({ use, call: callOf(id), outcome: 'released', why: 'reservation-unwritten' });
+    const detail = nd && nd.why === 'queued' ? `its journal line was still queued after ${Math.round(reserveLandMs / 1000)} s` : `its journal line was not written (${(nd && (nd.code || nd.why)) || 'the storage'})`;
+    lastOutcome = { at: now(), use, outcome: 'refused', why: 'reservation-unwritten' };
+    log.warn?.(`[decision] a ${use} judgment was refused before the provider was asked: ${detail} — nothing was sent, nothing counted`);
+    return { ok: false, why: 'reservation-unwritten', detail };
+  }
+  /** law 2 + 3: a reservation given back frees its slot — the day's estimate and the hour's call */
+  function giveBack(id, t) {
+    open.delete(id);
+    if (t !== null && t !== undefined) { const k = hourCalls.lastIndexOf(t); if (k >= 0) hourCalls.splice(k, 1); }
   }
   function memoPut(key, answers) {
     memo.delete(key); memo.set(key, answers);
@@ -290,9 +391,10 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   /** THE ONE JUDGE CALL — its answer waits until the day's counter it changed is on disk (lg-store-writes U1: money, an
    *  answered act is on disk; the loop never waits — only this call's promise) */
   async function judge(use, parts, opts = {}) {
-    const call = { counted: null };
+    const call = { counted: null }, j0 = jSeq;
     const r = await judgeCall(use, parts, opts, call);
     if (call.counted) await call.counted;
+    if (jSeq !== j0 && !(r && r.why === 'reservation-unwritten')) { try { await W().durable(F.journal, { timeoutMs: reserveLandMs }); } catch { } }   // B-0248: its journal lines on disk before the answer (bounded; never a refusal)
     return r;
   }
   async function judgeCall(use, parts, { questions, memo: memoParts = null, accountNever = false, perHour = Infinity, resolved = null } = {}, call) {
@@ -311,12 +413,20 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const t = now();
     const { v, id, estUsd } = reserve(use, { s, cred, accountNever, est, perHour, t });   // budgetVerdict + the reservation, one step
     if (!v.ok) return quiet(use, v.why, v.retryAt ? { retryAt: v.retryAt } : {});
+    const reserved = Math.round(estUsd * 1e8) / 1e8;
+    const base = { use, call: callOf(id), memo: key, dialect: cred.provider, model: cred.model, est, reserved, truncated: input.truncated, n, keyFp: sha(cred.key).slice(0, 6) };
+    // B-0248 (r2417 laws 1–3): THE RESERVATION LINE IS ON DISK BEFORE THE REQUEST IS BUILT — the slot was taken above, in the deciding
+    // step; a line that does not land refuses this judgment by name, its slot given back (nothing is sent, nothing counted)
+    journal({ ...base, outcome: 'reserved' });
+    { const landed = await reservationLanded(id, use, t); if (!landed.ok) return { ok: false, why: landed.why, detail: landed.detail }; }
+    // …and the owner's gates are judged AGAIN once it landed (its own slot not counted against itself): a switch turned off, a budget
+    // lowered, a row stop or a wall that came while the line was being written is never passed by the write's wait
+    { const again = verdictOf(use, { s: settings(), cred: credential(resolved), accountNever, estUsd, perHour, t: now(), mine: true });   // a key removed meanwhile: no-key
+      if (!again.ok) { giveBack(id, t); journal({ ...base, outcome: 'released', why: again.why }); return quiet(use, again.why, again.retryAt ? { retryAt: again.retryAt } : {}); } }
     const sent = M.scrubQuestions(qs);   // B-d375: a rule's condition / a choice's description are the owner's words — the ONE scrub
     const body = Object.freeze(M.buildRequest(cred.provider, { model: cred.model, input: input.text, questions: sent }));
     const bytes = new TextEncoder().encode(JSON.stringify(body));   // serialized ONCE — the bytes the one-shot stream sends (never a string body: lane judge-one-shot-body)
     const url = M.urlOf(cred.provider, baseUrlFor && baseUrlFor[cred.provider]);
-    const reserved = Math.round(estUsd * 1e8) / 1e8;
-    const base = { use, memo: key, dialect: cred.provider, model: cred.model, est, reserved, truncated: input.truncated, n, keyFp: sha(cred.key).slice(0, 6) };
     let status = 0, json = null, retryAfter = null, failed = null, sending = null;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -555,9 +665,14 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     settingsUnread,   // B-225b: the text-model client asks it before its verdict
     spentUsd: () => totalOf(today()).usd + reservedUsd(),
     useUsd: (use) => { const x = today().byUse[use]; return (x ? x.usd : 0) + [...open.values()].filter((r) => r.use === use).reduce((a, r) => a + r.usd, 0); },
-    hold: (use, usd) => { const id = ++openSeq; open.set(id, { use, usd: Number(usd) || 0 }); return id; },
+    // B-0248 (r2417 laws 1–3): the hold is the slot (sync) AND its reservation line; `landed` answers once that line is on disk —
+    // or gives the slot back and refuses by name; a line journaled with `hold` is that call's result (paired)
+    hold: (use, usd, meta = {}) => { const id = ++openSeq; open.set(id, { use, usd: Number(usd) || 0 }); journal({ ...meta, use, call: callOf(id), outcome: 'reserved', reserved: Math.round((Number(usd) || 0) * 1e8) / 1e8 }); return id; },
+    landed: (id, use) => reservationLanded(id, use),
     settle: (id, use, u, usd, est) => settle(id, use, u, usd, est),
-    journal: (o) => { lastOutcome = { at: now(), use: o.use, outcome: o.outcome, ...(o.why ? { why: o.why } : {}) }; journal(o); },
+    // → the line's landing (bounded by the reservation's own bound; true / false, never a throw): a completion's result is on disk
+    // before its answer, as a judgment's is
+    journal: (o) => { lastOutcome = { at: now(), use: o.use, outcome: o.outcome, ...(o.why ? { why: o.why } : {}) }; const { hold, ...row } = o || {}; journal(hold ? { ...row, call: callOf(hold) } : row); return W().durable(F.journal, { timeoutMs: reserveLandMs }).catch(() => false); },
   });
   const textModel = require('./text-model-client.js').create({ integrations, ledger, fetchImpl, now, log, baseUrl: baseUrlFor && baseUrlFor.openrouter ? baseUrlFor.openrouter : null });
 

@@ -337,7 +337,7 @@ const savedL = await lp.ev('window.__sets');
 const after = await lp.ev(`({ card: !!document.querySelector('[data-learn-card]'), box: document.querySelector('.settings-multiline-text').value })`);
 ok(savedL.length === 1 && savedL[0][0] === 'decision.attentionBlock' && savedL[0][1] === 'Invoices, contracts and payments due\nOutages and incidents' && !after.card && after.box === savedL[0][1], '保存 writes ONE set through the settings door: the edited line + the ticked new line (the unticked unsupported one is not written); the card closes, the box shows it', { savedL, after });
 lp.close();
-const jl = fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((j) => j.use === 'learn');
+const jl = fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((j) => j.use === 'learn' && j.outcome !== 'reserved');   // B-0248's next part: the RESULT line (its reservation is its own line before it)
 ok(jl.length === 1 && jl[0].outcome === 'ok' && jl[0].zdr === true && jl[0].usd === 0.0062 && decision.status().today.byUse.learn.usd === 0.0062, 'the engine journalled ONE learn call (zdr true, usd = the vendor\'s usage.cost 0.0062) and counted it in the day', jl);
 const pp = await page(390, 844, 'b=block&w=100%25');
 await pp.go();

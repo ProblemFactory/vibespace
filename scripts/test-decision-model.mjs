@@ -754,5 +754,46 @@ console.log('㉓ use vault-use-policy (lane vault-use-grants R4, default OFF) �
   ok(sites === 1 && !/\bfetch\s*\(|https?\.request\(/.test(door) && /policyJudge\(parts, \{ policy:/.test(door), 'ONE judge(\'vault-use-policy\') site — the wiring\'s policyJudge; the run door holds no request primitive and calls only that', { sites });
 }
 
+console.log('㉞ B-0248 (r2417 laws 4 + 5): the journal\'s calls — a reservation with no result is spent once; what a trim keeps');
+{
+  const repoJ = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const { anchored } = await import('./scratch.mjs');
+  const MUTJ = mutantCopies('decision-model-journal', repoJ), MSRC = fs.readFileSync(new URL('../src/decision-model.js', import.meta.url), 'utf8');
+  const D0 = Date.UTC(2026, 10, 20, 12), day = M.dayOf(D0, 0);
+  const rowsJ = [
+    { at: D0 - 9e5, use: 'attention', call: 'a.1', outcome: 'reserved', reserved: 0.0003, est: 3000 },                          // a stop before its result: SPENT, once
+    { at: D0 - 9e5, use: 'attention', call: 'a.1', outcome: 'reserved', reserved: 0.0003, est: 3000 },                          // …its line written twice
+    { at: D0 - 8e5, use: 'attention', call: 'a.2', outcome: 'reserved', reserved: 0.0009, est: 9000 },
+    { at: D0 - 7e5, use: 'attention', call: 'a.2', outcome: 'ok', usd: 0.0002, inputTokens: 2000, outputTokens: 4 },          // answered: the result counts, not the reservation
+    { at: D0 - 7e5, use: 'attention', call: 'a.2', outcome: 'ok', usd: 0.0002, inputTokens: 2000, outputTokens: 4 },          // …a result line re-offered: once
+    { at: D0 - 6e5, use: 'learn', call: 'a.3', outcome: 'reserved', reserved: 0.005, est: 500 },
+    { at: D0 - 6e5, use: 'learn', call: 'a.3', outcome: 'released', why: 'reservation-unwritten' },                            // given back: nothing
+    { at: D0 - 5e5, use: 'inbox', outcome: 'ok', usd: 0.0001, inputTokens: 1000 },                                              // the older shape (no call): as before
+  ];
+  const d = M.daySpendByUse(rowsJ, day, () => 0).byUse;
+  ok(d.attention && d.attention.calls === 2 && Math.abs(d.attention.usd - 0.0005) < 1e-12 && d.attention.inputTokens === 5000 && !d.learn && d.inbox && d.inbox.calls === 1,
+    'daySpendByUse: a reservation with NO result counts its reserved estimate ONCE (written twice), an answered one counts its result once (re-offered), a released one nothing, the older shape as before', d);
+  const mo = M.monthSpend(rowsJ, day.slice(0, 7), () => 0);
+  ok(mo.calls === 3 && Math.abs(mo.usd - 0.0006) < 1e-12, 'monthSpend: the same pairing (an open reservation spent once, each result once)', mo);
+  const noRes = MUTJ.load('src/decision-model.js', anchored(MSRC, "    if (!call || answered.has(call) || seen.has('r ' + call)) return null;", "    return null;", 'reservations-ignored'), 'reservations-ignored');
+  const d2 = noRes.daySpendByUse(rowsJ, day, () => 0).byUse;
+  ok(Math.abs(d2.attention.usd - 0.0002) < 1e-12, 'CONTROL (a copy that ignores reservations, the release\'s sum): the stopped call is not counted — the day UNDER-counted — red', d2);
+  const keepRows = [
+    { at: D0 - 40 * 864e5, call: 'old.1', outcome: 'reserved' },   // 0: a reservation with no result, 40 days old — kept
+    { at: D0 - 35 * 864e5 },                                       // 1: past 30 days — dropped
+    { at: D0 - 3 * 864e5 }, { at: D0 - 2 * 864e5 },                // 2, 3: inside 30 days — kept while room is left (room 4: the newest first)
+    null,                                                          // 4: a line that is not a row — dropped
+    { at: D0 - 3600e3 }, { at: D0 - 60e3 },                        // 5, 6: the belt's day — kept
+    { at: D0 - 30e3, call: 'n.1', outcome: 'reserved' }, { at: D0 - 20e3, call: 'n.1', outcome: 'ok' },   // 7, 8: today, answered
+  ];
+  const k = M.journalKeep(keepRows, { day, offsetMinOf: () => 0, now: D0, max: 5, days: 30 });
+  ok(JSON.stringify(k) === JSON.stringify([0, 3, 5, 6, 7, 8]), 'journalKeep: every row of the belt\'s day and every reservation with no result kept (they count toward the cap, never cut by it), then the newest inside 30 days while room is left; past 30 days and non-rows dropped', k);
+  const noOpen = MUTJ.load('src/decision-model.js', anchored(MSRC, "    const open = r.outcome === 'reserved' && typeof r.call === 'string' && !!r.call && !answered.has(r.call);", "    const open = false;", 'trim-drops-open'), 'trim-drops-open');
+  const k2 = noOpen.journalKeep(keepRows, { day, offsetMinOf: () => 0, now: D0, max: 5, days: 30 });
+  ok(!k2.includes(0), 'CONTROL (a copy whose trim forgets the reservations with no result): the stopped call\'s line is trimmed away — the belt loses it — red', k2);
+  for (const row of copiesCensus(MUTJ.files, MUTJ.dir, repoJ, { minCopies: 2, label: 'CONTROL: ' })) ok(row.pass, row.name, row.detail);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

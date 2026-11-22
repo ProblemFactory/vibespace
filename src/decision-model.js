@@ -524,7 +524,7 @@ const rowStopOf = (status) => (isKeyRefused(status) ? 'reconnect' : status === 4
 /** A journal line: a fixed field list (no key, no text of anyone's) — the key only as its 6-character fingerprint. */
 // + `p` (lane decision-attention-facts): an attention call's needs_now, 2 decimals — the next quality check needs no memo join
 // + `zdr` (lane rule-learning): a text-model call says it went through the zero-data-retention routing (always true — no other is sent)
-const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric', 'hits', 'p', 'zdr']);
+const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric', 'hits', 'p', 'zdr', 'call']);   // `call` (B-0248, r2417): a call's reservation and its result line, paired
 function journalRow(o = {}) {
   const row = {};
   for (const k of JOURNAL_FIELDS) {
@@ -1055,35 +1055,76 @@ function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd =
     month: t('LLM · today {spent} / {cap} · this month {month}', { spent: money, cap: capText, month: mo === null ? '—' : moneyText(mo, moved || mo > 0) }),
   };
 }
+/** B-0248 (r2417 law 4) — THE JOURNAL'S CALLS: a call journaled since the journal went through the store writer carries its `call`, on a
+ *  RESERVATION line (outcome 'reserved', on disk BEFORE the vendor was asked) and, once the call ended, on its result line (a refusal of
+ *  the reservation is the result 'released'). → the calls that have a result line. */
+function journalCalls(rows) {
+  const answered = new Set();
+  for (const r of rows) if (r && typeof r === 'object' && typeof r.call === 'string' && r.call && r.outcome !== 'reserved') answered.add(r.call);
+  return answered;
+}
+/** what one row SPENT, by the pairing (`seen`: what was counted already) → {usd, inT, outT, est, reserved} | null (counts nothing):
+ *  a reservation with NO result line is spent — its reserved estimate — ONCE; a result counts once however many times its line was
+ *  written (a write the writer re-offered); a result line without a call (an older journal's shape) counts as before. */
+function spentOf(r, answered, seen) {
+  const call = typeof r.call === 'string' && r.call ? r.call : null;
+  if (r.outcome === 'reserved') {
+    if (!call || answered.has(call) || seen.has('r ' + call)) return null;
+    seen.add('r ' + call);
+    return { usd: num0(r.reserved), inT: num0(r.est), outT: 0, est: num0(r.est), reserved: true };
+  }
+  if (call) { if (seen.has('c ' + call)) return null; seen.add('c ' + call); }
+  return { usd: num0(r.usd), inT: num0(r.inputTokens), outT: num0(r.outputTokens), est: num0(r.est), reserved: false };
+}
 /** The month so far from journal rows (data/decision-journal.jsonl, the caller's bounded tail): Σ usd of the rows whose
  *  local day starts with `month` ('YYYY-MM'). Malformed rows are skipped. → {usd, calls, days}. */
 /** B-a85f — A DAY'S SPEND BY USE FROM THE JOURNAL (PURE): the rows of `day` (local, by each row's own offset) that SPENT — the
  *  counter's own rule (settle counts a call that cost money or used tokens): {byUse: {use: {calls, inputTokens, outputTokens, usd}}}.
- *  The engine's boot raises each use's counter to at least these sums: a kill between a billed call's journal line (appended in
- *  the call's own run) and its counter's landing never loses that money. */
+ *  The engine's boot raises each use's counter to at least these sums: a kill between a billed call's ask and its counter's
+ *  landing never loses that money (its reservation line was on disk before the ask: B-0248, journalCalls / spentOf above). */
 function daySpendByUse(rows, day, offsetMinOf = () => 0) {
+  const list = Array.isArray(rows) ? rows : [], answered = journalCalls(list), seen = new Set();
   const byUse = {};
-  for (const r of Array.isArray(rows) ? rows : []) {
+  for (const r of list) {
     if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at)) || typeof r.use !== 'string' || !r.use) continue;
     if (dayOf(r.at, offsetMinOf(Number(r.at))) !== day) continue;
-    const usd = num0(r.usd), inT = num0(r.inputTokens);
-    if (!(usd > 0) && !(inT > 0)) continue;
+    const sp = spentOf(r, answered, seen);   // B-0248 (r2417 law 4): a reservation with no result is spent, once; a line twice counts once
+    if (!sp || (!(sp.usd > 0) && !(sp.inT > 0))) continue;
     const x = byUse[r.use] || (byUse[r.use] = { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
-    x.calls += 1; x.inputTokens += inT || num0(r.est); x.outputTokens += num0(r.outputTokens); x.usd = Math.round((x.usd + usd) * 1e8) / 1e8;
+    x.calls += 1; x.inputTokens += sp.inT || sp.est; x.outputTokens += sp.outT; x.usd = Math.round((x.usd + sp.usd) * 1e8) / 1e8;
   }
   return { byUse };
 }
 function monthSpend(rows, month, offsetMinOf = () => 0) {
+  const list = Array.isArray(rows) ? rows : [], answered = journalCalls(list), seen = new Set();
   const days = new Set();
   let usd = 0, calls = 0;
-  for (const r of Array.isArray(rows) ? rows : []) {
+  for (const r of list) {
     if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) continue;
     const day = dayOf(r.at, offsetMinOf(Number(r.at)));
     if (day.slice(0, 7) !== month) continue;
-    const v = num0(r.usd);
+    const sp = spentOf(r, answered, seen);   // B-0248 (r2417 law 4): a reservation with no result line is spent, once
+    if (!sp) continue;
+    const v = sp.usd;
     if (v > 0 || r.outcome === 'ok') { usd += v; calls += 1; days.add(day); }
   }
   return { usd: Math.round(usd * 1e8) / 1e8, calls, days: days.size };
+}
+/** B-0248 (r2417 law 5) — WHAT A TRIM OF THE JOURNAL KEEPS (PURE): over `rows` in the file's order ({at, call?, outcome?}; null =
+ *  a line that is not a row) → the indexes kept, ascending: EVERY row of the belt's window (`day`: the boot's rebuild counts it), EVERY
+ *  reservation with no result line, and the newest rows inside `days` up to `max` in all (the first two count toward it, never cut by
+ *  it). A line that is not a row is dropped. */
+function journalKeep(rows, { day, offsetMinOf = () => 0, now, max = 5000, days = 30 } = {}) {
+  const list = Array.isArray(rows) ? rows : [], answered = journalCalls(list), cut = Number(now) - days * 86400e3, keep = [];
+  let room = max;
+  for (let i = list.length - 1; i >= 0; i--) {   // the newest first
+    const r = list[i];
+    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) continue;
+    const belt = dayOf(Number(r.at), offsetMinOf(Number(r.at))) === day;
+    const open = r.outcome === 'reserved' && typeof r.call === 'string' && !!r.call && !answered.has(r.call);
+    if (belt || open || (room > 0 && Number(r.at) >= cut)) { keep.push(i); room--; }
+  }
+  return keep.reverse();
 }
 
 module.exports = {
@@ -1099,5 +1140,5 @@ module.exports = {
   cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, scrubQuestions, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
   READOUT_WARN_AT, READOUT_USES, moneyText, decisionTodayLine, monthSpend, daySpendByUse,   // lane decision-spend-readout
   ROAD_WHY, ROAD_GATE_WHY, ROAD_WORDS, judgedRoadState, roadWhyOf, judgedRoadLine, judgedSkipLine,   // lane judged-watch-state (B-f42e): THE judged road
-  dayOf, rateOf, budgetVerdict, settleUsd, fetchFailOf, oneShotBody, retryAfterMs, nextBackoff, isWall, isKeyRefused, ROW_STOPS, rowStopOf, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
+  dayOf, rateOf, budgetVerdict, settleUsd, journalKeep, fetchFailOf, oneShotBody, retryAfterMs, nextBackoff, isWall, isKeyRefused, ROW_STOPS, rowStopOf, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
 };

@@ -1141,7 +1141,7 @@ console.log('⑪ lane dm-reply-infers (B-6b4b): a plain reply judged ONCE by the
   const y = await inferLeg('e11-yes');
   await y.step(y.mkR('w-1', 2 * H1));
   const yIn = y.J.fetches[0] && y.J.fetches[0].input;
-  const yRow = y.J.journal().find((r) => r.use === 'reply-infer');
+  const yRow = y.J.journal().find((r) => r.use === 'reply-infer' && r.outcome !== 'reserved');   // B-0248's next part: the RESULT line (its reservation comes first)
   ok(y.set.ok && y.J.judged.length === 1 && y.J.fetches.length === 1 && y.delivered.length === 1 && y.delivered[0].cid === 'agent-1', 'a plain DM answer 2 h after the agent\'s send, judged YES ⇒ ONE call, ONE wake to the agent that sent', JSON.stringify({ judged: y.J.judged.length, fetches: y.J.fetches.length, delivered: y.delivered.map((d) => d.cid) }));
   ok(/matched: judged an answer to your message of \d\d:\d\d UTC/.test(y.delivered[0].text) && /\nReply to your message \([^)]*, "Can you send me the signed contract by Friday\?", judged 0\.90\): from userW at /.test(y.delivered[0].text) && y.delivered[0].o && y.delivered[0].o.spendReason === 'channel-message', 'the same wake, the same card: the why says it was judged, the hand-over line names the answered message and the score (the existing money door, channel-message)', y.delivered[0].text.split('\n').slice(0, 4).join(' | '));
   ok(yIn && /\nsent: Can you send me the signed contract by Friday\?\nreply: Signed it — sending now \(w-1\)\ngap: 120 minutes\nbetween: Nobody else wrote between sent and reply\.$/.test(yIn) && !yIn.includes(y.r0.text) && y.J.fetches[0].questions.length === 1 && y.J.fetches[0].questions[0].name === 'answers_sent', 'the parts = the sent text + the candidate\'s text + the gap + the between line (fixed words — lane reply-infer-owner-between) — NOTHING else of the conversation (its first message is not in the input); ONE fixed question', yIn);
@@ -1175,7 +1175,7 @@ console.log('⑪ lane dm-reply-infers (B-6b4b): a plain reply judged ONCE by the
   // ── THE CAP reached ⇒ no judgment, and the record says so ──
   const b = await inferLeg('e11-budget', { budgetCents: 0 });
   await b.step(b.mkR('w-1', 2 * H1));
-  const bRow = b.J.journal().find((r) => r.use === 'reply-infer');
+  const bRow = b.J.journal().find((r) => r.use === 'reply-infer' && r.outcome !== 'reserved');
   ok(b.J.fetches.length === 0 && b.delivered.length === 0 && bRow && bRow.outcome === 'refused' && bRow.why === 'daily-budget' && b.lines.some((l) => /reply-infer — 1 plain message\(s\) not judged — daily-budget \(no hit, no wake/.test(l)), 'the day\'s budget spent ⇒ no call, no wake; the decision ledger records the refusal (daily-budget) and the channels journal names it', JSON.stringify({ bRow, lines: b.lines.filter((l) => /reply-infer/.test(l)) }));
   const hcap = await inferLeg('e11-hour', { p: 0.2 });
   await hcap.step(...Array.from({ length: 22 }, (_, i) => hcap.mkR(`w-h${i}`, 2 * H1 + i * 1000)));

@@ -10258,6 +10258,7 @@ export default {
   "OpenRouter says the plan does not allow this model": "OpenRouter 说当前套餐不能用这个模型",
   "the model gave no usable proposal — try again": "模型没给出可用的提议——再试一次",
   "OpenRouter did not answer — try again in a minute": "OpenRouter 没有回应——过一分钟再试",
+  "the draft was not sent: its spending line could not be written to the data folder — nothing was charged; try again once the storage writes": "草稿没有发出：它的花费记录没能写入数据文件夹——没有任何花费；等存储恢复写入后再试", // B-0248's next part (r2417 law 2): the drafter's reservation did not land
   "{model} read {n} of your decisions and proposes {m} lines": "{model} 读了你的 {n} 个判定，提议 {m} 行",
   "digests went through OpenRouter to a zero-data-retention endpoint": "摘要经 OpenRouter 送到零数据保留端点",
   "use this line": "用这一行",
