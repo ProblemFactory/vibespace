@@ -593,7 +593,14 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   const LP = launches().slice(b0).filter((l) => l.sess === 'vs-bk-0000e5a1');
   let planned = null; try { planned = LP[0] && LP[0].config ? JSON.parse(fs.readFileSync(LP[0].config, 'utf8')) : null; } catch { planned = null; }
   if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(c.status === 0 && LP.length === 1 && LP[0].headed === true && LP[0].xvfb === true && /--ozone-platform=x11/.test(LP[0].args), 'H5 the pod, setting UNSET: the launch is HEADED on the CLI\'s own Xvfb (the hidden-window rung), not headless', { LP, stderr: c.stderr });
-  else ok(c.status === 0 && LP.length === 1 && LP[0].headed === false && recP && recP.display && !recP.display.wanted.byDefault && !recP.display.fallback, 'H5 OFF (2.369.200) the pod, setting UNSET: the launch is headless as in .199 — no window asked, no plan, no default mark', { LP, d: recP && recP.display, stderr: c.stderr });
+  // r1679 (the load row — seen red at 717191cda-20261121224429-both, UTC only: the launch WAS headless, one, no default mark, no
+  // fallback — every product term held; the one term the detail never printed was the verb's own answer, c.status, and its stderr
+  // was cut at its HEAD): the verb's answer is its OWN leg now (status, killed, signal, ms, stderr's TAIL), and the display law is
+  // judged on the launch and the record alone — a slow or refused verb on a loaded runner is said by name, never read as the law
+  else {
+    ok(c.status === 0, `H5 OFF …the agent's verb answered (status ${c.status}${c.killed ? ', KILLED at the runner\'s 30 s bound' : ''}${c.signal ? ', signal ' + c.signal : ''}, ${c.ms} ms)`, { status: c.status, killed: c.killed, signal: c.signal, ms: c.ms, stderrTail: String(c.stderr || '').slice(-300) });
+    ok(LP.length === 1 && LP[0].headed === false && recP && recP.display && !recP.display.wanted.byDefault && !recP.display.fallback, 'H5 OFF (2.369.200) the pod, setting UNSET: the launch is headless as in .199 — no window asked, no plan, no default mark', { LP, d: recP && recP.display });
+  }
   if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(planned && planned.headed === true && recP && recP.display && recP.display.wanted.byDefault === true && recP.display.fallback.rung === 'hidden-window', 'H5 …the LAUNCH CONFIG the keeper names carries headed:true, and the record\'s fact says the window was the default\'s (wanted.byDefault)', { planned, d: recP && recP.display });
   else ok(!planned || planned.headed !== true, 'H5 OFF …the launch config the keeper names asks no window', { planned });
   c = await cli(['eval', 'navigator.userAgent'], cliP(sP));
