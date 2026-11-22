@@ -271,8 +271,9 @@ function mintProgressId(taken) {
 }
 // PROGRESS ARCHIVE (2.369.204, the owner 2026-10-03: "进展记录不再删除"): the live list keeps the newest
 // LIVE_PROGRESS entries; an entry leaving it is MOVED — appended to data/task-groups-archive/<taskId>/<YYYY-MM>.ndjson
-// (the entry's own `at`, UTC month), one JSON line per entry, by _archiveProgress (THE one writer) BEFORE the live
-// list is trimmed: a crash between the two leaves the entry twice (every reader dedups by id), never nowhere. A month
+// (the entry's own `at`, UTC month), one JSON line per entry, THROUGH THE STORE WRITER (B-0248 step 3 (c): an append job on its
+// thread, fsynced — the main thread never opens the share at a note), and the live list is trimmed only once that append LANDED
+// (_archiveLanded): a crash between the two leaves the entry twice (every reader dedups by id), never nowhere. A month
 // file is only ever appended to, except by a clear and a config import (each rewrites ONE month file, tmp + rename);
 // a Task Group delete removes its directory. Reads page backwards by `before` (readProgress), bounded per request.
 const LIVE_PROGRESS = 500;
@@ -376,6 +377,7 @@ class TaskGroupManager {
     this._file = path.join(dataDir, 'task-groups.json');
     this._legacyFile = path.join(dataDir, 'tasks.json');
     this._archiveRoot = path.join(dataDir, ARCHIVE_DIR);
+    this._archQ = new Map();   // B-0248 step 3 (c): month file → { gid, month, ids (owed, not made yet), flying ([{id, clearedAt}] in an append on its way) }
     this._onChange = onChange || (() => {});
     this._state = { version: 1, tasks: {} };
     this._lastMd = new Map(); // groupId → last written TASK.md content (skip no-op writes)
@@ -3056,7 +3058,7 @@ class TaskGroupManager {
     // safe side: it admits nobody new); the reversed order (the cleanup riding the landing) could leave a row and a folder that a
     // group made again under the same id would inherit.
     // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
-    if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
+    if (archivableId(id)) { this._archiveDrop(id); fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true }); }
     const touched = this._touchDescendants(id, Date.now());   // lane lg-group-parents U4: the descendants are told without it (the cure (E): each named in the notice)
     delete this._state.tasks[id];
     for (const c of Object.values(this._state.tasks)) if (c && Array.isArray(c.parents) && c.parents.includes(id)) { if (!touched.includes(c.id)) touched.push(c.id); const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }   // lane lg-group-parents: a gone parent leaves every child's list
@@ -3195,22 +3197,87 @@ class TaskGroupManager {
     return { ...t };
   }
 
-  /** THE archive writer: `entries` (oldest first) appended to their month files. Throws on a failed write. */
-  _archiveProgress(id, entries) {
-    if (!archivableId(id)) throw new Error('no archive for this group id');
-    const byMonth = new Map();
-    for (const p of entries) if (p && typeof p === 'object') { const m = monthOf(p.at); byMonth.set(m, (byMonth.get(m) || '') + JSON.stringify(p) + '\n'); }
-    if (!byMonth.size) return;
-    const dir = path.join(this._archiveRoot, id);
-    fs.mkdirSync(dir, { recursive: true });
-    for (const [m, text] of byMonth) fs.appendFileSync(path.join(dir, m + '.ndjson'), text);
-  }
-  /** `list` capped to the live LIVE_PROGRESS: the overflow MOVES to the archive first; a failed archive write keeps it live. */
+  // ── THE ARCHIVE APPEND OFF THE LOOP (B-0248 step 3 (c), r1443) — every note of a group at its LIVE_PROGRESS bound appended its oldest
+  // entry to its month file on the main thread (an open + write + close on the data folder's share). Now the overflow is handed to
+  // the store writer by its ids: it STAYS LIVE (in memory and in task-groups.json) until its append landed, then it leaves the live
+  // list in one more save; a failed append keeps it live and the writer retries (the release's law). The bytes are made AT the write
+  // from the live entry — a clear of an entry still owed is written cleared; one cleared while its append flew is cleared in the
+  // file once it landed. A month file a clear or an import rewrites, and a group's removal, settle what is owed to it first. ──
+  /** `list` over the live LIVE_PROGRESS: its overflow is owed to the archive (its month files) — the list is returned WHOLE (each
+   *  entry leaves it once its append landed: _archiveLanded); an id the archive cannot hold keeps its overflow live, as before */
   _keepLive(id, list) {
-    if (list.length <= LIVE_PROGRESS) return list;
-    try { this._archiveProgress(id, list.slice(0, list.length - LIVE_PROGRESS)); }
-    catch (e) { console.error(`[task-groups] ${id}: the Activity-log archive write failed (${(e && e.code) || 'error'}) — the overflow stays live`); return list; }
-    return list.slice(-LIVE_PROGRESS);
+    if (list.length <= LIVE_PROGRESS || !archivableId(id)) return list;
+    for (const p of list.slice(0, list.length - LIVE_PROGRESS)) {
+      if (!p || typeof p !== 'object' || typeof p.id !== 'string') continue;   // an entry with no id stays live (every entry has one since 2026-09-28)
+      const file = path.join(this._archiveRoot, id, monthOf(p.at) + '.ndjson');
+      const q = this._archQ.get(file) || { gid: id, month: monthOf(p.at), ids: new Set(), flying: null };
+      if (q.flying && q.flying.some((x) => x.id === p.id)) continue;
+      q.ids.add(p.id); this._archQ.set(file, q);
+    }
+    for (const [file, q] of this._archQ) if (q.gid === id && q.ids.size) this._archiveAsk(file);
+    return list;
+  }
+  /** a month file's append handed to the store writer (THE archive writer; its timed-sync row's literal name) */
+  _archiveAsk(file) {
+    try { this._writer().dirty(file, { name: 'task-groups-archive.write', makeDir: true, produce: () => this._archiveProduce(file), onWritten: (ok, e) => this._archiveLanded(file, ok, e) }); }
+    catch (e) { console.warn(`[tasks] an Activity-log archive append could not be handed to the store writer: ${e && e.message}`); }
+  }
+  /** the bytes of one append, made NOW from the live entries still owed (a cleared one written cleared) → {append} | null (nothing owed) */
+  _archiveProduce(file) {
+    if (this._unread) throw Object.assign(new Error('task-groups.json is held (its read failed) — nothing is appended until it reads'), { code: 'EHELD' });
+    const q = this._archQ.get(file);
+    if (!q || !q.ids.size) return null;
+    const t = this._state.tasks[q.gid];
+    const live = new Map(((t && t.progress) || []).filter((p) => p && p.id).map((p) => [p.id, p]));
+    const sent = [], lines = [];
+    for (const id of q.ids) { const p = live.get(id); if (p) { sent.push({ id, clearedAt: p.clearedAt || null }); lines.push(JSON.stringify(p) + '\n'); } }
+    q.ids.clear();
+    if (!lines.length) return null;
+    q.flying = sent;
+    return { append: lines.join('') };
+  }
+  /** an append's outcome: landed ⇒ its entries leave the live list (one save); failed ⇒ owed again, said once until one lands */
+  _archiveLanded(file, ok, e) {
+    const q = this._archQ.get(file);
+    if (!q) return;
+    const fly = q.flying || [];
+    q.flying = null;
+    if (!ok) {
+      for (const x of fly) q.ids.add(x.id);
+      if (!this._archOwedSaid) { this._archOwedSaid = true; console.warn(`[tasks] an Activity-log archive append was not written (${(e && (e.code || e.message)) || 'an error'}) — its entries stay in the live list, the store writer retries`); }
+      if (q.ids.size) this._archiveAsk(file);
+      return;
+    }
+    if (this._archOwedSaid && fly.length) { this._archOwedSaid = false; console.warn('[tasks] the Activity-log archive is written again'); }
+    const t = this._state.tasks[q.gid];
+    if (t && fly.length && Array.isArray(t.progress)) {
+      const byId = new Map(t.progress.filter((p) => p && p.id).map((p) => [p.id, p]));
+      // cleared while its append flew: the file holds the words it had — cleared there now (the clear's own one-file rewrite)
+      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(q.gid, q.month, new Set([x.id]), { by: p.clearedBy || 'owner', at: p.clearedAt }, { settle: false }); }
+      const landed = new Set(fly.map((x) => x.id));
+      t.progress = t.progress.filter((p) => !(p && landed.has(p.id)));   // MOVED: on disk in its month file
+      this._save();
+    }
+    if (!q.ids.size && !q.flying) this._archQ.delete(file);
+  }
+  /** what this store still owes `file` (a month file about to be rewritten) lands first — a named wait (test-store-write-census WAITS):
+   *  a clear's and an import's one-file rewrite never races an append of the same file */
+  _archiveSettle(files) {
+    const W = this._writer();
+    const owed = (files || [...this._archQ.keys()]).filter((f) => W.pending(f));
+    if (owed.length) W.flushSync(owed);
+  }
+  /** a group's removal: what it still owes its archive is DROPPED (never written after its folder went); an append on its way lands
+   *  first (an append that lands after the removal would make the folder again — a group made again under the same id inheriting it) */
+  _archiveDrop(id) {
+    const W = this._writer();
+    for (const [file, q] of [...this._archQ]) {
+      if (q.gid !== id) continue;
+      q.ids.clear();
+      if (q.flying) this._archiveSettle([file]);
+      W.forget(file);
+      this._archQ.delete(file);
+    }
   }
   _archiveMonths(id) {
     if (!archivableId(id)) return [];
@@ -3236,8 +3303,9 @@ class TaskGroupManager {
     return [];
   }
   /** a clear's archive half: every line of month `m` whose id is in `ids` cleared, the ONE file rewritten (tmp + rename) → the ids changed */
-  _archiveClear(id, m, ids, { by, at }) {
+  _archiveClear(id, m, ids, { by, at }, { settle = true } = {}) {
     const f = path.join(this._archiveRoot, id, m + '.ndjson');
+    if (settle) this._archiveSettle([f]);   // B-0248 step 3 (c): an append owed to this month lands before the file is rewritten
     let text;
     try { text = fs.readFileSync(f, 'utf8'); } catch { return []; }
     const changed = new Set();
@@ -3421,6 +3489,7 @@ class TaskGroupManager {
   // after this the structured store is the truth (never re-parsed live).
   importFromFile(absPath) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
+    this._archiveSettle();   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten
     if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
     let text;
     try { text = fs.readFileSync(absPath, 'utf-8'); } catch (e) { if (e && e.code === 'EVSMOUNTSYNC') throw e; throw new Error('cannot read ' + absPath); } // lane hub-fuse-sync-guard: a refusal is said by name, never as a missing file
@@ -3552,7 +3621,7 @@ class TaskGroupManager {
     }
     return { version: 1, tasks: Object.values(this._state.tasks), ...(Object.keys(archive).length ? { archive } : {}) };
   }
-  /** an imported group's archive months, MERGED into this instance's (by id, a cleared copy wins, time order), one tmp + rename per month */
+  /** an imported group's archive months, MERGED into this instance's (B-0248 step 3 (c): the imports settle every owed append first) (by id, a cleared copy wins, time order), one tmp + rename per month */
   _importArchive(id, months, read = null) {
     if (!archivableId(id) || !months || typeof months !== 'object') return;
     const have = read instanceof Map ? read : new Map(); // every month read FIRST (strict): one that could not be read refuses the import before any month is written — importBundle hands the months it read for ALL groups (never read twice)
@@ -3575,6 +3644,7 @@ class TaskGroupManager {
 
   importBundle(bundle, { bearer = false, log = (m) => console.log(m) } = {}) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
+    this._archiveSettle();   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten
     const items = Array.isArray(bundle?.tasks) ? bundle.tasks : [];
     // every group's archived months read STRICTLY first (主开发 00:41Z (e)): one that could not be read refuses the import before ANY group is applied — and what was read is what the loop merges (never a second read that could fail half-way)
     const pre = new Map();

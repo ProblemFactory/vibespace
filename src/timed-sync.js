@@ -37,6 +37,7 @@ const STORES = Object.freeze({
   'user-todos.read': row('read', 'user-todos', 'src/user-todos.js'),
   'task-groups.write': row('write', 'task-groups', 'src/task-groups.js', ['_save']),
   'task-groups.read': row('read', 'task-groups', 'src/task-groups.js'),
+  'task-groups-archive.write': row('write', 'task-groups-archive-months', 'src/task-groups.js', ['_archiveAsk']),   // B-0248 step 3 (c): the Activity log's archive appends, through the store writer (THE archive writer)
   'jobs.write': row('write', 'jobs', 'src/jobs.js', ['_save']),
   'jobs-notifs.write': row('write', 'job-notifications', 'src/jobs.js', ['_save', '_saveNotifs']),
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),

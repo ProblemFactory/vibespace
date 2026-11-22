@@ -426,6 +426,11 @@
   "stops": "the agent's «done»: it says not on disk"
  },
  {
+  "key": "task-groups · src/task-groups.js · TaskGroupManager._archiveLanded · _save()",
+  "verdict": "none",
+  "why": "lost: kept twice, deduped by id"
+ },
+ {
   "key": "task-groups · src/task-groups.js · TaskGroupManager.clearProgress · _save()",
   "verdict": "waits",
   "why": "The clear's answer (owner route and agent progress-redact) is sent only from whenStored → tasks.persisted(); the archive month files are cleared before the record (safe order).",

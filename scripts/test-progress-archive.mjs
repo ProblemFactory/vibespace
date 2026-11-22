@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // test-progress-archive (fast, in-process) — 2.369.204, the owner 2026-10-03 "进展记录不再删除": a Task Group's
 // Activity log keeps its newest 500 entries live and MOVES the overflow to data/task-groups-archive/<taskId>/<YYYY-MM>.ndjson
-// (append-only, written BEFORE the live list is trimmed). Judged on the REAL store in a scratch data dir: nothing is
+// (append-only, through the store writer since B-0248 step 3 (c): the live list is trimmed only once the append LANDED).
+// Judged on the REAL store in a scratch data dir: nothing is
 // lost, a crash duplicate is read once, pages walk the whole log by `before` within a byte budget, a clear reaches the
 // archive copy (ONE month file rewritten), a delete takes the directory, a config bundle carries it — each rule bitten
 // by a patched copy of src/task-groups.js (scripts/mutant-copy.mjs).
@@ -31,32 +32,50 @@ const seed = (w, n, t0 = Date.UTC(2026, 8, 30, 23, 0), step = 60e3) => {
   const t = w.tg._state.tasks[w.id];
   t.progress = Array.from({ length: n }, (_, i) => ({ id: 'P-' + (0x100000 + i).toString(16), at: t0 + i * step, note: `note ${i}`, ...(i % 7 === 0 ? { detail: `detail ${i}` } : {}), session: i % 2 ? 'claude:a' : 'claude:b' }));
 };
+// B-0248 step 3 (c): the appends go through the process's store writer (its thread) — a leg lands them (and the trim's save) before it reads
+const SW = require(path.join(repo, 'src/store-writer.js')).storeWriter();
+const land = () => { for (let i = 0; i < 4; i++) SW.flushSync(); };
+const monthKey = (at) => new Date(at).toISOString().slice(0, 7);
+/** a crash between the append and the trim: `p` written straight into its month file while it is still live */
+const crashDup = (w, p) => { fs.mkdirSync(archDir(w), { recursive: true }); fs.appendFileSync(path.join(archDir(w), monthKey(p.at) + '.ndjson'), JSON.stringify(p) + '\n'); };
 const walk = (w, limit = 100) => { const all = []; let before = null, pages = 0, r; do { r = w.tg.readProgress(w.id, { before, limit }); all.push(...r.entries); if (r.entries.length) before = r.entries[r.entries.length - 1].at; pages++; } while (r.more && pages < 500); return { all, pages }; };
 
 console.log('① the overflow is MOVED, never dropped (written before the trim; a failed write keeps it live)');
-const ruleMoved = (M) => { const w = mk(M); seed(w, 500); for (let i = 0; i < 12; i++) w.tg.addProgress(w.id, { note: `fresh ${i}`, session: 'claude:a' }); const live = w.tg.get(w.id).progress; const arch = archLines(w); const ids = new Set([...arch, ...live].map((p) => p.id)); return { live: live.length, arch: arch.length, union: ids.size, oldestArchived: arch[0] && arch[0].note }; };
+const ruleMoved = (M) => { const w = mk(M); seed(w, 500); for (let i = 0; i < 12; i++) w.tg.addProgress(w.id, { note: `fresh ${i}`, session: 'claude:a' }); land(); const live = w.tg.get(w.id).progress; const arch = archLines(w); const ids = new Set([...arch, ...live].map((p) => p.id)); return { live: live.length, arch: arch.length, union: ids.size, oldestArchived: arch[0] && arch[0].note }; };
 { const r = ruleMoved(REAL); check('500 live + 12 added ⇒ 500 live, 12 archived, 512 distinct entries (nothing lost)', r.live === 500 && r.arch === 12 && r.union === 512 && r.oldestArchived === 'note 0', r); }
 { const M = patched('t.progress = this._keepLive(id, t.progress);', 't.progress = t.progress.slice(-500);', 'dropped'); const r = ruleMoved(M); check('CONTROL: the pre-lane trim (slice(-500), no archive) loses the 12 — the rule above goes red', r.union === 500 && r.arch === 0, r); }
-{ const w = mk(); seed(w, 500); fs.mkdirSync(path.join(w.dir, 'task-groups-archive'), { recursive: true }); fs.writeFileSync(archDir(w), 'not a dir'); const err = console.error; console.error = () => {}; try { w.tg.addProgress(w.id, { note: 'x' }); } finally { console.error = err; } check('a failed archive write keeps the overflow LIVE (501 entries), never a loss', w.tg.get(w.id).progress.length === 501); }
-{ const order = []; const w = mk(); seed(w, 500); const a = w.tg._archiveProgress.bind(w.tg); w.tg._archiveProgress = (...x) => { order.push('archive:' + w.tg.get(w.id).progress.length); return a(...x); }; w.tg.addProgress(w.id, { note: 'y' }); check('the archive append runs while the live list still holds the entry (before the trim and the save)', order[0] === 'archive:501', order); }
+{ const w = mk(); seed(w, 500); fs.mkdirSync(path.join(w.dir, 'task-groups-archive'), { recursive: true }); fs.writeFileSync(archDir(w), 'not a dir'); const warn = console.warn; console.warn = () => {}; try { w.tg.addProgress(w.id, { note: 'x' }); land(); } finally { console.warn = warn; } check('a failed archive append keeps the overflow LIVE (501 entries), never a loss', w.tg.get(w.id).progress.length === 501);
+  fs.rmSync(archDir(w), { force: true }); land(); check('…and once the storage answers, the retry lands it (500 live, 1 archived)', w.tg.get(w.id).progress.length === 500 && archLines(w).length === 1); }
+{ const M = patched('    if (list.length <= LIVE_PROGRESS || !archivableId(id)) return list;\n    for (const p of list.slice(0, list.length - LIVE_PROGRESS)) {', '    if (list.length <= LIVE_PROGRESS || !archivableId(id)) return list;\n    if (list) { for (const p of list.slice(0, list.length - LIVE_PROGRESS)) if (p && p.id) { const file = path.join(this._archiveRoot, id, monthOf(p.at) + \'.ndjson\'); const q = this._archQ.get(file) || { gid: id, month: monthOf(p.at), ids: new Set(), flying: null }; q.ids.add(p.id); this._archQ.set(file, q); this._archiveAsk(file); } return list.slice(-LIVE_PROGRESS); }\n    for (const p of list.slice(0, list.length - LIVE_PROGRESS)) {', 'trim-at-once');
+  const w = mk(M); seed(w, 500); fs.mkdirSync(path.join(w.dir, 'task-groups-archive'), { recursive: true }); fs.writeFileSync(archDir(w), 'not a dir'); const warn = console.warn; console.warn = () => {}; try { w.tg.addProgress(w.id, { note: 'x' }); land(); } finally { console.warn = warn; }
+  check('CONTROL (a copy that trims at the hand-off, before the append landed): the failed append LOSES the overflow (500 live, nothing archived) — red', w.tg.get(w.id).progress.length === 500 && !archLines(w).length);
+  fs.rmSync(archDir(w), { force: true }); land(); }
+// B-0248 step 3 (c): A NOTE AT THE BOUND OPENS NOTHING ON THE MAIN THREAD — the append is handed to the writer; the entry stays live until it landed
+const ruleOffLoop = (M) => { const w = mk(M); seed(w, 500); const n = { mkdir: 0, append: 0, open: 0 }; const mk0 = fs.mkdirSync, ap0 = fs.appendFileSync, op0 = fs.openSync;
+  fs.mkdirSync = (...a) => { if (String(a[0]).includes('task-groups-archive')) n.mkdir++; return mk0(...a); }; fs.appendFileSync = (...a) => { if (String(a[0]).includes('task-groups-archive')) n.append++; return ap0(...a); }; fs.openSync = (...a) => { if (String(a[0]).includes('task-groups-archive')) n.open++; return op0(...a); };
+  let atNote; try { w.tg.addProgress(w.id, { note: 'y' }); atNote = { live: w.tg.get(w.id).progress.length, file: fs.existsSync(path.join(archDir(w), '2026-09.ndjson')) }; } finally { fs.mkdirSync = mk0; fs.appendFileSync = ap0; fs.openSync = op0; }
+  land(); return { n, atNote, after: { live: w.tg.get(w.id).progress.length, arch: archLines(w).length } }; };
+{ const r = ruleOffLoop(REAL); check('a note at the 500 bound opens, makes and appends NOTHING on the main thread; the entry stays live (501, no file) until its append landed (then 500 live, 1 archived)', r.n.mkdir + r.n.append + r.n.open === 0 && r.atNote.live === 501 && !r.atNote.file && r.after.live === 500 && r.after.arch === 1, r); }
+{ const M = patched('    if (list.length <= LIVE_PROGRESS || !archivableId(id)) return list;\n    for (const p of list.slice(0, list.length - LIVE_PROGRESS)) {', '    if (list.length <= LIVE_PROGRESS || !archivableId(id)) return list;\n    if (list) { const dir = path.join(this._archiveRoot, id); fs.mkdirSync(dir, { recursive: true }); for (const p of list.slice(0, list.length - LIVE_PROGRESS)) fs.appendFileSync(path.join(dir, monthOf(p.at) + \'.ndjson\'), JSON.stringify(p) + \'\\n\'); return list.slice(-LIVE_PROGRESS); }\n    for (const p of list.slice(0, list.length - LIVE_PROGRESS)) {', 'sync-append');
+  const r = ruleOffLoop(M); check('CONTROL (the release\'s synchronous append, a copy): the note makes the folder and appends on the main thread — red', r.n.mkdir + r.n.append > 0, r); }
 
 console.log('② pages walk the whole log by `before` — newest first, deduped, nothing skipped at a shared instant');
-{ const w = mk(); seed(w, 900); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress);
+{ const w = mk(); seed(w, 900); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); land();
   const files = fs.readdirSync(archDir(w)).sort();
   check('the archive splits by the entry\'s UTC month (2026-09 / 2026-10 files)', files.join() === '2026-09.ndjson,2026-10.ndjson', files);
-  w.tg._archiveProgress(w.id, [w.tg.get(w.id).progress[0]]);   // a crash between the append and the trim: the oldest live entry is in both
+  crashDup(w, w.tg.get(w.id).progress[0]);   // a crash between the append and the trim: the oldest live entry is in both
   const { all, pages } = walk(w, 100);
   const ids = all.map((p) => p.id);
   check('a 100-entry walk returns all 900 entries once each (the crash duplicate read once)', ids.length === 900 && new Set(ids).size === 900, { n: ids.length, uniq: new Set(ids).size, pages });
   check('…newest first, every page', all.every((p, i) => !i || all[i - 1].at >= p.at));
   check('limit is clamped to 200', w.tg.readProgress(w.id, { limit: 5000 }).entries.length === 200); }
-{ const w = mk(); seed(w, 520, Date.UTC(2026, 9, 1), 60e3); const t = w.tg._state.tasks[w.id]; for (const i of [17, 18, 19]) t.progress[i].at = t.progress[16].at; t.progress = w.tg._keepLive(w.id, t.progress);
+{ const w = mk(); seed(w, 520, Date.UTC(2026, 9, 1), 60e3); const t = w.tg._state.tasks[w.id]; for (const i of [17, 18, 19]) t.progress[i].at = t.progress[16].at; t.progress = w.tg._keepLive(w.id, t.progress); land();
   const p1 = w.tg.readProgress(w.id, { before: t.progress[0].at, limit: 4 }); const p2 = w.tg.readProgress(w.id, { before: p1.entries[p1.entries.length - 1].at, limit: 4 });
   const got = [...p1.entries, ...p2.entries].map((p) => p.id);
   check('four entries of ONE millisecond at a page boundary ride together (a `before` cursor never skips one)', ['P-100010', 'P-100011', 'P-100012', 'P-100013'].every((x) => got.includes(x)), got); }
 
 console.log('③ one page reads a bounded number of bytes (binary search into the month, not a scan from its end)');
-const ruleBounded = (M) => { const w = mk(M); const t = w.tg._state.tasks[w.id]; const big = 'x'.repeat(900); seed(w, 6500, Date.UTC(2026, 9, 1), 1000); for (const p of t.progress) p.detail = big; t.progress = w.tg._keepLive(w.id, t.progress);
+const ruleBounded = (M) => { const w = mk(M); const t = w.tg._state.tasks[w.id]; const big = 'x'.repeat(900); seed(w, 6500, Date.UTC(2026, 9, 1), 1000); for (const p of t.progress) p.detail = big; t.progress = w.tg._keepLive(w.id, t.progress); land();
   const lines = archLines(w); const mid = lines[1000].at; let bytes = 0; const rs = fs.readSync; fs.readSync = (fd, b, o, l, p) => { const n = rs(fd, b, o, l, p); bytes += n; return n; };
   let r; try { r = w.tg.readProgress(w.id, { before: mid, limit: 100 }); } finally { fs.readSync = rs; }
   return { bytes, size: fs.statSync(path.join(archDir(w), '2026-10.ndjson')).size, n: r.entries.length, first: r.entries[0] && r.entries[0].at < mid };
@@ -65,7 +84,7 @@ const ruleBounded = (M) => { const w = mk(M); const t = w.tg._state.tasks[w.id];
 { const M = patched('  if (!Number.isFinite(lim)) return size;', '  return size;', 'scan-from-end'); const r = ruleBounded(M); check('CONTROL: without the binary search the same page scans from the month\'s end (> 1.5 MB) — the rule goes red', r.bytes > 1.5e6, r); }
 
 console.log('④ a clear reaches the archive copy — ONE month file rewritten, the rest byte-identical');
-const ruleClear = (M) => { const w = mk(M); seed(w, 560, Date.UTC(2026, 8, 30, 23, 30)); const t = w.tg._state.tasks[w.id]; t.progress[40].note = 'PLANTED-word'; t.progress[40].detail = 'PLANTED-detail'; t.progress = w.tg._keepLive(w.id, t.progress);
+const ruleClear = (M) => { const w = mk(M); seed(w, 560, Date.UTC(2026, 8, 30, 23, 30)); const t = w.tg._state.tasks[w.id]; t.progress[40].note = 'PLANTED-word'; t.progress[40].detail = 'PLANTED-detail'; t.progress = w.tg._keepLive(w.id, t.progress); land();
   const other = fs.readFileSync(path.join(archDir(w), '2026-09.ndjson'), 'utf8');
   const r = w.tg.clearProgress(w.id, ['P-100028'], { by: 'owner' });
   const oct = fs.readFileSync(path.join(archDir(w), '2026-10.ndjson'), 'utf8');
@@ -77,16 +96,16 @@ const ruleClear = (M) => { const w = mk(M); seed(w, 560, Date.UTC(2026, 8, 30, 2
   check('…by its ms `at` too', w.tg.clearProgress(w.id, [atRef]).cleared.join() === 'P-100009' && archLines(w).find((p) => p.id === 'P-100009').note === RC.CLEARED_TEXT);
   const refused = w.tg.clearProgress(w.id, ['P-10000a'], { allow: () => ({ ok: false, code: 'not_yours' }) });
   check('…the caller\'s verdict is asked of an archived entry (refused ⇒ untouched)', refused.refused.length === 1 && archLines(w).find((p) => p.id === 'P-10000a').note === 'note 10');
-  const dup = w.tg.get(w.id).progress[0]; w.tg._archiveProgress(w.id, [dup]);
+  const dup = w.tg.get(w.id).progress[0]; crashDup(w, dup);
   w.tg.clearProgress(w.id, [dup.id]);
   check('…a LIVE entry\'s crash-duplicate in the archive is cleared with it', archLines(w).filter((p) => p.id === dup.id).every((p) => p.note === RC.CLEARED_TEXT) && w.tg.get(w.id).progress[0].note === RC.CLEARED_TEXT); }
 { const M = patched('if (!hits.length) { hits = this._archiveFind(id, ref); live = false; }', '', 'live-only'); const r = ruleClear(M); check('CONTROL: a clear that looks in the live list only misses the planted archive line (unknown) — red', !r.gone && r.r.unknown.length === 1, r.r); }
 
 console.log('⑤ a Task Group delete takes its archive; Backup & migrate carries it');
-const ruleDelete = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); const had = fs.existsSync(archDir(w)); w.tg.remove(w.id); return { had, after: fs.existsSync(archDir(w)) }; };
+const ruleDelete = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); land(); const had = fs.existsSync(archDir(w)); w.tg.remove(w.id); return { had, after: fs.existsSync(archDir(w)) }; };
 { const r = ruleDelete(REAL); check('delete ⇒ data/task-groups-archive/<id>/ is gone', r.had && !r.after, r); }
-{ const M = patched('if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });', '', 'keep-dir'); const r = ruleDelete(M); check('CONTROL: without the rmSync the archived words outlive the group — red', r.had && r.after, r); }
-{ const a = mk(); seed(a, 530); const t = a.tg._state.tasks[a.id]; t.progress = a.tg._keepLive(a.id, t.progress); a.tg.clearProgress(a.id, ['P-100002']);
+{ const M = patched('this._archiveDrop(id); fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });', 'this._archiveDrop(id);', 'keep-dir'); const r = ruleDelete(M); check('CONTROL: without the rmSync the archived words outlive the group — red', r.had && r.after, r); }
+{ const a = mk(); seed(a, 530); const t = a.tg._state.tasks[a.id]; t.progress = a.tg._keepLive(a.id, t.progress); land(); a.tg.clearProgress(a.id, ['P-100002']);
   const bundle = JSON.parse(JSON.stringify(a.tg.exportBundle()));
   const b = { tg: new REAL.TaskGroupManager({ dataDir: freshDir(), onChange: () => {} }) }; b.id = a.id; b.dir = b.tg._file.replace(/\/task-groups\.json$/, '');
   fs.mkdirSync(archDir(b), { recursive: true }); fs.writeFileSync(path.join(archDir(b), '2026-09.ndjson'), JSON.stringify({ id: 'P-100002', at: archLines(a).find((p) => p.id === 'P-100002').at, note: 'old copy words', session: null }) + '\n');
@@ -94,7 +113,50 @@ const ruleDelete = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks[w.i
   const got = archLines(b);
   check('exportBundle carries the archive months; importBundle writes them (30 archived entries arrive)', !!bundle.archive && got.length === 30 && walk(b).all.length === 530, { n: got.length });
   check('…merged by id, a cleared copy wins over the target\'s uncleared one', got.find((p) => p.id === 'P-100002').note === RC.CLEARED_TEXT && !got.some((p) => /old copy words/.test(p.note))); }
-{ const M = patched("return { version: 1, tasks: Object.values(this._state.tasks), ...(Object.keys(archive).length ? { archive } : {}) };", 'return { version: 1, tasks: Object.values(this._state.tasks) };', 'no-export'); const a = mk(M); seed(a, 530); a.tg._state.tasks[a.id].progress = a.tg._keepLive(a.id, a.tg._state.tasks[a.id].progress); check('CONTROL: a bundle without the archive leaves the 30 behind — red', !a.tg.exportBundle().archive); }
+{ const M = patched("return { version: 1, tasks: Object.values(this._state.tasks), ...(Object.keys(archive).length ? { archive } : {}) };", 'return { version: 1, tasks: Object.values(this._state.tasks) };', 'no-export'); const a = mk(M); seed(a, 530); a.tg._state.tasks[a.id].progress = a.tg._keepLive(a.id, a.tg._state.tasks[a.id].progress); land(); check('CONTROL: a bundle without the archive leaves the 30 behind — red', !a.tg.exportBundle().archive); }
+
+console.log('⑦ B-0248 step 3 (c): what is still OWED to the archive — a clear, a removal');
+// an entry CLEARED while its append is owed reaches the file cleared — three belts: the clear's one-month rewrite settles what is owed
+// to that month first, the bytes are made at the write from the live entry, and a landed entry cleared meanwhile is cleared in the file
+// (any one alone holds; the control removes all three)
+const ruleQueuedClear = (M) => { const w = mk(M); seed(w, 500); const t = w.tg._state.tasks[w.id]; t.progress[0].note = 'QUEUED-words'; t.progress[0].detail = 'QUEUED-detail';
+  w.tg.addProgress(w.id, { note: 'z' }); const r = w.tg.clearProgress(w.id, ['P-100000'], { by: 'owner' }); land();
+  const raw = fs.readFileSync(path.join(archDir(w), '2026-09.ndjson'), 'utf8'); return { cleared: r.cleared.join(), words: raw.includes('QUEUED'), sentence: raw.includes(RC.CLEARED_TEXT), live: w.tg.get(w.id).progress.length }; };
+{ const r = ruleQueuedClear(REAL); check('an entry cleared while its append was owed reaches the file CLEARED (the sentence, never its words); then it leaves the live list', r.cleared === 'P-100000' && !r.words && r.sentence && r.live === 500, r); }
+{ const M = MUT.load('src/task-groups.js', [['      q.ids.add(p.id); this._archQ.set(file, q);', '      q.ids.add(p.id); (q.snap || (q.snap = new Map())).set(p.id, { ...p }); this._archQ.set(file, q);'], ["    const live = new Map(((t && t.progress) || []).filter((p) => p && p.id).map((p) => [p.id, p]));", '    const live = q.snap || new Map();'], ['    if (settle) this._archiveSettle([f]);', '    if (settle) { }'], ['      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', '      for (const x of []) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(']].reduce((src, [a, b]) => { if (src.split(a).length !== 2) throw new Error('control anchor gone: snap'); return src.replace(a, b); }, SRC), 'snap-at-queue');
+  const r = ruleQueuedClear(M); check('CONTROL (a copy that takes the bytes when the entry is QUEUED, rewrites a month without settling it first, and never clears a landed entry late — the three belts all gone): the cleared entry\'s words reach the archive — red', r.words, r); }
+// an entry cleared while its append FLEW: once it landed, the month file is cleared too (the clear's own one-file rewrite)
+const ruleFlyingClear = (M) => { const w = mk(M); seed(w, 500); const t = w.tg._state.tasks[w.id]; t.progress[0].note = 'FLYING-words';
+  w.tg.addProgress(w.id, { note: 'z' }); const file = path.join(archDir(w), '2026-09.ndjson');
+  const bytes = w.tg._archiveProduce(file);   // the writer's thread took them: the append is on its way
+  w.tg.clearProgress(w.id, ['P-100000'], { by: 'owner' });
+  fs.mkdirSync(archDir(w), { recursive: true }); fs.appendFileSync(file, bytes.append); w.tg._archiveLanded(file, true);   // …and it landed, with the words it had
+  land(); const raw = fs.readFileSync(file, 'utf8'); return { words: raw.includes('FLYING'), sentence: raw.includes(RC.CLEARED_TEXT), live: w.tg.get(w.id).progress.length }; };
+{ const r = ruleFlyingClear(REAL); check('an entry cleared while its append flew: once it landed, the month file holds the sentence, never its words; it leaves the live list', !r.words && r.sentence && r.live === 500, r); }
+{ const M = patched('      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', '      for (const x of []) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', 'no-late-clear');
+  const r = ruleFlyingClear(M); check('CONTROL (a copy without the late clear): the words it flew with stay in the archive — red', r.words, r); }
+// a group REMOVED: an append still owed makes no bytes (its group is gone), and one already ON ITS WAY lands BEFORE the folder goes —
+// an append that landed after the removal would make the folder again, and a group made again under the same id would inherit it.
+// A HOLDING writer (a stand-in) keeps one append in flight: its thread took the bytes, the landing is the scene's.
+const holdWriter = () => {
+  const st = { owed: new Map(), flying: null };
+  const writeOut = (file, o, bytes) => { if (bytes && typeof bytes === 'object' && 'append' in bytes) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.appendFileSync(file, bytes.append); } else if (bytes != null) fs.writeFileSync(file, bytes); if (o.onWritten) o.onWritten(true); };
+  const W = { st, dirty: (f, o) => st.owed.set(f, o), forget: (f) => { st.owed.delete(f); }, durable: () => Promise.resolve(true),
+    pending: (f) => st.owed.has(f) || !!(st.flying && st.flying.file === f),
+    take: (f) => { const o = st.owed.get(f); st.owed.delete(f); st.flying = { file: f, o, bytes: o.produce() }; },   // the writer's thread took the bytes
+    landFlying: () => { const x = st.flying; if (!x) return; st.flying = null; writeOut(x.file, x.o, x.bytes); },
+    flushSync: (files) => { if (st.flying && (!files || files.includes(st.flying.file))) W.landFlying(); for (const f of files || [...st.owed.keys()]) { const o = st.owed.get(f); if (!o) continue; st.owed.delete(f); writeOut(f, o, o.produce()); } return { written: [], left: [] }; } };
+  return W;
+};
+const ruleFlyingDelete = (M) => { const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir };
+  seed(w, 505); tg._state.tasks[g.id].progress = tg._keepLive(g.id, tg._state.tasks[g.id].progress);
+  const file = path.join(archDir(w), '2026-09.ndjson'); W.take(file);   // its append is on its way
+  tg.remove(g.id); const atRemove = fs.existsSync(archDir(w)); W.landFlying();   // whatever was still on its way lands now
+  return { atRemove, after: fs.existsSync(archDir(w)) }; };
+{ const r = ruleFlyingDelete(REAL); check('a group removed while its archive append FLIES: the append lands first, then the folder goes — nothing is written after the removal', !r.atRemove && !r.after, r); }
+{ const M = patched('this._archiveDrop(id); fs.rmSync(', 'fs.rmSync(', 'no-drop'); const r = ruleFlyingDelete(M); check('CONTROL (a copy that does not settle what flies): the append lands after the removal and makes the folder again — red', r.after, r); }
+{ const w = mk(); seed(w, 505); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); w.tg.remove(w.id); land();
+  check('a group removed with its archive append still OWED (not taken): nothing is written after the removal', !fs.existsSync(archDir(w))); }
 
 console.log('⑥ the doors: the route, the Task log window');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
