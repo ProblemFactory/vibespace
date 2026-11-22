@@ -28,6 +28,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600))); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const which = (b) => { try { return execFileSync('sh', ['-c', `command -v ${b}`], { encoding: 'utf8' }).trim(); } catch { return ''; } };
 const GIT = which('git'), OPENSSL = which('openssl');
 const BACKEND = GIT ? path.join(execFileSync(GIT, ['--exec-path'], { encoding: 'utf8' }).trim(), 'git-http-backend') : '';
@@ -162,7 +171,7 @@ try {
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/plugin-install.js'), 'utf8');
   const anchor = "GIT_CONFIG_GLOBAL: '/dev/null', ";
   const MC = mutantCopies('plugin-git-clone', REPO);
-  const insR = MC.load('src/server/plugin-install.js', SRC.replace(anchor, ''), 'home-config').create({ rootDir: IR, log: { log() {}, warn() {} }, integrations: () => store, gitBin: GIT, gitTimeoutMs: 30000 });
+  const insR = MC.load('src/server/plugin-install.js', editAnchor(SRC, anchor, '', "src/server/plugin-install.js"), 'home-config').create({ rootDir: IR, log: { log() {}, warn() {} }, integrations: () => store, gitBin: GIT, gitTimeoutMs: 30000 });
   const r = await swept(insR.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
   ok(SRC.includes(anchor) && r.err && r.err.code === 'plugin_git_auth' && evilSeen.some((x) => x.token), 'control: a copy WITHOUT GIT_CONFIG_GLOBAL follows the HOME rewrite and its askpass HANDS THE TOKEN to the other host (it answered 401, git asked, the token went) — RED', { err: r.err && r.err.code, evil: evilSeen.map((x) => ({ user: x.user, token: x.token })) });
   homeConfig();
@@ -177,8 +186,8 @@ try {
   homeConfig();
   const AES = fs.readFileSync(path.join(REPO, 'src/agent-env.js'), 'utf8');
   const caAnchor = ", 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH']);", reqAnchor = "const { serviceEnv } = require('../agent-env.js');";
-  const aeNoCa = MC.write('src/agent-env.js', AES.replace(caAnchor, ']);'), 'no-git-ca');
-  const insC = MC.load('src/server/plugin-install.js', SRC.replace(reqAnchor, `const { serviceEnv } = require(${JSON.stringify(aeNoCa)});`), 'no-git-ca').create({ rootDir: IR, log: { log() {}, warn() {} }, integrations: () => store, gitBin: GIT, gitTimeoutMs: 30000 });
+  const aeNoCa = MC.write('src/agent-env.js', editAnchor(AES, caAnchor, ']);', "src/agent-env.js"), 'no-git-ca');
+  const insC = MC.load('src/server/plugin-install.js', editAnchor(SRC, reqAnchor, `const { serviceEnv } = require(${JSON.stringify(aeNoCa)});`, "src/server/plugin-install.js"), 'no-git-ca').create({ rootDir: IR, log: { log() {}, warn() {} }, integrations: () => store, gitBin: GIT, gitTimeoutMs: 30000 });
   const n7b = seen.length;
   const gc = await swept(insC.install({ source: 'git', value: URL_H, ref: 'v2', credential: 'plugin-git' }));
   ok(AES.includes(caAnchor) && SRC.includes(reqAnchor) && gc.err && gc.err.code === 'plugin_git_failed' && /certificate|SSL|TLS/i.test(gc.err.message) && seen.length === n7b, 'control: a copy whose egress door lacks GIT_SSL_CAINFO / GIT_SSL_CAPATH fails the very clone ②–⑥ make (the hub names the CA, git never sees it) — RED', gc.err && gc.err.message);
@@ -239,7 +248,7 @@ console.log('— ⑨ the ssh host-key pin over real ssh (lane lg-remote-hardenin
           ok(SRC9.includes(from), '⑨ control: the pinned GIT_SSH_COMMAND is in plugin-install.js', from);
           const M9 = mutantCopies('plugin-git-clone-hostkey', REPO);
           values = { host: 'repo.test', deployKey, knownHosts: `repo.test ${pub('hostB')}\n` };
-          const eM = await install(M9.load('src/server/plugin-install.js', SRC9.replace(from, 'StrictHostKeyChecking=accept-new'), 'accept-new'));
+          const eM = await install(M9.load('src/server/plugin-install.js', editAnchor(SRC9, from, 'StrictHostKeyChecking=accept-new', "src/server/plugin-install.js"), 'accept-new'));
           const learned = (() => { try { return fs.readFileSync(homeKh, 'utf8'); } catch { return ''; } })();
           ok(eM && eM.code === 'plugin_git_auth' && learned.includes(pub('hostA').split(' ')[1]), '⑨ RED CONTROL: a copy with accept-new (no pin file) meets the same wrong pin, TRUSTS the stand-in\'s key (it lands in the scratch file standing in for the hub user\'s known_hosts) and goes on to the login — the leg above refuses that', eM && `${eM.code}: ${String(eM.message).slice(0, 120)}`);
           ok(!/Accepted /.test(fs.readFileSync(path.join(R, 'sshd.log'), 'utf8')), '⑨ the stand-in sshd accepted no login at all (AuthorizedKeysFile /dev/null)');

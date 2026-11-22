@@ -15,6 +15,15 @@ const { JobManager } = require('../src/jobs.js');
 const jobModel = require('../src/job-model.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(400); } return false; };
 
@@ -554,7 +563,7 @@ try {
     const JS = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
     const WAIT = 'const up = await this._portAnswers(job, job.ports[0], waitMs, gen);';
     ok(JS.split(WAIT).length === 2, 'the wait-for-the-port line is present once');
-    const JMmut = mutantCopies('jobs-publish', ROOT).load('src/jobs.js', JS.replace(WAIT, 'const up = true;'), 'no-wait').JobManager;
+    const JMmut = mutantCopies('jobs-publish', ROOT).load('src/jobs.js', editAnchor(JS, WAIT, 'const up = true;', "src/jobs.js"), 'no-wait').JobManager;
     calls.length = 0;
     const G = mkF(JMmut);
     const cg = G.create({ kind: 'service', name: 'late-web-ctl', cmd: late(2500), ports: [P], publish: true, restart: 'never', owner }, caller);

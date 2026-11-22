@@ -4211,7 +4211,7 @@ console.log('\n§22 the long-lived token\'s identity post-check: the real produc
     K22 >= 2 && JSON.stringify(lane.after) === JSON.stringify([...Array(K22 - 1).fill('pending'), 'mismatch']) && lane.checks.O2 === 'mismatch' && JSON.stringify(lane.others) === JSON.stringify([lane.OT_id]) && lane.kept, JSON.stringify(lane));
   ok('§22 …a conversation still on a row\'s PREVIOUS token never judges the token saved now (verify r1 F1) — however many turns', lane.checks.O3 === 'pending', JSON.stringify(lane.checks));
   ok('§22 …the pooled member whose folder holds its OWN login: its reading says nothing about its token — the check stays armed', lane.checks.LINK === 'pending' && lane.checks.OT === 'pending', JSON.stringify(lane.checks));
-  const baseSrc = ENG_SRC.replace(HOOK, '    const postCheck = () => { };\n');
+  const baseSrc = editAnchor(ENG_SRC, HOOK, '    const postCheck = () => { };\n', "src/server/usage-pool-engine.js");
   ok('§22 the control applies (the engine with the hook line cut out)', baseSrc !== ENG_SRC && !/oatIdentity\.onReading\(/.test(baseSrc));
   const base = run(MUT.load('src/server/usage-pool-engine.js', baseSrc, '22base'));
   ok('§22 …the base engine judges nothing (the checks are still armed) — the verdicts above are the hook\'s', base.checks.O1 === 'pending' && base.checks.O2 === 'pending' && base.checks.O3 === 'pending', JSON.stringify(base.checks));
@@ -4220,7 +4220,7 @@ console.log('\n§22 the long-lived token\'s identity post-check: the real produc
     JSON.stringify({ lane: lane.caches, base: base.caches, la: lane.archived, ba: base.archived }));
   // the RED control: a check consulted BEFORE the guard whose answer re-keys the reading (the hook itself runs after the
   // write since fix r2 — a re-key there would be inert, so the plant puts the consultation where it could move a number)
-  const rekey = ENG_SRC.replace('    if (win) {\n      const target = guardReadingTarget(key, win, ', "    if (win) { try { const v22 = oatIdentity.onReading(slotKey, { window: win, at: Date.now(), viaToken: () => tokenSpentBy(session, slotKey), gen: () => tokenGenOf(session, slotKey), eligible: witness, sid: session._webuiId || null }); if (v22 && v22.verdict === 'mismatch' && (v22.others || [])[0]) key = v22.others[0]; } catch { } }\n    if (win) {\n      const target = guardReadingTarget(key, win, ");
+  const rekey = editAnchor(ENG_SRC, '    if (win) {\n      const target = guardReadingTarget(key, win, ', "    if (win) { try { const v22 = oatIdentity.onReading(slotKey, { window: win, at: Date.now(), viaToken: () => tokenSpentBy(session, slotKey), gen: () => tokenGenOf(session, slotKey), eligible: witness, sid: session._webuiId || null }); if (v22 && v22.verdict === 'mismatch' && (v22.others || [])[0]) key = v22.others[0]; } catch { } }\n    if (win) {\n      const target = guardReadingTarget(key, win, ", "src/server/usage-pool-engine.js");
   ok('§22 the RED control applies (a check whose answer files the reading on the row it named)', rekey !== ENG_SRC && /key = v22\.others\[0\]/.test(rekey));
   const red = run(MUT.load('src/server/usage-pool-engine.js', rekey, '22rekey'));
   console.log(`    RED control (a reading re-attributed by the check): Token Other's cache ${JSON.stringify(red.caches.OT)} vs ${JSON.stringify(base.caches.OT)} without it`);

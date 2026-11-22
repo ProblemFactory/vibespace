@@ -1133,11 +1133,11 @@ try {
       const blSrc = fs.readFileSync(path.join(REPO, 'src/browser-login.js'), 'utf8');
       const bdSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
       const veSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
-      const LF_M1 = MUT.load('src/server/browser-login-fill.js', lfSrc.replace('  if (iso.origin !== wantOrigin) {', '  if (false && iso.origin !== wantOrigin) {'), 'origin-gate-removed');
-      const BL_M2 = MUT.load('src/browser-login.js', blSrc.replace(
+      const LF_M1 = MUT.load('src/server/browser-login-fill.js', editAnchor(lfSrc, '  if (iso.origin !== wantOrigin) {', '  if (false && iso.origin !== wantOrigin) {', "src/server/browser-login-fill.js"), 'origin-gate-removed');
+      const BL_M2 = MUT.load('src/browser-login.js', editAnchor(blSrc,
         "function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {",
-        "function liveFillVerdict() { return { ok: true }; }\nfunction _deadLiveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {",
-      ), 'read-fence-removed');
+        "function liveFillVerdict() { return { ok: true }; }\nfunction _deadLiveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '', holdReason = '' } = {}) {"
+      , "src/browser-login.js"), 'read-fence-removed');
       const LF_M3 = MUT.load('src/server/browser-login-fill.js', editAnchor(editAnchor(lfSrc,
         "const wantSecretPw = Boolean(secret && slot !== 'otp');", 'const wantSecretPw = false;', "src/server/browser-login-fill.js", 'all'),
         'async function wipeTabTypedInputs(', 'async function wipeTabTypedInputs() { return { ok: true, wiped: 0 }; }\nasync function _deadWipeTabTypedInputs(', "src/server/browser-login-fill.js"),
@@ -1146,7 +1146,7 @@ try {
         "if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {', "src/server/browser-dialogs.js"),
         "return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };", "src/server/browser-dialogs.js"),
       'multipart-branch-removed');
-      const VE_M5 = MUT.load('src/server/vault-engine.js', veSrc.replace(', ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {})', ''), 'secretNames-without-rev');
+      const VE_M5 = MUT.load('src/server/vault-engine.js', editAnchor(veSrc, ', ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {})', '', "src/server/vault-engine.js"), 'secretNames-without-rev');
       const LF_M8 = MUT.load('src/server/browser-login-fill.js', editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(lfSrc,
         "if (typeof setTimeout === 'function') {", "if (false && typeof setTimeout === 'function') {", "src/server/browser-login-fill.js"),
         'try { node.inert = true; } catch {}', '/* inert prop disabled */', "src/server/browser-login-fill.js", 'all'),
@@ -1156,22 +1156,22 @@ try {
         "el.addEventListener('blur', onTargetBlurGuard, true);", '/* blur guard disabled */', "src/server/browser-login-fill.js"),
         "const ins = await send('Input.insertText', { text: val });", "await new Promise((r) => setTimeout(r, 25)); const ins = await send('Input.insertText', { text: val });", "src/server/browser-login-fill.js"),
       'async-focus-seam');
-      const BD_M_EXFIL_ALLOW = MUT.load('src/server/browser-dialogs.js', bdSrc.replace(
+      const BD_M_EXFIL_ALLOW = MUT.load('src/server/browser-dialogs.js', editAnchor(bdSrc,
         'if (crossOrigin && (carries || undecodable)) {',
-        'if (false && crossOrigin && (carries || undecodable)) {',
-      ), 'n5-foreign-body-allow');
-      const BD_M_N1_HOLD = MUT.load('src/server/browser-dialogs.js', bdSrc.replace(
+        'if (false && crossOrigin && (carries || undecodable)) {'
+      , "src/server/browser-dialogs.js"), 'n5-foreign-body-allow');
+      const BD_M_N1_HOLD = MUT.load('src/server/browser-dialogs.js', editAnchor(bdSrc,
         'const wantCred = Boolean(e.liveFill || e.credPreArming);',
-        'const wantCred = Boolean((e.liveFill && !e.liveFill.holdReason) || e.credPreArming);',
-      ), 'n1-hold-relaxes-fetch');
-      const BD_M_N2_AX = MUT.load('src/server/browser-dialogs.js', bdSrc.replace(
+        'const wantCred = Boolean((e.liveFill && !e.liveFill.holdReason) || e.credPreArming);'
+      , "src/server/browser-dialogs.js"), 'n1-hold-relaxes-fetch');
+      const BD_M_N2_AX = MUT.load('src/server/browser-dialogs.js', editAnchor(bdSrc,
         '      writeSnapshotRefs(w, e, specs, { seq, at });', // B-21cc (r2849): a NAMED note writes the tab's references here
-        '      await call(w, \'Accessibility.getFullAXTree\', {}, e.sid);\n      writeSnapshotRefs(w, e, specs, { seq, at });',
-      ), 'n2-snapshot-full-ax');
-      const BD_M_N4_CAP = MUT.load('src/server/browser-dialogs.js', bdSrc.replace(
+        '      await call(w, \'Accessibility.getFullAXTree\', {}, e.sid);\n      writeSnapshotRefs(w, e, specs, { seq, at });'
+      , "src/server/browser-dialogs.js"), 'n2-snapshot-full-ax');
+      const BD_M_N4_CAP = MUT.load('src/server/browser-dialogs.js', editAnchor(bdSrc,
         "return { carries: false, undecodable: true, reason: 'json_too_many_nodes' };",
-        "return { carries: false, undecodable: false, format: 'json' };",
-      ), 'n4-json-cap-open');
+        "return { carries: false, undecodable: false, format: 'json' };"
+      , "src/server/browser-dialogs.js"), 'n4-json-cap-open');
 
       const ep = await w.kk.cdpEndpointFor(w.prof.id);
       const ws = new WSBase(ep.url);

@@ -63,7 +63,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, endDaemonsOf } from './scratch.mjs';
+import { scratch, scratchHome, endDaemonsOf, anchored } from './scratch.mjs';
 import { writeFakeFfmpeg, factsLine, calibrationFrame, rgbAt } from './fixtures/stream/screen-fakes.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -773,7 +773,7 @@ console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): n
       const n = ssText.split(from).length - 1;
       if (n !== 1) throw new Error(`its anchor moved: ${JSON.stringify(from).slice(0, 100)} found ${n} times in src/agentd/stream-screen.js, one meant — no mutant made`);
       fs.mkdirSync(path.dirname(f), { recursive: true });
-      fs.writeFileSync(f, pointAtTree(ssText.replace(from, to)));
+      fs.writeFileSync(f, pointAtTree(anchored(ssText, from, to, `test-stream-op ${name}`)));   // the door that fails by name (its count above says which)
     } catch (e) { notMade[name] = String((e && e.message) || e).split('\n')[0]; return null; }
     try { return require(f); } catch (e) { notMade[name] = `THE COPY DID NOT LOAD: ${String((e && e.message) || e).split('\n')[0]}`; return null; }
   };

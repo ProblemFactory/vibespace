@@ -60,6 +60,15 @@ const CTX = path.join(fakeHome, 'ctx');
 const CTX2 = path.join(fakeHome, 'ctx2');
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const note = (s) => console.log('  · ' + s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
@@ -656,7 +665,7 @@ console.log('\n§5b MUTANT: a clear that keeps the group summary\'s lastText mak
   // (lane ui-language: the clear also drops the summary's lastRaw — a system line's structure the page words — on the same line)
   const LINE = 'if (fresh.some((r) => Number(r.at) === Number(g.lastAt))) { g.lastText = RC.CLEARED_TEXT; g.lastCleared = true; g.lastRaw = null; }';
   check('§5b MUTANT setup: the clear\'s lastText line is found once in src/server/groups-engine.js', src.split(LINE).length === 2);
-  const KEEP = MUT.load('src/server/groups-engine.js', src.replace(LINE, '/* MUTANT: the clear keeps lastText */'), 'keeps-lasttext');
+  const KEEP = MUT.load('src/server/groups-engine.js', editAnchor(src, LINE, '/* MUTANT: the clear keeps lastText */', "src/server/groups-engine.js"), 'keeps-lasttext');
   const REAL = require(path.join(repo, 'src/server/groups-engine.js'));
   const run = async (GE, tag, label) => {
     const dir = scratch('rc-walk-lt-' + tag); fs.mkdirSync(dir, { recursive: true });

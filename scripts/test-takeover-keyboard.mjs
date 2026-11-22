@@ -41,6 +41,15 @@ const KYreal = await import(pathToFileURL(path.join(REPO, 'src/lib/keyboard-yiel
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const t0 = Date.now();
 const flush = async () => { for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); };
 
@@ -1419,7 +1428,7 @@ for (const c of CONTROLS) {
   const found = KYSRC.split(c.from).length === 2;
   let red = null;
   if (found) {
-    const f = M.write('src/lib/keyboard-yield.js', KYSRC.replace(c.from, c.to), c.tag, { esm: true });
+    const f = M.write('src/lib/keyboard-yield.js', editAnchor(KYSRC, c.from, c.to, "src/lib/keyboard-yield.js"), c.tag, { esm: true });
     const Rm = await scenarios(await import(pathToFileURL(f).href));
     red = Object.keys(Rm).filter((k) => !Rm[k].ok).sort();
   }

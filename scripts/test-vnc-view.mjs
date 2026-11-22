@@ -28,6 +28,15 @@ const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -444,7 +453,7 @@ console.log('§9 lane desktop-keepalive K2/K3 (userW inc-muoshmqn-dect: two Past
   // the 30 s bound: a stream that never comes back says the text was not pasted (a copy with a 150 ms bound)
   const shellSrc = read('src/lib/picture-shell.js');
   ok(shellSrc.includes('export const PASTE_WAIT_MS = 30000;'), 'K2: the queue waits PASTE_WAIT_MS = 30 s');
-  const FAST = await import(M9.write('src/lib/picture-shell.js', shellSrc.replace('export const PASTE_WAIT_MS = 30000;', 'export const PASTE_WAIT_MS = 150;'), 'fastwait', { esm: true }));
+  const FAST = await import(M9.write('src/lib/picture-shell.js', editAnchor(shellSrc, 'export const PASTE_WAIT_MS = 30000;', 'export const PASTE_WAIT_MS = 150;', "src/lib/picture-shell.js"), 'fastwait', { esm: true }));
   toasts.length = 0;
   const f1 = FAST.createPictureShell(host(), {}); f1.emit('disconnected');
   const sent = [];

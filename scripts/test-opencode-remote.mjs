@@ -31,6 +31,15 @@ const serve = require(path.join(REPO, 'src/opencode-serve.js'));
 
 let pass = 0; const fails = [];
 const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fails.push(name); console.log(`  ✗ ${name}${detail ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (name, why) => { pass++; console.log(`  ⊘ SKIP ${name} — ${why}`); };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 const SCRIPT = read('data/bin/vibespace-opencode-op');
@@ -336,7 +345,7 @@ http.createServer((q,s)=>{s.setHeader('content-type','application/json');s.end(J
     const from = "  if (rec) {\n    if (await healthy(rec.port)) return rec.port;\n    if (await settleRecordedServe(rec) === 'answered') return rec.port;\n  }";
     if (SCRIPT.split(from).length - 1 !== 1) return null;
     const f = path.join(os.tmpdir(), `vs-oc-op-prefix-${process.pid}`);
-    fs.writeFileSync(f, SCRIPT.split(from).join('  if (rec && await healthy(rec.port)) return rec.port;'), { mode: 0o755 });
+    fs.writeFileSync(f, editAnchor(SCRIPT, from, '  if (rec && await healthy(rec.port)) return rec.port;', "data/bin/vibespace-opencode-op", 'join'), { mode: 0o755 });
     return f;
   })();
   ok('(the control itself) a PRE-FIX copy of the shipped script can be built — the A/B below is only meaningful against it', !!preFix);

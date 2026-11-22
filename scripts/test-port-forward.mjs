@@ -14,6 +14,15 @@ import { mutantCopies } from './mutant-copy.mjs';
 
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pf-'));
@@ -343,7 +352,7 @@ try {
     // item 1 — the pre-fix adopt line: a TCP publish drops the subdomain, the repair gets a random one
     const STICKY = 'rec.publicSub = r.subdomain || rec.publicSub || null;';
     check('the sticky adopt line is present once', PF_SRC.split(STICKY).length === 2);
-    const PF1 = M.load('src/port-forward.js', PF_SRC.replace(STICKY, 'rec.publicSub = r.subdomain || null;'), 'pre-sticky').PortForwardManager;
+    const PF1 = M.load('src/port-forward.js', editAnchor(PF_SRC, STICKY, 'rec.publicSub = r.subdomain || null;', "src/port-forward.js"), 'pre-sticky').PortForwardManager;
     const drive = async (PF) => {
       fs.rmSync(path.join(pdir, 'port-forwards.json'), { force: true });
       const pm = mk(PF);
@@ -361,8 +370,8 @@ try {
     // item 2 — the pre-fix probe (a refused port reads "tcp") + the pre-fix decision (frpPublish probes, no last protocol)
     const THROW = "  if (!isHttp && !reached) throw Object.assign(new Error('nothing answers on that port'), { code: 'EUNREACHABLE' });\n";
     check('the undecided-probe throw is present once', PL_SRC.split(THROW).length === 2);
-    const plugMut = M.write('src/plugins.js', PL_SRC.replace(THROW, ''), 'pre-throw');
-    const PF2 = M.load('src/port-forward.js', PF_SRC.replace("require('./plugins')", `require(${JSON.stringify(plugMut)})`), 'pre-probe').PortForwardManager;
+    const plugMut = M.write('src/plugins.js', editAnchor(PL_SRC, THROW, '', "src/plugins.js"), 'pre-throw');
+    const PF2 = M.load('src/port-forward.js', editAnchor(PF_SRC, "require('./plugins')", `require(${JSON.stringify(plugMut)})`, "src/port-forward.js"), 'pre-probe').PortForwardManager;
     const drive2 = async (PF) => {
       fs.rmSync(path.join(pdir, 'port-forwards.json'), { force: true });
       const pm = mk(PF);

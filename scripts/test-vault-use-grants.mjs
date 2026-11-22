@@ -73,6 +73,15 @@ const PD = require(path.join(REPO, 'src/server/vault-paste-door.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ROOT = scratch('vault-use-grants');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -461,7 +470,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && (memberUsable(d, r.id, (standing.get(r.id) || {}).id) || sharedIds.has(r.id)))) {";   // B-bc3b: + a shared agent entry (no switch is its)
   ok(DSRC.split(cut).length === 2, 'the short-circuit line is there once (the control below patches it)');
   // (⑩ round 9's ruling-C pins of src/server/vault-run-door.js: MOVED to the fast scripts/test-vault-use-grants-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
-  const noShort = M.load('src/server/vault-run-door.js', DSRC.replace(cut, 'if (false) {'), 'noshort');
+  const noShort = M.load('src/server/vault-run-door.js', editAnchor(DSRC, cut, 'if (false) {', "src/server/vault-run-door.js"), 'noshort');
   const w1 = await world({ doorMod: noShort });
   const e1 = entryOf(w1);
   w1.door.setRunnable({ id: e1.id, on: true, reauthed: true });
@@ -471,9 +480,9 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   const USRC = fs.readFileSync(path.join(REPO, 'src/vault-use-grant.js'), 'utf8');
   const hcut = 'if (destinationKnown === true && run.length && !miss.length) return';
   ok(USRC.split(hcut).length === 2, 'the hosts rule is there once');
-  const uMut = M.write('src/vault-use-grant.js', USRC.replace(hcut, 'if (destinationKnown === true && run.length) return'), 'nohosts');
+  const uMut = M.write('src/vault-use-grant.js', editAnchor(USRC, hcut, 'if (destinationKnown === true && run.length) return', "src/vault-use-grant.js"), 'nohosts');
   const GSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-use-grants.js'), 'utf8');
-  const ugMut = M.load('src/server/vault-use-grants.js', GSRC.replace("require('../vault-use-grant.js')", `require(${JSON.stringify(uMut)})`), 'nohosts-writer');
+  const ugMut = M.load('src/server/vault-use-grants.js', editAnchor(GSRC, "require('../vault-use-grant.js')", `require(${JSON.stringify(uMut)})`, "src/server/vault-use-grants.js"), 'nohosts-writer');
   const w2 = await world({ ugMod: ugMut });
   const e2 = entryOf(w2);
   w2.door.setRunnable({ id: e2.id, on: true, reauthed: true });
@@ -482,7 +491,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   ok(m2.r.ok && m2.r.by === 'grant' && !m2.card, 'MUTANT «a verdict that ignores the hosts»: a grant for 192.168.1.1 sends the value to evil.example with NO card — the shipped verdict draws the card (④)', { by: m2.r.by, card: !!m2.card });
   const wcut = 'if ((undecided.has(String(id)) || widens(was, { to: rowTo, except: v.row.except })) && !reauthed) return named(\'reveal_needs_password\');';   // r4: judged on the Save's per-scope row; r3130 (d): the line also asks it of a Save that decides an undecided row (MOVED with it)
   ok(GSRC.split(wcut).length === 2, 'the widening rule is there once');
-  const noReauth = M.load('src/server/vault-use-grants.js', GSRC.replace(wcut, ''), 'noreauth');
+  const noReauth = M.load('src/server/vault-use-grants.js', editAnchor(GSRC, wcut, '', "src/server/vault-use-grants.js"), 'noreauth');
   const w3 = await world({ ugMod: noReauth });
   const e3 = entryOf(w3);
   const m3 = w3.useGrants.setRow(e3.id, { to: [{ kind: 'everyone', hosts: ['192.168.1.1'] }] }, { reauthed: false });
@@ -490,7 +499,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   const ESRC = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
   const ncut = "    writeAtomic(FILE, JSON.stringify(rec, null, 2) + '\\n');\n    contentsChanged('record');";
   ok(ESRC.split(ncut).length === 2, 'the record writer\'s notify is there once');
-  const silent = M.load('src/server/vault-engine.js', ESRC.replace(ncut, "    writeAtomic(FILE, JSON.stringify(rec, null, 2) + '\\n');"), 'silent');
+  const silent = M.load('src/server/vault-engine.js', editAnchor(ESRC, ncut, "    writeAtomic(FILE, JSON.stringify(rec, null, 2) + '\\n');", "src/server/vault-engine.js"), 'silent');
   const w4 = await world({ engineMod: silent });
   await sleep(10);
   const s0 = contentsFrames(w4).length;
@@ -581,7 +590,7 @@ console.log('⑪ THE POLICY JUDGE (R4, default OFF) — a stub judge, never a ve
   const DS = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
   const cut = 'if (j.approve) { verdict = { ok: true, by: \'policy\', p: j.p };';
   ok(DS.split(cut).length === 2, 'the judge\'s approval line is there once');
-  const lax = M2.load('src/server/vault-run-door.js', DS.replace(cut, 'if (true) { verdict = { ok: true, by: \'policy\', p: j.p || 0 };'), 'lax');
+  const lax = M2.load('src/server/vault-run-door.js', editAnchor(DS, cut, 'if (true) { verdict = { ok: true, by: \'policy\', p: j.p || 0 };', "src/server/vault-run-door.js"), 'lax');
   const w5 = await world({ doorMod: lax, judge: async () => ({ ok: false, why: 'plugin-off' }), judgeOn: () => true });
   const e5 = entryOf(w5);
   w5.door.setRunnable({ id: e5.id, on: true, reauthed: true });
@@ -622,7 +631,7 @@ console.log('⑫ ROUND 2 BLOCKER — a grant covers the run\'s DESTINATIONS, not
   const DS = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
   const cut = 'standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts,';
   ok(DS.split(cut).length === 2, 'the destination-aware verdict call is there once (the control patches it to shape.hosts)');
-  const hostsOnly = M.load('src/server/vault-run-door.js', DS.replace(cut, 'standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: shape.hosts,'), 'hostsonly');
+  const hostsOnly = M.load('src/server/vault-run-door.js', editAnchor(DS, cut, 'standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: shape.hosts,', "src/server/vault-run-door.js"), 'hostsonly');
   const w2 = await world({ doorMod: hostsOnly });
   const e2 = entryOf(w2);
   w2.door.setRunnable({ id: e2.id, on: true, reauthed: true });
