@@ -18,8 +18,8 @@ const { NO_IDLE, NO_WORKER } = require('../safe-fs.js');
 // M1: the pool has no worker free for the call — every worker busy (NO_IDLE), or every live one looking (NO_WORKER, bl-machines-a's
 // folder-rule look): asked again inside the bound, never «could not be read»
 const poolBusy = (err) => !!err && (err.code === NO_IDLE.code || err.code === NO_WORKER.code);
-const mono = () => performance.now();
-const LASTING_ERR = /^(ELOOP|ENAMETOOLONG|EACCES|EPERM)$/;   // r2178 (1): the erred facts that cannot heal by themselves   // the re-ask's bound: the monotonic clock (a stepped wall clock never widens it)
+const mono = () => performance.now();   // the re-ask's bound: the monotonic clock (a stepped wall clock never widens it)
+const LASTING_ERR = /^(ELOOP|ENAMETOOLONG|EACCES|EPERM)$/;   // r2178 (1): the erred facts that cannot heal by themselves
 // B-d833's remainder: EVERY call of the field runs on an IDLE worker or not at all (SafeFs `idleOnly`) — a healthy folder's check
 // sent into a worker held by a hung, slower call waited there, ran out ITS OWN deadline and was marked dead for 30 s. A call the pool
 // refuses (every worker busy) is LATE: still looking, asked again by the field — never a mark, never «could not be read»
