@@ -171,11 +171,12 @@ function paintAll(app) {
 }
 
 /** OFF: every mark once — the nodes warmth built, the attributes and the titles it wrote, the summary chip; the «+N»
- *  chip back to its plain «+N» (paintOverflowChip, warmth no longer drawn). */
+ *  chip back to its plain «+N» (paintOverflowChip, warmth no longer drawn). A phone row's `data-win-id` is the ROW BUILDER's stamp
+ *  (mobile-nav.js _buildWindowItem — the waiting patch, an id change's re-stamp and a press's «inside» test read it), never warmth's
+ *  to take away (r1958: it was, and an open list turned blind to all three once warmth was switched off). */
 function clearAll(app) {
   for (const el of document.querySelectorAll('.tab-warmth, .warmth-ring, .wl-head, .wl-band, .wl-left, .sess-warmth, .sess-warmth-left, #taskbar-warmth')) el.remove();
   for (const el of document.querySelectorAll('[data-warmth-tier], [data-warmth-tip]')) { el._warmthKey = null; setMark(el, null, null, ''); }
-  for (const el of document.querySelectorAll('.mobile-win-row[data-win-id]')) el.removeAttribute('data-win-id');
   for (const el of document.querySelectorAll('.overlap-switcher:not(.warmth-list) .wl-name')) el.classList.remove('wl-name'); // the ⧉ list's labels as before
   const chip = document.getElementById('taskbar-overflow');
   if (chip) paintOverflowChip(app, chip);

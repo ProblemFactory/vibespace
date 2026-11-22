@@ -282,9 +282,9 @@ function showHiddenTiles(app, chip) {
     item.append(icon, label);
     item.onclick = () => {
       pop.remove();
-      activateWindow(app, tl.id);
+      activateWindow(app, win.id);   // r1958: the window's id read live, off the instance (an id changed in place while the list stood open)
       // then its tile into the strip — looked up afresh (the activation may have re-drawn the strip), the nearest edge
-      requestAnimationFrame(() => { strip._bringIn = { id: tl.id, until: performance.now() + BRING_IN_MS, tries: 3 }; bringTileIn(strip); });
+      requestAnimationFrame(() => { strip._bringIn = { id: win.id, until: performance.now() + BRING_IN_MS, tries: 3 }; bringTileIn(strip); });
     };
     pop.appendChild(item);
   }
@@ -909,8 +909,8 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     item.append(icon, label);
     paintTile(app, item); // lane cache-warmth-band: the row's own ring (its tab's conversation)
     item.onclick = () => {
-      app.wm.revealWindow(tid); // the row names THIS tab — the host's own row included (the door that used to be spelled here by hand)
-      const session = app.sessions.get(tid);
+      app.wm.revealWindow(win.id); // the row names THIS tab — the host's own row included; its id read live (r1958: an id changed in place)
+      const session = app.sessions.get(win.id);
       if (session) session.focus();
       pop.remove();
     };
@@ -920,7 +920,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     item.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       state.pin();
-      showWindowContextMenu(app, tid, e.clientX, e.clientY, {
+      showWindowContextMenu(app, win.id, e.clientX, e.clientY, {
         onAction: (kind) => { if (pop.isConnected) (kind === 'move' ? pop.remove() : state.relist()); },
       });
     });
@@ -1068,8 +1068,8 @@ export function showWindowList(app, anchor, opts = {}) {
       item.append(icon, label);
       if (warm) { item.dataset.winId = id; paintListRow(app, item, { ids: tabIds }, label); rows.push(item); } // a host row: its tabs' worst
       item.onclick = () => {
-        app.wm.revealWindow(id); // the row is labelled with the HOST's title — show the host's tab, never the guest under its name
-        const session = app.sessions.get(id);
+        app.wm.revealWindow(win.id); // the row is labelled with the HOST's title — show the host's tab, never the guest under its name (its id read live: r1958)
+        const session = app.sessions.get(win.id);
         if (session) session.focus();
         pop.remove();
       };

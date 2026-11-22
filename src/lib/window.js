@@ -1990,10 +1990,24 @@ class WindowManager {
     const sess = this._app?.sessions?.get(oldId);
     if (sess) { this._app.sessions.delete(oldId); this._app.sessions.set(newId, sess); }
     this._app?.updateTaskbar?.();
-    this._app?._mobileNav?.followRekey?.(oldId, newId);   // r1793: the phone's open window list and its notes by id follow the new id (the one rule: mobile-nav.js)
+    this.followIdChange(oldId, newId);   // r1793 / r1958: every open list and the phone's notes follow the new id (THE one rule, below)
     return true;
   }
 
+  /** THE ONE RULE OF AN ID CHANGED IN PLACE (主开发 r1793 / r1958): the two roads that change a window's id in place — rekeyWindow
+   *  (B-1d87's adoption, the Stage's) and layout.js's restore remap — call this AFTER the change. Every open list's row that names
+   *  the window by its stamp takes the new one (the phone's switcher rows; the desk's grouped chooser, «+N» and ⧉ rows), a grouped
+   *  chooser opened for that host follows it (its title patch finds it by the host's id), and the phone's own notes follow
+   *  (MobileNav.followRekey: the rows' waiting mark, the shown window, the split's pair). Every row's tap reads its window's id
+   *  live, off the instance the change keeps — the stamp is what a patch and a press's «inside» test read. */
+  followIdChange(oldId, newId) {
+    const o = String(oldId), n = String(newId);
+    if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+      for (const row of document.querySelectorAll('.mobile-win-switcher [data-win-id], .overlap-switcher [data-win-id]')) if (row.dataset && row.dataset.winId === o) row.dataset.winId = n;
+      for (const pop of document.querySelectorAll('.taskbar-group-chooser')) if (pop._chooser && pop._chooser.hostId === o) pop._chooser.hostId = n;
+    }
+    this._app?._mobileNav?.followRekey?.(o, n);
+  }
   /** A USER'S close of ONE window (a lone window's ✕, a tab ✕, the window menu, Ctrl+\\ x, the phone nav ✕; a WHOLE group's
    *  doors go through tab-group.js requestCloseGroup, which asks, then closes each member here — B-a67c): the window may answer
    *  first — `winInfo.onCloseRequest()` returning false keeps it (round 3 A2: a desktop-app window asks its APP to

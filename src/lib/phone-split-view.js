@@ -71,7 +71,7 @@ export function installPhoneSplit(app) {
     root.classList.toggle('vs-split', !!want);
     if (want) {
       for (const [side, id] of [['left', want.left], ['right', want.right]]) {
-        const el = app.wm.windows.get(id)?.element;
+        const w = app.wm.windows.get(id), el = w?.element;
         if (!el) continue;
         el.classList.add('phone-pane'); el.dataset.pane = side;
         const bar = el.querySelector(':scope > .window-titlebar');
@@ -79,7 +79,9 @@ export function installPhoneSplit(app) {
           const x = document.createElement('button');
           x.type = 'button'; x.className = 'phone-pane-close'; x.textContent = '✕';
           x.title = t('Close the split'); x.setAttribute('aria-label', x.title);
-          x.addEventListener('click', (e) => { e.stopPropagation(); close(id); });
+          // its pane's id read LIVE, off the window instance (r1958: drawn with the id of that moment, a ✕ pressed after the pane's
+          // window was re-keyed ended the split and left the closed pane on show — closePane found no such pane)
+          x.addEventListener('click', (e) => { e.stopPropagation(); close(w.id); });
           bar.appendChild(x);
         }
       }
@@ -139,8 +141,10 @@ export function installPhoneSplit(app) {
     app._updateMobileNavTitle?.();
   }
   try { new ResizeObserver(() => apply()).observe(document.getElementById('workspace')); } catch { }
-  /** A pane's window took a new id (MobileNav.followRekey — wm.rekeyWindow, layout.js's restore remap; r1793): the pair, the
-   *  painted panes and the seen set name it under the new id — a pane re-keyed is never ended as «closed». → whether it named it */
+  /** A pane's window took a new id (MobileNav.followRekey, from window.js followIdChange — wm.rekeyWindow, layout.js's restore remap;
+   *  r1793): the pair, the painted panes and the seen set name it under the new id — a pane re-keyed is never ended as «closed». NO
+   *  REPAINT, on purpose (r1958): the marks sit on the same element (the instance the change keeps) and each pane's ✕ reads its
+   *  window's id live, so the screen already shows what the new names say — a repaint would only redraw it. → whether it named it */
   const rekey = (oldId, newId) => {
     const o = String(oldId), n = String(newId);
     let hit = false;

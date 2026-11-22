@@ -15,6 +15,8 @@ export const LIB = path.join(REPO, 'src/lib');
 export const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 /** window.js's rekeyWindow, its text as shipped, run on the rig's wm (`windows`; no strip to draw) */
 const REKEY = (() => { const src = read('src/lib/window.js'), i = src.indexOf('\n  rekeyWindow('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).rekeyWindow;`)(); })();
+/** …and the one rule it calls after the change (r1958: followIdChange — every open list's stamp, the phone's notes), its text as shipped */
+const FOLLOW_ID = (() => { const src = read('src/lib/window.js'), i = src.indexOf('\n  followIdChange('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).followIdChange;`)(); })();
 export const J = JSON.stringify;
 export const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 export const REAL = { log: console.log, warn: console.warn };
@@ -165,7 +167,8 @@ export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H 
       // window.js's requestClose (r4 — the r3 acceptance: the rig had none, so `wm.requestClose?.()` did nothing): the fence, the window's own answer, the close
       requestClose: (id, o = {}) => { const w = wins.get(id); if (!w) return false; if (app._closeFenced?.(id, 'requestClose')) return false; if (typeof w.onCloseRequest === 'function' && w.onCloseRequest(o) === false) return false; app.wm.closeWindow(id); return true; },
       setTitle(id, t) { const w = wins.get(id); if (w) w.title = t; },
-      rekeyWindow(a, b, o) { return REKEY.call(this, a, b, o); } }, // window.js's OWN method text (r3 C3: a grouped window keeps its seat — `inChain`)
+      rekeyWindow(a, b, o) { return REKEY.call(this, a, b, o); }, // window.js's OWN method text (r3 C3: a grouped window keeps its seat — `inChain`)
+      followIdChange(a, b) { return FOLLOW_ID.call(this, a, b); } }, // …and the one rule it calls after the change (r1958), its own text too
     themeManager: { current: 'dark', apply() {} }, _fontSize: 14, _fontFamily: 'mono', sidebar: { isOpen: false, _allSessions: [], toggle() {}, getCustomName: () => null },
     updateTaskbar() {}, _checkWelcome() {},
     // the real app's replay of a session window is attachSession's: a session this page already shows builds NOTHING (its shortcut)

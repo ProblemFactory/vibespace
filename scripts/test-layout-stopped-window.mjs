@@ -73,7 +73,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { scratchDir, scratchHome, landingWriter } from './scratch.mjs';
+import { scratchDir, scratchHome, landingWriter, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const LIB = path.join(REPO, 'src/lib');
@@ -870,7 +870,7 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
   const { WindowManager } = await import(pathToFileURL(path.join(LIB, 'window.js')).href);
   const LF = await import(pathToFileURL(path.join(LIB, 'late-focus.js')).href);
   const { installPhoneSplit } = await import(pathToFileURL(path.join(LIB, 'phone-split-view.js')).href);
-  const FOLLOW = '    this._app?._mobileNav?.followRekey?.(oldId, newId);   // r1793: the phone\'s open window list and its notes by id follow the new id (the one rule: mobile-nav.js)\n';
+  const FOLLOW = '    this.followIdChange(oldId, newId);   // r1793 / r1958: every open list and the phone\'s notes follow the new id (THE one rule, below)\n';
   const REPATCH = '    if (moved) this._patchSwitcherWaiting();\n';
   const INSTANCE = '  if (item && item._win === win) return true;   // r1793: the phone list\'s row names its window by INSTANCE (a row its tap took off the page, its stamp from before a re-key)\n';
   const GUARD = "    if (!win || !wm.windows.has(win.id)) {\n      showToast(t('That window is no longer open — the list now shows what is open.'), { type: 'info' });\n      if (typeof rerender === 'function') rerender();\n      return false;\n    }\n";
@@ -888,7 +888,7 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
     const nav = Object.create(MN.prototype); nav.app = W.app; nav._shown = { 'desk-p': 'win-new-1', 'desk-w': 'win-other' };
     const dots = []; nav._waitDot = (el, on) => dots.push([el.dataset.winId, on]);
     const splitCalls = []; nav.split = { offer: () => null, rekey: (x, y) => { splitCalls.push(x, y); return true; } };   // offer: no «Split» beside the row
-    wm._app = { _mobileNav: nav, updateTaskbar() {}, sessions: new Map() };
+    wm._app = { _mobileNav: nav, updateTaskbar() {}, sessions: new Map() }; wm.followIdChange = WM.prototype.followIdChange;   // window.js's one rule, on the world's wm
     const revealed = []; wm.revealWindow = (id) => { revealed.push(id); return true; };
     let closes = 0, redraws = 0;
     const row = nav._buildWindowItem(win, wm, () => { closes++; }, () => { redraws++; });
@@ -896,6 +896,10 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
     const pop = mkEl(); pop.className = 'mobile-win-switcher'; pop.append(row);
     pop.querySelectorAll = (sel) => (sel === '.mobile-win-row[data-win-id]' ? pop.children.filter((c) => c && c.dataset && c.dataset.winId) : []);
     const q0 = document.querySelector; document.querySelector = (sel) => (sel === '.mobile-win-switcher' ? pop : q0(sel));
+    // r1958: the DESK's grouped chooser open for that window as its host, its row stamped with the id (window.js followIdChange reads both)
+    const deskRow = mkEl(); deskRow.className = 'overlap-switcher-item'; deskRow.dataset.winId = 'win-new-1';
+    const chooser = mkEl(); chooser.className = 'overlap-switcher taskbar-group-chooser'; chooser._chooser = { hostId: 'win-new-1' }; chooser.append(deskRow);
+    const qa0 = document.querySelectorAll; document.querySelectorAll = (sel) => (sel === '.mobile-win-switcher [data-win-id], .overlap-switcher [data-win-id]' ? [...pop.children, deskRow].filter((c) => c && c.dataset && c.dataset.winId) : sel === '.taskbar-group-chooser' ? [chooser] : qa0(sel));
     try {
       if (tapFirst) { row.onclick(); pop.children = []; }   // the row's OWN tap first: the list closes, the row leaves the page — then the re-key
       const d0 = dots.length, w0 = said();
@@ -907,17 +911,18 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
       const mine = dots.slice(d0).filter((d) => d[0] === row.dataset.winId);
       const r0 = revealed.length, c0 = closes;
       if (!tapFirst) row.onclick();
-      return { took, stamp: row.dataset.winId, dot: mine.length ? mine.at(-1)[1] : null, inside: ins(win, row), winId: win.id, shown: nav._shown['desk-p'], other: nav._shown['desk-w'], split: splitCalls.join(), revealed: revealed.slice(r0).join(), closes: closes - c0, redraws, said: said() - w0 };
-    } finally { document.querySelector = q0; }
+      return { took, stamp: row.dataset.winId, dot: mine.length ? mine.at(-1)[1] : null, inside: ins(win, row), winId: win.id, shown: nav._shown['desk-p'], other: nav._shown['desk-w'], split: splitCalls.join(), revealed: revealed.slice(r0).join(), closes: closes - c0, redraws, said: said() - w0, desk: deskRow.dataset.winId, host: chooser._chooser.hostId };
+    } finally { document.querySelector = q0; document.querySelectorAll = qa0; }
   };
   const A = await openList();
-  ok(A.took === true && A.stamp === 'win-row-taken' && A.winId === 'win-row-taken', '§10 a re-key under the open list RE-STAMPS its row: the row names the new id (wm.rekeyWindow calls the one rule, MobileNav.followRekey)', A);
+  ok(A.took === true && A.stamp === 'win-row-taken' && A.winId === 'win-row-taken', '§10 a re-key under the open list RE-STAMPS its row: the row names the new id (wm.rekeyWindow calls the one rule, window.js followIdChange)', A);
+  ok(A.desk === 'win-row-taken' && A.host === 'win-row-taken', '§10 r1958 …the DESK\'s open grouped chooser follows too: its row\'s stamp and the chooser\'s host id name the new id (the strip\'s title patch finds it by the host)', A);
   ok(A.dot === true, '§10 …followRekey re-reads its waiting mark under the new id: the dot stays on', A);
   ok(A.inside === true, '§10 …a press on that row is a press ON that window (late-focus insideWindow: its late focus is not dropped)', A);
   ok(A.shown === 'win-row-taken' && A.other === 'win-other' && A.split === 'win-new-1,win-row-taken', '§10 …this tab\'s notes by id follow: the window on show per desktop moves to the new id (the other desktop\'s untouched), the split is told', A);
   ok(A.closes === 1 && A.revealed === 'win-row-taken' && A.said === 0, '§10 …its tap brings the window under the new id (the tap read the id live — as the release already did)', A);
   const R = await openList({ WM: (await mutantEsm('src/lib/window.js', FOLLOW, '')).WindowManager, patchAfter: true });
-  ok(R.took === true && R.stamp === 'win-new-1' && R.dot === false && R.shown === 'win-new-1' && R.split === '', `§10 RED: the release's rekeyWindow (no followRekey) leaves the old stamp and notes — the list's next patch turns the dot off (stamp ${R.stamp} · dot ${R.dot} · shown ${R.shown})`, R);
+  ok(R.took === true && R.stamp === 'win-new-1' && R.dot === false && R.shown === 'win-new-1' && R.split === '' && R.desk === 'win-new-1' && R.host === 'win-new-1', `§10 RED: the release's rekeyWindow (no followIdChange) leaves the old stamps, host and notes — the list's next patch turns the dot off (stamp ${R.stamp} · dot ${R.dot} · shown ${R.shown} · desk ${R.desk})`, R);
   const RP = await openList({ MN: (await mutantEsm('src/lib/mobile-nav.js', REPATCH, '')).MobileNav });
   ok(RP.stamp === 'win-row-taken' && RP.dot === null, `§10 RED: followRekey without its re-patch — the row is re-stamped but its mark is never read under the new id (dot ${RP.dot})`, RP);
   const D = await openList({ tapFirst: true });
@@ -943,7 +948,81 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
     } finally { if (had) Object.defineProperty(globalThis, 'sessionStorage', had); else delete globalThis.sessionStorage; }
   }
   const LY = read('src/lib/layout.js'), at = LY.indexOf('      // Remap window ID to saved ID for cross-client sync\n'), blk = at < 0 ? '' : LY.slice(at, LY.indexOf('\n      }\n', at));
-  ok(/\n        this\.app\._mobileNav\?\.followRekey\?\.\(oldId, winState\.winId\);/.test(blk), '§10 layout.js\'s restore remap — the other road that changes a window\'s id in place — calls the same rule (followRekey)', blk.slice(0, 240));
+  ok(/\n        wm\.followIdChange\?\.\(oldId, winState\.winId\);/.test(blk) && blk.indexOf('wm.windows.set(winState.winId, winInfo);') < blk.indexOf('wm.followIdChange'), '§10 layout.js\'s restore remap — the other road that changes a window\'s id in place — calls the same rule (followIdChange), AFTER the change', blk.slice(0, 240));
+  { // r1958 (1): A SPLIT PANE's ✕ AFTER ITS WINDOW's ID CHANGED — the REAL installPhoneSplit painting [A, B]; A re-keyed; A's ✕ pressed
+    const SPLIT_X = '          x.addEventListener(\'click\', (e) => { e.stopPropagation(); close(w.id); });\n';
+    const paneX = async (S0) => {
+      const store2 = new Map([['vibespace.phoneSplit', J({ 'desk-p': ['win-new-1', 'win-new-2'] })]]);
+      const had = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+      Object.defineProperty(globalThis, 'sessionStorage', { value: { getItem: (k) => (store2.has(k) ? store2.get(k) : null), setItem: (k, v) => store2.set(k, String(v)) }, configurable: true, writable: true });
+      const rec = NAMES.map((_, i) => answered(i));
+      const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+      await W.lm.restoreState({ windows: rec });
+      const wm = W.app.wm, focused = [];
+      W.app.isMobile = true; W.app._mobileNav = { _shownBooted: true }; wm.activeWindowId = 'win-new-1'; wm.focusWindow = (id) => focused.push(id);
+      const bars = {};
+      for (const id of ['win-new-1', 'win-new-2']) {   // each pane's title bar, as the page has one (the stand-in has no :scope queries)
+        const el = wm.windows.get(id).element, bar = mkEl(); bars[id] = bar;
+        const xOf = () => bar.children.find((c) => c && c.className === 'phone-pane-close') || null;
+        el.querySelector = (sel) => (sel === ':scope > .window-titlebar' ? bar : sel === ':scope > .window-titlebar > .phone-pane-close' ? xOf() : null);
+        bar.querySelector = (sel) => (sel === ':scope > .phone-pane-close' ? xOf() : null);
+      }
+      const ws = mkEl(); ws.offsetWidth = 1200;
+      const g0 = document.getElementById, ce0 = document.createElement, cl0 = document.documentElement.classList;
+      document.getElementById = (id) => (id === 'workspace' ? ws : g0(id));
+      document.documentElement.classList = { toggle() {}, add() {}, remove() {}, contains: () => false };
+      document.createElement = (tag) => { const el = ce0(tag), ls = {}; el.addEventListener = (type, fn) => { (ls[type] ||= []).push(fn); }; el._fire = (type) => (ls[type] || []).forEach((f) => f({ stopPropagation() {} })); return el; };
+      try {
+        const S = S0(W.app);
+        const v = S.apply(), panes = (S.panes() || []).join();
+        wm._app = { _mobileNav: { followRekey: (o, n) => S.rekey(o, n) }, updateTaskbar() {}, sessions: new Map() }; wm.followIdChange = WindowManager.prototype.followIdChange;
+        const took = WindowManager.prototype.rekeyWindow.call(wm, 'win-new-1', 'win-pane-taken');
+        const x = bars['win-new-1'].children.find((c) => c && c.className === 'phone-pane-close');
+        if (x) x._fire('click');
+        return { mode: v && v.mode, panes, took, pressed: !!x, focused: focused.join(), after: S.panes() };
+      } finally {
+        document.getElementById = g0; document.createElement = ce0; if (cl0 === undefined) delete document.documentElement.classList; else document.documentElement.classList = cl0;
+        if (had) Object.defineProperty(globalThis, 'sessionStorage', had); else delete globalThis.sessionStorage;
+      }
+    };
+    const P = await paneX(installPhoneSplit);
+    ok(P.mode === 'split' && P.panes === 'win-new-1,win-new-2' && P.took === true && P.pressed && P.focused === 'win-new-2' && P.after === null, `§10 r1958 a split pane's ✕ pressed AFTER its window was re-keyed ends the split and shows the OTHER pane (the ✕ reads its pane's id live) — focused «${P.focused}»`, P);
+    const RP2 = await paneX((await mutantEsm('src/lib/phone-split-view.js', SPLIT_X, SPLIT_X.replace('close(w.id)', 'close(id)'))).installPhoneSplit);
+    ok(RP2.pressed && RP2.focused === '', `§10 RED: the release's ✕ (closing by the id it was drawn with) ends the split but shows nothing new — the closed pane stays on show (focused «${RP2.focused}»)`, RP2);
+  }
+  { // r1958 (2): WARMTH SWITCHED OFF keeps the phone row's stamp (the row builder's, never warmth's to take away)
+    const STRIP = "  for (const el of document.querySelectorAll('.mobile-win-row[data-win-id]')) el.removeAttribute('data-win-id');\n";   // stale-pins: kept — the release's strip, the RED's own text
+    const KEEP = "  for (const el of document.querySelectorAll('[data-warmth-tier], [data-warmth-tip]')) { el._warmthKey = null; setMark(el, null, null, ''); }\n";
+    const off = async (WC) => {
+      const row = mkEl(); row.className = 'mobile-win-row'; row.dataset.winId = 'win-warm';
+      const removed = []; row.removeAttribute = (a) => { removed.push(a); delete row.dataset.winId; };
+      const qa1 = document.querySelectorAll; document.querySelectorAll = (sel) => (sel === '.mobile-win-row[data-win-id]' ? (row.dataset.winId ? [row] : []) : qa1(sel));
+      try {
+        const app = { wm: { windows: new Map() }, isMobile: true };
+        WC.noteWarmthAnswer(app, { map: {}, serverNow: Date.now(), receivedAt: Date.now() });   // ON (a tick's answer)
+        WC.noteWarmthAnswer(app, null);   // OFF (the setting off: the answer says nothing) — every mark cleared once
+        return { stamp: row.dataset.winId || null, removed: removed.join() };
+      } finally { document.querySelectorAll = qa1; }
+    };
+    const WC = await import(pathToFileURL(path.join(LIB, 'warmth-chrome.js')).href);
+    const O = await off(WC);
+    ok(O.stamp === 'win-warm' && O.removed === '', '§10 r1958 warmth switched OFF leaves the phone row\'s data-win-id (the waiting patch, an id change\'s re-stamp and a press\'s «inside» test still find the row)', O);
+    const RO = await off(await mutantEsm('src/lib/warmth-chrome.js', KEEP, KEEP + STRIP));
+    ok(RO.stamp === null && RO.removed === 'data-win-id', '§10 RED: the release\'s clear (it stripped the stamp) leaves the open list blind to its rows', RO);
+  }
+  { // r1958 (2): the DESK lists' taps read their window's id live — the grouped chooser's row (tap + right-click), the «+N» row, the ⧉ host row
+    const TB = read('src/lib/taskbar.js');
+    const taps = [
+      ['the grouped chooser row\'s tap', /item\.onclick = \(\) => \{\n\s+app\.wm\.revealWindow\(win\.id\); \/\/ the row names THIS tab[^\n]*\n\s+const session = app\.sessions\.get\(win\.id\);/],
+      ['the grouped chooser row\'s right-click', /state\.pin\(\);\s*showWindowContextMenu\(app, win\.id, e\.clientX, e\.clientY,/],
+      ['the «+N» row\'s tap', /pop\.remove\(\);\n\s+activateWindow\(app, win\.id\);[^\n]*\n[^\n]*\n\s+requestAnimationFrame\(\(\) => \{ strip\._bringIn = \{ id: win\.id,/],
+      ['the ⧉ list\'s host row', /item\.onclick = \(\) => \{\n\s+app\.wm\.revealWindow\(win\.id\);[^\n]*HOST's title/],
+    ];
+    const miss = (src) => taps.filter(([, re]) => !re.test(src)).map(([n]) => n);
+    ok(miss(TB).length === 0, '§10 r1958 the desk lists\' rows act on their window\'s id read live, off the instance (an id changed in place while the list stood open)', miss(TB));
+    const rel = anchored(anchored(TB, 'app.wm.revealWindow(win.id); // the row names THIS tab', 'app.wm.revealWindow(tid); // the row names THIS tab', 'the chooser tap, as released'), 'activateWindow(app, win.id);', 'activateWindow(app, tl.id);', 'the «+N» tap, as released');   // stale-pins: kept — the release's captured ids, the RED's own text
+    ok(rel !== TB && miss(rel).includes('the grouped chooser row\'s tap') && miss(rel).includes('the «+N» row\'s tap'), '§10 RED: the release\'s rows (a captured id) fail the check by name', miss(rel));
+  }
 });
 const HOUR = 3600000, DAY = 86400000;
 const ringName = (ms, seq) => 'layout-' + new Date(ms).toISOString().replace(/[:.]/g, '-') + '-' + seq.toString(36) + '.json';

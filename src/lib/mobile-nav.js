@@ -487,18 +487,17 @@ export class MobileNav {
     for (const tab of p.querySelectorAll('.mobile-desk-tab[data-desktop-id]')) { const on = [...wm.windows.values()].some((w) => w._desktopId === tab.dataset.desktopId && waits(w)); tab.classList.toggle('waiting', on); this._waitDot(tab, on); }
   }
 
-  /** THE PHONE FOLLOWS A WINDOW's NEW ID (主开发 r1793 — B-1d87 lets a window take another page's id). The two roads that change a
-   *  window's id in place — wm.rekeyWindow (where the focus, the sessions map, the tab chain and the taskbar follow) and layout.js's
-   *  restore remap — call this, so the rule lives here once: the open title switcher's row of that window takes the new stamp and its
-   *  waiting mark is read under it again (_patchSwitcherWaiting and warmth's row repaint read the stamp); this tab's own notes by id
-   *  follow too — the window on show per desktop (§6b guard 10, saved for the tab) and the split's pair (phone-split-view rekey: a
-   *  pane re-keyed is never «closed»). The row's taps read the window's id live, and late-focus knows the row by its window's
-   *  instance (`item._win`), so a row its own tap took off the page still names it. → whether an open row followed */
+  /** THE PHONE's PART OF AN ID CHANGED IN PLACE (主开发 r1793 / r1958 — B-1d87 lets a window take another page's id): window.js
+   *  followIdChange, THE one rule both roads call (rekeyWindow, layout.js's restore remap), re-stamps every open list's rows and then
+   *  calls this: the open title switcher's row of that window, now under the new stamp, has its waiting mark read again
+   *  (_patchSwitcherWaiting reads the stamp), and this tab's own notes by id follow — the window on show per desktop (§6b guard 10,
+   *  saved for the tab) and the split's pair (phone-split-view rekey: a pane re-keyed is never «closed»). The rows' taps read the
+   *  window's id live, and late-focus knows a row by its window's instance (`item._win`). → whether an open row names it now */
   followRekey(oldId, newId) {
     const o = String(oldId), n = String(newId);
     let moved = 0;
     const p = document.querySelector('.mobile-win-switcher');
-    if (p) for (const row of p.querySelectorAll('.mobile-win-row[data-win-id]')) if (row.dataset.winId === o) { row.dataset.winId = n; moved++; }
+    if (p) for (const row of p.querySelectorAll('.mobile-win-row[data-win-id]')) if (row.dataset.winId === n) moved++;
     if (moved) this._patchSwitcherWaiting();
     let noted = false;
     for (const d of Object.keys(this._shown || {})) if (this._shown[d] === o) { this._shown[d] = n; noted = true; }
