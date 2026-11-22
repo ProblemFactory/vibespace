@@ -276,9 +276,13 @@ function setup(ctx) {
   // beside it (<session>/workflows/<runId>.json). A run found elsewhere — a FORK names its own conversation while the run's
   // files are its parent's — pays the walk ONCE: where it was found is kept (runId → path, bounded), so the next poll asks
   // that one path.
+  // The order is the release's: the asker's OWN folder first (the cwd's, then its id across project dirs), then the kept place,
+  // then the walk (round w5daqaxxs). A found run with no snapshot beside it walks for one filed elsewhere at most once a
+  // WF_SNAP_REWALK_MS (a run's snapshot is written at its end, by whichever conversation ran it), never once a poll.
   const _wfWhere = new Map();
-  const WF_WHERE_MAX = 256;
+  const WF_WHERE_MAX = 256, WF_SNAP_REWALK_MS = 60 * 1000;
   const keepWhere = (key, p) => { _wfWhere.delete(key); _wfWhere.set(key, p); if (_wfWhere.size > WF_WHERE_MAX) _wfWhere.delete(_wfWhere.keys().next().value); return p; };
+  const keptWhere = (key) => { if (!_wfWhere.has(key)) return null; const p = _wfWhere.get(key); _wfWhere.delete(key); _wfWhere.set(key, p); return p; };   // a USE keeps it: the least recent use leaves first
   function findWorkflowSnapshot(runId, claudeSessionId, cwd, runDir = null) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const tryPath = (p) => { try { return fs.existsSync(p) ? p : null; } catch { return null; } };
@@ -287,11 +291,7 @@ function setup(ctx) {
       const hit = tryPath(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId, 'workflows', `${runId}.json`));
       if (hit) return hit;
     }
-    // THE RUN IS FOUND (B-360d part 2): its snapshot, when written, is the one beside its run dir — nothing to walk for
-    if (runDir) return tryPath(path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', `${runId}.json`));
-    // a snapshot an earlier walk found: that one path
-    { const kept = _wfWhere.get('snap:' + runId); if (kept) { if (tryPath(kept)) return kept; _wfWhere.delete('snap:' + runId); } }
-    // 2) session id known, unknown/mismatched cwd: scan project dirs
+    // 2) session id known, unknown/mismatched cwd: scan project dirs (the asker's own folder, wherever it is)
     if (claudeSessionId) {
       try {
         for (const dir of fs.readdirSync(projectsDir)) {
@@ -300,6 +300,12 @@ function setup(ctx) {
         }
       } catch {}
     }
+    // THE RUN IS FOUND (B-360d part 2): its snapshot, when written, is the one beside its run dir
+    if (runDir) { const beside = tryPath(path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', `${runId}.json`)); if (beside) return beside; }
+    // a snapshot an earlier walk found: that one path
+    { const kept = keptWhere('snap:' + runId); if (kept) { if (tryPath(kept)) return kept; _wfWhere.delete('snap:' + runId); } }
+    // a found run whose snapshot is nowhere yet (it is running): the walk at most once a WF_SNAP_REWALK_MS, never once a poll
+    if (runDir) { const walked = keptWhere('nosnap:' + runId); if (walked && Date.now() - walked < WF_SNAP_REWALK_MS) return null; keepWhere('nosnap:' + runId, Date.now()); }
     // 3) last resort: runId is unique — walk every session dir
     try {
       for (const dir of fs.readdirSync(projectsDir)) {
@@ -307,7 +313,7 @@ function setup(ctx) {
         let sids = []; try { sids = fs.readdirSync(base); } catch {}
         for (const sid of sids) {
           const hit = tryPath(path.join(base, sid, 'workflows', `${runId}.json`));
-          if (hit) return keepWhere('snap:' + runId, hit);   // kept: the next poll asks this one path
+          if (hit) { _wfWhere.delete('nosnap:' + runId); return keepWhere('snap:' + runId, hit); }   // kept: the next poll asks this one path
         }
       }
     } catch {}
@@ -372,11 +378,11 @@ function setup(ctx) {
     const sub = (base) => path.join(base, 'subagents', 'workflows', runId);
     const tryDir = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory() ? p : null; } catch { return null; } };
     if (claudeSessionId && cwd) { const h = tryDir(sub(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId))); if (h) return h; }
-    // a run dir an earlier walk found (B-360d part 2: a fork's view of its parent's run): that one path
-    { const kept = _wfWhere.get('dir:' + runId); if (kept) { if (tryDir(kept)) return kept; _wfWhere.delete('dir:' + runId); } }
     if (claudeSessionId) {
       try { for (const dir of fs.readdirSync(projectsDir)) { const h = tryDir(sub(path.join(projectsDir, dir, claudeSessionId))); if (h) return h; } } catch {}
     }
+    // a run dir an earlier walk found (B-360d part 2: a fork's view of its parent's run): that one path, after the asker's own
+    { const kept = keptWhere('dir:' + runId); if (kept) { if (tryDir(kept)) return kept; _wfWhere.delete('dir:' + runId); } }
     try {
       for (const dir of fs.readdirSync(projectsDir)) {
         const base = path.join(projectsDir, dir);
@@ -422,7 +428,9 @@ function setup(ctx) {
       metas: parts.metas || {}, agentFiles: parts.agentFiles || [], scriptName: parts.scriptName || '',
       newestMtime: parts.newestMtime || 0,
     });
-    return ti ? mergeLiveWorkflow(view, ti.workflow, ti.usage || null) : view;
+    const out = ti ? mergeLiveWorkflow(view, ti.workflow, ti.usage || null) : view;
+    if (parts.attempts && parts.attempts.tailUnread) out.journalTailUnread = true;   // SAID: a line past the bound has not ended yet
+    return out;
   }
   // The local run dir's parts, read OFF the event loop (a 2.5 s poll per open
   // window): the journal, every file's mtime (the newest = the run's last sign
@@ -468,8 +476,11 @@ function setup(ctx) {
   // are not the ones it read there — checked whenever the file moved) is read again from its start; the pollers of one run
   // share one read. A last line with no newline yet is folded once it is whole JSON (the old whole-text parse read it too).
   const _wfJournals = new Map();
-  const JOURNAL_SLICE = 512 * 1024, JOURNAL_EDGE = 64;
-  const freshJournal = () => ({ ino: null, mtimeMs: 0, offset: 0, edge: Buffer.alloc(0), tail: [], fold: journalFold(null, '') });
+  // A line that never ends is kept up to JOURNAL_TAIL_MAX bytes; past it its bytes are dropped (only its first JOURNAL_HEAD_KEEP
+  // kept), the poll's answer says the journal's tail cannot be read yet, and the line, once it ends, is folded from its head alone
+  // (its type and agent: a result never parsed whole) — round w5daqaxxs
+  const JOURNAL_SLICE = 512 * 1024, JOURNAL_EDGE = 64, JOURNAL_TAIL_MAX = 8 * 1024 * 1024, JOURNAL_HEAD_KEEP = 4096;
+  const freshJournal = () => ({ ino: null, mtimeMs: 0, offset: 0, edge: Buffer.alloc(0), tail: [], tailLen: 0, skipHead: null, fold: journalFold(null, '') });
   function journalOf(runDir) {
     let e = _wfJournals.get(runDir);
     if (e && e.inflight) return e.inflight;
@@ -500,18 +511,29 @@ function setup(ctx) {
             e.offset += bytesRead;
             e.edge = Buffer.from(piece.length >= JOURNAL_EDGE ? piece.subarray(piece.length - JOURNAL_EDGE) : Buffer.concat([e.edge, piece]).subarray(-JOURNAL_EDGE));
             const nl = piece.lastIndexOf(0x0a);   // the pieces waiting hold no newline: a line's end is in this piece or not read yet
-            if (nl < 0) { e.tail.push(piece); continue; }
+            if (nl < 0) {
+              if (e.skipHead) continue;   // a line past the bound: its bytes are not kept
+              e.tail.push(piece); e.tailLen += piece.length;
+              if (e.tailLen > JOURNAL_TAIL_MAX) { e.skipHead = Buffer.from(Buffer.concat(e.tail).subarray(0, JOURNAL_HEAD_KEEP)); e.tail = []; e.tailLen = 0; }
+              continue;
+            }
             // a newline byte never sits inside a UTF-8 sequence: the cut is a line's end, the text decodes whole
-            const text = Buffer.concat([...e.tail, piece.subarray(0, nl + 1)]).toString('utf8');
-            e.tail = nl + 1 < piece.length ? [piece.subarray(nl + 1)] : [];
+            let text;
+            if (e.skipHead) {   // the line past the bound ends here: folded from its head alone, the lines after it read whole
+              const head = e.skipHead.toString('utf8'); e.skipHead = null;
+              const ty = /"type"\s*:\s*"(\w+)"/.exec(head), ag = /"agentId"\s*:\s*"([0-9a-f]+)"/.exec(head), ky = /"key"\s*:\s*"([^"\\]{1,200})"/.exec(head);
+              if (ty && ag) journalFold(e.fold, JSON.stringify({ type: ty[1], agentId: ag[1], ...(ky ? { key: ky[1] } : {}) }));
+              text = piece.subarray(piece.indexOf(0x0a) + 1, nl + 1).toString('utf8');
+            } else text = Buffer.concat([...e.tail, piece.subarray(0, nl + 1)]).toString('utf8');
+            e.tail = nl + 1 < piece.length ? [piece.subarray(nl + 1)] : []; e.tailLen = e.tail.length ? e.tail[0].length : 0;
             journalFold(e.fold, text);
             if (e.offset < st.size) await new Promise((r) => setImmediate(r));   // the loop given back between slices
           }
         } catch { /* a read that failed keeps what it folded; the next poll goes on from there */ } finally { if (fh) await fh.close().catch((err) => console.warn('[workflow] the journal\'s close failed:', err && err.message)); }
         e.mtimeMs = st.mtimeMs;
       }
-      if (moved && e.tail.length) { const t = Buffer.concat(e.tail).toString('utf8').trim(); let whole = false; if (t.endsWith('}')) { try { JSON.parse(t); whole = true; } catch { } } if (whole) { journalFold(e.fold, t); e.tail = []; } }
-      return journalAttemptsOf(e.fold);
+      if (moved && e.tail.length && !e.skipHead) { const t = Buffer.concat(e.tail).toString('utf8').trim(); let whole = false; if (t.endsWith('}')) { try { JSON.parse(t); whole = true; } catch { } } if (whole) { journalFold(e.fold, t); e.tail = []; } }
+      return e.skipHead ? { ...journalAttemptsOf(e.fold), tailUnread: true } : journalAttemptsOf(e.fold);
     })().finally(() => { e.inflight = null; });
     return e.inflight;
   }
