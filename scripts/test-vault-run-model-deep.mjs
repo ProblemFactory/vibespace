@@ -36,12 +36,13 @@ import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const SRC = path.join(REPO, 'src/vault-run.js');
+const SCRUBBER_SRC = path.join(REPO, 'src/vault-scrubber.js');   // 主开发 r1919 (THE COST): the scrubber's own module — the run module exports its names
 const V = require(SRC);
 const VI = require(path.join(REPO, 'src/vault-inventory.js'));
 const M1 = 'vault://mounts/m1/secretKey', M2 = 'vault://mounts/m2/secretKey';   // as the fast suite names them (⑥ reads both)
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const { ok, report } = checker();
-const SCRUB = scrubLegs({ REPO, SRC, scratchDir, anchored, require });
+const SCRUB = scrubLegs({ REPO, SRC: SCRUBBER_SRC, scratchDir, anchored, require });
 
 console.log('① THE COST cut at the end on 2 MiB — the release\'s function and this one (r858; moved from test-vault-run-model)');
 {
@@ -311,13 +312,13 @@ console.log('⑥b THE REAL PRODUCERS\' TABLE — every printing × a 21-characte
   console.log(`  (the producers' table ran in ${Date.now() - t0} ms)`);
 }
 
-console.log('⑧ MUTANTS (of ⑥) — patched copies of src/vault-run.js must go RED (moved with ⑥ from test-vault-run-model)');
+console.log('⑧ MUTANTS (of ⑥) — patched copies of the scrubber (src/vault-scrubber.js) must go RED (moved with ⑥ from test-vault-run-model)');
 {
   const dir = scratchDir('scrubmodel-deep');   // r1670: never the run door's folder shape (vs-vault-run-…, src/temp-sweepers.js)
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
-  const real = fs.readFileSync(SRC, 'utf8');
-  const mutant = (name, from, to) => { const f = path.join(dir, 'src', `vault-run-${name}.js`); fs.writeFileSync(f, anchored(real, from, to, `⑧ «${name}»`)); return { hit: true, M: require(f) }; };   // anchored: an anchor that moved fails BY NAME
+  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+  const real = fs.readFileSync(SCRUBBER_SRC, 'utf8');   // every ⑧ anchor is the scrubber's own line (src/vault-scrubber.js since 主开发 r1919)
+  const mutant = (name, from, to) => { const f = path.join(dir, 'src', `vault-scrubber-${name}.js`); fs.writeFileSync(f, anchored(real, from, to, `⑧ «${name}»`)); return { hit: true, M: require(f) }; };   // anchored: an anchor that moved fails BY NAME
   const LEGS = [
     ['the scrubber without base64', '\n    ...base64Forms(bytes),\n', '\n    ...[],\n', (Vm) => (Vm === V ? once('scrub', () => scrubLeaks(V)) : scrubLeaks(Vm)).filter(([, n]) => /base64|Basic/.test(n) && !/^wrap: /.test(n))],
     ['a value split across chunks escaping (no window)', '  const W = maxLen - 1;\n', '  const W = 0;\n', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)) : chunkEscapes(Vm))],

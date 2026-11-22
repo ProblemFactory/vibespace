@@ -710,7 +710,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     const WK = path.join(REPO, 'src/server/vault-run-scrub-worker.js'), wkSrc = fs.readFileSync(WK, 'utf8');
     let wkMut = anchored(wkSrc, "m = VR.createRunMasker(msg.secrets, ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']", '(c2) a scrubber worker that masks nothing');
     wkMut = anchored(wkMut, "require('../worker-memory.js')", `require(${JSON.stringify(path.join(REPO, 'src/worker-memory.js'))})`, '(c2) the planted worker reads the memory helper');
-    wkMut = anchored(wkMut, "require('../vault-run.js')", `require(${JSON.stringify(path.join(REPO, 'src/vault-run.js'))})`, '(c2) the planted worker reads the scrubber');
+    wkMut = anchored(wkMut, "require('../vault-scrubber.js')", `require(${JSON.stringify(path.join(REPO, 'src/vault-scrubber.js'))})`, '(c2) the planted worker reads the scrubber');
     const wkFile = path.join(ROOT8, 'scrub-worker-masks-nothing.js'); fs.writeFileSync(wkFile, wkMut);
     const runM = require(path.join(REPO, 'src/server/vault-run-door.js')).create({ dataDir: path.join(ROOT8, 'mut-run'), vault: eng8, userTodos: todosO, sources: { secrets: () => require(path.join(REPO, 'src/server/vault-contents.js')).secretSource({ vault: eng8 }) }, instanceKind: () => 'cluster', runRoot: () => ROOT8, log: () => {}, scrubWorkerFile: wkFile });
     fs.mkdirSync(path.join(ROOT8, 'mut-run'), { recursive: true });

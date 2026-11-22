@@ -1,8 +1,9 @@
 // THE RUN SCRUBBER'S LEGS (lane lg-vault-file — 主开发 r858, the three faults; r1068, the scan's budget), shared by
 // test-vault-run-model (fast) and test-vault-run-model-deep (heavy: the 2 MiB of the bound). Each leg takes the module it judges
 // (the shipped one, the release's function rebuilt from it, or a patched copy) and returns what it counted — never a value. The
-// release copy writes ONE scratch copy of src/vault-run.js with the release's lines put back; the suite hands in its scratch.mjs
-// `scratchDir` / `anchored` and its `require`, so this file imports no harness.
+// release copy writes ONE scratch copy of the scrubber's module with the release's lines put back (`SRC`: src/vault-scrubber.js
+// since 主开发 r1919, THE COST — the scrubber's own lines live there); the suite hands in its scratch.mjs `scratchDir` / `anchored`
+// and its `require`, so this file imports no harness.
 import fs from 'node:fs';
 import path from 'node:path';
 /** the RELEASE's cutTailStart, its own lines (the release copy puts them back) */
@@ -164,7 +165,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
   const releaseCopy = () => {
     const dir = scratchDir('scrublegs-release');   // r1670: never the run door's folder shape (vs-vault-run-…, src/temp-sweepers.js)
     fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
     let t = fs.readFileSync(SRC, 'utf8');
     const back = (from, to, name) => { t = anchored(t, from, to, `⑦g the release's ${name}`); };
     t = anchored(t, /\n[^\n]*\/\/ THE SCRUBBER'S OVERLAP[^\n]*/, '', "⑦g the release's run scan", { count: 7 });
@@ -186,7 +187,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
     const ctA = t.indexOf('  function cutTailStart(buf) {'), ctZ = t.indexOf("  // THE CUT'S TWO FAULTS (lane lg-vault-file, r858");
     if (ctA < 0 || ctZ < ctA) throw new Error('ANCHOR GONE «⑦g the release\'s cutTailStart» — the function is not where the copy expects it');
     t = t.slice(0, ctA) + RELEASE_CUT_TAIL_START + t.slice(ctZ);
-    const f = path.join(dir, 'src', 'vault-run-release.js');
+    const f = path.join(dir, 'src', `${path.basename(SRC, '.js')}-release.js`);
     fs.writeFileSync(f, t);
     return require(f);
   };
@@ -376,8 +377,8 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
   const copyOf = (name, edit) => {
     const dir = scratchDir('scrublegs-' + name);
     fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
-    const f = path.join(dir, 'src', `vault-run-${name}.js`);
+    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+    const f = path.join(dir, 'src', `${path.basename(SRC, '.js')}-${name}.js`);
     fs.writeFileSync(f, edit(fs.readFileSync(SRC, 'utf8')));
     return require(f);
   };

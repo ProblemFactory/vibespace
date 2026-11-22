@@ -68,6 +68,7 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const SRC = path.join(REPO, 'src/vault-run.js');
+const SCRUBBER_SRC = path.join(REPO, 'src/vault-scrubber.js');   // 主开发 r1919 (THE COST): the scrubber's own module — the run module exports its names
 const V = require(SRC);
 const VI = require(path.join(REPO, 'src/vault-inventory.js'));
 const VB = require(path.join(REPO, 'src/vault-blocked.js'));
@@ -1286,7 +1287,7 @@ function foldLeg27(M) {
   return out;
 }
 console.log('⑦g THE SCRUBBER\'S THREE FAULTS (lane lg-vault-file, r858): a cut inside a value, a value split between the pipes at a cut, a value inside another\'s match — and nothing else changes');
-const SCRUB = scrubLegs({ REPO, SRC, scratchDir, anchored, require });   // the run scrubber's legs (r858, r1068): scripts/vault-run-scrub-legs.mjs, shared with the deep twin
+const SCRUB = scrubLegs({ REPO, SRC: SCRUBBER_SRC, scratchDir, anchored, require });   // the run scrubber's legs (r858, r1068): scripts/vault-run-scrub-legs.mjs, shared with the deep twin
 {
   const Vr = SCRUB.release();
   // the three scenes: what reaches the caller's output in the RELEASE and NOW (characters of the value in the clear, counted — never a value)
@@ -1348,15 +1349,20 @@ const SCRUB = scrubLegs({ REPO, SRC, scratchDir, anchored, require });   // the 
   // THE COST on a 2 MiB output and THE LONGEST TURN near the bound: the deep twin (test-vault-run-model-deep — 主开发 r1068)
 }
 
-console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
+console.log('⑧ MUTANTS — patched copies of src/vault-run.js (and of its scrubber, src/vault-scrubber.js) must go RED');
 {
   const dir = scratchDir('vaultrun-model');   // r1152: never the vault run door's folder shape vs-vault-run-…
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));   // B-ef1b: vault-inventory reads the For-you registry (a band item's declared buttons)
+  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));   // B-ef1b: vault-inventory reads the For-you registry (a band item's declared buttons)
   const real = fs.readFileSync(SRC, 'utf8');
   // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (the copy still loads, hit:
   // false, and the mutant's own «the patch hits once» row reds too — nothing crashes)
+  // 主开发 r1919 (THE COST): the scrubber's own lines are src/vault-scrubber.js — a mutant whose anchor is there patches a copy
+  // of THAT file (its legs read the scrubber's names, which the run module exports as they are)
+  const realS = fs.readFileSync(SCRUBBER_SRC, 'utf8');
   const mutant = (name, from, to) => {
+    const nS = realS.split(from).length - 1;
+    if (nS > 0 && real.split(from).length === 1) { const f = path.join(dir, 'src', `vault-scrubber-${name}.js`); fs.writeFileSync(f, anchored(realS, from, to, `⑧ «${name}» (src/vault-scrubber.js)`)); return { hit: true, M: require(f) }; }   // anchored: a doubled anchor fails BY NAME
     const n = real.split(from).length - 1;
     if (n !== 1) ok(false, `ANCHOR (${name}, src/vault-run.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant is not the control it says`);
     const f = path.join(dir, 'src', `vault-run-${name}.js`); fs.writeFileSync(f, real.replace(from, to)); return { hit: n === 1, M: require(f) };

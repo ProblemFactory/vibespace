@@ -13,7 +13,7 @@
 const { isMainThread, parentPort } = require('worker_threads');
 if (isMainThread) throw new Error('src/server/vault-run-scrub-worker.js runs as a worker only (the run door starts it)');
 const { answerMemory } = require('../worker-memory.js');
-const VR = require('../vault-run.js');
+const VR = require('../vault-scrubber.js');   // THE SCRUBBER alone (主开发 r1919, THE COST): never the run module's tree
 
 let m = null;
 const counts = () => ({ hits: m.hits, bytes: m.bytes, byForm: m.byForm, over: m.over, withheld: m.withheld });
