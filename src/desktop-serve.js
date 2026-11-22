@@ -1222,7 +1222,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const logFd = fs.openSync(path.join(dir, 'app.log'), 'a');
     const handles = { x: null, server: null, wm: null, app: null };
     children.set(id, handles);
-    const base = { ...env(), [SESSION_ENV]: id };
+    let base = { ...env(), [SESSION_ENV]: id };
     // rule 7: the record can turn terminal UNDER this function (a part that
     // exited, the guard) or a stop can be in progress (`stopping`) — every
     // await is followed by this question, and a `true` answer means "add
@@ -1234,6 +1234,12 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     try {
       const recipe = display.RECIPES[rec.recipe];
       if (typeof recipe !== 'function') throw namedError('no-recipe', `no bring-up recipe named ${JSON.stringify(rec.recipe)}`);
+      // B-34bc (主开发 r2362): EVERY child of this window (its display server, the helpers, the application) starts from ONE
+      // environment that has a UTF-8 character type when the hub's names no locale; a person's own locale is never replaced
+      const start = await (display.appStartEnv || displayFacts.appStartEnv)(base, { bins: f.bins });
+      if (gone()) return;
+      base = start.env;
+      if (!start.added && start.why !== 'named') log.warn?.(`[desktop] ${id}: no UTF-8 character type for its window (${start.why}) — text typed through an input method may arrive broken`);
       const cookie = display.newCookie();
       const authFile = path.join(dir, 'Xauthority');
       display.writeXauthority(authFile, [{ display: '0', cookieHex: cookie }]);

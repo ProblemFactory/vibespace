@@ -1205,6 +1205,23 @@ async function utf8LocaleEnv(env, { bins = null, now = Date.now } = {}) {
   }
   return { ok: false, tried, why: `\`locale charmap\` answers no UTF-8 for any of them${listed.names.length ? '' : ', and `locale -a` lists no other UTF-8 locale'}` };
 }
+/**
+ * B-34bc (主开发 r2358 / r2362): THE ONE ENVIRONMENT every child of an application window starts from (its display server,
+ * the helpers the hub starts on that display, and the application) carries a UTF-8 CHARACTER TYPE when the environment it
+ * is built from names NO locale (no LC_ALL, LC_CTYPE or LANG). A fleet pod's image sets none, and an application under the
+ * C locale turns what a person types through an input method (é, 中文) into replacement marks (measured on the hub's box,
+ * 2026-11-22). It is LC_CTYPE only, from the UTF-8 rule's own walk above (C.UTF-8, then the env's own UTF-8 locale, then
+ * what `locale -a` lists), so messages, numbers and dates keep the C library's defaults. A person's own locale (any of the
+ * three named, whatever it is) is NEVER replaced. → `{ env, locale, added, why }`; `why` names a walk that found none.
+ */
+async function appStartEnv(env, { bins = null, now = Date.now } = {}) {
+  const base = env || {};
+  const named = ctypeOf(base);
+  if (named) return { env: base, locale: named, added: false, why: 'named' };
+  const u = await utf8LocaleEnv(base, { bins, now });
+  if (!u.ok) return { env: base, locale: '', added: false, why: u.why };
+  return { env: { ...base, LC_CTYPE: u.locale }, locale: u.locale, added: true, why: u.verified ? 'verified' : 'unverified' };
+}
 // One `xwininfo -root -tree` child line: indent, id, the NAME, `: ("instance" "Class")`,
 // then `WxH+relX+relY  +absX+absY`. Parsed from the RIGHT, because the name is
 // printed UNESCAPED or not at all — MEASURED on xwininfo 1.1.6 (2026-09-22):
@@ -1604,7 +1621,7 @@ module.exports = {
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, setDisplaySize, applyWindowPlan, xpraVersion, installFacts, installState,
-  UTF8_LOCALE, utf8Env, utf8LocaleEnv,
+  UTF8_LOCALE, utf8Env, utf8LocaleEnv, appStartEnv,
   VNC_NATIVE, RFB_VIEWER_TYPES, RFB_VERSIONS, rfbAuthOf, rfbGreeting, // design 014 D1
   appA11yBus, // lane app-display-a11y-bus
   PORTAL_LIBEXEC_DIRS, portalBins, a11yBusAddress, startPortalBus, unmountUnder, // lane app-display-portal

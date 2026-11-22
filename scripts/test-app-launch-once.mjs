@@ -36,6 +36,10 @@
 //      body's `pin`) — the record is BORN pinned through the one stamp; a keeper-fixed rung (Xvfb+x11vnc's fit cell) starts
 //      its X server AT the pin; a bad size is refused in parsePin's words; a rung that cannot hold a pin (this suite's own
 //      rung has no fit cell; a 'shared' one; Xvnc's 'follows') refuses `pin_unsupported` BY NAME — no record, nothing run.
+//   ⑫ B-34bc (主开发 r2362 / r2375): a hub env that names NO locale ⇒ the application, its display server and the helpers'
+//      road (ctx.x11Env: the window manager, the portal bus) start with a UTF-8 character type (LC_CTYPE only,
+//      display.appStartEnv); a person's own locale (here a non-UTF-8 LANG) is never replaced. RED CONTROL: bringUp without its
+//      start environment (a copy) ⇒ all three start in the C locale.
 // ~3 s.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -340,7 +344,10 @@ await leg('⑨', async () => {
   ok(DSRC.split(ENDED_A).length === 2, 'control setup: the launch tests its record\'s state after the wait (found once)');
   const sw = await run(DS, 'stop-during-wait', { stopDuringWait: true });
   ok(!sw.err && sw.spawned === 0 && sw.state !== 'starting', '⑨ a Stop pressed while the launch waits for its record to land: NOTHING is spawned for the ended record', sw);
-  const MS = mutantCopies('alo-ended', repo).load('src/desktop-serve.js', anchored(DSRC, ENDED_A, "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');\n    /* MUTANT: the state is not tested after the wait */", 'alo-no-ended-check'), 'alo-no-ended-check');
+  // B-34bc: bringUp's first await (the window's start environment) asks the same question before anything starts — the copy
+  // cuts BOTH, so this control still says what the launch's own check stops
+  const START_A = '      const start = await (display.appStartEnv || displayFacts.appStartEnv)(base, { bins: f.bins });\n      if (gone()) return;\n';
+  const MS = mutantCopies('alo-ended', repo).load('src/desktop-serve.js', anchored(anchored(DSRC, ENDED_A, "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');\n    /* MUTANT: the state is not tested after the wait */", 'alo-no-ended-check'), START_A, '      const start = await (display.appStartEnv || displayFacts.appStartEnv)(base, { bins: f.bins });\n      /* MUTANT: nor after the start environment */\n', 'alo-no-ended-check'), 'alo-no-ended-check');
   const swx = await run(MS, 'stop-during-wait-red', { stopDuringWait: true });
   ok(swx.spawned >= 1, 'CONTROL (the state check cut, in a copy): the parts of an ENDED record are spawned (then reaped) — red', swx);
   // the two other launch roads hold the same line BETWEEN their record's commit and their bring-up (a RemoteApp, a browser's display)
@@ -457,6 +464,45 @@ await leg('⑧', async () => {
       `${name}: pin_unsupported BY NAME (the backend named, the picture follows the pane there, where to change it) — no record, no X server`, e2 && e2.message);
     d2.shutdown?.();
   }
+});
+await leg('⑫', async () => {
+  console.log('⑫ B-34bc — every child of an app window starts with a UTF-8 character type when the hub names no locale; a person\'s own locale is never replaced');
+  const LOC = script('locale-app', 'printf \'LC_ALL=%s\\nLC_CTYPE=%s\\nLANG=%s\\n\' "$LC_ALL" "$LC_CTYPE" "$LANG" > "$1"\nexec sleep 600');
+  const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
+  const DSRC = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  const UTF8 = /\.utf-?8(@|$)/i;
+  const pairs = (text, sep) => Object.fromEntries(text.split(sep).filter(Boolean).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]));
+  const environOf = (pid) => { try { return pairs(fs.readFileSync(`/proc/${pid}/environ`, 'utf8'), '\0'); } catch { return null; } };
+  const three = (e) => e && { LC_ALL: e.LC_ALL || '', LC_CTYPE: e.LC_CTYPE || '', LANG: e.LANG || '' };
+  // the HELPERS' road: the window manager and the portal bus start from ctx.x11Env(...) — recorded by the leg's own recipe
+  const helperEnvs = [];
+  const disp = { ...fakeDisplay, RECIPES: Object.freeze({ 'fake-x': async (ctx) => { helperEnvs.push(three(ctx.x11Env(FAKE_DISPLAY))); return fakeDisplay.RECIPES['fake-x'](ctx); } }) };
+  /** one launch of the locale app on `mod` under the hub env `envFn` ⇒ what the APPLICATION, the DISPLAY SERVER and the HELPERS' road started with */
+  const run = async (mod, tag, envFn) => {
+    const out = path.join(root, `locale-${tag}`); fs.rmSync(out, { force: true });
+    const ROW = { id: 'locale', label: 'Locale App', exec: LOC, args: [out], category: 'app' };
+    const ds = mod.install({ dataDir: path.join(root, `ds-loc-${tag}`), env: envFn, display: disp, backends: BACKENDS, registryRows: [ROW], log, now, tickMs: 3600e3, apps: noApps });
+    const h0 = helperEnvs.length;
+    try {
+      const id = (await ds.launch({ appId: 'locale' }, {})).id;
+      const r = await until(() => { const x = ds.get(id); return x && x.state !== 'launching' ? x : null; });
+      await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8').includes('LANG='));
+      const app = fs.existsSync(out) ? three(pairs(fs.readFileSync(out, 'utf8').trim(), '\n')) : null;
+      const server = r && r.pids && r.pids.x ? three(environOf(r.pids.x)) : null;
+      try { await ds.stop(id, { why: 'user' }); } catch { }
+      return { state: r && r.state, app, server, helpers: helperEnvs[h0] || null };
+    } finally { ds.shutdown?.(); }
+  };
+  const bare = await run(DS, 'bare', env);   // this suite's hub env: PATH and HOME, no locale
+  ok(bare.state === 'ready' && !!bare.app && UTF8.test(bare.app.LC_CTYPE) && !bare.app.LC_ALL && !bare.app.LANG && !!bare.server && bare.server.LC_CTYPE === bare.app.LC_CTYPE && !!bare.helpers && bare.helpers.LC_CTYPE === bare.app.LC_CTYPE,
+    `⑫ a hub env that names no locale ⇒ the APPLICATION, its DISPLAY SERVER and the HELPERS' road (ctx.x11Env) all start with LC_CTYPE ${bare.app && bare.app.LC_CTYPE} (a UTF-8 character type), and no other locale name`, bare);
+  const own = await run(DS, 'own', () => ({ ...env(), LANG: 'fr_FR.ISO-8859-1' }));
+  ok(own.state === 'ready' && !!own.app && own.app.LANG === 'fr_FR.ISO-8859-1' && !own.app.LC_CTYPE && !own.app.LC_ALL && !!own.server && own.server.LANG === 'fr_FR.ISO-8859-1' && !own.server.LC_CTYPE && !!own.helpers && own.helpers.LANG === 'fr_FR.ISO-8859-1' && !own.helpers.LC_CTYPE,
+    '⑫ a person\'s OWN locale (LANG=fr_FR.ISO-8859-1, not UTF-8) is never replaced: the app, its display server and the helpers\' road start with it, no LC_CTYPE added', own);
+  const MX = mutantCopies('alo-locale', repo).load('src/desktop-serve.js', anchored(DSRC, '      base = start.env;\n', '', 'alo-no-locale'), 'alo-no-locale');
+  const red = await run(MX, 'red', env);
+  ok(red.state === 'ready' && !!red.app && !red.app.LC_CTYPE && !red.app.LC_ALL && !red.app.LANG && !!red.server && !red.server.LC_CTYPE && !!red.helpers && !red.helpers.LC_CTYPE,
+    '⑫ RED CONTROL: bringUp without its start environment (a copy of desktop-serve) ⇒ the app, its display server and the helpers\' road start with NO locale at all — the C locale', red);
 });
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);
