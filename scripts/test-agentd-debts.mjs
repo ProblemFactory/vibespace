@@ -12,8 +12,10 @@
 //  ② THE PIPE CONVERSATION'S START (pipeSessions.open, the B-147f cure read only until now): the daemon's own copy of the input fifo
 //     is closed after the spawn — it holds the attach's one tail a start and nothing else of the start — and a start that never got a pid
 //     closes its three handles. Read in the daemon's own table (/proc/<pid>/fd: Linux — elsewhere ② is SKIPPED BY NAME) by WHAT
-//     EACH HANDLE NAMES (r1558: a count moved with unrelated handles under load): every start holds its tail's .out (a tail never
-//     opened is named) and nothing else of its start. RED: the fifo's close cut ⇒ its .in left a start;
+//     EACH HANDLE NAMES (r1558: a count moved with unrelated handles under load) and each .out by its MODE (r2371: the tail READS it),
+//     the count read once it has SETTLED (r2371: two moments read as reds; a handle that stays is NAMED when the bounded wait gives
+//     up — its RED: the no-pid closes cut, read with the green's wait): every start holds its tail's .out (a tail never opened is
+//     named) and nothing else of its start. RED: the fifo's close cut ⇒ its .in left a start;
 //     RED: the no-pid road's closes cut ⇒ its three handles left a start
 //  ③ THE PID-0 KILL LAW IN THE STREAM MODULES (r569): every process.kill there is guarded by a real pid, and the five sites the
 //     B-147f fold guarded keep `pid > 0` beside their kill (a census by line; CONTROL a guard removed in a copy is named). Their
@@ -139,15 +141,48 @@ try {
   // whose tail never opened NAMED — and then NOTHING ELSE of a start: no fifo (.in), no .err, no second .out. A handle that names
   // none of them is not this leg's (it can come and go). The REDs leak exactly those names: the fifo kept (one .in a start), the
   // no-pid road's three kept (.in, a second .out, .err a start)
+  // r2371 (主开发, «a flapping leg to place»; read over every red of the kit's runs, 11-22): THE COUNT IS READ ONCE IT HAS SETTLED.
+  // The reds of this form were two MOMENTS, no handle that stays: (a) the no-pid RED read «17 for 6: at least 18» — the leaked .out
+  // answered the tail wait, so one start was counted before its attach's own tail opened; (b) the green read «no-pid: 1 of their
+  // three handles left» — the no-pid road closes its three handles BEFORE the reply, then the spawn's async 'error' appends the end
+  // sentinel to the .out (appendFileSync: a WRITE handle for a moment), caught by the count. So a .out handle is judged by its MODE
+  // too (/proc/<pid>/fdinfo, O_ACCMODE): the tail READS it; a start's tail is open only when a read handle is; a .out it WRITES is
+  // left. And the count is read again until it settles, bounded (SETTLE_MS): the green until nothing of a start is left — a handle
+  // that STAYS is NAMED when it gives up (its RED: the no-pid closes cut, read with the green's wait) — a RED until three reads agree
+  const SETTLE_MS = 5000;
+  const modeOf = (pid, fd) => { try { const m = /^flags:\s*([0-7]+)/m.exec(fs.readFileSync(`/proc/${pid}/fdinfo/${fd}`, 'utf8')); return m ? parseInt(m[1], 8) & 3 : -1; } catch { return -1; } };   // O_ACCMODE: 0 reads, 1 writes, 2 both
   const handlesOf = (d, sids) => {
     let dir = path.join(d.state, 'sessions'); try { dir = fs.realpathSync(dir); } catch { }
-    const want = new Map(), per = new Map(sids.map((x) => [x, { out: 0, in: 0, err: 0 }]));
+    const want = new Map(), per = new Map(sids.map((x) => [x, { tail: 0, out: 0, in: 0, err: 0, named: [] }]));
     for (const x of sids) for (const k of ['out', 'in', 'err']) want.set(path.join(dir, `${x}.${k}`), [x, k]);
-    try { for (const fd of fs.readdirSync(`/proc/${d.child.pid}/fd`)) { let l = null; try { l = fs.readlinkSync(`/proc/${d.child.pid}/fd/${fd}`); } catch { } const w = l && want.get(l); if (w) per.get(w[0])[w[1]]++; } } catch { }
+    try {
+      for (const fd of fs.readdirSync(`/proc/${d.child.pid}/fd`)) {
+        let l = null; try { l = fs.readlinkSync(`/proc/${d.child.pid}/fd/${fd}`); } catch { }
+        const w = l && want.get(l); if (!w) continue;
+        const c = per.get(w[0]), mode = w[1] === 'out' ? modeOf(d.child.pid, fd) : null;
+        if (w[1] === 'out' && mode === 0 && c.tail === 0) { c.tail++; continue; }   // ITS tail (one read handle); a second one is left
+        c[w[1]]++; c.named.push(`${w[0]}.${w[1]}${w[1] === 'out' ? (mode === 0 ? ' (a second tail)' : ' (written)') : ''} fd ${fd}`);
+      }
+    } catch { }
     return per;
   };
-  const opens = async (d, how) => {
-    const L = pl[d.name] && pl[d.name].L; if (!L) return { delta: null, extra: null };
+  const leftOf = (h) => [...h.values()].reduce((n, c) => n + c.out + c.in + c.err, 0);
+  const shape = (h) => JSON.stringify([...h.values()].map((c) => [c.tail, c.out, c.in, c.err]));
+  /** the count settled: every tail open (10 s), then the green (`clean`) until nothing of a start is left, a RED until three reads
+   *  agree — bounded by `bound`; → the reading, `gaveUp` when the bound ran out, the handles still open NAMED */
+  const settle = async (d, sids, { clean = false, bound = SETTLE_MS } = {}) => {
+    let h = handlesOf(d, sids); const tailless = () => sids.filter((x) => h.get(x).tail < 1);
+    for (const tEnd = Date.now() + 10000; tailless().length && Date.now() < tEnd;) { await sleep(25); h = handlesOf(d, sids); }
+    let same = 0, prev = shape(h), gaveUp = false;
+    for (const tEnd = Date.now() + bound; !(clean ? leftOf(h) === 0 : same >= 2);) {
+      if (Date.now() >= tEnd) { gaveUp = true; break; }
+      await sleep(40); h = handlesOf(d, sids);
+      const now = shape(h); same = now === prev ? same + 1 : 0; prev = now;
+    }
+    return { h, unopened: tailless(), extra: leftOf(h), named: [...h.values()].flatMap((c) => c.named), gaveUp };
+  };
+  const opens = async (d, how, o = {}) => {
+    const L = pl[d.name] && pl[d.name].L; if (!L) return { delta: null, extra: null, named: [] };
     const base = fdsOf(d), pids = [], sids = [];
     for (let i = 0; i < N; i++) {
       const chan = (how === 'fresh' ? 200 : 300) + i, sid = `dbt-${how}-${i}`; sids.push(sid);
@@ -157,18 +192,20 @@ try {
       pids.push(m.op === 'pipe-session-open' ? m.pid : m.op);
       if (Number.isInteger(m.pid) && m.pid > 1) started.push(m.pid);
     }
-    let h = handlesOf(d, sids); const tailless = () => sids.filter((x) => h.get(x).out < 1);
-    for (const tEnd = Date.now() + 10000; tailless().length && Date.now() < tEnd;) { await sleep(25); h = handlesOf(d, sids); }
-    const left = tailless(), extra = sids.reduce((n, x) => { const c = h.get(x); return n + Math.max(0, c.out - 1) + c.in + c.err; }, 0);
-    return { delta: fdsOf(d) - base, pids, unopened: left, extra, per: Object.fromEntries(sids.map((x) => [x, h.get(x)])) };
+    const st = await settle(d, sids, o);
+    return { delta: fdsOf(d) - base, pids, sids, unopened: st.unopened, extra: st.extra, named: st.named, gaveUp: st.gaveUp, per: Object.fromEntries(sids.map((x) => [x, st.h.get(x)])) };
   };
   const g = {}, r1 = {}, r2 = {};
-  for (const how of ['fresh', 'nopid']) { g[how] = await opens(P1, how); r1[how] = await opens(P2, how); r2[how] = await opens(P3, how); }
+  for (const how of ['fresh', 'nopid']) { g[how] = await opens(P1, how, { clean: true }); r1[how] = await opens(P2, how); r2[how] = await opens(P3, how); }
+  const namedOf = (x) => (x.named && x.named.length ? `: ${x.named.join(', ')}` : '');
   const never = [...(g.fresh.unopened || []), ...(g.nopid.unopened || [])];
   ok(up && !never.length && g.fresh.extra === 0 && g.fresh.pids.every((p) => Number.isInteger(p) && p > 1) && g.nopid.extra === 0 && g.nopid.pids.every((p) => p === null),
-    `② ${N} pipe conversations started: each holds its tail (its .out) and NOTHING ELSE of its start — no fifo, no .err, no second .out (${g.fresh.extra} left; the table grew by ${g.fresh.delta}, a handle that names none of them not judged); ${N} starts that never got a pid: ${g.nopid.extra} of their three handles left${never.length ? ` — NEVER OPENED in 10 s: ${never.join(', ')}` : ''}`, { g });
+    `② ${N} pipe conversations started: each holds its tail (its .out, READ) and NOTHING ELSE of its start — no fifo, no .err, no .out it writes, no second tail (${g.fresh.extra} left${namedOf(g.fresh)}; the table grew by ${g.fresh.delta}, a handle that names none of them not judged); ${N} starts that never got a pid: ${g.nopid.extra} of their three handles left${namedOf(g.nopid)}${never.length ? ` — NEVER OPENED in 10 s: ${never.join(', ')}` : ''}${g.fresh.gaveUp || g.nopid.gaveUp ? ` — the count did not settle in ${SETTLE_MS / 1000} s` : ' (the count read once settled)'}`, { g });
   ok(r1.fresh.extra >= N, `RED: the fifo's close cut ⇒ its .in left a start (${r1.fresh.extra} for ${N}: at least ${N})`, r1);
-  ok(r2.nopid.extra >= 3 * N, `RED: the no-pid road's closes cut ⇒ three handles left a start (${r2.nopid.extra} for ${N}: at least ${3 * N})`, r2);
+  ok(r2.nopid.extra >= 3 * N, `RED: the no-pid road's closes cut ⇒ three handles left a start (${r2.nopid.extra} for ${N}: at least ${3 * N}; each start counted once its own tail is open)`, r2);
+  const stay = r2.nopid.sids ? await settle(P3, r2.nopid.sids, { clean: true, bound: 1000 }) : { gaveUp: false, extra: 0, named: [] };
+  ok(stay.gaveUp && stay.extra >= 3 * N && stay.named.length === stay.extra && stay.named.some((x) => /\.in fd /.test(x)) && stay.named.some((x) => /\.err fd /.test(x)) && stay.named.some((x) => /\.out \(written\) fd /.test(x)),
+    `RED: handles that STAY (the no-pid road's closes cut), read with the green's own wait: it gives up at its bound (1 s here) and NAMES each one (${stay.named.length}): ${stay.named.slice(0, 3).join(', ')} …`, stay);
   } else console.log(`  – ② SKIPPED BY NAME: the descriptor count reads /proc/<pid>/fd — this machine (${process.platform}) has none`);
 
   console.log('— ③ THE PID-0 KILL LAW IN THE STREAM MODULES (by line)');
