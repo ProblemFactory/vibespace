@@ -1742,6 +1742,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - accounts `_providerMemberOf`: a `pv-` id (not a built-in record) answers the provider store's record (providerRecordOf), and one the store does not hold an «unknown» provider of its own with no models (never null). LEGS (test-pool-auto): the record, the «unknown» one (not the pool's, serves nothing), account members as before; RED: a copy of the release's accounts answers null and the pool's reader agrees it with its own provider.
 - r2238's owed comment, as code: the resume's carry check judges a HINTED family (a resume naming no model) under every bucket; leg (the hinted scene drops the carry).
 
+### lg-providers B-d578 pool unit (c) — a provider member's usage is attributed to the provider (ruling r1516: (c) before any provider id reaches a decision)
+- WHY: usage attribution reads a pooled conversation's member from its credential LINK (accounts.poolMemberOfSession: the link first on a hot-switch harness); a provider member has no link (its key rides the spawn's env), so its rows would go to the link's subscription member and be priced at that member's rates.
+- ws-create: a pooled spawn that landed on a provider (`spawnAccount.kind === 'provider'`, its poolTarget) stamps `_heldPoolMember` — its process holds it, whatever the hot switch; accounts.poolMemberOfSession honours a PROVIDER stamp (`_providerMemberOf`) before the link (origin «provider»). The session schema's note says so. LEGS (test-pool-auto): the stamped conversation is the provider (attribution: acct = the provider's id, pool = the tag), an unstamped one as before, the spawn's stamp pinned; RED: a copy of the release's accounts attributes the provider's usage to Member A.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
