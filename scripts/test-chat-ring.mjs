@@ -186,6 +186,7 @@ const WRITES = [
   ['src/server/session-stdout.js', 'session.buffer += output;', 2, 'other', 'a chat backend with no stream protocol (raw passthrough) and a terminal: their own rings'],
   ['src/server/session-stdout.js', 'session.buffer = session.buffer.slice(-800000)', 1, 'other', 'the raw passthrough\'s own bound'],
   ['src/server/session-stdout.js', 'session.buffer = session.buffer.slice(0, session.buffer.length - catchUp.drop.length)', 2, 'other', 'a re-attach catch-up removes the read\'s partial last line from the END (no trim, no bound — lane bl-loop-a, B-cd4b)'],
+  ['src/server/session-stdout.js', 'session.buffer = session.buffer.slice(0, session.buffer.length - gap.drop.length)', 1, 'other', 'the restore\'s fence: the partial last line the catch-up fed is removed from the END before the lost lines go through the parser (no trim, no bound — lane bl-loop-a, B-cd4b r1266, on the root 7b23daa71)'],
   ['src/server/session-stdout.js', 'session.buffer += catchUp.text;', 1, 'other', 'a terminal\'s catch-up'],
   ['src/server/session-stdout.js', 'session.buffer = session.buffer.slice(-50000)', 2, 'other', 'a terminal\'s ring (75 000 → 50 000)'],
   ['src/server/session-stdout.js', 'session.buffer = tail.toString(\'utf-8\').slice(-50000);', 1, 'other', 'a terminal\'s repaint from its buffer file'],
