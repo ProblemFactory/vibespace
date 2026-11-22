@@ -5,6 +5,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 ## INDEX (one line per file; the essay is below)
 
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
+scripts/test-channels-agent-cli-verbs.mjs (NEW, heavy — B-7e49) — test-channels-agent-cli's legs that run the shipped CLI as a child moved verbatim with the stub: the verbs, the attachment verb, ⑳–㉔; the table (CLI presence, refused-set census) stays fast + a pin
 
 ```
 src/lib/late-focus.js (NEW — B-c87d) — THE ONE late-focus door: a window that finishes opening takes the keys only if the person pressed or typed nowhere else since its open began (PURE keyboard-yield lateFocusTakes); a lost race dropped, never queued ⇒ kb-file-structure
