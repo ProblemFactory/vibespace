@@ -437,7 +437,7 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   const LINKS_WORD = mutantCopies('peer-state-links-word', REPO).load('src/server/conversation-deliver.js', anchored(anchored(DSRC, LAW, OLD_HOLD, 'the-links-word'), DURABLE, '    return null;', 'no-durable-hold'), 'the-links-word');
   /** one rig over `dir`: the machine shut (no handle, the list offline) unless `box` says otherwise; its answer = `state` */
   const machine = (name, mod, box, state) => {
-    const R = rig(name, { mod, state, hello: box.hello || null, link: () => box.link, store: realStore(name, [MACHINE_H1()]), connect: async () => { if (box.gate) await box.gate; if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); } });
+    const R = rig(name, { mod, state, hello: box.hello || null, owner: () => (box.owner === undefined ? 'h-1' : box.owner), link: () => box.link, store: realStore(name, [MACHINE_H1()]), connect: async () => { if (box.gate) await box.gate; if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); } });
     return R;
   };
   const facts = (R) => ({ owed: R.deliver.endedEntries(X).length, away: R.deliver.endedEntries(X).map((e) => !!e.away), hooked: R.hooked.length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length, live: R.deliver.liveForWake(X) });
@@ -545,7 +545,7 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
     C.c.now += 61e3; await C.fire();
     return { owed: C.deliver.endedEntries(X).length, refused: C.wakes.filter((w) => w.cid === X && w.code === 'unpaired').length };
   };
-  const PAIR_CATCH = "    catch (e) { return e && e.code !== 'hosts-unread' && e.message === 'host not found' ? { reply: 'gone' } : UNKNOWN; }";
+  const PAIR_CATCH = "    catch (e) { return e && e.code === 'host_not_found' ? { reply: 'gone' } : UNKNOWN; }";
   const OLD_PAIRED = mutantCopies('peer-state-guessed-unpaired', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, PAIR_CATCH, "    catch { return { reply: 'gone' }; }", 'any-throw-is-gone'), 'any-throw-is-gone');
   const cs = await cannotSay(DELIVER, 'g'), csr = await cannotSay(OLD_PAIRED, 'r');
   ok(cs.owed === 1 && cs.refused === 0, '(2) a machines list whose read THROWS cannot say — the wake is KEPT (never «unpaired»: that turns its notices for good)', cs);
@@ -619,7 +619,7 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
 console.log('⑮ B-2566\'s remainder (r1645): THE PAIRING READ — one function, three replies, judged by ONE TABLE over the REAL machines list');
 {
   // the table: each row a REAL store (src/hosts.js) on a scratch folder, read through the deliver engine's own pairing read
-  const PAIR_CATCH = "    catch (e) { return e && e.code !== 'hosts-unread' && e.message === 'host not found' ? { reply: 'gone' } : UNKNOWN; }";
+  const PAIR_CATCH = "    catch (e) { return e && e.code === 'host_not_found' ? { reply: 'gone' } : UNKNOWN; }";
   const ROWS = [
     ['a paired machine', () => realStore('pair-paired', [MACHINE_H1()]), 'paired'],
     ['a machine the list READ gone (another machine paired, not this one)', () => realStore('pair-absent', [{ ...MACHINE_H1(), id: 'h-2' }]), 'gone'],
@@ -646,6 +646,32 @@ console.log('⑮ B-2566\'s remainder (r1645): THE PAIRING READ — one function,
   const planted = DSRC.replace("  const silentSinceOf = (hid) => {", "  const silentSinceOf = (hid) => { const _x = getHosts().get(hid);");
   ok(here.join() === 'pairingOf' && readers(planted).length === 2 && readers(planted).includes('silentSinceOf'),
     'THE CENSUS: the machines list\'s get is called in ONE place in the deliver engine — pairingOf; every reader of a machine asks it (CONTROL: a planted direct read is named)', { readers: here, planted: readers(planted) });
+}
+
+
+console.log('⑯ B-2566\'s remainder (r1730): «gone» by the store\'s CODE; a HELD list ends nothing on every road');
+{
+  // (1) the REAL store says a machine it read gone by a TYPED code (src/hosts.js get) — the pairing read matches the code, never the words
+  const st = realStore('code-gone', [{ ...MACHINE_H1(), id: 'h-2' }]);
+  let thrown = null; try { st.get('h-1'); } catch (e) { thrown = { code: e.code, message: e.message }; }
+  ok(thrown && thrown.code === 'host_not_found' && thrown.message === 'host not found', '(1) the real store\'s not-found throw carries its TYPED code (host_not_found — src/mount-error-words.js\'s own, so a page\'s words do not move)', thrown);
+  // (2) a conversation no ONE machine can be named for (two machines claim it) while the list is HELD: the judge ends nothing — the
+  // wake stays held past the bound; RED: the held return removed (a copy) ⇒ released after the bound with the no-link word
+  const X = CID(160);
+  const HELD_RETURN = "    if (hostsHeld()) return;   // r1730 (2): a HELD list ends NOTHING, on every road (an owner no one machine can be named for reaches here past attemptEnded's held return)\n";
+  const NOHELD = mutantCopies('peer-state-held-ends-nothing', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, HELD_RETURN, '', 'held-ends-wake'), 'held-ends-wake');
+  const heldTwoOwners = async (mod, tag) => {
+    const box = { up: false, link: 'offline' };
+    const R = rig('held-two-' + tag, { mod, owner: () => (box.owner === undefined ? 'h-1' : box.owner), link: () => box.link, store: realStore('held-two-' + tag, [MACHINE_H1()]), connect: async () => { throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); } });
+    await R.result(X, 'nightly report finished');
+    box.owner = null;   // two machines claim it now: no ONE owner can be named
+    R.store._unreadHold({ code: 'EIO', why: 'i/o error, read' });   // the REAL store's own hold: its read failed
+    R.c.now += 11 * 60e3; await R.fire(); await R.fire();
+    return { owed: R.deliver.endedEntries(X).length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length, held: R.store.held() };
+  };
+  const g = await heldTwoOwners(DELIVER, 'g'), r = await heldTwoOwners(NOHELD, 'r');
+  ok(g.held === true && g.owed === 1 && g.running === 0, '(2) a HELD list and an owner no one machine can be named for: the wake is KEPT past the bound — a held list ends nothing', g);
+  ok(r.running === 1 && r.owed === 0, '(2) RED: the held return removed (a copy) ⇒ the wake is released after the bound under the no-link word', r);
 }
 
 report();

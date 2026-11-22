@@ -1670,8 +1670,9 @@ class JobManager {
    *  kept closed — the engine's own judgement, over the store's answer; the wiring files what it is handed) */
   _fileMachineAway(hid, w, since, wordless = null) {
     const closed = typeof this.d.machineAwayClosedAt === 'function' ? this.d.machineAwayClosedAt(hid) : 0;
-    if (closed && Number(closed) >= Number(since)) return null;   // a person closed it this outage: kept closed
-    (this._machineAwaySince || (this._machineAwaySince = new Map())).set(hid, Number(since));
+    if (closed && Number(since) > 0 && Number(closed) >= Number(since)) return null;   // a person closed it this outage: kept closed — an UNKNOWN start (0, after a restart) never closes it (r1730 (4))
+    // an UNKNOWN start (after a restart): this filing's own instant — a person's close of what it filed stands (r1861 (a): the refile is once a machine)
+    (this._machineAwaySince || (this._machineAwaySince = new Map())).set(hid, Number(since) > 0 ? Number(since) : now());
     (this._machineAwaySaid || (this._machineAwaySaid = new Set())).add(hid);
     try { return this.d.noticeMachineAway({ hid, n: w.n, convs: w.convs, since, ...(wordless ? { wordless } : {}) }) || null; }
     catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» For-you item was not filed — ${e && e.message}`); return null; }
@@ -1708,13 +1709,27 @@ class JobManager {
   _machineWordless(cid, code) {
     const hids = new Set((this.pendingNotifs.get(cid) || []).filter((e) => e && e.held && e.held.kind === 'machine-away' && e.held.hostId).map((e) => e.held.hostId));
     const wl = this._machineWordlessOf || (this._machineWordlessOf = new Map());
+    const filed = this._machineAwayFiled();   // r1861: an item an EARLIER run of the hub filed counts as filed — looked at BEFORE the road decides
+    if (!this._machineAwayLooked && hids.size) (this._wordlessAtLook || (this._wordlessAtLook = new Map())).set(cid, code);   // a held tray: decided again AT the look
     for (const hid of hids) {
+      if (!filed.has(hid)) continue;   // r1730 (3): the mark belongs to a FILED item — an unfiled one would give a LATER ordinary outage the wordless words
+      const w = this._machineAwayOwed(hid);
       wl.set(hid, code);
-      const w = this._machineAwayOwed(hid), said = this._machineAwaySaid && this._machineAwaySaid.has(hid);
       const since = Number(this._machineAwaySince && this._machineAwaySince.get(hid)) || Number(typeof this.d.machineAwayOf === 'function' && (this.d.machineAwayOf(hid) || {}).since) || 0;   // after a restart: the ladder's own start
-      if (said && w.n) this._fileMachineAway(hid, w, since, code);
+      if (w.n) this._fileMachineAway(hid, w, since, code);
     }
     return hids.size;
+  }
+  /** THE MACHINES WHOSE ITEM IS FILED (r1861): this run's filings and, once a run, the open items an EARLIER run of the hub filed (the
+   *  store's own list, read once it could be READ: a held tray is looked at again) — the ONE look the settle and the wordless road take.
+   *  A wordless release that came while the tray could not be read is decided again AT the look, before its caller goes on */
+  _machineAwayFiled() {
+    const said = this._machineAwaySaid || (this._machineAwaySaid = new Set());
+    if (this._machineAwayLooked) return said;
+    try { const open = typeof this.d.machineAwayOpen === 'function' ? this.d.machineAwayOpen() : []; if (Array.isArray(open)) { this._machineAwayLooked = true; for (const hid of open) said.add(hid); } } catch { }
+    const q = this._machineAwayLooked && this._wordlessAtLook;
+    if (q) { this._wordlessAtLook = null; for (const [c, code] of q) this._machineWordless(c, code); }
+    return said;
   }
   /** the notices owed to the conversations of machine `hid` while it cannot be reached → {n, convs} */
   _machineAwayOwed(hid) {
@@ -1730,8 +1745,7 @@ class JobManager {
    *  machine this run filed for, and of the items an earlier run left open — the store's list, once it could be READ (r1277 (4)) */
   _machineAwaySettle() {
     if (typeof this.d.resolveMachineAway !== 'function') return;
-    const said = this._machineAwaySaid || (this._machineAwaySaid = new Set());
-    if (!this._machineAwayLooked) { try { const open = typeof this.d.machineAwayOpen === 'function' ? this.d.machineAwayOpen() : []; if (Array.isArray(open)) { this._machineAwayLooked = true; for (const hid of open) said.add(hid); } } catch { } }
+    const said = this._machineAwayFiled();
     for (const hid of [...said]) {
       // a machine that could not give its word (r1397 (1)): its item goes only once its results went out — never on the link's return
       const wordless = this._machineWordlessOf && this._machineWordlessOf.has(hid);

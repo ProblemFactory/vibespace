@@ -423,7 +423,7 @@ console.log('§3 a message to a conversation on a paired machine is never told �
   const slice = (head) => { const i = CD.indexOf(head), j = i < 0 ? -1 : CD.indexOf('\n  }\n', i); return i < 0 || j < 0 ? null : CD.slice(i, j + 4); };
   const pair = slice('  function pairingOf(hid) {\n'), fn = slice('  function ownerHostOf(cid) {\n');
   const HELD_READ = "    try { if (typeof hosts.held === 'function' && hosts.held()) return UNKNOWN; } catch { return UNKNOWN; }";
-  const CATCH = "    catch (e) { return e && e.code !== 'hosts-unread' && e.message === 'host not found' ? { reply: 'gone' } : UNKNOWN; }";
+  const CATCH = "    catch (e) { return e && e.code === 'host_not_found' ? { reply: 'gone' } : UNKNOWN; }";
   ok(!!pair && !!fn && pair.includes(HELD_READ) && pair.includes(CATCH) && fn.includes("idx.ownerHost(cid, (id) => pairingOf(id).reply !== 'gone')"), 'control setup: pairingOf and ownerHostOf are sliced from conversation-deliver.js — the held read, the store\'s own «gone», the claim asked of it (the control\'s anchors)');
   const ownerHostOf = (pairSrc) => {
     const hosts = { held: () => true, get: () => { throw Object.assign(new Error('hosts.json could not be read (EACCES)'), { code: 'hosts-unread', status: 503 }); } };

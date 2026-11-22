@@ -1783,6 +1783,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (pairingOf(hid).reply === 'gone') { for (const e of all) endEnded(e, { outcome: 'refused', code: 'unpaired', why: 'its machine is no longer paired — open the conversation to read what waits for it' }); return; }   // r1645: only the store's own «gone»; «cannot say» keeps the wake
     for (const e of all) e.nextAt = clock.now() + AWAY_HOLD_MS;
     scheduleRetry();
+    if (hostsHeld()) return;   // r1730 (2): a HELD list ends NOTHING, on every road (an owner no one machine can be named for reaches here past attemptEnded's held return)
     const link = linkOf(hid);
     // THE LAW, COMPLETED (r1397 (1)): where a machine CANNOT say — no device link to ask ('unknown': an ssh-only machine), or an agent
     // with no such op (older) — the release's road stands for it: the link's word, once it has stood a bound; the row says why
@@ -1851,7 +1852,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // rung 2 helper: which registered machine owns this conversation? null =
   // local/unknown (the local rung already ran by the time this is asked).
   /** THE PAIRING READ (主开发 r1645) — ONE function, THREE replies, written against the store's own contract (src/hosts.js get: the
-   *  machine's record; it THROWS «host not found» for a machine the list READ gone; a HELD list throws hosts-unread):
+   *  machine's record; it THROWS code host_not_found for a machine the list READ gone; a HELD list throws hosts-unread):
    *  {reply: 'paired', host} · {reply: 'gone'} · {reply: 'unknown'} (cannot say: no list, a held list, a read that failed any other
    *  way). EVERY reader of a machine in this engine asks it — the owner's claim, a held wake's machine, the silence's start, the
    *  machine's name; none reads the store itself (test-peer-state ⑮'s census; test-hosts-held-census holds its one lookup) */
@@ -1862,7 +1863,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!hid || !hosts || typeof hosts.get !== 'function') return UNKNOWN;
     try { if (typeof hosts.held === 'function' && hosts.held()) return UNKNOWN; } catch { return UNKNOWN; }
     try { const host = hosts.get(hid); return host ? { reply: 'paired', host } : UNKNOWN; }
-    catch (e) { return e && e.code !== 'hosts-unread' && e.message === 'host not found' ? { reply: 'gone' } : UNKNOWN; }   // the store's own word for a machine it READ gone
+    catch (e) { return e && e.code === 'host_not_found' ? { reply: 'gone' } : UNKNOWN; }   // the store's own CODE for a machine it READ gone (r1730 (1))
   }
   function ownerHostOf(cid) {
     try {

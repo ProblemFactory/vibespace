@@ -1451,9 +1451,9 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
   // `local` = a LOCAL conversation that runs but takes no message mid-turn (opencode / ACP / Codex in a terminal): no peer lane, its delivery
   // parks; `ended` = a reachable PAIRED owner whose machine said it ended there (the remote rung's notRunning + remoteEnded). The park's own
   // «live» (liveForWake) = a session here, or a reachable machine that has not said it ended — any other conversation is NOT RUNNING
-  const rig = (name, wiringMod = wiring) => {
+  const rig = (name, wiringMod = wiring, dir0 = null) => {   // dir0: an earlier rig's folder (r1861: A RESTART — a new engine and a new For-you store on it)
     const clock = { skew: 0 };   // the For-you store's own clock, placed (r1277: the next-outage leg steps it, never the store's internals)
-    const dir = mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now: () => Date.now() + clock.skew }), logs = [], live = new Set(), local = new Set(), ended = new Set(), metas = [];
+    const dir = dir0 || mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now: () => Date.now() + clock.skew }), logs = [], live = new Set(), local = new Set(), ended = new Set(), metas = [];
     // B-2566's remainder: `down` = a conversation on a paired machine (cid → its host id); `hostsDown` = a machine that cannot be reached
     // (host id → since when it is silent) — the ladder's verdict as conversation-deliver answers it (its connect missed, the list says offline)
     const down = new Map(), hostsDown = new Map();
@@ -1468,7 +1468,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
         deliverToConversation: async (cid, text, opts) => { if (opts && opts.retry) metas.push({ cid, meta: opts.retry.meta }); const u = away(cid); if (u) return { ok: false, lane: 'remote-message', hostId: u.hostId, reason: 'the machine did not answer within 6000 ms', notRunning: true, unreachable: true, since: u.since }; if (down.has(cid)) return { ok: true, lane: 'remote-message', hostId: down.get(cid) }; return ended.has(cid) ? { ok: false, lane: 'remote-message', hostId: 'h-paired', reason: 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true } : live.has(cid) ? { ok: true, lane: 'message' } : local.has(cid) ? { ok: false, parked: true, reason: 'busy', phase: 'mid-turn', busy: true } : AWAY; },
       } });
     W.initAfterListen();
-    return { W, jm: W.jm, todos, logs, live, local, ended, metas, down, hostsDown, clock, stop: () => { W.shutdown?.(); todos.stop(); } };
+    return { dir, W, jm: W.jm, todos, logs, live, local, ended, metas, down, hostsDown, clock, stop: () => { W.shutdown?.(); todos.stop(); } };
   };
   const owner = (cid) => ({ conversation: { backend: 'claude', id: cid }, sessionId: 's-' + cid, sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] });
   const task = (R, id, name, cid, extra = {}) => { const j = { id, kind: 'task', name, note: '', state: 'failed', desiredUp: false, owner: owner(cid), access: { view: 'group', control: 'session' }, runs: [{ startedAt: Date.now() - 60e3, endedAt: Date.now(), exit: 1, cause: 'error', lastLine: 'Error: frame 7 failed to render' }], notifyLog: [], ...extra }; R.jm.jobs.set(id, j); return j; };
@@ -1923,7 +1923,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     // r1277 (7): a person's close stands for the outage — the guard is the ENGINE's (its one filing, _fileMachineAway): RED: it removed (a
     // copy of the engine) ⇒ a later result REOPENS the item the person closed (a copy of the wiring cannot file at all: For you hands
     // origin 'jobs''s key to its one filer, src/server/jobs-wiring.js, by its own frame)
-    const R = rig('machine-close-red', wiringWith(anchored(JSRC, "    if (closed && Number(closed) >= Number(since)) return null;   // a person closed it this outage: kept closed\n", '', 'b2566r-close-guard'), 'b2566r-close-guard')), P = cidOf(0xf601);
+    const R = rig('machine-close-red', wiringWith(anchored(JSRC, "    if (closed && Number(since) > 0 && Number(closed) >= Number(since)) return null;   // a person closed it this outage: kept closed — an UNKNOWN start (0, after a restart) never closes it (r1730 (4))\n", '', 'b2566r-close-guard'), 'b2566r-close-guard')), P = cidOf(0xf601);
     R.down.set(P, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
     const pj = task(R, 'jb-p', 'render-p', P);
     failOf(R, pj);
@@ -1968,6 +1968,137 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     okP(/its agent is older and cannot say whether they run/.test(said.text) && said.status === 'open' && said.items === 1 && /Update VibeSpace’s device agent/.test(said.detail) && afterLanding === 'open' && machineItems(R)[0].status === 'done',
       'r1397 (1): a machine that cannot give its word — its item says WHY in place (its agent is older; update it), stays while its results wait (a landing on the machine is the link\'s word alone), and goes when they went out', { said, afterLanding, final: machineItems(R)[0].status });
     R.stop();
+  }
+  {
+    // r1730 (3): the wordless MARK belongs to a FILED item — a machine whose item was never filed (inside its grace) keeps none, so a
+    // LATER ordinary outage of it files the plain «silent since» words. RED: the mark set for an unfiled machine (a copy of the engine)
+    // — the mark alone, never a filing: the engine before r1730 (3)
+    const later = async (wmod, tag) => {
+      const R = rig('machine-wordless-unfiled-' + tag, wmod), V = cidOf(0xfb01);
+      R.down.set(V, 'h-b'); R.hostsDown.set('h-b', Date.now() - 10 * 60e3);   // inside the grace: nothing filed
+      failOf(R, task(R, 'jb-w1', 'render-w1', V));
+      await settle(() => owedAway(R, V) === 1);
+      const before = machineItems(R).length;
+      R.hostsDown.delete('h-b');
+      R.jm._onRetryEvent('wake', V, { producer: 'jobs', meta: { jobId: 'jb-w1' } }, { outcome: 'running', code: 'agent_older', why: 'its device agent is older: update it — the words wait for its next turn' });
+      R.jm.drainNotifs(V);   // its results went out
+      R.hostsDown.set('h-b', Date.now() - 2 * HOUR);   // a LATER, ordinary outage (its agent updated since)
+      nudge(R, V); failOf(R, task(R, 'jb-w2', 'render-w2', V));
+      await settle(() => machineItems(R).length === 1);
+      const it = machineItems(R)[0];
+      const out = { before, text: it && it.i18n.text.key, marked: !!(R.jm._machineWordlessOf && R.jm._machineWordlessOf.has('h-b')) };
+      R.stop(); return out;
+    };
+    const g = await later(wiring, 'g');
+    const r = await later(wiringWith(anchored(JSRC, "      if (!filed.has(hid)) continue;   // r1730 (3): the mark belongs to a FILED item — an unfiled one would give a LATER ordinary outage the wordless words\n", '      if (!filed.has(hid)) { wl.set(hid, code); continue; }\n', 'b2566r-mark-unfiled'), 'b2566r-mark-unfiled'), 'r');
+    okP(g.before === 0 && /it has been silent since/.test(g.text || '') && r.marked === true && /go out without its word/.test(r.text || ''),
+      'r1730 (3): a wordless release of a machine with NO item filed leaves no mark — a later ordinary outage files the «silent since» words; RED: the mark set anyway (a copy) ⇒ the later outage says «without its word»', { green: g, red: r });
+  }
+  {
+    // r1730 (4): after a RESTART an older agent's machine (its link online: the ladder names no outage start) still gets its wordless
+    // words filed — an UNKNOWN start (0) never closes the item. RED: the zero let close it (a copy of the engine)
+    const restart = (wmod, tag) => {
+      const R = rig('machine-wordless-restart-' + tag, wmod);
+      R.jm.d.machineAwayClosedAt = () => Date.now() - 3 * HOUR;   // the store answers: a person closed an older outage's item
+      const v = R.jm._fileMachineAway('h-b', { n: 2, convs: 1 }, 0, 'agent_older');
+      const it = machineItems(R)[0];
+      const out = { filed: !!v, text: it && it.i18n.text.key };
+      R.stop(); return out;
+    };
+    const g = restart(wiring, 'g');
+    const r = restart(wiringWith(anchored(JSRC, "    if (closed && Number(since) > 0 && Number(closed) >= Number(since)) return null;", "    if (closed && Number(closed) >= Number(since)) return null;", 'b2566r-zero-closes'), 'b2566r-zero-closes'), 'r');   // stale-pins: kept (the red copy's text: the guard before r1730 (4))
+    okP(g.filed && /go out without its word/.test(g.text || '') && r.filed === false && !r.text,
+      'r1730 (4): an UNKNOWN outage start (0, after a restart) never closes the item — the wordless words are filed; RED: the zero closes it (a copy)', { green: g, red: r });
+  }
+  // r1861: THE RESTART SHAPE — the first engine files the machine's item and stops (its stores landed); a NEW engine and a new For-you
+  // store open the SAME folder, nothing said in memory; the machine's held wakes still owe their word (the ladder's park is durable:
+  // machineAwayOf answers from it) until the older agent's release ends them
+  const rebooted = async (wmod, tag, cids) => {
+    let R = rig('machine-reboot-' + tag);
+    R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+    for (const c of cids) { R.down.set(c, 'h-b'); failOf(R, task(R, 'jb-rb-' + c.slice(-4), 'render-' + c.slice(-4), c)); }
+    await settle(() => machineItems(R).length === 1 && cids.every((c) => owedAway(R, c) === 1));
+    const first = machineItems(R)[0].i18n.text.key;
+    R.jm._save(); R.stop(); landedU4();
+    R = rig('machine-reboot-' + tag, wmod, R.dir);   // THE RESTART
+    R.hostsDown.set('h-b', Date.now() - 2 * HOUR); for (const c of cids) R.down.set(c, 'h-b');
+    return { R, first, boot: { owed: cids.map((c) => owedAway(R, c)), said: (R.jm._machineAwaySaid && R.jm._machineAwaySaid.size) || 0, looked: !!R.jm._machineAwayLooked, items: machineItems(R).length } };
+  };
+  const releaseOlder = (R, c) => { R.hostsDown.delete('h-b'); R.jm._onRetryEvent('wake', c, { producer: 'jobs', meta: { jobId: 'jb-rb-' + c.slice(-4) } }, { outcome: 'running', code: 'agent_older', why: 'its device agent is older: update it — the words wait for its next turn' }); };
+  const itemNow = (R) => { const it = machineItems(R)[0]; return it ? { status: it.status, text: it.i18n.text.key } : null; };   // a COPY: the store hands its own objects
+  const otherDrain = async (R, O) => { failOf(R, task(R, 'jb-o-' + O.slice(-4), 'render-o', O)); await settle(() => (R.jm.pendingNotifs.get(O) || []).length >= 1); return R.jm.drainNotifs(O).length; };   // an UNRELATED conversation's notices go out: the hub's settle runs
+  const LOOK = "    const filed = this._machineAwayFiled();   // r1861: an item an EARLIER run of the hub filed counts as filed — looked at BEFORE the road decides\n";
+  const REPLAY = "    if (q) { this._wordlessAtLook = null; for (const [c, code] of q) this._machineWordless(c, code); }\n";
+  {
+    // r1861 THE MUST: after a RESTART the item an EARLIER run filed counts as FILED — the look at the stored open items comes BEFORE the
+    // wordless road decides (one helper, the settle's too): the older agent's release ⇒ the item says its TRUE reason at once, STAYS
+    // OPEN through an unrelated drain while its result waits, and goes once it went out. RED 1: the look removed (a copy) ⇒ «silent
+    // since» stays at the release. RED 2: the look and the held-tray replay removed (the follow as it was) ⇒ the drain CLOSES it
+    const scene = async (wmod, tag) => {
+      const K = cidOf(0xfc01), O = cidOf(0xfc02);
+      const { R, first, boot } = await rebooted(wmod, 'must-' + tag, [K]);
+      releaseOlder(R, K);
+      const atRelease = itemNow(R), drained = await otherDrain(R, O), afterDrain = itemNow(R), owedThen = owedAway(R, K);
+      R.jm.drainNotifs(K);
+      const out = { first, boot, atRelease, drained, afterDrain, owedThen, final: itemNow(R) };
+      R.stop(); return out;
+    };
+    const g = await scene(wiring, 'g');
+    const r1 = await scene(wiringWith(anchored(JSRC, LOOK, "    const filed = this._machineAwaySaid || new Set();\n", 'b2566r-no-look'), 'b2566r-no-look'), 'r1');
+    const r2 = await scene(wiringWith(anchored(anchored(JSRC, LOOK, "    const filed = this._machineAwaySaid || new Set();\n", 'b2566r-no-look-2'), REPLAY, '', 'b2566r-no-look-2'), 'b2566r-no-look-2'), 'r2');
+    const WL = /go out without its word/, SIL = /it has been silent since/;
+    okP(SIL.test(g.first) && g.boot.owed.join() === '1' && g.boot.said === 0 && !g.boot.looked && g.boot.items === 1
+        && g.atRelease.status === 'open' && WL.test(g.atRelease.text) && g.drained >= 1 && g.afterDrain.status === 'open' && g.owedThen === 1 && g.final.status === 'done'
+        && r1.atRelease.status === 'open' && SIL.test(r1.atRelease.text)
+        && r2.drained >= 1 && r2.owedThen === 1 && r2.afterDrain.status === 'done' && SIL.test(r2.afterDrain.text),
+      'r1861: AFTER A RESTART (a new engine and a new For-you store on the first one\'s folder, nothing said in memory) the older agent\'s release finds the item the first run filed: it says its TRUE reason at once, stays open through an unrelated drain while its result waits, and goes when it went out; RED 1: the look removed ⇒ «silent since» at the release; RED 2: the look and the replay removed ⇒ the drain CLOSES it while its result waits',
+      { green: g, red1: r1, red2: r2 });
+  }
+  {
+    // r1861: a release that came while For you could not be READ (a held tray: no look) is decided again AT the look — the first settle
+    // after the read files the true reason and keeps the item while its result waits. RED: the replay removed (a copy) ⇒ that settle CLOSES it
+    const scene = async (wmod, tag) => {
+      const K = cidOf(0xfe01), O = cidOf(0xfe02);
+      const { R } = await rebooted(wmod, 'held-' + tag, [K]);
+      R.todos._holdUnread({ code: 'EIO', why: 'a test hold' });
+      releaseOlder(R, K);
+      const whileHeld = { looked: !!R.jm._machineAwayLooked, queued: !!(R.jm._wordlessAtLook && R.jm._wordlessAtLook.has(K)) };
+      for (let k = 0; k < 4 && R.todos.isHeldUnread(); k++) await R.todos.readAgain();
+      const lifted = !R.todos.isHeldUnread(), drained = await otherDrain(R, O), afterDrain = itemNow(R), owedThen = owedAway(R, K);
+      R.jm.drainNotifs(K);
+      const out = { whileHeld, lifted, drained, afterDrain, owedThen, final: itemNow(R) };
+      R.stop(); return out;
+    };
+    const g = await scene(wiring, 'g');
+    const r = await scene(wiringWith(anchored(JSRC, REPLAY, '', 'b2566r-no-replay'), 'b2566r-no-replay'), 'r');
+    okP(!g.whileHeld.looked && g.whileHeld.queued && g.lifted && g.drained >= 1 && g.afterDrain.status === 'open' && /go out without its word/.test(g.afterDrain.text) && g.owedThen === 1 && g.final.status === 'done'
+        && r.lifted && r.owedThen === 1 && r.afterDrain.status === 'done',
+      'r1861: an older agent\'s release while For you is HELD (no look possible) is decided again at the look — after the read the first settle files the true reason and keeps the item while its result waits; RED: the replay removed ⇒ that settle closes it while its result waits',
+      { green: g, red: r });
+  }
+  {
+    // r1861 (a): after a restart the outage's start is not known, so a person's close of the item an earlier run filed is filed again
+    // ONCE with the machine's reason (kb-features says so) — never once a conversation: the refile's own instant is kept, a close after
+    // it stands for the next release. RED: the unknown start kept as 0 (a copy) ⇒ the next conversation's release files it AGAIN
+    const scene = async (wmod, tag) => {
+      const K = cidOf(0xfd01), K2 = cidOf(0xfd02), O = cidOf(0xfd03);
+      const { R } = await rebooted(wmod, 'close-' + tag, [K, K2]);
+      await otherDrain(R, O);   // a settle while the held wakes still owe their word: the item an earlier run filed is found open, kept
+      const found = itemNow(R);
+      R.todos.setStatus(machineItems(R)[0].id, 'dismissed');   // a PERSON closes it
+      releaseOlder(R, K);
+      const once = itemNow(R);
+      R.todos.setStatus(machineItems(R)[0].id, 'dismissed');   // …and closes the refiled one
+      releaseOlder(R, K2);
+      const out = { found, once, again: itemNow(R), items: machineItems(R).length };
+      R.stop(); return out;
+    };
+    const g = await scene(wiring, 'g');
+    const r = await scene(wiringWith(anchored(JSRC, ".set(hid, Number(since) > 0 ? Number(since) : now());", '.set(hid, Number(since));', 'b2566r-start-zero'), 'b2566r-start-zero'), 'r');   // stale-pins: kept (the red copy's text: the start before r1861 (a))
+    okP(g.found.status === 'open' && g.once.status === 'open' && /go out without its word/.test(g.once.text) && g.again.status === 'dismissed' && g.items === 1
+        && r.once.status === 'open' && r.again.status === 'open',
+      'r1861 (a): after a restart a person\'s close of the item found open is filed again ONCE (the start unknown; the machine\'s reason is new), and the close after that stands for the next conversation\'s release; RED: the unknown start kept as 0 ⇒ that release reopens it again',
+      { green: g, red: r });
   }
   {
     // r1277 (7): the item goes BY ITSELF — RED: the drain's settle removed (a copy of the engine) ⇒ it stays open after the results went out

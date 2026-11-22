@@ -548,7 +548,7 @@ class HostManager {
     // never «not found» (ten callers read the held, empty list as a machine GONE: test-hosts-held-census holds every caller's row)
     if (this._unread) throw this._heldError();
     const h = this._state.hosts.find(x => x.id === id);
-    if (!h) throw new Error('host not found');
+    if (!h) throw Object.assign(new Error('host not found'), { code: 'host_not_found' });   // B-2566's remainder (r1730 (1)): a machine the list READ gone is said by a TYPED code (src/mount-error-words.js's own) — a reader matches the code, never the words
     return h;
   }
   /** (a) «is the store held?» — the one question every caller of a lookup asks before reading an absence as «gone» */
