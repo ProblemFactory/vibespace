@@ -2068,7 +2068,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     ok(sprR.running && sprR.listed && sprR.listed.endedBy === 'restart' && sprR.recordEnd === 'restart', `RED control: no end written at the spend ⇒ the restart is said over the run that used it — ${JSON.stringify(sprR)}`, sprR);
     const spf = await spentRestart(DOOR, { forget: true });
     ok(spf.running && spf.forgot && !spf.listed && spf.recordEnd === 'used' && spf.recordAtSpend, `r1700 (2): the entry deleted while a run that spent its once-grant runs, then a restart — nothing listed for the gone entry, the record «used» at the spend — ${JSON.stringify(spf)}`, spf);
-    const mspf = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const g of [...inFlight]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { grantEnded(g, 'used'); dropped++; }\n", '', 'test-vault-run r1700: the delete skips the run in flight'), 'a14b-spent-forget');
+    const mspf = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const g of [...inFlight]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { if (g.ran) grantEnded(g, 'used'); else if (!g.pendingEnd) g.pendingEnd = { by: 'deleted', at: now() }; dropped++; }\n", '', 'test-vault-run r1700: the delete skips the run in flight'), 'a14b-spent-forget');
     const spfR = await spentRestart(mspf, { forget: true });
     ok(spfR.running && spfR.listed && spfR.listed.endedBy === 'restart' && spfR.recordEnd === 'restart', `RED control: the delete that skips the run in flight ⇒ after the restart «restart» is listed for an entry that no longer exists — ${JSON.stringify(spfR)}`, spfR);
     const spa = await spentRestart(DOOR, { again: true });
@@ -2108,7 +2108,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const mbrs = M.load('src/server/vault-run-door.js', anchored(SRCa, ' if (burned) for (const a of spent) unsayUse(a.g);', '', 'test-vault-run r1700: no take-back'), 'a14b-burned-restart');
     const brsR = await burnedRestart(mbrs);
     ok(brsR.code === 'spawn_failed' && brsR.recordEnd === 'used' && brsR.listed.join() === 'used', `RED control: no take-back on a burned run ⇒ the restart says «its one run was used» of a run that never ran — ${JSON.stringify(brsR)}`, brsR);
-    // r1700 (2): an entry DELETED while a grant to it is live: the grant and its record end there («revoked»); a later restart writes
+    // r1700 (2): an entry DELETED while a grant to it is live: the grant and its record end there («deleted», its own word — r1825); a later restart writes
     // no end for the entry and `uses` offers no «ask again» for it. RED: the delete that leaves the live grant ⇒ «restart» listed
     const deletedLive = async (mod) => {
       const wd2 = await world();
@@ -2125,8 +2125,8 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       return { todo: !!todoId, forgot: !!(fe && fe.ok), afterForget, recordEnd: recEnd(), listed: wd2.door.usesFor(c8).ended.map((e) => e.endedBy) };
     };
     const dlv = await deletedLive(DOOR);
-    ok(dlv.todo && dlv.forgot && dlv.afterForget.grants === 0 && !dlv.afterForget.seen && dlv.afterForget.recordEnd === 'revoked' && dlv.recordEnd === 'revoked' && dlv.listed.length === 0, `r1700 (2): an entry deleted while a grant to it is live — the grant and its record end there («revoked»); after a restart \`uses\` offers nothing for the gone entry — ${JSON.stringify(dlv)}`, dlv);
-    const mdlv = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const [p, g] of [...grants]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { grants.delete(p); grantEnded(g, 'revoked'); dropped++; }\n", '', 'test-vault-run r1700: the delete leaves the live grant'), 'a14b-deleted-live');
+    ok(dlv.todo && dlv.forgot && dlv.afterForget.grants === 0 && !dlv.afterForget.seen && dlv.afterForget.recordEnd === 'deleted' && dlv.recordEnd === 'deleted' && dlv.listed.length === 0, `r1700 (2): an entry deleted while a grant to it is live — the grant and its record end there («deleted», its own word — r1825); after a restart \`uses\` offers nothing for the gone entry — ${JSON.stringify(dlv)}`, dlv);
+    const mdlv = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const [p, g] of [...grants]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { grants.delete(p); grantEnded(g, 'deleted'); dropped++; }\n", '', 'test-vault-run r1700: the delete leaves the live grant'), 'a14b-deleted-live');
     const dlvR = await deletedLive(mdlv);
     ok(dlvR.afterForget.grants === 1 && dlvR.recordEnd === 'restart' && dlvR.listed.join() === 'restart', `RED control: the delete that leaves the live grant ⇒ after a restart «restart» is listed for an entry that no longer exists — ${JSON.stringify(dlvR)}`, dlvR);
     const mdls = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const [p, x] of [...seen]) if (x && Array.isArray(x.entries) && x.entries.includes(key)) { seen.delete(p); dropped++; }", '', 'test-vault-run r1700 read: the delete leaves the seen shape'), 'a14b-deleted-seen');
@@ -2147,6 +2147,234 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const mswl = M.load('src/server/vault-run-door.js', anchored(SRCa, "catch (e) { if (!failed++) why = (e && e.message) || String(e); }", "catch (e) { if (!failed++) why = (e && e.message) || String(e); log(`a live approval's record could not be ended at the start (${(e && e.message) || e})`); }", 'test-vault-run r1700: a line a record'), 'a14b-sweep-log');
     const swlR = await sweepLog(mswl);
     ok(swlR.said === 4, `RED control: a line a record ⇒ the log says it four times for three records — ${JSON.stringify({ said: swlR.said })}`, swlR);
+    // B-a14b's last remainder (r1823/r1834) (2): the run card's 8-hour «Always» on the road WITH the use-grants store (the hub's one
+    // wiring, src/server/mounts-plugins-wiring.js) is a STANDING member — this conversation × the card's hosts × until — the store's
+    // own row; its record NAMES that member (principal + entries) and keeps the row's OWN until (one value). A restart ends nothing:
+    // the start asks the row, the card stays live, the same command runs with no card. A ✕ of the member in the Vault window then
+    // tells the card «revoked». On the road WITHOUT the store (memory: no production wiring) the restart did end it — «restart»,
+    // and the command draws its card again. REDs: the release's stamp (the start that asks no row); the ✕ that tells no card
+    const alwaysRestart = async (mod, { store = true } = {}) => {
+      const VUGa = R('src/server/vault-use-grants.js'), GSa = R('src/server/grants-store.js'), FAa = R('src/foryou-actions.js');
+      const wa = await world(), gsa = GSa.create({ memory: true });
+      const uga = store ? VUGa.create({ grants: () => gsa, vault: wa.vault, dataDir: wa.dataDir, log: (m) => wa.logs.push(String(m)) }) : null;
+      const mkA = () => (uga ? wa.mk(mod, { useGrants: uga, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) }) : wa.mk(mod));
+      wa.door = mkA(); openRow(wa);
+      const a8 = await runAnswered(wa, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '8h' });
+      const cardId = a8.card ? a8.card.id : null;
+      const f0 = ((cardId ? wa.userTodos.get(cardId) : null) || {}).resolvedFact || {};
+      let rowUntil = false;
+      if (uga && typeof f0.principal === 'string') { const m = (uga.publicFor('mounts:m1#secretKey').to || []).find((x) => x.principal === f0.principal); rowUntil = !!(m && (m.scopes || []).some((x) => Number(x.until) === Number(f0.until))); }
+      wa.door = mkA();   // THE RESTART: a new door over the same data (and the same grants store)
+      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));   // the start's sweeps have run
+      const it = cardId ? wa.userTodos.get(cardId) : null, f = (it && it.resolvedFact) || {};
+      const after = await runAnswered(wa, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/b'], { answer: 'deny' });
+      const out = { always: !!(a8.r && a8.r.ok && a8.a && a8.a.ok), alwaysFor: f.alwaysFor || null, named: typeof f0.principal === 'string' && Array.isArray(f0.entries) && f0.entries.includes('mounts:m1#secretKey'), rowUntil, recordEnd: f.endedBy || null, state: it ? FAa.decisionCard(it).state : null, ranNoCard: !!(after.r && after.r.ok) && !after.card, cardAgain: !!after.card };
+      if (uga && typeof f0.principal === 'string') {   // the ✕ in the Vault window (the owner's take-back of that member)
+        const tb = wa.door.takeBack({ id: 'mounts:m1#secretKey', principal: f0.principal, by: 'user' });
+        const it2 = cardId ? wa.userTodos.get(cardId) : null;
+        out.takeBack = { ok: !!(tb && tb.ok), recordEnd: ((it2 && it2.resolvedFact) || {}).endedBy || null, state: it2 ? FAa.decisionCard(it2).state : null };
+      }
+      return out;
+    };
+    const arc = await alwaysRestart(DOOR);
+    ok(arc.always && arc.alwaysFor === '8h' && arc.named && arc.rowUntil && !arc.recordEnd && arc.state !== 'ended' && arc.ranNoCard, `B-a14b's last remainder (2): the run card's 8-hour «Always» with the use-grants store — its record names its member and keeps the row's own until; a restart ends nothing: the card stays live, the same command runs with no card — ${JSON.stringify(arc)}`, arc);
+    ok(arc.takeBack && arc.takeBack.ok && arc.takeBack.recordEnd === 'revoked' && arc.takeBack.state === 'revoked', `(r1834) the member's ✕ in the Vault window ⇒ its card says «revoked», as the 1-hour window's does — ${JSON.stringify(arc.takeBack)}`, arc.takeBack);
+    const marc = M.load('src/server/vault-run-door.js', anchored(SRCa, "const end = says === 'memory' ? (f.alwaysFor === '8h' ? 'restart' : null) : says === 'replaced' ? 'replaced' : says === 'gone' ? 'revoked' : null;", "const end = f.alwaysFor === '8h' ? 'restart' : null;", "test-vault-run r1834: the release's stamp (the start asks no row)"), 'a14b-always-restart');
+    const arcR = await alwaysRestart(marc);
+    ok(arcR.always && arcR.recordEnd === 'restart' && arcR.state === 'ended' && arcR.ranNoCard, `RED control: the release's stamp — the start that asks no row says «ended · restart» while the member still lets the command run with no card — ${JSON.stringify(arcR)}`, arcR);
+    const marc2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "    let toldA = 0; if (r && r.ok && scope !== 'window') { try { toldA = alwaysTakenBack(String(id), 'revoked', pk); } catch { } }", '    let toldA = 0;', 'test-vault-run r1834: the ✕ that tells no card'), 'a14b-always-takeback');
+    const arcR2 = await alwaysRestart(marc2);
+    ok(arcR2.takeBack && arcR2.takeBack.ok && !arcR2.takeBack.recordEnd && arcR2.takeBack.state !== 'revoked', `RED control: the ✕ that tells no card ⇒ the card still reads «always allowed» after the owner took its member back — ${JSON.stringify(arcR2.takeBack)}`, arcR2);
+    const arm = await alwaysRestart(DOOR, { store: false });
+    ok(arm.always && !arm.named && arm.recordEnd === 'restart' && arm.state === 'ended' && arm.cardAgain, `(r1834) the road WITHOUT the store (memory — no production wiring): the restart did end the 8-hour «Always»: «ended · restart», and the command draws its card again — ${JSON.stringify(arm)}`, arm);
+    // (r1834's reads) a member whose END MOVED by a road that told no card (here: the store written directly — as a change made while
+    // For you was held unread): the START, at For you's read, catches up what the row says — «replaced». RED: the start that tells
+    // only the memory road (the read's third form) ⇒ the card keeps «always allowed» over a grant the row no longer says
+    const alwaysMoved = async (mod) => {
+      const VUGm = R('src/server/vault-use-grants.js'), GSm = R('src/server/grants-store.js'), FAm = R('src/foryou-actions.js');
+      const wm = await world(), gsm = GSm.create({ memory: true });
+      const ugm = VUGm.create({ grants: () => gsm, vault: wm.vault, dataDir: wm.dataDir, log: (m) => wm.logs.push(String(m)) });
+      const mkM = () => wm.mk(mod, { useGrants: ugm, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) });
+      wm.door = mkM(); openRow(wm);
+      const ID = 'mounts:m1#secretKey';
+      const a8 = await runAnswered(wm, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '8h' });
+      const cardId = a8.card ? a8.card.id : null;
+      const recOf = () => ((cardId ? wm.userTodos.get(cardId) : null) || {});
+      const f0 = recOf().resolvedFact || {}, pk = f0.principal, later = Number(f0.until) + 30 * 86400e3;
+      const moved = ugm.addMember(ID, { kind: 'conversation', key: wm.caller.conversationId, name: 'Lane X' }, { hosts: ['api.example.com'], until: later, source: 'owner' });
+      const scopesNow = ((ugm.publicFor(ID).to || []).find((x) => x.principal === pk) || {}).scopes || [];
+      const before = (recOf().resolvedFact || {}).endedBy || null;   // nothing told it: the store was written directly
+      wm.door = mkM();   // THE RESTART (its read)
+      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+      return { pressed: !!(a8.a && a8.a.ok), moved: !!(moved && moved.ok) && scopesNow.some((x) => Number(x.until) === later) && !scopesNow.some((x) => Number(x.until) === Number(f0.until)), before, end: (recOf().resolvedFact || {}).endedBy || null, state: FAm.decisionCard(recOf()).state };
+    };
+    const amv = await alwaysMoved(DOOR);
+    ok(amv.pressed && amv.moved && !amv.before && amv.end === 'replaced' && amv.state === 'ended', `(r1834's reads) a member whose end moved with no card told: the start catches up what the row says — «replaced» — ${JSON.stringify(amv)}`, amv);
+    const mamv = M.load('src/server/vault-run-door.js', anchored(SRCa, " : says === 'replaced' ? 'replaced' : says === 'gone' ? 'revoked' : null;", ' : null;', 'test-vault-run r1834 read 4: the start that tells only the memory road'), 'a14b-always-moved');
+    const amvR = await alwaysMoved(mamv);
+    ok(amvR.moved && !amvR.end, `RED control: the start that tells only the memory road ⇒ the card keeps «always allowed» over a grant the row no longer says — ${JSON.stringify(amvR)}`, amvR);
+    // (the fifth read) the start's catch-up of a GONE scope, on a 30-day card (any «Always», not the 8-hour one alone): its
+    // member revoked in the store directly (a road that told no card — as one made while For you was held unread), then a
+    // restart ⇒ «revoked». RED: the catch-up that leaves a gone scope unsaid
+    const alwaysGone = async (mod) => {
+      const VUGg = R('src/server/vault-use-grants.js'), GSg = R('src/server/grants-store.js'), FAg = R('src/foryou-actions.js');
+      const wg = await world(), gsg = GSg.create({ memory: true });
+      const ugg = VUGg.create({ grants: () => gsg, vault: wg.vault, dataDir: wg.dataDir, log: (m) => wg.logs.push(String(m)) });
+      const mkG = () => wg.mk(mod, { useGrants: ugg, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) });
+      wg.door = mkG(); openRow(wg);
+      const ID = 'mounts:m1#secretKey';
+      const c30 = await runAnswered(wg, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '30d' });
+      const cardId = c30.card ? c30.card.id : null, recOf = () => ((cardId ? wg.userTodos.get(cardId) : null) || {}), f0 = recOf().resolvedFact || {};
+      const rv = ugg.revoke(ID, f0.principal, { by: 'user' });   // the store written directly: no card told
+      const before = (recOf().resolvedFact || {}).endedBy || null;
+      wg.door = mkG();   // THE RESTART (its read)
+      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+      return { pressed: !!(c30.a && c30.a.ok), alwaysFor: f0.alwaysFor || null, revoked: !!(rv && rv.ok), before, end: (recOf().resolvedFact || {}).endedBy || null, state: FAg.decisionCard(recOf()).state };
+    };
+    const agn = await alwaysGone(DOOR);
+    ok(agn.pressed && agn.alwaysFor === '30d' && agn.revoked && !agn.before && agn.end === 'revoked' && agn.state === 'revoked', `(the fifth read) a 30-day card whose scope is gone with no card told: the start catches it up — «revoked» — ${JSON.stringify(agn)}`, agn);
+    const magn = M.load('src/server/vault-run-door.js', anchored(SRCa, " : says === 'gone' ? 'revoked' : null;", ' : null;', 'test-vault-run r1834 read 5: the catch-up that leaves a gone scope unsaid'), 'a14b-always-gone');
+    const agnR = await alwaysGone(magn);
+    ok(agnR.revoked && !agnR.end, `RED control: the catch-up that leaves a gone scope unsaid ⇒ the 30-day card keeps «always allowed» after its member was taken back — ${JSON.stringify(agnR)}`, agnR);
+    // another member's ✕ tells the card nothing; its entry DELETED (its row dropped first, then the door's forget) tells it
+    // «deleted». RED: the forget that tells no «Always» card
+    const alwaysOther = async (mod) => {
+      const VUGo = R('src/server/vault-use-grants.js'), GSo = R('src/server/grants-store.js'), FAo = R('src/foryou-actions.js');
+      const wo = await world(), gso = GSo.create({ memory: true });
+      const ugo = VUGo.create({ grants: () => gso, vault: wo.vault, dataDir: wo.dataDir, log: (m) => wo.logs.push(String(m)) });
+      wo.door = wo.mk(mod, { useGrants: ugo, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) }); openRow(wo);
+      const ID = 'mounts:m1#secretKey';
+      const a8 = await runAnswered(wo, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '8h' });
+      const cardId = a8.card ? a8.card.id : null;
+      const recOf = () => ((cardId ? wo.userTodos.get(cardId) : null) || {});
+      const other = ugo.addMember(ID, { kind: 'conversation', key: 'conv-y', name: 'Lane Y' }, { hosts: ['api.example.com'], source: 'owner' });
+      const tbY = wo.door.takeBack({ id: ID, principal: 'conversation:conv-y', by: 'user' });   // ANOTHER member's ✕
+      const afterOther = (recOf().resolvedFact || {}).endedBy || null;
+      const dropped = ugo.drop(ID, { by: 'user' });   // the entry deleted: its row first …
+      const fe = wo.door.forgetEntry(ID);   // … then the door's forget
+      return { pressed: !!(a8.a && a8.a.ok), other: !!(other && other.ok), tbY: !!(tbY && tbY.ok), afterOther, dropped: !!(dropped && dropped.ok), forgot: !!(fe && fe.ok), end: (recOf().resolvedFact || {}).endedBy || null, state: FAo.decisionCard(recOf()).state };
+    };
+    const aot = await alwaysOther(DOOR);
+    ok(aot.pressed && aot.other && aot.tbY && !aot.afterOther && aot.dropped && aot.forgot && aot.end === 'deleted' && aot.state === 'ended', `(r1834's reads) another member's ✕ tells the card nothing; its entry deleted tells it «deleted» — ${JSON.stringify(aot)}`, aot);
+    const mamv2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "    try { alwaysTakenBack(key, 'deleted'); } catch { }", '', 'test-vault-run r1834 read: the forget that tells no «Always» card'), 'a14b-always-deleted');
+    const aotR = await alwaysOther(mamv2);
+    ok(aotR.forgot && !aotR.end, `RED control: the forget that tells no «Always» card ⇒ the card still reads «always allowed» for a deleted entry — ${JSON.stringify(aotR)}`, aotR);
+    // (the fourth read) EVERY scope the card wrote: a card over TWO entries, then the ✕ of its member on ONE of them ⇒ «revoked»
+    // (its command no longer runs as pressed). And the PRESS road: a second card over both entries pressed «Always» (30 days)
+    // moves the first card's end ⇒ the first says «replaced»; a second card on the other entry alone leaves it. REDs: one listed
+    // scope read as enough; the press that tells no card
+    const twoEntries = async (mod, { second = null } = {}) => {
+      const VUGt = R('src/server/vault-use-grants.js'), GSt = R('src/server/grants-store.js'), FAt = R('src/foryou-actions.js');
+      const wt = await world(), gst = GSt.create({ memory: true });
+      const ugt = VUGt.create({ grants: () => gst, vault: wt.vault, dataDir: wt.dataDir, log: (m) => wt.logs.push(String(m)) });
+      wt.door = wt.mk(mod, { useGrants: ugt, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) }); openRow(wt); openRow(wt, 'app-secrets:app1#item.0.1');
+      const BOTH = ['--env', 'T=vault://mounts/m1/secretKey', '--env', 'U=vault://app-secrets/app1/item.0.1', '--', 'curl', '-s', 'https://api.example.com/v1/a'];
+      const ONE = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'];
+      const APP = ['--env', 'U=vault://app-secrets/app1/item.0.1', '--', 'curl', '-s', 'https://api.example.com/v1/b'];
+      const c1 = await runAnswered(wt, second ? ONE : BOTH, { answer: 'always', reauthed: true, ttl: '8h' });
+      const id1 = c1.card ? c1.card.id : null, recOf = () => ((id1 ? wt.userTodos.get(id1) : null) || {}), f1 = recOf().resolvedFact || {};
+      let act = null;
+      if (!second) act = wt.door.takeBack({ id: 'app-secrets:app1#item.0.1', principal: f1.principal, by: 'user' });   // the ✕ on ONE of its two entries
+      else { const c2 = await runAnswered(wt, second === 'both' ? BOTH : APP, { answer: 'always', reauthed: true, ttl: '30d' }); act = c2.a; }
+      return { pressed: !!(c1.a && c1.a.ok), entries: Array.isArray(f1.entries) ? f1.entries.length : 0, act: !!(act && act.ok), end: (recOf().resolvedFact || {}).endedBy || null, state: FAt.decisionCard(recOf()).state };
+    };
+    const tw1 = await twoEntries(DOOR);
+    ok(tw1.pressed && tw1.entries === 2 && tw1.act && tw1.end === 'revoked' && tw1.state === 'revoked', `(the fourth read) a card over two entries, the ✕ on one of them ⇒ «revoked» (its command no longer runs as pressed) — ${JSON.stringify(tw1)}`, tw1);
+    const mtw = M.load('src/server/vault-run-door.js', anchored(SRCa, "    return missing ? 'gone' : moved ? 'replaced' : 'held';", "    return (missing < want.length * f.entries.slice(0, 64).length) ? 'held' : 'gone';", 'test-vault-run r1834 read 4: one listed scope read as enough'), 'a14b-two-entries');
+    const tw1R = await twoEntries(mtw);
+    ok(tw1R.act && !tw1R.end, `RED control: one listed scope read as enough ⇒ the card keeps «always allowed» after the ✕ on one of its entries — ${JSON.stringify(tw1R)}`, tw1R);
+    const tw2 = await twoEntries(DOOR, { second: 'both' }), tw3 = await twoEntries(DOOR, { second: 'app' });
+    ok(tw2.pressed && tw2.act && tw2.end === 'replaced' && tw2.state === 'ended' && tw3.pressed && tw3.act && !tw3.end, `(the fourth read) the PRESS road: a second card over both entries moves the first card's end ⇒ «replaced»; a second card on the other entry alone leaves it — ${JSON.stringify({ tw2, tw3 })}`, { tw2, tw3 });
+    const mtp = M.load('src/server/vault-run-door.js', anchored(SRCa, "      try { for (const e of held.entries) alwaysTakenBack(String(e), 'revoked', held.principal); } catch { }", '', 'test-vault-run r1834 read 4: the press that tells no card'), 'a14b-press-tells');
+    const tw2R = await twoEntries(mtp, { second: 'both' });
+    ok(tw2R.act && !tw2R.end, `RED control: the press that tells no card ⇒ the first card keeps «always allowed (8 hours)» while its end is now the second press's — ${JSON.stringify(tw2R)}`, tw2R);
+    // …and BOTH roads that take a member back from the row (the ✕ — takeBack; the Save — saveRow) tell the «Always» cards: a census
+    // of the door's text (the Save's leg needs the page's row stamp). RED: the Save without it ⇒ the census names it
+    const takeBackCensus = (src) => { const fnOf = (name) => { const i = src.indexOf(`  function ${name}(`); return i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); }; return { takeBack: fnOf('takeBack').includes('alwaysTakenBack('), saveRow: fnOf('saveRow').includes('alwaysTakenBack('), press: fnOf('answer').includes('alwaysTakenBack('), standing: fnOf('answerRequest').includes('alwaysTakenBack('), forget: fnOf('forgetEntry').includes("alwaysTakenBack(key, 'deleted')") }; };
+    const tbc = takeBackCensus(SRCa);
+    ok(tbc.takeBack && tbc.saveRow && tbc.press && tbc.standing && tbc.forget, `(r1834 + its reads) every road that changes the row tells the cards it touches (the ✕, the Save, a second press, a standing Allow, a delete) — ${JSON.stringify(tbc)}`, tbc);
+    const tbcR = takeBackCensus(anchored(SRCa, "    if (r && r.ok) { try { told += alwaysTakenBack(String(id)); } catch { } }", '', 'test-vault-run r1834: the Save that tells no card'));
+    ok(tbcR.takeBack && !tbcR.saveRow, `RED control: the Save without it ⇒ the census names the Save road — ${JSON.stringify(tbcR)}`, tbcR);
+    // (r1834's third read) THE CARD IS JUDGED BY ITS OWN SCOPES — the owner's Save through the Vault window («Who may use it…»):
+    // one that MOVES the card's end ⇒ «replaced» (the card's own sentence no longer the row's); one that keeps the conversation
+    // but leaves the card's host out ⇒ «revoked» (it no longer says more than the row). And a 1-hour window card whose entry is
+    // DELETED ⇒ «deleted». REDs: the Save that tells no card (each); the delete that tells no window card
+    const alwaysSaved = async (mod, { keepHost = true } = {}) => {
+      const VUGs = R('src/server/vault-use-grants.js'), GSs = R('src/server/grants-store.js'), FAs = R('src/foryou-actions.js');
+      const ws = await world(), gss = GSs.create({ memory: true });
+      const ugs = VUGs.create({ grants: () => gss, vault: ws.vault, dataDir: ws.dataDir, log: (m) => ws.logs.push(String(m)) });
+      ws.door = ws.mk(mod, { useGrants: ugs, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) }); openRow(ws);
+      const ID = 'mounts:m1#secretKey';
+      const a8 = await runAnswered(ws, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '8h' });
+      const cardId = a8.card ? a8.card.id : null, f0 = ((cardId ? ws.userTodos.get(cardId) : null) || {}).resolvedFact || {};
+      const later = Number(f0.until) + 3600e3;
+      const to = [{ kind: 'conversation', key: ws.caller.conversationId, hosts: keepHost ? ['api.example.com'] : ['other.example.org'], ...(keepHost ? { until: later } : {}) }];
+      const sv = ws.door.saveRow(ID, { to }, { by: 'user', reauthed: true });
+      const it = cardId ? ws.userTodos.get(cardId) : null;
+      return { pressed: !!(a8.a && a8.a.ok), scopes: Array.isArray(f0.scopeHosts) && f0.scopeHosts.includes('api.example.com'), saved: !!(sv && sv.ok), code: sv && sv.code, end: ((it && it.resolvedFact) || {}).endedBy || null, state: it ? FAs.decisionCard(it).state : null };
+    };
+    const asv = await alwaysSaved(DOOR), asd = await alwaysSaved(DOOR, { keepHost: false });
+    ok(asv.pressed && asv.scopes && asv.saved && asv.end === 'replaced' && asv.state === 'ended', `(r1834's third read) the owner's Save that MOVES the card's end ⇒ the card says «replaced» — ${JSON.stringify(asv)}`, asv);
+    ok(asd.pressed && asd.saved && asd.end === 'revoked' && asd.state === 'revoked', `(r1834's third read) the owner's Save that keeps the conversation but leaves the card's host out ⇒ «revoked» — ${JSON.stringify(asd)}`, asd);
+    const masv = M.load('src/server/vault-run-door.js', anchored(SRCa, "    if (r && r.ok) { try { told += alwaysTakenBack(String(id)); } catch { } }", '', 'test-vault-run r1834 read 3: the Save that tells no card'), 'a14b-always-saved');
+    const asvR = await alwaysSaved(masv), asdR = await alwaysSaved(masv, { keepHost: false });
+    ok(asvR.saved && !asvR.end && asdR.saved && !asdR.end, `RED control: the Save that tells no card ⇒ both cards still read «always allowed» — ${JSON.stringify({ moved: asvR.end, left: asdR.end })}`, { asvR, asdR });
+    const windowDeleted = async (mod) => {
+      const VUGw = R('src/server/vault-use-grants.js'), GSw = R('src/server/grants-store.js'), FAw = R('src/foryou-actions.js');
+      const ww = await world(), gsw = GSw.create({ memory: true });
+      const ugw = VUGw.create({ grants: () => gsw, vault: ww.vault, dataDir: ww.dataDir, log: (m) => ww.logs.push(String(m)) });
+      ww.door = ww.mk(mod, { useGrants: ugw, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) }); openRow(ww);
+      const ID = 'mounts:m1#secretKey';
+      const sh = await runAnswered(ww, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'bash', '-c', 'curl https://api.example.com'], { answer: null });
+      const win = sh.card && sh.card.action && sh.card.action.window === true;
+      const yes = sh.card ? ww.door.answer(sh.card.action.askId, { answer: 'window', reauthed: true, person: true }) : null;
+      await sh.r;
+      const cardId = sh.card ? sh.card.id : null, f0 = ((cardId ? ww.userTodos.get(cardId) : null) || {}).resolvedFact || {};
+      const dropped = ugw.drop(ID, { by: 'user' });   // the entry deleted: its row first …
+      const fe = ww.door.forgetEntry(ID);   // … then the door's forget
+      const it = cardId ? ww.userTodos.get(cardId) : null;
+      return { offered: !!win, windowed: !!(yes && yes.ok) && f0.windowFor === '1h', dropped: !!(dropped && dropped.ok), forgot: !!(fe && fe.ok), end: ((it && it.resolvedFact) || {}).endedBy || null, state: it ? FAw.decisionCard(it).state : null };
+    };
+    const wdl = await windowDeleted(DOOR);
+    ok(wdl.offered && wdl.windowed && wdl.dropped && wdl.forgot && wdl.end === 'deleted' && wdl.state === 'ended', `(r1834's third read) a 1-hour window card whose entry is DELETED ⇒ «deleted» — ${JSON.stringify(wdl)}`, wdl);
+    const mwdl = M.load('src/server/vault-run-door.js', anchored(SRCa, "      if (f.windowFor) { if (word !== 'deleted') continue; says = ", "      if (f.windowFor) { continue; says = ", 'test-vault-run r1834 read 3: the delete that tells no window card'), 'a14b-window-deleted');
+    const wdlR = await windowDeleted(mwdl);
+    ok(wdlR.windowed && wdlR.forgot && !wdlR.end, `RED control: the delete that tells no window card ⇒ it still reads «until HH:MM» for a deleted entry — ${JSON.stringify(wdlR)}`, wdlR);
+    // (r1825's readers) a once-grant whose run BURNS after its entry was DELETED — or after a NEW approval of its pair — while its
+    // spawn was failing: nothing ran, so its record says that event's own word («deleted» / «replaced», at the event), never «used»;
+    // it is not given back. A stand-in spawn returns a child with NO pid (the spawn's error comes after); the event lands in between.
+    // REDs: the in-flight ending that says «used» whatever ran (at the delete; at the new approval)
+    const { EventEmitter } = await import('node:events');
+    const burnAfter = async (mod, { again = false } = {}) => {
+      const wz = await world(), clk = { t: Date.now() }; let atEvent = null;
+      const failing = () => {
+        const c = new EventEmitter(); c.pid = undefined; c.stdout = null; c.stderr = null; c.stdin = null; c.kill = () => false;
+        setTimeout(() => {
+          clk.t += 1000; atEvent = clk.t;
+          if (again) { const q2 = wz.door.request({ caller: c8, entry: M1, purpose: 'a new approval while the spawn fails' }); wz.door.answerRequest(q2.askId, { answer: '8h', reauthed: true, person: true }); }
+          else wz.door.forgetEntry('mounts:m1#secretKey');
+          setTimeout(() => c.emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' })), 5);
+        }, 5);
+        return c;
+      };
+      wz.door = wz.mk(mod, { now: () => clk.t, spawnImpl: failing, timers: { set: () => 0, clear: () => { } } });
+      const qz = wz.door.request({ caller: c8, entry: M1, purpose: 'a run whose spawn fails' });
+      wz.door.answerRequest(qz.askId, { answer: 'once', reauthed: true, person: true });
+      const g = [...wz.door._grants.values()].find((x) => x.conv === c8.scope && x.once), todoId = g ? g.todoId : null;
+      const ra = await runAnswered(wz, ENV('env'), { caller: c8 });
+      const f = ((todoId ? wz.userTodos.get(todoId) : null) || {}).resolvedFact || {};
+      return { code: ra.r && ra.r.code, recordEnd: f.endedBy || null, atEvent: atEvent != null && Number(f.endedAt) === atEvent, givenBack: [...wz.door._grants.values()].some((x) => x.conv === c8.scope && x.once) };
+    };
+    const bad = await burnAfter(DOOR);
+    ok(bad.code === 'spawn_failed' && bad.recordEnd === 'deleted' && bad.atEvent && !bad.givenBack, `(r1825) a run that burns after its entry was deleted mid-spawn — its record says «deleted» at the delete, never «used»; not given back — ${JSON.stringify(bad)}`, bad);
+    const mbad = M.load('src/server/vault-run-door.js', anchored(SRCa, "{ if (g.ran) grantEnded(g, 'used'); else if (!g.pendingEnd) g.pendingEnd = { by: 'deleted', at: now() }; dropped++; }", "{ grantEnded(g, 'used'); dropped++; }", 'test-vault-run r1825: the delete says «used» whatever ran'), 'a14b-burn-deleted');   // stale-pins: kept — a RED control: the shape before this unit restored on purpose
+    const badR = await burnAfter(mbad);
+    ok(badR.code === 'spawn_failed' && badR.recordEnd === 'used', `RED control: the delete that says «used» whatever ran ⇒ the record says the one run was used, for a run that never ran — ${JSON.stringify(badR)}`, badR);
+    const baa = await burnAfter(DOOR, { again: true });
+    ok(baa.code === 'spawn_failed' && baa.recordEnd === 'replaced' && baa.atEvent && !baa.givenBack, `(r1825) a run that burns after a new approval of its pair came mid-spawn — its record says «replaced» at the new approval, never «used» — ${JSON.stringify(baa)}`, baa);
+    const mbaa = M.load('src/server/vault-run-door.js', anchored(SRCa, "{ if (g.ran) grantEnded(g, 'used'); else if (!g.pendingEnd) g.pendingEnd = { by: 'replaced', at: now() }; } }", "grantEnded(g, 'used'); }", 'test-vault-run r1825: the new approval says «used» whatever ran'), 'a14b-burn-replaced');   // stale-pins: kept — a RED control: the shape before this unit restored on purpose
+    const baaR = await burnAfter(mbaa, { again: true });
+    ok(baaR.code === 'spawn_failed' && baaR.recordEnd === 'used', `RED control: the new approval that says «used» whatever ran ⇒ «used» for a run that never ran — ${JSON.stringify(baaR)}`, baaR);
     // …and EVERY end the door can say has the agent CLI's words (data/bin/vibespace-vault `uses`): a census of the two lists.
     // RED: the CLI without the restart's words
     const endsSaidOf = (src) => { const m = /ENDS_SAID = new Set\(\[([^\]]*)\]\)/.exec(src); return m ? [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]) : null; };

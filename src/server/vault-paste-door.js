@@ -224,7 +224,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!q.target) { settle(q, 'refused', { why: 'gone' }); return named('ask_unknown'); }   // its place left the registry since it was filed
     const st = vault.state();
     const who = VB.actorName(q.who, 'a conversation');
-    let entry = null, ref = null, grantHours = null;
+    let entry = null, ref = null, grantHours = null, grantFact = null;
     if (q.target.kind === 'field') {
       if (st === 'locked') return named('vault_locked');   // the box says it, 解锁… inline — nothing written, the item stays
       if (!integrations || typeof integrations.setIntegration !== 'function') return named('store_failed');
@@ -254,12 +254,13 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
       // The entry's «Usable by agent runs» switch is the owner's 验证是你 act and NOTHING else flips it: r4 forged
       // `reauthed:true` here, so one paste opened the new secret to EVERY conversation's run door (ON is an allow-list). To let
       // it be used without the 8-hour limit (and by whoever the owner lists), the owner turns the switch on in the Vault window.
-      if (grantsAsker() && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, hosts: (q.target && q.target.hosts) || [], by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }   // round 7 (MINOR): the grant is HOST-SCOPED to the hosts the request named (the words say «to those hosts»)
+      if (grantsAsker() && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, hosts: (q.target && q.target.hosts) || [], by, requestId: id, todoId: q.todoId || null }); if (g && g.ok) { grantHours = g.hours; grantFact = { grantedFor: '8h', until: g.until, conv: q.scope, entry: g.id, at: g.at, purpose: String(q.purpose || '').slice(0, 400) }; } } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }   // round 7 (MINOR): the grant is HOST-SCOPED to the hosts the request named (the words say «to those hosts»)
     }
     let receipt = null;
     try { receipt = (vault.noteUse(entry, { by: 'agent', door: 'paste', conv: q.scope }, { outcome: 'ok', purpose: q.purpose, actor: who }) || {}).receipt || null; } catch { /* the store answered: the use line is the audit's */ }
     audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: q.target.kind === 'field' ? P.intoOf(q.target) : entry, receipt });
     mark();
+    if (grantFact) q.fact = { ...(q.fact || {}), ...grantFact };   // B-a14b's last remainder (r1823): the record keeps the PASTED grant's facts — whose (the asker's scope), which entry (the run door's id), when and until when, the request's words; never a value — a start ends it «restart» from them
     settle(q, 'stored', { ref, grantHours, receipt });
     return { ok: true, outcome: 'stored', ...(q.target.kind === 'field' ? { into: P.intoOf(q.target) } : { entry, ref }) };
   }
