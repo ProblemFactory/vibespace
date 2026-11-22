@@ -10,8 +10,8 @@
 //      byte for byte, to the on-loop build of the same files (a hash of the hot window + the cold columns)
 //   ③ asks during a rebuild join it (one worker, one swap)        ④ a reader on every loop turn sees old or new, whole
 //   ⑤ a failed rebuild keeps the previous cache, says why ONCE, waits before the next try   ⑥ the walk folds the rebuilt cache
-//   ⑦ THE MEASUREMENT: a real-shape ledger (scripts/boot-shape.mjs, ~79 MB) — the longest loop turn's CPU (a harness meter:
-//      process.threadCpuUsage between setImmediate turns, never a wall clock) with the base's rule (a planted copy) vs now
+//   ⑦ THE MEASUREMENT moved VERBATIM to its heavy twin scripts/test-ledger-rebuild-measure.mjs (B-7e49, 主开发 r2460: its seconds
+//      ARE its measure — a ~79 MB real-shape ledger rebuilt twice); §T pins that the twin holds it and this file runs none of it
 // Every leg has a planted RED control (scripts/mutant-copy.mjs).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -252,39 +252,23 @@ console.log('⑥ a walk over a stale cache folds the rebuilt one');
   ok(old.stale && u._evCache !== old && JSON.stringify(a.totals) === JSON.stringify(ref.aggregate({ to: NOW }).totals) && (u._coldWalks || 0) - w0 === 1, `⑥ the walk waited for the rebuild and folded it ONCE (${(u._coldWalks || 0) - w0} fold, ${a.totals.requests} requests = a fresh sync fold)`);
 }
 
-// ── ⑦ THE MEASUREMENT ────────────────────────────────────────────────────────────────────────────────────────────────
-// The loop meter (harness only): the main thread's CPU between consecutive setImmediate turns — what one turn of the
-// loop cost, whatever else runs on the box (a wall clock would read the machine's contention). The pending turn is
-// counted at stop.
-const cpuMs = () => { const c = process.threadCpuUsage(); return (c.user + c.system) / 1000; };
-function loopMeter() { let last = cpuMs(), on = true, longest = 0, n = 0; const tick = () => { const t = cpuMs(); longest = Math.max(longest, t - last); n++; last = t; if (on) setImmediate(tick); }; setImmediate(tick); return { stop() { on = false; longest = Math.max(longest, cpuMs() - last); return { longest, n: n + 1 }; } }; }
-async function measure(UH, fx, tag, { reference = true } = {}) {
-  const u = new UH({ dataDir: path.dirname(path.join(copyOf(fx, 'm7' + tag), 'usage-history')), homeDir: tmp }); u.warm();
-  repair(u);
-  let swapCpu = null; const sw = u._swapCache?.bind(u); if (sw) u._swapCache = (x) => { const a = cpuMs(); sw(x); swapCpu = cpuMs() - a; };
-  const parse = JSON.parse; let parses = 0;
-  const meter = loopMeter();
-  JSON.parse = function (...a) { parses++; return parse.apply(this, a); };
-  try { await quiet(async () => { await new Promise((r) => setImmediate(() => { read(u); r(); })); await u.rebuildSettled(); await turn(); }); } finally { JSON.parse = parse; }
-  const m = meter.stop();
-  // lane fast-debt-clear: the fold digest computed ONCE (it was twice for the fix — `same` and `hash` — and once for the
-  // control, whose hash nothing reads); the reference build only for the fix, as before
-  const hash = reference ? digest(u._evCache) : null;
-  const same = reference ? hash === digest(onLoopBuild(u.dir, u._evCache.cutoff, u._ledgerWindowMs(), UH)._evCache) : null;
-  return { ...m, swapCpu, parses, same, hash, rows: u._evCache.events.length + u._evCache.cold.n };
-}
+// ── §T THE TWIN HOLDS THE MEASUREMENT (B-7e49, 主开发 r2460: a leg cannot fall between the two files) ─────────────────────────
+// ⑦ moved VERBATIM to the heavy twin scripts/test-ledger-rebuild-measure.mjs: its seconds ARE its measure (a 79.1 MB / 164 515-row
+// real-shape ledger built, then its rebuild timed twice — the base's rule and the worker). This file runs none of it.
 {
-  const big = shape('big', 0.2);
-  console.log(`⑦ the measurement: a real-shape ledger of ${big.rows} rows, ${(big.bytes / 1e6).toFixed(1)} MB — the longest loop turn (main-thread CPU) through a rebuild`);
-  const baseRule = uhSrc.replace('if (this._rebuildInWorker(why, c)) continue; yield* this._loadSteps(chunkBytes, trimBatch); return;', 'this._evCache = null; yield* this._loadSteps(chunkBytes, trimBatch); return;');
-  const ctl = await measure(M.load(UH_REL, baseRule, 'baserule').UsageHistory, big, 'c', { reference: false });
-  const fix = await measure(UsageHistory, big, 'f');
-  console.log(`   base rule (the reader re-parses): longest turn ${ctl.longest.toFixed(1)} ms CPU, ${ctl.parses} lines parsed on the loop`);
-  console.log(`   now (the worker builds):         longest turn ${fix.longest.toFixed(1)} ms CPU over ${fix.n} turns, the swap ${fix.swapCpu.toFixed(3)} ms, ${fix.parses} lines parsed on the loop, hash ${fix.hash} ${fix.same ? '=' : '≠'} the on-loop build`);
-  ok(baseRule !== uhSrc && ctl.longest >= 400 && ctl.parses >= big.rows, `control (the base's rule): one loop turn of ${ctl.longest.toFixed(0)} ms CPU (≥ 400) parsing ${ctl.parses} lines ⇒ RED`);
-  ok(fix.longest <= 50 && fix.parses === 0, `⑦ the longest loop turn through the rebuild: ${fix.longest.toFixed(1)} ms CPU (≤ 50), no ledger line parsed on the loop`);
-  ok(fix.swapCpu !== null && fix.swapCpu <= 20, `⑦ the swap itself: ${fix.swapCpu.toFixed(3)} ms CPU (≤ 20)`);
-  ok(fix.same && fix.rows === big.rows, `⑦ the rebuilt cache is the on-loop build's, byte for byte (${fix.hash}, ${fix.rows} rows)`);
+  const twinRel = 'scripts/test-ledger-rebuild-measure.mjs';
+  const twin = fs.existsSync(path.join(REPO, twinRel)) ? fs.readFileSync(path.join(REPO, twinRel), 'utf-8') : '';
+  const here = fs.readFileSync(new URL(import.meta.url), 'utf-8');
+  const MOVED = ['// ── ⑦ THE MEASUREMENT ─', "const big = shape('big', 0.2);", 'ctl.longest >= 400 && ctl.parses >= big.rows', 'fix.longest <= 50 && fix.parses === 0', 'fix.swapCpu !== null && fix.swapCpu <= 20', 'fix.same && fix.rows === big.rows',
+    "uhSrc.replace('if (this._rebuildInWorker(why, c)) continue; yield* this._loadSteps(chunkBytes, trimBatch); return;', 'this._evCache = null; yield* this._loadSteps(chunkBytes, trimBatch); return;')"];
+  const holds = (t) => MOVED.every((h) => t.includes(h));
+  // ⑦'s own texts stand here only in this list, and nothing here meters a loop turn. The base-rule copy (MOVED's last) is not
+  // counted: ①'s census control plants the same rule
+  const runsNone = (t) => MOVED.slice(0, 6).every((h) => t.split(h).length === 2) && !/loopMeter\(|await measure\(/.test(t);
+  ok(holds(twin) && runsNone(here), `§T the heavy twin holds ⑦ — its heading, its real-shape ledger, its control's rule and bound, its three bounds — and this file runs none of it`);
+  ok(/\{ name: 'test-ledger-rebuild-measure', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8')), '§T the twin is a HEAVY row of the tier');
+  ok(!holds(twin.replace('ctl.longest >= 400', 'ctl.longest >= 100')), 'RED CONTROL — a twin whose control bound was loosened (≥ 400 → ≥ 100) is no longer the moved ⑦: §T goes red');
+  ok(!runsNone(here + '\n' + twin.slice(Math.max(0, twin.indexOf(MOVED[0])))), 'RED CONTROL — this file with the twin\'s ⑦ planted back runs the measure again: §T goes red');
 }
 
 console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS ${pass} passed`);
