@@ -294,7 +294,8 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const a = it && it.action;
     if (!a || a.type !== VJ.ASK_TYPE || !VJ.ASK_ID_RE.test(String(a.askId || ''))) return null;
     const entries = ENTRY_KEYS.map((k) => a[k]).filter((x) => typeof x === 'string' && x);
-    return { askId: String(a.askId), todoId: it.id, jobId: String(a.jobId || ''), conv: String(a.conv || ''), rev: Number(a.rev) || 1, entries };
+    const legacy = !entries.length && typeof a.entry === 'string' && !!a.entry && a.rev == null;   // a card a train tip filed before ONE card a job: its one entry
+    return { askId: String(a.askId), todoId: it.id, jobId: String(a.jobId || ''), conv: String(a.conv || ''), rev: Number(a.rev) || 1, entries: legacy ? [String(a.entry)] : entries, ...(legacy ? { legacy: true } : {}) };
   };
   /** an entry id of a card → its --vault NAME and reference, read off the job's own declaration (the card holds ids only) */
   const refOf = (jobId, id) => {
@@ -357,13 +358,15 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     // again), is never asked twice
     const mineOpen = open.find((q) => q.jobId === jobId) || null;
     const fresh = need.filter((r) => !(mineOpen && mineOpen.entries.includes(r.id)));
-    if (!fresh.length) return { ok: true, filed: 0 };
+    const ids = need.map((r) => r.id);
+    const sameSet = !!mineOpen && ids.length === mineOpen.entries.length && ids.every((id) => mineOpen.entries.includes(id));
+    if (!need.length || sameSet) return { ok: true, filed: 0 };   // 主开发 r2666 (1): ANY change of the set draws the card again — a growth, a SHRINK, a SWAP — never only a growth
     if (fresh.some((r) => r.id.length > 200 || r.ref.length > 200)) { log(`[vault-job] ${jobId}: an entry reference past the tray's 200-character field — its card is not filed`); return named('ask_unfiled'); }   // the store cuts an action's field at 200 (src/user-todos.js normalizeAction): a cut id would approve another entry
     const t = now();
     for (const [k, u] of quiet) if (!(u > t)) quiet.delete(k);
     for (const r of fresh) { const qu = quiet.get(`${conv}\n${r.id}`); if (qu) return named('ask_quiet', { key: r.name, until: new Date(qu).toISOString() }); }
     const reading = pend.get(jobId);
-    if (reading) { for (const r of need) reading.missing.add(r.name); return { ok: true, filed: 0 }; }   // its card's facts are being read: the landing files (or draws again) the set it knows by then (a Deny's quiet asked first)
+    if (reading) { reading.missing = new Set(need.map((r) => r.name)); return { ok: true, filed: 0 }; }   // its card's facts are being read: the landing files (or draws again) the LATEST verdict's set — a shrink too (a Deny's quiet asked first)
     // THE CAPS COUNT JOBS (the adversarial read: by cards, a job with five entries could never start): 4 jobs waiting on cards per
     // conversation, 64 on the hub — this job's own open cards count it once
     const jobsOf = (list) => new Set(list.map((q) => q.jobId));
@@ -474,7 +477,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const it = userTodos && typeof userTodos.get === 'function' ? userTodos.get(q.todoId) : null;
     if (!it || it.status !== 'open' || !it.action || it.action.type !== VJ.ASK_TYPE || it.action.askId !== id) { forget(q); return named('ask_settled'); }   // the belt: still open, still this card's
     if (a !== 'allow' && a !== 'deny') return named('bad_job_answer');
-    if (Number(rev) !== q.rev) return named('ask_changed', { rev: q.rev });   // 主开发 r2528 (e): the card drawn again since — nothing written
+    if (Number(rev) !== q.rev && !(q.legacy && rev == null)) return named('ask_changed', { rev: q.rev });   // 主开发 r2528 (e): the card drawn again since — nothing written (a legacy card carries no revision: it was never drawn again)
     const job = jm ? jm.jobs.get(q.jobId) : null;
     const lines = (op, extra = {}) => { for (const e of q.entries) audit({ op, job: q.jobId, entry: refOf(q.jobId, e).ref, ...extra, askId: id }); };   // ONE line an entry, the card's one askId
     const over = (code) => { const keys = keysOf(q); settle(q, 'ask-over'); lines('over'); return named(code, keys ? { key: keys } : {}); };
@@ -611,7 +614,13 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const j = String(jobId || '');
     const job = jm && JOB_RE.test(j) ? jm.jobs.get(j) : null;
     if (!job) return named('bad_revoke');
-    const ids = [...new Set(VJ.refsOf(job).map((r) => VR.parseRef(r.ref)).filter(Boolean).map((p) => p.id))];
+    // EVERY vault-job row that names the job (主开发 r2666 (2)) — an approval of an entry the job has since dropped never outlives the
+    // card's take-back — and the entries it declares now (a row the store cannot list is still asked by its id)
+    const g0 = store();
+    let all = [];
+    try { all = g0 && typeof g0.rowsOfDoor === 'function' ? (g0.rowsOfDoor(VJ.DOOR) || []) : []; } catch { all = []; }
+    const named0 = all.filter((row) => (Array.isArray(row && row.to) ? row.to : []).some((m) => m && Array.isArray(m.jobs) && m.jobs.map(String).includes(j))).map((row) => String(row.resource || ''));
+    const ids = [...new Set([...named0, ...VJ.refsOf(job).map((r) => VR.parseRef(r.ref)).filter(Boolean).map((p) => p.id)])].filter(Boolean);
     const who = String(by || 'user').slice(0, 40), labels = [];
     let n = 0;
     for (const id of ids) {

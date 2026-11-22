@@ -13448,7 +13448,7 @@ export default {
   "Allowed — but the job did not start: Background Work says why": "已允许——但后台任务没有启动：原因见「后台工作」",
   // stage L3's F1 (主开发 r2528): ONE card a job — its entries named, what stands said, a changed card refused, the job card's ✕ takes back all
   "It will use: {secrets}": "它要使用：{secrets}",
-  "New on this card since it was first drawn: {secrets}": "这张卡最初显示后新增的：{secrets}",
+  "New on this card since it was last drawn: {secrets}": "这张卡上次显示后新增的：{secrets}",
   "Already allowed for this job (they stand): {secrets}": "已为这个后台任务允许过（仍然有效）：{secrets}",
   "The program reads each once from the descriptor its variable names ({vars}) — never from its environment, its command line or a file.": "程序从各自变量指名的描述符（{vars}）里各读一次——绝不从环境变量、命令行或文件里读。",
   "Where it sends the secrets: unknown — VibeSpace cannot read where a program connects. What the program writes to its own files, config, databases and caches is not protected.": "密钥发往哪里：未知——VibeSpace 读不出一个程序会连到哪里。程序写进它自己的文件、配置、数据库和缓存里的东西不受保护。",

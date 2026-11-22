@@ -514,7 +514,7 @@ async function legRedraw() {
   const c2 = cards(W).filter((i) => i.action.jobId === job.id), it2 = c2[0] || {}, a2 = it2.action || {}, f2 = it2.facts || {};
   const isNew = (e) => !!e && e.new === true;
   row(c1.length === 1 && JSON.stringify(entriesOf(a1)) === JSON.stringify([E_TOK]) && a1.rev === 1 && c2.length === 1 && a2.askId === a1.askId && a2.rev === 2 && JSON.stringify(entriesOf(a2).sort()) === JSON.stringify([E_TOK, E_T2].sort())
-    && (f2.entries || []).filter(isNew).length === 1 && (f2.entries || []).length === 2 && /New on this card since it was first drawn/.test(String(it2.detail)),
+    && (f2.entries || []).filter(isNew).length === 1 && (f2.entries || []).length === 2 && /New on this card since it was last drawn/.test(String(it2.detail)),
     'F1 (e) — a job whose set GROWS while its card is open: the SAME card drawn again (its ask id kept, its revision 2), naming both — what is NEW marked', { first: rows.first, second: { n: c2.length, entries: entriesOf(a2), rev: a2.rev, fresh: (f2.entries || []).filter(isNew).length } });
   const stale = W.door.answer(a1.askId, { answer: 'allow', reauthed: true, by: 'user', person: true, rev: 1 });
   const staleDeny = W.door.answer(a1.askId, { answer: 'deny', by: 'user', person: true, rev: 1 });
@@ -597,6 +597,69 @@ async function legTakeAll() {
     'F1 (d) — THE JOB CARD\'S ✕ takes back ALL of the job\'s approvals (both rows), ONE stop, ONE notice, a revoke line per entry', { up, rv, notes: notes.length });
   const again = W.door.revokeAll(job.id, { by: 'user' });
   row(!again.ok && again.code === 'not_approved', '…and again ⇒ not_approved, nothing written', again);
+  W.release(); W.end();
+  return rows;
+}
+// 主开发 r2666 (1): ANY change of the set draws the card again — a SHRINK («B gone») and a SWAP («C instead of B», a growth then a
+// shrink) — and a press of an earlier revision writes nothing. RED: the card drawn again on a growth only (the early return when
+// nothing is new)
+const E_T3 = 'secrets:agent:conv-a/t3#secret';
+async function legSetMoves(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(doorSrc ? 'setmvm' : 'setmv', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.vault.agentMint('agent:conv-a/t2', { length: 32 }); W.vault.agentPut('agent:conv-a/t3', SENT('t3')); W.release();
+  const cardOf = (job) => (cards(W).find((i) => i.action.jobId === job.id) || {});
+  const judge = async () => { W.jm.vaultChanged('vault-approved'); await W.door.factsLanded(); };
+  // «B gone»: the second entry becomes the conversation's own PUT value — the job no longer waits for it
+  const gone = W.jm.jobs.get(W.create({ name: 'b-gone', vault: TWO }).job.id);
+  await W.door.factsLanded();
+  const g1 = cardOf(gone).action || {};
+  W.vault.secretDrop('agent:conv-a/t2'); W.vault.agentPut('agent:conv-a/t2', SENT('t2p'));
+  await judge();
+  const g2 = cardOf(gone).action || {};
+  rows.gone = { first: entriesOf(g1), rev1: g1.rev, now: entriesOf(g2), rev: g2.rev };
+  const goneStale = W.door.answer(g1.askId, { answer: 'allow', reauthed: true, by: 'user', person: true, rev: 1 });
+  rows.gone.staleWrote = W.grants.rowsFor('vault-job', E_TOK).length + W.grants.rowsFor('vault-job', E_T2).length;
+  W.jm.stop(gone); await W.door.factsLanded();
+  // «C instead of B»: a third entry becomes hub-minted (the job waits for it too), then the second becomes the conversation's own
+  W.vault.secretDrop('agent:conv-a/t2'); W.vault.agentMint('agent:conv-a/t2', { length: 32 });
+  const swap = W.jm.jobs.get(W.create({ name: 'c-for-b', vault: [...TWO, 'T3=vault://agent:conv-a/t3'] }).job.id);
+  await W.door.factsLanded();
+  const s1 = cardOf(swap).action || {};
+  W.vault.secretDrop('agent:conv-a/t3'); W.vault.agentMint('agent:conv-a/t3', { length: 32 });
+  await judge();
+  const s2 = cardOf(swap).action || {};
+  W.vault.secretDrop('agent:conv-a/t2'); W.vault.agentPut('agent:conv-a/t2', SENT('t2q'));
+  await judge();
+  const s3 = cardOf(swap).action || {}, f3 = cardOf(swap).facts || {};
+  rows.swap = { first: entriesOf(s1), second: entriesOf(s2), now: entriesOf(s3), revs: [s1.rev, s2.rev, s3.rev] };
+  const swapStale = W.door.answer(s1.askId, { answer: 'allow', reauthed: true, by: 'user', person: true, rev: s2.rev });
+  rows.swap.staleWrote = W.grants.rowsFor('vault-job', E_T2).length;
+  if (doorSrc) { W.end(); return rows; }
+  row(JSON.stringify(entriesOf(g1).sort()) === JSON.stringify([E_TOK, E_T2].sort()) && g2.askId === g1.askId && g2.rev === 2 && JSON.stringify(entriesOf(g2)) === JSON.stringify([E_TOK]) && !goneStale.ok && goneStale.code === 'ask_changed' && rows.gone.staleWrote === 0,
+    'r2666 (1) «B GONE» — the job no longer waits for an entry its card names: the SAME card drawn again without it (rev 2), and a press of the earlier set writes NOTHING', rows.gone);
+  row(JSON.stringify(entriesOf(s1).sort()) === JSON.stringify([E_TOK, E_T2].sort()) && JSON.stringify(entriesOf(s3).sort()) === JSON.stringify([E_TOK, E_T3].sort()) && s3.askId === s1.askId && s3.rev === 3 && (f3.entries || []).length === 2
+    && !swapStale.ok && swapStale.code === 'ask_changed' && rows.swap.staleWrote === 0,
+    'r2666 (1) «C INSTEAD OF B» — the set grows (C) then shrinks (B leaves): the same card drawn again each time (rev 3) naming exactly C and A, and a press of an earlier revision writes nothing', rows.swap);
+  W.end();
+  return rows;
+}
+// 主开发 r2666 (2): THE JOB CARD'S TAKE-BACK takes back EVERY vault-job row that names the job — an approval of an entry the job no
+// longer declares never outlives it. RED: the take-back of the declared entries only
+async function legTakeAllRows(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(doorSrc ? 'tkrowm' : 'tkrow', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.vault.agentMint('agent:conv-a/t2', { length: 32 });
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'drops-one', vault: TWO }).job.id);
+  await W.door.factsLanded();
+  const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
+  W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  const up = await W.untilMs(() => W.got().length >= 1 && job.state === 'up', 4000);
+  W.grants.set('vault-job', E_T3, { to: [{ kind: 'conversation', key: 'conv-a', jobs: [job.id] }] }, 'test');   // an approval of an entry the job no longer declares (its third, dropped)
+  const rv = W.door.revokeAll(job.id, { by: 'user' });
+  rows.left = [E_TOK, E_T2, E_T3].filter((e) => W.grants.rowsFor('vault-job', e).length > 0);
+  if (doorSrc) { W.release(); W.end(); return rows; }
+  row(up.ok && rv.ok && rv.entries === 3 && rows.left.length === 0, 'r2666 (2) — the job card\'s ✕ takes back EVERY vault-job row that names the job — the one of an entry it no longer declares too', { up, rv, left: rows.left });
   W.release(); W.end();
   return rows;
 }
@@ -1375,6 +1438,9 @@ const MUT_DEDUPE = (() => { try { return swap(swap(DOOR_SRC, 'const fresh = need
 const MUT_HALF = dmut('          for (const d of done.reverse()) {', '          for (const d of [].reverse()) {');
 const MUT_NOWAIT = dmut("    if (why !== 'vault') return;\n    const entries", "    return;\n    const entries");
 const MUT_EVERYWAIT = (() => { try { return swap(JOBS_SRC, "if (!again && typeof door.waited === 'function') door.waited(job, why);", "if (typeof door.waited === 'function') door.waited(job, why);"); } catch { return null; } })();
+// r2666's controls: a card drawn again on a growth only · the take-back of the declared entries only
+const MUT_GROWONLY = dmut('    if (!need.length || sameSet) return { ok: true, filed: 0 };', '    if (!need.length || !fresh.length) return { ok: true, filed: 0 };');
+const MUT_DECLARED = dmut('const ids = [...new Set([...named0, ...VJ.refsOf(job)', 'const ids = [...new Set([...VJ.refsOf(job)');
 const MUT_DENY = dmut("try { jm.vaultRefused(q.jobId, named('vault_denied', { key: keysOf(q) })); }", 'try { void q; }');
 const MUT_CAP = dmut("    if (!mine.has(jobId) && mine.size + 1 > VJ.ASKS_PER_CONV) return named('too_many_asks');\n", '');
 const [card, deny, caps, cardRestart, cardMutReauth, cardMutDedupe, denyMut, capsMut] = await Promise.all([legCard(), legDeny(), legCaps(), legCardRestart(),
@@ -1408,9 +1474,9 @@ const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'fun
 const MUT_NOSLOT = dmut('    if (lateHere || !(await take())) throw LATE;', '    if (lateHere) throw LATE;');
 const MUT_VALUEPROG = dmut('function pastWrapper(argv, i) {\n', "function pastWrapper(argv, i) {\n  if (argv[i + 1] === '-s') return i + 2;\n");
 const [oneSlot, oneSlotMut, heldSaid, wrapMut] = await Promise.all([legOneSlot(), MUT_NOSLOT ? legOneSlot(MUT_NOSLOT) : null, legHeldSaid(), MUT_VALUEPROG ? legWrapperSkip(MUT_VALUEPROG) : null]);
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
-  legWords(), legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {}]);
+  legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1431,6 +1497,9 @@ print('⑥d A DEFERRED START · A STOP WHILE IT DRAINS (round 2, the review)', [
 print('⑨ THE APPROVAL CARD (lane vault-job-approval — one card per job × entry, 允许 = 验证是你 + the grant row, 拒绝 = refused)', [...card, ...deny, ...caps, ...cardRestart]);
 print('⑨d ONE CARD A JOB (stage L3\'s F1, 主开发 r2528) — its entries named, one Allow and one Deny cover them, all or nothing, what stands said, the same card drawn again, the job card\'s ✕ takes back all', [...oneCard, ...oneDeny, ...redraw, ...standing, ...fullRow, ...takeAll]);
 ok(!!MUT_HALF && !!fullHalfMut.half && fullHalfMut.half.tok === 1, 'CONTROL — the half-written press NOT taken back (the door\'s rollback cut): the first row stays written while the press is refused — RED on the copy', MUT_HALF ? fullHalfMut.half : 'the copy could not be built (its anchor is missing)');
+print('⑨d2 ANY CHANGE OF THE SET, AND THE TAKE-BACK OF EVERY ROW (主开发 r2666)', [...setMoves, ...takeRows]);
+ok(!!MUT_GROWONLY && !!setMovesMut.gone && setMovesMut.gone.rev === 1 && !!setMovesMut.swap && setMovesMut.swap.revs[2] === 2, 'CONTROL — the card drawn again on a GROWTH only (the early return when nothing is new): «B gone» keeps its rev 1 naming B, «C instead of B» stops at rev 2 naming B — RED on the copy', MUT_GROWONLY ? { gone: setMovesMut.gone, swap: setMovesMut.swap } : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_DECLARED && Array.isArray(takeRowsMut.left) && takeRowsMut.left.includes(E_T3), 'CONTROL — the take-back of the DECLARED entries only: the row of the entry the job dropped still names it — RED on the copy', MUT_DECLARED ? takeRowsMut.left : 'the copy could not be built (its anchor is missing)');
 print('⑨e THE WAIT\'S AUDIT LINE (stage L3\'s F3)', waitLine);
 print('⑨f THE ROAD\'S WORDS (stage L3\'s F4, F12, F5, F8 — 主开发 r2570)', words);
 ok(!!MUT_NOWAIT && noWaitMut.first === 0, 'CONTROL — the door that writes no wait line: a start waiting for the locked vault leaves NO line — RED on the copy', MUT_NOWAIT ? { first: noWaitMut.first } : 'the copy could not be built (its anchor is missing)');

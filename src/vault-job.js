@@ -289,7 +289,7 @@ function askCardOf({ who = '', job = {}, entries = [], standing = [], program = 
   const lines = [
     { key: KIND_LINES[kindKeyOf(kind, restart)] },
     { key: i18nKey('It will use: {secrets}'), params: { secrets: names(f.entries) } },
-    ...(fresh.length && fresh.length < f.entries.length ? [{ key: i18nKey('New on this card since it was first drawn: {secrets}'), params: { secrets: names(fresh) } }] : []),
+    ...(fresh.length && fresh.length < f.entries.length ? [{ key: i18nKey('New on this card since it was last drawn: {secrets}'), params: { secrets: names(fresh) } }] : []),
     ...(f.standing ? [{ key: i18nKey('Already allowed for this job (they stand): {secrets}'), params: { secrets: f.standing.map((e) => (e.since ? `«${e.label}» (${sinceOf(e.since)})` : `«${e.label}»`)).join(', ') } }] : []),   // the time as digits only — no English word inside a translated sentence's param
     { key: i18nKey('The program reads each once from the descriptor its variable names ({vars}) — never from its environment, its command line or a file.'), params: { vars: f.entries.map((e) => e.var).join(', ') } },
     f.program.unread ? { key: i18nKey('Program: {path} — its file facts could not be read in time; counted as one an agent can change.'), params: { path: f.program.path } }

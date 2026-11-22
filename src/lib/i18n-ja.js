@@ -13447,7 +13447,7 @@ export default {
   "Allowed — but the job did not start: Background Work says why": "許可しました — ただしジョブは起動しませんでした: 理由は「バックグラウンド作業」に",
   // stage L3's F1 (主开发 r2528): ONE card a job — its entries named, what stands said, a changed card refused, the job card's ✕ takes back all
   "It will use: {secrets}": "使うもの：{secrets}",
-  "New on this card since it was first drawn: {secrets}": "このカードに最初の表示から加わったもの：{secrets}",
+  "New on this card since it was last drawn: {secrets}": "このカードに前回の表示から加わったもの：{secrets}",
   "Already allowed for this job (they stand): {secrets}": "このジョブにすでに許可済み（有効のまま）：{secrets}",
   "The program reads each once from the descriptor its variable names ({vars}) — never from its environment, its command line or a file.": "プログラムはそれぞれの変数が示す記述子（{vars}）から一度ずつ読みます——環境変数・コマンドライン・ファイルからは決して読みません。",
   "Where it sends the secrets: unknown — VibeSpace cannot read where a program connects. What the program writes to its own files, config, databases and caches is not protected.": "シークレットの送り先：不明——VibeSpace にはプログラムの接続先は読めません。プログラムが自分のファイル・設定・データベース・キャッシュに書くものは保護されません。",
