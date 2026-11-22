@@ -16,7 +16,9 @@
 //   (b) THE PACE on the busy index at local speed (0 ms injected): index writes a minute and MB a minute, after vs before;
 //   (c) SIGTERM right after changes (500 ms per call): the last index change is on disk, and the exit flush leaves
 //       nothing — round 6 (E1): no bound of ours; its own line names what it wrote;
-//   (d) SIGKILL while an index write is in flight (1.1 s per call): the index still parses — the old or the new version;
+//   (d) SIGKILL while a JOURNAL append is in flight (1.1 s per call; 主开发 r2151 — the index's changes ride its journal):
+//       the index family still parses whole and every answered mark is on disk — the one in flight on disk or not; then a
+//       restart over that family and a stop, the SIGKILL INSIDE the exit's whole index write: it parses whole (old or new);
 //   (e) the canary / witness words for a data dir on bindfs (1.1 s per call — it speaks of a call ≥ 1 s): never
 //       «not under a mount»;
 //   (f) the boot at 500 ms per call: boot-to-ready split at the first loop turn (performance.nodeTiming.loopStart); the
@@ -349,27 +351,65 @@ if (r5) {
 
 // ── (d) + (e) at 1.1 s per call ──
 if (!OTHER && leg('d')) {
-  console.log(`— (d) (e) ${DELAY_KILL} ms per call: SIGKILL inside an index write; the witness's words for a bindfs data dir`);
+  console.log(`— (d) (e) ${DELAY_KILL} ms per call: SIGKILL with a journal append in flight (the index's changes' road); the witness's words for a bindfs data dir`);
   if (guard()) { ok(false, `thermal stop: ${guard()}`); process.exit(1); }
   const h = await boot('tree1100', TREE, DELAY_KILL);
   if (!h.readyAt || !h.hub) ok(false, '(d) the hub became ready at 1.1 s per call', fs.readFileSync(h.logf, 'utf8').slice(-1500));
   else {
-    const dir = path.join(h.wtB, 'data/channels'); const before = fs.readFileSync(path.join(dir, 'index.json'));
-    let tmp = null; const t0 = Date.now(); let k = 0;
-    while (Date.now() - t0 < 60000 && !tmp) { if (k++ % 5 === 0) await req('POST', `/api/channels/agents/${h.seed.ids[k % h.seed.ids.length]}/read`, { at: Date.now() }); tmp = fs.readdirSync(dir).find((f) => /^index\.json\.tmp/.test(f)) || null; if (!tmp) await sleep(40); }
-    await sleep(150);
-    const inFlight = !!tmp && fs.existsSync(path.join(dir, tmp));
+    // 主开发 r2151 (B-360d unit 1, line 267): a mark's change rides the index's JOURNAL (index-acts.ndjson; index.json is
+    // written whole only at its bound, a whole touch, a burst or a stop) — the kill lands with a JOURNAL APPEND IN FLIGHT: a
+    // mark's line seen in the file (it grew) while the mark's POST is still unanswered (a durable act answers when the append
+    // carrying it lands; the stand-in holds that append's fsync 1.1 s). Three marks land first, one at a time (each answered).
+    // The law the leg guards, NOTHING LOST AT A KILL: after it the family parses whole and every answered mark is on disk
+    const dir = path.join(h.wtB, 'data/channels'), actsF = path.join(dir, 'index-acts.ndjson'); const before = fs.readFileSync(path.join(dir, 'index.json'));
+    const size = () => { try { return fs.statSync(actsF).size; } catch { return 0; } };
+    const lineIn = (from, at) => { try { return fs.readFileSync(actsF).subarray(from).toString('utf8').includes(`"readAt":${at}`); } catch { return false; } };   // THIS mark's line, never any growth
+    const marks = []; let seen = null; const t0 = Date.now(); let k = 0;
+    while (Date.now() - t0 < 60000 && !seen) {
+      const id = h.seed.ids[(k++ * 13) % h.seed.ids.length], at = Date.now(), s0 = size(), m = { id, at, code: null, grew: null }; marks.push(m);
+      const p = req('POST', `/api/channels/agents/${id}/read`, { at }).then((c) => { m.code = c; });
+      while (m.code === null && Date.now() - t0 < 60000) { const s = size(); if (m.grew === null && s > s0 && lineIn(s0, at)) m.grew = { from: s0, to: s, afterMs: Date.now() - at }; if (m.grew && k > 3) break; await sleep(10); }
+      if (m.grew && m.code === null && k > 3) { seen = m; break; }
+      await Promise.race([p, sleep(65000)]);
+    }
+    await sleep(100);
+    const inFlight = !!seen && seen.code === null;   // its POST still unanswered at the kill: the append carrying it not landed
     await stopHub(h, 'SIGKILL', 5000);
-    let parsed = null, err = null; const after = fs.readFileSync(path.join(dir, 'index.json'));
-    try { parsed = JSON.parse(after.toString('utf8')); } catch (e) { err = e.message; }
-    let tmpParsed = null; try { tmpParsed = tmp && fs.existsSync(path.join(dir, tmp)) ? JSON.parse(fs.readFileSync(path.join(dir, tmp), 'utf8')) : null; } catch { tmpParsed = 'torn tmp (never read by the store)'; }
-    const old = after.equals(before);
-    ok(inFlight, `(d) an index write was IN FLIGHT when the hub was killed (${tmp || 'no temp file seen in 60 s'})`);
-    ok(!!parsed && Object.keys(parsed.conversations || {}).length === CONVS, `(d) after SIGKILL the index parses whole — the ${old ? 'OLD' : 'NEW'} version (${Object.keys((parsed && parsed.conversations) || {}).length} conversations)`, err);
+    let fam = null, err = null; try { fam = ixFamily(dir); } catch (e) { err = e.message; }
+    const rows = (fam && fam.conversations) || {}, onDisk = (m) => !!rows[`agents/${m.id}`] && rows[`agents/${m.id}`].readAt === m.at;
+    const answered = marks.filter((m) => m.code === 200), lost = answered.filter((m) => !onDisk(m)).map((m) => m.id.slice(0, 8));
+    const old = fs.readFileSync(path.join(dir, 'index.json')).equals(before), flying = !!seen && onDisk(seen);
+    ok(inFlight, `(d) a JOURNAL append was IN FLIGHT when the hub was killed (${seen ? `a mark's line in index-acts.ndjson, ${seen.grew.from} → ${seen.grew.to} bytes ${seen.grew.afterMs} ms after its POST; the POST unanswered at the kill` : 'no unanswered mark\'s line seen in 60 s'})`, marks.slice(-4));
+    ok(!!fam && Object.keys(rows).length === CONVS, `(d) after SIGKILL the index family (index.json + its journal, the store's one reader) parses whole — ${Object.keys(rows).length} conversations; the mark in flight ${flying ? 'ON disk (its line whole)' : 'not on disk (the old version)'}; index.json itself ${old ? 'untouched (the journal carried every mark)' : 'rewritten'}`, err);
+    ok(marks.length >= 4 && marks.slice(0, 3).every((m) => m.code === 200), `(d) the three marks before the kill answered 200, one at a time (${marks.slice(0, 3).map((m) => m.code).join(' ') || 'none'})`);
+    ok(answered.length >= 3 && !lost.length, `(d) nothing lost at the kill: every mark answered before it is on disk (${answered.length - lost.length} of ${answered.length} answered${lost.length ? '; lost: ' + lost.join(' ') : ''})`, marks.map((m) => ({ id: m.id.slice(0, 8), at: m.at, code: m.code })));
     const words = fs.readFileSync(h.logf, 'utf8').split('\n').filter((l) => /\[(canary|sync-fs)\]/.test(l) && l.includes(h.wt));
-    table.runs.tree1100 = { inFlight, version: old ? 'old' : 'new', tmp: typeof tmpParsed === 'string' ? tmpParsed : !!tmpParsed, words: words.slice(0, 6) }; save();
+    table.runs.tree1100 = { inFlight, seen: seen && seen.grew, marks: marks.length, answered: answered.length, lost: lost.length, flying, indexUntouched: old, words: words.slice(0, 6) }; save();
     info(`(e) ${words.length} witness line(s) named a path of the bindfs data dir${words[0] ? ': ' + words[0].slice(0, 260) : ''}`);
     ok(words.length > 0 && !words.some((l) => /not under a mount/.test(l)), `(e) the canary / witness never says «not under a mount» for the bindfs data dir (${words.length} line(s); ${words.filter((l) => /fuse\.bindfs/.test(l)).length} name fuse.bindfs)`);
+    // (d2) THE LEG'S FIRST SCENE KEPT (the r2061 chain's fresh read): index.json is still written WHOLE — at a stop (a fold,
+    // the bound, a burst too). The hub restarted over this very family (its journal replayed at the load), one more mark
+    // answered, a stop asked (SIGTERM), and the SIGKILL lands INSIDE the exit's whole index write (its temp file seen, its
+    // fsync and rename held 1.1 s each): the family parses whole — index.json the old version or the new — nothing lost
+    const h2 = await boot('tree1100b', TREE, DELAY_KILL, {}, { reuseOf: 'tree1100' });
+    if (!h2.readyAt || !h2.hub) ok(false, '(d2) the hub restarted over the killed family at 1.1 s per call', fs.readFileSync(h2.logf, 'utf8').slice(-1500));
+    else {
+      const m2 = { id: h.seed.ids[2000], at: Date.now() }; m2.code = await req('POST', `/api/channels/agents/${m2.id}/read`, { at: m2.at });
+      const before2 = fs.readFileSync(path.join(dir, 'index.json'));
+      try { process.kill(h2.hub, 'SIGTERM'); } catch { }
+      let tmp2 = null; const t2 = Date.now();
+      while (Date.now() - t2 < 60000 && !tmp2) { tmp2 = fs.readdirSync(dir).find((f) => /^index\.json\.tmp/.test(f)) || null; if (!tmp2) { try { process.kill(h2.hub, 0); } catch { break; } await sleep(20); } }
+      await sleep(150);
+      const inWhole = !!tmp2 && fs.existsSync(path.join(dir, tmp2));
+      await stopHub(h2, 'SIGKILL', 5000);
+      let fam2 = null, err2 = null; try { fam2 = ixFamily(dir); } catch (e) { err2 = e.message; }
+      const rows2 = (fam2 && fam2.conversations) || {}, on2 = (m) => !!rows2[`agents/${m.id}`] && rows2[`agents/${m.id}`].readAt === m.at;
+      const all2 = [...answered, ...(m2.code === 200 ? [m2] : [])], lost2 = all2.filter((m) => !on2(m)).map((m) => m.id.slice(0, 8));
+      const old2 = fs.readFileSync(path.join(dir, 'index.json')).equals(before2);
+      ok(m2.code === 200 && inWhole, `(d2) restarted over that family, a mark answered (${m2.code}), then a stop: the SIGKILL landed INSIDE the exit's whole index write (${tmp2 || 'no temp file of index.json seen in 60 s'})`);
+      ok(!!fam2 && Object.keys(rows2).length === CONVS && !lost2.length, `(d2) after that SIGKILL the family parses whole — index.json the ${old2 ? 'OLD' : 'NEW'} version, ${Object.keys(rows2).length} conversations — and every answered mark is on disk (${all2.length - lost2.length} of ${all2.length}${lost2.length ? '; lost: ' + lost2.join(' ') : ''})`, err2);
+      table.runs.tree1100.whole = { inWhole, tmp: tmp2, version: old2 ? 'old' : 'new', lost: lost2.length }; save();
+    }
   }
 }
 
@@ -539,7 +579,11 @@ if (!OTHER && leg('h')) {
   else {
     const chats = await createChats(3); await sleep(2500);
     const s0 = slowOf(h);
+    // the journal's own writes through the minute, by the writer's own numbers (the preload's dump, rewritten every second)
+    const jSeries = []; let jOn = true;
+    const jPoll = (async () => { while (jOn) { const s = slowOf(h), r = s && (s.writer || []).find((x) => /channels\/index-acts\.ndjson$/.test(x.file)); if (r && (!jSeries.length || jSeries[jSeries.length - 1].at !== s.at)) jSeries.push({ at: s.at, writes: r.writes }); await sleep(250); } })();
     const b = await busy(h, 60000);
+    jOn = false; await jPoll;
     await sleep(5000 + 1100);   // the acts still owed get 5 s past the stretch; the preload's dump is at most 1 s old after it
     const s1 = slowOf(h), load1 = loadNow('busy1200-end');
     const lat = b.marks.filter((m) => m.ms != null).map((m) => m.ms).sort((x, y) => x - y);
@@ -564,10 +608,18 @@ if (!OTHER && leg('h')) {
     ok(max != null && max <= actBound, `(h) LAW 1 (a): the slowest act answered in ${max} ms (p50 ${p50} ms) ≤ ${PA.actBoundWrites ? PA.actBoundWrites(Kd) : 3} writes of ${slowA} ms + 1.5 s = ${actBound} ms (${Kd} durable stores could be owed)`);
     const ix = files.find((r) => /channels\/index\.json$/.test(r.file));
     // ROUND 3 (law 1, bound b): the busy index — changed by every mark — is written within its gap plus PACED_BOUND writes,
-    // under the stream of acts (round 2: once in the minute; the act queue starved it)
+    // under the stream of acts (round 2: once in the minute; the act queue starved it). 主开发 r2151 (B-360d unit 1, line
+    // 267): its changes ride its JOURNAL (index.json is whole only at its bound) — the law is the journal's own pace, quiet
+    // (rank 1) lines and acts alike (one file: an append takes every line owed). An append has no rename: its landings are
+    // read from the WRITER'S OWN count (the preload's dump every second) — a landing lies between the two dumps where the
+    // count rose, and the stretch is measured outermost (the dumps' second counts against the law, never for it)
     const PW = require(path.join(TREE, 'src/store-pace.js')), nPaced = files.filter((r) => !/index-acts/.test(r.file)).length, slowest = Math.max(DH, ...files.map((r) => r.maxMs || 0));
-    const ixBound = ix ? Math.max(ix.gapMs || 0, 500) + PW.pacedBoundWrites(nPaced) * slowest + 1500 : null;
-    ok(!!ix && ix.writes >= 2 && ix.stretchMs != null && ix.stretchMs <= ixBound, `(h) LAW 1 (b): under 5 acts a second at ${DH} ms per call the busy index is written ${ix && ix.writes} times; the longest stretch between two of its writes ${ix && ix.stretchMs} ms ≤ its gap + ${PW.pacedBoundWrites(nPaced)} writes (${nPaced} paced files) = ${ixBound} ms`, ix);
+    const jr = files.find((r) => /channels\/index-acts\.ndjson$/.test(r.file));
+    const rises = []; for (let n = 1; n < jSeries.length; n++) if (jSeries[n].writes > jSeries[n - 1].writes && jSeries[n].at >= b.from && jSeries[n - 1].at <= b.to) rises.push({ lo: jSeries[n - 1].at, hi: jSeries[n].at });
+    const jStretch = rises.length ? Math.round(Math.max(rises[0].hi - b.from, b.to - rises[rises.length - 1].lo, ...rises.slice(1).map((x, n) => x.hi - rises[n].lo))) : null;
+    table.runs.busy1200.journal = { stretchMs: jStretch, dumps: jSeries.length, rises: rises.length }; save();
+    const jBound = jr ? Math.max(jr.gapMs || 0, 500) + PW.pacedBoundWrites(nPaced) * slowest + 1500 : null;
+    ok(!!jr && jr.writes >= 2 && jStretch != null && jStretch <= jBound, `(h) LAW 1 (b): under 5 acts a second at ${DH} ms per call the busy index's journal (index-acts.ndjson — its changes' road) is written ${jr && jr.writes} times; the longest stretch between two of its writes ${jStretch} ms (the writer's own count, ${jSeries.length} dumps) ≤ its gap + ${PW.pacedBoundWrites(nPaced)} writes (${nPaced} paced files) = ${jBound} ms`, jr);
     ok(!ix || ix.mbPerMin <= 250, `(h) the busy index at ${DH} ms per call: ${ix ? `${ix.writes} whole writes, ${ix.mbPerMin} MB a minute` : 'no whole write in the minute'} (≤ 250 MB)`);
     await stopHub(h);
   }
