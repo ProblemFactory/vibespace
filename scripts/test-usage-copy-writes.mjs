@@ -9,6 +9,10 @@
 //     (`{claude}` pretty-printed). RED: the release's writeUsageCache planted back (a write and a rename on the loop).
 //  ④ ITS OTHER WRITER, the identity repair (src/reading-repair.js repairGlobalFile), judges the copy MEMORY holds: a write
 //     still owed lands first. RED: the repair without that flush judges the stale disk.
+//  ⑤ ITS RELOAD (reloadRateLimitCache: the boot's, the hourly and the person's identity repair call it) keeps memory while a
+//     write of the copy is OWED (r2335): the owed write lands the newer reading, never the older file's. The folder no longer
+//     holding the reading stands in for the active poll's road (its reading lives in memory and this copy alone). RED: the
+//     release's reload reads the older file over memory and the owed write lands it.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -132,5 +136,36 @@ const judge = (mod, w) => mod.repairGlobalFile({ dataDir: w.dd, cacheDir: w.cach
   const r = judge(Cut, w);
   ok(r.state === 'absent', `④ RED CONTROL the repair without its flush judges the stale disk: «${r.state}» while memory holds a copy`, r);
   storeWriter().flushSync([w.file]);
+}
+// ═══ ⑤ the reload keeps memory while a write of the copy is owed (r2335) ═══
+console.log('\n— ⑤ the reload keeps memory while a write of the copy is owed');
+const UCF = require(path.join(REPO, 'src/usage-cache-folder.js'));
+const RELOAD_CURE = "function reloadRateLimitCache() { let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }\n";
+const RELOAD_REL = "function reloadRateLimitCache() { _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }\n";   // stale-pins: kept (the release reload)
+// the folder's reader answers in microtasks (its fsp hook): its fresh read lands before the store writer's next turn, the write stays owed
+const nowFsp = { readdir: async (d) => fs.readdirSync(d), readFile: async (f, e) => fs.readFileSync(f, e) };
+const reloadWorld = async (routesMod) => {
+  const w = usageWorld();
+  const older = { ...w.g, fetchedAt: T - 36e5, fiveHour: { ...w.g.fiveHour, utilization: 0.05 } };
+  fs.writeFileSync(w.file, JSON.stringify({ claude: older }, null, 2));
+  const reader = UCF.forDir(w.cacheDir, { fsp: nowFsp });   // the one reader setupUsage asks for (one per folder)
+  const api = await setup(routesMod, w);                       // memory: the folder's newer reading; its copy's write OWED
+  fs.rmSync(path.join(w.cacheDir, '__global__.json'));         // the folder no longer holds it: memory and the owed copy alone
+  await quiet(() => reader.fresh({ waitMs: 0 }));            // a read that STARTS after the removal (setup's own read is in flight)
+  const owed = storeWriter().pending(w.file);
+  await quiet(() => api.reloadRateLimitCache());
+  storeWriter().flushSync([w.file]);
+  let landed = null; try { landed = JSON.parse(fs.readFileSync(w.file, 'utf8')).claude; } catch { landed = null; }
+  return { owed, at: landed ? landed.fetchedAt : null, five: landed && landed.fiveHour ? landed.fiveHour.utilization : null };
+};
+const which = (at) => (at === T ? 'the newer reading' : at === T - 36e5 ? 'the OLDER file' : String(at));
+{
+  const r = await reloadWorld(require(path.join(REPO, 'src/usage-routes.js')));
+  ok(r.owed === true && r.at === T && r.five === 0.31, `⑤ a reload while the copy's write is owed keeps memory: the owed write lands the newer reading (owed: ${r.owed}; landed: ${which(r.at)})`, r);
+}
+{
+  const Rel = M.load('src/usage-routes.js', anchored(ROUTES_SRC, RELOAD_CURE, RELOAD_REL, 'the release reload'), 'release-reload');
+  const r = await reloadWorld(Rel);
+  ok(r.owed === true && r.at === T - 36e5 && r.five === 0.05, `⑤ RED CONTROL the release's reload reads the older file over memory and the owed write lands it (owed: ${r.owed}; landed: ${which(r.at)})`, r);
 }
 report();

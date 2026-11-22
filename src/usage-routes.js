@@ -338,8 +338,11 @@ let _codexLinkUndecided = false;   // B-360d (round wldn7whag): this pass could 
  *  module already loaded data/usage-cache.json into `_rateLimitCache` at boot
  *  (2026-09-08 repair r6 verifier: unlinking a poisoned sibling changed nothing
  *  for the life of that process — both panel rows kept the stranger's window).
- *  Cheap and idempotent: server.js calls it right after runLocalMigrations(). */
-function reloadRateLimitCache() { _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }
+ *  Cheap and idempotent: server.js calls it right after runLocalMigrations(). A write of the copy still OWED (r2335) means
+ *  memory is NEWER than the file (the store writer's produce reads memory when it writes): the reload keeps memory then, or the
+ *  owed write would land the older file's reading (the active poll's reading lives in memory and this copy alone; the repair
+ *  that judges this copy, reading-repair.js repairGlobalFile, flushes it first, so a repaired copy is read). */
+function reloadRateLimitCache() { let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }
 function ingestPassiveUsage() {
   const allAccts = accounts.list().accounts || [];
   const roster = allAccts.filter((a) => oauthUsageAccount(a));

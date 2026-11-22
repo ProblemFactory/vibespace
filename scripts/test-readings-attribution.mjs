@@ -2799,6 +2799,9 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       JSON.stringify([fixed.rateLimit?.sevenDay, fixed.accounts?.[A]?.sevenDay, fixed.globalLogin?.accountId]));
     ok('§16c …and the file is RE-SEEDED by the product\'s own `!_rateLimitCache` branch, from the repaired directory — so it agrees with the window this migration seeded for `__global__`, and its `fetchedAt` can never outrank it again',
       (() => {
+        // B-360d part 3 U2: the copy is written by the STORE WRITER (src/usage-routes.js writeUsageCache, off the thread) — a reader of the
+        // disk asks the writer to land it first, as the identity repair itself does (its flushSync before it judges the file)
+        try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync([path.join(dd, 'usage-cache.json')], { waitedBy: 'the leg (§16c re-seed)' }); } catch { }
         const sib = sibOf(dd), seeded = readWindow(path.join(dd, 'usage-cache'), '__global__');
         return !!sib && !!seeded && readingLag.weeklyNear(readingLag.windowOf(sib).sevenDay, seeded.sevenDay) === true
           && sib.fetchedAt === JSON.parse(fs.readFileSync(path.join(dd, 'usage-cache', '__global__.json'), 'utf8')).fetchedAt;
