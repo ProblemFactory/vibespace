@@ -1374,9 +1374,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // window). A card past its until ended by its time (left as it reads). While For you is held unread its list is empty: nothing
   // is told (as the 1-hour window's road)
   // r2175 (2): the paste door's delete that FAILED after it dropped the entry's use-grants row — the row is gone, so the cards it
-  // held are told (a read of the row: safe either way — a card the row still says stays as it reads)
-  function rowChanged(id) { try { return alwaysTakenBack(String(id || ''), 'revoked'); } catch { return 0; } }
-  function alwaysTakenBack(id, word = 'revoked', pk = null) {
+  // held are told (a read of the row: safe either way — a card the row still says stays as it reads). r2230 (1): its 1-hour cards
+  // too — the row took their window with it (this door refuses their runs), so a card none of whose entries still holds its window
+  // reads ended at once, never «allowed» to its hour's end. r2230 (4): named for what happened (src/lib/vault-use-row.js's
+  // rowChanged is the dialog's own)
+  function useRowDropped(id) { try { return alwaysTakenBack(String(id || ''), 'revoked', null, { windows: true }); } catch { return 0; } }
+  function alwaysTakenBack(id, word = 'revoked', pk = null, { windows = word === 'deleted' } = {}) {
     if (!useGrants || !userTodos || typeof userTodos.resolvedOf !== 'function' || typeof userTodos.noteFact !== 'function') return 0;
     let n = 0;
     const rows = new Map();
@@ -1384,7 +1387,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const f = it.resolvedFact && typeof it.resolvedFact === 'object' ? it.resolvedFact : {};
       if (it.resolvedBy !== 'always' || f.endedAt || typeof f.principal !== 'string' || (pk != null && f.principal !== pk) || !Array.isArray(f.entries) || !f.entries.includes(id) || (f.until != null && Number(f.until) <= now())) continue;
       let says;
-      if (f.windowFor) { if (word !== 'deleted') continue; says = f.entries.some((e) => { try { return useGrants.windowOf(String(e), f.principal) === Number(f.until); } catch { return true; } }) ? 'held' : 'gone'; }
+      // a 1-hour card: held while an entry it named still holds its window. While the vault is LOCKED no window can be read
+      // (windowOf reads no members): the entry whose row went holds none, any other is no news (r2230's read: never «revoked» over
+      // a window that still admits once unlocked)
+      if (f.windowFor) { if (!windows) continue; says = f.entries.some((e) => { try { return vaultState() !== 'unlocked' ? String(e) !== id : useGrants.windowOf(String(e), f.principal) === Number(f.until); } catch { return true; } }) ? 'held' : 'gone'; }
       else says = rowSays(f, rows);
       if (says === 'held' || says === 'memory') continue;   // another entry of that press still says it, or this one does
       try { if (userTodos.noteFact(it.id, { endedAt: now(), endedBy: says === 'replaced' ? 'replaced' : word })) n++; } catch { }
@@ -2861,7 +2867,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowChanged, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+  return { scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, useRowDropped, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }

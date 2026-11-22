@@ -526,7 +526,7 @@ async function agentDrop(w, s, name) {
     await vault.setup(PW);
     const store = GS.create({ memory: true });
     const useGrants = VUG.create({ grants: () => store, vault, dataDir, log: (m) => LOGS.push(String(m)) });
-    const told = [], vaultRun = { forgetEntry: () => ({ ok: true, dropped: 0 }), rowChanged: (id) => { told.push(String(id)); return 0; } };
+    const told = [], vaultRun = { forgetEntry: () => ({ ok: true, dropped: 0 }), useRowDropped: (id) => { told.push(String(id)); return 0; } };
     const failing = new Proxy(vault, { get: (t, k) => (k === 'secretDrop' ? () => ({ ok: false, code: 'store_failed' }) : (typeof t[k] === 'function' ? t[k].bind(t) : t[k])) });
     const paste = (doorMod || require(path.join(REPO, 'src/server/vault-paste-door.js'))).create({ vault: failing, useGrants, vaultRun, log: (m) => LOGS.push(String(m)) });
     const name = 'secret:' + crypto.randomBytes(5).toString('hex'), id = `secrets:${name}#secret`;
@@ -537,7 +537,7 @@ async function agentDrop(w, s, name) {
   };
   const fd = await failedDelete(null);
   ok(fd.put && fd.add && fd.code === 'store_failed' && fd.rowGone && fd.told.length === 1 && /^secrets:secret:[0-9a-f]{10}#secret$/.test(fd.told[0]), 'r2175 (2): a delete that FAILED after its row was dropped still tells the run door (its cards read what is true) — the failure answered by name', fd);
-  const fdR = await failedDelete(mutant('src/server/vault-paste-door.js', "if (vaultRun && typeof vaultRun.rowChanged === 'function') { try { vaultRun.rowChanged(rid); } catch { } }", ''));
+  const fdR = await failedDelete(mutant('src/server/vault-paste-door.js', "if (vaultRun && typeof vaultRun.useRowDropped === 'function') { try { vaultRun.useRowDropped(rid); } catch { } }", ''));
   ok(fdR.code === 'store_failed' && fdR.rowGone && fdR.told.length === 0, 'MUTANT r2175 (2) the failed delete that tells nothing ⇒ the run door never hears the row went (RED — its cards would read «always allowed» over a gone row)', fdR);
 }
 
@@ -1910,21 +1910,23 @@ async function runRoad(name, { door, routes } = {}) {
     const rec = (w.userTodos.resolvedOf('secret-request') || []).find((i) => i.action && i.action.requestId === a.json.requestId);
     const f = (rec && rec.resolvedFact) || {};
     const SHAPE_RE = /sk-b{40}/, endAtDelete = deleteFirst ? f.endedBy || null : null;
-    const door2 = (run || RUN).create({ dataDir: w.dataDir, vault: w.vault, sources: w.sources, userTodos: w.userTodos, log: (m) => LOGS.push(String(m)), liveOf: () => true });   // THE RESTART: a new run door over the same data
+    w.userTodos.stop();   // r2230 (2) THE RESTART: the first For-you store writes what it holds and stops …
+    const todos2 = new UserTodoManager({ dataDir: w.dataDir, expirySweepMs: 0 });   // … and a FRESH one reads the data folder (never the same object in memory)
+    const door2 = (run || RUN).create({ dataDir: w.dataDir, vault: w.vault, sources: w.sources, userTodos: todos2, log: (m) => LOGS.push(String(m)), liveOf: () => true });   // THE RESTART: a new run door over the same data
     for (let k = 0; k < 20; k++) await new Promise((res) => setImmediate(res));   // the start's sweep has run
     const ended = (door2.usesFor({ conversationId: 'cid-asker-1', scope: 'w1' }).ended || []).map((e) => ({ endedBy: e.endedBy, purpose: e.purpose }));
-    const rec2 = rec ? w.userTodos.get(rec.id) : null;
-    return { stored: r.status === 200, facts: { conv: f.conv === 'w1', entry: typeof f.entry === 'string' && !!r.json.entry && f.entry === `secrets:${r.json.entry}#secret`, until: Number(f.until) > Date.now(), grantedFor: f.grantedFor || null, person: f.decidedBy === 'person' }, listed: ended, recordEnd: ((rec2 && rec2.resolvedFact) || {}).endedBy || null, deleted: !!(delR && delR.status === 200), endAtDelete, purposeHas: typeof f.purpose === 'string' ? SHAPE_RE.test(f.purpose) : null, purposeRedacted: typeof f.purpose === 'string' && f.purpose.includes('«redacted»') };
+    const rec2 = rec ? todos2.get(rec.id) : null;   // the record as the data folder holds it
+    return { fresh: todos2 !== w.userTodos && !!rec2, stored: r.status === 200, facts: { conv: f.conv === 'w1', entry: typeof f.entry === 'string' && !!r.json.entry && f.entry === `secrets:${r.json.entry}#secret`, until: Number(f.until) > Date.now(), grantedFor: f.grantedFor || null, person: f.decidedBy === 'person' }, listed: ended, recordEnd: ((rec2 && rec2.resolvedFact) || {}).endedBy || null, deleted: !!(delR && delR.status === 200), endAtDelete, purposeHas: typeof f.purpose === 'string' ? SHAPE_RE.test(f.purpose) : null, purposeRedacted: typeof f.purpose === 'string' && f.purpose.includes('«redacted»') };
   }
   const pBase = await pastedRestart('m-pasted-restart');
-  ok(pBase.stored && pBase.facts.conv && pBase.facts.entry && pBase.facts.until && pBase.facts.grantedFor === '8h' && pBase.facts.person && pBase.listed.length === 1 && pBase.listed[0].endedBy === 'restart' && pBase.listed[0].purpose === 'the restart leg' && pBase.recordEnd === 'restart',
-    'B-a14b\'s last remainder (1): a PASTED grant then a restart — its paste record kept the grant\'s facts, the start ends it «restart»: `uses` lists it with the request\'s words', pBase);
+  ok(pBase.fresh && pBase.stored && pBase.facts.conv && pBase.facts.entry && pBase.facts.until && pBase.facts.grantedFor === '8h' && pBase.facts.person && pBase.listed.length === 1 && pBase.listed[0].endedBy === 'restart' && pBase.listed[0].purpose === 'the restart leg' && pBase.recordEnd === 'restart',
+    'B-a14b\'s last remainder (1): a PASTED grant then a restart (a fresh For-you store over the data folder, r2230 (2)) — its paste record kept the grant\'s facts, the start ends it «restart»: `uses` lists it with the request\'s words', pBase);
   const pNoRead = await pastedRestart('m-pasted-noread', { run: mutant('src/server/vault-run-door.js', "[[REQUEST_TYPE, 'granted'], [PASTE_TYPE, 'stored']]", "[[REQUEST_TYPE, 'granted']]") });
   ok(pNoRead.stored && pNoRead.facts.grantedFor === '8h' && pNoRead.listed.length === 0 && !pNoRead.recordEnd, 'MUTANT r1823 the start that reads no paste record ⇒ the pasted grant\'s end is never said (RED — the agent\'s next run is refused with no word of the restart)', pNoRead);
   // r2175 (3): THE PASTE RECORD's ID across a DELETE and a restart — the pasted grant carries its record, so the delete ends it
   // there («deleted»: the first end stands) and the restart says nothing for an entry that no longer exists. RED: the id not carried
   const pDel = await pastedRestart('m-pasted-deleted', { deleteFirst: true });
-  ok(pDel.stored && pDel.deleted && pDel.endAtDelete === 'deleted' && pDel.listed.length === 0 && pDel.recordEnd === 'deleted', 'r2175 (3): a paste, its entry deleted, a restart — the record ends «deleted» at the delete (the first end stands) and nothing is said for the gone entry', pDel);
+  ok(pDel.fresh && pDel.stored && pDel.deleted && pDel.endAtDelete === 'deleted' && pDel.listed.length === 0 && pDel.recordEnd === 'deleted', 'r2175 (3): a paste, its entry deleted, a restart — the record ends «deleted» at the delete (the first end stands) and nothing is said for the gone entry', pDel);
   const pDelR = await pastedRestart('m-pasted-noid', { deleteFirst: true, door: mutant('src/server/vault-paste-door.js', 'requestId: id, todoId: q.todoId || null });', 'requestId: id, todoId: null });') });
   ok(pDelR.deleted && !pDelR.endAtDelete && pDelR.listed.some((e) => e.endedBy === 'restart'), 'MUTANT r2175 (3) the pasted grant that carries no record ⇒ the delete ends nothing there and the restart says «restart» for an entry that no longer exists (RED)', pDelR);
   // r2175 (5): the request's words BELTED AT THE WRITE of the record (the ask belts them too — lineOf): a purpose holding a secret

@@ -425,8 +425,8 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** A free entry's delete door (its row's 删除 in the Vault window) — `id` = the part after `secret:`. A locked vault forgets too
    *  (the engine's secretDrop needs no key). */
   // B-a14b's last remainder (r2175 (2)): a delete that FAILED after its use-grants row was dropped still tells the run door, whose
-  // «Always» cards that row held then read what is true (a read of the row: safe either way)
-  const rowTold = (rid, out) => { if (vaultRun && typeof vaultRun.rowChanged === 'function') { try { vaultRun.rowChanged(rid); } catch { } } return out; };
+  // «Always» cards that row held then read what is true (a read of the row: safe either way) — its 1-hour cards too (r2230 (1))
+  const rowTold = (rid, out) => { if (vaultRun && typeof vaultRun.useRowDropped === 'function') { try { vaultRun.useRowDropped(rid); } catch { } } return out; };
   function dropEntry(id, { by = 'user' } = {}) {
     const entry = `${P.ENTRY_PREFIX}${String(id || '')}`;
     if (!/^secret:[\w.-]{1,160}$/.test(entry)) return named('entry_unknown_id');

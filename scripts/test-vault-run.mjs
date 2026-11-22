@@ -2419,9 +2419,78 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     };
     const wdl = await windowDeleted(DOOR);
     ok(wdl.offered && wdl.windowed && wdl.dropped && wdl.forgot && wdl.end === 'deleted' && wdl.state === 'ended', `(r1834's third read) a 1-hour window card whose entry is DELETED ⇒ «deleted» — ${JSON.stringify(wdl)}`, wdl);
-    const mwdl = M.load('src/server/vault-run-door.js', anchored(SRCa, "      if (f.windowFor) { if (word !== 'deleted') continue; says = ", "      if (f.windowFor) { continue; says = ", 'test-vault-run r1834 read 3: the delete that tells no window card'), 'a14b-window-deleted');
+    const mwdl = M.load('src/server/vault-run-door.js', anchored(SRCa, "      if (f.windowFor) { if (!windows) continue; says = ", "      if (f.windowFor) { continue; says = ", 'test-vault-run r1834 read 3: the delete that tells no window card'), 'a14b-window-deleted');
     const wdlR = await windowDeleted(mwdl);
     ok(wdlR.windowed && wdlR.forgot && !wdlR.end, `RED control: the delete that tells no window card ⇒ it still reads «until HH:MM» for a deleted entry — ${JSON.stringify(wdlR)}`, wdlR);
+    // r2230 (3) + (1): A FAILED DELETE's TELL, END TO END — a real run door holding a card over a FREE entry (pressed «Always», or the
+    // 1-hour window) and a real paste door whose vault drop fails AFTER it dropped the entry's use row: the card reads ended
+    // («revoked») at once — the 1-hour card too (the row took its window: this door refuses its runs). REDs: the paste door that
+    // tells nothing on that road (the card keeps «always allowed» over a gone row); the tell that judges no 1-hour card (it keeps
+    // «until HH:MM» to its hour's end)
+    const FREE_ID = 'secrets:secret:r2230-free#secret', FREE = { entry: 'secret:r2230-free', field: 'secret', label: 'a pasted key', bytes: 30, v: 'free-pasted-value-0123456789ab' };
+    const FREE_REF = ['vault://secrets', FREE.entry, FREE.field].join('/');   // its run ref, built (a literal reads to the secret scan as an assignment)
+    const SRCp = fs.readFileSync(path.join(REPO, 'src/server/vault-paste-door.js'), 'utf8');
+    const freeSources = () => { const rows = [...ROWS.secrets, FREE]; return { ...Object.fromEntries(Object.keys(ROWS).map((st) => [st, () => sourceOf(st)])), secrets: () => ({ vaultRows: () => rows.map(({ v, ...r }) => r), vaultReveal: (e, fl) => { const r = rows.find((x) => x.entry === e && x.field === fl); return r ? r.v : null; } }) }; };
+    const failingDrop = (v) => new Proxy(v, { get: (t, k) => (k === 'secretDrop' ? () => ({ ok: false, code: 'store_failed' }) : (typeof t[k] === 'function' ? t[k].bind(t) : t[k])) });   // the vault whose drop fails
+    const failedDeleteTold = async (kind, { mod = DOOR, pasteMod = R('src/server/vault-paste-door.js') } = {}) => {
+      const VUGf = R('src/server/vault-use-grants.js'), GSf = R('src/server/grants-store.js'), FAf = R('src/foryou-actions.js');
+      const wf = await world(), gsf = GSf.create({ memory: true });
+      const ugf = VUGf.create({ grants: () => gsf, vault: wf.vault, dataDir: wf.dataDir, log: (m) => wf.logs.push(String(m)) });
+      wf.door = wf.mk(mod, { useGrants: ugf, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }), sources: freeSources() }); openRow(wf, FREE_ID);
+      const REF = ['--env', 'T=' + FREE_REF, '--'];
+      let card = null, pressed = false;
+      if (kind === 'always') { const c = await runAnswered(wf, [...REF, 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '30d' }); card = c.card; pressed = !!(c.a && c.a.ok); }
+      else { const sh = await runAnswered(wf, [...REF, 'bash', '-c', 'curl https://api.example.com'], { answer: null }); card = sh.card; const yes = sh.card && sh.card.action && sh.card.action.window === true ? wf.door.answer(sh.card.action.askId, { answer: 'window', reauthed: true, person: true }) : null; await sh.r; pressed = !!(yes && yes.ok); }
+      const cardId = card ? card.id : null, recOf = () => ((cardId ? wf.userTodos.get(cardId) : null) || {});
+      const before = FAf.decisionCard(recOf()).state, members = ((ugf.publicFor(FREE_ID) || {}).to || []).length;
+      const paste = pasteMod.create({ vault: failingDrop(wf.vault), useGrants: ugf, vaultRun: wf.door, log: (m) => wf.logs.push(String(m)) });
+      const d = paste.dropEntry('r2230-free', { by: 'user' });
+      const it = recOf();
+      return { kind, pressed, window: (it.resolvedFact || {}).windowFor || null, before, members, code: (d && d.code) || null, rowGone: !ugf.rowsOf(FREE_ID).length, end: (it.resolvedFact || {}).endedBy || null, state: FAf.decisionCard(it).state };
+    };
+    const fdA = await failedDeleteTold('always'), fdW = await failedDeleteTold('window');
+    ok(fdA.pressed && fdA.members >= 1 && fdA.before === 'approved' && fdA.code === 'store_failed' && fdA.rowGone && fdA.end === 'revoked' && fdA.state === 'revoked'
+      && fdW.pressed && fdW.window === '1h' && fdW.before === 'approved' && fdW.code === 'store_failed' && fdW.rowGone && fdW.end === 'revoked' && fdW.state === 'revoked',
+      `r2230 (3) + (1): a delete that FAILED after its use row was dropped, end to end through the real run door — the «Always» card AND the 1-hour card read «revoked» at once — ${JSON.stringify({ fdA, fdW })}`, { fdA, fdW });
+    const mpsl = M.load('src/server/vault-paste-door.js', anchored(SRCp, "if (vaultRun && typeof vaultRun.useRowDropped === 'function') { try { vaultRun.useRowDropped(rid); } catch { } }", '', 'test-vault-run r2230 (3): the failed delete that tells nothing'), 'a14b-fail-silent');
+    const fdAR = await failedDeleteTold('always', { pasteMod: mpsl });
+    ok(fdAR.pressed && fdAR.code === 'store_failed' && fdAR.rowGone && !fdAR.end && fdAR.state === 'approved', `RED control: the paste door that tells nothing on that road ⇒ the card keeps «always allowed» over a gone row — ${JSON.stringify(fdAR)}`, fdAR);
+    const mrwd = M.load('src/server/vault-run-door.js', anchored(SRCa, "'revoked', null, { windows: true })", "'revoked', null, { windows: false })", 'test-vault-run r2230 (1): the failed delete tell that judges no 1-hour card'), 'a14b-fail-nowindow');
+    const fdWR = await failedDeleteTold('window', { mod: mrwd });
+    ok(fdWR.pressed && fdWR.window === '1h' && fdWR.code === 'store_failed' && fdWR.rowGone && !fdWR.end && fdWR.state === 'approved', `RED control: the tell that judges no 1-hour card ⇒ it keeps «until HH:MM» while its runs are refused — ${JSON.stringify(fdWR)}`, fdWR);
+    // r2230's read (its SHOULD, cured): while the vault is LOCKED no window can be read (windowOf reads no members) — a 1-hour card
+    // over two entries, told that the free one's row went (its delete failing, the row gone before by another road), keeps the other
+    // entry's window: no news, never «revoked» over a window that still admits once unlocked. RED: the judge that reads windows while
+    // locked (every window reads null ⇒ the card ends). Its other half: a card over the deleted entry ALONE ends «revoked», locked
+    // too (RED: anything locked read as no news ⇒ it keeps «until HH:MM» over a deleted entry)
+    const lockedWindow = async (mod, { alone = false } = {}) => {
+      const VUGl = R('src/server/vault-use-grants.js'), GSl = R('src/server/grants-store.js'), FAl = R('src/foryou-actions.js');
+      const wl = await world(), gsl = GSl.create({ memory: true });
+      const ugl = VUGl.create({ grants: () => gsl, vault: wl.vault, dataDir: wl.dataDir, log: (m) => wl.logs.push(String(m)) });
+      wl.door = wl.mk(mod, { useGrants: ugl, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }), sources: freeSources() }); openRow(wl); openRow(wl, FREE_ID);
+      const sh = await runAnswered(wl, [...(alone ? [] : ['--env', 'T=vault://mounts/m1/secretKey']), '--env', 'U=' + FREE_REF, '--', 'bash', '-c', 'curl https://api.example.com'], { answer: null });
+      const yes = sh.card && sh.card.action && sh.card.action.window === true ? wl.door.answer(sh.card.action.askId, { answer: 'window', reauthed: true, person: true }) : null;
+      await sh.r;
+      const cardId = sh.card ? sh.card.id : null, recOf = () => ((cardId ? wl.userTodos.get(cardId) : null) || {});
+      const f0 = recOf().resolvedFact || {};
+      const gone = ugl.drop(FREE_ID, { by: 'user' });   // the free entry's row went by another road (unlocked, nothing told: the setup)
+      const otherHolds = alone ? null : ugl.windowOf('mounts:m1#secretKey', f0.principal) === Number(f0.until);
+      wl.vault.lock('test');
+      const paste = R('src/server/vault-paste-door.js').create({ vault: failingDrop(wl.vault), useGrants: ugl, vaultRun: wl.door, log: (m) => wl.logs.push(String(m)) });
+      const d = paste.dropEntry('r2230-free', { by: 'user' });
+      const it = recOf();
+      return { pressed: !!(yes && yes.ok), window: f0.windowFor || null, entries: (f0.entries || []).length, gone: !!(gone && gone.ok), otherHolds, code: (d && d.code) || null, end: (it.resolvedFact || {}).endedBy || null, state: FAl.decisionCard(it).state };
+    };
+    const lkw = await lockedWindow(DOOR);
+    ok(lkw.pressed && lkw.window === '1h' && lkw.entries === 2 && lkw.gone && lkw.otherHolds && lkw.code === 'store_failed' && !lkw.end && lkw.state === 'approved', `r2230's read: a LOCKED vault — the 1-hour card over two entries, told of the one whose row went, keeps the other's window (no news) — ${JSON.stringify(lkw)}`, lkw);
+    const mlkw = M.load('src/server/vault-run-door.js', anchored(SRCa, "vaultState() !== 'unlocked' ? String(e) !== id : ", '', 'test-vault-run r2230 read: the window judge that reads windows while locked'), 'a14b-locked-window');
+    const lkwR = await lockedWindow(mlkw);
+    ok(lkwR.pressed && lkwR.entries === 2 && lkwR.otherHolds && lkwR.end === 'revoked', `RED control: the judge that reads windows while locked ⇒ every window reads none and the card ends «revoked» over a window that still admits — ${JSON.stringify(lkwR)}`, lkwR);
+    const lka = await lockedWindow(DOOR, { alone: true });
+    ok(lka.pressed && lka.window === '1h' && lka.entries === 1 && lka.gone && lka.code === 'store_failed' && lka.end === 'revoked' && lka.state === 'revoked', `r2230's read, its other half: a LOCKED vault — a 1-hour card over the deleted entry ALONE ends «revoked» (its row went: no window left to it) — ${JSON.stringify(lka)}`, lka);
+    const mlka = M.load('src/server/vault-run-door.js', anchored(SRCa, "vaultState() !== 'unlocked' ? String(e) !== id : ", "vaultState() !== 'unlocked' ? true : ", 'test-vault-run r2230 read: anything locked read as no news'), 'a14b-locked-alone');
+    const lkaR = await lockedWindow(mlka, { alone: true });
+    ok(lkaR.pressed && lkaR.entries === 1 && lkaR.code === 'store_failed' && !lkaR.end && lkaR.state === 'approved', `RED control: anything locked read as no news ⇒ the card over the deleted entry alone keeps «until HH:MM» — ${JSON.stringify(lkaR)}`, lkaR);
     // (r1825's readers) a once-grant whose run BURNS after its entry was DELETED — or after a NEW approval of its pair — while its
     // spawn was failing: nothing ran, so its record says that event's own word («deleted» / «replaced», at the event), never «used»;
     // it is not given back. A stand-in spawn returns a child with NO pid (the spawn's error comes after); the event lands in between.
