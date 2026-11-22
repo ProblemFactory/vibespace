@@ -367,10 +367,36 @@ await guard('§8', async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(5); } return fn(); };
   const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
-  const run = async (wrapperPath, label, env, { secondStop = false } = {}) => {
+  // THE RECORD IS SAID AFTER IT IS ON DISK (主开发 r2320, the hosted gates' «late: [] … lateLines: 1»): the wrapper logs «stop late» and
+  // «stop settled» while it handles the CLI's chunk, and SAYS the result that carries the fact only at the batch's end, after the
+  // durable write (data/bin/chat-wrapper.js endBatch: persistNow, the journal, then stdout — B-5a4d / B-cd4b). So the log runs one
+  // write AHEAD of the record by design; the run waits for the RECORD by order, never a clock. STALL: a preload placed in that very
+  // window — the wrapper's SAY is held: from the line that carries the chosen text (its STOP_LATE_STALL_AT-th copy) every line it
+  // says waits STOP_LATE_STALL_MS, then all go out in their order — the hosted symptom made at will. A held SAY, never a blocked
+  // write: a blocked durable write made the red control hang on how the CLI's lines met the wrapper (its result and its idle word
+  // in ONE chunk: the settle is logged before the record is said; in TWO: the record is said before the settle is logged, and the
+  // release's read is right). The held say opens the same window either way.
+  const STALL = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-late-stall-')), 'stall-say.cjs');
+  fs.writeFileSync(STALL, [
+    "'use strict';",
+    "const fs = require('fs'), out = process.stdout, write = out.write.bind(out), E = process.env;",
+    "const TEXT = E.STOP_LATE_STALL_TEXT || '', AT = Number(E.STOP_LATE_STALL_AT) || 1, MS = Number(E.STOP_LATE_STALL_MS) || 1500, MARK = E.STOP_LATE_STALL_MARK || '';",
+    "let seen = 0, state = 0, q = [];   // 0 not yet · 1 holding · 2 let go",
+    "out.write = function (chunk, ...a) {",
+    "  if (state === 1) { q.push([chunk, a]); return true; }",
+    "  if (state === 0 && TEXT) {",
+    "    const s = String(chunk); for (let i = s.indexOf(TEXT); i >= 0; i = s.indexOf(TEXT, i + 1)) seen++;",
+    "    if (seen >= AT) { state = 1; q.push([chunk, a]); if (MARK) fs.writeFileSync(MARK, 'held');",
+    "      setTimeout(() => { state = 2; for (const [c, x] of q) write(c, ...x); q = []; }, MS); return true; }",
+    "  }",
+    "  return write(chunk, ...a);",
+    "};",
+  ].join('\n') + '\n');
+  process.on('exit', () => { try { fs.rmSync(path.dirname(STALL), { recursive: true, force: true }); } catch { } });   // the stall's folder is the run's own
+  const run = async (wrapperPath, label, env, { secondStop = false, stall = null, oldWait = false } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-late-' + label + '-'));
     const dlv = path.join(dir, 'delivered.jsonl');
-    const w = spawn(process.execPath, [wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: '5000', VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env } });
+    const w = spawn(process.execPath, [...(stall ? ['-r', STALL] : []), wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: '5000', VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env, ...(stall ? { STOP_LATE_STALL_TEXT: stall.text, STOP_LATE_STALL_AT: String(stall.at), STOP_LATE_STALL_MS: '1500', STOP_LATE_STALL_MARK: path.join(dir, 'held') } : {}) } });
     const recs = []; let lb = '';
     w.stdout.setEncoding('utf8');
     w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
@@ -381,14 +407,26 @@ await guard('§8', async () => {
       await until(() => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
       w.stdin.write(ad.formatChatInput('MARK-B handed while the tool runs', 'm-b', { steer: true }).stdinPayload + '\n');
       await until(() => recs.some((r) => r.type === 'input_handover' && r.state === 'handed'), 3000);
+      const n0 = recs.length;   // what was said before the Stop: the settle's own line is read after it
       w.stdin.write(ad.formatInterrupt() + '\n');
       // a SECOND Stop pressed while the follow-up runs (its init came, its result not yet): the window is rebuilt around it
       if (secondStop && await until(() => recs.filter((r) => r.type === 'system' && r.subtype === 'init').length >= 2, 3000)) w.stdin.write(ad.formatInterrupt() + '\n');
       await until(() => /stop settled/.test(log()), 6000);
-      await sleep(20);
+      // BY ORDER (r2323), never a clock: after «stop late» in the log, the result record that carries the late mark; else the
+      // line the window SETTLED at (the CLI's idle word, said after the follow-up's result; a result where the CLI says no state
+      // word). The deadline only names a failure (byOrder 'DEADLINE'). `oldWait` is the release's 20 ms — the RED controls
+      let byOrder = 'off';
+      if (oldWait) await sleep(20);
+      else {
+        const lg0 = log();
+        const said = /stop late: /.test(lg0) ? (r) => r.type === 'result' && r.webui_stop_late
+          : /stop settled \(result\)/.test(lg0) ? (r) => r.type === 'result'
+          : (r) => r.type === 'system' && r.subtype === 'session_state_changed' && r.state === 'idle';
+        byOrder = (await until(() => recs.slice(n0).some(said), 15000)) ? 'read' : 'DEADLINE';
+      }
       const lg = log(), d1 = lg.indexOf('interrupt: dropped'), d2 = d1 < 0 ? -1 : lg.indexOf('interrupt: dropped', d1 + 1);
       const endAt = lg.indexOf('stop late: ') >= 0 ? lg.indexOf('stop late: ') : lg.indexOf('stop settled');   // the result's judgement, else the settle after it
-      return { recs: recs.filter((r) => r.type !== '_stdin_ack'), late: recs.filter((r) => r.type === 'result' && r.webui_stop_late).map((r) => r.webui_stop_late), requests: lines(dlv).filter((d) => d.how === 'request').length, settled: /stop settled/.test(lg), lateLines: (lg.match(/stop late: /g) || []).length, secondBeforeResult: d2 >= 0 && endAt >= 0 && d2 < endAt };
+      return { byOrder, results: recs.filter((r) => r.type === 'result').length, ...(stall ? { held: fs.existsSync(path.join(dir, 'held')) } : {}), recs: recs.filter((r) => r.type !== '_stdin_ack'), late: recs.filter((r) => r.type === 'result' && r.webui_stop_late).map((r) => r.webui_stop_late), requests: lines(dlv).filter((d) => d.how === 'request').length, settled: /stop settled/.test(lg), lateLines: (lg.match(/stop late: /g) || []).length, secondBeforeResult: d2 >= 0 && endAt >= 0 && d2 < endAt };
     } finally { try { w.kill('SIGKILL'); } catch { } fs.rmSync(dir, { recursive: true, force: true }); }
   };
   // RED CONTROLS: wrapper copies — one that NEVER LOOKS (the release's: the follow-up is not marked), one whose rebuilt window on a
@@ -413,9 +451,11 @@ await guard('§8', async () => {
   const LATE = { STAND_IN_FOLLOW_REQ_MS: '12', STAND_IN_FOLLOW_HOLD_UNTIL: 'request', STAND_IN_FOLLOW_MS: '600000' };
   const ONTIME = { STAND_IN_FOLLOW_MS: '600000' };   // no request at all: the interrupt is read first and ends the follow-up
   const AGENT = { ...ONTIME, STAND_IN_FOLLOW_AGENT_TOKENS: '900' };
-  let L, A, E, O, C, T2, M2, V, G, GS;
+  // the stalls: the SAY of the record that carries the late mark · of the follow-up's result (a run's second result)
+  const LATE_SAY = { text: '"webui_stop_late"', at: 1 }, SETTLE_SAY = { text: '"type":"result"', at: 2 };
+  let L, A, E, O, C, T2, M2, V, G, GS, K1, K2, K3, K4;
   try {
-    [L, A, E, O, C, T2, M2, V, G, GS] = (await Promise.allSettled([
+    [L, A, E, O, C, T2, M2, V, G, GS, K1, K2, K3, K4] = (await Promise.allSettled([
       run(LANE, 'late', LATE),                                                                                  // the request left, THEN the interrupt read
       run(LANE, 'answered', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10', STAND_IN_FOLLOW_HOLD_UNTIL: 'answer' }),   // …the model spoke, THEN
       run(LANE, 'ran', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10', STAND_IN_FOLLOW_MS: '40', STAND_IN_FOLLOW_HOLD_UNTIL: 'end' }),   // …it ended, THEN
@@ -426,10 +466,20 @@ await guard('§8', async () => {
       run(LANE, 'old', { ...LATE, STAND_IN_CLI_VERSION: '2.1.308' }),                                           // a CLI before the per-result count: its `usage`
       run(LANE, 'agent', AGENT),                                                                                // on time, but an agent's tokens in the since-last count
       run(SINCE, 'since', AGENT),                                                                               // RED CONTROL: the since-last count tells falsely
+      run(LANE, 'stall-old', LATE, { stall: LATE_SAY, oldWait: true }),                                         // RED CONTROL: the late record's say held, the release's 20 ms read
+      run(LANE, 'stall-new', LATE, { stall: LATE_SAY }),                                                        // …the same stall, read by order
+      run(LANE, 'settle-old', ONTIME, { stall: SETTLE_SAY, oldWait: true }),                                    // RED CONTROL: nothing late, the follow-up's result's say held, 20 ms
+      run(LANE, 'settle-new', ONTIME, { stall: SETTLE_SAY }),                                                   // …the same stall, read by order (the settle's line)
     ])).map((x) => { if (x.status === 'rejected') throw x.reason; return x.value; });   // every run ends (its finally kills its pair) before a throw
   } finally { for (const d of ctlDirs) fs.rmSync(d, { recursive: true, force: true }); }
   const rowsOf = (recs, live) => { const mm = createMessageManager('claude', 'stop-late'); if (live) { for (const r of recs) mm.processLive(r); } else mm.convertHistory(recs); return mm.messages.filter((m) => m.content?.[0]?.stopLate).map((m) => ({ status: m.status, text: m.content[0].text, late: m.content[0].stopLate })); };
-  const S8 = (x) => ({ late: x.late, requests: x.requests, settled: x.settled, lateLines: x.lateLines });
+  const S8 = (x) => ({ late: x.late, requests: x.requests, settled: x.settled, lateLines: x.lateLines, results: x.results, byOrder: x.byOrder, ...(x.held !== undefined ? { held: x.held } : {}) });
+  const offOrder = Object.entries({ L, A, E, O, C, T2, M2, V, G, GS, K2, K4 }).filter(([, x]) => x.byOrder !== 'read').map(([k, x]) => k + ': ' + x.byOrder);
+  ok(offOrder.length === 0, '§8 BY ORDER (r2323): every run read the record it waits for — the result carrying the late mark, else the line the window settled at (none met the deadline)', offOrder);
+  ok(K2.held === true && K2.settled && K2.lateLines === 1 && K2.late.length === 1 && K2.late[0].how === 'billed', '§8 THE RECORD BY ORDER (r2320): the SAY of the record that carries the late fact HELD (a stall placed between the logged fact and the said record) — the run still reads the fact off the record', S8(K2));
+  ok(K1.held === true && K1.settled && K1.lateLines === 1 && K1.late.length === 0, '§8 RED CONTROL: the same stall read the release\'s way (20 ms after the log\'s settle) misses the record — «late: [] · lateLines: 1», the hosted gates\' symptom made at will', S8(K1));
+  ok(K4.held === true && K4.settled && K4.lateLines === 0 && K4.late.length === 0 && K4.results >= 2, '§8 THE SETTLE\'S LINE BY ORDER (r2323): nothing late, the SAY of the follow-up\'s result HELD — the run reads past it (the CLI\'s idle word comes after it) before «nothing late» is judged', S8(K4));
+  ok(K3.held === true && K3.settled && K3.lateLines === 0 && K3.results === 1, '§8 RED CONTROL: the same stall read the release\'s way — «nothing late» judged before the follow-up\'s result was read', S8(K3));
   console.log(`    §8 agent tokens only — ${G.late.length} told (the since-last copy: ${GS.late.length})`);
   console.log(`    §8 leaked follow-ups (told) — late ${L.requests} (${L.late.length}) · answered ${A.requests} (${A.late.length}) · ran ${E.requests} (${E.late.length}) · on time ${O.requests} (${O.late.length}) · blind ${C.requests} (${C.late.length}) · second Stop ${T2.requests} (${T2.late.length}) · drops ${M2.requests} (${M2.late.length}) · 2.1.308 ${V.requests} (${V.late.length})`);
   ok(L.settled && L.requests === 1 && L.late.length === 1 && L.late[0].follow === 1 && L.late[0].how === 'billed' && L.late[0].cut === true && L.late[0].tokens > 0 && L.lateLines === 1,
