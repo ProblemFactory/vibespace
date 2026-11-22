@@ -338,6 +338,90 @@ parentPort.on('message', (m) => {
     ok(h1.order === 'open temp → write temp → fsync temp → close temp → rename temp > file' && h1.disk === '{"a":1}' && !h1.err && !h1.tempLeft, `⑫ (h) the pieces road: ${h1.order}`, h1);
     ok(!/fsync/.test(h0.order) && /rename temp > file/.test(h0.order), `⑫ (h) RED (the sync removed): ${h0.order}`, h0);
     ok(!!hA.err && !/rename/.test(hA.order) && hA.disk === 'old' && !hA.tempLeft, `⑫ (h) an ABORT at the last piece renames nothing, removes the temp, keeps the previous version (${hA.err})`, hA);
+
+    // (o) THE CHAIN'S MOVE, ITS MEETINGS (round wgxur2rci (1)–(3)): line 42's REWRITE of an append store between two appends of THAT
+    // store across the two lanes — the fence keeps it in order (RED: no fence — the second append runs beside the held rewrite, and
+    // the rewrite carries it ahead of its own line); a thread LOST during a rewrite takes the base's road, the store dirty again
+    // (RED: the lost-append road, «ETHREAD» — the trim told FAILED though its rename may have landed); the PIECE ROAD under B-f276
+    // 1b's two laws, as the plain road: a store read missing lands by its EXCLUSIVE link, a file that appeared kept (RED: a plain
+    // rename writes over it), and a temp still a second name of the store is never written through (RED: no check)
+    const RW = { rewrite: { ranges: new Float64Array([0, 7]), size: 7 }, then: 'R\n' };   // keep «line 0\n» (7 bytes), then its own line
+    const rewriteBetween = async (SWx, tag) => {
+      const dir = scene(`o-${tag}`, { hold: 'whole' }), f = path.join(dir, 'stash.ndjson');
+      let phase = 0;
+      const produce = () => (phase === 1 ? { ...RW, rewrite: { ranges: RW.rewrite.ranges.slice(), size: 7 } } : { append: `line ${phase}\n` });
+      const w = SWx.create({ log: quiet, workerPath: STAND });
+      try {
+        w.dirty(f, { name: 'stash.write', produce, debounceMs: 0, urgent: true }); await w.durable(f, { timeoutMs: 8000 });   // an append store
+        phase = 1; w.dirty(f, { name: 'stash.write', produce, debounceMs: 0, urgent: true });   // the REWRITE (a whole job to the stand-in), held
+        await until(() => fs.existsSync(path.join(dir, 'held')), 'the rewrite held');
+        phase = 2; w.dirty(f, { name: 'stash.write', produce, debounceMs: 0, urgent: true });   // an append of THAT store
+        await timerTurns(4);
+        const st = w.stats().find((x) => x.file === f), taken = !!(st && !st.dirty);
+        if (taken) await until(() => evs(dir).filter((e) => e.ev === 'begin').length >= 3, 'the unfenced append to begin');
+        const begun = evs(dir).filter((e) => e.ev === 'begin').length;
+        fs.writeFileSync(path.join(dir, 'release'), '1');
+        await until(() => !w.pending(f), 'the stash landed');
+        return { begun, order: evs(dir).map((e) => `${e.ev} ${e.kind}`).join(' · '), bytes: fs.readFileSync(f, 'utf8') };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const rewriteLost = async (SWx, tag) => {
+      const dir = scene(`o-d-${tag}`, { die: 'whole' }), f = path.join(dir, 'stash.ndjson'), told = [];
+      let phase = 0;
+      const produce = () => (phase === 1 ? { ...RW, rewrite: { ranges: RW.rewrite.ranges.slice(), size: 7 } } : { append: `line ${phase}\n` });
+      const onWritten = (okW, e) => told.push(`${okW}${e && e.code ? ' ' + e.code : ''}`);
+      const w = SWx.create({ log: quiet, workerPath: STAND });
+      try {
+        w.dirty(f, { name: 'stash.write', produce, debounceMs: 0, urgent: true, onWritten }); await w.durable(f, { timeoutMs: 8000 });
+        fs.writeFileSync(path.join(dir, 'die'), '1');   // the whole lane's thread exits at the rewrite
+        phase = 1; w.dirty(f, { name: 'stash.write', produce, debounceMs: 0, urgent: true, onWritten });
+        await until(() => !w.pending(f) && told.length >= 2 && told[told.length - 1] === 'true', 'the rewrite written again by the restarted thread');
+        return { told: told.join(', '), bytes: fs.readFileSync(f, 'utf8') };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const NO_REWRITE_ROAD = M12.load('src/store-writer.js', anchored(srcW, 'if (s && f.append && !f.rewrite && !f.unlink && !s.forgotten) fail(', 'if (s && f.append && !f.unlink && !s.forgotten) fail(', 'a lost rewrite takes the base\'s road'), 'no-rewrite-road');   // stale-pins: kept (the old requeue's line: the RED)
+    const [o1, o0, d1, d0] = await Promise.all([rewriteBetween(SW, 'fence'), rewriteBetween(NO_FENCE, 'no-fence'), rewriteLost(SW, 'road'), rewriteLost(NO_REWRITE_ROAD, 'append-road')]);
+    ok(o1.begun === 2 && o1.bytes === 'line 0\nR\nline 2\n' && o1.order === 'begin append · end append · begin whole · end whole · begin append · end append', `⑫ (o) a REWRITE between two appends of ONE store on the two lanes: the second append began only after the rewrite landed, the file in order (${JSON.stringify(o1.bytes)}; ${o1.order})`, o1);
+    ok(o0.bytes !== 'line 0\nR\nline 2\n', `⑫ (o) RED (no fence): the append ran beside the held rewrite — ${JSON.stringify(o0.bytes)} on disk (${o0.order})`, o0);
+    ok(!/ETHREAD/.test(d1.told) && d1.bytes === 'line 0\nR\n', `⑫ (o) a thread LOST during a rewrite: the store dirty again (the base's road — its producer says «not confirmed»), written again by the restarted thread, never told ETHREAD (${d1.told})`, d1);
+    ok(/false ETHREAD/.test(d0.told), `⑫ (o) RED (the lost-append road for a rewrite): the trim was told FAILED by ETHREAD though its rename may have landed (${d0.told})`, d0);
+    // the piece road, B-f276 1b's two laws (a recording fs, as (h)) — the link and an unlink the storage refuses
+    const recX = (file, tmp, { unlinkFails = false } = {}) => {
+      const order = [], fds = new Map(), role = (x) => (String(x) === tmp ? 'temp' : String(x) === file ? 'file' : path.basename(String(x)));
+      return { order, fs: { ...fs,
+        openSync: (q, ...a) => { const fd = fs.openSync(q, ...a); fds.set(fd, role(q)); order.push('open ' + role(q)); return fd; },
+        writeSync: (fd, ...a) => { const k = fs.writeSync(fd, ...a); if (order[order.length - 1] !== 'write ' + fds.get(fd)) order.push('write ' + fds.get(fd)); return k; },
+        linkSync: (x, y) => { order.push(`link ${role(x)} > ${role(y)}`); return fs.linkSync(x, y); },
+        unlinkSync: (x) => { if (unlinkFails && String(x) === tmp) { order.push('unlink temp REFUSED'); throw Object.assign(new Error('the storage refused the removal'), { code: 'EBUSY' }); } order.push('unlink ' + role(x)); return fs.unlinkSync(x); },
+        renameSync: (x, y) => { order.push(`rename ${role(x)} > ${role(y)}`); return fs.renameSync(x, y); } } };
+    };
+    const piecesOf = (W, r, file, tmp, extra) => {
+      const base = { id: 11, file, tmp, mode: 0o600, ...extra };
+      let cur = null, done = null;
+      for (const m of [{ ...base, ev: 'piece', first: true, parts: [ab('{"x":')] }, { ...base, ev: 'piece', last: true, parts: [ab('1}')] }]) { const x = W.pieceJob(m, cur, r.fs); cur = x.cur; done = x.done; }
+      return { order: r.order.join(' → '), disk: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null, err: done && done.err ? done.err.code : null };
+    };
+    const exclusive = (W, tag, appeared) => {
+      const dir = path.join(T12, `o-x-${tag}`); fs.mkdirSync(dir); const file = path.join(dir, 's.json'), tmp = file + '.tmp-x';
+      if (appeared) fs.writeFileSync(file, 'appeared');
+      const x = piecesOf(W, recX(file, tmp), file, tmp, { exclusive: true });
+      return { ...x, tempLeft: fs.existsSync(tmp) };
+    };
+    const linkedTemp = (W, tag) => {
+      const dir = path.join(T12, `o-l-${tag}`); fs.mkdirSync(dir); const file = path.join(dir, 's.json'), tmp = file + '.tmp-l';
+      fs.writeFileSync(file, 'old'); fs.writeFileSync(tmp, 'a temp that is a second name');
+      W.linkedHere(recX(path.join(dir, 'other.json'), tmp, { unlinkFails: true }).fs, tmp, path.join(dir, 'other.json'));   // its removal refused: THIS module's temp is still linked
+      return piecesOf(W, recX(file, tmp, { unlinkFails: true }), file, tmp, {});
+    };
+    const NO_XLINK = M12.load('src/store-writer-worker.js', anchored(srcK, 'if (!cur.err) { try { if (!(m.exclusive && linkedHere(fs, m.tmp, m.file))) fs.renameSync(m.tmp, m.file); } catch (e) { cur.err = e; } }', 'if (!cur.err) { try { fs.renameSync(m.tmp, m.file); } catch (e) { cur.err = e; } }', 'the piece road\'s exclusive landing'), 'no-xlink');
+    const NO_LCHECK = M12.load('src/store-writer-worker.js', anchored(srcK, '    if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) cur.err = ', '    if (false) cur.err = ', 'the piece road\'s linked-temp check'), 'no-lcheck');
+    const x1 = exclusive(WK, 'missing', false), x2 = exclusive(WK, 'appeared', true), x0 = exclusive(NO_XLINK, 'red', true);
+    ok(!x1.err && x1.disk === '{"x":1}' && /link temp > file/.test(x1.order) && !/rename/.test(x1.order) && !x1.tempLeft, `⑫ (o) the piece road lands a store read MISSING by its exclusive link, as writeJob does (${x1.order})`, x1);
+    ok(x2.err === 'EEXIST' && x2.disk === 'appeared' && !x2.tempLeft, `⑫ (o) …and a file that APPEARED is kept: the write fails EEXIST (its store's «appeared» road), the temp removed (${x2.order})`, x2);
+    ok(x0.disk === '{"x":1}', `⑫ (o) RED (a plain rename at the last piece): the file that appeared was written over (${x0.order})`, x0);
+    const l1 = linkedTemp(WK, 'check'), l0 = linkedTemp(NO_LCHECK, 'red');
+    ok(l1.err === 'ETEMPLINKED' && !/(open|write) temp/.test(l1.order) && l1.disk === 'old', `⑫ (o) a temp still a SECOND NAME of a store is never written through on the piece road: refused ETEMPLINKED, the store as it was (${l1.order})`, l1);
+    ok(/write temp/.test(l0.order) || l0.err !== 'ETEMPLINKED', `⑫ (o) RED (no check): the piece road wrote through a temp that is still a second name (${l0.order}; ${l0.err})`, l0);
   } finally { fs.rmSync(T12, { recursive: true, force: true }); }
 })();
 

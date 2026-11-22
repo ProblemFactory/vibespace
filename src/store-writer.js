@@ -81,6 +81,9 @@ function partsOf(bytes, { allowEmpty = false, verify = false } = {}) {
   if (bytes && typeof bytes === 'object' && !Array.isArray(bytes) && typeof bytes.byteLength !== 'number' && bytes.rewrite) {
     const R = bytes.rewrite;
     if (!(R.ranges instanceof Float64Array) || R.ranges.length % 2 || !(Number.isFinite(R.size) && R.size >= 0)) throw Object.assign(new Error('its rewrite is not {ranges: Float64Array of pairs, size}'), { code: 'EBADBYTES' });
+    // round wgxur2rci (2): a rewrite is never in pieces — its lines handed BY REFERENCE would come back as pieces with no parts and
+    // land with none of them, answered true: refused BY NAME
+    if (bytes.then && bytes.then[BYREF]) throw Object.assign(new Error('a rewrite\'s lines were handed by reference (byRef): hand them as plain bytes — a rewrite is never written in pieces'), { code: 'EBADBYTES' });
     const then = bytes.then == null || bytes.then === '' ? null : partsOf(bytes.then, { allowEmpty: true });
     const ranges = R.ranges.slice();   // a copy: what the store keeps is never handed away
     return { parts: then ? then.parts : [], transfer: [...(then ? then.transfer : []), ranges.buffer], size: then ? then.size : 0, append: false, rewrite: { ranges, size: R.size }, as: typeof bytes.as === 'string' ? bytes.as : null };
@@ -172,7 +175,9 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const f = l.inflight; l.inflight = null; l.feed = null;
     if (f) {
       const s = stores.get(f.name);
-      if (s && f.append && !f.unlink && !s.forgotten) fail(s, f.since, Object.assign(new Error(`the ${threadWord(l)} stopped during the append`), { code: 'ETHREAD' }));
+      // round wgxur2rci (1): a REWRITE (line 42's trim) is not a lost append: its rename may have landed. It keeps the base's road —
+      // the store dirty again, so its producer says honestly «the trim was not confirmed» — never «FAILED, the stash stays whole»
+      if (s && f.append && !f.rewrite && !f.unlink && !s.forgotten) fail(s, f.since, Object.assign(new Error(`the ${threadWord(l)} stopped during the append`), { code: 'ETHREAD' }));
       else if (s && !f.unlink && !s.forgotten && !s.dirty && s.produce) { s.dirty = true; s.dirtySince = f.since; }
     }
     schedule();
@@ -272,7 +277,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       p = partsOf(bytes, { allowEmpty: s.allowEmpty, verify });
     } catch (e) { fail(s, since, e); return; }
     const to = laneOf(p);
-    s.lane = to.name; if (p.append) s.appends = true;
+    if (!p.rewrite) s.lane = to.name; if (p.append) s.appends = true;   // round wgxur2rci (4): a rewrite leaves its append store's lane guess
     if (to !== l && (to.inflight || to.parked.length)) { to.parked.push({ s, p, since }); return; }
     post(to, s, p, since);
   }
@@ -287,7 +292,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function post(l, s, p, since) {
     if (l.mainOnly || !startWorker(l)) { const wp = mainParts(s, p, since); if (wp) writeHere(s, wp, since); return; }
     const id = ++seq;
-    l.inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, as: p.as || null };   // line 42: a rewrite keeps the store an append store (its pace, never unlinked as a forgotten whole file)
+    l.inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, rewrite: !!p.rewrite, as: p.as || null };   // line 42: a rewrite keeps the store an append store (its pace, never unlinked as a forgotten whole file)
     l.posted++;
     LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
     const msg = { ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, append: p.append, exclusive: !!s.exclusive, ownOnly: !!s.ownOnly, own: s.own || null, rewrite: p.rewrite || null };   // B-f276 1b's exclusive create, 1c's own-only fields and line 42's rewrite ride every job of a lane (a piece's too; a rewrite is never in pieces)
@@ -578,7 +583,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
    *  fallback, said once — writes here). → 'ok' | 'failed' | 'held' (the thread still has it at the deadline) */
   function writeWaiting(s, p, since, deadline, waitedBy) {
     const l = laneOf(p);
-    s.lane = l.name; if (p.append) s.appends = true;
+    if (!p.rewrite) s.lane = l.name; if (p.append) s.appends = true;   // round wgxur2rci (4): a rewrite leaves its append store's lane guess
     if (l.inflight && !settleInflight(l, deadline, waitedBy)) return 'held';   // its OWN lane's job first (an append never waits on W)
     if (l.mainOnly || !startWorker(l) || !l.S) { const wp = mainParts(s, p, since); return wp && writeHere(s, wp, since) ? 'ok' : 'failed'; }
     const f0 = s.failures;
