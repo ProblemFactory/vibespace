@@ -68,8 +68,31 @@ async function scene(Mod, tag, k = K) {
   } finally { pool.close(); }
 }
 
+// B-4b9a (the fast tier's time, 主开发 r2545): THE POOL SCENES SIDE BY SIDE. Seven blocks whose seconds are real waits on the pool's
+// own workers — ①, ①d, ①g, ①h, ①k, ①k2, ①o: deadlines run out, stalls, respawns, ①h's held call (2.5 s), every timer as it was —
+// start together here, each on pools of its own (no state of src/safe-fs.js is shared between pools). A block's checks and lines
+// are KEPT and told at the block's own place, in the suite's order; the rest of the suite (the reads, the router and its servers,
+// the lifted legs) runs after all seven have ended, alone, as before. A block that threw is told up to its throw; the throw stands.
+const sides = new Map();
+function side(fn) {
+  const said = [];
+  const p = fn((...a) => { said.push(['ok', a]); return a[0]; }, { log: (...a) => { said.push(['log', a]); } });
+  p.catch(() => {});   // told at its own place (below), never an unhandled rejection meanwhile
+  sides.set(fn, { said, p });
+}
+async function told(fn) {
+  const { said, p } = sides.get(fn);
+  let thrown = null;
+  try { await p; } catch (e) { thrown = e; }
+  for (const [w, a] of said) (w === 'ok' ? ok : console.log)(...a);
+  if (thrown) throw thrown;
+}
+for (const fn of [sideOne, sideD, sideG, sideH, sideK, sideK2, sideO]) side(fn);
+await Promise.allSettled([...sides.values()].map((s) => s.p));
+
 console.log('① asked K times, a dead path ends ONE worker; the rest are refused by name without a worker');
-{
+await told(sideOne);
+async function sideOne(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
   const NOTE = '    if (running) this._noteHung(running.payload, running.op, running !== call ? Math.max(call.timeoutMs || 0, monoNow() - (running.sentAt || monoNow())) : Math.min(running.timeoutMs || Infinity, monoNow() - (running.sentAt || monoNow())), { early: running !== call });   // the time since it was sent without an answer; ended EARLY by a queued call ⇒ only that long\n';
   const Rel = src.split(NOTE).length === 2 ? mutantCopies('safe-fs-path-memory', REPO).load('src/safe-fs.js', anchored(src, NOTE, '', 'release-no-memory'), 'release-no-memory') : null;
@@ -214,7 +237,8 @@ console.log('①e the pool\'s own mount reading is local-index\'s (parity: the p
 }
 
 console.log('①d the call the worker was RUNNING is the dead one — never a call queued behind it');
-{
+await told(sideD);
+async function sideD(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const run = async (Mod, probeMs = null) => {
     const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-queue', timeouts: { default: 15000 }, hungMs: 60000 });
     try {
@@ -242,7 +266,8 @@ console.log('①d the call the worker was RUNNING is the dead one — never a ca
 }
 
 console.log('①g 主开发\'s r275: a person\'s own press is tried; a path that replies is forgiven; a repeat end doubles its time');
-{
+await told(sideG);
+async function sideG(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const run = async (Mod) => {
     let shift = 0; const clock = () => performance.now() + shift;
     const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-press', timeouts: { default: 15000, __sleep: 300 }, hungMs: 30000, mountsText, clock });
@@ -576,7 +601,8 @@ console.log('①c the person\'s words: the files router says a remembered dead p
 }
 
 console.log('①h B-23e5\'s remainder (b): two SYMLINKS into dead mounts never name their healthy folder; two real dead children still do');
-{
+await told(sideH);
+async function sideH(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const os = require('os');
   const ROOTMI = '22 1 0:22 / / rw - ext4 /dev/root rw\n';   // one storage: the path text alone would name the folder
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'b23e5-links-')), X = path.join(T, 'x'), Y = path.join(T, 'y');
@@ -855,7 +881,8 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
 }
 
 console.log('①k r1378 (2) / r1442 (A): ONE TRY A REMEMBERED PATH — ten presses on a remembered dead folder start ONE worker; a press the memory does not refuse is never held');
-{
+await told(sideK);
+async function sideK(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const word = (p) => p.then(() => 'answered', (e) => (e && e.code === 'path-trying' ? 'still trying' : e && e.code === 'path-hung' ? (e.tried ? 'path-hung, tried' : 'path-hung') : e && e.safeFsTimeout ? 'deadline' : String(e && e.code)));
   const run = async (Mod, tag) => {
     const pool = new Mod.SafeFs({ poolSize: 4, name: `path-memory-ten-${tag}`, timeouts: { default: 15000, __sleep: 400 }, hungMs: 60000, mountsText });
@@ -921,7 +948,8 @@ console.log('①k r1378 (2) / r1442 (A): ONE TRY A REMEMBERED PATH — ten press
 }
 
 console.log('①k2 r1442 (E): the look never shares a worker — no other call is placed on a worker while a look runs there; one look a folder at a time');
-{
+await told(sideK2);
+async function sideK2(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const run = async (Mod) => {
     const pool = new Mod.SafeFs({ poolSize: 2, name: 'path-memory-share', timeouts: { default: 15000 }, hungMs: 60000, mountsText });
     try {
@@ -1033,7 +1061,8 @@ console.log('①m r1396: no other site\'s page can send the mark — a preflight
 }
 
 console.log('①o r1733 (4)(5)(6): the rules its round found with no leg — each driven, each with its RED');
-{
+await told(sideO);
+async function sideO(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const fv = rd('src/lib/file-viewer.js'), ce = rd('src/lib/code-editor.js'), dwu = rd('src/lib/doc-window-ui.js'), src = rd('src/safe-fs.js');
   const H = { 'X-VibeSpace-Attended': '1' };   // stale-pins: kept (the constant's value, handed to lifted bodies)
