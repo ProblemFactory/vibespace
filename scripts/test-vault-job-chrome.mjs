@@ -7,7 +7,8 @@
 //      door «Open For you»; the approved one names «Weather API» with its ✕
 //   ② «Open For you» opens THAT card — the For-you window's selected item is the job's approval card, its Allow on screen
 //   ③ Allow at 1280: 验证是你 (the second password, in the page's own dialog) ⇒ the job STARTS by itself
-//   ④ the Vault window: each approved job is a chip on its secret's row (its name · running · started N× · ✕)
+//   ④ the Vault window: each approved job is a chip on its secret's row (its name · running · started N× · ✕) — the count read when it
+//      lands (the hand-over's end), never between the two frames
 //   ⑤ the chip's ✕: the theme's confirm (never a native dialog) ⇒ the job STOPS, its chip leaves the row
 //   ⑥ 390 (a phone): «mail-bot»'s card — its Allow on screen, 验证是你, the job starts; then the job card's ✕ in the Background Work
 //      window: the confirm ⇒ stopped
@@ -191,8 +192,13 @@ try {
 
   // ④ THE VAULT WINDOW: each approved job is a chip on its secret's row
   await evalJs("window.dispatchEvent(new Event('vs-vault-door')); true");
-  const c1 = await until(async () => { const c = await chipsOf(S.e1); return c && c.length ? c : null; }, 15000);
-  const c2 = await until(async () => { const c = await chipsOf(S.e2); return c && c.length ? c : null; }, 15000);
+  // THE WORDS THEMSELVES (box row 210, 主开发 r2176): a job is «running» when its wrapper starts, and its start COUNT is the vault-use
+  // line written when the hand-over ENDS (the wrapper's ACK — src/jobs.js _handValues); that line's `vault-contents` makes the window
+  // re-read and redraw the row (src/lib/vault-window.js contentsMoved, the row's patch key carries its jobs) — so the chip says
+  // «started 1×» a moment after «running»: the leg waits for its words within the bound (never a sleep), then judges what it read
+  const chipSays = (entry, re) => async () => { const c = await chipsOf(entry); return c && c.length && re.test(c[0].words) ? c : null; };
+  const c1 = (await until(chipSays(S.e1, /· running · started 1×$/), 15000)) || await chipsOf(S.e1);
+  const c2 = (await until(chipSays(S.e2, /· running · started 1×$/), 15000)) || await chipsOf(S.e2);
   ok(!!(!!c1 && !!c2 && /^Background job: telegram-bot · running · started 1×$/.test(c1[0].words) && /^Background job: weather-poller · running · started 1×$/.test(c2[0].words) && c1[0].x && c2[0].x), '④ the Vault window: «Telegram bot»\'s row and «Weather API»\'s row each carry their job\'s chip — its name · running · started 1× — with its ✕', { c1, c2 });
 
   // ⑤ THE CHIP'S ✕: the theme's confirm ⇒ stopped, the chip gone
