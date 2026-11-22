@@ -263,15 +263,17 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const map = JSON.parse(Buffer.from(r.outputFiles.find((f) => f.path.endsWith('.map')).contents).toString('utf8'));
     // EVERY parseFromString call in the bundle, by its text — and what the bundle's symbol map says each one is
     const calls = posOf(js, allAt(js, '.parseFromString(', 1));
-    const said = SYM.lookupMany(map, calls);
+    // an app-code position that writes HTML into the live page: file-viewer's markdown (what a handler set by OUR code would be reported at)
+    const writes = posOf(js, allAt(js, '.innerHTML', 1));
+    // B-7e49: ONE pass over the map's mappings answers both questions (each position's answer is the map's alone, keyed by its
+    // own line:column) — two passes a build were 3.2 s of the suite's CPU
+    const said = SYM.lookupMany(map, [...calls, ...writes]);
     const is = ([l, c]) => said.get(`${l}:${c}`);
     const purify = calls.filter((p) => is(p) && /node_modules\/dompurify\//.test(is(p).source) && is(p).name === 'parseFromString');
     const sites = C.purifyParseSites(js);
     const others = calls.filter((p) => !purify.includes(p)).map((p) => `${(is(p) || {}).source || '?'}`.replace(/^(\.\.\/)+/, ''));
     ok(calls.length >= 2 && purify.length === 1 && JSON.stringify(sites) === JSON.stringify(purify), `${name} build: the symbol map names ONE of the bundle's ${calls.length} parseFromString calls DOMPurify's (${is(purify[0] || [0, 0]) ? is(purify[0]).source.replace(/^(\.\.\/)+/, '') + ':' + is(purify[0]).line : '?'}) and purifyParseSites finds exactly it, at ${JSON.stringify(sites)} — never ${others.join(', ')}`, { calls, purify, sites, others });
-    // an app-code position that writes HTML into the live page: file-viewer's markdown (what a handler set by OUR code would be reported at)
-    const writes = posOf(js, allAt(js, '.innerHTML', 1));
-    const own = SYM.lookupMany(map, writes);
+    const own = said;
     const appWrite = writes.find(([l, c]) => { const p = own.get(`${l}:${c}`); return p && /src\/lib\/file-viewer\.js$/.test(p.source); });
     builds[name] = { js, site: sites[0], appWrite, inputs: Object.keys(r.metafile.inputs) };
   }
@@ -1118,7 +1120,10 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   ok(/if \(req\.method === 'GET' && \/\^\\\/frame-host\\\/f\\\/\[A-Za-z0-9_-\]\{24\}\\\/\/\.test\(p\)\) return next\(\);/.test(readRepo('src/door.js')), 'src/door.js (the door class: lifted verbatim out of src/auth.js by B3a): the folder door is GET + /frame-host/f/<24 token characters>/ exactly (no prefix, no other method)');
   // THE CENSUS — every frame src/lib makes for foreign HTML: no `allow-same-origin`, no srcdoc — a site only with a reason row
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => `src/lib/${f}`);
-  const code = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
+  // B-7e49: code() is a pure function of the text — memoized by the text, so each file is stripped once, not twice a census
+  // and again for every mutant's census over all of src/lib (a mutant's changed text is a new key, stripped on its own)
+  const codeOf = new Map();
+  const code = (t) => { let c = codeOf.get(t); if (c === undefined) { c = t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, ''); codeOf.set(t, c); } return c; };
   const SAME_ORIGIN_OK = [
     ['src/lib/doc-window-ui.js', 'the doc window\'s PRINT frame: NO allow-scripts (nothing in it runs) — same-origin only so this window waits for the owner\'s own document\'s fonts and pictures and calls its print()'],
   ];
