@@ -12306,7 +12306,9 @@ MESSAGE's OUTCOME NEVER OUTLIVES THE OUTCOME: the unknown-outcome item is named
 only while the proposal is still `unknown`; whoever settles the outcome retracts
 it by that name, and a heal (at the boot sweep and after each settle, bounded,
 one journal line with its count) retracts an open one whose proposal is
-already settled.
+already settled, in one save; the recorded id is forgotten only after its close
+landed. An item whose proposal was pruned from the outbox is left alone on
+purpose: nothing says its outcome.
 THE SENDER HONESTY LINE is OFF by default (`channels.senderHonestyLine`; the
 adapter record's `senderHonestyLine` true/false/null overrides it via
 `setSenderHonesty`, audited) and appended at send time ONLY for an agent-drafted

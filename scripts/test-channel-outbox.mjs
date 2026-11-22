@@ -546,10 +546,57 @@ console.log('§3 P4: idempotency + reconcile');
     await W2.eng.sweepSending();   // the boot sweep, awaited: its heal has run when it answers (never a bound waited out)
     for (let i = 0; i < 100 && !healLines().length && st(ia) === 'done'; i++) await new Promise((r) => setTimeout(r, 10));   // the heal's one line follows its clear's write
     const boot = { a: st(ia), b: st(ib), c: st(ic), lines: healLines().slice(), aNames: W2.eng.store.outbox.snapshot().proposals[ids[0]].unknownTodoId || null };
+    // r2412 (4): the item read EXACTLY at the settle — an immediate queued when the write that moves (c) unknown → sent lands
+    // runs after the settle's own retract (the same turn: the fake's landed answer carries nothing the settle awaits) and
+    // before any heal the settle deferred (queued after it)
+    let atSettle = null;
+    const realU = W2.eng.store.outbox.update;
+    W2.eng.store.outbox.update = (fn, ...a) => {
+      let settled = false;
+      const run = realU((ob) => { const q0 = ob.proposals[ids[2]]; const was = q0 && q0.state; const r = fn(ob); const q1 = ob.proposals[ids[2]]; settled = was === 'unknown' && !!q1 && q1.state === 'sent'; return r; }, ...a);
+      return run.then((v) => { if (settled && atSettle === null) setImmediate(() => { atSettle = st(ic); }); return v; });
+    };
     const rc = await W2.eng.reconcile(ids[2]);
-    const atSettle = st(ic);
+    for (let i = 0; i < 50 && atSettle === null; i++) await new Promise((r) => setImmediate(r));
     await new Promise((r) => setTimeout(r, 60));
     const out = { boot, rc: { ok: !!rc.ok, state: rc.state }, atSettle, cAfter: st(ic), lines: healLines().slice(), ids };
+    W2.eng.stop();
+    return out;
+  }
+
+  // r2412 (2): THE HELD LIST — an item an older instance filed (no name, its id recorded) is settled by «Check outcome» while
+  // the For-you list is held unread: no close can land, so the recorded id is KEPT, and the heal (waiting for the read) closes
+  // the item at the read
+  async function heldSettle(ENGmod, name) {
+    const { registry } = spyRegistry();
+    const W = mkEngine({ name, registry, engine: ENGmod });
+    await prime(W.eng);
+    const id = (await W.eng.propose(AGENT, A, C, { text: 'held at the settle [[fake:landed]]' })).proposal.id;
+    const it = W.userTodos.add('channels', { origin: 'channels', text: 'Outbox: a send to ops 4 has an UNKNOWN outcome', urgency: 'high', by: 'agent', sessionName: 'Channels' });
+    await W.eng.store.outbox.update((ob) => { const q = ob.proposals[id]; corpse(q, Date.now()); q.state = 'unknown'; q.history.push({ state: 'unknown', at: Date.now() + 1, by: 'adapter' }); q.unknownTodoId = it.id; });
+    W.eng.stop();
+    // the For-you list HELD unread on demand (the store's own hold: no write lands, its readers wait for the read)
+    const hold = { on: false, waits: [] };
+    const refuse = () => { throw Object.assign(new Error('the For-you list is held unread'), { code: 'todos-unread' }); };
+    const todos = new Proxy(W.userTodos, { get(t, k) {
+      if (k === 'isHeldUnread') return () => hold.on;
+      if (k === 'whenRead') return (fn) => { if (hold.on) hold.waits.push(fn); else fn(); };
+      if (hold.on && (k === 'setStatus' || k === 'setStatusMany' || k === 'add')) return refuse;
+      const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
+    } });
+    const W2 = mkEngine({ name, registry: spyRegistry().registry, engine: ENGmod, userTodos: todos });
+    W2.eng.start();
+    await W2.eng.sweepSending();
+    hold.on = true;
+    const rc = await W2.eng.reconcile(id);
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));   // the settle's deferred heal reaches its wait for the read
+    const q = W2.eng.store.outbox.snapshot().proposals[id];
+    const during = { state: q.state, names: q.unknownTodoId || null, item: (W.userTodos.get(it.id) || {}).status, waits: hold.waits.length };
+    hold.on = false;
+    for (const fn of hold.waits.splice(0)) fn();   // THE READ
+    for (let i = 0; i < 100 && (W.userTodos.get(it.id) || {}).status === 'open'; i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 20));
+    const out = { rc: { ok: !!rc.ok, state: rc.state }, during, after: { item: (W.userTodos.get(it.id) || {}).status, names: W2.eng.store.outbox.snapshot().proposals[id].unknownTodoId || null } };
     W2.eng.stop();
     return out;
   }
@@ -557,8 +604,9 @@ console.log('§3 P4: idempotency + reconcile');
     const Q = '    for (const p of stuck) await onProposal(p.id, () => sweepOne(p));';
     const H = '  async function healUnknownItems() {';
     const K = '(i.itemKey === key || (!!todoId && i.id === todoId))';
+    const KEEP = '    const todoId = p.unknownTodoId || null;\n';
     const esrc = engineSource(REPO);
-    ok(esrc.split(Q).length === 2 && esrc.split(H).length === 2 && esrc.split(K).length === 2, 'r2268: the queued sweep line, the heal and the keyed retract are present once (the controls patch exactly them)');
+    ok(esrc.split(Q).length === 2 && esrc.split(H).length === 2 && esrc.split(K).length === 2 && esrc.split(KEEP).length === 2, 'r2268: the queued sweep line, the heal, the keyed retract and the retract\'s recorded id are present once (the controls patch exactly them)');
     const wv = await bootWindow(ENG, 'r2268-window');
     ok(wv.held === 1 && wv.inWindow === 'unknown' && !wv.settledInWindow, 'r2268 THE WINDOW: «Check outcome» pressed while the boot sweep\'s state flip is held WAITS for the sweep\'s whole step (it never settles in the window)', JSON.stringify(wv));
     ok(wv.rz.ok && wv.rz.state === 'sent' && wv.ops.filter((o) => o === 'outcome').length === 1 && JSON.stringify(wv.ops.slice(wv.ops.indexOf('outcome'))) === JSON.stringify(['outcome', 'reconcile-attempt', 'reconcile-outcome']), '…then settles it (landed ⇒ sent), the audit in order: the sweep\'s OUTCOME line (once) before the press\'s lines', JSON.stringify(wv.ops));
@@ -568,6 +616,9 @@ console.log('§3 P4: idempotency + reconcile');
     ok(hn.boot.c === 'open', '…the item of a proposal still UNKNOWN stays (it owes the person a look)', JSON.stringify(hn.boot));
     ok(hn.boot.lines.length === 1 && /\b2\b/.test(hn.boot.lines[0]) && !hn.ids.some((x) => hn.boot.lines[0].includes(x)) && !/ops|landed|unknown \[/.test(hn.boot.lines[0]), '…said ONCE in the journal with its count, no names', JSON.stringify(hn.boot.lines));
     ok(hn.rc.ok && hn.rc.state === 'sent' && hn.atSettle === 'done' && hn.lines.length === 1, 'r2268 THE NAME: «Check outcome» on a proposal whose item id was never recorded retracts the item BY ITS NAME at the settle (no heal needed: no second line)', JSON.stringify(hn));
+    const hs = await heldSettle(ENG, 'r2268-held');
+    ok(hs.rc.ok && hs.rc.state === 'sent' && hs.during.state === 'sent' && hs.during.names !== null && hs.during.item === 'open' && hs.during.waits >= 1, 'r2412 THE HELD LIST: «Check outcome» settles an older instance\'s unnamed item while the For-you list is held unread — the close cannot land, so the proposal KEEPS the item\'s id and the heal waits for the read', JSON.stringify(hs));
+    ok(hs.after.item === 'done' && hs.after.names === null, '…at the read the heal finds the item by the kept id and closes it; only then is the id forgotten', JSON.stringify(hs.after));
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const MW = mutantCopies('chan-outbox-r2268', REPO);
     const unqueued = MW.load('src/server/channels-engine.js', esrc.replace(Q, '    for (const p of stuck) await sweepOne(p);'), 'sweep-unqueued');
@@ -577,8 +628,11 @@ console.log('§3 P4: idempotency + reconcile');
     const hr = await healAndName(noHeal, 'r2268-heal-red');
     ok(hr.boot.a === 'open' && hr.boot.b === 'open', 'CONTROL: a copy without the heal leaves both leftover items open for proposals already sent — the heal leg would go red', JSON.stringify(hr.boot));
     const byId = MW.load('src/server/channels-engine.js', esrc.replace(K, '(!!todoId && i.id === todoId)'), 'retract-by-id-only');
+    const forgetFirst = MW.load('src/server/channels-engine.js', esrc.replace(KEEP, KEEP + '    if (todoId) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = null; });\n'), 'forget-before-close');   // stale-pins: kept — the red restores the old order (forget the id before the close) on purpose
+    const hr2 = await heldSettle(forgetFirst, 'r2268-held-red');
+    ok(hr2.during.names === null && hr2.after.item === 'open', 'CONTROL: a copy that forgets the recorded id BEFORE the close leaves that item open for ever (the read comes, nothing finds it) — the held-list leg would go red', JSON.stringify(hr2));
     const nr = await healAndName(byId, 'r2268-name-red');
-    ok(nr.atSettle === 'open' || nr.lines.length === 2, 'CONTROL: a copy that retracts only by a recorded id leaves the never-recorded item open at the settle (only a later heal takes it) — the name leg would go red', JSON.stringify(nr));
+    ok(nr.atSettle === 'open', 'CONTROL: a copy that retracts only by a recorded id leaves the never-recorded item OPEN at the settle (read exactly there; only a later heal takes it) — the name leg would go red', JSON.stringify(nr));
   }
 }
 

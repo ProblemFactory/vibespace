@@ -1966,16 +1966,20 @@ function create(engineCtx) {
   async function retractUnknownItem(p) {
     if (!p) return;
     const todoId = p.unknownTodoId || null;
-    if (todoId) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = null; });
-    if (userTodos && typeof userTodos.get === 'function') {
+    // r2412 (2): the recorded id is forgotten only AFTER its close landed. While the For-you list is held unread no close
+    // can land: the id stays, and the heal (which waits for the read) finds an older instance's unnamed item by it
+    const held = !!userTodos && typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread();
+    let closed = !held;
+    if (!held && userTodos && typeof userTodos.get === 'function') {
       try {
         const key = UNKNOWN_ITEM_PREFIX + p.id;
         const ids = typeof userTodos.idsWhere === 'function'
           ? userTodos.idsWhere((i) => i.sessionKey === INBOX_KEY && i.status === 'open' && (i.itemKey === key || (!!todoId && i.id === todoId)))
           : (todoId ? [todoId] : []);
         for (const id of ids) { const it = userTodos.get(id); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(id, 'done', RESOLVED_BY); }
-      } catch (e) { log.warn(`[channels] outbox ${p.id}: could not retract the unknown-outcome item: ${(e && e.message) || e}`); }
+      } catch (e) { closed = false; log.warn(`[channels] outbox ${p.id}: could not retract the unknown-outcome item: ${(e && e.message) || e}`); }
     }
+    if (todoId && closed) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = null; });
     healUnknownSoon();
   }
   /** THE HEAL (r2268): an OPEN «unknown outcome» item whose proposal is already settled (any state but `unknown`) is
@@ -1991,7 +1995,7 @@ function create(engineCtx) {
     if (t && typeof t.unref === 'function') t.unref();
   }
   async function healUnknownItems() {
-    if (!userTodos || typeof userTodos.idsWhere !== 'function' || typeof userTodos.get !== 'function') return 0;
+    if (!userTodos || typeof userTodos.idsWhere !== 'function' || typeof userTodos.setStatusMany !== 'function') return 0;
     if (waitRead('~unknown-heal', () => healUnknownItems())) return 0;   // the For-you list held unread: the heal runs at its read
     const props = (store.outbox.snapshot() || {}).proposals || {};
     const settledHolds = new Map();   // an item id a SETTLED proposal still names → that proposal
@@ -2001,7 +2005,11 @@ function create(engineCtx) {
     const ids = all.slice(0, HEAL_BOUND);
     const stillOpen = new Set(all.slice(HEAL_BOUND));   // past the bound: the next pass
     let n = 0, failed = 0;
-    for (const id of ids) { try { const it = userTodos.get(id); if (it && it.status === 'open') { userTodos.setStatus(id, 'done', RESOLVED_BY); n++; } } catch (e) { failed++; stillOpen.add(id); } }
+    if (ids.length) {
+      // r2412 (1): ONE save and ONE tell for the whole pass (the list's own many-at-once verb), never a snapshot an item
+      try { n = userTodos.setStatusMany(ids, 'done', RESOLVED_BY).changed.length; }
+      catch (e) { failed = ids.length; for (const id of ids) stillOpen.add(id); }
+    }
     if (failed) log.warn(`[channels] outbox: ${failed} «unknown outcome» item(s) could not be retracted now — the next settle or boot tries again`);
     // a settled proposal forgets an item id only once that item is closed (or gone): a refused close keeps its link for the next pass
     const clear = [...settledHolds].filter(([tid]) => !stillOpen.has(tid)).map(([, pid]) => pid).slice(0, HEAL_BOUND);
