@@ -1822,6 +1822,7 @@ await section(async () => {
     { file: 'src/server/memory-pressure-watch.js', needle: "via('ps', ['axo', 'pid=,ppid=,rss=,comm=,args=']", why: 'ONE per memory-pressure EPISODE start + ONE per 5-min own-Chrome scan (lane browser-resource-care) — async, never per process; PS_MAX_BUFFER governs its size; through the hub\'s starter since B-323e.' },
     { file: 'src/transcript-service.js', needle: "execFileSync('fuser', [fp]", why: 'ONE per human-triggered `rescue` — the two-writer refusal. Not on any poll.' },
     { file: 'src/incident.js', needle: "sh('ps', ['-eo', 'pid,ppid,lstart,etime,rss,stat,args']", why: 'ONE per HUMAN-TRIGGERED incident capture ("Report a problem"), and the WHOLE-TABLE form — the frozen scene is exactly what a human needs and /proc would only re-implement `ps`. Not on any poll, create or kill. Spelled through a promisified alias, which is why TOOL_FIRST exists.' },
+    { file: 'src/mounts.js', needle: "childStarter().run('ps', ['-o', 'stat=', '-o', 'etime='", why: 'NO-/proc ONLY, and ONCE per person\'s Disconnect that came during a daemon\'s start whose starter answered a pid with no start time: the ONE read that proves that daemon ours (its program and its age) before its one signal — through THE STARTER, off the hub\'s loop and its process (B-323e, line 385\'s small follow, r2259).' },
   ];
   if (!gitOk) {
     ok(true, `(a) PID-QUESTION CENSUS SKIPPED — \`git -C <repo> ls-files\` could not answer here: ${gitWhy45}`);

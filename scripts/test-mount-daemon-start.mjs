@@ -22,7 +22,7 @@
 //     today's («rclone exited before mounting»), never «died», nothing watched; a starter that never ran asked nothing (its words)
 //  ⑧ (its follow, r1782) a person's Disconnect while the start waits on its starter's answer: nothing wanted again, the daemon ended by
 //     the identity its starter answered — RED the generation not read again; ⑧b its answer lost; ⑧s it mounted meanwhile; ⑧c a Connect
-//     after that Disconnect; ⑧d a pid given away; ⑧e the last word a Disconnect; ⑧n no /proc — each RED; ⑨ the old road's detached start after two starter faults (its own
+//     after that Disconnect; ⑧d a pid given away; ⑧e the last word a Disconnect; ⑧n no /proc; ⑧n2 a stranger in the window — each RED; ⑨ the old road's detached start after two starter faults (its own
 //     session, its log, alive after the starter is let go) — RED its branch cut
 // Run: node scripts/test-mount-daemon-start.mjs
 import './scratch.mjs';
@@ -220,17 +220,17 @@ try {
   const NOSTARTER = { stats: () => S.stats(), run: (cmd, args, o) => (o && o.detach ? Promise.resolve({ unknown: true, why: 'no starter' }) : S.run(cmd, args, o)) };
   const NOSPAWN = { stats: () => S.stats(), run: (cmd, args, o) => (o && o.detach ? Promise.resolve({ unknown: true, why: 'the starter could not be started' }) : S.run(cmd, args, o)) };   // its read (NIT 3): its own start failed
   const nb = await noStart('nobin', null, MOUNTS, { nobin: true }), na = await noStart('noanswer', NOANS);
-  const UNANS = require(path.join(REPO, 'src/mount-error-words.js')).wordsFor('start_unanswered');
+  const UNANS = require(path.join(REPO, 'src/mount-error-words.js')).wordsFor('start_unanswered'), NOTASKED = require(path.join(REPO, 'src/mount-error-words.js')).wordsFor('start_not_asked');   // line 385's small follow: a starter that never ran — nothing was started, said so
   // RED the no answer read as «exited» (this unit's first form); RED the failure branch cut (the release's road: a watch over no pid)
-  const EXITED = MC.load('src/mounts.js', anchored(MSRC, "this._sayW(id, st && st.unknown && !unasked(st) ? 'start_unanswered' : 'start_exited')", "this._sayW(id, 'start_exited')", 'B-323e no answer read as exited'), 'no-answer-exited');
+  const EXITED = MC.load('src/mounts.js', anchored(MSRC, "this._sayW(id, unasked(st) ? 'start_not_asked' : st && st.unknown ? 'start_unanswered' : 'start_exited')", "this._sayW(id, 'start_exited')", 'B-323e no answer read as exited'), 'no-answer-exited');
   const NOBRANCH = MC.load('src/mounts.js', anchored(MSRC, '    if (!st || !st.started || !st.pid) {\n', '    if (false) {\n', 'B-323e the no-start branch cut'), 'no-branch');
   const naR = await noStart('noanswer-red', NOANS, EXITED), nbR = await noStart('nobin-red', null, NOBRANCH, { nobin: true });
   const nst = await noStart('nostarter', NOSTARTER), nsp = await noStart('nospawn', NOSPAWN);
-  const NSW = MC.load('src/mounts.js', anchored(MSRC, "st && st.unknown && !unasked(st) ? 'start_unanswered'", "st && st.unknown ? 'start_unanswered'", 'B-323e no starter read as no answer'), 'no-starter-words');   // stale-pins: kept (a red control plants the old road back)
+  const NSW = MC.load('src/mounts.js', anchored(MSRC, "unasked(st) ? 'start_not_asked' : st && st.unknown ? 'start_unanswered' : 'start_exited'", "st && st.unknown && !unasked(st) ? 'start_unanswered' : 'start_exited'", 'B-323e a never-ran starter read as «exited»'), 'no-starter-words');   // stale-pins: kept (a red control plants the old road back)
   const nstR = await noStart('nostarter-red', NOSTARTER, NSW);
   const quiet = (x) => x.r === false && !x.watched && x.couldNot && !x.died;
-  ok(quiet(nb) && quiet(na) && nb.words === 'rclone exited before mounting' && na.words === UNANS && naR.words === 'rclone exited before mounting' && !quiet(nbR) && quiet(nst) && nst.words === 'rclone exited before mounting' && quiet(nsp) && nsp.words === 'rclone exited before mounting' && nstR.words === UNANS,
-    `⑦ LAW 5: a start that could not be made (no such program) and one with NO ANSWER read «could not be started» in the journal, never «died», nothing watched; the person's words: no such program «${nb.words}» (the release's), no answer «${na.words}» (no verdict) — RED the no answer read as «exited» («${naR.words}»); RED the no-start branch cut: the release's road, a watch over no pid (${JSON.stringify({ r: nbR.r, watched: nbR.watched, died: nbR.died })})`, { nb, na, naR, nbR });
+  ok(quiet(nb) && quiet(na) && nb.words === 'rclone exited before mounting' && na.words === UNANS && naR.words === 'rclone exited before mounting' && !quiet(nbR) && quiet(nst) && nst.words === NOTASKED && quiet(nsp) && nsp.words === NOTASKED && nstR.words === 'rclone exited before mounting',
+    `⑦ LAW 5: a start that could not be made (no such program) and one with NO ANSWER read «could not be started» in the journal, never «died», nothing watched; the person's words: no such program «${nb.words}» (the release's), no answer «${na.words}» (no verdict) — a starter that never ran its own words («${nst.words}») — RED them read as «exited» («${nstR.words}»); RED the no answer read as «exited» («${naR.words}»); RED the no-start branch cut: the release's road, a watch over no pid (${JSON.stringify({ r: nbR.r, watched: nbR.watched, died: nbR.died })})`, { nb, na, naR, nbR });
   console.log('⑧ a person\'s Disconnect during the start (its follow, 主开发 r1782 (1), with its read\'s cures)');
   // the starter's answer HELD (a placed stall) while the daemon already runs; the person's Disconnect comes meanwhile: nothing is set
   // wanted again and that daemon is ended by the identity its starter answered — RED the generation not read again (wanted again,
@@ -238,10 +238,10 @@ try {
   // mount point waits for it — RED the lost answer not read there. ⑧s it MOUNTED before it was ended: the dead endpoint is released
   // (an internal unmount, the person's word unchanged) — RED that release cut. ⑧c a Connect AFTER that Disconnect (it joins the
   // connect in flight) is the person's last word: a connect anew — RED the join read as before
-  const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false } = {}) => {
+  const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false, stranger = false } = {}) => {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R), mp = mm.pathOf(R); let release; const gate = new Promise((r) => { release = r; });
-    const started = [], after = []; let released = false, mountedNow = false;
+    const started = [], after = []; let released = false, mountedNow = false, strangerKid = null;
     if (noProc) mm._procOpts = { procRoot: path.join(T, 'no-proc-' + tag) };
     if (mounted) mm.isMounted = () => mountedNow;
     mm._adoptable = async () => 0;   // ⑧ reads the re-check after the answer, never the adoption look (each look walks /proc: seconds on a loaded box)
@@ -250,7 +250,9 @@ try {
     const W = { stats: () => S.stats(), run: (cmd, args, o) => {
       if (released) after.push(path.basename(String(cmd)));
       const p = S.run(cmd, args, o); if (!(o && o.detach)) return p;
-      return p.then(async (r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); started.push(r); if (started.length === 1) { await gate; if (lost) return { unknown: true, why: 'its reply lost' }; } return r; });
+      return p.then(async (r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); started.push(r); if (started.length === 1) { await gate; if (lost) return { unknown: true, why: 'its reply lost' };
+        if (stranger) { strangerKid = CP.spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((x) => strangerKid.once('spawn', x)); return { ...r, pid: strangerKid.pid, starttime: null }; } }   // the answered pid a STRANGER's, started inside the window
+        return r; });
     } };
     CS.setChildStarter(W);
     try {
@@ -262,14 +264,14 @@ try {
       if (twice) await mm.unmount(R.id);              // …and a Disconnect again: the last word
       released = true; release(); const r = await conn; const r2 = conn2 ? await conn2 : null;
       const d0 = started[0] && started[0].pid;
-      if (M === MOUNTS) await until(() => !(d0 && alive(d0)), 2000);   // its end waited on; a red's daemon lives (nothing ends it): read at once
+      if (M === MOUNTS && !stranger) await until(() => !(d0 && alive(d0)), 2000);   // its end waited on; a red's daemon lives (nothing ends it): read at once
       const rec = mm._state.mounts.find((x) => x.id === R.id) || {};
       return { r, r2, desired: rec.desired, alive: !!(d0 && alive(d0)), starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
-        lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length };
-    } finally { release(); CS.setChildStarter(S); }
+        lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length, strangerAlive: strangerKid ? (M === MOUNTS ? alive(strangerKid.pid) : !(await until(() => !alive(strangerKid.pid), 1000))) : null };   // a red's kill waited on (its read: never read in the signal's own instant)
+    } finally { release(); CS.setChildStarter(S); if (strangerKid) { try { strangerKid.kill('SIGKILL'); } catch { } } }
   };
   const dd = await discDuring(MOUNTS, 'disc-during');
-  const NORECHECK = MC.load('src/mounts.js', anchored(MSRC, "    if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) {\n      if (st && st.started && st.pid) this._endStartedDaemon(mp, st, askAt);\n", "    if (false) {\n      if (st && st.started && st.pid) this._endStartedDaemon(mp, st, askAt);\n", 'B-323e the generation not read again after the start'), 'no-recheck');
+  const NORECHECK = MC.load('src/mounts.js', anchored(MSRC, "    if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) {\n      if (st && st.started && st.pid) await this._endStartedDaemon(mp, st, askAt);\n", "    if (false) {\n      if (st && st.started && st.pid) await this._endStartedDaemon(mp, st, askAt);\n", 'B-323e the generation not read again after the start'), 'no-recheck');
   const ddR = await discDuring(NORECHECK, 'disc-during-red');
   ok(dd.r === false && dd.desired === 'unmounted' && !dd.alive && ddR.desired === 'mounted' && ddR.alive,
     `⑧ a person's Disconnect while the start waits on its starter's answer: the connect ends with nothing wanted again (${dd.desired}) and the daemon that started meanwhile is ended (${!dd.alive}) — RED the generation not read again: wanted again (${ddR.desired}), the daemon left running (${ddR.alive})`, { dd, ddR });
@@ -298,19 +300,26 @@ try {
   // ⑧n its second read (SHOULD): with NO /proc the answered daemon is ended by its ps identity, proven ours by a start no earlier than
   // the ask — RED that proof cut (never ended; the next start held for it)
   const dn = await discDuring(MOUNTS, 'disc-np', { noProc: true });
-  const NOPS = MC.load('src/mounts.js', anchored(MSRC, 'target = Number.isFinite(at) && Math.abs(at - askAt) <= 120000 ? now : null;', 'target = null;', 'B-323e no /proc: no end by ps'), 'no-ps');
+  const NOPS = MC.load('src/mounts.js', anchored(MSRC, "target = ours ? { pid: ident.pid, starttime: null, lstart: row.lstart, bootId: '' } : null;", 'target = null;', 'B-323e no /proc: no end by ps'), 'no-ps');
   const dnR = await discDuring(NOPS, 'disc-np-red', { noProc: true });
   ok(dn.r === false && dn.desired === 'unmounted' && !dn.alive && !dn.lostMark && dnR.alive && dnR.lostMark,
     `⑧n with NO /proc the daemon started for a mount disconnected meanwhile is ended by its ps identity (${!dn.alive}), nothing held (${!dn.lostMark}) — RED that proof cut: left running (${dnR.alive}), the next start held for it (${dnR.lostMark})`, { dn, dnR });
+  // ⑧n2 line 385's small follow (主开发 r2259 (1)): the answered pid freed and taken by a STRANGER inside the window (a fresh start, another
+  // program): never signalled — the next start held for it, said — RED the program not read (the stranger killed)
+  const dnS = await discDuring(MOUNTS, 'disc-np-stranger', { noProc: true, stranger: true });
+  const NOPROG = MC.load('src/mounts.js', anchored(MSRC, "const ours = !!row && path.basename(row.comm || '').slice(0, 15) === prog && Number.isFinite(age)", 'const ours = !!row && Number.isFinite(age)', 'B-323e no /proc: the program not read'), 'no-prog');
+  const dnSR = await discDuring(NOPROG, 'disc-np-stranger-red', { noProc: true, stranger: true });
+  ok(dnS.r === false && dnS.strangerAlive === true && dnS.lostMark && dnSR.strangerAlive === false,
+    `⑧n2 with NO /proc a pid freed and taken by a STRANGER inside the window (a fresh start, another program) is never signalled (it lives: ${dnS.strangerAlive}); the next start waits (${dnS.lostMark}) — RED the program not read: the stranger killed (${!dnSR.strangerAlive})`, { dnS, dnSR });
   // ⑧d its read (MUST 2): ended by the ANSWERED identity alone — the person's Unmount ended it first (its walk's mark) and the kernel gave
   // its pid away (a stranger, this suite's own sleeper): never signalled — RED the record, else the identity read NOW (the stranger killed)
   const stranger = CP.spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((r) => stranger.once('spawn', r));
   const wasStart = PI.starttimeOf(stranger.pid) - 1;   // the ended daemon's start: not the stranger's
   const endOver = (M, tag) => { const mmS = mmOf(M, tag, null); (mmS._killed = new Map()).set(stranger.pid + ':' + wasStart, Date.now()); return mmS._endStartedDaemon(path.join(T, 'mp-' + tag), { started: true, pid: stranger.pid, starttime: wasStart }); };
-  const e1 = endOver(MOUNTS, 'stranger'), eLives = alive(stranger.pid);
+  const e1 = await endOver(MOUNTS, 'stranger'), eLives = alive(stranger.pid);
   const OLDEND = MC.load('src/mounts.js', anchored(MSRC, "    const ident = { pid: Number(st.pid), starttime: st.starttime == null ? null : st.starttime }, key = ident.pid + ':' + ident.starttime;\n    if (this._killed && this._killed.has(key)) return true;\n",
     "    this._seedDaemonId(mp, st.pid, st.starttime);\n    const ident = (this._daemonIds && this._daemonIds.get(mp)) || PI.identityOf(st.pid, popts), key = ident ? ident.pid + ':' + ident.starttime : '';\n", 'B-323e the identity read now'), 'old-end');   // stale-pins: kept (a red control plants the old road back)
-  endOver(OLDEND, 'stranger-red'); await until(() => !alive(stranger.pid), 1000); const eLivesR = alive(stranger.pid);
+  await endOver(OLDEND, 'stranger-red'); await until(() => !alive(stranger.pid), 1000); const eLivesR = alive(stranger.pid);
   try { stranger.kill('SIGKILL'); } catch { }
   ok(e1 === true && eLives && !eLivesR, `⑧d the daemon the person's Unmount already ended, its pid now another process's: never signalled (that process lives: ${eLives}) — RED the identity read now: it is killed (${!eLivesR})`, { e1, eLives, eLivesR });
 

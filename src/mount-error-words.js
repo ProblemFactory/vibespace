@@ -62,6 +62,7 @@ const WORDS = Object.freeze({
   start_hung: i18nKey('rclone made no progress for {s} s and never mounted — stopped it; will retry'),
   start_ceiling: i18nKey('still not mounted after {min} min of starting — stopped it; will retry'),
   start_exited: i18nKey('rclone exited before mounting'),
+  start_not_asked: i18nKey('Could not start the storage’s connection — VibeSpace’s own helper did not start; it is tried again by itself'),   // B-323e line 385's small follow (lane bl-machines-b, r2259 (2)): its starter never ran — nothing was started
   start_lost_wait: i18nKey('Waiting for an earlier start of this storage that may still run — up to {min} min, then it connects again by itself'),   // B-323e follow (lane bl-machines-b)
   start_unanswered: i18nKey('Could not tell whether the storage’s connection started — VibeSpace got no answer; it is tried again by itself'),   // B-323e (lane bl-machines-b)
   share_expired: i18nKey('connected but access denied — this share credential has expired'),

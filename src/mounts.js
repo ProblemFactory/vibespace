@@ -39,9 +39,8 @@ const notOurs = (e) => !!e && ['ENOENT', 'ESRCH', 'EACCES', 'EPERM'].includes(e.
 const READ_MS = 2000;   // B-e783: one /proc read that has not answered — the walk gives up («can't tell») and never asks that process again
 const CANT_TELL_GAP_MS = 30 * 60e3;   // r9: a «can't tell» entry this old is an episode long over — the next one waits again
 const DAEMON_ASK_MS = 15000;   // B-323e (主开发 r1299): the detached start's answer (its spawn) is awaited this long; past it: no verdict, no start said
-const LSTART_MON = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
-/** its follow: `ps -o lstart` («Sat Nov 21 18:22:11 2026», local time) → ms, NaN when it is not that shape (never a guess) */
-const lstartMs = (s) => { const f = String(s || '').trim().split(/\s+/), t = f.length === 5 ? f[3].split(':').map(Number) : []; return f.length === 5 && f[1] in LSTART_MON && t.length === 3 ? new Date(Number(f[4]), LSTART_MON[f[1]], Number(f[2]), t[0], t[1], t[2]).getTime() : NaN; };
+/** line 385's small follow: `ps -o etime` («[[dd-]hh:]mm:ss») → seconds, NaN when it is not that shape (never a guess) */
+const etimeSec = (s) => { const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(String(s || '').trim()); return m ? ((Number(m[1] || 0) * 24 + Number(m[2] || 0)) * 60 + Number(m[3])) * 60 + Number(m[4]) : NaN; };
 const unasked = (st) => !!st && !!st.unknown && (st.why === 'no starter' || st.why === 'the starter could not be started');   // its follow: a starter that never ran asked nothing
 const CANT_TELL_MS = 60000;   // B-e783 r8: a connect waits at most this long on «can't tell» (a sleeper it cannot read may be ANY rclone: a pull mount's, another instance's) — then it connects, said
 const hasProcMemo = new Map();   // no /proc (a hub on macOS): «can't tell» — the walks' callers keep their old answer; asked once per root
@@ -1421,7 +1420,7 @@ class MountManager {
     // generation is read again; moved (an Unmount, a removal) ⇒ nothing is set wanted again, and a daemon that started meanwhile is
     // ended by its recorded identity (the person's word stands)
     if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) {
-      if (st && st.started && st.pid) this._endStartedDaemon(mp, st, askAt);
+      if (st && st.started && st.pid) await this._endStartedDaemon(mp, st, askAt);
       else if (st && st.unknown && !unasked(st)) {   // its read (MUST 1): a LOST answer may have started one — with /proc its walk ends it; with none the next start on that mount point waits for it
         if (hasProc(this._procOpts)) await this._killMountDaemon(mp).catch(() => []);
         else (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());
@@ -1436,7 +1435,7 @@ class MountManager {
       // finds a daemon that lives before any new start — one daemon a mount point, whatever is lost
       console.warn(`[mounts] mount ${id}: the rclone daemon could not be started: ${(st && (st.error || (st.unknown ? (unasked(st) ? 'the starter could not be started' : 'no answer from the starter') : ''))) || 'not started'}`);
       if (st && st.unknown && !unasked(st) && !hasProc(this._procOpts)) (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());   // an ask that may have started it: no /proc ⇒ the next look waits (_adoptable); with /proc its walk finds it
-      this._errors.set(id, this._sayW(id, st && st.unknown && !unasked(st) ? 'start_unanswered' : 'start_exited'));   // no reply: no verdict — never «exited»; no starter at all: nothing was asked (its follow: the could-not-be-started words)
+      this._errors.set(id, this._sayW(id, unasked(st) ? 'start_not_asked' : st && st.unknown ? 'start_unanswered' : 'start_exited'));   // line 385's small follow (r2259 (2)): nothing was started — its own words   // no reply: no verdict — never «exited»; no starter at all: nothing was asked (its follow: the could-not-be-started words)
       this._save(); this._notify();
       return false;
     }
@@ -1817,28 +1816,42 @@ class MountManager {
   /** its follow (主开发 r1782 (1)): a daemon THIS connect started for a mount the person disconnected meanwhile — ended by the
    *  identity its starter ANSWERED (the pid and the start time read at its spawn) and by nothing else: a record or an identity read
    *  NOW may name a pid the person's Unmount already ended and the kernel gave to another process (its read's MUST 2). Ended already
-   *  (the Unmount's walk) or gone: nothing to do. NO /proc (its second read): no start time came back — the identity is read by `ps`
-   *  (the watch's own road there, a start from the hub: LEFT as before) and is ours only when that process started no earlier than
-   *  this ask (`askAt`); not provable ⇒ the next start on that mount point waits for it, said */
-  _endStartedDaemon(mp, st, askAt = 0) {
+   *  (the Unmount's walk) or gone: nothing to do. NO /proc: no start time came back — ONE ps row (`_psRow`, by THE STARTER: off the
+   *  hub's loop and its process) names the process: ours only when ITS PROGRAM is the mount's (rclone) and it began around this ask
+   *  (`askAt`, by its age: a pid freed and taken by a stranger in that window is never signalled — line 385's small follow, r2259 (1));
+   *  the signal's own judge reads that same row. Not provable ⇒ the next start on that mount point waits for it, said */
+  async _endStartedDaemon(mp, st, askAt = 0) {
     const o = this._procOpts || {}, popts = { ...(o.procRoot ? { procRoot: o.procRoot } : {}), ...(o.kill ? { kill: o.kill } : {}), ...(o.ps ? { ps: o.ps } : {}), what: 'the daemon of a storage mount point' };
     const ident = { pid: Number(st.pid), starttime: st.starttime == null ? null : st.starttime }, key = ident.pid + ':' + ident.starttime;
     if (this._killed && this._killed.has(key)) return true;
     const proc = hasProc(this._procOpts);
     let target = ident;
-    if (!proc) {   // no /proc: ONE ps read — its start proves it began around this ask (lstart = the boot time + its ticks: a clock stepped or
-      // slewed since the boot moves it by seconds — two minutes either way), and the signal's own judge reads THAT answer (a second ps
-      // may say another second: procps reads the boot time anew each call, and our own daemon would read «recycled», never ended)
-      const now = PI.identityOf(ident.pid, popts), at = now && now.lstart ? lstartMs(now.lstart) : NaN;
-      target = Number.isFinite(at) && Math.abs(at - askAt) <= 120000 ? now : null;
-      if (target && !o.ps) popts.ps = (p) => (Number(p) === ident.pid ? { ran: true, state: 'S', lstart: target.lstart } : { ran: true, state: null, lstart: null });
+    if (!proc) {   // no /proc: ONE ps row — its program the mount's, its age within two minutes of this ask (a clock stepped since the boot moves
+      // a start by seconds); the signal's own judge reads that same row (a second ps may move lstart by a second: our own daemon read «recycled»)
+      const row = await this._psRow(ident.pid);
+      if (row && row.gone) return true;   // ps answered: no such process — ours ended (nothing to end, nothing to hold)
+      const age = row ? etimeSec(row.etime) : NaN, prog = path.basename(this.rcloneBin() || 'rclone').slice(0, 15);   // a comm is 15 characters at most
+      const ours = !!row && path.basename(row.comm || '').slice(0, 15) === prog && Number.isFinite(age) && Math.abs(Date.now() - age * 1000 - askAt) <= 120000;
+      if (ours && this._killed && this._killed.has(ident.pid + ':' + row.lstart)) return true;   // ended already (its start: never a pid alone)
+      target = ours ? { pid: ident.pid, starttime: null, lstart: row.lstart, bootId: '' } : null;
+      if (target) popts.ps = (p) => (Number(p) === ident.pid ? { ran: true, state: row.state || 'S', lstart: row.lstart } : { ran: true, state: null, lstart: null });
     }
     const r = target ? PI.signalIdentity(target, 'SIGKILL', popts) : { ok: false, why: 'unknown-identity' };
-    if (r.ok) { (this._killed || (this._killed = new Map())).set(key, Date.now()); const rec = this._daemonIds?.get(mp); if (rec && Number(rec.pid) === ident.pid) this._daemonIds.delete(mp); return true; }
+    if (r.ok) { (this._killed || (this._killed = new Map())).set(proc ? key : ident.pid + ':' + target.lstart, Date.now()); const rec = this._daemonIds?.get(mp); if (rec && Number(rec.pid) === ident.pid) this._daemonIds.delete(mp); return true; }
     if (r.why === 'gone' || r.why === 'pid-recycled') return true;   // ours ended (its pid another's now: never signalled)
     if (!proc) (this._lostStart = this._lostStart || new Map()).set(mp, Date.now());   // only where no walk can look (with /proc the next connect's walk finds it)
     console.warn(`[mounts] the daemon started for a mount disconnected meanwhile was not ended (${r.why})${proc ? '' : ' — the next start on that mount point waits for it'}`);
     return false;
+  }
+
+  /** line 385's small follow (主开发 r2259 (1)(3)): ONE ps row of a pid — { state, etime, lstart, comm } — asked of THE STARTER (never a start
+   *  from the hub's own process, never its loop: a person's Disconnect waits on nothing synchronous), the C locale; { gone: true } when
+   *  ps answered that no such process runs; null when unanswered (its bound: the ask's 3 s, the starter's guard and one grace — about 7 s) */
+  async _psRow(pid) {
+    const r = await require('./server/child-starter').childStarter().run('ps', ['-o', 'stat=', '-o', 'etime=', '-o', 'lstart=', '-o', 'comm=', '-p', String(Number(pid))], { timeoutMs: 3000, capture: true, maxBuffer: 4096, envAdd: { PATH: process.env.PATH || '', LC_ALL: 'C' } }).catch(() => null);
+    if (r && !r.unknown && r.started && r.code === 1 && !String(r.stdout || '').trim()) return { gone: true };   // ps: no such process
+    const f = r && !r.unknown && r.started && r.code === 0 ? String(r.stdout || '').trim().split(/\s+/) : [];
+    return f.length >= 8 ? { state: f[0], etime: f[1], lstart: f.slice(2, 7).join(' '), comm: f.slice(7).join(' ') } : null;
   }
 
   /** B-e783: the daemon a connect ADOPTS — its pid, 0 (none: spawn; no /proc: spawn, as the release), or null («can't tell»: a
