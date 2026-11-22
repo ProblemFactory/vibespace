@@ -480,7 +480,7 @@ console.log('§10 Lark: the four chips, emitted ⊆ declared, the name door, the
   const M = mutantCopies('chan-facts-lark', REPO);
   const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   const FWD = "if (item && item.msg_type === 'merge_forward') out.push({ k: 'forwarded-from', v: {} });";
-  const over = srcL.replace(FWD, "if (item && item.msg_type === 'merge_forward') out.push({ k: 'forwarded-from', v: {} }, { k: 'importance', v: 'high' });");
+  const over = editAnchor(srcL, FWD, "if (item && item.msg_type === 'merge_forward') out.push({ k: 'forwarded-from', v: {} }, { k: 'importance', v: 'high' });", "src/channels/lark.js");
   const cOver = contract(M.load('src/channels/lark.js', over, 'over'), ITEMS, L.caps.facts);
   ok(over !== srcL && J(cOver.undeclared) === J(['importance']), 'CONTROL: a copy whose toRecord also emits a kind the schema knows but Lark does not declare (importance) is FLAGGED by the same judge', J(cOver));
   const cThin = contract(L, ITEMS.filter((it) => !/^om_facts_/.test(it.message_id)), L.caps.facts);
@@ -501,10 +501,10 @@ console.log('§10 Lark: the four chips, emitted ⊆ declared, the name door, the
   ok(j0.holds, 'the app\'s name in `via` passed the name door: no line break, no live frame, no bidi override, ≤ 200 — in the stored fact, the chip and the agent\'s line', J(j0));
   const srcR = fs.readFileSync(path.join(REPO, 'src/channel-record.js'), 'utf-8');
   const DOOR = "const name = peerName(typeof p.name === 'string' ? p.name : '', FACT_LIMITS.nameChars) || '';";
-  const noDoor = srcR.replace(DOOR, "const name = (typeof p.name === 'string' ? p.name : '') || '';");
+  const noDoor = editAnchor(srcR, DOOR, "const name = (typeof p.name === 'string' ? p.name : '') || '';", "src/channel-record.js");
   const recCopy = M.write('src/channel-record.js', noDoor, 'nodoor');
   const REQ = "require('../channel-record.js');   // peerName: THE name door";
-  const larkNoDoor = srcL.replace(REQ, `require(${J(recCopy)});   // peerName: THE name door`);
+  const larkNoDoor = editAnchor(srcL, REQ, `require(${J(recCopy)});   // peerName: THE name door`, "src/channels/lark.js");
   const jn = judgeName(M.load('src/channels/lark.js', larkNoDoor, 'nodoor').toRecord('lark', 'oc_x', appItem, { names }));
   ok(noDoor !== srcR && larkNoDoor !== srcL && !jn.holds && /\n/.test(jn.n) && /\u202e/.test(jn.n), 'CONTROL: the same item through a copy whose fact door skips peerName — the raw name (a line break, a live frame, a bidi override, 800 characters) is stored: the judge is RED', J(jn.n.slice(0, 90)));
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(c.pass, c.name, c.detail);

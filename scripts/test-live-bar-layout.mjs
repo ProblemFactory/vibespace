@@ -42,6 +42,15 @@ const MUT = mutantCopies('live-bar-layout', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const L = await import('../src/lib/live-bar-layout.js');
@@ -146,9 +155,9 @@ console.log('§2 properties over 3000 seeded random bars');
 // ── NEGATIVE CONTROLS: the tables are a judge ──
 {
   const src = read('src/lib/live-bar-layout.js');
-  const byPos = src.replace('.sort((a, b) => b.priority - a.priority || b.i - a.i)', '.sort((a, b) => b.i - a.i)');
-  const noMore = src.replace('const cost = () => sum(shown) + (folded.size ? moreCost(shown) : 0);', 'const cost = () => sum(shown);');
-  const floorNoMore = src.replace('const floor = sum(fixed) + (list.length > fixed.length ? moreCost(fixed) : 0);', 'const floor = sum(fixed);');
+  const byPos = editAnchor(src, '.sort((a, b) => b.priority - a.priority || b.i - a.i)', '.sort((a, b) => b.i - a.i)', "src/lib/live-bar-layout.js");
+  const noMore = editAnchor(src, 'const cost = () => sum(shown) + (folded.size ? moreCost(shown) : 0);', 'const cost = () => sum(shown);', "src/lib/live-bar-layout.js");
+  const floorNoMore = editAnchor(src, 'const floor = sum(fixed) + (list.length > fixed.length ? moreCost(fixed) : 0);', 'const floor = sum(fixed);', "src/lib/live-bar-layout.js");
   ok(byPos !== src && noMore !== src && floorNoMore !== src, 'NEGATIVE CONTROL: the three mutations applied to the copies (the anchors exist)');
   const Mpos = await import(pathToFileURL(MUT.write('src/lib/live-bar-layout.js', byPos, 'bypos', { esm: true })).href);
   const Mmore = await import(pathToFileURL(MUT.write('src/lib/live-bar-layout.js', noMore, 'nomore', { esm: true })).href);

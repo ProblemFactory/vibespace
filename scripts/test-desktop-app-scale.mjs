@@ -49,6 +49,15 @@ const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const MUT = mutantCopies('dapp-scale', repo);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) { console.error('  ✗ src/lib/build-version.js missing — run `npm run build` first'); process.exit(1); }
 
@@ -117,7 +126,7 @@ const precedenceTable = (mod) => {
   const src = read('src/desktop-fit.js'); // rv-desktop-apps F-S1: the scale family's own file
   const line = "  if (typeof app === 'number') return { scale: app, origin: 'app', from: null };\n";
   ok(src.split(line).length === 2, 'CONTROL: the app-default line is spelled exactly once (the copy removes exactly it)');
-  const Mc = MUT.load('src/desktop-fit.js', src.replace(line, ''), 'no-app-default');
+  const Mc = MUT.load('src/desktop-fit.js', editAnchor(src, line, '', "src/desktop-fit.js"), 'no-app-default');
   const bad = precedenceTable(Mc).filter((r) => !same(r.got, r.want));
   ok(bad.length === 3 && bad.every((r) => r.want[1] === 'app'), `CONTROL: without it the table fails on exactly the ${bad.length} app-default rows (they fall to Settings / auto)`, bad.map((r) => [r.appDefault, r.got]));
   // the window's Scale ▸ model: 2.5× and 3× rows, the app default marked (never current by itself)
@@ -154,7 +163,7 @@ console.log('§4 the client\'s PURE model — one key per app, the map, the laun
   const src = read('src/lib/desktop-app-scale.js');
   const line = "  if (typeof c === 'number') next[key] = c; else delete next[key];\n";
   ok(src.split(line).length === 2, 'CONTROL: the remove line is spelled exactly once');
-  const Sc = await import(pathToFileURL(MUT.write('src/lib/desktop-app-scale.js', src.replace(line, "  next[key] = c === null ? 'auto' : c;\n"), 'stores-auto')).href);
+  const Sc = await import(pathToFileURL(MUT.write('src/lib/desktop-app-scale.js', editAnchor(src, line, "  next[key] = c === null ? 'auto' : c;\n", "src/lib/desktop-app-scale.js"), 'stores-auto')).href);
   const grown = Sc.setScaleChoice({ a: 2 }, 'a', 'auto');
   ok(!same(grown, {}) && grown.a === 'auto', 'CONTROL: the patched copy keeps the key with "auto" — the map test above is a judge', grown);
 }
@@ -234,7 +243,7 @@ console.log('§6 the route refuses a bad default before any machine is asked; th
   const rsrc = read('src/routes/desktop-apps.js');
   const lines = "  const sv = scaleChoiceVerdict(req.body);\n  if (!sv.ok) return fail(res, { code: sv.code, message: sv.error });\n";
   ok(rsrc.split(lines).length === 2, 'CONTROL: the route\'s check is spelled exactly once');
-  const rc = await drive(MUT.load('src/routes/desktop-apps.js', rsrc.replace(lines, ''), 'no-check'));
+  const rc = await drive(MUT.load('src/routes/desktop-apps.js', editAnchor(rsrc, lines, '', "src/routes/desktop-apps.js"), 'no-check'));
   ok(rc.bad.status === 200 && rc.seen.some(([b, o]) => b.scaleChoice === 7 && o && o.host === 'dev-a'), 'CONTROL: without it the bad value reaches keeper.launch for dev-a (a device\'s own check is the only one left — an old one has none)', rc.bad);
   // the hub keeper hands the body to a paired machine INSIDE the op's `body` — the op's shape is unchanged apart from it
   const Kp = require('../src/server/desktop-app-keeper.js');

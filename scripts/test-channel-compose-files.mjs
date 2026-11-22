@@ -23,6 +23,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let n = 0, fails = 0;
 const ok = (c, m) => { n++; if (c) console.log(`  ✓ ${m}`); else { fails++; console.log(`  ✗ ${m}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const MC = mutantCopies('compose-files', REPO);
 
 const ROW = { maxCount: 10, maxTotalBytes: 25e6, withText: true };   // Gmail / Slack / Lark declare this one row
@@ -109,13 +118,13 @@ const ctlPure = [
 ];
 const PS = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf8');
 for (const [from, to, what] of ctlPure) {
-  const red = PS.includes(from) ? pureJudge(require(MC.write('src/channel-policy.js', PS.replace(from, to), what.replace(/\W+/g, '-').slice(0, 30)))) : null;
+  const red = PS.includes(from) ? pureJudge(require(MC.write('src/channel-policy.js', editAnchor(PS, from, to, "src/channel-policy.js"), what.replace(/\W+/g, '-').slice(0, 30)))) : null;
   ok(Array.isArray(red) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 {
   const RS = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8');
   const from = '    if (refuseAgentBearer(req, res, OWN_SEND_IS_OWNERS)) return;';
-  const red = RS.includes(from) ? await routeJudge(require(MC.write('src/routes/channels.js', RS.replace(from, ''), 'route-bearer'))) : null;
+  const red = RS.includes(from) ? await routeJudge(require(MC.write('src/routes/channels.js', editAnchor(RS, from, '', "src/routes/channels.js"), 'route-bearer'))) : null;
   ok(Array.isArray(red) && red.length > 0, `control — the agent's bearer ACCEPTED on the owner's send: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 
@@ -261,7 +270,7 @@ console.log('⑦ controls — the cell, not an id; the row reaches the proposal\
     ok(Array.isArray(red) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
   }
   const from = "  const one = (g) => !!(g && typeof g === 'object' && (g.alone === true || g.withText === false));";
-  const red = PS.includes(from) ? alonePureJudge(require(MC.write('src/channel-policy.js', PS.replace(from, "  const one = (g) => !!(g && typeof g === 'object' && g.withText === false);"), 'pure-no-cell'))) : null;
+  const red = PS.includes(from) ? alonePureJudge(require(MC.write('src/channel-policy.js', editAnchor(PS, from, "  const one = (g) => !!(g && typeof g === 'object' && g.withText === false);", "src/channel-policy.js"), 'pure-no-cell'))) : null;
   ok(Array.isArray(red) && red.length > 0, `control — fileAloneOf blind to the \`alone\` cell: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 

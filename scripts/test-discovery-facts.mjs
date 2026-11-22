@@ -17,6 +17,15 @@ const { readJsonlTailIds } = require('../src/session-store.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // ── naming: the drift case that motivated this ──
 const multiline = { type: 'user', message: { role: 'user', content: '帮我修这个bug\n下面是详细的日志\nERROR at foo.js:12' } };
@@ -171,15 +180,15 @@ ok(bundle.includes('pidLooksClaude') || bundle.includes('PID-reuse guard'), 'bui
   const dfSrc = read('src/discovery-facts.js');
   const anchor = '  if (d.isMeta === true || deliveredRecordKind(d)) return null;\n';
   ok(dfSrc.includes(anchor), 'control anchor present');
-  const D0 = require(MUT.write('src/discovery-facts.js', dfSrc.replace(anchor, ''), 'old-rule'));
+  const D0 = require(MUT.write('src/discovery-facts.js', editAnchor(dfSrc, anchor, '', "src/discovery-facts.js"), 'old-rule'));
   ok(D0.nameFromUserRecord(WAKE) === 'Another Claude session sent a message:', 'CONTROL the pre-fix rule: a worker is named "Another Claude session sent a message:" (① can go red)');
   const oldCard = card.replace(CHAIN, "const originalName = s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';");
   ok(oldCard !== card && !oldCard.includes(CHAIN), 'CONTROL the pre-fix card chain fails the ② pin (the first message beats the given name)');
   const nmSrc = read('src/session-name.js'), nmAnchor = '  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return s.cliTitle || \'\';\n';
   ok(nmSrc.includes(nmAnchor), 'control anchor present (the ladder\'s ② ③ rungs)');
-  const NM0 = require(MUT.write('src/session-name.js', nmSrc.replace(nmAnchor, "  if (s.cliTitle) return s.cliTitle;\n  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return '';\n"), 'title-over-given'));
+  const NM0 = require(MUT.write('src/session-name.js', editAnchor(nmSrc, nmAnchor, "  if (s.cliTitle) return s.cliTitle;\n  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return '';\n", "src/session-name.js"), 'title-over-given'));
   ok(ladderRows(NM0).some((r) => r.got !== r.want), 'CONTROL a ladder whose CLI title outranks the given name fails the PURE table');
-  const NM1 = require(MUT.write('src/session-name.js', nmSrc.replace(nmAnchor, "  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return '';\n"), 'no-title-rung'));
+  const NM1 = require(MUT.write('src/session-name.js', editAnchor(nmSrc, nmAnchor, "  if (s.nameExplicit && s.webuiName) return s.webuiName;\n  return '';\n", "src/session-name.js"), 'no-title-rung'));
   ok(ladderRows(NM1).some((r) => r.got !== r.want), 'CONTROL a ladder without the CLI-title rung fails the PURE table');
 }
 

@@ -29,6 +29,15 @@ const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const MUT = mutantCopies('exit-call', REPO);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const XC = require(path.join(REPO, 'src/exit-call.js'));
 const E = require(path.join(REPO, 'src/exit-reach.js'));
@@ -304,7 +313,7 @@ const MMSRC = read('src/message-manager.js');
   const from = "const host = !msgId && kind === 'notification' && typeof belongsTo === 'function' ? this._exitCallHost(fromName, belongsTo) : null;";
   if (!MMSRC.includes(from)) ok(false, 'CONTROL no-upgrade: the anchor is gone');
   else {
-    const { MessageManager: MMx } = require(MUT.write('src/message-manager.js', MMSRC.replace(from, 'const host = null;'), 'no-upgrade'));
+    const { MessageManager: MMx } = require(MUT.write('src/message-manager.js', editAnchor(MMSRC, from, 'const host = null;', "src/message-manager.js"), 'no-upgrade'));
     const Lx = LIVE(MMx);
     ok(Lx.after.filter((m) => RS.machineCardOf(m)).length === 2, 'CONTROL no-upgrade: the live card is a second card — ⑤ goes red (two cards for one call)', Lx.after.length);
   }
@@ -314,7 +323,7 @@ const RSSRC = read('src/lib/chat-run-summary.js');
   const from = "  if (!b0 || b0.toolName !== 'Bash' || typeof b0.input?.command !== 'string') return null;";
   if (!RSSRC.includes(from)) ok(false, 'CONTROL no-recognition: the anchor is gone');
   else {
-    const rs = await import(pathToFileURL(MUT.write('src/lib/chat-run-summary.js', RSSRC.replace(from, '  return null;'), 'no-recognition', { esm: true })).href);
+    const rs = await import(pathToFileURL(MUT.write('src/lib/chat-run-summary.js', editAnchor(RSSRC, from, '  return null;', "src/lib/chat-run-summary.js"), 'no-recognition', { esm: true })).href);
     const Hx = HISTORY(rs);
     ok(Hx.kinds.every((k) => k === 'bash'), 'CONTROL no-recognition (the base): every call is a plain Bash card — ④ goes red', Hx.kinds);
   }

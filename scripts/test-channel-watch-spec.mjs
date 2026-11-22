@@ -14,6 +14,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const F = require(path.join(REPO, 'src/channel-filter.js'));
 const WS = require(path.join(REPO, 'src/channel-watch-spec.js'));
 const MUT = mutantCopies('chan-watch-spec', REPO);
@@ -101,10 +110,10 @@ function regexLeg(W2) {
 const same = regexLeg(WS);
 ok(same === PATS.length && PATS.filter((p) => !F.regexVerdict(p).ok).length >= 9, `--regex "p" ⇒ exactly regexVerdict(p) for ${same}/${PATS.length} patterns (${PATS.filter((p) => !F.regexVerdict(p).ok).length} refused by name)`);
 { const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf8');
-  const cut = fsrc.replace("      const rv = regexVerdict(v);\n      if (!rv.ok) return rv;", "      const rv = { ok: true, source: v };");
+  const cut = editAnchor(fsrc, "      const rv = regexVerdict(v);\n      if (!rv.ok) return rv;", "      const rv = { ok: true, source: v };", "src/channel-filter.js");
   const fAbs = MUT.write('src/channel-filter.js', cut, 'nojudge');
   const wsrc = fs.readFileSync(path.join(REPO, 'src/channel-watch-spec.js'), 'utf8');
-  const W2 = MUT.load('src/channel-watch-spec.js', wsrc.replace("require('./channel-filter.js')", `require(${J(fAbs)})`), 'nojudge');
+  const W2 = MUT.load('src/channel-watch-spec.js', editAnchor(wsrc, "require('./channel-filter.js')", `require(${J(fAbs)})`, "src/channel-watch-spec.js"), 'nojudge');
   const r = W2.watchSpecFromArgs(['--regex', '(a+)+']);
   ok(cut !== fsrc && r.ok && regexLeg(W2) < PATS.length, `CONTROL: --regex without the judge accepts "(a+)+" — ④ is red (${regexLeg(W2)}/${PATS.length})`, J(r)); }
 
@@ -156,7 +165,7 @@ console.log('⑧ B-5740: a word list keeps a number whole (4,995 is ONE keyword)
   const SRC = fs.readFileSync(path.join(REPO, 'src/channel-watch-spec.js'), 'utf8');
   const KW = "rules: (v) => (splitWordList(v).length ? splitWordList(v) : ['']).map((value) => ({ kind: 'keyword', value })) },";
   ok(SRC.split(KW).length === 2, 'control setup: the keyword flag line is present once');
-  const Pre = MUT.load('src/channel-watch-spec.js', SRC.replace(KW, "rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'keyword', value })) },"), 'b5740-pre');   // stale-pins: kept (the release's line, restored by the red control)
+  const Pre = MUT.load('src/channel-watch-spec.js', editAnchor(SRC, KW, "rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'keyword', value })) },", "src/channel-watch-spec.js"), 'b5740-pre');   // stale-pins: kept (the release's line, restored by the red control)
   const pre = Pre.watchSpecFromArgs(['--keyword', '4,995']);
   ok(pre.ok && J(pre.spec.filter.rules.map((r) => r.value)) === J(['4', '995']), 'RED CONTROL: the release\'s splitter makes «4» and «995» (the keyword «4» matched almost every message) — the incident leg is red on it', J(pre.spec && pre.spec.filter));
   // wiring: the door carries the warnings; the CLI prints them; the help says the rule

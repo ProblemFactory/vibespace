@@ -514,7 +514,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
   const loadWith = async (dePath, tag, winText = winSrc) => {
     const deUrl = pathToFileURL(dePath).href;
     // a text whose tab-group import is already a copy's URL (the pre-capture control) keeps it; else a tab-group copy on the patched verdict
-    const tgP = winText.includes("from './tab-group.js'") ? MUT.write('src/lib/tab-group.js', tgSrc0.replace("from './drag-end.js'", `from ${JSON.stringify(deUrl)}`), tag, { esm: true }) : null;
+    const tgP = winText.includes("from './tab-group.js'") ? MUT.write('src/lib/tab-group.js', editAnchor(tgSrc0, "from './drag-end.js'", `from ${JSON.stringify(deUrl)}`, "src/lib/tab-group.js"), tag, { esm: true }) : null;
     if (tgP) copies.push(tgP);
     const text = winText.replace("from './drag-end.js'", `from ${JSON.stringify(deUrl)}`).replace("from './tab-group.js'", tgP ? `from ${JSON.stringify(pathToFileURL(tgP).href)}` : "from './tab-group.js'");
     if (!text.includes(deUrl) || (tgP && !text.includes(pathToFileURL(tgP).href))) throw new Error('the control copy of window.js did not take the patched drag-end / tab-group');
@@ -526,7 +526,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
   const loadFeedCtl = async (dfText, tag) => {
     const dfPath = MUT.write('src/lib/drag-feed.js', dfText, tag, { esm: true }); copies.push(dfPath);
     const dfUrl = pathToFileURL(dfPath).href;
-    const tgPath = MUT.write('src/lib/tab-group.js', tgSrc0.replace("from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`), tag, { esm: true }); copies.push(tgPath);
+    const tgPath = MUT.write('src/lib/tab-group.js', editAnchor(tgSrc0, "from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`, "src/lib/tab-group.js"), tag, { esm: true }); copies.push(tgPath);
     const tgUrl = pathToFileURL(tgPath).href;
     const text = editAnchor(editAnchor(winSrc, "from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`, "src/lib/window.js"), "from './tab-group.js'", `from ${JSON.stringify(tgUrl)}`, "src/lib/window.js");
     if (!text.includes(dfUrl) || !text.includes(tgUrl)) throw new Error('the feed control copy of window.js did not take the patched feed / tab-group');
@@ -545,7 +545,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
   const res = [];
   for (const [kind, from, to] of RULES) {
     if (!deSrc.includes(from)) { res.push([kind, 'patch-missed']); continue; }
-    const dePath = MUT.write('src/lib/drag-end.js', deSrc.replace(from, to), 'no-' + kind, { esm: true }); copies.push(dePath);
+    const dePath = MUT.write('src/lib/drag-end.js', editAnchor(deSrc, from, to, "src/lib/drag-end.js"), 'no-' + kind, { esm: true }); copies.push(dePath);
     const WM = await loadWith(dePath, 'no-' + kind);
     const wm = mkWm(WM);
     // a release / cancel of a CAPTURED pointer is followed by the browser's lostpointercapture — a belt that ends the drag

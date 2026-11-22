@@ -39,6 +39,15 @@ const V = require('../src/browser-verbs.js');      // which commands are read ba
 const RB = require('../src/browser-read-back.js'); // the read-back itself (its own file: the device bundle never carries it)
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 console.log('① readBackPlan — which commands are read back');
 {
@@ -378,7 +387,7 @@ const MUT = mutantCopies('read-back', REPO);
   // the release's behaviour: the driver's answer is trusted — a date field filled «Done» stays empty
   const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const from = '  const form = f.tag === \'input\' ? FIELD_FORMS[f.kind] : null;\n';
-  const f = MUT.write('src/browser-read-back.js', SRC.replace(from, '  const form = null; // CONTROL: the driver is trusted\n'), 'trust');
+  const f = MUT.write('src/browser-read-back.js', editAnchor(SRC, from, '  const form = null; // CONTROL: the driver is trusted\n', "src/browser-read-back.js"), 'trust');
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
   ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill ISO ⇒ the setter')) && bad.some((b) => b.startsWith('the owner\'s act')), 'CONTROL: a readBack that trusts the driver (the release\'s «Done» over an empty date field) FAILS ⑤', bad.slice(0, 3));
@@ -387,7 +396,7 @@ const MUT = mutantCopies('read-back', REPO);
   // 080d37c23's read-back (the second verdict's must): the attribute asked in the REVERSED order — get attr type <selector>
   const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const from = "call(['get', 'attr', plan.sel, 'type', '--json'])";
-  const f = MUT.write('src/browser-read-back.js', SRC.replace(from, "call(['get', 'attr', 'type', plan.sel, '--json'])"), 'reversed'); // stale-pins: kept — the reversed order IS the control's planted mutation
+  const f = MUT.write('src/browser-read-back.js', editAnchor(SRC, from, "call(['get', 'attr', 'type', plan.sel, '--json'])", "src/browser-read-back.js"), 'reversed'); // stale-pins: kept — the reversed order IS the control's planted mutation
   REFUSED_CALLS.length = 0;
   const { bad } = await readBackCensus(require(f).readBack);
   ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill by @ref')) && REFUSED_CALLS.some((r) => /is no attribute name/.test(r)), 'CONTROL: the read-back that asks get attr type <selector> (080d37c23) FAILS — its @ref date fill is not set, and the stand-in refuses the call by the help\'s grammar', { bad: bad.filter((b) => b.startsWith('a date fill by @ref')).map((b) => b.slice(0, 160)), refused: REFUSED_CALLS.slice(0, 2) });
@@ -397,7 +406,7 @@ const MUT = mutantCopies('read-back', REPO);
   // 68da75fa2's read-back (the must): whatever holds the FOCUS after the verb is judged, the target named only in the words
   const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const from = '  if (plan.sel == null) {\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));';
-  const f = MUT.write('src/browser-read-back.js', SRC.replace(from, '  if (true) { // CONTROL: the focused field, whatever the verb named\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));'), 'focused');
+  const f = MUT.write('src/browser-read-back.js', editAnchor(SRC, from, '  if (true) { // CONTROL: the focused field, whatever the verb named\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));', "src/browser-read-back.js"), 'focused');
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
   ok(SRC.includes(from) && bad.some((b) => b.startsWith('scene 1:')) && bad.some((b) => b.startsWith('scene 2:')) && bad.some((b) => b.startsWith('scene 3:')), 'CONTROL: the read-back that judges the FOCUSED field (68da75fa2) FAILS the three scenes — a one-time-code box, a card number, an earlier date field', bad.filter((b) => b.startsWith('scene')).map((b) => b.slice(0, 120)));

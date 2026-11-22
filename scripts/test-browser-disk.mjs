@@ -33,6 +33,15 @@ const PM = await import('../src/lib/browser-panel-model.js');
 const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const MIN = 60e3, G = 2 ** 30, MiB = 2 ** 20;
 const SCR = scratchDir('bdisk');
@@ -263,20 +272,20 @@ console.log('§9 patched copies — each red');
   const M = mutantCopies('bdisk', REPO);
   // (a) a sync walk
   const run = read('src/server/browser-disk-run.js');
-  const syncSrc = run.replace("return D.duVerdict(await du([dir]), dir);", "const walk = (d) => { let n = 0; for (const e of require('fs').readdirSync(d, { withFileTypes: true })) n += e.isDirectory() ? walk(path.join(d, e.name)) : require('fs').statSync(path.join(d, e.name)).blocks * 512; return n; }; return { state: 'ok', bytes: walk(dir), partial: false };");
+  const syncSrc = editAnchor(run, "return D.duVerdict(await du([dir]), dir);", "const walk = (d) => { let n = 0; for (const e of require('fs').readdirSync(d, { withFileTypes: true })) n += e.isDirectory() ? walk(path.join(d, e.name)) : require('fs').statSync(path.join(d, e.name)).blocks * 512; return n; }; return { state: 'ok', bytes: walk(dir), partial: false };", "src/server/browser-disk-run.js");
   ok(syncSrc !== run, 'the sync-walk copy is patched');
   const S = M.load('src/server/browser-disk-run.js', syncSrc, 'sync');
   const sm = await S.createDiskSampler({ profiles: () => [] }).sampleDir({ dir: SCR });
   ok(sm.state === 'ok' && SYNC_WALK.test(syncSrc), 'RED: a copy that samples with a sync walk still measures — and the no-sync pin catches it');
   // (b) a notice that names no remedy
   const pure = read('src/browser-disk.js');
-  const noRem = pure.replace('remedy: `Delete… in the Agent browser panel frees it; New profile… copied from "${name}" keeps its logins`', "remedy: 'See the panel.'");
+  const noRem = editAnchor(pure, 'remedy: `Delete… in the Agent browser panel frees it; New profile… copied from "${name}" keeps its logins`', "remedy: 'See the panel.'", "src/browser-disk.js");
   ok(noRem !== pure, 'the no-remedy copy is patched');
   const NR = M.load('src/browser-disk.js', noRem, 'noremedy');
   const remedyNamed = (Dm) => { const n = Dm.diskNotice({ label: 'work', verdict: RG.diskVerdict(3 * G), top: [{ name: 'Default/Cache', bytes: 2 * G }] }); return /Delete… in the Agent browser panel frees it/.test(n.text) && /New profile… copied from "work" keeps its logins/.test(n.text); };
   ok(remedyNamed(D) && !remedyNamed(NR), 'RED: a copy whose notice names no remedy fails the remedy check (the real one passes)');
   // (c) two profiles in one minute
-  const twoSrc = pure.replace('  if (s.slotAt !== null && now - s.slotAt < DISK_SLOT_MS) return { state: s, sample: null };\n', '');
+  const twoSrc = editAnchor(pure, '  if (s.slotAt !== null && now - s.slotAt < DISK_SLOT_MS) return { state: s, sample: null };\n', '', "src/browser-disk.js");
   ok(twoSrc !== pure, 'the two-in-a-minute copy is patched');
   const TW = M.load('src/browser-disk.js', twoSrc, 'twominute');
   const tw = walk(TW.diskSampleStep);

@@ -35,6 +35,15 @@ const D = require('../src/browser-display.js');
 const V = require('../src/browser-verbs.js');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const REPO = new URL('..', import.meta.url).pathname;
 const ROOT = scratch('browser-rejudge');
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -287,18 +296,18 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   const NO_REJ = "      if (rec.closed.unstable !== 'failing') return Promise.resolve(null);\n";
   const NO_FRESH = 'if (B.freshDaemonDue({ failed: L.failed,';
   ok(ksrc.split(NO_REJ).length === 2 && ksrc.split(NO_FRESH).length === 2, 'CONTROL setup: the re-judge branch and the fresh rung are found once each in the keeper');
-  const KR = M.load('src/server/browser-keeper.js', ksrc.replace(NO_REJ, '      return Promise.resolve(null);\n'), 'no-rejudge');
+  const KR = M.load('src/server/browser-keeper.js', editAnchor(ksrc, NO_REJ, '      return Promise.resolve(null);\n', "src/server/browser-keeper.js"), 'no-rejudge');
   const cb = await legs.boot(KR, 'ctl-boot');
   ok(!cb.threw && cb.parked === 'browser_unstable:failing' && cb.launches1 === 0 && cb.v.closed === 'browser_unstable' && cb.launchesAfter === 0,
     'CONTROL 1: a keeper copy that never re-judges keeps the adopted profile parked for ever (no ask at boot, none after) — the boot leg catches it', { launches1: cb.launches1, closed: cb.v && cb.v.closed });
-  const KF = M.load('src/server/browser-keeper.js', ksrc.replace(NO_FRESH, 'if (false && B.freshDaemonDue({ failed: L.failed,'), 'stale-daemon-only');
+  const KF = M.load('src/server/browser-keeper.js', editAnchor(ksrc, NO_FRESH, 'if (false && B.freshDaemonDue({ failed: L.failed,', "src/server/browser-keeper.js"), 'stale-daemon-only');
   const cf = await legs.fresh(KF, 'ctl-fresh');
   ok(!cf.threw && cf.fails === 3 && cf.launches === 1 && cf.d1Alive && cf.v.closed === 'browser_closed',
     'CONTROL 2: a keeper copy that relaunches only through the stale daemon fails its 3rd ask too (the daemon is still the one frozen on wayland-0) — the fresh leg catches it', { fails: cf.fails, launches: cf.launches, closed: cf.v && cf.v.closed });
   const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
   const CELL = "  if (c) return `${c.code === 'browser_unstable' ? 'parked' : 'closed'}";
   ok(vsrc.split(CELL).length === 2, 'CONTROL setup: the closed-browser line of browserCell is found once');
-  const VR = M.load('src/browser-verbs.js', vsrc.replace(CELL, "  return `${b.state}${b.pid ? ' pid ' + b.pid : ''}`;\n" + CELL), 'status-ready');
+  const VR = M.load('src/browser-verbs.js', editAnchor(vsrc, CELL, "  return `${b.state}${b.pid ? ' pid ' + b.pid : ''}`;\n" + CELL, "src/browser-verbs.js"), 'status-ready');
   const pc = VR.browserCell({ state: 'ready', pid: 3928207, browser: null, closed: { code: 'browser_unstable', error: B.unstableText({ label: 'Bank', count: 10, kind: 'failing', spanMs: 280000 }), unstable: 'failing' } });
   ok(pc === 'ready pid 3928207' && !/^parked/.test(pc), 'CONTROL 3: a status copy that says "ready pid <daemon>" for a parked profile (the incident\'s words) is caught by the ① status check', pc);
 }

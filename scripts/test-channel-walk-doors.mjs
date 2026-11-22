@@ -29,6 +29,15 @@ import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const ROOT = scratch('chan-walk-doors');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
@@ -197,7 +206,7 @@ async function rejudgeOnly(E, tag) {
   const TOUCH = 'if (next !== en.convCaps) { en.convCaps = next; store.index.touch(k); n++; }';
   ok(SRC.split(TOUCH).length === 2, 'control setup: the re-judge\'s touch is present once');
   const real = await rejudgeOnly(require(path.join(REPO, 'src/server/channels-engine.js')), 'real');
-  const c = await rejudgeOnly(MC.load('src/server/channels-engine.js', SRC.replace(TOUCH, 'if (next !== en.convCaps) { en.convCaps = next; n++; }'), 'no-touch'), 'no-touch');   // stale-pins: kept (the re-judge without its touch, the control's copy)
+  const c = await rejudgeOnly(MC.load('src/server/channels-engine.js', editAnchor(SRC, TOUCH, 'if (next !== en.convCaps) { en.convCaps = next; n++; }', "src/server/channels-engine.js"), 'no-touch'), 'no-touch');   // stale-pins: kept (the re-judge without its touch, the control's copy)
   ok(real.changed === OWN && real.own === OWN, `beside 200 rows of another account the disconnect's re-judge changed ${real.changed} rows and said ${real.own} of them`, real);
   ok(c.changed === OWN && c.own === 0, `CONTROL: the copy without the touch changed the same ${c.changed} rows and said ${c.own} — the incremental write would never carry them, red`, c);
 }
@@ -224,7 +233,7 @@ async function searchWalk(S, tag) {
   const NOW = "    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(";
   const BEFORE = "    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(";   // stale-pins: kept (the base's walk, restored by the control)
   ok(STORE.split(NOW).length === 2, 'control setup: the search\'s walk is present once as it reads now');
-  let old = STORE.replace(NOW, BEFORE);
+  let old = editAnchor(STORE, NOW, BEFORE, "src/channel-store.js");
   old = old.replace(" }   // B-dfa4 cut 1: this account's rows only\n", '\n');
   const c = await searchWalk(MC.load('src/channel-store.js', old, 'search-whole'), 'whole');
   ok((got.seen.search || 0) === 0 && Array.isArray(got.hits) && got.hits.length === OWN, `the search of the ${OWN}-row account beside ${OTHER_ROWS} others: 0 whole-map iterations, ${got.hits && got.hits.length} hits`, got);
@@ -257,7 +266,7 @@ async function insideUpdate(S, tag) {
   ok(got.after.includes('fake-poll/born2') && got.after.includes('other-account/thr_7') && got.after.length === 8, 'after the updates: the kept set holds the born rows and the moved one (handed to every account)', got.after);
   const LINE = "    if (curTouch) for (const k of curTouch) if (!(set && set.has(k)) && !oddKeys.has(k)) out.push(k);\n";
   ok(STORE.split(LINE).length === 2, 'control setup: the touched keys\' line is present once');
-  const c = await insideUpdate(MC.load('src/channel-store.js', STORE.replace(LINE, ''), 'no-touched'), 'no-touched');
+  const c = await insideUpdate(MC.load('src/channel-store.js', editAnchor(STORE, LINE, '', "src/channel-store.js"), 'no-touched'), 'no-touched');
   ok(!c.inside.includes('fake-poll/born') && !c.inside.includes('other-account/thr_7'), `CONTROL: without the touched keys the row born in the update and the moved row are missed (${c.inside.length} keys) — red`, c.inside);
 }
 

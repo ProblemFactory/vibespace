@@ -304,7 +304,7 @@ try {
     check('WIRING (A-r3a): server.js points hosts.onReachChange at exitProxy.rejudgeAll', /\nhosts\.onReachChange = \(why\) => exitProxy\.rejudgeAll\(`hosts-\$\{why\}`\);/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')));
     // CONTROL (A-r3a): a HostManager whose import does not tell the re-judge — the pre-fix shape: the open connection lives on
     const M = mutantCopies('exitproxy-hosts', REPO);
-    const patchedH = hsrc.replace("    this._reachChanged('import');", '    ;');
+    const patchedH = editAnchor(hsrc, "    this._reachChanged('import');", '    ;', "src/hosts.js");
     check('(the A-r3a control patch applies)', patchedH !== hsrc);
     const { HostManager: HM2 } = M.load('src/hosts.js', patchedH, 'noimporthook');
     // lane grants-unify: the narrowed LISTS land in the grants store, whose change hook re-judges too — the control takes
@@ -326,7 +326,7 @@ try {
     check('CONTROL: without the gate a bare local connection reaches the machine — the pre-verify shape', /EX:[\s\S]*ping/.test(bare2), JSON.stringify(bare2));
     await ex2.stop('host-mac');
     // CONTROL (A3-r2): a copy whose connection judge stops at the pair (r1's check) lets a dead conversation's pair through
-    const pairOnly = src.replace("    const s = this.sessionsMap().get(c.sessionId);\n    if (!s || (() => { const x = this.ctxFor(s, c.sessionId); return this._endsOn(E.exitVerdict(this.access(hostId), 'use', x), x); })()) {", "    const s = null;\n    if (false) {");
+    const pairOnly = editAnchor(src, "    const s = this.sessionsMap().get(c.sessionId);\n    if (!s || (() => { const x = this.ctxFor(s, c.sessionId); return this._endsOn(E.exitVerdict(this.access(hostId), 'use', x), x); })()) {", "    const s = null;\n    if (false) {", "src/exit-proxy.js");
     check('(the A3-r2 control patch applies)', pairOnly !== src);
     const { ExitProxyManager: EPM3 } = M.load('src/exit-proxy.js', pairOnly, 'paironly');
     const S9 = { name: 'nine', backend: 'claude', claudeSessionId: 'c-9' };
@@ -338,7 +338,7 @@ try {
     check('CONTROL (A3-r2): with the pair-only judge a DEAD conversation\'s pair still opens the machine — the leg above goes red', through.text.includes('EX:ping'), JSON.stringify(through.log));
     await ex3.stop('host-mac');
     // CONTROL (open): a copy whose re-judge judges nobody (the pre-fix manager: no hook) keeps the open connection
-    const noRejudge = src.replace("        for (const sid of new Set([...live.users, ...(live.bySession ? live.bySession.keys() : [])])) {", "        for (const sid of []) {");
+    const noRejudge = editAnchor(src, "        for (const sid of new Set([...live.users, ...(live.bySession ? live.bySession.keys() : [])])) {", "        for (const sid of []) {", "src/exit-proxy.js");
     check('(the open-connection control patch applies)', noRejudge !== src);
     const { ExitProxyManager: EPM4 } = M.load('src/exit-proxy.js', noRejudge, 'norejudge');
     const S8 = { name: 'eight', backend: 'claude', claudeSessionId: 'c-8' };

@@ -32,6 +32,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const ROOT = scratch('write-only-secrets');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -278,19 +287,19 @@ ok(!/\bclient\.appSecret\b|cfg\.client\.appSecret|c\.appSecret/.test(CAD) && (CA
 console.log('⑦ CONTROLS — the law removed, the census is RED');
 const mSrc = read('src/mounts.js');
 ok((mSrc.match(/return writeOnly\(out, m\);/g) || []).length === 1, 'src/mounts.js calls the storage law exactly once (config()\'s return)');
-const mRed = plantMounts(MC.load('src/mounts.js', mSrc.replace('return writeOnly(out, m);', 'return out;'), 'no-law').MountManager, 'mounts-no-law');
+const mRed = plantMounts(MC.load('src/mounts.js', editAnchor(mSrc, 'return writeOnly(out, m);', 'return out;', "src/mounts.js"), 'no-law').MountManager, 'mounts-no-law');
 ok(mRed.leaks.length >= 10, `a mounts.js without it answers the planted bytes (${mRed.leaks.length} leaks) ⇒ ① red`);
 const aSrc = read('src/server/channels-auth.js');
 const NEEDLE = 'client = { appId: String(rec.credential.appId || \'\'), secretSet: !!rec.credential.appSecretEnc, undecryptable };';
 ok(aSrc.split(NEEDLE).length === 2, 'channels-auth.js answers the custom client as {appId, secretSet, undecryptable} exactly once');
-const authMut = MC.write('src/server/channels-auth.js', aSrc.replace(NEEDLE, "client = { appId: String(rec.credential.appId || ''), appSecret: box.dec(rec.credential.appSecretEnc), undecryptable };"), 'no-law');
+const authMut = MC.write('src/server/channels-auth.js', editAnchor(aSrc, NEEDLE, "client = { appId: String(rec.credential.appId || ''), appSecret: box.dec(rec.credential.appSecretEnc), undecryptable };", "src/server/channels-auth.js"), 'no-law');
 const engMut = MC.write('src/server/channels-engine.js', read('src/server/channels-engine.js').replace("require('./channels-auth.js')", `require(${JSON.stringify(authMut)})`), 'no-law');
 const cRed = await plantChannels(engMut, 'channels-no-law');
 ok(cRed.leaks.length >= vendorRows.length, `a channels-auth.js answering the secret is caught (${cRed.leaks.length} leaks) ⇒ ④ red`, cRed.errors.join(' ; '));
 const iSrc = read('src/server/integration-store.js');
 const MASK_LINE = 'if (f.secret) masked[f.key] = set[f.key] ? R.maskValue(v) : null;';
 ok(iSrc.split(MASK_LINE).length === 2, 'integration-store.js masks a card\'s secret through R.maskValue exactly once (publicView)');
-const StoreMut = MC.load('src/server/integration-store.js', iSrc.replace(MASK_LINE, 'if (f.secret) masked[f.key] = set[f.key] ? String(v) : null;'), 'no-law');
+const StoreMut = MC.load('src/server/integration-store.js', editAnchor(iSrc, MASK_LINE, 'if (f.secret) masked[f.key] = set[f.key] ? String(v) : null;', "src/server/integration-store.js"), 'no-law');
 const redStore = StoreMut.create({ dataDir: path.join(ROOT, 'istore-no-law'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify(entries) }, log: quiet });
 const redText = JSON.stringify(secretRows.map((row) => { try { return redStore.publicView(row.id); } catch (e) { return e.message; } }));
 const redI = secretRows.flatMap((row) => row.fields.filter((f) => f.secret).map((f) => iPlant(row, f))).filter((p) => windows(p).some((w) => redText.includes(w)));
@@ -298,7 +307,7 @@ ok(redI.length >= 8, `an integration store answering a secret whole is caught ($
 const eSrc = read('src/server/channels-engine.js');
 const VIEW_LINE = "return { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, undecryptable };";
 ok(eSrc.split(VIEW_LINE).length === 2, 'channels-engine.js answers an account\'s own client as {appId, secretSet, undecryptable} exactly once (customClientView)');
-const engTail = MC.write('src/server/channels-engine.js', eSrc.replace(VIEW_LINE, "return { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, secretMasked: R.maskValue(box.dec(rec.credential.appSecretEnc)), undecryptable };"), 'tail');
+const engTail = MC.write('src/server/channels-engine.js', editAnchor(eSrc, VIEW_LINE, "return { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, secretMasked: R.maskValue(box.dec(rec.credential.appSecretEnc)), undecryptable };", "src/server/channels-engine.js"), 'tail');
 const tRed = await plantChannels(engTail, 'channels-tail');
 ok(tRed.leaks.length >= vendorRows.length, `a channels-engine.js whose account view carries the mask tail is caught (${tRed.leaks.length} leaks) ⇒ ④ red on a TAIL`, tRed.errors.join(' ; '));
 for (const row of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 5 })) ok(row.pass, row.name, row.detail);

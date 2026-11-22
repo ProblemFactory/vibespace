@@ -27,6 +27,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 const H = require(path.join(REPO, 'src/harnesses'));
@@ -151,13 +160,13 @@ const CONTROLS = [
 const closedWorld = (file, patched, tag) => {
   const member = M.write(file, patched, tag + '-member');
   const reg = M.write('src/spawn/index.js', read('src/spawn/index.js').replace(`require('./${path.basename(file, '.js')}')`, `require(${JSON.stringify(member)})`), tag + '-registry');
-  return M.load('src/ws-create.js', src.replace("require('./spawn')", `require(${JSON.stringify(reg)})`), tag);
+  return M.load('src/ws-create.js', editAnchor(src, "require('./spawn')", `require(${JSON.stringify(reg)})`, "src/ws-create.js"), tag);
 };
 for (const [name, line, old, judge, file = 'src/ws-create.js'] of CONTROLS) {
   const fsrc = read(file);
   ok(fsrc.split(line).length === 2, `control ${name}: the gate is one identifiable line in the product source (${file})`);
   ok(judge(r), `control ${name}: the shipped gate passes the fake's row`);
-  const mut = file === 'src/ws-create.js' ? M.load(file, src.replace(line, old), name.replace(/\W+/g, '-')) : closedWorld(file, fsrc.replace(line, old), name.replace(/\W+/g, '-'));
+  const mut = file === 'src/ws-create.js' ? M.load(file, editAnchor(src, line, old, "src/ws-create.js"), name.replace(/\W+/g, '-')) : closedWorld(file, fsrc.replace(line, old), name.replace(/\W+/g, '-'));
   const x = await drive(mut, { backend: 'acme' });
   ok(x.sent.some((m) => m.type === 'created') && !judge(x), `control ${name}: with the id branch restored the fake's declared row is LOST (the leg above can go red)`);
 }
@@ -192,7 +201,7 @@ console.log('— ④ the spawn-ladder seam: a fake transport through ONE registr
   const member = M.write('src/spawn/acme-link.js', ACME_LINK, 'acme-link');
   const regSrc = read('src/spawn/index.js');
   const anchor = "  require('./dial'),\n";
-  const regMut = regSrc.replace(anchor, anchor + `  require(${JSON.stringify(member)}),\n`);
+  const regMut = editAnchor(regSrc, anchor, anchor + `  require(${JSON.stringify(member)}),\n`, "src/spawn/index.js");
   const added = regMut.split('\n').filter((l) => !regSrc.split('\n').includes(l));
   ok(regSrc.split(anchor).length === 2 && added.length === 1 && regMut.split('\n').length === regSrc.split('\n').length + 1,
     'the registration is ONE added line in the registry copy', added);

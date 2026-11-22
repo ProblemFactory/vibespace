@@ -27,6 +27,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const GM = require('../src/grant-model.js');
 let pass = 0, fail = 0;
 const ok = (c, m, d) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); if (d !== undefined) console.log(`    ${typeof d === 'string' ? d : JSON.stringify(d)}`.slice(0, 600)); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = JSON.stringify;
 const row = (to, except = [], door = 'exit', resource = 'h:use') => ({ door, resource, to, except });
 
@@ -187,12 +196,12 @@ console.log('④ controls: patched copies of the model turn ② red');
     const src = fs.readFileSync(path.join(REPO, 'src/grant-model.js'), 'utf-8');
     const EX = "    if (x.kind === 'conversation' && F.keys.has(x.key)) return { state: 'excepted', row, entry: x };\n    if (x.kind === 'group') { if (F.groups.has(x.id)) return { state: 'excepted', row, entry: x }; if (F.unreadable) exceptUndecided = true; }\n";
     ok(src.split(EX).length === 2, 'CONTROL setup: the exception rung is found exactly once');
-    const M1 = MZ.load('src/grant-model.js', src.replace(EX, ''), 'ignores-except');
+    const M1 = MZ.load('src/grant-model.js', editAnchor(src, EX, '', "src/grant-model.js"), 'ignores-except');
     const v = M1.admits([row([{ kind: 'group', id: 'g1' }], [{ kind: 'conversation', key: 'm1' }])], { conversationKey: 'm1', groupIds: ['g1'] });
     ok(v.ok, 'CONTROL (a): an admits that ignores `except` admits the member the owner left out — ② «excepted» would be red');
     const DROP = "    if (!n) return { ok: false, code: 'unknown_shape', why: 'an exception this release cannot read — the whole grant is refused rather than read wider' };\n";
     ok(src.split(DROP).length === 2, 'CONTROL setup: the void-on-a-bad-exception line is found exactly once');
-    const M2 = MZ.load('src/grant-model.js', src.replace(DROP, '    if (!n) continue;\n'), 'drops-bad-except');
+    const M2 = MZ.load('src/grant-model.js', editAnchor(src, DROP, '    if (!n) continue;\n', "src/grant-model.js"), 'drops-bad-except');
     ok(M2.admits([row([{ kind: 'everyone' }], [{ kind: 'conversation', key: '' }])], { conversationKey: 'x' }).ok, 'CONTROL (b): a reader that DROPS a malformed exception reads the row WIDER (admits) — ① «voids the row» would be red');
   } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
@@ -297,7 +306,7 @@ console.log('⑥ lane lg-group-parents: a child group uses what its parents are 
     ok(!M1.admits([row([P])], child).ok, 'CONTROL (c): a model with no inherited hit refuses the child — ⑥ rule ② would be red');
     const M2 = MZ.load('src/grant-model.js', anchored(src, HIT, '(F.groups.has(e.id) || (toInherited && toInherited.has(e.id)))', 'ignores-only'), 'ignores-only');
     ok(M2.admits([row([PONLY])], child).ok, 'CONTROL (d): a model that ignores «仅本组» admits the child — ⑥ «仅本组» would be red');
-    const M3 = MZ.load('src/grant-model.js', src.replace(EXC, ''), 'except-own-only');
+    const M3 = MZ.load('src/grant-model.js', editAnchor(src, EXC, '', "src/grant-model.js"), 'except-own-only');
     ok(M3.admits([row([{ kind: 'everyone' }], [P])], child).ok, 'CONTROL (e): an exception judged over own groups only lets the child escape «everyone except the parent» — ⑥ rule ③ would be red');
     // the chain's cure (the U1fu read's should): the rule-④ guard — a model that lets the group-visibility door read the lineage
     // admits a child through its parent's visibility row (the leg «rule ④ holds IN THE MODEL» would be red)

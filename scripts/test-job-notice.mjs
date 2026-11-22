@@ -24,6 +24,15 @@ const require = createRequire(import.meta.url);
 const JN = require('../src/job-notice.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
 // ── §1 THE PURE VERDICT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -247,7 +256,7 @@ try {
   const AT = '    if (v.notice) this._notifyOwner(job, { what: v.notice.what });'; // B-74f5 r3: a «DOWN» is answered by its «back UP» at once, always
   ok(JS.split(AT).length === 2, 'the verdict\'s notice is the one notify of a publish outcome');
   const PRE = '    if (!next.ok && job.lastPublicUrl) this._notifyOwner(job, { what: `public URL ${job.lastPublicUrl} is DOWN — publish failed: ${(next.error && next.error.message) || next.error}` });'; // the pre-fix rule
-  const JMpre = mutantCopies('job-notice', ROOT).load('src/jobs.js', JS.replace(AT, PRE), 'pre-fix').JobManager;
+  const JMpre = mutantCopies('job-notice', ROOT).load('src/jobs.js', editAnchor(JS, AT, PRE, "src/jobs.js"), 'pre-fix').JobManager;
   const H = mk(JMpre, path.join(dir, 'pre')); cur = H;
   const hj = { ...job, id: 'jb-topo0002', publishDown: undefined, _pfId: undefined, notifyLog: [], subscribers: [] };
   H.jobs.set(hj.id, hj);
@@ -258,7 +267,7 @@ try {
   // RED CONTROL ② — the owner's filter line taken out: the DOWN the owner's own filter names reaches it (fb-a001be4917)
   const OWN = "      if (own && !M.filterMatches(own.filter, notifText)) { this._notifyLogPush(job, { lane: 'filtered', ok: false, reason: 'your own subscription filter' }); return; }";
   ok(JS.split(OWN).length === 2, 'the owner-filter line is present once');
-  const JMnoOwn = mutantCopies('job-notice', ROOT).load('src/jobs.js', JS.replace(OWN, ''), 'no-owner-filter').JobManager;
+  const JMnoOwn = mutantCopies('job-notice', ROOT).load('src/jobs.js', editAnchor(JS, OWN, '', "src/jobs.js"), 'no-owner-filter').JobManager;
   const K = mk(JMnoOwn, path.join(dir, 'noown')); cur = K;
   const kj = { ...job, id: 'jb-topo0003', publishDown: undefined, _pfId: undefined, notifyLog: [], subscribers: [] };
   K.jobs.set(kj.id, kj); K.subscribe(kj, ownerCaller, { filter: '^(?!.*is DOWN)' });
@@ -270,7 +279,7 @@ try {
   const PFS = fs.readFileSync(path.join(ROOT, 'src/port-forward.js'), 'utf-8');
   const TELL = "    try { const jm = this.getJobs && this.getJobs(); if (jm && typeof jm.relayPublished === 'function') jm.relayPublished(rec, r.url || null); } catch (e) { this.log('jobs follow ' + rec.id + ': ' + e.message); }";
   ok(PFS.split(TELL).length === 2, 'the Ports manager tells the jobs once, in _adoptPublish');
-  const { PortForwardManager: PFmut } = mutantCopies('job-notice', ROOT).load('src/port-forward.js', PFS.replace(TELL, ''), 'no-tell');
+  const { PortForwardManager: PFmut } = mutantCopies('job-notice', ROOT).load('src/port-forward.js', editAnchor(PFS, TELL, '', "src/port-forward.js"), 'no-tell');
   let curM = null;
   const pfm = new PFmut({ hosts: { list: () => [] }, dataDir: path.join(dir, 'pfm'), plugins: fakePlugins, broadcast: () => { }, log: () => { }, getJobs: () => curM });
   const L = mk(JobManager, path.join(dir, 'stale'), pfm); curM = L;

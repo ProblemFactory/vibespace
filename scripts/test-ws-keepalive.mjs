@@ -30,6 +30,15 @@ const KA = require(path.join(REPO, 'src/ws-keepalive.js'));
 const { WebSocket, WebSocketServer } = require('ws');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(e).slice(0, 500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(every); } return pred(); };
 const MUT = mutantCopies('ws-keepalive', REPO);
@@ -63,7 +72,7 @@ function armedLeg(K) {
   { const ws = fakeWs(), T = fakeTimers(); let drops = 0; KA.armKeepalive(ws, { pingMs: 100, now: () => 0, onDrop: () => drops++, ...T }); for (let i = 0; i < 20; i++) { T.tick(); ws.emit('message'); } ok(ws.terminated === 0 && drops === 0 && ws.pings === 20, 'a peer with no pong that sends bytes every round is never dropped (livenessVerdict: bytes from the peer ⇒ alive) — still pinged every round', JSON.stringify({ terminated: ws.terminated, pings: ws.pings })); }
   ok(KA.livenessVerdict({ pong: true }) === 'alive' && KA.livenessVerdict({ inbound: 1 }) === 'alive' && KA.livenessVerdict({ queuedBefore: 9, wroteBefore: 1, wroteNow: 2 }) === 'draining' && KA.livenessVerdict({ wroteBefore: 1, wroteNow: 2 }) === 'silent' && KA.livenessVerdict({}) === 'silent', 'livenessVerdict (PURE, here since the integration): pong / bytes ⇒ alive, progress through a backlog ⇒ draining, else silent');
   const src = fs.readFileSync(path.join(REPO, 'src/ws-keepalive.js'), 'utf8');
-  const cut = src.replace("return { state: s, send: null, drop: { code: KEEPALIVE_DROP_CODE, reason }, stalled };", "return { state: s, send: 'ping', drop: false, stalled };");
+  const cut = editAnchor(src, "return { state: s, send: null, drop: { code: KEEPALIVE_DROP_CODE, reason }, stalled };", "return { state: s, send: 'ping', drop: false, stalled };", "src/ws-keepalive.js");
   const bad = armedLeg(MUT.load('src/ws-keepalive.js', cut, 'never-drops'));
   ok(cut !== src && bad.silent.terminated === 0, 'CONTROL: a keepalive whose tick never drops keeps the silent peer for ever (the leg above would be red)', JSON.stringify(bad.silent));
 }
@@ -153,7 +162,7 @@ console.log('④ the real browser bridge: a half-open viewer is dropped, the oth
 }
 console.log('⑤ our own stall is not the peer\'s death (verify r1 T1①, the 2.369.16 rule)');
 const KA_SRC = fs.readFileSync(path.join(REPO, 'src/ws-keepalive.js'), 'utf8');
-const NO_STALL = KA_SRC.replace('if (stalled && s.misses <= MAX_STALLED_MISSES) return', 'if (false) return'); // the pre-fix rule
+const NO_STALL = editAnchor(KA_SRC, 'if (stalled && s.misses <= MAX_STALLED_MISSES) return', 'if (false) return', "src/ws-keepalive.js"); // the pre-fix rule
 function stallTable(K) {
   const o = {};
   let s = K.keepaliveStep(K.keepaliveInit(0), 'tick', 20000).state;          // a ping goes out at 20 s
@@ -197,7 +206,7 @@ function stallTable(K) {
   };
   const wr = wiringLeg(KA);
   ok(wr.mid.terminated === 0 && wr.mid.pings === 2 && wr.terminated === 1 && wr.seen[0] === 'no pong for 40000 ms and nothing acknowledged after 1 stalled round(s)', 'armKeepalive hands the gauge\'s gap to the step: a silent peer is re-pinged through a stalled round and dropped in the next clean one', JSON.stringify(wr));
-  const NO_WIRE = KA_SRC.replace('loopGapMs = g.gapMs;', 'loopGapMs = 0;');
+  const NO_WIRE = editAnchor(KA_SRC, 'loopGapMs = g.gapMs;', 'loopGapMs = 0;', "src/ws-keepalive.js");
   const wm = wiringLeg(MUT.load('src/ws-keepalive.js', NO_WIRE, 'no-gauge-wire'));
   ok(NO_WIRE !== KA_SRC && wm.mid.terminated === 1, 'CONTROL: an armKeepalive that never reads the gauge drops the silent peer inside the stalled round', JSON.stringify(wm));
   const pre = stallTable(MUT.load('src/ws-keepalive.js', NO_STALL, 'no-stall-verdict'));
@@ -242,7 +251,7 @@ async function stormLeg(BSmod) {
   ok(r.before === 3 && r.after === 3 && r.framed === 3 && r.named.length === 0, `two 1 s bursts back to back at keepaliveMs 200: all 3 live viewers stay (count ${r.before} → ${r.after}), no close line, each gets the next frame`, JSON.stringify(r));
   const kaPre = MUT.write('src/ws-keepalive.js', NO_STALL, 'storm-pre');
   const bsSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-  const bsPre = bsSrc.replace("require('../ws-keepalive.js')", `require(${JSON.stringify(kaPre)})`);
+  const bsPre = editAnchor(bsSrc, "require('../ws-keepalive.js')", `require(${JSON.stringify(kaPre)})`, "src/server/browser-stream.js");
   const c = await stormLeg(MUT.load('src/server/browser-stream.js', bsPre, 'storm-pre'));
   ok(bsPre !== bsSrc && c.before === 3 && c.after === 0 && c.named.length === 3, `CONTROL: the same storm through the bridge on the pre-fix rule drops all 3 live viewers at once (count ${c.before} → ${c.after}, ${c.named.length} named line(s)) — our stall read as their death`, JSON.stringify(c));
 }

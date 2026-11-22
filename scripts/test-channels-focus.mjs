@@ -64,6 +64,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FOCUS_PATH = path.join(REPO, 'src/channel-focus.js');   // design 008: the predicate moved to the shared tier (src/lib/channel-focus.js re-exports it)
@@ -583,7 +592,7 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-focus.js'), 'utf8');
   const RULE = "  if (c.kind === 'dm' && !c.app && num(c.unread) > 0";
   ok(fsrc.includes(RULE), 'design 012: the patch site of the app control is in channel-focus.js');
-  const F2 = require(MUT.write('src/channel-focus.js', fsrc.replace(RULE, "  if (c.kind === 'dm' && num(c.unread) > 0"), 'app-dm'));
+  const F2 = require(MUT.write('src/channel-focus.js', editAnchor(fsrc, RULE, "  if (c.kind === 'dm' && num(c.unread) > 0", "src/channel-focus.js"), 'app-dm'));
   ok(F2.statusTag({ ...dm, app: true }, t) && F2.statusTag({ ...dm, app: true }, t).code === 'direct', 'design 012 NEGATIVE CONTROL: a copy without the `app` test tags a GitHub bot\'s DM "Direct"');
 }
 
@@ -616,7 +625,7 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-focus.js'), 'utf8');
   const PIN = '  if (atYouOf(r, now) > 0) return true;\n';   // lane attention-rule-at-you: THE predicate (an agent group's own count first)
   ok(fsrc.split(PIN).length === 2, 'channels-badges CONTROL setup: the @-you clause is spelled once');
-  const F0 = require(MUT.write('src/channel-focus.js', fsrc.replace(PIN, ''), 'badges-no-at'));
+  const F0 = require(MUT.write('src/channel-focus.js', editAnchor(fsrc, PIN, '', "src/channel-focus.js"), 'badges-no-at'));
   ok(!keys(F0.internalBlock(L, { folded: true, now: t })).includes('g2'), 'channels-badges NEGATIVE CONTROL: a copy without the @-you clause folds the group that @-mentions the owner away — the leg above would be red');
 }
 
@@ -764,7 +773,7 @@ console.log('⑭ the at-you rule (lane attention-rule-at-you): an unread @ of me
   const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-focus.js'), 'utf8');
   const CLAUSE = "  if (ay > 0) return { code: 'at-you', n: ay };\n";
   ok(fsrc.split(CLAUSE).length === 2, 'at-you CONTROL setup: the clause is spelled once');
-  const Fb = require(MUT.write('src/channel-focus.js', fsrc.replace(CLAUSE, ''), 'no-at-you'));
+  const Fb = require(MUT.write('src/channel-focus.js', editAnchor(fsrc, CLAUSE, '', "src/channel-focus.js"), 'no-at-you'));
   ok(Fb.statusTag(conv(at1), NOW) === null && !Fb.firstScreen([conv(at1)], { now: NOW }).shown.length, 'RED CONTROL: a copy that ignores mentions never lists the @ row — the legs above would be red');
 }
 
