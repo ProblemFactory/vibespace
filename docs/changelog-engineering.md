@@ -1794,6 +1794,9 @@ This file is the engineers' record of every release: the lanes, the verification
   - a 37 MB agent whole;
   - the watcher's finder (zero synchronous listings, five watchers one listing).
 
+### bl-machines-b — test-dir-slice-remote ①: judged by the order (主开发 r2574; tests only)
+- The healthy typed folder is listed while a base and a probe hang: the leg judges the ORDER — the healthy run LANDED while the hung run was still out, and the next ask serves it — on a host of its own whose runs carry a 20 s net that judges nothing (twice the leg's 10 s landing wait); it waits on the landing (a fact), and ends its own stall (no new one; its sleeps by the pids they wrote; every run of that host ended, asserted). The first reply is the hub's own 200 ms wait, which a real sh and ls under twelve lanes once missed (the box zone of e95ccdcba-20261122211626-both). The final cleanup writes the no-stall mark first.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
