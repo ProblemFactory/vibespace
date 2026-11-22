@@ -163,10 +163,34 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   /** r2224 (1): a read under the home made OUTSIDE a job (the opted-out start's look at our hook rows) goes through the SAME guard —
    *  bounded by the run's bound (or `ms`: a reader a person or a start waits on — r2345), counted while it is out — from the RUN's
    *  bound, never a shorter reader's (r2513 (1)) — and refused at once while an earlier read is out → { value } | { error } |
-   *  { timedOut, why } | { held, why } */
-  function homeRead(fn, ms = timeoutMs) {
+   *  { timedOut, why } | { held, why }
+   *  r2592 (2), THE PILE ON A SILENT HOME — ONE READ OUT PER READER CLASS (`cls`: the statusline read, the hook status, an opted-out
+   *  start's look): callers of one class SHARE the read in flight, each waiting up to its own bound; a caller that finds its OWN
+   *  class's read already past that class's bound is refused at once (on a silent home only the first start waits, and one read is
+   *  parked, not one a start); a class past its bound never refuses ANOTHER class before the run's bound. */
+  const flights = new Map();   // cls → { p, ms, pastBound }
+  function homeRead(fn, ms = timeoutMs, { cls = null } = {}) {
     if (homeStuck > 0) return Promise.resolve({ held: true, why: `the home still has not answered an earlier read (${homeStuck} still out)` });
-    return bounded(fn, ms, { countAt: timeoutMs }).then((r) => (r.timedOut ? { timedOut: true, why: `the home did not answer within ${ms} ms` } : r));
+    if (!cls) return bounded(fn, ms, { countAt: timeoutMs }).then((r) => (r.timedOut ? { timedOut: true, why: `the home did not answer within ${ms} ms` } : r));
+    let f = flights.get(cls);
+    if (f && f.pastBound) return Promise.resolve({ held: true, why: `this reader's last read of the home has not answered (past its ${f.ms} ms)` });
+    if (!f) {
+      const p = Promise.resolve().then(fn);
+      f = { p, ms, pastBound: false };
+      flights.set(cls, f);
+      const counted = setTimeout(() => { homeStuck++; const back = () => { homeStuck--; }; p.then(back, back); }, timeoutMs);   // out past the RUN's bound
+      const past = setTimeout(() => { f.pastBound = true; }, ms);   // past the CLASS's bound: its next caller is refused at once
+      counted.unref?.(); past.unref?.();
+      const done = () => { clearTimeout(counted); clearTimeout(past); if (flights.get(cls) === f) flights.delete(cls); };
+      p.then(done, done);
+    }
+    const flight = f;
+    return new Promise((resolve) => {   // each caller waits on the SHARED read up to its own bound
+      let over = false;
+      const t = setTimeout(() => { over = true; resolve({ timedOut: true, why: `the home did not answer within ${ms} ms` }); }, ms);
+      t.unref?.();
+      flight.p.then((value) => { if (!over) { clearTimeout(t); resolve({ value }); } }, (error) => { if (!over) { clearTimeout(t); resolve({ error }); } });
+    });
   }
   /** --status: the managed keys read off disk BY THE HELPER (nothing written). Never queued behind an apply's waiter list:
    *  a read beside a write is a read. */

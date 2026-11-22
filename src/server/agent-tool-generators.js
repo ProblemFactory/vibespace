@@ -167,25 +167,25 @@ try { if (fs.existsSync(USAGE_STATUSLINE_CMD)) fs.chmodSync(USAGE_STATUSLINE_CMD
 // r2345 (b): read OFF THE LOOP through the runner's guard, within 2 s — it was a synchronous read of the person's home at every
 // local terminal start; a home that does not answer (or an earlier read still out) passes no statusline through for that start
 // (the usage one still runs), said once per cause; a missing or unparsable file is no statusline, as before
-// r2513 (2)/(3): SAID WHERE THE PERSON LOOKS — `unread(why)` (the start's notice) is called once a cause: a home that does not answer
-// (its read past the bound, or refused while an earlier one is out) is ONE cause, so the next stalled start says nothing again;
-// any answer of the home (a value, or a missing file) clears the mark, so a later stall is said again
+// r2513 (2)/(3) + r2592 (1): SAID WHERE THE PERSON LOOKS, AND ONLY WHEN SOMEONE SAW IT — `unread(why, seq)` (the start's notice) answers
+// how many pages it reached (serverNotice's count); the told-mark latches only above 0, so a start with no page open (a resume, a task,
+// an API start) tells no one and latches nothing: the next stalled start tries again. A silent home (its read past the bound, or
+// refused while one is out) is ONE cause while it lasts; any answer of the home (a value, or a missing file) ends it and moves `seq`,
+// so the next stall's notice has a fresh name (serverNotice says one name once a boot). The journal says each silent spell once.
 const STATUSLINE_READ_MS = 2000;
-let _statuslineUnreadSaid = null;
+let _statuslineTold = false, _statuslineWarned = false, _statuslineSeq = 0;
+const statuslineAnswered = () => { if (_statuslineTold || _statuslineWarned) _statuslineSeq++; _statuslineTold = false; _statuslineWarned = false; };
 async function userStatuslineCmd({ unread = null } = {}) {
   const read = () => fs.promises.readFile(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8');
-  const r = typeof homeRead === 'function' ? await homeRead(read, STATUSLINE_READ_MS) : await read().then((value) => ({ value }), (error) => ({ error }));
+  const r = typeof homeRead === 'function' ? await homeRead(read, STATUSLINE_READ_MS, { cls: 'statusline' }) : await read().then((value) => ({ value }), (error) => ({ error }));   // r2592 (2): one read out for every start that asks
   if (!('value' in r)) {
     if (r.held || r.timedOut) {
-      if (_statuslineUnreadSaid !== 'silent') {
-        _statuslineUnreadSaid = 'silent';
-        console.warn(`[statusline] ~/.claude/settings.json was not read (${r.why}) — this start passes no statusline of the person's through; read again at the next start`);
-        if (typeof unread === 'function') { try { unread(String(r.why || 'no answer')); } catch { } }
-      }
-    } else _statuslineUnreadSaid = null;   // the home answered (no file, or not readable as such): no statusline, as before
+      if (!_statuslineWarned) { _statuslineWarned = true; console.warn(`[statusline] ~/.claude/settings.json was not read (${r.why}) — this start passes no statusline of the person's through; read again at the next start`); }
+      if (!_statuslineTold && typeof unread === 'function') { let n = 0; try { n = Number(unread(String(r.why || 'no answer'), _statuslineSeq)) || 0; } catch { n = 0; } if (n > 0) _statuslineTold = true; }
+    } else statuslineAnswered();   // the home answered (no file, or not readable as such): no statusline, as before
     return '';
   }
-  _statuslineUnreadSaid = null;
+  statuslineAnswered();
   try {
     const s = JSON.parse(r.value);
     const sl = s && s.statusLine;
@@ -516,7 +516,7 @@ async function agentHooksStatus() {
   const hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE), refused: ownerWriteRefusal(), registeredAfterError: _registeredAfterError }; // verify r2 ①: the chip says "registered at HH:MM after an earlier read error"
-  const r = typeof homeRead === 'function' ? await homeRead(hookFileFacts, STATUS_READ_MS) : await hookFileFacts().then((value) => ({ value }), (error) => ({ error }));
+  const r = typeof homeRead === 'function' ? await homeRead(hookFileFacts, STATUS_READ_MS, { cls: 'hook-status' }) : await hookFileFacts().then((value) => ({ value }), (error) => ({ error }));   // r2592 (2): one read out for every page and check that asks
   if (!r.value) {
     const why = `the hook files were not read (${r.why || (r.error && r.error.message) || r.error || 'no answer'})`;
     const cause = r.held || r.timedOut ? 'silent' : why;   // r2513 (3): a home that does not answer is ONE cause, timed out or refused
@@ -718,7 +718,7 @@ function ensureAgentHooks({ auto = false } = {}) {
   if (refused) return Promise.resolve({ skipped: true, refused });
   const held = settingsHeldNow();
   if (held) { replayAtLift(); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }   // B-225b: no write while the settings are held
-  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return (typeof homeRead === 'function' ? homeRead(ourRowsOnDisk) : ourRowsOnDisk().then((value) => ({ value }))).then((r) => (r.value ? (r.value.some((x) => x.ours) ? stripAgentHookEntries({ ifOptedOut: true }).then((removed) => ({ optedOut: true, removed })) : { optedOut: true }) : optedOutUnread(r)));   // r1675: opted out AND our rows still there (a removal the hub's stop lost) ⇒ ONE removal queued; r2224 (1): that look is a read under the home OUTSIDE a job — through the runner's guard (bounded, counted, refused while an earlier read is out), an unanswered look queues no removal and says why
+  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return (typeof homeRead === 'function' ? homeRead(ourRowsOnDisk, undefined, { cls: 'opted-out-look' }) : ourRowsOnDisk().then((value) => ({ value }))).then((r) => (r.value ? (r.value.some((x) => x.ours) ? stripAgentHookEntries({ ifOptedOut: true }).then((removed) => ({ optedOut: true, removed })) : { optedOut: true }) : optedOutUnread(r)));   // r1675: opted out AND our rows still there (a removal the hub's stop lost) ⇒ ONE removal queued; r2224 (1): that look is a read under the home OUTSIDE a job — through the runner's guard (bounded, counted, refused while an earlier read is out), an unanswered look queues no removal and says why
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
   const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`;

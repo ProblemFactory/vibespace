@@ -432,7 +432,7 @@ const {
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
   ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery, rootFactsNow, onRootLanded, // B-1425: the root facts a caller that can wait awaits
   agentHooksStatus, HOOK_OPTOUT_FILE,
-} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev), applyThisMachine: (o) => harnessConfig.applyThisMachine(o), homeRead: (fn, ms) => harnessConfig.homeRead(fn, ms) }); // B-ddf3 u2 line 1: this machine's hooks through the shipped helper
+} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev), applyThisMachine: (o) => harnessConfig.applyThisMachine(o), homeRead: (fn, ms, opts) => harnessConfig.homeRead(fn, ms, opts) }); // B-ddf3 u2 line 1: this machine's hooks through the shipped helper
 // ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
 // THE typed accessors over the descriptor-declared tables (harnessSetting /
 // harnessDeclares / harnessSpawnSettings — threaded to ws-create and the pool
