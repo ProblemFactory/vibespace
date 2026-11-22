@@ -81,6 +81,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A backlog change made on the board no longer erases an agent's claim or a row it parked a moment before; a row removed meanwhile is named.
 - Archiving a conversation that is in a Task Group no longer holds VibeSpace still while the groups are saved.
 - When a conversation's login answered as another of your accounts, that account's usage was counted as this one's. Now its row says its own usage is unknown.
+- An agent can now read one part of a large window page at a time, and the whole text of one field, such as a full web address.
+- An agent reading a window through its accessibility tree no longer gets the text of a password field.
+- An agent can now act on a window item whose name is longer than 200 characters; before, it was refused every time as if the page had changed.
 
 ## 2.369.415 — 2026-11-21
 
