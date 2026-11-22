@@ -27,7 +27,11 @@
  *       unfollowed  — 主开发 r617: «SAYS SO» AT THE START — every setting the person chose that this start cannot follow (an
  *                     Automatic with nothing to follow, a kept value the runtime no longer accepts): [{ key, mode, said }]. The
  *                     start still runs (the owner's decision 2: it acts as this machine's), and it SAYS so where the person is
- *   · environmentLogView(env)         — a place is the person's private fact: never in a log or a journal line (its kind only)
+ *   · environmentLogView(env)         — a place is the person's private fact: never in a log or a journal line (its kind only;
+ *                                       its sites by their COUNT, never an origin)
+ *   · siteVerdict(s) / sitesVerdict(list) — B-9584 THE PLACE'S ROAD (the owner's choice B, 主开发 r1791 / r1898): the sites a place is
+ *                                       given to — each an EXACT origin (scheme, host, port; no wildcard, no suffix match), at most
+ *                                       SITES_MAX, sorted, once each; default none (no site reads the place)
  *   · stockLaunchOf(resolved, o)      — U2b: the STOCK browser's own start — its two language switches (one tag), its TZ, the
  *                                       store's mark that a language was ever told
  *   · machineLanguageTag(locale)      — the hub's own tag, STATED at «this machine's» once a language was told (its base —
@@ -90,6 +94,30 @@ function placeVerdict(v) {
   const six = (x) => Math.round(x * 1e6) / 1e6 || 0;   // kept at six decimals (≈ 0.11 m): what a start uses, no finer private fact stored
   return { ok: true, value: { latitude: six(lat), longitude: six(lng), ...(acc !== null ? { accuracy: acc } : {}) } };
 }
+/** B-9584 THE PLACE'S ROAD (主开发 r1898 (6)): A LISTED SITE IS AN EXACT ORIGIN — its scheme, host and port, nothing else (a path, a query,
+ *  a fragment are dropped: the origin is what the browser grants); never a wildcard, a pattern or a suffix match; http or https only;
+ *  no user name or password. → { ok, value: 'https://maps.example.com' } | refused by name. */
+const SITES_MAX = 20;
+function siteVerdict(s) {
+  const t = str(s).trim();
+  if (!t || t.length > 300) return refuse('env_site_invalid', 'a site is one address, like https://maps.example.com');
+  if (/[*\s]/.test(t)) return refuse('env_site_invalid', `«${t.slice(0, 60)}»: a site is ONE exact address — no wildcard, no space`);
+  let u = null; try { u = new URL(t); } catch { u = null; }
+  if (!u) return refuse('env_site_invalid', `«${t.slice(0, 60)}» is not an address — write it with its scheme: https://…`);
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return refuse('env_site_invalid', `«${t.slice(0, 60)}»: a site is an http or https address`);
+  if (u.username || u.password) return refuse('env_site_invalid', 'a site carries no user name or password');
+  if (!u.hostname) return refuse('env_site_invalid', `«${t.slice(0, 60)}» names no host`);
+  return { ok: true, value: u.origin };
+}
+/** The list beside a place: absent = none; each judged (siteVerdict), once each, sorted; at most SITES_MAX. */
+function sitesVerdict(list) {
+  if (list == null) return { ok: true, value: [] };
+  if (!Array.isArray(list)) return refuse('env_sites_invalid', 'the sites are a list of addresses');
+  if (list.length > SITES_MAX) return refuse('env_sites_invalid', `at most ${SITES_MAX} sites may know a place`);
+  const out = new Set();
+  for (const x of list) { const v = siteVerdict(x); if (!v.ok) return v; out.add(v.value); }
+  return { ok: true, value: [...out].sort() };
+}
 /** A zone: the exit check's own rule (a real IANA name, canonical spelling), under this setting's code; an empty name is no zone. */
 function timezoneVerdict(v) {
   const z = zoneVerdict(v);
@@ -136,10 +164,13 @@ function environmentVerdict(input) {
     if (!MODE_LIST.includes(mode)) return refuse('env_mode_invalid', `${key}: the choice is one of ${row.choices.join(', ')}`);
     if (!row.choices.includes(mode)) return refuse('env_mode_unoffered', `${key} offers ${row.choices.join(', ')} — not ${mode}`);
     if (mode === MODES.MACHINE) continue;   // this machine's: nothing kept
+    const listed = key === 'location' && c.sites != null && !(Array.isArray(c.sites) && c.sites.length === 0);
+    if (listed && mode !== MODES.VALUE) return refuse('env_sites_unoffered', 'location: sites are listed only beside a place');   // B-9584 (B): a «blocked» location gives no site anything
     if (mode !== MODES.VALUE) { out[key] = { mode }; continue; }
     const v = row.value(c.value);
     if (!v.ok) return { ...v, error: `${key}: ${v.error}` };
     out[key] = { mode, value: v.value };
+    if (key === 'location') { const sv = sitesVerdict(c.sites); if (!sv.ok) return { ...sv, error: `location: ${sv.error}` }; if (sv.value.length) out[key].sites = sv.value; }   // B-9584 (B): the sites that may know the place (default none)
   }
   return { ok: true, value: Object.keys(out).length ? out : null };
 }
@@ -169,7 +200,7 @@ function resolveEnvironment(environment, exit = null) {
     else r = { from: 'machine', value: null };
     if (r.from === 'value' || r.from === 'exit') told[row.key] = row.key === 'location' ? { latitude: r.value.latitude, longitude: r.value.longitude } : r.value;
     if (r.from === 'block') told[row.key] = 'blocked';   // B-9584 U2a (主开发 r745): the kernel's hand-over now has a form for it — the word
-    if (row.key === 'location' && (r.from === 'value' || r.from === 'exit')) geolocation = { kind: 'place', latitude: r.value.latitude, longitude: r.value.longitude, accuracy: r.value.accuracy != null ? r.value.accuracy : PLACE_ACCURACY_M };
+    if (row.key === 'location' && (r.from === 'value' || r.from === 'exit')) { const sv = sitesVerdict(c && c.sites); geolocation = { kind: 'place', latitude: r.value.latitude, longitude: r.value.longitude, accuracy: r.value.accuracy != null ? r.value.accuracy : PLACE_ACCURACY_M, sites: sv.ok ? sv.value : [] }; }   // B-9584 (B): the sites judged again at use — a list that no longer passes gives NO site the place (fail closed)
     if (row.key === 'location' && r.from === 'block') geolocation = { kind: 'blocked' };
     if (r.said) unfollowed.push({ key: row.key, mode, said: r.said });
     settings.push({ key: row.key, mode, from: r.from, value: r.value, said: r.said || null });
@@ -211,7 +242,12 @@ function machineLanguageTag(locale = (() => { try { return Intl.DateTimeFormat()
  *  (the default and each row's setting, never a place: these are site names and their allow / ask / block), kept beside the profile to
  *  give back when the location returns to «this machine's» (geoStoredRestore). A file of another shape is refused, never overwritten. */
 const GEO_BLOCK = 2;
-function geoStoredDenial(prefs) {
+/** r2172 (b)(d) OURS KEPT APART FROM THE PERSON'S: every row the denial writes carries OUR stamp in its `last_modified` (the browser sets a
+ *  row's own stamp whenever a person changes it), kept beside the person's values. The give-back restores a row ONLY while it still
+ *  carries our stamp — a row the person changed since (to «block» too) stays as the browser keeps it, and a give-back that half ran
+ *  never runs again over it; the default (no stamp of its own) only while it still reads our «block». `stamp` = the browser's own
+ *  clock form (microseconds since 1601, a string); absent ⇒ no row is stamped (a kept file of the built part gives back what reads «block»). */
+function geoStoredDenial(prefs, { stamp = null } = {}) {
   if (prefs !== null && (typeof prefs !== 'object' || Array.isArray(prefs))) return { ok: false, why: 'its Preferences are not an object' };
   const p = prefs ? JSON.parse(JSON.stringify(prefs)) : {};
   const prof = p.profile && typeof p.profile === 'object' && !Array.isArray(p.profile) ? p.profile : (p.profile = {});
@@ -219,13 +255,15 @@ function geoStoredDenial(prefs) {
   const cs = prof.content_settings && typeof prof.content_settings === 'object' ? prof.content_settings : (prof.content_settings = {});
   const ex = cs.exceptions && typeof cs.exceptions === 'object' ? cs.exceptions : (cs.exceptions = {});
   const rows = ex.geolocation && typeof ex.geolocation === 'object' && !Array.isArray(ex.geolocation) ? ex.geolocation : (ex.geolocation = {});
-  const kept = { default: Object.prototype.hasOwnProperty.call(dflt, 'geolocation') ? dflt.geolocation : null, rows: {} };
+  const kept = { default: Object.prototype.hasOwnProperty.call(dflt, 'geolocation') ? dflt.geolocation : null, rows: {}, ...(stamp ? { stamp: String(stamp), stamps: {} } : {}) };
   let changed = dflt.geolocation !== GEO_BLOCK;
   dflt.geolocation = GEO_BLOCK;
   for (const [key, row] of Object.entries(rows)) {
     if (!row || typeof row !== 'object') continue;
     kept.rows[key] = Object.prototype.hasOwnProperty.call(row, 'setting') ? row.setting : null;
+    if (stamp) kept.stamps[key] = Object.prototype.hasOwnProperty.call(row, 'last_modified') ? row.last_modified : null;
     if (row.setting !== GEO_BLOCK) { row.setting = GEO_BLOCK; changed = true; }
+    if (stamp && row.last_modified !== String(stamp)) { row.last_modified = String(stamp); changed = true; }   // OURS, told apart from the person's
   }
   return { ok: true, changed, prefs: p, kept };
 }
@@ -238,14 +276,19 @@ function geoStoredRestore(prefs, kept) {
   const prof = p.profile && typeof p.profile === 'object' ? p.profile : (p.profile = {});
   const dflt = prof.default_content_setting_values && typeof prof.default_content_setting_values === 'object' ? prof.default_content_setting_values : (prof.default_content_setting_values = {});
   let changed = false;
-  if (kept.default === null || kept.default === undefined) { if ('geolocation' in dflt) { delete dflt.geolocation; changed = true; } }
-  else if (dflt.geolocation !== kept.default) { dflt.geolocation = kept.default; changed = true; }
+  const oursDefault = dflt.geolocation === GEO_BLOCK;   // r2172 (b): a default the person changed since (not our «block») stays theirs
+  if (oursDefault && (kept.default === null || kept.default === undefined)) { delete dflt.geolocation; changed = true; }
+  else if (oursDefault && dflt.geolocation !== kept.default) { dflt.geolocation = kept.default; changed = true; }
   const rows = (((prof.content_settings || {}).exceptions || {}).geolocation) || {};
   for (const [key, setting] of Object.entries(kept.rows || {})) {
     const row = rows[key];
     if (!row || typeof row !== 'object') continue;
+    // r2172 (b)(d): only a row still as OUR denial left it — our stamp (or, from a kept file without one, still «block»); a row the
+    // person changed since keeps the person's value, whatever it is
+    if (kept.stamp ? String(row.last_modified) !== String(kept.stamp) : row.setting !== GEO_BLOCK) continue;
     if (setting === null) { if ('setting' in row) { delete row.setting; changed = true; } }
     else if (row.setting !== setting) { row.setting = setting; changed = true; }
+    if (kept.stamp) { const lm = kept.stamps && Object.prototype.hasOwnProperty.call(kept.stamps, key) ? kept.stamps[key] : null; if (lm === null) delete row.last_modified; else row.last_modified = lm; changed = true; }   // its own stamp back: never ours again
   }
   return { ok: true, changed, prefs: p };
 }
@@ -255,12 +298,13 @@ function geoStoredRestore(prefs, kept) {
  *  the default keeps its first. PURE → { ok, changed, kept }; kept values of another shape are refused, never merged into. */
 function geoKeptMerge(kept, found) {
   if (!kept || typeof kept !== 'object' || Array.isArray(kept) || (kept.rows !== undefined && (!kept.rows || typeof kept.rows !== 'object' || Array.isArray(kept.rows)))) return { ok: false, why: 'the kept values are not of their shape' };
-  const out = { default: Object.prototype.hasOwnProperty.call(kept, 'default') ? kept.default : null, rows: { ...(kept.rows || {}) } };
+  const out = { default: Object.prototype.hasOwnProperty.call(kept, 'default') ? kept.default : null, rows: { ...(kept.rows || {}) }, ...(found && found.stamp ? { stamp: found.stamp, stamps: { ...((found && found.stamps) || {}), ...(kept.stamps || {}) } } : kept.stamp ? { stamp: kept.stamp, stamps: { ...(kept.stamps || {}) } } : {}) };   // r2172: the stamp of THIS launch's denial (the rows carry it now)
   let changed = false;
   for (const [key, setting] of Object.entries((found && found.rows) || {})) {
     if (Object.prototype.hasOwnProperty.call(out.rows, key) || setting === GEO_BLOCK) continue;
     out.rows[key] = setting; changed = true;
   }
+  if (found && found.stamp && found.stamp !== kept.stamp) changed = true;   // a new launch's stamp is written beside the values
   return { ok: true, changed, kept: out };
 }
 /** THE HUB'S TWO CANONICAL FORMS (round wyx4vuerd 3) — a zone as the runtime's date formatter spells it (a legacy alias and its zone,
@@ -285,9 +329,9 @@ function environmentLogView(environment) {
   for (const row of SETTINGS) {
     const c = env[row.key];
     if (!c || typeof c !== 'object') continue;
-    out[row.key] = row.key === 'location' ? str(c.mode) : c.mode === MODES.VALUE ? `${c.mode}:${str(c.value)}` : str(c.mode);
+    out[row.key] = row.key === 'location' ? `${str(c.mode)}${Array.isArray(c.sites) && c.sites.length ? ` · ${c.sites.length} site${c.sites.length === 1 ? '' : 's'}` : ''}` : c.mode === MODES.VALUE ? `${c.mode}:${str(c.value)}` : str(c.mode);   // B-9584 (B): the sites by their COUNT, never an origin
   }
   return out;
 }
 
-module.exports = { stockLaunchOf, machineLanguageTag, canonicalZone, canonicalTag, geoStoredDenial, geoStoredRestore, geoKeptMerge, GEO_BLOCK, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };
+module.exports = { siteVerdict, sitesVerdict, SITES_MAX, stockLaunchOf, machineLanguageTag, canonicalZone, canonicalTag, geoStoredDenial, geoStoredRestore, geoKeptMerge, GEO_BLOCK, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };

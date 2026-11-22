@@ -130,6 +130,9 @@ console.log('— ③ THE HOLDER CENSUS');
     // download folder it was — by the profile and that CONVERSATION's own browser key — to name the conversation its notice goes to;
     // a told event comes only from a grant, and a grant is minted only for a conversation lease (the person's own key keeps the raw url)
     onTold: 1,
+    // B-9584 (B, 主开发 r1791): a tab the place's hold CLOSED (sites on the list, its place not given) marks the CONVERSATION lease
+    // that bound it (its next command says why by name); the person's own row binds no tab of ours
+    onGeoEvent: 1,
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + their row)
   const HOLDER = { list: 1, holdersOn: 1 };

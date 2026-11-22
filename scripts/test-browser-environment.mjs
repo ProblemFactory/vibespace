@@ -11,9 +11,10 @@
 //   ④ THE ONE READER of the kept exit
 //   ⑤ WHAT EACH SETTING IS — told (the hand-over's own object, or null), geolocation, unfollowed, case by case
 //   ⑥ THE SEEDED LAW — 3 seeds × 400 environments × exits; the facts judged printed
-//   ⑦ REDS — eleven mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
+//   ⑦ REDS — fourteen mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
 //      used raw at a start — the hostile-values leg goes red; the tenth, B-9584 U2c: the stored denial writing the default only; the
-//      eleventh, r1707 (3): the kept values merged with a later launch's value over the first)
+//      eleventh, r1707 (3): the kept values merged with a later launch's value over the first; the twelfth and thirteenth, B-9584 (B):
+//      a wildcard taken as a site, the log carrying the sites; the fourteenth, r2172 (b): a give-back over the person's later block)
 // The runtime decides two facts here: a zone name (its date formatter) and a language tag (Intl.getCanonicalLocales, its ICU data);
 // where the runtime's own spelling is the expected value (a legacy alias, Etc/UTC, a three-letter code), the leg asks the runtime.
 import fs from 'node:fs';
@@ -139,7 +140,7 @@ function legs(M) {
   }
   // ⑤ geolocation: what the hand-over has no form for (a place's accuracy, blocked) — the protocol road's
   const gp = R({ location: { mode: 'value', value: { latitude: 35.68, longitude: 139.76 } } }), gpa = R({ location: { mode: 'value', value: { latitude: 1, longitude: 2, accuracy: 20 } } }), gb = R({ location: { mode: 'block' } });
-  leg('⑤ geolocation: a place with the stated 100 m, a place with its own accuracy, blocked — and the hand-over carries blocked as its word, never an accuracy', J(gp.geolocation) === J({ kind: 'place', latitude: 35.68, longitude: 139.76, accuracy: 100 }) && J(gpa.geolocation) === J({ kind: 'place', latitude: 1, longitude: 2, accuracy: 20 }) && J(gb.geolocation) === J({ kind: 'blocked' }) && J(gb.told) === J({ location: 'blocked' }) && !('accuracy' in (gpa.told || {}).location), { gp: gp.geolocation, gpa: gpa.geolocation, gb });
+  leg('⑤ geolocation: a place with the stated 100 m, a place with its own accuracy, blocked — and the hand-over carries blocked as its word, never an accuracy', J(gp.geolocation) === J({ kind: 'place', latitude: 35.68, longitude: 139.76, accuracy: 100, sites: [] }) && J(gpa.geolocation) === J({ kind: 'place', latitude: 1, longitude: 2, accuracy: 20, sites: [] }) && J(gb.geolocation) === J({ kind: 'blocked' }) && J(gb.told) === J({ location: 'blocked' }) && !('accuracy' in (gpa.told || {}).location), { gp: gp.geolocation, gpa: gpa.geolocation, gb });
   // ⑤ «SAYS SO» AT THE START (主开发 r617): every choice the start cannot follow is listed for the start road to say
   const pr = R({ timezone: { mode: 'auto' }, language: { mode: 'auto' } }, null), fine = R({ timezone: { mode: 'auto' }, language: { mode: 'auto' } }, M.keptExitOf(tokyo));
   const stale = R({ timezone: { mode: 'value', value: 'Mars/Olympus' } });
@@ -191,6 +192,41 @@ function legs(M) {
     leg('U2c the kept values merged at a later held launch: a site allowed while held joins them (shop 1), the one kept before keeps its FIRST value (maps 1, never the 3 seen later), a «block» row is not kept, the default its first; nothing new ⇒ unchanged; another shape refused',
       m1.ok && m1.changed && J(m1.kept) === J({ default: null, rows: { 'https://maps.example:443,*': 1, 'https://shop.example:443,*': 1 } }) && J(kept0.rows) === J({ 'https://maps.example:443,*': 1 })
       && m0.ok && !m0.changed && !bad.ok && !bad2.ok, { m1: m1.kept, m0 }); }
+  // B-9584 (B, the owner's choice; 主开发 r1898 (5)(6)): THE SITES A PLACE IS GIVEN TO — each an EXACT origin, default none, judged at the
+  // door and again at use, the log by their count only
+  { const sv = M.siteVerdict, ss = M.sitesVerdict;
+    const okOrigins = [['HTTPS://Maps.Example.com:443/a?b#c', 'https://maps.example.com'], ['http://maps.example:8080/', 'http://maps.example:8080']].every(([i, o]) => { const v = sv(i); return v.ok && v.value === o; });
+    const refusedSites = ['*.example.com', 'https://*.example.com', 'example.com', 'ftp://example.com', 'https://u:p@example.com', ' ', 'https://a b.com'].every((x) => !sv(x).ok);
+    const list = ss(['https://b.example', 'https://a.example/x', 'https://b.example/']);
+    const tooMany = ss(Array.from({ length: M.SITES_MAX + 1 }, (_, i) => `https://s${i}.example`));
+    const place = { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } };
+    const kept = M.environmentVerdict({ location: { ...place, sites: ['https://a.example/x'] } });
+    const none = M.environmentVerdict({ location: { ...place, sites: [] } });
+    const onBlock = M.environmentVerdict({ location: { mode: 'block', sites: ['https://a.example'] } });
+    const r = M.resolveEnvironment({ location: { ...place, sites: ['https://a.example'] } });
+    const rBad = M.resolveEnvironment({ location: { ...place, sites: ['*.a.example'] } });
+    const lg = J(M.environmentLogView({ location: { ...place, sites: ['https://a.example', 'https://b.example'] } }));
+    leg('(B) the sites: each an EXACT origin (a path, a query dropped; the host lower-cased, the default port dropped); a wildcard, a bare name, another scheme, a user name, a space refused by name; sorted, once each, at most SITES_MAX; kept only beside a place (none ⇒ no key; beside «blocked» refused); judged again at use (a stored list that fails gives NO site the place); the log carries the COUNT, never an origin',
+      okOrigins && refusedSites && list.ok && J(list.value) === J(['https://a.example', 'https://b.example']) && !tooMany.ok
+      && kept.ok && J(kept.value.location.sites) === J(['https://a.example']) && none.ok && !('sites' in none.value.location) && !onBlock.ok && onBlock.code === 'env_sites_unoffered'
+      && J(r.geolocation.sites) === J(['https://a.example']) && J(rBad.geolocation.sites) === '[]' && /2 sites/.test(lg) && !/a\.example/.test(lg),
+      { list: list.value, kept: kept.value, lg }); }
+  // r2172 (b)(d): OURS KEPT APART FROM THE PERSON'S — the denial stamps the rows it writes; the give-back restores a row only while it
+  // still carries our stamp (a person's later block stays a block; a give-back that half ran never runs again over the person's change);
+  // the default only while it still reads our «block»
+  { const before = { profile: { content_settings: { exceptions: { geolocation: { 'https://a.example:443,*': { setting: 1, last_modified: '100' }, 'https://b.example:443,*': { setting: 1, last_modified: '200' } } } } } };
+    const d = M.geoStoredDenial(before, { stamp: '999' });
+    const held = JSON.parse(JSON.stringify(d.prefs));
+    held.profile.content_settings.exceptions.geolocation['https://b.example:443,*'] = { setting: 2, last_modified: '1000' };   // the person BLOCKS b while held (the browser stamps it)
+    held.profile.default_content_setting_values.geolocation = 3;   // …and sets the default to «ask»
+    const r = M.geoStoredRestore(held, d.kept);
+    const again = r.ok ? M.geoStoredRestore(r.prefs, d.kept) : null;   // a give-back that half ran (the kept file not removed) runs again
+    const rows = (x) => x.profile.content_settings.exceptions.geolocation;
+    leg('r2172 (b)(d) ours apart from the person\'s: the denial stamps its rows (999); back at «this machine\'s» a row still ours is given back with its own stamp (a ⇒ allow, 100), a row the person BLOCKED since stays a block (b ⇒ block, never allow), a default the person changed since stays theirs (ask); a second give-back changes nothing',
+      d.ok && rows(d.prefs)['https://a.example:443,*'].last_modified === '999' && d.kept.stamp === '999' && J(d.kept.stamps) === J({ 'https://a.example:443,*': '100', 'https://b.example:443,*': '200' })
+      && r.ok && rows(r.prefs)['https://a.example:443,*'].setting === 1 && rows(r.prefs)['https://a.example:443,*'].last_modified === '100' && rows(r.prefs)['https://b.example:443,*'].setting === 2 && r.prefs.profile.default_content_setting_values.geolocation === 3
+      && !!again && again.ok && !again.changed && J(again.prefs) === J(r.prefs),
+      { after: r.ok && rows(r.prefs), dflt: r.ok && r.prefs.profile.default_content_setting_values }); }
   // round wyx4vuerd (3): THE HUB'S TWO CANONICAL FORMS — a zone's and a tag's case and the runtime's own spelling; a value neither reads kept as given
   leg('the hub\'s two canonical forms: asia/tokyo ⇒ Asia/Tokyo, ja-jp ⇒ ja-JP; a name that is no zone or tag kept as given (it then differs)',
     M.canonicalZone('asia/tokyo') === 'Asia/Tokyo' && M.canonicalTag('ja-jp') === 'ja-JP' && M.canonicalZone('Mars/Base') === 'Mars/Base' && M.canonicalTag('--no-sandbox') === '--no-sandbox' && M.canonicalZone(M.canonicalZone('Asia/Calcutta')) === M.canonicalZone('Asia/Kolkata'),
@@ -257,12 +293,15 @@ const failedOf = (M) => legs(M).filter(([, pass]) => !pass).map(([name]) => name
 const REDS = [
   ['the guessed zone (Automatic with no exit falls back to UTC)', ["auto: (exit) => { if (!exit) return { none: 'no_exit' };", "auto: (exit) => { if (!exit) return { value: 'UTC' };"], '⑤ Automatic zone, NO exit kept', 'X'],
   ['the default moved (this machine\'s kept in the store)', ['    if (mode === MODES.MACHINE) continue;   // this machine\'s: nothing kept\n', ''], '③ THE DEFAULT', 'N'],
-  ['the place in the log (the log view keeps its coordinates)', ["out[row.key] = row.key === 'location' ? str(c.mode) :", "out[row.key] = row.key === 'location' ? JSON.stringify(c) :"], '⑦ the log view', 'L'],
+  ['the place in the log (the log view keeps its coordinates)', ["out[row.key] = row.key === 'location' ? `${str(c.mode)}", "out[row.key] = row.key === 'location' ? `${JSON.stringify(c)}"], '⑦ the log view', 'L'],
   ['the country name guessed (a country kept as a name read as English)', ["const tag = /^[A-Za-z]{2}$/.test(c) ? languageOfCountry(c.toUpperCase()) : null;", "const tag = /^[A-Za-z]{2}$/.test(c) ? languageOfCountry(c.toUpperCase()) : 'en-US';"], '⑤ Automatic language, the country kept as a NAME', null],
   ['the start left unsaid (no unfollowed list)', ['    if (r.said) unfollowed.push({ key: row.key, mode, said: r.said });\n', ''], '⑤ «SAYS SO» AT THE START', 'U'],
   ['an untouched profile hands {} (the told object always present)', ['  return { settings, told: Object.keys(told).length ? told : null, geolocation, unfollowed };', '  return { settings, told, geolocation, unfollowed };'], '⑤ THE DEFAULT', 'E'],
   ['the language rule wider than the kernel\'s (its shape not checked)', ['  if (!KERNEL_TAG.test(canon[0])) return refuse(', '  if (false) return refuse('], '③ refused by name: an extension the kernel refuses', null],
   ['the stored denial writes the default only (a site allowed before keeps its «allow» and wins — measured)', ['    if (row.setting !== GEO_BLOCK) { row.setting = GEO_BLOCK; changed = true; }', '    void 0;'], 'U2c the stored denial', null],
+  ['a site matched by a pattern (a wildcard taken as a site)', ["  if (/[*\\s]/.test(t)) return refuse(", "  if (/\\s/.test(t)) return refuse("], '(B) the sites', null],
+  ['the log carrying the sites (an origin in a log line)', ["? ` · ${c.sites.length} site${c.sites.length === 1 ? '' : 's'}` : ''}`", "? ` · ${c.sites.join(',')}` : ''}`"], '(B) the sites', null],
+  ['a give-back over the person\'s later block (the stamp not read)', ["    if (kept.stamp ? String(row.last_modified) !== String(kept.stamp) : row.setting !== GEO_BLOCK) continue;", "    void 0;"], 'r2172 (b)(d) ours apart', null],
   ['a later launch\'s value over the first one kept (the merge takes a row it had)', ['    if (Object.prototype.hasOwnProperty.call(out.rows, key) || setting === GEO_BLOCK) continue;', '    if (setting === GEO_BLOCK) continue;'], 'U2c the kept values merged', null],
   ['a kept value used raw at a start (the judgment at use bypassed)', ['    if (mode === MODES.VALUE) { const v = row.value(c.value);', '    if (mode === MODES.VALUE) { const v = { ok: true, value: c.value };'], 'U2b hostile stored values at use', null],
   ['a hex or an exponent read as a number', ["typeof x === 'string' && DECIMAL.test(x.trim()) ? Number(x.trim()) : NaN", "typeof x === 'string' && x.trim() !== '' ? Number(x.trim()) : NaN"], '③ refused by name: a hex latitude', null],

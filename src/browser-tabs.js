@@ -615,10 +615,11 @@ function rebindPick({ targets = null, holders = [], key = '' } = {}) {
 }
 /** The ONE sentence the agent reads after a rebind (its command's answer, once): why its tab is gone, where it is bound now.
  *  `how` = `switched` (bound to the browser's only page) | `new` (a new tab of its own); `why` = `life` (the browser was
- *  restarted) | `closed` (the tab was closed). */
+ *  restarted) | `closed` (the tab was closed) | `place` (B-9584 (B): the hold CLOSED it — its place could not be given to it in time,
+ *  and a site on the profile's list would have read this machine's location there). */
 const REBOUND_URL_MAX = 200;
 function reboundNoteText({ how = 'new', url = '', why = 'life' } = {}) {
-  const gone = why === 'closed' ? 'your tab was closed' : 'your tab from the previous run is gone (the browser was restarted)';
+  const gone = why === 'closed' ? 'your tab was closed' : why === 'place' ? 'your tab was closed: this profile\'s place could not be given to it in time (a site on its list would have read this machine\'s location there)' : 'your tab from the previous run is gone (the browser was restarted)';
   // verify r1 (F8): the url is the PAGE's (a data: url keeps every character — a frame tag, a bidi override) and this note
   // is printed to the agent: THE belt (peer-text), as browser-kept's keptUrl and browser-stuck's loadingText — never a raw slice
   const u = PT.toAgentText(str(url), { kind: 'line', max: REBOUND_URL_MAX }).trim();

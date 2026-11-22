@@ -521,6 +521,11 @@
   "why": "refusal words; the stop re-records"
  },
  {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > onGeoEvent · commit()",
+  "verdict": "none",
+  "why": "the lost-tab mark and confirmed word"
+ },
+ {
   "key": "browser-keeper · src/server/browser-keeper.js · create > noteBuildMissing · commit()",
   "verdict": "none",
   "why": "notice mark; worst case duplicate item"

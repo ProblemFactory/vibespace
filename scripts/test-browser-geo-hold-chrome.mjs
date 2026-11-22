@@ -49,13 +49,17 @@ for (const sg of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sg, () => process.e
 const reports = [];
 const page = (body) => `<!doctype html><meta charset="utf-8"><title>g</title><script>${body}</script>`;
 const say = "const say=(o)=>fetch('/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});";
-const READ = `const read=(k,i)=>{navigator.permissions.query({name:'geolocation'}).then((ps)=>{const t0=performance.now();navigator.geolocation.getCurrentPosition((p)=>say({k,i,perm:ps.state,lat:p.coords.latitude,lng:p.coords.longitude,ms:Math.round(performance.now()-t0)}),(e)=>say({k,i,perm:ps.state,err:e.code,ms:Math.round(performance.now()-t0)}),{timeout:${READ_MS},maximumAge:0});});};`;
+const READ = `const read=(k,i)=>{navigator.permissions.query({name:'geolocation'}).then((ps)=>{const t0=performance.now(),callAt=Date.now();navigator.geolocation.getCurrentPosition((p)=>say({k,i,callAt,perm:ps.state,lat:p.coords.latitude,lng:p.coords.longitude,ms:Math.round(performance.now()-t0)}),(e)=>say({k,i,callAt,perm:ps.state,err:e.code,ms:Math.round(performance.now()-t0)}),{timeout:${READ_MS},maximumAge:0});});};`;
+const POP="window.go=(k,delay)=>{const w=window.open('');const fire=()=>{const callAt=Date.now(),t0=performance.now();const fin=(o)=>{let q;try{q=w.navigator.permissions.query({name:'geolocation'});}catch(e){q=Promise.resolve({state:'unreadable'});}q.then((ps)=>say({k,i:'0',perm:ps.state,callAt,ms:Math.round(performance.now()-t0),...o}),()=>say({k,i:'0',perm:'unreadable',callAt,ms:Math.round(performance.now()-t0),...o}));};try{w.navigator.geolocation.getCurrentPosition((p)=>fin({lat:p.coords.latitude,lng:p.coords.longitude}),(e)=>fin({err:e.code}),{timeout:1500,maximumAge:0});}catch(e){fin({threw:String(e&&e.message).slice(0,80)});}};if(delay)setTimeout(fire,delay);else fire();return 'opened';};";
 const srv = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   const k = JSON.stringify(String(u.searchParams.get('k') || '').replace(/[^\w-]/g, '')), i = JSON.stringify(String(u.searchParams.get('i') || '0').replace(/\D/g, ''));
   if (req.method === 'POST' && u.pathname === '/report') { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { reports.push({ at: Date.now(), ...JSON.parse(b) }); } catch { /* not ours */ } res.end('ok'); }); return; }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   if (u.pathname === '/geo') return res.end(page(`${say}${READ}read(${k},${i});window.again=(n)=>read(${k},String(n));`));
+  if (u.pathname === '/pop') return res.end(page(`${say}${READ}${POP}`));   // B-9584 (B): a listed site's popup read in the same script that opens it
+  if (u.pathname === '/frame-host') { const src = String(u.searchParams.get('src') || ''); if (!/^http:\/\/(?:127\.0\.0\.1|localhost):\d+\/geo\?[\w=&-]+$/.test(src)) { res.statusCode = 400; return res.end(''); } return res.end(`<!doctype html><meta charset="utf-8"><title>f</title><iframe src="${src}"${u.searchParams.get('allow') === '1' ? ' allow="geolocation"' : ''}></iframe>`); }   // a frame of one origin inside another's page
+  if (u.pathname === '/worker') return res.end(page(`${say}const w=new Worker(URL.createObjectURL(new Blob(["postMessage('geolocation' in self.navigator)"],{type:'text/javascript'})));w.onmessage=(e)=>say({k:${k},i:'0',worker:e.data});`));   // a worker: no geolocation there
   if (u.pathname === '/opener') { const n = Math.min(6, Number(u.searchParams.get('n')) || 1), first = Math.min(5000, Number(u.searchParams.get('first')) || 0); return res.end(page(`let i=0;const next=()=>{if(i>=${n})return;window.open('/geo?k='+encodeURIComponent(${k})+'&i='+(i++),'_blank');setTimeout(next,${SPACING_MS});};setTimeout(next,${first});`)); }
   res.statusCode = 404; res.end('');
 });
@@ -112,7 +116,7 @@ function wrapped(ctl) {
     }
     send(data, ...rest) {
       let m = null; try { m = JSON.parse(String(data)); } catch { m = null; }
-      if (m && m.method === 'Emulation.setGeolocationOverride' && m.sessionId) ctl.asked.add(m.sessionId);
+      if (m && m.method === 'Emulation.setGeolocationOverride' && m.sessionId) { ctl.asked.add(m.sessionId); if (!ctl.askedAt.has(m.sessionId)) ctl.askedAt.set(m.sessionId, Date.now()); }   // when the hold SENT a tab's place (one machine, one clock: the page's own callAt is compared)
       if (m && m.method === 'Runtime.runIfWaitingForDebugger' && m.sessionId) ctl.released.add(m.sessionId);
       if (m && m.method === 'Emulation.setGeolocationOverride' && ctl.place !== 'pass') {
         if (ctl.place === 'refuse') { setImmediate(() => this.emit('message', Buffer.from(J({ id: m.id, error: { code: -32000, message: 'refused (a stand-in)' } })), false)); return; }
@@ -124,7 +128,7 @@ function wrapped(ctl) {
   };
 }
 async function holdOn(c, plan, { G = GH, boundMs = 1500, rearmMs = [60000] } = {}) {
-  const ctl = { place: 'pass', sockets: [], attached: [], asked: new Set(), released: new Set() }, evs = [];
+  const ctl = { place: 'pass', sockets: [], attached: [], asked: new Set(), askedAt: new Map(), released: new Set() }, evs = [];
   const h = G.create({ WebSocketImpl: wrapped(ctl), log: quiet, boundMs, closeMs: 1500, armMs: 8000, rearmMs, onEvent: (e) => evs.push(e) });
   const r = await h.arm(`bp-${c.tag}`, { url: c.url, plan });
   return { h, ctl, evs, armed: r };
@@ -208,10 +212,12 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
   ok(!F.deathPaused.readWithin3000ms, '⑥ (a) THE HOLD DIES INSIDE THE PAUSE: the browser does NOT release the tab by itself — no read in 3 s (so the hold\'s next arm must)', F.deathPaused);
   h.dispose(); await stop(c);
 }
-// ⑥ (b) THE HOLD'S OWN NEXT ARM: it finds the tab its dead socket left paused, sets the place, releases it — its first read is the place
+// ⑥ (b) THE HOLD'S OWN NEXT ARM: it finds the tab its dead socket left paused, sets the place, releases it — its first read is the place.
+// B-9584 (B), r1898 (7): the site LISTED and NO stand-in grant (the socket's death resets every override anyway, measured): the hold's
+// re-arm is the only giver, so the place AND the grant must both be set before the tab runs
 {
-  const c = await chrome();
-  const { h, ctl, evs } = await holdOn(c, PLACE, { boundMs: 20000, rearmMs: [3000] });
+  const c = await chrome({ grant: false });
+  const { h, ctl, evs } = await holdOn(c, { ...PLACE, sites: [ORIGIN] }, { boundMs: 20000, rearmMs: [3000] });
   const op = await openThenMode(c, ctl, 'rearm', 'swallow');
   await childAsked(ctl, op);
   for (const s of ctl.sockets) { try { s.terminate(); } catch { /* gone */ } }
@@ -219,7 +225,7 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
   ctl.place = 'pass';   // the next arm's place goes through
   const got = await reportsOf((x) => x.k === 'rearm', 1, 10000);
   F.rearm = { firstReadAfterMs: got[0] ? got[0].at - t0 : null, read: got[0] || null, heldAgain: evs.some((e) => e.kind === 'held' && e.after === 'lost') };
-  ok(got.length === 1 && isPlace(got[0]) && F.rearm.heldAgain, `⑥ (b) the hold's next arm (3 s here) sets the place on the tab its dead socket left paused and releases it: its first read IS the place (${F.rearm.firstReadAfterMs} ms after the hold died) — never hung for good, never this machine's place`, F.rearm);
+  ok(got.length === 1 && isPlace(got[0]) && F.rearm.heldAgain, `⑥ (b) the hold's next arm (3 s here) sets the place on the tab its dead socket left paused and releases it: its first read IS the place, its grant given before it ran (${F.rearm.firstReadAfterMs} ms after the hold died) — never hung for good, never «denied» on its listed site, never this machine's place`, F.rearm);
   h.dispose(); await stop(c);
 }
 {
@@ -273,7 +279,77 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
   ok(isPlace(r1) && got.length === 2 && isPlace(got[1]), '⑦ ANOTHER CLIENT attaches a held tab and leaves: the tab\'s next read is still the place', F.visit);
   h.dispose(); await stop(c);
 }
+
+// ═══ B-9584 (B) THE PLACE'S ROAD (the owner's choice; 主开发 r1791 / r1898): a LISTED site — the hold is the ONLY giver, on its own
+// socket, after the place is set; every other site denied in silence (the stored denial + the hold's every-origin denial) ═══
+// (4) every place a listed site's script can ask from: a new tab; a popup read in the same script that opens it (the ORDER asserted:
+// asked AFTER the hold sent its place); a frame of ANOTHER origin inside a listed page (with allow="geolocation", and without); the
+// listed site framed inside an UNLISTED page; a worker (no geolocation there at all: named); an unlisted site's own tab. (2)(7) the
+// hold's socket dies: «denied» until it is armed again, then the place. (D) the dialog watch's own every-origin denial and its leaving.
+// (r1791) with sites on the list a tab the hold could not place is CLOSED.
+const LISTED = ORIGIN, OTHER = `http://localhost:${PORT}`;
+const denied = (x) => !!x && x.err === 1 && x.perm === 'denied';
+const refusedRead = (x) => !!x && x.err === 1 && x.lat === undefined;   // the read refused, whatever the frame's own permission query says
+{
+  const c = await chrome({ grant: false });
+  const { h, ctl } = await holdOn(c, { ...PLACE, sites: [LISTED] });
+  await openTabs(c, 'b-tab', 1);
+  const [t1] = await reportsOf((x) => x.k === 'b-tab', 1, SPACING_MS + 4000);
+  const op = await c.cdp.send('Target.createTarget', { url: `${LISTED}/pop?k=b-pop` });
+  await untilV(() => { const a = ctl.attached.find((x) => x.tid === op.targetId); return a && ctl.released.has(a.sid) ? a : null; }, 8000);
+  const oa = await c.cdp.send('Target.attachToTarget', { targetId: op.targetId, flatten: true });
+  await c.cdp.send('Runtime.evaluate', { expression: "window.go('b-pop-now', 0)", userGesture: true }, oa.sessionId);
+  const [pr] = await reportsOf((x) => x.k === 'b-pop-now', 1, 6000);
+  const popA = ctl.attached.find((x) => x.opener === op.targetId) || null;
+  const popPlaceAt = popA ? ctl.askedAt.get(popA.sid) || null : null;
+  const framed = async (top, src, allow, k) => { await c.cdp.send('Target.createTarget', { url: `${top}/frame-host?src=${encodeURIComponent(src)}&allow=${allow ? 1 : 0}` }); return (await reportsOf((x) => x.k === k, 1, SPACING_MS + 4000))[0] || null; };
+  const xf = await framed(LISTED, `${OTHER}/geo?k=b-xframe&i=0`, true, 'b-xframe');
+  const xf0 = await framed(LISTED, `${OTHER}/geo?k=b-xframe0&i=0`, false, 'b-xframe0');
+  const fr = await framed(OTHER, `${LISTED}/geo?k=b-framed&i=0`, true, 'b-framed');
+  await c.cdp.send('Target.createTarget', { url: `${LISTED}/worker?k=b-worker` });
+  const [wk] = await reportsOf((x) => x.k === 'b-worker', 1, 6000);
+  await c.cdp.send('Target.createTarget', { url: `${OTHER}/geo?k=b-other&i=0` });
+  const [ot] = await reportsOf((x) => x.k === 'b-other', 1, SPACING_MS + 4000);
+  F.B = { newTab: t1 || null, popup: pr || null, popupAskedAfterItsPlaceMs: pr && popPlaceAt ? pr.callAt - popPlaceAt : null, crossFrameAllowed: xf, crossFrameNotAllowed: xf0, listedInUnlistedTop: fr, worker: wk || null, unlisted: ot || null };
+  ok(isPlace(t1), `(B) (4) a listed site's NEW TAB: its first read is the place (${J(t1 || null)})`, F.B);
+  ok(isPlace(pr) && !!popPlaceAt && pr.callAt >= popPlaceAt, `(B) (4)(8) a listed site's POPUP read in the same script that opens it: the place, and its ask came AFTER the hold sent the popup's place (+${F.B.popupAskedAfterItsPlaceMs} ms) — asserted every run`, F.B);
+  ok(isPlace(xf) && refusedRead(xf0), `(B) (4) a frame of ANOTHER origin inside a listed page: with allow="geolocation" it reads the place (the top page's grant, its tab's place); without it its read is REFUSED, PERMISSION_DENIED by the frame's policy (measured: its own permission query still says «${xf0 && xf0.perm}») (${J({ xf, xf0 })})`, F.B);
+  ok(denied(fr), `(B) (4) the listed site FRAMED inside an UNLISTED page: «denied» (the top page's own setting) (${J(fr)})`, F.B);
+  ok(!!wk && wk.worker === false, `(B) (4) a WORKER of a listed page: no geolocation in it at all (${J(wk || null)})`, F.B);
+  ok(denied(ot), `(B) (3) an UNLISTED site's tab: «denied», in silence (${J(ot || null)})`, F.B);
+  h.dispose(); await stop(c);
+}
+{
+  const c = await chrome({ grant: false });
+  const { h, ctl, evs } = await holdOn(c, { ...PLACE, sites: [LISTED] }, { rearmMs: [1500] });
+  await openTabs(c, 'b-run', 1);
+  const [r0] = await reportsOf((x) => x.k === 'b-run', 1, SPACING_MS + 4000);
+  const tab = (await pageTargets(c)).find((t) => t.url.includes('k=b-run&i=0'));
+  const own = await c.cdp.send('Target.attachToTarget', { targetId: tab.targetId, flatten: true });
+  const readAgain = async (n) => { await c.cdp.send('Target.activateTarget', { targetId: tab.targetId }); await c.cdp.send('Runtime.evaluate', { expression: `window.again(${n})` }, own.sessionId); return (await reportsOf((x) => x.k === 'b-run' && x.i === String(n), 1, 6000))[0] || null; };
+  for (const s2 of ctl.sockets) { try { s2.terminate(); } catch { /* gone */ } }
+  const rDead = await readAgain(1);   // between its death and its next arm (1.5 s here)
+  const back = await untilV(() => evs.find((e) => e.kind === 'held' && e.after === 'lost') || null, 10000);
+  const rBack = await readAgain(2);
+  F.Bdeath = { before: r0 || null, betweenTheDeathAndTheArm: rDead, armedAgain: !!back, afterIt: rBack };
+  ok(isPlace(r0) && denied(rDead) && !!back && isPlace(rBack), `(B) (2)(7) the hold's socket DIES: a listed site's running tab reads «denied» (its grant died with that socket — never this machine's position); armed again, the place again (${J(F.Bdeath)})`, F.Bdeath);
+  const w = await connect(c.url);
+  await w.send('Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied' });
+  const rW = await readAgain(3);
+  w.close(); await sleep(400);
+  const rW2 = await readAgain(4);
+  F.Bwatch = { underAnotherClientsDenial: rW, afterThatClientLeft: rW2 };
+  ok(!!rW && !!rW2 && !(rW.lat !== undefined && !isPlace(rW)) && !(rW2.lat !== undefined && !isPlace(rW2)), `(B) (D) the dialog watch's kind of client: its every-origin denial, then its leaving — never this machine's position; what the listed site reads (a FACT): ${J(F.Bwatch)}`, F.Bwatch);
+  ctl.place = 'refuse';
+  await openTabs(c, 'b-unplaced', 1);
+  const closedEv = await untilV(() => evs.find((e) => e.kind === 'closed') || null, SPACING_MS + 6000);
+  const rU = await reportsOf((x) => x.k === 'b-unplaced', 1, 2000);
+  F.Bunplaced = { closed: closedEv ? { why: closedEv.why, shut: closedEv.shut } : null, reads: rU.length };
+  ok(!!closedEv && closedEv.shut === true && rU.length === 0, '(B) with sites on the list, a tab the hold could not place is CLOSED — it never reads (r1791)', F.Bunplaced);
+  h.dispose(); await stop(c);
+}
 console.log('\nFACT ⑥ the hold dead inside a pause: ' + J({ paused: F.deathPaused, rearm: F.rearm, openedWhileDown: F.down }) + ' (a tab opened while it is down: the dead provider here; on a machine with a working one, this machine\'s real place where the site holds the permission)');
 console.log('FACT ③ «blocked» (the stored denial alone) first read: ' + J(F.blocked));
+console.log('FACT (B) ' + J({ B: F.B, death: F.Bdeath, watch: F.Bwatch, unplaced: F.Bunplaced }));
 srv.close();
 report();

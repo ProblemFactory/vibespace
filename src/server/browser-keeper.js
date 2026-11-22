@@ -1612,7 +1612,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const geolocation = geoPlanFor(p, envR);   // B-9584 U2c: a place (the stored denial + the hold on top) or «blocked» (the stored denial alone); null ⇒ nothing written, nothing armed — r1707 (4): ONE function for the record and the arm
     const notApplied = !geolocation && !!envR.geolocation;   // an ephemeral or a paired machine's profile: nothing written, no hold — said as not applied, never «blocked» or «fixed»
     const says = !!p.environment || st.args.length > 0;
-    return { ...st, geolocation, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: geolocation ? (geolocation.kind === 'place' ? 'fixed' : 'blocked') : notApplied ? 'not-applied' : 'machine' }, ...(geolocation && geolocation.kind === 'place' ? { locationSaid: PLACE_SAID } : notApplied ? { locationSaid: NOT_APPLIED_SAID } : {}), confirmed: !notApplied && (!geolocation || geolocation.kind === 'blocked'), by: 'stock', unfollowed: envR.unfollowed } : null };   // «blocked» = the stored denial, written before its Chrome or the start is refused; a place is confirmed once held
+    return { ...st, geolocation, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: geolocation ? (geolocation.kind === 'place' ? 'fixed' : 'blocked') : notApplied ? 'not-applied' : 'machine' }, ...(geolocation && geolocation.kind === 'place' ? { locationSaid: placeSaid(geolocation) } : notApplied ? { locationSaid: NOT_APPLIED_SAID } : {}), confirmed: !notApplied && (!geolocation || geolocation.kind === 'blocked'), by: 'stock', unfollowed: envR.unfollowed } : null };   // «blocked» = the stored denial, written before its Chrome or the start is refused; a place is confirmed once held
   }
   // ── B-9584 U2c — THE PLACE ON THE STOCK BROWSER (road B: src/server/browser-geo-hold.js) ──
   // A stock profile whose location is a place or «blocked» gets the hold on its browser at its start, before the browser is anyone's
@@ -1629,7 +1629,18 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** r1707 (4): THE RECORD TELLS THE TRUTH — «fixed» while no site may read the place says so in its own words; a profile this road
    *  does not hold (an ephemeral one, a paired machine's) says its location is not applied. */
   const PLACE_SAID = 'fixed on its tabs — every site is denied the location (the profile\'s own setting): no site is allowed the place';
+  /** B-9584 (B): with sites on the profile's list, «fixed» says that ONLY they read the place (their count, never an origin). */
+  const placeSaid = (g) => { const n = g && Array.isArray(g.sites) ? g.sites.length : 0; return n ? `fixed — only the ${n} site${n === 1 ? '' : 's'} on its list read the place; every other site is denied the location (the profile\'s own setting)` : PLACE_SAID; };
   const NOT_APPLIED_SAID = 'not applied — this browser is not held to a place or «blocked»: its sites get this machine\'s answer';
+  /** r2172 (a): a place or «blocked» is held only on a NAMED profile of THIS machine's stock browser (the stored denial + the hold). An
+   *  ephemeral profile or a paired machine's has neither, so it would read that machine's REAL position: its start is refused by name
+   *  (the setting's own door — U3's writer — refuses it there too). An engine's profile hands its location to its kernel (U2a). */
+  function placeRefusalOf(p) {
+    if (!p || !(isEph(p) || p.host) || (p.browser && p.browser.kind === 'plugin')) return null;
+    const g = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p)).geolocation;
+    if (!g) return null;
+    return namedError('browser_place_unsupported', `"${p.label}" was not started: a place or a blocked location is held only on a named profile of this machine's browser — on ${isEph(p) ? 'a conversation\'s own browser' : 'a paired machine'} its sites would read that machine's real position`);
+  }
   /** U1's `geolocation` → this road's plan: «blocked» (the stored denial alone) or a place the hold can hold (GH.planOf); else null. */
   function geoPlanOf(g) { return g && g.kind === 'blocked' ? { kind: 'blocked' } : GH.planOf(g); }
   /** B-9584 U2c (主开发 r1264, MEASURED on a real Chrome): THE PROFILE'S OWN STORED DENIAL, written before its Chrome starts (no Chrome
@@ -1670,7 +1681,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     let writing = keptFile;
     try {
       if (plan) {
-        const v = ENV.geoStoredDenial(prefs);
+        const v = ENV.geoStoredDenial(prefs, { stamp: String((now() + 11644473600000) * 1000) });   // r2172 (b)(d): OUR rows told apart by their stamp (the browser's microseconds since 1601)
         if (!v.ok) return fail(`Default/Preferences: ${v.why}`);
         // the person's own values FIRST (a crash between the two writes loses nothing); r1707 (3): at every LATER held launch a row the
         // person allowed in Chrome's own settings meanwhile joins them (a row kept before keeps its FIRST value — never a denial's)
@@ -1711,13 +1722,22 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const f = geoHoldOwn ? geoHoldOwn.factOf(pid) : null;
     const what = f && f.kind === 'blocked' ? 'its blocked location' : 'its place';
     const said = geoSaid.get(pid) || new Set(); geoSaid.set(pid, said);
+    // r2172 (c): THE RECORD TELLS THE TRUTH while it runs — «confirmed» falls when the hold is lost or down, comes back when it holds again
+    { const rg = reg.browsers[pid]; const v = ev.kind === 'held' ? true : ev.kind === 'lost' || ev.kind === 'down' ? false : null;
+      if (v !== null && rg && rg.environment && rg.environment.applied && rg.environment.applied.location === 'fixed' && rg.environment.confirmed !== v) { rg.environment.confirmed = v; commit(); } }
     const file = (key, text, detail, kind = 'notice') => {
       if (said.has(key)) return; said.add(key);
       if (!userTodos || typeof userTodos.add !== 'function') return;
       try { userTodos.add('browser', { origin: 'browser', kind, urgency: kind === 'action' ? 'high' : 'normal', by: 'agent', text, detail, sessionName: 'Agent browser' }); }
       catch (e) { log.warn?.(`[browser] ${pid} "${label}": the place hold's notice was not filed (${e && e.message})`); }
     };
-    if (ev.kind === 'unplaced') {
+    if (ev.kind === 'closed') {   // B-9584 (B, 主开发 r1791): with sites on the list, a tab the hold could not place is CLOSED — the person told once a run, the agent whose tab it was told BY NAME at its next command
+      const tid = String(ev.targetId || '');
+      let told = 0;
+      if (tid) for (const l of reg.leases) if (l && l.profileId === pid && (String(l.targetId || '') === tid || (Array.isArray(l.tabs) && l.tabs.map(String).includes(tid)))) { markTabLost(pid, l.browserKey, 'place'); told++; }
+      if (told) commit();
+      file('closed', `"${label}": a tab was closed — its place could not be given to it in time`, `VibeSpace gives every tab of "${label}" its place before the tab runs; this one did not take it in time, and a site on the profile's list would have read this machine's location there — so the tab was closed${ev.shut === false ? ' (the browser did not close it: its browser context gives no site the place until the browser restarts)' : ''}. Open the page again; if this keeps happening, restart the browser.`);
+    } else if (ev.kind === 'unplaced') {
       file('unplaced', `"${label}": a tab ${ev.opened ? 'opened' : 'was open'} without its place — sites there are denied the location`, `VibeSpace gives every tab of "${label}" its place before the tab runs. Its browser did not take the place on this one in time, so the tab runs with the profile's own setting: sites are denied the location — never given this machine's. Open the page again to get the place; if this keeps happening, restart the browser.`);
     } else if (ev.kind === 'held' && (ev.after === 'lost' || ev.after === 'restart')) {
       log.log?.(`[browser] ${pid} "${label}": ${what} given to its tabs again (${ev.after === 'restart' ? 'after a restart' : 'its hold dropped'}) — sites were denied the location meanwhile`);   // r1707 (6): QUIET — no For-you notice while no site can read the place (nothing to act on); the place's road brings it back
@@ -2844,7 +2864,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const k = `${profileId}|${browserKey}`;
     reg.tabClosed[k] = now();
     if (!reg.tabLostWhy || typeof reg.tabLostWhy !== 'object') reg.tabLostWhy = {};
-    reg.tabLostWhy[k] = why === 'closed' ? 'closed' : 'life';
+    reg.tabLostWhy[k] = why === 'closed' || why === 'place' ? why : 'life';   // B-9584 (B): 'place' — the hold closed it, said by name
   }
   function clearTabLost(profileId, browserKey) {
     const k = `${profileId}|${browserKey}`;
@@ -5078,6 +5098,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!p) throw namedError('not-found', `no profile ${profileId}`);
     // the moved2 cure 3 (its read's should): an ADOPTED profile whose folder has not moved yet (its record's landing is owed) is never
     // started — a browser launched on the empty target would make the move fail under it
+    { const pr = placeRefusalOf(p); if (pr) throw pr; }   // r2172 (a): never started «not applied» — it would read the machine's real position
     if (adopting.has(String(profileId))) throw namedError('adopt_pending', `profile "${p.label}" is being adopted — its folder moves once its record is on disk; start it again in a moment`);
     const cur = reg.browsers[profileId];
     // takeover C3: an ephemeral daemon that idled out between two ticks is
@@ -5873,7 +5894,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // user's close) or whose window was in a previous run is TOLD it was rebound, as L2's block below would have said it: this bind
     // takes the mark, so that block never runs. Before, the first command after a SingletonLock takeover printed no [tab_rebound]
     // and the agent silently lost its page (test-browser-share ⑩). The note rides the lease until an answer carries it (F4).
-    const lostWhy = reg.tabClosed[k] ? (reg.tabLostWhy && reg.tabLostWhy[k] === 'closed' ? 'closed' : 'life') : stale ? 'life' : null;
+    const lostWhy = reg.tabClosed[k] ? (reg.tabLostWhy && (reg.tabLostWhy[k] === 'closed' || reg.tabLostWhy[k] === 'place') ? reg.tabLostWhy[k] : 'life') : stale ? 'life' : null;
     if (lostWhy) keepRebound(p.id, browserKey, { how: 'new', targetId: String(r.targetId), url: 'about:blank', why: lostWhy, text: TBS.reboundNoteText({ how: 'new', why: lostWhy }) });
     delete reg.tabClosed[k]; if (reg.tabLostWhy && typeof reg.tabLostWhy === 'object') delete reg.tabLostWhy[k];
     commit();
@@ -5976,7 +5997,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     let rebound = null; // lane profile-lock-roll (L2): what this attach bound, said once in the command's answer
     if (!isMediated(p) && reg.tabClosed[`${p.id}|${browserKey}`]) {
       let bound = false;
-      const why = reg.tabLostWhy && reg.tabLostWhy[`${p.id}|${browserKey}`] === 'life' ? 'life' : 'closed';
+      const why = reg.tabLostWhy && ['life', 'place'].includes(reg.tabLostWhy[`${p.id}|${browserKey}`]) ? reg.tabLostWhy[`${p.id}|${browserKey}`] : 'closed';
       // verify r1 (F3): one rebind at a time per profile — the page list is read AFTER the previous session's bind landed
       await serialRebind(p.id, async () => { if (!reg.tabClosed[`${p.id}|${browserKey}`]) { bound = true; return; }
       // verify r2 (F2): re-asked AFTER the wait — a lease detached while it queued opens no tab (a blank tab nobody rooted was
@@ -6034,7 +6055,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // Stop) binds a NEW tab before its first command — under ITS session in ITS namespace over ITS scoped url (the same
       // env its CLI runs with, so its daemon is not restarted), so the tab is created through the grant and is its own
       if (reg.tabClosed[`${p.id}|${browserKey}`] && g && g.url) {
-        const why = reg.tabLostWhy && reg.tabLostWhy[`${p.id}|${browserKey}`] === 'life' ? 'life' : 'closed';
+        const why = reg.tabLostWhy && ['life', 'place'].includes(reg.tabLostWhy[`${p.id}|${browserKey}`]) ? reg.tabLostWhy[`${p.id}|${browserKey}`] : 'closed';
         try {
           const env = require('../browser-stream.js').pairsToEnv(M.mediatedEnvFor({ browserKey, profileId: p.id, url: g.url, idleMs: idleMs() }));
           const r = await rt.exec(null, [...(pinTab ? ['--pin-tab'] : []), 'tab', 'new'], { extraEnv: env });
