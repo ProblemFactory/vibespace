@@ -1349,6 +1349,8 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
       if (en.lane.lastError) delete en.lane.lastError;
     }
   });
+  const logLines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+  const logBytes = (f) => { try { return fs.statSync(f).size; } catch { return 0; } };
   const quietRun = async (M, tag, inRow) => {
     const dir = path.join(ROOT, `qs-${tag}`); fs.mkdirSync(dir, { recursive: true });
     const st = M.createChannelStore({ dir, log: slog });
@@ -1356,14 +1358,14 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     const w0 = st.index.flushStats().writes, i0 = ino(st.indexFile);
     for (let p = 1; p <= 10; p++) { await quietPass(st, ['c1', 'c300', 'c599'], T + p * 5e3, inRow); st.index.flush(); }
     const fs1 = st.index.flushStats();
-    const r = { writes: fs1.writes - w0, skipped: fs1.skipped, sameFile: ino(st.indexFile) === i0, lastOnDisk: fs.readFileSync(st.indexFile, 'utf8').includes(String(T + 50e3)), stamp: st.stamps.lane(st.index.peek('a/c300')).lastPollAt, disk: fs.readFileSync(st.indexFile, 'utf8') === JSON.stringify(st.index.snapshot(), RT, 1), journal: (st.stamps.stats().journal || {}).lines, jbytes: (st.stamps.stats().journal || {}).bytes };
+    const r = { writes: fs1.writes - w0, skipped: fs1.skipped, sameFile: ino(st.indexFile) === i0, lastOnDisk: fs.readFileSync(st.indexFile, 'utf8').includes(String(T + 50e3)), stamp: st.stamps.lane(st.index.peek('a/c300')).lastPollAt, disk: fs.readFileSync(st.indexFile, 'utf8') === JSON.stringify(st.index.snapshot(), RT, 1), journal: logLines(path.join(dir, 'poll-stamps.log')), jbytes: logBytes(path.join(dir, 'poll-stamps.log')) };   // 主开发 r2287 (3): the journal FILE, never the store's own counter
     st.close();
     return r;
   };
   const head = await quietRun(S, 'head', false);
   // B-360d unit 1 (line 267, 主开发 r2081): a quiet pass makes no journal line and owes the index nothing, so flush() asks no write
   // at all — the law judged: no index write, the inode kept, the stamp journal's lines (the equal-bytes skip is not met on this road — its own scene below)
-  ok(head.writes === 0 && head.sameFile && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal took one line per stamp (${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
+  ok(head.writes === 0 && head.sameFile && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal FILE holds one line per stamp (poll-stamps.log read back: ${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
   const headRow = await quietRun(S, 'head-inrow', true);
   ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && headRow.disk, `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized and at the update's end (主开发 r2081): ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
   const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];

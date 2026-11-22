@@ -1847,6 +1847,17 @@ const esrc2 = engineSource(REPO);
     const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, '').replace(LINE2, LINE2.replace('if (stopped) {', 'if (false) {')));
     const smc = await stopMidChain(require(cp), 'r4-stopmid-ctl');
     ok(smc.calls === 2 && smc.held === 0, `CONTROL: a copy without its two stop guards starts the queued wake after stop() (${smc.calls} calls, ${smc.held} held) — the legs above would go red`);
+    // 主开发 r2287 (3): EACH GUARD CUT ALONE, measured. In this scene the queued wake reaches wakeNow already stopped, so either
+    // guard holds it by itself (1 call, 1 held). Guard 2 ALONE is reached where stop() lands DURING the wake's wait:
+    // test-channel-take-race's round w8ghfur9h (1) (a waiter parked, then stop()), whose red cuts guard 2 alone (1 start).
+    // Guard 1 alone has no such scene: the one road between the two guards that guard 2 does not cover is the batch's
+    // «already reached through another watcher» answer, which starts nothing — so «never started after stop()» stands on
+    // guard 2 by itself, and guard 1 is the early road (it holds before the target is resolved)
+    const g1 = patchPath('src/server', 'channels-engine'); writeCopy(g1, esrc2.replace(LINE, ''));
+    const s1 = await stopMidChain(require(g1), 'r4-stopmid-g1');
+    const g2 = patchPath('src/server', 'channels-engine'); writeCopy(g2, esrc2.replace(LINE2, LINE2.replace('if (stopped) {', 'if (false) {')));
+    const s2 = await stopMidChain(require(g2), 'r4-stopmid-g2');
+    ok(s1.calls === 1 && s1.held === 1 && s2.calls === 1 && s2.held === 1, `each stop guard cut ALONE holds the queued wake by the other (without the first: ${s1.calls} call, ${s1.held} held; without the second: ${s2.calls} call, ${s2.held} held) — the second guard's own scene and red: test-channel-take-race, round w8ghfur9h (1)`, JSON.stringify({ s1, s2 }));
     // the store half: the pre-fix markDirty dropped a change after close() (the debounce was gone) — the hold never reached the disk
     const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
     const SLINE = "    if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }\n    W().dirty(";

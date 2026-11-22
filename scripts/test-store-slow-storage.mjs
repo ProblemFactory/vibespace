@@ -390,7 +390,9 @@ if (!OTHER && leg('d')) {
     // (d2) THE LEG'S FIRST SCENE KEPT (the r2061 chain's fresh read): index.json is still written WHOLE — at a stop (a fold,
     // the bound, a burst too). The hub restarted over this very family (its journal replayed at the load), one more mark
     // answered, a stop asked (SIGTERM), and the SIGKILL lands INSIDE the exit's whole index write (its temp file seen, its
-    // fsync and rename held 1.1 s each): the family parses whole — index.json the old version or the new — nothing lost
+    // fsync and rename held 1.1 s each): the family parses whole — index.json the old version or the new — nothing lost.
+    // 主开发 r2287 (3): the scene LEANS ON the exit's whole index write (close()'s flush({ full: true }) at a stop): an exit
+    // that skipped an equal write would show «no temp file of index.json seen» — a red that names it, never a false green
     const h2 = await boot('tree1100b', TREE, DELAY_KILL, {}, { reuseOf: 'tree1100' });
     if (!h2.readyAt || !h2.hub) ok(false, '(d2) the hub restarted over the killed family at 1.1 s per call', fs.readFileSync(h2.logf, 'utf8').slice(-1500));
     else {
@@ -406,7 +408,7 @@ if (!OTHER && leg('d')) {
       const rows2 = (fam2 && fam2.conversations) || {}, on2 = (m) => !!rows2[`agents/${m.id}`] && rows2[`agents/${m.id}`].readAt === m.at;
       const all2 = [...answered, ...(m2.code === 200 ? [m2] : [])], lost2 = all2.filter((m) => !on2(m)).map((m) => m.id.slice(0, 8));
       const old2 = fs.readFileSync(path.join(dir, 'index.json')).equals(before2);
-      ok(m2.code === 200 && inWhole, `(d2) restarted over that family, a mark answered (${m2.code}), then a stop: the SIGKILL landed INSIDE the exit's whole index write (${tmp2 || 'no temp file of index.json seen in 60 s'})`);
+      ok(m2.code === 200 && inWhole, `(d2) restarted over that family, a mark answered (${m2.code}), then a stop: the SIGKILL landed INSIDE the exit's whole index write (${tmp2 || 'no temp file of index.json seen in 60 s — the scene needs the exit to write index.json whole at a stop'})`);
       ok(!!fam2 && Object.keys(rows2).length === CONVS && !lost2.length, `(d2) after that SIGKILL the family parses whole — index.json the ${old2 ? 'OLD' : 'NEW'} version, ${Object.keys(rows2).length} conversations — and every answered mark is on disk (${all2.length - lost2.length} of ${all2.length}${lost2.length ? '; lost: ' + lost2.join(' ') : ''})`, err2);
       table.runs.tree1100.whole = { inWhole, tmp: tmp2, version: old2 ? 'old' : 'new', lost: lost2.length }; save();
     }

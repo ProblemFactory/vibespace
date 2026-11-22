@@ -357,6 +357,10 @@ console.log('⑧ the engine\'s own writers are incremental');
   rows.push(await step('a mark-read', () => e8.markRead(A, 'fake-poll-ops')));
   rows.push(await step('a refresh override', () => e8.setRefresh(A, 'fake-poll-ops', 60)));
   offset -= 122e3;
+  // 主开发 r2287 (3): ONE changed row READ BACK from the file — the family (index.json + its journal, the store's one reader):
+  // the mark-read's row, its readAt and unread as the live row holds them
+  const live8 = x8.peek(`${A}/fake-poll-ops`), disk8 = ((S.readIndexFamily(path.dirname(e8.store.indexFile)) || {}).conversations || {})[`${A}/fake-poll-ops`];
+  ok(!!live8 && !!disk8 && disk8.readAt === live8.readAt && disk8.unread === live8.unread, `⑧ the mark-read's row READ BACK from the file (index.json + its journal): readAt ${disk8 && disk8.readAt} = ${live8 && live8.readAt}, unread ${disk8 && disk8.unread} = ${live8 && live8.unread}`);
   ok(first.full === 1, 'fixture: the boot\'s first write is a whole one');
   // a pass walks the listing: its rows are flushed before the walk's cursor is recorded (keepDisc), then the pass's own write
   // B-360d unit 1 (line 267): a step's rows ride the index's JOURNAL (keepDisc's ordering write answers on its line), so the index
