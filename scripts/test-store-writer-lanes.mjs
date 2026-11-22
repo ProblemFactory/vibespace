@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import './scratch.mjs';   // the build's own order (§113, r1845): the scratch import first, after node's own
 import { checker } from './lib/check.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
