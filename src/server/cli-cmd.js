@@ -54,7 +54,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync, spawn } = require('child_process');
+const { execFileSync } = require('child_process');
 const { serviceEnv } = require('../agent-env');
 const LS = require('../login-shell');
 
@@ -138,57 +138,33 @@ async function loginShellOf({ env = process.env, userInfo = () => os.userInfo(),
 }
 
 /**
- * ONE LOGIN-SHELL RUN (the ask and the probe share it — one spawn site, one kill site): `<shell> -l -i -c '<line>'` (the
- * three flags spelled apart — fish takes them too), stdin /dev/null, TERM=dumb, the sanitized env (serviceEnv), its OWN
- * session (`detached`: an rc's `kill 0` or a job-control grab never reaches the hub's process group), bounded by
- * `timeoutMs` (the child is killed by its pid, then whatever is left in the probe's own session — an rc's leftover
- * background job that would hold the pipe). `complete(out)` = the whole answer is in; `judge(out, err, exitWhy)` = the
- * answer. Resolves the judged answer + `shell` + `ms`, or { kind: 'unanswered', why } (timeout / spawn).
+ * ONE LOGIN-SHELL RUN (the ask and the probe share it — one start, through the hub's starter): `<shell> -l -i -c '<line>'`
+ * (the three flags spelled apart — fish takes them too), stdin /dev/null, TERM=dumb, the sanitized env (serviceEnv), its OWN
+ * session (the starter's session option: an rc's `kill 0` or a job-control grab never reaches the hub's or the starter's
+ * process group), bounded by `timeoutMs`; the starter ends the session's group when the shell exits or at the bound (an
+ * rc's leftover background job that would hold the pipe). `judge(out, err, exitWhy)` = the answer, read once the run has
+ * ended (`complete` is the caller's contract, no longer read here: the group's end closes the pipe at the shell's exit).
+ * Resolves the judged answer + `shell` + `ms`, or { kind: 'unanswered', why } (timeout / spawn / no-reply).
  */
 function runShell({ shell, line, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now, complete, judge }) {
-  return new Promise((resolve) => {
-    const t0 = now();
-    let settled = false, child = null, timer = null, out = '', err = '';
-    // the probe's own session (detached ⇒ setsid ⇒ pgid = its pid): nothing but this ask's shell and what its rc started
-    const killGroup = () => { if (child && Number.isInteger(child.pid) && child.pid > 1) { try { process.kill(-child.pid, 'SIGKILL'); } catch { } } };
-    const reap = () => {
-      if (!child) return;
-      try { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); } catch { }
-      killGroup();
-      try { child.stdout?.destroy(); } catch { }
-      try { child.stderr?.destroy(); } catch { }
-    };
-    const done = (a) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      reap();
-      resolve({ ...a, shell: shell || null, ms: now() - t0 });
-    };
-    const home = typeof env.HOME === 'string' && env.HOME.startsWith('/') ? env.HOME : undefined;
-    try {
-      // THE ENV IT IS ASKED IN — an ALLOWLIST (serviceEnv): HOME LANG LC_* TMPDIR XDG_RUNTIME_DIR + USER LOGNAME, the
-      // hub's PATH as the baseline its rc builds on, SHELL = itself, TERM=dumb. NEVER a VIBESPACE_* name, a token or npm_*:
-      // a person's rc runs arbitrary code. VIBESPACE_SHELL_PROBE=1 lets that rc skip a tmux autostart or a banner.
-      child = spawn(shell, ['-l', '-i', '-c', line], { stdio: ['ignore', 'pipe', 'pipe'], env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } }), cwd: home, detached: true });
-    } catch (e) { return done({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` }); }
-    child.on('error', (e) => done({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` }));
-    // ckpt61 cure 2: a start that failed at once has no pipes — the listener above answers it in this function's own words; a pipe
-    // read unguarded threw first and the caller got a rejection instead
-    if (child.stdout) { child.stdout.setEncoding('utf8'); child.stdout.on('data', (d) => { out += d; if (out.length > OUT_CAP) out = out.slice(-OUT_CAP); }); }
-    if (child.stderr) { child.stderr.setEncoding('utf8'); child.stderr.on('data', (d) => { err += d; if (err.length > 8192) err = err.slice(-8192); }); } // the tail a refusal quotes
-    let exitWhy = null;
-    child.on('exit', (code, sig) => {
-      exitWhy = sig ? `exit:${sig}` : `exit:${code}`;
-      // the shell is gone: whatever its rc left in the probe's session goes too, so the pipe closes and 'close' comes
-      killGroup();
-      if (complete(out)) done(judge(out, err, exitWhy)); // the whole answer is in (the LAST sequence: an rc's decoy printed before the line never ends it)
-    });
-    child.on('close', (code, sig) => done(judge(out, err, exitWhy || (sig ? `exit:${sig}` : `exit:${code}`))));
-    // THE BOUND (the ONE timer in this file: it ENDS an ask, it never starts one — nothing here checks on a timer)
-    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);
-    if (typeof timer.unref === 'function') timer.unref();
-  });
+  const t0 = now();
+  const home = typeof env.HOME === 'string' && env.HOME.startsWith('/') ? env.HOME : undefined;
+  // B-323e's remainder (lane bl-chat-b, the coordinator's r2689 (a)): ASKED OF THE HUB'S STARTER, never started from the hub's own
+  // process (while a CLI is missing it is asked every RECHECK_MS) — with the starter's SESSION option: the shell in its own session
+  // and home, and the starter ends THAT session's group when the shell exits or at the bound, so an rc that left a job holding the
+  // pipe is answered when the shell itself has ended (the starter's own handle on its own child: never a name, never a pattern).
+  // THE ENV IT IS ASKED IN — an ALLOWLIST (serviceEnv), sent WHOLE: HOME LANG LC_* TMPDIR XDG_RUNTIME_DIR + USER LOGNAME, the hub's
+  // PATH as the baseline its rc builds on, SHELL = itself, TERM=dumb. NEVER a VIBESPACE_* name, a token or npm_*: a person's rc runs
+  // arbitrary code. VIBESPACE_SHELL_PROBE=1 lets that rc skip a tmux autostart or a banner. The answer is the TAIL of its printout
+  // (the sentinels are at its end; the starter's buffer is wide, so a chatty rc is cut only past it).
+  const req = { timeoutMs, capture: true, maxBuffer: 4 * 1024 * 1024, wholeEnv: true, env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } }), session: { cwd: home } };
+  return Promise.resolve().then(() => require('./child-starter').childStarter().run(shell, ['-l', '-i', '-c', line], req)).then((r) => {
+    if (!r || r.unknown) return { kind: 'unanswered', why: 'no-reply' };                        // the starter gave no answer
+    if (r.started === false) return { kind: 'unanswered', why: `spawn:${r.error || 'error'}` };
+    if (r.timedOut) return { kind: 'unanswered', why: 'timeout' };
+    const out = String(r.stdout || ''), err = String(r.stderr || '');
+    return judge(out.length > OUT_CAP ? out.slice(-OUT_CAP) : out, err.length > 8192 ? err.slice(-8192) : err, r.signal ? `exit:${r.signal}` : `exit:${r.code}`);
+  }, (e) => ({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` })).then((a) => ({ ...a, shell: shell || null, ms: now() - t0 }));
 }
 
 /**

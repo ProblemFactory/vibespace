@@ -23,10 +23,13 @@ const held = new Map();   // request id → the ChildProcess this process spawne
 let buf = '', ending = false;
 
 function send(o) { try { process.stdout.write(JSON.stringify(o) + '\n'); } catch { bye(); } }
+/** B-323e's remainder (lane bl-chat-b, the coordinator's r2689): a SESSION child's group — the one this process made itself (the child
+ *  was started detached, so its pid is its group's id) — ended by this process's own handle on that child; never a name, never a pattern */
+function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }
 function bye() {
   if (ending) return;
   ending = true;
-  for (const c of held.values()) { try { c.kill('SIGKILL'); } catch { } }   // only the children it spawned and holds
+  for (const c of held.values()) { try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); }   // only the children it spawned and holds (a session child: its own group too)
   held.clear();
   process.exit(0);
 }
@@ -40,7 +43,10 @@ function handle(line) {
   const env = m.whole === true ? {} : { ...process.env };   // B-323e: a whole env is the child's env as its site built it
   for (const [k, v] of Object.entries(m.env || {})) { if (typeof v === 'string') env[k] = v; else if (v === null) delete env[k]; }   // null: the site's env lacks it
   let c, out = '', err = '', done = false, timedOut = false, timer = null, outN = 0, errN = 0, overflow = false;
-  try { c = spawn(cmd, args, { env, stdio: ['ignore', capture ? 'pipe' : 'ignore', capture ? 'pipe' : 'ignore'] }); }
+  // B-323e's remainder (r2689): a SESSION request — the child in its own session (detached) and folder; at its exit and at the bound
+  // this process ends that session's group (a shell whose rc left a job holding the pipe answers when the shell itself has ended)
+  const session = m.session && typeof m.session === 'object' ? { cwd: typeof m.session.cwd === 'string' && m.session.cwd ? m.session.cwd : undefined } : null;
+  try { c = spawn(cmd, args, { env, stdio: ['ignore', capture ? 'pipe' : 'ignore', capture ? 'pipe' : 'ignore'], ...(session ? { detached: true, cwd: session.cwd } : {}) }); }
   catch (e) { send({ id, ev: 'exit', code: null, signal: null, error: String((e && e.code) || e) }); return; }
   held.set(id, c);
   // the error listener FIRST (ckpt61): a start that fails at once (EMFILE / ENFILE) returns with no pipes and its 'error' queued for
@@ -48,6 +54,7 @@ function handle(line) {
   // answers the error, the starter lives)
   const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
   c.on('error', (e) => end({ code: null, signal: null, error: String((e && e.code) || e) }));
+  if (session) { c.vsSession = true; c.on('exit', () => endOwnGroup(c)); }
   if (capture && c.stdout && c.stderr) {
     c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8');
     // past the bound the child is ENDED, as execFile's maxBuffer did (B-323e smalls, the reader's M2: kept running, a slow listing past
@@ -58,7 +65,7 @@ function handle(line) {
   }
   c.on('spawn', () => send({ id, ev: 'started', pid: c.pid }));
   c.on('close', (code, signal) => end({ code, signal }));
-  if (Number(m.timeoutMs) > 0) timer = setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } send({ id, ev: 'timeout', overflow }); }, Number(m.timeoutMs));   // an overflow kept: the bound past the cut is not «hung»
+  if (Number(m.timeoutMs) > 0) timer = setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); send({ id, ev: 'timeout', overflow }); }, Number(m.timeoutMs));   // an overflow kept: the bound past the cut is not «hung»
 }
 
 /** B-323e (主开发 r1299): THE DETACHED START — never in `held`, never signalled, never counted; the env dropped once started */

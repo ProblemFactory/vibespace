@@ -588,7 +588,7 @@ WD.section('⑨');
   ok(found === '/opt/vs/bin/vs-cli-found' && unanswered === 'vs-cli-none' && !!wq && JSON.stringify(wq.args) === '["vs-cli-found"]' && wq.o.timeoutMs === 2000 && typeof wq.o.envAdd.PATH === 'string' && directOf('which') === W0,
     `(b) the CLI which asks the starter (2 s): ${found}; a NO-REPLY is no answer — the hub's own dir walk, then the bare name (${unanswered}) — none from the hub's process`, { found, unanswered, wq: wq && { args: wq.args, o: wq.o } });
   const CC = read('src/server/cli-cmd.js');
-  const OLDCLI = anchored(anchored(CC, "const { execFileSync, spawn } = require('child_process');", "const { execFileSync, execFile, spawn } = require('child_process');", 'the release\'s import'),
+  const OLDCLI = anchored(anchored(CC, "const { execFileSync } = require('child_process');", "const { execFileSync, execFile, spawn } = require('child_process');", 'the release\'s import'),   // stale-pins: kept (the release's import — the leg's RED)
     "    Promise.resolve().then(() => require('./child-starter').childStarter().run('/usr/bin/which', [name], { timeoutMs: 2000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } }))\n      .then((x) => ({ err: !(x && x.started !== false && !x.unknown && !x.timedOut && !x.overflow && x.code === 0), out: String((x && x.stdout) || '') }), () => ({ err: true, out: '' }))\n      .then(async ({ err, out }) => {\n",
     "    execFile('/usr/bin/which', [name], { encoding: 'utf-8', timeout: 2000 }, async (err, out) => {\n", 'the release\'s which');   // stale-pins: kept (the release's text — the leg's RED)
   const OLDC = require(M.write('src/server/cli-cmd.js', OLDCLI, 'release-which'));
@@ -635,6 +635,81 @@ WD.section('⑨');
     "names.pending = new Promise((resolve) => execFile(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeout: 5000, maxBuffer: 16 << 20,", 'the release\'s lookup');   // stale-pins: kept (the release's text — the leg's RED)
   ok(look(TSs) && !look(TSOLD), '(d) the tailnet lookup asks the starter (5 s, 16 MB); a no-reply is a failed read (failAt: the last table serves, its time said) — RED: the release\'s text, `status --json` from the hub\'s process');
   answer = prev9;
+}
+say('⑩ B-323e\'S REMAINDER, the login-shell look (lane bl-chat-b, 主开发 r2689 (a)) — the starter\'s SESSION option: its own session and folder, the session\'s group ended at the child\'s exit and at the bound; the shell asked through it');
+WD.section('⑩');
+{
+  const prev10 = answer;
+  // a scratch process's life read from /proc (gone, or a zombie: no longer running) — never a signal
+  const gone10 = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.slice(st.lastIndexOf(')') + 2).split(' ')[0] === 'Z'; } catch { return true; } };
+  const waitGone = async (pid) => { for (let i = 0; i < 300 && !gone10(pid); i++) await new Promise((r) => setTimeout(r, 10)); return gone10(pid); };
+  // the leftover a RED leaves (its own scratch `sleep`, proven by its cmdline) — ended by this suite
+  const endLeftover = (pid) => { try { if (/\bsleep\b/.test(fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' '))) process.kill(pid, 'SIGKILL'); } catch { } };
+  const CWD10 = fs.realpathSync(fs.mkdtempSync(path.join(TMP, 'session-')));
+  // bash (the spy watches `sh`): the shell prints its folder and its job's pid, then exits — the job (`sleep 20`) still holds the pipe
+  const LINE = 'sleep 20 & echo "job=$!"; echo "cwd=$(pwd)"; echo answered';
+  const read10 = (r) => ({ job: Number((/job=(\d+)/.exec(String((r && r.stdout) || '')) || [])[1]) || 0, cwd: (/cwd=(.*)/.exec(String((r && r.stdout) || '')) || [])[1] || '', answered: /answered/.test(String((r && r.stdout) || '')) });
+  const sessionLegs = async (S, road) => {
+    const r = await S.run('/bin/bash', ['-c', LINE], { timeoutMs: 8000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' }, session: { cwd: CWD10 } });
+    const f = read10(r), jobGone = f.job > 1 ? await waitGone(f.job) : false;
+    ok(!!r && r.timedOut !== true && r.code === 0 && f.answered && f.cwd === CWD10 && f.job > 1 && jobGone,
+      `(${road}) a SESSION child answers when the shell ends — its job left holding the pipe, the session's group ended by the starter (the job gone: ${jobGone}), in its own folder (${f.cwd === CWD10})`, { r: r && { timedOut: r.timedOut, code: r.code, unknown: r.unknown }, f, jobGone });
+    const red = await S.run('/bin/bash', ['-c', LINE], { timeoutMs: 500, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } });
+    const g = read10(red); endLeftover(g.job);
+    ok(!!red && red.timedOut === true, `(${road}) RED: the same child with NO session option — its job holds the pipe and nobody ends it: the run reaches its bound (timedOut ${red && red.timedOut})`, red && { timedOut: red.timedOut, code: red.code });
+  };
+  // (a) THE STARTER's road: a REAL starter process (its own children are real; this process's spy never sees them)
+  const S1 = CS.createChildStarter();
+  try { await sessionLegs(S1, 'a, the starter'); } finally { S1.closePipe(); }
+  // (a2) a WHOLE env through the REAL starter keeps the login-shell look's MARK (VIBESPACE_SHELL_PROBE, a word a person's rc reads)
+  //      and still drops the hub's own names (a planted token) — the gate's own red found the mark dropped (the fake starter skips
+  //      the belt); RED: a copy of the starter whose belt keeps no mark
+  const markLegs = async (CSmod) => { const S = CSmod.createChildStarter(); try {
+    const r = await S.run('/bin/bash', ['-c', 'env'], { timeoutMs: 8000, capture: true, maxBuffer: 256 * 1024, wholeEnv: true, env: { PATH: process.env.PATH || '', VIBESPACE_SHELL_PROBE: '1', VIBESPACE_SESSION_TOKEN: ['vs', 'planted', 'x'].join('-') } });
+    const names = String((r && r.stdout) || '').split('\n').map((l) => l.split('=')[0]);
+    return { mark: names.includes('VIBESPACE_SHELL_PROBE'), token: names.includes('VIBESPACE_SESSION_TOKEN'), n: names.length };
+  } finally { S.closePipe(); } };
+  const mk1 = await markLegs(CS);
+  ok(mk1.mark && !mk1.token && mk1.n > 1, `(a2) a whole env through the REAL starter keeps the login-shell look's mark (${mk1.mark}) and drops the hub's own token (${!mk1.token})`, mk1);
+  const NOMARK = M.load('src/server/child-starter.js', anchored(read('src/server/child-starter.js'), 'if (HUB_OWN.test(k) && !WHOLE_MARKS.has(k)) { n++; continue; }', 'if (HUB_OWN.test(k)) { n++; continue; }', 'no mark kept'), 'no-mark');   // stale-pins: kept (the release's belt — the leg's RED)
+  const mk2 = await markLegs(NOMARK);
+  ok(!mk2.mark && !mk2.token, `(a2) RED: the starter's belt with no mark kept — the login-shell look's mark is dropped (${mk2.mark})`, mk2);
+  // (b) THE OLD ROAD: a starter whose script ends at once — two faults, then the direct start from this process
+  const DIES = path.join(TMP, 'starter-dies.js'); fs.writeFileSync(DIES, 'process.exit(0)\n');
+  const S2 = CS.createChildStarter({ script: DIES, log: { warn() { } } });
+  for (let i = 0; i < 6 && !S2.stats().direct; i++) await S2.run('/bin/bash', ['-c', 'true'], { timeoutMs: 500 });
+  ok(S2.stats().direct === true, '(b) the starter that ends at once falls to the old road (the direct start) after its two faults', S2.stats());
+  await sessionLegs(S2, 'b, the old road');
+  const CSS = read('src/server/child-starter.js'), PROC = read('src/server/child-starter-proc.js');
+  const own = (src) => src.includes("function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }");
+  ok(own(CSS) && own(PROC) && (PROC.match(/process\.kill\(/g) || []).length === 1 && (CSS.match(/process\.kill\(/g) || []).length === 1,
+    'THE KILL LAW: each road ends only the group of a child it started itself (`vsSession`, detached: its pid is the group\'s id) by that child\'s own handle — one group kill a file, never a name or a pattern');
+
+  // (c) THE LOGIN-SHELL LOOK (src/server/cli-cmd.js runShell / askShell) asks the starter with the session option
+  const CLI2 = require(path.join(ROOT, 'src/server/cli-cmd.js'));
+  const SHN = 'vs-standin-loginsh', SH10 = path.join(TMP, SHN); WATCH.add(SHN);
+  try {
+    const HOME10 = path.join(TMP, 'home10'); fs.mkdirSync(HOME10, { recursive: true });
+    const env10 = { PATH: process.env.PATH || '', HOME: HOME10, USER: 'userL', GITHUB_TOKEN: ['gh', 'planted', 'x'].join('-'), VIBESPACE_SESSION_TOKEN: ['vs', 'planted'].join('-') };
+    const ans = [{ unknown: true }, { started: true, timedOut: true }, { started: false, code: null, error: 'ENOENT' }];
+    const got = [], reqs = [];
+    for (const a of ans) {
+      answer = (cmd, args) => (cmd === SHN ? a : prev10(cmd, args));
+      const A4 = asked.length; got.push(await CLI2.askShell('vs-cli-x', { shell: SH10, env: env10, timeoutMs: 3000 })); reqs.push(asked.slice(A4).find((x) => x.cmd === SHN));
+    }
+    const q = reqs[0] || { args: [], o: {} }, e = q.o.env || {};
+    ok(reqs.every(Boolean) && JSON.stringify(q.args.slice(0, 3)) === '["-l","-i","-c"]' && q.o.session && q.o.session.cwd === HOME10 && q.o.wholeEnv === true && q.o.timeoutMs === 3000
+      && e.TERM === 'dumb' && e.VIBESPACE_SHELL_PROBE === '1' && e.SHELL === SH10 && e.USER === 'userL' && !('GITHUB_TOKEN' in e) && !('VIBESPACE_SESSION_TOKEN' in e) && directOf(SHN) === 0,
+      '(c) the login-shell look asks the starter: `-l -i -c <line>`, its own session in the person\'s HOME, its whole env the allowlist (TERM=dumb, the probe mark, SHELL itself, USER kept; no token), its bound — none from the hub\'s process', { args: q.args.slice(0, 3), o: { session: q.o.session, wholeEnv: q.o.wholeEnv, timeoutMs: q.o.timeoutMs }, envNames: Object.keys(e) });
+    ok(got[0].kind === 'unanswered' && got[0].why === 'no-reply' && got[1].kind === 'unanswered' && got[1].why === 'timeout' && got[2].kind === 'unanswered' && got[2].why === 'spawn:ENOENT' && got.every((x) => x.shell === SH10),
+      '(c) each no-reply says what it is: the starter gave no answer (no-reply), the bound (timeout), a start that failed (spawn:ENOENT) — the provisional path stays, as before (unanswered is never «none»)', got.map((x) => `${x.kind}:${x.why}`));
+    const CCX = read('src/server/cli-cmd.js');
+    const OLDSH = anchored(CCX, "require('./child-starter').childStarter().run(shell, ['-l', '-i', '-c', line], req)",
+      "new Promise((res) => { const c = require('child_process').spawn(shell, ['-l', '-i', '-c', line], { env: req.env, detached: true }); c.on('error', (e) => res({ started: false, code: null, error: String((e && e.code) || e) })); c.on('close', (code) => res({ started: true, code, stdout: '' })); })", 'the old road');   // stale-pins: kept (the release's road — the leg's RED)
+    const OLDS = require(M.write('src/server/cli-cmd.js', OLDSH, 'old-shell-road'));
+    const S0 = directOf(SHN); await OLDS.askShell('vs-cli-x', { shell: SH10, env: env10, timeoutMs: 3000 });
+    ok(directOf(SHN) - S0 === 1, '(c) RED: a copy on the old road starts the person\'s login shell from the hub\'s process (the spy counts it)', { direct: directOf(SHN) - S0 });
+  } finally { WATCH.delete(SHN); answer = prev10; }
 }
 for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 16, label: 'B-323e starts ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 

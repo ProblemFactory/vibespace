@@ -141,15 +141,19 @@ try {
 
   console.log('③ the kill law: each side signals only what it spawned and holds');
   const hubSrc = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8');
-  const law = (src) => ({ bare: /process\.kill\(/.test(src), pattern: /\b(pkill|killall)\b|kill\s+-/.test(src), held: (src.match(/\.kill\(/g) || []).length, ofHeld: (src.match(/\b(p|c)\.kill\(/g) || []).length });
+  // B-323e's remainder (lane bl-chat-b, 主开发 r2689 (a)): each side's ONE own-group kill — a SESSION child's group, by the handle of the
+  // child it started detached (endOwnGroup, guarded by `vsSession`) — is counted and set apart; every other kill is judged as before
+  const OWN_GROUP = "process.kill(-c.pid, 'SIGKILL')";
+  const law = (src) => { const own = src.split(OWN_GROUP).length - 1, rest = src.split(OWN_GROUP).join('');
+    return { own, ownGuard: src.includes('function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { try { ' + OWN_GROUP), bare: /process\.kill\(/.test(rest), pattern: /\b(pkill|killall)\b|kill\s+-/.test(rest), held: (rest.match(/\.kill\(/g) || []).length, ofHeld: (rest.match(/\b(p|c)\.kill\(/g) || []).length }; };
   const lh = law(hubSrc), lp = law(psSrc);
   const S3 = CS.createChildStarter();
   await S3.run(process.execPath, ['-e', '0'], { timeoutMs: 10000 });
   S3._proc().stdin.write(JSON.stringify({ op: 'kill', id: 999999 }) + '\n');   // an op it does not know (the starter has no kill verb: it kills only at a bound or at its end)
   const after = await S3.run(process.execPath, ['-e', 'process.stdout.write("still")'], { timeoutMs: 10000, capture: true });
   S3.closePipe();
-  ok(!lh.bare && !lh.pattern && lh.held > 0 && lh.held === lh.ofHeld && !lp.bare && !lp.pattern && lp.held > 0 && lp.held === lp.ofHeld && after.stdout === 'still',
-    `no process.kill, no pattern, no bare pid in either file — every kill is of a held ChildProcess (hub ${lh.ofHeld}/${lh.held}, starter ${lp.ofHeld}/${lp.held}); an op it does not know changed nothing (it answered «${after.stdout}» after it)`, { lh, lp });
+  ok(!lh.bare && !lh.pattern && lh.held > 0 && lh.held === lh.ofHeld && !lp.bare && !lp.pattern && lp.held > 0 && lp.held === lp.ofHeld && lh.own === 1 && lp.own === 1 && lh.ownGuard && lp.ownGuard && after.stdout === 'still',
+    `no process.kill, no pattern, no bare pid in either file — every kill is of a held ChildProcess (hub ${lh.ofHeld}/${lh.held}, starter ${lp.ofHeld}/${lp.held}), save each side's ONE own-group kill of a session child it started (endOwnGroup: ${lh.own} / ${lp.own}); an op it does not know changed nothing (it answered «${after.stdout}» after it)`, { lh, lp });
 
   console.log('④ a dead or slow starter is «unknown», never «the mount is down»; replaced once; then the old road, said once');
   const SILENT = path.join(T, 'silent-starter.js');
