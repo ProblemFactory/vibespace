@@ -126,6 +126,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a restart, a run card's 8-hour «Always» no longer reads as ended while it still works, and an agent is told when a pasted key's approval ended.
 - When the agent groups' file cannot be read, the Channels panel now says the groups are paused instead of «No groups yet», and nothing is sent until it reads.
 - Pairing with a VibeSpace whose channels are paused now says so, and the same code still works once it reads again.
+- A VibeSpace started from another VibeSpace's terminal, with VibeSpace integration off, no longer gives its conversations the other VibeSpace's address.
 
 ## 2.369.415 — 2026-11-21
 
