@@ -320,8 +320,10 @@ router.get('/api/dir-complete', async (req, res) => {
   const sliced = req.query.bases != null || req.query.q != null || req.query.probe != null || req.query.kind != null;
   if (R && sliced) {
     const guard = setTimeout(() => { if (!res.headersSent) res.json({ suggestions: [], partial: true, error: 'machine did not answer in time' }); }, 2500);
+    // r1633 (1): the page's abort (a newer ask of the same field) ends a paired machine's late wait at once
+    const ac = new AbortController(); if (typeof res.on === 'function') res.on('close', () => { if (!res.writableEnded) ac.abort(); });
     try {
-      const ans = await R.fs.dirSlice(R.host, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') });
+      const ans = await R.fs.dirSlice(R.host, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), press: req.query.press === '1', late: req.query.late === '1' }, { signal: ac.signal });
       clearTimeout(guard);
       if (!res.headersSent) res.json(ans);
     } catch (e) {
@@ -334,7 +336,7 @@ router.get('/api/dir-complete', async (req, res) => {
     try {
       // B-d833 M1: the page's abort (a field removed, a text that moved) closes this response — the field's re-asks end with it
       const ac = new AbortController(); res.on('close', () => { if (!res.writableEnded) ac.abort(); });
-      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), press: req.query.press === '1', q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450, signal: ac.signal });
+      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), press: req.query.press === '1', late: req.query.late === '1', q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450, signal: ac.signal });   // r1633: `late` = the page's quiet re-ask (the late-facts wait)
       return res.json({ suggestions: require('../path-candidates.js').legacySuggestions(ans.listing, String(req.query.path || '')), ...ans });
     } catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120) }); }
   }

@@ -599,7 +599,18 @@ async function runFs(action, params, timeoutMs) {
 // vibespace are found by their own facts. One collector per daemon (its caches serve every hub link).
 const DIR_CALL_MS = 15000;
 let dirCollector = null;
-const dirMounts = { at: 0, rows: [] };
+const dirMounts = { at: 0, rows: [], p: null };
+// THIS machine's mounted folders (src/dir-ops.js mountRows — names only), read on the worker: once before the first ask (bounded — the
+// first walk and the first facts must know them, the fresh read's S7) and then BEHIND the answers, at most every 5 s (never taking a
+// worker as an ask's first stat goes, its N21)
+function dirMountsRefresh() {
+  if (dirMounts.p || !workerPool || !workerPool.alive()) return dirMounts.p || Promise.resolve();
+  dirMounts.at = Date.now();
+  dirMounts.p = workerPool.run('mountRows', { dirOp: true, home: require('os').homedir(), platform: process.platform }, 5000, { idleOnly: true })
+    .then((r) => { if (r && r.result && Array.isArray(r.result.rows)) dirMounts.rows = r.result.rows; }, () => { }).finally(() => { dirMounts.p = null; });
+  return dirMounts.p;
+}
+const dirWaits = new Map();   // a late ask's key → its wait's end (r1633 (1)): `dir-collect-end` ends it at once
 function dirCollectorOf() {
   if (dirCollector) return dirCollector;
   const DCm = require('../dir-collect.js'), hung = DCm.hungMemory({ home: require('os').homedir() });   // B-23e5's law for this pool (the fresh read's MUST)
@@ -608,15 +619,9 @@ function dirCollectorOf() {
     roots: [],
     poolBusy: (err) => !!err && (err.code === 'no-idle-worker' || err.code === 'no-worker'),
     log: (m) => log(m),
-    // THIS machine's mounted folders (src/dir-ops.js mountRows — names only), read on the worker behind the answers at most every 5 s
-    mounts: () => {
-      const t = Date.now();
-      if (t - dirMounts.at >= 5000 && workerPool && workerPool.alive()) {
-        dirMounts.at = t;
-        workerPool.run('mountRows', { dirOp: true, home: require('os').homedir(), platform: process.platform }, 5000, { idleOnly: true }).then((r) => { if (r && r.result && Array.isArray(r.result.rows)) dirMounts.rows = r.result.rows; }, () => { });
-      }
-      return dirMounts.rows;
-    },
+    mounts: () => dirMounts.rows,   // (read behind the answers: dirMountsRefresh)
+    // a Mac's ~/Library is never walked (the sh road's own prune: its caches would fill the 6000 folders, and it holds ~/Library/CloudStorage)
+    walkSkip: process.platform === 'darwin' ? [require('path').join(require('os').homedir(), 'Library')] : [],
     call: async (op, payload, opts) => {
       if (!workerPool || !workerPool.alive()) throw Object.assign(new Error('no fs worker of this agent is running'), { code: 'no-worker' });
       const refused = hung.refusal(op, payload); if (refused) throw refused;   // a dead path is never sent to a fresh worker
@@ -2715,10 +2720,25 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         (async () => {
           try {
             const DCm = require('../dir-collect.js');
-            const facts = DCm.cutToCap(await dirCollectorOf().collect(msg.plan || {}), DCm.COLLECT_CAP_BYTES);
-            mux.control({ op: 'dir-collect-result', id: msg.id, facts });
+            // r1633 (1): a late ask's wait is ended at once by its field's newer ask — `dir-collect-end` names it by the ask's own key
+            const ac = typeof msg.key === 'string' && msg.key ? new AbortController() : null;
+            if (ac) { dirWaits.set(msg.key, ac); if (dirWaits.size > 64) dirWaits.delete(dirWaits.keys().next().value); }
+            try {
+              const plan = { ...(msg.plan || {}) }, b = Number(plan.budgetMs);
+            plan.budgetMs = Number.isFinite(b) && b > 0 ? Math.min(b, 2000) : 450;   // the reply's own bound: at most 2 s whatever a hub asks
+            if (!dirMounts.at) await Promise.race([dirMountsRefresh(), new Promise((r) => setTimeout(r, 300))]);   // the first ask knows the mounts
+            const facts = DCm.cutToCap(await dirCollectorOf().collect(plan, { signal: ac ? ac.signal : null }), DCm.COLLECT_CAP_BYTES);
+              mux.control({ op: 'dir-collect-result', id: msg.id, facts });
+              if (Date.now() - dirMounts.at >= 5000) dirMountsRefresh();   // behind the answer
+            } finally { if (ac) dirWaits.delete(msg.key); }
           } catch (e) { mux.control({ op: 'dir-collect-result', id: msg.id, error: String((e && e.message) || e).slice(0, 200) }); }
         })();
+        return;
+      }
+      if (msg.op === 'dir-collect-end') {
+        const ac = typeof msg.key === 'string' ? dirWaits.get(msg.key) : null;
+        if (ac) { dirWaits.delete(msg.key); ac.abort(); }
+        mux.control({ op: 'dir-collect-end-result', id: msg.id, ended: !!ac });
         return;
       }
       if (msg.op === 'sysinfo') {

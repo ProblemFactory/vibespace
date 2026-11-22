@@ -418,7 +418,8 @@ const jsonList = (v) => { if (Array.isArray(v)) return v.map(String); if (typeof
 const { refusalBody } = require('../hosts.js'); // «my-mac cannot be reached» as the path field's words (lane hub-dies-dead-ssh-host)
 app.get('/api/hosts/:id/dir-complete', async (req, res) => {
   if (req.query.bases != null || req.query.q != null || req.query.probe != null || req.query.kind != null) {
-    try { return res.json(await hosts.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') }, { by: DAU.byOfReq(req) })); }
+    const ac = new AbortController(); if (typeof res.on === 'function') res.on('close', () => { if (!res.writableEnded) ac.abort(); });   // r1633 (1): a newer ask ends the late wait there
+    try { return res.json(await hosts.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), press: req.query.press === '1', late: req.query.late === '1' }, { by: DAU.byOfReq(req), signal: ac.signal })); }
     catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120), ...refusalBody(e) }); }
   }
   try { res.json({ suggestions: await hosts.dirComplete(req.params.id, req.query.path || '', { by: DAU.byOfReq(req) }) }); }

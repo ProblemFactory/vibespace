@@ -38,7 +38,7 @@ const CAPS = Object.freeze({
   'desktop-serve': LINE_MAX,       // list / status: one row per app record, no count cap
   // small by construction (an ack, a fact, a short list) — the design's line bound
   'attach-pipe-session': SMALL, 'browser-serve': SMALL, 'desktop-input': SMALL, 'dial-status': SMALL, 'discovery-watch': SMALL,
-  'display-facts': SMALL, 'hello': SMALL, 'input-events': SMALL, 'kill-pipe-session': SMALL, 'kill-session': SMALL,
+  'dir-collect-end': SMALL /* r1633: { ended } */, 'display-facts': SMALL, 'hello': SMALL, 'input-events': SMALL, 'kill-pipe-session': SMALL, 'kill-session': SMALL,
   'left-behind': SMALL, 'left-behind-end': SMALL /* B-69a7 (b): names + counts */, 'ok': SMALL, 'open-pipe-session': SMALL, 'open-session': SMALL, 'peer-post': SMALL, 'peer-state': SMALL /* B-95fc: {live, inbox} */, 'ping-info': SMALL,
   'place-secret': SMALL, 'settings-merge': SMALL /* B-e7c0: {ok, path, dropped names} */, 'pool-orders-log-ack': SMALL, 'probe-cli': SMALL, 'remoteapp-facts': SMALL, 'resize-session': SMALL,
   'run-stream': SMALL, 'serve-folder': SMALL, 'serve-socks': SMALL, 'session-events-watch': SMALL, 'settings-open': SMALL,

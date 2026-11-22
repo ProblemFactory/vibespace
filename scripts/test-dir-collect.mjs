@@ -204,6 +204,101 @@ console.log('⑤ the reply\'s byte cap: cut, and said');
 }
 
 
+console.log('⑥ THE LATE-FACTS WAIT (r1633), on both roads: a kid whose own fact is slow (its package.json a FIFO the suite writes later)');
+const { execFileSync } = await import('node:child_process');
+const slowKid = (dir) => { mk(dir + '/kid/.git'); const f = path.join(HOME, dir, 'kid', 'package.json'); execFileSync('mkfifo', [f]); setOld(path.join(HOME, dir)); fs.utimesSync(path.join(HOME, dir), OLD, OLD); return f; };
+const released = new Set();
+// the fact lands when its reader (the facts call, blocked in a worker) gets the bytes: open the FIFO's write end once a reader is there
+const release = async (fifo, afterMs = 0) => { if (afterMs) await sleep(afterMs); for (let i = 0; i < 400 && !released.has(fifo); i++) { try { const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.writeSync(fd, JSON.stringify({ name: 'kid' })); fs.closeSync(fd); released.add(fifo); } catch { await sleep(10); } } };
+const kidOf = (f, dir) => { const d = (f.listed || []).find((x) => x.path === path.join(HOME, dir)); return d && (d.kids || []).find((k) => k.name === 'kid'); };
+const roadsOf = { hub: (wire, o) => hubC.collect(wire, o), paired: (wire, o) => dm.dirCollect(wire, { timeoutMs: 8000, ...(o || {}) }) };
+await Promise.all(Object.entries(roadsOf).map(async ([road, ask]) => {   // (the two roads at once: their folders, FIFOs and pools are their own)
+  const s1 = slowKid(`s1${road}`), b1 = slowKid(`b1${road}`), x1 = slowKid(`x1${road}`);
+  // S1: a FAST link — the quiet re-ask arrives before the fact
+  const P1 = DS.plan({ text: `~/s1${road}/`, bases: [], budgetMs: 1500 }, HOME);
+  const first = await ask(P1.wire), unmarked = await ask(P1.wire);
+  release(s1, 300);
+  const t1 = Date.now(), lateR = await ask({ ...P1.wire, late: true }), took1 = Date.now() - t1;
+  ok(!!(first.factsLate && unmarked.factsLate && !(kidOf(unmarked, `s1${road}`) || {}).git), `⑥ ${road} S1 RED (no wait): the re-ask that arrives before the kid's fact — unmarked — answers at once with factsLate (the page would ask no third time: the badge never comes)`);
+  ok(!!(!lateR.factsLate && (kidOf(lateR, `s1${road}`) || {}).git === true && released.has(s1) && took1 < DC.LATE_WAIT_MS), `⑥ ${road} S1: the SAME re-ask marked late waits where the fact lives and replies ONCE, whole — the kid's git badge in it (its reply came after the fact was handed, ${took1} ms, inside the bound)`, { took1, factsLate: lateR.factsLate, kid: kidOf(lateR, `s1${road}`) });
+  // THE BOUND: a fact past 1 s — the reply says the rest is late; the fact is kept for the next ask
+  const P2 = DS.plan({ text: `~/b1${road}/`, bases: [], budgetMs: 1500 }, HOME);
+  await ask(P2.wire); release(b1, 1300);
+  const t2 = Date.now(), lateB = await ask({ ...P2.wire, late: true }), took2 = Date.now() - t2;
+  ok(!!(lateB.factsLate === true && took2 >= DC.LATE_WAIT_MS - 50 && took2 < DC.LATE_WAIT_MS + 600), `⑥ ${road} THE BOUND: a fact past it — the late re-ask replies at the bound (${took2} ms ≈ ${DC.LATE_WAIT_MS}) with what landed and factsLate for the rest`);
+  await sleep(500);
+  const nextB = await ask(P2.wire);
+  ok(!!((kidOf(nextB, `b1${road}`) || {}).git === true), `⑥ ${road} …the fact that landed after the bound is KEPT there: the next ordinary ask has it (other kids' facts may still be on their way while the pool was held)`, { factsLate: nextB.factsLate, kid: kidOf(nextB, `b1${road}`), took2 });
+  // SUPERSEDED: a newer ask of the same field ends the wait at once
+  const P3 = DS.plan({ text: `~/x1${road}/`, bases: [], budgetMs: 1500 }, HOME);
+  await ask(P3.wire);
+  const ac = new AbortController(), ends = [], asks = [];
+  const raw = dm._request.bind(dm);
+  if (road === 'paired') dm._request = (p, o) => { const r = raw(p, o); if (p.op === 'dir-collect-end') ends.push(r); if (p.op === 'dir-collect') asks.push(r); return r; };
+  const t3 = Date.now(); setTimeout(() => ac.abort(), 100);
+  let out3 = null; try { out3 = await ask({ ...P3.wire, late: true }, { signal: ac.signal }); } catch (e) { out3 = { code: e.code }; }
+  const took3 = Date.now() - t3;
+  if (road === 'paired') {
+    dm._request = raw;
+    const endR = ends.length ? await ends[0] : null, agentR = asks.length ? await asks[asks.length - 1] : null, agentTook = Date.now() - t3;
+    ok(!!(out3.code === 'aborted' && took3 < DC.LATE_WAIT_MS && endR && endR.ended === true && agentR && agentR.facts && agentTook < DC.LATE_WAIT_MS && !released.has(x1)), `⑥ paired SUPERSEDED: the field's newer ask ends the wait AT ONCE — the hub's ask rejects (${took3} ms), the agent is told (ended ${endR && endR.ended}) and its wait ends well before the fact (${agentTook} ms)`, { out3, endR, agentTook });
+  } else ok(!!(out3 && out3.factsLate === true && took3 < DC.LATE_WAIT_MS && !released.has(x1)), `⑥ hub SUPERSEDED: the field's newer ask (its signal) ends the wait AT ONCE (${took3} ms), the reply says the fact is late`, { took3 });
+  release(s1); release(b1); release(x1);
+}));
+await Promise.all([...[...fs.readdirSync(HOME)].filter((d) => /^(s1|b1|x1)/.test(d)).map((d) => release(path.join(HOME, d, 'kid', 'package.json')))]);
+
+console.log('⑦ THE INDEX ON THE WIRE (r1651): only when the hub\'s copy is stale, never in front of the line and the rows');
+{
+  const P = DS.plan({ text: 'pay', q: 'pay', bases: ['~'], budgetMs: 1500 }, HOME), root = P.wire.roots[0];
+  const lateFull = await settle(() => dm.dirCollect({ ...P.wire, late: true, index: { have: {} } }, { timeoutMs: 8000 }));
+  const body = lateFull.index[0] && lateFull.index[0].ok;
+  ok(!!(body && Array.isArray(body.dirs) && body.dirs.length > 5 && /^[0-9a-f]{16}$/.test(body.v || '')), `the late re-ask carries the machine's index (${body && body.dirs && body.dirs.length} folders, version ${body && body.v} — its content's)`);
+  const first = await dm.dirCollect({ ...P.wire, index: { have: {} } }, { timeoutMs: 8000 }), fi = first.index[0] && first.index[0].ok;
+  ok(!!(fi && fi.held === true && !fi.dirs && first.factsLate === true && Buffer.byteLength(JSON.stringify(first.index)) < 200), `(b) the ORDINARY reply never carries it: «held» there (${Buffer.byteLength(JSON.stringify(first.index))} bytes for the index), factsLate — the page asks once more, quietly, and that reply carries it`, first.index);
+  const same = await dm.dirCollect({ ...P.wire, index: { have: { [root]: body.v } } }, { timeoutMs: 8000 }), si = same.index[0] && same.index[0].ok;
+  ok(!!(si && si.same === true && !si.dirs && Buffer.byteLength(JSON.stringify(same.index)) < 120 && !same.factsLate), `(a) the hub naming the version it holds is answered «the same» in a few bytes (${Buffer.byteLength(JSON.stringify(same.index))}) — never an index a keystroke`);
+  const sameLate = await dm.dirCollect({ ...P.wire, late: true, index: { have: { [root]: body.v } } }, { timeoutMs: 8000 });
+  ok(!!(sameLate.index[0].ok.same === true), '(a) …the late re-ask too: «the same» when the hub holds it');
+  // the hosts road keeps the copy and its version per machine, and shapes with it
+  const { HostManager } = require(REPO + '/src/hosts.js');
+  const hm = new HostManager({ dataDir: path.join(dataDir, 'hub-hosts') });
+  hm._state.hosts.push({ id: 'h-pair', name: 'paired', transport: 'dial' });
+  hm._devices = new Map([['h-pair', dm]]);
+  const road = hm.collectRoadOf('h-pair');
+  const viaA = await hm.dirSlice('h-pair', { text: 'pay', q: 'pay', bases: ['~'] }), viaB = await hm.dirSlice('h-pair', { text: 'pay', q: 'pay', bases: ['~'], late: true }), viaC = await hm.dirSlice('h-pair', { text: 'pay', q: 'pay', bases: ['~'] });
+  const rowsOf = (r) => Object.keys((r && r.listing && r.listing.dirs) || {}).filter((k) => k.includes('pay')).sort();
+  ok(!!(road && viaA.rowsLate === true && viaA.factsLate === true && rowsOf(viaB).includes('~/work/payments') && !viaB.factsLate && rowsOf(viaC).includes('~/work/payments') && !viaC.rowsLate),
+    `the hosts road: a first search with no copy says «still looking» + factsLate; the quiet re-ask brings the index (${rowsOf(viaB).join(', ')}); the next keystroke answers from the kept copy at once`, { a: { rowsLate: viaA.rowsLate, factsLate: viaA.factsLate }, b: rowsOf(viaB), c: { rows: rowsOf(viaC), rowsLate: viaC.rowsLate } });
+  // ⑦b (the fresh read's N13): each ask of ② answered by hosts.dirSlice on the paired machine — the plan in its home, the index kept and
+  // named, the marks rebased, the shape — equals this hub's own answer once both have every fact
+  const doneR = (r) => r && !r.factsLate && !r.rowsLate && !r.partial, doneBig = (r) => r && !r.rowsLate && !r.partial;
+  const sameAs = (r) => { const x = shown(r); delete x.suggestions; delete x.os; if (x.listing) x.listing.machine = null; return JSON.stringify(x); };
+  for (const [what, args] of ASKS) {
+    const dn = what.includes('400') ? doneBig : doneR;
+    const viaHub = await settle(() => hubDS.slice({ budgetMs: 1500, ...args }), dn);
+    const viaPair = await settle(async () => { const r = await hm.dirSlice('h-pair', args); return r.factsLate ? hm.dirSlice('h-pair', { ...args, late: true }) : r; }, dn);
+    ok(!!(sameAs(viaHub) === sameAs(viaPair) && viaPair.listing.machine === 'h-pair'), `⑦b ${what}: the hosts road's reply on the paired machine equals this hub's own answer (but its machine)`, { hub: sameAs(viaHub).slice(0, 500), paired: sameAs(viaPair).slice(0, 500) });
+  }
+  // an agent without the capability, a Windows machine, a hello with no home: the sh road (asked nothing new)
+  const stub = (info) => ({ helloInfo: () => info, isLinked: () => true, dirCollect: () => { throw new Error('asked'); } });
+  const roadFor = (info) => { hm._devices = new Map([['h-x', stub(info)]]); return hm.collectRoadOf('h-x'); };
+  ok(!!(!roadFor({ capabilities: ['probe'], home: '/home/u', platform: 'linux' }) && !roadFor({ capabilities: ['dir-collect'], home: 'C:\\Users\\u', platform: 'win32' }) && !roadFor({ capabilities: ['dir-collect'], platform: 'linux' }) && !!roadFor({ capabilities: ['dir-collect'], home: '/home/u', platform: 'linux' })),
+    'an OLDER agent (no dir-collect), a Windows machine and a hello without a home keep the sh road — CONTROL: a posix agent saying it takes the collector road');
+  hm._devices = new Map([['h-pair', dm]]);
+}
+
+console.log('⑧ the first reply at today\'s bounds (r1651 (b)): the line and the rows, measured');
+{
+  const B = Array.from({ length: 13 }, (_, i) => `wide/b${String(i).padStart(2, '0')}`);
+  for (const b of B) for (let k = 0; k < 400; k++) mk(`${b}/${'folder-name-of-forty-characters-' + String(k).padStart(4, '0')}`);
+  setOld(path.join(HOME, 'wide'));
+  const P = DS.plan({ text: 'x', q: 'x', bases: B.map((b) => '~/' + b), budgetMs: 1500 }, HOME);
+  const f = await settle(() => dm.dirCollect({ ...P.wire, index: { have: {} } }, { timeoutMs: 8000 }), (x) => (x.listed || []).length === 14 && !(x.rows || []).some((r) => r && r.late)), bytes = Buffer.byteLength(JSON.stringify(f));
+  const kids = (f.listed || []).reduce((n, d) => n + ((d.kids || []).length), 0);
+  ok(!!(P.wire.rows.length === 13 && (f.listed || []).length === 13 && kids >= 12 * 400 && bytes < 1024 * 1024 && f.index.every((r) => !(r && r.ok && r.ok.dirs))),
+    `MEASURED: the first reply at today's bounds — the home and 12 bases listed, 400 kids each (${kids} kids; the plan's own cap: 12 bases), every index root held — is ${bytes} bytes (${(bytes / 1024).toFixed(0)} KiB), under 1 MiB; the 4 MiB cap is the hard bound behind it`, { rows: P.wire.rows.length, listed: (f.listed || []).length, bytes });
+}
+
 POOL.close();
 {
   let e = null; daemonEnded = true;

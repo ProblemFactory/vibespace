@@ -1773,7 +1773,13 @@ class HostManager {
    *  · `partial` is true EXACTLY when the typed folders have no landed result (not even a kept one); a late or held rest sets
    *    rowsLate / rowsUnread (+ rowsHeld) / probesLate — the names the field words — and never `partial`.
    *  → { suggestions, listing, self, took, partial, verdict?, rowsLate?, sourcesLate?, rowsUnread?, sourcesUnread?, rowsHeld?, heldFor?, probesLate? } */
-  async dirSlice(id, { text = '', bases = [], probe = [], q = '', kind = 'folder', waitMs } = {}, { by = 'system:hosts' } = {}) {
+  async dirSlice(id, { text = '', bases = [], probe = [], q = '', kind = 'folder', waitMs, press = false, late = false } = {}, { by = 'system:hosts', signal = null } = {}) {
+    // r1508 / r1636 / r1651 — THE MACHINE COLLECTS, THE HUB SHAPES: an agent that says `dir-collect` (with its home, on a posix machine)
+    // collects the facts THERE over this hub's plan, and this hub shapes them with ITS OWN shaper (src/server/dir-slice.js — the very
+    // function of its own answer). An older agent (no capability: never asked an unknown op), a Windows machine and an ssh-only one
+    // keep the sh road below, as before.
+    const road = this.collectRoadOf(id);
+    if (road) return this._dirCollected(id, road, { text, bases, probe, q, kind, press, late }, { signal, by });
     const h = this.get(id);
     if (h && h.transport !== 'dial') await this.refuseUnreachable(id); // BY NAME, before any spawn (lane hub-dies-dead-ssh-host)
     const PC = require('./path-candidates.js');
@@ -1908,6 +1914,57 @@ class HostManager {
     const named = errs.find((e) => e && e.code);
     if (named && !out.error) Object.assign(out, { error: String(named.message || named).slice(0, 120), ...refusalBody(named) });   // a typed ask refused BY NAME is said, kept data or not
     return out;
+  }
+
+  /** r1636: the collector road to this machine, or null (the sh road): its agent CONNECTED now (a list never starts a connect), its hello
+   *  saying `dir-collect`, its home absolute, not Windows (the plan is in posix paths). → { dm, info } | null */
+  collectRoadOf(id) {
+    const dm = typeof this.connectedDevice === 'function' ? this.connectedDevice(id) : null;
+    const info = dm ? helloOf(dm) : null;
+    const caps = info && Array.isArray(info.capabilities) ? info.capabilities : [];
+    return caps.includes('dir-collect') && typeof info.home === 'string' && info.home.startsWith('/') && info.platform !== 'win32' && typeof dm.dirCollect === 'function' ? { dm, info } : null;
+  }
+
+  /** r1636 / r1651: THE FOLDER FIELD ON A PAIRED MACHINE — ONE trip to the line and the rows (the agent's `dir-collect`: the plan in
+   *  THAT machine's paths, its home from the hello; `by` = who asked, as on the sh road), TWO for all (the page's quiet re-ask, `late`: the agent waits ≤ 1 s for the facts on
+   *  their way and replies once). This hub keeps, per machine, only each index root's copy and its version: the ask names the version
+   *  held and the agent answers «the same» in a few bytes; a newer one is held THERE on the ordinary reply (never in front of the line
+   *  and the rows: this hub answers from the copy it has, and the page's quiet re-ask carries the new one). A Mac's display names stay
+   *  on the sh road (r1651 Q1), asked once in ten minutes, behind. The marks' ends come in THAT machine's clock: rebased to this one. */
+  async _dirCollected(id, { dm, info }, args, { signal = null, by = 'system:hosts' } = {}) {
+    const DSL = require('./server/dir-slice.js'), PC = require('./path-candidates.js');
+    const t0 = Date.now();
+    const c = (this._collectCache = this._collectCache || new Map()).get(id) || { index: new Map(), names: null, namesAt: 0 };
+    this._collectCache.set(id, c);
+    const P = DSL.plan({ ...args, budgetMs: 450 }, info.home);
+    const have = {}; for (const r of P.wire.roots) { const e = c.index.get(r); if (e && !e.cut) have[r] = e.v; }   // a CUT copy is never named: the next late re-ask brings it whole
+    const F = await dm.dirCollect({ ...P.wire, ...(P.wire.roots.length ? { index: { have } } : {}) }, { signal, timeoutMs: 2400 });
+    const got = Date.now(), shift = got - (Number(F && F.at) || got);
+    for (const a of (F && F.answers) || []) if (a && Number.isFinite(a.until)) a.until += shift;   // THAT machine's clock → this hub's
+    let stale = false;
+    F.index = (F.index || []).map((r, i) => {
+      const root = P.wire.roots[i];
+      if (!r || !r.ok) return r;
+      if (r.ok.same || r.ok.held) {
+        const e = c.index.get(root);
+        if (!e) return { held: true };   // (a copy dropped meanwhile: a fact on its way, the late re-ask carries it)
+        if (r.ok.held) stale = true;   // the copy this hub has answers now; the newer one rides the page's quiet re-ask
+        return { ok: e };
+      }
+      c.index.set(root, { v: r.ok.v, dirs: r.ok.dirs || [], links: r.ok.links || [], partial: !!r.ok.partial, ...(r.ok.cut ? { cut: true } : {}) });
+      if (c.index.size > 16) c.index.delete(c.index.keys().next().value);
+      return { ok: c.index.get(root) };
+    });
+    if (stale) F.factsLate = true;
+    // r1651 Q1: a Mac's display names (文稿 for Documents) stay on today's road — the sh script's names alone, once in ten minutes, behind
+    if (info.platform === 'darwin' && Date.now() - c.namesAt > 600e3) {
+      c.namesAt = Date.now();
+      const DSS = require('./dir-slice-script.js');
+      Promise.resolve().then(() => dm.runCmd('sh', ['-c', DSS.sliceScript({ list: [], names: true })], { timeoutMs: 6000, by }))
+        .then((r) => { const raw = DSS.parseSlice(String((r && r.stdout) || '')); if (raw && raw.localized) c.names = raw.localized; }, () => { });
+    }
+    const out = DSL.shape(P, F, { machine: id, localized: c.names || {}, took: Date.now() - t0 });
+    return { suggestions: PC.legacySuggestions(out.listing, String(args.text || '')), ...out, os: info.platform === 'darwin' ? 'Darwin' : info.platform === 'linux' ? 'Linux' : String(info.platform || '') };
   }
 
   /** B-24e2: does the build `version` a conversation runs on this machine DECLARE the background signal — read by the machine of its OWN program file (shared

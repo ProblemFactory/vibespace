@@ -28,9 +28,9 @@ const poolBusy = (err) => !!err && (err.code === NO_IDLE.code || err.code === NO
 
 /** THE PLAN of one answer, in the machine's own paths (`home` = THAT machine's home: this hub's, or a paired machine's from its hello).
  *  `text` = what the field holds; `bases` / `probe` = paths (`~/…` or absolute); `q` = the fuzzy words; `press` = a person's press is
- *  waiting for it (R-i). → { wire (what the collector is asked: src/dir-collect.js collect), text, tAll, allBases, sentAs, candAbs,
+ *  waiting for it (R-i); `late` = the page's quiet re-ask (r1633: the late-facts wait where the facts live). → { wire (what the collector is asked: src/dir-collect.js collect), text, tAll, allBases, sentAs, candAbs,
  *  fuzzy (the words), home } — the rest stays here for the shape */
-function plan({ text = '', bases = [], probe = [], q = '', kind = 'folder', budgetMs = 450, press = false } = {}, home) {
+function plan({ text = '', bases = [], probe = [], q = '', kind = 'folder', budgetMs = 450, press = false, late = false } = {}, home) {
   const abs = (p) => PC.fromTilde(home, String(p || '').trim()).replace(/(.)\/+$/, '$1');
   const allBases = (Array.isArray(bases) ? bases : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~')));
   const tAll = allBases.map((p) => ({ path: PC.toTilde(home, abs(p)) }));
@@ -48,7 +48,7 @@ function plan({ text = '', bases = [], probe = [], q = '', kind = 'folder', budg
   const t = String(text);
   const seg = /\s/.test(t) ? '' : t.trim().slice(t.trim().lastIndexOf('/') + 1).toLowerCase();
   const lastSeg = /\s/.test(t) || !t.includes('/') ? '' : t.slice(t.lastIndexOf('/') + 1).toLowerCase();
-  return { wire: { cands, rows, probes, roots, fuzzy: !!fuzzy, files: kind === 'file', press: !!press, budgetMs, seg, lastSeg }, text: t, tAll, allBases, sentAs, candAbs, fuzzy, home };
+  return { wire: { cands, rows, probes, roots, fuzzy: !!fuzzy, files: kind === 'file', press: !!press, budgetMs, seg, lastSeg, ...(late ? { late: true } : {}) }, text: t, tAll, allBases, sentAs, candAbs, fuzzy, home };
 }
 
 /** THE SHAPE of one answer — the plan (above) and the collector's facts (src/dir-collect.js collect: JSON-safe, from either road) →
@@ -60,6 +60,9 @@ function shape(P, F, { machine = null, localized = null, took = 0, now = Date.no
   const w = P.wire, cands = w.cands, answers = Array.isArray(F.answers) ? F.answers : [];
   const okOf = (r) => (r && r.ok ? r.ok : null);
   const isLate = (r) => !!r && r.late === true;
+  // r1651 (b): an index root a paired machine HOLDS (newer than the hub's copy, which it has none of): not a source that did not answer —
+  // a fact on its way: the rows say «still looking», the page asks once more, quietly, and that reply carries it (src/hosts.js)
+  const isHeld = (r) => !!r && r.held === true;
   const listR = Array.isArray(F.rows) ? F.rows : [], auxR = Array.isArray(F.probes) ? F.probes : [], idxR = Array.isArray(F.index) ? F.index : [];
   const text = P.text;
   const verdict = cands.length ? { ...PC.textVerdict(answers) } : null;
@@ -82,19 +85,19 @@ function shape(P, F, { machine = null, localized = null, took = 0, now = Date.no
   const sourcesUnread = [...w.rows.filter((_, i) => listR[i] && listR[i].skipped), ...w.roots.filter((_, i) => idxR[i] && idxR[i].skipped)];
   let idx = null, idxPartial = false;
   if (P.fuzzy) {
-    const es = idxR.map(okOf);
+    const es = idxR.filter((r) => !isHeld(r)).map(okOf);
     idxPartial = es.some((e) => !e || e.partial);
     if (es.some(Boolean)) { idx = { dirs: [], links: [] }; for (const e of es) if (e) { idx.dirs.push(...(e.dirs || [])); idx.links.push(...(e.links || [])); } }
   }
   // the line's own facts land in the listing too (a candidate's stat, a level's «a folder»): its resolution's facts
   const facts = [...answers.flatMap((x) => [x.stat && x.stat.exists ? x.stat : null, x.stat && x.stat.one && x.stat.one.exists ? x.stat.one : null]).filter(Boolean), ...auxR.map(okOf).filter(Boolean)];
   const listing = PC.sliceListing({ home: F.home || P.home, machine, dirs: Array.isArray(F.listed) ? F.listed : [], probes: facts, index: idx, mounts: (Array.isArray(F.mounts) ? F.mounts : []).filter((m) => !m.blocked), ...(localized ? { localized } : {}), q: P.fuzzy });
-  const factsLate = !!F.factsLate;
+  const heldIdx = idxR.some(isHeld), factsLate = !!F.factsLate || heldIdx;
   // `partial`: the verdict NEEDS a source that did not answer (asked again, bounded); a search's rows when an index root is late or cut.
   // `rowsLate`: a source the rows for this text come from did not answer (the list says «still looking», never «no match» — P8)
   const partial = verdict ? verdict.kind === 'late' : !!(P.fuzzy && idxPartial);
   // (a paired machine's reply CUT to its byte cap — src/dir-collect.js cutToCap — is never whole: its rows say «still looking»)
-  const rowsLate = sourcesLate.length > 0 || !!(P.fuzzy && idxPartial) || !!F.cut, rowsUnread = sourcesUnread.length > 0;
+  const rowsLate = sourcesLate.length > 0 || !!(P.fuzzy && idxPartial) || !!F.cut || heldIdx, rowsUnread = sourcesUnread.length > 0;
   return { listing, self: F.me, took, partial, ...(factsLate ? { factsLate: true } : {}), ...(verdict ? { verdict } : {}), ...(rowsLate ? { rowsLate: true } : {}), ...(rowsUnread ? { rowsUnread: true, sourcesUnread } : {}), ...(probesLate.length ? { probesLate } : {}), ...(probesFailed.length ? { probesFailed } : {}), ...(sourcesLate.length ? { sourcesLate } : {}) };
 }
 

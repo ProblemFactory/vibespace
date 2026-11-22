@@ -524,7 +524,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       return { walks: c.rec.filter((x) => x.startsWith('dirIndex:')).length, row1: !!r1.listing.dirs['~/work/slowbase-r138/deep/needle-q7r'], row2: !!r2.listing.dirs['~/work/slowbase-r138/deep/needle-q7r'] };
     };
     lap('    · wr, wc');
-    const [wr, wc] = await Promise.all([walkTwice(DS), walkTwice(mutant('s4-walkinflight', [['      const skip = [...new Set([...me.roots, ...mountPaths, ...marked])];', '      const skip = [...new Set([...me.roots, ...mountPaths, ...[...sent.values()].filter((m) => m.entrance).map((m) => m.path)])];', 'calls still in flight in the walk\'s skip']]))]);
+    const [wr, wc] = await Promise.all([walkTwice(DS), walkTwice(mutant('s4-walkinflight', [['      skip = [...new Set([...me.roots, ...mountPaths, ...marked, ...walkSkip])];', '      skip = [...new Set([...me.roots, ...mountPaths, ...[...sent.values()].filter((m) => m.entrance).map((m) => m.path), ...walkSkip])];', 'calls still in flight in the walk\'s skip']]))]);
     ok(`③c the walk's skip holds only what is stable: a search asked twice makes ${wr.walks} walk, and the folder under a healthy base whose stat was out is in the rows (${wr.row1}, ${wr.row2}) — CONTROL calls in flight in the walk's skip: ${wc.walks} walks, the first rows ${wc.row1 ? 'had' : 'MISSED'} it`, wr.walks === 1 && wr.row1 && wr.row2 && wc.walks === 2 && !wc.row1, { real: wr, control: wc });
   });
   // ③c (the fresh read's M3) A ROW CALL THE DEADLINE ENDED is not sent again inside its window: a folder's listing hangs ONCE (since
@@ -1084,7 +1084,7 @@ await section('⑥', async () => {
   ok('files.js: /api/dir-complete answers the slice for bases / q / probe / kind, locally (dir-slice) and over ?host= (R.fs.dirSlice)', /const sliced = req\.query\.bases != null \|\| req\.query\.q != null/.test(fsr) && /R\.fs\.dirSlice\(R\.host,/.test(fsr) && /dirSliceOf\(req\)\.slice\(/.test(fsr), null);
   ok('files.js: /api/home-folders drops the excluded folders (isExcludedPath over self)', /isExcludedPath\(f\.path, self \|\| \{ home, roots: \[\] \}\)/.test(fsr), null);
   ok('exit-routes.js: /api/hosts/:id/dir-complete → hosts.dirSlice; recent-cwds answers COUNTS', /hosts\.dirSlice\(req\.params\.id,/.test(ex) && /recent: require\('\.\.\/path-candidates\.js'\)\.recentCounts\(sessions\)/.test(ex), null);
-  ok('hosts.js: dirSlice runs ONE sh script (device runCmd first, the ssh rung otherwise) and sliceListing builds the answer', /async dirSlice\(id, \{ text = '', bases = \[\], probe = \[\], q = '', kind = 'folder', waitMs \} = \{\}/.test(hs) && /dm\.runCmd\('sh', \['-c', script\]/.test(hs) && /PC\.sliceListing\(\{ home, machine: id,/.test(hs), null);
+  ok('hosts.js: dirSlice runs ONE sh script (device runCmd first, the ssh rung otherwise) and sliceListing builds the answer', /async dirSlice\(id, \{ text = '', bases = \[\], probe = \[\], q = '', kind = 'folder', waitMs, press = false, late = false \} = \{\}/.test(hs) && /dm\.runCmd\('sh', \['-c', script\]/.test(hs) && /PC\.sliceListing\(\{ home, machine: id,/.test(hs), null);
   ok('SafeFs: dirSlice + dirIndex carry their deadlines (a stall is reclaimed, never answered on the loop)', /dirSlice: 15000, dirIndex: 15000/.test(sfsm), null);
 });
 

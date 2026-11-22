@@ -80,12 +80,19 @@ const SELF_FACTS = 24;  // S2 (r1507): a home folder's own facts asked at most 2
 const SELF_KEEP_MS = 10 * 60e3; // …and KEPT while the home's own time (its listing's mtime) has not moved, at most this long
 const QUEUE_MAX_MS = 2000;   // a row call still queued this long after it was asked for is dropped (no burst of stale calls)
 const LATE = Object.freeze({ late: true });
+/* r1633 (主开发, YES): THE LATE-FACTS WAIT — the page's quiet re-ask (marked late on the wire: `plan.late`) WAITS WHERE THE FACTS LIVE
+   for the facts already on their way (this answer's kids, the home's self facts, an index walk in flight), at most LATE_WAIT_MS, and
+   replies ONCE: what landed, and `factsLate` for the rest. It STARTS NO CALL (a kid not asked yet waits for the next ordinary ask) and
+   holds no worker, counter or lock (a promise race): a person's ask is never behind it; a newer ask of the same field ends it at once
+   (its `signal`). Later facts are KEPT here for the next ask; the page asks no third time (path-field-model's one quiet re-ask a key). */
+const LATE_WAIT_MS = 1000;
 
 /** One collector. `call(op, payload, opts)` = the pool's door (op: dirSlice | pathStat | dirIndex; opts.idleOnly); `home` = this
  *  machine's home; `roots` = the exclusion roots of this instance's own (the hub: its checkout and data dir; a paired machine: none —
  *  the home's checkouts named vibespace are found by their own facts); `mounts()` = the mounted rows ({ path, label, mounted, blocked });
- *  `poolBusy(err)` = the pool refused for no free worker (asked again, never a mark); `log` = the M1 line (once a minute). */
-function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () => [], now = Date.now, poolBusy, log = (m) => console.log(m) } = {}) {
+ *  `poolBusy(err)` = the pool refused for no free worker (asked again, never a mark); `log` = the M1 line (once a minute); `walkSkip` =
+ *  folders the index walk never enters beside the exclusion and the mounts (a Mac's ~/Library: the sh road's own prune). */
+function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = [], mounts = () => [], now = Date.now, poolBusy, log = (m) => console.log(m) } = {}) {
   if (typeof poolBusy !== 'function') throw new Error('dir-collect: the pool\'s own busy word (poolBusy) is required');
   const listCache = new Map();   // abs → { at, entry }
   const kidFacts = new Map();    // abs → { at, f }: a kid's own facts (B-5561: pathStat `facts`), kept PROBE_LATE_MS
@@ -195,9 +202,12 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
      this ask states by its own call is NAMED by every listing, never crossed) */
   /* B-5561: A KID'S OWN FACTS — kept, and asked behind an answer (never waited for). → true when asked (it may still land) */
   const factOf = (p, t = now()) => { const k = kidFacts.get(p); return k && t - k.at < (k.keep || PROBE_LATE_MS) ? k.f : null; };
-  function askFacts(p) {
+  /* the call already on its way for p's ONE key (sent, or queued in any counter) — what a late re-ask may wait on */
+  const outFor = (p) => { const s0 = sent.get('stat:' + p); if (s0 && s0.hungAt == null) return s0.p; for (const [k, q] of queued) if (k.endsWith('\nstat:' + p)) return q; return null; };
+  function askFacts(p, join = false) {
     const t = now();
     if (factOf(p, t) || mountPaths.includes(p) || entranceAbove(p, t)) return false;   // kept · a mount (named, never stated) · under a dead mark
+    if (join) return outFor(p) ? true : 'none';   // r1633 (1): a late re-ask starts none — it joins a call on its way, or names the fact unasked
     // r1748 (b): a facts call that ERRS at once (a stale mount, a link loop, the pool's own refusal by its memory) is kept AS SUCH for
     // the keep time — not asked again at every reply, its late flag settled, its slot never taken from the kids after it. A deadline
     // (its mark) and a busy pool (asked again, or late) are not answers and are not kept
@@ -320,13 +330,22 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
   }
 
   /** The exclusion facts — never blocks on a fresh walk twice (one in flight). */
-  function self() {
+  function self({ join = false } = {}) {
     const t = now();
     if (selfCache.v && t - selfCache.at < SELF_TTL_MS) return Promise.resolve(selfCache.v);
+    // r1633 (1), the fresh read's S8 / N16: a LATE re-ask asks nothing and waits on no listing — the exclusion is read again from the home's
+    // KEPT listing (whatever its age) and the kept facts, and never through the ordinary ask's promise (that one asks the facts it lacks)
+    if (join) { const h = listCache.get(home); return Promise.resolve(h ? selfOf(h.entry, true) : selfCache.v || { home, roots: [...ownRoots] }); }
     if (selfCache.p) return selfCache.p;
     selfCache.p = Promise.resolve(listOne(home, {})).then((r) => {
       const d = r && r.ok;
       if (!d) { selfCache.p = null; return { home, roots: [...ownRoots] }; }
+      return selfOf(d, false);
+    });
+    return selfCache.p;
+  }
+  function selfOf(d, join) {
+    {
       // each home folder's package.json name is THAT folder's own fact (B-5561: its own call, behind); until every one that can land
       // has, the exclusion is read again at the next ask (the home's listing kept, the facts kept: no call) — never kept a minute short
       // of a checkout
@@ -344,12 +363,11 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
         if (sf && sf.pkg === PT.SELF_PACKAGE) roots.push(p);
         if (kf) continue;   // (r1748 (b): its call erred at once — kept as such for the keep time, not asked again)
         if (asked >= SELF_FACTS) { missing++; continue; } // (the rest at the next ask)
-        if (askFacts(p)) { asked++; missing++; }
+        const r = askFacts(p, join); if (r === true) { asked++; missing++; } else if (r === 'none') missing++;   // (a late re-ask asks none: still missing)
       }
-      selfCache = { at: missing ? 0 : now(), v: { home, roots: [...new Set(roots)] }, p: null, missing };
+      selfCache = { at: missing ? 0 : now(), v: { home, roots: [...new Set(roots)] }, p: join ? selfCache.p : null, missing };
       return selfCache.v;
-    });
-    return selfCache.p;
+    }
   }
 
   /* ONE index root walked (a root on a dead mount is its own source — the home's walk still answers) */
@@ -359,7 +377,9 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
     const walk = () => {
       const p = Promise.resolve(once('index:' + key, 'rows', root, () => call('dirIndex', { path: root, roots: [root], depth: 4, max: 6000, budgetMs: 350, skip }, IDLE_ONLY), o)).then((r) => {
         if (r && r.ok) {
-          indexCache.set(key, { at: now(), dirs: r.ok.dirs || [], links: r.ok.links || [], partial: !!r.ok.partial, p: null });
+          const dirs = r.ok.dirs || [], links = r.ok.links || [], partial = !!r.ok.partial;
+          const v = require('crypto').createHash('sha1').update(dirs.join('\n')).update('\0').update(links.map((l) => l.from + '\t' + l.to).join('\n')).update(partial ? '\0p' : '\0w').digest('hex').slice(0, 16);   // its version = its content
+          indexCache.set(key, { at: now(), v, dirs, links, partial, p: null });
           if (indexCache.size > 48) indexCache.delete(indexCache.keys().next().value);
           return indexCache.get(key);
         }
@@ -377,12 +397,13 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
   /* a source's outcome ON THE WIRE (JSON-safe — the shaper never compares identity): late · skipped (its mark's end, THIS machine's
      clock — the hub rebases it) · failed · { ok } (null: not there) · null (no answer of its own) */
   const wireOf = (r) => (r == null ? null : r === LATE || r.late === true ? { late: true } : r.skipped != null ? { skipped: r.skipped, ...(r.at ? { at: r.at } : {}) } : r.failed != null ? { failed: r.failed } : 'ok' in r ? { ok: r.ok == null ? null : r.ok } : null);
-  const indexWireOf = (r) => { const w = wireOf(r); return w && w.ok ? { ok: { at: w.ok.at, dirs: w.ok.dirs || [], links: w.ok.links || [], partial: !!w.ok.partial } } : w; };
+  const indexWireOf = (r) => { const w = wireOf(r); return w && w.ok ? { ok: { v: w.ok.v, dirs: w.ok.dirs || [], links: w.ok.links || [], partial: !!w.ok.partial } } : w; };
 
   /** THE FACTS OF ONE ANSWER, as the hub's plan names them (src/server/dir-slice.js plan — the hub decides WHAT a text asks for; this
    *  collects it where the facts live). plan = { cands: [{ c, a }] (the line's candidates in the bases' order — `c` its `~` form, `a`
    *  absolute), rows: [abs] (the folders listed), probes: [abs], roots: [abs] (the index roots; a search only), fuzzy, files, press,
-   *  budgetMs, seg (the typed last segment the rows' kids are asked for), lastSeg (the one-match listing's) }. Bounded as the slice is:
+   *  budgetMs, seg (the typed last segment the rows' kids are asked for), lastSeg (the one-match listing's), late (the page's quiet
+   *  re-ask: the late-facts wait), index: { have: { root: version } } (a paired machine's: the version of each root's index the hub holds) }. Bounded as the slice is:
    *  MAX_LIST listings + the one match's 4, every folder cut at its 400 kids (`more`), MAX_PROBES probes, KID_FACTS + LINK_FACTS kids'
    *  facts asked, an index of 6000 folders a root (`partial`). → { home, at, took, me, answers, rows, probes, index, listed, listedTyped,
    *  mounts, factsLate? } — `at` = this machine's clock at the reply (a mark's end is in it), every outcome JSON-safe */
@@ -393,6 +414,7 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
       log(`[dir-slice] the file pool was busy: the folder field asked ${busy.reasked - busySaid.reasked} call(s) again, ${busy.late - busySaid.late} ended late (no idle worker within its reply's bound)`);
       busySaid = { at: Date.now(), reasked: busy.reasked, late: busy.late };
     }
+    const late = !!plan.late, have = plan.index && plan.index.have && typeof plan.index.have === 'object' ? plan.index.have : null;
     const files = !!plan.files, budgetMs = plan.budgetMs == null || !Number.isFinite(Number(plan.budgetMs)) ? 450 : Number(plan.budgetMs);
     // the plan's lists keep their places (the hub reads each outcome by its index): a path that is not absolute is asked nothing (null)
     const paths = (v, n) => (Array.isArray(v) ? v : []).slice(0, n).map(String);
@@ -420,12 +442,12 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
       return out;
     })();
     // THE ROWS (their own slot): the exclusion facts, the bases and the text's folders listed, the auxiliary probes, the index roots
-    const selfP = raceOf(self().then((v) => ({ ok: v })), untilSoft);
+    const selfP = raceOf(self({ join: late }).then((v) => ({ ok: v })), untilSoft);
     const listP = rowsList.map((p) => sure(p, () => rowSource(p, o, () => listOne(p, { files, ...o }))));
     const auxP = probes.map((a) => sure(a, () => keptProbe(a, o) || rowSource(a, o, () => probeOne(a, o), true)));
     const meR = await selfP;
     const me = okOf(meR) || selfCache.v || { home, roots: [...ownRoots] };
-    let roots = [], idxP = [];
+    let roots = [], idxP = [], skip = [];
     if (fuzzy) {
       roots = paths(plan.roots, 13);
       // the WALK's skip — and so the index cache's NAME — holds only what is STABLE: the roots, the mounts, the entrances whose deadline mark is
@@ -433,7 +455,7 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
       // looking» while typing — and a walk taken meanwhile never entered that healthy folder, «no matching folder» kept 30 s). Calls still
       // out stay in the LISTINGS' skip only.
       const marked = [...sent.values()].filter((m) => m.entrance && m.hungAt != null).map((m) => m.path);
-      const skip = [...new Set([...me.roots, ...mountPaths, ...marked])];
+      skip = [...new Set([...me.roots, ...mountPaths, ...marked, ...walkSkip])];
       idxP = roots.map((r) => sure(r, () => rowSource(r, o, () => indexOne(r, skip, o).then((e) => (e && e.dirs ? { ok: e } : null)))));
     }
     const [answers, listR, auxR, idxR] = await Promise.all([lineP, Promise.all(listP), Promise.all(auxP), Promise.all(idxP)]);
@@ -448,7 +470,7 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
         if (!k.name.toLowerCase().startsWith(pre)) continue;
         const p = path.join(d.path, k.name), isLink = k.link != null;
         if (isLink ? ln >= LINK_FACTS : kn >= KID_FACTS) continue;
-        if (askFacts(p)) { factAsked.push(p); if (isLink) ln++; else kn++; }
+        if (askFacts(p, late) === true) { factAsked.push(p); if (isLink) ln++; else kn++; }
       }
     };
     /* exactly one folder starts with the typed last segment → list it too (rows: what is inside; Tab goes in) */
@@ -459,8 +481,38 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], mounts = () =
       if (one.length) listed.push(...(await Promise.all([...new Set(one)].slice(0, 4).map((p) => rowSource(p, o, () => listOne(p, { files, ...o }))))).map(okOf).filter(Boolean));   // down its chain too (a dead kid is met by its one stat)
     }
     askKids(listed.slice(0, listedTyped), seg); askKids(listed.slice(listedTyped), '');
-    const factsLate = factAsked.some((p) => !factOf(p)) || !!(selfCache.missing && selfCache.v === me);
-    return { home, at: now(), took: now() - t0, me, answers, rows: listR.map(wireOf), probes: auxR.map(wireOf), index: idxR.map(indexWireOf), listed: listed.map(withFacts), listedTyped, mounts: mountRows, ...(factsLate ? { factsLate: true } : {}) };
+    let meNow = me;
+    if (late) {
+      const keyOf = (r) => r + '\n' + skip.join('\n');
+      const selfOut = selfCache.missing ? (((listCache.get(home) || {}).entry || {}).kids || []).filter((k) => k.link == null).map((k) => path.join(home, k.name)).filter((p) => !factOf(p)).map(outFor) : [];
+      const walks = roots.map((r, i) => { const e = idxR[i] === LATE ? indexCache.get(keyOf(r)) : null; return e && e.p ? e.p : null; });
+      const waits = [...factAsked.filter((p) => !factOf(p)).map(outFor), ...selfOut, ...walks].filter(Boolean);
+      if (waits.length && !(signal && signal.aborted)) {
+        await new Promise((res) => {
+          const end = () => { clearTimeout(tw); if (signal) signal.removeEventListener('abort', end); res(); };
+          const tw = setTimeout(end, LATE_WAIT_MS);
+          if (signal) signal.addEventListener('abort', end, { once: true });
+          Promise.allSettled(waits).then(end);
+        });
+      }
+      // what landed — waited on or landed before the wait began (the fresh read's S11): the self facts read again from what is kept (no
+      // call), a walk that ended taken from its cache
+      meNow = await self({ join: true });
+      roots.forEach((r, i) => { if (idxR[i] !== LATE) return; const e = indexCache.get(keyOf(r)); if (e && e.dirs) idxR[i] = { ok: e }; });
+    }
+    // r1651 (a)/(b): THE INDEX ON THE WIRE (a paired machine: the plan names the version the hub holds, `index.have`) — the same version
+    // answers «the same» in a few bytes; a newer one is NEVER in front of the line and the rows: the ordinary reply says it is held here
+    // (`held`, and `factsLate`: the page asks once more, quietly) and the late re-ask carries it. The hub's own road (no `have`) gets it whole
+    let held = false;
+    const indexOut = idxR.map((r, i) => {
+      const w = indexWireOf(r);
+      if (!have || !w || !w.ok) return w;
+      if (have[roots[i]] === w.ok.v) return { ok: { same: true, v: w.ok.v, partial: w.ok.partial } };
+      if (!late) { held = true; return { ok: { held: true, v: w.ok.v, partial: w.ok.partial } }; }
+      return w;
+    });
+    const factsLate = held || factAsked.some((p) => !factOf(p)) || !!(selfCache.missing && selfCache.v === meNow);
+    return { home, at: now(), took: now() - t0, me: meNow, answers, rows: listR.map((r) => { const w = wireOf(r); return w && w.ok ? { ok: true } : w; }), probes: auxR.map(wireOf), index: indexOut, listed: listed.map(withFacts), listedTyped, mounts: mountRows, ...(factsLate ? { factsLate: true } : {}) };
   }
 
   /** r1748 (a): the exclusion WHOLE — self() asked again while any home folder's fact is still out, inside `boundMs` (the monotonic
@@ -549,4 +601,4 @@ function hungMemory({ home = os.homedir(), ms = 30000, keep = 256, capX = 16, no
   };
 }
 
-module.exports = { create, cutToCap, COLLECT_CAP_BYTES, hungMemory, IDLE_ONLY, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, MAX_LIST, MAX_PROBES, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS, FACT_SLOTS, KID_FACTS, LINK_FACTS };
+module.exports = { create, cutToCap, COLLECT_CAP_BYTES, hungMemory, LATE_WAIT_MS, IDLE_ONLY, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, MAX_LIST, MAX_PROBES, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS, FACT_SLOTS, KID_FACTS, LINK_FACTS };

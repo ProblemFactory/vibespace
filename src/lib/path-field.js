@@ -435,7 +435,7 @@ export function pathField(input, opts = {}) {
     }
   }
   /* the ask's URL (the probes the field needs: the groups' folders, the name rows, the recents, the missing path) */
-  function sliceUrl(text, h, press = false) {
+  function sliceUrl(text, h, press = false, late = false) {
     const inp = inputsNow();
     const m = rankCandidates(text, inp);
     const probe = new Set();
@@ -446,7 +446,7 @@ export function pathField(input, opts = {}) {
     if (m.missing) probe.add(m.missing.path);
     const fuzzy = m.mode === 'fuzzy' ? text : '';
     const sent = [...probe].slice(0, 40);   // the probes SENT (only these may be marked asked)
-    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify(sent))}${press ? '&press=1' : ''}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;   // (B-d833: the machine derives every candidate; a PRESS rides `press` — R-i)
+    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify(sent))}${press ? '&press=1' : ''}${late ? '&late=1' : ''}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;   // (B-d833: the machine derives every candidate; a PRESS rides `press` — R-i)
     return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe: sent, bases: inp.bases };
   }
   /* the field's last replies, bounded (a test reads them: pf.trace()): which machine, its number against the field's current one, how it was
@@ -478,7 +478,7 @@ export function pathField(input, opts = {}) {
     const text = keyText(key), h = hk(), W = world(h);
     const go = () => {
       if (st.destroyed) return;
-      const { url, probe } = sliceUrl(text, h, press);
+      const { url, probe } = sliceUrl(text, h, press, by === 'late');   // r1633: the quiet re-ask is MARKED late on the wire (the machine waits for its facts there, ≤ 1 s)
       // B-d833 (主开发 r174): WHAT A MACHINE SENT FOR THE LIST IS NEVER DROPPED while nothing newer is out for THAT machine — a newer ask
       // gives up only the older ask for the SAME machine; an ask for another machine lands in its own world (not the model's: not current)
       const prev = st.ctls.get(h); if (prev) prev.abort();
