@@ -385,18 +385,20 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
     C._setTranscriptPoolForTest(S);
     const premise = C.fileStorageHung(fpX) && !C.poolGone();
     const wx = SM.warmSessionJsonlAsync(sidX, cwd);   // X's storage retry: out, held by its storage
+    let xDone = false; wx.then(() => { xDone = true; }, () => { xDone = true; });
     await new Promise((res) => setImmediate(res));
-    const t0 = performance.now();
+    // THE ORDER, read (主开发 r2426 — never a clock bound: test-ci-gate §2e): Y's warm answers while X's retry is STILL OUT (its read held
+    // by the stand-in until settle() below). The window is only the RED's: a Y still waiting when it closes is a Y behind X
     const wy = await Promise.race([SM.warmSessionJsonlAsync(sidY, cwd), new Promise((res) => setTimeout(() => res('still waiting'), 1500))]);
-    const ms = Math.round(performance.now() - t0), held = S.xCalls.slice();   // what X's retry asked (held by its storage)
+    const xStillOut = !xDone, held = S.xCalls.slice();   // what X's retry asked (held by its storage)
     if (settle) settle();   // X's read ends at its deadline
     const wxOut = await Promise.race([wx, new Promise((res) => setTimeout(() => res('still out'), 3000))]);
-    return { premise, wy, ms, held, wx: wxOut };
+    return { premise, wy, xStillOut, held, wx: wxOut };
   };
   const h8 = await holdRun(SS0);
   const lineRoad = anchored(SSsrc, '    else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }', '    else { try { r = await warmPaged(known, { bulk }).p; } catch { return false; } }', 'storage-retry-on-the-warm-line');   // stale-pins: kept — the moved form's road, planted back as the RED control
   const h8r = await holdRun(MC.load('src/session-store.js', lineRoad, 'storage-retry-on-the-warm-line'));
-  ok(h8.premise && h8.held.join() === 'jsonlTail' && h8.wy === true && h8.ms < 1500 && h8.wx === false, `(8) a file the storage holds never holds the line: its retry out (${h8.held.join()}: the one-shot on the general pool), a second conversation's warm lands in ${h8.ms} ms`, h8);
+  ok(h8.premise && h8.held.join() === 'jsonlTail' && h8.wy === true && h8.xStillOut && h8.wx === false, `(8) a file the storage holds never holds the line: its retry out (${h8.held.join()}: the one-shot on the general pool), a second conversation's warm lands while that retry is still out (the order, read: ${h8.xStillOut})`, h8);
   ok(h8r.premise && h8r.held.join() === 'boundedParsedPage' && h8r.wy === 'still waiting', `RED: the storage retry on the warm line (the moved form's road: ${h8r.held.join()}) ⇒ the second conversation's warm still waits at 1500 ms (${h8r.wy})`, h8r);
   // (9) A TRANSCRIPT CUT SHORTER IN PLACE (主开发 r2246, the lane's find — an editor's save, a redirect: the same inode, smaller, LATER by
   // its time): the warm's read of it LANDS — the parse then answers the cache, a stat only, nothing read on the loop. RED: r935 (a)'s
