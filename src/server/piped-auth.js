@@ -15,10 +15,9 @@
 // it to the answer); config transfer carries no password record (export: none; import: refused by name); the vault's «not the
 // sign-in password» check answers false; a vault lock's count is the interface's (revokeAllTokens says the order on the link and
 // answers 0; the interface's answer names the count in this hub's journal).
-const { AsyncLocalStorage } = require('node:async_hooks');
 const { Auth } = require('../auth.js');
 const { signinFactOf } = require('./interface-party.js');
-const { onSigninState, signinRevokeAll, revokePending } = require('./hub-port.js');
+const { onSigninState, signinRevokeAll, revokePending, revokeFloor } = require('./hub-port.js');
 const { tokenDigest, hashMatches } = require('../signin-table.js');
 
 const IN_INTERFACE = 'signin-in-interface';
@@ -28,15 +27,16 @@ const ROAD = [['get', '/login'], ['post', '/api/login'], ['post', '/api/clerk-lo
 class PipedAuth extends Auth {
   // ITS OWN STATE IS PRIVATE (#): the head a gate call judges, and the interface's last state line — never an underscore field a
   // census could take for a session's (test-session-schema reads every such write under src/server/, comments included)
-  #head = new AsyncLocalStorage();   // the head a gate call judges (its socket carries the interface's fact)
+  #cur = null;                       // the head the gate is judging NOW — for that synchronous call only (law 3, below)
   #told = null;                      // the interface's last {op:'signin-state'}
-  #say; #revoke; #pending;           // B3b-2: the journal, the revoke line and its hold (hub-port's, or a suite's)
+  #say; #revoke; #pending; #floor;   // B3b-2 + the follow: the journal, the revoke line, its hold and its newest id (hub-port's, or a suite's)
   #mis = { at: 0, n: 0, muted: 0, total: 0 };   // the mismatches said, at most five a minute
   constructor(dataDir, opts = {}) {
     super(dataDir, opts);   // its _load (below) opens nothing
     this.#say = opts.log || console;
     this.#revoke = typeof opts.revoke === 'function' ? opts.revoke : signinRevokeAll;              // the revoke line (a suite hands its own)
     this.#pending = typeof opts.revokePending === 'function' ? opts.revokePending : revokePending;
+    this.#floor = typeof opts.revokeFloor === 'function' ? opts.revokeFloor : revokeFloor;   // the newest order's id (law 1)
     (typeof opts.subscribe === 'function' ? opts.subscribe : onSigninState)((m) => {   // the interface's state line (a suite hands its own hook)
       if (m && m.op === 'signin-state') this.#told = m;
       else if (m && m.op === 'signin-revoke-all-ack') { try { this.#say.log?.(`[auth] the interface signed ${Number(m.revoked) || 0} login(s) out (a vault lock's revoke, answered)`); } catch { } }
@@ -46,7 +46,13 @@ class PipedAuth extends Auth {
   _load() { }   // (the parent's constructor already holds no table: `_state` null, nothing held)
   _save() { }   // never writes: the file is the interface's
   /** the fact the interface stamped on the head being judged — undefined with no head (or a socket that carries none) */
-  _fact() { const req = this.#head.getStore(); return req ? signinFactOf(req.socket) : undefined; }
+  _fact() { return this.#cur ? signinFactOf(this.#cur.socket) : undefined; }
+  /** THE LOCK ASKS FRESH (the follow, law 3): a head's fact is read only INSIDE the gate's own synchronous call — never from a
+   *  context a timer or a promise born in a request carries on (an AsyncLocalStorage did, and a vault lock armed in a request
+   *  read that request's «off» for good); everything else reads the table's current state line */
+  #run(req, fn) { const prev = this.#cur; this.#cur = req; try { return fn(); } finally { this.#cur = prev; } }
+  /** the piped form's mark for the routes that must not touch the table (config transfer): the table is the interface's */
+  get signinInInterface() { return true; }
   get held() { return null; }
   get shut() { return false; }
   upgradeHeld() { return false; }   // the interface refuses every upgrade itself while held
@@ -66,6 +72,7 @@ class PipedAuth extends Auth {
     if (f === 'off') return true;
     if (this.#pending()) return false;   // a vault lock's revoke said, not yet answered: no login is honoured
     if (!token || !f || typeof f.alive !== 'string') return false;
+    if (!(f.epoch >= this.#floor())) return false;   // law 1: stamped BEFORE the interface applied the newest order — never honoured after it
     if (!hashMatches(tokenDigest(token), f.alive)) { this._mismatch(); return false; }   // THE HONOUR CHECK
     return true;
   }
@@ -79,9 +86,9 @@ class PipedAuth extends Auth {
   _slideCookie() { }   // the interface appends the slide's cookie to the answer
   middleware() {
     const gate = super.middleware();
-    return (req, res, next) => this.#head.run(req, () => gate(req, res, next));
+    return (req, res, next) => this.#run(req, () => gate(req, res, next));
   }
-  requestAuthed(req) { return this.#head.run(req, () => super.requestAuthed(req)); }
+  requestAuthed(req) { return this.#run(req, () => super.requestAuthed(req)); }
   /** the road is the interface's: a head of it never reaches this hub — if one did, it is refused by name */
   registerRoutes(app) {
     for (const [m, p] of ROAD) app[m](p, (req, res) => res.status(503).json({ error: IN_INTERFACE, why: 'the interface answers the sign-in road' }));

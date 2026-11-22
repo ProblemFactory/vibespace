@@ -53,7 +53,8 @@ async function replaceShreddingAsync(file, text) {
   if (st && st.isSymbolicLink()) throw Object.assign(new Error(`${file} is a symbolic link — a secret-bearing file is never rewritten (nor its old bytes overwritten) through a link`), { code: 'ELOOP' });
   let old = null, size = 0, closeErr = null;
   const closeOf = async (h) => { try { await h.close(); } catch (e) { if (!closeErr) closeErr = e; } };   // kept, never swallowed
-  try { old = await fsp.open(file, 'r+'); size = (await old.stat()).size; } catch (e) { if (old) await closeOf(old); old = null; size = 0; }
+  try { old = await fsp.open(file, 'r+'); size = (await old.stat()).size; }
+  catch (e) { void e; if (old) { try { await old.close(); } catch (c) { void c; /* the old file is only shredded: its own close never stops the new text's rename */ } } old = null; size = 0; }
   const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   try {
     const fh = await fsp.open(tmp, 'wx', 0o600);

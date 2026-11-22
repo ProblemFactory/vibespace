@@ -15,7 +15,7 @@
 // socket (src/agentd/chan-socket.js: the router credits its own channels — this module never does — and onDead ⇒
 // router.dead()). The stamp the interface wrote — {secure, addr, port} — rides the socket (remoteAddress / encrypted).
 // THE SIGN-IN FACT (piece B3b-1, 主开发 r1517 (A)): when the interface holds the sign-in table, the stamp carries its fact for
-// that head — 'off', { alive: <a login's sha256 digest> } or null — kept on the channel's socket (signinFactOf), read by the
+// that head — 'off', { alive: <a login's sha256 digest>, epoch } or null — kept on the channel's socket (signinFactOf), read by the
 // piped hub's gate (src/server/piped-auth.js); a malformed fact is kept as null (no login). The table's state line
 // `{op:'signin-state', …}` and its answer to a revoke (`{op:'signin-revoke-all-ack', revoked}`) go to `onSignin`.
 const net = require('net');
@@ -33,7 +33,8 @@ function factOf(stamp) {
   if (!stamp || !('signin' in stamp)) return undefined;
   const f = stamp.signin;
   if (f === 'off') return 'off';
-  return f && typeof f === 'object' && typeof f.alive === 'string' && DIGEST_RE.test(f.alive) ? { alive: f.alive } : null;
+  if (!(f && typeof f === 'object' && typeof f.alive === 'string' && DIGEST_RE.test(f.alive))) return null;
+  return { alive: f.alive, epoch: Number.isSafeInteger(f.epoch) && f.epoch >= 0 ? f.epoch : -1 };   // the follow: the order the stamp was made after (no epoch: before every order)
 }
 /** the fact the interface wrote for the head this socket carries (undefined: none — not a channel, or no table) */
 const signinFactOf = (socket) => (socket ? socket[SIGNIN] : undefined);

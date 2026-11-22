@@ -77,15 +77,22 @@ function create({ ownerOf = owners.ownerOf, firstByteMs, handshakeMs, helloMs = 
           if (old && old !== link) { try { old.destroy(); } catch { } }   // a re-attach: the old link goes FIRST (its onDead ends its own pages)
           party = v.party; rh = r.handlersFor(link); links.set(party, link); r.attach(link);
           link.control({ op: 'hello-ack', protoVersion: admission.PROTO_VERSION, party: 'interface', capabilities: CAPABILITIES });
-          if (table) { try { link.control(table.stateLine()); } catch { } }   // the table's state, before any channel
+          if (table) { table.adoptEpoch(0); try { link.control(table.stateLine()); } catch { } }   // a new join starts at epoch 0 (the hub raises it); the table's state, before any channel
           return;
         }
-        if (m && m.op === 'signin-revoke-all') {   // a vault lock (the hub, B3b-2's sender): every login revoked, said by name
-          const n = table ? table.revokeAll() : 0;
-          try { log.log?.(`[interface] every login signed out (${String(m.why || 'asked').slice(0, 60)}) — ${n} login(s)`); } catch { }
-          try { link.control({ op: 'signin-revoke-all-ack', revoked: n }); } catch { }
+        if (m && m.op === 'signin-revoke-all') {   // a vault lock (the hub's order `id`): every login revoked — ANSWERED ONCE ON DISK (law 2)
+          const id = Number.isSafeInteger(m.id) ? m.id : null, why = String(m.why || 'asked').slice(0, 60);
+          const r = table ? table.revokeAll(id) : { n: 0, written: Promise.resolve(false) };
+          r.written.then((w) => {
+            try { log.log?.(`[interface] every login signed out (${why}) — ${r.n} login(s), ${w ? 'written' : 'nothing to write'}`); } catch { }
+            try { link.control({ op: 'signin-revoke-all-ack', id, ok: true, revoked: r.n }); } catch { }
+          }, (e) => {   // not on disk: said so, and the hub keeps holding (it says the order again)
+            try { log.error?.(`[interface] every login signed out in memory (${why}) — the table's save FAILED (${(e && e.code) || 'error'}): not answered as done`); } catch { }
+            try { link.control({ op: 'signin-revoke-all-ack', id, ok: false, revoked: r.n, why: String((e && e.code) || 'error') }); } catch { }
+          });
           return;
         }
+        if (m && m.op === 'signin-epoch') { if (table) table.adoptEpoch(m.id); return; }   // the hub's word after a join: the orders its interface answered on disk
         if (m && m.op === 'certificate') {
           const res = f.useCertificate(m.cert && m.key ? { cert: m.cert, key: m.key } : null);
           if (!res.ok) { said.certRefused++; said.lastCertRefused = res.why; }

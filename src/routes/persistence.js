@@ -2062,7 +2062,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         })(),
       },
       sensitive: {
-        vsPassword: !!auth?.enabled,
+        vsPassword: !!auth?.enabled && !auth?.signinInInterface,   // the piped form: the record is the interface's (the separation's B3b follow)
         claudeCreds: fs.existsSync(CLAUDE_CREDS),
         codexCreds: fs.existsSync(CODEX_CREDS),
         hosts: (getHosts?.()?.list?.() || []).length, hostsUnread: (getHosts?.()?.held?.() && getHosts().unreadWords()) || null,   // the B-f276 remainder (H15): a held list is no «no hosts»
@@ -2237,7 +2237,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         const r = getAccounts?.()?.importBundle?.(sens.accounts);
         applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
       }
-      if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth && auth.ssoEnabled) {
+      if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth && auth.signinInInterface) {
+        // the piped form (the separation's B3b follow): the sign-in table is the interface's — refused BY NAME, before it could throw
+        applied.push('vsPassword: skipped (signin-in-interface: set the password on the sign-in page)');
+      } else if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth && auth.ssoEnabled) {
         // SSO configured → a local password is redundant (login goes through
         // the IdP); ignore the imported record instead of silently applying it.
         applied.push('vsPassword: skipped (SSO configured)');

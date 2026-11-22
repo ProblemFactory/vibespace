@@ -50,6 +50,8 @@ const heldError = (held) => Object.assign(new Error(`the sign-in file is held ($
 function create({ file, clerk = null, clerkAuth = null, log = console, now = () => Date.now(), hashOf = T.hash } = {}) {
   const ck = clerkAuth || (clerk ? new ClerkAuth({ publishableKey: String(clerk.publishableKey || ''), allowedEmails: Array.isArray(clerk.allowedEmails) ? clerk.allowedEmails.join(',') : String(clerk.allowedEmails || ''), keepLastGood: true }) : null);
   let state = null, held = null, scrypts = 0;
+  let epoch = 0;   // the follow (law 1): the highest vault-lock order applied — every live login's stamp carries it
+  const tries = new Map();   // the follow (a should): an address's guesses IN FLIGHT, counted with its fails before a hash starts
   const attempts = new Map(), slid = new Set(), listeners = new Set();
   const said = { writes: 0, writeFails: 0, lastWriteError: null, busy: 0, crossSite: 0 };
   const sso = () => !!(ck && ck.enabled);
@@ -178,17 +180,32 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     if (!token) return { fact: null, lines: [] };
     const page = !upgrade && doorClassOf({ method: req.method, path: pathOf(req.url), headers: req.headers, encrypted: !!facts.secure }, { enabled: true }).kind === 'page';
     const d = use(token, page || (upgrade && originOk(req, facts.secure)));
-    return { fact: d ? { alive: d } : null, lines: page ? slideLines(req, d) : [] };
+    return { fact: d ? { alive: d, epoch } : null, lines: page ? slideLines(req, d) : [] };
   }
   const upgradeRefused = (req) => shut() && !T.OWN_RULE_UPGRADES.has(pathOf(req.url));
   function refuseUpgrade(socket) { try { socket.end(T.HELD_UPGRADE, () => socket.destroy()); } catch { try { socket.destroy(); } catch { } } }
-  /** a vault lock (B3b-2's sender, the hub): every login revoked → how many ended (0 while shut, as the plain form) */
-  function revokeAll() {
-    if (!state || shut()) return 0;
+  /** a vault lock (the hub's order `id`): every login revoked → { n, written } — `written` resolves once the table's save LANDED
+   *  (true; false when nothing may be written: held, or no table) and rejects when it failed (law 2: the answer means ON DISK).
+   *  From this call on every stamp carries the order's id (law 1). The set-password road calls it with no id. */
+  function revokeAll(id) {
+    if (Number.isSafeInteger(id) && id > epoch) epoch = id;
+    if (!state || shut()) return { n: 0, written: Promise.resolve(false) };
     const n = Object.keys(state.tokens || {}).length;
     state.tokens = {}; slid.clear();
-    save().catch((e) => e);
-    return n;
+    const written = save(); written.catch((e) => e);
+    return { n, written };
+  }
+  /** the hub's word after a join: the highest order its interface answered on disk (this table's file holds it) */
+  function adoptEpoch(id) { if (Number.isSafeInteger(id) && id >= 0) epoch = id; }
+  /** a guess's place, taken BEFORE its hash: an address's fails AND its guesses in flight count against RATE_FAILS (the plain
+   *  form's hash is synchronous, so it never had two in flight) → the release, or null (answered 429) */
+  function reserve(ip) {
+    if (!T.rateCheck(attempts, ip, now())) return null;
+    const a = attempts.get(ip), inflight = tries.get(ip) || 0;
+    if ((a ? a.fails : 0) + inflight >= T.RATE_FAILS) return null;
+    tries.set(ip, inflight + 1);
+    let done = false;
+    return () => { if (done) return; done = true; const k = (tries.get(ip) || 1) - 1; if (k > 0) tries.set(ip, k); else tries.delete(ip); };
   }
 
   // ── THE ROAD'S ANSWERS ──
@@ -246,9 +263,11 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     const ip = ipOf(facts);
     if (key === '/api/login') {
       if (!enabled()) return json(res, 200, { success: true }, cookies);
-      if (!T.rateCheck(attempts, ip, now())) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
+      const release = reserve(ip);
+      if (!release) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
       let good;
-      try { good = await verify(String(body?.password ?? '')); } catch (e) { if (e && e.code === 'signin-busy') return busy(res, cookies); throw e; }
+      try { good = await verify(String(body?.password ?? '')); } catch (e) { release(); if (e && e.code === 'signin-busy') return busy(res, cookies); throw e; }
+      release();
       if (!good) { T.rateFail(attempts, ip, now()); return json(res, 401, { error: 'Wrong password', code: 'wrong-password' }, cookies); }
       attempts.delete(ip);
       const { token, written } = issue(req.headers['user-agent']);
@@ -257,29 +276,31 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     }
     if (key === '/api/clerk-login') {
       if (!sso()) return json(res, 404, { error: 'SSO not configured' }, cookies);
-      if (!T.rateCheck(attempts, ip, now())) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
-      try {
-        const { email } = await ck.verifyToken(String(body?.token || ''));
-        if (!email) return json(res, 403, { error: 'Token has no email claim — add {"email": "{{user.primary_email_address}}"} to the Clerk session token custom claims (or a "vibespace" JWT template)' }, cookies);
-        if (!ck.emailAllowed(email)) { T.rateFail(attempts, ip, now()); return json(res, 403, { error: `${email} is not allowed on this instance` }, cookies); }
-        attempts.delete(ip);
-        const { token, written } = issue(req.headers['user-agent']);
-        await written;
-        return json(res, 200, { success: true, email }, [T.loginCookie(token, IDLE_S, req.headers)]);
-      } catch (e) {
-        T.rateFail(attempts, ip, now());
-        return json(res, 401, { error: `SSO verification failed: ${e && e.message}` }, cookies);
-      }
+      const release = reserve(ip);
+      if (!release) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
+      let email;
+      try { ({ email } = await ck.verifyToken(String(body?.token || ''))); }
+      catch (e) { release(); T.rateFail(attempts, ip, now()); return json(res, 401, { error: `SSO verification failed: ${e && e.message}` }, cookies); }
+      release();
+      if (!email) return json(res, 403, { error: 'Token has no email claim — add {"email": "{{user.primary_email_address}}"} to the Clerk session token custom claims (or a "vibespace" JWT template)' }, cookies);
+      if (!ck.emailAllowed(email)) { T.rateFail(attempts, ip, now()); return json(res, 403, { error: `${email} is not allowed on this instance` }, cookies); }
+      attempts.delete(ip);
+      const { token, written } = issue(req.headers['user-agent']);
+      try { await written; } catch (e) { return writeFailed(res, e, cookies); }   // the round's should: a failed write is no failed verification (no rateFail, no path in a reply)
+      return json(res, 200, { success: true, email }, [T.loginCookie(token, IDLE_S, req.headers)]);
     }
     // /api/auth/set-password — WHO MAY SET A PASSWORD, judged by the instance's state (the plain form's route, src/auth.js)
     if (enabled() && !passwordEnabled() && !authed(req, facts.secure)) return json(res, 401, { error: 'unauthorized' }, cookies);
-    if (!T.rateCheck(attempts, ip, now())) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
+    const release = reserve(ip);
+    if (!release) return json(res, 429, { error: 'Too many attempts — wait a minute', code: 'too-many' }, cookies);
     const { current, newPassword, remove } = body || {};
     try {
       if (passwordEnabled()) {
-        if (!(await verify(String(current ?? '')))) { T.rateFail(attempts, ip, now()); return json(res, 401, { error: 'Current password is wrong' }, cookies); }
+        let good;
+        try { good = await verify(String(current ?? '')); } finally { release(); }
+        if (!good) { T.rateFail(attempts, ip, now()); return json(res, 401, { error: 'Current password is wrong' }, cookies); }
         attempts.delete(ip);
-      }
+      } else release();
       if (remove) {
         if (!passwordEnabled()) return json(res, 200, { success: true, enabled: enabled() }, cookies);
         state = { userSet: true, tokens: {} }; slid.clear();
@@ -322,11 +343,11 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
   }
 
   return {
-    load, ensure, road, head, upgradeRefused, refuseUpgrade, revokeAll, stateLine,
+    load, ensure, road, head, upgradeRefused, refuseUpgrade, revokeAll, adoptEpoch, stateLine,
     onChange: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
     flushed: () => writing || Promise.resolve(),
     get held() { return held; }, get shut() { return shut(); }, get enabled() { return enabled(); },
-    stats: () => ({ ...said, held: held ? held.why : null, enabled: enabled(), scrypts, logins: Object.keys((state && state.tokens) || {}).length }),
+    stats: () => ({ ...said, held: held ? held.why : null, enabled: enabled(), scrypts, epoch, logins: Object.keys((state && state.tokens) || {}).length }),
   };
 }
 

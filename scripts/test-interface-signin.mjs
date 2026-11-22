@@ -211,7 +211,7 @@ async function bothForms(sso) {
   const b = await bothForms(true);
   ok(b.diff.length === 0 && b.plain.find((s) => s.name === 'sso-in').cookie === 'set:2592000' && b.plain.find((s) => s.name === 'sso-pw-anon').status === 401 && b.plain.find((s) => s.name === 'sso-pw-login').status === 200,
     `single sign-on (a stand-in of the outside service): ${b.plain.length} steps, each the plain form's (${b.plain.map((s) => `${s.name} ${s.status}`).join(' · ')})`, b.diff);
-  const noLock = mutant('src/interface/signin.js', "      if (!enabled()) return json(res, 200, { success: true }, cookies);\n      if (!T.rateCheck(attempts, ip, now())) return json(res, 429,", "      if (!enabled()) return json(res, 200, { success: true }, cookies);\n      if (false) return json(res, 429,");
+  const noLock = mutant('src/interface/signin.js', "      if (!enabled()) return json(res, 200, { success: true }, cookies);\n      const release = reserve(ip);\n      if (!release) return json(res, 429,", "      if (!enabled()) return json(res, 200, { success: true }, cookies);\n      const release = () => { };\n      if (false) return json(res, 429,");   // the follow: the counters' place is reserve()
   const c = { diff: diffOf(a.plain, await ifaceForm(false, noLock)) };   // against the plain form's reading above
   ok(c.diff.some(({ p, q }) => p.name === 'locked' && p.status === 429 && q.status === 200), 'RED CONTROL — the counters cut in the interface: the lock step differs from the plain form (429 there, a sign-in here)', c.diff.map(({ p, q }) => `${p.name}: ${p.status}/${q.status}`));
 }
@@ -237,6 +237,56 @@ async function fifth(mod) {
     `four hashes in flight, the fifth sign-in answered at once: ${r.five && r.five.status} «${r.five && r.five.json && r.five.json.code}»; the four signed in (${r.four.join(', ')})`, r);
   const lifted = await fifth(mutant('src/interface/signin.js', 'const SCRYPT_MAX = 4;', 'const SCRYPT_MAX = 99;'));
   ok(!lifted.five || lifted.five.status !== 503, `RED CONTROL — the bound lifted: the fifth is not refused (${lifted.five ? lifted.five.status : 'it waits with the others'})`, lifted);
+}
+
+console.log('— ③b THE GUESS BOUND COUNTS THE GUESSES IN FLIGHT (the follow: an address gets RATE_FAILS tries, not more, however many at once)');
+async function guesses(mod) {
+  const d = freshDir(); plainAuth(d).setPassword('pw-guess-9');
+  const waiting = []; let hold = false, hashed = 0;
+  const hashOf = (pw, salt) => { if (!hold) return ST.hash(pw, salt); hashed++; return new Promise((resolve) => waiting.push(() => resolve(ST.hash(pw, salt)))); };
+  const t = mod.create({ file: path.join(d, 'auth.json'), log: quiet, hashOf }); await t.load();
+  const s = await tableServer(t);
+  for (let i = 0; i < ST.RATE_FAILS - 1; i++) await ask(s.port, 'POST', '/api/login', { headers: SAME, body: { password: 'wrong' } });   // one try left
+  hold = true;
+  const rs = Array.from({ length: 4 }, () => ask(s.port, 'POST', '/api/login', { headers: SAME, body: { password: 'wrong' } }));   // then four AT ONCE
+  await until(() => waiting.length >= 1, 3000); await sleep(80);
+  const inFlight = hashed;
+  while (waiting.length) waiting.shift()();
+  const all = await Promise.all(rs); await s.close();
+  return { hashed: inFlight, refused: all.filter((r) => r.status === 429).length, statuses: all.map((r) => r.status) };
+}
+{
+  const r = await guesses(SI);
+  ok(r.hashed === 1 && r.refused === 3, `one try left, then four wrong guesses AT ONCE from the address: ${r.hashed} reaches the hash, ${r.refused} are answered 429 before any (the release's ${ST.RATE_FAILS} a lock, not more)`, r);
+  const loose = await guesses(mutant('src/interface/signin.js', '    if ((a ? a.fails : 0) + inflight >= T.RATE_FAILS) return null;\n', ''));
+  ok(loose.hashed === 4, `RED CONTROL — the guesses in flight not counted: all ${loose.hashed} pass the bound before any fail is counted (${ST.RATE_FAILS - 1 + loose.hashed} guesses in one lock)`, loose);
+}
+
+console.log('— ③c CLERK\'S KEY SET: the last good one answers when a refresh fails (the interface\'s option); none ⇒ fails closed');
+{
+  const { ClerkAuth } = require(path.join(REPO, 'src/clerk-auth.js'));
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'k1' };
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const h = b64u({ alg: 'RS256', kid: 'k1' }), pl = b64u({ email: 'person@example.test', iss: 'https://sso.example', exp: Math.floor(Date.now() / 1000) + 600 });
+  const jwt = `${h}.${pl}.${crypto.sign('RSA-SHA256', Buffer.from(`${h}.${pl}`), privateKey).toString('base64url')}`;
+  const pk = 'pk_test_' + Buffer.from('sso.example$').toString('base64');
+  const realFetch = globalThis.fetch; let up = true, asked = 0;
+  globalThis.fetch = async () => { asked++; if (!up) throw new Error('the key service is unreachable'); return { ok: true, status: 200, json: async () => ({ keys: [jwk] }) }; };
+  const verify = (c) => c.verifyToken(jwt).then((v) => v.email, (e) => `refused: ${e.message}`);
+  try {
+    const keep = new ClerkAuth({ publishableKey: pk, allowedEmails: 'person@example.test', keepLastGood: true });
+    const first = await verify(keep); keep._jwksFetchedAt = 0; up = false;   // an hour on: the refresh fails
+    const kept = await verify(keep);
+    up = true; const plain = new ClerkAuth({ publishableKey: pk, allowedEmails: 'person@example.test' });
+    await verify(plain); plain._jwksFetchedAt = 0; up = false;
+    const plainAfter = await verify(plain);
+    const never = await verify(new ClerkAuth({ publishableKey: pk, allowedEmails: 'person@example.test', keepLastGood: true }));
+    ok(first === 'person@example.test' && kept === 'person@example.test' && /unreachable/.test(String(keep.lastFetchError)),
+      `keepLastGood: a refresh that fails keeps the last good key set — the sign-in still verifies (${kept}; the failure kept: «${keep.lastFetchError}»)`, { first, kept });
+    ok(/^refused: the key service is unreachable/.test(plainAfter) && /^refused: the key service is unreachable/.test(never),
+      `without the option (the plain form, today's) the same refresh refuses (${plainAfter}); with no set ever fetched it FAILS CLOSED (${never})`, { plainAfter, never, asked });
+  } finally { globalThis.fetch = realFetch; }
 }
 
 console.log('— ④ HELD IN THE INTERFACE (shut, and under single sign-on): refused by name, nothing written');
