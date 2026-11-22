@@ -1014,15 +1014,16 @@ function restoreSessions() {
   // apiKeySource (spawned before tracking): chat sessions carry the init
   // record in their buffer; terminal sessions get a /proc env probe (env
   // key = definite API). One broadcast when done.
-  // B-cd4b: NEVER A PROGRAM, NO READ — the LAST `apiKeySource":"…"` of the buffer this restore already read for the conversation
-  // (`s.buffer`: the file resolveWrapperFiles named, the counter-collision case included — never `${id}.buf` by name). It used to
+  // B-cd4b: NEVER A PROGRAM, NO READ — the LAST `apiKeySource":"…"` of the ring THIS RESTORE'S REGISTRATION read for the
+  // conversation (r1487: taken at the registration, `billingRead` — nothing fed into the buffer after the attach takes it away; the
+  // file resolveWrapperFiles named, the counter-collision case included — never `${id}.buf` by name). It used to
   // fork `sh -c grep … | tail -1` for EVERY restored session in ONE synchronous pass: at 80 survivors that was 80 forks of the
   // hub's whole memory in one turn — the loop held 1.6 s (the B-cd4b measure, the first test machine; the owner's hub is several
   // times that memory, and restarts at every update). A buffer is the wrapper's ≤ 500 KB ring: its lastIndexOf is well under a
   // millisecond. Until a session's value arrives, its one reader (src/harnesses/claude.js billingIdentity → the page's billing
   // chip) shows the spawn-time guess marked `guessed`, or «unknown» — never a confirmed source it did not read
-  // ONE EXCEPTION (the round's): a conversation restored with an EMPTY buffer (an R6 pipe re-open, a re-adopted remote keeper
-  // session) has no copy to read — it stays unset until its live stream says its init (the chip: guessed / unknown meanwhile)
+  // A conversation this restore did not read (an R6 pipe re-open, a re-adopted remote keeper session) falls back to the copy it
+  // holds (`s.buffer`); one with an EMPTY copy stays unset until its live stream says its init (the chip: guessed / unknown meanwhile)
   setTimeout(() => {
     let changed = false;
     for (const [, s] of activeSessions) {
