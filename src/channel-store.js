@@ -1325,6 +1325,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     for (const k of t) {
       if (String(k).startsWith('_')) continue;
       const has = hasOwn(conv, k);
+      // 主开发 r2081: a poll stamp written INTO the row (a write past the door) is healed into the side map — and its journal — HERE,
+      // at the update's end, as the chunk's serializer does: the row's print omits stamps, so it may never be serialized before a fold
+      if (has) healRow(k, conv[k]);
       const line = has ? rowLine(k, conv[k]) : null;
       const f = line === null ? null : fpOf(line);
       const prev = rowFp.has(k) ? rowFp.get(k) : undefined;

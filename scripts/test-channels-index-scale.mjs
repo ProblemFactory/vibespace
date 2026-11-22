@@ -398,8 +398,9 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
   // the pre-lane row: the engine's pass stamps the ROW, the serializer keeps the stamps, nothing heals them
   const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
   const HEAL = ['      healRow(k, conv[k]);\n', ''];
+  const HEAL2 = ['      if (has) healRow(k, conv[k]);\n', ''];   // 主开发 r2081: the update's end heals too — the pre-lane row has neither heal
   const WRITER = ["      store.stamps.set(en.key, { [lane.via === 'scan' ? 'lastScanAt' : 'lastPollAt']: now(), ...(complete ? { walkStartedAt } : {}) });", "      Object.assign(en.lane, { [lane.via === 'scan' ? 'lastScanAt' : 'lastPollAt']: now(), ...(complete ? { walkStartedAt } : {}) });"];
-  ok([KEEP, HEAL].every(([f]) => ssrc.split(f).length === 2) && esrc.split(WRITER[0]).length === 2, '⑩ CONTROL setup: the omission, the heal and the engine\'s stamp writer are where the control cuts them');
+  ok([KEEP, HEAL, HEAL2].every(([f]) => ssrc.split(f).length === 2) && esrc.split(WRITER[0]).length === 2, '⑩ CONTROL setup: the omission, both heals and the engine\'s stamp writer are where the control cuts them');
   const minute = async (M, tag) => {
     const e = M.create({ dataDir: path.join(ROOT, `quiet-${tag}`), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now, log: quiet, censusTimer: () => ({ cancel() {} }) });
     const x = e.store.index;
@@ -440,7 +441,7 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
   const q = await minute(ENG, 'head');
   ok(q.rows >= N && q.pollSteps > 0 && q.polled === q.own && q.writes === 0 && q.sameFile, `⑩ a quiet minute at ${q.rows} rows (${q.mb} MB on disk): the timer's 12 passes polled the account's ${q.polled} conversations in ${q.pollSteps} of them and brought nothing — ${q.writes} index writes, ${q.skipped} flushes skipped, the same file; the stamps wait in memory for the side file (owed ${q.stampsOwed}), each appended to its journal (${q.journalBytes} bytes in the minute)`, JSON.stringify(q));
   console.log(`  · printed, not judged: discovery's own cycle (every coldSec = 900 s) stamps listedAt on every listed row — ${q.discoveryWrites} index write(s) per cycle (outside this lane's three stamps)`);
-  const sc = MC.write('src/channel-store.js', editAnchor(editAnchor(ssrc, KEEP[0], KEEP[1], "src/channel-store.js"), HEAL[0], HEAL[1], "src/channel-store.js"), 'quiet-inrow');
+  const sc = MC.write('src/channel-store.js', editAnchor(editAnchor(editAnchor(ssrc, KEEP[0], KEEP[1], "src/channel-store.js"), HEAL[0], HEAL[1], "src/channel-store.js"), HEAL2[0], HEAL2[1], "src/channel-store.js"), 'quiet-inrow');
   const ec = MC.write('src/server/channels-engine.js', esrc.replace(WRITER[0], WRITER[1]).replace("require('../channel-store.js')", `require(${JSON.stringify(sc)})`), 'quiet-inrow');
   const qc = await minute(require(ec), 'inrow');
   // lane mirror-green-channels (2.369.204): a rewrite is witnessed by the file's BYTES, never its inode number — an ext4

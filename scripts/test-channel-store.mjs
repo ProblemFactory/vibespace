@@ -1365,9 +1365,10 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   // at all — the law judged: no index write, the inode kept, the stamp journal's lines (the equal-bytes skip is not met on this road — its own scene below)
   ok(head.writes === 0 && head.sameFile && head.stamp === T + 50e3 && head.journal === 30, `⑭ ten passes that bring nothing (three rows each, the engine's own update shape): ${head.writes} index writes, the same file (inode kept), ${head.skipped} flushes skipped; the last stamp reads back through stamps.lane(); the journal took one line per stamp (${head.journal} lines, ${head.jbytes} bytes)`, JSON.stringify(head));
   const headRow = await quietRun(S, 'head-inrow', true);
-  ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && headRow.disk, `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized: ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
+  ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && headRow.disk, `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized and at the update's end (主开发 r2081): ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
   const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
   const HEAL = ['      healRow(k, conv[k]);\n', ''];
+  const HEAL2 = ['      if (has) healRow(k, conv[k]);\n', ''];   // 主开发 r2081: the update's end heals too
   const SKIP = ['    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return null; }\n', ''];
   const QUIET = ['      if (prev !== undefined && prev === f) continue;', '      void 0;'];   // B-360d unit 1: the journal's compare — the first wall a quiet pass meets
   const CLOSE = ['    flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache\n    stampsFlush();\n', '    flush({ full: true });\n'];
@@ -1382,12 +1383,12 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const JOURNAL = ['    journal(k);\n    armStamps();\n', '    armStamps();\n'];
   const REPLAY = ['      if (Object.keys(st).length) stampMap.set(a[0], st); else stampMap.delete(a[0]);\n', ''];
   const FOLD = ['    try { if (journalFd !== null) fs.ftruncateSync(journalFd, 0); else fs.truncateSync(stampsLog, 0); journalTorn = false; }', '    try { journalTorn = false; }'];   // the fold runs in the side file's LANDED callback (stampsWritten)
-  const cuts = { KEEP, HEAL, SKIP, QUIET, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
+  const cuts = { KEEP, HEAL, HEAL2, SKIP, QUIET, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
   const missing = Object.entries(cuts).filter(([, [from]]) => src.split(from).length !== 2).map(([k]) => k);
-  ok(!missing.length, `⑭ CONTROL setup: the thirteen rules are where the controls cut them (missing: ${missing.join(', ') || 'none'})`);
+  ok(!missing.length, `⑭ CONTROL setup: the fourteen rules are where the controls cut them (missing: ${missing.join(', ') || 'none'})`);
   const cutFile = (tag, ...cs) => MUTCS.write('src/channel-store.js', cs.reduce((s, [from, to]) => s.replace(from, to), src), tag);
   const cut = (tag, ...cs) => require(cutFile(tag, ...cs));
-  const c1 = await quietRun(cut('qs-inrow', KEEP, HEAL), 'c-inrow', true);
+  const c1 = await quietRun(cut('qs-inrow', KEEP, HEAL, HEAL2), 'c-inrow', true);
   // lane mirror-green-channels (the Actions mirror, 2.369.204): the rewrite is witnessed by its BYTES (the tenth pass's
   // stamp in the file), never by the inode number. An ext4 /tmp (the runner's) hands a freed inode to the next tmp file:
   // the ten tmp + rename writes alternate between TWO numbers and the tenth lands on the first again (measured on ext4:

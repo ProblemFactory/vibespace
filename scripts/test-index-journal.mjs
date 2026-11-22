@@ -29,6 +29,8 @@
 //      answer; a journal deaf to the hold.
 //   ⑤ LAW 7 — A ROLLBACK FINDS EVERYTHING: the RELEASE'S OWN replay (scripts/fixtures/release-index-replay.cjs, frozen) over
 //      every kill copy equals the new store's map; after close(), index.json alone equals it.
+//   ⑱ AN IN-ROW STAMP (主开发 r2081): a poll stamp written into the row past the door reaches the stamp journal at the
+//      update's end — a kill before any fold keeps it. RED: no heal at the update's end.
 // Run: node scripts/test-index-journal.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -551,6 +553,27 @@ async function heldLandLeg(mod, tag, waitMs = 200) {
   const MH = M.load('src/channel-store.js', anchored(anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'actOf deaf'), "    if (ixLoad.blocked) { warn('[channels] index-acts.ndjson not written: ' + ixLoad.blocked); return null; }", "    void 0;", 'produceActs deaf'), "      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),", "      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),", 'landed deaf'), 'land-held-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
   const rh = await heldLandLeg(MH, 'land-held-red', 2500);
   ok(rh.landed === true || rh.afBytes > 0, `⑮ (3) RED CONTROL: a journal deaf to the hold — a line written beside the held index (${rh.afBytes} bytes) and the row said landed (${rh.landed}) — the leg above would go red`, rh);
+}
+
+// ═══ ⑱ A STAMP WRITTEN INTO A ROW IS HEALED AT THE UPDATE'S END (主开发 r2081) ═══
+console.log('⑱ a poll stamp written into the row past the door reaches the stamp journal at the update\'s end');
+// INDEX_KEYS omits a row's poll stamps from its printed line, so an update that writes a stamp INTO the row (a write past the
+// door: the engine stamps through store.stamps.set) reads as quiet and the row is not serialized until a fold — the update's end
+// heals it into the side map and its journal (poll-stamps.log), as the chunk's serializer does. A kill before the fold keeps it.
+async function inRowStampLeg(mod, tag) {
+  const dir = tmp(tag), o = open(mod, dir), T = Date.UTC(2026, 10, 21, 12, 0, 0);
+  await seed(o.st, 20);
+  await o.st.index.update(() => { const en = o.st.index.entry('a', 'c3'); en.lane = { ...(en.lane || {}), via: 'poll', lastPollAt: T + 7e3 }; });   // the stamp INTO the row
+  const k = kill(dir, tag); shut(o);
+  const o2 = open(CS, k); const lp = Number((o2.st.stamps.lane(o2.st.index.peek('a/c3')) || {}).lastPollAt) || 0; shut(o2);
+  return { kept: lp === T + 7e3, lp };
+}
+{
+  const r = await inRowStampLeg(CS, 'inrow');
+  ok(r.kept, `⑱ a stamp written into a row past the door, then a kill before any fold: the stamp is read back after the restart (${r.lp})`, r);
+  const HM = M.load('src/channel-store.js', anchored(SRC, '      if (has) healRow(k, conv[k]);\n', '', 'no heal at the update\'s end'), 'no-heal-end');
+  const rr = await inRowStampLeg(HM, 'inrow-red');
+  ok(!rr.kept, `⑱ RED CONTROL: the update's end without its heal (line 267 as it stood) — the stamp lost at the kill (${rr.lp}, «never polled») — the leg above would go red`, rr);
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
