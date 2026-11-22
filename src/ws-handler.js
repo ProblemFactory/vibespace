@@ -1246,7 +1246,7 @@ function registerWsHandler(wss, ctx) {
           const job = data.dryRun === true ? D.filesConfirmOf({ session, msgId: data.msgId, by, hosts, conv })
             : D.pressFiles({ session, msgId: data.msgId, by, hosts, conv, choice: data.choice, drawn: data.drawn || null, lastSeenUuid: data.lastSeenUuid, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null, reqId: typeof data.reqId === 'string' ? data.reqId : null });
           const reply = (r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { } };
-          job.then(reply, (e) => { console.error('[rewind-files] the door failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });   // a throw is said, never a silent page
+          job.then((r) => { reply(r); if (data.dryRun !== true) require('./server/rewind-kept-door.js').afterFilesPress(session, conv, r, { broadcastToSession, hosts, msgId: data.msgId }); }, (e) => { console.error('[rewind-files] the door failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });   // a throw is said, never a silent page
           break;
         }
 
@@ -1254,7 +1254,7 @@ function registerWsHandler(wss, ctx) {
           const session = activeSessions.get(data.sessionId), by = ws._personPage === true ? byOfWs(ws) : null;
           const reply = (r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-put-back-result', sessionId: data.sessionId, reqId: data.reqId ?? null, press: data.press ?? null, ...r })); } catch { } };
           require('./server/rewind-kept-door.js').putBack({ session, conv: typeof data.sessionId === 'string' ? data.sessionId : null, press: data.press, by, hosts, dryRun: data.dryRun === true, expect: Array.isArray(data.expect) ? data.expect : null })
-            .then(reply, (e) => { console.error('[rewind-files] the put-back failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });
+            .then((r) => { reply(r); require('./server/rewind-kept-door.js').afterPutBack(session, data.sessionId, data.press, r, { broadcastToSession, hosts }); }, (e) => { console.error('[rewind-files] the put-back failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });
           break;
         }
 
@@ -1952,6 +1952,7 @@ function registerWsHandler(wss, ctx) {
                 remoteState: session._vaultWait ? { state: 'vault-locked', at: session._vaultWait } : session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),   // lane vault-e2e-password-fix-r2: waiting for the vault
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null,
                 leftBehind: (() => { try { return require('./server/left-behind-door.js').linesOf(session); } catch { return []; } })(),   // B-69a7 (d): a reload draws them again
+                fileCheckpoints: session._fileCheckpoints === true,   // B-437e U3: the conversation's own files fact (U1 sets it) — the page asks the files confirm only then
               };
               // + `opSeq` on both rungs (the capability advert: the last seq this
               // socket is current to), then the replay OR the slab. Written to
@@ -1966,6 +1967,7 @@ function registerWsHandler(wss, ctx) {
               })));
               if (ws.readyState === WS_OPEN && !livePayload.historyNotLoaded) BULK.replied(session);   // B-cd4b r1093, THE DOOR: the attach replied the history (whatever served it: its read, the hub's copy, a replay) — a socket gone first keeps the mark   // row B-422c at the move: a «not loaded» reply is a refusal said — it consumes nothing (bulk-read.js: the retry is still the first read)
               armResume(session, ws);
+              try { require('./server/rewind-kept-door.js').sendKeptLines(ws, data.sessionId); } catch { }   // B-437e U3: the kept lines (what a rewind did to its files) drawn again
               // ASK THE ONE PROCESS THAT KNOWS (2026-09-09, the ghost-row
               // incident). We just told the client our queue is a GUESS, so
               // the strip is showing NOTHING; the wrapper's answer is an

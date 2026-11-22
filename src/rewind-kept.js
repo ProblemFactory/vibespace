@@ -31,6 +31,7 @@ const KEEP = Object.freeze({ maxFiles: 64, fileMax: 32 * MiB, pressMax: 256 * Mi
 const MARK_KIND = 'vibespace-rewind-kept';
 const MARK_FILE = '.vibespace-rewind-kept';
 const MANIFEST_FILE = 'manifest.json';
+const LINES_FILE = 'lines.json';   // U3: a conversation's kept lines (what was done to its files), beside its press folders
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 // a press's own folder name: `kp-` + the press time (base 36) + 8 hex — the sweep reads ONLY this shape
@@ -163,4 +164,4 @@ function putBackPlanOf(manifest, cur = {}, kept = {}) {
   });
 }
 
-module.exports = { isAbsPath, KEEP, MARK_KIND, MARK_FILE, MANIFEST_FILE, DIR_MODE, FILE_MODE, PRESS_RE, KEEP_WHY, PUT_BACK_ACTS, pressIdOf, keptName, kindOfMode, keepPlanOf, readBackOf, manifestOf, markOf, usedOf, sweepOf, putBackPlanOf };
+module.exports = { isAbsPath, KEEP, MARK_KIND, MARK_FILE, MANIFEST_FILE, LINES_FILE, DIR_MODE, FILE_MODE, PRESS_RE, KEEP_WHY, PUT_BACK_ACTS, pressIdOf, keptName, kindOfMode, keepPlanOf, readBackOf, manifestOf, markOf, usedOf, sweepOf, putBackPlanOf };

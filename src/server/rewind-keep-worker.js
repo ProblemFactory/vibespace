@@ -104,6 +104,24 @@ const OPS = {
     try { fs.unlinkSync(file); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
     return { ok: true };
   },
+  // U3 (主开发 r1988): THE KEPT LINES of one conversation — a record of what was done to a person's files, in the conversation's own
+  // kept folder (data/rewind-kept/<conversation>/lines.json): never a press folder, so no sweep takes it; written synced
+  readLines({ root } = {}) {
+    let text = null;
+    try { text = fs.readFileSync(path.join(root, K.LINES_FILE), 'utf8'); } catch (e) { if (e && e.code === 'ENOENT') return { lines: [] }; throw e; }
+    try { const j = JSON.parse(text); return { lines: Array.isArray(j && j.lines) ? j.lines : [] }; } catch { return { lines: [], torn: true }; }
+  },
+  writeLines({ root, lines = [] } = {}) {
+    if (typeof root !== 'string' || !path.isAbsolute(root)) throw Object.assign(new Error('not a kept folder'), { code: 'EBADPRESS' });
+    fs.mkdirSync(root, { recursive: true, mode: K.DIR_MODE });
+    const to = path.join(root, K.LINES_FILE), tmp = `${to}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify({ v: 1, kind: K.MARK_KIND, lines }), { mode: K.FILE_MODE, flag: 'w' });
+      const fd = fs.openSync(tmp, 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }   // the record on disk BEFORE its name points at it
+      fs.renameSync(tmp, to);
+    } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
+    return { ok: true };
+  },
   keptFacts({ dir, rows = [] } = {}) {
     const out = {};
     for (const r of rows) {

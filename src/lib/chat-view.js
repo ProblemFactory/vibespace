@@ -13,6 +13,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t, tc } from './i18n.js';
+import { confirmModel, drawnOf, filesOutcomeWords, pressRefusalWords, keptLineModel, putBackDoorWords, putBackPlanWords, putBackOutcomeWords } from './rewind-files-words.js'; // B-437e U3: the files tier's page (PURE)
 import { pressVerdict } from './press-arm.js'; // B-ef04: a card row that opens a conversation counts a press only on what sat still
 /** B-ef04: the transcript's rows that OPEN A CONVERSATION — a channel card's row, a peer's name — a press on one that the list just
  *  moved under a still pointer is refused */
@@ -20,7 +21,7 @@ const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
 /** the cure: a row by a KEY that outlives a re-render — a channel row's own key, else its record and its words (a peer's name is
  *  rebuilt by innerHTML when its message re-renders) — so no node is kept and a redrawn row is the same row */
 const pressKeyOf = (row) => (!row ? null : row.dataset?.key ? 'k:' + row.dataset.key : 'm:' + (row.closest?.('[data-msg-id]')?.dataset?.msgId || '') + '|' + (row.textContent || ''));
-import { stampAt as when, num, span, stampSpan, clockOf } from './page-time.js';
+import { stampAt as when, num, span, stampSpan, clockOf, dateOf } from './page-time.js';
 import { reaskNext, retryAtOf } from './history-reask.js';
 import { readerKindOf, readerAskWords, readerLineWords } from './reader-words.js'; // row B-422c (r3077): the reader's refusal in the words of the cause it has // row B-422c (r1461): the page's re-ask of a history «not loaded» — PURE // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
@@ -62,6 +63,8 @@ import { NeedsCards, hiddenRecord } from './chat-needs-card.js'; // lane chat-ne
 import { endLineWords } from './left-behind-line.js'; // B-69a7: a press's outcome said in place (the line never grows)
 import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 import { lateFocus, openClock, PAGE_START } from './late-focus.js'; // B-c87d: the rewind answer's focus goes through THE door (the keyboard stays where the person last put it)
+const REWIND_FILES_ASK_MS = 20000;     // B-437e U3: the files dry run's bound (the door's own: its dry run 15 s + the file times 5 s)
+const REWIND_FILES_PRESS_MS = 150000;  // the files press's (the keep 60 s, the dry run again, the press 60 s)
 
 // lane lg-recovery (主开发 r3103 (4)): the hub's sub-agent refusals BY THEIR CODE (src/server/subagent-transcript.js `said`,
 // src/ws-handler.js) — worded here, through the page's translation; every code the hub sends has its row (test-subagent-transcript ⑫)
@@ -1533,6 +1536,7 @@ class ChatView {
           if (meta.goal != null) { this._onGoalUpdated(meta.goal, meta.goalElapsed); if (meta.goalStatus) this._statusBar.setGoalStatus(meta.goalStatus); }
           this._applyLiveMeta?.(meta);
           if (Array.isArray(meta.leftBehind)) for (const d of meta.leftBehind) this._sayLeftBehind(d || {});   // B-69a7 (d): drawn once (kept where still on the page)
+          this._redrawKeptLines();   // B-437e U3: a history redraw never drops a kept line
         }
         if (isStreaming) this._onServerStreamLabel(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
         else this._hideTyping?.();
@@ -1565,6 +1569,7 @@ class ChatView {
       if (meta.taskState) this._applyTaskState(meta.taskState);
       if (meta.goal != null) { this._onGoalUpdated(meta.goal, meta.goalElapsed); if (meta.goalStatus) this._statusBar.setGoalStatus(meta.goalStatus); }
       if (Array.isArray(meta.leftBehind)) for (const d of meta.leftBehind) this._sayLeftBehind(d || {});   // B-69a7 (d): a reload draws what a Stop left running again, its door while it stands
+      this._redrawKeptLines();   // B-437e U3: a history load never drops a kept line
       // Restore pending permission overlays from server (survived in buffer).
       // Usually redundant — MessageManager attaches `permission` onto the
       // normalized tool message — but covers control_requests the normalizer
@@ -2073,6 +2078,7 @@ class ChatView {
   // showed "default" while the session verifiably ran Concise; 2.368.4).
   _applyLiveMeta(meta) {
     if (!meta) return;
+    if ('fileCheckpoints' in meta) this._fileCheckpoints = meta.fileCheckpoints === true;   // B-437e U3: the conversation's own files fact (U1 sets it) — the files confirm is asked only then
     // THE OP-SEQ ADVERT (perf lane chunk D), carries-the-key guarded like every
     // fact here: a server that stamps its ops says the last seq this socket is
     // current to. Seeing it is what lets _reattach ask for a replay; a slab
@@ -2165,6 +2171,149 @@ class ChatView {
   // are. The SERVER decides (src/server/rewind-requests.js over the conversation it holds); this view asks once, names
   // the cost first (showConfirmDialog — never a native dialog), and says every refusal by its reason. A running turn is
   // refused here before any dialog (the server refuses it too): never a silent interrupt.
+  // ── B-437e U3: THE FILES TIER's PAGE (lane lg-rewind, 主开发 r1988). Its decisions and words are PURE (src/lib/rewind-files-words.js);
+  // here only the drawing and the frames. It is ASKED only for a conversation whose own files fact is on (`fileCheckpoints` in its
+  // meta — U1 sets it); everywhere else tier one's door below runs word for word (DARK as shipped).
+  /** the files dry run beside tier one's → a promise of its facts, or null (unanswered within its bound, a closed view, no socket):
+   *  null draws today's confirm — the conversation step is never held by the files ask past its bound */
+  _askRewindFiles(msg) {
+    return new Promise((resolve) => {
+      let done = false;
+      const end = (v) => { if (!done) { done = true; resolve(v); } };
+      const reqId = 'rwf-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      try {
+        this.ws.request({ type: 'rewind-files', sessionId: this.sessionId, msgId: msg.id, reqId, dryRun: true },
+          (m) => { if (!m || m.type !== 'rewind-files-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false; end(m.ok ? m : null); return true; },
+          { isAlive: () => !this._disposed, timeoutMs: REWIND_FILES_ASK_MS, onTimeout: () => end(null) });
+      } catch { end(null); }
+    });
+  }
+  /** the FILES confirm when the server drew a files choice → true (drawn here) | false (today's confirm draws instead) */
+  _confirmRewindFiles(msg, plan, said, facts) {
+    const model = confirmModel(facts, { machine: facts.machine || null });
+    if (model.kind !== 'files') return false;
+    const n = Math.max(1, Number(said.turns) || 1);
+    const body = n === 1 ? t('This message and everything after it are taken back — 1 turn. The agent will no longer remember it.')
+      : t('This message and everything after it are taken back — {n} turns. The agent will no longer remember them.', { n });
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const box = el('div', 'rewind-files'), name = 'rwf-choice-' + Math.random().toString(36).slice(2, 8);
+    const pick = el('div', 'rewind-files-choices');
+    pick.setAttribute('role', 'radiogroup'); pick.setAttribute('aria-label', t('What to rewind'));
+    for (const c of model.choices) {   // only the choices the server drew: one that cannot act is absent (said below), never greyed
+      const lab = el('label', 'rewind-files-choice'), r = el('input');
+      r.type = 'radio'; r.name = name; r.value = c.id; r.checked = c.id === model.def;
+      lab.append(r, el('span', null, c.words)); pick.appendChild(lab);
+    }
+    box.appendChild(pick);
+    if (model.absent) box.appendChild(el('p', 'dialog-hint', model.absent));
+    box.appendChild(el('p', 'dialog-hint', model.plus || model.minus ? t('The files changed after this message (+{plus} −{minus} lines):', { plus: model.plus, minus: model.minus }) : t('The files changed after this message:')));
+    const ul = el('ul', 'dialog-list rewind-files-rows');
+    for (const r of model.rows) { const li = el('li', `rewind-files-row rewind-files-${r.state || 'unknown'}`), p = el('span', 'rewind-files-path', r.short); p.title = r.path; li.append(p, el('span', 'rewind-files-state', r.words)); ul.appendChild(li); }
+    if (model.more) ul.appendChild(el('li', null, t('and {n} more', { n: model.more })));
+    box.appendChild(ul);
+    box.appendChild(el('p', 'dialog-hint rewind-files-keep', model.keep.words));
+    if (model.keep.rows.length) { const ku = el('ul', 'dialog-list'); for (const k of model.keep.rows) ku.appendChild(el('li', null, k.short ? `${k.short} — ${k.words}` : k.words)); box.appendChild(ku); }
+    showConfirmDialog({ title: t('Rewind to before this message?'), message: body, extra: box, confirmText: t('Rewind'), danger: true }).then((yes) => {
+      this._rewindInFlight = false;                // the confirm's hold ends here
+      if (!yes) return;
+      const chosen = box.querySelector('input[type="radio"]:checked');
+      this._pressRewindFiles(msg, plan, said, facts, chosen ? chosen.value : model.def);
+    });
+    return true;
+  }
+  /** THE FILES PRESS with its choice. The conversation step (both, or the conversation only) binds EXACTLY as tier one's press: under
+   *  the CLI's own request id, before it is sent; its one-minute watchdog starts once the door has asked it. The files step is said ON
+   *  ITS OWN when the door answers — never «all files restored» */
+  _pressRewindFiles(msg, plan, said, facts, choice) {
+    if (this._disposed) { showToast(t('The window was closed — nothing was sent.'), { type: 'error' }); return; }
+    if (!this.ws.connected) { showToast(t('Not connected — nothing was sent. Try again when the connection is back.'), { type: 'error' }); return; }
+    const row = backendFeatureCaps(this._getSessionIds().backend).checkpoints;
+    const now = rewindPlanOf(row, this._messages, msg.id, { live: true });
+    const reqId = 'rw-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ourId = REWIND_REQUEST_PREFIX + reqId;
+    const withConversation = choice !== 'files';
+    this._rewindInFlight = true;
+    const settle = () => { this._rewindInFlight = false; if (this._rewindLive === ourId) this._rewindLive = null; clearTimeout(this._rewindAnswerTimer); };
+    const unbind = () => { this._rewindBound?.delete(ourId); this._keepRewind(ourId, null); };
+    if (withConversation) {
+      if (!this._rewindBound) this._rewindBound = new Map();
+      const entry = { text: (now.ok ? now : plan).prefillText || '', granularity: row && row.granularity, at: openClock() };
+      this._rewindBound.set(ourId, entry);
+      this._keepRewind(ourId, { msgId: msg.id, granularity: entry.granularity });   // the tab keeps its ids: a page reloaded before the answer binds it
+      this._rewindLive = ourId;
+    }
+    this.ws.request(
+      { type: 'rewind-files', sessionId: this.sessionId, msgId: msg.id, reqId, choice, drawn: drawnOf(facts), lastSeenUuid: now.ok ? now.lastSeenUuid : plan.lastSeenUuid, expectTaken: said.taken },
+      (m) => {
+        if (!m || m.type !== 'rewind-files-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
+        if (!m.ok) { if (withConversation) unbind(); settle(); const w = pressRefusalWords(m.reason); if (w) showToast(w, { type: 'error' }); else this._sayRewindRefusal(m.reason, m.cls); return true; }
+        if (choice !== 'conversation') showToast(filesOutcomeWords(m), { type: m.results && m.results.files && m.results.files.ok ? 'info' : 'error' });
+        const conv = m.results && m.results.conversation;
+        if (!withConversation) { settle(); return true; }
+        if (!conv || conv.ok === false) { unbind(); settle(); if (conv) this._sayRewindRefusal(conv.reason, conv.cls); return true; }
+        clearTimeout(this._rewindAnswerTimer);   // the conversation step was ASKED: tier one's minute, from now
+        this._rewindAnswerTimer = setTimeout(() => {
+          if (this._disposed || this._rewindLive !== ourId) return;
+          settle();
+          showToast(t('The rewind did not answer within a minute — nothing has been taken back yet. Messages can be sent again; a new rewind waits until this one answers.'), { type: 'error' });
+        }, REWIND_LIFE_MS);
+        return true;
+      },
+      { isAlive: () => !this._disposed, timeoutMs: REWIND_FILES_PRESS_MS, onTimeout: () => { settle(); showToast(t('No answer to the files rewind yet — VibeSpace may still be putting them back. The kept copy holds them as they were.'), { type: 'error' }); } },
+    );
+  }
+  /** A KEPT LINE (src/server/rewind-kept-door.js): what a rewind did to this conversation's files — kept by the hub, drawn again after a
+   *  reload, told live to every client. The view keeps them: a history redraw (a compaction view, a rewind of the conversation past
+   *  it) draws them again. The door only while its copy stands; after that the line SAYS so (never a greyed door) */
+  _sayKeptLine(d) {
+    if (!d || typeof d.press !== 'string' || !d.press) return;
+    (this._keptLines || (this._keptLines = new Map())).set(d.press, d);
+    if (!this._keptStrip || !this._keptStrip.isConnected) {
+      this._keptStrip = document.createElement('div');
+      this._keptStrip.className = 'chat-rewind-kept';
+      this._container.appendChild(this._keptStrip);
+    }
+    const els = this._keptEls || (this._keptEls = new Map());
+    let line = els.get(d.press);
+    if (!line || !line.isConnected) { line = document.createElement('div'); line.className = 'chat-system chat-rewind-kept-line'; this._keptStrip.prepend(line); els.set(d.press, line); }
+    const m = keptLineModel(d, { fmt: (ms) => dateOf(ms, { words: true }) });   // page-time: the ONE formatter (a date inside a sentence: its words form)
+    line.textContent = '';
+    const words = document.createElement('span'); words.textContent = m.words; line.appendChild(words);
+    const said = this._keptSaid && this._keptSaid.get(d.press);
+    if (said) { const s = document.createElement('span'); s.className = 'chat-rewind-kept-said'; s.textContent = said; line.appendChild(s); }   // the LATEST outcome, in place
+    if (m.door) { const b = document.createElement('button'); b.type = 'button'; b.textContent = putBackDoorWords(); b.onclick = () => this._putBackFiles(d.press); line.appendChild(b); }
+  }
+  _redrawKeptLines() {
+    if (!this._keptLines) return;
+    for (const d of [...this._keptLines.values()].sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0))) this._sayKeptLine(d);   // newest on top
+  }
+  _keptSay(press, words) {
+    (this._keptSaid || (this._keptSaid = new Map())).set(press, words);
+    const d = this._keptLines && this._keptLines.get(press);
+    if (d) this._sayKeptLine(d); else showToast(words);
+  }
+  /** «PUT MY FILES BACK AS THEY WERE»: the plan first (each path's act named), then the act with that plan. A press while one is out on
+   *  this page is SAID, never a dead button; two clients on one press: the hub refuses the second (`pending`), said in words */
+  _putBackFiles(press) {
+    const busy = this._putBackBusy || (this._putBackBusy = new Set());
+    if (busy.has(press)) { this._keptSay(press, putBackOutcomeWords({ ok: false, reason: 'pending' })); return; }
+    if (!this.ws.connected) { showToast(t('Not connected — nothing was sent. Try again when the connection is back.'), { type: 'error' }); return; }
+    busy.add(press);
+    const ask = (frame, then) => {
+      const reqId = 'pb-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      this.ws.request({ type: 'rewind-files-put-back', sessionId: this.sessionId, press, reqId, ...frame }, (m) => {
+        if (!m || m.type !== 'rewind-files-put-back-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
+        then(m); return true;
+      }, { isAlive: () => !this._disposed, timeoutMs: REWIND_FILES_PRESS_MS, onTimeout: () => { busy.delete(press); this._keptSay(press, t('No answer to the put-back yet — look again in a moment.')); } });
+    };
+    ask({ dryRun: true }, (plan) => {
+      if (!plan.ok) { busy.delete(press); this._keptSay(press, putBackOutcomeWords(plan)); return; }
+      showConfirmDialog({ title: t('Put these files back as they were?'), message: t('What stands at each path now is kept first (for seven days), so this too can be undone.'), items: putBackPlanWords(plan.rows), confirmText: t('Put back'), danger: true }).then((yes) => {
+        if (!yes) { busy.delete(press); return; }
+        ask({ expect: plan.rows }, (r) => { busy.delete(press); this._keptSay(press, putBackOutcomeWords(r)); });
+      });
+    });
+  }
+
   _rewindFromMessage(msg) {
     if (this._disposed) return;                                         // a closed view asks nothing
     const { backend } = this._getSessionIds();
@@ -2181,12 +2330,13 @@ class ChatView {
     this._rewindInFlight = true;
     const dryId = 'rwd-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const free = () => { this._rewindInFlight = false; };
+    const files = this._fileCheckpoints === true ? this._askRewindFiles(msg) : null;   // B-437e U3: the files dry run beside it — ONLY where the conversation's files fact is on
     this._rewindCancel = this.ws.request(
       { type: 'rewind', sessionId: this.sessionId, msgId: msg.id, reqId: dryId, lastSeenUuid: plan.lastSeenUuid, dryRun: true },
       (m) => {
         if (!m || m.type !== 'rewind-result' || m.sessionId !== this.sessionId || m.reqId !== dryId) return false;
         if (!m.ok) { free(); this._sayRewindRefusal(m.reason, m.cls); return true; }
-        this._confirmRewind(msg, plan, m);           // still one in flight while the confirm is open (one dialog)
+        if (files) files.then((f) => this._confirmRewind(msg, plan, m, f)); else this._confirmRewind(msg, plan, m);   // still one in flight while the confirm is open (one dialog)
         return true;
       },
       { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { this._rewindCancel?.(); if (this._disposed) return; free(); showToast(t('No answer to the rewind yet — the conversation is as you see it.'), { type: 'error' }); } },
@@ -2194,7 +2344,8 @@ class ChatView {
   }
 
   /** The confirm, worded from the SERVER's plan `said` ({turns, files}), then the press itself. */
-  _confirmRewind(msg, plan, said) {
+  _confirmRewind(msg, plan, said, files = null) {
+    if (files && this._confirmRewindFiles(msg, plan, said, files)) return;   // B-437e U3: the files confirm when the server drew a files choice
     const n = Math.max(1, Number(said.turns) || 1);
     const body = said.files !== true                       // the caveat is left out only when the plan SAYS files roll back
       ? (n === 1 ? t('This message and everything after it are taken back — 1 turn. The agent will no longer remember it. Files on disk are not rolled back: whatever the agent changed stays as it is now.')
@@ -5341,6 +5492,8 @@ class ChatView {
     // B-bba6 cure: a put-back at the conversation's END (no Stop — its process ended; text only): its own one toast
     // B-69a7: what a settled Stop's command tool left running — said once, «End them» on THIS machine (a person's press)
     if (op.subtype === 'left-behind') { this._sayLeftBehind(op.data || {}); return; }
+    if (op.subtype === 'rewind-kept-line') { this._sayKeptLine(op.data || {}); return; }   // B-437e U3: a kept line, told live to every client
+    if (op.subtype === 'rewind-kept-lines') { for (const l of (op.data && Array.isArray(op.data.lines) ? op.data.lines : [])) this._sayKeptLine(l); return; }   // a reload's
     if (op.subtype === 'queue-putback' && op.by === 'exit' && op.n > 0) {
       const said = [t('The conversation ended — {n} queued message(s) put back into the input box', { n: op.n })];
       if (op.cut > 0) said.push(t('{m} message(s) came back shortened', { m: op.cut }));

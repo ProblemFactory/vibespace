@@ -25,6 +25,7 @@
 // renamed over the person's file); no sweep removes a press while it is being put back; it touches nothing of the conversation.
 const path = require('path');
 const crypto = require('crypto');
+const fsp = require('fs/promises');
 const DOOR = require('../mount-door');
 const DA = require('../device-acts.js');
 const { SafeFs } = require('../safe-fs');
@@ -73,6 +74,8 @@ function hubRoad(conv, { dataRoot = DATA_ROOT, call = null } = {}) {
     keptFacts: (dir, rows) => run('keptFacts', { dir, rows }),
     putOne: (dir, row, act, press) => (DOOR.blocked(row.path) ? Promise.reject(Object.assign(new Error('blocked'), { code: 'EBLOCKED' })) : run('putOne', { dir, row, act, press })),
     dropTmp: (file) => run('dropTmp', { file }),
+    readLines: () => run('readLines', { root: rootOf(conv) }),
+    writeLines: (lines) => run('writeLines', { root: rootOf(conv), lines }),
   };
 }
 
@@ -277,4 +280,66 @@ async function putBack({ session, conv, press, by, hosts = null, dryRun = false,
   } finally { PUTTING.delete(press); if (session && RQ.filesOutOf(session) === mark) RQ.setFilesOut(session, null); }
 }
 
-module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, closePool, DATA_ROOT };
+// ── U3 (主开发 r1988): THE KEPT LINES — one per keep of a person's files (a files press, a put-back's keep-first), a RECORD of what a
+// rewind did to them: data/rewind-kept/<conversation>/lines.json on THIS hub for every machine (a paired press's manifest is the
+// hub's too), written synced by the keep pool, so a hub restart keeps them and no sweep takes them. A page draws them in the
+// conversation, again after a reload; every client of the conversation is told a change live. The door («Put my files back as they
+// were») stands ONLY while its copy does: after the seven days, or once put back, the line stays and SAYS so (never a greyed door).
+const LINES_MAX = 32;
+const LINE_CHAIN = new Map();   // conversation → its last line write (one after another: two notes never race one file)
+function chained(conv, fn) {
+  const prev = LINE_CHAIN.get(conv) || Promise.resolve();
+  const next = prev.catch(() => { }).then(fn);
+  LINE_CHAIN.set(conv, next);
+  next.finally(() => { if (LINE_CHAIN.get(conv) === next) LINE_CHAIN.delete(conv); }).catch(() => { });
+  return next;
+}
+/** one line written (merged by its press) → the line as it stands | null */
+function noteLine(conv, patch, opts = {}) {
+  if (typeof conv !== 'string' || !CONV_RE.test(conv) || !patch || !K.PRESS_RE.test(String(patch.press || ''))) return Promise.resolve(null);
+  return chained(conv, async () => {
+    const hub = hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call });
+    const { lines } = await hub.readLines();
+    const i = lines.findIndex((l) => l && l.press === patch.press);
+    const line = { ...(i >= 0 ? lines[i] : {}), ...patch };
+    await hub.writeLines(i >= 0 ? lines.map((l, k) => (k === i ? line : l)) : lines.concat([line]).slice(-LINES_MAX));
+    return line;
+  });
+}
+/** the lines as a page draws them now → [{press, at, until, machine, files, msgId, state: 'kept' | 'put-back' | 'gone', door}] —
+ *  `door` only while its press's copy stands on this hub's record and its seven days have not passed */
+async function linesOf(conv, { now = Date.now(), ...opts } = {}) {
+  if (typeof conv !== 'string' || !CONV_RE.test(conv)) return [];
+  const hub = hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call });
+  const [{ lines }, presses] = await Promise.all([hub.readLines(), hub.list()]);
+  const here = new Set(presses.filter((e) => e && e.manifest).map((e) => e.name));
+  return lines.filter((l) => l && K.PRESS_RE.test(String(l.press || ''))).map((l) => {
+    const live = l.state === 'kept' && here.has(l.press) && Number(now) < Number(l.until);
+    return { ...l, state: l.state === 'kept' && !live ? 'gone' : l.state, door: live };
+  });
+}
+const lineOfKeep = (kept, { at, msgId = null, machine = null, files = 0 } = {}) => ({ press: kept.press, at, until: at + K.KEEP.lifeMs, msgId: typeof msgId === 'string' ? msgId : null, machine, files: Number(files) || 0, state: 'kept' });
+const nameOf2 = (hosts, id) => { if (!id) return null; try { const h = hosts && typeof hosts.get === 'function' ? hosts.get(id) : null; return (h && (h.name || h.label)) || String(id); } catch { return String(id); } };
+const told = (broadcastToSession, session, conv, line) => { if (!line || typeof broadcastToSession !== 'function' || !session) return; try { broadcastToSession(session, conv, { type: 'msg', sessionId: conv, op: 'meta', subtype: 'rewind-kept-line', data: line }); } catch { } };
+/** after a FILES PRESS answered (src/ws-handler.js, the rewind-files case): a keep made ⇒ its line, told to every client */
+function afterFilesPress(session, conv, r, { broadcastToSession, hosts = null, msgId = null, now = Date.now(), ...opts } = {}) {
+  const kept = r && r.ok && r.results && r.results.kept;
+  if (!kept || !K.PRESS_RE.test(String(kept.press || ''))) return Promise.resolve(null);
+  const files = Number(kept.files) || 0;
+  return noteLine(conv, lineOfKeep(kept, { at: now, msgId, machine: nameOf2(hosts, kept.machine), files }), opts).then((line) => { told(broadcastToSession, session, conv, line); return line; }, () => null);
+}
+/** after a PUT-BACK acted: its line reads «put back», and its keep-first (what stood there) is a line of its own */
+function afterPutBack(session, conv, press, r, { broadcastToSession, hosts = null, now = Date.now(), ...opts } = {}) {
+  if (!r || r.ok !== true || r.dryRun === true || !K.PRESS_RE.test(String(press || ''))) return Promise.resolve(null);
+  const jobs = [noteLine(conv, { press, state: 'put-back', putBackAt: now }, opts)];
+  if (r.kept && K.PRESS_RE.test(String(r.kept.press || ''))) jobs.push(noteLine(conv, lineOfKeep(r.kept, { at: now, machine: nameOf2(hosts, r.kept.machine), files: Array.isArray(r.rows) ? r.rows.filter((x) => x.act === 'overwrite' || x.act === 'remove').length : 0 }), opts));
+  return Promise.all(jobs).then((lines) => { for (const l of lines) told(broadcastToSession, session, conv, l); return lines; }, () => null);
+}
+/** an ATTACH (a reload): the conversation's lines sent again as their own meta, read off the loop — and only where it HAS a lines
+ *  file (one async look: a conversation that never kept anything starts no keep pool) */
+function sendKeptLines(ws, conv, { dataRoot = DATA_ROOT, ...opts } = {}) {
+  if (typeof conv !== 'string' || !CONV_RE.test(conv)) return Promise.resolve([]);
+  return fsp.access(path.join(dataRoot, conv, K.LINES_FILE)).then(() => linesOf(conv, { dataRoot, ...opts }), () => []).then((lines) => { if (lines.length && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'msg', sessionId: conv, op: 'meta', subtype: 'rewind-kept-lines', data: { lines } })); return lines; }, () => []);
+}
+
+module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, closePool, noteLine, linesOf, afterFilesPress, afterPutBack, sendKeptLines, LINES_MAX, DATA_ROOT };

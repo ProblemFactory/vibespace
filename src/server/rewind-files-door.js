@@ -221,7 +221,7 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
     // THE LAW (r1247 (2)): every listed file KEPT and read back before anything is put back — else nothing is sent
     const kept = await KD.keepFor({ session, conv, files: j.dry.files, hosts, by, ...keepOpts });
     if (!kept.ok) return { ok: false, reason: 'not-kept', cls: 'cannot', keep: kept.refusals };
-    results.kept = { press: kept.press, where: kept.where, machine: kept.machine, check: kept.check };
+    results.kept = { press: kept.press, where: kept.where, machine: kept.machine, check: kept.check, files: j.dry.files.length };   // U3: its line counts them
     const onLate = (answer) => {   // the press's answer after its bound: journalled, and the mark is released
       clearTimeout(hold);
       try { console.warn(`[rewind-files] the press's late answer (${String(mark.id).slice(0, 40)}): ${JSON.stringify(answer).slice(0, 200)}`); } catch { }

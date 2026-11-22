@@ -247,6 +247,48 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
   const [first, second] = await twoPutBacks(KD, { session: s8, conv: 'conv-8', press: rh8.press, expect: ph8.rows, dataRoot: root });
   ok(rh8.ok && first.ok && first.rows[0].done === true && !second.ok && second.reason === 'pending' && fs.readFileSync(h8, 'utf8') === 'h as kept\n',
     '② TWO CLIENTS PRESS ONE PUT-BACK AT ONCE, both past its first fence: the second is refused by name (pending — the fence asked again right before the mark is set), the first ends whole', { first: first.rows, second });
+  // U3 (主开发 r1988): THE KEPT LINES — a record of what a rewind did to a conversation's files, kept by the hub
+  const klLroot = fs.mkdtempSync(path.join(SCRATCH, 'lines-')), klLw = path.join(SCRATCH, 'klLw'); fs.mkdirSync(klLw, { recursive: true });
+  const klLf = path.join(klLw, 'l.txt'); fs.writeFileSync(klLf, 'l as it was\n');
+  const klLk = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-l', files: [klLf], by: HUMAN, now: T0, hex8: '0000c9c9', ...KA(klLroot) });
+  const klTold = [], klBcast = (sess, id, klFrame) => klTold.push([sess, id, klFrame]);
+  const klLs = { mode: 'chat' };
+  const klL1 = await KD.afterFilesPress(klLs, 'conv-l', { ok: true, results: { kept: { press: klLk.press, where: klLk.where, machine: null, check: 'sha256', files: 1 }, files: { ok: true } } }, { broadcastToSession: klBcast, msgId: 'p1', now: T0, ...KA(klLroot) });
+  const klSeen1 = await KD.linesOf('conv-l', { now: T0 + 1000, ...KA(klLroot) });
+  ok(klLk.ok && klL1 && klL1.state === 'kept' && klL1.until === T0 + K.KEEP.lifeMs && klL1.files === 1 && klL1.msgId === 'p1' && klTold.length === 1 && klTold[0][0] === klLs && klTold[0][2].op === 'meta' && klTold[0][2].subtype === 'rewind-kept-line' && klTold[0][2].data.press === klLk.press
+    && klSeen1.length === 1 && klSeen1[0].door === true && fs.existsSync(path.join(klLroot, 'conv-l', K.LINES_FILE)),
+    '② A KEPT LINE (r1988): a files press that kept copies writes its line (data/rewind-kept/<conversation>/lines.json, synced) and tells EVERY client of the conversation live; its door stands while its copy does', { klL1, klSeen1 });
+  // a put-back: its line reads «put back»; its keep-klFirst (what stood there) is a line of its own, with its door
+  fs.writeFileSync(klLf, 'l after\n');
+  const klLp = await KD.putBack({ session: klLs, conv: 'conv-l', press: klLk.press, by: HUMAN, dryRun: true, ...KA(klLroot) });
+  const klLd = await KD.putBack({ session: klLs, conv: 'conv-l', press: klLk.press, by: HUMAN, expect: klLp.rows, now: T0 + 2000, hex8: '0000cac0', ...KA(klLroot) });
+  klTold.length = 0;
+  await KD.afterPutBack(klLs, 'conv-l', klLk.press, klLd, { broadcastToSession: klBcast, now: T0 + 2000, ...KA(klLroot) });
+  const klSeen2 = await KD.linesOf('conv-l', { now: T0 + 3000, ...KA(klLroot) });
+  const klWas = klSeen2.find((x) => x.press === klLk.press), klFirst = klSeen2.find((x) => x.press !== klLk.press);
+  ok(klLd.ok && klWas && klWas.state === 'put-back' && klWas.door === false && klWas.putBackAt === T0 + 2000 && klFirst && klFirst.state === 'kept' && klFirst.door === true && klTold.length === 2,
+    '② the put-back: its line stays and SAYS «put back» (no door); what stood there, kept first, is a line of its own with its door; both told live', klSeen2);
+  // the copy gone, or its seven days past: the line stays and says so — never a door
+  const klSeen3 = await KD.linesOf('conv-l', { now: T0 + 2000 + K.KEEP.lifeMs + 1, ...KA(klLroot) });
+  fs.rmSync(path.join(klLroot, 'conv-l', klFirst.press), { recursive: true, force: true });
+  const klSeen4 = await KD.linesOf('conv-l', { now: T0 + 3000, ...KA(klLroot) });
+  ok(klSeen3.find((x) => x.press === klFirst.press).state === 'gone' && klSeen3.every((x) => x.door === false) && klSeen4.find((x) => x.press === klFirst.press).state === 'gone' && klSeen4.length === 2,
+    '② its seven days past, or its copy swept: the line STAYS and reads «gone» — the door only while the copy stands', { klSeen3: klSeen3.map((x) => x.state), klSeen4: klSeen4.map((x) => x.state) });
+  // THE HUB RESTARTS: a fresh door (none of its memory) reads the same lines from disk
+  const klDoorPath = require.resolve(path.join(REPO, 'src/server/rewind-kept-door.js'));
+  delete require.cache[klDoorPath];
+  const klKD2 = require(klDoorPath);
+  const klSeen5 = await klKD2.linesOf('conv-l', { now: T0 + 3000, ...KA(klLroot) });
+  ok(klKD2 !== KD && JSON.stringify(klSeen5) === JSON.stringify(klSeen4), '② A HUB RESTART keeps the lines (r1988 law 4): a fresh door reads them back from the conversation\'s own record', klSeen5.length);
+  // an attach (a reload): the lines sent again — and a conversation with none starts no keep pool
+  let klPoolCalls = 0; const klSpyCall = (op, payload) => { klPoolCalls++; return call(op, payload); };
+  const klSentNone = [], klSentSome = [];
+  await KD.sendKeptLines({ readyState: 1, send: (x) => klSentNone.push(x) }, 'conv-none', { dataRoot: klLroot, call: klSpyCall });
+  const klBefore = klPoolCalls;
+  await KD.sendKeptLines({ readyState: 1, send: (x) => klSentSome.push(x) }, 'conv-l', { dataRoot: klLroot, call: klSpyCall, now: T0 + 3000 });
+  const klFrame = klSentSome[0] ? JSON.parse(klSentSome[0]) : null;
+  ok(klBefore === 0 && !klSentNone.length && klFrame && klFrame.op === 'meta' && klFrame.subtype === 'rewind-kept-lines' && klFrame.data.lines.length === 2 && klPoolCalls > 0,
+    '② AN ATTACH draws them again (their own meta, read off the loop); a conversation that never kept anything asks no keep pool (one async look for its lines file)', { klBefore, sent: klFrame && klFrame.data.lines.length });
   // THE REAL POOL (no `call`): the «rewind-keep» worker thread does the keep and its read-back
   const poolRoot = fs.mkdtempSync(path.join(SCRATCH, 'pool-'));
   const rp = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-pool', files: [a], by: HUMAN, now: T0, hex8: '0000b7b7', dataRoot: poolRoot });
@@ -327,16 +369,23 @@ function standIn({ home, shortCopy = false, noPortable = false, deny = null, old
   // THE REAL AGENT's stat action (r1859 (3)): src/agentd/agentd.js run as its own fs worker (the role its pool starts it in) —
   // the field the keep reads is the one the agent says, not a hand copy of it
   const { Worker } = await import('node:worker_threads');
+  // (r1992 (1)) its error and its exit fail every wait BY NAME, and its end is in a finally: a worker that does not load never hangs the suite
   const agentW = new Worker(path.join(REPO, 'src/agentd/agentd.js'), { workerData: { role: 'agentd-worker' } });
-  let wid = 0; const waits = new Map();
+  let wid = 0, agentFault = null; const waits = new Map();
+  const failAll = (why) => { agentFault = agentFault || why; for (const [, r] of waits) r({ error: why, code: 'EAGENTWORKER' }); waits.clear(); };
   agentW.on('message', (m) => { const r = waits.get(m.id); if (r) { waits.delete(m.id); r(m); } });
-  const realStat = (p) => new Promise((resolve, reject) => { const id = ++wid; waits.set(id, (m) => (m.error ? reject(Object.assign(new Error(m.error), { code: m.code })) : resolve({ ok: m.ok, stat: m.stat }))); agentW.postMessage({ id, action: 'stat', path: p }); });
+  agentW.on('error', (e) => failAll(`the agent's fs worker failed: ${(e && e.message) || e}`));
+  agentW.on('exit', (code) => failAll(`the agent's fs worker exited (${code}) before it answered`));
+  const realStat = (p) => new Promise((resolve, reject) => { if (agentFault) { reject(Object.assign(new Error(agentFault), { code: 'EAGENTWORKER' })); return; } const id = ++wid; waits.set(id, (m) => (m.error ? reject(Object.assign(new Error(m.error), { code: m.code })) : resolve({ ok: m.ok, stat: m.stat }))); agentW.postMessage({ id, action: 'stat', path: p }); });
   const realDm = { ...standIn({ home }), fsStat: realStat };
-  const sl = await realStat(l), sa = await realStat(a);
-  const rlr = await KD.keepFor({ session, conv: 'conv-p', files: [a, l], by: BY, now: T0 + 9970, hex8: '0000c8c8', dataRoot: hubRoot, call, dm: realDm });
-  const rar = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9971, hex8: '0000c8c9', dataRoot: hubRoot, call, dm: realDm });
-  await agentW.terminate();
-  ok(sl.stat.link === true && sa.stat.link === false && !rlr.ok && JSON.stringify(rlr.refusals) === JSON.stringify([{ path: l, why: 'link' }]) && rar.ok && rar.check === 'size',
+  let sl = { stat: {} }, sa = { stat: {} }, rlr = { ok: true, refusals: [] }, rar = { ok: false }, realErr = null;
+  try {
+    sl = await realStat(l); sa = await realStat(a);
+    rlr = await KD.keepFor({ session, conv: 'conv-p', files: [a, l], by: BY, now: T0 + 9970, hex8: '0000c8c8', dataRoot: hubRoot, call, dm: realDm });
+    rar = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9971, hex8: '0000c8c9', dataRoot: hubRoot, call, dm: realDm });
+  } catch (e) { realErr = (e && e.message) || String(e); } finally { agentW.removeAllListeners('exit'); await agentW.terminate(); }
+  if (realErr || agentFault) console.log(`    (the real agent's worker: ${realErr || agentFault})`);
+  ok(!realErr && !agentFault && sl.stat.link === true && sa.stat.link === false && !rlr.ok && JSON.stringify(rlr.refusals) === JSON.stringify([{ path: l, why: 'link' }]) && rar.ok && rar.check === 'size',
     '③ THE REAL AGENT\'s stat (src/agentd/agentd.js, its own fs worker): it says link: true for a link and false for a plain file; through it the keep refuses the link by name and keeps the file', { link: sl.stat.link, file: sa.stat.link, rlr: rlr.refusals, rar: rar.ok });
   // the ONE bound holds inside one conversation's walk of presses too (r1859 (4)): each press folder's list is slow, the walk is not
   const slowDm = standIn({ home, slowPress: 60 });
@@ -428,6 +477,12 @@ console.log('— red controls');
   for (const [t, h] of [[T0 - 3000, '0000e1e1'], [T0 - 2000, '0000e2e2'], [T0 - 1000, '0000e3e3']]) await walkUnbound.keepFor({ session: wses, conv: 'c-wb', files: [wf], by: WBY, now: t, hex8: h, dataRoot: wh, call, dm: standIn({ home: whome }) });
   const wu = await walkUnbound.keepableOf({ session: wses, conv: 'c-wb', files: [wf], by: WBY, now: T0, dataRoot: wh, call, dm: standIn({ home: whome, slowPress: 60 }), allMs: 40 });
   ok(wu.ok === true, 'RED CONTROL (one conversation\'s walk unbound): its slow press folders are all listed past the one bound and the confirm answers');
+  // U3's red: a line never written to its record does not survive the hub's restart
+  const noWrite = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "    await hub.writeLines(i >= 0 ? lines.map((l, k) => (k === i ? line : l)) : lines.concat([line]).slice(-LINES_MAX));\n", '', 'kept: lines never written'), 'no-write');
+  const nr = hubAt('nwl'), nw = hubAt('nwlw'), nf = path.join(nw, 'n.txt'); fs.writeFileSync(nf, 'n\n');
+  const nk = await noWrite.keepFor({ session: { mode: 'chat' }, conv: 'c-nw', files: [nf], by: HUMAN, now: T0, hex8: '0000cbcb', ...KA(nr) });
+  await noWrite.afterFilesPress({ mode: 'chat' }, 'c-nw', { ok: true, results: { kept: { press: nk.press, machine: null, files: 1 }, files: { ok: true } } }, { broadcastToSession: () => { }, now: T0, ...KA(nr) });
+  ok((await KD.linesOf('c-nw', { now: T0 + 1, ...KA(nr) })).length === 0, 'RED CONTROL (a kept line never written to its record): after the hub restarts the conversation shows no line of what was done to its files');
 }
 
 report();

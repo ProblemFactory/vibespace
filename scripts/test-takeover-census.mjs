@@ -116,6 +116,7 @@ export const CENSUS = [
   ['chat-status-bar.js', 'input', 'control', 'the publish checkbox'],
   ['chat-status-bar.js', 'textarea', 'text', 'the goal / note editors'],
   ['chat-view.js', 'tabindex', 'widget', 'the chat container (-1: a press on the message list focuses it)'],
+  ['chat-view.js', 'input', 'control', 'B-437e U3: the files confirm\'s choice radios (type=radio in a <label> row — the conversation only / the files only / both)'],
   ['code-editor.js', 'select', 'choice', 'the language select'],
   ['code-editor.js', 'iframe', 'frame', 'the HTML / Markdown preview'],
   ['code-editor.js', 'codemirror', 'text', 'THE CODE EDITOR (.cm-content; its gutter takes no typing)'],

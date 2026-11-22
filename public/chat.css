@@ -1573,6 +1573,18 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-left-behind button { font: inherit; padding: 1px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-panel, var(--bg-dialog)); color: var(--text); cursor: pointer; }
 .chat-left-behind button.chat-left-behind-close { padding: 0 4px; border: 0; background: transparent; color: var(--text-dim); display: inline-flex; }
 .chat-left-behind button.chat-left-behind-close svg { width: 12px; height: 12px; }
+/* B-437e U3: the files tier's confirm (inside showConfirmDialog's extra node) and the conversation's kept lines */
+.rewind-files-choices { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.rewind-files-choice { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.rewind-files-rows { max-height: 220px; overflow: auto; }
+.rewind-files-row { display: flex; gap: 8px; justify-content: space-between; min-width: 0; }
+.rewind-files-path { font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rewind-files-state { color: var(--text-dim); flex-shrink: 0; }
+.rewind-files-changed .rewind-files-state, .rewind-files-unknown .rewind-files-state { color: var(--text); font-weight: 600; }
+.chat-rewind-kept { position: absolute; top: 40px; left: 12px; z-index: 18; max-width: min(560px, 80%); display: flex; flex-direction: column; gap: 4px; }
+.chat-rewind-kept-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chat-rewind-kept-said { color: var(--text-dim); }
+.chat-rewind-kept button { font: inherit; padding: 1px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-panel, var(--bg-dialog)); color: var(--text); cursor: pointer; }
 .chat-pos-indicator {
   position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 10;
   font-size: 10px; padding: 3px 8px; border-radius: var(--radius-sm); pointer-events: none;
