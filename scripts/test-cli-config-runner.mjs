@@ -69,8 +69,8 @@ const R = require(path.join(REPO, RUNNER_REL));
 
 console.log('①b r1518 (the full round\'s must): a request is NEVER replaced by one of another kind — each kind asked runs, in order');
 // THE TIP's MERGE (c90929dc8): one waiting slot, the newest request's kind written over the waiting one's — rebuilt for the red
-const TAIL = '      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; tail.resolvers.push(resolve); return; }';
-const MERGED = '      if (tail) { tail.kind = kind; tail.uninstall = uninstall; tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; tail.resolvers.push(resolve); return; }';   // stale-pins: kept (the tip's merge, rebuilt for the red control)
+const TAIL = '      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.resolvers.push(resolve); return; }';
+const MERGED = '      if (tail) { tail.kind = kind; tail.uninstall = uninstall; tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.resolvers.push(resolve); return; }';   // stale-pins: kept (the tip's merge, rebuilt for the red control)
 async function kindLegs(Rm) {
   const st = handStarter(), r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
   const inflight = r.apply(() => 'PLAN-0', 'a save', { kind: 'apply' });
@@ -123,6 +123,26 @@ async function gateLegs(Sync) {
     'WIRING: a local start awaits the gate BEFORE its args are built, and a late / failed gate is said once, by name (cli-config-late-<id>)');
   const words = require(path.join(REPO, 'src/settings-file-words.js')).CLI_CONFIG_LATE_WORDS;
   ok(/\{name\}/.test(words) && /\{why\}/.test(words) && src('src/lib/i18n-zh.js').includes(JSON.stringify(words)) && src('src/lib/i18n-ja.js').includes(JSON.stringify(words)) && sfw.includes('CLI_CONFIG_LATE_WORDS'), 'the words name the conversation and the why, in zh and ja');
+}
+
+console.log('①c r1675: a request\'s own check of the files runs INSIDE its job — before the next queued request starts');
+async function afterLegs(Rm) {
+  const order = [], st = handStarter(), r = Rm.createCliConfigRunner({ starter: { run: (cmd, args, o) => { order.push('run ' + o.envAdd.VIBESPACE_CLI_CONFIG); return st.run(cmd, args, o); } }, helperPath: '/x/helper.mjs', stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+  const first = r.apply(() => 'PLAN-0', 'a save', { kind: 'apply' });
+  await tick();
+  const strip = r.apply(() => 'PLAN-S', 'hooks removed', { uninstall: true, after: async () => { await tick(); await tick(); order.push('check of PLAN-S'); return ['read'] } });
+  const reg = r.apply(() => 'PLAN-R', 'hooks (asked)', { kind: 'apply+hooks' });
+  for (let k = 0; k < 8; k++) { for (const call of st.calls) call.finish(okRun); await tick(); }
+  const all = await Promise.race([Promise.all([first, strip, reg]), new Promise((res) => setTimeout(() => res(null), 5000))]);
+  return { order, after: all && all[1].after };
+}
+{
+  const a = await afterLegs(R);
+  ok(a.order.indexOf('check of PLAN-S') >= 0 && a.order.indexOf('check of PLAN-S') < a.order.indexOf('run PLAN-R') && JSON.stringify(a.after) === '["read"]',
+    'Remove then Install inside one run: the removal\'s check reads the files BEFORE the registration\'s helper starts, its answer on its own landing', a);
+  const AFTER = "      if (typeof job.after === 'function') { try { landing.after = await job.after(landing); }";
+  const am = await afterLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), AFTER, "      if (typeof job.after === 'function') { inFlight = null; pump(); try { landing.after = await job.after(landing); }", 'the check after the queue moved on'), 'after-late')));
+  ok(am.order.indexOf('run PLAN-R') >= 0 && am.order.indexOf('run PLAN-R') < am.order.indexOf('check of PLAN-S'), 'RED (the check after the queue moved on — the cure\'s form): the registration\'s helper runs BEFORE the removal\'s check reads the files', am);
 }
 
 console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created read off the loop, the env, the hook command key by key');
@@ -234,6 +254,31 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       ok(bad && bad.ok === false && /~\/\.claude\/settings\.json is not valid JSON — not touched/.test(bad.why || '') && genSay.some((l) => /\[hooks\] the removal did not land: /.test(l)) && !genSay.some((l) => /Removed VibeSpace hooks/.test(l)),
         'r1518: a removal the files did not take (a torn ~/.claude/settings.json) is said NOT landed, by name — never «Removed VibeSpace hooks»', { bad, genSay });
       fs.writeFileSync(sf, good);
+      // r1675 (1) on the real files: Remove, then Install, both inside one helper run in flight — each answer is about ITS run
+      const SK = mkK(null), GENK = require(path.join(REPO, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SK.applyThisMachine(o) });
+      let releaseK; hold = new Promise((r) => { releaseK = r; });
+      const inflight = SK.applyThisMachine({ reason: 'a save in flight' });
+      await tick();
+      const rmK = GENK.stripAgentHookEntries(), regK = GENK.ensureAgentHooks({ auto: false });
+      hold = null; releaseK();
+      const [, rmA, regA] = await Promise.all([inflight, rmK, regK]);
+      ok(rmA && rmA.ok === true && regA.claude && regA.claude.ok === true && oursIn(JSON.parse(fs.readFileSync(sf, 'utf8'))),
+        'r1675: Remove then Install inside one run — the removal is answered «removed» (its check read its own run\'s files) and the registration «ok»; the rows end there (the last request)', { rm: rmA && { ok: rmA.ok, why: rmA.why }, reg: regA.claude });
+      // r1675 (2): at a start, the opt-out mark present AND our rows found (a removal the hub's stop lost) queues ONE removal
+      const optLegs = async (G) => {
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
+        fs.writeFileSync(G.HOOK_OPTOUT_FILE, new Date().toISOString() + '\n');
+        const r = await G.ensureAgentHooks({ auto: true });
+        const left = oursIn(JSON.parse(fs.readFileSync(sf, 'utf8')));
+        fs.rmSync(G.HOOK_OPTOUT_FILE, { force: true });
+        return { r: r && { optedOut: r.optedOut, removed: r.removed && r.removed.ok }, left };
+      };
+      const op = await optLegs(GEN);
+      ok(op.r.optedOut === true && op.r.removed === true && !op.left, 'r1675: a start with the opt-out mark and our rows still in the file queues ONE removal — the rows are gone', op);
+      const OPT_NOW = /  if \(auto && fs\.existsSync\(HOOK_OPTOUT_FILE\)\) return ourRowsOnDisk\(\)[^\n]*/;
+      const GENO = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), OPT_NOW, '  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });', 'the cure\'s early return'), 'opt-out-early')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });   // stale-pins: kept (the cure's line, rebuilt for the red control)
+      const opm = await optLegs(GENO);
+      ok(opm.r.optedOut === true && !opm.r.removed && opm.left, 'RED (the cure\'s early return): opted out, nothing removed — our rows stay in the person\'s file', opm);
     } finally { console.warn = warn0; console.log = log0b; delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; }
     const SJ = src('server.js'), hc = SJ.slice(SJ.indexOf('function checkAgentHookHealth()'), SJ.indexOf('function checkAgentHookHealth()') + 1600);
     ok(/if \(info\.stale \|\| !info\.installed \|\| scriptMissing\) \{[\s\S]*?ensureAgentHooks\(\{ auto: true \}\)/.test(hc) && (hc.match(/ensureAgentHooks\(/g) || []).length === 1,

@@ -674,16 +674,21 @@ function ensureAgentHooks({ auto = false } = {}) {
   if (refused) return Promise.resolve({ skipped: true, refused });
   const held = settingsHeldNow();
   if (held) { replayAtLift(); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }   // B-225b: no write while the settings are held
-  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });
+  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return ourRowsOnDisk().then((on) => (on.some((x) => x.ours) ? stripAgentHookEntries().then((removed) => ({ optedOut: true, removed })) : { optedOut: true }));   // r1675: opted out AND our rows still there (a removal the hub's stop lost) ⇒ ONE removal queued
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
   const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`;
   // our entries' commands BEFORE the run, read at its own start (r1407 (e): a rewrite journalled by name); r1518: QUEUED AT THE CALL
   const ourCmds = async (key, file) => { try { const root = JSON.parse(await fsp.readFile(file, 'utf8')); return Object.fromEntries(HOOK_EVENTS_FOR(key).map((ev) => { const h = _findOurHookIn(root && root.hooks && root.hooks[ev]); return [ev, h ? h.command : null]; })); } catch { return null; } };
   const readBefore = () => Promise.all(Object.entries(HOOK_FILES).map(([key, def]) => ourCmds(key, def.file()).then((c) => [key, c]))).then(Object.fromEntries);
-  return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true, before: readBefore }).then(async (landing) => {
+  return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true, before: readBefore, after: verifyFiles }).then((landing) => {
+    const a = landing && landing.after;
+    return a && !a.error ? a : Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: `the check after the landing broke: ${(a && a.error) || 'no landing'}` }]));
+  });
+  // the helper prints KEY receipts only: each hook file is VERIFIED off the loop (fs.promises) by the run's own `after` — INSIDE its
+  // job, before the next queued request starts (r1675: a check after the queue moved on read the NEXT run's files)
+  async function verifyFiles(landing) {
     const before = (landing && landing.before) || {};
-    // the helper prints KEY receipts only: each hook file is VERIFIED here, off the loop (fs.promises), after the landing
     const results = {};
     for (const [key, def] of Object.entries(HOOK_FILES)) {
       const rel = def.rel.join('/'), file = def.file(), dir = path.dirname(file);
@@ -710,7 +715,20 @@ function ensureAgentHooks({ auto = false } = {}) {
     // verify r2 ①: registered AFTER an earlier unknown verdict (a read error at boot) — remembered once, said once by server.js
     if (_lastRootError && !_registeredAfterError && Object.values(results).some((x) => x && x.ok)) _registeredAfterError = { at: Date.now(), error: _lastRootError.error, since: _lastRootError.at };
     return results;
-  });
+  }
+}
+// which hook files still hold one of OUR entries, read off the loop; a file that cannot be read or parsed is said by name
+async function ourRowsOnDisk() {
+  const out = [];
+  for (const [, def] of Object.entries(HOOK_FILES)) {
+    const rel = def.rel.join('/');
+    let text = null;
+    try { text = await fs.promises.readFile(def.file(), 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') out.push({ rel, why: `~/${rel} could not be read (${(e && e.code) || e})` }); continue; }
+    let root = null; try { root = JSON.parse(text); } catch { out.push({ rel, why: `~/${rel} is not valid JSON — not touched` }); continue; }
+    const ours = Object.values((root && root.hooks) || {}).some((gs) => Array.isArray(gs) && gs.some((g) => g && Array.isArray(g.hooks) && g.hooks.some((h) => h && typeof h.command === 'string' && h.command.includes(HOOK_MARKER))));
+    if (ours) out.push({ rel, why: `our hook entries are still in ~/${rel}`, ours: true });
+  }
+  return out;
 }
 // Strip ONLY our entries from both CLI configs — no opt-out marker. Used by
 // the Integration master switch (agents.vibespaceIntegration OFF), which is a
@@ -723,19 +741,10 @@ function stripAgentHookEntries() {
   // the helper's --uninstall run strips ONLY our entries (never a managed key) — through the starter, like every write here. The
   // helper prints KEY receipts only (a removal has none), so the OUTCOME is read on the files, off the loop, before «removed» is
   // said (r1518): a file that cannot be read or parsed, or that still holds one of our entries, is a removal that did not land
-  return applyThisMachine({ reason: 'hooks removed', strip: true }).then(async (landing) => {
-    if (landing && landing.ok) {
-      const left = [];
-      for (const [, def] of Object.entries(HOOK_FILES)) {
-        const rel = def.rel.join('/');
-        let text = null;
-        try { text = await fs.promises.readFile(def.file(), 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') left.push(`~/${rel} could not be read (${(e && e.code) || e})`); continue; }
-        let root = null; try { root = JSON.parse(text); } catch { left.push(`~/${rel} is not valid JSON — not touched`); continue; }
-        const ours = Object.values((root && root.hooks) || {}).some((gs) => Array.isArray(gs) && gs.some((g) => g && Array.isArray(g.hooks) && g.hooks.some((h) => h && typeof h.command === 'string' && h.command.includes(HOOK_MARKER))));
-        if (ours) left.push(`our hook entries are still in ~/${rel}`);
-      }
-      if (left.length) landing = { ...landing, ok: false, why: left.join('; ') };
-    }
+  return applyThisMachine({ reason: 'hooks removed', strip: true, after: (landing) => (landing && landing.ok ? ourRowsOnDisk() : []) }).then((landing) => {
+    // r1675: the check ran INSIDE the removal's job (before the next queued request could put rows back)
+    const a = landing && landing.after, left = Array.isArray(a) ? a.map((x) => x.why) : a && a.error ? [`the check after the removal broke: ${a.error}`] : [];
+    if (landing && landing.ok && left.length) landing = { ...landing, ok: false, why: left.join('; ') };
     if (landing && landing.ok) console.log('Removed VibeSpace hooks from this machine\'s CLI configs'); else console.warn(`[hooks] the removal did not land: ${landing && landing.why}`);
     return landing;
   });

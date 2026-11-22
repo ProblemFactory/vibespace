@@ -69,12 +69,15 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
 
   /** APPLY a plan on this machine → resolves at the landing of a run of ITS OWN KIND that started after this call. `planOf()` is
    *  read when the run starts (the newest settings win); `kind` names what the run does ('strip' | 'apply+hooks' | 'apply');
-   *  `before()` (optional) runs at the run's start, before the helper, its answer handed back on the landing (`landing.before`). */
-  function apply(planOf, reason = 'apply', { uninstall = false, kind = uninstall ? 'strip' : 'apply', before = null } = {}) {
+   *  `before()` (optional) runs at the run's start, before the helper, its answer handed back on the landing (`landing.before`);
+   *  `after(landing)` (optional, r1675) runs INSIDE the job, after the helper and BEFORE the next queued request starts — a
+   *  request's own check of the files reads them as ITS run left them (`landing.after`). Two requests of one kind that join
+   *  share one run, so they share one `before` / `after` answer: the later caller's functions are the ones run. */
+  function apply(planOf, reason = 'apply', { uninstall = false, kind = uninstall ? 'strip' : 'apply', before = null, after = null } = {}) {
     return new Promise((resolve) => {
       const tail = queue[queue.length - 1];
-      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; tail.resolvers.push(resolve); return; }
-      queue.push({ kind, planOf, reason, uninstall, before, resolvers: [resolve] });
+      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.resolvers.push(resolve); return; }
+      queue.push({ kind, planOf, reason, uninstall, before, after, resolvers: [resolve] });
       pump();
     });
   }
@@ -88,8 +91,10 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       let planB64 = null;
       try { planB64 = typeof job.planOf === 'function' ? job.planOf() : job.planOf; } catch { planB64 = null; }
       if (planB64 == null) return broke(job, 'the plan could not be built');
-      const landing = await runOnce(planB64, { reason: job.reason, uninstall: job.uninstall });
-      return before === undefined ? landing : { ...landing, before };
+      const ran = await runOnce(planB64, { reason: job.reason, uninstall: job.uninstall });
+      const landing = before === undefined ? ran : { ...ran, before };
+      if (typeof job.after === 'function') { try { landing.after = await job.after(landing); } catch (e) { landing.after = { error: (e && e.message) || String(e) }; } }
+      return landing;
     })()
       .catch((e) => broke(job, `the run broke (${(e && e.message) || e}) — nothing is known to have landed`))
       .then((landing) => {

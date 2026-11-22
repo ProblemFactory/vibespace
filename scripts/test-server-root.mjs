@@ -154,7 +154,7 @@ const GUARD = /ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|refusalNow\(\)|\(refus
 const SITES = [
   // B-ddf3 unit 2 line 1: THIS machine's writes all go through applyThisMachine (the shipped helper, through the starter)
   { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: auto \? 'hooks'/, what: 'ensureAgentHooks — register our hook entries in ~/.claude/settings.json + ~/.codex/hooks.json (through the shipped helper)' },
-  { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: 'hooks removed', strip: true \}\)/, what: 'stripAgentHookEntries — strip them (Integration OFF / Remove; the helper\'s --uninstall)' },
+  { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: 'hooks removed', strip: true[ ,]/, what: 'stripAgentHookEntries — strip them (Integration OFF / Remove; the helper\'s --uninstall)' },
   { file: 'src/server/harness-config-sync.js', re: /return applyThisMachine\(\{ reason \}\)/, what: 'syncCliConfig — the managed keys at boot and on every settings write (onSettingsWrite; through the shipped helper)' },
   { file: 'src/hosts.js', re: /VIBESPACE_CLI_CONFIG=\$\{this\._cliConfigPlanB64\(\)\} "\$VS_NODE" "\$HOME\/\.vibespace\/bin\/vibespace-hook-register\.mjs" 2>/, what: 'hosts.installAgentTools — the remote register' },
   { file: 'src/hosts.js', re: /vibespace-hook-register\.mjs" --uninstall/, what: 'hosts.uninstallAgentTools — the remote strip' },
@@ -427,11 +427,11 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
   const waits = [
     ['the boot\'s hook registration', /\nrootFactsNow\(\)\.then\(syncHookRegistration\)\.catch\(\(e\) => console\.warn\(/.test(srv8)],
     ['the boot\'s cli-config sync', /rootFactsNow\(\)\.then\(\(\) => harnessConfig\.syncCliConfig\(\{ reason: 'boot' \}\)\)\.catch\(/.test(srv8)],
-    ['the integration switch\'s sync', /if \(was !== now\) rootFactsNow\(\)\.then\(syncHookRegistration\)\.catch\(\(e\) => console\.warn\(/.test(srv8)],
+    ['the integration switch\'s sync', /const toggled = was !== now \? rootFactsNow\(\)\.then\(syncHookRegistration\)\.catch\(\(e\) => \{ console\.warn\(/.test(srv8)],   // B-ddf3 unit 2: the switch's sync rides back to the settings answer
     ['the hook-health probe (60 s, then 6 h)', /setTimeout\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\)\.catch\([^\n]*\), 60000\)/.test(srv8) && /setInterval\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\)\.catch\([^\n]*\), 6 \* 3600 \* 1000\)/.test(srv8)],
     ['GET /api/agent-hooks', /app\.get\('\/api\/agent-hooks', async \(req, res\) => \{ try \{ await rootFactsNow\(\); res\.json\(/.test(srv8)],
     ['the install route', /app\.post\('\/api\/agent-hooks\/install', async \(req, res\) => \{[\s\S]{0,2000}?await rootFactsNow\(\); createHookHelper\(\);/.test(srv8)],
-    ['the uninstall route', /app\.post\('\/api\/agent-hooks\/uninstall', async \(req, res\) => \{ try \{\n\s*await rootFactsNow\(\); removeAgentHooks\(\);/.test(srv8)],
+    ['the uninstall route', /app\.post\('\/api\/agent-hooks\/uninstall', async \(req, res\) => \{ try \{\n\s*await rootFactsNow\(\); const landing = await removeAgentHooks\(\);/.test(srv8)],   // B-ddf3 unit 2: answered at the removal's landing
     ['the Apply route (hooks-late)', /app\.post\('\/api\/cli-config\/apply', async \(req, res\) => \{ try \{[^\n]*\n\s*if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);/.test(late8) && /hookRegistrationSafe, rootFactsNow \}\);/.test(srv8)],
     ['a paired machine\'s conversation start (spawn/dial.js)', /if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);[^\n]*\n\s*await dm\.runCmd\('sh', \['-c',/.test(dial8)],
     ['an ssh machine\'s conversation start (spawn/ssh.js)', /if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);[^\n]*\n\s*prelude \+= \(ownerWriteRefusal\(\)/.test(ssh8)],
@@ -485,7 +485,7 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     fs.mkdirSync(path.join(R8, 'w3'), { recursive: true });
     try {
       await G3.rootFactsNow();   // the boot's await: past the deadline, the named late fact
-      const r1 = W3.sync();
+      const r1 = await W3.sync();   // B-ddf3 unit 2: the watch's sync answers at the registration's landing (a Promise)
       const t1 = timers.length;
       timers.shift()();   // the first re-judge: it awaits the facts (still out), then syncs again
       for (let i = 0; i < 50 && timers.length < 1; i++) await new Promise((r) => setImmediate(r));
