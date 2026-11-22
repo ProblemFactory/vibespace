@@ -1,5 +1,5 @@
 {
- "how": "B-9dd0 (主开发 r1246): the rows whose node children the egress reader MAY carry into — every ci.mjs row the tree's impact scope (affectedSuites over the READERS) does NOT name. A row not listed (a new suite included) reads its children not at all. Derived; scripts/test-egress-census.mjs re-derives it and is red when it drifts.",
+ "how": "B-9dd0 (主开发 r1246): the rows whose node children the egress reader MAY carry into — every ci.mjs row the tree's impact scope (affectedSuites over the READERS) does NOT name. A row not listed (a new suite included) reads its children not at all. Derived; scripts/test-egress-census.mjs re-derives it and is red when it drifts. Each row added after the first derivation is listed in `judged` with its judgement (主开发 r2063): whether the suite starts a child, of what kind, and so how the reader holds it.",
  "readers": [
   "data/bin/job-wrapper.js",
   "data/bin/vibespace-opencode-op",
@@ -67,6 +67,7 @@
   "test-dialog-unsaved-census",
   "test-doc-comment-pop",
   "test-doc-wheel",
+  "test-door-class",
   "test-egress-fence",
   "test-eml",
   "test-enter-census",
@@ -75,7 +76,11 @@
   "test-fold-ux-pins",
   "test-gmail-sync",
   "test-inbox-window-ui-pins",
+  "test-interface-backpressure",
+  "test-interface-rejoin",
+  "test-interface-relay",
   "test-lark-refresh-stall-pins",
+  "test-late-focus",
   "test-layout-history-pins",
   "test-lazy",
   "test-locate-verdict",
@@ -99,6 +104,7 @@
   "test-phone-desktop-sync-pins",
   "test-phone-doors",
   "test-phone-refusal-wrap",
+  "test-phone-surface-fit",
   "test-remote-attribution",
   "test-remote-lasterror",
   "test-resume-desktop",
@@ -108,6 +114,7 @@
   "test-stale-watch",
   "test-stream-hdr",
   "test-stream-stats",
+  "test-strip-table",
   "test-task-detail-body",
   "test-task-scan",
   "test-task-wakeup-card",
@@ -133,5 +140,14 @@
   "test-window-reveal-desktop",
   "test-workflow-usage-tailer",
   "test-wrapper-files"
- ]
+ ],
+ "judged": {
+  "test-door-class": "in-process, no child: the reader stays in its own process; nothing to carry",
+  "test-interface-backpressure": "one child, `openssl req -x509` (a local cert, no network): not node, so counted «other» and never shimmed",
+  "test-interface-rejoin": "one child, `openssl req -x509` (a local cert, no network): not node, so counted «other» and never shimmed",
+  "test-interface-relay": "`openssl req -x509` (counted «other») + one child on the running node (execFileSync(process.execPath, [child, …])): carried, so the shim follows it and a reach past the box is red by host",
+  "test-late-focus": "in-process, no child: the reader stays in its own process; nothing to carry",
+  "test-phone-surface-fit": "in-process, no child: the reader stays in its own process; nothing to carry",
+  "test-strip-table": "in-process, no child (its exec( calls are RegExp.exec): the reader stays in its own process; nothing to carry"
+ }
 }
