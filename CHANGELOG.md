@@ -78,6 +78,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a paired machine, «End them» now ends what a stopped turn left running there, if that machine's agent is up to date.
 - An open System panel no longer makes VibeSpace pause every few seconds while it reads the CPU use of each process.
 - A password written inside a web address (user:password@host) is now hidden in messages, job output and job names; the user and the host stay readable.
+- A backlog change made on the board no longer erases an agent's claim or a row it parked a moment before; a row removed meanwhile is named.
+- Archiving a conversation that is in a Task Group no longer holds VibeSpace still while the groups are saved.
 
 ## 2.369.415 — 2026-11-21
 
