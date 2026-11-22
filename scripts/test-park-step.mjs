@@ -75,6 +75,11 @@ function factsFrom(rnd) {
   const r = rnd();
   return { pidAlive: rnd() > 0.1, spend: r < 0.85 ? 'ok' : r < 0.93 ? 'refused' : 'threw', postOutcome: (() => { const q = rnd(); return q < 0.7 ? 'ok' : q < 0.9 ? 'transient' : q < 0.95 ? 'final' : 'late'; })(), oldestWaiting: rnd() > 0.2 };
 }
+/** B-7e49 (lane lg-recovery): THE STORED-FIELD COMPARISON, field by field over the module's OWN `STORED` list (a patched copy's
+ *  list when a control walks one) — stricter than comparing the joined `stored()` strings (two different records can join alike),
+ *  and no string is built: the walk spent 73 % of its time (13.9 of 18.9 s, a CPU profile on the test machine) re-building
+ *  `P.stored()` two to four times a step over 4 033 134 steps. The walk asks it at most ONCE a step, and only when a check needs it. */
+const storedDiffers = (P, a, b) => { for (const k of P.STORED) if (String(a[k]) !== String(b[k])) return true; return false; };
 /** walk ONE sequence from a start state; returns the violations found */
 function walk(P, start, seq, rnd, startNow = NOW) {
   const viol = [];
@@ -87,37 +92,38 @@ function walk(P, start, seq, rnd, startNow = NOW) {
     const r = P.parkStep(prev, ev, f);
     const before = now;
     e = r.entry; now = r.now;
-    const tag = { toString: () => `${start} [${seq.slice(0, i + 1).join(' → ')}]` };
+    const tag = () => `${start} [${seq.slice(0, i + 1).join(' → ')}]`;   // B-7e49: built only when a violation is pushed (the same words)
+    let differs; const changed = () => (differs === undefined ? (differs = storedDiffers(P, prev, e)) : differs);   // once a step, when asked
     if (ev === 'boot-ho' || ev === 'boot-inflight') booted = true;
     // (I6) not applicable ⇒ nothing changes; terminal ⇒ not applicable
-    if (r.na && (P.stored(prev) !== P.stored(e) || r.post || r.say || r.leave || r.charge || r.authorize)) viol.push(tag + ': na but something changed');
-    if (P.TERMINAL.has(prev.s) && !r.na) viol.push(tag + ': a terminal entry answered an event');
+    if (r.na && (changed() || r.post || r.say || r.leave || r.charge || r.authorize)) viol.push(tag() + ': na but something changed');
+    if (P.TERMINAL.has(prev.s) && !r.na) viol.push(tag() + ': a terminal entry answered an event');
     // (I1) a post at most once per attempt: the park's posts never outnumber the attempts; a post leaves only from waiting / cleared
-    if (r.post) { posts++; if (!(prev.s === 'waiting' || prev.s === 'cleared')) viol.push(tag + ': a post from ' + prev.s); if (e.s !== 'inflight') viol.push(tag + ': a post that did not go on the wire'); if (posts > e.attempts) viol.push(tag + ': posts ' + posts + ' > attempts ' + e.attempts + ' (two posts for one attempt)'); }
-    if (prev.s === 'landed' && r.post) viol.push(tag + ': a landed entry posted again');
+    if (r.post) { posts++; if (!(prev.s === 'waiting' || prev.s === 'cleared')) viol.push(tag() + ': a post from ' + prev.s); if (e.s !== 'inflight') viol.push(tag() + ': a post that did not go on the wire'); if (posts > e.attempts) viol.push(tag() + ': posts ' + posts + ' > attempts ' + e.attempts + ' (two posts for one attempt)'); }
+    if (prev.s === 'landed' && r.post) viol.push(tag() + ': a landed entry posted again');
     // (I1b) "maybe twice" is said only on the far side of a boot
-    if (r.say && /may have landed/.test(r.say) && e.s === 'stashed') { maybeSaid = true; if (!booted) viol.push(tag + ': may-have-landed without a boot'); }
+    if (r.say && /may have landed/.test(r.say) && e.s === 'stashed') { maybeSaid = true; if (!booted) viol.push(tag() + ': may-have-landed without a boot'); }
     // (I2 / I3) nothing leaves the park except by landed / stash / evicted / expired, and every drop is said by id
     if (P.TERMINAL.has(e.s) && !P.TERMINAL.has(prev.s)) {
-      if (!r.leave) viol.push(tag + ': left the park with no leave verdict');
-      if (r.leave !== 'landed' && !(r.say && r.say.includes(prev.id))) viol.push(tag + ': a drop (' + r.leave + ') not said by id');
-      if (r.leave === 'evicted' && !/evicted/.test(r.say)) viol.push(tag + ': evicted without the word');
-      if (r.leave === 'expired' && !/expired/.test(r.say)) viol.push(tag + ': expired without the word');
-      if (e.s === 'landed' && prev.s === 'inflight' && !r.charge) viol.push(tag + ': the park landed its own frame without ONE charge');
-      if (e.s === 'landed' && prev.s === 'claimed' && r.charge) viol.push(tag + ': the park charged a hand-over\'s landing');
+      if (!r.leave) viol.push(tag() + ': left the park with no leave verdict');
+      if (r.leave !== 'landed' && !(r.say && r.say.includes(prev.id))) viol.push(tag() + ': a drop (' + r.leave + ') not said by id');
+      if (r.leave === 'evicted' && !/evicted/.test(r.say)) viol.push(tag() + ': evicted without the word');
+      if (r.leave === 'expired' && !/expired/.test(r.say)) viol.push(tag() + ': expired without the word');
+      if (e.s === 'landed' && prev.s === 'inflight' && !r.charge) viol.push(tag() + ': the park landed its own frame without ONE charge');
+      if (e.s === 'landed' && prev.s === 'claimed' && r.charge) viol.push(tag() + ': the park charged a hand-over\'s landing');
     }
-    if (!P.TERMINAL.has(e.s) && r.leave) viol.push(tag + ': a leave verdict without leaving');
+    if (!P.TERMINAL.has(e.s) && r.leave) viol.push(tag() + ': a leave verdict without leaving');
     // (I4) the file after every step = the state
-    if (P.stored(prev) !== P.stored(e) && !r.persist) viol.push(tag + ': the state changed on a step that did not persist');
+    if (!r.persist && changed()) viol.push(tag() + ': the state changed on a step that did not persist');
     // (I5) one authorization per frame; one charge per landing; a hold after a boot is never trusted
-    if (!!r.authorize !== !!r.post) viol.push(tag + ': authorization and post disagree (' + r.authorize + ' / ' + r.post + ')');
+    if (!!r.authorize !== !!r.post) viol.push(tag() + ': authorization and post disagree (' + r.authorize + ' / ' + r.post + ')');
     // (I5b, verify r4 T2⑥: a cell mutant that converted a forgotten hold was green) a hold is converted only while it exists
     // and is inside its TTL; otherwise the frame is asked for afresh — never the other way round
-    if (r.authorize) { const live = !!prev.holds && (r.now - prev.holdAt) <= P.HOLD_TTL_MS; if (r.authorize === 'hold' && !live) viol.push(tag + ': a hold converted past its TTL or without one'); if (r.authorize === 'fresh' && live) viol.push(tag + ': asked again inside a live hold'); }
-    if (r.charge) { charged++; if (charged > 1) viol.push(tag + ': charged twice'); if (!(prev.s === 'inflight' && e.s === 'landed')) viol.push(tag + ': a charge outside the park\'s own landing'); }
-    if ((ev === 'boot-ho' || ev === 'boot-inflight') && e.holds) viol.push(tag + ': a hold survived a boot');
+    if (r.authorize) { const live = !!prev.holds && (r.now - prev.holdAt) <= P.HOLD_TTL_MS; if (r.authorize === 'hold' && !live) viol.push(tag() + ': a hold converted past its TTL or without one'); if (r.authorize === 'fresh' && live) viol.push(tag() + ': asked again inside a live hold'); }
+    if (r.charge) { charged++; if (charged > 1) viol.push(tag() + ': charged twice'); if (!(prev.s === 'inflight' && e.s === 'landed')) viol.push(tag() + ': a charge outside the park\'s own landing'); }
+    if ((ev === 'boot-ho' || ev === 'boot-inflight') && e.holds) viol.push(tag() + ': a hold survived a boot');
     // the clock only goes back on its own event
-    if (now < before && ev !== 'clock-backward') viol.push(tag + ': time went back');
+    if (now < before && ev !== 'clock-backward') viol.push(tag() + ': time went back');
   }
   return viol;
 }
