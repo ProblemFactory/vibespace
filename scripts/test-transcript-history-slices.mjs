@@ -26,6 +26,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import './scratch.mjs';   // FIRST (§113, B-ba47's order): a temp home of its own before any of this suite's code
 import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);

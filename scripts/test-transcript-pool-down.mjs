@@ -23,6 +23,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import './scratch.mjs';   // FIRST (§113, B-ba47's order): a temp home of its own before any of this suite's code
 import { checker } from './lib/check.mjs';
 import * as RQ from '../src/lib/history-reask.js';   // row B-422c (r1461): the page's re-ask decision, PURE
 
