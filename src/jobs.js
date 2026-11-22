@@ -1341,8 +1341,12 @@ class JobManager {
     if (this._notifsUnread && arch[i].clearedAt) return { error: this._notifsClearedWords(id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
     const tell = (r) => { if (answer) { try { answer(r); } catch (e) { this.d.log('[jobs] a removal answer failed:', (e && e.message) || e); } } };
     // the removal's end rides the REAL landing (its dir, the pages told); the reply is bounded at 15 s, under the CLI's write budget
-    const w = this._writeArchive(arch.filter((r) => r.id !== id), { onLanded: () => this._rmLanded(id), replyMs: 15000, answer: (r) => tell(r.ok ? { ok: true } : { error: 'archive write not on disk yet: ' + r.error, notDurable: true }) });
-    if (!w.ok) return { error: 'archive write failed: ' + w.error }; // the row stays until its removal is durable
+    // r1917: logsGone() asked between the hand-off and the landing WAITS for the landing — never «gone» for a folder the remover was not
+    // handed yet (the landing's step hands it, and its promise is what this one becomes)
+    let atLanding = null; const handed = new Promise((r) => { atLanding = r; });
+    this._logsGone.set(id, handed); handed.then(() => { if (this._logsGone.get(id) === handed) this._logsGone.delete(id); });
+    const w = this._writeArchive(arch.filter((r) => r.id !== id), { onLanded: () => atLanding(this._rmLanded(id)), replyMs: 15000, answer: (r) => tell(r.ok ? { ok: true } : { error: 'archive write not on disk yet: ' + r.error, notDurable: true }) });
+    if (!w.ok) { atLanding({ pending: true }); return { error: 'archive write failed: ' + w.error }; } // the row stays until its removal is durable
     return { ok: true, pending: true };
   }
   /** the removal LANDED: its dir goes, the pages told */
@@ -1351,6 +1355,7 @@ class JobManager {
     const gone = this._logsWhole([id]).then((a) => (!a || a.error ? { pending: true } : (a.gone || []).includes(id) ? { gone: true } : { kept: (a.keptWhy || {})[id] || 'pending' }));   // round 2: the promise names what stays and why
     this._logsGone.set(id, gone); gone.then(() => { if (this._logsGone.get(id) === gone) this._logsGone.delete(id); });
     try { this.d.broadcast('jobs-updated', { id, removed: true, archived: true }); } catch { }
+    return gone;   // r1917: what a logsGone() asked before the landing becomes
   }
 
   // ── owner auto-notify (2.344.0, B-0bf4 — the CLI's own cross-session

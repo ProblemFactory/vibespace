@@ -2352,6 +2352,29 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   ok(JSRC.split(TO_A).length === 2, 'control setup: the hiding of a copy being taken out is found once');
   const RVX = removedScene(MJb.load('src/jobs.js', anchored(JSRC, TO_A, "  archivedById(id) { if (this.jobs.has(id)) return null;   /* MUTANT: the hiding cut */", 'archive-hiding-cut'), 'archive-hiding-cut'), 'hidingx');
   ok(RVX.atLanding.listed === true, 'CONTROL (the hiding cut, in a copy): the job the person removed shows as an archived row until the follow-up lands (red)', RVX.atLanding);
+  // (11) r1917: logsGone() ASKED BETWEEN A ✕'s HAND-OFF AND ITS LANDING WAITS FOR THE LANDING — never «gone» for a folder the remover
+  // was not handed yet (the heavy suite's eight asked it right after the ✕; the routes wait for the landing's answer). RED: not armed at
+  // the hand-off — «gone» at once while the row is still on disk
+  const goneScene = async (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag);
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
+    const id = J.archivedList()[0].id;
+    J._logsWhole = (ids) => Promise.resolve({ gone: [], keptWhy: Object.fromEntries(ids.map((x) => [x, 'running'])) });   // the remover's answer: a run still running
+    J.rmArchived(id, () => { });
+    let v = null; J.logsGone(id, 3000).then((x) => { v = x; });
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    const inFlight = v;
+    g.land(AF);
+    for (let i = 0; i < 100 && v === null; i++) await new Promise((r) => setTimeout(r, 5));
+    try { J.shutdown(); } catch { }
+    return { inFlight, atLanding: v };
+  };
+  const GN = await goneScene({ JobManager }, 'gone');
+  ok(GN.inFlight === null && GN.atLanding && GN.atLanding.kept === 'running', 'logsGone() asked between a ✕\'s hand-off and its landing waits for the landing, then says what stays and why (here «running») — never «gone» for a folder the remover was not handed yet', GN);
+  const GN_A = "    this._logsGone.set(id, handed); handed.then(";
+  ok(JSRC.split(GN_A).length === 2, 'control setup: the ✕\'s hand-off arming logsGone is found once');
+  const GNX = await goneScene(MJb.load('src/jobs.js', anchored(JSRC, GN_A, "    /* MUTANT: not armed at the hand-off */ handed.then(", 'archive-gone-unarmed'), 'archive-gone-unarmed'), 'gonex');
+  ok(GNX.inFlight && GNX.inFlight.gone === true, 'CONTROL (not armed at the hand-off, in a copy): logsGone() says «gone» while the ✕ is in flight and its folder was never handed to the remover (red)', GNX);
   // (5) THE LOOP NO LONGER WAITS FOR THE ARCHIVE: the REAL store writer (its own thread), 300 ms placed in each main-thread rename /
   // fsync of the scene's folder; judged against the red's own figure (the release's write at the call, in a copy)
   const SWr = require(path.join(ROOT, 'src/store-writer.js'));
