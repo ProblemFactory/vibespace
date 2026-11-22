@@ -115,5 +115,11 @@ function withoutConversationNames(env = {}, { keepMarks = false, floorToo = fals
   return { env: out, dropped: dropped.sort(), kept: kept.sort(), by: has ? 'mark' : 'floor' };
 }
 
+/** THE FLOOR's MARK (r2607): a road on the plain sanitized env that gives a PERSON a shell (the OpenCode terminal) hands that shell
+ *  the hub's floor names its own env holds (CONVERSATION_HUB_ENV: the keeper's folder, the instance name, the device and daemon
+ *  roots, the retired task id) — this is their names-only mark, so a hub started there by hand drops them like every other road's
+ *  ('' when the env holds none). */
+function floorMarkOf(env = {}) { return markOf(CONVERSATION_HUB_ENV.filter((k) => Object.prototype.hasOwnProperty.call(env || {}, k))); }
+
 module.exports = { CONVERSATION_ENV, CONVERSATION_TELEMETRY_ENV, CONVERSATION_ACCOUNT_ENV, CONVERSATION_HUB_ENV, CONVERSATION_ENV_FAMILIES, CONVERSATION_MARKS,
-  HANDED_MARK, PERSON_SESSION_ENV, isConversationName, withoutConversationNames, handedNames, markOf, withHandedMark, namesOfMark };
+  HANDED_MARK, PERSON_SESSION_ENV, isConversationName, withoutConversationNames, handedNames, markOf, withHandedMark, namesOfMark, floorMarkOf };

@@ -1938,6 +1938,10 @@ function createFacts(locator, { now = Date.now, nameBatch = NAME_BATCH, listCach
    *  working directory and the op table carries it; it must never become a
    *  query again. */
   async function openPty({ cwd = null, command = null, args = null, title = null, env = null, timeoutMs = PTY_TIMEOUT_MS } = {}) {
+    // r2607: a PERSON's shell — the serve's shell carries the serve's env, which holds the hub's floor names (agentEnv keeps them
+    // from this process's env): its names-only mark rides the request (OpenCode's /pty takes `env` in its body), so a hub started
+    // by hand in this terminal drops them like every other road's (src/server/throwaway-root.js dropHandedAtBoot)
+    { const CE = require('./conversation-env.js'), mark = CE.floorMarkOf(process.env); if (mark) env = { ...(env && typeof env === 'object' ? env : {}), [CE.HANDED_MARK]: mark }; }
     const client = await userClient(timeoutMs);
     let pty;
     // THE ONE WINDOW THE REAPER CANNOT REASON ABOUT is between "the serve made

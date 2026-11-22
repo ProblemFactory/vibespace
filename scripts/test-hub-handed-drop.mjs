@@ -14,9 +14,14 @@
 //     raw sites take a built env
 //  ④ THE ROADS' CENSUS: its wall is test-architecture §112 (its sites, the roads that finish a child's env and write the mark, each
 //     site's road — a site with no road is red there); the desktop app road is joined to all three; and the remote shell's TYPED
-//     mark is driven here: every name its real command line sets is in the mark it carries.
-//  REDS: the act ignoring the mark; the family catch-all back; each fixed clause cut (the app mark, the page helpers); each
-//  exemption cut (the session names, the credential rows, the instance name); a remote assignment its mark does not list.
+//     mark is driven here over the dial road's REAL prelude: every name its real command line exports is in the mark it carries.
+//  ⑤ THE ROADS ON THE PLAIN SANITIZED ENV (r2607), which §112 cannot see: the OpenCode terminal marks its shell with the floor's
+//     mark (a hub started there drops the floor names, the device roots with them; the instance name stays); the two services
+//     (the OpenCode serve, the plugin loader) and the two roads that hand a shell no VibeSpace name (the Desktop start, the tmux
+//     attach) each have their row, held to their spawn's shape.
+//  REDS (ten plants, nine checks): the act ignoring the mark; the family catch-all back; each fixed clause cut (the app mark, the
+//  page helpers); each exemption cut (the session names, the credential rows, the instance name); a name the prelude exports and a
+//  prefix assignment on the program, neither in the mark; the Desktop start handed the agent env.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -103,25 +108,56 @@ const forgedScene = (Mod) => {
 const ARCH = fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8');
 const blockOf = (text, head) => { const at = text.indexOf(head); return at < 0 ? '' : text.slice(at, text.indexOf('});', at)); };
 const joined = ['const SITES112 = Object.freeze({', 'const ROADS112 = Object.freeze({', 'const SITE_ROAD112 = Object.freeze({'].map((h) => blockOf(ARCH, h).includes("'src/desktop-serve.js':"));
-// the remote shell's TYPED mark, driven: every name its REAL command line sets (the assignments before the program and its env
-// pairs) is in the mark the same line carries
+// the remote shell's TYPED mark, driven: every name its REAL command line EXPORTS to the program is in the mark the same line
+// carries — over the dial road's REAL prelude (r2613: an assignment exported there was not seen before). Exported = an `export
+// NAME` / `export NAME=…` anywhere before the program, the prefix assignments of the command that runs it (after the last `; `),
+// its `exec env` pairs; never a shell-local assignment (the node finder's VS_NODE) nor a session name (the act never drops one)
 const shq = (x) => `'${String(x).replace(/'/g, `'\\''`)}'`;
-const remoteLine = RS.buildRemoteExec({ cwd: '/w', shq, browser: 'export AGENT_BROWSER_PROFILE=p; ', tokenAssign: RS.acctSecretAssign('CLAUDE_CODE_OAUTH_TOKEN', '/r/tok'),
+const REAL_PRE = RS.buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true });
+const lineWith = (pre) => RS.buildRemoteExec({ cwd: '/w', shq, pre, browser: 'export AGENT_BROWSER_PROFILE=p; ', tokenAssign: RS.acctSecretAssign('CLAUDE_CODE_OAUTH_TOKEN', '/r/tok'),
   acctEnv: RS.acctFolderAssign('CLAUDE_CONFIG_DIR', '$HOME/.claude-acct'), parts: [`VIBESPACE_API=${shq('http://outer-hub.invalid')}`, `CLAUDE_WEBUI_SESSION_ID=${shq('sid')}`, 'claude', '--print'] });
-const setNames = (l) => {
-  const at = l.indexOf('exec env '), names = new Set();
-  for (const m of l.slice(0, at < 0 ? l.length : at).matchAll(/(?:^|[\s;])(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/g)) names.add(m[1]);
+const remoteLine = lineWith(REAL_PRE);
+const exportedNames = (l) => {
+  const at = l.indexOf('exec env '), head = at < 0 ? l : l.slice(0, at), names = new Set();
+  for (const m of head.matchAll(/(?:^|[\s;])export\s+([^;]*)/g)) for (const w of m[1].trim().split(/\s+/)) { const n = /^([A-Za-z_][A-Za-z0-9_]*)(?:=|$)/.exec(w); if (n) names.add(n[1]); }
+  for (const m of head.slice(head.lastIndexOf('; ') + 2).matchAll(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=/g)) names.add(m[1]);
   if (at >= 0) for (const p of l.slice(at + 9).split(' ')) { const m = /^'?([A-Za-z_][A-Za-z0-9_]*)=/.exec(p); if (!m) break; names.add(m[1]); }
-  names.delete(CE.HANDED_MARK);
+  names.delete(CE.HANDED_MARK); for (const k of CE.PERSON_SESSION_ENV) names.delete(k);
   return [...names].sort();
 };
-const typedGap = (l) => { const m = new RegExp(CE.HANDED_MARK + "='([^']*)'").exec(l); if (!m) return ['no mark on the remote command line']; const marked = CE.namesOfMark(m[1]); return setNames(l).filter((k) => !marked.includes(k)); };
+const typedGap = (l) => { const m = new RegExp(CE.HANDED_MARK + "='([^']*)'").exec(l); if (!m) return ['no mark on the remote command line']; const marked = CE.namesOfMark(m[1]); return exportedNames(l).filter((k) => !marked.includes(k)); };
 {
-  const gap = typedGap(remoteLine), set = setNames(remoteLine);
+  const gap = typedGap(remoteLine), set = exportedNames(remoteLine);
   ok(!!joined.every(Boolean), `④ the desktop app road is joined to test-architecture §112's three lists — its sites, its roads (the app's mark by its own line) and each site's road (${JSON.stringify(joined)})`, joined);
-  ok(!!(!gap.length && set.length >= 6 && ['VIBESPACE_SESSION_CWD', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'AGENT_BROWSER_PROFILE', 'VIBESPACE_API', 'CLAUDE_WEBUI_SESSION_ID'].every((k) => set.includes(k))), `④ the remote shell's typed mark: every name its real command line sets (${set.length}: the cwd export, the token and account assignments, the browser export, the env pairs) is in the mark it carries`, { set, gap });
-  const plantedGap = typedGap(remoteLine.replace('exec env ', 'VIBESPACE_EXTRA=1 exec env '));
-  ok(!!plantedGap.includes('VIBESPACE_EXTRA'), 'CONTROL (the typed mark\'s census): a remote assignment its mark does not list is red by name', plantedGap);
+  ok(!!(!gap.length && set.length === 6 && ['VIBESPACE_SESSION_CWD', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'AGENT_BROWSER_PROFILE', 'VIBESPACE_API', 'CLAUDE_WEBUI_SESSION_ID'].every((k) => set.includes(k)) && /VS_NODE=/.test(REAL_PRE)), `④ the remote shell's typed mark over the dial road's REAL prelude: every name its command line exports (${set.length}: the cwd export, the browser export, the token and account assignments, the env pairs — the prelude's PATH a session name, its VS_NODE shell-local) is in the mark it carries`, { set, gap });
+  const plantedPre = typedGap(lineWith(REAL_PRE + 'export VIBESPACE_EXTRA=1; '));
+  const plantedPair = typedGap(remoteLine.replace('exec env ', 'VIBESPACE_EXTRA2=1 exec env '));
+  ok(!!(plantedPre.includes('VIBESPACE_EXTRA') && plantedPair.includes('VIBESPACE_EXTRA2')), 'CONTROLS (the typed mark\'s census): a name the prelude exports and a prefix assignment on the program, neither in the mark, are each red by name', { plantedPre, plantedPair });
+}
+// ⑤ THE ROADS ON THE PLAIN SANITIZED ENV (r2607): they write no conversation name, so §112 cannot see them; each has its row here.
+// The one that gives a PERSON a shell holding the hub's floor names — the OpenCode terminal — marks it (the floor's mark rides its
+// request); the two services are left (nobody types a hub start there); the Desktop start and the tmux attach hand a person's
+// shell no VibeSpace name at all (said by their spawn's own shape, which each row holds)
+const readTree = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
+const FLOOR = { PATH: '/usr/bin', HOME: '/home/userL', VIBESPACE_KEEPER_DIR: '/outer/keeper', VIBESPACE_DEVICE_ROOT: '/outer/device', VIBESPACE_AGENTD_ROOT: '/outer/agentd', VIBESPACE_INSTANCE_NAME: 'pod-a', VIBESPACE_TASK_ID: 'T-outer', [KNOB]: '5' };
+const PLAIN = Object.freeze([
+  ['the OpenCode terminal', 'src/opencode-serve.js', 'MARKED (r2607): the serve\'s shell carries the floor names; the floor\'s mark rides the /pty request', /mark = CE\.floorMarkOf\(process\.env\); if \(mark\) env = \{ \.\.\.\(env && typeof env === 'object' \? env : \{\}\), \[CE\.HANDED_MARK\]: mark \}; \}\s*\n\s*const client = await userClient\(timeoutMs\);/],
+  ['the OpenCode serve', 'src/opencode-serve.js', 'a SERVICE: nobody types a hub start in it (r2607) — its terminal is the row above', /env: env\(\), stdio: 'ignore', detached: true/],
+  ['the plugin loader', 'src/server/plugin-loader.js', 'a SERVICE: a plugin process, nobody types a hub start in it (r2607)', /const env = \{ \.\.\.agentEnv\(\), VIBESPACE_PLUGIN_ID: rec\.id/],
+  ['the Desktop start', 'src/vnc.js', 'hands NO VibeSpace name: its session env is serviceEnv (the service keep, LC_*, USER / LOGNAME / SHELL, DISPLAY)', /const env = serviceEnv\(process\.env, \{ keep: \['USER', 'LOGNAME', 'SHELL'\], add: \{ DISPLAY: this\.display \} \}\);/],
+  ['the tmux attach', 'src/ws-handler.js', 'a tmux CLIENT: its env never reaches a pane a person types in (tmux copies only its update-environment list into a session — no VibeSpace name on it)', /pty\.spawn\('tmux', \['attach-session', '-t', tmuxTarget\], \{\s*\n[^\n]*\n\s*env: \{ \.\.\.agentEnv\(\), TERM: 'xterm-256color', COLORTERM: 'truecolor' \},/],
+]);
+const plainRed = (read) => PLAIN.filter(([, f, , re]) => !re.test(read(f))).map(([road, f]) => `${road} (${f}): its spawn is no longer the shape its row judged — class it again`);
+{
+  const fm = CE.floorMarkOf(FLOOR);
+  ok(!!(fm === 'VIBESPACE_AGENTD_ROOT,VIBESPACE_DEVICE_ROOT,VIBESPACE_INSTANCE_NAME,VIBESPACE_KEEPER_DIR,VIBESPACE_TASK_ID' && CE.floorMarkOf({ PATH: '/usr/bin', [KNOB]: '5' }) === ''), `⑤ the floor's mark names the hub's floor names an env holds — no session name, no knob («${fm}»), and none for an env with none`, fm);
+  const env = { ...FLOOR, [CE.HANDED_MARK]: fm };
+  TR.dropHandedAtBoot({ env });
+  ok(!!(!('VIBESPACE_KEEPER_DIR' in env) && !('VIBESPACE_DEVICE_ROOT' in env) && !('VIBESPACE_AGENTD_ROOT' in env) && !('VIBESPACE_TASK_ID' in env) && env.VIBESPACE_INSTANCE_NAME === 'pod-a' && env[KNOB] === '5' && env.PATH === '/usr/bin'), '⑤ a hub started by hand in the OpenCode terminal drops the floor names it was handed, the device roots with them; the instance name stays (kept), and so do its own knob and the session names', env);
+  const red = plainRed(readTree);
+  ok(!!(!red.length && PLAIN.length === 5), `⑤ the five roads on the plain sanitized env each have their row (${PLAIN.map(([r, , w]) => `${r}: ${w.split(':')[0]}`).join(' · ')})`, red);
+  const planted = plainRed((f) => (f === 'src/vnc.js' ? readTree(f).replace("serviceEnv(process.env, { keep: ['USER', 'LOGNAME', 'SHELL']", "agentEnv({ keep: ['USER', 'LOGNAME', 'SHELL']") : readTree(f)));
+  ok(!!planted.some((x) => x.startsWith('the Desktop start')), 'CONTROL (the plain roads\' census): the Desktop start handed the agent env instead is red by name — its row must be judged again', planted);
 }
 {
   const M = mutantCopies('hub-handed-drop', REPO);
