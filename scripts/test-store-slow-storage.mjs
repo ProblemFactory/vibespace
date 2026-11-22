@@ -164,7 +164,7 @@ function controlTree() {
 let PORT = 0, VNC = {};
 const logs = {};
 /** ONE scratch hub of `tree` on the bindfs mount, under strace with `delayMs` per call (0 = traced, not delayed). */
-async function boot(tag, tree, delayMs, extraEnv = {}, { reuseOf = null } = {}) {
+async function boot(tag, tree, delayMs, extraEnv = {}, { reuseOf = null, patch = null } = {}) {
   // round 3 (law 3): `reuseOf` — boot AGAIN over another hub's tree and data dir (a restart: its conversations' dtach
   // sessions still alive), never a fresh copy
   const dirTag = reuseOf || tag, wtB = path.join(BACK, 'trees', dirTag, 'wt'), wt = path.join(MNT, 'trees', dirTag, 'wt');
@@ -174,6 +174,7 @@ async function boot(tag, tree, delayMs, extraEnv = {}, { reuseOf = null } = {}) 
     for (const f of TREE_FILES) fs.cpSync(path.join(tree, f), path.join(wtB, f), { recursive: true });
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wtB, 'node_modules'));
     seed = seedChannels(path.join(wtB, 'data/channels'));
+    if (patch) patch(wtB);   // a mutant of the booted copy (a law's red), never the tree
     for (const f of fs.readdirSync(path.join(HOME, '.claude/sessions'))) fs.rmSync(path.join(HOME, '.claude/sessions', f), { force: true });
   }
   const sl = path.join(OUT, `strace-${tag}.log`), logf = path.join(OUT, `hub-${tag}.log`); logs[tag] = logf;
@@ -480,9 +481,9 @@ if (!OTHER && leg('i')) {
   console.log('— (i) the crash path at 500 ms per call: a status write in flight, an act owed behind its own file\'s append (two lanes) — rank 0 first; the exit writes everything and ends by itself');
   if (guard()) { ok(false, `thermal stop: ${guard()}`); process.exit(1); }
   // THE SCENE, primed (a first act's append in flight on the act's own lane, so the probed act is OWED at the crash) or not — its RED
-  const crashScene = async (tag, prime) => {
+  const crashScene = async (tag, prime, patch = null) => {
   const CF = path.join(OUT, `crash-${tag}`);
-  const h = await boot(tag, TREE, DELAY, { STORE_SLOW_CRASH_FILE: CF });
+  const h = await boot(tag, TREE, DELAY, { STORE_SLOW_CRASH_FILE: CF }, { patch });
   loadNow(tag);
   if (!h.readyAt || !h.hub) { ok(false, `(i) the hub became ready (${tag})`, fs.readFileSync(h.logf, 'utf8').slice(-800)); await stopHub(h, 'SIGKILL', 2000); return null; }
   {
@@ -493,10 +494,11 @@ if (!OTHER && leg('i')) {
     const id = h.seed.ids[31], at = Date.now() + 9;
     req('POST', '/api/session-status', { sessionKey: 'crash-probe', state: 'working', reason: 'the crash path' });   // its durable write: in flight
     await sleep(40);
-    // THE WRITER'S TWO LANES (line 320; the coordinator's r2150): an act's journal line is an APPEND, and an append never waits behind
-    // ANOTHER file's whole write (law 2: the status write above flies on the whole lane). So the act is made OWED at the crash by its
-    // OWN file: a first act's journal append is in flight on the append lane (500 ms per call), and the probed act's line waits
-    // behind it (the fence: one job of a file at a time) — the exit must still write it FIRST, before the road's unmoved stores
+    // THE WRITER'S TWO LANES (line 320; the coordinator's r2150 / r2248): in the RUNNING hub an act's journal line is an APPEND, and an
+    // append never waits behind ANOTHER file's whole write (law 2: the status write above flies on the whole lane). So the act is
+    // made OWED at the crash by its OWN file: a first act's journal append is in flight on the append lane (500 ms per call), and
+    // the probed act's line waits behind it (the fence: one job of a file at a time). THE EXIT's order is another: every lane's job
+    // in flight settled first (the status write's too), then the owed rank-0 writes, then the road's unmoved stores
     if (prime) { req('POST', `/api/channels/agents/${h.seed.ids[32]}/read`, { at: at - 1 }); await sleep(40); }   // the first act: its journal append in flight on the append lane
     const pm = req('POST', `/api/channels/agents/${id}/read`, { at });   // the probed act: applied in memory, its journal line owed behind its own file's append in flight
     await sleep(250);   // the hub reads and applies the mark (localhost) while the first act's append and the status write (500 ms a call) still fly
@@ -518,10 +520,16 @@ if (!OTHER && leg('i')) {
   };
   const r = await crashScene('crash500', true);
   if (r) ok(r.law, `(i) LAW 2 on the crash path: the act (rank 0) written FIRST — before the crash road's own unmoved stores (${r.debtMs} ms of census debt) — on disk; nothing left, and the process ended BY ITSELF ${r.crashMs} ms after the crash (no keeper: inside the grace)`, { line: r.line, onDisk: r.onDisk, crashMs: r.crashMs });
-  // ITS RED: the scene with no first act (the one-lane scene). On the two lanes the probed act's append lands on its own lane BEFORE the
-  // crash, so the exit has no first job: the same check must fail — the leg above measures an act that IS owed
+  // ITS CONTROL (the scene, r2248): no first act (the one-lane scene). On the two lanes the probed act's append is IN FLIGHT at the crash
+  // (an append fsyncs, at 500 ms a call), so the exit's in-flight pass settles it — a pass the exit line does not count as first — and
+  // nothing is owed for rank 0: the same check fails here, so the leg above measures an act that IS owed
   const r0 = await crashScene('crash500-unprimed', false);
-  if (r0) ok(!r0.law && r0.onDisk && r0.first === 0, `(i) RED (the scene without its first act): the act landed on its own lane before the crash (on disk: ${r0.onDisk}), so the exit had no first job (${r0.first}) — the check above fails here, as it must`, { line: r0.line, onDisk: r0.onDisk, first: r0.first });
+  if (r0) ok(!r0.law && r0.onDisk && r0.first === 0, `(i) CONTROL (the scene without its first act): the act's append was in flight at the crash and settled by the exit's in-flight pass, uncounted as first (on disk: ${r0.onDisk}; first ${r0.first}) — the check above fails here, as it must`, { line: r0.line, onDisk: r0.onDisk, first: r0.first });
+  // ITS RED (the LAW, r2248): the booted copy's crash road with its rank-0 pass REMOVED, so the owed act is written only by the last pass,
+  // after the road's own unmoved stores (the census debt) — the check above must fail on the order itself
+  const NO_RANK0 = (wt) => { const f = path.join(wt, 'server.js'), s = fs.readFileSync(f, 'utf8'), a = "w0.beginExit({ crash: true }); w0.exitFlush({ only: 'rank0' }); }"; if (s.split(a).length !== 2) throw new Error('the anchor of the red «no rank-0 pass on the crash road» is not in the booted server.js'); fs.writeFileSync(f, s.replace(a, 'w0.beginExit({ crash: true }); }')); };
+  const rM = await crashScene('crash500-no-rank0', true, NO_RANK0);
+  if (rM) ok(!rM.law && rM.onDisk, `(i) RED (the crash road's rank-0 pass removed: the act written only after the unmoved stores): the check above fails (first ${rM.first}; ${rM.line || 'no exit line'})`, { line: rM.line, first: rM.first });
 }
 
 // ── (k) THE KEEPER IS THERE FROM BOOT (round 6, E3 a): the REAL server.js booted (a stated grace of 3 s), then the install

@@ -423,6 +423,10 @@ parentPort.on('message', (m) => {
     const l1 = linkedTemp(WK, 'check'), l0 = linkedTemp(NO_LCHECK, 'red');
     ok(l1.err === 'ETEMPLINKED' && !/(open|write) temp/.test(l1.order) && l1.disk === 'old', `⑫ (o) a temp still a SECOND NAME of a store is never written through on the piece road: refused ETEMPLINKED, the store as it was (${l1.order})`, l1);
     ok(/write temp/.test(l0.order) || l0.err !== 'ETEMPLINKED', `⑫ (o) RED (no check): the piece road wrote through a temp that is still a second name (${l0.order}; ${l0.err})`, l0);
+    // round w7skcarva (r2248): a rewrite's lines handed BY REFERENCE are refused by name (EBADBYTES), the file as it was
+    { const dir = path.join(T12, 'o-byref'); fs.mkdirSync(dir); const f = path.join(dir, 's.ndjson'); fs.writeFileSync(f, 'kept\n'); const told = [], w = SW.create({ log: quiet });
+      try { w.dirty(f, { name: 's.write', produce: () => ({ rewrite: { ranges: new Float64Array([0, 5]), size: 5 }, then: SW.byRef([Buffer.from('x\n')]) }), debounceMs: 0, urgent: true, onWritten: (okW, e) => told.push(`${okW} ${e && e.code}`) }); await until(() => told.length > 0, 'the refusal said'); } finally { try { w.stop(); } catch { } }
+      ok(told[0] === 'false EBADBYTES' && fs.readFileSync(f, 'utf8') === 'kept\n', `⑫ (o) a rewrite's lines handed BY REFERENCE are refused by name (${told[0]}), the file as it was`, told); }
     // (p) THE OWN NUMBERS ACROSS THE LANES (B-f276 1c × the lanes): an own-only store's file that ONE thread made is its store's own
     // on the OTHER thread too (each thread's map is its own) — (p1) through the SHARED CELLS: its first append settled by a
     // synchronous flush (the answer not read yet), the compaction flushed IN THE SAME CALL on the whole-write thread lands; RED: a
