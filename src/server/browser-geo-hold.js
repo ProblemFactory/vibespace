@@ -124,16 +124,31 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
   async function grantJob(h, ctx, deadline) {
     const at = ctx ? { browserContextId: ctx } : {};
     const ms = () => Math.max(1, Math.min(boundMs, deadline - now()));   // r2311 (small): the phase's own bound, never a call's bound per site
-    if (now() >= deadline) { h.ungranted += h.plan.sites.length; say(`${h.profileId}: no grant was sent in a browser context in time — its listed sites read «denied»`); return true; }
+    if (now() >= deadline) { h.ungranted += h.plan.sites.length; say(`${h.profileId}: no grant was sent in a browser context in time — its listed sites read «denied»`); told(h, h.plan.sites.length); return true; }
+    let failed = 0;
     const d = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', ...at }, null, ms());
     if (!fine(d)) say(`${h.profileId}: the every-origin denial was not set on its browser (${d && d.timeout ? 'no answer' : 'refused'}) — the profile's own stored denial stands under it`);
     for (const origin of h.plan.sites) {
       if (h.dirty.has(ctx)) return true;   // tainted meanwhile: no more grants here (taintCtx takes back what was given)
-      if (now() >= deadline) { h.ungranted++; say(`${h.profileId}: a listed site was not granted its place in time — it reads «denied»`); continue; }
+      if (now() >= deadline) { h.ungranted++; failed++; say(`${h.profileId}: a listed site was not granted its place in time — it reads «denied»`); continue; }
       const g = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'granted', origin, ...at }, null, ms());
-      if (!fine(g)) { h.ungranted++; say(`${h.profileId}: a listed site was not granted its place (${g && g.timeout ? 'no answer' : 'refused'}) — it reads «denied»`); }
+      if (!fine(g)) { h.ungranted++; failed++; say(`${h.profileId}: a listed site was not granted its place (${g && g.timeout ? 'no answer' : 'refused'}) — it reads «denied»`); }
     }
+    told(h, failed);
     return true;
+  }
+  /** r2311 (ii) A GRANT THAT FAILED IS TOLD: after every grant job with a list, how many of its sites were not given the place (never an
+   *  origin) — the keeper's record stops saying every listed site reads it, and the person is told. */
+  function told(h, failed) { if (h.plan.sites.length) emit({ kind: 'grants', profileId: h.profileId, failed, of: h.plan.sites.length, at: now() }); }
+  /** r2311 (i) THE HOLD GRANTS AGAIN after another client reset the browser's permissions or left (the dialog watch's takeover reset,
+   *  its socket gone — measured: the listed site read «denied» after that client left): on its OWN live socket, every context again
+   *  (the every-origin denial, then the listed origins), within the phase's own bound. Not held (arming, lost, down, gone) ⇒ false. */
+  function regrant(profileId) {
+    const h = holds.get(String(profileId || ''));
+    if (!h || h.state !== 'held' || !h.ws || h.ws.readyState !== 1) return Promise.resolve(false);
+    const ws = h.ws;
+    h.granting = new Map();
+    return grantAll(h, now() + grantMs).then(() => h.ws === ws, () => false);
   }
 
   /** r2311 MUST (2): A CONTEXT HOLDING A TAB THE HOLD COULD NEITHER PLACE NOR CLOSE has no grant — and if it had them (a grant given
@@ -280,7 +295,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
     return true;
   }
   function dispose() { for (const pid of [...holds.keys()]) disarm(pid, 'disposed'); }
-  return { arm, disarm, heldOf, factOf, rearmNow, dispose, _holds: holds };
+  return { arm, disarm, heldOf, factOf, rearmNow, regrant, dispose, _holds: holds };
 }
 
 module.exports = { create, overrideOf, planOf, DOCUMENT_TYPES, BOUND_MS, CLOSE_MS, ARM_MS, REARM_MS, GRANT_MS };

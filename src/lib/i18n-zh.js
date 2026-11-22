@@ -15526,7 +15526,7 @@ export default {
   "{label}'s environment is saved": "{label} 的环境已保存",
   "The time zone is not one this browser knows — write it as a region and a city, like Europe/Paris.": "浏览器不认识这个时区——请写成“地区/城市”，例如 Europe/Paris。",
   "The language is not a language tag — write it like fr-FR or ja.": "这不是语言标记——请写成 fr-FR 或 ja 这样的形式。",
-  "A place needs a latitude from -90 to 90 and a longitude from -180 to 180, written as numbers (an accuracy, if given, in metres above 0).": "地点需要纬度（-90 到 90）和经度（-180 到 180），用数字填写（如填精度，单位为米，须大于 0）。",
+  "A place is a latitude from -90 to 90 and a longitude from -180 to 180, written as numbers (an accuracy, if given, in metres above 0).": "地点需要纬度（-90 到 90）和经度（-180 到 180），用数字填写（如填精度，单位为米，须大于 0）。",
   "Each site is one web address with its scheme, like https://maps.example.com — no wildcard, no user name, at most {n} sites.": "每个网站是一个带协议的网址，例如 https://maps.example.com——不能用通配符，不能带用户名，最多 {n} 个。",
   "A list of sites is kept only beside a place — when the location is blocked or this machine's, no site is given anything.": "网站列表只能和地点一起保存——位置设为已阻止或本机的时，任何网站都得不到位置。",
   "A place or a blocked location is held only on a named profile of this machine's own browser — on a paired machine, its sites would read that machine's real position.": "地点或已阻止的位置只能用在本机浏览器的命名配置上——在配对的机器上，网站会读到那台机器的真实位置。",

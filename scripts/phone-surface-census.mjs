@@ -303,6 +303,7 @@ export const EXCUSE_BY_FILE = {
 };
 /** Keys whose words are their own (more precise than their file's). */
 export const EXCUSES = {
+  'dialog:browser-env-dialog': 'needs an agent-browser profile record — the seeded hub has none (the keeper is never started)',   // B-9584 U3: «Environment…»
   'dialog:static:dialog-fork': 'needs a conversation to fork (the page\'s own fork dialog)',
   'dialog:static:dialog-grid': 'no phone door: the desk\'s «add a grid» (src/phone-doors.js PHONE_TWINS btn-add-grid: none)',
   'dialog:static:dialog-presets': 'no phone door: the desk\'s arrangements (src/phone-doors.js PHONE_TWINS btn-presets: none)',

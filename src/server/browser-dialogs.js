@@ -378,7 +378,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     });
     ws.on('message', (d) => { try { onMessage(w, d); } catch (err) { say('msg:' + (err && err.message), `${w.profileId}: a CDP event was not handled — ${err && err.message}`); } }); // key-file-law-fix: a throw never leaves the listener (uncaughtException = the hub's exit)
     ws.on('error', (e) => { say('err:' + w.profileId + ':' + (e && e.code), `${w.profileId}: the watch's socket failed — ${e && e.message}`); });
-    ws.on('close', () => down(w, SOCKET_CLOSED));
+    ws.on('close', () => { down(w, SOCKET_CLOSED); regrantPlace(w.profileId); });   // r2311 (i): its leaving reset the context's overrides (the hold's grants too)
   }
   function down(w, why, { keepNotices = false } = {}) {
     if (w.state === 'down') return;
@@ -1036,6 +1036,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!placeHeld(w.profileId) && [...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted')) await Promise.all(tabs.map((e) => call(w, 'Emulation.clearGeolocationOverride', {}, e.sid)));   // B-9584 U2c (r1264 must 1): the hand-over never clears a place the person set
     const ctxs = [...w.permCtx.keys()]; w.permCtx.clear();
     for (const k of ctxs) await call(w, 'Browser.resetPermissions', k ? { browserContextId: k } : {});
+    if (ctxs.length) regrantPlace(w.profileId);   // r2311 (i): the reset took the place hold's grants too — it grants again
   }
   /** person → agent: the agent browser's policies on, as a fresh agent watch puts them (each context's plan first). */
   async function toAgent(w) {
@@ -2346,6 +2347,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // Fetch pauses DOCUMENT requests only (a sub-resource never waits on this socket; on '*' a 100-image page cost +12 ms); a
   // sign-in on a sub-resource is not caught (named in the kb table).
   /** B-9584 U2c: the place the keeper's hold keeps on this browser's every tab (a place, or «blocked»), or null — never replaced here. */
+  /** r2311 (i): the place hold grants again (the keeper's door; a profile with no held place, or a hold not held, does nothing). */
+  function regrantPlace(pid) { try { if (keeper && typeof keeper.geoRegrant === 'function') Promise.resolve(keeper.geoRegrant(String(pid || ''))).catch(() => { }); } catch { /* the hold's own */ } }
   function placeHeld(pid) { try { return keeper && typeof keeper.geoHeldFor === 'function' ? keeper.geoHeldFor(String(pid || '')) : null; } catch { return null; } }
   function armPrompts(w, e) {
     if (!e.sid) return;

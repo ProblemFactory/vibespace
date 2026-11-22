@@ -50,7 +50,7 @@ async function fakeBrowser({ pages = [{ targetId: 'T0', type: 'page', url: 'abou
       if (m.method === 'Target.setAutoAttach') { if (f.mode.autoAttach === 'never') return; for (const t of f.targets.values()) attach(t, f.paused.has(t.targetId)); return answer(); }
       if (m.method === 'Target.getTargets') return answer({ targetInfos: [...f.targets.values()] });
       if (m.method === 'Target.attachToTarget') { const s = `S${++f.sid}`; f.sessions.set(s, f.targets.get(String(m.params.targetId)) || {}); return answer({ sessionId: s }); }
-      if (m.method === 'Browser.setPermission') { if (f.mode.permission === 'never') return; if (f.mode.permission === 'delay') { setTimeout(() => answer(), f.permDelayMs || 150); return; } }   // r2311: a browser that answers its permission calls late or never
+      if (m.method === 'Browser.setPermission') { if (f.mode.permission === 'refuse') return send({ id: m.id, error: { code: -32000, message: 'refused (a stand-in)' } }); if (f.mode.permission === 'never') return; if (f.mode.permission === 'delay') { setTimeout(() => answer(), f.permDelayMs || 150); return; } }   // r2311: a browser that answers its permission calls late or never
       if (m.method === 'Emulation.setGeolocationOverride') { if (f.mode.place === 'never') return; if (f.mode.place === 'delay') { setTimeout(() => answer(), f.placeDelayMs || 150); return; } if (f.mode.place === 'refuse') return send({ id: m.id, error: { code: -32000, message: 'refused (a stand-in)' } }); return answer(); }
       if (m.method === 'Target.closeTarget') { if (f.mode.close === 'never') return; f.closed.push(m.params.targetId); f.targets.delete(m.params.targetId); return answer({ success: true }); }
       return answer();
@@ -322,6 +322,28 @@ async function legsOf(G, only = null) {
     out.taintBound = told() && ms < 900 && sent === 5; out.taintBoundMs = ms;
     h.dispose(); await f.close();
   }
+  // r2311 (i) THE HOLD GRANTS AGAIN on its own live socket (after another client reset or left); not held ⇒ nothing. (ii) after every
+  // grant job with a list, how many were not given — told (no origin)
+  if (run('regrant')) {
+    const f = await fakeBrowser(), e = [];
+    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: 300, closeMs: 100, armMs: 3000, rearmMs: [600000], onEvent: (x) => e.push(x) });
+    await h.arm('bp-00000013', { url: () => f.url, plan: { ...PLACE, sites: [SITE_T] } });
+    const okAtArm = e.some((x) => x.kind === 'grants' && x.failed === 0 && x.of === 1);
+    const n0 = f.calls.length;
+    const again = await h.regrant('bp-00000013');
+    const after = f.calls.slice(n0).filter((c) => c.method === 'Browser.setPermission' && c.params.browserContextId === 'D0');
+    out.regrantGrants = again === true && after.some((c) => c.params.setting === 'denied' && !c.params.origin) && after.some((c) => c.params.setting === 'granted' && c.params.origin === SITE_T);
+    f.mode.permission = 'refuse';
+    const e0 = e.length;
+    await h.regrant('bp-00000013');
+    const failedEv = e.slice(e0).find((x) => x.kind === 'grants');
+    out.grantsTold = okAtArm && !!failedEv && failedEv.failed === 1 && failedEv.of === 1 && !/127\.0\.0\.1:9/.test(JSON.stringify(e));
+    f.mode.permission = 'ok';
+    f.dropAll();
+    await until(() => h.factOf('bp-00000013') && h.factOf('bp-00000013').state !== 'held', 1000);
+    out.regrantNotHeld = (await h.regrant('bp-00000013')) === false && (await h.regrant('bp-0000dead')) === false;
+    h.dispose(); await f.close();
+  }
   return out;
 }
 
@@ -354,6 +376,8 @@ ok(R.grantBound, `r2311 (small) the grant phase has its OWN bound: a browser tha
 ok(R.twoTabs, 'r2311 two tabs born at once in a NEW context: the second waits for the first one\'s grants still in flight — neither is released before them', R);
 ok(R.noCtx, 'r2497 (3) a target that names NO browser context: never granted (no permission call at all — a grant with no id is the default context\'s), the tab still placed and released', R);
 ok(R.taintBound, `r2497 (4) the take-back's calls share ONE deadline: five listed origins set back to «denied» at once, the tab said closed after ${R.taintBoundMs} ms (one call bound 300 ms, never five)`, R);
+ok(R.regrantGrants && R.regrantNotHeld, 'r2311 (i) the hold GRANTS AGAIN on its own live socket (the every-origin denial, then the listed origin) — after another client reset or left; a hold not held, or none, does nothing', R);
+ok(R.grantsTold, 'r2311 (ii) after every grant job with a list: how many sites were not given the place, told (0 at a good arm, 1 when the browser refused) — never an origin', R);
 ok(R.sitesRearmRelease, '(B) r1898 (7) the hold armed again: a tab its dead socket left PAUSED is released only AFTER its context\'s grants (released at its place, a listed site read «denied» on a real browser)', R);
 ok(R.sitesRearm && R.noOriginInEvents, '(B) the hold armed again: on its new socket every place BEFORE its grants (between the death and then, «denied»); no event names a site', R);
 ok(R.refusedArm, 'an arm with no loopback address, nothing to hold, or «blocked» ⇒ refused by name (place_not_held), nothing held', R);
@@ -396,6 +420,10 @@ const ctxless = MUT.load('src/server/browser-geo-hold.js', emptyAllowed(src), 'c
 BRED.push([legsOf(ctxless, ['noctx']), (o) => !o.noCtx, 'RED — a target naming no context granted under the empty name: the default context\'s grant, whatever it holds']);
 const takeOneByOne = MUT.load('src/server/browser-geo-hold.js', anchored(src, "    const takeBack = (origin) => call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin, ...at }, null, Math.max(1, Math.min(boundMs, by - now())));\n    const back = (await Promise.all(h.plan.sites.map(takeBack))).filter(fine).length;\n", "    let back = 0;\n    for (const origin of h.plan.sites) { const r = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin, ...at }); if (fine(r)) back++; }\n", 'geo RED take-back one by one'), 'takeback-serial');
 BRED.push([legsOf(takeOneByOne, ['taintBound']), (o) => !o.taintBound, 'RED — the take-back one call at a time, each on its own bound: five bounds before the tab is said']);
+const noClear = MUT.load('src/server/browser-geo-hold.js', anchored(src, '    h.granting = new Map();\n    return grantAll(h, now() + grantMs)', '    return grantAll(h, now() + grantMs)', 'geo RED regrant keeps its jobs'), 'regrant-keeps');
+BRED.push([legsOf(noClear, ['regrant']), (o) => !o.regrantGrants, 'RED — a regrant that keeps the old jobs: every context reads as granted, nothing is sent (the listed site stays «denied»)']);
+const notTold = MUT.load('src/server/browser-geo-hold.js', anchored(src, '  function told(h, failed) { if (h.plan.sites.length) emit(', '  function told(h, failed) { if (false) emit(', 'geo RED grants not told'), 'grants-untold');
+BRED.push([legsOf(notTold, ['regrant']), (o) => !o.grantsTold, 'RED — a failed grant only counted, never told']);
 const releaseEarly = MUT.load('src/server/browser-geo-hold.js', anchored(src, "    if (placed && h.state !== 'held') { h.release.add(sid); return placed; }\n", '', 'geo RED arm releases before grants'), 'release-early');
 BRED.push([legsOf(releaseEarly, ['sites']), (o) => !o.sitesRearmRelease, 'RED — the arm releases each placed tab at its place: a paused tab of a listed site reads «denied» before its grant']);
 const releaseUnplaced = MUT.load('src/server/browser-geo-hold.js', anchored(src, '      if (h.plan.sites.length) {   // B-9584 (B, 主开发 r1791)', '      if (false) {   // B-9584 (B, 主开发 r1791)', 'geo RED unplaced released'), 'unplaced-released');

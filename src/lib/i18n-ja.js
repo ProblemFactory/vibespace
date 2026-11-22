@@ -15525,7 +15525,7 @@ export default {
   "{label}'s environment is saved": "{label} の環境を保存しました",
   "The time zone is not one this browser knows — write it as a region and a city, like Europe/Paris.": "このタイムゾーンはブラウザが認識できません。Europe/Paris のように「地域/都市」で書いてください。",
   "The language is not a language tag — write it like fr-FR or ja.": "言語タグではありません。fr-FR や ja のように書いてください。",
-  "A place needs a latitude from -90 to 90 and a longitude from -180 to 180, written as numbers (an accuracy, if given, in metres above 0).": "場所には緯度（-90〜90）と経度（-180〜180）を数字で入れてください（精度を入れる場合はメートル単位で 0 より大きく）。",
+  "A place is a latitude from -90 to 90 and a longitude from -180 to 180, written as numbers (an accuracy, if given, in metres above 0).": "場所には緯度（-90〜90）と経度（-180〜180）を数字で入れてください（精度を入れる場合はメートル単位で 0 より大きく）。",
   "Each site is one web address with its scheme, like https://maps.example.com — no wildcard, no user name, at most {n} sites.": "各サイトは https://maps.example.com のようにスキーム付きのウェブアドレス 1 つ。ワイルドカードやユーザー名は使えません。最大 {n} 件。",
   "A list of sites is kept only beside a place — when the location is blocked or this machine's, no site is given anything.": "サイトの一覧は場所を指定したときだけ保存されます。ブロックやこのマシンのものでは、どのサイトにも何も渡しません。",
   "A place or a blocked location is held only on a named profile of this machine's own browser — on a paired machine, its sites would read that machine's real position.": "場所の指定やブロックは、このマシンのブラウザの名前付きプロファイルでのみ保持されます。ペアリングしたマシンでは、サイトがそのマシンの実際の位置を読んでしまいます。",

@@ -141,7 +141,7 @@ const census = (Mod) => {
   return { missing, dup, union: [...union] };
 };
 {
-  ok(Object.values(TODAY).length === 11 && Object.values(TODAY).every((id) => M.ROW_ACTS.includes(id)) && M.ROW_ACTS.length === 15 && M.ROW_ACTS.includes('passkeys') && M.ROW_ACTS.includes('proxy') && M.ROW_ACTS.includes('proxy-move') && M.ROW_ACTS.includes('exit-check'), 'the model names the eleven acts the 2.369.204 row offered + lane passkey-ui\'s Passkeys + B-8b87\'s Proxy… and «Move the password to the vault» (n)… (ROW_ACTS)');
+  ok(Object.values(TODAY).length === 11 && Object.values(TODAY).every((id) => M.ROW_ACTS.includes(id)) && M.ROW_ACTS.length === 16 && M.ROW_ACTS.includes('passkeys') && M.ROW_ACTS.includes('proxy') && M.ROW_ACTS.includes('proxy-move') && M.ROW_ACTS.includes('exit-check') && M.ROW_ACTS.includes('environment'), 'the model names the eleven acts the 2.369.204 row offered + lane passkey-ui\'s Passkeys + B-8b87\'s Proxy… and «Move the password to the vault» (n)… (ROW_ACTS)');
   const c = census(M);
   ok(!c.missing.length && !c.dup.length, 'every act appears in the primary ∪ the ⋯ menu ∪ the who cell — exactly once per row (a full live row + a leave-page-dialogs row cover all eleven)', c);
   for (const r of Object.values(P)) { const a = M.rowActs(r, x(r, { stuck: STUCK, autoDialogs: true, autoText: AUTO })); if (new Set(a).size !== a.length) ok(false, `no act twice on ${r.label}`, a); }
@@ -150,7 +150,7 @@ const census = (Mod) => {
   const tv = read('src/lib/browser-trace-view.js');
   const runBlk = tv.slice(tv.indexOf('  const RUN = {'), tv.indexOf('\n  };\n', tv.indexOf('  const RUN = {')));
   const runIds = [...runBlk.matchAll(/^    '?([a-z-]+)'?: (?:async )?\(r\) =>/gm)].map((m) => m[1]);
-  ok(M.ROW_ACTS.filter((id) => id !== 'browse' && id !== 'who').every((id) => runIds.includes(id)) && runIds.length === 13, 'the view runs each of the thirteen menu acts by its id (RUN; lane passkey-ui: + passkeys; B-8b87: + proxy, proxy-move; the exit check: + exit-check)', runIds);
+  ok(M.ROW_ACTS.filter((id) => id !== 'browse' && id !== 'who').every((id) => runIds.includes(id)) && runIds.length === 14, 'the view runs each of the fourteen menu acts by its id (RUN; lane passkey-ui: + passkeys; B-8b87: + proxy, proxy-move; the exit check: + exit-check; B-9584 U3: + environment)', runIds);
   ok(/if \(L\.primary\) \{[\s\S]{0,400}app\.browseYourself\(r\.id/.test(tv) && /btn\(t\('Change…'\), \(\) => \{ if \(rowNow\) openWhoDialog\(app, rowNow\.id/.test(tv), 'the primary opens Browse yourself; the who cell\'s Change… opens the who dialog');
   // lane browser-unresponsive: a hung row's primary is Restart — the view runs RUN.restart (THE user's restart route)
   ok(/if \(L\.primary\.id === 'restart'\) \{[^\n]*bb\.onclick = \(\) => RUN\.restart\(r\);/.test(tv), 'a hung row\'s primary (Restart) runs RUN.restart');

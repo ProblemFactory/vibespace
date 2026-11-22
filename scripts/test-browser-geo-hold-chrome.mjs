@@ -360,6 +360,12 @@ const refusedRead = (x) => !!x && x.err === 1 && x.lat === undefined;   // the r
   const rW2 = await readAgain(4);
   F.Bwatch = { underAnotherClientsDenial: rW, afterThatClientLeft: rW2 };
   ok(!!rW && !!rW2 && (denied(rW) || isPlace(rW)) && (denied(rW2) || isPlace(rW2)), `(B) (D) the dialog watch's kind of client: its every-origin denial, then its leaving — never this machine's position; what the listed site reads (a FACT): ${J(F.Bwatch)}`, F.Bwatch);
+  // r2311 (i): THE HOLD GRANTS AGAIN after that client left (the keeper asks it when the dialog watch's socket closes, and after the
+  // watch's takeover reset): on its own socket, the listed site reads the PLACE again
+  const regranted = await h.regrant(`bp-${c.tag}`);
+  const rW3 = await readAgain(5);
+  F.Bwatch.regranted = regranted; F.Bwatch.afterTheRegrant = rW3;
+  ok(regranted === true && isPlace(rW3), `r2311 (i) after another client left (then: ${J(rW2)}), the hold GRANTS AGAIN on its own socket — the listed site reads the PLACE (${J(rW3)})`, F.Bwatch);
   ctl.place = 'refuse';
   await openTabs(c, 'b-unplaced', 1);
   const closedEv = await untilV(() => evs.find((e) => e.kind === 'closed') || null, SPACING_MS + 6000);

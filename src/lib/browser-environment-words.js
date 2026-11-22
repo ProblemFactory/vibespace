@@ -9,7 +9,7 @@ export function envWords(code, t, { limit = 20 } = {}) {
   switch (code) {
     case 'env_timezone_invalid': return row(t('The time zone is not one this browser knows — write it as a region and a city, like Europe/Paris.'));
     case 'env_language_invalid': return row(t('The language is not a language tag — write it like fr-FR or ja.'));
-    case 'env_place_invalid': return row(t('A place needs a latitude from -90 to 90 and a longitude from -180 to 180, written as numbers (an accuracy, if given, in metres above 0).'));
+    case 'env_place_invalid': return row(t('A place is a latitude from -90 to 90 and a longitude from -180 to 180, written as numbers (an accuracy, if given, in metres above 0).'));
     case 'env_site_invalid':
     case 'env_sites_invalid': return row(t('Each site is one web address with its scheme, like https://maps.example.com — no wildcard, no user name, at most {n} sites.', { n: limit }));
     case 'env_sites_unoffered': return row(t('A list of sites is kept only beside a place — when the location is blocked or this machine\'s, no site is given anything.'));

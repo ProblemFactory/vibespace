@@ -19,7 +19,7 @@ export const GRID = Object.freeze({ mins: Object.freeze([140, 100, 170, 120]), g
 export function gridNeed(actsPx) { return GRID.mins.reduce((s, n) => s + n, 0) + Math.max(0, Number(actsPx) || 0) + GRID.gap * GRID.mins.length; }
 
 /** Every act a profile row offers, once: the primary, the ⋯ menu's items, the who cell's Change… (the ACT CENSUS). */
-export const ROW_ACTS = Object.freeze(['browse', 'record', 'record-mine', 'replay', 'build', 'proxy-move', 'proxy', 'exit-check', 'rename', 'stop', 'restart', 'restart-hold', 'passkeys', 'delete', 'who']); // + B-8b87: Proxy… and «Move the password to the vault» // lane passkey-ui: + Passkeys (n)…
+export const ROW_ACTS = Object.freeze(['browse', 'record', 'record-mine', 'replay', 'build', 'proxy-move', 'proxy', 'exit-check', 'environment', 'rename', 'stop', 'restart', 'restart-hold', 'passkeys', 'delete', 'who']); // + B-8b87: Proxy… and «Move the password to the vault» // lane passkey-ui: + Passkeys (n)…
 
 const T = (x) => (x && x.w && typeof x.w.t === 'function' ? x.w.t : (s) => s);
 const W = (x, k, d) => (x && x.w && typeof x.w[k] === 'function' ? x.w[k] : d);

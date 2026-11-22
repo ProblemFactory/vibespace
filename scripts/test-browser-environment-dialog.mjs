@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -36,9 +36,9 @@ console.log('— ① the door: the person\'s save, judged whole, kept canonical;
 {
   const k = mkK();
   const p = k.createProfile({ label: 'Env' });
-  const r1 = await k.setEnvironment(p.id, { environment: { timezone: { mode: 'value', value: 'Asia/Kolkata' }, location: { ...PLACE, sites: ['https://B.example/x', 'https://a.example', 'https://b.example/'] } } });
+  const r1 = await k.setEnvironment(p.id, { environment: { timezone: { mode: 'value', value: 'Europe/Paris' }, location: { ...PLACE, sites: ['https://B.example/x', 'https://a.example', 'https://b.example/'] } } });
   const kept = recOf(k, p.id).environment;
-  ok(r1.ok && r1.changed === true && r1.restartNeeded === false && J(kept.location.sites) === J(['https://a.example', 'https://b.example']) && kept.location.mode === 'value' && kept.timezone.value === 'Asia/Kolkata'
+  ok(r1.ok && r1.changed === true && r1.restartNeeded === false && J(kept.location.sites) === J(['https://a.example', 'https://b.example']) && kept.location.mode === 'value' && kept.timezone.value === 'Europe/Paris'
     && !!r1.profile && J(r1.profile.environment) === J(kept), '① a place with its sites: kept canonical (the sites exact origins, sorted, once each), the answer carries the profile, nothing to restart (no browser runs)', { r1, kept });
   const r2 = await k.setEnvironment(p.id, { environment: kept });
   ok(r2.ok && r2.changed === false && r2.restartNeeded === false, '① the same save again changes nothing', r2);
@@ -68,8 +68,7 @@ console.log('— ① the door: the person\'s save, judged whole, kept canonical;
   const MUT = mutantCopies('env-dialog', REPO);
   const src = read('src/server/browser-keeper.js');
   const A = "      if (g && !engine && (isEph(p) || p.host)) return { ok: false, code: 'browser_place_unsupported',";
-  ok(src.split(A).length === 2, '① control setup: the door\'s paired / ephemeral refusal is spelled once');
-  const Kn = MUT.load('src/server/browser-keeper.js', src.split(A).join("      if (false) return { ok: false, code: 'browser_place_unsupported',"), 'no-paired-refusal');
+  const Kn = MUT.load('src/server/browser-keeper.js', anchored(src, A, "      if (false) return { ok: false, code: 'browser_place_unsupported',", 'env door RED no paired refusal'), 'no-paired-refusal');   // anchored(): the line found ONCE, else it throws by name
   const kn = mkK(Kn), pn = kn.createProfile({ label: 'Paired' }); recOf(kn, pn.id).host = 'paired-stand-in';
   const rn = await kn.setEnvironment(pn.id, { environment: { location: PLACE } });
   ok(rn.ok === true, '① RED — the door without the paired refusal: a paired machine\'s profile takes a place', rn);
@@ -91,20 +90,20 @@ console.log('— ③ the form: the fields round-trip, the list dropped beside «
 {
   const F = await import(new URL('../src/lib/browser-environment-form.js', import.meta.url).href);
   const ENVm = require('../src/browser-environment.js');
-  const kept = { timezone: { mode: 'value', value: 'Asia/Kolkata' }, language: { mode: 'auto' }, location: { mode: 'value', value: { latitude: 12.5, longitude: 45.25 }, sites: ['https://a.example', 'https://b.example'] } };
+  const kept = { timezone: { mode: 'value', value: 'Europe/Paris' }, language: { mode: 'auto' }, location: { mode: 'value', value: { latitude: 12.5, longitude: 45.25 }, sites: ['https://a.example', 'https://b.example'] } };
   const r = { id: 'bp-000000e1', label: 'Env', environment: kept };
   const f = F.fieldsOf(r), back = F.bodyOf(f), v = ENVm.environmentVerdict(back.environment);
   ok(f.timezone.mode === 'value' && f.language.mode === 'auto' && f.location.mode === 'value' && f.location.sites === 'https://a.example\nhttps://b.example' && v.ok && J(v.value.location.sites) === J(kept.location.sites)
-    && v.value.timezone.value === 'Asia/Kolkata' && v.value.language.mode === 'auto' && !F.changedFrom(r, f), '③ a kept environment round-trips: fields from it, the body back, U1\'s verdict keeps the same; nothing changed', { f, back, v });
+    && v.value.timezone.value === 'Europe/Paris' && v.value.language.mode === 'auto' && !F.changedFrom(r, f), '③ a kept environment round-trips: fields from it, the body back, U1\'s verdict keeps the same; nothing changed', { f, back, v });
   const machine = F.bodyOf({ ...f, location: { ...f.location, mode: 'machine' } }), blocked = F.bodyOf({ ...f, location: { ...f.location, mode: 'block' } });
   ok(machine.environment.location === null && J(blocked.environment.location) === J({ mode: 'block' }) && F.changedFrom(r, { ...f, location: { ...f.location, mode: 'block' } }),
     '③ r2497 (5): location «this machine\'s» or «Blocked» DROPS the list of sites from the body (never a silent keep, never a refused save)', { machine, blocked });
   const badZone = F.checkOf({ ...f, timezone: { mode: 'value', value: 'Mars/Olympus' } }), badSite = F.checkOf({ ...f, location: { ...f.location, sites: '*.example.com' } });
   ok(!badZone.ok && badZone.code === 'env_timezone_invalid' && !badSite.ok && /^env_site/.test(badSite.code), '③ the page\'s own check is U1\'s verdict on the very body it would send (a zone it does not know, a wildcard site)', { badZone, badSite });
   ok(J(F.sitesOf(' https://a.example ,\n\nhttps://b.example\n')) === J(['https://a.example', 'https://b.example']) && F.SITES_LIMIT === ENVm.SITES_MAX, '③ one site a line (a comma too), blanks dropped; the limit is U1\'s');
-  const withExit = { ...r, egress: { publicIp: '203.0.113.9', country: 'FR', timezone: 'Asia/Kolkata', checkedAt: 1, source: 'measured' } };
+  const withExit = { ...r, egress: { publicIp: '203.0.113.9', country: 'FR', timezone: 'Europe/Paris', checkedAt: 1, source: 'measured' } };
   const aE = F.autoSaidOf(withExit), aN = F.autoSaidOf(r);
-  ok(aE.timezone.from === 'exit' && aE.timezone.value === 'Asia/Kolkata' && aE.language.from === 'exit' && !!aE.language.value && aN.timezone.value === null && aN.timezone.said === 'no_exit' && aN.language.value === null,
+  ok(aE.timezone.from === 'exit' && aE.timezone.value === 'Europe/Paris' && aE.language.from === 'exit' && !!aE.language.value && aN.timezone.value === null && aN.timezone.said === 'no_exit' && aN.language.value === null,
     '③ «Automatic» said RIGHT NOW from the kept exit (U1\'s resolver: its zone, its country\'s language); none kept ⇒ nothing to follow, said', { aE, aN });
 }
 
@@ -117,9 +116,20 @@ console.log('— ④ the words: every code the verdict and the door can answer h
   const codes = new Set([...ENVsrc.matchAll(/refuse\('(env_[a-z_]+)'/g)].map((m) => m[1]).concat([...door.matchAll(/code: '([a-z_-]+)'/g)].map((m) => m[1]), ['agent_forbidden']));
   const missing = [...codes].filter((c) => !Wd.envWords(c, T).known);
   ok(codes.size >= 12 && missing.length === 0 && Wd.envWords('zzz_new', T).known === false && /zzz_new/.test(Wd.envWords('zzz_new', T).text), `④ every code (${codes.size}) the verdict and the door answer has the page's sentence; an unknown code is named by its code`, { codes: [...codes], missing });
-  ok(/Automatic now: Asia\/Kolkata/.test(Wd.autoWords({ value: 'Asia/Kolkata', from: 'exit' }, T)) && /none is kept yet/.test(Wd.autoWords({ value: null, said: 'no_exit' }, T)), '④ Automatic\'s line: its value now and whence, or that nothing is kept');
+  ok(/Automatic now: Europe\/Paris/.test(Wd.autoWords({ value: 'Europe/Paris', from: 'exit' }, T)) && /none is kept yet/.test(Wd.autoWords({ value: null, said: 'no_exit' }, T)), '④ Automatic\'s line: its value now and whence, or that nothing is kept');
   const DLG = read('src/lib/browser-environment-dialog.js');
   ok(/`\/api\/browser\/profiles\/\$\{encodeURIComponent\(r\.id\)\}\/environment`, \{ method: 'POST'/.test(DLG) && /const f = read\(\), v = checkOf\(f\);\n      if \(!v\.ok\) \{ sayCode\(v\.code, v\.error\); return; \}/.test(DLG) && !/\.disabled = true;(?![^\n]*busy)/.test(DLG.replace('busy = true; save.disabled = true;', '')),
     '④ the dialog posts to the keeper\'s one door after the page\'s own check; no control greyed but the save while it is sent', null);
+}
+
+console.log('— ⑤ r2311 (i): the dialog watch\'s reset and its leaving ask the place hold to grant again');
+{
+  const DS = read('src/server/browser-dialogs.js'), KS = read('src/server/browser-keeper.js'), GS = read('src/server/browser-geo-hold.js');
+  ok(DS.includes("    for (const k of ctxs) await call(w, 'Browser.resetPermissions', k ? { browserContextId: k } : {});\n    if (ctxs.length) regrantPlace(w.profileId);")
+    && DS.includes("    ws.on('close', () => { down(w, SOCKET_CLOSED); regrantPlace(w.profileId); });")
+    && /function regrantPlace\(pid\) \{ try \{ if \(keeper && typeof keeper\.geoRegrant === 'function'\) Promise\.resolve\(keeper\.geoRegrant\(String\(pid \|\| ''\)\)\)\.catch/.test(DS)
+    && /geoRegrant: \(profileId\) => \(geoHoldOwn \? geoHoldOwn\.regrant\(String\(profileId \|\| ''\)\)\.catch\(\(\) => false\) : Promise\.resolve\(false\)\)/.test(KS)
+    && /return \{ arm, disarm, heldOf, factOf, rearmNow, regrant, dispose,/.test(GS),
+    '⑤ PIN: after the watch resets the browser\'s permissions (a takeover) and when its socket closes, the keeper asks the place hold to grant again (the hold\'s own regrant: legs and REDs in test-browser-geo-hold; the real browser in test-browser-geo-hold-chrome)');
 }
 report();

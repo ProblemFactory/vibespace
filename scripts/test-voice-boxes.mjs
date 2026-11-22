@@ -51,6 +51,7 @@ const ROWS = [
   ['jobs-panel.js', "b.type === 'input' ? 'input' : 'textarea'", A, 1, 'a job\'s question answered in its panel (the textarea block)'],
   ['channel-filter-editor.js', 'chan-dec-cond', 'a notification rule\'s condition — a setting the judge reads, not a message', 1],
   ['mounts-dialog.js', "el = document.createElement('textarea')", 'a mount form\'s field (configuration)', 1],
+  ['browser-environment-dialog.js', "const sites = document.createElement('textarea')", 'B-9584 U3: the web addresses that may read a profile\'s place, one a line — a setting, not a message', 1],
   ['integrations-window.js', 'integ-input-multiline', 'a several-line SECRET field of an integration card (an ssh deploy key pasted whole) — a key paste, not a message; a secret never goes to a dictation vendor', 1], // lane engine-distribution
   ['vault-use-row.js', 'vw-use-policy-in', 'an entry\'s policy for the vault\'s decision-API judge (lane vault-use-grants R4) — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],
   ['vault-paste-box.js', 'vault-secret-note', 'a note stored beside a secret in the vault (「其他密钥或密码…」) — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],

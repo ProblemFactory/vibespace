@@ -1633,6 +1633,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  does not hold (an ephemeral one, a paired machine's) says its location is not applied. */
   const PLACE_SAID = 'fixed on its tabs — every site is denied the location (the profile\'s own setting): no site is allowed the place';
   /** B-9584 (B): with sites on the profile's list, «fixed» says that ONLY they read the place (their count, never an origin). */
+  /** r2311 (ii): the record's words when some listed sites were not given the place (the browser refused or did not answer). */
+  const placeSaidShort = (of, n) => `fixed — ${of - n} of the ${of} site${of === 1 ? '' : 's'} on its list read the place; ${n} ${n === 1 ? 'was' : 'were'} not given it (${n === 1 ? 'it reads' : 'they read'} «denied»); every other site is denied the location (the profile\'s own setting)`;
   const placeSaid = (g) => { const n = g && Array.isArray(g.sites) ? g.sites.length : 0; return n ? `fixed — only the ${n} site${n === 1 ? '' : 's'} on its list read the place; every other site is denied the location (the profile\'s own setting)` : PLACE_SAID; };
   const NOT_APPLIED_SAID = 'not applied — this browser is not held to a place or «blocked»: its sites get this machine\'s answer';
   /** r2172 (a): a place or «blocked» is held only on a NAMED profile of THIS machine's stock browser (the stored denial + the hold). An
@@ -1741,6 +1743,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (tid) for (const l of reg.leases) if (l && l.profileId === pid && (String(l.targetId || '') === tid || (Array.isArray(l.tabs) && l.tabs.map(String).includes(tid)))) { markTabLost(pid, l.browserKey, 'place'); told++; }
       if (told) commit();
       file('closed', `"${label}": a tab was closed — its place could not be given to it in time`, `VibeSpace gives every tab of "${label}" its place before the tab runs; this one did not take it in time, and a site on the profile's list would have read this machine's location there — so the tab was closed${ev.shut === false ? ' (the browser did not close it: its browser context gives no site the place until the browser restarts)' : ''}. Open the page again; if this keeps happening, restart the browser.`);
+    } else if (ev.kind === 'grants') {   // r2311 (ii): A GRANT THAT FAILED IS TOLD — the record's words follow the latest grant job; the person told once a run
+      const n = Math.max(0, Number(ev.failed) || 0), of = Math.max(0, Number(ev.of) || 0);
+      const rg = reg.browsers[pid];
+      if (rg && rg.environment && rg.environment.applied && rg.environment.applied.location === 'fixed') {
+        const words = n ? placeSaidShort(of, n) : placeSaid({ sites: Array(of).fill('') });
+        if (rg.environment.locationSaid !== words) { rg.environment.locationSaid = words; commit(); }
+      }
+      if (n) file('ungranted', `"${label}": ${n === 1 ? 'a site' : `${n} sites`} on its list ${n === 1 ? 'was' : 'were'} not given its place`, `VibeSpace gives each site on the list of "${label}" its place on the browser's own connection; the browser did not take it for ${n} of the ${of} site${of === 1 ? '' : 's'}, so ${n === 1 ? 'it reads' : 'they read'} «denied» — never this machine's location. Restart the browser to try again.`);
     } else if (ev.kind === 'unplaced') {
       file('unplaced', `"${label}": a tab ${ev.opened ? 'opened' : 'was open'} without its place — sites there are denied the location`, `VibeSpace gives every tab of "${label}" its place before the tab runs. Its browser did not take the place on this one in time, so the tab runs with the profile's own setting: sites are denied the location — never given this machine's. Open the page again to get the place; if this keeps happening, restart the browser.`);
     } else if (ev.kind === 'held' && (ev.after === 'lost' || ev.after === 'restart')) {
@@ -9314,6 +9324,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     tabVisibilityFor, captureTabFor, watchTabFor, // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames
     setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
+    geoRegrant: (profileId) => (geoHoldOwn ? geoHoldOwn.regrant(String(profileId || '')).catch(() => false) : Promise.resolve(false)),   // r2311 (i): the dialog watch's reset or leaving ⇒ the hold grants again
     cdpEndpointFor, geoHeldFor: (profileId) => { let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
     // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
