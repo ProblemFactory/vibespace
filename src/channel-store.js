@@ -474,6 +474,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     });
     let st;
     try { st = fam.H.readAtStart(); } finally { startRead = true; }
+    fam.H.takeText();   // 主开发 r2542: the start read's TEXT is not kept — the hold keeps it «until the caller takes it», and the store reads the value alone (index.json's whole text stayed for the store's life: twice the file's bytes a row of heap, measured)
     if (st === 'data') { fam.value = fam.H.answer(); return fam; }
     fam.readMissing = st === 'missing';   // B-f276 1c (r1143 (1)): own-only for the life until a read of this life saw the file
     if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }
@@ -490,6 +491,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   /** the store hold's lift: the family reads again (a small one is taken in place; a big one is SAID, loaded at the next start) */
   function liftFamily(fam, v) {
+    fam.H.takeText();   // r2542: a read again's text is not kept either (the hold set it before this lift)
     if (heldStopped || !holds.has(fam.file)) return;
     if (fam.big) {
       fam.q.readsAt = now(); fam.q.readsAs = 'data';
