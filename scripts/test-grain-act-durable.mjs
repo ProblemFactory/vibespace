@@ -10,6 +10,7 @@
 //      channel-watch fields) reads a newer record's WHO the same; `rule` / `blocks` kept on their rows only, a bad one refused at
 //      the write by name and dropped at the read; the store keeps a row that holds only a block and lands a change of it alone;
 //      a watcher → its entry → the watcher (the settings round-trip)
+//      THE RELEASE's model is the release's OWN file (a3f329c05's src/grant-model.js bytes, their sha256 pinned — r2541 (b))
 //   ② THE ANSWER BEFORE THE INDEX'S DISK — a REAL process whose store writer never writes: the person's two acts (a NEW rule with a
 //      filtered digest watcher; Notify… saved without the agent's own row) are answered; grants.json holds both; the index files
 //      hold neither. RED: the old spelling (the index's durable write awaited) — no answer
@@ -33,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -261,12 +263,19 @@ console.log('① PURE: what the record carries — typed, an older record read a
   console.log('    an older model reads the newer record: ' + J(facts2));
   ok(!!(nOld.ok && nOld.row.to.length === 1 && J(Object.keys(nOld.row.to[0]).sort()) === J(['at', 'by', 'key', 'kind', 'name']) && facts2.oldAdmits && facts2.newAdmits && !facts2.otherOld),
     'an OLDER model (no channel-watch fields) keeps the entry — its WHO judged exactly as this release judges it — and drops the settings it cannot read', facts2);
-  // THE RELEASE's model (a frozen copy of an older tree's grant-model, no channel-watch fields, no row fields) reads the newer record
-  const REL = MUT.load('src/grant-model.js', fs.readFileSync(path.join(REPO, 'scripts/fixtures/grants-read-lookup/base/src/grant-model.js.frozen'), 'utf8'), 'release-model');
+  // THE RELEASE's model (主开发 r2541 (b)): the release 2.369.415's OWN src/grant-model.js — its bytes, held under
+  // scripts/fixtures/grain-act-durable/release-a3f329c05/ and pinned by their sha256 (git show a3f329c05:src/grant-model.js), never an
+  // older tree's copy (the leg read one until r2541: 62583 bytes, not the release's 74663) — reads the newer record
+  const REL_FILE = path.join(REPO, 'scripts/fixtures/grain-act-durable/release-a3f329c05/src/grant-model.js.frozen');
+  const REL_SHA = 'a5c14770c7e3564d5b98b3ce5313a1788d4432147ef4d57f28cb2d8c7d55f539';
+  const relBytes = fs.readFileSync(REL_FILE);
+  const relSha = createHash('sha256').update(relBytes).digest('hex');
+  ok(!!(relSha === REL_SHA && relBytes.length === 74663), `THE RELEASE's model is the release's own file: a3f329c05's src/grant-model.js, ${relBytes.length} bytes, sha256 ${relSha.slice(0, 16)}… (pinned)`, relSha);
+  const REL = MUT.load('src/grant-model.js', relBytes.toString('utf8'), 'release-model');
   const nRel = REL.normRow({ ...newer, blocks: [{ key: 'agent:agent-2' }], cleared: 9 });
   console.log('    the release model reads the newer record: ' + J(nRel.row));
   ok(!!(nRel.ok && J(Object.keys(nRel.row).sort()) === J(['door', 'except', 'resource', 'to']) && nRel.row.to.length === 1 && !('notify' in nRel.row.to[0]) && REL.admits([nRel.row], { conversationKey: 'agent-1', groupIds: [] }).ok),
-    'THE RELEASE\'s model (a frozen older copy): the row\'s rule / blocks / cleared dropped, the entry kept with its settings dropped, WHO judged the same', nRel.row);
+    'THE RELEASE\'s model (its own bytes, a3f329c05): the row\'s rule / blocks / cleared dropped, the entry kept with its settings dropped, WHO judged the same', nRel.row);
   const FW = GM.ENTRY_FIELDS['channel-watch'];
   ok(!!(J(FW.notify) === J(F.NOTIFY_MODES) && J(FW.mode) === J(F.ASSIGN_MODES) && J(FW.delivery) === J(F.DELIVERY_MODES) && J(FW.origin) === J(F.WATCH_ORIGINS.filter((o) => o !== 'user'))), 'the carried closed sets are channel-filter\'s own (notify, mode, delivery; origin less its default)', { FW, F: [F.NOTIFY_MODES, F.ASSIGN_MODES, F.DELIVERY_MODES, F.WATCH_ORIGINS] });
   const UD = path.join(ROOT, 'unreadable'); fs.mkdirSync(UD, { recursive: true }); fs.writeFileSync(path.join(UD, 'grants.json'), '{ not json');
