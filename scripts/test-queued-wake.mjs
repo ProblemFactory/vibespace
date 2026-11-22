@@ -18,6 +18,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };   // (name, condition, detail)
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 const G = require(path.join(REPO, 'src/channel-groups.js'));
@@ -874,7 +883,7 @@ console.log('㉔ AN OLD AGENT\'S FRAME, SAID FOR REAL (B-0a33 cure (c)) — the 
     got.length === 1 && /could not be held: its agent is too old to give a queued message back/.test(got[0].it.text) && got[0].it.sessionName === 'Spending', JSON.stringify({ got: got.map((g) => ({ key: g.key, text: g.it.text, itemKey: g.it.itemKey })), why: got.why }));
   const dsrc = read('src/server/conversation-deliver.js'), NR = "return 'no-remove';";
   ok('㉔ setup: pullQueued\'s «no-remove» is in the ladder once', dsrc.split(NR).length === 2);
-  const NoNR = mutantCopies('queued-wake-nr', REPO).load('src/server/conversation-deliver.js', dsrc.replace(NR, 'return false;'), 'no-remove-false');
+  const NoNR = mutantCopies('queued-wake-nr', REPO).load('src/server/conversation-deliver.js', editAnchor(dsrc, NR, 'return false;', "src/server/conversation-deliver.js"), 'no-remove-false');
   ok('㉔ CONTROL: a ladder whose pullQueued still answers false files NO line — the person is never told (㉔ can go red)', (await run(NoNR)).length === 0);
 }
 
@@ -894,7 +903,7 @@ console.log('㉕ A SETTINGS WRITE ASKS AGAIN (B-0a33 cure (d)) — the re-judge 
   ok('㉕ a frame over the cap is asked back ONCE for what it is (bound: one ask); a sweep asks nothing more; a settings write (`fresh`) asks it once more', r.afterBind === 1 && r.afterSweep === 1 && r.afterWrite === 2, JSON.stringify(r));
   const qsrc = read('src/server/queued-wakes.js'), FR = 'if (!fresh && !again && e.pulled && (';
   ok('㉕ setup: the re-judge\'s fresh test is in queued-wakes once', qsrc.split(FR).length === 2);
-  const NoFresh = mutantCopies('queued-wake-fresh', REPO).load('src/server/queued-wakes.js', qsrc.replace(FR, 'if (!again && e.pulled && ('), 'no-fresh');
+  const NoFresh = mutantCopies('queued-wake-fresh', REPO).load('src/server/queued-wakes.js', editAnchor(qsrc, FR, 'if (!again && e.pulled && (', "src/server/queued-wakes.js"), 'no-fresh');
   ok('㉕ CONTROL: a re-judge that ignores `fresh` never asks again after a settings write (㉕ can go red)', run(NoFresh).afterWrite === 1, JSON.stringify(run(NoFresh)));
 }
 
@@ -904,7 +913,7 @@ console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its l
   const dsrc = read('src/server/conversation-deliver.js');
   const BRANCH = '          else if (rpc.s._isStreaming === true) {';
   ok('⑩ setup: the in-turn branch is in the ladder once', dsrc.split(BRANCH).length === 2);
-  const NoBranch = MUT.load('src/server/conversation-deliver.js', dsrc.replace(BRANCH, '          else if (false) {'), 'no-branch');
+  const NoBranch = MUT.load('src/server/conversation-deliver.js', editAnchor(dsrc, BRANCH, '          else if (false) {', "src/server/conversation-deliver.js"), 'no-branch');
   const W = world('antigravity', { mod: NoBranch });
   const gid = (await W.eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false })).group.id;
   const sent = [];
@@ -915,7 +924,7 @@ console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its l
   const gsrc = read('src/server/groups-engine.js');
   const MOVE = "      if (!(Number(m.reportedUpTo) >= upTo)) m.reportedUpTo = upTo;\n      m.queued = ";
   ok('⑩ setup: markQueued moves the marker once', gsrc.split(MOVE).length === 2);
-  const NoMove = MUT.load('src/server/groups-engine.js', gsrc.replace(MOVE, '      m.queued = '), 'no-marker-move');
+  const NoMove = MUT.load('src/server/groups-engine.js', editAnchor(gsrc, MOVE, '      m.queued = ', "src/server/groups-engine.js"), 'no-marker-move');
   const W4 = world('antigravity', { ge: NoMove });
   const g4 = (await W4.eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false })).group.id;
   const s4 = await W4.eng.post({ group: g4, from: A, text: 'held by the queue', wake: true });
@@ -925,7 +934,7 @@ console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its l
   const msrc = read('src/channel-groups.js');
   const Q = "    const q = queuedFor(m, at);\n    const handed = !q && Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at;";
   ok('⑩ setup: deliveryOf reads the queued entry once', msrc.split(Q).length === 2);
-  const NoQ = MUT.load('src/channel-groups.js', msrc.replace(Q, "    const q = null;\n    const handed = Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at;"), 'no-queued-state');
+  const NoQ = MUT.load('src/channel-groups.js', editAnchor(msrc, Q, "    const q = null;\n    const handed = Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at;", "src/channel-groups.js"), 'no-queued-state');
   const W5 = world('antigravity');
   const g5 = (await W5.eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false })).group.id;
   const s5 = await W5.eng.post({ group: g5, from: A, text: 'still in the queue', wake: true });
@@ -935,14 +944,14 @@ console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its l
   const qsrc = read('src/server/queued-wakes.js');
   const GUARD = "    if (stillUnread()) {   // B-e3fe: never written over while it cannot be read\n";
   ok('⑩ setup: persist() asks stillUnread() once', qsrc.split(GUARD).length === 2);
-  const NoGuard = MUT.load('src/server/queued-wakes.js', qsrc.replace(GUARD, '    if (false) {\n'), 'no-unread-guard');
+  const NoGuard = MUT.load('src/server/queued-wakes.js', editAnchor(qsrc, GUARD, '    if (false) {\n', "src/server/queued-wakes.js"), 'no-unread-guard');
   const wg = mkUnread(NoGuard, TORN_QW); unreadFrame(wg, 'new words'); const wgLast = lastWrite(wg);
   ok('⑩ WITHOUT the guard the torn msg-queued.json is WRITTEN OVER at the first write with this process\'s entry alone — the frame it held is gone (㉒ A can go red)',
     wg.writes.length > 0 && !!wgLast && wgLast.v === 2 && wgLast.entries.length === 1 && !wg.writes.some((x) => x.includes('old-1')), JSON.stringify({ n: wg.writes.length, wgLast }));
   // B-e3fe: the join removed ⇒ a file that reads again is written over with this process's entries alone
   const JOIN = "      entries = [...entries, ...held.entries.filter((e) => !ids.has(e.id))];";
   ok('⑩ setup: the re-read joins the file\'s entries once', qsrc.split(JOIN).length === 2);
-  const NoJoin = MUT.load('src/server/queued-wakes.js', qsrc.replace(JOIN, '      entries = [...entries];'), 'no-unread-join');
+  const NoJoin = MUT.load('src/server/queued-wakes.js', editAnchor(qsrc, JOIN, '      entries = [...entries];', "src/server/queued-wakes.js"), 'no-unread-join');
   const wj = mkUnread(NoJoin, TORN_QW); unreadFrame(wj, 'j1'); wj.disk.now = OLD_QW; wj.adv(60e3); unreadFrame(wj, 'j2'); const wjLast = lastWrite(wj);
   ok('⑩ WITHOUT the join, the file that reads again is written over with this process\'s two frames alone — old-1 is lost (㉒ C can go red)',
     !!wjLast && wjLast.entries.length === 2 && !wjLast.entries.some((x) => x.id === 'old-1'), JSON.stringify({ wjLast }));

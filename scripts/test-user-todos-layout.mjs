@@ -942,10 +942,10 @@ console.log('⑫ THE SIZE OF AN ITEM + THE PREVIEW SHAPE (2026-09-27, the For-yo
     const ROW_OF = require(path.join(ROOT, 'src/foryou-actions.js')).ROW_OF, producerOf = (type) => (ROW_OF[type] || {}).producer;
     const olderRecs = JSON.parse(fs.readFileSync(path.join(olderTree(), 'user-todos.json'), 'utf8')).items;
     const rungMarks = (IOm) => ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'b0', 'b1', 'b2'].map((x) => (IOm.legacyAsk(olderRecs.find((r) => r.id === 'ut-00000000' + x), producerOf) ? 'ask' : '-')).join();
-    const IO7 = ioSrc.includes(AGENTS) ? M.load('src/inbox-origin.js', ioSrc.replace(AGENTS, "i.origin === 'agent'"), 'r7-origin') : null;
+    const IO7 = ioSrc.includes(AGENTS) ? M.load('src/inbox-origin.js', editAnchor(ioSrc, AGENTS, "i.origin === 'agent'", "src/inbox-origin.js"), 'r7-origin') : null;
     ok(IO7, 'CONTROL needle present: the ask rung reads an origin-less item as the tray does (r8) — a tree without it has nothing to patch');
     if (IO7) ok(rungMarks(IO7) === 'ask,ask,ask,-,-,-,-,-,-,-,-,-', 'CONTROL r7\'s rung (origin `agent` only) ⇒ the pre-.169 ask stays unmarked — its page reads «Made here» while the store keeps it — RED', rungMarks(IO7));
-    const IO8 = ioSrc.includes(BROWSER) ? M.load('src/inbox-origin.js', ioSrc.replace(BROWSER, ''), 'r8-origin') : null;
+    const IO8 = ioSrc.includes(BROWSER) ? M.load('src/inbox-origin.js', editAnchor(ioSrc, BROWSER, '', "src/inbox-origin.js"), 'r8-origin') : null;
     ok(IO8, 'CONTROL needle present: the ask rung tells the browser\'s .168 records apart (r9) — a tree without it has nothing to patch');
     if (IO8) ok(rungMarks(IO8) === 'ask,ask,ask,-,-,-,ask,-,-,ask,ask,ask', 'CONTROL r8\'s rung (every origin-less item the tray files under Agents) ⇒ the browser\'s three .168 records marked as asks — the lapsed takeover\'s page a phantom «for you» — RED', rungMarks(IO8));
     // the mark is the ask route's alone: a product file other than src/agent-routes/status.js is refused by name
@@ -1031,7 +1031,7 @@ console.log('⑫ THE SIZE OF AN ITEM + THE PREVIEW SHAPE (2026-09-27, the For-yo
     const src = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
     const needle = '    if (!i || !i.detailTruncated) return i;';
     ok(src.includes(needle), 'control needle present in user-todos-layout.js');
-    const noRestore = await import(pathToFileURL(M.write('src/lib/user-todos-layout.js', src.split(needle).join('    if (i) return i;'), 'no-restore')).href);
+    const noRestore = await import(pathToFileURL(M.write('src/lib/user-todos-layout.js', editAnchor(src, needle, '    if (i) return i;', "src/lib/user-todos-layout.js", 'join'), 'no-restore')).href);
     const r = noRestore.restoreDetails({ open: [], resolved: [{ id: 'a', status: 'done', detail: WHOLE.slice(0, 300), detailTruncated: true }] }, seen.fullById);
     ok(r.todos.resolved[0].detailTruncated === true, 'CONTROL: a copy that never restores leaves the reader\'s item a preview (the restore leg fails on it)');
   }
@@ -1505,7 +1505,7 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
     const src = fs.readFileSync(path.join(ROOT, 'src/attention-model.js'), 'utf8');
     const needle = '  if (r.plugin || r.blocked || ';
     ok(src.split(needle).length === 2, 'the mutant\'s needle occurs exactly once (else the control proves nothing)');
-    const Mut = M.load('src/attention-model.js', src.replace(needle, '  if (r.blocked || '), 'pin');
+    const Mut = M.load('src/attention-model.js', editAnchor(src, needle, '  if (r.blocked || ', "src/attention-model.js"), 'pin');
     const vm = verdict(L, open, Mut);
     ok(JSON.stringify(vm.bands) !== JSON.stringify(want.bands) && vm.bands[vm.bands.length - 1].endsWith('h1+q1+p2+p1'), 'MUTANT RED: without the rule the reminders sort by time into band 5, under the high ask', vm.bands);
   }
@@ -2238,7 +2238,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     for (const [edge, [from, to]] of Object.entries(MUT)) {
       const real = kept(U, edge);
       const applied = USRC.split(from).length === 2;
-      const Um = applied ? await import(pathToFileURL(MU.write('src/lib/utils.js', USRC.replace(from, to), edge.toLowerCase())).href) : null;
+      const Um = applied ? await import(pathToFileURL(MU.write('src/lib/utils.js', editAnchor(USRC, from, to, "src/lib/utils.js"), edge.toLowerCase())).href) : null;
       const mut = Um ? kept(Um, edge) : null;
       rows.push({ edge, real, mut, applied });
     }
@@ -2263,7 +2263,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     const M9 = { list: ["'.chat-input-area, .chat-attn-dock, .window-controls, .chat-permission-inline button, .cn-card.cn-open button, .cn-card textarea'", "'.chat-input-area, .chat-attn-dock, .window-controls'"],
       clip: ['cb = c || b;', 'cb = b;'], msg: ['if (m && c && (m.bottom <= c.top', 'if (false && m && c && (m.bottom <= c.top'], soft: ["soft: !!el.classList?.contains('window-controls') || !!list });", "soft: !!el.classList?.contains('window-controls') });"] };
     const m9 = {};
-    for (const [k, [from, to]] of Object.entries(M9)) { if (USRC.split(from).length !== 2) { m9[k] = 'ANCHOR GONE'; continue; } m9[k] = t9(await import(pathToFileURL(MU.write('src/lib/utils.js', USRC.replace(from, to), 'b9a64-' + k)).href)); }
+    for (const [k, [from, to]] of Object.entries(M9)) { if (USRC.split(from).length !== 2) { m9[k] = 'ANCHOR GONE'; continue; } m9[k] = t9(await import(pathToFileURL(MU.write('src/lib/utils.js', editAnchor(USRC, from, to, "src/lib/utils.js"), 'b9a64-' + k)).href)); }
     ok(m9.list !== 'ANCHOR GONE' && m9.list.kinds.every((x) => x === 554) && m9.clip !== 'ANCHOR GONE' && m9.clip.out === 392 && m9.msg !== 'ANCHOR GONE' && m9.msg.far[1] > 0 && m9.soft !== 'ANCHOR GONE' && m9.soft.tall === 554,
       `CONTROLS (B-9a64): the list without the transcript stands on the press point (${J(m9.list && m9.list.kinds)}); without the list's clip a scrolled-out one still pushes it (${m9.clip && m9.clip.out}); without the message's box first a far message's press point is read (${J(m9.msg && m9.msg.far)}); the transcript HARD puts it on the composer (${m9.soft && m9.soft.tall}) — each RED by name`, m9);
   }
@@ -2492,7 +2492,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     const keyed = ['The command is cut — its card holds the whole', '(too long to show here — the hosts are on its card)', '(too long to show here — the hosts, and «Always», are on its card)', "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and the hosts it sends to are on its card in For you"].every((k) => ZH.includes(J(k) + ':') && JA.includes(J(k) + ':'));
     ok(J(wNone) === '["always"]' && J(wPast) === '[]' && toastPick && keyed, `the landing's toast says what the strip offers — the strip that withholds «Always» (${J(wNone)}) is named «offers Allow once and Deny — «Always» and the hosts it sends to … on its card in For you»; one that offers all (${J(wPast)}) keeps «answer it in the strip»; every new word in zh and ja`, { wNone, wPast, toastPick, keyed });
     // the controls: a renderer that offers «Always» whatever fits; a strip grammar that hides the facts again
-    const mut = src.replace("answers = held.filter((a) => a !== 'always' || s.fits);", 'answers = held;');
+    const mut = editAnchor(src, "answers = held.filter((a) => a !== 'always' || s.fits);", 'answers = held;', "src/lib/user-todos-row.js");
     const Rm = await import(pathToFileURL(mutantCopies('utrow15', ROOT).write(REL, mut, 'stripall')).href);
     const gm = seeAll(Rm), gc = seeAll(R, CC.replace(/:not\(\.ut-run-cmd, \.ut-run-gist, \.ut-run-changes, \.ut-run-answer(?:, \.ut-dock-fold)?\)/, ':not(.ut-run-cmd, .ut-run-answer)')); // the .367 seam 6 keeps .ut-run-changes
     ok(mut !== src && gm.many.answers.includes('always') && !gm.many.facts.includes('replica-0'), `CONTROL (r15): the mutant that offers «Always» whatever fits puts it beside twelve hosts it does not show (${J(gm.many.answers)}) — the leg goes red`, gm.many);
@@ -2715,7 +2715,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
       `r16: the bound counts the HOSTS row alone — five hosts (${five.list.join(', ').length} characters) + the «asked again» line ⇒ fits (${st16 && st16.fits}), the hosts whole and every answer the card offers (${J(f.answers)})`, { st16: st16 && { fits: st16.fits }, f });
     const FAS = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8');
     const from = "const fits = !hosts || hosts.label.length + 1 + hosts.lines.map(words).join(', ').length <= RUN_STRIP_MAX;";
-    const mutFA = FAS.replace(from, "const fits = card.rows.filter((r) => r.key === 'hosts' || r.warn).reduce((k, r) => k + r.label.length + 1 + r.lines.map(words).join(', ').length, 0) + (card.again ? words(card.again).length : 0) <= RUN_STRIP_MAX;");
+    const mutFA = editAnchor(FAS, from, "const fits = card.rows.filter((r) => r.key === 'hosts' || r.warn).reduce((k, r) => k + r.label.length + 1 + r.lines.map(words).join(', ').length, 0) + (card.again ? words(card.again).length : 0) <= RUN_STRIP_MAX;", "src/foryou-actions.js");
     const FAx = mutFA !== FAS ? createRequire(import.meta.url)(mutantCopies('fa16', ROOT).write('src/foryou-actions.js', mutFA, 'stripcount')) : null;
     const stx = FAx ? FAx.runStripOf(FAx.runCardOf(A16.fits.item, { t: ctx.t })) : null;
     ok(!!stx && stx.fits === false, `CONTROL (r16): the mutant that counts the warnings and the «asked again» line inside the bound (882665da7's) withholds five hosts that fit, and «Always» with them (fits ${stx && stx.fits}) — the leg goes red`, { stx: stx && stx.fits });
@@ -2781,7 +2781,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     const p21 = progOf(FA17, 2100), p15 = progOf(FA17, 1500);
     ok(/…$/.test(p21.card) && /^…a+\/evil-tail\/run\.sh \(shortened — the whole is on its card\) \(in a folder an agent can write\)$/.test(p21.words) && /\/evil-tail\/run\.sh \(shortened — the whole is on its card\)/.test(p15.words),
       `RED-able (r17 — e77f7a3f6: «…aaaa…» + «(in a folder an agent can write)» — no program, nothing said): a 2 100-character writable path (the card's value its head «…${p21.card.slice(-8)}») ⇒ the strip keeps the ORIGINAL's tail and says it was shortened («${p21.words}»); 1 500 characters the same («${p15.words.slice(-80)}»)`, { p21: p21.words, p15: p15.words });
-    const FAS17 = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), mid17 = FAS17.replace('const { whole, ...y } = x, v = whole != null ? whole : x[k];', 'const { whole, ...y } = x, v = x[k];');
+    const FAS17 = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), mid17 = editAnchor(FAS17, 'const { whole, ...y } = x, v = whole != null ? whole : x[k];', 'const { whole, ...y } = x, v = x[k];', "src/foryou-actions.js");
     const FAy = mid17 !== FAS17 ? createRequire(import.meta.url)(mutantCopies('fa17', ROOT).write('src/foryou-actions.js', mid17, 'cardvalue')) : null, py = FAy ? progOf(FAy, 2100) : null;
     ok(!!py && !/evil-tail/.test(py.words), `CONTROL (r17): the mutant that cuts the CARD's value draws a middle slice («${py && py.words}») — the leg goes red`, { py: py && py.words });
   } catch (e) { ok(false, '㉟ D: the pure strip runs', e.stack); }

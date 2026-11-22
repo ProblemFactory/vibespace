@@ -557,9 +557,9 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
     const wc = "if (row) pkCache = PS.normalizeStore(PS.dropRows(pkRead(), pid, (x) => x.credentialId === row.credentialId).store); ";
     ok(ds.includes(gb) && ds.includes(wc), 'control setup (B-d981 (3)): the give-back and the kernel road\'s own undo of its unstored row are where the controls cut');
     const MD = mutantCopies('browser-passkey-d981', REPO);
-    const burnt = await legD(MD.load('src/server/browser-dialogs.js', ds.replace(gb, '    const giveBack = () => {};'), 'burns-grant'));
+    const burnt = await legD(MD.load('src/server/browser-dialogs.js', editAnchor(ds, gb, '    const giveBack = () => {};', "src/server/browser-dialogs.js"), 'burns-grant'));
     ok(burnt.a2 === 'NotAllowedError' && burnt.r2why === 'no-grant' && burnt.rows === 0, 'CONTROL (B-d981 (3)): a gate that burns the grant at its verdict — the retry is refused no-grant (RED for the leg above)', burnt);
-    const kept = await legD(MD.load('src/server/browser-dialogs.js', ds.replace(wc, ''), 'cache-keeps'));
+    const kept = await legD(MD.load('src/server/browser-dialogs.js', editAnchor(ds, wc, '', "src/server/browser-dialogs.js"), 'cache-keeps'));
     ok(kept.rows === 2, 'CONTROL (B-d981 (3)): a store cache that keeps the unwritten row stores TWO keys after the retry — one the site never got (RED for the leg above)', kept);
   }
   // B-d981 cure (主开发 09:07Z): the two give-back exits that had no leg — the vault locked when the key is made
@@ -591,7 +591,7 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
     const gbG = "    const giveBack = () => { if (taken && pkAnswered.get(gk) === taken && now() <= taken.expiresAt) { taken.used = false; pkGrants.set(gk, taken); } };";
     if (!dsG.includes(gbG)) throw new Error('the anchor of the control «B-d981 cure: the grant burnt» is not in the source');
     const MG = mutantCopies('browser-passkey-d981-cure', REPO);
-    const Mburn = MG.load('src/server/browser-dialogs.js', dsG.replace(gbG, '    const giveBack = () => {};'), 'burns-grant-2');
+    const Mburn = MG.load('src/server/browser-dialogs.js', editAnchor(dsG, gbG, '    const giveBack = () => {};', "src/server/browser-dialogs.js"), 'burns-grant-2');
     const L0 = await legL(Mburn), G0 = await legG(Mburn);
     ok(L0.r2why === 'no-grant' && G0.r2why === 'no-grant' && G0.rows === 0,
       'CONTROL (B-d981 cure): a gate that burns the grant at its verdict refuses both retries no-grant (RED for the two legs above)', { L0, G0 });
@@ -1043,7 +1043,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const DISARM_REARM = "    { const r = rearms.get(String(profileId || '')); if (r && r.t) clearTimeout(r.t); rearms.delete(String(profileId || '')); }";
     ok(dsrc346.split(DISARM_REARM).length === 2, 'B-346d control setup: the disarm\'s end of a pending re-arm is found once in src/server/browser-dialogs.js');
     const MUT346 = mutantCopies('browser-passkey-b346d', REPO);
-    const noEnd = MUT346.write('src/server/browser-dialogs.js', dsrc346.replace(DISARM_REARM, '    { /* (no end of a pending re-arm) */ }'), 'b346d-disarm-keeps-rearm');
+    const noEnd = MUT346.write('src/server/browser-dialogs.js', editAnchor(dsrc346, DISARM_REARM, '    { /* (no end of a pending re-arm) */ }', "src/server/browser-dialogs.js"), 'b346d-disarm-keeps-rearm');
     const [stopNow, stopCtl] = await Promise.all([stoppedLeg(null), stoppedLeg(noEnd)]);
     ok(stopNow === 0 && stopCtl > 0, `B-346d: a socket closed under an open view, then the browser STOPS — no socket opens after it (${stopNow}); CONTROL: a disarm that leaves the pending re-arm opens ${stopCtl} on the stopped browser — RED`, { stopNow, stopCtl });
   }
@@ -1203,7 +1203,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const needle = "    return { type: 'prompt-fact', fact: f && f.state === 'prompt' && f.prompt ? f : null, profileId: relayProfileId(relay), ended: (ps && ps.ended) || null, hook: (ps && ps.hook) || null };";
     ok(bs.includes(needle), 'control setup (B-37a1): the record line is where the control cuts');
     const MUT37 = mutantCopies('browser-passkey-37a1', REPO);
-    const bad = await run(MUT37.load('src/server/browser-stream.js', bs.replace(needle, '    return null;'), 'no-prompt-record'));
+    const bad = await run(MUT37.load('src/server/browser-stream.js', editAnchor(bs, needle, '    return null;', "src/server/browser-stream.js"), 'no-prompt-record'));
     ok(bad.atHello.length === 0 && bad.afterClear.length === 0, 'CONTROL (B-37a1): a bridge without the record says nothing of the sheet to the person\'s window — the base\'s gap (RED for the leg above)', bad);
     // the window's own code: its `prompt-fact` case and stuckNow (sliced), then the REAL deskDoorOf / deskDoorStuck the door renders by
     const lw = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
@@ -1348,7 +1348,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const digestNow = "  const promptDigestOf = (rec) => (rec && (rec.fact || rec.ended || rec.hook) ? JSON.stringify([rec.fact ? rec.fact.prompt : null, rec.ended || null, rec.hook || null]) : '');";
     if (bsB.split(digestNow).length !== 2) throw new Error('B-b56d control setup: the digest line is not found once in src/server/browser-stream.js');
     const MUTe = mutantCopies('browser-passkey-b56d-ended', REPO);
-    const erBase = await endedRun(MUTe.load('src/server/browser-stream.js', bsB.replace(digestNow, "  const promptDigestOf = (rec) => (rec && rec.fact ? JSON.stringify(rec.fact.prompt) : '');"), 'digest-fact-only'));   // stale-pins: kept — the base's digest, written back by this RED control
+    const erBase = await endedRun(MUTe.load('src/server/browser-stream.js', editAnchor(bsB, digestNow, "  const promptDigestOf = (rec) => (rec && rec.fact ? JSON.stringify(rec.fact.prompt) : '');", "src/server/browser-stream.js"), 'digest-fact-only'));   // stale-pins: kept — the base's digest, written back by this RED control
     ok(erBase.after.length === 1 && !erBase.after.some((m) => m.ended), 'CONTROL (主开发 (4)): a bridge whose digest reads the fact only never sends the ended note — the window would not say it (RED for the leg above)', erBase);
     const MUTb = mutantCopies('browser-passkey-b56d', REPO);
     const baseB = await run(MUTb.load('src/server/browser-stream.js', editAnchor(editAnchor(editAnchor(bsB, cut1, "    if (false && credentialView(viewer)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in", "src/server/browser-stream.js"), cut2, '    if (false && !(viewer.page && pageVerdict(', "src/server/browser-stream.js"), cut3, ' }', "src/server/browser-stream.js"), 'no-person-road'));
@@ -1767,13 +1767,13 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
     const ONE_END = " rpId = rpId || rec.rpId; pkEnd(w, e, rec).catch(";
     // RED CONTROL: the Cancel no longer reaching the one end (the pkEnd it hands each ended ceremony removed) — the key stays
-    const mut = MUTP.write('src/server/browser-dialogs.js', dsrc.replace(ONE_END, " rpId = rpId || rec.rpId; void (w, e, rec, () => {}).catch?.("), 'b97ae-no-end');
+    const mut = MUTP.write('src/server/browser-dialogs.js', editAnchor(dsrc, ONE_END, " rpId = rpId || rec.rpId; void (w, e, rec, () => {}).catch?.(", "src/server/browser-dialogs.js"), 'b97ae-no-end');
     const r = await cancelRun('answer-first', { modPath: mut });
     ok(dsrc.split(ONE_END).length === 2 && r.lent.auth && r.after.removedIds.length === 0 && r.after.auth === r.auth1,
       'B-97ae RED CONTROL: a Cancel that marks the ceremony ended without the one end (05082bbd0\'s cancelPasskey) leaves the person\'s key lent on the tab — the order that was red on real Chrome', r);
     // TIMER CONTROL (acceptance): the one end reached, but 50 ms late — at rest the key, its UV and the authenticator are still on
     // the tab: the legs above are red by BEHAVIOUR on a delayed end, not by a text anchor
-    const late = MUTP.write('src/server/browser-dialogs.js', dsrc.replace(ONE_END, " rpId = rpId || rec.rpId; new Promise((go) => setTimeout(go, 50)).then(() => pkEnd(w, e, rec)).catch("), 'b97ae-late-end');
+    const late = MUTP.write('src/server/browser-dialogs.js', editAnchor(dsrc, ONE_END, " rpId = rpId || rec.rpId; new Promise((go) => setTimeout(go, 50)).then(() => pkEnd(w, e, rec)).catch(", "src/server/browser-dialogs.js"), 'b97ae-late-end');
     for (const order of ['answer-first', 'never-reported']) {
       const t = await cancelRun(order, { modPath: late });
       ok(dsrc.split(ONE_END).length === 2 && lentOk(t) && !backOk(t) && t.after.auth === t.auth1 && t.after.keysOn1.length === 1 && t.after.uvOn.includes(t.auth1),

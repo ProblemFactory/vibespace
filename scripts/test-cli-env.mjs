@@ -56,6 +56,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const DIR = scratch('cli-env');
 fs.rmSync(DIR, { recursive: true, force: true });
@@ -405,7 +414,7 @@ const M = mutantCopies('cli-env', REPO); // ONE copy set for ④ and ⑦ — its
   const ccSrc = read('src/server/cli-cmd.js'), rtSrc = read('src/server/backend-status-route.js');
   const BOUND = '        if (!force && now() - e.lookedAt < recheckMs) return null;\n';
   ok('control unbounded: the bound line exists in cli-cmd.js', ccSrc.includes(BOUND));
-  const unbounded = M.load('src/server/cli-cmd.js', ccSrc.replace(BOUND, ''), 'unbounded');
+  const unbounded = M.load('src/server/cli-cmd.js', editAnchor(ccSrc, BOUND, '', "src/server/cli-cmd.js"), 'unbounded');
   const redU = (await helperLegs(unbounded)).filter((r) => !r.pass).map((r) => r.name);
   ok(`control unbounded (a lookup on EVERY read): THE BOUND leg is RED by call count (${redU.length} red)`, redU.some((n) => /^THE BOUND/.test(n)), redU.join(' | ').slice(0, 300));
   const PRE = [
@@ -416,7 +425,7 @@ const M = mutantCopies('cli-env', REPO); // ONE copy set for ④ and ⑦ — its
   const preRoute = M.load('src/server/backend-status-route.js', PRE.reduce((s, [a, b]) => s.replace(a, b), rtSrc), 'pre-fix');
   const redP = (await routeLegs(preRoute, CLI)).filter((r) => !r.pass).map((r) => r.name);
   ok(`control pre-fix (the boot answer, no check — the owner's card): the "appears" leg is RED (${redP.length} red)`, redP.some((n) => /says INSTALLED/.test(n)), redP.join(' | ').slice(0, 300));
-  const staleRoute = M.load('src/server/backend-status-route.js', rtSrc.replace('machineStatus({ cmd: cmdOf(h.id) })', 'machineStatus({ cmd: cliCmds?.current?.(h.id) ?? null })'), 'current-not-checked');
+  const staleRoute = M.load('src/server/backend-status-route.js', editAnchor(rtSrc, 'machineStatus({ cmd: cmdOf(h.id) })', 'machineStatus({ cmd: cliCmds?.current?.(h.id) ?? null })', "src/server/backend-status-route.js"), 'current-not-checked');
   const redS = (await routeLegs(staleRoute, CLI)).filter((r) => !r.pass).map((r) => r.name);
   ok(`control current-not-checked (a check runs, the row reads the registry): the uninstall leg is RED (${redS.length} red)`, redS.some((n) => /removed/.test(n)), redS.join(' | ').slice(0, 300));
 }
@@ -702,7 +711,7 @@ else {
   ok('wiring: the ssh ladder\'s terminal and the dial ladder run that program (else the configured name); the host status carries the census', ssh.includes('const rcmdT = c.rcmd || rcmd;') && ssh.includes('...spawnEnvPairs.map(shq), rcmdT, ...spawnArgs.map(shq)]') && dial.includes('const rcmd1 = SP.loginShell ? rcmd0 : (rcmd || rcmd0);') && dial.includes('...spawnEnvPairs.map(shq), rcmd1, ') && xr.includes('cliWhere: rc.census(req.params.id)'));
   const rsrc = read('src/server/remote-cli.js'), RA = "    if (a.kind === 'path') return programLine(a.path, { tools: integration });\n";
   ok('the remote mutant\'s anchor is in remote-cli.js', rsrc.split(RA).length === 2);
-  const RM = rsrc.includes(RA) ? M.load('src/server/remote-cli.js', rsrc.replace(RA, "    if (a.kind === 'path') return name;\n"), 'remote-name') : null;
+  const RM = rsrc.includes(RA) ? M.load('src/server/remote-cli.js', editAnchor(rsrc, RA, "    if (a.kind === 'path') return name;\n", "src/server/remote-cli.js"), 'remote-name') : null;
   const redR = RM ? (await remoteLegs(RM, REM11.LSM)).filter((r) => !r.pass).map((r) => r.name) : [];
   const parR = RM ? (await REM11.runsOf(RM)).filter((m) => { const l = loc.find((x) => x.label === m.label && x.sn === m.sn); return l && !same(l, m); }).length : 0;
   ok(`MUTANT the answer ignored (the configured name, the pre-twin road) ⇒ the path leg RED (${redR.length}) and the parity RED on ${parR} runs`, redR.some((n) => /^THE REMOTE TWIN/.test(n)) && parR > 0, redR.join(' | ').slice(0, 300));
@@ -748,7 +757,7 @@ else {
   ok(`THE VIBESPACE TOOLS STAY FIRST: after the spawn's integrated prelude, the program line of a CLI installed beside the real browser driver reaches the SHIM (${d1}); a pristine spawn gets no tools dir from the line (${d0}), even when the machine's own PATH holds it (${dLeft})`, d1 === 'DRIVER-SHIM' && d0 === 'DRIVER-REAL' && dLeft === 'DRIVER-REAL', { d1, d0, dLeft });
   const PLA = "const programLine = (p, { tools = false } = {}) => `env PATH=${tools ? '\"$HOME/.vibespace/bin\":' : ''}${shWord(p.replace(/\\/[^/]*$/, '') || '/')}:\"$PATH\" ${shWord(p)}`;";
   ok('the anchor of the control «the CLI\'s dir first» is in remote-cli.js once', rsrc.split(PLA).length === 2);
-  const RP = rsrc.includes(PLA) ? M.load('src/server/remote-cli.js', rsrc.replace(PLA, "const programLine = (p, { tools = false } = {}) => `env PATH=${shWord(p.replace(/\\/[^/]*$/, '') || '/')}:\"$PATH\" ${shWord(p)}`;"), 'cli-dir-first') : null;   // the tip before this, on purpose — stale-pins: kept
+  const RP = rsrc.includes(PLA) ? M.load('src/server/remote-cli.js', editAnchor(rsrc, PLA, "const programLine = (p, { tools = false } = {}) => `env PATH=${shWord(p.replace(/\\/[^/]*$/, '') || '/')}:\"$PATH\" ${shWord(p)}`;", "src/server/remote-cli.js"), 'cli-dir-first') : null;   // the tip before this, on purpose — stale-pins: kept
   const dR = RP ? driverBy(RP, true) : null;
   ok(`RED CONTROL: the line with the CLI's directory first (the tip before this) — the REAL driver answers, the mediation bypassed without a sign (${dR})`, dR === 'DRIVER-REAL', dR);
   // MUST 2 — ONE PRELUDE FOR THE ASK AND THE SPAWN, and the fallback rung is a LOGIN sh as the spawn's: the machine's login
@@ -765,10 +774,10 @@ else {
     ok(`ONE PRELUDE FOR THE ASK AND THE SPAWN: with integration on the spawn's prelude reaches the CLI (${s1 ? 'found' : 'none'}) and the ask agrees — the name runs (${JSON.stringify(a1)}); with it off neither has it — refused (${JSON.stringify(a0)})`,
       s1 === path.join(PB, 'b63cli') && a1.cmd === 'b63cli' && s0 === '' && a0.err === 'cli-missing', { s1, s0, a1, a0 });
     ok(`…and the fallback rung is a LOGIN sh as the spawn's: a CLI only ~/.profile puts on PATH — the spawn's login sh reaches it (${sm ? 'found' : 'none'}), the ask agrees, the name runs (${JSON.stringify(am)})`, sm === path.join(PH, 'bin', 'mycli') && am.cmd === 'mycli', { sm, am });
-    const RA2 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', rsrc.replace(PAA, "const preludeAsk = (name, integration) => `sh -lc ${sq(`${buildRemoteShellPrelude({})}printf '\\\\n${R_PRE}%s\\\\n' \"$(command -v ${name} 2>/dev/null | head -n 1)\"`)} </dev/null 2>/dev/null`;"), 'short-ask-prelude') : null;
+    const RA2 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', editAnchor(rsrc, PAA, "const preludeAsk = (name, integration) => `sh -lc ${sq(`${buildRemoteShellPrelude({})}printf '\\\\n${R_PRE}%s\\\\n' \"$(command -v ${name} 2>/dev/null | head -n 1)\"`)} </dev/null 2>/dev/null`;", "src/server/remote-cli.js"), 'short-ask-prelude') : null;
     const aR = RA2 ? await askBy(RA2, 'b63cli', true) : null;
     ok(`RED CONTROL: the ask with the base prelude only (the first tip: no node finder) — a create the spawn would run is REFUSED (${JSON.stringify(aR)})`, !!aR && aR.err === 'cli-missing', aR);
-    const RA3 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', rsrc.replace(PAA, "const preludeAsk = (name, integration) => `printf '\\\\n${R_PRE}%s\\\\n' \"$( ${askPrelude(integration)} command -v ${name} 2>/dev/null | head -n 1 )\"`;"), 'non-login-fallback') : null;   // the cure's first cut, on purpose — stale-pins: kept
+    const RA3 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', editAnchor(rsrc, PAA, "const preludeAsk = (name, integration) => `printf '\\\\n${R_PRE}%s\\\\n' \"$( ${askPrelude(integration)} command -v ${name} 2>/dev/null | head -n 1 )\"`;", "src/server/remote-cli.js"), 'non-login-fallback') : null;   // the cure's first cut, on purpose — stale-pins: kept
     const aN = RA3 ? await askBy(RA3, 'mycli', false) : null;
     ok(`RED CONTROL: a non-login fallback (the cure's first cut) — the CLI only ~/.profile reaches is REFUSED though the spawn would run it (${JSON.stringify(aN)})`, !!aN && aN.err === 'cli-missing', aN);
   }
@@ -790,7 +799,7 @@ const SEVEN = (() => {
     ['session not signalled (only the shell is killed at the bound — the probe\'s own group never)', "    const killGroup = () => { if (child && Number.isInteger(child.pid) && child.pid > 1) { try { process.kill(-child.pid, 'SIGKILL'); } catch { } } };", '    const killGroup = () => { };', (m) => sleepyTurn(() => rungLegs(m, { groups: ['sleepy'], deathMs: 1500 })), /leftover child/],   // 1.5 s: the shell is gone at once, a child nobody signalled lives on (sleep 60) — the real leg keeps DEATH_MS
   ];
   const runs = MUT.map(([label, from, to, legs]) => cc.includes(from)
-    ? legs(M.load('src/server/cli-cmd.js', cc.replace(from, to), label.split(' ')[0].replace(/[^a-z]/g, ''))).then((rs) => rs.filter((r) => !r.pass).map((r) => r.name))
+    ? legs(M.load('src/server/cli-cmd.js', editAnchor(cc, from, to, "src/server/cli-cmd.js"), label.split(' ')[0].replace(/[^a-z]/g, ''))).then((rs) => rs.filter((r) => !r.pass).map((r) => r.name))
     : Promise.resolve(null));
   return { MUT, reds: Promise.all(runs) };
 })();
@@ -1010,7 +1019,7 @@ console.log('⑨b round 3 — THE LOCAL SHELL\'S ANSWER IS LOCAL: a remote road 
   const cc = read('src/server/cli-cmd.js');
   const RFROM = '      return e && cmd && cmd === e.current ? base(e.name) : base(cmd);';
   if (ok('B r3 mutant: the remoteName line exists', cc.includes(RFROM))) {
-    const mm = M.load('src/server/cli-cmd.js', cc.replace(RFROM, '      return base(cmd);'), 'remotebase');
+    const mm = M.load('src/server/cli-cmd.js', editAnchor(cc, RFROM, '      return base(cmd);', "src/server/cli-cmd.js"), 'remotebase');
     const rm = await remoteLegs(mm);
     ok(`B r3 mutant «the remote command = basename of the adopted path» ⇒ RED («${rm.rn}»)`, !rm.pass && rm.rn !== 'codex', JSON.stringify(rm));
   }

@@ -537,7 +537,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   ok(err13 && err13.code === 'STALE' && allRowsCalls === 0, `§13 a shard rewritten under EVERY try ⇒ ${err13 && err13.code}: "${err13 && err13.message.slice(0, 60)}…", the loop never folded`);
   const M = mutantCopies('cachebounds-uh', REPO);
   const uhSrc = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
-  const r2rung = uhSrc.replace("throw Object.assign(new Error('the usage ledger was rewritten during the read twice (' + e.message + ') — retry'), { code: 'STALE' });", 'return this.aggregate(opts); // r2: the last rung folded on the loop');
+  const r2rung = editAnchor(uhSrc, "throw Object.assign(new Error('the usage ledger was rewritten during the read twice (' + e.message + ') — retry'), { code: 'STALE' });", 'return this.aggregate(opts); // r2: the last rung folded on the loop', "src/usage-history.js");
   const UH2 = M.load('src/usage-history.js', r2rung, 'r2rung').UsageHistory;
   const t2 = new UH2({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); t2.ledgerWindowMs = 40 * DAY; t2.ledgerHotMaxBytes = 60 * 1024; t2.warm();
   let n2 = 0; const real2 = t2._allRows.bind(t2); t2._allRows = function* (...x) { n2++; yield* real2(...x); };
@@ -593,7 +593,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   // §14's r2 fallback copy and its two children run INSIDE this control's 1 s (lane fast-debt-clear): they share nothing with
   // t's pending walk (the copy is its own patched module; the children their own processes, READING r3), and the verdict
   // below can only be 'still waiting' if the fold still waits when they are done — never less than 1 s of proof
-  const fb = uhSrc.replace("      throw e;\n    } finally { if (c.walking > 0) c.walking--;", "      return this.aggregate(opts); // the r2 fallback\n    } finally { if (c.walking > 0) c.walking--;"); // usage-cpu U1: the walk's end runs the trim it owes after the decrement
+  const fb = editAnchor(uhSrc, "      throw e;\n    } finally { if (c.walking > 0) c.walking--;", "      return this.aggregate(opts); // the r2 fallback\n    } finally { if (c.walking > 0) c.walking--;", "src/usage-history.js"); // usage-cpu U1: the walk's end runs the trim it owes after the decrement
   const UHf = M.load('src/usage-history.js', fb, 'fallback').UsageHistory;
   const tf = new UHf({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); tf.ledgerWindowMs = 40 * DAY; tf.ledgerHotMaxBytes = 60 * 1024; tf.warm(); tf.coldWorkerHeapMb = 32; tf.coldWorkerFile = oom;
   let nf = 0; const realf = tf._allRows.bind(tf); tf._allRows = function* (...x) { nf++; yield* realf(...x); };
@@ -604,9 +604,9 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const child = (src) => new Promise((resolve) => execFile(process.execPath, ['--max-old-space-size=4096', '--input-type=module', '-e', src], { encoding: 'utf8', timeout: 60000 }, (_e, stdout, stderr) => resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') })));
   const body = (file) => `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.join(REPO, 'scripts/x.js'))}); const { UsageHistory } = require(${JSON.stringify(file)}); const u = new UsageHistory({ dataDir: ${JSON.stringify(path.join(tmp, 'r3'))}, homeDir: ${JSON.stringify(tmp)} }); u.ledgerWindowMs = ${40 * DAY}; u.ledgerHotMaxBytes = ${60 * 1024}; u.warm(); u.coldWorkerHeapMb = 1; u.coldWorkerFile = WORKER_FILE; u.aggregateAsync({ to: ${NOW - 7} }).then(() => console.log('ANSWERED'), (e) => console.log('REFUSED ' + e.message));`;
   const wSrc = fs.readFileSync(path.join(REPO, 'src/usage-cold-worker.js'), 'utf8');
-  const noSoft = M.write('src/usage-cold-worker.js', wSrc.replace("if (capBytes && ++n % 2000 === 0 && (over = overCap(capBytes, rule, judge))) throw", "if (false) throw"), 'nosoftcap');
+  const noSoft = M.write('src/usage-cold-worker.js', editAnchor(wSrc, "if (capBytes && ++n % 2000 === 0 && (over = overCap(capBytes, rule, judge))) throw", "if (false) throw", "src/usage-cold-worker.js"), 'nosoftcap');
   // §30b's control (B-f35e): the READING judged wherever the limit is — what the collector has not taken yet counted as held
-  readingOnly30 = M.write('src/usage-cold-worker.js', wSrc.replace("const rule = CB.foldCapRule(", "const rule = 'reading' || CB.foldCapRule("), 'readingonly');
+  readingOnly30 = M.write('src/usage-cold-worker.js', editAnchor(wSrc, "const rule = CB.foldCapRule(", "const rule = 'reading' || CB.foldCapRule(", "src/usage-cold-worker.js"), 'readingonly');
   ok(readingOnly30 !== noSoft && fs.readFileSync(readingOnly30, 'utf8').includes("const rule = 'reading' || CB.foldCapRule("), '§30b the reading-only copy is a copy (its needle found)');
   const [withCap, without] = await Promise.all([child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', 'null')), child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', JSON.stringify(noSoft)))]);
   ok(/REFUSED .*memory/.test(withCap.stdout), `§14 under a parent --max-old-space-size=4096 the fold's 1 MB cap still binds (the soft cap — under any worker's own baseline heap) (${(withCap.stdout || withCap.stderr).trim().slice(0, 80)})`);
@@ -676,7 +676,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   const before18 = t.aggregate({}).totals.requests;
   writeRows(t.dir, [{ ...mkRow(NOW - 50 * DAY), rid: 'req_collides', mid: 'msg_collides2' }]); cc.checkedAt = 0; t._loadEvents();
   ok(t.aggregate({}).totals.requests === before18 + 1 && !t.ledgerKnowsId('msg_collides'), '§18 a row whose rid HASH hits another row loads and counts; a hashed-only mid is not "known"');
-  const r2hash = uhSrc.replace("for (const loc of c.cold.idx.rid.findSorted(CB.idHash(ev.rid))) if (this._rowAt(c, loc)?.rid === ev.rid) return 0;", 'if (c.cold.idx.rid.findSorted(CB.idHash(ev.rid)).length) return 0;');
+  const r2hash = editAnchor(uhSrc, "for (const loc of c.cold.idx.rid.findSorted(CB.idHash(ev.rid))) if (this._rowAt(c, loc)?.rid === ev.rid) return 0;", 'if (c.cold.idx.rid.findSorted(CB.idHash(ev.rid)).length) return 0;', "src/usage-history.js");
   ok(r2hash !== uhSrc, 'control text: the r2 hash-is-identity drop');
   const UHh = M.load('src/usage-history.js', r2hash, 'hashid').UsageHistory;
   const th = new UHh({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); th.ledgerWindowMs = 40 * DAY; th.ledgerHotMaxBytes = 60 * 1024; th.warm();
@@ -738,7 +738,7 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   let e29 = null; try { await t4.aggregateAsync({ to: NOW - 33 }); } catch (e) { e29 = e; } t4.walkHook = null;
   ok(e29 && e29.code === 'STALE' && JSON.stringify(tries) === '[0,1]', `§29 a rewrite on every try: tries ${JSON.stringify(tries)} (one rebuild), then "${e29 && e29.message.slice(0, 50)}…"`);
   const M4 = mutantCopies('cachebounds-r4', REPO), uhSrc4 = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
-  const r3ladder = uhSrc4.replace('if (tries < 1) return this._aggregateWalk(opts, tries + 1);', 'if (tries < 2) return this._aggregateWalk(opts, tries + 1);');
+  const r3ladder = editAnchor(uhSrc4, 'if (tries < 1) return this._aggregateWalk(opts, tries + 1);', 'if (tries < 2) return this._aggregateWalk(opts, tries + 1);', "src/usage-history.js");
   const t3l = new (M4.load('src/usage-history.js', r3ladder, 'r3ladder').UsageHistory)({ dataDir: path.join(tmp, 'r4'), homeDir: tmp }); t3l.ledgerWindowMs = 40 * DAY; t3l.ledgerHotMaxBytes = 60 * 1024; t3l.warm();
   const tries3 = [];
   t3l.walkHook = (k) => { tries3.push(k); const f = path.join(t3l.dir, sh4[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); t3l._evCache.checkedAt = 0; t3l._loadEvents(); };
@@ -811,7 +811,7 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   t4.coldFoldDeadlineMs = 0; t4.coldTerminateDeadlineMs = 0; // the real fold below runs on the product's own deadlines (300 ms is the stub's)
   const a26 = await t4.aggregateAsync({ to: NOW - 42 }).then((x) => x, (e) => e);
   ok(gone26 && a26 && a26.totals && stuckGone(t4)(), '§26 released: the stuck worker exited, the count dropped, folds resume');
-  const r3stuck = uhSrc4.replace("if (STUCK.size) return Promise.reject(", "if (false) return Promise.reject(");
+  const r3stuck = editAnchor(uhSrc4, "if (STUCK.size) return Promise.reject(", "if (false) return Promise.reject(", "src/usage-history.js");
   const ts3 = new (M4.load('src/usage-history.js', r3stuck, 'r3stuck').UsageHistory)({ dataDir: path.join(tmp, 'r4'), homeDir: tmp }); ts3.ledgerWindowMs = 40 * DAY; ts3.ledgerHotMaxBytes = 60 * 1024; ts3.warm();
   ts3.coldWorkerFile = blocked; ts3.coldFoldDeadlineMs = 300; ts3.coldTerminateDeadlineMs = 300;
   // lane fast-debt-clear: §30's month builds and folds while this control's two blocked workers wait out their deadlines — the

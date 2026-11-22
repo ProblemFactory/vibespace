@@ -38,6 +38,15 @@ const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const MUT = mutantCopies('browser-switcher-model', repo);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const SW = require('../src/browser-switch.js');
@@ -354,13 +363,13 @@ console.log('NEGATIVE CONTROLS (patched copies in the scratch dir)');
 {
   const msrc = read('src/lib/browser-switcher-model.js'), ssrc = read('src/browser-switch.js');
   // (a) a model that shows the server's sentence instead of its own words
-  const aSrc = msrc.replace("return { key: 'target:' + r.id, id: r.id, name, blurb: blurbOf(r.id, t), state, sentences: w.sentences,", "return { key: 'target:' + r.id, id: r.id, name, blurb: blurbOf(r.id, t), state, sentences: [{ text: String(r.reason || r.code || r.state), warn: false }],");
+  const aSrc = editAnchor(msrc, "return { key: 'target:' + r.id, id: r.id, name, blurb: blurbOf(r.id, t), state, sentences: w.sentences,", "return { key: 'target:' + r.id, id: r.id, name, blurb: blurbOf(r.id, t), state, sentences: [{ text: String(r.reason || r.code || r.state), warn: false }],", "src/lib/browser-switcher-model.js");
   // (e) the code read before the rollback facts
-  const eSrc = msrc.replace("  if (r.restored === true) return", "  if (STALE_CODES.has(String(r.code || ''))) return { tone: 'warn', text: t(i18nKey('Not switched; something changed — see the reason below.')), refresh: true };\n  if (r.restored === true) return");
+  const eSrc = editAnchor(msrc, "  if (r.restored === true) return", "  if (STALE_CODES.has(String(r.code || ''))) return { tone: 'warn', text: t(i18nKey('Not switched; something changed — see the reason below.')), refresh: true };\n  if (r.restored === true) return", "src/lib/browser-switcher-model.js");
   // (b) the closed set short of one state; (c) choices that ignore the control; (d) the key before the program
-  const bSrc = ssrc.replace("'needs-key', 'older-browser', 'all-in-use-own',", "'needs-key', 'all-in-use-own',");
-  const cSrc = ssrc.replace('    return !!(c && c.ok === true);\n', '    return true;\n');
-  const dSrc = ssrc.replace("  if (v.code === 'backend_no_key') return 'needs-key';\n", "");
+  const bSrc = editAnchor(ssrc, "'needs-key', 'older-browser', 'all-in-use-own',", "'needs-key', 'all-in-use-own',", "src/browser-switch.js");
+  const cSrc = editAnchor(ssrc, '    return !!(c && c.ok === true);\n', '    return true;\n', "src/browser-switch.js");
+  const dSrc = editAnchor(ssrc, "  if (v.code === 'backend_no_key') return 'needs-key';\n", "", "src/browser-switch.js");
   ok(aSrc !== msrc && eSrc !== msrc && bSrc !== ssrc && cSrc !== ssrc && dSrc !== ssrc, 'NEGATIVE CONTROL: the five mutations applied to their copies (the anchors exist)');
   const Ma = await import(pathToFileURL(MUT.write('src/lib/browser-switcher-model.js', aSrc, 'echo', { esm: true })).href);
   const Me = await import(pathToFileURL(MUT.write('src/lib/browser-switcher-model.js', eSrc, 'codefirst', { esm: true })).href);
@@ -378,9 +387,9 @@ console.log('NEGATIVE CONTROLS (patched copies in the scratch dir)');
   const e = judgeClosed(Me, SW);
   ok(e.some((x) => /backend_no_key\+restored/.test(x)), `NEGATIVE CONTROL (e): switchOutcomeWords reading the code before restored fails §2 (${e.find((x) => /restored/.test(x))})`);
   // (f) the needs-key card's pre-fix filter (every code but `no-values` explained) — the plain instance's `no-preset`
-  const fSrc = msrc.replace("if (k && KEY_UNUSABLE.has(String(k.whyCode || '')) && typeof c.credentialWhy === 'function') {", "if (k && k.whyCode && k.whyCode !== 'no-values' && typeof c.credentialWhy === 'function') {");
+  const fSrc = editAnchor(msrc, "if (k && KEY_UNUSABLE.has(String(k.whyCode || '')) && typeof c.credentialWhy === 'function') {", "if (k && k.whyCode && k.whyCode !== 'no-values' && typeof c.credentialWhy === 'function') {", "src/lib/browser-switcher-model.js");
   // (g) the driven card's pre-fix act (a trip to the live view, behind the modal)
-  const gSrc = msrc.replace("action: sessionId ? act('handback', t(i18nKey('Hand it back to your agent')), { sessionId }) : null", "action: sessionId ? act('live-view', t(i18nKey('Go to live view')), { sessionId }) : null");
+  const gSrc = editAnchor(msrc, "action: sessionId ? act('handback', t(i18nKey('Hand it back to your agent')), { sessionId }) : null", "action: sessionId ? act('live-view', t(i18nKey('Go to live view')), { sessionId }) : null", "src/lib/browser-switcher-model.js");
   ok(fSrc !== msrc && gSrc !== msrc, 'NEGATIVE CONTROL: (f) + (g) applied to their copies (the anchors exist)');
   const Mf = await import(pathToFileURL(MUT.write('src/lib/browser-switcher-model.js', fSrc, 'keyfilter', { esm: true })).href);
   const f = judgeStates(Mf, F.views());

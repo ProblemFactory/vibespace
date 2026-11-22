@@ -517,7 +517,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const arsrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     const LINE = "  const own = ownConversationIdOf(s);\n  return { job: null, cid: own.cid, cidWhy: own.why, s, id, myGroups: _myGroupIds(s, id) };";
     ok(arsrc.split(LINE).length === 2, 'the own-id line of msgCaller is present once (the control answers the raw, possibly borrowed, id)');
-    const ARc = M.load('src/agent-routes.js', arsrc.replace(LINE, "  return { job: null, cid: s.claudeSessionId || s.backendSessionId || null, s, id, myGroups: _myGroupIds(s, id) };"), 'msgcaller-raw-id');
+    const ARc = M.load('src/agent-routes.js', editAnchor(arsrc, LINE, "  return { job: null, cid: s.claudeSessionId || s.backendSessionId || null, s, id, myGroups: _myGroupIds(s, id) };", "src/agent-routes.js"), 'msgcaller-raw-id');
     const fkc = await forkLeg(ARc, 'fork-ctl');
     ok(fkc.send === '200:ok' && fkc.pairHoldsParent && fkc.reply === '200:ok' && fkc.woke.includes(P),
       `CONTROL: the routes whose msgCaller answers the raw id let the pending fork make the pair under the PARENT's id and the target's reply WAKES THE PARENT (${JSON.stringify(fkc.woke)}) — the leg would go red`, JSON.stringify(fkc));
@@ -588,11 +588,11 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const lcsrc = fs.readFileSync(path.join(REPO, 'src/claude-lock-capture.js'), 'utf-8');
     const PRED = "  return cid && !liveForkPending(session) ? cid : null;";
     ok(lcsrc.split(PRED).length === 2, 'addressableId\'s own-id line is present once (the control answers the raw, possibly borrowed, id)');
-    const LCc = M5.load('src/claude-lock-capture.js', lcsrc.replace(PRED, "  return cid;"), 'addressable-raw');
+    const LCc = M5.load('src/claude-lock-capture.js', editAnchor(lcsrc, PRED, "  return cid;", "src/claude-lock-capture.js"), 'addressable-raw');
     const arsrc5 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     const EP = "    const cid = addressableId(t);\n    if (!cid) continue;";
     ok(arsrc5.split(EP).length === 2, '_msgEndpoints reads the endpoint id through addressableId, once');
-    const ARc5 = M5.load('src/agent-routes.js', arsrc5.replace(EP, "    const cid = t.claudeSessionId || t.backendSessionId;\n    if (!cid) continue;"), 'endpoints-raw');
+    const ARc5 = M5.load('src/agent-routes.js', editAnchor(arsrc5, EP, "    const cid = t.claudeSessionId || t.backendSessionId;\n    if (!cid) continue;", "src/agent-routes.js"), 'endpoints-raw');
     const deadC = await targetLeg(ARc5, LCc, 'r5-target-dead-ctl', { parentLive: false });
     ok(deadC.forkListed && deadC.toFork === '200:ok' && deadC.pairHoldsParent && deadC.askedOnParent === 1,
       `CONTROL: the raw-id roster + endpoints list the fork under the parent's id, mint the pair under the PARENT and authorize a billed turn on it (${JSON.stringify(deadC)}) — the leg would go red`);
@@ -670,14 +670,14 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       `B-55dc ⋈ B-70f9: a throw on the create route's SECOND entry (after the membership read) is answered by name — ${re.reply ? re.reply.status + ' ' + re.reply.body.code : 'no reply'} (${JSON.stringify(re)})`);
     const RE = 'readMembership(req, res, answersEveryThrow(jobsCreateRoute), a.session, a.sessionId)';
     const MR = mutantCopies('msg-cli-reentry', REPO);   // the plant proves itself: a copy that changes nothing fails by name
-    const ARbare = MR.load('src/agent-routes.js', arsrc5.replace(RE, 'readMembership(req, res, jobsCreateRoute, a.session, a.sessionId)'), 'reentry-bare');
+    const ARbare = MR.load('src/agent-routes.js', editAnchor(arsrc5, RE, 'readMembership(req, res, jobsCreateRoute, a.session, a.sessionId)', "src/agent-routes.js"), 'reentry-bare');
     const reRed = await reentryLeg(ARbare, 'b55-reentry-red');
     ok(reRed.reply === null && reRed.creates === 1 && reRed.stray.some((m) => /the store refused on the second entry/.test(m)),
       `RED CONTROL: the re-entry through the bare handler — the throw is an unhandled rejection, no reply ever comes (${JSON.stringify(reRed)})`);
     for (const c of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'B-55dc re-entry control: ' })) ok(c.pass, c.name, c.detail);
     const JC = "  const own = ownConversationIdOf(s);\n  return {\n    conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),";
     ok(arsrc5.split(JC).length === 2, 'jobsCaller reads the caller\'s conversation through ownConversationIdOf, once (the control reads the raw status key)');
-    const ARj = M5.load('src/agent-routes.js', arsrc5.replace(JC, "  return {\n    conversationId: key.startsWith('webui:') ? null : key.slice(key.indexOf(':') + 1), borrowed: null,"), 'jobscaller-raw');
+    const ARj = M5.load('src/agent-routes.js', editAnchor(arsrc5, JC, "  return {\n    conversationId: key.startsWith('webui:') ? null : key.slice(key.indexOf(':') + 1), borrowed: null,", "src/agent-routes.js"), 'jobscaller-raw');
     const jbc = await jobLeg(ARj, 'r5-job-ctl');
     ok(jbc.create === '200:ok' && jbc.ownerIsParent && jbc.postedOnParent === 1, `CONTROL: the raw-key jobsCaller records the PARENT as the fork's job owner and its first notification is a billed post on the parent (${JSON.stringify(jbc)}) — the leg would go red`);
 
@@ -695,7 +695,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       const wsrc = fs.readFileSync(path.join(REPO, 'src/server/window-request.js'), 'utf-8');
       const WL = "    if (liveForkPending(s)) throw namedError('fork_pending',";
       ok(wsrc.split(WL).length === 2, 'the window-request guard is present once');
-      const WRc = M5.load('src/server/window-request.js', wsrc.replace(WL, "    if (false) throw namedError('fork_pending',"), 'winreq-raw');
+      const WRc = M5.load('src/server/window-request.js', editAnchor(wsrc, WL, "    if (false) throw namedError('fork_pending',", "src/server/window-request.js"), 'winreq-raw');
       const stashed2 = [];
       const wr2 = WRc.create({ engine, deliver: { stashFor: (cid) => { stashed2.push(cid); return { stored: true }; }, deliverToConversation: async () => ({ ok: true }) }, activeSessions: ss, log: { log() {}, warn() {} } });
       const r2 = await wr2.request({ handle: 'h1', sessionId: 'w-F', wake: false });
@@ -733,8 +733,8 @@ console.log('§2 the routes over the REAL engine + store + ladder');
       // WORLD — the patched family copy, and an agent-routes copy whose one registration line requires it
       const sts5 = fs.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf-8'), REG5 = "require('./agent-routes/status.js')";
       ok(sts5.split(AL).length === 2 && arsrc5.split(REG5).length === 2, 'the user-todo key line is present once (the control keys by the raw status key)');
-      const stsC = M5.write('src/agent-routes/status.js', sts5.replace(AL, "  const key = sessionStatusKey(s, id);"), 'ask-raw-key-status');
-      const ARa = M5.load('src/agent-routes.js', arsrc5.replace(REG5, `require(${JSON.stringify(stsC)})`), 'ask-raw-key');
+      const stsC = M5.write('src/agent-routes/status.js', editAnchor(sts5, AL, "  const key = sessionStatusKey(s, id);", "src/agent-routes/status.js"), 'ask-raw-key-status');
+      const ARa = M5.load('src/agent-routes.js', editAnchor(arsrc5, REG5, `require(${JSON.stringify(stsC)})`, "src/agent-routes.js"), 'ask-raw-key');
       const ac = await askLeg(ARa, 'r5-ask-ctl');
       ok(ac.key === 'claude:' + P && ac.repliesTo === 'w-P', `CONTROL: keyed by the raw status key the item is the PARENT's and the reply is typed into the parent (${JSON.stringify(ac)}) — the leg would go red`);
     }
@@ -829,7 +829,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     // B-c198 (lane for-you-jobs) moved the block up — the report is DECIDED FIRST — and assigns the hoisted `myCid`
     const GR = "      myCid = ownConversationIdOf(s).cid;\n";   // lane stash-any-turn: the any-turn comment now sits between it and the `if`
     ok(arsrc6.split(GR).length === 2, 'the next-turn group-report block reads the caller through ownConversationIdOf, once (the control reads the raw id)');
-    const ARr = M6.load('src/agent-routes.js', arsrc6.replace(GR, "      myCid = s.claudeSessionId || s.backendSessionId || null;\n"), 'reports-raw');
+    const ARr = M6.load('src/agent-routes.js', editAnchor(arsrc6, GR, "      myCid = s.claudeSessionId || s.backendSessionId || null;\n", "src/agent-routes.js"), 'reports-raw');
     const rpC = await reportLeg(ARr, 'r6-report-ctl');
     ok(rpC.forkGot && !rpC.parentGot, `CONTROL: with the raw id the FORK's prompt carries the parent's report and the parent's own prompt is empty (${JSON.stringify(rpC)}) — the leg would go red`);
     for (const c of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r6 fork control: ' })) ok(c.pass, c.name, c.detail);

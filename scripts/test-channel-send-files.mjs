@@ -46,6 +46,15 @@ const LF = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/lark/sen
 const SF = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/slack/send-files.json'), 'utf8'));
 let fails = 0, n = 0;
 const ok = (c, m) => { n++; if (c) console.log(`  ✓ ${m}`); else { fails++; console.log(`  ✗ ${m}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
 const PDF = Buffer.from('%PDF-1.4\n%fixture\n', 'latin1');
@@ -516,7 +525,7 @@ const alo = await aloneOwnerJudge(ENG);
 ok(alo.length === 0, `Lark on a stub vendor: the owner's file alone ⇒ ONE upload + ONE msg_type file message, no text message, parts name only the file; a propose-mode reply with a picture held (nothing sent), Approve ⇒ one image message alone; Reject ⇒ the stored file removed, nothing uploaded${alo.length ? ` — ${alo.join('; ')}` : ''}`);
 { const LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
   const from = "const pieces = [...(hasText ? [{ part: 'text' }] : []), ...files.map(";
-  const red = LS.includes(from) ? await aloneOwnerJudge(ENG, require(MC.write('src/channels/lark.js', LS.replace(from, "const pieces = [{ part: 'text' }, ...files.map("), 'lark-empty-text'))) : null;
+  const red = LS.includes(from) ? await aloneOwnerJudge(ENG, require(MC.write('src/channels/lark.js', editAnchor(LS, from, "const pieces = [{ part: 'text' }, ...files.map(", "src/channels/lark.js"), 'lark-empty-text'))) : null;
   ok(Array.isArray(red) && red.length > 0, `control — lark posts an EMPTY text message beside the file: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 
 // ⑩ lane lark-send-hold (B-efa0, channel-send-files verify r1 L2): A LARK 429 ON A SEND HOLDS THE ACCOUNT'S NEXT SENDS.
@@ -640,7 +649,7 @@ const slackMethodsMissing = (src, tiers) => [...new Set([...src.matchAll(SLACK_M
   ok(miss.length === 0 && named.has('files.upload') && named.has('files.getUploadURLExternal') && named.size >= 15, `slack.js names ${named.size} methods, every one a METHOD_TIERS row${miss.length ? ` — missing ${miss.join(', ')}` : ''}`);
   const lsrc = fs.readFileSync(path.join(REPO, 'src/channels/slack-limits.js'), 'utf8');
   const ROW = "  'files.upload': 4,\n";
-  const L2 = lsrc.includes(ROW) ? require(MC.write('src/channels/slack-limits.js', lsrc.replace(ROW, ''), 'no-files-upload')) : null;
+  const L2 = lsrc.includes(ROW) ? require(MC.write('src/channels/slack-limits.js', editAnchor(lsrc, ROW, '', "src/channels/slack-limits.js"), 'no-files-upload')) : null;
   const red = L2 ? slackMethodsMissing(ssrc, L2.METHOD_TIERS) : null;
   ok(Array.isArray(red) && red.join() === 'files.upload', `control — a copy of the table without 'files.upload': red (${red === null ? 'the patch site is gone' : red.join() || 'GREEN — the census missed it'})`);
 }
@@ -1091,13 +1100,13 @@ ok(!bj['F3·engine'], `F3 the lanes through a real engine: an agent's direct rep
       return null;
     }
     const pp = MC.write('src/channel-upload-plan.js', PS.replace(from, to), tag);
-    return { S: require(MC.write('src/channels/slack.js', SS.replace(PLAN_REQ, `require(${JSON.stringify(pp)})`), `${tag}-slack`)), L: require(MC.write('src/channels/lark.js', LS.replace(PLAN_REQ, `require(${JSON.stringify(pp)})`), `${tag}-lark`)) };
+    return { S: require(MC.write('src/channels/slack.js', editAnchor(SS, PLAN_REQ, `require(${JSON.stringify(pp)})`, "src/channels/slack.js"), `${tag}-slack`)), L: require(MC.write('src/channels/lark.js', editAnchor(LS, PLAN_REQ, `require(${JSON.stringify(pp)})`, "src/channels/lark.js"), `${tag}-lark`)) };
   };
   const say = (red, pins) => (red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `red by ${red.join(' ') || 'nothing'} — GREEN on ${pins.filter((p) => !red.includes(p)).join(' ')}`);
   const f1 = onPlan('const named = Number(retryAfterSec) > 0 ? Math.ceil(Number(retryAfterSec) * 1000) : 0;', 'const named = 0;', 'r2-F1-ignore-header');
   const f3 = onPlan('return Number.isFinite(b) ? Number(now) + Math.max(0, b) : Infinity;', 'return Infinity;', 'r2-F3-no-budget');
   const HOLD = '        const hold = heldRefusal(); if (hold) throw hold;   // another send';
-  const f2 = LS.includes(HOLD) ? require(MC.write('src/channels/lark.js', LS.replace(HOLD, '        /*r2-F2*/   // another send'), 'r2-F2-no-hold-check')) : null;
+  const f2 = LS.includes(HOLD) ? require(MC.write('src/channels/lark.js', editAnchor(LS, HOLD, '        /*r2-F2*/   // another send', "src/channels/lark.js"), 'r2-F2-no-hold-check')) : null;
   const rows = [
     ["r2-F1-ignore-header (the base's loop: the vendor's wait never read)", f1 ? await vendorWaitJudge(f1.S, f1.L) : null, ['F1·slack', 'F1·lark']],
     ['r2-F2-no-hold-check (lark: no hold check after the wait)', f2 ? await holdAfterWaitJudge(f2) : null, ['F2']],

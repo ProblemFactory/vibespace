@@ -43,6 +43,15 @@ const A = require(path.join(REPO, 'src/attention-model.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() { }, warn() { }, error() { } };
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 const ROOT = scratch('decision-inbox');
@@ -221,12 +230,12 @@ console.log('④ RED CONTROLS — scratch copies with ONE named edit');
   const mSrc = fs.readFileSync(path.join(REPO, 'src/decision-model.js'), 'utf8');
   const a1 = "detail: str(item && item.detail), session:";
   ok(mSrc.split(a1).length === 2, 'ANCHOR: the input\'s detail part');
-  const Leaky = MUT.load('src/decision-model.js', mSrc.replace(a1, "detail: str(item && item.detail) + ' ' + str(item && item.reply && item.reply.text), session:"), 'reply-leak');
+  const Leaky = MUT.load('src/decision-model.js', editAnchor(mSrc, a1, "detail: str(item && item.detail) + ' ' + str(item && item.reply && item.reply.text), session:", "src/decision-model.js"), 'reply-leak');
   ok(!neverKept(Leaky, ITEM).ok, 'CONTROL: the reply text appended to the detail ⇒ the never-list check is RED');
   const eSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const a2 = 'for (const [it, f] of due.slice(0, max)) {';
   ok(eSrc.split(a2).length === 2, 'ANCHOR: the pass\'s cap');
-  const NoCap = MUT.load('src/server/decision-engine.js', eSrc.replace(a2, 'for (const [it, f] of due) {'), 'no-cap');
+  const NoCap = MUT.load('src/server/decision-engine.js', editAnchor(eSrc, a2, 'for (const [it, f] of due) {', "src/server/decision-engine.js"), 'no-cap');
   const w = world('ctl-cap', { Engine: NoCap });
   seed(w); w.eng.attachInbox(w.store, { tickMs: 0 });
   await w.eng.inboxPass();
@@ -235,7 +244,7 @@ console.log('④ RED CONTROLS — scratch copies with ONE named edit');
   const sSrc = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
   const a3 = '    it.judged = { group, p, at: Number(judged.at) || this._now(), v: Number(judged.v) || 1 };\n';
   ok(sSrc.split(a3).length === 2, 'ANCHOR: the store writes the verdict beside the item');
-  const { UserTodoManager: ReUrg } = MUT.load('src/user-todos.js', sSrc.replace(a3, a3 + "    if (group === 'now') it.urgency = 'high';\n"), 're-urgence');
+  const { UserTodoManager: ReUrg } = MUT.load('src/user-todos.js', editAnchor(sSrc, a3, a3 + "    if (group === 'now') it.urgency = 'high';\n", "src/user-todos.js"), 're-urgence');
   const w2 = world('ctl-urg', { Store: ReUrg });
   const u0 = seed(w2); w2.eng.attachInbox(w2.store, { tickMs: 0 });
   await w2.eng.inboxPass();
@@ -282,13 +291,13 @@ async function refileRun(name, opts = {}) {
   const sSrc = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
   const a1 = "{ existing.detail = detail; delete existing.judged; changed = true; }";
   ok(sSrc.split(a1).length === 2, 'ANCHOR: the re-file clears the verdict');
-  const { UserTodoManager: Keeps } = MUT.load('src/user-todos.js', sSrc.replace(a1, '{ existing.detail = detail; changed = true; }'), 'keeps-judged');
+  const { UserTodoManager: Keeps } = MUT.load('src/user-todos.js', editAnchor(sSrc, a1, '{ existing.detail = detail; changed = true; }', "src/user-todos.js"), 'keeps-judged');
   const k = await refileRun('ctl-refile-store', { Store: Keeps });
   ok(!k.cleared && k.second === 'later' && k.calls2 === 2, 'CONTROL: the base store (a re-file keeps `judged`) ⇒ the old verdict stays, 0 new calls — the legs above are RED on it', k);
   const eSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const a2 = 'memo: M.inboxMemoOf(it, sha, f) });';
   ok(eSrc.split(a2).length === 2, 'ANCHOR: the pass keys the memo by the digest');
-  const IdOnly = MUT.load('src/server/decision-engine.js', eSrc.replace(a2, 'memo: { id: it.id } });'), 'memo-id-only');
+  const IdOnly = MUT.load('src/server/decision-engine.js', editAnchor(eSrc, a2, 'memo: { id: it.id } });', "src/server/decision-engine.js"), 'memo-id-only');
   const m = await refileRun('ctl-refile-memo', { Engine: IdOnly });
   ok(m.cleared && m.second === 'later' && m.calls2 === 2, 'CONTROL: the base memo key (item id only) ⇒ judged cleared but the memo answers the OLD verdict — RED', m);
 }
@@ -444,7 +453,7 @@ console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, 
   const eSrc6 = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const aTie = 'const due = eligible.filter(([it]) => tied.has(it.id));';
   ok(eSrc6.split(aTie).length === 2, 'ANCHOR: the pass keeps only the band-5 ties');
-  const NoTie = MUT6.load('src/server/decision-engine.js', eSrc6.replace(aTie, 'const due = eligible;'), 'no-tie');
+  const NoTie = MUT6.load('src/server/decision-engine.js', editAnchor(eSrc6, aTie, 'const due = eligible;', "src/server/decision-engine.js"), 'no-tie');
   const wn = world('v2-no-tie', { Engine: NoTie });
   wn.T = T;
   const nIds = {};
@@ -468,7 +477,7 @@ console.log('⑦ ONE CLOCK (lane decision-inbox-clock) — the store reads only 
   ok(sSrc.includes('class UserTodoManager {') && lines.length === 0, 'CENSUS: no Date.now / new Date() in UserTodoManager but the constructor default', lines);
   const a4 = '        existing.createdAt = this._now();\n';
   ok(sSrc.split(a4).length === 2, 'ANCHOR: the re-file stamps createdAt on the store clock');
-  const planted = sSrc.replace(a4, '        existing.createdAt = Date.now();\n');
+  const planted = editAnchor(sSrc, a4, '        existing.createdAt = Date.now();\n', "src/user-todos.js");
   ok(bareClock(planted).length === 1, 'CONTROL: a planted Date.now() at the re-file ⇒ the census names it — RED', bareClock(planted));
   /** refileRun with the PROCESS clock (Date.now) moved to T0 + skew — the engine and the store run on w.T either way */
   const skewed = async (name, skew, opts) => {

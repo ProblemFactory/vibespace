@@ -77,7 +77,7 @@ console.log('§1 THE SLICE — at most ' + STEP + ' pairs a turn; the first slic
   const M = mutantCopies('usage-relearn-stepped', REPO), src = read('src/usage-estimator.js');
   const from = 'const RELEARN_STEP_LINES = 2000;';
   ok(src.includes(from), 'the slice patch site exists');
-  const EM = require(M.write('src/usage-estimator.js', src.replace(from, 'const RELEARN_STEP_LINES = Infinity;'), 'one-fold'));
+  const EM = require(M.write('src/usage-estimator.js', editAnchor(src, from, 'const RELEARN_STEP_LINES = Infinity;', "src/usage-estimator.js"), 'one-fold'));
   const w = world(REPO, { seed: 51, rows: 2000, pairs: [7000, 300, 120, 400], steps: [2, 30, 60, 20] });
   const est = new EM.UsageEstimator({ anchorsDir: w.adir, usageHistory: w.uh, resolveIdentity: w.est.resolveIdentity, lagS: 20 });
   est.ratesFor('email:a@x'); const pairs = counting(est); est.invalidate('email:a@x');
@@ -103,7 +103,7 @@ console.log('§1 THE SLICE — at most ' + STEP + ' pairs a turn; the first slic
   const fx = run(null);
   ok(fx.inHandler <= STEP && fx.perTurn.every((n) => n <= STEP) && fx.landed, `ONE BUDGET A TURN: every identity stale (an anchor sweep's invalidation), one handler asks all four (10 000 pairs) — it folds ${fx.inHandler} pairs (≤ ${STEP}) and answers the cached rates; the rest folds ${fx.perTurn.length} later turns of ≤ ${STEP} (${fx.perTurn.join(' / ')}), all four land`, fx);
   const M = mutantCopies('usage-relearn-stepped-turn', REPO), src = read('src/usage-estimator.js'), from = '    if (this._turnLeft === undefined) this._turnLeft = step;';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '    this._turnLeft = step;'), 'budget-an-ask')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    this._turnLeft = step;', "src/usage-estimator.js"), 'budget-an-ask')) : null;
   const rd = EM ? run(EM) : null;
   ok(!!rd && rd.inHandler > STEP * 2, `RED: a budget an ASK instead of a turn ⇒ the one handler folds ${rd && rd.inHandler} pairs (a slice an identity — the owner's 27 after a sweep: ≈ 0.3 s)`, rd);
 }
@@ -180,7 +180,7 @@ console.log('§3 ONE EPOCH — a fold is of one price table, one ledger, one set
   };
   const res = []; for (const m of ['pricing', 'rebuild', 'lines', 'lines-quiet']) res.push(await scene(m)); // lines-quiet: the anchor file grew, no invalidate — the judge sees it by the file itself (round 2, MUST 3)
   const M = mutantCopies('usage-relearn-stepped-epoch', REPO), src = read('src/usage-estimator.js'), from = '        if (f.chunks && f.moved()) {';
-  const blind = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '        if (false) {'), 'fold-blind')) : null;
+  const blind = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '        if (false) {', "src/usage-estimator.js"), 'fold-blind')) : null;
   const red = []; if (blind) for (const m of ['pricing', 'lines-quiet']) red.push(await scene(m, blind));
   ok(res.every((x) => x.abandoned === 1 && x.equal), `ONE EPOCH: a pricing edit / a rebuilt ledger / new anchor lines mid-fold ⇒ the fold ABANDONED at its next turn (${res.map((x) => x.abandoned).join(' / ')}), the next ask folded again, and the landed rates equal the synchronous fold of the NEW price table / ledger / lines`, res);
   ok(!!blind && red.every((x) => !x.equal), `RED: a fold blind to its epoch and lines (the turn's judge removed) ⇒ it lands a fold over two price tables / the old line set as fresh (an append with an invalidate heals at the next ask: the landing is stale): ${red.map((x) => `${x.mover} equal=${x.equal}`).join(', ')}`, red);
@@ -196,7 +196,7 @@ console.log('§4 ONE FOLD — asks while it runs join it');
   const started = (w.est.foldsStarted || 0) - f0, costed = pairs() - c0, n = w.est.lines('email:a@x').filter((l) => l.prevFetchedAt).length;
   {
     const M = mutantCopies('usage-relearn-stepped-join', REPO), src = read('src/usage-estimator.js'), from = '    if (run && !run.done && run.loading === loading) {';
-    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '    if (false) {'), 'no-join')) : null;
+    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    if (false) {', "src/usage-estimator.js"), 'no-join')) : null;
     const w2 = world(REPO, { seed: 56, rows: 2000, pairs: [6000, 300, 120, 400], steps: [2, 30, 60, 20] });
     const e2 = EM ? new EM.UsageEstimator({ anchorsDir: w2.adir, usageHistory: w2.uh, resolveIdentity: w2.est.resolveIdentity, lagS: 20 }) : null;
     let st2 = 0; if (e2) { const S2 = stepper(e2); e2.ratesFor('email:a@x'); while (S2.q.length) S2.turn(); e2.invalidate('email:a@x'); const g0 = e2.foldsStarted || 0; for (let k = 0; k < 5; k++) { e2.ratesFor('email:a@x'); S2.turn(); } while (S2.q.length) S2.turn(); st2 = (e2.foldsStarted || 0) - g0; }
@@ -362,7 +362,7 @@ console.log('§8 THE ESTIMATES GO WHEN NEWER RATES LAND (round 2, MUST 2)');
   ok(a.nullFirst === 4 && a.equalB === 4, `A RESTART: 4 identities of 2 100 lines — the first pass «still learning» (${a.nullFirst} of 4 null), the first pass after their landing (${a.turns} turns) = commit B's estimates (${a.equalB} of 4)`, a);
   ok(b.moved && b.equalB, `AFTER A SWEEP: a 300-line identity behind a 1 750-line one — built on its old rates inside the fold (7-day ${b.seven[0]}), the first pass after its landing = commit B's (${b.seven[1]} = ${b.seven[2]})`, b);
   const M = mutantCopies('usage-relearn-stepped-memo', REPO), src = read('src/usage-estimator.js'), from = " && (!m.ik || this._ratesVerOf(m.ik) === m.rv)) return ownEstimate(m.est, rawCache);";
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, ') return ownEstimate(m.est, rawCache);'), 'memo-kept')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, ') return ownEstimate(m.est, rawCache);', "src/usage-estimator.js"), 'memo-kept')) : null;
   const ra = EM ? restart(EM.UsageEstimator) : null, rb = EM ? behind(EM.UsageEstimator) : null;
   ok(!!ra && ra.equalB < 4 && !rb.equalB, `RED: the memo blind to the landing ⇒ a restart's estimates stay as built (${ra && ra.equalB} of 4 = B's), the sweep's stale one stays (${rb && rb.seven[1]} vs B's ${rb && rb.seven[2]})`, { ra, rb });
 }
@@ -393,7 +393,7 @@ console.log('§9 A FOLD IS ABANDONED ONLY WHEN ITS OWN INPUTS MOVED (round 2, MU
   const ra = scene(8000, null, true);
   ok(ra.abandoned === 1 && ra.landed, `…a real anchor append mid-fold still abandons it once (${ra.abandoned}), and the refold lands`, ra);
   const M = mutantCopies('usage-relearn-stepped-livelock', REPO), src = read('src/usage-estimator.js'), from = '    f.moved = () => this._folds.get(identityKey) !== f || (!loading && epochNow() !== f.ep) || this._sigNow(identityKey) !== f.file;';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '    f.moved = () => this._folds.get(identityKey) !== f || (!loading && epochNow() !== f.ep) || this._sigNow(identityKey) !== f.file || f.dirty;'), 'by-invalidate')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    f.moved = () => this._folds.get(identityKey) !== f || (!loading && epochNow() !== f.ep) || this._sigNow(identityKey) !== f.file || f.dirty;', "src/usage-estimator.js"), 'by-invalidate')) : null;
   const R = EM ? scene(8000, EM.UsageEstimator) : null;
   ok(!!R && (R.abandoned > 5 || !R.landed), `RED: a fold abandoned by every invalidation (round 1's rule) ⇒ ${R && R.abandoned} folds thrown away, landed: ${R && R.landed} (in ${R && R.turns} turns)`, R);
 }
@@ -420,7 +420,7 @@ console.log('§10 THE REAL SCHEDULER — the event loop makes a pass between eve
   const r = await scene(null), want = Math.ceil(8000 / STEP);
   ok(r.landed && r.turns >= want && r.minGap >= 1, `ON COUNTED TURNS (the default setImmediate scheduler): an 8 000-line fold landed in ${r.turns} turns (≥ ${want} = 8 000 ÷ ${STEP}); between every two of them the loop made ≥ ${r.minGap} pass (gaps ${r.gaps}) — no clock in the row`, r);
   const M = mutantCopies('usage-relearn-stepped-nexttick', REPO), src = read('src/usage-estimator.js'), from = '    const next = this.relearnNext || ((fn) => setImmediate(fn));';
-  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '    const next = this.relearnNext || ((fn) => process.nextTick(fn));'), 'nexttick')) : null;
+  const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '    const next = this.relearnNext || ((fn) => process.nextTick(fn));', "src/usage-estimator.js"), 'nexttick')) : null;
   const R = EM ? await scene(EM.UsageEstimator) : null;
   ok(!!R && R.landed && R.minGap === 0, `RED: a process.nextTick scheduler ⇒ the fold's ${R && R.turns} turns run with no loop pass between them (gaps ${R && R.gaps})`, R);
 }
@@ -490,7 +490,7 @@ console.log('§12 A FOLD THAT THROWS · AN ESTIMATOR LET GO · THE SMALLEST FIRS
   rmWorld(w);
   const fc = (() => { // RED: first-come — the queue's order kept
     const M = mutantCopies('usage-relearn-stepped-fifo', REPO), src = read('src/usage-estimator.js'), from = "      if (Q.length > 1) Q.sort(";
-    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, "      if (false) Q.sort("), 'fifo')) : null; if (!EM) return null;
+    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, "      if (false) Q.sort(", "src/usage-estimator.js"), 'fifo')) : null; if (!EM) return null;
     const w2 = world(REPO, { seed: 87, rows: 2000, pairs: [6000, 3000, 120, 2000], steps: [2, 3, 60, 4] }), e = new EM.UsageEstimator({ anchorsDir: w2.adir, usageHistory: w2.uh, resolveIdentity: w2.est.resolveIdentity, lagS: 20 }), S2 = stepper(e);
     for (const [k] of w2.IDS) { e.ratesFor(k); while (S2.q.length) S2.turn(); }
     for (const [k] of w2.IDS) e.invalidate(k); for (const [k] of w2.IDS) e.ratesFor(k);

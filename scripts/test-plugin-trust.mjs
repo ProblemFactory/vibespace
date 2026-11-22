@@ -15,6 +15,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (pred, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(100); } return !!(await pred()); };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -235,10 +244,10 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
     if (LSRCW.split(WA).length === 2 && LSRCW.split(MV).length === 2) {
       const Mw = mutantCopies('plugin-trust-waits', REPO);
       delete regs['plugin-git'];   // the read's should: the mutant's own registration is what the control reads — never the real loader's left over
-      mkW(Mw.load('src/server/plugin-loader.js', LSRCW.replace(WA, '    const waits = () => null;\n'), 'waits-never'), 'root-waits-mutant');
+      mkW(Mw.load('src/server/plugin-loader.js', editAnchor(LSRCW, WA, '    const waits = () => null;\n', "src/server/plugin-loader.js"), 'waits-never'), 'root-waits-mutant');
       ok(!!regs['plugin-git'] && waitsNow() === null, 'MUTANT RED: a loader whose Test never waits offers it with no repository known — a door that can only refuse (the mutant\'s own registration read)');
       const n0 = moved.length;
-      const PLM = mkW(Mw.load('src/server/plugin-loader.js', LSRCW.replace(MV, ''), 'waits-unpushed'), 'root-waits-mutant2');
+      const PLM = mkW(Mw.load('src/server/plugin-loader.js', editAnchor(LSRCW, MV, '', "src/server/plugin-loader.js"), 'waits-unpushed'), 'root-waits-mutant2');
       await PLM.install({ source: 'git', value: URL_H, ref: 'v1' });
       ok(moved.length === n0 && waitsNow() === null, 'MUTANT RED: a loader whose git install does not push the card leaves an open window saying the Test waits after the install it waited for', { pushed: moved.length - n0 });
     }
@@ -326,7 +335,7 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
     ok(LSRC.includes(anchor), 'control ⑦b: the git branch of unchanged is in plugin-loader.js', anchor);
     const moved = (u, rec, sha) => !!u && u.unchanged === false && rec?.sha === sha && u.plugin?.version === '1.0.2';
     const before = PL.installRecord('acme.private');
-    const mut = M.load('src/server/plugin-loader.js', LSRC.replace(anchor, "inst.source === 'git' ? !!r.sha :"), 'unchanged-git').create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: CLEAN_GIT_MS });
+    const mut = M.load('src/server/plugin-loader.js', editAnchor(LSRC, anchor, "inst.source === 'git' ? !!r.sha :", "src/server/plugin-loader.js"), 'unchanged-git').create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: CLEAN_GIT_MS });
     const sha3 = FX.commit({ 'vibespace-plugin.json': pkg('1.0.2') });
     const um = await mut.update('acme.private');
     ok(before.ref === 'main' && before.sha === sha2 && sha3 !== sha2 && um.unchanged === true && !moved(um, mut.installRecord('acme.private'), sha3), 'RED CONTROL ⑦b: a loader whose git branch ignores the recorded sha answers unchanged: true on a ref that moved — the leg below refuses it', { unchanged: um.unchanged, sha: mut.installRecord('acme.private')?.sha });
@@ -363,7 +372,7 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
     'round 2: a HOME .gitconfig whose url.insteadOf rewrites the repository ⇒ the clone still comes from the URL credentialFor judged (v1 = 1.0.0 at its sha, ONE fetch answered by the askpass) — every git child (init · fetch · checkout · rev-parse) runs with GIT_CONFIG_GLOBAL=/dev/null beside GIT_CONFIG_NOSYSTEM=1', { v: r10.version, err: r10.err && r10.err.message, env: c10.map((c) => c.env.GIT_CONFIG_GLOBAL) });
   const homeAnchor = "GIT_CONFIG_GLOBAL: '/dev/null', ";
   ok(SRC.includes(homeAnchor), 'control: the HOME-config switch\'s anchor is in plugin-install.js');
-  const r10m = await viaHome(M.load('src/server/plugin-install.js', SRC.replace(homeAnchor, ''), 'home-config').create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
+  const r10m = await viaHome(M.load('src/server/plugin-install.js', editAnchor(SRC, homeAnchor, '', "src/server/plugin-install.js"), 'home-config').create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
   ok(r10m.version === '6.6.6', 'control (e): a copy WITHOUT GIT_CONFIG_GLOBAL follows the HOME rewrite — it installs the OTHER repository\'s package (6.6.6), fetched with the token meant for this one: RED', r10m.version || (r10m.err && r10m.err.message));
   await PL.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }); // the right package back
   // ⑪ ROUND 2 (SHOULD 5): a throw while the credential files are written (a full disk at the second) SHREDS the first one
@@ -378,7 +387,7 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   ok(SRC.includes(throwAnchor), 'control: the shred-on-throw anchor is in plugin-install.js');
   fs.rmSync(W11, { force: true });
   const st11b = fs.mkdtempSync(path.join(G, 'st11b-'));
-  await thr(M.load('src/server/plugin-install.js', SRC.replace(throwAnchor, '  } catch (e) { throw e; }'), 'no-shred-on-throw').credentialFiles(st11b, credT, { writeFile: failSecond() }));
+  await thr(M.load('src/server/plugin-install.js', editAnchor(SRC, throwAnchor, '  } catch (e) { throw e; }', "src/server/plugin-install.js"), 'no-shred-on-throw').credentialFiles(st11b, credT, { writeFile: failSecond() }));
   ok(held(W11, TOKEN), 'control (f): a copy that does not shred on that throw leaves the token in the first file\'s inode (only the stage\'s rm would unlink it) — RED');
   // ⑫ ROUND 3 (item 3): no HOME config is read (⑩), so a TLS-inspecting egress's trust root reaches git through the EGRESS DOOR —
   // GIT_SSL_CAINFO / GIT_SSL_CAPATH (a git on libcurl-GnuTLS ignores SSL_CERT_FILE / SSL_CERT_DIR); a HOME http.sslCAInfo never
@@ -396,8 +405,8 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   const AES = fs.readFileSync(path.join(REPO, 'src/agent-env.js'), 'utf8');
   const caAnchor = ", 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH']);", reqAnchor = "const { serviceEnv } = require('../agent-env.js');";
   ok(AES.includes(caAnchor) && SRC.includes(reqAnchor), 'control: the egress door\'s git trust-root names are in agent-env.js; plugin-install.js reads serviceEnv from it');
-  const aeNoCa = M.write('src/agent-env.js', AES.replace(caAnchor, ']);'), 'no-git-ca');
-  const r12m = await viaCa(M.load('src/server/plugin-install.js', SRC.replace(reqAnchor, `const { serviceEnv } = require(${JSON.stringify(aeNoCa)});`), 'no-git-ca').create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
+  const aeNoCa = M.write('src/agent-env.js', editAnchor(AES, caAnchor, ']);', "src/agent-env.js"), 'no-git-ca');
+  const r12m = await viaCa(M.load('src/server/plugin-install.js', editAnchor(SRC, reqAnchor, `const { serviceEnv } = require(${JSON.stringify(aeNoCa)});`, "src/server/plugin-install.js"), 'no-git-ca').create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
   const c12m = calls();
   ok(c12m.length >= 1 && c12m.every((c) => !('GIT_SSL_CAINFO' in c.env) && !('GIT_SSL_CAPATH' in c.env) && caOf(c.env) === ''), 'control (g): a copy whose egress door lacks GIT_SSL_CAINFO / GIT_SSL_CAPATH hands git NO trust root at all (the HOME one is not read either) — behind a TLS-inspecting egress every clone fails: RED', { v: r12m.version, env: c12m.map((c) => c.env.GIT_SSL_CAINFO || null) });
 }

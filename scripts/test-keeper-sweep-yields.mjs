@@ -57,6 +57,15 @@ const F = require('../src/browser-facts.js');
 const B = require('../src/browser-profiles.js');
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sweep-yields-'));
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* next run */ } });
 const PARENT = 'bk-0000a1a1';
@@ -145,7 +154,7 @@ console.log('— ① L1: the orphan sweep takes ONE record per loop turn, whatev
   const st = await sweep(K, registry(300), { how: 'tick', stallMs: 0 });
   ok(st.removed === 300 && st.left === 0 && st.perTurnMax === 1, `the tick (the runtime half), 300 orphan records: all removed, one per loop turn (most in one turn ${st.perTurnMax}; lateness evidence ${st.lateEvidenceMs} ms)`, { removed: st.removed, perTurnMax: st.perTurnMax });
   // MUTANT: the yield removed (the steps run back to back inside one turn)
-  const noYield = ksrc.replace('        await yieldLoop();\n        if (reg.leases.some((l) => l.profileId === id))', '        if (reg.leases.some((l) => l.profileId === id))');
+  const noYield = editAnchor(ksrc, '        await yieldLoop();\n        if (reg.leases.some((l) => l.profileId === id))', '        if (reg.leases.some((l) => l.profileId === id))', "src/server/browser-keeper.js");
   ok(noYield !== ksrc, 'MUTANT (the yield removed): the patch applies');
   if (noYield !== ksrc) {
     const Kn = M.load('src/server/browser-keeper.js', noYield, 'no-yield');
@@ -177,7 +186,7 @@ console.log('— ② L2: a record whose daemon is GONE starts no browser-CLI chi
   ok(st != null && c.removed === 4 && c.closes === 1 && procGone, `CONTROL: beside 3 gone daemons, ONE whose daemon runs (pid ${proc.pid}, its start time recorded) is still closed by the browser CLI — 1 start in all — and ended; all 4 records removed`, { st, removed: c.removed, closes: c.closes, procGone });
   try { proc.kill('SIGKILL'); } catch { /* gone */ }
   // MUTANT: the gone-daemon judgment removed (every live-looking record goes to the CLI's close)
-  const noJudge = ksrc.replace("        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonSeenGone(rec0)) {", '        if (false) {');
+  const noJudge = editAnchor(ksrc, "        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonSeenGone(rec0)) {", '        if (false) {', "src/server/browser-keeper.js");
   ok(noJudge !== ksrc, 'MUTANT (the gone-daemon judgment removed): the patch applies');
   if (noJudge !== ksrc) {
     const Kj = M.load('src/server/browser-keeper.js', noJudge, 'no-judge');
@@ -240,7 +249,7 @@ const f2 = async (Km) => {
 {
   const g = await f2(K);
   ok(g.kept && g.state === 'ready' && g.alive && g.closes === 0 && g.out && g.out.kept === true, 'the conversation resumed inside the reap\'s window: after the reap the retire reads the lease again — the record KEPT, the browser it just started left RUNNING, no CLI start', g);
-  const noReread = ksrc.replace("      if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };\n      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }", "      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }");
+  const noReread = editAnchor(ksrc, "      if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };\n      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }", "      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }", "src/server/browser-keeper.js");
   ok(noReread !== ksrc, 'MUTANT (the re-read after the reap removed): the patch applies');
   if (noReread !== ksrc) {
     const gm = await f2(M.load('src/server/browser-keeper.js', noReread, 'no-reread'));
@@ -301,7 +310,7 @@ console.log('— ⑧ F5: one registry write and one broadcast per PIECE of the w
     await sweep(K, dataDir, { stallMs: 0, onRemoved: (n, k) => { if (n === 10 && at === null) { k.shutdown(); at = { disk: onDisk(dataDir), memory: k._reg().profiles.filter((p) => p.ephemeral).length }; } } });
     ok(at && at.memory === 50 && at.disk === at.memory, `K1: a stop (the keeper's shutdown) after 10 of 60 removals, inside one piece — the file holds what memory holds: ${at && at.disk} on disk, ${at && at.memory} in memory`, at);
   }
-  const noBatch = ksrc.replace('    if (sweepIds.has(id)) sweepDirty = true; else commit();', '    commit();');
+  const noBatch = editAnchor(ksrc, '    if (sweepIds.has(id)) sweepDirty = true; else commit();', '    commit();', "src/server/browser-keeper.js");
   ok(noBatch !== ksrc, 'MUTANT (the batching dropped): the patch applies');
   if (noBatch !== ksrc) {
     const sm = await sweep(M.load('src/server/browser-keeper.js', noBatch, 'no-batch'), registry(300), { stallMs: 0 });
@@ -328,7 +337,7 @@ const unseen = async (Km, shape, waitMs = 1500) => {   // waitMs: how long a clo
     const u = await unseen(K, shape);
     ok(u.closes === 1 && u.ended && u.removed === 1, `a LIVE daemon whose record has ${shape === 'no pid' ? 'no pid' : 'its pid but no start time'}: the retire cannot see it gone, so it closes it by the CLI as before — ${u.closes} start, the daemon ${u.ended ? 'ended' : 'LEFT RUNNING'}, the record removed`, u);
   }
-  const oldJudge = ksrc.replace('!stopping.has(profileId) && daemonSeenGone(rec0)) {', '!stopping.has(profileId) && daemonGone(rec0)) {');
+  const oldJudge = editAnchor(ksrc, '!stopping.has(profileId) && daemonSeenGone(rec0)) {', '!stopping.has(profileId) && daemonGone(rec0)) {', "src/server/browser-keeper.js");
   ok(oldJudge !== ksrc, 'MUTANT (an absent fact read as «gone», the old judgment): the patch applies');
   if (oldJudge !== ksrc) {
     const um = await unseen(M.load('src/server/browser-keeper.js', oldJudge, 'absent-is-gone'), 'no pid', 300);   // no close is made: 300 ms shows it left running
@@ -412,8 +421,8 @@ console.log('— ⑪ B-346d law 2: a daemon gone BEFORE its idle timeout is neve
   const BEFORE = '    const served = Math.max(Number(pe && pe.verbBeforeAt) || 0, Number(rec.startedAt) || 0);';
   if (!ksrc.includes(EARLY)) ok(false, 'the anchor of the control «B-346d law 2: the early verdict» is not in the source (src/server/browser-keeper.js)');
   if (!ksrc.includes(BEFORE)) ok(false, 'the anchor of the control «B-346d law 2: the verb before the newest» is not in the source (src/server/browser-keeper.js)');
-  const Krel = ksrc.includes(EARLY) ? M.load('src/server/browser-keeper.js', ksrc.replace(EARLY, '    const early = false; // the release: every gone daemon «idled out»'), 'law2-release') : null;
-  const Knaive = ksrc.includes(BEFORE) ? M.load('src/server/browser-keeper.js', ksrc.replace(BEFORE, '    const served = Math.max(Number(pe && pe.lastVerbAt) || 0, Number(rec.startedAt) || 0); // the newest verb (the asking one)'), 'law2-newest-verb') : null;
+  const Krel = ksrc.includes(EARLY) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, EARLY, '    const early = false; // the release: every gone daemon «idled out»', "src/server/browser-keeper.js"), 'law2-release') : null;
+  const Knaive = ksrc.includes(BEFORE) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, BEFORE, '    const served = Math.max(Number(pe && pe.lastVerbAt) || 0, Number(rec.startedAt) || 0); // the newest verb (the asking one)', "src/server/browser-keeper.js"), 'law2-newest-verb') : null;
   const [r, rel, naive] = await Promise.all([law2(K), Krel ? law2(Krel) : null, Knaive ? law2(Knaive) : null]);
   ok(r.every((x) => x.state === 'stopped' && x.by === 'idle'), 'every gone daemon is recorded stopped with stoppedBy «idle» — every behaviour keyed on it unchanged (the next verb starts it again, its kept tabs reopen)', r);
   ok(r[0].early && r[0].early.withinMs === 65000 && r[0].early.idleMs === IDLE && /^the browser was found gone within 65 s of a command it served, before its idle timeout of 15 min — why is not known here; the next command starts it again$/.test(r[0].note) && r[0].rowEarly && r[0].rowEarly.withinMs === 65000,
