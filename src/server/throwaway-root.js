@@ -79,18 +79,21 @@ function seamOf(env, roots) {
 /** THE ONE TEST, for a root and the home it was handed (`roots`: the temp roots, tmpRootsOf's by default — a seam for the
  *  suites' tables). The home is judged by its real path too; an unread home is never a «temp» one (no answer is never throwaway). */
 function judge(root, handed, { roots = tmpRoots(handed) } = {}) {
-  const facts = readRootFacts(root), r = realOr(root);
+  // the root's real path ONCE (主开发 r1952 (1)): the facts' own read resolved it — a blocked root's facts carry it as given
+  const facts = readRootFacts(root), r = facts.root || realOr(root);
   // the handed home is RESOLVED only when the root lies under a temp root (the only case it decides): an installed root's boot
   // never touches the home it was handed
   const home = typeof handed === 'string' && handed.startsWith('/') ? (SR.tmpRootUnder({ root: r, tmpRoots: roots }) ? realOr(handed) : handed) : null;
   const v = SR.rootVerdict({ ...facts, root: r, tmpRoots: roots, home });
   return { facts, rootVerdict: v, throwaway: SR.isThrowaway(v), linkedWorktree: SR.isLinkedWorktree(facts.gitDir, facts.gitCommonDir) };
 }
-/** Is this root throwaway? — the boot's answer for the declared hub, else judged now (no hub declared ⇒ false). */
+/** Is this root throwaway? — ONE root only (主开发 r1952 (2)): the hub's own, the boot's answer. Another root, or none declared, is
+ *  REFUSED (false): never a synchronous judge of a folder that may sit on a mount — the boot judged its own tree once, before its first
+ *  turn (kb «BEFORE THE FIRST TURN»), and no caller asks about any other. Declared and not judged yet: the boot's own read. */
 function throwaway(root = hubRoot) {
-  if (!root) return false;
-  if (verdict && hubRoot && path.resolve(String(root)) === hubRoot) return verdict.throwaway;
-  return judge(root, process.env.HOME || os.homedir()).throwaway && process.env[OVERRIDE_ENV] !== '1';
+  if (!root || !hubRoot || path.resolve(String(root)) !== hubRoot) return false;
+  if (verdict) return verdict.throwaway;
+  return judge(hubRoot, process.env.HOME || os.homedir()).throwaway && process.env[OVERRIDE_ENV] !== '1';
 }
 
 /** THE BOOT'S FIRST ACT: the one test, and the re-home of THIS process's env when the root is a linked worktree handed a home
@@ -98,15 +101,20 @@ function throwaway(root = hubRoot) {
 function rehomeAtBoot({ root, env = process.env, execPath = process.execPath } = {}) {
   setHubRoot(root);
   const handed = env.HOME || os.homedir();
-  const j = judge(hubRoot, handed);
+  const roots = tmpRoots(handed);   // the temp roots ONCE (主开发 r1952 (1)), handed to the one test, the seam and the re-home's verdict
+  const j = judge(hubRoot, handed, { roots });
   const override = env[OVERRIDE_ENV] === '1';
   // the main thread never waits on a storage mount (lane hub-fuse-sync-guard): a handed path on a FUSE, network or storage mount
-  // is never walked from the first act (the witness is not installed yet) — could not look, so the value rule does not carry it
-  let mounts = []; try { mounts = MPC.parseMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')); } catch { }
-  const mctx = { mountRoots: MPC.rootsOf({ mounts, rootDir: hubRoot }), rootDir: hubRoot };
-  const onMount = (p) => !!MPC.rootOf(p, mctx);
+  // is never walked from the first act (the witness is not installed yet) — could not look, so the value rule does not carry it.
+  // THE MOUNT TABLE IS READ ONLY WHEN A WALK NEEDS IT (主开发 r1952 (1)): a hub that is no linked worktree (the production clone) leaves
+  // the verdict at «not-worktree» before any walk, so its first act reads only what it needs
+  let mctx = null;
+  const onMount = (p) => {
+    if (!mctx) { let mounts = []; try { mounts = MPC.parseMountinfo(fs.readFileSync('/proc/self/mountinfo', 'utf8')); } catch { } mctx = { mountRoots: MPC.rootsOf({ mounts, rootDir: hubRoot }), rootDir: hubRoot }; }
+    return !!MPC.rootOf(p, mctx);
+  };
   const resolve = HL.makeResolver({ refuse: onMount });
-  const roots = tmpRoots(handed), seam = seamOf(env, roots);
+  const seam = seamOf(env, roots);
   const v = HV.hubRehome({ root: hubRoot, home: handed, tmpRoots: roots, notTemp: seam && !seam.refused ? [seam.path] : [], resolve, linkedWorktree: j.linkedWorktree, override });
   // the override is the person's word «this copy is my real install»: no re-home, and every gate treats it as real
   verdict = { root: hubRoot, throwaway: j.throwaway && !override, sign: j.linkedWorktree ? 'worktree' : j.throwaway ? 'scratch-clone' : null, override, checkout: (j.rootVerdict && j.rootVerdict.checkout) || null, seam: seam || null, ...v };

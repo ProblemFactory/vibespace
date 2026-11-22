@@ -664,9 +664,10 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     ok(j.throwaway === false && !r.includes('/') && r.every((t) => t.startsWith('/')), `r1278 THE LAW — the production hub is never throwaway: ${what} ⇒ ${j.rootVerdict.kind}`, { roots: r, kind: j.rootVerdict.kind, why: j.rootVerdict.why });
   }
   { // an env name a parent left: the one test reads HOME, the temp variable and VIBESPACE_REAL_INSTALL alone — nothing else it is handed
-    const child = execFileSync(process.execPath, ['-e', `process.stdout.write(String(require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.js'))}).throwaway(${JSON.stringify(PROD)})))`],
+    // through the BOOT's own verdict (r1952 (2): throwaway() answers the declared hub's root alone — a bare ask about another is refused)
+    const child = execFileSync(process.execPath, ['-e', `const T = require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.js'))}); T.rehomeAtBoot({ root: ${JSON.stringify(PROD)}, env: process.env }); process.stdout.write(String(T.throwaway(${JSON.stringify(PROD)})) + ' ' + String(T.throwaway('/nonexistent-vs-srvroot-other')))`],
       { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: PERSON, TMPDIR: '/', VIBESPACE_FORCE_AGENT_HOOKS: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_REAL_INSTALL: '0', VIBESPACE_API: 'http://127.0.0.1:1', NODE_ENV: 'test' } });
-    ok(child === 'false', 'r1278 THE LAW — env names a parent left (the hook switches, an override that is not «1», a conversation\'s address) make the production hub nothing but real', child);
+    ok(child === 'false false', 'r1278 THE LAW — env names a parent left (the hook switches, an override that is not «1», a conversation\'s address) make the production hub nothing but real, by the boot\'s own verdict; and another root is never judged (r1952 (2))', child);
   }
   const rf = fs.readFileSync(path.join(REPO, 'src/server/root-facts.js'), 'utf8');
   ok(!/['"`]data['"`]|dataDir/.test(rf), 'r1278 THE LAW — the one test reads the root\'s .git alone: no data folder (a slow or silent mount there answers nothing it asks)');

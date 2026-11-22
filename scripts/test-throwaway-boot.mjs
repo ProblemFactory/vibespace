@@ -52,11 +52,13 @@ const POISON = `/nonexistent-vs-tboot-${process.pid}`;   // outside every temp r
 const PRELOAD = path.join(DIR, 'poison-preload.cjs');
 fs.writeFileSync(PRELOAD, `'use strict';
 const fs = require('fs'), os = require('os');
-const P = ${JSON.stringify(POISON)}, rec = { phase: 'require', touches: [], homedir: [], userInfo: [] };
+const P = ${JSON.stringify(POISON)}, rec = { phase: 'require', touches: [], homedir: [], userInfo: [], seen: [] };
+const ROOT = process.argv[2] || '', OTHER = '/nonexistent-vs-tboot-other';   // r1952: the boot's reads of its own root, the mount table, another root
+const seen = (a) => { try { const s = a instanceof URL ? a.pathname : Buffer.isBuffer(a) ? a.toString() : String(a); return s === '/proc/self/mountinfo' ? 'mountinfo' : s === OTHER || s.startsWith(OTHER + '/') ? 'other' : (ROOT && s === ROOT) ? 'root' : null; } catch { return null; } };
 global.__rec = rec;
 const hit = (a) => { try { const s = a instanceof URL ? a.pathname : Buffer.isBuffer(a) ? a.toString() : String(a); return typeof s === 'string' && (s === P || s.startsWith(P + '/')); } catch { return false; } };
 const wrap = (obj, label) => { for (const k of Object.keys(obj)) { const f = obj[k]; if (typeof f !== 'function' || /^[A-Z]/.test(k)) continue;
-  const w = function (...a) { if (hit(a[0]) || hit(a[1])) rec.touches.push(rec.phase + ' ' + label + k + ' ' + String(a[0]).slice(P.length)); return f.apply(this, a); };
+  const w = function (...a) { if (hit(a[0]) || hit(a[1])) rec.touches.push(rec.phase + ' ' + label + k + ' ' + String(a[0]).slice(P.length)); const sn = seen(a[0]); if (sn) rec.seen.push(rec.phase + ' ' + sn + ' ' + label + k); return f.apply(this, a); };
   for (const p of Object.keys(f)) w[p] = f[p]; obj[k] = w; } };
 wrap(fs, 'fs.'); wrap(fs.promises, 'fs.promises.');
 const hd = os.homedir, ui = os.userInfo;
@@ -74,7 +76,8 @@ const TR = require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.j
 const home = require('os').homedir();
 const pm = require(${JSON.stringify(path.join(REPO, 'src/peer-messaging.js'))}).REGISTRY_DIR;   // a home CAPTURED WHEN A MODULE LOADS, loaded after line 1 (§113 (i))
 const kid = require('child_process').spawnSync(process.execPath, ['-e', 'process.stdout.write(require("os").homedir())'], { encoding: 'utf8' }).stdout;
-setImmediate(() => console.log(JSON.stringify({ rec, home, pm, view: TR.view(), kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED', 'SSL_CERT_FILE', 'VIBESPACE_START_FD'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
+rec.phase = 'other'; const otherAsk = TR.throwaway('/nonexistent-vs-tboot-other'); rec.phase = 'after';
+setImmediate(() => console.log(JSON.stringify({ rec, home, pm, view: TR.view(), kid, otherAsk, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED', 'SSL_CERT_FILE', 'VIBESPACE_START_FD'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
 `);
 const NODE_BIN = path.dirname(process.execPath);
 const SYS = createRequire(import.meta.url)('../src/home-verdict.js').SYSTEM_PATHS[process.platform === 'darwin' ? 'darwin' : 'linux'].join(':');
@@ -178,6 +181,18 @@ for (const k of Object.keys(fs)) { const f = fs[k]; if (typeof f !== 'function' 
     "(f) CONTROL: the same start with no mount there walks the path (its touches recorded) and carries it — the skip is the mount's, never the name's", { env: off.env && off.env.SSL_CERT_FILE, touched: touched(off), err: off.err });
 }
 
+{ // r1952 (1) + (2): PRODUCTION's FIRST ACT READS ONLY WHAT IT NEEDS, and the one test answers ONE root
+  const seenOf = (j, ph) => ((j.rec || {}).seen || []).filter((x) => x.startsWith(ph + ' '));
+  const inst = bootIn(mkWorktree('wt-r1952-wt'), STAND_IN), clone = (() => { const d = path.join(DIR, 'r1952-clone'); fs.mkdirSync(path.join(d, '.git'), { recursive: true }); return d; })();
+  const prod = bootIn(clone, STAND_IN);
+  const mt = (j) => seenOf(j, 'boot').filter((x) => x.includes(' mountinfo ')).length, rr = (j) => seenOf(j, 'boot').filter((x) => / root fs\.realpathSync/.test(x)).length;
+  ok(prod.verdict && prod.verdict.rehome === false && prod.verdict.why === 'not-worktree' && mt(prod) === 0 && rr(prod) === 1,
+    "(1) a CLONE's boot (the production kind) reads NO mount table — the table is read only when a walk needs it — and resolves its root's real path ONCE", { verdict: prod.verdict, seen: seenOf(prod, 'boot') });
+  ok(inst.verdict && inst.verdict.rehome === true && mt(inst) >= 1, '(1) CONTROL: a worktree\'s boot that re-homes reads it (its walk never steps on a mount)', { seen: seenOf(inst, 'boot') });
+  ok(prod.otherAsk === false && inst.otherAsk === false && seenOf(prod, 'other').filter((x) => x.includes(' other ')).length === 0 && seenOf(inst, 'other').filter((x) => x.includes(' other ')).length === 0,
+    "(2) the one test answers the HUB's OWN root alone: another root is refused (false) and never read — no synchronous judge of a folder that may sit on a mount", { prod: seenOf(prod, 'other'), inst: seenOf(inst, 'other') });
+}
+
 console.log('— ② THE NAMED EXCEPTIONS: every passwd read in the product is a row; ssh is the one row more');
 const PASSWD_ROWS = Object.freeze([
   { file: 'src/claude-oat-probe.js', n: 1, why: 'homedir — REAL_HOME, a DENY root (law E): compared against, never opened' },
@@ -214,7 +229,7 @@ console.log("— ⑥ THE HUB'S SEAM (主开发 r1412 road (ii)): it names a fold
     "⑥ the seam: a folder under a temp root counts; a temp root itself is REFUSED; a value outside every temp root, relative, the disk's root or empty is IGNORED");
   const src = fs.readFileSync(path.join(REPO, 'src/server/throwaway-root.js'), 'utf8');
   const judgeFn = src.slice(src.indexOf('function judge('), src.indexOf('function throwaway('));
-  ok(/const roots = tmpRoots\(handed\), seam = seamOf\(env, roots\);/.test(src) && /notTemp: seam && !seam\.refused \? \[seam\.path\] : \[\]/.test(src) && !/seam|SEAM/.test(judgeFn) && !/SEAM_ENV|seamOf/.test(src.slice(src.indexOf('function tmpRootsOf('), src.indexOf('const tmpRoots =')))
+  ok(/const roots = tmpRoots\(handed\);/.test(src) && /const seam = seamOf\(env, roots\);/.test(src) && /notTemp: seam && !seam\.refused \? \[seam\.path\] : \[\]/.test(src) && !/seam|SEAM/.test(judgeFn) && !/SEAM_ENV|seamOf/.test(src.slice(src.indexOf('function tmpRootsOf('), src.indexOf('const tmpRoots =')))
     && (src.match(/seamOf\(/g) || []).length === 2,
     "⑥ …it reaches ONE judgment — the home's, in the re-home (hubRehome's notTemp) — and never a gate: the one test (judge) and the temp roots never read it");
 }
