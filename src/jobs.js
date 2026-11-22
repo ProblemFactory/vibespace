@@ -1782,28 +1782,54 @@ class JobManager {
   /** r1397 (1): the machine could NOT give its word (an older agent; no device link) and the release's road ended the hold: the
    *  machine's item says WHY in words, in place, and goes once its results went out (never on the link's return alone) */
   _machineWordless(cid, code) {
-    const hids = new Set((this.pendingNotifs.get(cid) || []).filter((e) => e && e.held && e.held.kind === 'machine-away' && e.held.hostId).map((e) => e.held.hostId));
-    const wl = this._machineWordlessOf || (this._machineWordlessOf = new Map());
+    const q = (this.pendingNotifs.get(cid) || []).filter((e) => e && e.held && e.held.kind === 'machine-away' && e.held.hostId);
+    const hids = new Set(q.map((e) => e.held.hostId));
     const filed = this._machineAwayFiled();   // r1861: an item an EARLIER run of the hub filed counts as filed — looked at BEFORE the road decides
-    if (!this._machineAwayLooked && hids.size) (this._wordlessAtLook || (this._wordlessAtLook = new Map())).set(cid, code);   // a held tray: decided again AT the look
+    // r2022: the decision is written ON the notices it is about (the stash file: durable) — a restart after the release, or a held
+    // tray through a second restart, reads it back at the look (_machineAwayFiled)
+    let stamped = 0;
+    for (const e of q) if (e.held.wordless !== code) { e.held = { ...e.held, wordless: code }; stamped++; }
+    if (stamped) this._dirty = true;
     for (const hid of hids) {
       if (!filed.has(hid)) continue;   // r1730 (3): the mark belongs to a FILED item — an unfiled one would give a LATER ordinary outage the wordless words
-      const w = this._machineAwayOwed(hid);
-      wl.set(hid, code);
-      const since = Number(this._machineAwaySince && this._machineAwaySince.get(hid)) || Number(typeof this.d.machineAwayOf === 'function' && (this.d.machineAwayOf(hid) || {}).since) || 0;   // after a restart: the ladder's own start
-      if (w.n) this._fileMachineAway(hid, w, since, code);
+      this._machineWordlessAt(hid, code);
     }
     return hids.size;
   }
+  /** the wordless MARK of machine `hid` (its item goes only once its results went out) and its words, filed in place */
+  _machineWordlessAt(hid, code) {
+    (this._machineWordlessOf || (this._machineWordlessOf = new Map())).set(hid, code);
+    const w = this._machineAwayOwed(hid);
+    const since = Number(this._machineAwaySince && this._machineAwaySince.get(hid)) || Number(typeof this.d.machineAwayOf === 'function' && (this.d.machineAwayOf(hid) || {}).since) || 0;   // after a restart: the ladder's own start
+    if (w.n) this._fileMachineAway(hid, w, since, code);
+  }
+  /** r2022: the decision a release WROTE on machine `hid`'s waiting notices (agent_older / no_link), else null */
+  _machineWordlessWritten(hid) {
+    let code = null;
+    for (const q of this.pendingNotifs.values()) for (const e of q || []) {
+      if (e && e.held && e.held.kind === 'machine-away' && e.held.hostId === hid && !e.held.maybeDelivered && (e.held.wordless === 'agent_older' || e.held.wordless === 'no_link')) code = e.held.wordless;
+    }
+    return code;
+  }
   /** THE MACHINES WHOSE ITEM IS FILED (r1861): this run's filings and, once a run, the open items an EARLIER run of the hub filed (the
    *  store's own list, read once it could be READ: a held tray is looked at again) — the ONE look the settle and the wordless road take.
-   *  A wordless release that came while the tray could not be read is decided again AT the look, before its caller goes on */
+   *  r2022: at the look, an open item whose machine's waiting notices carry a release's decision gets its mark and its words back */
   _machineAwayFiled() {
     const said = this._machineAwaySaid || (this._machineAwaySaid = new Set());
     if (this._machineAwayLooked) return said;
-    try { const open = typeof this.d.machineAwayOpen === 'function' ? this.d.machineAwayOpen() : []; if (Array.isArray(open)) { this._machineAwayLooked = true; for (const hid of open) said.add(hid); } } catch { }
-    const q = this._machineAwayLooked && this._wordlessAtLook;
-    if (q) { this._wordlessAtLook = null; for (const [c, code] of q) this._machineWordless(c, code); }
+    let open = null;
+    try { open = typeof this.d.machineAwayOpen === 'function' ? this.d.machineAwayOpen() : []; } catch { open = null; }
+    if (!Array.isArray(open)) return said;   // a held tray: looked at again next time
+    this._machineAwayLooked = true;
+    for (const hid of open) said.add(hid);
+    for (const hid of open) {
+      if (this._machineWordlessOf && this._machineWordlessOf.has(hid)) continue;
+      try {
+        const code = this._machineWordlessWritten(hid);
+        // only while the ladder names no outage of it: a machine away NOW says «silent since», and its outage holds the item by itself
+        if (code && !(typeof this.d.machineAwayOf === 'function' && this.d.machineAwayOf(hid))) this._machineWordlessAt(hid, code);
+      } catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» item's mark was not read back — ${e && e.message}`); }
+    }
     return said;
   }
   /** the notices owed to the conversations of machine `hid` while it cannot be reached → {n, convs} */

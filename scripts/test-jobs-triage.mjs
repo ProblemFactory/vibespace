@@ -1997,7 +1997,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
       R.stop(); return out;
     };
     const g = await later(wiring, 'g');
-    const r = await later(wiringWith(anchored(JSRC, "      if (!filed.has(hid)) continue;   // r1730 (3): the mark belongs to a FILED item — an unfiled one would give a LATER ordinary outage the wordless words\n", '      if (!filed.has(hid)) { wl.set(hid, code); continue; }\n', 'b2566r-mark-unfiled'), 'b2566r-mark-unfiled'), 'r');
+    const r = await later(wiringWith(anchored(JSRC, "      if (!filed.has(hid)) continue;   // r1730 (3): the mark belongs to a FILED item — an unfiled one would give a LATER ordinary outage the wordless words\n", '      if (!filed.has(hid)) { (this._machineWordlessOf || (this._machineWordlessOf = new Map())).set(hid, code); continue; }\n', 'b2566r-mark-unfiled'), 'b2566r-mark-unfiled'), 'r');
     okP(g.before === 0 && /it has been silent since/.test(g.text || '') && r.marked === true && /go out without its word/.test(r.text || ''),
       'r1730 (3): a wordless release of a machine with NO item filed leaves no mark — a later ordinary outage files the «silent since» words; RED: the mark set anyway (a copy) ⇒ the later outage says «without its word»', { green: g, red: r });
   }
@@ -2035,12 +2035,15 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
   const itemNow = (R) => { const it = machineItems(R)[0]; return it ? { status: it.status, text: it.i18n.text.key } : null; };   // a COPY: the store hands its own objects
   const otherDrain = async (R, O) => { failOf(R, task(R, 'jb-o-' + O.slice(-4), 'render-o', O)); await settle(() => (R.jm.pendingNotifs.get(O) || []).length >= 1); return R.jm.drainNotifs(O).length; };   // an UNRELATED conversation's notices go out: the hub's settle runs
   const LOOK = "    const filed = this._machineAwayFiled();   // r1861: an item an EARLIER run of the hub filed counts as filed — looked at BEFORE the road decides\n";
-  const REPLAY = "    if (q) { this._wordlessAtLook = null; for (const [c, code] of q) this._machineWordless(c, code); }\n";
+  // r2022: the look READS BACK a release's decision written on the machine's waiting notices (the line below); STAMP writes it there
+  const REBUILD = "        if (code && !(typeof this.d.machineAwayOf === 'function' && this.d.machineAwayOf(hid))) this._machineWordlessAt(hid, code);\n";
+  const STAMP = "    for (const e of q) if (e.held.wordless !== code) { e.held = { ...e.held, wordless: code }; stamped++; }\n";
+  const restartOf = (R, wmod) => { R.jm._save(); R.stop(); landedU4(); return rig('machine-reboot-again', wmod, R.dir); };   // a restart of a rig: its stores landed, a new engine and store on its folder
   {
     // r1861 THE MUST: after a RESTART the item an EARLIER run filed counts as FILED — the look at the stored open items comes BEFORE the
     // wordless road decides (one helper, the settle's too): the older agent's release ⇒ the item says its TRUE reason at once, STAYS
     // OPEN through an unrelated drain while its result waits, and goes once it went out. RED 1: the look removed (a copy) ⇒ «silent
-    // since» stays at the release. RED 2: the look and the held-tray replay removed (the follow as it was) ⇒ the drain CLOSES it
+    // since» stays at the release. RED 2: the look and the read-back removed (the follow as a8f736156 had it) ⇒ the drain CLOSES it
     const scene = async (wmod, tag) => {
       const K = cidOf(0xfc01), O = cidOf(0xfc02);
       const { R, first, boot } = await rebooted(wmod, 'must-' + tag, [K]);
@@ -2052,24 +2055,25 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     };
     const g = await scene(wiring, 'g');
     const r1 = await scene(wiringWith(anchored(JSRC, LOOK, "    const filed = this._machineAwaySaid || new Set();\n", 'b2566r-no-look'), 'b2566r-no-look'), 'r1');
-    const r2 = await scene(wiringWith(anchored(anchored(JSRC, LOOK, "    const filed = this._machineAwaySaid || new Set();\n", 'b2566r-no-look-2'), REPLAY, '', 'b2566r-no-look-2'), 'b2566r-no-look-2'), 'r2');
+    const r2 = await scene(wiringWith(anchored(anchored(JSRC, LOOK, "    const filed = this._machineAwaySaid || new Set();\n", 'b2566r-no-look-2'), REBUILD, '', 'b2566r-no-look-2'), 'b2566r-no-look-2'), 'r2');
     const WL = /go out without its word/, SIL = /it has been silent since/;
     okP(SIL.test(g.first) && g.boot.owed.join() === '1' && g.boot.said === 0 && !g.boot.looked && g.boot.items === 1
         && g.atRelease.status === 'open' && WL.test(g.atRelease.text) && g.drained >= 1 && g.afterDrain.status === 'open' && g.owedThen === 1 && g.final.status === 'done'
         && r1.atRelease.status === 'open' && SIL.test(r1.atRelease.text)
         && r2.drained >= 1 && r2.owedThen === 1 && r2.afterDrain.status === 'done' && SIL.test(r2.afterDrain.text),
-      'r1861: AFTER A RESTART (a new engine and a new For-you store on the first one\'s folder, nothing said in memory) the older agent\'s release finds the item the first run filed: it says its TRUE reason at once, stays open through an unrelated drain while its result waits, and goes when it went out; RED 1: the look removed ⇒ «silent since» at the release; RED 2: the look and the replay removed ⇒ the drain CLOSES it while its result waits',
+      'r1861: AFTER A RESTART (a new engine and a new For-you store on the first one\'s folder, nothing said in memory) the older agent\'s release finds the item the first run filed: it says its TRUE reason at once, stays open through an unrelated drain while its result waits, and goes when it went out; RED 1: the look removed ⇒ «silent since» at the release; RED 2: the look and the read-back removed ⇒ the drain CLOSES it while its result waits',
       { green: g, red1: r1, red2: r2 });
   }
   {
-    // r1861: a release that came while For you could not be READ (a held tray: no look) is decided again AT the look — the first settle
-    // after the read files the true reason and keeps the item while its result waits. RED: the replay removed (a copy) ⇒ that settle CLOSES it
+    // r1861 + r2022: a release that came while For you could not be READ (a held tray: no look) writes its decision on the notices; the
+    // first settle after the read reads it back, files the true reason and keeps the item while its result waits. RED: the read-back
+    // removed (a copy) ⇒ that settle CLOSES it
     const scene = async (wmod, tag) => {
       const K = cidOf(0xfe01), O = cidOf(0xfe02);
       const { R } = await rebooted(wmod, 'held-' + tag, [K]);
       R.todos._holdUnread({ code: 'EIO', why: 'a test hold' });
       releaseOlder(R, K);
-      const whileHeld = { looked: !!R.jm._machineAwayLooked, queued: !!(R.jm._wordlessAtLook && R.jm._wordlessAtLook.has(K)) };
+      const whileHeld = { looked: !!R.jm._machineAwayLooked, written: (R.jm.pendingNotifs.get(K) || []).map((n) => n.held && n.held.wordless).join() };
       for (let k = 0; k < 4 && R.todos.isHeldUnread(); k++) await R.todos.readAgain();
       const lifted = !R.todos.isHeldUnread(), drained = await otherDrain(R, O), afterDrain = itemNow(R), owedThen = owedAway(R, K);
       R.jm.drainNotifs(K);
@@ -2077,10 +2081,61 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
       R.stop(); return out;
     };
     const g = await scene(wiring, 'g');
-    const r = await scene(wiringWith(anchored(JSRC, REPLAY, '', 'b2566r-no-replay'), 'b2566r-no-replay'), 'r');
-    okP(!g.whileHeld.looked && g.whileHeld.queued && g.lifted && g.drained >= 1 && g.afterDrain.status === 'open' && /go out without its word/.test(g.afterDrain.text) && g.owedThen === 1 && g.final.status === 'done'
+    const r = await scene(wiringWith(anchored(JSRC, REBUILD, '', 'b2566r-no-readback'), 'b2566r-no-readback'), 'r');
+    okP(!g.whileHeld.looked && g.whileHeld.written === 'agent_older' && g.lifted && g.drained >= 1 && g.afterDrain.status === 'open' && /go out without its word/.test(g.afterDrain.text) && g.owedThen === 1 && g.final.status === 'done'
         && r.lifted && r.owedThen === 1 && r.afterDrain.status === 'done',
-      'r1861: an older agent\'s release while For you is HELD (no look possible) is decided again at the look — after the read the first settle files the true reason and keeps the item while its result waits; RED: the replay removed ⇒ that settle closes it while its result waits',
+      'r1861 + r2022: an older agent\'s release while For you is HELD (no look possible) writes its decision on the notices — after the read the first settle reads it back, files the true reason and keeps the item while its result waits; RED: the read-back removed ⇒ that settle closes it while its result waits',
+      { green: g, red: r });
+  }
+  {
+    // r2022: the restart comes AFTER the release — the mark is read back from the notices it is about: the next run's first settle
+    // (an unrelated drain) keeps the «update the agent» item while its result waits; it goes when it went out. RED: the read-back
+    // removed (a copy) ⇒ that settle closes it while its result waits
+    const scene = async (wmod, tag) => {
+      const K = cidOf(0xfe11), O = cidOf(0xfe12);
+      let R = rig('machine-after-release-' + tag, wmod);
+      R.down.set(K, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+      failOf(R, task(R, 'jb-rb-' + K.slice(-4), 'render-k', K));
+      await settle(() => machineItems(R).length === 1 && owedAway(R, K) === 1);
+      releaseOlder(R, K);   // run 1: the older agent's release — the mark and its words
+      const run1 = itemNow(R);
+      R = restartOf(R, wmod);   // THE RESTART after the release: no release comes again (its wakes ended)
+      R.down.set(K, 'h-b');   // the link is online; no wake is held for it
+      const boot = { owed: owedAway(R, K), written: (R.jm.pendingNotifs.get(K) || []).map((n) => n.held && n.held.wordless).join(), marked: !!(R.jm._machineWordlessOf && R.jm._machineWordlessOf.size) };
+      const drained = await otherDrain(R, O), afterDrain = itemNow(R), owedThen = owedAway(R, K);
+      R.jm.drainNotifs(K);
+      const out = { run1, boot, drained, afterDrain, owedThen, final: itemNow(R) };
+      R.stop(); return out;
+    };
+    const g = await scene(wiring, 'g');
+    const r = await scene(wiringWith(anchored(JSRC, REBUILD, '', 'b2566r-after-release'), 'b2566r-after-release'), 'r');
+    const WL = /go out without its word/;
+    okP(WL.test(g.run1.text) && g.boot.owed === 1 && g.boot.written === 'agent_older' && !g.boot.marked && g.drained >= 1 && g.afterDrain.status === 'open' && WL.test(g.afterDrain.text) && g.owedThen === 1 && g.final.status === 'done'
+        && r.boot.written === 'agent_older' && r.owedThen === 1 && r.afterDrain.status === 'done',
+      'r2022: a restart AFTER the older agent\'s release — the decision is on the notices it is about, so the next run\'s first settle keeps the «update the agent» item while its result waits, and it goes when it went out; RED: the read-back removed ⇒ that settle closes it while its result waits',
+      { green: g, red: r });
+  }
+  {
+    // r2022: a release while For you is HELD, then a SECOND restart before the tray reads — the decision survives on the notices; the
+    // third run's first settle files the true reason and keeps the item. RED: the decision never written (a copy) ⇒ that settle closes it
+    const scene = async (wmod, tag) => {
+      const K = cidOf(0xfe21), O = cidOf(0xfe22);
+      let { R } = await rebooted(wmod, 'held-twice-' + tag, [K]);
+      R.todos._holdUnread({ code: 'EIO', why: 'a test hold' });
+      releaseOlder(R, K);   // run 2: the release while the tray cannot be read — no look possible
+      const run2 = { looked: !!R.jm._machineAwayLooked, text: itemNow(R) && itemNow(R).text };
+      R = restartOf(R, wmod);   // THE SECOND RESTART, the tray still unread when it came
+      R.down.set(K, 'h-b');
+      const drained = await otherDrain(R, O), afterDrain = itemNow(R), owedThen = owedAway(R, K);
+      R.jm.drainNotifs(K);
+      const out = { run2, drained, afterDrain, owedThen, final: itemNow(R) };
+      R.stop(); return out;
+    };
+    const g = await scene(wiring, 'g');
+    const r = await scene(wiringWith(anchored(JSRC, STAMP, '', 'b2566r-not-written'), 'b2566r-not-written'), 'r');
+    okP(!g.run2.looked && /it has been silent since/.test(g.run2.text || '') && g.drained >= 1 && g.afterDrain.status === 'open' && /go out without its word/.test(g.afterDrain.text) && g.owedThen === 1 && g.final.status === 'done'
+        && r.owedThen === 1 && r.afterDrain.status === 'done',
+      'r2022: a release under a HELD tray, then a second restart — the decision survives on the notices: the third run\'s first settle files the true reason and keeps the item while its result waits; RED: the decision never written ⇒ that settle closes it while its result waits',
       { green: g, red: r });
   }
   {

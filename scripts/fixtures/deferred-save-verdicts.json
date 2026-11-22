@@ -180,6 +180,11 @@
   "why": "held words; the next tick carries"
  },
  {
+  "key": "jobs · src/jobs.js · JobManager._machineWordless · _dirty = true",
+  "verdict": "none",
+  "why": "held decision; the next tick carries"
+ },
+ {
   "key": "jobs · src/jobs.js · JobManager.markAck · _dirty = true",
   "verdict": "none",
   "why": "ack bookkeeping; next tick carries"
