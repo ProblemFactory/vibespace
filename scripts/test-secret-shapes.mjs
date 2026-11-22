@@ -914,6 +914,7 @@ const R7_E06 = {
   value: "const QUERY_VALUE_RE = /«[^&#;\\s\"'<>`«»\\u0080-\\uffff]{1,65536}»?|(?:[^&#;\\s\"'<>`\\u0080-\\uffff]|«redacted»){1,65536}/y;",   // stale-pins: kept (the round's tip, a red control)
   nested: "const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\\-\\[\\]%]{1,80})=(?!«)(?=«|[^&#;\\s\"'<>`\\u0080-\\uffff])/g;",   // stale-pins: kept (the round's tip, a red control)
 };
+const R7_0582_NAME = "const NAME_QUERY_VALUE_RE = /«[^«»\\r\\n]{1,65536}»|(?:«redacted»|[^&#;\\s\"'<>]){1,65536}/y;";   // stale-pins: kept (058237eb2's name-road expression: the mark read as a quote, r2280's red control)
 const R7_KINDS = ['accented', 'startsOutside', 'guillemetName', 'encodedNested', 'rawNested', 'backtick', 'guillemet', 'turnToCjk'];
 const r7Plant = (src, which) => {
   const lineOf = (s, k) => s.split('\n').find((l) => l.startsWith(k)).split('   //')[0], asName = (l) => 'const NAME_QUERY_VALUE_RE = ' + l.slice('const QUERY_VALUE_RE = '.length);
@@ -1119,7 +1120,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
         if (zh) put(pick(ZH)); else put(' ' + pick(LA));
       }
       // (D, the coordinator's r1553): a query value glued to unspaced Chinese prose with a later at-sign in the same run is
-      // R7's to read (the release's r5: its value runs to the next & # ; or blank and hides it whole when the prose holds a userinfo). Its
+      // R7's to read (since r2209 an ASCII-led value ends at the prose, and R9 hides the later pass-phrase on its own). Its
       // check is weaker: no byte of any pass-phrase in the output, and nothing before that query value differs
       if (onDraw) onDraw(t, secrets, [], null);
       const classD = qAt >= 0 && laterAt;
@@ -1181,8 +1182,8 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   // r1553 (a) THE LEAK THE GENERATOR FOUND, a NAMED leg (its shape written out, pinned whatever the generator draws next): an address
   // with a query, glued to unspaced Chinese prose that later holds a URL with a userinfo. R7's value runs to the next `& # ;` or blank,
   // so it swallowed the prose and cut the later pass-phrase at its `;`: the URL's scheme went with the cut, R9 never saw it, and the
-  // tail stayed in plain. R9 now runs FIRST (both rules): every pass-phrase is hidden whole before R7 reads the value; R7 then masks
-  // that value whole, as the release does (class D: no byte of a pass-phrase out, nothing before the query value differs)
+  // tail stayed in plain. R9 now runs FIRST (both rules): every pass-phrase is hidden whole before R7 reads the value; R7 then reads
+  // that value up to the prose (r2209: an ASCII-led value ends at the CJK kind) (class D: no byte of a pass-phrase out, nothing before the query value differs)
   const Q7 = "    text = redactQuery(text, (head) => { n++; if (say) say(head); });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)\n";
   const pA = ['MS|*~', 'MWK\\', 'UZG%'].join(''), pB = ['D^%+@|', ';', 'U).8-3'].join(''), pC = ['CW^', '\\NN\\'].join('');
   const LEAKS = [['a later pass-phrase holding the «;» R7 cut at', '有问题（redis://app:' + pA + '@build.example:4301/db?replicaSet=rs0）！联系ops@corp.example日志里「HTTPS://ops:' + pB + '@mq.example」；看一下', [pA, pB, 'U).8-3', 'D^%+@|']],
@@ -1310,6 +1311,25 @@ console.log('r1554 → r2209 (主开发\'s law, restated; beside line 246\'s str
   const stopBad = STOPS.filter((ch) => SS.redactSecrets('x ?token=QW12ER34' + ch + '之后').text !== 'x ?token=' + REDACTED + ch + '之后');
   ok(STOPS.length >= 10 && !stopBad.length, `(a) every MESSAGE_STOPS member (${STOPS.length}) ends an ASCII-led value${stopBad.length ? ' — not: ' + stopBad.join(' ') : ''}`);
   ok(ROWS.every(([, t, , w]) => w === 'name' || SS.redactSecrets(SS.redactSecrets(t).text).text === SS.redactSecrets(t).text), 'idempotent on the rows');
+  // r2280 (1): at a NAME the belts' own mark is NEVER an opening quote — a public value that is the mark with an encoded address glued
+  // after it is read whole (line 246's run) and hidden when that address holds a holder. RED: 058237eb2's guillemet branch (the mark read
+  // as a quote: only the mark judged, the encoded pass-phrase shown)
+  const PWN = 'Pw' + crypto.randomBytes(5).toString('hex'), MARKED = 'job?next=' + REDACTED + 'https%3A%2F%2Fh.example%2Fcb%3Fpassword%3D' + PWN + ' now';
+  const N0582 = mutantCopies('r2280-name-0582', REPO).load('src/secret-shapes.js', anchored(SRC, lineOf(SRC, 'const NAME_QUERY_VALUE_RE = '), R7_0582_NAME, 'r2280 the mark read as a quote'), 'name-0582');
+  const mk = SS.redactByValue(MARKED).text, mkRed = N0582.redactByValue(MARKED).text;
+  ok(!mk.includes(PWN) && mk.startsWith('job?next=' + REDACTED) && mkRed.includes(PWN), `r2280 (1): at a name the mark is never an opening quote — the mark with an encoded holder glued after it is hidden whole: ${J(mk)}; RED (058237eb2's guillemet branch): ${J(mkRed)}`);
+  // r2280 (3), by law (d): at a name a value in guillemets with a tail glued after its » — only the quoted part hidden, the tail shown
+  ok(SS.redactByValue('nightly?password=«Summer1!»tail').text === 'nightly?password=' + REDACTED + 'tail', `r2280 (3): at a name «…» is the value and a glued tail is not (law (d)) — ${J(SS.redactByValue('nightly?password=«Summer1!»tail').text)}`);
+  // r2280 (5): the kept copy of line 246's R7 expressions IS fa0a6c1a5's text, read from git when this clone has it (the comparison stays
+  // the real one when the tree moves); a clone without it says so loudly
+  {
+    const { gitEnvFrom } = await import('./git-env.mjs');
+    const { spawnSync } = await import('node:child_process');
+    const g = spawnSync('git', ['show', 'fa0a6c1a5:src/secret-shapes.js'], { cwd: REPO, encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 });   // test-architecture §75: a tested spawnSync (g.status below)
+    if (g.status !== 0) console.log(`  SKIP (LOUD): r2280 (5) — git cannot read fa0a6c1a5 here (${(g.stderr || '').trim().slice(0, 80)})`);
+    else ok(lineOf(g.stdout, 'const QUERY_VALUE_RE = ') === R7_L246.value && lineOf(g.stdout, 'const QUERY_HEAD_RE = ') === R7_L246.head && lineOf(g.stdout, 'const NESTED_HEAD_RE = ') === R7_L246.nested,
+      'r2280 (5): the kept copy of line 246\'s three R7 expressions is fa0a6c1a5\'s text, character for character');
+  }
   ok(SS.redactSecrets(SS.redactSecrets(CASES[0].t).text).text === SS.redactSecrets(CASES[0].t).text, 'idempotent');
   // RED CONTROL: the release's value class (up to the next & # ; ' " < > or blank) — the prose, the mail and the second URL masked
   const rel = mutantCopies('r1554-r7', REPO).load('src/secret-shapes.js', anchored(SRC, lineOf(SRC, 'const QUERY_VALUE_RE = '), R7_L246.value, 'r1554-release-value'), 'release-value');

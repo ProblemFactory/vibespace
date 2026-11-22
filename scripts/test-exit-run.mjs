@@ -346,8 +346,16 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
     digests: (n) => (' ' + '('.repeat(8) + 'ab12'.repeat(10)).repeat(n / 49), quotedLong: (n) => ('token="' + 'a'.repeat(300) + ' ').repeat(n / 308),
     // r10 (lane lg-recovery — the fresh read: the name's query row read every head's value before its name, 1.25 s at 64 KiB): heads of a public
     // name, and of a holder
-    queryHeads: (n) => '?a='.repeat(n / 3), queryHolders: (n) => '?token='.repeat(n / 7), quotedBare: (n) => 'password "a '.repeat(n / 12) };
+    queryHeads: (n) => '?a='.repeat(n / 3), queryHolders: (n) => '?token='.repeat(n / 7), quotedBare: (n) => 'password "a '.repeat(n / 12),
+    // r2280 (主开发): the name road's own value expression (NAME_QUERY_VALUE_RE, r2209 (d)) — an unclosed guillemet repeated, a guillemet
+    // inside repeated holders and public heads, the mark glued to a public value: a failed « scan ends at the next «, so the scans are disjoint
+    guillemetOpen: (n) => '?token=«'.repeat(n / 8), guillemetHolders: (n) => '?a=«x&token=«'.repeat(n / 13), guillemetPublic: (n) => '?a=«x&'.repeat(n / 6), markGlued: (n) => '?next=«redacted»x&'.repeat(n / 18) };
   for (const [k, mk] of Object.entries(NAME_STORMS)) { const v = SS_NAME(mk, 4096, 4); ok(v.ok, `r9 THE NAME RULE linear on ${k} by the count: ${stepsLine(v)} at ×4 input`, v); }
+  { // r2280 RED CONTROL: the guillemet branch without its « stop (a failed scan runs on to the line's end) reads guillemetPublic quadratic
+    const ssG = fs.readFileSync(SS_FILE, 'utf8'), G = ssG.split('\n').find((l) => l.startsWith('const NAME_QUERY_VALUE_RE = ')).split('   //')[0];
+    const NO_STOP = "const NAME_QUERY_VALUE_RE = /«(?!redacted»)[^»\\r\\n]{1,65536}»|(?:«redacted»|[^&#;\\s\"'<>]){1,65536}/y;";   // stale-pins: kept (r2280's red control: the guillemet branch without its « stop)
+    const fG = mutantCopies('exr-name-guil', REPO).write('src/secret-shapes.js', anchored(ssG, G, NO_STOP, 'r2280: the guillemet branch without its « stop'), 'guil-no-stop'), v = SS_NAME(NAME_STORMS.guillemetPublic, 1024, 4, fG);
+    ok(G.includes('[^«»') && !v.err && !v.ok, `r2280 RED CONTROL: the name road's guillemet branch without its « stop reads quadratic by the count — ${stepsLine(v)} at ×4 input (the guillemetPublic leg goes red)`, v); }
   { const ssN = fs.readFileSync(SS_FILE, 'utf8'), cutN = ssN.replace('  const core = coreOf(run);', "  const core = run.replace(/[)\"'`\\]}>,;:!?.]+$/, '');");
     const fN9 = mutantCopies('exr-name9', REPO).write('src/secret-shapes.js', cutN, 'coretrim'), v = SS_NAME(NAME_STORMS.closers, 1024, 4, fN9);
     ok(cutN !== ssN && !v.err && !v.ok, `r9 RED CONTROL: the run row's core trimmed by a \`[…]+$\` regex reads quadratic by the count — ${stepsLine(v)} at ×4 input (the closers leg goes red)`, v); }

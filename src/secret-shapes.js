@@ -633,8 +633,13 @@ function holderVerdict(k) {
 // is PART of the value and hidden with it. Inside such a value a backtick (a code span's end) and a « or » that is not the belts'
 // own mark end it too: the two things line 246 hid that this shows, as ruled (no credential carries either raw). A value that
 // STARTS outside ASCII, or with a backtick, is read exactly as line 246 read it, hidden whole (a little prose hidden is the safe
-// side). THE ONE LIMIT: a pass-phrase that turns from ASCII to CJK in its middle, raw in a query on a free text, is hidden up to
-// the turn. A URL carries its own non-ASCII percent-encoded, so an encoded value is ASCII and read whole. The head is line 246's
+// side). THE ONE LIMIT: a value that turns from ASCII to CJK in its middle, raw in a query on a free text, is hidden up to the turn —
+// a pass-phrase, or an encoded redirect with a raw CJK character before an encoded holder (the OUTER value is a free-text value like
+// any other; only the nested head read inside a DECODED value is line 246's, r2209 (c)). A URL carries its own non-ASCII
+// percent-encoded, so an encoded value is ASCII and read whole. The head is line 246's. Of the CJK kind the stop set leaves out, on
+// the safe side (an ASCII value runs on into them, hidden with it): Yi (U+A000–A4CF), the hexagrams (U+4DC0–4DFF), the kana
+// supplement and extensions of plane 1 (high surrogate U+D82C) and the enclosed ideographic supplement (U+1F200: its high surrogate
+// U+D83C is the emoji's, so no stop by code unit can tell them apart)
 const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=[^&#;\s"'<>])/g;
 const isBlankCode = (c) => (c >= 9 && c <= 13) || c === 32 || c === 0xA0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200A) || c === 0x2028 || c === 0x2029 || c === 0x202F || c === 0x205F || c === 0x3000 || c === 0xFEFF;   // `\s`'s set
 // r3 (G): what the PROSE opened before the head (in its blank-free run) — a closer that ends a holder's value goes outside the mask
@@ -845,7 +850,7 @@ const QUOTED_TOKEN_MAX = 256;   // a quoted value is ONE token when it closes wi
 // (b) R2 at a name: a secret-named `KEY:` / `KEY=` (this table's KV_HEAD) — the ONE token after it: a quoted value closed on its
 // line, else the next blank-delimited token; nothing on the head's line ⇒ the token on the next one (`password:` ⏎ a value — R2b's
 // shape); a YAML block indicator (`token: |`) ⇒ the token under it
-// r10 (B-a3fe): R7 at a name — the release's query walk (QUERY_HEAD_RE, the value read by QUERY_VALUE_RE) and its name grammar
+// r10 (B-a3fe): R7 at a name — the release's query walk (QUERY_HEAD_RE without its `(?!«)`; the value read by NAME_QUERY_VALUE_RE since r2209 (d)) and its name grammar
 // (holderName); the ONE value after a holder's `=` is hidden only when it is a VALUE (wordValue), like every word row of a name
 // r10 (B-a3fe — 主开发's law: a notice a job sends never carries a credential's bytes): at a NAME the word rows read the value after
 // up to 16 blanks, a no-break space and an ideographic space included (`password␣␣␣␣<value>`, `password\u00a0<value>` passed whole
@@ -862,8 +867,9 @@ const WORD_NEXT_NAME_RE = NAME_BLANKS(WORD_NEXT_RE), WORD_RUN_NAME_RE = NAME_BLA
 const HTTP_NAME_RE = (() => { const src = HTTP_RE.source.split('[ \\t]+').join(NAME_BLANK_CLASS + '{1,16}'); if (src === HTTP_RE.source) throw new Error('secret-shapes: the bearer row lost its blank run'); return new RegExp(src, HTTP_RE.flags); })();   // `bearer`␣(any blank)…
 // r2209 (d): at a NAME a value is read as line 246 read it (a name is not a free text: no CJK stop, no backtick or guillemet stop), and
 // a value a person QUOTES in guillemets is hidden from its « to its », whatever is inside (`?password=«密码»`, `«Grüße»`); a « with no
-// » on its line before the next « is line 246's run. The mark is one unit here too
-const NAME_QUERY_VALUE_RE = /«[^«»\r\n]{1,65536}»|(?:«redacted»|[^&#;\s"'<>]){1,65536}/y;   // an unclosed « gives its run back a step a character, to the next « or line end, once: linear
+// » on its line before the next « is line 246's run. The mark is one unit here too, and (r2280) NEVER an opening quote: a value that
+// starts with the mark takes line 246's run, whatever is glued after it (a public value `«redacted»https%3A…%3Fpassword%3D…` read whole)
+const NAME_QUERY_VALUE_RE = /«(?!redacted»)[^«»\r\n]{1,65536}»|(?:«redacted»|[^&#;\s"'<>]){1,65536}/y;   // an unclosed « gives its run back a step a character, to the next « or line end, once: linear
 const NAME_QUERY_HEAD_RE = new RegExp(QUERY_HEAD_RE.source.replace('(?!«)', ''), 'g');
 function nameQuery(text) {
   let n = 0, out = '', last = 0, m, judgedTo = 0;
