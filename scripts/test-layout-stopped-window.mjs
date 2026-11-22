@@ -888,7 +888,8 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
     const nav = Object.create(MN.prototype); nav.app = W.app; nav._shown = { 'desk-p': 'win-new-1', 'desk-w': 'win-other' };
     const dots = []; nav._waitDot = (el, on) => dots.push([el.dataset.winId, on]);
     const splitCalls = []; nav.split = { offer: () => null, rekey: (x, y) => { splitCalls.push(x, y); return true; } };   // offer: no «Split» beside the row
-    wm._app = { _mobileNav: nav, updateTaskbar() {}, sessions: new Map() }; wm.followIdChange = WM.prototype.followIdChange;   // window.js's one rule, on the world's wm
+    let stripSaw = null;   // r2250: the chooser's host as the strip's rebuild (updateTaskbar) finds it
+    wm._app = { _mobileNav: nav, updateTaskbar() { stripSaw = chooser._chooser.hostId; }, sessions: new Map() }; wm.followIdChange = WM.prototype.followIdChange;   // window.js's one rule, on the world's wm
     const revealed = []; wm.revealWindow = (id) => { revealed.push(id); return true; };
     let closes = 0, redraws = 0;
     const row = nav._buildWindowItem(win, wm, () => { closes++; }, () => { redraws++; });
@@ -911,18 +912,22 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
       const mine = dots.slice(d0).filter((d) => d[0] === row.dataset.winId);
       const r0 = revealed.length, c0 = closes;
       if (!tapFirst) row.onclick();
-      return { took, stamp: row.dataset.winId, dot: mine.length ? mine.at(-1)[1] : null, inside: ins(win, row), winId: win.id, shown: nav._shown['desk-p'], other: nav._shown['desk-w'], split: splitCalls.join(), revealed: revealed.slice(r0).join(), closes: closes - c0, redraws, said: said() - w0, desk: deskRow.dataset.winId, host: chooser._chooser.hostId };
+      return { strip: stripSaw, took, stamp: row.dataset.winId, dot: mine.length ? mine.at(-1)[1] : null, inside: ins(win, row), winId: win.id, shown: nav._shown['desk-p'], other: nav._shown['desk-w'], split: splitCalls.join(), revealed: revealed.slice(r0).join(), closes: closes - c0, redraws, said: said() - w0, desk: deskRow.dataset.winId, host: chooser._chooser.hostId };
     } finally { document.querySelector = q0; document.querySelectorAll = qa0; }
   };
   const A = await openList();
   ok(A.took === true && A.stamp === 'win-row-taken' && A.winId === 'win-row-taken', '§10 a re-key under the open list RE-STAMPS its row: the row names the new id (wm.rekeyWindow calls the one rule, window.js followIdChange)', A);
   ok(A.desk === 'win-row-taken' && A.host === 'win-row-taken', '§10 r1958 …the DESK\'s open grouped chooser follows too: its row\'s stamp and the chooser\'s host id name the new id (the strip\'s title patch finds it by the host)', A);
+  ok(A.strip === 'win-row-taken', '§10 r2250 …and the rule runs BEFORE the strip\'s rebuild: at updateTaskbar the open chooser already names the new host (a group button rebuilt then finds it — its anchor, Esc\'s focus, the outside-press exclusion)', A);
   ok(A.dot === true, '§10 …followRekey re-reads its waiting mark under the new id: the dot stays on', A);
   ok(A.inside === true, '§10 …a press on that row is a press ON that window (late-focus insideWindow: its late focus is not dropped)', A);
   ok(A.shown === 'win-row-taken' && A.other === 'win-other' && A.split === 'win-new-1,win-row-taken', '§10 …this tab\'s notes by id follow: the window on show per desktop moves to the new id (the other desktop\'s untouched), the split is told', A);
   ok(A.closes === 1 && A.revealed === 'win-row-taken' && A.said === 0, '§10 …its tap brings the window under the new id (the tap read the id live — as the release already did)', A);
   const R = await openList({ WM: (await mutantEsm('src/lib/window.js', FOLLOW, '')).WindowManager, patchAfter: true });
   ok(R.took === true && R.stamp === 'win-new-1' && R.dot === false && R.shown === 'win-new-1' && R.split === '' && R.desk === 'win-new-1' && R.host === 'win-new-1', `§10 RED: the release's rekeyWindow (no followIdChange) leaves the old stamps, host and notes — the list's next patch turns the dot off (stamp ${R.stamp} · dot ${R.dot} · shown ${R.shown} · desk ${R.desk})`, R);
+  const STRIP = "    this._app?.updateTaskbar?.();   // r2250: AFTER the rule — a group button the strip rebuilds now finds its open chooser by the new host id\n";
+  const RO = await openList({ WM: (await mutantEsm('src/lib/window.js', FOLLOW + STRIP, '    this._app?.updateTaskbar?.();\n' + FOLLOW)).WindowManager });   // stale-pins: kept — the release's order, the RED's own text
+  ok(RO.took === true && RO.host === 'win-row-taken' && RO.strip === 'win-new-1', `§10 RED: the release's order (the strip rebuilt BEFORE the rule) — at updateTaskbar the chooser still names the old host (${RO.strip}): a group button rebuilt then misses it`, RO);
   const RP = await openList({ MN: (await mutantEsm('src/lib/mobile-nav.js', REPATCH, '')).MobileNav });
   ok(RP.stamp === 'win-row-taken' && RP.dot === null, `§10 RED: followRekey without its re-patch — the row is re-stamped but its mark is never read under the new id (dot ${RP.dot})`, RP);
   const D = await openList({ tapFirst: true });
@@ -1017,11 +1022,20 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
       ['the grouped chooser row\'s right-click', /state\.pin\(\);\s*showWindowContextMenu\(app, win\.id, e\.clientX, e\.clientY,/],
       ['the «+N» row\'s tap', /pop\.remove\(\);\n\s+activateWindow\(app, win\.id\);[^\n]*\n[^\n]*\n\s+requestAnimationFrame\(\(\) => \{ strip\._bringIn = \{ id: win\.id,/],
       ['the ⧉ list\'s host row', /item\.onclick = \(\) => \{\n\s+app\.wm\.revealWindow\(win\.id\);[^\n]*HOST's title/],
+      // r2250: the ⧉ row's right-click, the every-desktop and other-desktops rows' taps, the chooser's re-list and close observer
+      ['the ⧉ list row\'s right-click', /showWindowContextMenu\(app, win\.id, e\.clientX, e\.clientY, \{ onAction: \(kind\) => \{ if \(!pop\.isConnected\) return;/],
+      ['the every-desktop row\'s stamp and tap', /const idOf = \(r\) => winOf\.get\(r\)\?\.id \|\| r\.id;[\s\S]*?item\.dataset\.winId = idOf\(r\);[\s\S]*?goOtherDesk\(app, \{ id: idOf\(r\), deskId: r\.deskId, built: r\.built \}\)/],
+      ['the other-desktops row\'s tap', /const w = r\.built \? app\.wm\.windows\.get\(r\.id\) : null;[^\n]*\n\s+item\.onclick = \(\) => \{ pop\.remove\(\); goOtherDesk\(app, w \? \{ \.\.\.r, id: w\.id \} : r\); \};/],
+      ['the chooser\'s re-list', /relist\(\) \{\n\s+const live = app\.wm\.windows\.get\(state\.hostId\)\?\._tabChain[^\n]*\n\s+pop\.remove\(\);\n\s+if \(live && live\.tabs\[0\] === state\.hostId /],
+      ['the chooser\'s close observer', /if \(_chooserOf\(state\.hostId\)\?\._chooser\.anchor !== state\.anchor\)/],
     ];
     const miss = (src) => taps.filter(([, re]) => !re.test(src)).map(([n]) => n);
-    ok(miss(TB).length === 0, '§10 r1958 the desk lists\' rows act on their window\'s id read live, off the instance (an id changed in place while the list stood open)', miss(TB));
+    ok(miss(TB).length === 0, '§10 r1958 / r2250 the desk lists\' rows act on their window\'s id read live, off the instance (an id changed in place while the list stood open)', miss(TB));
     const rel = anchored(anchored(TB, 'app.wm.revealWindow(win.id); // the row names THIS tab', 'app.wm.revealWindow(tid); // the row names THIS tab', 'the chooser tap, as released'), 'activateWindow(app, win.id);', 'activateWindow(app, tl.id);', 'the «+N» tap, as released');   // stale-pins: kept — the release's captured ids, the RED's own text
     ok(rel !== TB && miss(rel).includes('the grouped chooser row\'s tap') && miss(rel).includes('the «+N» row\'s tap'), '§10 RED: the release\'s rows (a captured id) fail the check by name', miss(rel));
+    const rel2 = anchored(anchored(anchored(anchored(TB, 'showWindowContextMenu(app, win.id, e.clientX, e.clientY, { onAction:', 'showWindowContextMenu(app, id, e.clientX, e.clientY, { onAction:', 'the ⧉ right-click, as released'), 'goOtherDesk(app, { id: idOf(r),', 'goOtherDesk(app, { id: r.id,', 'the every-desktop tap, as released'), 'goOtherDesk(app, w ? { ...r, id: w.id } : r);', 'goOtherDesk(app, r);', 'the other-desktops tap, as released'), 'const live = app.wm.windows.get(state.hostId)?._tabChain', 'const live = app.wm.windows.get(hostId)?._tabChain', 'the re-list, as released');   // stale-pins: kept — the release's captured ids, the RED's own text
+    const R2 = ['the ⧉ list row\'s right-click', 'the every-desktop row\'s stamp and tap', 'the other-desktops row\'s tap', 'the chooser\'s re-list'];
+    ok(rel2 !== TB && R2.every((n) => miss(rel2).includes(n)), '§10 RED (r2250): the release\'s ⧉ right-click, every-desktop and other-desktops taps and the chooser\'s re-list (a captured id) fail the check by name', miss(rel2));
   }
 });
 const HOUR = 3600000, DAY = 86400000;

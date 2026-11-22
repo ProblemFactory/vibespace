@@ -30,7 +30,8 @@
 //     844 × 390 — «Split» opens two panes (left | right, each ≥ MIN_PANE, both transcripts drawn, each composer 16 px,
 //     each head naming its window with a 44 px ✕), a pane's tap makes it the one on show, the back closes a layer opened
 //     over the split and leaves both panes; a rotation to portrait shows one pane (the pair kept), the rotation back and a
-//     reload restore it; a pane's ✕ ends it
+//     reload restore it; a pane's ✕ ends it — pressed after its window took a new id in place (a REAL wm.rekeyWindow, r2250): the
+//     OTHER pane's window is the one on show (the pressed pane's window stays open under its new id, off show)
 //   ⑦ ROUND 2 (the acceptance's findings on 6f4f858c): ⑦a the backlog chip's base rule (.bl-prio 9 px / 0 5 px — the
 //     round-1 block cut the comment above it); ⑦b 844 × 390, the split standing, ☰ shows the list column ⇒ the split
 //     collapses to the pane on show (the pair kept, the other in the switcher), ☰ again ⇒ it returns; ⑦c the first tap on
@@ -551,9 +552,18 @@ try {
     await load(); await settled('regular'); await waitFor(`document.querySelectorAll('.window.phone-pane').length === 2`, 12000); await sleep(800);
     const r3 = await evalJs(SPL);
     check('⑥ a reload restores it (this tab\'s own — sessionStorage)', r3.on && r3.panes.length === 2, r3);
+    // r2250 (5): the ✕ pressed AFTER its pane's window took a new id IN PLACE — the REAL wm.rekeyWindow in this page, as B-1d87's
+    // adoption calls it ({ inChain: true }), the split standing; the ✕ was drawn before (line 382 reads its pane's id live — the
+    // release's ✕ asked closePane by its drawn id, found no such pane, and left the pressed pane's window on show). The ✕ closes no
+    // window: the split ends and the other pane's window is the one on show (phone-split-view close)
+    const RK = await evalJs(`(() => { const ps = [...document.querySelectorAll('.window.phone-pane')], winOf = (side) => { const el = ps.find((p) => p.dataset.pane === side); return el ? [...app.wm.windows.values()].find((w) => w.element === el) || null : null; };
+      const r = winOf('right'), l = winOf('left'); if (!r || !l) return { right: !!r, left: !!l };
+      const was = r.id, now = was + '-rk2250'; return { was, now, other: l.id, took: app.wm.rekeyWindow(was, now, { inChain: true }) === true, held: app.wm.windows.get(now) === r, split: document.documentElement.classList.contains('vs-split') }; })()`);
+    check('⑥ r2250 a REAL re-key in the page: the right pane\'s window takes a new id in place, the split standing (wm.rekeyWindow, as B-1d87\'s adoption calls it)', RK.took === true && RK.held === true && RK.split === true, RK);
     await realClick('.window.phone-pane[data-pane="right"] .phone-pane-close'); await sleep(1200);
-    const r4 = await evalJs(SPL);
+    const r4 = await evalJs(SPL), k4 = await evalJs(`(() => { const vis = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0; return { kept: app.wm.windows.has(${JSON.stringify(RK.now)}) && !app.wm.windows.has(${JSON.stringify(RK.was)}), shown: [...app.wm.windows.values()].filter((w) => vis(w.element)).map((w) => w.id) }; })()`);
     check('⑥ a pane\'s ✕ ends it: one window on show', !r4.on && r4.drawn === 1 && (await evalJs(`sessionStorage.getItem('vibespace.phoneSplit')`)) === '{}', r4);
+    check('⑥ r2250 …pressed AFTER its window\'s re-key, the ✕ puts the OTHER pane\'s window on show; the pressed pane\'s window stays open under its new id, off show (the release\'s ✕, by its drawn id, found no such pane and left the pressed pane\'s window on show)', k4.kept === true && k4.shown.length === 1 && k4.shown[0] === RK.other, { k4, RK });
   }
   // ═══ ⑦ ROUND 2 (the acceptance's findings) ═══
   if (leg(7)) {

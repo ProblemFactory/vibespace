@@ -879,9 +879,9 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     // after a row's window menu acted: re-list from the LIVE chain (a tab
     // closed, renamed, split), or close when the group is gone from here
     relist() {
-      const live = app.wm.windows.get(hostId)?._tabChain, el = state.anchor;
+      const live = app.wm.windows.get(state.hostId)?._tabChain, el = state.anchor;   // the host's id as it stands NOW (r2250: followIdChange moves it; the one captured at open named no window after a re-key)
       pop.remove();
-      if (live && live.tabs[0] === hostId && live.tabs.length > 1 && el.isConnected) showTabGroupList(app, el, live);
+      if (live && live.tabs[0] === state.hostId && live.tabs.length > 1 && el.isConnected) showTabGroupList(app, el, live);
     },
   };
   pop.dataset.mode = state.mode;
@@ -956,7 +956,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     mo.disconnect(); ctl.abort(); pop._closeCtl?.abort(); state.keep();
     // the LIVE button (a rebuild re-anchors); a re-list already opened the next
     // chooser on the same button: it stays expanded
-    if (_chooserOf(hostId)?._chooser.anchor !== state.anchor) state.anchor.setAttribute?.('aria-expanded', 'false');
+    if (_chooserOf(state.hostId)?._chooser.anchor !== state.anchor) state.anchor.setAttribute?.('aria-expanded', 'false');   // its host as it stands now (r2250)
   });
   mo.observe(pop.parentNode, { childList: true });
   requestAnimationFrame(() => {
@@ -991,6 +991,10 @@ function warmthHead(words, rerender) {
  *  at open and at a press — the tick patches each row's band and words in place, nothing moves under the pointer. */
 function renderEveryDesktop(app, pop, place) {
   const dm = app.desktopManager, rows = warmthRows(app);
+  // a built row's WINDOW, held from the open: the row's stamp and its tap read that window's id live (r2250 — an id changed in place
+  // while the list stood open; a press on the head draws the rows again from this list)
+  const winOf = new Map(rows.filter((r) => r.built).map((r) => [r, app.wm.windows.get(r.id)]));
+  const idOf = (r) => winOf.get(r)?.id || r.id;
   const deskName = (id) => (dm?.desktops || []).find((d) => d.id === id)?.name || '';
   const render = () => {
     pop.innerHTML = '';
@@ -998,7 +1002,7 @@ function renderEveryDesktop(app, pop, place) {
     const items = rows.map((r) => {
       const item = document.createElement('div');
       item.className = 'overlap-switcher-item';
-      item.dataset.winId = r.id; item.dataset.desktopId = r.deskId || '';
+      item.dataset.winId = idOf(r); item.dataset.desktopId = r.deskId || '';
       const icon = document.createElement('span');
       icon.appendChild(windowListMark(r.mark, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
@@ -1006,7 +1010,7 @@ function renderEveryDesktop(app, pop, place) {
       const dk = document.createElement('span'); dk.className = 'dk'; dk.textContent = deskName(r.deskId);
       item.append(icon, label, dk);
       paintListRow(app, item, { key: r.key }, label);
-      item.onclick = () => { pop.remove(); goOtherDesk(app, { id: r.id, deskId: r.deskId, built: r.built }); };
+      item.onclick = () => { pop.remove(); goOtherDesk(app, { id: idOf(r), deskId: r.deskId, built: r.built }); };
       return item;
     });
     const deskAt = (id) => { const i = (dm?.desktops || []).findIndex((d) => d.id === id); return i < 0 ? Infinity : i; };
@@ -1079,13 +1083,8 @@ export function showWindowList(app, anchor, opts = {}) {
       // which takes over the whole screen, so the list gets out of the way.
       item.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        showWindowContextMenu(app, id, e.clientX, e.clientY, {
-          onAction: (kind) => {
-            if (!pop.isConnected) return;
-            if (kind === 'move') pop.remove();
-            else render();
-          },
-        });
+        // its id read live, as the row's tap (r2250: the id captured in the loop opened no menu after a re-key, and said nothing)
+        showWindowContextMenu(app, win.id, e.clientX, e.clientY, { onAction: (kind) => { if (!pop.isConnected) return; if (kind === 'move') pop.remove(); else render(); } });
       });
       pop.appendChild(item);
     }
@@ -1109,7 +1108,8 @@ export function showWindowList(app, anchor, opts = {}) {
         label.textContent = r.title + ' \u00B7 ' + r.deskName;
         item.append(label);
         if (warm) paintListRow(app, item, { ids: tileIds(app, r.id) }, label); // a group's host row: its tabs' worst (built or held — r2 H2)
-        item.onclick = () => { pop.remove(); goOtherDesk(app, r); };
+        const w = r.built ? app.wm.windows.get(r.id) : null;   // a built row's WINDOW: its tap reads the id live (r2250 — the rule re-stamps this row)
+        item.onclick = () => { pop.remove(); goOtherDesk(app, w ? { ...r, id: w.id } : r); };
         pop.appendChild(item);
       }
     }

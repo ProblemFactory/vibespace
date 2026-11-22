@@ -457,7 +457,7 @@ console.log('— ⑨ the wiring and the laws (r1b)');
     /if \(digest \+ form === this\._switcherDigest\) return;/.test(dm) && /if \(form === 'compact'\) \{ this\._renderCompactSwitcher\(container\); return; \}/.test(dm) && !/warmth/i.test(bodyOf(tb, /\nexport function updateTaskbar\(app\) /).split('fitTaskbarStrip(app);')[0]));
   ok('…the ⧉ list keeps its pinned lines and THE door count (taskbar.js .revealWindow( = 4 — a held row is the desktop\'s deferred reveal since r8 of userW inc-mw1ogdno-5jny; the summary\'s rows jump through goOtherDesk)',
     (tb.match(/\.revealWindow\(/g) || []).length === 4 && /if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb) && /let otherDesksOpen = false;/.test(tb)
-    && /item\.onclick = \(\) => \{ pop\.remove\(\); goOtherDesk\(app, \{ id: r\.id, deskId: r\.deskId, built: r\.built \}\); \};/.test(tb));
+    && /item\.onclick = \(\) => \{ pop\.remove\(\); goOtherDesk\(app, \{ id: idOf\(r\), deskId: r\.deskId, built: r\.built \}\); \};/.test(tb));
   const css = read('public/style.css');
   const a = css.indexOf('/* q-059 r1b (lane cache-warmth-band)'), z = css.indexOf('/* ── end of the q-059 r1b warmth block');
   const block = a >= 0 && z > a ? stripAll(css.slice(a, z)) : '';

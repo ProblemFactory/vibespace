@@ -1989,13 +1989,14 @@ class WindowManager {
     }
     const sess = this._app?.sessions?.get(oldId);
     if (sess) { this._app.sessions.delete(oldId); this._app.sessions.set(newId, sess); }
-    this._app?.updateTaskbar?.();
     this.followIdChange(oldId, newId);   // r1793 / r1958: every open list and the phone's notes follow the new id (THE one rule, below)
+    this._app?.updateTaskbar?.();   // r2250: AFTER the rule — a group button the strip rebuilds now finds its open chooser by the new host id
     return true;
   }
 
   /** THE ONE RULE OF AN ID CHANGED IN PLACE (主开发 r1793 / r1958): the two roads that change a window's id in place — rekeyWindow
-   *  (B-1d87's adoption, the Stage's) and layout.js's restore remap — call this AFTER the change. Every open list's row that names
+   *  (B-1d87's adoption, the Stage's) and layout.js's restore remap — call this AFTER the change (rekeyWindow: before the strip's
+   *  rebuild, r2250 — a group button rebuilt then finds its open chooser by the new host id). Every open list's row that names
    *  the window by its stamp takes the new one (the phone's switcher rows; the desk's grouped chooser, «+N» and ⧉ rows), a grouped
    *  chooser opened for that host follows it (its title patch finds it by the host's id), and the phone's own notes follow
    *  (MobileNav.followRekey: the rows' waiting mark, the shown window, the split's pair). Every row's tap reads its window's id
