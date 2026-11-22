@@ -124,6 +124,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - VibeSpace no longer stops responding while it writes the CLIs' own settings on a machine whose home folder answers slowly.
 - VibeSpace no longer pauses for a moment each time a job changes while the Jobs list is open, or every few seconds while sessions are listed.
 - After a restart, a run card's 8-hour «Always» no longer reads as ended while it still works, and an agent is told when a pasted key's approval ended.
+- When the agent groups' file cannot be read, the Channels panel now says the groups are paused instead of «No groups yet», and nothing is sent until it reads.
+- Pairing with a VibeSpace whose channels are paused now says so, and the same code still works once it reads again.
 
 ## 2.369.415 — 2026-11-21
 

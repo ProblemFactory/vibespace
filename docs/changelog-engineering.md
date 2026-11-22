@@ -1505,6 +1505,32 @@ This file is the engineers' record of every release: the lanes, the verification
 - ITS CURE (r1602, the full round wd8wo8si8's two musts): A KEY THE FILE REVOKES IS NEVER PINNED — src/host-keys.js `revokedKeysOf`: a key named by ANY `@revoked` line of the hub user's known_hosts, whatever its host pattern, is left out, and what is left decides (none: refused by name, as before; the marker line used to be skipped, not honoured, and the revoked key pinned). THE PRESS PINS ONLY WHERE ssh's LOOKUP NAME IS CERTAIN FROM THE RECORD: a record that takes its address or port from the hub's ssh configuration (viaConfig) is refused by name (`host-key-via-config`) and its press opens the Host key… dialog's scan-and-confirm; the release looked it up as the bare name on port 22 and could pin another sshd's key. Smalls: a known_hosts over its bound and an unreadable one are refused by their own codes (`host-key-known-too-big` / `host-key-known-unreadable`), never «no key yet» and never with the path; «Pin all N» names every machine that did not pin with its own words; a record whose pin was REFUSED as unusable is refused by that pin's words and shows no «not pinned» (pinView `hostKeysUnusable`). Legs: test-host-key-known ① ② ③ (the revocation on the plain line's own key; RED: the release's reader, a copy, pins it).
 - ITS SMALLS (the round w0z9ourlm, r1966; legs and words only): a RED control that MOVES the dot-segment refusal below the door class (a copy: a door's prefix carries a dot segment through again; before, only its removal was pinned); one sentence in src/path-dot-segment.js on why the socket's upgrade road does not ask it; the true RED of «the lookup name is certain» (a copy of the press without its viaConfig refusal pins the port-22 line's key); legs for an @revoked line under a hashed name and one beside an @cert-authority line; the comments: revokedKeysOf compares the self-typed blob, and reads only this one file's revocations; test-door-class's dotted rows are judged by the law alone.
 
+### bl-windows B-f276 unit 1c — the groups engine paused; a family that read missing never renames over a file it has not read (the third of three, 主开发 r1143)
+- WHY: 1b's round wwlskwphv (three takes, no must) named two of the row's own losses by other roads, given AS IF MUSTS. First, a late mount AFTER the first write: the next writes went back to a rename over the mount's real file. Second, a companion read (the acts journal, the stamps log) took a failed read as empty.
+- THE LAW, WHOLE: until a read of this life has seen the file it writes, every whole write and every journal append of a family that read missing is the exclusive create, or is checked on the writer's thread against the file it made itself (dev + ino). A file not its own is read and kept, and the change refused by name.
+- A companion's failed read holds its family. The damaged door's own rename runs off the loop. The peer's pairing completion asks the pause first. The groups' «store blocked» words no longer say «set aside».
+- THE GROUPS ENGINE PAUSED (A3's groups half, ported): every door a row of GROUP_HELD_DOORS, deny by default. The pacer waits; nothing is dispatched or reported while held; owed words and falls are walled; the orphan scan runs again on read. A pace-held mark stays until the pacer registers (r809 (2)). The panel never says «No groups yet» over a groups.json nobody read.
+- FROM THE ROUND'S SHOULDS:
+  - the agent's reminder says the channels are paused;
+  - a small family is held for the length of its appeared read;
+  - the own-temp sweep's failed unlink marks a second name;
+  - the damaged door's route has its leg (an agent bearer 403);
+  - legs for the writer's no-link fallback and own-temp sweep, two presses at once, a failed put-back, a paced change meeting an appeared index, the aliases refused while held;
+  - ⑮b's pure checks also run in the fast tier.
+- NAMED: test-key-file-law's three copies controls stay in ONE store copy (each control is red by its own cut; that is argued in the leg's comment, not shown by separate copies).
+- ITS FOLLOW (round whfrsuwsp: three takes, no must; 主开发 r1588 rules it into the moved form's one small commit):
+  - MONEY: a leg parks a group's wake while groups.json is held, lifts the hold, and the wake is posted exactly once. Its control is the door that never lifts.
+  - The stamps journal's EEXIST branch asks the life-long flag.
+  - The own numbers: the store's cell first, the thread's map second.
+  - The end sweep runs again at the lift.
+  - The hung send has a behaviour leg: the real route over a held engine answers 503 and returns.
+  - Legs for the stamps fold's guard, a family started empty by the door (own-only again; the door now resets the index's journal too) and the pairing refused by name: A's 503 store-blocked is `peer-paused` at B, with the person's words.
+  - The appeared words name the other cause (storage that does not keep file numbers stable).
+  - The worker's comment says what the code holds (checked just before the rename); the kb names the two narrow limits.
+  - Judged: a later own-only append never creates its file (a journal gone since is refused, nothing made); the stale `actsWriting` cell is cleared.
+  - MOVED ONTO THE TRAIN (主开发 r1864, the store knot: on 1cd4db2d5, after B-360d unit 1 — every index change rides the journal): the own-file law covers each of the journal's roads. Every journal write under the index's law (`...actsOwn()`: the act's line, `askActs`, the compaction after a fold); `produceActs` answers a held «appeared» index BY NAME (EEXIST), never null, before law 10's LATER; a held index is refused in `flush()` before the journal-only change is made owed; a touch outside an update takes no line while held; a durable act's failure words by the hold (store-appeared). Legs: a journal not its own meets the next durable act; append, compaction, append; a journal-only family at open — each with its red control.
+  - SAID WRONGLY IN 1c's LINE, now true: 1c's line said its legs covered the agent's «paused» reminder and the own-temp sweep's failed unlink. They did not. Both legs are here, each with its control.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
