@@ -674,7 +674,7 @@ function _transcriptPoolGet() {
   if (!_workerScript) return (_inPlace ||= { inPlace: true, call: async (op, payload) => (await require('../transcript-worker').runOp(op, payload)).result });
   if (_transcriptPool === null || (_transcriptPool === false && _poolFails < POOL_RETRY_MAX && Date.now() >= _poolRetryAt)) {
     try {
-      const { SafeFs } = require('../safe-fs');
+      const { SafeFs } = require('../hub-pool').hubPool(path.join(__dirname, '..', 'transcript-worker.js'));   // r2660 (B): never in the device bundle
       // THE HISTORY LANE'S HEAP IS BOUNDED, and only its (lane resume-all-paced L3 cure, 主开发 23:16Z): the bound was measured
       // for the codex history read alone — the pool's two workers also serve Claude's history reads, the line index and the turn
       // scans, unmeasured under a cap, so they keep the runtime's limit as before. Twice: the worker's resourceLimits (a hard

@@ -39,7 +39,7 @@ const cardsPool = () => {
   // a bundle that ships no such worker (the device agent's: §107 keeps it out) reads its OWN store in place, on its own loop, as
   // the release read it there — never the hub's (the hub's checkout always has the script)
   if (!fs.existsSync(path.join(__dirname, 'agy-cards-worker.js'))) return (_pool = { inPlace: true, call: async (op, x) => snapshotsOf(x) });
-  const { SafeFs } = require('./safe-fs.js');
+  const { SafeFs } = require('./hub-pool').hubPool(path.join(__dirname, 'agy-cards-worker.js'));   // r2660 (B): never in the device bundle
   return (_pool = new SafeFs({ workerPath: path.join(__dirname, 'agy-cards-worker.js'), name: 'agy-cards', poolSize: 1,
     serial: { busy: { message: 'the subagent cards are still being read', code: 'agy_cards_busy' } } }));   // B-3b03: no pool runs an op inline — its belt is gone
 };

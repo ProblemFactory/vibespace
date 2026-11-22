@@ -7940,6 +7940,23 @@ await section(async () => {
   // B-82b8 (主开发 r654): the harness settings' WORDS (a person's — shown only by the hub's Settings window) never ride the device bundle;
   // the table of machine facts does (the descriptors read its keys, types, defaults and apply road)
   ok(in107.some((k) => /src\/harness-settings\.js$/.test(k)) && !in107.some((k) => /src\/harness-settings-words\.js$/.test(k)), `§107 B-82b8: the device bundle carries src/harness-settings.js (the machine facts) but NOT src/harness-settings-words.js (a person's words) — the bundle is ${size107} bytes`, in107.filter((k) => /harness-settings/.test(k)));
+  // 主开发 r2660 (B): THE HUB'S FILE POOL NEVER RIDES THE DEVICE BUNDLE. src/safe-fs.js (about 23 KB as shipped) reached it through the
+  // lazy requires of three files the device carries (the codex adapter, the transcript service, the agy backfill), each asked only when
+  // its worker script exists, so no pool was ever built on a machine. They ask src/hub-pool.js now, whose require is a computed path the
+  // build does not follow. RED CONTROL: the same build with that require written as a literal carries src/safe-fs.js again.
+  const hubSrc107 = read('src/hub-pool.js') || '', POOL107 = '  return require(POOL);\n', GUARD107 = '  if (!fs.existsSync(script)) return null;\n';
+  const lit107 = hubSrc107.split(POOL107).length === 2 ? await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent',
+    plugins: [{ name: 'hub-pool-literal', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]hub-pool\.js$/ }, () => ({ contents: hubSrc107.replace(POOL107, "  return require('./safe-fs.js');\n"), loader: 'js' })); } }] }) : null;
+  const litIn107 = lit107 ? Object.keys(lit107.metafile.inputs) : [];
+  ok(!in107.some((k) => /src\/safe-fs\.js$/.test(k)) && in107.some((k) => /src\/hub-pool\.js$/.test(k)) && litIn107.some((k) => /src\/safe-fs\.js$/.test(k)),
+    `§107 r2660 (B): the device bundle carries src/hub-pool.js but NOT src/safe-fs.js, the hub's file pool; RED CONTROL: the helper's require written as a literal puts it back in the build's input list (${litIn107.filter((k) => /safe-fs|hub-pool/.test(k)).join(', ') || 'no control build: its require line moved'})`, in107.filter((k) => /safe-fs|hub-pool/.test(k)));
+  // and a machine without the worker's script never reaches that require (the helper's own body, lifted; RED: its existence line cut)
+  const body107 = (/function hubPool\(script\) \{\n([\s\S]*?)\n\}/.exec(hubSrc107) || [])[1] || '';
+  const ask107 = (body, script) => { const asked = []; const out = new Function('fs', 'require', 'POOL', 'script', body)({ existsSync: (p) => p === '/hub/src/agy-cards-worker.js' }, (p) => { asked.push(p); return { SafeFs: 'the pool' }; }, '/hub/src/safe-fs.js', script); return { out, asked }; };
+  const none107 = body107 ? ask107(body107, '/bundle/agy-cards-worker.js') : null, hub107 = body107 ? ask107(body107, '/hub/src/agy-cards-worker.js') : null;
+  const red107 = (body107 + '\n').split(GUARD107).length === 2 ? ask107((body107 + '\n').replace(GUARD107, ''), '/bundle/agy-cards-worker.js') : null;
+  ok(!!none107 && none107.out === null && none107.asked.length === 0 && !!hub107 && hub107.asked.join() === '/hub/src/safe-fs.js' && !!red107 && red107.asked.length === 1,
+    `§107 r2660 (B): a machine without the worker's script never reaches the pool's require (asked ${none107 && none107.asked.length} times, null back); the hub's checkout asks it once; RED (the existence line cut): that machine asks it (${red107 && red107.asked.length})`, { none107, hub107, red107 });
   ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of ${RELEASE_BUNDLE_BYTES} bytes — the 2.369.417 release's signed device bundle, plus ${DEVICE_BUNDLE_MARGIN * 100} % for this block's device code — as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code over the margin is the coordinator\'s to rule — the base is the last release\'s signed size, restated only at a cut' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
@@ -7986,8 +8003,10 @@ await section(async () => {
   ok(cqSrc107.includes(NAME107) && pred107(rp107).length > 0, `§107 CONTROL: claude-quota.js requiring its adapter (the shape before) carries prediction code into the device bundle (${pred107(rp107).join(', ')}) — the leg above goes red on it`);
   // B-3b03 (lane hub-loop-stalls): the device bundle no longer reaches the SafeFs worker at all (src/safe-fs.js stopped requiring it
   // for its in-main fallback), so xlsx is out of it even when not external — the CONTROL plants that require back (an esbuild onLoad
-  // over safe-fs.js, the release's reach) and builds with xlsx NOT external: xlsx is inlined and both legs above go red on it
-  const plant107 = { name: 'plant-safe-fs-worker', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]safe-fs\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8') + "\nrequire('./safe-fs-worker');\n", loader: 'js', resolveDir: path.dirname(a.path) })); } };
+  // over safe-fs.js, the release's reach) and builds with xlsx NOT external: xlsx is inlined and both legs above go red on it.
+  // r2660 (B): src/safe-fs.js is out of the device bundle too now, so the plant goes into src/hub-pool.js, the pool's one door the
+  // bundle carries — the same reach, from the file the device does load
+  const plant107 = { name: 'plant-safe-fs-worker', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]hub-pool\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8') + "\nrequire('./safe-fs-worker');\n", loader: 'js', resolveDir: path.dirname(a.path) })); } };
   const rc107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107.filter((x) => x !== 'xlsx'), preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [plant107] });
   const rcSize107 = Buffer.byteLength(shipped107(rc107));
   ok(libs107(rc107).includes('xlsx') && rcSize107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with the SafeFs worker's require planted back (the release's reach, B-3b03) and xlsx NOT external inlines node_modules/xlsx (${rcSize107} bytes as shipped) — both legs above go red on it`);

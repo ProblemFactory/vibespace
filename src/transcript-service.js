@@ -53,7 +53,7 @@ function picturePool() {
   // runner did there (`picture` on a main thread answers «unavailable» — the device answers its pictures through pictureHere); the
   // hub's checkout always has the script, so the hub never runs it in-main (its pool refuses: the route's 503 «finding»)
   if (!fs.existsSync(PICTURE_WORKER)) return (_picturePool = { inPlace: true, call: async (op, q) => (await require('./transcript-worker').runOp(op, q)).result });
-  const { SafeFs } = require('./safe-fs');
+  const { SafeFs } = require('./hub-pool').hubPool(PICTURE_WORKER);   // r2660 (B): the pool by a path the device build never follows
   _picturePool = new SafeFs({ workerPath: PICTURE_WORKER, name: 'transcript-picture', poolSize: 1, timeouts: { default: 120000 } });
   return _picturePool;
 }
