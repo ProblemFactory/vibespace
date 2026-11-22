@@ -296,6 +296,7 @@ const RUN_SAID = Object.freeze({
     scrub_work_bound: 'the command ran; scrubbing its output met its work bound, so the output after the words is withheld (scrub_work_bound) — do not run it again blindly',
   }),
   withheldOther: 'the command ran; the output after the words is withheld — do not run it again blindly',
+  ranLocked: 'the command ran to its end before the lock; its output after the lock is withheld — do not run it again blindly',   // r2161 (c)
   hits: (n) => `${n} occurrence(s) of a stored secret blanked`,
   truncated: 'the output was cut at 2 MiB',
   timedOut: 'stopped at its timeout',
@@ -306,7 +307,12 @@ async function runCmd(rest) {
   let r;
   try { r = await postLong('/api/agent/vault/run', { args: rest, cwd: process.cwd() }); } finally { clearTimeout(note); }
   const d = r.data || {};
-  if (r.status >= 400 || !d.ok) { console.error('vibespace-vault run: ' + (d.error || 'HTTP ' + r.status) + (d.code ? ` (${d.code})` : '')); process.exit(r.status === 400 && d.code === 'bad_flag' ? 2 : 1); }
+  if (r.status >= 400 || !d.ok) {
+    console.error('vibespace-vault run: ' + (d.error || 'HTTP ' + r.status) + (d.code ? ` (${d.code})` : ''));
+    if (d.ran === true) console.error(`# vibespace-vault run: ${RUN_SAID.ranLocked}`);   // r2161 (c): the child FINISHED before the lock
+    if (d.receipt) console.error(`# vibespace-vault run: receipt ${d.receipt}`);   // r2161 (d): a refusal of a child that ran carries its receipt (run_unanswered, a lock after the run)
+    process.exit(r.status === 400 && d.code === 'bad_flag' ? 2 : 1);
+  }
   if (d.stdout) process.stdout.write(d.stdout);
   if (d.stderr) process.stderr.write(d.stderr);
   const said = [];

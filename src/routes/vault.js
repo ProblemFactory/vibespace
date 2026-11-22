@@ -582,7 +582,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     }
     return null;
   }
-  const refusal = (res, r) => res.status(DOOR.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || r.code, ...Object.fromEntries(['ref', 'door', 'tool', 'template', 'name', 'flag', 'why', 'killed'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
+  const refusal = (res, r) => res.status(DOOR.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || r.code, ...Object.fromEntries(['ref', 'door', 'tool', 'template', 'name', 'flag', 'why', 'killed', 'ran', 'receipt'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });   // r2161 (c)(d): a refusal of a child that RAN says so (`ran`) and carries its receipt
   app.post('/api/agent/vault/run', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const caller = runCallerOf(req);

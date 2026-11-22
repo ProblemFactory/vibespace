@@ -225,6 +225,8 @@ const STATUS = Object.freeze({
 });
 // the door's sentence for the run's storage (a PARKED mount's own words when it is one — B-5ce7's cure), + where and that nothing ran
 const storageWords = (p) => `${DOOR.sentenceFor(p)} (the run's folder, its program or a template is on it) — nothing ran`;
+// r2161 (c): a lock that lands while a FINISHED child's output is scrubbed — the command RAN; a tool that cannot be repeated must not be run again blindly
+const LOCKED_AFTER_RAN = VB.agentWords('the command RAN to its end before the lock — do not run it again blindly; its output after the lock is withheld, and a new run waits until a person unlocks it on this instance\'s page');
 const MORE_WORDS = Object.freeze({
   run_unanswered: 'the command RAN, but its answer could not be written: its output is lost — do not run it again blindly; its receipt and its use are recorded',   // r1919 (2)
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
@@ -2258,7 +2260,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!usedRefs || (USE_SKIP.has(outcome) && !ran) || typeof vault.noteUse !== 'function') return;   // a child that RAN with the value is a use whatever ended it
       for (const r of usedRefs) { try { vault.noteUse(r.ref, { by: by.kind, door: 'run', conv: scope }, { outcome: outcome === 'ran' ? 'ok' : outcome, purpose: purposes.get(r.id) || null, actor: VB.actorName(caller.name, 'a conversation'), receipt, store: r.store, used: ran, grant: standingIds.get(r.id) || null }); } catch { } }
     };
-    const note = (outcome, extra = {}) => { audit('vault-run', { by, outcome, ...extra }); useLines(outcome, runReceipt, !!extra.receipt); };   // ONE line: the actor, the outcome (ran | the refusal's code), the facts — never a value; + each entry's use line
+    const note = (outcome, extra = {}) => { try { audit('vault-run', { by, outcome, ...extra }); } finally { useLines(outcome, runReceipt, !!extra.receipt); } };   // r2161 (f): the use lines are written even when the audit line throws (a child that RAN keeps its one use line)   // ONE line: the actor, the outcome (ran | the refusal's code), the facts — never a value; + each entry's use line
     if (caller.job) { note('job_no_use'); return named('job_no_use'); }
     if (!caller.conversationId) return named('unauthorized');
     const st = vaultState();
@@ -2592,7 +2594,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       startingBy.set(sconv, (startingBy.get(sconv) || 0) + 1); startingAll++;
       let scrub;
       try { scrub = await startScrub(); } finally { const n = (startingBy.get(sconv) || 1) - 1; if (n > 0) startingBy.set(sconv, n); else startingBy.delete(sconv); startingAll--; }
-      if (scrub.refused) { giveBackLate(); if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); } if (lockGen !== lg0 || vaultState() !== 'unlocked') { note('vault_locked', head); return named('vault_locked'); } note('spawn_failed', { ...head, why: `the scrubber (${scrub.refused})` }); return named('spawn_failed', { why: 'the scrubber could not start' }); }   // the caller gone first (the read's #22)
+      if (scrub.refused) { giveBackLate(); if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); } if (lockGen !== lg0 || vaultState() !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } note('vault_locked', head); return named('vault_locked'); } note('spawn_failed', { ...head, why: `the scrubber (${scrub.refused})` }); return named('spawn_failed', { why: 'the scrubber could not start' }); }   // the caller gone first (the read's #22)
       scrubOfRun = scrub;   // r1919 (5): a started worker only (a refused start is no scrubber: its worker already ended)
       const unscrub = (r) => { scrub.close(); return r; };
       if (lockGen !== lg0 || vaultState() !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } note('vault_locked', head); return unscrub(named('vault_locked')); }
@@ -2731,7 +2733,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
           const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: stoppedBy === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
           if (spawnErr) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnErr }); resolve(named('spawn_failed', { why: spawnErr })); return; }   // no child ran: no receipt, no use
-          if (stoppedBy === 'lock') { note('vault_locked', { ...line, killed: stoppedAt === 'lock' }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: stoppedAt === 'lock' })); return; }
+          if (stoppedBy === 'lock') { const ranFirst = stoppedAt !== 'lock'; note('vault_locked', { ...line, killed: !ranFirst, ...(ranFirst ? { ran: true } : {}) }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(ranFirst ? { ...named('vault_locked', { killed: false, ran: true, receipt }), words: LOCKED_AFTER_RAN } : named('vault_locked', { killed: true })); return; }   // r2161 (c): a child that FINISHED before the lock — its words (and the CLI) say the command RAN
           if (stoppedBy === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
           note('ran', line);
           resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes, ...(scrubbed.withheld ? { withheld: scrubbed.withheld } : {}) }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
@@ -2767,7 +2769,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       rec.child = child;
       runs.add(rec);
       if (verdict.window && child.pid) sayWindowUse(verdict.window, receipt);   // r7: a run the 1-hour window let through — ONE notice, nothing filed
-      child.on('error', (e) => { spawnError = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); if (!child.pid) finish(null, null); });
+      child.on('error', (e) => { const why = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); if (!child.pid) { spawnError = why; finish(null, null); } else log(`vault-run: the child's error after its spawn (${why}) — it ran; its end is the run's answer`); });   // r2161 (a): the spawn-failed word (which gives a spent once-grant back) only when no pid was ever given
       if (child.stdout) child.stdout.on('data', (b) => take('out', b));
       if (child.stderr) child.stderr.on('data', (b) => take('err', b));
       if (m.stdin != null && child.stdin) { child.stdin.on('error', () => { }); child.stdin.end(m.stdin); }
@@ -2849,7 +2851,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return n;
   }
   /** The process ends: every child, its strays and its files with it (sync — an exit handler). */
-  function closeAll() { for (const rec of [...runs]) { killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); for (const w of [...scrubLive]) { try { w.terminate(); } catch { } } scrubLive.clear(); }   // + every run's scrubber worker (no worker outlives the hub's door)
+  function closeAll() { for (const rec of [...runs]) { if (rec.done) continue; killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); for (const w of [...scrubLive]) { try { w.terminate(); } catch { } } scrubLive.clear(); }   // + every run's scrubber worker (no worker outlives the hub's door); r2161 (b): a run whose child ended (its worker answering the end) is not signalled — finish already ended its group, its marks and its files
 
   // round 14 (MINOR): the sealed PATH and whether `git` lives on it are computed ONCE at the door's construction (a boot step,
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).

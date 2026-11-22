@@ -1105,11 +1105,31 @@ const SMALL = { scrubSteps: { push: 64, run: 1 << 30 } };
     w.door.onLocked('test');
     const { r } = await p;
     const line = runLines(w).pop();
-    return { waited, counted, ok: !!(r && r.ok), code: r && r.code, line: line && line.outcome, killed: line ? line.killed : null, withheld: line && line.scrubbed ? line.scrubbed.withheld : null, leaks: leaks(JSON.stringify(r || {}) + JSON.stringify(line || {}), VALUE).length };
+    return { waited, counted, ok: !!(r && r.ok), code: r && r.code, line: line && line.outcome, killed: line ? line.killed : null, withheld: line && line.scrubbed ? line.scrubbed.withheld : null, leaks: leaks(JSON.stringify(r || {}) + JSON.stringify(line || {}), VALUE).length,
+      ranSaid: !!(r && r.ran === true && /the command RAN to its end before the lock — do not run it again blindly/.test(String(r.words)) && /on this instance's page/.test(String(r.words))), receipt: !!(r && r.receipt && line && line.receipt === r.receipt) };   // r2161 (c): the words say the command RAN; its receipt reaches the caller
   };
   const e1 = await endWaitLeg(DOOR, 'shipped'), e0 = await endWaitLeg(doorCopy('done = true; rec.done = true;', 'done = true; rec.done = true; runs.delete(rec);', 'the run leaves the lock\'s walk at its child\'s end'), 'control');
+  const eR = await endWaitLeg(doorCopy('const ranFirst = stoppedAt !== \'lock\';', 'const ranFirst = false;', 'the lock after the run says only that a run waits'), 'ransaid');
+  ok(e1.ranSaid && e1.receipt && !eR.ranSaid, `r2161 (c) A LOCK AFTER A FINISHED CHILD SAYS THE COMMAND RAN: its words «the command RAN to its end before the lock — do not run it again blindly» (still where a person unlocks it), \`ran: true\` and its receipt (the line's); red control: «the lock after the run says only that a run waits»`, { e1: { ranSaid: e1.ranSaid, receipt: e1.receipt }, eR: { ranSaid: eR.ranSaid, code: eR.code } });
   ok(e1.waited && e1.counted === 1 && e1.code === 'vault_locked' && e1.line === 'vault_locked' && e1.killed === false && e1.withheld === 'scrub_worker_gone' && e1.leaks === 0 && e0.waited && e0.counted === 0 && e0.ok,
     `r1919 (1) THE LOCK SEES A RUN UNTIL ITS WORKER HAS ENDED: its child gone, its worker still answering the end — the run is counted (${e1.counted}), the lock ends its worker and the run answers vault_locked (the line: not killed, its output withheld by name, nothing of the value); red control: «the run leaves the lock's walk at its child's end» (counted ${e0.counted}, answered ${e0.ok ? 'ran' : e0.code})`, { e1, e0 });
+  // r2161 (b): THE CLOSE OF ALL RUNS SIGNALS ONLY A CHILD IT STILL HOLDS — the hub's closeAll lands while a run's child has ended and
+  // its worker still answers the end: no group signal, no end-mark sweep (process.kill counted while closeAll runs); red control: the walk with no skip
+  const closeLeg = async (doorMod, tag) => {
+    const mark = path.join(ROOT, `closewait-${tag}.txt`);
+    const wf = workerCopy("if (msg.type === 'end') { const o = m.end(!!msg.cut); parentPort.postMessage({ type: 'end', seq: msg.seq, out: o.out, err: o.err, counts: counts() }); }",
+      `if (msg.type === 'end') { const o = m.end(!!msg.cut), r = { type: 'end', seq: msg.seq, out: o.out, err: o.err, counts: counts() }; require('fs').writeFileSync(${JSON.stringify(mark)}, '1'); setTimeout(() => parentPort.postMessage(r), 400); }`, `the worker answers its end 400 ms late (close ${tag})`);
+    const w = await W({ doorMod, doorExtra: { scrubWorkerFile: wf } });
+    const p = runAnswered(w, ENV('env'));
+    for (let k = 0; k < 300 && !fs.existsSync(mark); k++) await sleep(10);
+    const waited = fs.existsSync(mark), realKill = process.kill, sent = [];
+    process.kill = (pid, sig) => { sent.push([pid, sig]); return true; };   // counted, never sent (closeAll is synchronous)
+    try { w.door.closeAll(); } finally { process.kill = realKill; }
+    const { r } = await p;
+    return { waited, sent: sent.length, ok: !!(r && r.ok), withheld: r && r.scrubbed ? r.scrubbed.withheld : null };
+  };
+  const k1 = await closeLeg(DOOR, 'shipped'), k0 = await closeLeg(doorCopy('function closeAll() { for (const rec of [...runs]) { if (rec.done) continue; killGroup(', 'function closeAll() { for (const rec of [...runs]) { killGroup(', 'closeAll signals a run whose child ended'), 'control');   // stale-pins: kept (the replacement IS the release's closeAll)
+  ok(k1.waited && k1.sent === 0 && k1.ok && k1.withheld === 'scrub_worker_gone' && k0.waited && k0.sent > 0, `r2161 (b) THE CLOSE OF ALL RUNS SIGNALS ONLY A CHILD IT STILL HOLDS: closeAll while a run's child has ended and its worker answers the end — ${k1.sent} signal(s) sent (no group signal, no end-mark sweep), the run answered with its output withheld by name; red control: «closeAll signals a run whose child ended» sends ${k0.sent}`, { k1, k0 });
   // r1919 (2): A REPLY AFTER THE CHILD RAN NEVER GIVES THE ONCE-GRANT BACK — the run's answer planted to throw after its worker's end:
   // run_unanswered (the command RAN), the grant stays spent, the run line and the use line carry the receipt; red control: the release's catch (spawn_failed, burned)
   const unansweredLeg = async (doorMod) => {
@@ -1126,12 +1146,42 @@ const SMALL = { scrubSteps: { push: 64, run: 1 << 30 } };
   const u1 = await unansweredLeg(doorCopy([THROW], null, 'the answer cannot be written'));
   const u0 = await unansweredLeg(doorCopy([THROW, [
     "try { note('run_unanswered', { ...head, receipt, why: 'the answer could not be written' }); } catch { }\n          resolve(named('run_unanswered', { receipt }));", "resolve(named('spawn_failed', { why: 'the run could not be answered' }));"]], null, 'the release catch gives the grant back'));   // stale-pins: kept (its replacement IS the release's catch)
+  const AUDIT_FAILS = ["    const note = (outcome, extra = {}) => { try { audit('vault-run', { by, outcome, ...extra }); }", "    const note = (outcome, extra = {}) => { try { if (outcome === 'run_unanswered') throw new Error('planted: the audit line fails'); audit('vault-run', { by, outcome, ...extra }); }"];
+  const uf1 = await unansweredLeg(doorCopy([THROW, AUDIT_FAILS], null, 'the answer and its audit line cannot be written'));
+  const uf0 = await unansweredLeg(doorCopy([THROW, ["    const note = (outcome, extra = {}) => { try { audit('vault-run', { by, outcome, ...extra }); } finally { useLines(outcome, runReceipt, !!extra.receipt); } };", "    const note = (outcome, extra = {}) => { if (outcome === 'run_unanswered') throw new Error('planted: the audit line fails'); audit('vault-run', { by, outcome, ...extra }); useLines(outcome, runReceipt, !!extra.receipt); };"]], null, 'the release note with its audit line failing'));
+  ok(uf1.code === 'run_unanswered' && uf1.use === 'run_unanswered' && uf1.left === 0 && uf0.code === 'run_unanswered' && uf0.use === null, `r2161 (f) THE USE LINE OF A CHILD THAT RAN IS WRITTEN EVEN WHEN ITS AUDIT LINE FAILS (the unanswered road, the audit planted to throw): the use line carries the receipt, the grant stays spent; red control: «the release note with its audit line failing» writes none`, { uf1, uf0 });
   ok(u1.granted === 1 && u1.ran && u1.code === 'run_unanswered' && /RAN/.test(String(u1.words)) && !!u1.receipt && u1.left === 0 && u1.line === 'run_unanswered' && u1.lineReceipt === u1.receipt && u1.use === 'run_unanswered' && u0.ran && u0.code === 'spawn_failed' && u0.left === 1,
     `r1919 (2) A REPLY AFTER THE CHILD RAN NEVER GIVES THE ONCE-GRANT BACK: an answer that could not be written is run_unanswered («the command RAN…»), outside BURNED — the once-grant stays spent (${u1.left} left), the run line and the use line carry its receipt; red control: «the release catch gives the grant back» (spawn_failed: ${u0.left} grant back)`, { u1, u0 });
+  // r2161 (a): A ONCE-GRANT NEVER COMES BACK FOR A CHILD THAT RAN, on the older road too — the child's 'error' event after its pid
+  // exists (the kill fallback can emit one) is no spawn failure: the run answers its end, the grant stays spent; red control: the release's handler
+  const lateErrLeg = async (doorMod) => {
+    const spawnLate = (...a) => { const c = require('node:child_process').spawn(...a); if (c.pid) setImmediate(() => c.emit('error', Object.assign(new Error('planted: an error after the spawn'), { code: 'EPLANTED' }))); return c; };
+    const w = await world({ doorMod, doorExtra: { spawnImpl: spawnLate } }); worlds.push(w);
+    const caller = { ...w.caller, scope: 'webui-1' };
+    const q = w.door.request({ caller, entry: 'vault://mounts/m1/secretKey', purpose: 'the late error leg' });
+    w.door.answerRequest(q.askId, { answer: 'once', reauthed: true });
+    const ranF = path.join(w.work, 'ran.txt');
+    const { r } = await runAnswered(w, ENV('ran', ranF), { caller });
+    return { ran: fs.existsSync(ranF), ok: !!(r && r.ok), code: r && r.code, left: w.door._grants.size, line: (runLines(w).pop() || {}).outcome, said: w.logs.some((l) => /the child's error after its spawn \(EPLANTED\)/.test(l)) };
+  };
+  const la1 = await lateErrLeg(DOOR);
+  const la0 = await lateErrLeg(doorCopy("child.on('error', (e) => { const why = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); if (!child.pid) { spawnError = why; finish(null, null); } else log(", "child.on('error', (e) => { const why = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); spawnError = why; if (!child.pid) { finish(null, null); } else log(", 'any child error is the spawn\'s'));
+  ok(la1.ran && la1.ok && la1.left === 0 && la1.line === 'ran' && la1.said && la0.ran && la0.code === 'spawn_failed' && la0.left === 1, `r2161 (a) A ONCE-GRANT NEVER COMES BACK FOR A CHILD THAT RAN: a child 'error' event after its pid is said in the journal and the run answers its end (ran, the grant spent: ${la1.left} left); red control: «any child error is the spawn's» answers spawn_failed and gives the grant back (${la0.left})`, { la1, la0 });
+  // r2161 (e): A START REFUSED WHILE THE VAULT LOCKS writes the blocked record, as its sibling branch does; red control: the branch without it
+  const lockStartLeg = async (doorMod) => {
+    const w = await W({ doorMod, doorExtra: { scrubWorkerFile: neverReady, scrubSilenceMs: 600 } });
+    const p = runAnswered(w, ENV('env'));
+    for (let k = 0; k < 300 && w.door.scrubThreads() < 1; k++) await sleep(5);
+    const started = w.door.scrubThreads() >= 1; w.vault.lock('test');
+    const { r } = await p;
+    return { started, code: r && r.code, blocked: w.vault.blockedSummary().actors.some((a) => a.verbs.includes('vibespace-vault run')) };
+  };
+  const ls1 = await lockStartLeg(DOOR), ls0 = await lockStartLeg(doorCopy("if (lockGen !== lg0 || vaultState() !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } note('vault_locked', head); return named('vault_locked'); } note('spawn_failed'", "if (lockGen !== lg0 || vaultState() !== 'unlocked') { note('vault_locked', head); return named('vault_locked'); } note('spawn_failed'", 'the refused start under a lock records no block'));   // stale-pins: kept (the replacement IS the release's branch)
+  ok(ls1.started && ls1.code === 'vault_locked' && ls1.blocked && ls0.started && ls0.code === 'vault_locked' && !ls0.blocked, `r2161 (e) A START REFUSED WHILE THE VAULT LOCKS answers vault_locked and writes the blocked record (the owner's list of who the lock stopped names the run); red control: «the refused start under a lock records no block»`, { ls1, ls0 });
   // r1919 (3): THE CLI SAYS THE COMMAND RAN when its output is withheld — the words from its ONE table (data/bin/vibespace-vault
   // RUN_SAID), a cause it does not know yet said without it; red control: the release's sentence (it never said the command ran)
-  const cliSays = async (cli, withheld) => {
-    const srv = require('node:http').createServer((q, s) => { q.resume(); q.on('end', () => { s.setHeader('Content-Type', 'application/json'); s.end(JSON.stringify({ ok: true, exit: 0, stdout: '', stderr: '', scrubbed: { hits: 1, bytes: 1, withheld }, receipt: 'rcpt-leg' })); }); });
+  const cliSays = async (cli, withheld, body = null) => {   // body: the answer itself (a refusal), else a ran answer withheld by `withheld`
+    const srv = require('node:http').createServer((q, s) => { q.resume(); q.on('end', () => { s.setHeader('Content-Type', 'application/json'); s.end(JSON.stringify(body || { ok: true, exit: 0, stdout: '', stderr: '', scrubbed: { hits: 1, bytes: 1, withheld }, receipt: 'rcpt-leg' })); }); });
     await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
     try {
       const p = require('node:child_process').spawn(NODE, [cli, 'run', '--', 'true'], { env: { ...SUITE_ENV, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'leg-session' }, stdio: ['ignore', 'ignore', 'pipe'] });
@@ -1145,6 +1195,13 @@ const SMALL = { scrubSteps: { push: 64, run: 1 << 30 } };
   const cs = []; for (const k of ['scrub_worker_gone', 'scrub_work_bound', 'a_cause_not_known_yet']) cs.push(await cliSays(CLI, k));
   const cliOld = M.write('data/bin/vibespace-vault', anchored(fs.readFileSync(CLI, 'utf8'), "scrub_worker_gone: 'the command ran; its scrubber stopped, so the output after the words is withheld (scrub_worker_gone) — do not run it again blindly',", "scrub_worker_gone: 'the scrubber stopped — the output after the words is withheld (scrub_worker_gone)',", 'test-vault-run r1919 (3): the release sentence'), 'the CLI\'s release sentence');
   const co = await cliSays(cliOld, 'scrub_worker_gone');
+  // r2161 (c)(d): a REFUSAL of a child that ran — a lock after its end (`ran: true`), an unanswered run — says the command ran and shows its receipt
+  const LOCKED_ANS = { ok: false, code: 'vault_locked', error: 'the vault is locked — the command RAN to its end before the lock', killed: false, ran: true, receipt: 'rcpt-lock' }, UNANSWERED = { ok: false, code: 'run_unanswered', error: DOOR.MORE_WORDS.run_unanswered, receipt: 'rcpt-unans' };
+  const refSaid = (x, rc) => x.rc === 1 && /the command ran to its end before the lock; [^\n]* do not run it again blindly/.test(x.err) && /# vibespace-vault run: receipt rcpt-lock/.test(x.err) && /# vibespace-vault run: receipt rcpt-unans/.test(rc.err) && /\(run_unanswered\)/.test(rc.err) && rc.rc === 1;
+  const cl = await cliSays(CLI, null, LOCKED_ANS), cu = await cliSays(CLI, null, UNANSWERED);
+  const cliRel = M.write('data/bin/vibespace-vault', anchored(fs.readFileSync(CLI, 'utf8'), "    if (d.ran === true) console.error(`# vibespace-vault run: ${RUN_SAID.ranLocked}`);   // r2161 (c): the child FINISHED before the lock\n    if (d.receipt) console.error(`# vibespace-vault run: receipt ${d.receipt}`);", '', 'test-vault-run r2161 (c)(d): the release refusal road'), 'the CLI\'s release refusal road');
+  const cl0 = await cliSays(cliRel, null, LOCKED_ANS), cu0 = await cliSays(cliRel, null, UNANSWERED);
+  ok(refSaid(cl, cu) && !refSaid(cl0, cu0), 'r2161 (c)(d) THE CLI ON A REFUSAL OF A CHILD THAT RAN: a lock after its end says «the command ran to its end before the lock; … — do not run it again blindly», and it and an unanswered run each show their receipt; red control: «the CLI\'s release refusal road»', { cl, cu, cl0 });
   ok(cs.every(ranSaid) && !ranSaid(co), 'r1919 (3) THE CLI SAYS THE COMMAND RAN: a withheld output (the scrubber lost, the work bound, a cause it does not know yet) is said from its one table — «the command ran; … withheld … — do not run it again blindly», the cause by name; red control: «the CLI\'s release sentence»', { cs, co });
   // (7) NO WORKER OUTLIVES ITS RUN: twelve runs end to end, a lock mid-run, a gone caller, the hub's closeAll mid-run — and every world above
   const wn = await W();
