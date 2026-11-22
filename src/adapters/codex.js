@@ -717,6 +717,7 @@ function readerRefusedAnswer(e, now = Date.now()) {
     body: { error: e && e.message, code: e && e.code, storageHung: !!(e && e.storageHung), readerGone: !!(e && e.readerGone), readerCause: (e && e.readerCause) || null, retryAt: at || null, retryIn: at ? Math.max(0, at - now) : null } };
 }
 /** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
+const POOL_BUSY = Symbol('the pool had no idle worker: the call was not sent');   // r2506: an idleOnly call's own answer, never a failure
 async function poolRead(op, payload, opts) {
   const fp = payload && payload.fp;   // unit 2: the FILE's state — a refusal notes it, any answer for it (a result, or the op's own error) forgives it
   const pool = _transcriptPoolGet();
@@ -724,6 +725,7 @@ async function poolRead(op, payload, opts) {
   let out;
   try { out = await pool.call(op, payload, opts); }
   catch (e) {
+    if (opts && opts.idleOnly && e && e.code === 'no-idle-worker') return POOL_BUSY;   // NOT sent (no worker idle): nothing noted, the pool not marked refusing
     if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); r.readerGone = poolGone(); throw r; }   // its next try, after the record took the refusal
     poolAnswered(fp, op);   // the op's own error: a worker ran it — the pool answered
     throw e;
@@ -743,16 +745,17 @@ async function scanJsonlUserTurnsAsync(fp, backend, sent = null) { return poolRe
 async function readJsonlTailAsync(fp, { dropSubagent = false } = {}) {
   return poolRead('jsonlTail', { fp, dropSubagent });
 }
-/** 主开发 r2344 (1): THE STORAGE RETRY'S PROBE — one small read of the file (its first bytes: an open, 4 bytes, a close — the worker's
- *  `probe`) under a SHORT bound on the general pool. Resolves when the file answers; a pool failure (its deadline above all: the
- *  storage still hangs) REJECTS with the refusal by name, noted on the file — and the deadline is remembered by the pool's path memory
- *  for calls this short, so the next retry's probe is refused at the door without a worker. Answering forgives nothing (not a history
- *  read): the paged read after it does. */
+/** 主开发 r2344 (1) / r2506: THE STORAGE RETRY'S PROBE — one small read of the file (its first bytes: the worker's `probe`, fileIsZst's
+ *  open + 4 bytes + close) under a SHORT bound on the general pool, sent ONLY to a worker IDLE at the send (idleOnly: a deadline queued
+ *  behind a healthy call would end that call). → true: the worker came back within the bound (fileIsZst swallows every error of its
+ *  read, so the probe has no op error of its own: an answer means the storage answered); 'busy': NOT sent — no general worker idle
+ *  (nothing noted, the pool not marked refusing); a pool failure (its deadline above all: the storage still hangs) REJECTS with the
+ *  refusal by name, noted on the file — and the deadline is remembered by the pool's path memory for calls this short. Answering
+ *  forgives nothing (not a history read): the paged read after it does. */
 let STORAGE_PROBE_MS = 1500;   // a suite's own bound: _setSlicedForTest({ probeMs })
 async function probeTranscriptAsync(fp) {
-  try { await poolRead('probe', { fp }, { timeoutMs: STORAGE_PROBE_MS }); }
-  catch (e) { if (e && e.code === 'transcript_reader_restarting') throw e; }   // a POOL failure (its deadline above all): the refusal by name. The op's OWN error (EACCES …) is the file ANSWERING: the paged read after it meets that error and says it (its answer ends the storage's note)
-  return true;
+  const out = await poolRead('probe', { fp }, { timeoutMs: STORAGE_PROBE_MS, idleOnly: true });
+  return out === POOL_BUSY ? 'busy' : true;
 }
 async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent = false } = {}) {
   const pool = _transcriptPoolGet();
@@ -895,16 +898,18 @@ const POOL_REFUSING_MS = 30000;
 // worker tries) at most once a gap: 30 s, doubling on each retry, at most 8 min (B-23e5's span); one caller claims each retry
 let STORAGE_RETRY_MS = 30000;
 const STORAGE_RETRY_MAX_MS = 8 * 60000;
-function storageRetryDue(fp) {
+function storageRetryDue(fp, { claim = true } = {}) {
   const r = fp && _fileRefusals.get(fp);
   if (!r || !(r.storage || r.ownDeadline)) return true;   // the door or the pool's memory alone: the pool's door answers at once
   if (poolGone() && _storageParked) return false;   // the pool gone: the ONE storage retry the main process may hold is parked — this one cannot run; its gap is not spent
   const now = Date.now();
   if (now < (r.retryAt || 0)) return false;
-  r.retryGap = Math.min(STORAGE_RETRY_MAX_MS, (r.retryGap || STORAGE_RETRY_MS) * 2);   // the next retry waits twice as long (30 s, 1 min, 2 … ≤ 8 min)
-  r.retryAt = now + r.retryGap;
+  if (claim) spendRetryGap(r, now);
   return true;
 }
+// the retry's gap SPENT — by a retry that was sent (主开发 r2506: a probe not sent, no worker idle, spends nothing)
+const spendRetryGap = (r, now) => { r.retryGap = Math.min(STORAGE_RETRY_MAX_MS, (r.retryGap || STORAGE_RETRY_MS) * 2); r.retryAt = now + r.retryGap; };   // the next retry waits twice as long (30 s, 1 min, 2 … ≤ 8 min)
+function storageRetryClaim(fp) { const r = fp && _fileRefusals.get(fp); if (r && (r.storage || r.ownDeadline)) spendRetryGap(r, Date.now()); }
 let _poolRefusedAt = 0;
 const POOL_WIDE = new Set(['no-worker']);   // SafeFs's own code (src/safe-fs.js NO_WORKER); its `no-idle-worker` (NO_IDLE: an `idleOnly` call while every worker
 // is busy) is ORDINARY LOAD, never a pool that refuses — dropped ON PURPOSE (round w5gioyat2 asked; no transcript call passes idleOnly)
@@ -1852,7 +1857,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, readerRefusedAnswer, readerCauseOf, readerCauseFor, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, readerRefusedAnswer, readerCauseOf, readerCauseFor, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, storageRetryClaim, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, probeTranscriptAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

@@ -790,7 +790,8 @@ async function warmTurn(fp, fresh, lane) {
   const t0 = performance.now();
   if (fresh && fresh()) return { fresh: true };
   const { readJsonlBoundedParsedPagedAsync } = require('./adapters/codex');
-  const r = await readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: lane || 'warm', onFail: warmLeft, lane });   // B-80cb cure: the lane's own slot ('warm' / 'warm2')
+  const look = performance.now();   // r2506: the worker's look at the file comes after this send
+  const r = stampLook(await readJsonlBoundedParsedPagedAsync(fp, { entry: true, dropSubagent: true, slot: lane || 'warm', onFail: warmLeft, lane }), look);   // B-80cb cure: the lane's own slot ('warm' / 'warm2')
   return r ? { ...r, t0 } : r;
 }
 function pumpWarm() {
@@ -808,16 +809,17 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
   pumpWarm();
   return { p, job };
 }
-// r935 (a) — every put of a WHOLE read that waited (a warm's, the main process's slices, the storage's retry): NEVER OVER A NEWER ENTRY
-// OF THE SAME FILE. A read that carries its TIME is the file as it was read (readJsonlTail says -1 when the file moved under the read)
-// and it is TAKEN, whatever its time against the cached copy's (主开发 r2246 / r2344 (2)): a later time (a transcript cut shorter IN
-// PLACE — an editor's save, a redirect), an equal one (one clock tick, a storage with coarse times: the safe side), an OLDER one (a
-// restore that keeps the old time, a clock stepped back). By size, or by a later time alone, the stale larger copy stayed and the page
-// was told «ready» over a history still «not loaded», again and again. An append that landed after that read is folded in by the
-// parse's own stat, one read later — never a wrong history. Only a read with NO time (it raced a growth: mtimeMs -1, the copy may be
-// partial) keeps a cached copy of the same inode at least as large — the size rule (r2344 (3): two raced reads, both -1, too)
-const cachedCopyWins = (c, entry) => !!(c && entry && entry.mtimeMs === -1 && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0));   // PURE — the rule above
-const putUnlessNewer = (id, entry) => { if (!cachedCopyWins(_jsonlCache.get(id), entry)) _warmPut(id, entry); };   // B-80cb cure: every warm's put is the warm's — the cache, or (not admitted) the handoff to the next parse
+// r935 (a) — every put of a WHOLE read that waited (a warm's, the main process's slices, the storage's retry): NEVER OVER A NEWER ENTRY.
+// ONE LAW (主开发 r2506): A READ IS JUDGED BY WHEN ITS LOOK AT THE FILE WAS TAKEN, never by the file's own time or size. The look's
+// moment is `lookAt` — this thread's monotonic clock (performance.now), stamped where the read is ASKED: a worker's read when it is
+// SENT (its look at the file comes after), a read on this thread at its stat. A read whose look is LATER than the cached copy's (or as
+// late) is taken — an older restore, a cut in place, a clock stepped back: all taken; a read whose look was EARLIER never replaces it
+// (an older read landing after a newer one was cached: the newest history stays, nothing folded); a SHORT read (the file shrank under
+// it: readJsonlTail's mtimeMs -1) never replaces a copy. A copy with no look (put before this rule) is replaced
+const cachedCopyWins = (c, entry) => !!(c && entry && c !== entry && (entry.mtimeMs === -1 || (c.lookAt != null && entry.lookAt != null && c.lookAt > entry.lookAt)));   // PURE — the law above
+const stampLook = (r, at) => { if (r && r.entry && r.mode !== 'hit' && r.entry.lookAt == null) r.entry.lookAt = at; return r; };   // a hit is the copy itself: its own look stands
+// → true: put; false: the cached copy won — the warm that read it says NOT «ready» (its caller returns false: the page is told nothing)
+const putUnlessNewer = (id, entry) => { if (cachedCopyWins(_jsonlCache.get(id), entry)) return false; _warmPut(id, entry); return true; };   // B-80cb cure: every warm's put is the warm's — the cache, or (not admitted) the handoff to the next parse
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 // ONE WARM A SESSION AT A TIME: a second ask while one is in flight joins it (the parse's 2 s re-warm, an attach, a page) — never a
 // second history read of the same file sent to the pool (the whole-state read: unjoined re-warms queued reads whose deadlines ended
@@ -841,7 +843,7 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
   const bulk = !!(opts && opts.bulk === true);   // r935: a bulk resume's first attach (ws-handler `_bulkRead`); every other ask is a person's
   const known = knownPathOf(claudeSessionId, cwd);
   if (known && C().fileStorageHung(known)) {
-    if (!C().storageRetryDue(known)) return false;   // asked of the pool again at most once a gap (30 s doubling, ≤ 8 min) — never stuck
+    if (!C().storageRetryDue(known, { claim: false })) return false;   // asked of the pool again at most once a gap (30 s doubling, ≤ 8 min) — never stuck; the gap is SPENT only by a retry that is sent (r2506)
     // the STORAGE hung under this transcript (a deadline, a hung path, a blocked mount — its record says so) — NO find and NO stat on
     // this loop: the pool alone is asked again (its path memory refuses at once while it remembers; then a worker tries, off the loop)
     // the POOL GONE (closed for good, none on this process) can never retry it: the due retry is the main process's own sliced read
@@ -850,19 +852,26 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     // on the main process while a worker can still come back
     const t0 = performance.now();
     let r = null;
-    if (C().poolGone()) { try { r = await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }); } catch { return false; } }
+    if (C().poolGone()) { C().storageRetryClaim(known); const look = performance.now(); try { r = stampLook(await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }), look); } catch { return false; } }
     // the POOL UP (主开发 r2246's MUST, r2344 (1)): a file whose record says «the storage» never holds a line the other conversations
     // wait in. Its retry first PROBES the file — one small read (its first bytes) under a short bound, on the general pool: a file that
     // does not answer costs that bound and nothing else (its deadline is remembered by the pool's path memory for calls that short: the
     // next retry's probe is refused at the door). A file that ANSWERS joins B-cd4b's paged warm line like any other (person first): read
-    // in pages, never one whole clone; the line is held by no dead file, and two dead files in step never hold both general workers
+    // in pages, never one whole clone; the line is held by no dead file, and two dead files in step never hold both general workers.
+    // THE PROBE's BOUND ENDS ONLY THE PROBE (主开发 r2506): it is sent only to a general worker IDLE at the send (the pool's own
+    // idleOnly) — a deadline queued behind a healthy call would end THAT call and mark ITS file the storage's. None idle ⇒ NOT sent:
+    // nothing ended, nothing marked, the retry's gap NOT spent — asked again at the next ask. A file whose first bytes answer but which
+    // hangs later still holds the warm line for the history bound (its page's 60 s): the probe is a look, not a promise
     else {
-      try { await C().probeTranscriptAsync(known); } catch { return false; }
+      let probe;
+      try { probe = await C().probeTranscriptAsync(known); } catch { C().storageRetryClaim(known); return false; }   // sent, refused (its deadline: still hung) — the gap spent
+      if (probe === 'busy') return false;   // NOT sent: no general worker idle
+      C().storageRetryClaim(known);   // sent and answered: the gap spent; the file joins the warm line
       try { r = await warmPaged(known, { bulk }).p; } catch { return false; }
     }
     if (!r || !r.entry) return false;
     _stampJsonlParse(r.bytes, performance.now() - t0);
-    putUnlessNewer(claudeSessionId, r.entry);
+    if (!putUnlessNewer(claudeSessionId, r.entry)) return false;   // a later copy is cached: not «ready» (r2506)
     await warmTaskEvents(claudeSessionId, known, { ino: r.entry.ino, size: r.entry.size });   // the storage answers again: the task scan beside it
     return true;
   }
@@ -872,6 +881,7 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     if (!fp) return false;
     knowFp(claudeSessionId, fp);
     if (C().fileStorageHung(fp)) return false;   // found now, and the memory calls it the storage's: no stat (the next warm: the pool alone)
+    const look = performance.now();   // r2506: this thread's look at the file (its stat)
     const stat = fs.statSync(fp);
     tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
     const cached = _jsonlCache.get(claudeSessionId) || _handoffGet(claudeSessionId);   // B-80cb cure: or the read the cache did not admit
@@ -879,7 +889,7 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     const { readJsonlTail } = C();
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
-      const r = readJsonlTail(fp, cached, { dropSubagent: true, stat, appendOnly: true });
+      const r = stampLook(readJsonlTail(fp, cached, { dropSubagent: true, stat, appendOnly: true }), look);
       if (r) {
         if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
         _stampJsonlParse(r.bytes, performance.now() - t0);
@@ -900,8 +910,7 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
         _stampJsonlParse(r.bytes, performance.now() - (r.t0 || performance.now()));
         // r935 (a): never over a NEWER entry of the same file (the sync road or the inline append put it while this warm waited in the
         // line) — one rule for every warm's put, its modification time with it (putUnlessNewer, above)
-        putUnlessNewer(claudeSessionId, r.entry);
-        return true;
+        return putUnlessNewer(claudeSessionId, r.entry);   // a later copy is cached: not «ready» (r2506)
       })().finally(() => { if (_warmInFlight.get(fp) === w) _warmInFlight.delete(fp); });
       _warmInFlight.set(fp, w);
     }
@@ -914,8 +923,8 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
       if (!(e && e.code === NOT_LOADED) || e.storageHung || !C().slicedRoadFor(fp).ok) return false;
       const t1 = performance.now();
       try {
-        const r2 = await C().readJsonlTailSliced(fp, { dropSubagent: true });
-        if (r2 && r2.entry) { _stampJsonlParse(r2.bytes, performance.now() - t1); putUnlessNewer(claudeSessionId, r2.entry); return true; }
+        const r2 = stampLook(await C().readJsonlTailSliced(fp, { dropSubagent: true }), t1);
+        if (r2 && r2.entry) { _stampJsonlParse(r2.bytes, performance.now() - t1); return putUnlessNewer(claudeSessionId, r2.entry); }
       } catch { }
       return false;
     }
@@ -940,6 +949,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     const info = { storageHung: hung, retryAt: C().nextReadAt(known), readerGone: C().poolGone(), readerCause: C().readerCauseFor(known) };   // r1243 items 1 + 2: the page says which door refused, and when it asks again (r3077: its cause)
     if (!kept || !Array.isArray(kept.messages)) { noteAwaiting(claudeSessionId); return notLoadedList(info); }
     if (!hung && known) {
+      const look = performance.now();   // r2506: this thread's look (the stat)
       let st = null; try { st = fs.statSync(known); } catch { st = null; }
       if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) { _jsonlUsed.set(kept, Date.now()); noteReadable(claudeSessionId); return kept.messages; }   // the copy IS the file: loaded
       // the file merely GREW past the copy, within the warm's inline bound (≤ WARM_INLINE_APPEND_MAX): folded in here as the warm does
@@ -947,7 +957,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
       // «not loaded» between two warms
       if (st && kept.incr && st.ino === kept.ino && st.size > kept.size && st.size - kept.spanEnd <= WARM_INLINE_APPEND_MAX) {
         const t0 = performance.now();
-        let r = null; try { r = readJsonlTail(known, kept, { dropSubagent: true, stat: st, appendOnly: true }); } catch { r = null; }
+        let r = null; try { r = stampLook(readJsonlTail(known, kept, { dropSubagent: true, stat: st, appendOnly: true }), look); } catch { r = null; }
         if (r && r.entry) {
           if (r.mode === 'append') carryPosFrom(r.entry, kept);
           _stampJsonlParse(r.bytes, performance.now() - t0);
@@ -963,6 +973,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
   const fp = findSessionJsonlPath(claudeSessionId, cwd);
   if (!fp) return [];
   try {
+    const look = performance.now();   // r2506: this thread's look (the stat)
     const stat = fs.statSync(fp);
     const held = _jsonlCache.get(claudeSessionId) ? null : _handoffGet(claudeSessionId);   // B-80cb cure: the warm's read the cache did not admit
     const cached = held || _jsonlCache.get(claudeSessionId);
@@ -972,7 +983,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     // Tail-only: the client seek-loads the earlier history as a continuous
     // virtual scroll, so no seam marker is stitched in.
     const t0 = performance.now();
-    const r = readJsonlTail(fp, cached && cached.spanEnd != null ? cached : null, { dropSubagent: true, stat });
+    const r = stampLook(readJsonlTail(fp, cached && cached.spanEnd != null ? cached : null, { dropSubagent: true, stat }), look);
     if (r.mode !== 'hit') _stampJsonlParse(r.bytes, performance.now() - t0);
     if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
     _jsonlCachePut(claudeSessionId, r.entry);   // refreshes the LRU position on a hit too

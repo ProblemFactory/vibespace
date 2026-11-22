@@ -309,7 +309,10 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // … or the op's own error (the note ends; the parse is the old road)
   rewrite(1200);
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); await SS0.warmSessionJsonlAsync(sid, cwd);
-  C._setTranscriptPoolForTest(refusing({ code: 'EACCES' })); await SS0.warmSessionJsonlAsync(sid, cwd);
+  // the retry's read meets its own error (EACCES): the probe answers as the real worker's does (fileIsZst swallows every error of its
+  // read — the probe has no op error of its own), the paged read after it meets the EACCES
+  C._setTranscriptPoolForTest({ calls: [], call(op, payload) { this.calls.push(op); if (op === 'probe') return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); return Promise.reject(Object.assign(new Error("a stand-in's EACCES"), { code: 'EACCES' })); } });
+  await SS0.warmSessionJsonlAsync(sid, cwd);
   const opEnd = SS0.parseSessionJsonl(sid, cwd);
   ok(!opEnd.notLoaded && opEnd.length === 1200, `the hung note ends on its retry's own op error (EACCES): the old road (${opEnd.length} records)`, { n: opEnd.length, notLoaded: opEnd.notLoaded });
   // TWO WARMS OF ONE SESSION AT ONCE ARE ONE (joined): the second ask while the first reads is the SAME read — never a second
@@ -460,7 +463,10 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
     return { premise, wy, byBound, dead, wx: wxOut };
   };
   const PROBED = `    else {
-      try { await C().probeTranscriptAsync(known); } catch { return false; }
+      let probe;
+      try { probe = await C().probeTranscriptAsync(known); } catch { C().storageRetryClaim(known); return false; }   // sent, refused (its deadline: still hung) — the gap spent
+      if (probe === 'busy') return false;   // NOT sent: no general worker idle
+      C().storageRetryClaim(known);   // sent and answered: the gap spent; the file joins the warm line
       try { r = await warmPaged(known, { bulk }).p; } catch { return false; }
     }`;
   const h8 = await lineRun(SS0, 'a');
@@ -469,6 +475,11 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   ok(h8.premise && h8.dead.join() === 'probe,probe' && h8.wy === true && h8.byBound >= 1 && Array.isArray(h8.wx) && h8.wx.every((x) => x === false), `(8) two files the storage holds, their retries in step: each PROBES (${h8.dead.join()}) and costs its bound; a healthy conversation's warm answers before the leg releases anything (the dead calls ended by their own bound: ${h8.byBound})`, h8);
   ok(h8g.premise && h8g.dead.join() === 'jsonlTail,jsonlTail' && h8g.wy === 'still waiting', `RED (i): the retry as a one-shot on the general pool (${h8g.dead.join()}) ⇒ both general workers held, the healthy conversation's task scan waits (${h8g.wy} at 1000 ms)`, h8g);
   ok(h8w.premise && h8w.dead.join() === 'boundedParsedPage' && h8w.wy === 'still waiting', `RED (ii): the retry on the warm line (${h8w.dead.join()}) ⇒ the healthy conversation's warm waits behind the dead file's page (${h8w.wy} at 1000 ms)`, h8w);
+  // THE PUT's RULE as each form had it (主开发 r2506's law now; earlier forms planted back as REDs)
+  const RULE_NOW = 'const cachedCopyWins = (c, entry) => !!(c && entry && c !== entry && (entry.mtimeMs === -1 || (c.lookAt != null && entry.lookAt != null && c.lookAt > entry.lookAt)));';
+  const RULE_SIZE = 'const cachedCopyWins = (c, entry) => !!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0));';   // stale-pins: kept — r935 (a) by size alone
+  const RULE_2246 = 'const cachedCopyWins = (c, entry) => !!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0));';   // stale-pins: kept — r2246's rule
+  const RULE_TIMED = 'const cachedCopyWins = (c, entry) => !!(c && entry && entry.mtimeMs === -1 && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0));';   // stale-pins: kept — d135c99f2's rule
   // (9) A TRANSCRIPT CUT SHORTER IN PLACE (主开发 r2246, the lane's find — an editor's save, a redirect: the same inode, smaller, LATER by
   // its time): the warm's read of it LANDS — the parse then answers the cache, a stat only, nothing read on the loop. RED: r935 (a)'s
   // size-only rule (the stale copy stays; the parse reads the file on the loop, and the page was told «ready» over «not loaded»)
@@ -486,7 +497,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
     return { w0, w1, inPlace, n: R.out && R.out.n, notLoaded: R.out && R.out.notLoaded, reads: content(R).length };
   };
   const s9 = await shrinkRun(SS0, '91111111-2222-4333-8444-555555555561');
-  const sizeOnly = anchored(SSsrc, 'const cachedCopyWins = (c, entry) => !!(c && entry && entry.mtimeMs === -1 && c.ino != null', 'const cachedCopyWins = (c, entry) => !!(c && entry && c.ino != null', 'r935a-size-only');   // stale-pins: kept — r935 (a) by size alone, planted back as the RED control
+  const sizeOnly = anchored(SSsrc, RULE_NOW, RULE_SIZE, 'r935a-size-only');
   const s9r = await shrinkRun(MC.load('src/session-store.js', sizeOnly, 'r935a-size-only'), '91111111-2222-4333-8444-555555555562');
   ok(s9.w0 === true && s9.w1 === true && s9.inPlace && s9.n === 500 && !s9.notLoaded && s9.reads === 0, `(9) a transcript cut shorter in place: the warm's read lands — the parse answers it from the cache (${s9.n} records), nothing read on the loop (${s9.reads})`, s9);
   ok(s9r.inPlace && s9r.reads > 0, `RED: r935 (a) by size alone ⇒ the stale copy stays and the parse reads the file on the loop (${s9r.reads} reads)`, s9r);
@@ -494,7 +505,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // (a restore that keeps it, a clock stepped back) — the main process's sliced read lands (a read that carries its time is taken), the
   // parse answers it LOADED, the page is told at most once. RED: r2246's rule (the cached copy wins when it is strictly later): the stale
   // larger copy stays, each warm says «ready», each parse says «not loaded» — the history-ready pushes counted round after round
-  const r2246Rule = anchored(SSsrc, 'const cachedCopyWins = (c, entry) => !!(c && entry && entry.mtimeMs === -1 && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0));', 'const cachedCopyWins = (c, entry) => !!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0));', 'r2246-rule');   // stale-pins: kept — r2246's rule, planted back as the RED
+  const r2246Rule = anchored(SSsrc, RULE_NOW, RULE_2246, 'r2246-rule');
   const SS2246 = MC.load('src/session-store.js', r2246Rule, 'r2246-rule');
   const cycleRun = async (SM, id) => {
     const f = path.join(projDir, id + '.jsonl');
@@ -516,23 +527,116 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   };
   const c10 = await cycleRun(SS0, 'a1111111-2222-4333-8444-555555555571'), c10r = await cycleRun(SS2246, 'a1111111-2222-4333-8444-555555555572');
   ok(c10.premise && c10.n === 500 && !c10.notLoaded && c10.pushes <= 1, `(10) a transcript cut shorter in place with an OLDER time, the pool refusing: the sliced read lands — LOADED (${c10.n} records), told ${c10.pushes} time(s)`, c10);
-  ok(c10r.premise && !!c10r.notLoaded && c10r.pushes >= 2, `RED: r2246's rule (strictly later wins) ⇒ the stale copy stays — «not loaded» after 4 rounds, «ready» pushed ${c10r.pushes} times (the cycle)`, c10r);
-  // (11) THE RULE, PURE (r2344 (2) and (3)): a read that carries its time is taken — later, equal or OLDER; a read with NO time (it raced
-  // a growth: -1) keeps a cached copy of the same inode at least as large — two raced reads too (the size rule); another inode never
-  const W = SS0.cachedCopyWins, W2246 = SS2246.cachedCopyWins, C0 = { ino: 7, size: 900, mtimeMs: 2000 };
+  ok(c10r.premise && !!c10r.notLoaded, `RED: r2246's rule (strictly later wins) ⇒ the stale copy stays — «not loaded» after 4 rounds (a skipped put says no «ready»: ${c10r.pushes} pushes)`, c10r);
+  // (11) THE LAW, PURE (主开发 r2506): a read is judged by WHEN ITS LOOK AT THE FILE WAS TAKEN (`lookAt`), never by the file's own time
+  // or size — a later or equal look is taken (an older restore, a cut in place, a clock stepped back); an EARLIER look never replaces the
+  // copy (an older read landing after a newer one); a SHORT read (the file shrank under it: mtimeMs -1) never replaces a copy; a copy with
+  // no look (put before the law) is replaced. RED: the timed-read rule (d135c99f2's: every read that carries its time taken)
+  const SSTIMED = MC.load('src/session-store.js', anchored(SSsrc, RULE_NOW, RULE_TIMED, 'rule-timed'), 'rule-timed');   // stale-pins: kept — d135c99f2's rule, planted back as the RED
+  const W = SS0.cachedCopyWins, WT = SSTIMED.cachedCopyWins, C0 = { ino: 7, size: 900, mtimeMs: 2000, lookAt: 100 };
   const CASES = [
-    ['a later time, shorter (cut in place)', C0, { ino: 7, size: 500, mtimeMs: 3000 }, false],
-    ['the same time, shorter (one clock tick, a storage with coarse times)', C0, { ino: 7, size: 500, mtimeMs: 2000 }, false],
-    ['an OLDER time, shorter (a restore that keeps it, a clock stepped back)', C0, { ino: 7, size: 500, mtimeMs: 1000 }, false],
-    ['no time (it raced a growth), shorter', C0, { ino: 7, size: 500, mtimeMs: -1 }, true],
-    ['no time, longer', C0, { ino: 7, size: 1200, mtimeMs: -1 }, false],
-    ['two raced reads (both no time), the read shorter', { ino: 7, size: 900, mtimeMs: -1 }, { ino: 7, size: 500, mtimeMs: -1 }, true],
-    ['another inode, no time', C0, { ino: 8, size: 500, mtimeMs: -1 }, false],
+    ['a later look, shorter, a later file time (a cut in place)', C0, { ino: 7, size: 500, mtimeMs: 3000, lookAt: 200 }, false],
+    ['a later look, shorter, an OLDER file time (a restore that keeps it, a clock stepped back)', C0, { ino: 7, size: 500, mtimeMs: 1000, lookAt: 200 }, false],
+    ['the same look (one tick)', C0, { ino: 7, size: 500, mtimeMs: 2000, lookAt: 100 }, false],
+    ['an EARLIER look, shorter (an older read landing last)', C0, { ino: 7, size: 600, mtimeMs: 1500, lookAt: 50 }, true],
+    ['an EARLIER look, another inode', C0, { ino: 8, size: 600, mtimeMs: 2500, lookAt: 50 }, true],
+    ['a SHORT read (the file shrank under it), a later look', C0, { ino: 7, size: 500, mtimeMs: -1, lookAt: 200 }, true],
+    ['two short reads', { ino: 7, size: 900, mtimeMs: -1, lookAt: 100 }, { ino: 7, size: 500, mtimeMs: -1, lookAt: 200 }, true],
+    ['a copy with no look (put before the law)', { ino: 7, size: 900, mtimeMs: 2000 }, { ino: 7, size: 500, mtimeMs: 1000, lookAt: 200 }, false],
   ];
-  const bad = CASES.filter(([, c, e, want]) => W(c, e) !== want).map(([n]) => n), bad2246 = CASES.filter(([, c, e, want]) => W2246(c, e) !== want).map(([n]) => n);
-  ok(bad.length === 0, `(11) the cached copy wins only over a read with NO time, of the same inode, at least as large — ${CASES.length} cases`, { bad });
-  ok(bad2246.includes('an OLDER time, shorter (a restore that keeps it, a clock stepped back)') && bad2246.includes('two raced reads (both no time), the read shorter'), `RED: r2246's rule fails the older time and the two raced reads (${bad2246.length} cases)`, { bad2246 });
+  const bad = CASES.filter(([, c, e, want]) => W(c, e) !== want).map(([n]) => n), badT = CASES.filter(([, c, e, want]) => WT(c, e) !== want).map(([n]) => n);
+  ok(bad.length === 0, `(11) the law: a read judged by when its look at the file was taken — ${CASES.length} cases`, { bad });
+  ok(badT.includes('an EARLIER look, shorter (an older read landing last)'), `RED: the timed-read rule fails the earlier look (${badT.length} cases: ${badT.join(' · ')})`, { badT });
   C._setSlicedForTest({});
+  // (12) TWO READS IN FLIGHT, THE OLDER LOOK LANDING LAST (主开发 r2506): a warm's read is sent (its look: the 600-line file), the file
+  // grows, the sync road reads it then (a LATER look, 700 lines, cached), and the warm's older read lands LAST — the newest history stays,
+  // nothing is folded (the next parse a hit: no read on the loop), and the warm whose put was skipped is NOT «ready». RED: the timed-read
+  // rule — the older read goes over the newer copy and the next parse folds the difference on the loop
+  const lateRun = async (SM, id) => {
+    const f = path.join(projDir, id + '.jsonl');
+    fs.writeFileSync(f, lines.slice(0, 600).join('\n') + '\n');
+    let release = null, held = false;
+    const P = { calls: [], call(op, payload) { this.calls.push(op); const out = Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); if (op === 'boundedParsedPage' && !held) { held = true; return new Promise((res) => { release = () => res(out); }); } return out; } };   // the page's read is TAKEN at the send, its answer held
+    C._setTranscriptPoolForTest(P);
+    const w = SM.warmSessionJsonlAsync(id, cwd);
+    for (let k = 0; k < 50 && !release; k++) await new Promise((res) => setImmediate(res));
+    fs.appendFileSync(f, lines.slice(600, 700).join('\n') + '\n');   // the file grows …
+    const newer = SM.parseSessionJsonl(id, cwd).length;   // … the sync road reads it now: the LATER look, cached
+    const sent = !!release; if (release) release();   // the older read lands LAST
+    const wOut = await w;
+    const R = await road(`(12) a parse after an older read landed last (${id.slice(0, 8)})`, () => SM.parseSessionJsonl(id, cwd).length);
+    return { sent, newer, wOut, n: R.out, reads: content(R).length };
+  };
+  const l12 = await lateRun(SS0, 'b1111111-2222-4333-8444-555555555581'), l12r = await lateRun(SSTIMED, 'b1111111-2222-4333-8444-555555555582');
+  ok(l12.sent && l12.newer === 700 && l12.wOut === false && l12.n === 700 && l12.reads === 0, `(12) the older read landing last never replaces the newer copy: the history stays ${l12.n} records, nothing folded on the loop (${l12.reads}); the warm whose put was skipped is not «ready» (${l12.wOut})`, l12);
+  ok(l12r.sent && l12r.reads > 0, `RED: the timed-read rule ⇒ the older read goes over the newer copy — the next parse folds on the loop (${l12r.reads} reads)`, l12r);
+  // (8b) THE PROBE's BOUND ENDS ONLY THE PROBE (主开发 r2506, round wsjcggt2p's MUST): both general workers run HEALTHY long calls (two
+  // conversations' reads, held), a dead file's retry comes due — modelled as the real pool does it: a call goes to the least busy worker
+  // even when it runs something, and a call's deadline, from its SEND, ends the WORKER it sits on (whatever runs there; the pool's memory
+  // then names the op that worker was running). The probe is sent only to an IDLE worker: none ⇒ NOT sent — no healthy call ended, no
+  // healthy file marked, the retry's gap NOT spent (asked again at once); a worker freed ⇒ the probe runs there and costs its bound.
+  // RED: today's send (the probe not idle-only) — queued behind a healthy call, its deadline ends THAT call and marks ITS file
+  const busyPool = (dead, healthy) => {
+    const slots = [{ cur: null, q: [] }, { cur: null, q: [] }];
+    const P = { calls: [], idleRefused: 0, sent: [], ended: [], hung: new Set(), running: [] };
+    const start = (s, job) => { s.cur = job; job.run(); };
+    const done = (s, job) => { if (s.cur === job) { s.cur = null; const n = s.q.shift(); if (n) start(s, n); } else { const i = s.q.indexOf(job); if (i >= 0) s.q.splice(i, 1); } };
+    P._hungOf = (payload) => (payload && P.hung.has(payload.fp) ? { path: payload.fp, ms: 30000 } : null);   // the pool's path memory
+    P.call = (op, payload, opts = {}) => new Promise((resolve, reject) => {
+      P.calls.push(op);
+      const free = slots.find((s) => !s.cur);
+      if (opts.idleOnly && !free) { P.idleRefused++; reject(Object.assign(new Error('every worker of the transcript pool is busy — the call was not sent'), { status: 503, code: 'no-idle-worker' })); return; }
+      if (op === 'probe') P.sent.push(payload.fp);
+      const s = free || slots.reduce((a, b) => (b.q.length < a.q.length ? b : a));
+      const fp = payload && payload.fp, job = { fp, settled: false };
+      const fin = (fn, v) => { if (job.settled) return; job.settled = true; done(s, job); fn(v); };
+      job.end = (e) => fin(reject, e); job.ok = (v) => fin(resolve, v);
+      job.run = () => { if (healthy.has(fp)) P.running.push(job); else if (!dead.has(fp)) Promise.resolve(TW.runOp(op, payload)).then((x) => job.ok(x.result), (e) => job.end(e)); };
+      if (opts.timeoutMs) setTimeout(() => {   // its deadline, from the SEND: the worker it sits on is ended
+        if (job.settled) return;
+        const dl = () => Object.assign(new Error('a stand-in deadline'), { status: 503, safeFsTimeout: true });
+        const run = s.cur;
+        if (run && run !== job) { P.ended.push(run.fp); P.hung.add(run.fp); run.end(dl()); } else P.hung.add(fp);
+        job.end(dl());
+      }, opts.timeoutMs);
+      if (s.cur) s.q.push(job); else start(s, job);
+    });
+    P.freeOne = () => { const j = P.running.shift(); if (j) j.ok(null); };
+    P.freeAll = () => { for (const j of P.running.splice(0)) j.ok(null); };
+    return P;
+  };
+  const CXsrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
+  const probeRun = async (CM, SM, tag) => {
+    const [x, h1, h2] = ['1', '2', '3'].map((k) => `c${tag}${k}11111-2222-4333-8444-555555555555`), fpOf = (id) => path.join(projDir, id + '.jsonl');
+    for (const id of [x, h1, h2]) fs.writeFileSync(fpOf(id), lines.slice(0, 300).join('\n') + '\n');
+    CM._setSlicedForTest({ storageRetryMs: 0 });   // the retry due at once (the gap set when the refusal is noted: first)
+    CM._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); try { await CM.readJsonlTailAsync(fpOf(x), { dropSubagent: true }); } catch { }
+    CM._setSlicedForTest({ storageRetryMs: 60000, probeMs: 200 });   // a SPENT gap now waits 2 minutes: a second ask at once tells it apart
+    const P = busyPool(new Set([fpOf(x)]), new Set([fpOf(h1), fpOf(h2)]));
+    CM._setTranscriptPoolForTest(P);
+    const longs = [h1, h2].map((id) => CM.jsonlGapInfoAsync(fpOf(id)).then(() => 'answered', (e) => (e && e.code) || 'failed'));   // two healthy long calls: both workers busy
+    await new Promise((res) => setImmediate(res));
+    const w1 = await SM.warmSessionJsonlAsync(x, cwd);   // the retry due: both workers busy
+    await new Promise((res) => setTimeout(res, 300));   // a placed wait past the probe's bound (any deadline of it has fired)
+    const w2 = await SM.warmSessionJsonlAsync(x, cwd);   // asked again at once: due only if the first spent nothing
+    const busyPhase = { idleRefused: P.idleRefused, sent: P.sent.length, ended: P.ended.slice(), h1Hung: CM.fileStorageHung(fpOf(h1)), h2Hung: CM.fileStorageHung(fpOf(h2)) };
+    P.freeOne();   // one healthy call answers: a worker idle
+    await new Promise((res) => setImmediate(res));
+    const w3 = await SM.warmSessionJsonlAsync(x, cwd);   // the probe runs there, costs its bound
+    const freed = { sent: P.sent.length, ended: P.ended.slice(), xHung: CM.fileStorageHung(fpOf(x)) };
+    P.freeAll();
+    const healthyOut = await Promise.all(longs);
+    return { w1, w2, w3, busyPhase, freed, healthyOut, healthyHung: [h1, h2].map((id) => CM.fileStorageHung(fpOf(id))) };
+  };
+  const p8 = await probeRun(C, SS0, 'a');
+  const cxSend = MC.write('src/adapters/codex.js', anchored(CXsrc, "{ timeoutMs: STORAGE_PROBE_MS, idleOnly: true }", "{ timeoutMs: STORAGE_PROBE_MS }", 'probe-not-idle-only'), 'probe-not-idle-only');   // stale-pins: kept — today's send (d135c99f2), planted back as the RED
+  const CX = require(cxSend), SSsend = MC.load('src/session-store.js', anchored(SSsrc, "require('./adapters/codex')", () => `require(${JSON.stringify(cxSend)})`, 'session-store-on-the-codex-copy', { count: 4 }), 'probe-not-idle-only');
+  const p8r = await probeRun(CX, SSsend, 'b');
+  ok(p8.busyPhase.idleRefused === 2 && p8.busyPhase.sent === 0 && p8.busyPhase.ended.length === 0 && !p8.busyPhase.h1Hung && !p8.busyPhase.h2Hung && p8.w1 === false && p8.w2 === false
+    && p8.freed.sent === 1 && p8.freed.ended.length === 0 && p8.freed.xHung && p8.healthyOut.every((x) => x === 'answered') && p8.healthyHung.every((x) => !x),
+    `(8b) the probe's bound ends only the probe: both workers busy ⇒ NOT sent (${p8.busyPhase.idleRefused} asks, the gap unspent), no healthy call ended, no healthy file marked; a worker freed ⇒ the probe ran there (${p8.freed.sent}), the dead file still the storage's; both healthy calls answered`, p8);
+  ok(p8r.busyPhase.ended.length >= 1 && (p8r.busyPhase.h1Hung || p8r.busyPhase.h2Hung) && p8r.healthyOut.some((x) => x !== 'answered'), `RED: today's send (the probe not idle-only) ⇒ queued behind a healthy call, its deadline ended THAT call and marked ITS file the storage's (ended: ${p8r.busyPhase.ended.length})`, p8r);
+  CX._setSlicedForTest({}); C._setSlicedForTest({});
 }
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 
