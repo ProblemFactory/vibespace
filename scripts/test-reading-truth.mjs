@@ -499,7 +499,15 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const routes = {};
     const rapp = { get: (p0, h) => { routes['GET ' + p0] = h; }, post() { }, put() { }, delete() { }, use() { }, locals: app.locals };   // ONE app, as the hub has: the engine's doors on its locals
     const api = quiet(() => (routesMod || { setupUsage }).setupUsage({ app: rapp, accounts: am, hosts: null, usageHistory: null, activeSessions: sessions, serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(root, 'buffers'), apiDerivedWindow: eng.apiDerivedWindow, establishedWindows: eng.establishedWindows, ...(cli ? { CLAUDE_CMD: cli } : {}) }));
-    const usage = () => { const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } }; quiet(() => routes['GET /api/usage']({ query: {}, headers: {} }, res)); return res.body; };
+    // B-360d part 3 U3 moved the route: GET /api/usage first awaits the usage folder's fresh reply (off the loop), then answers — so the
+    // answer is AWAITED here. An answer with no body throws: a «nothing unknown» leg never passes on a route that said nothing
+    const usage = async () => {
+      const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } };
+      const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { };
+      try { await routes['GET /api/usage']({ query: {}, headers: {} }, res); } finally { console.log = o; console.warn = w; }
+      if (!res.body) throw new Error('B-6a92: the usage route answered no body — every row leg below would read nothing');
+      return res.body;
+    };
     return { root, am, eng, api, V, O, RV, RO, RX, cacheDir, reading, own: () => readJ(V + '.json'), stamp: () => readJ(readingLag.windowSidecarName(V)), wit: () => readJ(readingLag.apiWindowSidecarName(V)), usage };
   };
   // c2b: SIX readings in a row, every one with Orin's window, on a conversation billed to Vela
@@ -514,14 +522,14 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   ok('B-6a92 NOTHING MOVES: Vela\'s established window stays its own after six readings of Orin\'s window (no re-anchor)', st && st.sevenDay === H.RV, st);
   ok('B-6a92 NOTHING IS FILED: Vela\'s file keeps its OWN last reading — never Orin\'s numbers (0.81) or window', own && own.sevenDay && own.sevenDay.utilization === 0.2 && own.sevenDay.resetsAt === H.RV, own);
   ok('B-6a92 the row\'s own window is UNKNOWN, by the other account: the witness names Orin', f && Array.isArray(f.names) && f.names[0] === H.O, f);
-  const u = H.usage(), wu = u && u.accounts && u.accounts[H.V] && u.accounts[H.V].windowUnknown;
+  const u = (await H.usage()), wu = u && u.accounts && u.accounts[H.V] && u.accounts[H.V].windowUnknown;
   ok('B-6a92 the usage route carries it on Vela\'s row with the name the person gave Orin — never an address', wu && wu.otherNames && wu.otherNames[0] === 'Orin' && !J(wu).includes('@') && !(u.accounts[H.O] && u.accounts[H.O].windowUnknown), wu);
   // THE POOL (主开发 r560 item 3): what the pool engine reads for that member while its window is unknown
   const pv = H.eng.poolReadCache(null)(H.V);
   ok('B-6a92 THE POOL reads Vela\'s OWN last reading (its age said by its fetchedAt) — never the other account\'s numbers', pv && pv.sevenDay && pv.sevenDay.utilization === 0.2 && pv.sevenDay.resetsAt === H.RV, pv && pv.sevenDay);
   // r5: A RUN SHORTER THAN K (one reading of a third window) rewrites the sidecar and KEEPS the hold — the words never vanish unproven
   H.reading(0.5, H.RX); await sleep(3);
-  const hF = H.wit() && H.wit().foreign, hWu = (() => { const u5 = H.usage(); return u5 && u5.accounts && u5.accounts[H.V] && u5.accounts[H.V].windowUnknown; })();
+  const hF = H.wit() && H.wit().foreign, hWu = ((u5) => u5 && u5.accounts && u5.accounts[H.V] && u5.accounts[H.V].windowUnknown)(await H.usage());
   const esrc = read(ENG);   // r6: the mutants below are made from the engine as it is
   ok('B-6a92 a run shorter than K (one reading of another window) keeps the hold: the sidecar and the row still name Orin', !!(hF && hF.names[0] === H.O && hWu && hWu.otherNames[0] === 'Orin'), { hF, hWu });
   // RED CONTROL (r6, ruled 4): the carry removed — the same one reading drops the hold and the words vanish unproven
@@ -553,10 +561,10 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   await run6(G);
   const gRep = repairOver(G);
   const gRow = ((gRep && gRep.identities) || []).find((r) => r.key === G.V) || {};
-  const gSt = G.stamp(), gOwn = G.own(), gWit = G.wit(), gWu = sideOf(G.usage(), G.V);
+  const gSt = G.stamp(), gOwn = G.own(), gWit = G.wit(), gWu = sideOf((await G.usage()), G.V);
   const G2 = held(realEng, { again: G });   // …and a restarted hub, reading the hold back from the sidecar the repair left
   quiet(() => G2.eng.repairIdentityAnchors('boot'));   // r6: the start's identity repair warms the held facts (the poll reads memory only)
-  const g2Wu = sideOf(G2.usage(), G2.V);
+  const g2Wu = sideOf((await G2.usage()), G2.V);
   ok('B-6a92 THE REPAIR (the must): the standing identity repair counts NONE of the readings the guard found to name Orin as Vela\'s evidence', !!gRow.sources && gRow.sources.named >= 3 && gRow.sources.archived === 0, gRow);
   ok('B-6a92 THE REPAIR: Vela\'s stamp stays its own and its file keeps its own last reading — no restamp, no readmit of Orin\'s numbers', gSt && gSt.sevenDay === G.RV && gOwn && gOwn.sevenDay && gOwn.sevenDay.utilization === 0.2 && gOwn.sevenDay.resetsAt === G.RV, { gSt, own: gOwn && gOwn.sevenDay, row: gRow });
   ok('B-6a92 THE REPAIR: the row\'s words stand — the sidecar keeps Orin\'s name, the route says it, and so does a restarted hub', !!(gWit && gWit.foreign && gWit.foreign.names[0] === G.O && gWu && gWu.otherNames[0] === 'Orin' && g2Wu && g2Wu.otherNames[0] === 'Orin'), { foreign: gWit && gWit.foreign, gWu, g2Wu });
@@ -586,9 +594,9 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const binHeld = standIn('claude-panel-held.sh', tP);
   const P = held(realEng, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN } });   // each folder holds its OWN account's login
   await run6(P);
-  const pBefore = sideOf(P.usage(), P.V);
+  const pBefore = sideOf((await P.usage()), P.V);
   const pr = await hush(() => P.api.refreshViaCliPanel(P.V));
-  const pSt = P.stamp(), pOwn = P.own(), pWit = P.wit(), pWu = sideOf(P.usage(), P.V);
+  const pSt = P.stamp(), pOwn = P.own(), pWit = P.wit(), pWu = sideOf((await P.usage()), P.V);
   ok('B-6a92 THE DOOR: Vela\'s own ⟳ read answering in the held window is written (true), the stamp moves there BY ITS OWN READ, and the hold ends in that turn (sidecar and route)', !!pBefore && pr.v === true && !!(pSt && pSt.sevenDay === roP && pSt.verifiedBy === 'own-panel') && !!pWit && !pWit.foreign && !pWu, { pBefore, v: pr.v, pSt, wit: pWit && { sevenDay: pWit.sevenDay, foreign: pWit.foreign }, pWu, said: pr.said.filter((l) => /window|panel/.test(l)).slice(0, 4) });
   ok('B-6a92 THE DOOR: the numbers are the row\'s own read (its panel\'s 12%), never the other account\'s 81%', !!(pOwn && pOwn.sevenDay && pOwn.sevenDay.utilization === 0.12 && pOwn.sevenDay.resetsAt === roP), pOwn && pOwn.sevenDay);
   P.reading(0.4, P.RO); await sleep(3);
@@ -600,7 +608,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const PN = mNoDoor ? held(mNoDoor, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN } }) : null;
   if (PN) await run6(PN);
   const pnr = PN ? await hush(() => PN.api.refreshViaCliPanel(PN.V)) : { v: null };
-  ok('B-6a92 RED CONTROL (no door): the same read is refused, the stamp stays, the row still says unknown — the door legs can fail', !!PN && pnr.v === false && !!sideOf(PN.usage(), PN.V) && (PN.stamp() || {}).sevenDay === PN.RV, { v: pnr.v });
+  ok('B-6a92 RED CONTROL (no door): the same read is refused, the stamp stays, the row still says unknown — the door legs can fail', !!PN && pnr.v === false && !!sideOf((await PN.usage()), PN.V) && (PN.stamp() || {}).sevenDay === PN.RV, { v: pnr.v });
   // ── r8 (主开发 r873 / r879 / r890): THE DOOR IS ONE PURE VERDICT, AND A ROW IS NEVER HELD ON A NAME OF ITS OWN ACCOUNT ─────────
   // «The account a row is» = what its identity GROUP says (the ONE notion, as in the pool and the estimator): its cache's
   // organisation, else its record's address — the folder's login where the folder names one, the declared address otherwise.
@@ -612,7 +620,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const S = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN }, rowOrg: VELA.org });
   await run6(S);
   const sr = await hush(() => S.api.refreshViaCliPanel(S.V));
-  const sSt = S.stamp() || {}, sOwn = S.own() || {}, sWit = S.wit() || {}, sWu = sideOf(S.usage(), S.V), sWhy = wordsOf(S);
+  const sSt = S.stamp() || {}, sOwn = S.own() || {}, sWit = S.wit() || {}, sWu = sideOf((await S.usage()), S.V), sWhy = wordsOf(S);
   ok('B-6a92 THE DOOR, Vela (its own organisation on file) with its folder signed in as Orin: no lift and nothing written — the stamp, the file, the sidecar\'s name and the row\'s words all stand', sr.v === false && sSt.sevenDay === S.RV && !!(sOwn.sevenDay && sOwn.sevenDay.utilization === 0.2 && sOwn.sevenDay.resetsAt === S.RV) && !!(sWit.foreign && sWit.foreign.names[0] === S.O) && !!(sWu && sWu.otherNames[0] === 'Orin'), { v: sr.v, sSt, own: sOwn.sevenDay, foreign: sWit.foreign, sWu });
   ok('B-6a92 …refused signed-in-as, the true remedy: «Vela\'s sign-in folder is signed in as Orin … sign Vela in again with its own account» — no identity value', /Vela's sign-in folder is signed in as Orin/.test(sWhy) && /sign Vela in again with its own account/.test(sWhy) && noId(sWhy), sWhy);
   // RED CONTROL: r5's door (it lifted whenever the answer was in the held window) — Vela stamped on Orin's window, Orin's numbers on Vela
@@ -630,9 +638,9 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const TEAMV = { email: 'mail-vela-0001', org: 'org-team-0001' }, TEAMO = { email: 'mail-orin-0001', org: 'org-team-0001' };   // invented
   const TSW = held(realEng, { ro: roP, cli: binHeld, logins: { V: TEAMV, O: TEAMO } });
   await run6(TSW);
-  const tsBefore = sideOf(TSW.usage(), TSW.V);
+  const tsBefore = sideOf((await TSW.usage()), TSW.V);
   const tsr = await hush(() => TSW.api.refreshViaCliPanel(TSW.V));
-  ok('B-6a92 THE r8 MUST: two seats of one Team organisation, Vela held naming Orin — Vela\'s honest own read lifts (stamped by its own read, written, the row no longer «unknown»)', !!(tsBefore && tsBefore.otherNames[0] === 'Orin') && tsr.v === true && (TSW.stamp() || {}).sevenDay === roP && !sideOf(TSW.usage(), TSW.V), { tsBefore, v: tsr.v, st: TSW.stamp(), why: wordsOf(TSW) });
+  ok('B-6a92 THE r8 MUST: two seats of one Team organisation, Vela held naming Orin — Vela\'s honest own read lifts (stamped by its own read, written, the row no longer «unknown»)', !!(tsBefore && tsBefore.otherNames[0] === 'Orin') && tsr.v === true && (TSW.stamp() || {}).sevenDay === roP && !sideOf((await TSW.usage()), TSW.V), { tsBefore, v: tsr.v, st: TSW.stamp(), why: wordsOf(TSW) });
   // RED CONTROL: r8's verdict order (the hit, by organisation first, before the proof) — the honest seat refused «signed in as Orin»
   const RLF0 = 'src/reading-lag.js', rlsrc0 = read(RLF0), PROVEN0 = "  if (proven) return !liftable ? { act: 'none' } : onHeld ? { act: 'lift' } : { act: 'own' };";
   const R8HIT0 = "  if (rowKey && answer) { const k = (l) => (l && l.org ? 'org:' + String(l.org).toLowerCase() : l && l.email ? 'email:' + String(l.email).trim().toLowerCase() : null); const hit = others.filter((h) => k(h.login) && k(h.login) === k(answer)); if (hit.length) return { act: 'refuse', code: 'signed-in-as', names: hit.map((h) => h.name) }; }\n";
@@ -641,7 +649,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const TSR = mSeat ? held(mSeat, { ro: roP, cli: binHeld, logins: { V: TEAMV, O: TEAMO } }) : null;
   if (TSR) await run6(TSR);
   const tsrr = TSR ? await hush(() => TSR.api.refreshViaCliPanel(TSR.V)) : { v: null };
-  ok('B-6a92 RED CONTROL (r8\'s order, the hit before the proof): the honest seat is refused «signed in as Orin» and stays «unknown»', !!TSR && tsrr.v === false && /Vela's sign-in folder is signed in as Orin/.test(wordsOf(TSR)) && !!sideOf(TSR.usage(), TSR.V), { v: tsrr.v, why: TSR && wordsOf(TSR) });
+  ok('B-6a92 RED CONTROL (r8\'s order, the hit before the proof): the honest seat is refused «signed in as Orin» and stays «unknown»', !!TSR && tsrr.v === false && /Vela's sign-in folder is signed in as Orin/.test(wordsOf(TSR)) && !!sideOf((await TSR.usage()), TSR.V), { v: tsrr.v, why: TSR && wordsOf(TSR) });
   // BOUND 1 (r890): Vela's cache names NO organisation and its folder holds Orin's login — by the group Vela IS Orin's account under
   // a second name (one quota in the pool), so no hold forms: its window follows its readings and nothing reads «unknown»
   // ON THE TRAIN's DECISION ROAD (B-360d, d229032f4 — «an account not confirmed is its own identity (no merge)»): the group merges by
@@ -651,21 +659,21 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   await M.am.signinFactsSettled();
   await run6(M);
   const mWit = M.wit() || {}, mSt = M.stamp() || {};
-  ok('B-6a92 BOUND 1: a row with no organisation of its own whose folder holds another row\'s login is that account by the group — no hold, its stamp follows its readings, the row says nothing «unknown»', !mWit.foreign && mSt.sevenDay === M.RO && !sideOf(M.usage(), M.V), { foreign: mWit.foreign, mSt });
+  ok('B-6a92 BOUND 1: a row with no organisation of its own whose folder holds another row\'s login is that account by the group — no hold, its stamp follows its readings, the row says nothing «unknown»', !mWit.foreign && mSt.sevenDay === M.RO && !sideOf((await M.usage()), M.V), { foreign: mWit.foreign, mSt });
   // …and BEFORE the sign-in is confirmed (the decision road's own law, named and judged here): the row is its own identity, so a hold
   // forms naming Orin; once the sign-in is confirmed the hold is NOT shown — a row is never held on a name of its own account, at every
   // read of a hold (r8) — read by a fresh engine (its groups' 30 s memo new) over the same folder and accounts
   const MU = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } });
   await run6(MU);
-  const muWit = MU.wit() || {}, muBefore = sideOf(MU.usage(), MU.V);
+  const muWit = MU.wit() || {}, muBefore = sideOf((await MU.usage()), MU.V);
   await MU.am.signinFactsSettled();
-  const MU2 = held(realEng, { again: MU }), muAfter = sideOf(MU2.usage(), MU2.V);
+  const MU2 = held(realEng, { again: MU }), muAfter = sideOf((await MU2.usage()), MU2.V);
   ok('B-6a92 BOUND 1 BEFORE THE SIGN-IN IS CONFIRMED (B-360d\'s decision road): the row is its own identity — a hold forms naming Orin, and once the sign-in is confirmed it is not shown (never held on a name of its own account)', !!muWit.foreign && !!muBefore && !muAfter, J({ foreign: muWit.foreign, muBefore, muAfter }));
   // EACH REFUSAL CODE IN A WORLD (the table below covers every combination), each with its true remedy
   const U = held(realEng, { ro: roP, cli: binHeld });   // nothing names which account Vela is: no organisation, no login, no address
   await run6(U);
   const ur = await hush(() => U.api.refreshViaCliPanel(U.V));
-  ok('B-6a92 row-unknown: nothing on file names which account Vela is — no lift, nothing written, «sign Vela in again with its own account (the sign-in records which account it is)»', ur.v === false && (U.stamp() || {}).sevenDay === U.RV && !!sideOf(U.usage(), U.V) && /nothing on file names which account Vela is/.test(wordsOf(U)) && /sign Vela in again with its own account/.test(wordsOf(U)), wordsOf(U));
+  ok('B-6a92 row-unknown: nothing on file names which account Vela is — no lift, nothing written, «sign Vela in again with its own account (the sign-in records which account it is)»', ur.v === false && (U.stamp() || {}).sevenDay === U.RV && !!sideOf((await U.usage()), U.V) && /nothing on file names which account Vela is/.test(wordsOf(U)) && /sign Vela in again with its own account/.test(wordsOf(U)), wordsOf(U));
   const AU = held(realEng, { ro: roP, cli: binHeld, logins: { O: ORIN }, rowOrg: VELA.org });   // Vela's own organisation on file, its folder names no login
   await run6(AU);
   const aur = await hush(() => AU.api.refreshViaCliPanel(AU.V));
@@ -689,12 +697,12 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const ghNames = ((GH.wit() || {}).foreign || {}).names || [];
   ok('B-6a92 SETUP: the hold names the hub\'s own login (its window stamp is among the established windows)', ghNames.includes('__global__') && !ghNames.includes(GH.O), ghNames);
   const ghr = await withHome(GLOBAL, () => hush(() => GH.api.refreshViaCliPanel(GH.V)));
-  ok('B-6a92 THE DOOR, the held name the hub\'s own login, Vela honestly signed in: the hold lifts (stamped by its own read, the hold ended, the panel written)', ghr.v === true && (GH.stamp() || {}).sevenDay === roP && !sideOf(GH.usage(), GH.V), { v: ghr.v, st: GH.stamp(), why: wordsOf(GH) });
+  ok('B-6a92 THE DOOR, the held name the hub\'s own login, Vela honestly signed in: the hold lifts (stamped by its own read, the hold ended, the panel written)', ghr.v === true && (GH.stamp() || {}).sevenDay === roP && !sideOf((await GH.usage()), GH.V), { v: ghr.v, st: GH.stamp(), why: wordsOf(GH) });
   const GS = held(realEng, { ro: roP, cli: binHeld, logins: { V: GLOBAL, O: ORIN }, withGlobal: true, rowOrg: VELA.org });
   await run6(GS);
   const gsr = await withHome(GLOBAL, () => hush(() => GS.api.refreshViaCliPanel(GS.V)));
   const gsWhy = wordsOf(GS);
-  ok('B-6a92 THE DOOR, Vela (its own organisation on file) with its folder holding the hub\'s login: refused by the hub\'s label — nothing written, the hold standing, no identity value', gsr.v === false && (GS.stamp() || {}).sevenDay === GS.RV && !!sideOf(GS.usage(), GS.V) && /Vela's sign-in folder is signed in as this machine's own login \(CLI login\)/.test(gsWhy) && noId(gsWhy), { v: gsr.v, why: gsWhy });
+  ok('B-6a92 THE DOOR, Vela (its own organisation on file) with its folder holding the hub\'s login: refused by the hub\'s label — nothing written, the hold standing, no identity value', gsr.v === false && (GS.stamp() || {}).sevenDay === GS.RV && !!sideOf((await GS.usage()), GS.V) && /Vela's sign-in folder is signed in as this machine's own login \(CLI login\)/.test(gsWhy) && noId(gsWhy), { v: gsr.v, why: gsWhy });
   // RED CONTROL: the folder-only read (r6's form: every held name from its pool folder) — the hub's own login has none, so the
   // refusal can no longer NAME it (another code, not the hub's label)
   const ONE = "loginOf: (n) => probeLog.loginOfAccount(n, { accounts })";
@@ -711,18 +719,18 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   await run6(GM);
   const gmWit = GM.wit() || {}, gmSt = GM.stamp() || {};
   const gmr = await withHome(VELA, () => hush(() => GM.api.refreshViaCliPanel(GM.V)));
-  ok('B-6a92 THE r7 MUST: the hub\'s own login and Vela one account by the group — no hold forms (rule 1), Vela\'s stamp follows its readings, nothing «unknown», and its honest read is written', !gmWit.foreign && gmSt.sevenDay === GM.RO && !sideOf(GM.usage(), GM.V) && gmr.v === true, { foreign: gmWit.foreign, gmSt, v: gmr.v, why: wordsOf(GM) });
+  ok('B-6a92 THE r7 MUST: the hub\'s own login and Vela one account by the group — no hold forms (rule 1), Vela\'s stamp follows its readings, nothing «unknown», and its honest read is written', !gmWit.foreign && gmSt.sevenDay === GM.RO && !sideOf((await GM.usage()), GM.V) && gmr.v === true, { foreign: gmWit.foreign, gmSt, v: gmr.v, why: wordsOf(GM) });
   // …a hold already on disk naming only the row's own group is no hold: planted on Vela's witness, read back by a restarted hub
   { const w0 = GM.wit() || {}; fs.writeFileSync(path.join(GM.cacheDir, readingLag.apiWindowSidecarName(GM.V)), J({ ...w0, foreign: { names: ['__global__'], phase: GM.RO, at: Date.now(), n: 3 } })); }
   const GM2 = held(realEng, { again: GM });
   quiet(() => GM2.eng.repairIdentityAnchors('boot'));
-  ok('B-6a92 …a hold on disk naming only Vela\'s own group (the hub\'s login merged with it) reads as no hold after a restart', !sideOf(GM2.usage(), GM2.V) && !(GM2.eng.apiDerivedWindow(GM2.V, { held: true }) || {}).foreign, (GM2.eng.apiDerivedWindow(GM2.V, { held: true }) || {}).foreign);
+  ok('B-6a92 …a hold on disk naming only Vela\'s own group (the hub\'s login merged with it) reads as no hold after a restart', !sideOf((await GM2.usage()), GM2.V) && !(GM2.eng.apiDerivedWindow(GM2.V, { held: true }) || {}).foreign, (GM2.eng.apiDerivedWindow(GM2.V, { held: true }) || {}).foreign);
   // RED CONTROL: rule 1 taken out at the source (the row's own group not dropped) — Vela held on its own account's other name
   const OWNG = "const othersOf = (key, names) => { const own = ownGroupOf(key);";
   const mNoRule1 = esrc.includes(OWNG) ? require(MUT.write(ENG, esrc.split(OWNG).join("const othersOf = (key, names) => { const own = new Set([key]);"), 'b6a92-no-rule1')) : null;
   const GMR = mNoRule1 ? held(mNoRule1, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN }, withGlobal: true, rowOrg: VELA.org, globalOrg: VELA.org }) : null;
   if (GMR) await run6(GMR);
-  const gmrWu = GMR ? sideOf(GMR.usage(), GMR.V) : null;
+  const gmrWu = GMR ? sideOf((await GMR.usage()), GMR.V) : null;
   ok('B-6a92 RED CONTROL (rule 1 out): Vela is held on the hub\'s login — its own account under a second name', !!GMR && !!(gmrWu && (gmrWu.others || []).includes('__global__')), gmrWu);
   // THE ONE READER, PINNED (r7; r8: the machine's own login read around the probe pinned by its TEXT): every `machineOauthAccount(`
   // call is a rowed one, and the three identity sites ask the one reader. A planted second reader is red BY NAME
@@ -897,7 +905,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const Q = held(realEng, { cli: standIn('claude-panel-third.sh', panelText(hourAt(3 * 86400 + 11 * 3600), 7)) });
   await run6(Q);
   const qr = await hush(() => Q.api.refreshViaCliPanel(Q.V));
-  const qv = Q.api.panelVerdictFor(Q.V) || {}, qWu = sideOf(Q.usage(), Q.V), qOwn = Q.own();
+  const qv = Q.api.panelVerdictFor(Q.V) || {}, qWu = sideOf((await Q.usage()), Q.V), qOwn = Q.own();
   const RTS = 'src/usage-routes.js', rtsrc = read(RTS), HELDARG = ", held: (wit && wit.foreign) || null });";
   const mRts = rtsrc.includes(HELDARG) ? require(MUT.write(RTS, rtsrc.split(HELDARG).join(' });'), 'b6a92-no-held-words')) : null;
   const QN = mRts ? held(realEng, { cli: standIn('claude-panel-third.sh', panelText(hourAt(3 * 86400 + 11 * 3600), 7)), routesMod: mRts }) : null;
@@ -924,7 +932,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     for (let i = 0; i < 10; i++) {
       await sleep(1);
       if (i === 5) Date.now = () => realNow() + 6000;   // past the window list's 5 s memo
-      phase = 'poll'; tWu = sideOf(T.usage(), T.V);
+      phase = 'poll'; tWu = sideOf((await T.usage()), T.V);
       phase = 'list'; T.eng.establishedWindows();
     }
   } finally { fs.readFileSync = realRead; Date.now = realNow; }
