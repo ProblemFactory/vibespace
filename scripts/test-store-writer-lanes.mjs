@@ -5,7 +5,7 @@
 // fence, (c) law 1, (d) a flush / the exit mid-pieces, (e) a second write mid-pieces, (f) EBYREF, (g) the append thread's
 // failures, (h) unit 1 on the pieces road, (i) the producer census, (j) a post that throws mid-pieces at the exit, (k) a detached
 // handed buffer, (l) a buffer spanning pieces, (m) the exit's rank-0 pass and a parked job, (n) both isolates in the memory
-// census — each with its RED where one exists. Split out of test-store-writer-r4 (its fast seconds).
+// census, (p) the own numbers of an own-only store's file across the lanes — each with its RED where one exists. Split out of test-store-writer-r4 (its fast seconds).
 // Run: node scripts/test-store-writer-lanes.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,10 +54,11 @@ const S = new Int32Array(workerData.sab), nap = new Int32Array(new SharedArrayBu
 let cur = null;
 const cfgOf = (f) => { try { return JSON.parse(fs.readFileSync(P.join(P.dirname(f), 'scene.json'), 'utf8')); } catch { return {}; } };
 const note = (f, o) => fs.appendFileSync(P.join(P.dirname(f), 'events.ndjson'), JSON.stringify(o) + '\\n');
-const end = (m, err, ms) => {
+const end = (m, err, ms, own = null) => {
+  const B = new BigUint64Array(S.buffer, 48, 2); B[0] = own ? BigInt(own.dev) : 0n; B[1] = own ? BigInt(own.ino) : 0n;   // the own numbers, as the product's cells
   if (err) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else Atomics.store(S, 3, 0);
   Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 1);
-  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own });
 };
 parentPort.on('message', (m) => {
   if (!m || !['write', 'unlink', 'piece'].includes(m.ev)) return;
@@ -68,12 +69,12 @@ parentPort.on('message', (m) => {
     fs.writeFileSync(P.join(dir, 'held'), name);
     for (let k = 0; k < (c.holdTurns || 2000) && !fs.existsSync(P.join(dir, 'release')); k++) Atomics.wait(nap, 0, 0, 5);
   }
-  let err = null;
-  if (m.ev === 'piece') { const r = pieceJob(m, cur, fs); cur = r.cur; if (!r.done) return; err = r.done.err ? { code: r.done.err.code || null, message: r.done.err.message } : null; note(m.file, { ev: 'end', kind, name }); end(m, err, r.done.ms); return; }
+  let err = null, own = null;
+  if (m.ev === 'piece') { const r = pieceJob(m, cur, fs); cur = r.cur; if (!r.done) return; err = r.done.err ? { code: r.done.err.code || null, message: r.done.err.message } : null; note(m.file, { ev: 'end', kind, name }); end(m, err, r.done.ms, r.done.own || null); return; }
   if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
-  else { try { writeJob(m, fs); } catch (e) { err = { code: e.code || null, message: e.message }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } } }
+  else { try { own = (writeJob(m, fs) || {}).own || null; } catch (e) { err = { code: e.code || null, message: e.message }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } } }
   note(m.file, { ev: 'end', kind, name });
-  end(m, err, 0);
+  end(m, err, 0, own);
 });
 `);
     const srcW = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8');
@@ -422,6 +423,54 @@ parentPort.on('message', (m) => {
     const l1 = linkedTemp(WK, 'check'), l0 = linkedTemp(NO_LCHECK, 'red');
     ok(l1.err === 'ETEMPLINKED' && !/(open|write) temp/.test(l1.order) && l1.disk === 'old', `⑫ (o) a temp still a SECOND NAME of a store is never written through on the piece road: refused ETEMPLINKED, the store as it was (${l1.order})`, l1);
     ok(/write temp/.test(l0.order) || l0.err !== 'ETEMPLINKED', `⑫ (o) RED (no check): the piece road wrote through a temp that is still a second name (${l0.order}; ${l0.err})`, l0);
+    // (p) THE OWN NUMBERS ACROSS THE LANES (B-f276 1c × the lanes): an own-only store's file that ONE thread made is its store's own
+    // on the OTHER thread too (each thread's map is its own) — (p1) through the SHARED CELLS: its first append settled by a
+    // synchronous flush (the answer not read yet), the compaction flushed IN THE SAME CALL on the whole-write thread lands; RED: a
+    // settle that reads no numbers from the cells — refused as a file that appeared. (p2) through the ANSWER: a first append that
+    // CREATED the file and then failed, then the compaction, lands; RED: an answer that carries only a job's own result — refused.
+    const ownCells = async (SWx, tag) => {
+      const dir = path.join(T12, `p-cells-${tag}`); fs.mkdirSync(dir); const f = path.join(dir, 'acts.ndjson'), said = [];
+      const w = SWx.create({ log: { warn: (l) => said.push(String(l)), log: () => { }, error: () => { } } });
+      try {
+        const wa = path.join(dir, 'warm.ndjson'), ww = path.join(dir, 'warm.json');
+        w.dirty(wa, { name: 'warm.append', produce: () => ({ append: 'w\n' }), debounceMs: 0, urgent: true });
+        w.dirty(ww, { name: 'warm.write', produce: () => '{"w":1}', debounceMs: 0, urgent: true });
+        await Promise.all([w.durable(wa, { timeoutMs: 8000 }), w.durable(ww, { timeoutMs: 8000 })]);   // both threads up: the flushes below wait on writes only
+        let whole = false;
+        const produce = () => (whole ? 'compacted\n' : { append: 'line 1\n' });
+        w.dirty(f, { name: 'acts.write', produce, debounceMs: 0, ownOnly: true });
+        const a = w.flushSync([f]);   // the append thread: its file made ('ax'), the job settled through the cells
+        whole = true; w.dirty(f, { name: 'acts.write', produce, debounceMs: 0, ownOnly: true });
+        const b = w.flushSync([f]);   // the SAME turn: the whole-write thread, the append's answer still unread
+        return { a: a.written.length, b: b.written.length, disk: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null, refused: said.some((l) => /appeared since/.test(l)) };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const srcK0 = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf8');
+    const asThread = (src) => anchored(src, 'if (parentPort && require.main === module) {', 'if (parentPort) {', 'the copy is the thread\'s own script');
+    const plantFail = (src) => anchored(src, '      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);', "      if (FS.existsSync(m.file + '.fail')) { FS.unlinkSync(m.file + '.fail'); throw Object.assign(new Error('a planted failure after the create'), { code: 'EIO' }); }\n      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);", 'an append that fails after its create');
+    const ANSWER = M12.write('src/store-writer-worker.js', plantFail(asThread(srcK0)), 'answer');
+    const ANSWER_RED = M12.write('src/store-writer-worker.js', anchored(plantFail(asThread(srcK0)), '  const ownNow = (m, own) => own || (m.ownOnly && m.file ? OWN.get(m.file) || null : null);', '  const ownNow = (m, own) => own || null;', 'an answer that carries only a job\'s own result'), 'answer-red');
+    const ownAnswer = async (workerPath, tag) => {
+      const dir = path.join(T12, `p-answer-${tag}`); fs.mkdirSync(dir); const f = path.join(dir, 'acts.ndjson'), said = [];
+      const w = SW.create({ log: { warn: (l) => said.push(String(l)), log: () => { }, error: () => { } }, workerPath });
+      try {
+        let whole = false;
+        const produce = () => (whole ? 'compacted\n' : { append: 'line 1\n' });
+        fs.writeFileSync(f + '.fail', '1');   // the FIRST append makes the file, then fails (planted after the create)
+        w.dirty(f, { name: 'acts.write', produce, debounceMs: 0, ownOnly: true, urgent: true });
+        const first = await w.durable(f, { timeoutMs: 8000 });   // false: its answer read (the failure said), the store owed again
+        const made = fs.existsSync(f);
+        whole = true;
+        const b = w.flushSync([f]);   // the compaction, on the whole-write thread, before the append's retry
+        return { first, made, b: b.written.length, disk: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null, refused: said.some((l) => /appeared since/.test(l)) };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const NO_CELLS_OWN = M12.load('src/store-writer.js', anchored(srcW, '    if (s) { const o = jobOwn(l); if (o) s.own = o; }', '    void 0;', 'a settle that reads no own numbers from the cells'), 'no-cells-own');
+    const [p1, p0, q1, q0] = await Promise.all([ownCells(SW, 'cells'), ownCells(NO_CELLS_OWN, 'no-cells'), ownAnswer(ANSWER, 'answer'), ownAnswer(ANSWER_RED, 'answer-red')]);
+    ok(p1.disk === 'compacted\n' && !p1.refused && p1.a === 1, `⑫ (p1) an own-only store's first append settled by a synchronous flush, its compaction flushed in the same call on the OTHER thread: written (${JSON.stringify(p1.disk)}), never refused as a file that appeared — the cells carried its own numbers`, p1);
+    ok(p0.refused && p0.disk === 'line 1\n', `⑫ (p1) RED (a settle that reads no numbers from the cells): the compaction refused its store's own file (${JSON.stringify(p0.disk)})`, p0);
+    ok(q1.first === false && q1.made && q1.disk === 'compacted\n' && !q1.refused, `⑫ (p2) an own-only store's FIRST append made the file and then failed: the answer carried the numbers — the compaction on the other thread landed (${JSON.stringify(q1.disk)})`, q1);
+    ok(q0.refused && q0.disk === '', `⑫ (p2) RED (an answer that carries only a job's own result): the compaction refused the file its own failed append made (${JSON.stringify(q0.disk)})`, q0);
   } finally { fs.rmSync(T12, { recursive: true, force: true }); }
 })();
 

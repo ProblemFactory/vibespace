@@ -288,11 +288,15 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
   const fs = FS;
   let cur = null;   // this thread's one whole write in pieces (pieceJob)
   /** a job's end in the shared cells: its outcome, its error code, the done count (this thread its ONE writer), then the wake */
-  const settleCells = (err) => {
+  const settleCells = (err, own = null) => {
     if (!S) return;
+    if (S.byteLength >= 64) { const B = new BigUint64Array(S.buffer, 48, 2); B[0] = own ? BigInt(own.dev) : 0n; B[1] = own ? BigInt(own.ino) : 0n; }   // the own numbers, read by a settle before this answer is
     if (err && S.byteLength >= 48) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else if (S.length > 3) Atomics.store(S, 3, 0);
     Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1);   /* this thread is the count's ONE writer */ Atomics.store(S, 0, 0); Atomics.notify(S, 1);   // the cell the main thread waits on
   };
+  // THE FILE ITS STORE MADE, whatever the job's end (B-f276 1c × the lanes): this thread's map is not the other lane's — a FIRST
+  // append that created the file and then failed leaves it here only; the answer carries it to the store's own cell
+  const ownNow = (m, own) => own || (m.ownOnly && m.file ? OWN.get(m.file) || null : null);
   parentPort.on('message', (msg) => {
     if (answerMemory(msg, parentPort)) return;   // the memory census (src/worker-memory.js) — answered at once
     const m = msg;
@@ -302,8 +306,9 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
       const r = pieceJob(m, cur, fs); cur = r.cur;
       if (!r.done) return;
       const err = r.done.err ? { code: (r.done.err && r.done.err.code) || null, message: (r.done.err && r.done.err.message) || String(r.done.err) } : null;
-      settleCells(err);
-      parentPort.postMessage({ ev: 'written', id: m.id, ms: r.done.ms, err, file: m.file, own: r.done.own || null, ...(r.done.dropped ? { dropped: r.done.dropped } : {}) });   // own: as the plain road's (B-f276 1c)
+      const own = ownNow(m, r.done.own);
+      settleCells(err, own);
+      parentPort.postMessage({ ev: 'written', id: m.id, ms: r.done.ms, err, file: m.file, own, ...(r.done.dropped ? { dropped: r.done.dropped } : {}) });   // own: as the plain road's (B-f276 1c)
       return;
     }
     if (S) Atomics.store(S, 0, m.id);
@@ -313,8 +318,9 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
     if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch (e) { if (!e || e.code !== 'ENOENT') err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; } }
     else { try { res = writeJob(m); } catch (e) { err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } } }
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-    settleCells(err);
-    parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own: (res && res.own) || null });   // own: the numbers of the file an own-only store made
+    const own = m.ev === 'unlink' ? null : ownNow(m, res && res.own);
+    settleCells(err, own);
+    parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own });   // own: the numbers of the file an own-only store made
   });
 }
 

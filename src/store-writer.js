@@ -137,7 +137,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (l.worker || l.mainOnly || stopped) return l.worker;
     try {
       const { Worker } = require('worker_threads');
-      const sab = new SharedArrayBuffer(48);   // [0..3] the cells, then a failed job's error code (≤ 32 bytes) — store-writer-worker.js
+      const sab = new SharedArrayBuffer(64);   // [0..3] the cells, then a failed job's error code (≤ 32 bytes), then the own numbers (dev, ino) of the file an own-only job wrote — store-writer-worker.js
       l.S = new Int32Array(sab); l.posted = 0;
       const w = new Worker(workerPath || path.join(__dirname, 'store-writer-worker.js'), { workerData: { sab }, stdout: false, stderr: false });
       l.worker = w;
@@ -557,6 +557,13 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     try { const n = Atomics.load(S, 3); if (n > 0 && S.byteLength >= 48) return Buffer.from(new Uint8Array(S.buffer, 16, Math.min(32, n))).toString('latin1'); } catch { }
     return 'EWRITE';
   }
+  /** the own numbers {dev, ino} of the file the lane's last job wrote for an own-only store, from the shared cells (B-f276 1c × the
+   *  lanes: one thread's map is not the other's — the store's own cell carries them across) — or null */
+  function jobOwn(l) {
+    const S = l.S;
+    try { if (S.byteLength >= 64) { const B = new BigUint64Array(S.buffer, 48, 2); if (B[1] > 0n) return { dev: B[0], ino: B[1] }; } } catch { }
+    return null;
+  }
   /** wait (blocking — the loop cannot turn here) for the thread's job in flight, at most until `deadline`. The thread
    *  NOTIFIES the cell this waits on: a waited write ends when the write ends (round 6's amend — it ended at the 50 ms
    *  poll); `waitsTimedOut` counts a wait that ended by its poll with the job still in flight (the fast pin reads it) */
@@ -574,6 +581,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const f = l.inflight; l.inflight = null;
     const s = stores.get(f.name);
     if (f.unlink) { if (s && s.forgotten) stores.delete(f.name); return true; }
+    if (s) { const o = jobOwn(l); if (o) s.own = o; }   // the file its store made, known BEFORE the job's answer is read: the next write of it (the other lane, in this call) is not refused as not its own
     if (s) finish(s, Atomics.load(S, 2) === 2 ? { code: jobErrorCode(l) } : null, now() - f.startedAt, f.size, f.since, false, f.append, waitedBy, f.as);
     if (s && s.forgotten && !f.append && Atomics.load(S, 2) !== 2) postUnlink(l, s);   // forgotten while it flew: gone again — on the thread
     return true;

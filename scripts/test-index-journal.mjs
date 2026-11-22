@@ -285,10 +285,10 @@ const STANDJ = path.join(ROOT, 'standj.cjs');
 fs.writeFileSync(STANDJ, `'use strict';
 const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'); const path = require('path');
 const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
-const S = new Int32Array(workerData.sab);
+const S = new Int32Array(workerData.sab), OWNS = new Map();   // OWNS: this thread's record of the files its own-only stores made
 parentPort.on('message', (m) => {
   if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
-  Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
+  Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null, own = null; const was = m.ev === 'write' && fs.existsSync(m.file);
   const dirOf = path.dirname(m.file), marker = path.join(dirOf, 'fault'), faulty = m.append && fs.existsSync(marker);
   let f = fs, cfg = {}; try { cfg = JSON.parse(fs.readFileSync(path.join(dirOf, 'fault.json'), 'utf8')); } catch { }
   if (m.ev === 'write' && /index-acts\\.ndjson$/.test(m.file)) fs.appendFileSync(path.join(dirOf, 'jobs.log'), (m.append ? 'append' : 'whole') + (faulty ? ' FAULT' : '') + '\\n');
@@ -301,10 +301,11 @@ parentPort.on('message', (m) => {
       ftruncateSync: (fd, len) => { if (cfg.trunc === 'eio') throw Object.assign(new Error('i/o error'), { code: 'EIO' }); return fs.ftruncateSync(fd, len); } }; }
   const blockIx = m.ev === 'write' && /index\\.json$/.test(m.file) && fs.existsSync(path.join(dirOf, 'blockix'));   // the index unwritable: the journal is the change's only record
   if (blockIx) err = { code: 'EIO', message: 'the index is unwritable in this scene' };
-  else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else { try { writeJob(m, f); } catch (e) { err = { code: e.code || null, message: e.message }; try { if (m.tmp) fs.unlinkSync(m.tmp); } catch { } } }
+  else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else { try { own = (writeJob(m, f) || {}).own || null; } catch (e) { err = { code: e.code || null, message: e.message }; try { if (m.tmp) fs.unlinkSync(m.tmp); } catch { } } }
+  if (m.ev === 'write' && m.ownOnly) { if (own) OWNS.set(m.file, own); else if (!was) { try { const st = fs.statSync(m.file, { bigint: true }); OWNS.set(m.file, { dev: st.dev, ino: st.ino }); } catch { } } own = own || OWNS.get(m.file) || null; }   // the thread's own record whatever the job's end, as the real thread answers (a first append that made the file, then failed)
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
-  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own });   // own: as the real thread's answer (B-f276 1c: the store's other lane knows the file it made)
 });
 `);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
