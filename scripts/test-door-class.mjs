@@ -105,6 +105,7 @@ function through(mw, r, cookie) {
 }
 // B-7f0b (r1317): the one answer that is not master's — a path with a dot segment (raw, %2e / %2f / %5c) is refused by name
 const PD = require(path.join(REPO, 'src/path-dot-segment.js'));
+// a dotted request is judged by the LAW alone (the refusal), never against master's answer
 const expectOf = (r, master) => (PD.dotSegment(r.path) ? { next: false, status: 400, location: null, body: PD.refusal().body } : master);
 const quietly = (f) => { const w = console.warn; console.warn = () => { }; try { return f(); } finally { console.warn = w; } };
 const said = (o) => (o.next ? 'next' : o.status + (o.location ? ' → ' + o.location : ''));

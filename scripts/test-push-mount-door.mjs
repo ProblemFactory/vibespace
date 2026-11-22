@@ -295,6 +295,16 @@ console.log('④ THE DOT-SEGMENT LAW on the hub\'s port, signed out');
   const served = rgot.filter(([, x]) => x.status === 200 && /THE APP SHELL/.test(x.body)).map(([u]) => u);
   ok(served.includes('/dav/../index.html') && served.includes('/dav/%2e%2e/index.html'),
     `RED (the release's auth layer, a copy): signed out, ${served.length} of ${rgot.length} dotted door paths served the app's page (200) — /dav/../index.html among them`, served.slice(0, 8));
+  // THE ORDER (round w0z9ourlm): the refusal MOVED below the door class (a copy) lets a door's prefix carry a dot segment through again
+  const passLine = AUTH_SRC.split('\n').find((l) => l.includes('if (PASSES.has(d.kind)) return next();')) + '\n';
+  const Below = M.load('src/auth.js', anchored(anchored(AUTH_SRC, gateLine, '', 'below-door-class-cut'), passLine, passLine + gateLine, 'below-door-class'), 'below-door-class');
+  const BH = await hubPort4(Below);
+  const bgot = [];
+  for (const u of ['/dav/../index.html', '/dav/%2e%2e/index.html']) bgot.push([u, await ask(BH.port, { url: u })]);   // two requests show the order
+  await BH.close();
+  const bserved = bgot.filter(([, x]) => x.status === 200 && /THE APP SHELL/.test(x.body)).map(([u]) => u);
+  ok(bserved.includes('/dav/../index.html') && bserved.includes('/dav/%2e%2e/index.html'),
+    `RED (the refusal moved BELOW the door class, a copy): signed out, /dav/../index.html and its escaped spelling served the app's page again (${bserved.length} of 2) — the order (the held block, the refusal, then the door class) is the law's`, bserved.slice(0, 6));
 }
 
 console.log('⑤ A PATH THE VERDICT CANNOT SPELL A DOT SEGMENT IN GOES ON EXACTLY AS ON THE RELEASE (r1382)');

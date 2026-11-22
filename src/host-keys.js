@@ -163,6 +163,9 @@ const pinView = (h) => (pinned(h) ? { hostKeys: keysOf(h).map((k) => ({ type: k.
 const KNOWN_FILE_MAX = 4 * 1024 * 1024;
 const knownRefusal = (code, why) => Object.assign(new Error(why), { code });
 /** the keys the file's `@revoked` lines name (any host pattern: `@revoked * ssh-ed25519 K` revokes K for every host) */
+// The key's base64 blob names its own type (its first field), so comparing the blob compares the type and the key. Only THIS
+// file's revocations are read (the hub user's known_hosts): known_hosts2, /etc/ssh/ssh_known_hosts and a configuration's own
+// UserKnownHostsFile are not read here, so a revocation set only there is not seen by the press.
 function revokedKeysOf(text) {
   const out = new Set();
   for (const line of String(text).split('\n')) {

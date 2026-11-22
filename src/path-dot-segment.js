@@ -15,6 +15,9 @@
  *     business: a bare «%» («100%»), a Latin-1, GBK or Shift_JIS name (an older site through the browser's proxy, a served
  *     folder's file) goes on to its route exactly as on the release — no other byte decodes to a dot, a slash or a backslash.
  *   refusal() — { status: 400, body: { error, code: 'path_dot_segment' } }
+ * The WebSocket upgrade road (server.js's upgrade dispatcher) does not ask it: an upgrade never reaches the public files'
+ * handler, and its routes resolve no path into files (/ws and /proxy/ by the cookie's requestAuthed, the device dial-in by
+ * its own token).
  */
 const SEGMENT = /(?:^|[\/\\])\.\.?(?:[\/\\]|$)/;
 const SPELL = /%(2e|2f|5c)/gi;   // the only escapes that decode to a dot, a slash or a backslash

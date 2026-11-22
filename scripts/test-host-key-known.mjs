@@ -68,6 +68,13 @@ console.log('① THE READER: the keys this hub already trusts for a record');
   const r1 = await HK.knownKeysOf({ host: 'box-r', port: 22 }, { file: rev }), r2 = await HK.knownKeysOf({ host: 'box-q', port: 22 }, { file: rev }), r3 = await HK.knownKeysOf({ host: 'box-k', port: 22 }, { file: rev });
   ok(r1.length === 0 && r2.length === 0 && r3.length === 1 && r3[0].key === KK && HK.revokedKeysOf(fs.readFileSync(rev, 'utf8')).size === 2,
     `a key named by ANY @revoked line is never offered: revoked for every host (box-r: ${r1.length}), revoked under another host's name (box-q: ${r2.length}); what is left decides (box-k: its one other key)`);
+  // the cure round's legs: an @revoked line under a HASHED name, one beside an @cert-authority line (the host field never matters)
+  const KHR = ED('revoked-hashed'), KC = ED('beside-ca'), KCA = ED('a-ca');
+  const rev2 = path.join(tmp, 'known_hosts.revoked2');
+  fs.writeFileSync(rev2, ['box-h ssh-ed25519 ' + KHR, '@revoked ' + hashedName('box-h') + ' ssh-ed25519 ' + KHR, '@cert-authority *.example.test ssh-ed25519 ' + KCA, 'box-c ssh-ed25519 ' + KC, '@revoked box-c ssh-ed25519 ' + KC, 'box-ca ssh-ed25519 ' + KCA].join('\n') + '\n');
+  const q1 = await HK.knownKeysOf({ host: 'box-h', port: 22 }, { file: rev2 }), q2 = await HK.knownKeysOf({ host: 'box-c', port: 22 }, { file: rev2 }), q3 = await HK.knownKeysOf({ host: 'box-ca', port: 22 }, { file: rev2 });
+  ok(q1.length === 0 && q2.length === 0 && q3.length === 1 && q3[0].key === KCA,
+    `an @revoked line under a HASHED name still revokes its key (box-h: ${q1.length}); one beside an @cert-authority line revokes its own key (box-c: ${q2.length}); the @cert-authority line is no revocation (box-ca keeps its key: ${q3.length})`);
   const Skip = M.load('src/host-keys.js', anchored(SRC, "    if (revoked.has(k.key)) continue;   // r1602 (1): revoked anywhere in the file ⇒ never this machine's pin\n", '', 'revoked-skipped'), 'revoked-skipped');
   const rr = await Skip.knownKeysOf({ host: 'box-r', port: 22 }, { file: rev });
   ok(rr.some((k) => k.key === KR), 'CONTROL (the release\'s reader: a marker line skipped, not honoured — a copy): the revoked key would be pinned — RED');
@@ -104,6 +111,16 @@ console.log('② THE PRESS: one press pins exactly those keys; none ⇒ refused 
   const wouldPin = await HK.knownKeysOf({ host: 'gpu-a', port: null }, { file: known });
   ok(e4 && e4.code === 'host-key-via-config' && !hm._state.hosts.find((x) => x.id === 'h4').hostKeys && wouldPin.some((k) => k.key === KA),
     `an ssh-configuration record: refused by name («${e4 && e4.message.slice(0, 80)}…») and left unpinned — RED: the reader alone names the port-22 line of the same name (another sshd) for it`);
+  // the law's TRUE RED (the cure round's leg): a copy of the press with its viaConfig refusal taken out pins the port-22 line's key
+  const HSRC = read('src/hosts.js');
+  const viaLine = HSRC.split('\n').find((l) => l.startsWith('    if (h0.viaConfig) throw Object.assign(new Error(')) + '\n';
+  const NoVia = M.load('src/hosts.js', anchored(HSRC, viaLine, '', 'no-via-config'), 'no-via-config');
+  const hmR = new NoVia.HostManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'hub-red-')) });
+  hmR._dropConnections = () => { }; hmR.persisted = async () => true;
+  hmR._state.hosts.push({ id: 'h4', name: 'cfg-box', host: 'gpu-a', port: null, viaConfig: true, transport: 'ssh' });
+  let pinnedR = null; try { pinnedR = await hmR.pinKnownHostKeys('h4', { file: known }); } catch { pinnedR = null; }
+  ok(!!(pinnedR && pinnedR.hostKeys && pinnedR.hostKeys.some((k) => k.fp === HK.fingerprintOf(KA))),
+    'RED (the press without its viaConfig refusal, a copy): the ssh-configuration record is pinned to the port-22 line\'s key — another sshd\'s');
   // a record whose pin was REFUSED as unusable is refused by that pin's words — never re-pinned from the file; its view says so
   let e5 = null; try { await hm.pinKnownHostKeys('h5', { file: known }); } catch (e) { e5 = e; }
   const r5 = hm._state.hosts.find((x) => x.id === 'h5');
