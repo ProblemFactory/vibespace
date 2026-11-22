@@ -3,7 +3,7 @@
 // test-hub-start-failures (THE TIER RULE: that row stays under the fast bound, and so does this one). The agent's BUILT bundle
 // (esbuild with the release's flags, the strip step aside) runs as daemons of their own roots and HOME against a stand-in hub; a
 // SIGNED self-upgrade lands (a throwaway release key each device pins); its successor cannot start: the node each daemon runs
-// from is GONE (a link to — or a copy of — node, removed after the boot: what a package manager's upgrade of node does to a
+// from is GONE (a private copy of node — never a link of its inode, r2029 — removed after the boot: what a package manager's upgrade of node does to a
 // running agent).
 //  ① a DIALED device STAYS: its lock and its socket taken again, its hub DIALED AGAIN — in both orders: the hub ends the link at
 //    upgrade-done BEFORE the stay (the dial the upgrade ended is re-armed) or AFTER it (the close takes the dial's own road) — and
@@ -64,40 +64,35 @@ const muts = {
   oldLockExit: bsrc.replace(/if \((\w+)\.readFileSync\((\w+), "utf-8"\)\.trim\(\) === String\(process\.pid\)\)\s*(\w+)\.unlinkSync\(\2\);/, '$3.unlinkSync($2);'),
 };
 ok(!!realVersion && Object.values(muts).every((m) => m !== bsrc), `(the base: the built bundle ${realVersion}, its release keys emptied; five RED copies, each with one edit applied: ${Object.entries(muts).map(([k, m]) => `${k} ${m !== bsrc ? 'applied' : 'NOT applied'}`).join(', ')})`);
-// the node they run from: a HARD LINK that goes after their boot. Where the scratch is another file system than node (the hub box:
-// a memory /tmp beside a binary on the root disk) the link answers EXDEV and the node is COPIED, once a run (~100 MB, said with its
-// size), into the scratch only — never beside the binary, never under a home — and removed after their boot as the link is (the
-// scratch reaper sweeps it with the rest). A symlink cannot stand in: a daemon's process.execPath is the RESOLVED binary
-// (/proc/self/exe), so removing a symlink leaves its successor startable. Any other refusal is NOT RUN, by name, red
+// the node they run from: a PRIVATE COPY in this suite's scratch, removed after their boot (~100 MB, said with its size) and at
+// exit — NEVER A HARD LINK (主开发 r2029): a link changes the real binary's inode (its link count and its change time) while other
+// suites run (test-browser-builds read a moved stamp of that shared file once). The copy used to be the fallback across file
+// systems (EXDEV, r884); it is the only road now. A symlink cannot stand in: a daemon's process.execPath is the RESOLVED binary
+// (/proc/self/exe), so removing a symlink leaves its successor startable. A copy that fails is NOT RUN, by name, red
 const NODE = path.join(T, 'node-gone');
 const copyNode = (from, to) => { fs.copyFileSync(from, to); fs.chmodSync(to, 0o755); };
-function placeNode(dst, { link = fs.linkSync, copy = copyNode } = {}) {
-  try { link(process.execPath, dst); return { how: 'link' }; } catch (e) {
-    const code = (e && e.code) || String(e);
-    if (code !== 'EXDEV' || !copy) return { how: null, why: code };
-    try { copy(process.execPath, dst); return { how: 'copy', bytes: fs.statSync(dst).size }; } catch (e2) { return { how: null, why: `EXDEV, then the copy failed: ${(e2 && e2.code) || e2}` }; }
-  }
+function placeNode(dst, { copy = copyNode } = {}) {
+  try { copy(process.execPath, dst); return { how: 'copy', bytes: fs.statSync(dst).size }; } catch (e) { return { how: null, why: (e && e.code) || String(e) }; }
 }
+const binBefore = (() => { const st = fs.statSync(process.execPath); return { nlink: st.nlink, ctimeMs: st.ctimeMs }; })();
 const placed = placeNode(NODE);
-if (!placed.how) { ok(false, `NOT RUN — the node binary cannot be placed in the scratch (${placed.why}: ${process.execPath} → ${T}); a symlink cannot stand in (process.execPath is the resolved binary)`); console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
-console.log(placed.how === 'link' ? `  (the node the daemons run from: a hard link of ${process.execPath}, removed after their boot)`
-  : `  (the node the daemons run from: a COPY of ${process.execPath}, ${(placed.bytes / 1048576).toFixed(1)} MB — the scratch is another file system (EXDEV); removed after their boot)`);
-// THE EXDEV ROAD on every machine (r884): where the link works, a PLACED EXDEV from the link call (never a real second file system)
-// drives the copy once — the same bytes, executable, it runs; where the link answered EXDEV for real, the road above is the proof.
-// RED: the fallback cut (no copy) ⇒ NOT RUN again (EXDEV)
+if (!placed.how) { ok(false, `NOT RUN — the node binary cannot be copied into the scratch (${placed.why}: ${process.execPath} → ${T}); a symlink cannot stand in (process.execPath is the resolved binary)`); console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
+console.log(`  (the node the daemons run from: a PRIVATE COPY of ${process.execPath}, ${(placed.bytes / 1048576).toFixed(1)} MB, removed after their boot)`);
+// THE RULE (r2029): the real binary's inode is untouched by the placement (its link count and change time read before and after),
+// and NO suite under scripts/ hard-links the running program (a census by text: `linkSync(` or a `link(` handed process.execPath;
+// a symlink is not a link of the inode). CONTROL: a planted hard link is named, a planted symlink is not
 {
-  const xdev = () => { const e = new Error('EXDEV: cross-device link not permitted (placed)'); e.code = 'EXDEV'; throw e; };
-  const want = fs.statSync(process.execPath).size;
-  let road = placed, runs = null;
-  if (placed.how === 'link') {
-    const N2 = path.join(T, 'node-exdev');
-    road = placeNode(N2, { link: xdev });
-    try { runs = road.how === 'copy' ? execFileSync(N2, ['-e', 'process.stdout.write(process.version)'], { encoding: 'utf8', timeout: 20000 }) === process.version : false; } catch { runs = false; }
-    try { fs.unlinkSync(N2); } catch { }
-  } else runs = true;   // the daemons below run from it
-  const red = placeNode(path.join(T, 'node-exdev-red'), { link: xdev, copy: null });
-  ok(road.how === 'copy' && road.bytes === want && runs === true, `THE EXDEV ROAD: the link refused across file systems ⇒ the node copied into the scratch (${road.bytes} B of ${want}, ${placed.how === 'copy' ? 'for real on this machine' : 'a placed EXDEV'}), and it runs`, { road, runs });
-  ok(red.how === null && red.why === 'EXDEV' && !fs.existsSync(path.join(T, 'node-exdev-red')), `RED: the fallback cut ⇒ NOT RUN again (${red.why}), nothing placed`, red);
+  const st = fs.statSync(process.execPath), want = st.size;
+  ok(placed.bytes === want && st.nlink === binBefore.nlink && st.ctimeMs === binBefore.ctimeMs,
+    `THE PRIVATE COPY: ${placed.bytes} B of ${want}, executable; the real binary untouched (its link count ${st.nlink}, its change time the same)`, { placed, before: binBefore, after: { nlink: st.nlink, ctimeMs: st.ctimeMs } });
+  const HARD = /(?<![A-Za-z])(?:linkSync|link)\(\s*process\.execPath\b/;
+  const linkers = (files) => files.filter(([, t]) => t.split('\n').some((l) => HARD.test(l.replace(/\/\/.*$/, '')))).map(([f]) => f);
+  const dir = path.join(REPO, 'scripts'), tree = fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).map((f) => [f, fs.readFileSync(path.join(dir, f), 'utf8')]);
+  const found = linkers(tree);
+  // the planted texts are built from pieces at run time: this file is in the census too, and never names what it hunts in one piece
+  const ctl = linkers([['planted-hard.mjs', 'fs.link' + 'Sync(process.execPath, x);\n'], ['planted-param.mjs', 'li' + 'nk(process.execPath, dst);\n'], ['planted-sym.mjs', 'fs.symlinkSync(process.execPath, x);\n']]);
+  ok(!found.length && tree.length > 100, `no suite under scripts/ hard-links the running program (${tree.length} files read: ${found.join(', ') || 'none'})`, found);
+  ok(ctl.join() === 'planted-hard.mjs,planted-param.mjs', `CONTROL: a planted hard link and a link handed process.execPath are named, a planted symlink is not (${ctl.join(', ')})`, ctl);
 }
 const HOMEN = path.join(T, 'home'); fs.mkdirSync(HOMEN, { recursive: true });   // never the person's HOME: its desktop apps, its keepers
 const XB = path.join(T, 'x'); fs.mkdirSync(XB, { recursive: true, mode: 0o700 });   // ②'s runtime folders, this suite's own

@@ -13,6 +13,9 @@
 //     is heard and the daemon STAYS; RED: the successor's error listener cut (the shape before B-147f) ⇒ the unheard error ends it.
 //     The table is bounded first (prlimit --nofile=1024, said if it fails) and the fill stops at 4096: no prlimit on the machine ⇒ ④
 //     is SKIPPED BY NAME, never a fill of whatever table the daemon inherited
+// THE NODE ①–③ RUN FROM is a PRIVATE COPY in this suite's scratch, removed at exit — never a hard link (主开发 r2029): a link
+// changes the real binary's inode (its link count and its change time) while other suites run, and test-browser-builds read a
+// moved stamp of that shared file once. A suite never touches a system program's inode.
 // Every wait is bounded on what happened; the roads are waited for together.
 // Run: node scripts/test-agentd-stay-window.mjs
 import fs from 'node:fs';
@@ -75,9 +78,9 @@ muts.serverErrRed = muts.serverErr.replace(/(const stayFatal[\w$]* = \(([\w$]+)\
 muts.emfileRed = muts.emfile.replace(/[\w$]+\.on\("error", \(([\w$]+)\) => log[\w$]*\(`the successor could not be started: [^`]*`\)\);/, '/* the successor\'s error listener cut */');
 ok(!!realVersion && Object.values(muts).every((m) => m !== bsrc) && muts.serverErrRed !== muts.serverErr && muts.emfileRed !== muts.emfile,
   `(the base: the built bundle ${realVersion}, its release keys emptied; six copies, each condition placed by one edit: ${Object.entries(muts).map(([k, m]) => `${k} ${m !== bsrc ? 'applied' : 'NOT APPLIED'}`).join(', ')}${muts.serverErrRed === muts.serverErr ? ' — serverErrRed NOT APPLIED' : ''}${muts.emfileRed === muts.emfile ? ' — emfileRed NOT APPLIED' : ''})`);
-// the node ①–③ run from: a HARD LINK that goes after their boot (a successor from it cannot start), else a COPY across file systems
+// the node ①–③ run from: a PRIVATE COPY that goes after their boot (a successor from it cannot start) — never a link (r2029)
 const NODE = path.join(T, 'node-gone');
-try { fs.linkSync(process.execPath, NODE); } catch (e) { if (e && e.code === 'EXDEV') { fs.copyFileSync(process.execPath, NODE); fs.chmodSync(NODE, 0o755); } else throw e; }
+fs.copyFileSync(process.execPath, NODE); fs.chmodSync(NODE, 0o755);
 const HOMEN = path.join(T, 'home'); fs.mkdirSync(HOMEN, { recursive: true });   // never the person's HOME
 const tok = (p) => [p, '_'].join('') + crypto.randomBytes(12).toString('hex');   // built at run time (no token-shaped literal)
 const install = (name, src) => {
