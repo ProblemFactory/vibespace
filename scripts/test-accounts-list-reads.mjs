@@ -501,6 +501,43 @@ console.log('\n⑨ the expiry sweep keeps the ledger\'s birth apart from the set
   ck('(b) a login that dies AFTER the hub began watching is SAID (an item filed), never recorded as a pre-existing death', filedW.length === 1, JSON.stringify(filedW.map((i) => i.text || i.title || '?')));
 }
 
+// ── ⑩ A WRITER THAT CHANGES WHAT A ROW SHOWS PUSHES THE RECOMPUTED ROWS IN ITS OWN STEP (主开发 r2201 / r2204): the page never
+// waits on a landing for an act of ours — (a) a pool default switch, (b) a sign-in finished through our flow. RED: a copy of the
+// store whose two writers lack their push (the pool default's: its own and _noteSlot's; the finish's own) answers only at a later landing
+console.log('\n⑩ a writer that changes what a row shows pushes the rows in its own step (主开发 r2204):');
+{
+  const stepPushes = async (Mgr) => {
+    const pushes = [];
+    const am = new Mgr({ dataDir: fs.mkdtempSync(path.join(ROOT, 'push-')), safeFs: door, platform: 'linux', onChange: (l) => pushes.push(l.accounts) });
+    const A = am.createSubscription({ name: 'Push A' }).id; signIn(am, A, 101); am.finalizeSubscription(A);
+    const B = am.createSubscription({ name: 'Push B' }).id; signIn(am, B, 102); am.finalizeSubscription(B);
+    const pool = am.createPool({ name: 'Push P', members: [A, B] });
+    const C = am.createSubscription({ name: 'Push C' }).id;
+    await am.displaySettled(); await new Promise((r) => setTimeout(r, 150));   // every landing and its coalesced push are past
+    pushes.length = 0;
+    am.setPoolTarget(pool.id, pool.current === A ? B : A);
+    const switched = pushes.length ? (pushes[pushes.length - 1].find((x) => x.id === pool.id) || null) : null;   // read in the SAME step: no await yet
+    const want = pool.current === A ? B : A;
+    signIn(am, C, 103);
+    pushes.length = 0;
+    am.finalizeSubscription(C);
+    const signed = pushes.length ? (pushes[pushes.length - 1].find((x) => x.id === C) || null) : null;
+    await am.displaySettled();
+    return { switched: !!switched && switched.current === want, signed: !!signed && signed.loggedIn === true && signed.email === emailOf(103), seen: { pool: switched && switched.current, want, c: signed && { loggedIn: signed.loggedIn, email: signed.email } } };
+  };
+  const real = await stepPushes(AccountManager);
+  ck('(a) a pool default switch pushes the rows IN ITS OWN STEP — the pool row names its new member, no wait on any landing', real.switched, JSON.stringify(real.seen));
+  ck('(b) a sign-in finished through our flow pushes the rows IN ITS OWN STEP — the row signed in, with its address', real.signed, JSON.stringify(real.seen));
+  const M10 = mutantCopies('acctpush', REPO);
+  const srcA = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const noPush = anchored(anchored(anchored(srcA, "      if (sessionId) this._notifyLinks(); else this._notify();\n", "      if (sessionId) this._notifyLinks();\n", 'the pool default\'s push (_noteSlot)'),
+    "    this._notify();\n    return { id, current: subId, name: target.name, swept };\n", "    return { id, current: subId, name: target.name, swept };\n", 'the pool default\'s own push (setPoolTarget)'),
+    "    this._displaySeed(a);   // B-360d: the person's own sign-in — the row right at once\n    this._notify();\n    const { accessToken: _accessToken, ...publicInfo } = info;\n",
+    "    this._displaySeed(a);   // B-360d: the person's own sign-in — the row right at once\n    const { accessToken: _accessToken, ...publicInfo } = info;\n", 'the finish\'s push');
+  const red = await stepPushes(M10.load('src/accounts.js', noPush, 'nopush').AccountManager);
+  ck('(a)/(b) RED CONTROL — the store without the two writers\' push: neither row reaches the page in the writer\'s step', !red.switched && !red.signed, JSON.stringify(red.seen));
+}
+
 const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const CENSUS = [
   { f: 'src/accounts.js', kind: 'DISPLAY', who: 'list() / rowOf() and their broadcast', has: ['_rowsOf(this._state.accounts)', 'rowOf(id) { const a = this.get(id); return a ? this._rowsOf([a])[0] : null; }'], unread: 'facts {state: unread}, loggedIn null', unreadable: 'facts {state: unreadable, reason}' },
