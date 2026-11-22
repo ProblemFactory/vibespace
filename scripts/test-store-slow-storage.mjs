@@ -477,13 +477,15 @@ if (!OTHER && leg('D')) {
 // ── (i) THE CRASH PATH (round 3, law 2): the server's own uncaughtException handler on slow storage — a status write in
 //    flight, a person's act owed: rank 0 on disk FIRST (before the unmoved stores), inside the crash's own bound, the exit ends
 if (!OTHER && leg('i')) {
-  console.log('— (i) the crash path at 500 ms per call: a status write in flight, an act owed — rank 0 first; the exit writes everything and ends by itself');
+  console.log('— (i) the crash path at 500 ms per call: a status write in flight, an act owed behind its own file\'s append (two lanes) — rank 0 first; the exit writes everything and ends by itself');
   if (guard()) { ok(false, `thermal stop: ${guard()}`); process.exit(1); }
-  const CF = path.join(OUT, 'crash-crash500');
-  const h = await boot('crash500', TREE, DELAY, { STORE_SLOW_CRASH_FILE: CF });
-  loadNow('crash500');
-  if (!h.readyAt || !h.hub) { ok(false, '(i) the hub became ready', fs.readFileSync(h.logf, 'utf8').slice(-800)); await stopHub(h, 'SIGKILL', 2000); }
-  else {
+  // THE SCENE, primed (a first act's append in flight on the act's own lane, so the probed act is OWED at the crash) or not — its RED
+  const crashScene = async (tag, prime) => {
+  const CF = path.join(OUT, `crash-${tag}`);
+  const h = await boot(tag, TREE, DELAY, { STORE_SLOW_CRASH_FILE: CF });
+  loadNow(tag);
+  if (!h.readyAt || !h.hub) { ok(false, `(i) the hub became ready (${tag})`, fs.readFileSync(h.logf, 'utf8').slice(-800)); await stopHub(h, 'SIGKILL', 2000); return null; }
+  {
     await sleep(3000);
     // the channels engine answers marks first (its 22 MB index loaded): one mark awaited, then the scene
     let warm = 0; for (let k = 0; k < 20 && warm !== 200; k++) { warm = await req('POST', `/api/channels/agents/${h.seed.ids[30]}/read`, { at: Date.now() }); if (warm !== 200) await sleep(500); }
@@ -491,8 +493,13 @@ if (!OTHER && leg('i')) {
     const id = h.seed.ids[31], at = Date.now() + 9;
     req('POST', '/api/session-status', { sessionKey: 'crash-probe', state: 'working', reason: 'the crash path' });   // its durable write: in flight
     await sleep(40);
-    const pm = req('POST', `/api/channels/agents/${id}/read`, { at });   // a person's act: applied in memory, its journal line owed behind the status write in flight
-    await sleep(250);   // the hub reads and applies the mark (localhost) while the status write (500 ms) still flies
+    // THE WRITER'S TWO LANES (line 320; the coordinator's r2150): an act's journal line is an APPEND, and an append never waits behind
+    // ANOTHER file's whole write (law 2: the status write above flies on the whole lane). So the act is made OWED at the crash by its
+    // OWN file: a first act's journal append is in flight on the append lane (500 ms per call), and the probed act's line waits
+    // behind it (the fence: one job of a file at a time) — the exit must still write it FIRST, before the road's unmoved stores
+    if (prime) { req('POST', `/api/channels/agents/${h.seed.ids[32]}/read`, { at: at - 1 }); await sleep(40); }   // the first act: its journal append in flight on the append lane
+    const pm = req('POST', `/api/channels/agents/${id}/read`, { at });   // the probed act: applied in memory, its journal line owed behind its own file's append in flight
+    await sleep(250);   // the hub reads and applies the mark (localhost) while the first act's append and the status write (500 ms a call) still fly
     const tC = Date.now(); fs.writeFileSync(CF, '1');
     let gone = 0; while (Date.now() - tC < 60000) { try { process.kill(h.hub, 0); } catch { gone = Date.now(); break; } await sleep(25); }
     await pm.catch(() => null);
@@ -504,11 +511,17 @@ if (!OTHER && leg('i')) {
     const m = /written in (\d+) ms \(([^)]*)\)(?:; the first (\d+) before the crash road's own unmoved stores \(census debt\), which took (\d+) ms)?/.exec(line) || [];
     const first = m[3] ? +m[3] : 0, debtMs = m[4] ? +m[4] : null, names = (m[2] || '').split(', ');
     const markCode = await Promise.race([pm, sleep(100).then(() => 'no answer (the process ended)')]);
-    table.runs.crash500 = { crashMs, line, onDisk, first, debtMs, warm, markCode }; save();
-    info(`(i) crashed ${crashMs != null ? `→ gone in ${(crashMs / 1000).toFixed(1)} s` : '(never ended in 60 s)'}; ${line || '(no exit line)'}; the act ${onDisk ? 'ON disk' : 'NOT on disk'}`);
-    ok(crashMs != null && first >= 1 && /channels-acts\.write/.test(names.slice(0, first).join(',')) && onDisk && !/NOT written|bound|signal|shutdown's/.test(line) && !/exit after the crash: [\d.]+ s after the crash/.test(log),
-      `(i) LAW 2 on the crash path: the act (rank 0) written FIRST — before the crash road's own unmoved stores (${debtMs} ms of census debt) — on disk; nothing left, and the process ended BY ITSELF ${crashMs} ms after the crash (no keeper: inside the grace)`, { line, onDisk, crashMs });
+    table.runs[tag] = { crashMs, line, onDisk, first, debtMs, warm, markCode, prime }; save();
+    info(`(i) ${prime ? '' : 'RED scene, '}crashed ${crashMs != null ? `→ gone in ${(crashMs / 1000).toFixed(1)} s` : '(never ended in 60 s)'}; ${line || '(no exit line)'}; the act ${onDisk ? 'ON disk' : 'NOT on disk'}`);
+    return { crashMs, line, onDisk, first, debtMs, names, log, law: crashMs != null && first >= 1 && /channels-acts\.write/.test(names.slice(0, first).join(',')) && onDisk && !/NOT written|bound|signal|shutdown's/.test(line) && !/exit after the crash: [\d.]+ s after the crash/.test(log) };
   }
+  };
+  const r = await crashScene('crash500', true);
+  if (r) ok(r.law, `(i) LAW 2 on the crash path: the act (rank 0) written FIRST — before the crash road's own unmoved stores (${r.debtMs} ms of census debt) — on disk; nothing left, and the process ended BY ITSELF ${r.crashMs} ms after the crash (no keeper: inside the grace)`, { line: r.line, onDisk: r.onDisk, crashMs: r.crashMs });
+  // ITS RED: the scene with no first act (the one-lane scene). On the two lanes the probed act's append lands on its own lane BEFORE the
+  // crash, so the exit has no first job: the same check must fail — the leg above measures an act that IS owed
+  const r0 = await crashScene('crash500-unprimed', false);
+  if (r0) ok(!r0.law && r0.onDisk && r0.first === 0, `(i) RED (the scene without its first act): the act landed on its own lane before the crash (on disk: ${r0.onDisk}), so the exit had no first job (${r0.first}) — the check above fails here, as it must`, { line: r0.line, onDisk: r0.onDisk, first: r0.first });
 }
 
 // ── (k) THE KEEPER IS THERE FROM BOOT (round 6, E3 a): the REAL server.js booted (a stated grace of 3 s), then the install
