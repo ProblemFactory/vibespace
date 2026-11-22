@@ -730,13 +730,37 @@ leg('§3 IN-PROCESS ㊳ A CUT SCAN PROVES NOTHING — AND IS AN ANSWER: what a s
       MEMBERS.delete(c.id); stopEngine(E2);
     }
   }
-  const r2 = E.start(j, { caller: STARTER }), walked2 = walks[j.id]; await until(() => !j._starting, 1500, 5);
+  // r2228 (2): a press behind a standing stamp walks through the clear ALONE (no _startAfter): the leg waits on the engine's own
+  // in-flight clear — its answer settles before the next press (a press inside it joins it, by design)
+  const clearing = (x) => !!(E._clearing && E._clearing.has(x.runs[0]));
+  const r2 = E.start(j, { caller: STARTER }), walked2 = walks[j.id]; await until(() => !j._starting && !clearing(j), 1500, 5);
   ok(walked2 === 2 && doorW(j).test(r2.error || '') && !r2.ok && !E.spawned.length && notices(j) === 1 && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1 && told.filter((x) => x.eng === E && x.id === j.id).length === 1,
     `a later start is a new decision: ONE walk more — still cut, its answer the refusal («${r2.error}»), nothing said twice, no second notice, its starter (answered by the refusal itself) not told again (8ad58d8b: «ok — it starts only once it is», and nothing walked again)`, { walked2, r2 });
   cut[j.id] = false; // the next walk finishes
-  E.start(j); await until(() => E.spawned.length, 1500, 5);
-  ok(walks[j.id] === 3 && l.gone > 0 && !l.cut && E.spawned.length === 1 && E.spawned[0].id === j.id && journal(E, j, /^what its last run left running had already ended — nothing stopped \(its mark searched in 3100 processes; unreadable: 2 of other users, 1 of ours, not dumpable\)$/),
-    'a FINISHED walk proves it: `gone`, the stamp lifted, the start goes — what it could not read said by owner («of other users» only for theirs)', { left: l, spawned: E.spawned });
+  // 主开发 r2228 (2): this press comes while r2's cut stamp STANDS — refused in its own reply and NOT KEPT: its walk runs once more
+  // (finished now: `gone`, the stamp lifted) and NOTHING starts from it, so its reply «not restarted … then start it again» is true;
+  // the next press goes at once (the walk proved it — no walk more). Round w353xjah9: before, that walk started the service the reply
+  // had just called «not restarted»
+  const r3 = E.start(j, { caller: STARTER }); await until(() => !clearing(j), 1500, 5); await until(() => E.spawned.length, 150, 5);
+  ok(!r3.ok && doorW(j).test(r3.error || '') && walks[j.id] === 3 && l.gone > 0 && !l.cut && !E.spawned.length && journal(E, j, /^what its last run left running had already ended — nothing stopped \(its mark searched in 3100 processes; unreadable: 2 of other users, 1 of ours, not dumpable\)$/) && told.filter((x) => x.eng === E && x.id === j.id).length === 1,
+    `r2228 (2): THE THIRD PRESS READS ITS OWN REPLY — «${r3.error}»: refused and not kept; its walk once more FINISHED (\`gone\`, the stamp lifted, what it could not read said by owner — «of other users» only for theirs) and nothing started from it`, { r3, left: l, spawned: E.spawned });
+  const r4 = E.start(j, { caller: STARTER }); await until(() => E.spawned.length, 1500, 5);
+  ok(r4.ok && walks[j.id] === 3 && E.spawned.length === 1 && E.spawned[0].id === j.id, 'then the next press starts AT ONCE — the finished walk proved it (no walk more)', { r4, walks: { ...walks }, spawned: E.spawned });
+  {   // RED (r2228 (2)): start()'s own text with the early refusal cut, on an engine of its own — the press is KEPT behind a standing
+      // stamp: refused in its reply («not restarted»), its walk then finishes clean and the service STARTS
+    const A = '      if (cut0) {', ST = JobManager.prototype.start.toString();
+    if (ST.split(A).length !== 2) ok(false, `ANCHOR (src/jobs.js start): ${JSON.stringify(A)} — found ${ST.split(A).length - 1} time(s): the control builds nothing`);
+    else {
+      const dir3 = tmp('vs-jobs-mem-'), E3 = engine(dir3, { memorySample: { stopMs: 2000 } });
+      E3.start = new Function('M', 'now', 'return function ' + ST.replace(A, '      if (false && cut0) {   /* MUTANT: the press kept behind a standing stamp */') + ';')(M, () => Date.now());   // eslint-disable-line no-new-func
+      const c2 = deadJob(dir3, 'jb-cutscan4', { kind: 'service', state: 'down', desiredUp: false });
+      Object.assign(c2.runs[0], { endedAt: Date.now() - 1000, cause: 'ok', left: { n: 1, kept: true, pids: [[DEAD, 12345]], boot: BOOT, cut: { at: Date.now() - 500, why: 'could not check 100 of 3100 processes for what it left running' } } }); E3.jobs.set(c2.id, c2);
+      MEMBERS.set(c2.id, () => Object.assign([], { scan: { scanned: 3100, total: 3100, unreadable: 0, others: 0, cut: false } }));
+      const rc2 = E3.start(c2, { caller: STARTER }); await until(() => E3.spawned.length, 1500, 5);
+      ok(!rc2.ok && doorW(c2).test(rc2.error || '') && E3.spawned.length === 1 && E3.spawned[0].id === c2.id, 'CONTROL (the early refusal cut from start, its own text in a copy): the press is KEPT behind a standing stamp — its reply says «not restarted», its walk finishes clean and the service STARTS (red)', { rc2, spawned: E3.spawned });
+      MEMBERS.delete(c2.id); stopEngine(E3);
+    }
+  }
   E.stop(k); await until(() => k.runs[0].doubtOver, 1500, 5); // the person's stop: its clear walks ONCE (still cut) — the person's word ends it
   ok(walks[k.id] === 2 && k.runs[0].doubtOver && k.runs[0].doubtOver.by === 'stop' && journal(E, k, /^stopped by its owner — what its last run left was not proven gone \(could not check 100 of 3100 processes for what it left running\); it may start again$/),
     `the person's stop ends a cut hold — its own clear's ONE walk, no second (${walks[k.id] - 1} for the stop), said`, { walks, over: k.runs[0].doubtOver });

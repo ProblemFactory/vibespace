@@ -2427,7 +2427,7 @@ class JobManager {
     return n + escaped;
     };
     const done = marks ? this._walkMarked({ mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`, since: Number(stamp.starttime) || 0 }).then(finish) : Promise.resolve(finish([]));
-    (this._markWalks || (this._markWalks = new Set())).add(done); done.finally(() => this._markWalks.delete(done)).catch(() => { });   // a suite's wait (markWalksSettled)
+    (this._markWalks || (this._markWalks = new Set())).add(done); done.finally(() => this._markWalks.delete(done)).catch((e) => { try { this.d.log(`[jobs] ${job.id}: its forced end's walk answered but could not be acted on (${(e && e.message) || e}) — what carries its run's mark may be left`); } catch { } });   // a suite's wait (markWalksSettled)
     return n;   // the tree's kills now; the mark's when its walk answers (no caller reads this count)
   }
   /** B-d8f4 (9), 主开发 r1745: what carries a job's mark — walked OFF the hub's main thread and off the shared file threadpool
@@ -2874,7 +2874,7 @@ class JobManager {
     // hub's loop 91 % stalled). A later decision (a start, the person's stop, a boot) walks once more; a finished walk ends it
     run._clearSent = (run._clearSent || 0) + n; n = run._clearSent;
     if (seen && seen.cut) {
-      if (!l.cut) l.cut = { at: now(), why: `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running${n ? `; ${n} found and stopped` : ''}` }; // the late walk's cut
+      if (!l.cut) l.cut = { at: now(), why: `${seen.ended ? require('./server/marked-walk.js').endedWords(seen.ended) : `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running`}${n ? `; ${n} found and stopped` : ''}` }; // the late walk's cut — an ENDED late walk in its own words (主开发 r2228 (1): never «could not check 0 of N»)
       this._dirty = true;
       return;
     }
@@ -5009,6 +5009,16 @@ class JobManager {
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
       if (this._besideLive(job, 'manual')) return { error: `${job.id}'s last run is still running — stop it first` }; // round 7
       const last = job.runs && job.runs[job.runs.length - 1]; // round 8: its doubt checked first, never beside it
+      // 主开发 r2228 (2): a press while a CUT STAMP STANDS is refused in its own reply and NOT KEPT — the walk it asks runs once more
+      // (r1993: a later decision walks once more; a finished walk lifts the stamp, so the NEXT press goes at once) but nothing
+      // starts from this press: its reply «not restarted … then start it again» stays true (the walk is off the hub's thread now)
+      const cut0 = this._cutOf(last);
+      if (cut0) {
+        job.desiredUp = before.desiredUp; job.supervise = before.supervise;
+        this._clearKept(job, last).then(() => { if (this._cutOf(last)) this._doubtBlocks(job, last, 'manual'); }).catch(() => { });
+        this._save();
+        return { error: this._doorWords(job, last, cut0) };
+      }
       // a press DEFERRED behind its last run's reap and refused later: undone, and every presser told (_startAfter's settle)
       joinPress();
       try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state), { caller }); } catch (e) { if (e && e.code === 'memory-budget') this._undoRefusedPress(job); else delete job._press; return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; }   // B-b14a

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
@@ -36,9 +37,9 @@ let answer = null; const runs = [];
 MW.setRunImpl((cmd, args, o) => { runs.push({ cmd, args: [...args], o }); return typeof answer === 'function' ? answer(args) : Promise.resolve(answer); });
 const rowsLine = (rows) => ({ started: true, code: 0, signal: null, stdout: JSON.stringify({ rows, scan: { scanned: 3, total: 3, unreadable: 0, others: 0, cut: false } }) + '\n', stderr: '' });
 // the hub's own thread: a COUNTING membersOf (any call here is a walk on the hub's loop) and stubbed signals
-let inProcess = 0; const sent = [];
+let inProcess = 0; const sent = [], sentIds = [];
 const keep = {}; for (const k of ['treeOf', 'membersOf', 'signalIdentity', 'keptOut', 'pgidOf']) keep[k] = PI[k];
-const stubPI = () => { PI.treeOf = () => []; PI.membersOf = () => { inProcess++; return Object.assign([{ pid: STR, starttime: 5, bootId: 'b' }], { scan: { scanned: 1, total: 1, cut: false } }); }; PI.signalIdentity = (id) => { sent.push(id.pid); return { ok: true }; }; PI.keptOut = () => []; PI.pgidOf = () => 0; };
+const stubPI = () => { PI.treeOf = () => []; PI.membersOf = () => { inProcess++; return Object.assign([{ pid: STR, starttime: 5, bootId: 'b' }], { scan: { scanned: 1, total: 1, cut: false } }); }; PI.signalIdentity = (id) => { sent.push(id.pid); sentIds.push({ pid: id.pid, starttime: id.starttime, bootId: id.bootId }); return { ok: true }; }; PI.keptOut = () => []; PI.pgidOf = () => 0; };
 const restorePI = () => Object.assign(PI, keep);
 let seq = 0;
 const engine = (Mod, tag) => {
@@ -51,12 +52,12 @@ const engine = (Mod, tag) => {
 };
 const forced = async (Mod, tag, ans) => {
   const { jm, job, logs } = engine(Mod, tag);
-  answer = ans; sent.length = 0; inProcess = 0; runs.length = 0;
+  answer = ans; sent.length = 0; sentIds.length = 0; inProcess = 0; runs.length = 0;
   stubPI();
   try { jm._killTree(job, { pid: WRAPPER, starttime: 1 }, { group: true }); if (typeof jm.markWalksSettled === 'function') await jm.markWalksSettled(); else await sleep(20); }
   finally { restorePI(); }
   try { jm.shutdown(); } catch { }
-  return { sent: [...sent], inProcess, runs: runs.map((r) => ({ args: r.args.slice(1).map((a, i) => (i === 0 ? path.basename(String(a)) : a)), env: Object.keys((r.o && r.o.env) || {}), whole: !!(r.o && r.o.wholeEnv), timeoutMs: r.o && r.o.timeoutMs })), said: logs.join(' | ') };
+  return { sent: [...sent], ids: sentIds.map((x) => ({ ...x })), inProcess, runs: runs.map((r) => ({ args: r.args.slice(1).map((a, i) => (i === 0 ? path.basename(String(a)) : a)), env: Object.keys((r.o && r.o.env) || {}), whole: !!(r.o && r.o.wholeEnv), timeoutMs: r.o && r.o.timeoutMs })), said: logs.join(' | ') };
 };
 
 try {
@@ -64,6 +65,7 @@ try {
   {
     const f = await forced(realJM, 'forced', rowsLine([[STR, 5]]));
     okP(f.inProcess === 0 && f.runs.length === 1 && f.sent.includes(STR) && /1 process carrying its run's mark outside its group/.test(f.said), 'the FORCED END walks nothing on the hub\'s thread (0 membersOf here): ONE run of the starter, and the stranger it found is ended when it answers', f);
+    okP(f.ids.length === 1 && f.ids[0].pid === STR && f.ids[0].starttime === 5 && f.ids[0].bootId === PI.bootIdOf(), 'r2228 (3): the identity SIGNALLED is the walked row\'s own — its pid, ITS start time (the child read it), this machine\'s boot — never a start time read again on the hub', f.ids);
     const r = f.runs[0] || { args: [] };
     okP(/marked-walk-child\.js$/.test(r.args[0] || '') && r.args[1] === 'VIBESPACE_JOB_RUN=jb-9a1c0001:1700000000000' && r.whole && JSON.stringify(r.env) === '["PATH"]' && r.timeoutMs === MW.DEADLINE_MS, 'its start: the walker, the run\'s mark, its numbers — a PATH-only whole env, ended at its deadline', r);
     const { jm, job } = engine(realJM, 'doubt');
@@ -117,6 +119,91 @@ try {
     okP(!w.ended && same && w.rows.length === 1 && w.rows[0].pid === 7001, 'the child answers what membersOf answers on the same placed /proc (the same function: the D-state one never read, one started before the bound never its)', { child: w.rows, here: mine.map((r) => [Number(r.pid), Number(r.starttime)]), ended: w.ended });
     const parsed = (() => { try { return JSON.parse(line.trim()); } catch { return null; } })();
     okP(!!parsed && !line.includes(SECRETISH) && parsed.rows.every((x) => Array.isArray(x) && x.length === 2 && x.every(Number.isFinite)), 'its one line carries pids and start times ONLY — the planted environment value is nowhere in it', { line: line.trim().slice(0, 200) });
+  }
+  console.log('§5 the kill law across the hand-over: the REAL identity signal refuses a pid reused while the walk ran');
+  {
+    const kid = spawn('sleep', ['30'], { stdio: 'ignore' });   // this suite's own child: the only process these legs may signal
+    const exited = () => kid.exitCode !== null || kid.signalCode !== null;
+    try {
+      let real = null; for (let k = 0; k < 100 && !real; k++) { real = PI.identityOf(kid.pid); if (!real) await sleep(10); }
+      // judged by STATE: the real signal's own verdict for this pid (a spy around it, the call unchanged) and the child's own exit
+      const lawLeg = async (Mod, tag) => {
+        const { jm, job } = engine(Mod, tag);
+        answer = rowsLine([[kid.pid, Number(real.starttime) + 1]]); runs.length = 0;   // the walked row: THIS pid with ANOTHER start time — a pid reused during the walk
+        const t0 = PI.treeOf, s0 = PI.signalIdentity, verdicts = [];
+        PI.treeOf = () => [];   // the tree of a stand-in wrapper: none (the real identity signal is the point)
+        PI.signalIdentity = (id, sig, o) => { const r = s0(id, sig, o); if (id && Number(id.pid) === kid.pid) verdicts.push(r && r.ok ? 'ok' : String((r && r.why) || 'refused')); return r; };
+        try { jm._killTree(job, { pid: WRAPPER, starttime: 1 }, { group: true }); if (typeof jm.markWalksSettled === 'function') await jm.markWalksSettled(); } finally { PI.treeOf = t0; PI.signalIdentity = s0; }
+        try { jm.shutdown(); } catch { }
+        return verdicts;
+      };
+      const v = await lawLeg(realJM, 'law-reused');
+      okP(!!real && JSON.stringify(v) === '["pid-recycled"]' && !exited() && PI.aliveIdentity(real) === true, 'r2228 (3): a walked row whose start time is not the live pid\'s is NEVER signalled — the real identity signal re-judges pid, start time and boot in the same call and answers «pid-recycled» (a pid reused while the walk ran)', { pid: kid.pid, verdicts: v });
+      const reread = MC.load('src/jobs.js', anchored(JSRC, 'const rows = w.rows.map((r) => ({ pid: r.pid, starttime: r.starttime, bootId: boot }));', 'const rows = w.rows.map((r) => ({ pid: r.pid, starttime: PI.starttimeOf(r.pid), bootId: boot }));   /* MUTANT: the start time read again on the hub */', 'red-starttime-reread'), 'red-starttime-reread');
+      const vx = await lawLeg(reread, 'law-reused-red');
+      for (let k = 0; k < 100 && !exited(); k++) await sleep(20);   // the SIGKILL it sent lands when the child exits (a wait on its exit; the guard only ends a wait that never comes)
+      okP(JSON.stringify(vx) === '["ok"]' && exited(), 'RED: the start time read again on the hub (not the walked row\'s) — the reused pid is SIGNALLED (the real signal answers ok; the child ends)', { verdicts: vx, exitSignal: kid.signalCode });
+    } finally { try { kid.kill('SIGKILL'); } catch { } }
+  }
+
+  // a kept service run — what the service clear walks for: its pid.json on this boot, one recorded pid, its scope none
+  const KEPT = 4194311;
+  const keptSvc = (Mod, tag, { alive = () => false } = {}) => {
+    const { jm, job, logs } = engine(Mod, tag);
+    const run = job.runs[0], ctl = jm._ctlDir(job, run.startedAt); fs.mkdirSync(ctl, { recursive: true });
+    fs.writeFileSync(path.join(ctl, 'pid.json'), JSON.stringify({ pid: WRAPPER, starttime: 1, bootId: PI.bootIdOf(), startedAt: run.startedAt }));
+    Object.assign(job, { kind: 'service', name: job.id, state: 'down', desiredUp: true, cmd: { argv: ['true'] }, owner: { conversation: { backend: 'claude', id: 'conv-mw-own' }, sessionId: 's-own', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] }, access: { view: 'session', control: 'session' } });
+    Object.assign(run, { endedAt: run.startedAt + 1000, cause: 'ok', left: { n: 1, kept: true, pids: [[KEPT, 9]], boot: PI.bootIdOf() } });
+    jm.jobs.set(job.id, job); jm._runScope = () => null; jm._graceMs = () => 60;
+    const keep2 = {}; for (const k of ['aliveIdentity', 'signalIdentity', 'keptOut', 'pgidOf', 'treeOf']) keep2[k] = PI[k];
+    const stub = () => { PI.aliveIdentity = (id) => (id && id.pid === KEPT ? alive() : false); PI.signalIdentity = (id, sig) => { sent.push(`${id.pid}:${sig}`); return { ok: true }; }; PI.keptOut = () => []; PI.pgidOf = () => 0; PI.treeOf = () => []; };
+    return { jm, job, run, logs, stub, unstub: () => Object.assign(PI, keep2) };
+  };
+  const ENDED = { started: true, timedOut: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '' };
+
+  console.log('§6 an ENDED walk in the service clear: it proves nothing — the next start refused in the ended walk\'s own words');
+  {
+    const clearEnded = async (Mod, tag) => {
+      const s = keptSvc(Mod, tag); answer = ENDED; runs.length = 0; sent.length = 0; s.stub();
+      let goes = null; try { goes = await s.jm._clearBefore(s.job, s.run, 'manual'); } finally { s.unstub(); }
+      const l = s.run.left, reply = s.jm._cutOf(s.run) ? s.jm._doorWords(s.job, s.run, s.jm._cutOf(s.run)) : '';
+      try { s.jm.shutdown(); } catch { }
+      return { goes, cut: l.cut || null, gone: !!l.gone, reply, said: s.jm.events.filter((e) => e.jobId === s.job.id).map((e) => e.what).join(' | ') };
+    };
+    const c = await clearEnded(realJM, 'clear-ended');
+    okP(c.goes === false && !c.gone && !!c.cut && c.cut.why === MW.endedWords('deadline') && /^cannot prove the previous run is gone \(its walk for what carries its mark was ended at its 3 s bound\) — not restarted/.test(c.reply) && c.said.includes(c.reply), 'r2228 (3): the clear\'s kept walk ENDED at its bound proves nothing — the start refused, stamped and said in the ended walk\'s own words; the next press\'s reply is those words', c);
+    const cutX = MC.load('src/jobs.js', anchored(JSRC, '        if (found.ended) seen = { scanned: 0, total: 0, ...(seen || {}), cut: true, ended: found.ended };', '        /* MUTANT: an ended walk read as «nothing left» */', 'red-clear-ended-cut'), 'red-clear-ended-cut');
+    const cx = await clearEnded(cutX, 'clear-ended-red');
+    okP(cx.goes === true && cx.gone && !cx.cut, 'RED: the ended check cut — an ended walk reads as «nothing left»: `gone`, and the start goes', cx);
+    // r2228 (1): the FIRST walk finishes, something lives through the grace, the LATE walk is ended: its own words, never «could not check 0 of N»
+    const lateEnded = async (Mod, tag) => {
+      let k = 0; const s = keptSvc(Mod, tag, { alive: () => true }); answer = () => Promise.resolve(++k === 1 ? rowsLine([]) : ENDED); runs.length = 0; sent.length = 0; s.stub();
+      try { await s.jm._clearKept(s.job, s.run); } finally { s.unstub(); }
+      try { s.jm.shutdown(); } catch { }
+      return { walks: k, why: (s.run.left.cut && s.run.left.cut.why) || '', sent: [...sent] };
+    };
+    const le = await lateEnded(realJM, 'late-ended');
+    okP(le.walks === 2 && le.why === `${MW.endedWords('deadline')}; 1 found and stopped` && !/could not check 0 of/.test(le.why) && le.sent.includes(`${KEPT}:SIGKILL`), 'r2228 (1): a LATE walk ended at its bound (the first one finished; something outlived the grace) is stamped in its OWN words — never «could not check 0 of N»', le);
+    const oldWords = MC.load('src/jobs.js', anchored(JSRC, "${seen.ended ? require('./server/marked-walk.js').endedWords(seen.ended) : `could not check", "${false ? '' : `could not check", 'red-late-words'), 'red-late-words');
+    const lx = await lateEnded(oldWords, 'late-ended-red');
+    okP(/^could not check 0 of 3 processes/.test(lx.why), 'RED: the late walk\'s ended words cut — «could not check 0 of 3 processes»: zero unchecked, yet refused', lx);
+  }
+
+  console.log('§7 the refusal told to its presser: only a presser that can still VIEW the job');
+  {
+    const tellTo = (Mod, tag) => {
+      const s = keptSvc(Mod, tag); s.run.left.cut = { at: Date.now(), why: 'could not check 100 of 3100 processes for what it left running' };
+      const to = []; s.jm._deliverTo = (cid) => { to.push(cid); };
+      const viewer = { conversationId: 'conv-mw-own', sessionId: 's-own', sessionCreatedAt: 1, groups: new Set() }, stranger = { conversationId: 'conv-mw-other', sessionId: 's-other', sessionCreatedAt: 1, groups: new Set() };
+      const n = s.jm._tellNotStarted(s.job, s.run, [viewer, stranger]);
+      try { s.jm.shutdown(); } catch { }
+      return { n, to };
+    };
+    const tv = tellTo(realJM, 'tell-view');
+    okP(tv.n === 1 && JSON.stringify(tv.to) === '["conv-mw-own"]', 'r2228 (3): the refusal reaches the presser that can still VIEW the job — a presser that cannot is never told (its name is the job\'s)', tv);
+    const noView = MC.load('src/jobs.js', anchored(JSRC, "if (!cid || told.has(cid) || !M.canView(job, c)) continue;   // the presser must still VIEW the job\n", "if (!cid || told.has(cid)) continue;   /* MUTANT: no view check */\n", 'red-tell-no-view'), 'red-tell-no-view');
+    const tx = tellTo(noView, 'tell-view-red');
+    okP(tx.n === 2 && tx.to.includes('conv-mw-other'), 'CONTROL (the view check cut, in a copy): the presser that cannot view the job IS told — RED', tx);
   }
 } catch (e) {
   fail++; console.error('  ✗ the suite threw: ' + ((e && e.stack) || e));
