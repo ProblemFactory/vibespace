@@ -147,6 +147,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When VibeSpace cannot check for a desktop server in time, the Desktop says so and stays available, instead of vanishing or opening an empty screen.
 - A memory warning now says when the process list could not be read, instead of listing no processes at all.
 - Removing an account that forgets its data now says so when some of that data is still on disk for a while, instead of a plain «Removed».
+- Opening a sub-agent's log from its card or a workflow window no longer pauses VibeSpace while it reads a long log.
+- Starting many sub-agents at once no longer makes VibeSpace pause while it looks for their logs.
 
 ## 2.369.415 — 2026-11-21
 

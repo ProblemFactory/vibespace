@@ -1774,6 +1774,26 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE: `fam.H.takeText()` after the start read (every family) and at a read again (`liftFamily`). The hold's own file is untouched. The class, by a fixed-string search: the hold's other start-read callers (src/routes/persistence.js ×5) take their text; the migrations' `readNow` keeps none.
 - LEG: scripts/test-channel-store-heap.mjs (new, fast): 8 000 rows, the settled heap a row under twice the file's bytes a row; RED the text kept. KNOWN COST, said: the layout warmed at open (unit 1, to fill the prints) is 908 bytes a row of ArrayBuffers + 125 of heap against «built at the first whole write».
 
+### lg-recovery — a finished sub-agent's transcript and the live helper watcher's finder off the hub's loop (the coordinator's r2350 / r2374)
+- MEASURED FIRST (step 1, on a stand-in home, the REAL handlers):
+  - the sub-agent viewer's WebSocket attach of `sub-agent-<id>` held the loop 11–119 ms an open, at 300 / 1000 project folders and 1 / 5 / 20 MB transcripts;
+  - GET /api/subagent-messages held it 24 ms – 1.7 s an ask; no client asks it;
+  - the codex roster route held it 1.2–3.1 ms on a miss (its walk was already in the worker): no cure.
+- ONE HELPER, src/server/subagent-transcript.js:
+  - it finds the transcript by the kept place, the cwd's folder, then an asynchronous walk;
+  - it reads the file WHOLE through the transcript pool's pages on its own slot, one read at a time, asks of one file sharing its read;
+  - a refusal is said by name, never a read on the loop (`loadRefused` in the viewer, with zh / ja; 503 `refused` on the route).
+  - Both callers use it; the route converts in paced slices.
+- THE LIVE WATCHER'S FINDER (src/server/stdout/claude-stream-json.js): the kept place and the cwd's folder by one stat each, so the exact place still starts at once; anywhere else goes through the hub's ONE shared listing (asynchronous, at most once a second).
+- GATED by the NEW fast suite test-subagent-transcript (26, about 2.3 s alone), each leg with a red copy:
+  - zero synchronous listings and whole reads on the loop, counted;
+  - the place kept;
+  - ten windows at once (at most one read in flight, three shared);
+  - the pool refusing;
+  - the route;
+  - a 37 MB agent whole;
+  - the watcher's finder (zero synchronous listings, five watchers one listing).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
