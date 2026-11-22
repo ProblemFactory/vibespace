@@ -972,13 +972,29 @@ function markerPids(id) {
   return out;
 }
 { // (a) a stop that lands DURING the bring-up leaves nothing behind
-  const k = mk('r3a'); await k.adoptAll(); k.start();
+  // r2566 (主开发): THE SCENE IS HELD BY A STATE, never by the clock. A stop 0 ms after the launch used to land inside the recipe;
+  // since the bring-up's first wait is the start environment (B-34bc) it can land BEFORE the recipe's first spawn (box row 337:
+  // every pid empty) — the other order, a lawful one, played on purpose in (a2) below. Here the stop is given in the very commit
+  // that records the recipe's X server (the keeper's broadcast is synchronous with that commit), on the next microtask: the
+  // recipe is then at its next wait (the picture server's port), so the stop always lands DURING the bring-up.
+  let k = null, recId = null, atStop = null, stopP = null, stopT0 = 0, queued = false;
+  k = mk('r3a', { broadcast: () => {
+    if (queued || !k) return;
+    const id = recId || ((k.listApps().find((a) => a && a.label === 'stop-in-flight') || {}).id);
+    const r = id ? k.get(id) : null;
+    if (!r || !(r.pids && r.pids.x > 0)) return;
+    queued = true;
+    queueMicrotask(() => { const n = k.get(id); atStop = { state: n.state, pids: { ...n.pids } }; stopT0 = Date.now(); stopP = k.stop(id); });
+  } });
+  await k.adoptAll(); k.start();
   const rec = await k.launch({ exec: '/bin/sleep', args: ['3600'], label: 'stop-in-flight' });
-  const t0 = Date.now();
-  const s = await k.stop(rec.id); // 0 ms after launch: the recipe has not even spawned Xvfb yet
-  const stopMs = Date.now() - t0;
-  ok(s.state === 'exited' && s.stoppedBy === 'user', `stop() 0 ms after launch answers exited/user (took ${stopMs} ms — it WAITED for the bring-up it cancelled)`, s);
-  ok(s.pids.x > 0 && s.pids.server > 0, 'the answer already names the X and picture-server pids the recipe minted meanwhile (the bring-up was settled, not raced)', s.pids);
+  recId = rec.id;
+  await until(() => (stopP ? true : null), 20000, 5);   // the STATE (the X server recorded), bounded — never a fixed sleep
+  const s = await (stopP || k.stop(rec.id));
+  const stopMs = Date.now() - stopT0;
+  ok(!!atStop && atStop.state === 'launching' && atStop.pids.x > 0 && !atStop.pids.server, 'THE SCENE\'s PREMISE, held by a state: the stop was given in the commit that recorded the recipe\'s X server — the record launching, no picture server yet', atStop || { stopGiven: false, record: k.get(rec.id) });
+  ok(s.state === 'exited' && s.stoppedBy === 'user', `a stop given DURING the bring-up answers exited/user (took ${stopMs} ms — it WAITED for the bring-up it cancelled)`, s);
+  ok(s.pids.x > 0 && s.pids.server > 0, 'the answer names the X AND the picture-server pid — the server the recipe minted AFTER the stop was given (the bring-up was settled, not raced)', s.pids);
   await sleep(5000);
   const later = k.get(rec.id);
   const census = markerPids(rec.id);
@@ -1017,6 +1033,61 @@ function markerPids(id) {
   ok(markerPids(c.id).length === 0 && leftover.every((p) => !alive(p)), `the next BOOT's marker census reaped the ${leftover.length} leftover(s) of the exited record (${leftover.join(', ')})`);
   ok(warned.some((m) => new RegExp(`${c.id} \\(exited\\) still has ${leftover.length} process\\(es\\) carrying its marker or its per-app XAUTHORITY at boot`).test(m)), 'and said so, naming the record, its state and the pids', warned);
   k2.shutdown(); k3b.shutdown();
+}
+{ // (a2) r2566 (主开发): THE OTHER ORDER, on purpose — a stop that lands BEFORE the recipe's first spawn. The bring-up's first wait
+  // (the start environment, B-34bc) is HELD OPEN by a state — the suite's own gate, opened only once the stop is in progress (the
+  // machine half's stop marks `stopping` before its first await) — then let go: the bring-up asks, finds the stop, adds nothing.
+  // A LAWFUL outcome of the product: nothing started, nothing to name, nothing left.
+  // r2603 (主开发): the recipe is never entered — COUNTED (every recipe of the table wrapped, by name); the app's folder keeps
+  // nothing a later launch would trip on — LISTED (the display cookie is written only after the stop's ask) and PROVEN (a later
+  // launch on the same keeper comes up and stops clean)
+  const heldStart = () => {
+    let open = null;
+    const gate = new Promise((r) => { open = r; });
+    const h = { asked: 0, entered: 0, open: () => open() };
+    const RECIPES = Object.fromEntries(Object.entries(D.RECIPES).map(([name, fn]) => [name, async (ctx) => { h.entered += 1; return fn(ctx); }]));
+    h.display = { ...D, RECIPES, appStartEnv: async (...a) => { h.asked += 1; await gate; return D.appStartEnv(...a); } };
+    return h;
+  };
+  const play = async (kk, h, label, { again = false } = {}) => {
+    await kk.adoptAll(); kk.start();
+    const r = await kk.launch({ exec: '/bin/sleep', args: ['3600'], label });
+    const atWait = await until(() => { if (!h.asked) return null; const n = kk.get(r.id); return { asked: h.asked, entered: h.entered, state: n.state, pids: { ...n.pids } }; }, 8000, 5);
+    const sp = kk.stop(r.id);   // 0 ms after the launch, at the held wait — `stopping` holds the id from here on
+    h.open();
+    const s = await sp;
+    await sleep(1500);
+    let files = null;
+    try { files = fs.readdirSync(path.join(kk.logRoot, r.id)).sort(); } catch (e) { files = { unread: e.code || String(e) }; }
+    const out = { id: r.id, atWait, s, entered: h.entered, files, later: kk.get(r.id), census: markerPids(r.id), dir: procCensus(path.join(kk.logRoot, r.id)) };
+    if (again) {
+      const a = await kk.launch({ exec: '/bin/sleep', args: ['3600'], label: `${label}-again` });
+      const ra = await until(() => { const x = kk.get(a.id); return x && x.state !== 'launching' ? x : null; }, 30000);
+      const sa = ra ? await kk.stop(a.id) : null;
+      await sleep(1500);
+      out.again = { state: ra && ra.state, lastError: ra && ra.lastError, stopped: sa && sa.state, census: markerPids(a.id) };
+    }
+    return out;
+  };
+  const none = (pids) => !!pids && Object.values(pids).every((p) => !p);
+  const h1 = heldStart();
+  const ke = mk('r3a2', { display: h1.display });
+  const e = await play(ke, h1, 'stop-before-spawn', { again: true });
+  ok(!!e.atWait && e.atWait.state === 'launching' && none(e.atWait.pids) && e.atWait.entered === 0, 'THE OTHER ORDER\'s PREMISE, held by a state: a stop 0 ms after the launch finds the bring-up at its first step (the start environment) — the record launching, no part recorded, the recipe not entered', e.atWait);
+  ok(e.s.state === 'exited' && e.s.stoppedBy === 'user' && none(e.s.pids), 'a stop BEFORE the recipe\'s first spawn answers exited/user and names NO pid — nothing was started (a lawful outcome: nothing to name)', e.s);
+  ok(e.entered === 0 && e.later.state === 'exited' && none(e.later.pids) && e.census.length === 0 && e.dir.length === 0, `once its held step is let go the bring-up adds NOTHING: the recipe was entered ${e.entered} time(s), the record still names no pid, nothing carries the marker, nothing names the app's folder`, { entered: e.entered, later: e.later.pids, census: e.census, dir: e.dir });
+  ok(Array.isArray(e.files) && e.files.includes('app.log') && !e.files.includes('Xauthority'), `the app's folder keeps no display cookie (the bring-up never got that far) — it holds: [${Array.isArray(e.files) ? e.files.join(', ') : JSON.stringify(e.files)}]`, e.files);
+  ok(!!e.again && e.again.state === 'ready' && e.again.stopped === 'exited' && e.again.census.length === 0, 'and a LATER launch on the same keeper comes up ready and stops clean (nothing of the early stop tripped it)', e.again);
+  ke.shutdown();
+  // CONTROL (RED): a bring-up that never asks after its first wait runs the recipe under the stop — the stop still waits for it and
+  // tears down what it minted, so the answer NAMES those parts: «nothing started» fails, for that one reason
+  const { mod: K3 } = mutant('a2', [['      if (gone()) return;\n      base = start.env;', '      base = start.env; // pre-fix: the start environment\'s wait never asked']]);
+  const h2 = heldStart();
+  const dataDir = path.join(root, 'r3a2-ctl'); fs.mkdirSync(dataDir, { recursive: true });
+  const kc = K3.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, display: h2.display, log: { log() {}, warn() {}, error() {} } }); keepers.push(kc);
+  const c = await play(kc, h2, 'stop-before-spawn-ctl');
+  ok(!!c.atWait && none(c.atWait.pids) && c.s.state === 'exited' && c.entered >= 1 && !none(c.s.pids) && Array.isArray(c.files) && c.files.includes('Xauthority'), `CONTROL (RED): a bring-up that does not ask after its first wait ENTERS the recipe under the stop (${c.entered} time(s)) — the answer names the parts it minted and its folder holds a display cookie, so «nothing started» fails`, { atWait: c.atWait, entered: c.entered, answer: c.s.pids, files: c.files, census: c.census });
+  kc.shutdown();
 }
 { // (b) the boot belt is scoped to OUR store: a marker for an id we do not hold is never signalled
   const dataDir = path.join(root, 'r3b'); fs.mkdirSync(dataDir, { recursive: true });
