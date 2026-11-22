@@ -1840,10 +1840,13 @@ const esrc2 = engineSource(REPO);
   ok(sm.held === 1 && sm.rows === 1 && sm.final === 1, `ON DISK after settle: the queued wake's hit is held for the next boot (${sm.held}) and the in-flight wake's outcome row is final (${sm.final} of ${sm.rows}) — both written after close()`, JSON.stringify(sm));
   {
     const LINE = "    if (stopped) { if (!fromPending) await keepPending(rec, convId, freshHits, elided, pk); return { ok: false, why: 'stopped', held: true }; }";
-    ok(esrc2.split(LINE).length === 2, 'the stop guard line is present once in wakeNow (the control patches exactly it)');
-    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, ''));
+    // B-1ca5 part B (c7f6603d7) added a SECOND stop guard in wakeNow, after its wait (主开发 r2081: the control cut only the first, so
+    // its copy ran on into the second and held the queued wake — 1 call, 1 held): the control cuts BOTH
+    const LINE2 = "    // B-1ca5 round w8ghfur9h: a wait that stop() settled — what is left of the block is HELD (as the stop path at the top), never started\n    if (stopped) {";
+    ok(esrc2.split(LINE).length === 2 && esrc2.split(LINE2).length === 2, 'the two stop guards are present once each in wakeNow (the control patches exactly them)');
+    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, '').replace(LINE2, LINE2.replace('if (stopped) {', 'if (false) {')));
     const smc = await stopMidChain(require(cp), 'r4-stopmid-ctl');
-    ok(smc.calls === 2 && smc.held === 0, `CONTROL: a copy without the stop guard starts the queued wake after stop() (${smc.calls} calls, ${smc.held} held) — the legs above would go red`);
+    ok(smc.calls === 2 && smc.held === 0, `CONTROL: a copy without its two stop guards starts the queued wake after stop() (${smc.calls} calls, ${smc.held} held) — the legs above would go red`);
     // the store half: the pre-fix markDirty dropped a change after close() (the debounce was gone) — the hold never reached the disk
     const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
     const SLINE = "    if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }\n    W().dirty(";
