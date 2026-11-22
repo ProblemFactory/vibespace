@@ -1573,6 +1573,7 @@ export default {
   "{label}: needs update": "{label}：需要更新",
   "{label}: not installed": "{label}：未安装",
   "{label}: not read — {why}": "{label}：未读取 — {why}",
+  "A Claude terminal started without your own statusLine: ~/.claude/settings.json was not read ({why}). The usage statusline still runs, and the next start reads your statusLine again.": "一个 Claude 终端启动时没有带上你自己的 statusLine：~/.claude/settings.json 未能读取（{why}）。用量状态栏照常运行，下次启动会再次读取你的 statusLine。",
   "will be created at the next start — or press Apply": "将在下次启动时创建——或点击“应用”",
   "will be created at the next tool install or session start on that machine": "将在那台机器下次安装工具或启动会话时创建",
   "{dir} not found — the CLI has not run on this machine, so nothing is written": "{dir} 不存在——这台机器上还没运行过该 CLI，因此不写入任何内容",

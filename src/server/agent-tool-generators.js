@@ -167,13 +167,22 @@ try { if (fs.existsSync(USAGE_STATUSLINE_CMD)) fs.chmodSync(USAGE_STATUSLINE_CMD
 // r2345 (b): read OFF THE LOOP through the runner's guard, within 2 s — it was a synchronous read of the person's home at every
 // local terminal start; a home that does not answer (or an earlier read still out) passes no statusline through for that start
 // (the usage one still runs), said once per cause; a missing or unparsable file is no statusline, as before
+// r2513 (2)/(3): SAID WHERE THE PERSON LOOKS — `unread(why)` (the start's notice) is called once a cause: a home that does not answer
+// (its read past the bound, or refused while an earlier one is out) is ONE cause, so the next stalled start says nothing again;
+// any answer of the home (a value, or a missing file) clears the mark, so a later stall is said again
 const STATUSLINE_READ_MS = 2000;
 let _statuslineUnreadSaid = null;
-async function userStatuslineCmd() {
+async function userStatuslineCmd({ unread = null } = {}) {
   const read = () => fs.promises.readFile(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8');
   const r = typeof homeRead === 'function' ? await homeRead(read, STATUSLINE_READ_MS) : await read().then((value) => ({ value }), (error) => ({ error }));
   if (!('value' in r)) {
-    if (r.held || r.timedOut) { const why = String(r.why || 'no answer').replace(/\d+ still out/, ''); if (_statuslineUnreadSaid !== why) { _statuslineUnreadSaid = why; console.warn(`[statusline] ~/.claude/settings.json was not read (${r.why}) — this start passes no statusline of the person's through; read again at the next start`); } }
+    if (r.held || r.timedOut) {
+      if (_statuslineUnreadSaid !== 'silent') {
+        _statuslineUnreadSaid = 'silent';
+        console.warn(`[statusline] ~/.claude/settings.json was not read (${r.why}) — this start passes no statusline of the person's through; read again at the next start`);
+        if (typeof unread === 'function') { try { unread(String(r.why || 'no answer')); } catch { } }
+      }
+    } else _statuslineUnreadSaid = null;   // the home answered (no file, or not readable as such): no statusline, as before
     return '';
   }
   _statuslineUnreadSaid = null;
@@ -510,7 +519,8 @@ async function agentHooksStatus() {
   const r = typeof homeRead === 'function' ? await homeRead(hookFileFacts, STATUS_READ_MS) : await hookFileFacts().then((value) => ({ value }), (error) => ({ error }));
   if (!r.value) {
     const why = `the hook files were not read (${r.why || (r.error && r.error.message) || r.error || 'no answer'})`;
-    if (_statusUnreadSaid !== why.replace(/\d+ still out/, '')) { _statusUnreadSaid = why.replace(/\d+ still out/, ''); console.warn(`[hooks] ${why} — the status says «not read»; nothing is judged broken or repaired on it`); }
+    const cause = r.held || r.timedOut ? 'silent' : why;   // r2513 (3): a home that does not answer is ONE cause, timed out or refused
+    if (_statusUnreadSaid !== cause) { _statusUnreadSaid = cause; console.warn(`[hooks] ${why} — the status says «not read»; nothing is judged broken or repaired on it`); }
   } else _statusUnreadSaid = null;
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     const f = r.value && r.value[key];

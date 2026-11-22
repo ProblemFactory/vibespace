@@ -106,13 +106,17 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   // (`homeStuck`) until it settles; while one is out a job asks the home nothing more — it fails at once, by name — so a hung home
   // strands one job's reads, never one job's more each turn (a full pool waits every file read of the hub)
   let homeStuck = 0;
-  const bounded = (fn, ms = timeoutMs, { home = true } = {}) => new Promise((resolve) => {
-    let done = false;
+  // r2513 (1): A SHORT BOUND REFUSES NO ONE. The caller stops WAITING at its own bound `ms`; the read is COUNTED as out only once
+  // it passes `countAt` — a job's step counts at its own bound (the run's), a reader with a shorter bound (a start's 2 s, a page's
+  // 10 s) counts at the RUN's bound: a home that is only slow (it answers in three seconds) refuses no other reader of it
+  const bounded = (fn, ms = timeoutMs, { home = true, countAt = ms } = {}) => new Promise((resolve) => {
+    let done = false, settled = false, c = null;
     const end = (r) => { if (!done) { done = true; clearTimeout(t); resolve(r); } };
     const p = Promise.resolve().then(fn);
-    const t = setTimeout(() => { if (home) { homeStuck++; const back = () => { homeStuck--; }; p.then(back, back); } end({ timedOut: true }); }, ms);
+    const count = () => { if (settled) return; homeStuck++; const back = () => { homeStuck--; }; p.then(back, back); };
+    const t = setTimeout(() => { if (home) { if (countAt <= ms) count(); else { c = setTimeout(count, countAt - ms); c.unref?.(); } } end({ timedOut: true }); }, ms);
     t.unref?.();
-    p.then((value) => end({ value }), (error) => end({ error }));
+    p.then((value) => { settled = true; if (c) clearTimeout(c); end({ value }); }, (error) => { settled = true; if (c) clearTimeout(c); end({ error }); });
   });
   const said = (e) => (e && e.message) || String(e);
   function pump() {
@@ -157,11 +161,12 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       .finally(() => { inFlight = null; if (!queue.length) settle(last); pump(); });
   }
   /** r2224 (1): a read under the home made OUTSIDE a job (the opted-out start's look at our hook rows) goes through the SAME guard —
-   *  bounded by the run's bound (or `ms`: a reader a person or a start waits on — r2345), counted while it is out, refused at once
-   *  while an earlier read is out → { value } | { error } | { timedOut, why } | { held, why } */
+   *  bounded by the run's bound (or `ms`: a reader a person or a start waits on — r2345), counted while it is out — from the RUN's
+   *  bound, never a shorter reader's (r2513 (1)) — and refused at once while an earlier read is out → { value } | { error } |
+   *  { timedOut, why } | { held, why } */
   function homeRead(fn, ms = timeoutMs) {
     if (homeStuck > 0) return Promise.resolve({ held: true, why: `the home still has not answered an earlier read (${homeStuck} still out)` });
-    return bounded(fn, ms).then((r) => (r.timedOut ? { timedOut: true, why: `the home did not answer within ${ms} ms` } : r));
+    return bounded(fn, ms, { countAt: timeoutMs }).then((r) => (r.timedOut ? { timedOut: true, why: `the home did not answer within ${ms} ms` } : r));
   }
   /** --status: the managed keys read off disk BY THE HELPER (nothing written). Never queued behind an apply's waiter list:
    *  a read beside a write is a read. */

@@ -50,7 +50,7 @@ async function prepare(c) {
               // the member it started on. The link itself is the slot, so ship
               // its PATH and let the statusline resolve it per write.
               const acctKey = spawnAccount?.poolTarget || spawnAccount?.id || '__global__';
-              const orig = (userStatuslineCmd && await userStatuslineCmd()) || '';   // r2345 (b): off the loop, through the runner's guard (≤ 2 s)
+              const orig = (userStatuslineCmd && await userStatuslineCmd({ unread: (why) => { const W = require('../settings-file-words.js').STATUSLINE_UNREAD_WORDS; try { ctx.serverNotice?.('statusline-unread', W.replace('{why}', () => why), { level: 1, i18n: { key: W, params: { why } } }); } catch { } } })) || '';   // r2345 (b): off the loop, through the runner's guard (≤ 2 s); r2513 (2): a start without the person's statusLine says so, once a cause
               usageEnvPairs.push(`VIBESPACE_ACCOUNT_KEY=${acctKey}`);
               // resolveForSpawn NAMES the credential symlink (`linkPath`) — the
               // per-session plan-C link, else the pool default. Not derived

@@ -52,4 +52,7 @@ const MERGE_DROPPED_WORDS = '{name}: under the subscription chosen for it, these
 /** B-ddf3 unit 2 line 1 (r1407 (a)): a start that did not wait for this machine's CLI config to land (late or failed) — said once,
  *  by name; the conversation runs with the config as it stood before, and the next start asks again */
 const CLI_CONFIG_LATE_WORDS = '{name} started before VibeSpace\'s hooks and CLI settings were written on this machine ({why}): it runs with them as they stood before, and the next start asks again.';
-module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, PROVIDER_BILLING_WORDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW, MERGE_DROPPED_WORDS, CLI_CONFIG_LATE_WORDS };
+/** r2513 (2): a local Claude terminal that started WITHOUT the person's own statusLine (the read of ~/.claude/settings.json did not
+ *  answer within its 2 s, or an earlier read of the home is still out) — said once a cause, where the person looks, with why */
+const STATUSLINE_UNREAD_WORDS = 'A Claude terminal started without your own statusLine: ~/.claude/settings.json was not read ({why}). The usage statusline still runs, and the next start reads your statusLine again.';
+module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, PROVIDER_BILLING_WORDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW, MERGE_DROPPED_WORDS, CLI_CONFIG_LATE_WORDS, STATUSLINE_UNREAD_WORDS };

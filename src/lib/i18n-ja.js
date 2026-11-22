@@ -1572,6 +1572,7 @@ export default {
   "{label}: needs update": "{label}: 更新が必要",
   "{label}: not installed": "{label}: 未インストール",
   "{label}: not read — {why}": "{label}: 読み取れていません — {why}",
+  "A Claude terminal started without your own statusLine: ~/.claude/settings.json was not read ({why}). The usage statusline still runs, and the next start reads your statusLine again.": "Claude ターミナルがあなた自身の statusLine なしで開始しました：~/.claude/settings.json を読み取れませんでした（{why}）。使用量のステータスラインは動作し、次回の開始時にあなたの statusLine をもう一度読み取ります。",
   "will be created at the next start — or press Apply": "次回の起動時に作成されます — または「適用」を押してください",
   "will be created at the next tool install or session start on that machine": "そのマシンで次にツールをインストールするかセッションを開始したときに作成されます",
   "{dir} not found — the CLI has not run on this machine, so nothing is written": "{dir} が見つかりません — このマシンではまだ CLI が実行されていないため、何も書き込みません",

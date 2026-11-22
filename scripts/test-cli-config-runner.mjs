@@ -253,8 +253,8 @@ async function releaseLegs(Rm) {
   const z = await releaseLegs(R);
   ok(!!(z.first.ok === false && /could not be read within 80 ms/.test(z.first.why || '') && z.next && z.next.ok === true && z.runs === 1),
     'a held home that answers at last: the first job ended at its bound; the read settles, the count returns to zero, and the NEXT job runs the helper and lands', z);
-  const BACK = 'homeStuck++; const back = () => { homeStuck--; }; p.then(back, back); }';
-  const zm = await releaseLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), BACK, 'homeStuck++; }', 'a count that never comes back'), 'stuck-for-ever')));
+  const BACK = 'homeStuck++; const back = () => { homeStuck--; }; p.then(back, back); };';
+  const zm = await releaseLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), BACK, 'homeStuck++; };', 'a count that never comes back'), 'stuck-for-ever')));
   ok(!!(zm.next && zm.next.ok === false && /the home still has not answered an earlier read/.test(zm.next.why || '') && zm.runs === 0), 'RED (a count that never comes back): the home answered, yet every next job is refused — the runner never runs again', zm);
 }
 
@@ -276,6 +276,27 @@ async function beforeLegs(Rm) {
     'one joined read ran out of time, another said yes: the job ends at once, by name, and its `before` (a read of the home) is never started', b);
   const bm = await beforeLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), BEFORE_GUARD, '', 'no guard after the reads'), 'before-after-stuck')));
   ok(bm.befores === 1, 'RED (no guard after the reads — the second follow\'s form): the `before` read starts while the timed-out read is still out', bm);
+}
+
+console.log('①k r2513 (1): A SHORT BOUND REFUSES NO ONE — a reader stops waiting at its own bound; the read counts as out only past the RUN\'s bound');
+async function shortBoundLegs(Rm) {
+  let stall = true; const rel = [];
+  const r = Rm.createCliConfigRunner({ starter: handStarter(), helperPath: '/x/helper.mjs', timeoutMs: 250, journal: () => {}, warn: () => {} });   // the run's bound: 250 ms
+  const slowRead = () => (stall ? new Promise((res) => { rel.push(res); }) : Promise.resolve('read'));   // a home that is only SLOW: it answers when released
+  const first = await r.homeRead(slowRead, 60);   // a start's short reader: it stops waiting at 60 ms
+  stall = false; const second = await r.homeRead(slowRead, 60);   // the next reader, while the first read is out but under the run's bound
+  await new Promise((res) => setTimeout(res, 300));   // past the run's bound: the first read now counts as out
+  const third = await r.homeRead(slowRead, 60);
+  for (const f of rel) f('late'); await tick(); await tick();
+  const fourth = await r.homeRead(slowRead, 60);   // the slow home answered: the count is back to zero
+  return { first: first.timedOut ? 'timedOut' : first, second: second.value || second, third: third.held ? 'held' : third, fourth: fourth.value || fourth };
+}
+{
+  const k = await shortBoundLegs(R);
+  ok(!!(k.first === 'timedOut' && k.second === 'read' && k.third === 'held' && k.fourth === 'read'),
+    'a 60 ms reader past ITS bound stops waiting, and the next reader of the home is NOT refused; past the run\'s 250 ms bound it is; the late answer brings the count back to zero', k);
+  const km = await shortBoundLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), 'return bounded(fn, ms, { countAt: timeoutMs }).then(', 'return bounded(fn, ms).then(', 'counted at the reader\'s own bound'), 'count-at-reader-bound')));   // stale-pins: kept (the RED is the old form on purpose: counted at the reader's own bound)
+  ok(km.second && km.second.held === true, 'RED (counted at the reader\'s own bound — the status unit\'s form): a slow home\'s 60 ms reader makes the guard refuse the NEXT reader before the run\'s bound', km);
 }
 
 console.log('①j r2224 (5): a run whose own look ran out of time says ITS reason to the check, never the guard\'s');
@@ -518,7 +539,63 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const GSS = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), "const read = () => fs.promises.readFile(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8');", "const read = async () => fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8');", 'the release\'s synchronous read'), 'sline-sync'));
       const sls2 = await slineLegs(GSS);
       ok(sls2.syncReads > 0, 'RED (the release\'s synchronous read): each terminal start reads the person\'s home ON the hub\'s loop', sls2);
-      ok(src('src/spawn/local.js').includes("const orig = (userStatuslineCmd && await userStatuslineCmd()) || '';"), 'WIRING (r2345 (b)): the local terminal start awaits the statusline read');
+      const LOC = src('src/spawn/local.js');
+      ok(LOC.includes("const orig = (userStatuslineCmd && await userStatuslineCmd({ unread: (why) => {") && /ctx\.serverNotice\?\.\('statusline-unread', W\.replace\('\{why\}', \(\) => why\), \{ level: 1, i18n: \{ key: W, params: \{ why \} \} \}\)/.test(LOC) && /STATUSLINE_UNREAD_WORDS/.test(LOC),
+        'WIRING (r2345 (b) + r2513 (2)): the local terminal start awaits the statusline read, and a start without the person\'s statusLine says so by a notice (statusline-unread), with why');
+      const SUW = require(path.join(REPO, 'src/settings-file-words.js')).STATUSLINE_UNREAD_WORDS;
+      ok(/\{why\}/.test(SUW) && /next start reads your statusLine again/.test(SUW) && src('src/lib/i18n-zh.js').includes(JSON.stringify(SUW)) && src('src/lib/i18n-ja.js').includes(JSON.stringify(SUW)),
+        'r2513 (2): the words say why and that the next start reads it again, in zh and ja');
+      // r2513 (3): THE LEGS THE ROUND ASKED FOR, on the two new readers — the count back to zero after a LATE answer, and the said-once marks
+      const lateLegs = async (GM) => {
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
+        const RS = R.createCliConfigRunner({ starter: handStarter(), helperPath: '/x/helper.mjs', timeoutMs: 80, journal: () => {}, warn: () => {} });
+        const G = GM.create({ rootDir: genRoot, port: 0, homeRead: (fn) => RS.homeRead(fn, 80) });
+        const sfl = path.join(home, '.claude', 'settings.json'), j0 = fs.readFileSync(sfl, 'utf8'), jl = JSON.parse(j0);
+        jl.statusLine = { type: 'command', command: 'my-own-statusline --flag' }; fs.writeFileSync(sfl, JSON.stringify(jl, null, 2) + '\n');
+        const rf0 = fs.promises.readFile, w0 = console.warn; let stall = false; const held = [], warned = [], told = [];
+        fs.promises.readFile = (f, ...a) => (stall && String(f).startsWith(home) ? new Promise((res, rej) => { held.push(() => rf0.call(fs.promises, f, ...a).then(res, rej)); }) : rf0.call(fs.promises, f, ...a));
+        console.warn = (...a) => { warned.push(a.join(' ')); };
+        const unread = (why) => { told.push(why); };
+        const out = {};
+        try {
+          stall = true;
+          out.s1 = await G.userStatuslineCmd({ unread });   // a silent home: none passed through, said once
+          out.s2 = await G.userStatuslineCmd({ unread });   // the next start, the read still out: refused — NOT said again
+          out.h1 = (await G.agentHooksStatus()).claude.unread || null;
+          out.toldStalled = told.length; out.warnStatus1 = warned.filter((l) => l.startsWith('[hooks]')).length;
+          stall = false; for (const f of held.splice(0)) f(); await new Promise((res) => setTimeout(res, 30));   // the home answers LATE
+          out.s3 = await G.userStatuslineCmd({ unread });   // the count is back to zero: read, passed through; the mark is cleared
+          out.h2 = (await G.agentHooksStatus()).claude.installed;
+          stall = true; out.s4 = await G.userStatuslineCmd({ unread });   // a NEW stall after an answer: said again
+          stall = false; for (const f of held.splice(0)) f(); await new Promise((res) => setTimeout(res, 30));
+          out.told = told.length; out.warnStatus = warned.filter((l) => l.startsWith('[hooks]')).length;
+        } finally { fs.promises.readFile = rf0; console.warn = w0; fs.writeFileSync(sfl, j0); }
+        return out;
+      };
+      const lt = await lateLegs(require(path.join(REPO, 'src/server/agent-tool-generators.js')));
+      ok(!!(lt.s1 === '' && lt.s2 === '' && lt.toldStalled === 1 && lt.h1 && lt.warnStatus1 === 1 && lt.s3 === 'my-own-statusline --flag' && lt.h2 === true && lt.s4 === '' && lt.told === 2),
+        'r2513 (3): a silent home is said ONCE (the second stalled start is not said again, nor the status\'s refusal); a LATE answer brings the count back to zero on both readers (the statusLine passes through, the status reads installed) and clears the mark: a new stall is said again', lt);
+      const GMK = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), "      if (_statuslineUnreadSaid !== 'silent') {", '      if (true) {', 'a statusline said at every stalled start'), 'said-every-start'));
+      const ltm = await lateLegs(GMK);
+      ok(ltm.toldStalled === 2, 'RED (no said-once mark): the second stalled start is said again', ltm);
+      // r2513 (3): THE SIX-HOURLY CHECK's SKIP BY BEHAVIOUR — the check lifted from server.js and run: an unread entry calls no repair
+      const SJ4 = src('server.js'), c0 = SJ4.indexOf('async function checkAgentHookHealth() {'), c1 = SJ4.indexOf('\n}\n', c0) + 2;
+      const runCheck = async (text, st) => {
+        const calls = [];
+        const fn = new Function('hookRootWatch', 'integrationEnabled', 'fs', 'HOOK_OPTOUT_FILE', 'HOOK_CMD', 'createHookHelper', 'agentHooksStatus', 'ensureAgentHooks', 'serverNotice', text + '\nreturn checkAgentHookHealth;')(
+          { probeMayRun: () => true, saidRecoveryInstead: () => false }, () => true, { existsSync: (f) => f === '/hook-cmd' }, '/opt-out', '/hook-cmd', () => {},
+          async () => st, (a) => { calls.push(a); return { claude: { ok: true } }; }, () => {});
+        await fn(); await tick();
+        return calls.length;
+      };
+      const UNREAD = { file: 'x', unread: 'the home did not answer within 10000 ms', fileExists: null, dirExists: null, creatable: false, parseError: false, installed: null, stale: false };
+      const STALE = { file: 'x', fileExists: true, dirExists: true, creatable: false, parseError: false, installed: false, stale: true };
+      const chk = SJ4.slice(c0, c1);
+      const nUnread = await runCheck(chk, { hookPath: '/hook-cmd', optedOut: false, claude: UNREAD, codex: UNREAD }), nStale = await runCheck(chk, { hookPath: '/hook-cmd', optedOut: false, claude: STALE, codex: UNREAD });
+      ok(c0 > 0 && c1 > c0 && nUnread === 0 && nStale === 1, 'r2513 (3): the six-hourly check, RUN (lifted from server.js): two unread entries call NO repair; a stale one beside an unread one calls ONE', { nUnread, nStale });
+      const SKIP = '      if (!info.fileExists || info.parseError) continue; // that CLI isn\'t set up here / unreadable\n';
+      const nRed = chk.includes(SKIP) ? await runCheck(chk.replace(SKIP, ''), { hookPath: '/hook-cmd', optedOut: false, claude: UNREAD, codex: UNREAD }) : -1;
+      ok(nRed === 2, 'RED (the skip taken out): an unread entry (installed null) reads «not installed» and the check calls a repair for each', { nRed });
       // r1813 (2): an Install pressed WHILE the start reads the mark and the rows (outside the queue): the start's removal reads the
       // mark again INSIDE its job — the Install, answered «ok», is never stripped after it
       const pressLegs = async (G) => {
