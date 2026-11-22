@@ -1099,6 +1099,40 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     const LLx = await laterLanded(cut('press-never-cleared', '    if (_pressPending && _producedSeq >= _pressSeq) _pressPending = null;\n', ''));
     ok(!!LLx.vd && LLx.vd.since === LLx.since0, 'CONTROL (the pending press never cleared, in a copy — the line as taken): the noted, recorded loss is told again with its old moment — red', J(LLx.vd));
   }
+  // r2338 (1), THE EXACT BOUNDARY: the WRITER'S retry lands the press's OWN bytes (their seq EQUAL to the press's; no later flush) —
+  // the carried loss is cleared all the same. (The hold's own ladder lands by the same door: its landing runs layoutsLanded with the
+  // seq of the bytes it made.)
+  {
+    const retryWriter = () => {   // the stand-in writer that also writes a refused file AGAIN with the SAME producer (the store writer's backoff)
+      const base = landingWriter(), last = new Map();
+      return { ...base, dirty(f, o = {}) { last.set(f, o); return base.dirty(f, o); }, retry(f) { const o = last.get(f); if (o) base.dirty(f, o); } };
+    };
+    const ownBytes = async (src) => {
+      const dd = scratch(); await runOne(dd, { owe: true });
+      const m0 = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8'));
+      const A = hub(dd); still(() => A.R.readLayouts()); await stopOf(A); still(() => A.R.flushLayouts({ stop: true }));   // carried; nobody pressed
+      await new Promise((r) => setTimeout(r, 5));
+      const RW = retryWriter(), C = hub(dd, src, RW); still(() => C.R.readLayouts()); await stopOf(C);
+      plant(tmpOf(dd, 'layouts.json'));
+      const pr = await still(() => C.call('post', '/api/stores/layouts.json/stop-noted', { headers: { 'sec-fetch-site': 'same-origin' } }));   // refused: not recorded yet
+      await C.R.layoutsMarkSettled();
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      still(() => RW.retry(path.join(dd, 'layouts.json'))); await C.R.layoutsMarkSettled();   // the storage is back: the writer writes the press's own bytes again — no new flush
+      const t = fs.readFileSync(path.join(dd, 'layouts.json'), 'utf8'), own = PZ.stampOfRead(JSON.parse(t), t).stamp;
+      await new Promise((r) => setTimeout(r, 5));
+      plant(tmpOf(dd, 'layouts.json'));
+      still(() => { C.R.writeLayouts(desk('w8')); C.R.flushLayouts(); }); await C.R.layoutsMarkSettled();   // a SECOND episode of this run
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      let mk = null; try { mk = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8')); } catch { }
+      const D = hub(dd); still(() => D.R.readLayouts());   // C KILLED
+      return { recorded: pr.body && pr.body.recorded, own: own && { seq: own.seq, unnoted: !!own.unnoted }, since0: m0.since, mk, vd: await stopOf(D) };
+    };
+    const OB = await ownBytes(null);
+    ok(OB.recorded === false && !!OB.own && OB.own.seq === 1 && !OB.own.unnoted && !!OB.mk && !OB.mk.prior && !!OB.vd && OB.vd.kind === 'known' && OB.vd.since === OB.mk.since && OB.vd.since !== OB.since0,
+      'r2338 (1), THE BOUNDARY: the writer\'s retry lands the press\'s OWN bytes (this run\'s first, seq 1: the press\'s own number; no later flush) and the carried loss is cleared — this run\'s second episode, then a kill: the next start tells that episode\'s own moment, never the noted loss\'s', J(OB));
+    const OBx = await ownBytes(cut('press-seq-strict', '    if (_pressPending && _producedSeq >= _pressSeq) _pressPending = null;\n', '    if (_pressPending && _producedSeq > _pressSeq) _pressPending = null;\n'));
+    ok(!!OBx.own && OBx.own.seq === 1 && !!OBx.vd && OBx.vd.since === OBx.since0, 'CONTROL (only bytes AFTER the press\'s clear it, in a copy): the press\'s own bytes land and clear nothing — the noted, recorded loss is told again with its old moment — red', J(OBx.vd));
+  }
   // r2254 (2): an episode BEGUN BEFORE the verdict learns its prior once the verdict is KNOWN — a kill tells the old loss's moment
   {
     const beganEarly = async (src) => {

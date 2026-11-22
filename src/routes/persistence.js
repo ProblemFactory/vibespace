@@ -233,6 +233,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _mark = null;              // this run's mark: { run, seq, since, base, code, written, trying }
   let _lastLanded = null;        // the stamp of the last desktops write that LANDED, as far as this run knows ({run, seq}; the start's own at first)
   let _producedSeq = 0;          // the seq of the bytes the writer took last (its producer is called right before its write)
+  // r2338 (2): the press's clear (layoutsLanded) reads _producedSeq as the seq of the bytes that just LANDED. That is true only while
+  // the writer has ONE write in flight a file (it calls the next producer once the write before is done). A writer that ever sent
+  // two at once would credit the landing of the earlier bytes to the later ones.
   let _markJudged = false;       // the last run's mark has been JUDGED (read and weighed) — only then may this run remove it
   let _judgedSeq = 0;            // r1595 (a): the last seq of bytes made BEFORE the verdict (they carry no `unnoted`)
   let _oldKnown = null;          // r1595 (a): the last run's mark when it IS the KNOWN verdict — it follows this run's landings of such bytes
@@ -2038,6 +2041,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // again at the next start — right; the person's page says so)
     let recorded = true;
     if (was && was.kind === 'known') {
+      // r2338 (2): _pressSeq is the number the press's own flush takes (++_vsSeq). It is set even when no flush follows (the store held
+      // unread, no copy in memory). That is right only because the NEXT flush takes that number, and its bytes, made after the press,
+      // carry no unnoted loss: their landing may clear it
       _pressPending = was; _pressSeq = _vsSeq + 1;   // (a refused note's write begins an episode: its mark carries this loss, never this run's time for it)
       recorded = !_layoutsRead || !_layoutsCache ? false : await new Promise((resolve) => { try { flushLayouts({ press: true }, (ok) => resolve(ok === true)); } catch { resolve(false); } });
       if (recorded && _pressPending === was) _pressPending = null;
