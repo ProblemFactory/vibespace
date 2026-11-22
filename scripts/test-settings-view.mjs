@@ -692,7 +692,7 @@ console.log('§14 the settings\' faces: the server reads schema keys only, the d
     'src/server/owner-facts.js: read(k)': [1, "the tray's arrangement rows (src/tray-words.js TRAY_SETTING_KEYS)"],
     'src/server/spend-guard.js: serverSetting(SETTINGS_HELD)': [1, "no key: the settings hold's marker"],
     'server.js: serverSetting(...a)': [8, "the reader handed to a module as a dependency (a pass-through: the module's own reads are walked by name)"],
-    'server.js: serverSetting(k)': [6, 'the reader handed to a module as a dependency (a pass-through)'],
+    'server.js: serverSetting(k)': [7, 'the reader handed to a module as a dependency (a pass-through) — the seventh (B-460d\'s follow, block line 294): cli-env\'s create, so the OpenCode serve\'s start reads the person\'s agents.lowerCpuPriority through the one reader'],
   });
   const judge = (F) => {
     const count = new Map(); for (const d of F.dynamic) count.set(d, (count.get(d) || 0) + 1);
