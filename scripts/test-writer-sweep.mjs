@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 // HOLDER MODE (r2): the suite file itself, run as a transcript holder. §6 copies
 // this file into a `.claude/worktrees/<wt>/scripts/` checkout and runs THE COPY
@@ -460,6 +461,10 @@ if (fs.existsSync('/proc/self')) {
   fs.mkdirSync(wtScripts, { recursive: true });
   const suiteCopy = path.join(wtScripts, 'test-writer-sweep.mjs');
   fs.copyFileSync(new URL(import.meta.url), suiteCopy);
+  // the copy's own FIRST import (B-ba47 pick C: every suite file takes `import './scratch.mjs';` first) resolves beside it: the
+  // tree's scratch.mjs, linked (node resolves the link to the real file, so its own imports are the tree's) — a lone copy dies at
+  // its load, and the legs below read no argv and no ready file (主开发 r2068, the block's hosted run)
+  fs.symlinkSync(fileURLToPath(new URL('./scratch.mjs', import.meta.url)), path.join(wtScripts, 'scratch.mjs'));
   const suiteHolder = (name, args, cwd) => {
     const ready = path.join(dir, 'ready-' + name);
     const p = spawn(process.execPath, args, {
