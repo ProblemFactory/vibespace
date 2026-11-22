@@ -1701,35 +1701,52 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
   ok(r15.every((x) => x.red), `§15 CONTROLS: ${r15.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(' · ')}`);
 
   // (b) + (c): the RUNNING module against a loopback fake of a provider's list — the hit count is the witness
+  // r2155 (lane bl-tests-e): EACH REQUEST MARKED BY THE LEG THAT SENT IT. One sighting at 838036995 (the whole-tree row, under
+  // load) read (c)+(d) ✗ and «3» for the control's two presses. The probe (8aa19b294, both zones) put no second request on the
+  // product's road — the stand-in answering 600 ms past the road's timeout: one request a press, none late — and showed the count
+  // took ANY request reaching the stand-in's port: one the stand-in parsed after its own leg's press gave up was counted by the
+  // NEXT leg (the sighting's pair, by a stall placed in the stand-in). What sent that run's third request is NOT known: the row ran
+  // 7.8 s, inside the road's 15 s timeout. Now each leg's base URL carries its own mark (/leg-<n>/), a leg counts only the requests
+  // with its mark (the count stays exact: === 1, === 2), a red §15 mark prints every request the stand-in got with the leg that sent
+  // it, a request no leg sent is printed (⊙), and a CONTROL plants both kinds of stray inside an unthrottled leg.
   const http = await import('node:http');
   const Mod = (await import('node:module')).default;
-  let hits = 0;
-  const fakeSrv = http.createServer((req, res) => { hits++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'vendor/model-a' }] })); });
+  const got15 = [];   // every request the stand-in got: its leg's mark (null: none), the method and the path
+  let leg15 = 0;
+  const fakeSrv = http.createServer((req, res) => { const m = /^\/leg-(\d+)\//.exec(req.url || ''); got15.push({ leg: m ? Number(m[1]) : null, what: `${req.method} ${String(req.url).slice(0, 80)}` }); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'vendor/model-a' }] })); });
+  const who15 = (r) => JSON.stringify({ leg: r.leg, counted: r.hits, answers: r.out.map((o) => (o.ok ? 'ok' : o.code + (o.reason ? ':' + o.reason : ''))), ms: r.ms, got: got15.map((g) => `${g.leg === null ? 'NO LEG' : 'leg ' + g.leg}: ${g.what}`) });
   await new Promise((r) => fakeSrv.listen(0, '127.0.0.1', r));
   const scratch15 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-vw15-'));
   try {
     const MPsrc = fs.readFileSync(path.join(REPO, 'src/model-providers.js'), 'utf-8'), PMsrc = fs.readFileSync(path.join(REPO, MOD), 'utf-8');
     const compile = (src, file, swap = null) => { const m = new Mod(file); m.filename = file; m.paths = Mod._nodeModulePaths(path.dirname(file)); if (swap) m.require = (id) => (id === '../model-providers.js' ? swap : require(id.startsWith('.') ? path.resolve(path.dirname(file), id) : id)); m._compile(src, file); return m.exports; };
     const mpOf = (from, to) => { if (from && MPsrc.split(from).length !== 2) throw new Error('§15 anchor missing: ' + from); return compile(from ? MPsrc.replace(from, to) : MPsrc, path.join(REPO, 'src/model-providers.js')); };
-    const run = async (MP, { vault = 'unlocked', presses = 2 } = {}) => {
+    const stray = (p) => new Promise((ok1) => { http.get({ host: '127.0.0.1', port: fakeSrv.address().port, path: p }, (a) => { a.resume(); a.on('end', ok1); }).on('error', ok1); });
+    const run = async (MP, { vault = 'unlocked', presses = 2, strays = null } = {}) => {
+      const leg = ++leg15;
       const dataDir = fs.mkdtempSync(path.join(scratch15, 'd-'));
       const PS = compile(fs.readFileSync(path.join(REPO, 'src/server/provider-store.js'), 'utf-8'), path.join(REPO, 'src/server/provider-store.js'), MP);
       const store = PS.create({ dataDir, log: () => { } });
-      store.put({ id: 'pv-openrouter', kind: 'openrouter', label: 'OpenRouter', baseUrl: `http://127.0.0.1:${fakeSrv.address().port}/api/v1`, modelsSource: 'listed', listedBy: 'provider-api' });
+      store.put({ id: 'pv-openrouter', kind: 'openrouter', label: 'OpenRouter', baseUrl: `http://127.0.0.1:${fakeSrv.address().port}/leg-${leg}/api/v1`, modelsSource: 'listed', listedBy: 'provider-api' });
       const PM = compile(PMsrc, path.join(REPO, MOD), MP);
       const r = PM.create({ providers: store, vaultState: () => vault, now: () => 1792494000000, log: () => { } });
-      hits = 0;
-      const out = [];
-      for (let i = 0; i < presses; i++) out.push(await r.refreshListedModels('pv-openrouter', { by: 'human' }));
-      return { hits, out, kept: store.get('pv-openrouter') };
+      if (strays) for (const p of strays(leg)) await stray(p);   // the CONTROL's planted requests: none of them this leg's road
+      const out = [], ms = [];
+      for (let i = 0; i < presses; i++) { const t0 = Date.now(); out.push(await r.refreshListedModels('pv-openrouter', { by: 'human' })); ms.push(Date.now() - t0); }
+      return { leg, hits: got15.filter((g) => g.leg === leg).length, out, ms, kept: store.get('pv-openrouter') };
     };
     const real = await run(mpOf());
-    ok(real.hits === 1 && real.out[0].ok && real.out[1].code === 'cooldown' && real.kept.fetchedAt === 1792494000000 && real.kept.models[0].id === 'vendor/model-a', '§15 (c)+(d) THE REAL MODULE: two presses inside the minute ⇒ ONE request; the second refused (cooldown); the answer kept with fetchedAt', { hits: real.hits, out: real.out.map((o) => o.code || 'ok') });
+    ok(real.hits === 1 && real.out[0].ok && real.out[1].code === 'cooldown' && real.kept.fetchedAt === 1792494000000 && real.kept.models[0].id === 'vendor/model-a', '§15 (c)+(d) THE REAL MODULE: two presses inside the minute ⇒ ONE request; the second refused (cooldown); the answer kept with fetchedAt', who15(real));
     const loose = await run(mpOf('  if (wait > 0) return { ok: false, code: \'cooldown\', retryAfterMs: wait };\n', ''));
-    ok(loose.hits === 2, '§15 CONTROL: an UNTHROTTLED refresh (the verdict\'s cooldown taken out) asks the provider TWICE inside the minute (RED: > 1)', loose.hits);
+    ok(loose.hits === 2, '§15 CONTROL: an UNTHROTTLED refresh (the verdict\'s cooldown taken out) asks the provider TWICE inside the minute (RED: > 1)', who15(loose));
     const locked = await run(mpOf(), { vault: 'locked', presses: 1 });
     const open = await run(mpOf("  if (vault !== 'unlocked') return { ok: false, code: vault === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked' };\n", ''), { vault: 'locked', presses: 1 });
-    ok(locked.hits === 0 && locked.out[0].code === 'vault_locked' && open.hits === 1, '§15 (b) THE VAULT: locked ⇒ the provider never asked (vault_locked); CONTROL: a verdict that skips the vault asks it (RED)', { locked: locked.hits, open: open.hits });
+    ok(locked.hits === 0 && locked.out[0].code === 'vault_locked' && open.hits === 1, '§15 (b) THE VAULT: locked ⇒ the provider never asked (vault_locked); CONTROL: a verdict that skips the vault asks it (RED)', `${who15(locked)} · ${who15(open)}`);
+    const LOOSE_A = '  if (wait > 0) return { ok: false, code: \'cooldown\', retryAfterMs: wait };\n';
+    const planted = await run(mpOf(LOOSE_A, ''), { strays: (leg) => ['/planted/api/v1/models', `/leg-${leg - 1}/api/v1/models`] });
+    ok(planted.hits === 2 && got15.filter((g) => g.what.includes(' /planted/') || g.what.includes(` /leg-${planted.leg - 1}/`)).length >= 2, '§15 CONTROL (the count itself): a request NO leg sent and one an EARLIER leg\'s mark carries, landing inside an unthrottled leg, are not its count — it counts its own two', who15(planted));
+    const noLeg = got15.filter((g) => g.leg === null && !g.what.includes(' /planted/'));
+    if (noLeg.length) console.log(`  ⊙ §15 the stand-in got ${noLeg.length} request(s) no leg sent (counted by none): ${noLeg.map((g) => g.what).join(' · ')}`);
   } finally { fakeSrv.close(); fs.rmSync(scratch15, { recursive: true, force: true }); }
 }
 
