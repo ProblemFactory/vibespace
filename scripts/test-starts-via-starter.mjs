@@ -14,6 +14,7 @@
 //      + the proxy plugin's runner reads the starter (census; RED: the release's text)
 //   ⑥ the certificate pass's runner (its answer table) and its default; the display's lookup asynchronous through the starter
 //      (RED: the release's synchronous lookup); the keeper's version ask (census; RED: the release's text)
+//      (r2480) the person's Start in THE SAME MILLISECOND as a kept answer (one frozen clock): a press never reads it, «answered» by count
 //   ⑦ a FAILED copy of the rclone binary is remembered for its bound (15 min), then tried again (RED: the release; a copy kept for ever)
 // r1381 (6): every moved reader is also read with a starter that gives NO REPLY (what it then says), and the env + the bound each
 // site hands are pinned.
@@ -251,6 +252,30 @@ WD.section('⑥');
   answer = (cmd) => (cmd === 'which' ? { unknown: true } : { started: true, code: 0, stdout: '' });
   let why2 = null; try { await new V.VncManager({ dataDir: TMP, port: 1, display: ':96' }).ensureRunning(); } catch (e) { why2 = e.message; }
   ok(/could not check whether a VNC server is installed/.test(String(why2)) && !/no VNC server installed/.test(String(why2)), 'a NO-REPLY: the Start names its own cause («could not check … try again»), never «no VNC server installed»', { why2 });
+  // r2473 / r2480: THE SAME MILLISECOND — the two Starts again under ONE frozen clock (the window placed, never a stall nor load):
+  // a person's press never reads the kept answer, even one recorded in its own millisecond; whether an answer CAME is a count of
+  // the answers recorded for the name, never a time compared with the last. Each scene runs a fresh copy of the lookup's module
+  // (its own kept answers) under a copy of the display's module that asks THAT copy.
+  const VSRC6 = read('src/vnc.js'), WSRC6 = read('src/plugins/which-kept.js');
+  const sameMs = async (wkSrc, tag) => {
+    const wk = M.write('src/plugins/which-kept.js', wkSrc, 'wk-' + tag, { same: wkSrc === WSRC6 });   // the cured scene's copy is deliberate (a fresh module: its own kept answers)
+    const VM = require(M.write('src/vnc.js', anchored(VSRC6, "const lookup = (cmd, o) => require('./plugins/which-kept.js').whichFreshAnswer(cmd, o);", `const lookup = (cmd, o) => require(${JSON.stringify(wk)}).whichFreshAnswer(cmd, o);`, 'B-323e the scene\'s own lookup'), 'vnc-' + tag));
+    const start = async () => { const a0 = askedOf('which').length; let w = null; try { await new VM.VncManager({ dataDir: TMP, port: 1, display: ':91' }).ensureRunning(); } catch (e) { w = e.message; } return { asked: askedOf('which').length - a0, why: String(w) }; };
+    const clock = Date.now, F = clock(); Date.now = () => F;   // ONE millisecond for the whole scene
+    try {
+      answer = (cmd) => (cmd === 'which' ? { started: true, code: 1, stdout: '' } : { started: true, code: 0, stdout: '' });
+      const s1 = await start(), s2 = await start();   // a «not found» recorded in this very millisecond, then a press in it again
+      answer = (cmd) => (cmd === 'which' ? { unknown: true } : { started: true, code: 0, stdout: '' });
+      const s3 = await start();   // the lookup silent: a press in the millisecond of the kept «not found»
+      return { s1, s2, s3 };
+    } finally { Date.now = clock; }
+  };
+  const ms = await sameMs(WSRC6, 'cured');
+  const msK = await sameMs(anchored(WSRC6, '  if (maxAgeMs > 0 && k && k.at && Date.now() - k.at <= maxAgeMs) return Promise.resolve(said(k));\n', '  if (k && k.at && Date.now() - k.at <= maxAgeMs) return Promise.resolve(said(k));\n', 'B-323e a press reads the kept answer'), 'kept-read');   // stale-pins: kept (the release's road planted back — the leg's RED)
+  const msT = await sameMs(anchored(anchored(WSRC6, '  const n0 = k ? k.n : 0;\n', '  const at0 = k ? k.at : 0;\n', 'B-323e answered by time 1'), '    if (k2 && k2.n !== n0) return said(k2);\n', '    if (k2 && k2.at && k2.at !== at0) return said(k2);\n', 'B-323e answered by time 2'), 'by-time');   // stale-pins: kept (the release's road planted back — the leg's RED)
+  ok(ms.s1.asked === 2 && /no VNC server installed/.test(ms.s1.why) && ms.s2.asked === 2 && /no VNC server installed/.test(ms.s2.why) && ms.s3.asked === 2 && /could not check whether a VNC server is installed/.test(ms.s3.why) && !/no VNC server installed/.test(ms.s3.why)
+    && /no VNC server installed/.test(msK.s3.why) && /could not check whether a VNC server is installed/.test(msT.s2.why),
+    `THE SAME MILLISECOND (one frozen clock): a press looks again past a «not found» kept in its own millisecond (${ms.s2.asked} lookups) and says the true cause; with the lookup silent it says it could not check (${ms.s3.asked} lookups) — RED a press reads the kept answer: the no-reply said as «not installed» (${msK.s3.why}); RED «answered» by a time unequal to the last: a real «not found» said as «could not check» (${msT.s2.why})`, { ms, msK, msT });
   answer = (cmd) => (cmd === 'which' ? { started: true, code: 1, stdout: '' } : { started: true, code: 0, stdout: '' });
   const VSRC = read('src/vnc.js');
   const REL = require(M.write('src/vnc.js', anchored(VSRC, "const lookup = (cmd, o) => require('./plugins/which-kept.js').whichFreshAnswer(cmd, o);   // {path, known} — known false: no reply",
