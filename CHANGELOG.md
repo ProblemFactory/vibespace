@@ -85,6 +85,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent can now read one part of a large window page at a time, and the whole text of one field, such as a full web address.
 - An agent reading a window through its accessibility tree no longer gets the text of a password field.
 - An agent can now act on a window item whose name is longer than 200 characters; before, it was refused every time as if the page had changed.
+- When VibeSpace runs as a Background Work job and restarts by itself, its conversations are no longer stopped with the job.
+- When VibeSpace runs as a Background Work service, a second copy of it is no longer started beside the running one when the job's helper process is killed.
+- A Background Work job running VibeSpace itself now says on its card why it was not restarted and that its memory bound ends VibeSpace with its conversations.
 
 ## 2.369.415 — 2026-11-21
 
