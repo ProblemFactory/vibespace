@@ -331,9 +331,12 @@ try {
       const heardC = heardSince(c0);
       const who = (/^\/key\?w=(\w+)&k=c$/.exec(heardC[0] || '') || [])[1] || null;
       const noteC = (kc.out || '').split('\n').find((l) => /when this was sent, the keyboard was in /.test(l)) || '';
-      const unseen = who && who !== 'main' && who === `p${popNamed[1]}`;
+      // round wd6ogrta0 (e): «unseen» is WHICHEVER popup heard the key being one the screenshot named (outside its image) — every
+      // named «Sign in – stand-in N» mapped to its own handle, never the first named one only
+      const namedByPage = new Map([...((ssP && ssP.out) || '').matchAll(/«Sign in – stand-in ([12])(?: - [^»]*)?» \d+x\d+ at [^;]*? its own handle `([^`]+)`/g)].map((m) => [`p${m[1]}`, m[2]]));
+      const unseen = !!who && namedByPage.has(who);
       console.log(`    MEASURE B-dbb4 M3 shape (not a proof): \`key ${H2} c\` was heard by ${JSON.stringify(heardC)}; the reply's note: ${noteC ? JSON.stringify(noteC.trim()) : 'none'}`);
-      check(`B-dbb4 M3 shape on the real chromium: \`key ${H2} c\` goes where the keyboard is (ONE page heard it: ${who || 'none'}) and the reply ${noteC ? 'NAMES the own handle of the window this image does not show that held the keyboard' : 'says nothing (the keyboard was in a window this image shows)'} — a note only for an unseen window, and always for the named popup when it heard the key`, kc.code === 0 && heardC.length === 1 && (who !== 'main' || !noteC) && (!noteC || ((acc && acc.named) || []).some((h) => noteC.includes(h))) && (!unseen || noteC.includes(popNamed[2])), { kc, heardC, noteC, named: acc && acc.named });
+      check(`B-dbb4 M3 shape on the real chromium: \`key ${H2} c\` goes where the keyboard is (ONE page heard it: ${who || 'none'}) and the reply ${noteC ? 'NAMES the own handle of the window this image does not show that held the keyboard' : 'says nothing (the keyboard was in a window this image shows)'} — a note only for an unseen window, and always for the named popup when it heard the key`, kc.code === 0 && heardC.length === 1 && (who !== 'main' || !noteC) && (!noteC || ((acc && acc.named) || []).some((h) => noteC.includes(h))) && (!unseen || noteC.includes(namedByPage.get(who))) && (unseen || !noteC), { kc, heardC, noteC, named: [...namedByPage] });
       const k0 = hits.length;
       const kp = await cli('vibespace-window', ['key', popNamed[2], 'k']);
       const inPop = await until(async () => (hits.slice(k0).some((h) => h.url === `/key?w=p${popNamed[1]}&k=k`) ? true : null), 15000, 300);

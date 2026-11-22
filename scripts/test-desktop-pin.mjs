@@ -567,14 +567,14 @@ console.log('CONTROLS (patched copies)');
       let kbAnswer = null, kbCalls = 0;
       wtP.keyboardWindow = async () => { kbCalls++; return typeof kbAnswer === 'function' ? kbAnswer() : kbAnswer; };
       const rowsKeepS = rowsP;
-      const scene = async (E, { rows, answer, before = null, act = { verb: 'key', chord: 'Return' } }) => {
-        rowsP = rows.map((w) => ({ ...w })); kbAnswer = answer; kbCalls = 0;
+      const scene = async (E, { rows, answer, before = null, act = { verb: 'key', chord: 'Return' }, pin = null }) => {
+        rowsP = rows.map((w) => ({ ...w })); kbAnswer = answer; kbCalls = 0; recP.pin = pin || undefined;
         if (before) await before(E);
         kbCalls = 0;
         const k0 = keysP.length, t0 = typedP.length, at0 = Date.now();
         let r = null, code = null; try { r = await E.act('da-pop', fP, act); } catch (e) { code = e && e.code; }
         const sent = act.verb === 'key' ? keysP.slice(k0) : typedP.slice(t0);
-        rowsP = rowsKeepS; kbAnswer = null;
+        rowsP = rowsKeepS; kbAnswer = null; recP.pin = undefined;
         return { code, note: r && r.note || null, keyboard: r && r.keyboard || null, windows: sent.map((x) => x.window), calls: kbCalls, ms: Date.now() - at0 };
       };
       const clickMain = (E) => E.act('da-pop', fP, { verb: 'click', at: '10,20' });
@@ -586,6 +586,12 @@ console.log('CONTROLS (patched copies)');
         one: await scene(E, { rows: [helper, main], answer: { ok: true, id: 1 }, before: clickMain }),
         unread: await scene(E, { rows: [pop, helper, main], answer: { ok: false, why: 'no focus window read' }, before: clickMain }),
         late: await scene(E, { rows: [pop, helper, main], answer: () => new Promise((res) => setTimeout(() => res({ ok: true, id: 2 }), 2500)), before: clickMain }),
+        // (a) round wd6ogrta0: a popup PARTLY in the image (over the pinned main, reaching past the pin: clipped) — a click on its visible
+        // part aimed into it (no note); a click elsewhere did not (the note names it)
+        clipIn: await scene(E, { rows: [big, pinned], pin: '1600x900', answer: { ok: true, id: 6 }, before: (E2) => E2.act('da-pop', fP, { verb: 'click', at: '1450,750' }) }),
+        clipOut: await scene(E, { rows: [big, pinned], pin: '1600x900', answer: { ok: true, id: 6 }, before: (E2) => E2.act('da-pop', fP, { verb: 'click', at: '100,100' }) }),
+        // (b) a REFUSED act does not move the last aim: an aim into the popup (its own handle), then a click the takeover refuses — the aim stands
+        refused: await scene(E, { rows: [pop, helper, main], answer: { ok: true, id: 2 }, before: async (E2) => { await E2.act('da-pop.w2', fP, { verb: 'key', chord: 'Tab' }); try { await E2.act('da-pop', fP, { verb: 'click', at: '9999,9999' }); } catch { /* refused after the door: a point outside the image */ } } }),
       });
       const S = await runScenes(EP);
       const none = (x) => !!x && !x.code && x.windows.length === 1 && x.windows[0] == null && !x.note;
@@ -596,12 +602,21 @@ console.log('CONTROLS (patched copies)');
       const audS = fs.readFileSync(EP.auditFile, 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } });
       ok(audS.some((l) => l.verb === 'key' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2') && audS.some((l) => l.verb === 'type' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2'), 'M3 shape (C): the audit names the handle where the keyboard was (keyboardIn)');
       ok(none(S.one) && S.one.calls === 0, 'M3 shape (1): an app with ONE window a person sees (Chrome\'s 15×15 helper aside) — no look made, no extra call', S.one);
+      ok(none(S.clipIn) && !!S.clipOut.note && S.clipOut.note.includes('`da-pop.w6`'), 'M3 shape (a, round wd6ogrta0): a click on the visible part of a CLIPPED popup aimed into it — nothing said; a click elsewhere did not — the note names it', { clipIn: S.clipIn, clipOut: S.clipOut });
+      ok(none(S.refused), 'M3 shape (b, round wd6ogrta0): a REFUSED act (a click at a point outside the image, refused after the door) does not move the last aim — the aim into the popup stands, nothing said', S.refused);
       ok(none(S.unread) && none(S.late) && S.late.ms < 1500, `M3 shape (2): a look that failed, or one that did not answer within its bound — the key lands as at the release and NOTHING is said (never a guess, never a refusal; the late one waited ${S.late.ms} ms)`, { unread: S.unread, late: S.late });
       // RED CONTROLS (anchored, each anchor found exactly once — or twice where said)
       const SS = read(ENGINE_REL);
       const scenesOn = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E3 = EC.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-shape-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); E3.grantReach('da-pop', { kind: 'session', id: 's1' }); E3.setShareMode('da-pop', 'pixels'); E3.attach('da-pop', fP); return runScenes(E3); };
       const forced = await scenesOn(anchored(SS, 'window: dw ? dw.id : null', 'window: dw ? dw.id : (px && px.plan && px.plan.main ? px.plan.main.id : null)', 'M3 shape control: ab6d685ff\'s main focus', { count: 2 }), 'main-forced');
       ok(forced.A.windows[0] === 1 && forced.B.windows[0] === 1, 'RED CONTROL (A)(B): the main forced whenever it is named (ab6d685ff\'s road) — window 1 under a drawn window and after an aim into the popup: the keys go under it / away from the aim', { A: forced.A.windows, B: forced.B.windows });
+      const noAimCheck = await scenesOn(anchored(SS, "    if (a && (a.kind === 'tree' || (a.kind === 'window' && a.wid === w.id))) return null; // the agent aimed into it (law B)\n", '', 'M3 shape control: the aim check cut'), 'no-aim-check');
+      ok(!!noAimCheck.B.note && !!noAimCheck.refused.note, 'RED CONTROL (B, round wd6ogrta0 (d)): the aim check cut — a note is said right after the agent aimed into the popup', { B: noAimCheck.B.note, refused: noAimCheck.refused.note });
+      const noPoint = await scenesOn(anchored(SS, '    if (a && a.kind === \'point\' && a.at && a.at.x >= w.x && a.at.x < w.x + w.w && a.at.y >= w.y && a.at.y < w.y + w.h) return null; // (a) a click on the part of it the image shows (a clipped window) aimed into it\n', '', 'M3 shape control: the point aim not read'), 'no-point');
+      ok(!!noPoint.clipIn.note, 'RED CONTROL (a): the click\'s point not read — the note is said right after a click INTO the clipped popup', noPoint.clipIn);
+      const headSrc = anchored(anchored(SS, '    if (aimOut.key && aimOut.aim) aims.set(aimOut.key, { ...aimOut.aim, t: now() });\n', '', 'M3 shape control (b): the answered-only keep cut'), ": null; // B-dbb4 M3 (r1879; wd6ogrta0 (a)(b)): this act's aim, kept when it answers — a point aim keeps its point\n", ": null; if (aimOut.aim) aims.set(aimOut.key, { ...aimOut.aim, t: now() }); // the control: kept at the head\n", 'M3 shape control (b): the aim kept at the act\'s head');
+      const aimAtHead = await scenesOn(headSrc, 'aim-at-head');
+      ok(!!aimAtHead.refused.note, 'RED CONTROL (b): the aim kept at the act\'s head (before it answers) — the refused click took the aim, and the note is said', aimAtHead.refused);
       const mute = await scenesOn(anchored(SS, '    if (!un.length) return null;\n', '    return null;\n', 'M3 shape control: no look'), 'no-look');
       ok(!mute.C.note && !mute.Ct.note, 'RED CONTROL (C): no look — the key goes to the unseen popup in silence (the box\'s red: nothing tells the agent)', { C: mute.C.note, Ct: mute.Ct.note });
       const always = await scenesOn(anchored(SS, '    if (!un.length) return null;\n', '', 'M3 shape control: a look every time'), 'look-always');
@@ -621,6 +636,19 @@ console.log('CONTROLS (patched copies)');
     const shWords = UN.unshownText([{ id: 2, title: 'Terminal', x: -600, y: 0, w: 500, h: 400, why: 'outside' }], 'da-sh', { handles: false });
     ok(!!(sh1 && sh1.code === 'window_subject_shared' && /use the app's own handle da-sh/.test(sh1.message) && !/own handle `/.test(shWords) && /shared with the user's own windows/.test(shWords)),
       'RULED: on a SHARED desktop (desktop-singleton: it does not own its display) a typed window handle is refused window_subject_shared (use the app\'s own handle), and unit 1\'s words give no window a handle there', { sh1: sh1 && [sh1.code, sh1.message], shWords });
+    // round wd6ogrta0's MUST: on a SHARED desktop the windows the image leaves out can be the PERSON's own — a window outside the
+    // image holds the keyboard ⇒ a key on the app's own handle makes NO look and says NO note (a handle there does not exist). RED:
+    // the line as it stood (no own-display test) — the look is made and the note names a handle the door refuses
+    {
+      let kbN = 0; const keepKw = wtP.keyboardWindow; wtP.keyboardWindow = async () => { kbN++; return { ok: true, id: 2 }; };
+      const sharedKey = async (Emod, tag) => { const E4 = Emod === ENGINE ? ES2 : Emod.create({ keeper: keeperS, dataDir: path.join(dir, 'dbb4-shared-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); if (E4 !== ES2) { E4.grantReach('da-sh', { kind: 'session', id: 's1' }); E4.setShareMode('da-sh', 'pixels'); E4.attach('da-sh', fP); } kbN = 0; let r = null, code = null; try { r = await E4.act('da-sh', fP, { verb: 'key', chord: 'Return' }); } catch (e) { code = e && e.code; } return { code, note: r && r.note || null, calls: kbN }; };
+      const sk = await sharedKey(ENGINE, 'now');
+      ok(!sk.code && !sk.note && sk.calls === 0, 'round wd6ogrta0 MUST: on a SHARED desktop a window outside the image holds the keyboard — a key on the app\'s own handle makes no look and says no note (no window handle exists there)', sk);
+      const SSh = read(ENGINE_REL);
+      const skRed = await sharedKey(MUT.load(ENGINE_REL, anchored(SSh, '    if (!capsOf(rec).ownsDisplay) return null;\n', '', 'shared-desktop control: the own-display test cut'), 'shared-look'), 'red');
+      ok(!!skRed.note && skRed.calls >= 1 && /da-sh\.w2/.test(skRed.note), 'RED CONTROL (the MUST): the line as it stood — on the shared desktop the look is made and the note names `da-sh.w2`, a handle the door refuses (window_subject_shared)', skRed);
+      wtP.keyboardWindow = keepKw;
+    }
     // a window of ANOTHER app (an id this app's display does not list) is refused window_gone — the list is the app's own display's
     let fo = null; try { await EP.screenshot('da-pop.w7', fP); } catch (e) { fo = e; }
     ok(!!(fo && fo.code === 'window_gone' && /da-pop\.w7 is gone/.test(fo.message)), 'a window id this app\'s display does not hold (another app\'s, a closed one) is refused window_gone naming THAT handle', fo && [fo.code, fo.message]);

@@ -199,6 +199,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
   const leaseFile = path.join(dataDir, LEASE_FILE);
   const leases = new Map(); // handle → { handle, sessionId, browserKey, since, origin, refs, snapshotAt, carrierLostAt }
+  const aims = new Map(); // B-dbb4 M3 (r1879): `${record}|${session}` → { kind: 'window' | 'tree' | 'point', wid?, at?, t } — this lease's last aimed act that ANSWERED (declared beside the leases: a lease dropped at load drops its aim)
+  const aimKey = (rec, facts) => `${rec.id}|${facts && facts.sessionId}`;
   const inputs = new Map(); // handle → browser-takeover input state (in memory)
   const acting = new Map(); // lane E verify r3 (F1): handle → Set<AbortController> — the injections RUNNING on that window (in memory)
   const inputListeners = new Set();
@@ -1026,6 +1028,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (st && st.input === 'user') handback({ handle, cause: detachCause, viewerId: null });
     inputs.delete(handle);
     leases.delete(handle);
+    aims.delete(`${handle}|${l.sessionId}`); // B-dbb4 M3 (wd6ogrta0 (c)): the lease's last aim goes with it
     audit({ sessionId: l.sessionId, browserKey: l.browserKey, handle, origin: l.origin || ORIGIN, verb: 'lease-dropped', by, ok: true, why });
     log.log?.(`[window] dropped the lease of ${l.sessionId} on ${handle}: ${why}`);
     return true;
@@ -1326,11 +1329,19 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   // ── act ──
   const nodeLine = (e, action) => ({ role: e.role, name: e.name, ...(action ? { action } : {}) });
-  async function act(handle0, facts, body = {}) {
+  // B-dbb4 M3 (round wd6ogrta0 (b)): an act's aim is kept as this lease's last ONLY when the act answered — a refused act moves
+  // nothing. The engine answers `act` through this wrapper; the body keeps its own name (the a11y census reads calls by it)
+  async function actKept(handle0, facts, body = {}) {
+    const aimOut = { key: null, aim: null };
+    const r = await act(handle0, facts, body, aimOut);
+    if (aimOut.key && aimOut.aim) aims.set(aimOut.key, { ...aimOut.aim, t: now() });
+    return r;
+  }
+  async function act(handle0, facts, body = {}, aimOut = { key: null, aim: null }) {
     const verb = String(body.verb || '');
     const door = plainDoor(handle0, facts, verb || 'act') || await subjectDoor(handle0, facts, verb || 'act', { subjectVerb: ['click', 'type', 'key', 'scroll'].includes(verb), tree: !!body.ref }); // B-dbb4 (r946): the one door; r1623: the app's own handle answered synchronously, so a tree act runs before a same-tick revoke
     const { handle, sub, rec, lease } = door; // the door's one read; the verb's re-asks after its real awaits stay (lane E: never across a revoke)
-    { const aim = sub != null ? { kind: 'window', wid: sub } : body.ref ? { kind: 'tree' } : (verb === 'click' && body.at != null) ? { kind: 'point' } : null; if (aim) aims.set(aimKey(rec, facts), { ...aim, at: now() }); } // B-dbb4 M3 (r1879): this lease's last aim
+    aimOut.key = aimKey(rec, facts); aimOut.aim = sub != null ? { kind: 'window', wid: sub } : body.ref ? { kind: 'tree' } : (verb === 'click' && body.at != null) ? { kind: 'point', at: parseAt(body.at) } : null; // B-dbb4 M3 (r1879; wd6ogrta0 (a)(b)): this act's aim, kept when it answers — a point aim keeps its point
     // B-dbb4 M3: the chosen window IS the plan's main (its own plan) — keys and text focus it and go to its X window
     const subjectWin = (px) => (sub != null && px && px.plan && px.plan.subject && px.plan.main ? px.plan.main : null);
     const centreOf = (m) => ({ x: m.x + Math.min(20, Math.floor(m.w / 2)), y: m.y + Math.min(20, Math.floor(m.h / 2)) });
@@ -1460,7 +1471,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const injected = async (e, line) => {
         const px = await pixelsFor(rec, who, 'type', { sub, ...(door.plan ? { plan: door.plan } : {}) });
         await displayHolds(rec, px, subjectWin(px) ? visiblePoint(subjectWin(px)) : keysPointOf(px, lease), who, 'type', 'keys are');   // fb-bc200800e0: keys on a display that cannot take them are refused, never «typed»
-        if (e) { aims.set(aimKey(rec, facts), { kind: 'tree', at: now() }); held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
+        if (e) { aimOut.aim = { kind: 'tree' }; held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
         const kb = !e && sub == null && !dialogWindow(px, lease) ? await keyboardNoteFor(rec, facts, px) : null; // r1879: the look — before the act's last re-check
         held();
         const dw = e ? null : (subjectWin(px) || dialogWindow(px, lease)); // B-dbb4 M3: a chosen window's text goes to ITS X window
@@ -1488,7 +1499,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         audit({ ...who, verb: 'type', by: 'node', node: nodeLine(e), ok: false, code: 'node_not_editable' }); throw namedError('node_not_editable', `${e.role} ${JSON.stringify(e.name)} (${e.ref}) exports no EditableText — pick a text field from the snapshot (\`editable\`)`, { node: nodeLine(e) });
       }
       held(); // no-await-before: the post-probe re-check (a ref) or the focused-node read's own (no ref, B-a38d) precedes it with no await between — redundant by construction, kept as the act's own guard
-      aims.set(aimKey(rec, facts), { kind: 'tree', at: now() }); // r1879: a text the tree aimed (a ref, the focused node) — this lease's aim
+      aimOut.aim = { kind: 'tree' }; // r1879: a text the tree aimed (a ref, the focused node) — this lease's aim, kept when it answers
       const r = await wt.actOnNode({ entry: e, verb: body.replace ? 'set_text' : 'insert_text', text, env: base, ...helperOpts() });
       fromHelper(r, { verb: 'type', by: 'node', node: nodeLine(e), chars: text.length });
       return { ok: true, handle: rec.id, did: { verb: 'type', by: 'node', ref: e.ref, chars: text.length, replaced: !!body.replace }, ms: r.ms };
@@ -1523,9 +1534,11 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   // it. The look: only when the plan holds such a window (an app with one window pays no call), only on the X display's own
   // injection (xtest), bounded; unread, failed or late ⇒ nothing said and the act goes as at the release.
   const KB_LOOK_MS = 400;
-  const aims = new Map(); // `${record}|${session}` → { kind: 'window' | 'tree' | 'point', wid?, at } — this lease's last aimed act
-  const aimKey = (rec, facts) => `${rec.id}|${facts && facts.sessionId}`;
   async function keyboardNoteFor(rec, facts, px) {
+    // round wd6ogrta0's MUST: a desktop the app does NOT own shows the person's own windows — no look, no note there (the same test
+    // the screenshot's window handles take: a shared desktop has none)
+    if (!capsOf(rec).ownsDisplay) return null;
+    for (const k of [...aims.keys()]) if (!liveAny(k.slice(0, k.lastIndexOf('|')))) aims.delete(k); // (c) a record that went takes its aims
     const un = px && px.plan && Array.isArray(px.plan.unshown) ? px.plan.unshown : [];
     if (!un.length) return null;
     if (!px.backends || !px.backends.injection || px.backends.injection.backend !== 'xtest' || typeof wt.keyboardWindow !== 'function') return null;
@@ -1536,6 +1549,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (!w) return null;
     const a = aims.get(aimKey(rec, facts));
     if (a && (a.kind === 'tree' || (a.kind === 'window' && a.wid === w.id))) return null; // the agent aimed into it (law B)
+    if (a && a.kind === 'point' && a.at && a.at.x >= w.x && a.at.x < w.x + w.w && a.at.y >= w.y && a.at.y < w.y + w.h) return null; // (a) a click on the part of it the image shows (a clipped window) aimed into it
     return { handle: UN.subHandle(rec.id, w.id), title: w.title, note: UN.keyboardText(w, rec.id) };
   }
   function mainFocus(px, lease) {
@@ -1827,7 +1841,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     }
     return out;
   }
-  return { factsForToken, mayUseFor, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
+  return { factsForToken, mayUseFor, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act: actKept, screenshot, watch,
     // lane E: reach + the share mode (the user's side)
     reachOf, reachViews, grantReach, revokeReach, setReachOnly, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
