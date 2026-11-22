@@ -100,11 +100,12 @@ try {
   const g4r = await two(require(M.write('src/session-store.js', oneLane, 'warm-one-lane')));
   ok(g4r.gone > 0, `RED: both warms in ONE lane — the second warm's first page cuts the first's snapshot (${g4r.gone} gone)`);
   // three at once: two read, the third waits its turn in the line (never a third worker's heap, never a shared slot)
-  const three4 = async (SM) => { const s0 = stats(); const sids = ['a0b10000-0000-4000-8000-00000000c4f1', 'a0b10000-0000-4000-8000-00000000c4f2', 'a0b10000-0000-4000-8000-00000000c4f3']; for (const sid of sids) fs.copyFileSync(hist, path.join(PROJ, sid + '.jsonl')); SM.jsonlCacheClear?.(); const r = await Promise.all(sids.map((sid) => SM.warmSessionJsonlAsync(sid, CWD))); return { r, gone: stats().gone - s0.gone, atOnce: SM.warmLineStats().atOnce }; };
+  // r2195 (c): «at once» = the pager's reads REALLY in flight (counted at the pager: the line's own count stops at its lanes' two)
+  const three4 = async (SM) => { const s0 = stats(); const sids = ['a0b10000-0000-4000-8000-00000000c4f1', 'a0b10000-0000-4000-8000-00000000c4f2', 'a0b10000-0000-4000-8000-00000000c4f3']; for (const sid of sids) fs.copyFileSync(hist, path.join(PROJ, sid + '.jsonl')); SM.jsonlCacheClear?.(); const real = codex.readJsonlBoundedParsedPagedAsync; let now = 0, most = 0; codex.readJsonlBoundedParsedPagedAsync = function (fp, o) { now++; most = Math.max(most, now); return Promise.resolve(real.call(this, fp, o)).finally(() => { now--; }); }; let r; try { r = await Promise.all(sids.map((sid) => SM.warmSessionJsonlAsync(sid, CWD))); } finally { codex.readJsonlBoundedParsedPagedAsync = real; } return { r, gone: stats().gone - s0.gone, atOnce: most }; };
   const unbounded = anchored(anchored(ssSrc, '  while (_warmQ.free.length) {', '  while (_warmQ.person.length || _warmQ.bulk.length) {', 'warm-unbounded'), '    const lane = _warmQ.free.shift();', "    const lane = _warmQ.free.shift() || 'warm';", 'warm-unbounded-lane');
   const g43 = await three4(S), g43r = await three4(require(M.write('src/session-store.js', unbounded, 'warm-unbounded')));
   ok(g43.r.every((x) => x === true) && g43.gone === 0 && g43.atOnce === 2, `three warms at once: two read, the third waits its turn (at most ${g43.atOnce} in flight, nothing gone)`, g43);
-  ok(g43r.gone > 0, `RED: no bound on the warms in flight ⇒ a third warm shares a lane, its snapshot cut (${g43r.gone} gone)`, g43r);   // the line's count stops at its two lanes: the cut snapshot is what the copy shows
+  ok(g43r.atOnce === 3 && g43r.gone > 0, `RED: no bound on the warms in flight ⇒ ${g43r.atOnce} reads at once, a lane's snapshot cut (${g43r.gone} gone)`, g43r);
 
   console.log('— ⑤ ONE WARM IN FLIGHT A FILE (its fresh read\'s MUST): a second asker joins the first, never a second whole read');
   {

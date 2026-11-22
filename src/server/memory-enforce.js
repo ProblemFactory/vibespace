@@ -24,7 +24,7 @@ function heldOf(activeSessions) {
 
 let wiredFor = null;
 /** ONE TICK: wire the held set once (the live sessions' map is the hub's, for its whole run), then the two idle trims.
- *  → { tails: {evicted, freedBytes, ms, entries}, lines: … | null } */
+ *  → { tails: {evicted, freedBytes, ms, entries, handoffsExpired}, lines: … | null } (B-80cb r2195: the handed tails past their time go here) */
 function tick({ activeSessions = null, usageEstimator = null, now = Date.now() } = {}) {
   if (activeSessions && wiredFor !== activeSessions) { wiredFor = activeSessions; ss.setJsonlHeld(() => heldOf(activeSessions)); }
   const tails = ss.jsonlCacheTrim(now);

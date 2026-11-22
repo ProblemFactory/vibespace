@@ -652,7 +652,7 @@ const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
 // as every parse past the cache's bound always did); counted in the transcript-tails census row.
 const WARM_HANDOFF_MAX = 4, WARM_HANDOFF_MS = 120000;   // a handoff lives from a warm to its reader's parse: two warms at once ⇒ ≤ 2–3 held
 const _warmHandoff = new Map();   // claude session id → { entry, at }
-const _handoffStats = { held: 0, taken: 0, dropped: 0 };
+const _handoffStats = { held: 0, taken: 0, dropped: 0, expired: 0 };   // dropped = pushed out past WARM_HANDOFF_MAX or past its time; expired = past its time (the census tick's sweep, r2195 (b))
 let _liveMaxBytes = JSONL_LIVE_MAX_BYTES;   // the cache's live bound (a test seam sets it low: the not-admitted road at any size)
 function _handoffGet(id) {
   const h = _warmHandoff.get(id);
@@ -685,7 +685,9 @@ function jsonlCacheTrim(now = Date.now()) {
   const t0 = performance.now(), before = _jsonlResident, held = _jsonlHeldNow();
   const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: Infinity, now, sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e), held: (k) => held.has(k) });
   _jsonlResident = r.bytes; _jsonlLive = r.live;
-  return { evicted: r.evicted, freedBytes: Math.max(0, before - r.bytes), ms: performance.now() - t0, entries: _jsonlCache.size };
+  let handoffsExpired = 0;   // r2195 (b): a handed tail nobody came for (a window closed between its warm and its parse) goes at its time — never held until four newer ones push it out
+  for (const [hid, h] of [..._warmHandoff]) if (now - h.at > WARM_HANDOFF_MS) { _warmHandoff.delete(hid); _handoffStats.dropped++; _handoffStats.expired++; handoffsExpired++; }
+  return { evicted: r.evicted, freedBytes: Math.max(0, before - r.bytes), ms: performance.now() - t0, entries: _jsonlCache.size, handoffsExpired };
 }
 /** (a suite's) a parsed tail of `bytes` put as if last read at `usedAt` — the trim's and the rows' legs over this very map */
 function jsonlHas(id) { return _jsonlCache.has(id); }
@@ -767,7 +769,7 @@ const taggedKeptOf = (list, info = {}) => { let c = _taggedKept.get(list); if (!
 // rules stand: a person's warm before every bulk one not started, the lift, one warm a file joined, the fresh check, let go in a finally.
 const WARM_LANES = ['warm', 'warm2'];
 const _warmQ = { person: [], bulk: [], free: [...WARM_LANES] };
-const _warmLine = { turns: 0, atOnce: 0 };
+const _warmLine = { turns: 0, atOnce: 0, bulkTurns: 0 };   // bulkTurns: the turns a bulk warm took (r2195 (a): the door's bulk word, seen)
 const warmLineStats = () => ({ ..._warmLine, free: _warmQ.free.length });
 // its fresh read's MUSTs: ONE warm in flight a file — a second asker (an attach's task-state warm gives up at 10 s, then its transcript
 // warm asks again) joins it, never a second whole read; a warm whose turn comes after the cache was filled for the same file (another
@@ -788,7 +790,7 @@ function pumpWarm() {
     const job = _warmQ.person.shift() || _warmQ.bulk.shift();
     if (!job) return;
     const lane = _warmQ.free.shift();
-    _warmLine.turns++; _warmLine.atOnce = Math.max(_warmLine.atOnce, WARM_LANES.length - _warmQ.free.length);
+    _warmLine.turns++; if (job.bulk) _warmLine.bulkTurns++; _warmLine.atOnce = Math.max(_warmLine.atOnce, WARM_LANES.length - _warmQ.free.length);
     Promise.resolve().then(() => warmTurn(job.fp, job.fresh, lane)).then(job.resolve, job.reject).finally(() => { _warmQ.free.push(lane); pumpWarm(); });
   }
 }
@@ -951,7 +953,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     const stat = fs.statSync(fp);
     const held = _jsonlCache.get(claudeSessionId) ? null : _handoffGet(claudeSessionId);   // B-80cb cure: the warm's read the cache did not admit
     const cached = held || _jsonlCache.get(claudeSessionId);
-    if (held) { _warmHandoff.delete(claudeSessionId); _handoffStats.taken++; }   // taken once
+    if (held) _handoffStats.taken++;   // r2195 (round wll8bb3rr's MUST): TAKEN BY EVERY READER of its warm (a view and its live attach, two devices' re-attaches) — never deleted at a take: it goes at its time (the census tick's sweep), at a newer read, or when the cache admits it
     // Bounded read: a full readFileSync('utf-8') THROWS past Node's ~512MB
     // string limit (and blocks the event loop for hundreds of MB below it).
     // Tail-only: the client seek-loads the earlier history as a continuous
@@ -961,6 +963,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     if (r.mode !== 'hit') _stampJsonlParse(r.bytes, performance.now() - t0);
     if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
     _jsonlCachePut(claudeSessionId, r.entry);   // refreshes the LRU position on a hit too
+    if (held) { const h = _warmHandoff.get(claudeSessionId); if (_jsonlCache.get(claudeSessionId) === r.entry) _warmHandoff.delete(claudeSessionId); else if (h && h.entry !== r.entry) h.entry = r.entry; }   // admitted ⇒ the cache holds it; a newer read (an append) ⇒ the handoff carries it, its time unchanged
     return r.entry.messages;
   } catch { return []; }
 }
@@ -1403,7 +1406,8 @@ class SessionMessages {
     const jsonl = historySessionId ? parseSessionJsonl(historySessionId, session.cwd) : [];
     // B-437e files tier (r1247): whether these records reach back to the transcript's FIRST byte — a transcript past the tail
     // bound is read from its tail only (src/adapters/codex.js readJsonlTail: the span's start); no transcript read: not known
-    this._fromStart = spanFromStart(historySessionId ? _jsonlCache.get(historySessionId) : null, jsonl);
+    // r2195 (e): a tail handed to its reader (not admitted by the cache), read from the file's first byte, says so too
+    this._fromStart = spanFromStart(historySessionId ? (_jsonlCache.get(historySessionId) || _handoffGet(historySessionId)) : null, jsonl);
     this.notLoaded = (jsonl && jsonl.notLoaded) || null;   // row B-422c: the page says the history waits on the reader
     this.notLoadedStorage = !!(jsonl && jsonl.notLoaded && jsonl.storageHung);   // r1243 item 1: which door refused (the storage's: its own words)
     this.notLoadedRetryAt = (jsonl && jsonl.notLoaded && jsonl.retryAt) || null;   // r1243 item 2: when the page asks again by itself
@@ -1537,12 +1541,15 @@ class SessionMessages {
    *  in the worker (warmSessionJsonlAsync) BEFORE this reader's merge, so a reader read after it does not parse its 32 MB tail on
    *  the hub's loop (measured on stand-ins: 123–162 ms a cold parse; an append since the warm is folded in on the loop, up to 4 MB, as
    *  before; the transcript pool down: the old road). `wanted` (a socket closed while it waited) drops the read before
-   *  it starts. → the records (null when dropped) */
-  async rawAsync({ wanted = null } = {}) {
+   *  it starts — and is asked AGAIN after the warm (r2195: a caller that left meanwhile takes no parse). `bulk` (r2195 (a)): the
+   *  first attach of a paced «Resume all»'s conversation — carried to the warm, so this door's own warm never counts as a person's
+   *  (it would lift a waiting bulk warm into the person's line). → the records (null when dropped) */
+  async rawAsync({ wanted = null, bulk = false } = {}) {
     if (this._all) return this._all;
     if (typeof wanted === 'function' && !wanted()) return null;
     const id = getHistorySessionId(this._session);
-    if (id) { try { await warmSessionJsonlAsync(id, this._session.cwd); } catch { } }
+    if (id) { try { await warmSessionJsonlAsync(id, this._session.cwd, bulk === true ? { bulk: true } : null); } catch { } }
+    if (typeof wanted === 'function' && !wanted()) return null;
     this._ensureParsed();
     return this._all;
   }

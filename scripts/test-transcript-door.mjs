@@ -71,7 +71,7 @@ console.log('A) the claude reader\'s door: a re-attach reads its transcript off 
   ok(typeof sm.rawAsync === 'function' && r.v.took === true && r.v.rows > 0 && r.n === 0,
     `a claude reader taken through readOffLoop, then read (activePendingPermissions, raw): ${r.v.rows} records, ${r.n} open(s) of its transcript on this thread`, r);
   let SSx = null, why = null;
-  try { SSx = mutantCopies('transcript-door-none', REPO).load(SS_REL, anchored(SS_SRC, '  async rawAsync({ wanted = null } = {}) {', '  async rawAsyncGone({ wanted = null } = {}) {', 'the claude reader has no door'), 'nodoor'); } catch (e) { why = e.message; }
+  try { SSx = mutantCopies('transcript-door-none', REPO).load(SS_REL, anchored(SS_SRC, '  async rawAsync({ wanted = null, bulk = false } = {}) {', '  async rawAsyncGone({ wanted = null, bulk = false } = {}) {', 'the claude reader has no door'), 'nodoor'); } catch (e) { why = e.message; }
   let x = null;
   if (SSx) {
     SSx.jsonlCacheClear();
@@ -172,5 +172,71 @@ console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail 
   try { SSh = mutantCopies('transcript-door-no-handoff', REPO).load(SS_REL, anchored(SS_SRC, '  if (_jsonlCache.get(id) === entry) { _warmHandoff.delete(id); return; }\n', '  return;\n', 'the warm drops what the cache did not admit'), 'nohandoff'); } catch (e) { whyh = e.message; }
   const hox = SSh ? await handoff(SSh) : null;
   ok(!!hox && hox.rows > 0 && hox.opens >= 1 && hox.held === 0, `RED CONTROL (the warm drops what the cache did not admit): its reader opened the transcript ${hox ? hox.opens : '?'} time(s) on this thread — the parse on the loop`, hox || whyh);
+  // ── 主开发 r2195 (round wll8bb3rr): the handed tail serves EVERY reader of its warm; the door carries the bulk word and asks «still
+  // wanted» after the warm; handed tails go at their time; a handed tail read from the first byte says so ──
+  const ssCopy = (tag, from, to, what) => { try { return { M: mutantCopies(`transcript-door-${tag}`, REPO).load(SS_REL, anchored(SS_SRC, from, to, what), tag) }; } catch (e) { return { why: e.message }; } };
+  const notAdmitted = async (M, fn) => { M._warmHandoffTestSeam({ liveMaxBytes: 1 }); try { M.jsonlCacheClear(); return await fn(); } finally { M._warmHandoffTestSeam({ liveMaxBytes: null }); M.jsonlCacheClear(); } };
+  const readerOf = (M, id, w) => new M.SessionMessages({ backend: 'claude', claudeSessionId: id, backendSessionId: id, cwd: CWD, buffer: '' }, w, {});
+  // F2 (THE MUST): two readers joined on ONE warm the cache does not admit (a view and its live attach; two devices' re-attaches) —
+  // ZERO opens of the transcript on this thread for BOTH. RED: the handed tail taken once (the second reader parses on the loop)
+  const twoReaders = (M) => notAdmitted(M, async () => {
+    const A = small(12), B = small(13);
+    await M.warmSessionJsonlAsync(A.id, CWD);   // the live set: A's — B's tail is not admitted
+    const r1 = readerOf(M, B.id, 'w-two-1'), r2 = readerOf(M, B.id, 'w-two-2');
+    const rd = await opensDuring(async () => { const [x, y] = await Promise.all([r1.rawAsync(), r2.rawAsync()]); return [x ? x.length : -1, y ? y.length : -1]; }, B.fp);
+    return { rows: rd.v, opens: rd.n };
+  });
+  const tr = await twoReaders(SS);
+  ok(tr.rows[0] > 0 && tr.rows[1] === tr.rows[0] && tr.opens === 0, `TWO READERS joined on one warm the cache did not admit: both read ${tr.rows.join(' + ')} records with ${tr.opens} open(s) of the transcript on this thread`, tr);
+  const once = ssCopy('handoff-once', '    if (held) _handoffStats.taken++;', '    if (held) { _warmHandoff.delete(claudeSessionId); _handoffStats.taken++; }', 'the handed tail taken once');   // stale-pins: kept — the RED plants the cut before this cure back into a copy
+  const trx = once.M ? await twoReaders(once.M) : null;
+  ok(!!trx && trx.opens >= 1, `RED CONTROL (the handed tail taken ONCE — the cut before this cure): the second reader opened the transcript ${trx ? trx.opens : '?'} time(s) on this thread — the parse on the loop`, trx || once.why);
+  // F3: the first caller LEAVES while the warm runs (its «wanted» turns false): it takes no parse; the second still reads its records
+  // with ZERO opens. RED: «still wanted» not asked after the warm (the leaver parses)
+  const leaver = (M) => notAdmitted(M, async () => {
+    const A = small(14), B = small(15);
+    await M.warmSessionJsonlAsync(A.id, CWD);
+    const r1 = readerOf(M, B.id, 'w-left'), r2 = readerOf(M, B.id, 'w-stay');
+    let open = true;
+    const rd = await opensDuring(async () => { const p1 = r1.rawAsync({ wanted: () => open }), p2 = r2.rawAsync(); open = false; const [x, y] = await Promise.all([p1, p2]); return { left: x, leftParsed: !!r1._all, stay: y ? y.length : -1 }; }, B.fp);
+    return { ...rd.v, opens: rd.n };
+  });
+  const lv = await leaver(SS);
+  ok(lv.left === null && lv.leftParsed === false && lv.stay > 0 && lv.opens === 0, `a reader whose caller LEFT during the warm takes no parse; the other reader of the same warm reads its ${lv.stay} records with ${lv.opens} open(s) on this thread`, lv);
+  const noAfter = ssCopy('no-after-wanted', "    if (typeof wanted === 'function' && !wanted()) return null;\n    this._ensureParsed();", '    this._ensureParsed();', '«still wanted» not asked after the warm');
+  const lvx = noAfter.M ? await leaver(noAfter.M) : null;
+  ok(!!lvx && lvx.leftParsed === true, `RED CONTROL (the door not asking «still wanted» after the warm): the reader whose caller left parsed all the same (${lvx ? lvx.leftParsed : '?'})`, lvx || noAfter.why);
+  // F4 (r2195 (a)): THE DOOR CARRIES THE BULK WORD — a bulk resume's first attach read through the door warms in the BULK line (its own
+  // warm never counts as a person's). RED: the door without the word
+  const bulkDoor = async (M) => { M.jsonlCacheClear(); const C = small(16), l0 = M.warmLineStats(); await readerOf(M, C.id, 'w-bulk').rawAsync({ bulk: true }); const l1 = M.warmLineStats(); M.jsonlCacheClear(); return { turns: l1.turns - l0.turns, bulk: l1.bulkTurns - l0.bulkTurns }; };
+  const bd = await bulkDoor(SS);
+  ok(bd.turns === 1 && bd.bulk === 1, `the door's own warm of a bulk resume's first attach waits in the BULK line (${bd.bulk} bulk turn of ${bd.turns})`, bd);
+  const noWord = ssCopy('door-no-bulk', '    if (id) { try { await warmSessionJsonlAsync(id, this._session.cwd, bulk === true ? { bulk: true } : null); } catch { } }', '    if (id) { try { await warmSessionJsonlAsync(id, this._session.cwd); } catch { } }', 'the door without the bulk word');   // stale-pins: kept — the RED plants the cut before this cure back into a copy
+  const bdx = noWord.M ? await bulkDoor(noWord.M) : null;
+  ok(!!bdx && bdx.turns === 1 && bdx.bulk === 0, `RED CONTROL (the door without the bulk word — the cut before this cure): its warm took a PERSON's turn (${bdx ? bdx.bulk : '?'} bulk)`, bdx || noWord.why);
+  // F5 (r2195 (b)): A HANDED TAIL GOES AT ITS TIME — the census tick (jsonlCacheTrim, the memory census's minute) drops one nobody came
+  // for, counted. RED: no sweep (it stays until newer ones push it out)
+  const sweep = (M) => notAdmitted(M, async () => {
+    const A = small(17), B = small(18);
+    await M.warmSessionJsonlAsync(A.id, CWD); await M.warmSessionJsonlAsync(B.id, CWD);   // B's tail handed, nobody reads it
+    const h0 = M.warmHandoffStats(), t = M.jsonlCacheTrim(Date.now() + 121000), h1 = M.warmHandoffStats();
+    return { holdingBefore: h0.holding, holdingAfter: h1.holding, expired: h1.expired - h0.expired, said: t && t.handoffsExpired };
+  });
+  const sw = await sweep(SS);
+  ok(sw.holdingBefore === 1 && sw.holdingAfter === 0 && sw.expired === 1 && sw.said === 1, `a handed tail nobody came for goes at the census tick past its time (${sw.holdingBefore} → ${sw.holdingAfter} held, ${sw.expired} counted expired)`, sw);
+  const noSweep = ssCopy('no-sweep', '  for (const [hid, h] of [..._warmHandoff]) if (now - h.at > WARM_HANDOFF_MS) {', '  for (const [hid, h] of []) if (now - h.at > WARM_HANDOFF_MS) {', 'no sweep of the handed tails');
+  const swx = noSweep.M ? await sweep(noSweep.M) : null;
+  ok(!!swx && swx.holdingAfter === 1, `RED CONTROL (no sweep): the handed tail is still held after its time (${swx ? swx.holdingAfter : '?'})`, swx || noSweep.why);
+  // F6 (r2195 (e)): a reader fed from a handed tail read from the file's FIRST BYTE says so (fromStart). RED: the cache alone asked
+  const whole = (M) => notAdmitted(M, async () => {
+    const A = small(19), B = small(20);
+    await M.warmSessionJsonlAsync(A.id, CWD); await M.warmSessionJsonlAsync(B.id, CWD);
+    return { fromStart: readerOf(M, B.id, 'w-whole').fromStart };
+  });
+  const wh = await whole(SS);
+  ok(wh.fromStart === true, `a reader fed from a handed tail read from the first byte says «from the start» (${wh.fromStart})`, wh);
+  const cacheOnly = ssCopy('fromstart-cache-only', '(_jsonlCache.get(historySessionId) || _handoffGet(historySessionId))', '_jsonlCache.get(historySessionId)', 'the from-start mark from the cache alone');
+  const whx = cacheOnly.M ? await whole(cacheOnly.M) : null;
+  ok(!!whx && whx.fromStart === false, `RED CONTROL (the from-start mark read from the cache alone): the whole tail said «not from the start» (${whx ? whx.fromStart : '?'})`, whx || cacheOnly.why);
 }
 report();

@@ -341,7 +341,7 @@ console.log('— ⑥ whole records, the version');
   const SS = require(path.join(REPO, 'src/session-store.js')), arr = [{ type: 'user' }];
   const spans = [[{ messages: arr, spanStart: 0 }, arr, true], [{ messages: arr, spanStart: 33554432 }, arr, false], [null, arr, false], [{ messages: [...arr], spanStart: 0 }, arr, false]].map(([e, j, want]) => SS._spanFromStart(e, j) === want);
   ok(spans.every(Boolean), '⑥ «whole» only when the store\'s span reaches the start (r1307): the parse IS the cache entry\'s array and its span starts at byte 0 — a tail read (span past 0), no entry, another array: not whole', spans);
-  ok(/this\._fromStart = spanFromStart\(historySessionId \? _jsonlCache\.get\(historySessionId\) : null, jsonl\);/.test(store) && /get fromStart\(\) \{ this\._ensureParsed\(\); return this\._fromStart === true; \}/.test(store)
+  ok(/this\._fromStart = spanFromStart\(historySessionId \? \(_jsonlCache\.get\(historySessionId\) \|\| _handoffGet\(historySessionId\)\) : null, jsonl\);/.test(store) && /get fromStart\(\) \{ this\._ensureParsed\(\); return this\._fromStart === true; \}/.test(store)
     && /fromStart: sm\.fromStart === true && !session\.host(?:, notLoaded: [^\n]*?)? \}\);/.test(wh) && /\{ session\._historyLoaded = true; session\._normalizer\.recordsFromStart = true; \}/.test(wc),
     '⑥ THE WIRING: the session store says its records reach the transcript\'s first byte (the span the tail reader kept starts at 0), the attach rebuild passes it on, a conversation born here is whole from its birth');
   const v1 = conv({ answers: [DRY(), { error: 'Failed to rewind: No files were restored: 1 file failed (backup missing, or the file could not be updated)' }], cli: '2.1.322' });
