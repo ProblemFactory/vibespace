@@ -97,6 +97,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Opening a folder, a bookmark, a typed path, the folder above or a file is tried once even if that folder just did not answer; pressing again meanwhile says so.
 - A save that meets a folder that does not answer keeps your text and says which file is not saved and what you can do.
 - Closing a code editor, a document window or a terminal's editor pane that holds unsaved text now asks first.
+- In a Task Group with a full Activity log, each new note no longer holds VibeSpace still while older entries are moved to its archive.
 
 ## 2.369.415 — 2026-11-21
 
