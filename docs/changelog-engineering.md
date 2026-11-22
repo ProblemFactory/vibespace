@@ -1103,6 +1103,8 @@ This file is the engineers' record of every release: the lanes, the verification
   - THE LEG IS THE CLASS (test-hub-boot): every road × harness × account kind read from the descriptors' creds (45 children); RED: the mark cut, one name left out.
   - §112 gains the roads.
 
+- ITS SYNC (the coordinator's r1669, a red of the root's whole fast tier: test-temp-rename-census «NO ROW … writeDropped (unsynced)»): the pool report's dropped count and its head's drop (src/agentd/agentd.js writeDropped, dropReportHead) must survive a crash, and their temps were renamed with no sync — after a power loss on the paired machine the name could point at an empty file (a count lost, or the records not yet acked). Each temp is now SYNCED before its rename (a sync that fails fails the write), and the census rows them in the self-synced family.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
