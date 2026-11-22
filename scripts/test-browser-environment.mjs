@@ -11,10 +11,10 @@
 //   ④ THE ONE READER of the kept exit
 //   ⑤ WHAT EACH SETTING IS — told (the hand-over's own object, or null), geolocation, unfollowed, case by case
 //   ⑥ THE SEEDED LAW — 3 seeds × 400 environments × exits; the facts judged printed
-//   ⑦ REDS — sixteen mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
+//   ⑦ REDS — seventeen mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
 //      used raw at a start — the hostile-values leg goes red; the tenth, B-9584 U2c: the stored denial writing the default only; the
 //      eleventh, r1707 (3): the kept values merged with a later launch's value over the first; the twelfth and thirteenth, B-9584 (B):
-//      a wildcard taken as a site, the log carrying the sites; the fourteenth, r2172 (b): a give-back over the person's later block; the fifteenth, r2311 (1): the merge over two held launches as it was; the sixteenth, r2497 (2): only the last earlier stamp kept)
+//      a wildcard taken as a site, the log carrying the sites; the fourteenth, r2172 (b): a give-back over the person's later block; the fifteenth, r2311 (1): the merge over two held launches as it was; the sixteenth, r2497 (2): only the last earlier stamp kept; the seventeenth, r2595: every earlier stamp kept for ever)
 // The runtime decides two facts here: a zone name (its date formatter) and a language tag (Intl.getCanonicalLocales, its ICU data);
 // where the runtime's own spelling is the expected value (a legacy alias, Etc/UTC, a three-letter code), the leg asks the runtime.
 import fs from 'node:fs';
@@ -225,10 +225,17 @@ function legs(M) {
     const d3 = M.geoStoredDenial(held, { stamp: '2999' }), m3 = mg.ok ? M.geoKeptMerge(mg.kept, d3.kept) : null, crash2 = m3 && m3.ok ? M.geoStoredRestore(held, m3.kept) : null;
     const at = (x, k) => x.profile.content_settings.exceptions.geolocation[`https://${k}.example:443,*`];
     const three = (x) => !!x && x.ok && at(x.prefs, 'a').setting === 1 && at(x.prefs, 'a').last_modified === '100' && at(x.prefs, 'b').setting === 2 && at(x.prefs, 'b').last_modified === '1000' && at(x.prefs, 'c').setting === 3 && at(x.prefs, 'c').last_modified === '1001';
-    leg('r2311 (1) law (b) over two held launches: a block the person set while held gives back a BLOCK (b), an «ask» an «ask» (c), a row still ours its allow (a); the kept file carries the person\'s value and stamp, this launch\'s stamp and every earlier one (1999; 999); a crash between a later launch\'s two writes gives back the same, at two launches in a row too (r2497)',
-      d1.ok && d2.ok && mg.ok && mg.changed && J(mg.kept.rows) === J({ 'https://a.example:443,*': 1, 'https://b.example:443,*': 2, 'https://c.example:443,*': 3 }) && mg.kept.stamp === '1999' && J(mg.kept.prevs) === J(['999']) && !!m3 && m3.ok && m3.kept.stamp === '2999' && J(m3.kept.prevs) === J(['999', '1999'])
+    leg('r2311 (1) law (b) over two held launches: a block the person set while held gives back a BLOCK (b), an «ask» an «ask» (c), a row still ours its allow (a); the kept file carries the person\'s value and stamp, this launch\'s stamp and every earlier one (1999; 999); a crash between a later launch\'s two writes gives back the same, at two launches in a row too (r2497); an earlier stamp no row carries is not kept (1999 never reached a row: r2595)',
+      d1.ok && d2.ok && mg.ok && mg.changed && J(mg.kept.rows) === J({ 'https://a.example:443,*': 1, 'https://b.example:443,*': 2, 'https://c.example:443,*': 3 }) && mg.kept.stamp === '1999' && J(mg.kept.prevs) === J(['999']) && !!m3 && m3.ok && m3.kept.stamp === '2999' && J(m3.kept.prevs) === J(['999'])
       && J(mg.kept.stamps) === J({ 'https://a.example:443,*': '100', 'https://b.example:443,*': '1000', 'https://c.example:443,*': '1001' }) && three(back) && three(crash) && three(crash2),
       { kept: mg.ok && mg.kept, kept3: m3 && m3.ok && m3.kept, back: back && back.ok && back.prefs.profile.content_settings.exceptions.geolocation, crash: crash && crash.ok && crash.prefs.profile.content_settings.exceptions.geolocation }); }
+  // r2595: THE EARLIER STAMPS ARE BOUNDED BY THE ROWS — a year of daily held launches, each written: the kept file holds ONE earlier
+  // stamp at most (the launch before, which the rows carry until this launch's write lands), never one a launch
+  { let prefs = { profile: { content_settings: { exceptions: { geolocation: { 'https://a.example:443,*': { setting: 1, last_modified: '100' } } } } } }, kept = null, longest = 0;
+    for (let i = 1; i <= 365; i++) { const d = M.geoStoredDenial(prefs, { stamp: String(1000 + i) }); const m = kept ? M.geoKeptMerge(kept, d.kept) : { ok: true, kept: d.kept }; kept = m.kept; prefs = d.prefs; longest = Math.max(longest, (kept.prevs || []).length); }
+    const back = M.geoStoredRestore(prefs, kept), a = (x) => x.profile.content_settings.exceptions.geolocation['https://a.example:443,*'];
+    leg('r2595 the earlier stamps bounded where a bound loses nothing: 365 held launches, each written — never more than ONE earlier stamp kept (the launch before), and the give-back still gives the person\'s allow back with its own stamp',
+      longest === 1 && J(kept.prevs) === J(['1364']) && kept.stamp === '1365' && back.ok && a(back.prefs).setting === 1 && a(back.prefs).last_modified === '100', { longest, kept: { stamp: kept.stamp, prevs: kept.prevs } }); }
   // r2172 (b)(d): OURS KEPT APART FROM THE PERSON'S — the denial stamps the rows it writes; the give-back restores a row only while it
   // still carries our stamp (a person's later block stays a block; a give-back that half ran never runs again over the person's change);
   // the default only while it still reads our «block»
@@ -320,6 +327,7 @@ const REDS = [
   ['a site matched by a pattern (a wildcard taken as a site)', ["  if (/[*\\s]/.test(t)) return refuse(", "  if (/\\s/.test(t)) return refuse("], '(B) the sites', null],
   ['the log carrying the sites (an origin in a log line)', ["? ` · ${c.sites.length} site${c.sites.length === 1 ? '' : 's'}` : ''}`", "? ` · ${c.sites.join(',')}` : ''}`"], '(B) the sites', null],
   ['a give-back over the person\'s later block (the stamp not read)', ["    if (kept.stamp ? !oursStamp(kept, row.last_modified) : row.setting !== GEO_BLOCK) continue;", "    void 0;"], 'r2172 (b)(d) ours apart', null],
+  ['every earlier stamp kept for ever (the list grows a stamp a held launch)', ['  const prevs = stamped ? earlier.filter((x) => onRows.has(x)) : earlier;', '  const prevs = earlier;'], 'r2595 the earlier stamps bounded', null],
   ['only the last earlier stamp kept (a crash at two held launches in a row loses the person\'s allow)', ['  const earlier = [...(Array.isArray(kept.prevs) ? kept.prevs : []), ...(kept.prev != null ? [kept.prev] : []), ...(stamped && kept.stamp && String(kept.stamp) !== String(found.stamp) ? [kept.stamp] : [])].map(String).filter((x, i, a) => a.indexOf(x) === i);', "  const earlier = (stamped && kept.stamp && String(kept.stamp) !== String(found.stamp) ? [String(kept.stamp)] : []);"], 'r2311 (1) law (b) over two held launches', null],
   ['the merge over two held launches as it was (a kept row keeps its first value, the person\'s later block lost)', ['    const persons = kept.stamp && stamped ? !oursStamp(kept, lm) : setting !== GEO_BLOCK;', '    const persons = false;'], 'r2311 (1) law (b) over two held launches', null],
   ['a later launch\'s value over the first one kept (the merge takes a row still OURS — our own «block» over the person\'s first value)', ['    const persons = kept.stamp && stamped ? !oursStamp(kept, lm) : setting !== GEO_BLOCK;', '    const persons = true;'], 'U2c the kept values merged', null],

@@ -272,7 +272,7 @@ function geoStoredDenial(prefs, { stamp = null } = {}) {
  *  a row added since stays as Chrome keeps it. PURE → { ok, changed, prefs }. */
 /** r2311 + r2497 (2): the stamps that are OURS — the last denial's and EVERY earlier one since the first (`prevs`: a later launch wrote
  *  its kept file, then a crash kept its Preferences from being written — twice in a row too: the rows still carry an earlier stamp of
- *  ours, never the person's). One stamp a held launch (about twenty bytes) until the give-back removes the file. PURE. */
+ *  ours, never the person's). The merge keeps an earlier stamp only while a row still carries it (r2595). PURE. */
 function oursStamp(kept, lm) {
   if (lm == null || !kept) return false;
   const s = String(lm);
@@ -307,15 +307,21 @@ function geoStoredRestore(prefs, kept) {
  *  (it carries one of our stamps — the last denial's or any earlier one), never a denial's over it; a row the PERSON changed since
  *  our last denial (any other stamp; without stamps, anything but «block») takes the person's value and stamp (r2311 must (1): a
  *  block they set while held gives back a block). The default: the person's when it reads anything but our «block». The kept
- *  file carries this launch's stamp and every earlier one (`prevs`, r2497). PURE → { ok, changed, kept }; another shape refused. */
+ *  file carries this launch's stamp and every earlier one a row still carries (`prevs`, r2497; bounded by the rows, r2595). PURE → { ok,
+ *  changed, kept }; another shape refused. */
 function geoKeptMerge(kept, found) {
   if (!kept || typeof kept !== 'object' || Array.isArray(kept) || (kept.rows !== undefined && (!kept.rows || typeof kept.rows !== 'object' || Array.isArray(kept.rows)))) return { ok: false, why: 'the kept values are not of their shape' };
   const stamped = !!(found && found.stamp);
   // r2497 (2): every stamp of ours since the first denial (a crash between the two writes at two held launches in a row loses nothing)
   const earlier = [...(Array.isArray(kept.prevs) ? kept.prevs : []), ...(kept.prev != null ? [kept.prev] : []), ...(stamped && kept.stamp && String(kept.stamp) !== String(found.stamp) ? [kept.stamp] : [])].map(String).filter((x, i, a) => a.indexOf(x) === i);
+  // r2595: BOUNDED WHERE A BOUND LOSES NOTHING — an earlier stamp is kept only while a row still carries it at this launch (a stamp no row
+  // carries can never be matched again: every row this launch writes carries THIS launch's stamp). So the list holds at most the
+  // stamps of launches whose Preferences were never written — in practice none or one — never one a launch for a year of starts.
+  const onRows = new Set(Object.values((found && found.stamps) || {}).filter((x) => x != null).map(String));
+  const prevs = stamped ? earlier.filter((x) => onRows.has(x)) : earlier;
   const out = { default: Object.prototype.hasOwnProperty.call(kept, 'default') ? kept.default : null, rows: { ...(kept.rows || {}) },
-    ...(stamped ? { stamp: found.stamp, ...(earlier.length ? { prevs: earlier } : {}), stamps: { ...(kept.stamps || {}) } }
-      : kept.stamp ? { stamp: kept.stamp, ...(earlier.length ? { prevs: earlier } : {}), stamps: { ...(kept.stamps || {}) } } : {}) };   // r2172: the stamp of THIS launch's denial (the rows carry it now)
+    ...(stamped ? { stamp: found.stamp, ...(prevs.length ? { prevs } : {}), stamps: { ...(kept.stamps || {}) } }
+      : kept.stamp ? { stamp: kept.stamp, ...(prevs.length ? { prevs } : {}), stamps: { ...(kept.stamps || {}) } } : {}) };   // r2172: the stamp of THIS launch's denial (the rows carry it now)
   const fstamps = (found && found.stamps) || {};
   let changed = false;
   for (const [key, setting] of Object.entries((found && found.rows) || {})) {
