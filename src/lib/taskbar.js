@@ -316,22 +316,25 @@ function showHiddenTiles(app, chip) {
 const _tileIconKey = (w) => (w?.backendIconSlot?.children.length ? 'b:' + w.backendIconSlot.children[0].outerHTML : 't:' + (w?._typeIcon || ''));
 // B-6cf9 FOLLOW (the coordinator's r1649; round wc34w0kxj's should): THE STRIP'S TEXT IS PAINTED AT MOST ONCE A FRAME. The first
 // change of a frame paints at once (a rename reads in place the moment it is made, and a press across it keeps its tile); a
-// burst's later changes wait for the next frame, which runs updateTaskbar once more and paints what the strip says THEN — a
-// title that ticks many times a second no longer walks the strip on every call. A frame = the next animation frame, or 100 ms
-// when the page draws none (a hidden page still paints, later).
+// burst's later changes wait for the next frame, whose callback runs the TEXT-ONLY painter (_paintTextLater below — never the
+// whole updateTaskbar) over what the strip says THEN, and refits the strip after it — a title that ticks many times a second no
+// longer walks the strip on every call. A frame = the next animation frame, or 100 ms when the page draws none (a hidden page
+// still paints, later — and the frame request that lost is cancelled: a hidden page keeps every pending one until it is shown).
 let _textPaintedThisFrame = false, _textPaintDue = false;
 // (its one callback is named apart: test-late-focus §4 marks by NAME every function a timer is handed — the group chooser's own
 // keydown helper is a `go`, and a timer's `go` here made that key handler's focus read as late)
-const _nextFrame = (fn) => { let done = false; const _frameDone = () => { if (done) return; done = true; clearTimeout(t); fn(); }; const t = setTimeout(_frameDone, 100); requestAnimationFrame(_frameDone); };
+const _nextFrame = (fn) => { let done = false, raf = 0; const _frameDone = () => { if (done) return; done = true; clearTimeout(t); if (raf) cancelAnimationFrame(raf); fn(); }; const t = setTimeout(_frameDone, 100); raf = requestAnimationFrame(_frameDone); };
 function _textPaintNow(app) {
   if (!_textPaintedThisFrame) { _textPaintedThisFrame = true; _nextFrame(() => { _textPaintedThisFrame = false; }); return true; }
   if (!_textPaintDue) { _textPaintDue = true; _nextFrame(() => { _textPaintDue = false; _paintTextLater(app); }); }
   return false;
 }
 // the burst's later paint, on its frame: the TEXT ONLY, painted in place when the strip's structure is still the one drawn (a
-// structure change runs its own updateTaskbar, which rebuilds). It reaches no builder and no other road: the late-focus census
+// structure change runs its own updateTaskbar, which rebuilds), then REFITS the strip (a title that changes a tile's width moves
+// the «+N» chip's count and list — round wvsbmpzjq's should). It reaches no tile or group builder: the late-focus census
 // (test-late-focus §4) follows every call a frame callback makes within this file, and a rebuild's builders lead to the group
-// chooser's keyboard focus
+// chooser's keyboard focus. What it does reach moves no focus: the group stack icon's refill (_buildStackIcon) and the fit
+// (fitTaskbarStrip, a frame callback's road already)
 function _paintTextLater(app) {
   const container = document.getElementById('taskbar-items');
   if (!container) return;
@@ -340,6 +343,7 @@ function _paintTextLater(app) {
   if (container._structKey !== structure || container._textKey === text || !_textPaintNow(app)) return;
   container._textKey = text;
   _paintTextInPlace(app, container, entries);
+  fitTaskbarStrip(app);   // the refit (a tile's width follows its title) — its own comment keeps the suite's mutant anchor (updateTaskbar's last line) one of a kind
 }
 function _paintTextInPlace(app, container, entries) {
   const byId = new Map(entries.map((e) => [e.id, e]));
