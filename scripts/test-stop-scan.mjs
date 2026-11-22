@@ -23,7 +23,10 @@ const scanOf = (src) => {
   if (a < 0 || b < a || !src.slice(a, b).includes('function escapedOf()')) throw new Error('ANCHOR GONE: the wrapper\'s scan (keptAncestors … escapedOf … drainGroup) — move this suite with it');
   return src.slice(a, b);
 };
-const build = (src) => new Function('fs', 'statOf', 'MARK', 'MARK_RUN', 'stamp', 'process', 'keptTest', 'keptOutHere', 'Date', scanOf(src) + '\nreturn escapedOf;');
+/** B-d8f4 (主开发 r2215): the scan reads the shipped twin's ONE rule, envOf (the engine's membersOf reads the same text) — taken from the
+ *  same source as the scan and run over the same placed fs; RED by name if the twin moved */
+const envOfText = (src) => { const a = src.indexOf('function envOf(root, pid, rest) {'), b = a < 0 ? -1 : src.indexOf('\n// ── SHIPPED TWIN (B-c134) END ──', a); if (a < 0 || b < a) throw new Error('ANCHOR GONE: the twin\'s envOf (B-d8f4, r2215) — move this suite with it'); return src.slice(a, b); };
+const build = (src) => new Function('fs', 'statOf', 'MARK', 'MARK_RUN', 'stamp', 'process', 'keptTest', 'keptOutHere', 'Date', envOfText(src) + '\n' + scanOf(src) + '\nreturn escapedOf;');
 const WPID = 4000, START = 1000, MARK = 'VIBESPACE_JOB_MARK=jb-5ca0001', MARK_RUN = 'VIBESPACE_JOB_RUN=7';
 /** a /proc/<pid>/stat as the wrapper splits it after «) »: [state, ppid, pgrp, …, starttime at 19] */
 const statRow = (state, pgrp, start) => { const a = Array(22).fill('0'); a[0] = state; a[1] = '1'; a[2] = String(pgrp); a[19] = String(start); return a; };
@@ -86,7 +89,7 @@ try {
     const rows = [{ pid: 6001, state: 'D', pgrp: 6001, start: START + 5, environ: 'BLOCK' }, { pid: 6002, state: 'S', pgrp: 6002, start: START + 5, environ: env(true) }];
     const s = scan(WRAP, rows);
     okP(s.blocked.length === 0 && !s.reads.includes(6001) && s.out.some((r) => r.pid === 6002), 'a D-state process is skipped before its environ is read (no wait on its memory map) — the scan goes on to the next and finds it', { blocked: s.blocked, read: s.reads, found: s.out.map((r) => r.pid) });
-    const red = scan(anchored(WRAP, "r[0] === 'Z' || r[0] === 'D' ||", "r[0] === 'Z' ||", 'red-reads-d'), rows);
+    const red = scan(anchored(WRAP, "  if (rest[0] === 'D') return { unread: 'D' };\n", '', 'red-reads-d'), rows);   // r2215: the D skip's home is the twin's envOf now
     okP(red.blocked.includes(6001), 'RED: no D skip — the scan reads the D-state process\'s environ (in life: the stop waits on its memory map)', { blocked: red.blocked });
   }
 } catch (e) {

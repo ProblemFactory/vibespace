@@ -193,14 +193,16 @@ function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBE
   let scanned = 0, unreadable = 0, others = 0, cut = false;
   const ownerOf = (e) => { try { const m = /^Uid:\s+(\d+)/m.exec(fs.readFileSync(`${root}/${e}/status`, 'utf8')); return m ? Number(m[1]) : -1; } catch { return -1; } };
   const unread = (e) => { unreadable++; const u = ownerOf(e); if (u >= 0 && u !== me) others++; };
-  const check = (e) => {
-    scanned++;
+  const again = [];   // B-d8f4 (主开发 r2215): read unread for a moment (uninterruptible sleep, an exec's empty window) — read ONCE more at the end
+  const check = (e, second = false) => {
+    if (!second) scanned++;
     const r = statRest(e, opts);
     if (!r || r[0] === 'Z' || Number(r[19]) < since) return;
     let hit = !!pgid && Number(r[2]) === Number(pgid);
     if (!hit && mark) {
-      if (r[0] === 'D') unread(e);
-      else { try { hit = fs.readFileSync(`${root}/${e}/environ`, 'latin1').split('\0').includes(mark); } catch (err) { if (!err || (err.code !== 'ENOENT' && err.code !== 'ESRCH')) unread(e); } } // gone meanwhile: nothing unread
+      const v = envOf(root, e, r);   // the shipped twin's ONE rule (the wrapper's escapee scan reads the same text)
+      if (v.env) hit = v.env.includes(mark);
+      else if (v.unread) { if (v.final || second) unread(e); else again.push(e); }   // an access refusal is final; unread twice is counted
     }
     if (hit) out.push({ pid: e, starttime: Number(r[19]), bootId });
   };
@@ -220,6 +222,9 @@ function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBE
     if (rest >= maxRows || Date.now() - t1 > maxMs) { cut = true; break; }
     rest++; check(e);
   }
+  // B-d8f4 (主开发 r2215): THE SECOND READ — at the walk's end, INSIDE its own bound, of ONLY those read unread for a moment; what it then
+  // reads decides (the mark ⇒ a member, its start time read again; none ⇒ not counted); still unread ⇒ counted. No third read, no wait
+  for (const e of again) { if (Date.now() - t1 > maxMs) unread(e); else check(e, true); }
   out.scan = { scanned, total: pids.length, unreadable, others, cut };
   return out;
 }
@@ -304,6 +309,25 @@ function hubChain(hub, { procRoot = '/proc', maxHops = 64, stop = 0, stopStart =
     p = Number(r[1]);
   }
   return { pids, reached: false };
+}
+/** B-d8f4 (主开发 r2215): ONE ANSWER to «what environment does this process carry?» — proc-identity's membersOf (the engine's walks)
+ *  and the job wrapper's escapee scan read THIS text. `rest` = its /proc/<pid>/stat after the comm (the state first, the flags 7th).
+ *  → {env: [...]} | {none: why} | {unread: why, final?}. A zombie or a kernel thread (its flags: PF_KTHREAD) carries none. A process in
+ *  uninterruptible sleep is NEVER read (an environ read takes its memory map's lock): unread. An environ that reads EMPTY while the
+ *  command line reads empty too is a process inside its exec (the new image's tables not yet written — Linux reads both as nothing,
+ *  no error): unread; an empty environ WITH a command line was started with none: it carries no mark. A read refused (another user's:
+ *  EACCES / EPERM) is unread for good (`final`); any other failed read is unread; a gone one carries none */
+function envOf(root, pid, rest) {
+  if (!rest || rest[0] === 'Z' || (Number(rest[6]) & 0x00200000)) return { none: 'no process to carry one' };
+  if (rest[0] === 'D') return { unread: 'D' };
+  const read = (name) => { try { return { text: fs.readFileSync(`${root}/${pid}/${name}`, 'latin1') }; } catch (err) { return { err: err || {} }; } };
+  const gone = (r) => !!r.err && (r.err.code === 'ENOENT' || r.err.code === 'ESRCH');
+  const env = read('environ');
+  if (env.err) return gone(env) ? { none: 'gone' } : { unread: env.err.code || 'error', final: env.err.code === 'EACCES' || env.err.code === 'EPERM' };
+  if (env.text.length) return { env: env.text.split('\0') };
+  const cmd = read('cmdline');
+  if (cmd.err) return gone(cmd) ? { none: 'gone' } : { unread: cmd.err.code || 'error' };
+  return cmd.text.length ? { env: [] } : { unread: 'exec' };
 }
 // ── SHIPPED TWIN (B-c134) END ──
 /** WHAT NO STOP OWNS (B-c134 cure, MUST A — the kill law: a stop never reaches the hub's own subtree). Each road that HOLDS a

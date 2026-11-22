@@ -781,6 +781,25 @@ function hubChain(hub, { procRoot = '/proc', maxHops = 64, stop = 0, stopStart =
   }
   return { pids, reached: false };
 }
+/** B-d8f4 (主开发 r2215): ONE ANSWER to «what environment does this process carry?» — proc-identity's membersOf (the engine's walks)
+ *  and the job wrapper's escapee scan read THIS text. `rest` = its /proc/<pid>/stat after the comm (the state first, the flags 7th).
+ *  → {env: [...]} | {none: why} | {unread: why, final?}. A zombie or a kernel thread (its flags: PF_KTHREAD) carries none. A process in
+ *  uninterruptible sleep is NEVER read (an environ read takes its memory map's lock): unread. An environ that reads EMPTY while the
+ *  command line reads empty too is a process inside its exec (the new image's tables not yet written — Linux reads both as nothing,
+ *  no error): unread; an empty environ WITH a command line was started with none: it carries no mark. A read refused (another user's:
+ *  EACCES / EPERM) is unread for good (`final`); any other failed read is unread; a gone one carries none */
+function envOf(root, pid, rest) {
+  if (!rest || rest[0] === 'Z' || (Number(rest[6]) & 0x00200000)) return { none: 'no process to carry one' };
+  if (rest[0] === 'D') return { unread: 'D' };
+  const read = (name) => { try { return { text: fs.readFileSync(`${root}/${pid}/${name}`, 'latin1') }; } catch (err) { return { err: err || {} }; } };
+  const gone = (r) => !!r.err && (r.err.code === 'ENOENT' || r.err.code === 'ESRCH');
+  const env = read('environ');
+  if (env.err) return gone(env) ? { none: 'gone' } : { unread: env.err.code || 'error', final: env.err.code === 'EACCES' || env.err.code === 'EPERM' };
+  if (env.text.length) return { env: env.text.split('\0') };
+  const cmd = read('cmdline');
+  if (cmd.err) return gone(cmd) ? { none: 'gone' } : { unread: cmd.err.code || 'error' };
+  return cmd.text.length ? { env: [] } : { unread: 'exec' };
+}
 // ── SHIPPED TWIN (B-c134) END ──
 // B-c134 A STOP ENDS THE WHOLE TREE IT STARTED: the tree under this wrapper, read at the stop BEFORE its first signal — the members
 // outside our group (setsid, the timeout program, a `systemd-run --scope … env -i`) hear the stop from us through the ONE table,
@@ -1064,15 +1083,25 @@ function escapedOf() { // started after us, outside our group, carrying the job'
   let ents = [];
   if (!MARK) return out;
   try { ents = fs.readdirSync('/proc').filter((e) => /^\d+$/.test(e)).sort((a, b) => Number(b) - Number(a)); } catch (err) { out.none = (err && err.code) || 'error'; return out; }   // newest pid first: inside the bound on a busy machine; B-d8f4 (10): a listing that failed — said by the stop, with its errno
-  const t0 = Date.now();
+  const t0 = Date.now(), again = [];
+  // B-d8f4 (主开发 r2215): the engine's rule by ONE text (envOf, the shipped twin) — a process in uninterruptible sleep never read, an exec's
+  // empty window unread, a kernel thread or a start with no environment none; what read unread for a moment is read ONCE more at the
+  // end, inside the bound; still unread is COUNTED (`out.unread`) and said — never silently «not carrying». A refusal (another user's
+  // process: EACCES) is skipped as before — not this job's to judge, and on a shared machine every stop would say it
+  const look = (e, r, second) => {
+    const v = envOf('/proc', e, r);
+    if (v.env) { if (v.env.includes(MARK)) out.push([Number(e), Number(r[19]), !!MARK_RUN && v.env.includes(MARK_RUN)]); return; }
+    if (v.unread && !v.final) { if (second) out.unread = (out.unread || 0) + 1; else again.push(e); }
+  };
   for (const e of ents) {
     if (!/^\d+$/.test(e) || Number(e) === process.pid) continue;
     if (Date.now() - t0 > 250) { out.cut = true; break; }   // B-7ca1 (its read): bounded — what a cut scan did not read is neither stopped nor counted (the engine's own bounded scan backs a force)
     const r = statOf(e);
-    if (!r || r[0] === 'Z' || r[0] === 'D' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime) continue;   // D: an environ read takes its memory map's lock
+    if (!r || r[0] === 'Z' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime) continue;
     if ((kept && kept(e)) || anc.has(Number(e))) continue;
-    try { const env = fs.readFileSync(`/proc/${e}/environ`, 'latin1').split('\0'); if (env.includes(MARK)) out.push([Number(e), Number(r[19]), !!MARK_RUN && env.includes(MARK_RUN)]); } catch { }
+    look(e, r, false);
   }
+  for (const e of again) { if (Date.now() - t0 > 250) { out.unread = (out.unread || 0) + 1; continue; } const r = statOf(e); if (r && r[0] !== 'Z' && Number(r[19]) >= stamp.starttime) look(e, r, true); }
   return out;
 }
 async function drainGroup() {
@@ -1081,8 +1110,9 @@ async function drainGroup() {
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
   // B-7ca1 (its round's should 5): a cut scan is said, as the engine's; B-d8f4 (10, its read's S2): a listing that failed too — for EVERY scan of
   // this drain (the late stop's rescan, the kill pass), each said once
-  let saidCut = false, saidNone = false;
+  let saidCut = false, saidNone = false, saidUnread = false;
   const sayScan = (o) => {
+    if (o && o.unread && !saidUnread) { saidUnread = true; try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: its scan for what left its group could not read ${o.unread} process${o.unread === 1 ? '' : 'es'} twice (in uninterruptible sleep, or inside an exec) — what they carry is unknown: they may be left running\n`)); } catch { } }   // B-d8f4 (r2215): said, never silently «not carrying»
     if (o && o.cut && !saidCut) { saidCut = true; try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: its scan for what left its group read only part of the processes (past 250 ms) — what it did not read may be left running\n`)); } catch { } }
     if (o && o.none && stopping && !saidNone) { saidNone = true; const why = o.none === 'ENOENT' ? 'this machine has no process file system (/proc)' : `it could not list the processes in /proc (${o.none})`; try { fs.writeSync(logOpen(), Buffer.from(`[job-wrapper] stop: ${why} — what left its group cannot be found, and may be left running\n`)); } catch { } }
   };

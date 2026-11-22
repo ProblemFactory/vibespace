@@ -205,6 +205,57 @@ try {
     const tx = tellTo(noView, 'tell-view-red');
     okP(tx.n === 2 && tx.to.includes('conv-mw-other'), 'CONTROL (the view check cut, in a copy): the presser that cannot view the job IS told — RED', tx);
   }
+  console.log('§8 THE UNREAD MEMBER (主开发 r2215): a living process whose environment AND command line read empty is inside its exec — UNREAD, read once more, counted');
+  {
+    const PISRC = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8');
+    const root2 = path.join(T, 'proc2'); fs.mkdirSync(path.join(root2, 'sys/kernel/random'), { recursive: true }); fs.writeFileSync(path.join(root2, 'sys/kernel/random/boot_id'), 'placed-boot\n');
+    const MARK = 'VIBESPACE_JOB_RUN=jb-9a1cun:1700000000000';
+    const put2 = (pid, { state = 'S', flags = 0, start = 2000, env = '', cmd = '' }) => { const d = path.join(root2, String(pid)); fs.mkdirSync(d, { recursive: true }); const f = [state, '1', String(pid), ...Array(16).fill('0'), String(start), '0', '0']; f[6] = String(flags); fs.writeFileSync(path.join(d, 'stat'), `${pid} (x) ${f.join(' ')}`); fs.writeFileSync(path.join(d, 'environ'), env); fs.writeFileSync(path.join(d, 'cmdline'), cmd); };
+    put2(7201, {});                                                               // inside its exec: environ AND cmdline empty ⇒ unread
+    put2(7202, { cmd: 'sleep\0' + '30\0' });                                      // started with no environment: carries no mark
+    put2(7203, { flags: 0x00200000 });                                            // a kernel thread: carries none
+    put2(7204, { env: ['PATH=/usr/bin', MARK].join('\0'), cmd: 'sleep\0' });     // a member
+    put2(7205, { state: 'D', env: MARK, cmd: 'x\0' });                            // uninterruptible sleep: never read ⇒ unread
+    const pids = (rows) => rows.map((r) => Number(r.pid)).sort((a, b) => a - b);
+    const m = PI.membersOf({ mark: MARK, since: 1000 }, { procRoot: root2 });
+    okP(JSON.stringify(pids(m)) === '[7204]' && m.scan.unreadable === 2 && m.scan.scanned === 5, 'the empty environ AND command line (inside its exec) is UNREAD and counted, as the stuck one is; an empty environ WITH a command line and a kernel thread carry no mark — never «unread»', { rows: pids(m), scan: m.scan });
+    const oldRule = MC.load('src/proc-identity.js', anchored(PISRC, "return cmd.text.length ? { env: [] } : { unread: 'exec' };", "return { env: [] };   /* MUTANT: the release's «not carrying» */", 'red-empty-not-carrying'), 'red-empty-not-carrying');
+    const mx = oldRule.membersOf({ mark: MARK, since: 1000 }, { procRoot: root2 });
+    okP(mx.scan.unreadable === 1, 'RED: the release\'s rule — the empty environ read as «not carrying», UNCOUNTED (only the stuck one counted)', { scan: mx.scan });
+    // THE WRAPPER's TWIN: the job wrapper's escapee scan — its OWN text, over the same placed table — answers what membersOf answers
+    const WT = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8');
+    const cutOut = (s, a, b) => { const i = s.indexOf(a), j = i < 0 ? -1 : s.indexOf(b, i); return i >= 0 && j > i ? s.slice(i, j) : null; };
+    const escText = cutOut(WT, 'function escapedOf() {', '\nasync function drainGroup() {'), envText = cutOut(WT, 'function envOf(root, pid, rest) {', '\n// ── SHIPPED TWIN (B-c134) END ──');
+    const pfs = { readdirSync: (p, ...a) => fs.readdirSync(String(p).replace(/^\/proc/, root2), ...a), readFileSync: (p, ...a) => fs.readFileSync(String(p).replace(/^\/proc/, root2), ...a) };
+    const statOfP = (pid) => { try { const s = pfs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
+    const wrapScan = (envSrc) => new Function('fs', 'statOf', 'envOf', 'keptTest', 'keptAncestors', 'MARK', 'MARK_RUN', 'stamp', `return ${escText}`)(pfs, statOfP, new Function('fs', `return ${envSrc}`)(pfs), () => null, () => new Set(), MARK, '', { starttime: 1000 })();   // eslint-disable-line no-new-func
+    if (!escText || !envText) ok(false, 'ANCHOR (data/bin/job-wrapper.js): escapedOf / envOf not found — the parity leg reads nothing');
+    else {
+      const w = wrapScan(envText);
+      okP(JSON.stringify(w.map((x) => x[0]).sort((a, b) => a - b)) === JSON.stringify(pids(m)) && (w.unread || 0) === m.scan.unreadable, 'THE WRAPPER\'s TWIN: the job wrapper\'s escapee scan, ITS OWN TEXT over the same placed table, answers what membersOf answers — the same members, the same unread (one rule: the shipped twin, pinned byte for byte by test-stop-tree §3b)', { wrapper: w.map((x) => x[0]), unread: w.unread || 0 });
+      const wx = wrapScan(envText.replace("return cmd.text.length ? { env: [] } : { unread: 'exec' };", 'return { env: [] };'));
+      okP((wx.unread || 0) !== m.scan.unreadable, 'RED: a wrapper rule that drifted (the empty environ «not carrying») answers another count than membersOf — the parity leg sees it', { unread: wx.unread || 0, membersOf: m.scan.unreadable });
+    }
+    // THE SECOND READ decides: one read inside its exec at the first look, carrying the mark at the second (at the walk's end, inside its bound)
+    put2(7206, {});
+    const at6 = `${root2}/7206/environ`, rf = fs.readFileSync; let k6 = 0;
+    const twice = (Mod) => { k6 = 0; fs.readFileSync = function (p, ...a) { if (p === at6) { k6++; return k6 === 1 ? '' : ['PATH=/usr/bin', MARK].join('\0'); } return rf.call(fs, p, ...a); }; try { return Mod.membersOf({ mark: MARK, since: 1000 }, { procRoot: root2 }); } finally { fs.readFileSync = rf; } };
+    const m2 = twice(PI);
+    okP(JSON.stringify(pids(m2)) === '[7204,7206]' && k6 === 2 && m2.scan.unreadable === 2, 'THE SECOND READ decides: read inside its exec at the first look, it carries the mark at the walk\'s end — a MEMBER (its start time read again), never counted unread; no third read', { rows: pids(m2), reads: k6, scan: m2.scan });
+    const noSecond = MC.load('src/proc-identity.js', anchored(PISRC, '  for (const e of again) { if (Date.now() - t1 > maxMs) unread(e); else check(e, true); }\n', '  /* MUTANT: no second read */\n', 'red-no-second-read'), 'red-no-second-read');
+    const m2x = twice(noSecond);
+    okP(!pids(m2x).includes(7206) && k6 === 1, 'RED: no second read — the member read inside its exec is missed (and the unread go uncounted)', { rows: pids(m2x), reads: k6, scan: m2x.scan });
+  }
+
+  console.log('§9 a still-unread member is SAID by the forced end too, in the clear\'s words');
+  {
+    const UNR = { started: true, code: 0, signal: null, stdout: JSON.stringify({ rows: [], scan: { scanned: 9, total: 9, unreadable: 2, others: 1, cut: false } }) + '\n', stderr: '' };
+    const u = await forced(realJM, 'unread-said', UNR);
+    okP(/its mark searched in 9 processes; unreadable: 1 of other users, 1 of ours, not dumpable: what carries its mark there may be left/.test(u.said), 'the forced end says what its walk could not read — counted and said, as the clear says it', { said: u.said });
+    const mute = MC.load('src/jobs.js', anchored(JSRC, '      + (mscan.unreadable > 0 ? ', '      + (false && mscan.unreadable > 0 ? ', 'red-unread-unsaid'), 'red-unread-unsaid');
+    const ux = await forced(mute, 'unread-said-red', UNR);
+    okP(!/unreadable/.test(ux.said), 'RED: the words cut — the forced end silent about what it could not read (the release\'s)', { said: ux.said });
+  }
 } catch (e) {
   fail++; console.error('  ✗ the suite threw: ' + ((e && e.stack) || e));
 } finally {
