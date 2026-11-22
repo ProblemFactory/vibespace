@@ -303,24 +303,24 @@ console.log('— controls (patched copies) —');
   const rb = runTable(M.load('src/dial-health.js', mB, 'nolive')).filter(([, got, want]) => got !== want);
   ok(rb.length >= 2, `CONTROL (b): without the connected rule a disconnected device's re-pair reads as a second agent — ${rb.length} rows red`, rb);
   const wsrc = fs.readFileSync(path.join(REPO, 'src/server/dial-health-watch.js'), 'utf8');
-  const mC = wsrc.replace('      if (!rec) {\n', '      if (true) {\n');
+  const mC = editAnchor(wsrc, '      if (!rec) {\n', '      if (true) {\n', "src/server/dial-health-watch.js");
   ok(mC !== wsrc, '(c) the patch applies');
   const C = world(M.load('src/server/dial-health-watch.js', mC, 'nodedupe')); const c1 = C.mk();
   c1.observe(macHost(C), { connected: true }); C.tick(30e3);
   C.todos.setStatus(C.open()[0].id, 'dismissed', 'user'); C.mk().observe(macHost(C), { connected: true });
   ok(C.open().length === 1, 'CONTROL (c): without the ledger rule the next boot files it again over the owner\'s dismissal — FY-8 goes red');
-  const mD = wsrc.replace('    if (!DH.logDue(lastLogAt.get(hostId), t)) return false;\n', '');
+  const mD = editAnchor(wsrc, '    if (!DH.logDue(lastLogAt.get(hostId), t)) return false;\n', '', "src/server/dial-health-watch.js");
   ok(mD !== wsrc, '(d) the patch applies');
   const D = world(M.load('src/server/dial-health-watch.js', mD, 'nolog')).mk();
   let nD = 0; for (let i = 0; i < 41; i++) if (D.shouldLog('h', { kind: 'second-dialer-stale-token' })) nD++;
   ok(nD === 41, `CONTROL (d): without the 10-min rule the journal says it at every knock (${nD} lines) — LOG-1 red`);
   // lane mac-repair-retires-stale: (e) the recipe as it was — the launch item only, no kill line ⇒ ROW-1 red; (f) no live
   // install on the row ⇒ ROW-1b red
-  const mE = src.replace(" 'kill $(cat ~/.vibespace/device@<x>/state/agentd.lock)'],\n  linux:", "],\n  linux:");
+  const mE = editAnchor(src, " 'kill $(cat ~/.vibespace/device@<x>/state/agentd.lock)'],\n  linux:", "],\n  linux:", "src/dial-health.js");
   ok(mE !== src, '(e) the patch applies');
   const E = rowsOf(M.load('src/dial-health.js', mE, 'nokill'));
   ok(E.mac && !E.mac.recipe.includes(KILL), 'CONTROL (e): a darwin recipe without the kill line (bootout only — the detached agent keeps dialing) ⇒ ROW-1 red', E.mac && E.mac.recipe);
-  const mF = src.replace('  const live = liveInstallOf(d.mintedBase);', '  const live = null;');
+  const mF = editAnchor(src, '  const live = liveInstallOf(d.mintedBase);', '  const live = null;', "src/dial-health.js");
   ok(mF !== src, '(f) the patch applies');
   const F = rowsOf(M.load('src/dial-health.js', mF, 'nolivekey'));
   ok(F.macLive && F.macLive.live === null && !F.macLive.recipe.includes('grep -vxF'), 'CONTROL (f): a row that does not name the live install lists every install, the live one too ⇒ ROW-1b red', F.macLive);

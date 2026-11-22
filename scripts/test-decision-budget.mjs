@@ -39,6 +39,15 @@ const DE = require(path.join(REPO, 'src/server/decision-engine.js'));
 const M = require(path.join(REPO, 'src/decision-model.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() { }, warn() { }, error() { } };
 const ROOT = scratch('decision-budget');
 // lane lg-store-writes (B-0248 U1): the engine's memo is the STORE WRITER's (paced) — its owed writes land before the scratch
@@ -162,7 +171,7 @@ console.log('⑦ RED CONTROLS — the old shapes in scratch copies');
   const engSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const a1 = '    open.set(id, { use, usd: estUsd });\n';
   ok(engSrc.split(a1).length === 2, 'ANCHOR: the reservation is written once');
-  const NoReserve = MUT.load('src/server/decision-engine.js', engSrc.replace(a1, '\n'), 'no-reserve');
+  const NoReserve = MUT.load('src/server/decision-engine.js', editAnchor(engSrc, a1, '\n', "src/server/decision-engine.js"), 'no-reserve');
   const w = world('ctl-race', { Engine: NoReserve, cents: roomForOne, hold: true, answer: () => ({ status: 200, body: okBody({ input_tokens: EST }) }) });
   const all = Array.from({ length: 6 }, () => w.judge());
   await new Promise((r) => setImmediate(r));
@@ -170,7 +179,7 @@ console.log('⑦ RED CONTROLS — the old shapes in scratch copies');
   ok(w.fetches === 6, `CONTROL: read-then-write (no reservation) ⇒ ${w.fetches} fetches — leg ① would be red`);
   const a2 = 'const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: M.PRICE_PER_MTOK_USD[cred.provider], failed });';
   ok(engSrc.split(a2).length === 2, 'ANCHOR: the settle line');
-  const Est = MUT.load('src/server/decision-engine.js', engSrc.replace(a2, 'const usd = estUsd;'), 'settle-estimate');
+  const Est = MUT.load('src/server/decision-engine.js', editAnchor(engSrc, a2, 'const usd = estUsd;', "src/server/decision-engine.js"), 'settle-estimate');
   const w2 = world('ctl-cost', { Engine: Est, provider: 'openrouter', answer: (n, b) => ({ status: 200, body: { model: b.model, answers: { q1: { type: 'noul', noul: 0.2 } }, usage: { input_tokens: 40, cost: 3 } } }) });
   await w2.judge(); const r2 = await w2.judge();
   ok(r2.ok && w2.fetches === 2, 'CONTROL: settled at the estimate (the recorded cost ignored) ⇒ the 2nd call flies — leg ② would be red');
@@ -320,7 +329,7 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   const tmSrc = fs.readFileSync(path.join(REPO, 'src/server/text-model-client.js'), 'utf8');
   const aT = '    await ledger.settle(hold, use, u, usd, est);';
   ok(tmSrc.split(aT).length === 2, 'ANCHOR: the text-model client awaits its settle, once');
-  const TMno = mutantCopies('decision-budget-tm', REPO).load('src/server/text-model-client.js', tmSrc.replace(aT, '    ledger.settle(hold, use, u, usd, est);'), 'no-await');
+  const TMno = mutantCopies('decision-budget-tm', REPO).load('src/server/text-model-client.js', editAnchor(tmSrc, aT, '    ledger.settle(hold, use, u, usd, est);', "src/server/text-model-client.js"), 'no-await');
   const t2 = await tmLeg(TMno, 'red');
   ok(!t2.waited && t2.ok, 'CONTROL: the settle not awaited ⇒ the drafter answers while its counter is still owed — the check above would be red', t2);
   // RED CONTROL: the change removed — the writes made on the main thread at the change (the old writeJsonAtomic shape)
@@ -328,7 +337,7 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   const a3 = "  const W = () => writer || require('../store-writer.js').storeWriter();\n";
   ok(engSrc.split(a3).length === 2, 'ANCHOR: the engine\'s one writer line');
   const syncShim = "  const W = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce(), { mode: 0o600 }), durable: async () => true, whyNotDurable: () => null, pending: () => false, flushSync: () => ({ written: [], left: [] }) });\n";
-  const Sync = mutantCopies('decision-budget-sw', REPO).load('src/server/decision-engine.js', engSrc.replace(a3, syncShim), 'sync-writes');
+  const Sync = mutantCopies('decision-budget-sw', REPO).load('src/server/decision-engine.js', editAnchor(engSrc, a3, syncShim, "src/server/decision-engine.js"), 'sync-writes');
   const b = mkW(Sync, 'red');
   const rb = await b.w.judge({ memo: { id: 'sw-red', rule: 'r' } });
   const bDisk = [b.F.usage, b.F.memo].filter((f) => fs.existsSync(f)).map((f) => path.basename(f));

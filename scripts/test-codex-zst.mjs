@@ -1862,7 +1862,7 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   const guard = "  if (hasProcfs(procRoot)) return '';   // B-f64b: gone — never a ps per exited pid\n";
   if (!ciSrc.includes(guard)) throw new Error('the anchor of the control «B-f64b: the ps fallthrough» is not in the source');
   const MCi = mutantCopies('codex-zst-f64b', REPO);
-  const c0 = countRun(MCi.load('src/cli-identity.js', ciSrc.replace(guard, ''), 'ps-per-gone-pid'));
+  const c0 = countRun(MCi.load('src/cli-identity.js', editAnchor(ciSrc, guard, '', "src/cli-identity.js"), 'ps-per-gone-pid'));
   ok(c0.execs >= 25, 'CONTROL (B-f64b): the base\'s fallthrough runs one ps per gone pid (RED for the leg above)', { execs: c0.execs });
   // (b) THE WALK NEVER RUNS ON THE MAIN THREAD (the read's must, 09:5xZ): the sync listing reads the kept answer, and a
   // worker that cannot answer (the pool down; the op inline on the main thread) answers null = NOT KNOWN — counted as
@@ -1914,7 +1914,7 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   const twSrc = fs.readFileSync(path.join(REPO, 'src/transcript-worker.js'), 'utf8');
   const twCut = "      if (isMainThread) return { result: null };\n      const { listOpenCodexRolloutPaths, codexThreadIdOf } = require('./discovery-facts');";
   if (!twSrc.includes(twCut)) throw new Error('the anchor of the control «B-f64b: the op\'s guard» is not in the source');
-  const TW0 = MCi.load('src/transcript-worker.js', twSrc.replace(twCut, "      const { listOpenCodexRolloutPaths, codexThreadIdOf } = require('./discovery-facts');"), 'op-no-guard');
+  const TW0 = MCi.load('src/transcript-worker.js', editAnchor(twSrc, twCut, "      const { listOpenCodexRolloutPaths, codexThreadIdOf } = require('./discovery-facts');", "src/transcript-worker.js"), 'op-no-guard');
   const op0 = procWalks(() => TW0.runOp('codexOpenThreads', {}));
   ok(op0.n >= 1, 'CONTROL (B-f64b): the op without its guard walks /proc on the main thread (RED for the leg above)', { n: op0.n });
 }
@@ -1941,7 +1941,7 @@ console.log('⑧ the zst cache and the ssh control folder are judged before use 
     const awayAfterNew = fs.readdirSync(away).length;
     ok(cxSrc.includes(CXA) && !!err && err.code === 'EZSTCACHE' && err.message.includes(path.join(T, `vibespace-zst-${uid}`)) && /SYMLINK/.test(err.message) && /the way out/.test(err.message) && awayAfterNew === 0,
       `B-3767 unit 2: a link at the zst cache's per-user name is refused by name with the way out, and no twin is written through it (${err ? err.code + ': ' + err.message.slice(0, 160) : 'no error'}; ${awayAfterNew} file(s) behind the link)`);
-    const OLD = M.load('src/adapters/codex.js', cxSrc.replace(CXA, '  const v = { ok: true }; try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { }\n'), 'old');
+    const OLD = M.load('src/adapters/codex.js', editAnchor(cxSrc, CXA, '  const v = { ok: true }; try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { }\n', "src/adapters/codex.js"), 'old');
     let oldTwin = null; try { oldTwin = OLD.plainJsonlPath(zstPath); } catch { }
     ok(!!oldTwin && fs.realpathSync(oldTwin).startsWith(fs.realpathSync(away) + '/'), `CONTROL B-3767 unit 2: the release's mkdir-in-a-catch wrote the twin through the planted link (red): ${oldTwin}`);
     for (const f of fs.readdirSync(away)) fs.rmSync(path.join(away, f), { force: true });
@@ -1966,7 +1966,7 @@ console.log('⑧ the zst cache and the ssh control folder are judged before use 
       `B-3767 unit 2: a link at the ssh control folder's name turns connection sharing OFF (no ControlPath into it), said once with the path and the way out; once the planted name is gone sharing comes back by itself (no restart, no second warning); a private folder keeps it (${JSON.stringify({ refusedHasCM: /ControlMaster/.test(argsRefused), warned: warnOnce.length })})`);
     process.env.TMPDIR = T;
     fs.rmSync(path.join(T, `vs-cm-${uid}`), { recursive: true, force: true }); fs.symlinkSync(away, path.join(T, `vs-cm-${uid}`));   // planted again for the control
-    const HM0 = M.load('src/hosts.js', hostsSrc.replace(HA, '    const cm = { ok: true }; try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }\n'), 'old').HostManager;
+    const HM0 = M.load('src/hosts.js', editAnchor(hostsSrc, HA, '    const cm = { ok: true }; try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }\n', "src/hosts.js"), 'old').HostManager;
     const oldArgs = new HM0({ dataDir: path.join(T, 'data-c') }).sshArgs(h, { multiplex: true }).join(' ');
     ok(oldArgs.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`), 'CONTROL B-3767 unit 2: the release put its ControlPath into the planted link (red)');
   } finally {

@@ -565,7 +565,7 @@ const clientOf = (Mod) => (e, t) => (Mod ? Mod.create({ integrations: ROW, ledge
     const r = await sweepLaw(clientOf(MCW.load('src/server/text-model-client.js', src, `sweep${++i}`)), { first: true, tiers: ['sonnet', 'flash'] });
     ok(r.broke.length > 0, `RED CONTROL (${name}): the sweep breaks at ${r.broke[0] ? `${r.broke[0].tier} · ${r.broke[0].answer} ⇒ ${r.broke[0].requests.join(' + ') || 'no request'}` : 'nothing'} (answer ${r.n})`, r.broke.slice(0, 1));
   }
-  const FR = MCW.load('src/server/text-model-client.js', TM_SRC.replace(SER, "    if (tier.key === 'sonnet') body.provider.data_collection = 'allow';\n" + SER), 'frozen-n2b');
+  const FR = MCW.load('src/server/text-model-client.js', editAnchor(TM_SRC, SER, "    if (tier.key === 'sonnet') body.provider.data_collection = 'allow';\n" + SER, "src/server/text-model-client.js"), 'frozen-n2b');
   const eF = mkEng({ learnModel: 'sonnet' }); plan = ['ok']; const kF = wire.length;
   const thrown = await press(clientOf(FR)(eF, 0)).then(() => null, (err) => err);
   plan = [];
@@ -608,7 +608,7 @@ console.log('⑫ THE JUDGE\'S REDIRECT (lane rule-learning-fix L2 — the same v
   };
   const a = await judgeOnce(DE);
   ok(!a.r.ok && a.r.why === 'redirect' && a.r.retryAt > 0 && a.got.length === 1 && a.got[0].srv === 'or' && a.st.total.usd === 0 && a.st.reserved === 0 && a.jl.some((x) => x.outcome === 'redirect'), 'a 307 on the decisions endpoint ⇒ `redirect` (journalled, paced like a wall), ONE request, nothing to the other origin, $0 settled', { r: a.r, got: a.got.map((q) => q.srv), usd: a.st.total.usd });
-  const follow = DE_SRC.replace(", redirect: 'error' });   // a 3xx is never followed (lane rule-learning-fix L2)", ' });');
+  const follow = editAnchor(DE_SRC, ", redirect: 'error' });   // a 3xx is never followed (lane rule-learning-fix L2)", ' });', "src/server/decision-engine.js");
   // lane judge-one-shot-body: the judge's body is a ONE-SHOT stream now — a followed 307 / 308 has no source to re-send, so
   // that copy fails closed (nothing reaches the other origin); a 303 is still followed (a GET, no body) — the control
   const FOLLOW = follow === DE_SRC ? null : MCW.load('src/server/decision-engine.js', follow, 'judge-follow');
@@ -642,7 +642,7 @@ console.log('⑬ ONE DRAFT AT A TIME (lane rule-learning-fix L4) — the REAL ch
   ok(two.map((x) => x.s).sort().join() === '200,409' && busy && busy.j.why === 'busy' && busy.j.ok === false && wire.length - n === 2 && third.s === 200, 'two POSTs at once ⇒ 200 + 409 `busy` (ONE vendor request); the next POST after it ⇒ 200 again (the flight is released)', { statuses: two.map((x) => x.s), busy: busy && busy.j, requests: wire.length - n, third: third.s });
   srv.close();
   const RT_SRC = fs.readFileSync(path.join(repo, 'src/routes/channels.js'), 'utf8');
-  const noGate = RT_SRC.replace("    if (learnInFlight) return res.status(409).json({ ok: false, why: 'busy', error: 'a draft is already being made' });\n", '');
+  const noGate = editAnchor(RT_SRC, "    if (learnInFlight) return res.status(409).json({ ok: false, why: 'busy', error: 'a draft is already being made' });\n", '', "src/routes/channels.js");
   if (noGate === RT_SRC) ok(false, 'mutant anchor missing: the single-flight line');
   else {
     const m = await serve(MCW.load('src/routes/channels.js', noGate, 'no-flight'));

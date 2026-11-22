@@ -32,6 +32,15 @@ const SRC = fs.readFileSync(path.join(ROOT, REL), 'utf8');
 const RC = require(path.join(ROOT, REL));
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = JSON.stringify;
 const M = mutantCopies('record-clear', ROOT);
 const mutant = (tag, from, to) => {
@@ -414,7 +423,7 @@ const statusGuardFailures = (tasksSrc, statusSrc, serverSrc) => {
   ok(statusGuardFailures(T_SRC, ST_SRC, SV_SRC).length === 0, 'a status history clear reaches the sidebar: the broadcast names it, server.js carries it, the change guard admits it (verify r5)', statusGuardFailures(T_SRC, ST_SRC, SV_SRC));
   const FIXED = 'let changed = Array.isArray(msg && msg.cleared) && msg.cleared.length > 0;';
   ok(T_SRC.split(FIXED).length === 2, 'the guard is present once (the control swaps exactly it)');
-  const PRE = M.write(T_REL, T_SRC.replace(FIXED, 'let changed = false;'), 'status-guard-drops-clear');
+  const PRE = M.write(T_REL, editAnchor(T_SRC, FIXED, 'let changed = false;', "src/lib/sidebar-tasks.js"), 'status-guard-drops-clear');
   const bad = statusGuardFailures(fs.readFileSync(PRE, 'utf8'), ST_SRC, SV_SRC);
   ok(bad.length === 1 && /change guard/.test(bad[0]), 'NEGATIVE CONTROL: the pre-r5 guard (the statuses\' signature alone) fails the check', bad);
 }
@@ -573,12 +582,12 @@ const orderFailures = (win, jobs, acts, sidebar = null, appSrc = '', panel = '')
   const APP_PRE = "      fetchJson('/api/session-status').then((d) => {\n        const sb = this.sidebar;\n        if (!d?.statuses || !sb) return;\n        sb._sessionStatuses = d.statuses;\n        sb._render?.();\n        sb._lastAttnSig = null;\n        sb.refreshTaskAttention?.();\n      }).catch(() => {});\n";
   const APP_FIX = '      try { this.sidebar?._fetchStatuses?.(); } catch {}';
   ok(AP.split(APP_FIX).length === 2, 'the resync\'s status fetch is present once (the control swaps exactly it)');
-  const APP_M = M.write('src/lib/app.js', AP.replace(APP_FIX, APP_PRE), 'status-resync-ungated');
+  const APP_M = M.write('src/lib/app.js', editAnchor(AP, APP_FIX, APP_PRE, "src/lib/app.js"), 'status-resync-ungated');
   const badR = orderFailures(W_SRC, JB, AC, SB, fs.readFileSync(APP_M, 'utf8'), CP);
   ok(badR.length === 1 && /reconnect resync fetches the statuses itself/.test(badR[0]), 'NEGATIVE CONTROL (verify r6): the pre-r6 reconnect resync (the statuses set from its own fetch, no generation) fails the check', badR);
   const PANEL_FIX = '    if (groupsGen !== g0) {';
   ok(CP.split(PANEL_FIX).length === 2, 'the panel\'s generation check is present once (the control removes exactly it)');
-  const CP_M = M.write('src/lib/channels-panel.js', CP.replace(PANEL_FIX, '    if (false) {'), 'panel-refresh-ungated');
+  const CP_M = M.write('src/lib/channels-panel.js', editAnchor(CP, PANEL_FIX, '    if (false) {', "src/lib/channels-panel.js"), 'panel-refresh-ungated');
   const badP = orderFailures(W_SRC, JB, AC, SB, AP, fs.readFileSync(CP_M, 'utf8'));
   ok(badP.length === 1 && /Channels panel/.test(badP[0]), 'NEGATIVE CONTROL (verify r6): a Channels panel refresh that keeps its answer over a newer broadcast fails the check', badP);
   // verify r6 NEGATIVE CONTROL: the pre-r6 broadcast handler (returns on `!group` before it keeps the clear) fails the check
@@ -621,7 +630,7 @@ const popoverFailures = (src) => {
   ok(popoverFailures(T_SRC).length === 0, 'the status popover\'s Apply sends the LIVE reason for an untouched prefill — a reason cleared while it was open is never re-filed (verify r6)', popoverFailures(T_SRC));
   const FIXED = "      const live = this.getSessionStatus(sessionRef) || {};\n      const reason = reasonInp.value === prefill ? (live.clearedAt ? '' : (live.reason || '')) : reasonInp.value;\n      this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason });";
   ok(T_SRC.split(FIXED).length === 2, 'the Apply handler is present once (the control swaps exactly it)');
-  const PRE = M.write(T_REL, T_SRC.replace(FIXED, "      this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason: reasonInp.value });"), 'popover-apply-refiles-prefill');
+  const PRE = M.write(T_REL, editAnchor(T_SRC, FIXED, "      this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason: reasonInp.value });", "src/lib/sidebar-tasks.js"), 'popover-apply-refiles-prefill');
   const bad = popoverFailures(fs.readFileSync(PRE, 'utf8'));
   ok(bad.length === 1 && /re-files an untouched prefill/.test(bad[0]), 'NEGATIVE CONTROL (verify r6): the pre-r6 Apply (the box\'s value, whatever it was prefilled with) fails the check', bad);
 }

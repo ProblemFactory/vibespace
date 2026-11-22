@@ -819,7 +819,7 @@ const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')
   // MUTATION CONTROL: the pre-fix gate, reproduced from the product source. The
   // copy's `require` is re-bound to the real path (MUTH), so its relative
   // requires resolve exactly as the original's.
-  const mutSrc = wsCreateSrc.replace('if (wtWillPass) {', 'if (data.worktree) {');
+  const mutSrc = editAnchor(wsCreateSrc, 'if (wtWillPass) {', 'if (data.worktree) {', "src/ws-create.js");
   ok(mutSrc !== wsCreateSrc, 'MUTATION CONTROL: the gate is one identifiable line');
   const mutPath = MUTH.write('src/ws-create.js', mutSrc, 'negctl');
   try {
@@ -1155,11 +1155,11 @@ console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / g
     ok(oauthUsageAccount({ type: 'subscription', backend: 'acme-chat' }), 'PROOF: a register()ed harness that declares oauthUsage joins the OAuth usage-poll accounts');
     // CONTROLS: the old branch restored in a patched copy cannot see the fakes
     const wrSrc = fs.readFileSync(path.join(REPO, 'src/window-reach.js'), 'utf8');
-    const wrMut = wrSrc.split('capsOf(s.backend).terminalOnly').join("s.backend === 'shell'");
+    const wrMut = editAnchor(wrSrc, 'capsOf(s.backend).terminalOnly', "s.backend === 'shell'", "src/window-reach.js", 'join');
     ok(wrMut !== wrSrc && seen(MUTH.load('src/window-reach.js', wrMut, 'tail-shell')).includes('sess-acme-term-1'),
       'CONTROL: window-reach with `s.backend === \'shell\'` restored offers the fake terminal session (the declared row is what drops it)');
     const uimSrc = fs.readFileSync(path.join(REPO, 'src/usage-index-model.js'), 'utf8');
-    const uimMut = uimSrc.replace('r.acct || globalUsageKeyOf(r.be)', "r.acct || (r.be === 'codex' ? '__global_codex__' : '__global__')");
+    const uimMut = editAnchor(uimSrc, 'r.acct || globalUsageKeyOf(r.be)', "r.acct || (r.be === 'codex' ? '__global_codex__' : '__global__')", "src/usage-index-model.js");
     ok(uimMut !== uimSrc && MUTH.load('src/usage-index-model.js', uimMut, 'tail-key').keysOf({ be: 'acme-chat' }).account === '__global__',
       'CONTROL: usage-index-model with the codex ternary restored books the fake under __global__ (the declared key is what routes it)');
   } finally { H.unregister('acme-term'); H.unregister('acme-chat'); }
@@ -1330,7 +1330,7 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   const jobsSrc = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
   const derivedLine = "['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS'].includes(k) || credentials.has(k)";
   const handLine = "['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS', 'ANTHROPIC_API_KEY', 'CLAUDE_SECURESTORAGE_CONFIG_DIR'].includes(k)";
-  const handJobs = jobsSrc.includes(derivedLine) ? MUTH.load('src/jobs.js', jobsSrc.replace(derivedLine, handLine), 'hand-list').jobEnv : null;
+  const handJobs = jobsSrc.includes(derivedLine) ? MUTH.load('src/jobs.js', editAnchor(jobsSrc, derivedLine, handLine, "src/jobs.js"), 'hand-list').jobEnv : null;
   const jh = handJobs ? judgeJob(handJobs) : { pass: true, leaked: [] };
   ok(handJobs && !jh.pass && jh.leaked.includes('CODEX_HOME'), `RED control: the base's hand list fails the job judge (leaks ${jh.leaked.join(' ')})`);
   const ab = judgeAgent((b) => AE.agentEnv(b));

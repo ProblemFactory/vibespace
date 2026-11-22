@@ -29,6 +29,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 const ROOT = scratch('cli-one-text');
@@ -77,7 +86,7 @@ console.log('§1 the PURE rule (src/agent-cli-text.js)');
   {
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const tsrc = fs.readFileSync(path.join(REPO, 'src/agent-cli-text.js'), 'utf8');
-    const T0 = mutantCopies('blm-cli', REPO).load('src/agent-cli-text.js', tsrc.replace('  if (said.length) line +=', '  if (false) line +='), 'no-masked');
+    const T0 = mutantCopies('blm-cli', REPO).load('src/agent-cli-text.js', editAnchor(tsrc, '  if (said.length) line +=', '  if (false) line +=', "src/agent-cli-text.js"), 'no-masked');
     ok(T.sentLine({ chars: 30, masked: ['a:'], maskedMore: true }, 'y'.repeat(36)).includes('«a:» and more (each'), '…a ninth mask is said as «and more»');
     ok(tsrc.includes('  if (said.length) line +=') && T0.sentLine({ chars: 30, masked: ['session:'] }, 'y'.repeat(36)).endsWith('were CUT'), 'RED CONTROL (the masked branch removed): the mask is read as a CUT again — the leg above goes red');
   }
@@ -295,19 +304,19 @@ console.log('§6 controls: the pre-fix shapes are RED under the same judge; the 
   const msgSrc = read('data/bin/vibespace-msg');
   const A = "oneText('vibespace-msg send', 'a message', args[2], args.slice(3))";
   ok(msgSrc.includes(A), 'the msg send call site is where the control cuts');
-  const msgNo = M.write('data/bin/vibespace-msg', msgSrc.replace(A, "oneText('vibespace-msg send', 'a message', args[2], [])"), 'no-stray');
+  const msgNo = M.write('data/bin/vibespace-msg', editAnchor(msgSrc, A, "oneText('vibespace-msg send', 'a message', args[2], [])", "data/bin/vibespace-msg"), 'no-stray');
   const r1 = await run(msgNo, ['send', 'g-1', ...PIECES]);
   ok(!strayJudge(r1, 'vibespace-msg send') && r1.code === 0 && r1.calls.length === 1 && r1.calls[0].body.text === PIECES[0], 'CONTROL: msg send without the stray scan sends the FIRST piece and drops the rest, exit 0 — RED under §3\'s judge', r1.err || JSON.stringify(r1.calls.map((c) => c.body.text)));
   const chSrc = read('data/bin/vibespace-channels');
   const B = 'const strays = pos.slice(CH_SPEC.n);';
   ok(chSrc.includes(B), 'the channels scan line is where the control cuts');
-  const chNo = M.write('data/bin/vibespace-channels', chSrc.replace(B, 'const strays = [];'), 'no-stray');
+  const chNo = M.write('data/bin/vibespace-channels', editAnchor(chSrc, B, 'const strays = [];', "data/bin/vibespace-channels"), 'no-stray');
   const r2 = await run(chNo, ['reply', 'lark/oc_1', ...PIECES, '--to', 'om_1']);
   ok(!strayJudge(r2, 'vibespace-channels reply') && r2.code === 0 && r2.calls.length === 1 && r2.calls[0].body.text === PIECES[0], 'CONTROL: THE INCIDENT — reply without the scan proposes "……若对照有源码权限的人" alone, exit 0, nothing said', r2.err || JSON.stringify(r2.calls.map((c) => c.body.text)));
   const askSrc = read('data/bin/vibespace-ask');
   const C = "return fileItem(oneText('vibespace-ask', rawArgs[0], rawArgs.slice(1)));";
   ok(askSrc.includes(C), 'the ask default-form call site is where the join control cuts');
-  const askJoin = M.write('data/bin/vibespace-ask', askSrc.replace(C, "return fileItem(rawArgs.join(' ').trim());"), 'join');
+  const askJoin = M.write('data/bin/vibespace-ask', editAnchor(askSrc, C, "return fileItem(rawArgs.join(' ').trim());", "data/bin/vibespace-ask"), 'join');
   const r3 = await run(askJoin, PIECES);
   ok(!strayJudge(r3, 'vibespace-ask') && r3.code === 0 && r3.calls.length === 1 && r3.calls[0].body.add.text === PIECES.join(' ').trim(), 'CONTROL: the pre-fix JOIN (ask) files the pieces glued with spaces — the quotes lost, exit 0 — RED under the judge', r3.err || r3.out);
   // a HOST: the CLI in a bin dir with no checkout two levels up reads the boot-time copy beside it — and refuses without it

@@ -433,11 +433,11 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   const noHandle = require(M.write('src/message-manager.js', editAnchor(editAnchor(mmSrc, handled, '', "src/message-manager.js"), branch, '    if (false) {', "src/message-manager.js"), 'no-handler'));
   const a = live(noHandle, [stAsk('m0'), stNotice('m1')]);
   ok('CONTROL: without the handler the notice is the red Unknown-event card again (the owner\'s report)', cards(a).length === 1 && cards(a)[0].content[0].name === 'informational' && stops(a).length === 0, a.messages.map((m) => m.noticeKind));
-  const noFold = require(M.write('src/message-manager.js', mmSrc.replace(fold, '        if (false) {'), 'no-fold'));
+  const noFold = require(M.write('src/message-manager.js', editAnchor(mmSrc, fold, '        if (false) {', "src/message-manager.js"), 'no-fold'));
   const b = hist(noFold, [txAsk('n0'), txNotice('n1'), txNudge('n2')]);
   ok('CONTROL: without the fold the history nudge is a user message ("You") and a second turn', users(b).length === 2 && b.turnIndex === 2 && users(b)[1].typed !== true, { users: users(b).length, turn: b.turnIndex });
   const ssCopy = M.write('src/safety-stop.js', read('src/safety-stop.js').replace("'s safeguards stopped the response above · continuing once with that noted\", '≤2.1.280'", "'s safeguards stopped the response above\", '≤2.1.280'"), 'row-drift');
-  const rowDrift = require(M.write('src/message-manager.js', mmSrc.replace("require('./safety-stop.js')", `require(${JSON.stringify(ssCopy)})`), 'on-row-drift'));
+  const rowDrift = require(M.write('src/message-manager.js', editAnchor(mmSrc, "require('./safety-stop.js')", `require(${JSON.stringify(ssCopy)})`, "src/message-manager.js"), 'on-row-drift'));
   const c = live(rowDrift, [stAsk('o0'), stNotice('o1')]);
   ok('CONTROL: with the census row mis-spelled the notice is the generic banner, not the stop card (the TABLE decides)', infos(c).length === 1 && stops(c).length === 0 && cards(c).length === 0, c.messages.map((m) => m.noticeKind));
   ok('the copies live outside the tree', M.files.length === 4 && M.files.every((x) => !x.startsWith(REPO)));
@@ -531,12 +531,12 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
   const rsSrc = read('src/lib/chat-run-summary.js');
   const guard = "m?.noticeKind === 'unknown-fields') return 'unknown';";
   ok('the patch site exists (a control is meaningful only if its line does)', rsSrc.includes(guard));
-  const RSx = await import(pathToFileURL(M.write('src/lib/chat-run-summary.js', rsSrc.replace(guard, "(m?.noticeKind === 'unknown-fields' && !(m.content?.[0]?.fields?.length && !m.content?.[0]?.enumDrift?.length))) return 'unknown';"), 'hidden-276-fold', { esm: true })).href);
+  const RSx = await import(pathToFileURL(M.write('src/lib/chat-run-summary.js', editAnchor(rsSrc, guard, "(m?.noticeKind === 'unknown-fields' && !(m.content?.[0]?.fields?.length && !m.content?.[0]?.enumDrift?.length))) return 'unknown';", "src/lib/chat-run-summary.js"), 'hidden-276-fold', { esm: true })).href);
   ok('CONTROL: a copy with .276\'s fold exclusion restored gives the stored field-only card NO kind again (RED for the fold leg; the enum card stays "unknown")', RSx.messageKind(stored, { toolCard: false }) === null && RSx.messageKind(enumCard, { toolCard: false }) === 'unknown');
   const gate = '    if (entry && !newFields.length && !newEnums.length) return;\n';
   const mmSrc = read('src/message-manager.js');
   ok('the normalizer patch site exists once', mmSrc.split(gate).length === 2);
-  const MMh = require(M.write('src/message-manager.js', mmSrc.replace(gate, '    if (!newEnums.length) return;\n'), 'hidden-276'));
+  const MMh = require(M.write('src/message-manager.js', editAnchor(mmSrc, gate, '    if (!newEnums.length) return;\n', "src/message-manager.js"), 'hidden-276'));
   const hc = feedGrown(new MMh.MessageManager('test-grown-hidden'));
   ok('CONTROL: a normalizer copy with .276\'s hiding restored (only an undeclared value draws a card) ⇒ NO card for the grown field — RED for the card leg', hc.length === 0, hc.map((m) => m.content[0]));
 

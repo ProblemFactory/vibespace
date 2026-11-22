@@ -28,6 +28,15 @@ const MUT = mutantCopies('title-chips', repo);
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) { console.error('  ✗ src/lib/build-version.js missing — run `npm run build` first'); process.exit(1); }
 
 // ── the PURE table: every row a (inputs → form) with its reason ──
@@ -102,18 +111,18 @@ console.log('§2 NEGATIVE CONTROLS on patched copies of the rule');
   // (a) the pre-fix chip: always every word
   const a1 = "  if (a - full + EPS >= tw) return 'full';";
   ok(src.split(a1).length === 2, 'the full-form verdict is spelled once (the controls patch exactly it)');
-  const alwaysFull = src.replace("export function chipMode({ availablePx, titlePx, chipFullPx, chipCompactPx, titleMinPx } = {}) {", "export function chipMode({ availablePx, titlePx, chipFullPx, chipCompactPx, titleMinPx } = {}) { return 'full'; // CONTROL: the pre-fix chip");
+  const alwaysFull = editAnchor(src, "export function chipMode({ availablePx, titlePx, chipFullPx, chipCompactPx, titleMinPx } = {}) {", "export function chipMode({ availablePx, titlePx, chipFullPx, chipCompactPx, titleMinPx } = {}) { return 'full'; // CONTROL: the pre-fix chip", "src/lib/title-chips.js");
   ok(alwaysFull !== src, 'control (a) patched the rule\'s entry line');
   const MA = await import(MUT.write('src/lib/title-chips.js', alwaysFull, 'always-full'));
   const fa = tableFailures(MA);
   ok(fa.length >= 6 && fa.some((f) => f.startsWith('the owner\'s tab: 95 px shared ⇒ compact')), `CONTROL (a) — a chip that always shows every word (2.369.177) fails ${fa.length} rows, the owner's tab among them`, fa);
   // (b) "the chip keeps its words while ANY of the title shows" — the cut title is exactly the report
-  const anyTitle = src.replace(a1, "  if (a - full + EPS >= least) return 'full'; // CONTROL: full while six characters show");
+  const anyTitle = editAnchor(src, a1, "  if (a - full + EPS >= least) return 'full'; // CONTROL: full while six characters show", "src/lib/title-chips.js");
   const MB = await import(MUT.write('src/lib/title-chips.js', anyTitle, 'any-title'));
   const fb = tableFailures(MB);
   ok(fb.length >= 1 && fb.some((f) => f.startsWith('ONE px short of the whole title')), `CONTROL (b) — a chip that yields only below six characters (the title still CUT beside every word) fails ${fb.length} rows`, fb);
   // (c) no icon floor: compact whatever the room
-  const noIcon = src.replace("  return 'icon';\n}", "  return 'compact'; // CONTROL: no icon form\n}");
+  const noIcon = editAnchor(src, "  return 'icon';\n}", "  return 'compact'; // CONTROL: no icon form\n}", "src/lib/title-chips.js");
   const MC = await import(MUT.write('src/lib/title-chips.js', noIcon, 'no-icon'));
   const fc = tableFailures(MC);
   ok(noIcon !== src && fc.some((f) => f.startsWith('one px under six characters')), `CONTROL (c) — a chip with no icon form fails ${fc.length} rows (the title under six characters)`, fc);
@@ -212,7 +221,7 @@ const judge = (WM) => {
   const src = read('src/lib/window.js');
   const line = '    const availablePx = label.offsetWidth + chip.offsetWidth - deficit;';
   ok(src.split(line).length === 2, 'the room is spelled once in window.js (the control patches exactly it)');
-  const { WindowManager: WX } = await import(MUT.write('src/lib/window.js', src.replace(line, '    const availablePx = label.offsetWidth - deficit; // CONTROL: the chip\'s own width forgotten'), 'label-only'));
+  const { WindowManager: WX } = await import(MUT.write('src/lib/window.js', editAnchor(src, line, '    const availablePx = label.offsetWidth - deficit; // CONTROL: the chip\'s own width forgotten', "src/lib/window.js"), 'label-only'));
   const badX = judge(WX);
   ok(badX.length >= 6, `CONTROL — measuring the room as the label alone lands on the wrong form (or a different one per starting form) in ${badX.length} of ${CASES.length * 3} cases`, badX.slice(0, 4));
 }

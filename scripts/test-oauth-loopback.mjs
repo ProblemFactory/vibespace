@@ -401,7 +401,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
   };
   const K = '    if (!st.exchanging) forget(st);\n';
   ok(src.split(K).length === 2, '(a) CONTROL setup: the cancel-side release line is present once');
-  const keep = require(M.write('src/oauth-loopback.js', src.replace(K, '    if (!st.exchanging) { const kept = st.onDone; forget(st); st.onDone = kept; }\n'), 'keeps-ondone'));
+  const keep = require(M.write('src/oauth-loopback.js', editAnchor(src, K, '    if (!st.exchanging) { const kept = st.onDone; forget(st); st.onDone = kept; }\n', "src/oauth-loopback.js"), 'keeps-ondone'));
   if (!gcNow) ok(false, 'SKIP: no gc handle — the closure legs cannot be judged');
   else {
     const r = await driveScoped(OL);
@@ -485,7 +485,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     // CONTROL: a copy whose post-bind step ignores the flow's end (the r3 shape) keeps the listener — in fixed mode the port
     const B = "    const bound = () => { if (st.cancelled || st.done) { try { srv.close(); } catch {} return; } st.server = srv; st.listening = true; };\n";
     ok(src.split(B).length === 2, '(d) CONTROL setup: the post-bind check is present once');
-    const olm = mkOl(require(M.write('src/oauth-loopback.js', src.replace(B, '    const bound = () => { st.server = srv; st.listening = true; };\n'), 'binds-after-end')));
+    const olm = mkOl(require(M.write('src/oauth-loopback.js', editAnchor(src, B, '    const bound = () => { st.server = srv; st.listening = true; };\n', "src/oauth-loopback.js"), 'binds-after-end')));
     const rm = await twice(olm, 'fixed');
     const nextm = await olm.begin({ id: 'next', mode: 'fixed', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
     ok(rm.left === 1 && nextm.refusal && nextm.refusal.code === 'port-busy', `(d) CONTROL: a copy that binds after the end keeps ${rm.left} listener past stopAll and the next fixed begin is ${nextm.refusal && nextm.refusal.code} — the checks above would be red`);
@@ -584,13 +584,13 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
     const ONCE = "    if (st.narrowedGroups >= st.groups.length) {";   // lane lark-search-poll: the guard is per GROUP now
     const ERRB = "        if (verr) {";
     ok(src9.split(ONCE).length === 2 && src9.split(ERRB).length === 2, 'CONTROL setup: the once-guard and the error branch are each present once');
-    const OLa = require(M9.write('src/oauth-loopback.js', src9.replace(ONCE, "    if (false) {"), 'narrow-twice'));
+    const OLa = require(M9.write('src/oauth-loopback.js', editAnchor(src9, ONCE, "    if (false) {", "src/oauth-loopback.js"), 'narrow-twice'));
     const [Pa, Pb] = await freePorts(2);
     const a = await run9(OLa, Pa);
     a.ol.narrow(a.f.flowId); let twice = null; try { twice = a.ol.narrow(a.f.flowId); } catch { twice = null; }
     ok(!!twice, 'CONTROL: a copy without the once-guard narrows TWICE — the "ONCE" assert above would be red');
     a.ol.stopAll();
-    const OLb = require(M9.write('src/oauth-loopback.js', src9.replace(ERRB, '        if (false) {'), 'no-error-branch'));
+    const OLb = require(M9.write('src/oauth-loopback.js', editAnchor(src9, ERRB, '        if (false) {', "src/oauth-loopback.js"), 'no-error-branch'));
     const b = await run9(OLb, Pb);
     const rb = await get(`http://127.0.0.1:${Pb}/lark/cb?error=access_denied&state=${new URL(b.f.consentUrl).searchParams.get('state')}`);
     await sleep(30);

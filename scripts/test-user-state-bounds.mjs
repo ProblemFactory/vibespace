@@ -41,6 +41,15 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ueb-'));
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { } });
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // the bounds, AS NUMBERS (round 12: «the one-over legs are written from the numbers»)
 const OPS_BODY = 2097152, OPS = 5000, MOVES = 20000, GROUP = 20000, VALUES = 524288, VALUE = 16384, NAME = 4096, DEPTH = 4, FIELD = 200, BATCH_BYTES = 1048576;
@@ -303,7 +312,7 @@ process.stdout.write(JSON.stringify({ n, ops: out.length, op: out[0] }));`;
     ok(r.status === 200 && onDisk === n + 1 && one(d) && d.n <= 64,
       `law A, master's road: an old tab archives ONE more on ${what} (its whole key, ${n + 1} ids) ⇒ ${r.status}, ${onDisk} on disk; its diff is ONE op and puts ${d.n} item(s) into Sets / Maps (≤ 64 — counted in a child, not timed; the request read ${xC(r.ms)})`, { status: r.status, onDisk, d });
     const src12 = fs.readFileSync(path.join(REPO, 'src/user-state-ops.js'), 'utf8'), HEAD = 'function listDiff(bl, al, gone, came) {\n  const nb = bl.length, na = al.length;';
-    const p12 = src12.includes(HEAD) ? mutantCopies('user-state-round12', REPO).write('src/user-state-ops.js', src12.replace(HEAD, 'function listDiff(bl, al, gone, came) {\n  { const as = new Set(al), bs = new Set(bl); for (const x of bl) if (!as.has(x)) gone(x); for (const x of al) if (!bs.has(x)) came(x); return; }\n  const nb = bl.length, na = al.length;'), 'two-sets') : null;
+    const p12 = src12.includes(HEAD) ? mutantCopies('user-state-round12', REPO).write('src/user-state-ops.js', editAnchor(src12, HEAD, 'function listDiff(bl, al, gone, came) {\n  { const as = new Set(al), bs = new Set(bl); for (const x of bl) if (!as.has(x)) gone(x); for (const x of al) if (!bs.has(x)) came(x); return; }\n  const nb = bl.length, na = al.length;', "src/user-state-ops.js"), 'two-sets') : null;
     const d12 = p12 ? diffCount(p12, n) : null;
     ok(!!d12 && one(d12) && d12.n >= 2 * n,
       `CONTROL: the round-12 shape (two Sets of the whole key, a patched copy, counted in its own child) gives the same ONE op and puts ${d12 ? d12.n : '?'} items into Sets / Maps (≥ 2 × ${n}) — the count above is red on it`, d12);
@@ -721,7 +730,7 @@ console.log('§W B-518e — WORK, NEVER THE CLOCK: what each request above DID (
     // (1) a product of sizes ON the member-add road: ordered()'s add looks the member up by scanning the list (an includes),
     // not its Map — 2 000 adds into a group of 2 000 (the first probe's «a Set per op» copy read the tree's own count: that
     // Set is built once per request on this road, so it was no control)
-    const pathA = mutantCopies('usb-ordered-scan', REPO).write('src/user-state-ops.js', srcOps.replace(ORD_ADD, ORD_ADD.replace('if (at.has(x)) return;', 'if (order.includes(x)) return;')));
+    const pathA = mutantCopies('usb-ordered-scan', REPO).write('src/user-state-ops.js', editAnchor(srcOps, ORD_ADD, ORD_ADD.replace('if (at.has(x)) return;', 'if (order.includes(x)) return;'), "src/user-state-ops.js"));
     const g0 = Array.from({ length: 2000 }, (_, i) => k(i));
     const body = batches('pgworkctl01', 1, () => Array.from({ length: 2000 }, (_, i) => ({ key: 'sessionGroups', item: 'g', member: k(5000 + i), value: true })));
     const sc = { pre: IMPORT(US({ sessionGroups: { g: g0 } })), reqs: [['patch', '/api/user-state/batches', body]] };
@@ -732,9 +741,9 @@ console.log('§W B-518e — WORK, NEVER THE CLOCK: what each request above DID (
   } else ok(false, 'CONTROL: ordered()\'s add line is not in src/user-state-ops.js — the control cannot be made', null);
   if (srcOps.includes(LD_HEAD)) {
     // (2) the whole key scanned per item: listDiff as two includes loops — an old tab's whole key of 2 001 over a store of 2 000
-    const pathB = mutantCopies('usb-listdiff-scan', REPO).write('src/user-state-ops.js', srcOps.replace(LD_HEAD, 'function listDiff(bl, al, gone, came) {\n  { for (const x of bl) if (!al.includes(x)) gone(x); for (const x of al) if (!bl.includes(x)) came(x); return; }\n  const nb = bl.length, na = al.length;'));
+    const pathB = mutantCopies('usb-listdiff-scan', REPO).write('src/user-state-ops.js', editAnchor(srcOps, LD_HEAD, 'function listDiff(bl, al, gone, came) {\n  { for (const x of bl) if (!al.includes(x)) gone(x); for (const x of al) if (!bl.includes(x)) came(x); return; }\n  const nb = bl.length, na = al.length;', "src/user-state-ops.js"));
     // (3) round 12's shape: the whole key into two Sets — ONE more id on a store of 66 670
-    const pathC = mutantCopies('usb-listdiff-round12', REPO).write('src/user-state-ops.js', srcOps.replace(LD_HEAD, 'function listDiff(bl, al, gone, came) {\n  { const as = new Set(al), bs = new Set(bl); for (const x of bl) if (!as.has(x)) gone(x); for (const x of al) if (!bs.has(x)) came(x); return; }\n  const nb = bl.length, na = al.length;'));
+    const pathC = mutantCopies('usb-listdiff-round12', REPO).write('src/user-state-ops.js', editAnchor(srcOps, LD_HEAD, 'function listDiff(bl, al, gone, came) {\n  { const as = new Set(al), bs = new Set(bl); for (const x of bl) if (!as.has(x)) gone(x); for (const x of al) if (!bs.has(x)) came(x); return; }\n  const nb = bl.length, na = al.length;', "src/user-state-ops.js"));
     const ids = Array.from({ length: 2000 }, (_, i) => k(i));
     const scB = { pre: IMPORT(US({ archivedSessions: ids })), reqs: [['patch', '/api/user-state', { archivedSessions: [k(9999), ...ids.slice(0, 1000), k(9998), ...ids.slice(1000)] }]] };
     const ids10 = Array.from({ length: 66670 }, (_, i) => k(i));

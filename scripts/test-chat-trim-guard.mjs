@@ -15,6 +15,15 @@ import { judgeGesture, PAGE_UP_BAND_PX, DELIVERY_MIN_FRACTION, KEEP_ZONE_VIEWPOR
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
 // chat-view imports telemetry-client → build-version.js, which `npm run build`
 // GENERATES (gitignored); ci.mjs builds before any suite runs.
@@ -1394,7 +1403,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   const LINE = "        if (this._gapMinimapActive && missedStart + i >= knownTotal && m.role === 'user' && !m.imageAttachment) this._chatMinimap.appendFullTurn({ turnIndex: m.turnIndex, ts: m.ts, role: 'user', ...turnPreviewOf(m) }, { once: true });\n";
   ok('…the control\'s anchor is in chat-view.js once', cv.split(LINE).length === 2);
   const { pathToFileURL } = await import('node:url');
-  const pre = await import(pathToFileURL(MUT.write('src/lib/chat-view.js', cv.replace(LINE, ''), 'nofull', { esm: true })).href);
+  const pre = await import(pathToFileURL(MUT.write('src/lib/chat-view.js', editAnchor(cv, LINE, '', "src/lib/chat-view.js"), 'nofull', { esm: true })).href);
   { const c = await catchUp(pre.ChatView, true); ok(`CONTROL (the catch-up line removed): the catch-up ran (${c.add} turns through addTurn) and no missed turn reaches the full-extent minimap — the leg goes RED`, c.add === 2 && c.full.length === 0, c); }
   // the minimap's own once: a turn it already holds (by instant) is not drawn twice; a live append is unchanged
   const { ChatMinimap } = await import(path.join(REPO, 'src/lib/chat-minimap.js'));
@@ -1443,11 +1452,11 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   ok(`B-f1f0 RED-able (8658d36be: the compacted anchor kept its top and E2 jumped up): a pass that COMPACTS the topmost element (still shown, 196 → 60 px) ⇒ E2 stays where the reader saw it (${cpt.before[2]} → ${cpt.after[2]})`, cpt.after[2] === cpt.before[2] && cpt.after[2] === 96, JSON.stringify(cpt));
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const CVS = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), from = "keep = changed ? anchor.below.find(([e]) => e.isConnected && e.offsetParent !== null) : null;";
-  const CVm = CVS.split(from).length === 2 ? (await import(mutantCopies('f1f0', REPO).write('src/lib/chat-view.js', CVS.replace(from, 'keep = null;'), 'no-below'))).ChatView : null;
+  const CVm = CVS.split(from).length === 2 ? (await import(mutantCopies('f1f0', REPO).write('src/lib/chat-view.js', editAnchor(CVS, from, 'keep = null;', "src/lib/chat-view.js"), 'no-below'))).ChatView : null;
   const red = CVm ? scene(CVm, [1]) : null;
   ok(`B-f1f0 CONTROL: the patched copy that never keeps an element below the anchor moves the reader (E2 ${red && red.before[2]} → ${red && red.after[2]}) — the leg goes red`, !!red && red.after[2] !== red.before[2], JSON.stringify(red));
   const fromH = 'changed = anchorEl.offsetParent === null || anchorEl.offsetHeight !== anchor.h;';
-  const CVh = CVS.split(fromH).length === 2 ? (await import(mutantCopies('f1f0h', REPO).write('src/lib/chat-view.js', CVS.replace(fromH, 'changed = anchorEl.offsetParent === null;'), 'no-height'))).ChatView : null;
+  const CVh = CVS.split(fromH).length === 2 ? (await import(mutantCopies('f1f0h', REPO).write('src/lib/chat-view.js', editAnchor(CVS, fromH, 'changed = anchorEl.offsetParent === null;', "src/lib/chat-view.js"), 'no-height'))).ChatView : null;
   const redH = CVh ? scene(CVh, 'compact') : null;
   ok(`B-f1f0 CONTROL (the height clause — a reader's should on 487a63379): the patched copy that keeps a COMPACTED anchor's top moves the reader (E2 ${redH && redH.before[2]} → ${redH && redH.after[2]}) — the compact leg goes red`, !!redH && redH.after[2] !== redH.before[2], JSON.stringify(redH));
 }
@@ -1521,7 +1530,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     alwaysMoved: ['    if (!anchor) return false;\n    return [[anchor.el, anchor.delta], ...anchor.below]', '    if (!anchor) return true;\n    return true || [[anchor.el, anchor.delta], ...anchor.below]'],
     noNote: ['    this._endResumeSettle();\n    this._chooseAim();', '    this._endResumeSettle();'] };
   const red = {};
-  for (const [k, [from, to]] of Object.entries(muts)) { if (CVS.split(from).length !== 2) { red[k] = 'ANCHOR GONE'; continue; } const CVm = (await import(MU.write('src/lib/chat-view.js', CVS.replace(from, to), 'ef04-' + k))).ChatView;
+  for (const [k, [from, to]] of Object.entries(muts)) { if (CVS.split(from).length !== 2) { red[k] = 'ANCHOR GONE'; continue; } const CVm = (await import(MU.write('src/lib/chat-view.js', editAnchor(CVS, from, to, "src/lib/chat-view.js"), 'ef04-' + k))).ChatView;
     red[k] = k === 'never' ? caseOf(CVm).moved : k === 'noReaim' ? page(CVm, { dataset: { key: 'rowB' } }).wheel : k === 'noNote' ? notedOf(CVm) : movedOf(CVm).none; }
   ok(`B-ef04 CONTROLS: the copy whose rule never refuses answers the moved press (refused: ${red.never}); the copy without the scroll's re-aim refuses the wheel-then-click (refused: ${red.noReaim}); the copy whose pass always moved stamps a pass that moved nothing (moved: ${red.alwaysMoved}); the copy whose note of positioning arms no re-aim leaves the message box's PageUp un-aimed (armed: ${red.noNote}) — each RED by name`, red.never === false && red.noReaim === true && red.alwaysMoved === true && red.noNote === false, J(red));
 }

@@ -56,6 +56,15 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const tick = () => new Promise((r) => setTimeout(r, 5));
 if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) { console.error('  ✗ src/lib/build-version.js missing — run `npm run build` first (utils.js imports telemetry-client, which imports it)'); process.exit(1); }
 
@@ -509,7 +518,7 @@ const M = mutantCopies('outside-press', repo);
   const OPTS = 'const o = { capture: true, passive: true, signal: ctl.signal };';
   ok(src.split(ARM).length === 2 && src.split(OPTS).length === 2, 'the two edits the controls make are each spelled exactly once in utils.js');
   // (b) the helper listening for mousedown again (the pre-lane event): the pane's cancelled pointerdown has no mousedown
-  const mdF = M.write('src/lib/utils.js', src.replace(ARM, ARM.replace("'pointerdown'", "'mousedown'")), 'mousedown');
+  const mdF = M.write('src/lib/utils.js', editAnchor(src, ARM, ARM.replace("'pointerdown'", "'mousedown'"), "src/lib/utils.js"), 'mousedown');
   const UM = await import(pathToFileURL(mdF).href);
   const B = fresh(); let closedB = 0; const bb = [...doc.l];
   const dB = UM.onOutsidePress(B.pop, () => { closedB++; }, { once: false });
@@ -519,7 +528,7 @@ const M = mutantCopies('outside-press', repo);
   ok(openOverPane && closedB === 1, `CONTROL (the helper on 'mousedown'): a press into the pane leaves it OPEN, a press elsewhere closes it (${closedB}×) — the event the helper listens for is the fix`);
   dB();
   // (c) the helper in the BUBBLE phase: a pane that stops the press (stopPropagation on pointerdown) hides it
-  const bubF = M.write('src/lib/utils.js', src.replace(OPTS, 'const o = { capture: false, passive: true, signal: ctl.signal };'), 'bubble');
+  const bubF = M.write('src/lib/utils.js', editAnchor(src, OPTS, 'const o = { capture: false, passive: true, signal: ctl.signal };', "src/lib/utils.js"), 'bubble');
   const UB = await import(pathToFileURL(bubF).href);
   const C = fresh(); let closedC = 0; const bc = [...doc.l];
   const dC = UB.onOutsidePress(C.pop, () => { closedC++; }, { once: false });
@@ -536,7 +545,7 @@ const M = mutantCopies('outside-press', repo);
   const BLUR_GATE = "if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {\n    window.addEventListener('blur', (e) => {";
   const TOGGLE = "if (reopened && opts.position !== 'cursor' && opts.toggle !== false) {";
   ok(src.split(BLUR_GATE).length === 2 && src.split(TOGGLE).length === 2, 'the two edits the lane\'s controls make are each spelled exactly once in utils.js');
-  const nbF = M.write('src/lib/utils.js', src.replace(BLUR_GATE, "if (false) {\n    window.addEventListener('blur', (e) => {"), 'no-blur');
+  const nbF = M.write('src/lib/utils.js', editAnchor(src, BLUR_GATE, "if (false) {\n    window.addEventListener('blur', (e) => {", "src/lib/utils.js"), 'no-blur');
   const UN = await import(pathToFileURL(nbF).href);
   const E = fresh(); const frameE = new El('iframe', win_); let closedE = 0;
   const dE = UN.onOutsidePress(E.pop, () => { closedE++; }, { once: false });
@@ -548,7 +557,7 @@ const M = mutantCopies('outside-press', repo);
   blurAll({ active: frameE, hasFocus: true }); dF();
   ok(blindToFrame && closedE === 1 && closedF === 1, `CONTROL (the helper without its blur listener): a press into a frame leaves the menu OPEN (a press elsewhere still closes, ${closedE}×); the real helper closes on the frame (${closedF}×) — the blur listener is the fix`);
   // (e) createPopover WITHOUT the toggle — the residue itself: the second press on ⚙ REBUILDS the popover
-  const ntF = M.write('src/lib/utils.js', src.replace(TOGGLE, 'if (false) {'), 'no-toggle');
+  const ntF = M.write('src/lib/utils.js', editAnchor(src, TOGGLE, 'if (false) {', "src/lib/utils.js"), 'no-toggle');
   const UT = await import(pathToFileURL(ntF).href);
   const gearT = new El('button', toolbar);
   const q1 = UT.createPopover(gearT, 'global-settings-popover'); const q2 = UT.createPopover(gearT, 'global-settings-popover');
