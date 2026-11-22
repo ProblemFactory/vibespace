@@ -317,6 +317,7 @@ function repairUsageCaches({ cacheDir, archiveDir, markers, anchorFiles, id }) {
 // ── ② anchors repair (+ the estimator's learning chain) ─────────────────────
 function repairAnchors({ anchorsDir, archiveDir, markers, anchorFiles, id }) {
   const res = { files: 0, dropped: 0, voided: 0 };
+  try {
   for (const f of anchorFiles) {
     const keep = [], drop = [];
     for (const r of f.rows) {
@@ -351,8 +352,11 @@ function repairAnchors({ anchorsDir, archiveDir, markers, anchorFiles, id }) {
     _writeAtomic(f.file, keep.map((r) => JSON.stringify(r)).join('\n') + (keep.length ? '\n' : ''));
     f.rows = keep;
   }
-  // B-360d U1: the anchors stores of this process keep each file's last line — a rewrite says so at its write
-  if (res.files) require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);
+  } finally {
+    // B-360d U1 (r1976 (e)): the anchors stores of this process keep each file's last line — a rewrite says so in a finally: one that
+    // throws halfway (a full disk) still says the files it already rewrote
+    if (res.files) require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);
+  }
   // The learned rates are DERIVED from the pairs we just changed — archive the
   // snapshot and drop it so the estimator re-learns from the cleaned anchors.
   if (res.dropped) {
@@ -873,12 +877,15 @@ function repairAnchorsByWindow({ anchorsDir, archiveDir, anchorFiles, windows, i
   }
   if (!touched.size) return res;
   _appendArchive(archiveDir, 'readings-window-anchors.ndjson', archived);
+  try {
   for (const ident of touched) {
     const f = windows.get(ident).file;
     _writeAtomic(f.file, f.rows.map((r) => JSON.stringify(r)).join('\n') + (f.rows.length ? '\n' : ''));
   }
-  // B-360d U1: the anchors stores of this process keep each file's last line — a rewrite says so at its write
-  require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);
+  } finally {
+    // B-360d U1 (r1976 (e)): said in a finally — a write that throws halfway still says the files it already rewrote
+    require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);
+  }
   const rates = path.join(anchorsDir, 'rates.json');
   const cur = _readJson(rates);
   if (cur) {

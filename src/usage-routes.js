@@ -457,7 +457,9 @@ usageFolder.onReply(() => ingestPassiveUsage());   // ONE CLOCK (B-360d U3): eve
 // B-360d: the timer pass decides the machine login's link on sign-in facts confirmed OFF the loop first (awaited, bounded) —
 // then the folder's refresh (fs.promises, at most one in flight; a read not replying past its period is said held), whose reply
 // runs the ingestion: the ONE 30-s clock of the usage folder (src/usage-cache-folder.js)
-const ingestConfirmed = () => accounts.signinFactsSettled().catch(() => null).then(() => { try { usageFolder.tick(); } catch { } });
+// r1976 (c): while the folder is HELD (its read failed or has not replied) no reply comes — the pass runs the ingestion over the KEPT
+// reply itself, so its memory-only work goes on (removed accounts dropped, the machine login's link decided again on confirmed facts)
+const ingestConfirmed = () => accounts.signinFactsSettled().catch(() => null).then(() => { try { usageFolder.tick(); if (usageFolder.state().held) ingestPassiveUsage(); } catch { } });
 ingestConfirmed();
 setInterval(ingestConfirmed, 30000); // the folder read off the loop — no network
 // Normalizer-visible settings (chat.hideEmptyHooks) — lazy, store-safe getter.
@@ -1718,6 +1720,11 @@ app.get('/api/usage', async (req, res) => {
   // pick up whatever active sessions' statuslines just wrote: a refresh asked NOW, off the loop — its reply runs the ingestion
   // (one clock); a folder that does not reply within its bound answers the kept reply, and `usageFolder` says how old
   try { await usageFolder.fresh(); } catch { }
+  // B-360d U3 (r1976 (a)): the answer after the await answers an error BY NAME — a throw there (the codex summary, the account list)
+  // would otherwise be an unhandled rejection and the request never answered (the popup waits for its own timeout)
+  try { usageAnswer(req, res); } catch (e) { try { res.status(500).json({ error: `the usage answer failed: ${(e && e.message) || e}` }); } catch { } }
+});
+function usageAnswer(req, res) {
   const codexRl = summarizeCodexRateLimits();
   const codexAccounts = {};
   const acctList = Object.keys(codexRl.byAccount || {}).length ? (accounts.list().accounts || []) : [];
@@ -1838,7 +1845,7 @@ app.get('/api/usage', async (req, res) => {
     // Named accounts read on a person's Re-check (quota.onDemand — antigravity), keyed by account id
     homeAccounts: onDemandReadings(),
   });
-});
+}
 
 
   return { refreshViaCliPanel, panelVerdictFor, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };

@@ -28,6 +28,12 @@ const EVERY_MS = 30000;
 const WAIT_MS = 2000;
 const readers = new Map();   // the folder (resolved) → its one reader
 
+/** of two texts of one reading file, the LATER reading (its fetchedAt); a text that does not parse loses to one that does; a tie keeps `own` */
+function laterOf(read, own) {
+  if (typeof read !== 'string') return own;
+  const at = (t) => { try { const v = JSON.parse(t); return v && typeof v.fetchedAt === 'number' ? v.fetchedAt : -Infinity; } catch { return -Infinity; } };
+  return at(read) > at(own) ? read : own;
+}
 const enoent = (p) => Object.assign(new Error(`ENOENT: not in the usage folder's reply, '${p}'`), { code: 'ENOENT' });
 
 function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, log = () => { }, fillSync = true } = {}) {
@@ -59,8 +65,9 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
     const names = jsonOnly(all);
     const texts = new Map();
     for (const n of names) {
-      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); }
-      catch (e) { if (!e || e.code !== 'ENOENT') throw e; }   // removed between the list and its read: not in the reply
+      // a file that cannot be read now (removed after the list, unreadable, a folder named .json) is SKIPPED, as the release skipped it
+      // (r1976 (b)): it never holds the other identities' readings; only the folder's own listing failing holds the reply
+      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); } catch { }
     }
     return texts;
   }
@@ -69,7 +76,7 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
     const at = startedAt = now(); own = new Map();
     const p = readOnce().then((texts) => {
       const mine = own; inflight = null; own = null;
-      for (const [n, t] of mine) texts.set(n, t);   // the hub's own writes during the read stand over what it saw
+      for (const [n, t] of mine) texts.set(n, laterOf(texts.get(n), t));   // the hub's own writes during the read stand over what it saw — unless the read saw a LATER reading (r1976 (g))
       return land(texts, at);
     }, (e) => {
       inflight = null; own = null;
@@ -82,6 +89,7 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
   }
   /** a reply from a refresh that STARTED after this ask; past `waitMs` the kept reply (its state says how old). */
   function fresh({ waitMs = WAIT_MS } = {}) {
+    if (inflight && now() - startedAt >= everyMs) { sayHeld('a read has not replied'); return Promise.resolve(reply); }   // r1976 (f): no chain on a hung read
     const p = !inflight ? refresh() : (next || (next = inflight.then(() => { next = null; return refresh(); })));
     if (!(waitMs > 0)) return p;
     return new Promise((resolve) => {
@@ -140,4 +148,4 @@ function noteWrittenFile(file, text) {
 }
 try { require('./usage-cache-write.js').onWritten(noteWrittenFile); } catch { }
 
-module.exports = { create, forDir, noteWrittenFile, EVERY_MS, WAIT_MS };
+module.exports = { create, forDir, noteWrittenFile, laterOf, EVERY_MS, WAIT_MS };

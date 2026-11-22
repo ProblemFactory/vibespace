@@ -142,7 +142,7 @@ const tick = () => new Promise((z) => setImmediate(z));
   const R2 = await routesOf(NoFresh, w2);
   fs.writeFileSync(path.join(w2.cacheDir, w2.ids[0] + '.json'), reading(newer, 'org-a2-moved'));
   const ans2 = await R2.get();
-  ok(!!(!(ans2.accounts && ans2.accounts[w2.ids[0]] && ans2.accounts[w2.ids[0]].fetchedAt === newer)), 'CONTROL (the request without its refresh): the answer is the kept reply\'s — the new reading is not in it — red');
+  ok(!!(ans2.accounts && ans2.accounts[w2.ids[0]] && ans2.accounts[w2.ids[0]].fetchedAt === NOW - 600e3), 'CONTROL (the request without its refresh): the answer is the kept reply\'s — the OLDER reading — red');
   const NoReply = M.load('src/usage-routes.js', anchored(R_SRC, 'usageFolder.onReply(() => ingestPassiveUsage());', '', 'the routes without the reply\'s ingestion'), 'no-reply');
   const w3 = world(); await quiet(() => engineOf(ENG, w3));
   await routesOf(NoReply, w3);
@@ -169,7 +169,7 @@ const tick = () => new Promise((z) => setImmediate(z));
   const C2 = w2.ids[2];
   Wcut.writeCacheObject({ cacheDir: w2.cacheDir, key: C2, obj: JSON.parse(reading(at1, 'org-c2-own')), source: 'statusline', backend: 'claude' });
   let cutAt = null; for (const [, g] of e2.usageIdentityGroups()) if (g.accountIds.includes(C2)) cutAt = g.cache && g.cache.fetchedAt;
-  ok(!!(cutAt !== at1), `CONTROL (the write path without its notice): the hub's own write is not in the reply until a refresh (the groups read ${cutAt === at1 ? 'it' : 'the older reading'}) — red`);
+  ok(!!(cutAt === NOW - 600e3), `CONTROL (the write path without its notice): the hub's own write is not in the reply until a refresh — the groups read the OLDER reading (${cutAt}) — red`);
 }
 // ③ (the reader alone) a write landing AFTER a read in flight took its file's old bytes stands over them
 async function overlayLeg(mod) {
@@ -188,7 +188,7 @@ async function overlayLeg(mod) {
 {
   const got = await overlayLeg(F);
   ok(!!(got === 2), `③ a write after a read in flight took the old bytes stands in the reply it brings (fetchedAt ${got})`);
-  const NoOverlay = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      for (const [n, t] of mine) texts.set(n, t);   // the hub's own writes during the read stand over what it saw\n", '', 'the reply without the writes during its read'), 'no-overlay');
+  const NoOverlay = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      for (const [n, t] of mine) texts.set(n, laterOf(texts.get(n), t));   // the hub's own writes during the read stand over what it saw — unless the read saw a LATER reading (r1976 (g))\n", '', 'the reply without the writes during its read'), 'no-overlay');
   const got2 = await overlayLeg(NoOverlay);
   ok(!!(got2 === 1), `CONTROL (the reply without the writes made during its read): the older bytes come back over the hub's write (fetchedAt ${got2}) — red`);
 }
@@ -223,5 +223,73 @@ async function heldLeg(mod) {
   const Empty = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      inflight = null; own = null;\n      failed = { at: now(), code: (e && e.code) || 'error' };\n", "      inflight = null; own = null; reply = { at: now(), texts: new Map() };\n      failed = { at: now(), code: (e && e.code) || 'error' };\n", 'a reader that empties its reply'), 'empties');
   const he = await heldLeg(Empty);
   ok(!!(he.list1 === 0), `CONTROL (a reader that empties its reply on a failed read): the folder reads as holding nothing (${he.list1} files) — «no readings» — red`);
+}
+// ⑤ (r1976's legs) THE MEMO DROPPED AT A REPLY · THE ROUTE ANSWERS A HELD FOLDER WITH ITS AGE · ONE UNREADABLE FILE · THE LATER READING
+{
+  // the groups' memo never outlives the reply it was built on: an identity another process filed reaches resolveIdentity's groups at the next reply
+  const memoScene = async (engMod) => {
+    const w = world(3); const eng = await quiet(() => engineOf(engMod, w));
+    eng.usageIdentityGroupsCached();   // the memo built on the boot's reply
+    const id = w.am.createSubscription({ name: 'acct-new' }).id;   // the engine's own account manager knows it
+    fs.writeFileSync(path.join(w.am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 });
+    fs.writeFileSync(path.join(w.cacheDir, id + '.json'), reading(NOW, 'org-new-' + (++seq)));
+    await F.forDir(w.cacheDir).refresh();
+    return [...eng.usageIdentityGroupsCached().values()].some((g) => g.accountIds.includes(id));
+  };
+  ok(!!(await memoScene(ENG)), '⑤ the groups\' memo is dropped at a folder reply: an identity filed by another process is in resolveIdentity\'s groups at the next reply');
+  const NoDrop = M.load('src/server/usage-pool-engine.js', anchored(E_SRC, "usageFolder.onReply(() => { _identGroupsMemo.groups = null; });", '', 'the memo kept across a reply'), 'memo-kept');
+  ok(!!(!(await memoScene(NoDrop))), 'CONTROL (the memo kept across a reply): the new identity stays out of the groups for the memo\'s life — red');
+}
+{
+  // a held folder: the route answers with the kept readings and SAYS how old they are
+  const w = world(); const dir = path.resolve(w.cacheDir);
+  let hang = false;
+  const fsp = { readdir: (d) => (hang ? new Promise(() => { }) : fs.promises.readdir(d)), readFile: (f, e) => fs.promises.readFile(f, e) };
+  const reader = F.forDir(dir, { fsp, everyMs: 20, log: () => { } });   // made FIRST: the engine and the routes find this reader
+  const asOf = reader.state().asOf;
+  await quiet(() => engineOf(ENG, w));
+  const R = await routesOf(ROUTES, w);
+  hang = true; reader.refresh();
+  await new Promise((z) => setTimeout(z, 40));
+  const ans = await R.get();
+  ok(!!(ans.usageFolder && ans.usageFolder.held === true && ans.usageFolder.asOf === asOf && ans.accounts && ans.accounts[w.ids[0]] && ans.accounts[w.ids[0]].fetchedAt === NOW - 600e3), `⑤ a held folder: GET /api/usage answers the kept readings and says held, as of the last reply (${JSON.stringify(ans.usageFolder)})`);
+  const meter = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');
+  ok(!!(meter.includes("this._usageFolder = data?.usageFolder || null;") && meter.includes("this._usageFolder && this._usageFolder.held ?") && meter.includes("t('⚠ The usage folder is not answering: the readings shown are as of {ago}.', { ago: agoText(this._usageFolder.asOf) })")), '⑤ PIN: the usage popup reads the answer\'s usageFolder and draws its sentence when held, with the readings\' age');
+}
+async function unreadableLeg(mod) {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'bad-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 1 }));
+  fs.mkdirSync(path.join(dir, 'b.json'));   // a folder named .json: reading it fails (EISDIR)
+  const r = mod.create(dir, { fillSync: false, log: () => { } });
+  await r.refresh();
+  const st = r.state();
+  return { held: st.held, names: r.via.readdir(dir) };
+}
+{
+  const u = await unreadableLeg(F);
+  ok(!!(u.held === false && u.names.length === 1 && u.names[0] === 'a.json'), `⑤ one unreadable file is skipped (as the release skipped it): the others come, the folder is not held (${JSON.stringify(u)})`);
+  const Strict = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); } catch { }\n", "      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }\n", 'one unreadable file fails the refresh'), 'strict');
+  const s2 = await unreadableLeg(Strict);
+  ok(!!(s2.held === true), 'CONTROL (one unreadable file fails the whole refresh): the folder is held for every identity — red');
+}
+async function laterLeg(mod) {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'later-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 1 }));
+  const held = [];
+  const fsp = { readdir: (d) => fs.promises.readdir(d), readFile: (f) => new Promise((res) => held.push(() => res(fs.readFileSync(f, 'utf8')))) };
+  const r = mod.create(dir, { fsp, fillSync: false });
+  const pr = r.refresh();
+  r.noteWritten('a.json', JSON.stringify({ fetchedAt: 2 }));                   // the hub writes while the read is in flight …
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 3 })); // … then another process writes a LATER reading, which the read takes
+  for (let k = 0; k < 20 && !held.length; k++) await tick();
+  held.shift()();
+  await pr;
+  return JSON.parse(r.via.readText(path.join(dir, 'a.json'))).fetchedAt;
+}
+{
+  const got = await laterLeg(F);
+  ok(!!(got === 3), `⑤ the hub's write during a read keeps the LATER of the two readings: another process's newer reading stands (fetchedAt ${got})`);
+  const OwnWins = M.load('src/usage-cache-folder.js', anchored(F_SRC, 'texts.set(n, laterOf(texts.get(n), t));', 'texts.set(n, t);', 'the own write always wins'), 'own-wins');   // stale-pins: kept (the control's planted release form)
+  ok(!!((await laterLeg(OwnWins)) === 2), 'CONTROL (the own write always wins): the hub\'s older text hides the newer reading for a refresh — red');
 }
 report();

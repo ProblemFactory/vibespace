@@ -97,7 +97,9 @@ const E_SRC = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js')
 const R_SRC = fs.readFileSync(path.join(REPO, 'src/reading-repair.js'), 'utf8');
 const KEPT_READ = "    if (this._ready) { const r = this._kept.get(this._name(key)); return r ? JSON.parse(JSON.stringify(r)) : null; }\n";
 const VIEW_STEP = '      usageEstimator.withView(view, () => step(k, g));\n';
-const REPAIR_NOTE = "  if (res.files) require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);\n";
+const REPAIR_NOTE = "    if (res.files) require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);\n";   // r1976 (e): in a finally
+const WINDOW_NOTE = "    require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);\n";   // repairAnchorsByWindow's, in its finally
+const PURGE_NOTE = "    if (report.anchorFiles && !dryRun) require('./usage-anchors.js').noteAnchorsRewritten(anchorsDir);\n";
 const ANCHORS_REQ = "costBetweenMulti } = require('../usage-anchors.js')";   // the one require that builds the store (the engine reads identityKeyFor by a second one)
 const engineWith = (anchorsSrc, engineSrc, tag) => {
   const aPath = M.write('src/usage-anchors.js', anchorsSrc, tag + '-anchors', { esm: false, same: anchorsSrc === A_SRC });
@@ -187,5 +189,89 @@ console.log('\n— ⑤ red controls');
   const RepairCut = M.load('src/reading-repair.js', anchored(R_SRC, REPAIR_NOTE, '', 'the repair without its notice'), 'repair-notice-cut');
   const s = await rewriteScene(ENG, RepairCut);
   ok(s.after !== r4.after, `⑤ RED CONTROL the repair's notice cut: the kept line still names the dropped reading — the sweep anchored nothing (${s.after} lines; the release ${r4.after})`, { cut: s, release: r4 });
+}
+// ═══ ⑥ THE TWO OTHER REWRITERS SAY SO (r1976's legs): the kept last line of a file they rewrote is its new last line ═══
+console.log('\n— ⑥ the window repair and the fixture purge: each rewrite reaches the kept last lines');
+const keptAfter = async (fileDir, key, run) => {
+  const { UsageAnchors } = require(path.join(REPO, 'src/usage-anchors.js'));
+  const store = new UsageAnchors({ dataDir: path.dirname(fileDir) });
+  await store.prime();
+  await quiet(async () => run());
+  if (store._primeP) await store._primeP;   // only the read the notice started: a prime asked here would heal the red
+  return store.lastAnchor(key);
+};
+const windowWorld = () => {
+  const root = fs.mkdtempSync(path.join(ROOT, 'win-')), dataDir = path.join(root, 'data'), aDir = path.join(dataDir, 'usage-anchors'), cDir = path.join(dataDir, 'usage-cache');
+  for (const p0 of [aDir, cDir]) fs.mkdirSync(p0, { recursive: true });
+  const A = 'sub-aaaaaaaaaaaa', B = 'sub-bbbbbbbbbbbb', WA = 1789030800, WB = 1789142400, T0 = Date.parse('2026-09-08T00:00:00Z');
+  const rec = (acct, ident, ts, u, resetsAt, source = 'on-demand', extra = {}) => ({ ts, fetchedAt: ts, source, accountId: acct, identityKey: ident, buckets: { fiveHour: { u: 0.2, resetsAt: 1 }, sevenDay: { u, resetsAt }, scopedWeekly: [] }, prevFetchedAt: null, elapsedSec: null, costSince: null, ...extra });
+  const put = (ident, rows) => fs.writeFileSync(path.join(aDir, `anchors-${ident}.ndjson`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const aRows = []; for (let i = 0; i < 8; i++) aRows.push(rec(A, 'org_aaaa', T0 + i * 60000, 0.1 + i * 0.01, i % 2 ? WA : WA - 60));
+  aRows.push(rec(A, 'org_aaaa', T0 + 9 * 60000, 0.9, WB, 'rate-limit-event'));   // B's window, filed on A: the repair moves it to B, B's LAST line
+  put('org_aaaa', aRows);
+  put('org_bbbb', Array.from({ length: 8 }, (_, i) => rec(B, 'org_bbbb', T0 + i * 60000, 0.5, i % 2 ? WB : WB - 60)));
+  fs.writeFileSync(path.join(cDir, A + '.json'), JSON.stringify({ fetchedAt: T0 + 9 * 60000, source: 'rate-limit-event', sevenDay: { utilization: 0.9, resetsAt: WB }, orgUuid: 'aaaa' }));
+  fs.writeFileSync(path.join(cDir, B + '.json'), JSON.stringify({ fetchedAt: T0, source: 'on-demand', sevenDay: { utilization: 0.5, resetsAt: WB }, orgUuid: 'bbbb' }));
+  return { dataDir, aDir, roster: [A, B], file: path.join(aDir, 'anchors-org_bbbb.ndjson') };
+};
+const windowScene = async (repairMod) => { const w = windowWorld(); const kept = await keptAfter(w.aDir, 'org_bbbb', () => repairMod.repairByWindow({ dataDir: w.dataDir, roster: w.roster, id: 'test-window' })); return { kept: kept && kept.fetchedAt, file: lastLine(w.file).fetchedAt }; };
+{
+  const cure = await windowScene(require(path.join(REPO, 'src/reading-repair.js')));
+  ok(!!(cure.kept === cure.file && cure.file != null), `⑥ the window repair moved a reading onto another identity's file: its kept last line is the file's new last one (${cure.kept} = ${cure.file})`, cure);
+  const Cut = M.load('src/reading-repair.js', anchored(R_SRC, WINDOW_NOTE, '', 'the window repair without its notice'), 'window-notice-cut');
+  const cut = await windowScene(Cut);
+  ok(!!(cut.kept !== cut.file && cut.kept != null), `⑥ RED CONTROL the window repair's notice cut: the kept last line is still the older one (${cut.kept}, the file's ${cut.file})`, cut);
+}
+const purgeWorld = () => {
+  const root = fs.mkdtempSync(path.join(ROOT, 'purge-')), dataDir = path.join(root, 'data'), hist = path.join(dataDir, 'usage-history'), aDir = path.join(dataDir, 'usage-anchors');
+  for (const p0 of [hist, aDir]) fs.mkdirSync(p0, { recursive: true });
+  const FX = 'e2e00000-0000-4000-8000-000000000001', REAL = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const row = (o) => JSON.stringify({ rid: o.rid, ts: o.ts, sid: o.sid, be: 'claude', model: 'claude-fable-5', acct: null, atype: 'global', cwd: o.cwd ?? null, i: 10, cw5: 0, cw1: 0, cr: 0, o: 50, tier: null });
+  fs.writeFileSync(path.join(hist, 'events-2026-08.ndjson'), [row({ rid: 'real_1', ts: 1000, sid: REAL, cwd: '/home/u/work' }), row({ rid: 'fx_sid_1', ts: 3000, sid: FX })].join('\n') + '\n');
+  fs.writeFileSync(path.join(aDir, 'anchors-org_x.ndjson'), [
+    JSON.stringify({ accountId: 'sub-a', fetchedAt: 900, prevFetchedAt: 500, costSince: { total: 1 } }),
+    JSON.stringify({ accountId: 'sub-a', fetchedAt: 3500, prevFetchedAt: 2900, costSince: { total: 2 } }),   // its interval holds the fabricated row: VOIDED — the LAST line
+  ].join('\n') + '\n');
+  return { dataDir, aDir };
+};
+const purgeScene = async (purgeMod) => { const w = purgeWorld(); const kept = await keptAfter(w.aDir, 'org_x', () => purgeMod.purgeFixtureLedger({ dataDir: w.dataDir, id: 'test-purge' })); return { keptCost: kept ? kept.costSince : 'none', file: lastLine(path.join(w.aDir, 'anchors-org_x.ndjson')).costSince }; };
+{
+  const P_SRC = fs.readFileSync(path.join(REPO, 'src/fixture-ledger-purge.js'), 'utf8');
+  const cure = await purgeScene(require(path.join(REPO, 'src/fixture-ledger-purge.js')));
+  ok(!!(cure.file === null && cure.keptCost === null), `⑥ the fixture purge voided the last line's cost: its kept last line says so too (kept ${JSON.stringify(cure.keptCost)}, the file's ${JSON.stringify(cure.file)})`, cure);
+  const Cut = M.load('src/fixture-ledger-purge.js', anchored(P_SRC, PURGE_NOTE, '', 'the fixture purge without its notice'), 'purge-notice-cut');
+  const cut = await purgeScene(Cut);
+  ok(!!(cut.file === null && cut.keptCost && cut.keptCost.total === 2), `⑥ RED CONTROL the purge's notice cut: the kept last line still carries the voided cost (${JSON.stringify(cut.keptCost)})`, cut);
+}
+// ═══ ⑦ THE SWEEP WAITS FOR THE PRIME (r1976): a prime held open — the steps run only after it, never on the release's whole read ═══
+console.log('\n— ⑦ a sweep under a prime held open waits for it');
+const heldPrime = async (engMod) => {
+  const d = seedData();
+  const real = fs.promises.readdir; let open;
+  const gate = new Promise((r) => { open = r; });
+  fs.promises.readdir = async function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(d.aDir)) await gate; return real.call(this, p0, ...a); };
+  try {
+    const w = await quiet(async () => engineOf(engMod, d));
+    const sw = quiet(() => w.eng.sweepUsageAnchors());
+    for (let k = 0; k < 5; k++) await new Promise((z) => setImmediate(z));
+    open();
+    await sw;
+    return { syncReads: w.eng.usageAnchors.syncReads, ready: w.eng.usageAnchors.ready() };
+  } finally { fs.promises.readdir = real; }
+};
+{
+  const cure = await heldPrime(ENG);
+  ok(!!(cure.syncReads === 0 && cure.ready), `⑦ a sweep asked while the prime is held open waits for it: no synchronous read of an anchors file (${cure.syncReads})`, cure);
+  const LOOP = "    for (let n = 0; !usageAnchors.ready() && n < 3; n++) { try { await usageAnchors.prime(); } catch { } }\n";
+  const NoWait = M.load('src/server/usage-pool-engine.js', anchored(E_SRC, LOOP, '', 'the sweep without its wait for the prime'), 'no-wait');
+  const cut = await heldPrime(NoWait);
+  ok(!!(cut.syncReads > 0), `⑦ RED CONTROL the wait cut: the steps ran on a store not ready — ${cut.syncReads} synchronous whole reads (the release's)`, cut);
+}
+// ═══ ⑧ ONE SWEEP AT A TIME (a pin: the ordering law holds by construction) ═══
+{
+  const d = seedData(); const w = await quiet(async () => engineOf(ENG, d));
+  const p1 = w.eng.sweepUsageAnchors(), p2 = w.eng.sweepUsageAnchors();
+  await quiet(() => p1);
+  ok(!!(p1 && typeof p1.then === 'function' && p1 === p2), '⑧ two sweeps asked at once are ONE (the second joins the first): no reading lands between one sweep\'s check and its append');
 }
 report();

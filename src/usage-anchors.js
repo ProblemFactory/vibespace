@@ -88,7 +88,9 @@ class UsageAnchors {
     const p = (async () => {
       const kept = new Map();
       let names = [];
-      try { names = (await fs.promises.readdir(this.dir)).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { names = []; }
+      // r1976 (d): a missing folder is no anchors yet; any other listing error leaves the store NOT ready (thrown: the next sweep primes again),
+      // never an empty store marked ready (every identity would read as fresh and append its last line again)
+      try { names = (await fs.promises.readdir(this.dir)).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; names = []; }
       for (const name of names) kept.set(name, await lastRecordOf(path.join(this.dir, name)));
       if (epoch !== this._epoch) return false;
       for (const [name, rec] of this._since) kept.set(name, rec);
