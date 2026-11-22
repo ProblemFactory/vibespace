@@ -274,7 +274,6 @@ const ROWS = [
   ["src/server/login-expiry-watch.js", "unsynced", "store", "", "create > save"],
   ["src/server/migrations.js", "unsynced", "store", "", "create > run", "create > run", "create > run", "create > run", "create > run", "create > run", "create > run", "create > run", "create > migrateContextRowsFile", "create > dropWarmthDerived", "create > cloakMigrateNow > writeAtomic", "create > stripRetiredSettingsFile", "create > migrateExitLists > reshape", "create > migrateExitLists", "create > voidRunaway", "create > stampDesktopHostKey"],
   ["src/server/migrations.js", "move", "move", "", "create > run"],
-  ["src/server/otel-ingest.js", "unsynced", "store", "", "create > replayEnd"],
   ["src/server/plugin-install.js", "move", "move", "", "moveDir"],
   ["src/server/plugin-loader.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/published-pages.js", "unsynced", "store", "", "writeJsonAtomic"],
@@ -303,6 +302,7 @@ const ROWS = [
   ["src/store-hold.js", "move", "move", "", "create > setAside"],
   ["src/store-writer-worker.js", "move", "move", "a ring's rotation (the live log to .1; each append was synced)", "writeJob"],
   ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: every store the writer holds", "writeJob"],
+  ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: the REWRITE of an append store from its own bytes (row B-360d — the OTel stash's trim), synced, then renamed over the file", "rewriteJob"],
   ["src/sync-store.js", "unsynced", "store", "", "SyncStore.flush"],
   ["src/sysinfo.js", "unsynced", "store", "", "persistHistory"],
   ["src/task-groups.js", "move", "move", "", "TaskGroupManager._mirrorIo > rename"],
@@ -325,7 +325,7 @@ const ROWS = [
   ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
   ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
 ];
-const OWED_MAX = 148;   // B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+const OWED_MAX = 147;   // row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
 // THE RATCHET (round wl2wglpsq): OWED_MAX is an EQUALITY with the census (a cure lowers it in the cure's own commit). A commit
 // could raise it and stay green here, so a rise above the KEPT baseline is red by name unless RISES names it with its row
 const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)
