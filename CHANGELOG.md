@@ -17,6 +17,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A tool that did not start is listed in Session Properties and ⚙ Diagnostics, and on a phone or tablet the search button sits in the top bar.
 - On a tablet held upright, when its top bar is full, search moves into the bar's «⋯» menu as «Search this conversation».
 - On an instance with a memory limit, a Background Work job that does not fit beside what the running jobs use is not started; you are told which jobs use it.
+- A page left open from before this update cannot approve a proposal that names people until you reload it.
 
 ### Fixed
 - When a Channels file cannot be read, the sidebar shows a warning and the panel says what is paused; nothing is fetched, sent or written over until it reads.
