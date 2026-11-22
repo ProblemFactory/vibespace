@@ -51,4 +51,11 @@ function unshownText(list, handle = '<handle>', { handles = true } = {}) {
   return `this app has ${rows.length} more window(s) this image does not show — ${rows.map(one).join('; ')}${tail}`;
 }
 
-module.exports = { unshownOf, unshownText, titleOf, UNSHOWN_MIN_PX, UNSHOWN_KEEP, SUB_RE, subHandle };
+/** B-dbb4 M3 (r1879): what a key or a text on the app's own handle SAYS when the display's own word put the keyboard in one of
+ *  the app's windows this image does not show — only what was read (where the keyboard WAS when the act was sent), its handle and
+ *  the two ways on. `win` = an unshownOf entry (its title already through titleOf, the window list's own door). */
+function keyboardText(win, handle) {
+  const own = subHandle(handle, win.id);
+  return `when this was sent, the keyboard was in «${win.title || 'an untitled window'}» (\`${own}\`), a window this image does not show — to reach the main window, click into it first (\`vibespace-window click ${handle} --at x,y\`); to act on that window, use its own handle \`${own}\``;
+}
+module.exports = { keyboardText, unshownOf, unshownText, titleOf, UNSHOWN_MIN_PX, UNSHOWN_KEEP, SUB_RE, subHandle };

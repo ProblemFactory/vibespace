@@ -1330,6 +1330,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const verb = String(body.verb || '');
     const door = plainDoor(handle0, facts, verb || 'act') || await subjectDoor(handle0, facts, verb || 'act', { subjectVerb: ['click', 'type', 'key', 'scroll'].includes(verb), tree: !!body.ref }); // B-dbb4 (r946): the one door; r1623: the app's own handle answered synchronously, so a tree act runs before a same-tick revoke
     const { handle, sub, rec, lease } = door; // the door's one read; the verb's re-asks after its real awaits stay (lane E: never across a revoke)
+    { const aim = sub != null ? { kind: 'window', wid: sub } : body.ref ? { kind: 'tree' } : (verb === 'click' && body.at != null) ? { kind: 'point' } : null; if (aim) aims.set(aimKey(rec, facts), { ...aim, at: now() }); } // B-dbb4 M3 (r1879): this lease's last aim
     // B-dbb4 M3: the chosen window IS the plan's main (its own plan) — keys and text focus it and go to its X window
     const subjectWin = (px) => (sub != null && px && px.plan && px.plan.subject && px.plan.main ? px.plan.main : null);
     const centreOf = (m) => ({ x: m.x + Math.min(20, Math.floor(m.w / 2)), y: m.y + Math.min(20, Math.floor(m.h / 2)) });
@@ -1459,12 +1460,13 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const injected = async (e, line) => {
         const px = await pixelsFor(rec, who, 'type', { sub, ...(door.plan ? { plan: door.plan } : {}) });
         await displayHolds(rec, px, subjectWin(px) ? visiblePoint(subjectWin(px)) : keysPointOf(px, lease), who, 'type', 'keys are');   // fb-bc200800e0: keys on a display that cannot take them are refused, never «typed»
-        if (e) { held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
+        if (e) { aims.set(aimKey(rec, facts), { kind: 'tree', at: now() }); held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
+        const kb = !e && sub == null && !dialogWindow(px, lease) ? await keyboardNoteFor(rec, facts, px) : null; // r1879: the look — before the act's last re-check
         held();
         const dw = e ? null : (subjectWin(px) || dialogWindow(px, lease)); // B-dbb4 M3: a chosen window's text goes to ITS X window
         const r = await injecting((signal) => wt.injectType({ bins: px.bins, xenv: px.xenv, text, replace: !!body.replace, focus: subjectWin(px) ? centreOf(subjectWin(px)) : mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
-        fromHelper(r, { verb: 'type', by: 'inject', chars: text.length, ...(e ? { node: nodeLine(e), focusedBy: 'tree' } : dw ? { focusedBy: subjectWin(px) ? 'subject' : 'window' } : {}), ...line, backend: px.backends.injection.backend });
-        return { ok: true, handle: rec.id, did: { verb: 'type', by: 'inject', ...(e ? { ref: e.ref } : {}), chars: text.length, replaced: !!body.replace } };
+        fromHelper(r, { verb: 'type', by: 'inject', chars: text.length, ...(e ? { node: nodeLine(e), focusedBy: 'tree' } : dw ? { focusedBy: subjectWin(px) ? 'subject' : 'window' } : {}), ...(kb ? { keyboardIn: kb.handle } : {}), ...line, backend: px.backends.injection.backend });
+        return { ok: true, handle: rec.id, did: { verb: 'type', by: 'inject', ...(e ? { ref: e.ref } : {}), chars: text.length, replaced: !!body.replace }, ...(kb ? { note: kb.note, keyboard: { handle: kb.handle, title: kb.title } } : {}) };
       };
       if (!body.ref && (pixelShare || sub != null)) return injected(null, { mode: rr ? rr.mode : null }); // B-dbb4 M2: a chosen window is typed into by its keys, under any share — never the app's focused field
       let e = null;
@@ -1486,6 +1488,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         audit({ ...who, verb: 'type', by: 'node', node: nodeLine(e), ok: false, code: 'node_not_editable' }); throw namedError('node_not_editable', `${e.role} ${JSON.stringify(e.name)} (${e.ref}) exports no EditableText — pick a text field from the snapshot (\`editable\`)`, { node: nodeLine(e) });
       }
       held(); // no-await-before: the post-probe re-check (a ref) or the focused-node read's own (no ref, B-a38d) precedes it with no await between — redundant by construction, kept as the act's own guard
+      aims.set(aimKey(rec, facts), { kind: 'tree', at: now() }); // r1879: a text the tree aimed (a ref, the focused node) — this lease's aim
       const r = await wt.actOnNode({ entry: e, verb: body.replace ? 'set_text' : 'insert_text', text, env: base, ...helperOpts() });
       fromHelper(r, { verb: 'type', by: 'node', node: nodeLine(e), chars: text.length });
       return { ok: true, handle: rec.id, did: { verb: 'type', by: 'node', ref: e.ref, chars: text.length, replaced: !!body.replace }, ms: r.ms };
@@ -1498,11 +1501,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       await displayHolds(rec, px, subjectWin(px) ? visiblePoint(subjectWin(px)) : keysPointOf(px, lease), who, 'key', 'keys are');   // fb-bc200800e0: the same for a chord
       // where the pointer rests before a chord (a bare display has PointerRoot focus): inside the MAIN window when the
       // keeper names it (lane E — tree bounds are toolkit coordinates), else the last snapshot's frame
+      const kb = sub == null && !dialogWindow(px, lease) ? await keyboardNoteFor(rec, facts, px) : null; // r1879: the look — before the act's last re-check
       held();
       const dw = subjectWin(px) || dialogWindow(px, lease); // lane window-dialog-member: a dialog's keys go to ITS X window — B-dbb4 M3: a chosen window's to ITS
       const r = await injecting((signal) => wt.injectKey({ bins: px.bins, xenv: px.xenv, chord, focus: subjectWin(px) ? centreOf(subjectWin(px)) : mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
-      fromHelper(r, { verb: 'key', by: 'inject', chord: chord.hasModifier ? chord.xdotool : '(key)', ...(dw ? { focusedBy: subjectWin(px) ? 'subject' : 'window' } : {}), backend: px.backends.injection.backend });
-      return { ok: true, handle: rec.id, did: r.did };
+      fromHelper(r, { verb: 'key', by: 'inject', chord: chord.hasModifier ? chord.xdotool : '(key)', ...(dw ? { focusedBy: subjectWin(px) ? 'subject' : 'window' } : {}), ...(kb ? { keyboardIn: kb.handle } : {}), backend: px.backends.injection.backend });
+      return { ok: true, handle: rec.id, did: r.did, ...(kb ? { note: kb.note, keyboard: { handle: kb.handle, title: kb.title } } : {}) };
     }
     throw namedError('bad-request', `unknown verb ${JSON.stringify(verb)} — click | type | key | scroll`);
   }
@@ -1512,6 +1516,27 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function dialogWindow(px, lease) {
     const d = lease && lease.dialog;
     return d && px && px.plan && px.plan.members ? R.windowOfNode(d, px.plan.members) : null;
+  }
+  // B-dbb4 M3 (the coordinator's r1873 / r1879, the change of shape): THE ENGINE FOCUSES NOTHING for a key or a text with no aim on
+  // the app's own handle — the release's road: a click, a ref or a handle that aimed, and the app's own focus, decide. It only SAYS,
+  // on the display's own word, when the keyboard is in a window of the app this image does not show and this lease did not aim into
+  // it. The look: only when the plan holds such a window (an app with one window pays no call), only on the X display's own
+  // injection (xtest), bounded; unread, failed or late ⇒ nothing said and the act goes as at the release.
+  const KB_LOOK_MS = 400;
+  const aims = new Map(); // `${record}|${session}` → { kind: 'window' | 'tree' | 'point', wid?, at } — this lease's last aimed act
+  const aimKey = (rec, facts) => `${rec.id}|${facts && facts.sessionId}`;
+  async function keyboardNoteFor(rec, facts, px) {
+    const un = px && px.plan && Array.isArray(px.plan.unshown) ? px.plan.unshown : [];
+    if (!un.length) return null;
+    if (!px.backends || !px.backends.injection || px.backends.injection.backend !== 'xtest' || typeof wt.keyboardWindow !== 'function') return null;
+    let r = null;
+    try { r = await Promise.race([wt.keyboardWindow({ bins: px.bins, xenv: px.xenv, timeout: KB_LOOK_MS }), sleep(KB_LOOK_MS + 100).then(() => null)]); } catch { r = null; }
+    if (!r || !r.ok || !Number.isInteger(r.id)) return null;
+    const w = un.find((x) => x && x.id === r.id);
+    if (!w) return null;
+    const a = aims.get(aimKey(rec, facts));
+    if (a && (a.kind === 'tree' || (a.kind === 'window' && a.wid === w.id))) return null; // the agent aimed into it (law B)
+    return { handle: UN.subHandle(rec.id, w.id), title: w.title, note: UN.keyboardText(w, rec.id) };
   }
   function mainFocus(px, lease) {
     const dw = dialogWindow(px, lease);

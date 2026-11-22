@@ -79,7 +79,11 @@ const hits = [];
 // the cure (round wudero5nj, M3): every page reports its OWN keydowns (/key?w=<which>&k=<key>) — a key on the popup's handle must
 // arrive in the popup and none in the main; the main's own «x» closes both popups (the CONTROL key, and the leg's clean-up)
 const KEYS_JS = (w) => `<script>addEventListener('keydown', (e) => { fetch('/key?w=${w}&k=' + encodeURIComponent(e.key)); if (${JSON.stringify(w)} === 'main' && e.key === 'x') { for (const p of (window.__pops || [])) { try { p.close(); } catch {} } } });</script>`;
-const POPUPS_HTML = '<!doctype html><title>Popups</title><button id="open" style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" onclick="var n = (window.__n = (window.__n || 0) + 1); (window.__pops = window.__pops || []).push(n === 1 ? window.open(\'/p1\', \'p1\', \'left=0,top=0,width=520,height=620\') : window.open(\'/p2\', \'p2\', \'left=3200,top=2400,width=420,height=320\'))">Open the sign-in windows</button>' + KEYS_JS('main');
+// B-dbb4 M3's shape (r1879): a select AFTER the button in the tab order, six options so its open list is a window of 100 px or
+// more drawn over the main; a pick reports itself (/pick?v=<value>). A THIRD click on the button opens nothing (the leg's aim into
+// the main page)
+const SELECT_HTML = '<select id="pick" style="position:fixed;left:20px;top:20px;z-index:2;font-size:20px;width:240px" onchange="fetch(\'/pick?v=\' + this.value)">' + ['one', 'two', 'three', 'four', 'five', 'six'].map((v) => `<option value="${v}">${v}</option>`).join('') + '</select>';
+const POPUPS_HTML = '<!doctype html><title>Popups</title><button id="open" style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" onclick="var n = (window.__n = (window.__n || 0) + 1); if (n > 2) return; (window.__pops = window.__pops || []).push(n === 1 ? window.open(\'/p1\', \'p1\', \'left=0,top=0,width=520,height=620\') : window.open(\'/p2\', \'p2\', \'left=3200,top=2400,width=420,height=320\'))">Open the sign-in windows</button>' + SELECT_HTML + KEYS_JS('main');
 const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html; charset=utf-8'); if (String(req.url).startsWith('/popups')) return res.end(POPUPS_HTML); if (/^\/p[12]\b/.test(String(req.url))) return res.end(`<!doctype html><title>Sign in – stand-in ${String(req.url).slice(2, 3)}</title><h1>Sign in</h1>${KEYS_JS('p' + String(req.url).slice(2, 3))}`); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
 await new Promise((r) => page.listen(PAGE_PORT, '127.0.0.1', r));
 const appsOf = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps); } catch { return []; } };
@@ -309,19 +313,52 @@ try {
     const popNamed = ((ssP && ssP.out) || '').match(/«Sign in – stand-in ([12])(?: - [^»]*)?» \d+x\d+ at [^;]*? its own handle `([^`]+)`/); // the title as the window bar has it: + the browser's own suffix
     const popOwn = popNamed ? own.find((x) => x.h === popNamed[2]) : null;
     check(`B-dbb4 unit 2 on the real chromium: a NAMED window is the stand-in's own popup by its title (${popNamed ? `«Sign in – stand-in ${popNamed[1]}» as ${popNamed[2]}` : 'none named'}) and its OWN handle gives its own image; every other named window's too (${own.length} named)`, !!popNamed && !!popOwn && popOwn.code === 0 && popOwn.subject && !!popOwn.dims && own.every((x) => (x.code === 0 && x.subject && x.dims) || /\[window_not_visible\]/.test(x.err)), { popNamed, own });
-    // M3: a key on the popup's OWN handle arrives in THAT popup (its page reads its own keydown) and the main window gets none;
-    // CONTROL: the same kind of key on the APP's own handle lands in the main page (and its «x» closes both popups: the clean-up)
+    // M3, THE SHAPE (the coordinator's r1873 / r1879): THE ENGINE FOCUSES NOTHING for a key on the APP's own handle; the display's
+    // own word (X's input focus, read right before the key) says where the keyboard was. Here, the box's scene: the clicks opened
+    // the popups and one of them took the keyboard; this lease aimed at no popup.
+    //   (1) THE CONTROL: `key <app> c` — the key goes where the keyboard is (one page hears it), and the reply NAMES that popup's own
+    //       handle exactly when the page that heard it is a popup this image does not show (never a claim about another window);
+    //   (2) M3: a key on the popup's OWN handle arrives in THAT popup, the main window hears none;
+    //   (3) after an aim INTO the main (a click on its page — the third click opens nothing), the keys stand there: the select's list
+    //       opened by Tab + alt+Down (one more window drawn in the image, read), Down then Return PICK «two» (nothing forced, the
+    //       list's grab kept); `key <app> x` lands in the main page (and closes both popups: the clean-up)
     if (popNamed) {
+      const heardSince = (k0) => hits.slice(k0).filter((h) => /^\/key\?/.test(h.url)).map((h) => h.url);
+      const c0 = hits.length;
+      const kc = await cli('vibespace-window', ['key', H2, 'c']);
+      await until(async () => (heardSince(c0).length ? true : null), 15000, 300);
+      await sleep(800);
+      const heardC = heardSince(c0);
+      const who = (/^\/key\?w=(\w+)&k=c$/.exec(heardC[0] || '') || [])[1] || null;
+      const noteC = (kc.out || '').split('\n').find((l) => /when this was sent, the keyboard was in /.test(l)) || '';
+      const unseen = who && who !== 'main' && who === `p${popNamed[1]}`;
+      console.log(`    MEASURE B-dbb4 M3 shape (not a proof): \`key ${H2} c\` was heard by ${JSON.stringify(heardC)}; the reply's note: ${noteC ? JSON.stringify(noteC.trim()) : 'none'}`);
+      check(`B-dbb4 M3 shape on the real chromium: \`key ${H2} c\` goes where the keyboard is (ONE page heard it: ${who || 'none'}) and the reply ${noteC ? 'NAMES the own handle of the window this image does not show that held the keyboard' : 'says nothing (the keyboard was in a window this image shows)'} — a note only for an unseen window, and always for the named popup when it heard the key`, kc.code === 0 && heardC.length === 1 && (who !== 'main' || !noteC) && (!noteC || ((acc && acc.named) || []).some((h) => noteC.includes(h))) && (!unseen || noteC.includes(popNamed[2])), { kc, heardC, noteC, named: acc && acc.named });
       const k0 = hits.length;
       const kp = await cli('vibespace-window', ['key', popNamed[2], 'k']);
       const inPop = await until(async () => (hits.slice(k0).some((h) => h.url === `/key?w=p${popNamed[1]}&k=k`) ? true : null), 15000, 300);
       await sleep(1500);
       const inMain = hits.slice(k0).filter((h) => /^\/key\?w=main/.test(h.url)).map((h) => h.url);
+      // the aim INTO the main page, then the select's list (its open list is drawn over the main: nothing is looked at or forced)
+      const ckA = await cli('vibespace-window', ['click', H2, '--at', '960,540']);
+      await sleep(800);
+      const composed = async () => { const r = await cli('vibespace-window', ['screenshot', H2]); const m = /(\d+) windows? of the app composed/.exec(r.out || ''); return m ? Number(m[1]) : 1; };
+      const s0 = hits.length;
+      const kt = await cli('vibespace-window', ['key', H2, 'Tab']);
+      const before = await composed();
+      const ko = await cli('vibespace-window', ['key', H2, 'alt+Down']);
+      await sleep(800);
+      const after = await composed();
+      const kd = await cli('vibespace-window', ['key', H2, 'Down']);
+      const kr = await cli('vibespace-window', ['key', H2, 'Return']);
+      const picked = await until(async () => (hits.slice(s0).some((h) => h.url === '/pick?v=two') ? true : null), 15000, 300);
+      console.log(`    MEASURE B-dbb4 r1691 (not a proof): the windows composed in the main handle's image ${before} → ${after} after alt+Down (the select's list); what the page heard — ${JSON.stringify(hits.slice(s0).filter((h) => /^\/(key|pick)/.test(h.url)).map((h) => h.url))}`);
+      check(`B-dbb4 r1691 on the real chromium: after an aim into the main page, a select's list OPEN (one more window drawn: ${before} → ${after}), Down then Return on the APP's own handle PICK the option «two» (nothing forced)`, ckA.code === 0 && kt.code === 0 && ko.code === 0 && kd.code === 0 && kr.code === 0 && after > before && !!picked, { ckA: ckA.code, kt: kt.code, ko: ko.code, kd: kd.code, kr: kr.code, before, after, picked: !!picked });
       const k1 = hits.length;
       const km = await cli('vibespace-window', ['key', H2, 'x']);
       const mainGot = await until(async () => (hits.slice(k1).some((h) => h.url === '/key?w=main&k=x') ? true : null), 15000, 300);
       console.log(`    MEASURE B-dbb4 (not a proof): the keys the pages heard — ${JSON.stringify(hits.slice(k0).filter((h) => /^\/key/.test(h.url)).map((h) => h.url))}`);
-      check(`B-dbb4 M3 on the real chromium: \`key ${popNamed[2]} k\` arrives in the POPUP (its own keydown) and the main window hears none; CONTROL: \`key ${H2} x\` lands in the main page`, kp.code === 0 && !!inPop && !inMain.length && km.code === 0 && !!mainGot, { kp, inPop: !!inPop, inMain, km, mainGot: !!mainGot });
+      check(`B-dbb4 M3 on the real chromium: \`key ${popNamed[2]} k\` arrives in the POPUP (its own keydown) and the main window hears none; after the aim into the main page, \`key ${H2} x\` lands in the main page`, kp.code === 0 && !!inPop && !inMain.length && km.code === 0 && !!mainGot, { kp, inPop: !!inPop, inMain, km, mainGot: !!mainGot });
     }
   }
   // lane e2-canvas (THE SECOND E2 CHROME PATH, 4/6 at 1 and 2 lanes after the first race's fix): xpra 6.5.4 closes a connection

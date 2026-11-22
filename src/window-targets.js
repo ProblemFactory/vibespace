@@ -166,6 +166,15 @@ async function probeA11y({ env = process.env, now = Date.now, ...rest } = {}) {
   return memoSet(key, { ok: true, apps: r.apps, why: null, sessionBus: r.sessionBus, ms: r.ms }, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
 }
 
+/** B-dbb4 M3 (the coordinator's r1879): THE DISPLAY's OWN WORD for where the keyboard is — X's input focus (`xdotool
+ *  getwindowfocus`), bounded by `timeout`; { ok: true, id } or { ok: false, why } — never a guess. Read just before a key or a text
+ *  with no aim on an app's own handle; its caller says nothing when it is not ok. */
+async function keyboardWindow({ bins, xenv, timeout = 400 } = {}) {
+  if (!bins || !bins.xdotool) return { ok: false, why: 'xdotool not on PATH' };
+  const r = await run(bins.xdotool, ['getwindowfocus'], { env: xenv, timeout });
+  const id = !r.err && /^\s*(\d+)\s*$/.test(r.stdout) ? Number(r.stdout.trim()) : null;
+  return Number.isInteger(id) && id > 0 ? { ok: true, id } : { ok: false, why: r.err ? String(r.err.message || r.err).split('\n')[0].slice(0, 120) : 'no focus window read' };
+}
 function run(bin, args, { env, timeout = 3000 } = {}) {
   return new Promise((resolve) => execFile(bin, args, { env, timeout, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => resolve({ err, stdout: String(stdout || '') })));
 }
@@ -724,7 +733,7 @@ module.exports = {
   HELPER_PATH, HELPER_FILE, TRAVERSAL_LIMITS, REFUSALS, refuse,
   // mirror red on 2.369.181: the failures that mean "no tree here" (an auto share folds them into mode_pixels)
   TREE_UNREACHABLE, treeUnreachable,
-  runHelper, probeA11y, probeInputBackends, probeScreenCastPortal, resetProbeMemo, envKeyOf,
+  runHelper, probeA11y, probeInputBackends, keyboardWindow /* B-dbb4 M3, r1879 */, probeScreenCastPortal, resetProbeMemo, envKeyOf,
   verbVerdicts, parseChord, pickAction, ACTION_PREFERENCE, NEVER_BY_DEFAULT, NAMED_KEYS, refTableOf, resolveRef, targetRows, nodeView, textBoundOf,
   snapshotTarget, actOnNode, focusedNode, screenshotDisplay, injectKey, injectClick,
   // lane E (D7): the pixel road

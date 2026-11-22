@@ -556,6 +556,62 @@ console.log('CONTROLS (patched copies)');
     ok(!!(red1 && red1.clicked === 1), 'RED CONTROL of M1: today\'s fall-through — the list unreadable, the click on `da-pop.w2` is SENT (at display coordinates) and answered', red1);
     ok(!!(red2 && red2.window == null), 'RED CONTROL of M3: without the subject window the key carries no window — X focus decides (the main, on xpra with a viewer)', red2);
     ok(!!(red3 && (red3.threw || red3.typed === 0)), 'RED CONTROL of M2: the tree road for a chosen window never types into it (the app\'s focused field, or a refusal of the tree\'s own)', red3);
+    // B-dbb4 M3 for the MAIN handle, THE SHAPE (the coordinator's r1873 / r1879, after int361's box row 103): THE ENGINE FOCUSES
+    // NOTHING for a key or a text with no aim on the app's own handle (the release's road); it SAYS, on the display's own word (X's
+    // input focus, read just before the act), when the keyboard is in a window of the app this image does not show and this lease did
+    // not aim into it. (A) a window DRAWN in the image holds the keyboard ⇒ no window sent, no look, no note; (B) after an aim into the
+    // popup (its own handle) ⇒ no window, no note; (C) the popup OUTSIDE the image holds the keyboard after a click aimed at the main
+    // (the box's scene) ⇒ no window sent, the reply and the audit name its handle; (1) an app with one window ⇒ no look made; (2) a look
+    // unread or late ⇒ the act lands, nothing said. Each with its RED.
+    {
+      let kbAnswer = null, kbCalls = 0;
+      wtP.keyboardWindow = async () => { kbCalls++; return typeof kbAnswer === 'function' ? kbAnswer() : kbAnswer; };
+      const rowsKeepS = rowsP;
+      const scene = async (E, { rows, answer, before = null, act = { verb: 'key', chord: 'Return' } }) => {
+        rowsP = rows.map((w) => ({ ...w })); kbAnswer = answer; kbCalls = 0;
+        if (before) await before(E);
+        kbCalls = 0;
+        const k0 = keysP.length, t0 = typedP.length, at0 = Date.now();
+        let r = null, code = null; try { r = await E.act('da-pop', fP, act); } catch (e) { code = e && e.code; }
+        const sent = act.verb === 'key' ? keysP.slice(k0) : typedP.slice(t0);
+        rowsP = rowsKeepS; kbAnswer = null;
+        return { code, note: r && r.note || null, keyboard: r && r.keyboard || null, windows: sent.map((x) => x.window), calls: kbCalls, ms: Date.now() - at0 };
+      };
+      const clickMain = (E) => E.act('da-pop', fP, { verb: 'click', at: '10,20' });
+      const runScenes = async (E) => ({
+        A: await scene(E, { rows: [over, helper, main], answer: { ok: true, id: 5 } }),
+        B: await scene(E, { rows: [pop, helper, main], answer: { ok: true, id: 2 }, before: (E2) => E2.act('da-pop.w2', fP, { verb: 'key', chord: 'Tab' }) }),
+        C: await scene(E, { rows: [pop, helper, main], answer: { ok: true, id: 2 }, before: clickMain }),
+        Ct: await scene(E, { rows: [pop, helper, main], answer: { ok: true, id: 2 }, before: clickMain, act: { verb: 'type', text: 'hi' } }),
+        one: await scene(E, { rows: [helper, main], answer: { ok: true, id: 1 }, before: clickMain }),
+        unread: await scene(E, { rows: [pop, helper, main], answer: { ok: false, why: 'no focus window read' }, before: clickMain }),
+        late: await scene(E, { rows: [pop, helper, main], answer: () => new Promise((res) => setTimeout(() => res({ ok: true, id: 2 }), 2500)), before: clickMain }),
+      });
+      const S = await runScenes(EP);
+      const none = (x) => !!x && !x.code && x.windows.length === 1 && x.windows[0] == null && !x.note;
+      ok(none(S.A) && S.A.calls === 0, 'M3 shape (A): a window DRAWN in this handle\'s image holds the keyboard — no window sent, no look made, nothing said (the release\'s road: the app\'s own focus decides)', S.A);
+      ok(none(S.B), 'M3 shape (B): after an aim INTO the popup (its own handle) a key on the main handle sends no window and says nothing — the aim stands', S.B);
+      const named = (x) => !!x && !x.code && x.windows.length === 1 && x.windows[0] == null && !!x.note && x.note.includes('`da-pop.w2`') && x.note.includes('«Sign in – Google Accounts»') && /^when this was sent, the keyboard was in /.test(x.note) && x.keyboard && x.keyboard.handle === 'da-pop.w2';
+      ok(named(S.C) && named(S.Ct), 'M3 shape (C): the popup OUTSIDE the image holds the keyboard after a click aimed at the main (the box\'s scene) — NOTHING forced (no window sent), and the reply SAYS where the keyboard was, by its title and its own handle, with the two ways on; a key and a text alike', { C: S.C, Ct: S.Ct });
+      const audS = fs.readFileSync(EP.auditFile, 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } });
+      ok(audS.some((l) => l.verb === 'key' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2') && audS.some((l) => l.verb === 'type' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2'), 'M3 shape (C): the audit names the handle where the keyboard was (keyboardIn)');
+      ok(none(S.one) && S.one.calls === 0, 'M3 shape (1): an app with ONE window a person sees (Chrome\'s 15×15 helper aside) — no look made, no extra call', S.one);
+      ok(none(S.unread) && none(S.late) && S.late.ms < 1500, `M3 shape (2): a look that failed, or one that did not answer within its bound — the key lands as at the release and NOTHING is said (never a guess, never a refusal; the late one waited ${S.late.ms} ms)`, { unread: S.unread, late: S.late });
+      // RED CONTROLS (anchored, each anchor found exactly once — or twice where said)
+      const SS = read(ENGINE_REL);
+      const scenesOn = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E3 = EC.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-shape-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); E3.grantReach('da-pop', { kind: 'session', id: 's1' }); E3.setShareMode('da-pop', 'pixels'); E3.attach('da-pop', fP); return runScenes(E3); };
+      const forced = await scenesOn(anchored(SS, 'window: dw ? dw.id : null', 'window: dw ? dw.id : (px && px.plan && px.plan.main ? px.plan.main.id : null)', 'M3 shape control: ab6d685ff\'s main focus', { count: 2 }), 'main-forced');
+      ok(forced.A.windows[0] === 1 && forced.B.windows[0] === 1, 'RED CONTROL (A)(B): the main forced whenever it is named (ab6d685ff\'s road) — window 1 under a drawn window and after an aim into the popup: the keys go under it / away from the aim', { A: forced.A.windows, B: forced.B.windows });
+      const mute = await scenesOn(anchored(SS, '    if (!un.length) return null;\n', '    return null;\n', 'M3 shape control: no look'), 'no-look');
+      ok(!mute.C.note && !mute.Ct.note, 'RED CONTROL (C): no look — the key goes to the unseen popup in silence (the box\'s red: nothing tells the agent)', { C: mute.C.note, Ct: mute.Ct.note });
+      const always = await scenesOn(anchored(SS, '    if (!un.length) return null;\n', '', 'M3 shape control: a look every time'), 'look-always');
+      ok(always.one.calls >= 1, `RED CONTROL (1): a look with no unseen window to say anything about — an extra call for an app with one window (${always.one.calls})`, always.one);
+      const refusing = await scenesOn(anchored(SS, '    if (!r || !r.ok || !Number.isInteger(r.id)) return null;\n', "    if (!r || !r.ok || !Number.isInteger(r.id)) throw namedError('keyboard_unknown', 'where the keyboard is could not be read');\n", 'M3 shape control: an unread look refuses'), 'look-refuses');
+      ok(refusing.unread.code === 'keyboard_unknown' && refusing.late.code === 'keyboard_unknown', 'RED CONTROL (2): a look that refuses when unread or late — the act is STOPPED by the look', { unread: refusing.unread.code, late: refusing.late.code });
+      const unbound = await scenesOn(anchored(SS, '    try { r = await Promise.race([wt.keyboardWindow({ bins: px.bins, xenv: px.xenv, timeout: KB_LOOK_MS }), sleep(KB_LOOK_MS + 100).then(() => null)]); } catch { r = null; }\n', '    try { r = await wt.keyboardWindow({ bins: px.bins, xenv: px.xenv, timeout: KB_LOOK_MS }); } catch { r = null; }\n', 'M3 shape control: the look unbounded'), 'look-unbound');
+      ok(unbound.late.ms >= 2000, `RED CONTROL (2): the look with no bound of its own — the act waits on it (${unbound.late.ms} ms)`, unbound.late);
+      delete wtP.keyboardWindow;
+    }
     // RULED: on a SHARED desktop (a rung that does not own its display) no window has a handle of its own
     const recS = { id: 'da-sh', label: 'Shared', exec: 'x', state: 'ready', display: ':0', pids: { app: 4646 }, backend: 'desktop-singleton', startedAt: Date.now(), readyAt: Date.now() };
     const keeperS = { ...keeperP, listApps: () => [recP, recS], get: (id) => (id === recP.id ? recP : id === recS.id ? recS : null) };
