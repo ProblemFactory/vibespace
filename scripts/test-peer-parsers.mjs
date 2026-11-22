@@ -26,6 +26,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = JSON.stringify;
 const MF = require(path.join(REPO, 'src/mail-frame.js'));
 const B = require(path.join(REPO, 'src/channel-blocks.js'));
@@ -345,12 +354,12 @@ const deadlineInChild = (file, fn, src) => new Promise((res) => {
 {
   const M = mutantCopies('peer-parsers', REPO);
   const mfSrc = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
-  const oldScan = mfSrc.replace("    if (nlAt !== -1 && nlAt <= i) nlAt = css.indexOf('\\n', i + 1);", "    nlAt = css.indexOf('\\n', i + 1);");
+  const oldScan = editAnchor(mfSrc, "    if (nlAt !== -1 && nlAt <= i) nlAt = css.indexOf('\\n', i + 1);", "    nlAt = css.indexOf('\\n', i + 1);", "src/mail-frame.js");
   const row1 = ROWS.find((r) => r.mod === 'mail-frame' && r.fn === 'sanitizeCss');
   const css = { run: '(M, x) => M.sanitizeCss(x)', mk: `(n) => (${row1.shapes['quote pairs, no newline']})(n || 64)`, n: 8 * K, kind: 'linear' };
   const v1 = judgeInChild({ ...css, module: M.write('src/mail-frame.js', oldScan, 'per-quote-newline-scan') }), w1 = judgeInChild({ ...css, module: path.join(REPO, 'src/mail-frame.js') });
   ok(oldScan !== mfSrc && !v1.ok && v1.r > 3 && w1.ok, `CONTROL: the mail sanitizer with round 1's per-quote newline scan is NOT linear in WORK (×${(v1.r || 0).toFixed(2)}; the real one ×${(w1.r || 0).toFixed(2)})`, J({ v1, w1 }));
-  const oldStrip = gmailSrc.replace(/function stripHtml\(html\) \{[\s\S]*?\n\}\n/, `function stripHtml(html) { /* stale-pins: kept — the old gmail stripHtml as a control; a coincidence with subagent-card.js, not a pin */
+  const oldStrip = editAnchor(gmailSrc, /function stripHtml\(html\) \{[\s\S]*?\n\}\n/, `function stripHtml(html) { /* stale-pins: kept — the old gmail stripHtml as a control; a coincidence with subagent-card.js, not a pin */
   return String(html || '')
     .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
     .replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/(p|div|tr|li|h[1-6])>/gi, '\\n')
@@ -358,17 +367,17 @@ const deadlineInChild = (file, fn, src) => new Promise((res) => {
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     .replace(/[ \\t]+/g, ' ').replace(/\\n[ \\t]+/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
 }
-`);
+`, "src/channels/gmail.js");
   const realGmail = path.join(REPO, 'src/channels/gmail.js'), LT64 = `() => '<'.repeat(${64 * K})`;
   const [v2, r2, r3] = await Promise.all([deadlineInChild(M.write('src/channels/gmail.js', oldStrip, 'regex-chain-strip'), 'stripHtml', LT64), deadlineInChild(realGmail, 'stripHtml', LT64), deadlineInChild(realGmail, 'parseAddress', LT64)]);
   ok(oldStrip !== gmailSrc && v2.over && !r2.over, `CONTROL: gmail's round-2 regex-chain stripHtml is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v2.killed ? 'killed' : v2.ms + ' ms'}; the real one ${r2.ms} ms)`, J({ v2, r2 }));
-  const oldAddr = gmailSrc.replace(/function parseAddress\(s\) \{[\s\S]*?\n\}\n/, `function parseAddress(s) {
+  const oldAddr = editAnchor(gmailSrc, /function parseAddress\(s\) \{[\s\S]*?\n\}\n/, `function parseAddress(s) {
   const raw = String(s || '').trim();
   const m = /^(.*?)\\s*<([^>]+)>\\s*$/.exec(raw);
   if (m) return { id: m[2].trim().toLowerCase(), name: m[1].replace(/^"|"$/g, '').trim() || m[2].trim() };
   return { id: raw.toLowerCase(), name: raw };
 }
-`);
+`, "src/channels/gmail.js");
   const v3 = await deadlineInChild(M.write('src/channels/gmail.js', oldAddr, 'lazy-address-regex'), 'parseAddress', LT64);
   ok(oldAddr !== gmailSrc && v3.over && !r3.over, `CONTROL: gmail's round-2 lazy parseAddress regex is past the ${REGEX_DEADLINE_MS} ms deadline on 64 KB of "<" (${v3.killed ? 'killed' : v3.ms + ' ms'}; the real one ${r3.ms} ms)`, J({ v3, r3 }));
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(c.pass, c.name, c.detail);

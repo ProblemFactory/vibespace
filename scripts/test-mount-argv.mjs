@@ -31,6 +31,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const A = require(path.join(REPO, 'src/mount-argv.js'));
 const PROV = require(path.join(REPO, 'src/mount-providers/index.js'));
 const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
@@ -185,17 +194,17 @@ try {
   const odSrc = fs.readFileSync(path.join(REPO, 'src/mount-providers/onedrive.js'), 'utf8');
   const POLL = "dirCache: { ttl: '5m', poll: '1m' }";
   ok(odSrc.split(POLL).length === 2, '⑧ control anchor: the onedrive dirCache cell exists once');
-  const odMut = require(MC.write('src/mount-providers/onedrive.js', odSrc.replace(POLL, "dirCache: { ttl: '30s', poll: '1m' }"), 'poll'));
+  const odMut = require(MC.write('src/mount-providers/onedrive.js', editAnchor(odSrc, POLL, "dirCache: { ttl: '30s', poll: '1m' }", "src/mount-providers/onedrive.js"), 'poll'));
   ok(census([odMut]).length === 1, '⑧ NEGATIVE CONTROL: today\'s 30 s under the 1 m poll (poll ≥ ttl) ⇒ the census is red', census([odMut]).join());
   const mSrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8');
   const EFF = 'const conn = this._connOf(m), row = rowFor(this, m);';
   const OPEN = "const fd = fs.openSync(f, 'a');";
   ok(mSrc.split(EFF).length === 2 && mSrc.split(OPEN).length === 2, '⑧ control anchors: the effective-row line and the append open exist once');
-  const childMut = makeMgr(require(MC.write('src/mounts.js', mSrc.replace(EFF, 'const conn = this._connOf(m), row = rowOf(m);'), 'child')).MountManager, 'mutc',
+  const childMut = makeMgr(require(MC.write('src/mounts.js', editAnchor(mSrc, EFF, 'const conn = this._connOf(m), row = rowOf(m);', "src/mounts.js"), 'child')).MountManager, 'mutc',
     [{ id: 'gd', name: 'gd', type: 'drive' }, { id: 'gdc', name: 'gdc', parentId: 'gd' }]);
   const gm = argvOf(childMut, 'gdc');
   ok(gm.includes(S3F) && cell(gm, '--dir-cache-time') === '30s', '⑧ NEGATIVE CONTROL: a child built from rowOf(child) gets the s3 flag and the s3 row\'s 30 s (red)', JSON.stringify(gm));
-  const logMut = makeMgr(require(MC.write('src/mounts.js', mSrc.replace(OPEN, "const fd = fs.openSync(f, 'w');"), 'w')).MountManager, 'mutw', []);
+  const logMut = makeMgr(require(MC.write('src/mounts.js', editAnchor(mSrc, OPEN, "const fd = fs.openSync(f, 'w');", "src/mounts.js"), 'w')).MountManager, 'mutw', []);
   say(logMut, 'L', 'daemon 1 last words'); say(logMut, 'L', 'daemon 2 up');
   ok(!/daemon 1 last words/.test(logOf(logMut, 'L')), '⑧ NEGATIVE CONTROL: the log opened \'w\' again ⇒ the dead daemon\'s last words are gone (red)');
 

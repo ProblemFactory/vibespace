@@ -29,6 +29,15 @@ const R = require(path.join(ROOT, 'src/browser-takeover-request.js'));
 const A = require(path.join(ROOT, 'src/attention-model.js'));
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m, { got: a, want: b });
 const M = mutantCopies('takeover-request', ROOT);
 const T0 = Date.UTC(2026, 9, 23, 18, 0, 0);
@@ -154,12 +163,12 @@ console.log('⑨ mutants');
   const SRC = fs.readFileSync(path.join(ROOT, 'src/browser-takeover-request.js'), 'utf8');
   const n1 = "  if (how === 'release') {\n";
   ok(SRC.split(n1).length === 2, 'mutant anchor 1 present once');
-  const Rel = M.load('src/browser-takeover-request.js', SRC.replace(n1, "  if (how === 'release') return close('done');\n  if (false) {\n"), 'release-resolves');
+  const Rel = M.load('src/browser-takeover-request.js', editAnchor(SRC, n1, "  if (how === 'release') return close('done');\n  if (false) {\n", "src/browser-takeover-request.js"), 'release-resolves');
   const tk = Rel.transition(Rel.newRequest({ id: 'tr-0000aaaa', browserKey: 'bk-a', text: 'x' }), 'take', { at: 1 }).rec;
   ok(Rel.transition(tk, 'release', { at: 2 }).to === 'done', 'MUTANT: a release that resolves the request (the person closed the view ⇒ «done») — the ② release row reddens on it');
   const n2 = "  if (!isOpen(rec)) return { ok: false, code: 'closed', rec };\n";
   ok(SRC.split(n2).length === 2, 'mutant anchor 2 present once');
-  const Two = M.load('src/browser-takeover-request.js', SRC.replace(n2, "  return { ok: false, code: 'closed', rec };\n"), 'reask-new-row');
+  const Two = M.load('src/browser-takeover-request.js', editAnchor(SRC, n2, "  return { ok: false, code: 'closed', rec };\n", "src/browser-takeover-request.js"), 'reask-new-row');
   ok(Two.reassert(Two.newRequest({ id: 'tr-0000aaaa', browserKey: 'bk-a', text: 'x' }), { text: 'y' }).ok === false, 'MUTANT: a re-ask that never re-asserts (the keeper then files a SECOND row) — the ③ row reddens on it');
 }
 

@@ -163,9 +163,9 @@ console.log('⑤ negative controls (patched copies in scratch)');
   const src = fs.readFileSync(path.join(repo, 'src/runaway-guard.js'), 'utf8');
   const needle = "memGuard !== 'unavailable' && sample.memBytes > L.GUARD_MEM_BYTES";
   ok(src.split(needle).length === 2, 'CONTROL setup: the memory comparison is found exactly once');
-  const m1 = MUT.load('src/runaway-guard.js', src.replace(needle, 'sample.rssBytes > L.GUARD_MEM_BYTES'), 'rss-sum');
+  const m1 = MUT.load('src/runaway-guard.js', editAnchor(src, needle, 'sample.rssBytes > L.GUARD_MEM_BYTES', "src/runaway-guard.js"), 'rss-sum');
   ok(m1.resourceVerdict(incident, null, 0, 1000).over !== null, 'CONTROL: a copy comparing rssBytes calls the incident fixture OVER — the Chrome incident, reproduced; the shipped verdict does not');
-  const m2 = MUT.load('src/runaway-guard.js', src.replace(needle, 'sample.memBytes > L.GUARD_MEM_BYTES'), 'no-skip');
+  const m2 = MUT.load('src/runaway-guard.js', editAnchor(src, needle, 'sample.memBytes > L.GUARD_MEM_BYTES', "src/runaway-guard.js"), 'no-skip');
   ok(m2.resourceVerdict({ cpuTicks: 0, memBytes: 90 * GiB, memMetric: 'rss' }, null, 0, 1000).over !== null, 'CONTROL: a copy that forgets the summed-RSS skip judges a 90 GB RSS sum — the shipped verdict leaves it unjudged');
   // the r2 report level: a copy that re-arms on ONE normal sample with no floor (the pre-r2 rule) toasts on every
   // crossing of the oscillation fixture; a copy that treats an undelivered notice as said never re-sends it
@@ -174,7 +174,7 @@ console.log('⑤ negative controls (patched copies in scratch)');
   ok(src.split(rearm).length === 2 && src.split(floor).length === 2 && src.split('pending: delivered === 0').length === 2, 'CONTROL setup: the re-arm count, the floor and the delivery rule are each found exactly once');
   const m3 = MUT.load('src/runaway-guard.js', editAnchor(editAnchor(editAnchor(src, rearm, '0', "src/runaway-guard.js"), floor, '0', "src/runaway-guard.js"), 's.clearRun = verdict.clear ? s.clearRun + 1 : 0;', 's.clearRun = 1;', "src/runaway-guard.js"), 'no-hysteresis');
   ok(oscOf(m3) === '1010101010' && oscOf(RG) === '1000000000', `CONTROL: a copy without the hysteresis or the floor files 5 notices on the oscillation fixture (${oscOf(m3)}) — the shipped level files one`);
-  const m4 = MUT.load('src/runaway-guard.js', src.replace('pending: delivered === 0', 'pending: false'), 'no-delivery');
+  const m4 = MUT.load('src/runaway-guard.js', editAnchor(src, 'pending: delivered === 0', 'pending: false', "src/runaway-guard.js"), 'no-delivery');
   const undelivered = (mod) => { const a = mod.reportTransition(null, { over: 'x', memGuard: 'pss', clear: false }, { now: 0 }); return mod.reportTransition(mod.reportDelivery(a.state, 0), { over: 'x', memGuard: 'pss', clear: false }, { now: 60e3 }).notify; };
   ok(undelivered(m4) === false && undelivered(RG) === true, 'CONTROL: a copy that latches an undelivered notice as said never re-sends it — the shipped level re-sends the same key');
   for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4, label: '⑤ ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));

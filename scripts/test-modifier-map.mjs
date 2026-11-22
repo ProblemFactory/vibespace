@@ -27,6 +27,15 @@ const M = mutantCopies('modifier-map', REPO);
 
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // THE RULE, written out from the brief (never read back from the module): mac viewer on a non-Mac host ⇒ ⌘ is Ctrl; a
@@ -107,10 +116,10 @@ console.log('§4 RED controls — copies of the table the judge must refuse');
   const src = read('src/lib/modifier-map.js');
   const ROW = "  row('mac', 'linux', { meta: 'control' },", SAME = "  row('linux', 'windows', {},";
   ok(src.split(ROW).length === 2 && src.split(SAME).length === 2, 'control anchors: the mac→linux row and the linux→windows row are one line each');
-  const leaves = M.load('src/lib/modifier-map.js', src.replace(ROW, "  row('mac', 'linux', {},"), 'leaves-meta');
+  const leaves = M.load('src/lib/modifier-map.js', editAnchor(src, ROW, "  row('mac', 'linux', {},", "src/lib/modifier-map.js"), 'leaves-meta');
   const bad1 = judge(leaves);
   ok(bad1.length === 1 && /^mac>linux/.test(bad1[0]), `RED: a mac→linux row that leaves meta is refused (${bad1.join('; ')})`, bad1);
-  const moves = M.load('src/lib/modifier-map.js', src.replace(SAME, "  row('linux', 'windows', { control: 'meta' },"), 'same-family');
+  const moves = M.load('src/lib/modifier-map.js', editAnchor(src, SAME, "  row('linux', 'windows', { control: 'meta' },", "src/lib/modifier-map.js"), 'same-family');
   const bad2 = judge(moves);
   ok(bad2.length === 1 && /^linux>windows/.test(bad2[0]), `RED: a same-family row that moves anything is refused (${bad2.join('; ')})`, bad2);
 }
@@ -134,7 +143,7 @@ console.log('§5 the doors: both import the one table and call it; macChord read
   ok(read('src/lib/modifier-map.js').split(ROW).length === 2, 'control anchor: the mac→unknown row is one line');
   const mmId = M.write('src/lib/modifier-map.js', read('src/lib/modifier-map.js').replace(ROW, "  row('mac', 'unknown', {},"), 'macchord-id');
   ok(take.split(REQ).length === 2, 'control anchor: browser-takeover requires the table once');
-  const T0 = M.load('src/browser-takeover.js', take.replace(REQ, `require(${JSON.stringify(mmId)})`), 'macchord-id');
+  const T0 = M.load('src/browser-takeover.js', editAnchor(take, REQ, `require(${JSON.stringify(mmId)})`, "src/browser-takeover.js"), 'macchord-id');
   const k0 = T0.macChord({ key: 'a', code: 'KeyA', keyCode: 65, metaKey: true }, { viewerMac: true, remoteMac: false });
   ok(k0.metaKey === true && k0.ctrlKey === false && k0.rule === null, 'CONTROL: macChord over a table whose mac→unknown row leaves meta ⇒ ⌘A stays Meta+A (the live view follows the one table)', k0);
 

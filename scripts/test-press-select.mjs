@@ -33,6 +33,15 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) { console.error('  ✗ src/lib/build-version.js missing — run `npm run build` first (utils.js imports telemetry-client, which imports it)'); process.exit(1); }
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
 
@@ -458,13 +467,13 @@ const M = mutantCopies('msel', repo);
   const TRUST = "    else if (act === 'stop') e.stopImmediatePropagation();";
   ok(src.split(ARM).length === 2 && src.split(TRUST).length === 2, 'the two edits the door controls make are each spelled exactly once in utils.js');
   // (a) THE PRE-LANE DOOR: it arms on any press (only the native list excluded) — the incident in the model
-  const preF = M.write('src/lib/utils.js', src.replace(ARM, "    if (target.closest?.(NATIVE_PRESS_SELECTOR)) return;\n"), 'pre-lane-arm');
+  const preF = M.write('src/lib/utils.js', editAnchor(src, ARM, "    if (target.closest?.(NATIVE_PRESS_SELECTOR)) return;\n", "src/lib/utils.js"), 'pre-lane-arm');
   const UP = await import(pathToFileURL(preF).href);
   const Rp = withDoor(UP, () => longPress(para, 60, 107, paraText));
   const Rr = withDoor(U, () => longPress(para, 60, 107, paraText));
   ok(Rp.synth === 1 && Rp.menus === 1 && Rr.synth === 0 && Rr.menus === 0, `CONTROL (the pre-lane door, arming on every press): a long press on the WORDS opens the menu over them — the tester's report, in the model (${JSON.stringify(Rp)}); the real door opens none`);
   // (b) a door that CANCELS the trusted one (the chat handler's old preventDefault): the native selection is killed
-  const pdF = M.write('src/lib/utils.js', src.replace(TRUST, "    else if (act === 'stop') { e.preventDefault(); e.stopImmediatePropagation(); }"), 'cancel-trusted');
+  const pdF = M.write('src/lib/utils.js', editAnchor(src, TRUST, "    else if (act === 'stop') { e.preventDefault(); e.stopImmediatePropagation(); }", "src/lib/utils.js"), 'cancel-trusted');
   const UC = await import(pathToFileURL(pdF).href);
   const Tc = withDoor(UC, () => trusted(para, 60, 107, paraText));
   const Tr = withDoor(U, () => trusted(para, 60, 107, paraText));
@@ -473,7 +482,7 @@ const M = mutantCopies('msel', repo);
   const ps = read('src/lib/press-select.js');
   const CLS = "  if (overText && String(userSelect || 'auto').toLowerCase() !== 'none') return 'text';\n";
   ok(ps.split(CLS).length === 2, 'the class rule the third control edits is spelled exactly once');
-  const clsF = M.write('src/lib/press-select.js', ps.replace(CLS, "  if (overText) return 'text';\n"), 'no-user-select');
+  const clsF = M.write('src/lib/press-select.js', editAnchor(ps, CLS, "  if (overText) return 'text';\n", "src/lib/press-select.js"), 'no-user-select');
   const PM = await import(pathToFileURL(clsF).href);
   ok(PM.pressTargetClass({ overText: true, userSelect: 'none' }) === 'text' && PS.pressTargetClass({ overText: true, userSelect: 'none' }) === 'chrome', 'CONTROL (a class that ignores user-select): a user-select:none label reads as text — its menu would be lost; the real class keeps it chrome');
   for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);

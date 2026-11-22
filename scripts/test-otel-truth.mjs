@@ -400,14 +400,14 @@ const PAYLOAD = (recs) => ({
       let g4 = null, g4red = null;
       const SPLIT = "        if (!onDisk && !(why && why.why === 'failed')) return res.status(503)";
       const srcS = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
-      const RS = mutantCopies('otel-truth-cure-split', REPO).load('src/server/otel-ingest.js', srcS.replace(SPLIT, () => "        if (!onDisk) return res.status(503)"), 'no-split');   // stale-pins: kept (2b202b257's door, planted back as the RED control)
+      const RS = mutantCopies('otel-truth-cure-split', REPO).load('src/server/otel-ingest.js', editAnchor(srcS, SPLIT, () => "        if (!onDisk) return res.status(503)", "src/server/otel-ingest.js"), 'no-split');   // stale-pins: kept (2b202b257's door, planted back as the RED control)
       const dS = mkDir4('j'), oS = mk4(dS, RS); await oS.replayed;
       try { g4 = await callLogs(oH, dH, 'req_cure_failing'); g4red = await callLogs(oS, dS, 'req_cure_failing_red'); } finally { SW.durable = realDurable; SW.whyNotDurable = realWhy; }
       ok(srcS.split(SPLIT).length === 2 && g4 && g4.code === 200 && (await oH.observedOrgForRid('req_cure_failing')) === 'sub-true' && g4red && g4red.code === 503,
         `a FAILING storage (its back-off past the exporter's retries): the post answered 200, its record held (${g4 && g4.code}); RED (no split): ${g4red && g4red.code} — the exporter would drop a batch the hub already holds`, { g4, g4red });
       try { await SW.durable(path.join(dS, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(dS, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(dS, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(dS, { recursive: true, force: true });
       const srcC = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8'), WAIT = "      if (stashOwed.length || stashWriting) {\n";
-      const RC = mutantCopies('otel-truth-cure', REPO).load('src/server/otel-ingest.js', srcC.replace(WAIT, () => "      if (false) {\n"), 'answer-at-once');
+      const RC = mutantCopies('otel-truth-cure', REPO).load('src/server/otel-ingest.js', editAnchor(srcC, WAIT, () => "      if (false) {\n", "src/server/otel-ingest.js"), 'answer-at-once');
       const dR = mkDir4('i'), oR = mk4(dR, RC); await oR.replayed;
       const r1 = await callLogs(oR, dR, 'req_cure_red');
       ok(srcC.split(WAIT).length === 2 && g1.code === 200 && g1.onDisk === 1 && g2 && g2.code === 503 && g2.retryAfter === '1' && /again/.test(String(g2.body && g2.body.error)) && g3.code === 200 && g3.onDisk === 1,
@@ -416,7 +416,7 @@ const PAYLOAD = (recs) => ({
       for (const d of [dH, dR]) { try { await SW.durable(path.join(d, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(d, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d, { recursive: true, force: true }); }
     }
     const src4 = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
-    const rel4 = src4.replace('    if (replay.done) return take(records, seen);', () => '    if (!replay.done) { try { fs.readFileSync(file); } catch { } }\n    if (replay.done) return take(records, seen);');   // row B-360d: the release's road (a whole read of the stash in the post's tick) planted back
+    const rel4 = editAnchor(src4, '    if (replay.done) return take(records, seen);', () => '    if (!replay.done) { try { fs.readFileSync(file); } catch { } }\n    if (replay.done) return take(records, seen);', "src/server/otel-ingest.js");   // row B-360d: the release's road (a whole read of the stash in the post's tick) planted back
     const R4 = mutantCopies('otel-truth-u4', REPO).load('src/server/otel-ingest.js', rel4, 'sync-finish');
     const d7 = mkDir4('c'), c7 = midPost(mk4(d7, R4), PAYLOAD([REC({ request_id: { stringValue: 'req_u4ctl' } })]));
     ok(rel4 !== src4 && c7.bytes > 1048576, `control (the release's whole read of the stash in a post's tick, planted back): the post read ${(c7.bytes / 1048576).toFixed(1)} MB of the stash on the loop ⇒ RED`);

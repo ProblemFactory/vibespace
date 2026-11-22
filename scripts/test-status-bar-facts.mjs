@@ -26,6 +26,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 const U = require(path.join(REPO, 'src/agy-turn-usage.js'));
 const SB = require(path.join(REPO, 'src/status-bar-facts.js'));
@@ -122,7 +131,7 @@ ok(new AcpSessionMessages({ buffer: buffer.split('\n')[0] + '\n' }, 'sess-acp', 
     attach = count(() => new AcpSessionMessages(sess, 'sess-long', { buffersDir: BUF }).chatStatus());
     reload = count(() => new AcpSessionMessages({ buffer: lbuf }, 'sess-long', { buffersDir: BUF }).chatStatus());
     const src = fs.readFileSync(path.join(REPO, 'src/acp-message-manager.js'), 'utf8'), NEW = "const st = own instanceof AcpMessageManager ? own.status() : statusOf(this.raw(), this._sessionId || 'status');";
-    const R = mutantCopies('acp-status-release', REPO).load('src/acp-message-manager.js', src.replace(NEW, "const mm = new AcpMessageManager(this._sessionId || 'status'); mm.convertHistory(this.raw()); const st = mm.status();"), 'release');
+    const R = mutantCopies('acp-status-release', REPO).load('src/acp-message-manager.js', editAnchor(src, NEW, "const mm = new AcpMessageManager(this._sessionId || 'status'); mm.convertHistory(this.raw()); const st = mm.status();", "src/acp-message-manager.js"), 'release');
     const rs = { buffer: lbuf }; rs._normalizer = built; rs._historyLoaded = true;
     let rseen = 0; const rpr = R.AcpMessageManager.prototype._processRecord; R.AcpMessageManager.prototype._processRecord = function (...a) { rseen++; return rpr.apply(this, a); };
     rel = { v: new R.AcpSessionMessages(rs, 'sess-long', { buffersDir: BUF }).chatStatus(), n: rseen, once: src.split(NEW).length === 2 };
@@ -205,13 +214,13 @@ const M = mutantCopies('status-bar-facts', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
   const gate = '    if (facts.cache && this._statusLastCacheRead != null && this._statusLastInputTokens) {';
   ok(src.includes(gate), 'control anchor: the cache chip is gated on the facts row');
-  const mbar = await barOf(M.write('src/lib/chat-status-bar.js', src.replace(gate, '    if (this._statusLastCacheRead != null && this._statusLastInputTokens) {'), 'nogate', { esm: true }));
+  const mbar = await barOf(M.write('src/lib/chat-status-bar.js', editAnchor(src, gate, '    if (this._statusLastCacheRead != null && this._statusLastInputTokens) {', "src/lib/chat-status-bar.js"), 'nogate', { esm: true }));
   const o = mbar('opencode', { model: 'm' }, { input_tokens: 30000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, contextWindow: 128000 });
   ok(o.cache && /0%/.test(o.cache.text), 'RED (the base shape): without the row gate opencode draws ⚡0% — a cache rate its stream never reported (③ sees it)', o.cache);
   const usrc = fs.readFileSync(path.join(REPO, 'src/agy-turn-usage.js'), 'utf8');
   const lastLine = '  const last = transcript && transcript.last ? { ...transcript.last } : null;';
   ok(usrc.includes(lastLine), 'control anchor: the context is the transcript\'s LAST call');
-  const MU = M.load('src/agy-turn-usage.js', usrc.replace(lastLine, '  const last = turn ? { input: turn.input, cacheRead: turn.cacheRead, output: turn.output } : null;'), 'sum-as-context');
+  const MU = M.load('src/agy-turn-usage.js', editAnchor(usrc, lastLine, '  const last = turn ? { input: turn.input, cacheRead: turn.cacheRead, output: turn.output } : null;', "src/agy-turn-usage.js"), 'sum-as-context');
   const bad = MU.turnUsage({ usage: OWNER_1, transcript: { complete: true, calls: 90, input: 545062, output: 172175, cacheRead: 6556922, last: { input: 2379, cacheRead: 87849, output: 1315 } } });
   ok(ctxPct(bad.last) === 677, 'RED: the context taken from the turn\'s SUM reads 677 % of the window on the owner\'s measured turn (① sees 9 %)', ctxPct(bad.last));
 }

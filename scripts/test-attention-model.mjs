@@ -36,6 +36,15 @@ const A = require(path.join(ROOT, 'src/attention-model.js'));
 const DA = require(path.join(ROOT, 'src/server/device-alerts.js'));
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m, { got: a, want: b });
 const M = mutantCopies('attention-model', ROOT);
 const SRC = fs.readFileSync(path.join(ROOT, 'src/attention-model.js'), 'utf8');
@@ -183,7 +192,7 @@ console.log('⑦ THE JUDGE IS A TIE-BREAKER — a verdict never moves a row betw
   // THE MUTANT: the judge's p ranks ACROSS bands ⇒ RED
   const needle = '  const active = [1, 2, 3, 4, 5].flatMap((b) => by.get(b));\n';
   ok(SRC.split(needle).length === 2, 'ANCHOR: the list is the bands in order');
-  const Mut = M.load('src/attention-model.js', SRC.replace(needle, '  const active = [1, 2, 3, 4, 5].flatMap((b) => by.get(b)).sort((a, b) => tieScore(b) - tieScore(a));\n'), 'p-across-bands');
+  const Mut = M.load('src/attention-model.js', editAnchor(SRC, needle, '  const active = [1, 2, 3, 4, 5].flatMap((b) => by.get(b)).sort((a, b) => tieScore(b) - tieScore(a));\n', "src/attention-model.js"), 'p-across-bands');
   const rm = Mut.needsMe(judgedPile.map((i) => Mut.rowOf(i, NOW)), NOW, { cap: 999 });
   const seqM = rm.list.map((x) => Mut.placeOf(x, NOW));
   ok(!seqM.every((b, k) => !k || seqM[k - 1] <= b), 'MUTANT RED: a judge whose p ranks across bands lifts band-5 asks over bands 1–4 — the order leg above fails on it', seqM.slice(0, 12));
@@ -193,7 +202,7 @@ console.log('⑧ the CAP is what keeps the first screen');
 {
   const needle = '  const room = Math.max(p.cap, by.get(1).length);';
   ok(SRC.split(needle).length === 2, 'ANCHOR: the screen\'s room = the cap (or every urgent row)');
-  const NoCap = M.load('src/attention-model.js', SRC.replace(needle, '  const room = Infinity;'), 'no-cap');
+  const NoCap = M.load('src/attention-model.js', editAnchor(SRC, needle, '  const room = Infinity;', "src/attention-model.js"), 'no-cap');
   const r = NoCap.needsMe(SHAPE.map((i) => NoCap.rowOf(i, NOW)), NOW);
   ok(r.screen.length === 10 && !r.folds.some((f) => f.band <= 5), `MUTANT RED: without the cap the production shape draws ${r.screen.length} rows on the first screen (② says ≤ 6) and folds nothing but 搁置`, r.screen.length);
 }

@@ -25,6 +25,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -323,13 +332,13 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   const anchor = (src, from, name) => { const k = src.split(from).length - 1; ok(`the anchor of the control ${name} is in the source (once)`, k === 1, `found ${k} times`); return k === 1; };
   const fromMM = "  if (!o || typeof o !== 'object') return { by: 'unrecorded' };";
   if (anchor(MMsrc, fromMM, 'B-d868 never-you')) {
-    const MMx = require(MU.write('src/message-manager.js', MMsrc.replace(fromMM, "  if (!o || typeof o !== 'object') return { by: 'person' };"), 'unproved-you'));
+    const MMx = require(MU.write('src/message-manager.js', editAnchor(MMsrc, fromMM, "  if (!o || typeof o !== 'object') return { by: 'person' };", "src/message-manager.js"), 'unproved-you'));
     ok(`CONTROL (B-d868): the copy that calls an unproved record «the person» answers ${MMx.turnOpenerOf(T('a', null)).by} — the leg goes red`, MMx.turnOpenerOf(T('a', null)).by === 'person');
   }
   const CSsrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
   const fromBg = "  if ((Array.isArray(background) ? background : []).some((b) => b !== key)) return { by: 'unrecorded', why: 'background' };";
   if (anchor(MMsrc, fromBg, 'B-d868 background')) {
-    const MMb = require(MU.write('src/message-manager.js', MMsrc.replace(fromBg, ''), 'no-background'));
+    const MMb = require(MU.write('src/message-manager.js', editAnchor(MMsrc, fromBg, '', "src/message-manager.js"), 'no-background'));
     ok(`CONTROL (B-d868): the copy that ignores the background answers «${MMb.turnByForAsk({ by: 'person' }, ['peer']).by}» for a peer's helper — the leg goes red`, MMb.turnByForAsk({ by: 'person' }, ['peer']).by === 'person');
   }
   // THE ONE IMPLEMENTATION (主开发's as-if-must (2), 11:37Z): the opener's machine lives in session-brain, fed by the parse (every
@@ -775,7 +784,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   }
   const fromAttach = "    try { require('../session-brain.js').noteTurnAttach(session); } catch { }";
   if (anchor(CSsrc, fromAttach, 'B-d868 the attach resets it')) {
-    const CSx = require(MU.write('src/server/stdout/claude-stream-json.js', CSsrc.replace(fromAttach, ''), 'no-attach-reset'));
+    const CSx = require(MU.write('src/server/stdout/claude-stream-json.js', editAnchor(CSsrc, fromAttach, '', "src/server/stdout/claude-stream-json.js"), 'no-attach-reset'));
     const ax = CSx.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
     const rb = mkSession('w-reattach-ctl');
     rb.p.data(J({ type: 'frame_stamp', msg_id: 'web-rc', cli_uuid: U('d') })); rb.p.data(J(init([U('d')])));

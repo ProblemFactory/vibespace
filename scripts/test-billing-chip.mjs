@@ -33,6 +33,15 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf-8');
 const MUT = mutantCopies('billing-chip', repo);
 const tEn = (k, p) => (p ? String(k).replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)) : String(k));
@@ -225,14 +234,14 @@ console.log('§4 negative controls (scripts/mutant-copy.mjs)');
   const src = read('src/lib/chat-status-bar.js');
   const line = '    const key = billingAuthKey(auth, t);';
   ok(src.split(line).length === 2, 'setBilling spells its key once (the control patches exactly it)');
-  const { ChatStatusBar: Old } = await import(pathToFileURL(MUT.write('src/lib/chat-status-bar.js', src.replace(line, "    const key = auth ? `${auth.source}:${auth.name || ''}` : ''; // CONTROL: the pre-fix key (the pool's name alone)"), 'old-key')).href);
+  const { ChatStatusBar: Old } = await import(pathToFileURL(MUT.write('src/lib/chat-status-bar.js', editAnchor(src, line, "    const key = auth ? `${auth.source}:${auth.name || ''}` : ''; // CONTROL: the pre-fix key (the pool's name alone)", "src/lib/chat-status-bar.js"), 'old-key')).href);
   const w = walkBar(Old);
   ok(w.text0 === '⣿ 全部 → Alpha Max' && w.text1 === '⣿ 全部 → Alpha Max', `CONTROL ① — the pre-fix key keeps the chip on member A after the switch (${JSON.stringify(w.text1)}): the owner's phone, and §2 can fail`);
   w.bar.dispose();
   const psrc = read('src/lib/pool-priority-model.js');
   const pline = "  return JSON.stringify([auth.source || '', auth.name || '', auth.poolTarget || '', auth.poolTargetId || '',";
   ok(psrc.split(pline).length === 2, 'the PURE key spells its field list once (the control patches exactly it)');
-  const M2 = await import(pathToFileURL(MUT.write('src/lib/pool-priority-model.js', psrc.replace(pline, "  return JSON.stringify([auth.source || '', auth.name || '', '', '', // CONTROL: the member forgotten"), 'no-member')).href);
+  const M2 = await import(pathToFileURL(MUT.write('src/lib/pool-priority-model.js', editAnchor(psrc, pline, "  return JSON.stringify([auth.source || '', auth.name || '', '', '', // CONTROL: the member forgotten", "src/lib/pool-priority-model.js"), 'no-member')).href);
   const bad = keyTable(M2.billingAuthKey);
   ok(bad.some((b) => /member the conversation runs on/.test(b)) && bad.some((b) => /member by id/.test(b)), `CONTROL ② — a PURE key that forgets the member fails §1's table (${bad.length} rows)`, bad);
 }

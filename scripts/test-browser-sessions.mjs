@@ -39,6 +39,15 @@ const express = require('express');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const quiet = { log() { }, warn() { } };
 const MB = 1048576, DAY = 86400000, MIN = 60000;
 const ROOT = scratch('browser-sessions');
@@ -149,7 +158,7 @@ function planLegs(TT, tag = '') {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-trace.js'), 'utf8');
   const needle = '    for (const s of order) {\n      if (frames + lists <= limit) break;';
   ok(src.includes(needle), 'the control\'s anchor is in the plan (else the control would judge nothing)');
-  const aged = M.load('src/browser-trace.js', src.replace(needle, "    for (const s of sessions) for (const e of s.entries) if ((Number(e.frameBytes) || 0) && (Date.now() - (Number(e.at) || 0) > 7 * 86400000 || (arguments[0].now && arguments[0].now - (Number(e.at) || 0) > 7 * 86400000))) { removeFrames.push({ key, id: e.id, session: s.id, bytes: Number(e.frameBytes) || 0, why: 'older than 7 d' }); frames -= Number(e.frameBytes) || 0; e.frameBytes = 0; }\n" + needle), 'by-age');
+  const aged = M.load('src/browser-trace.js', editAnchor(src, needle, "    for (const s of sessions) for (const e of s.entries) if ((Number(e.frameBytes) || 0) && (Date.now() - (Number(e.at) || 0) > 7 * 86400000 || (arguments[0].now && arguments[0].now - (Number(e.at) || 0) > 7 * 86400000))) { removeFrames.push({ key, id: e.id, session: s.id, bytes: Number(e.frameBytes) || 0, why: 'older than 7 d' }); frames -= Number(e.frameBytes) || 0; e.frameBytes = 0; }\n" + needle, "src/browser-trace.js"), 'by-age');
   const agedLegs = planLegs(aged, '[age copy] ');
   ok(agedLegs.some((x) => !x.c), `CONTROL: a copy that also sweeps by AGE fails the legs (${agedLegs.filter((x) => !x.c).map((x) => x.n.replace('[age copy] ', '')).join(' | ')})`);
   // the census: no age rule in either browser-trace.js; TRACE_RETENTION_MS nowhere in the product
@@ -310,7 +319,7 @@ async function click(w, key, id) {
   ok(osrc.includes(needle), 'the list-dropping control\'s anchor is in the sweep');
   const snap = fs.mkdtempSync(path.join(ROOT, 'snap-'));
   fs.cpSync(sd, snap, { recursive: true });
-  const dropper = M.load('src/server/browser-trace.js', osrc.replace(needle, '      rewriteIndex(sc, list.filter((e) => !gone.has(e.id)));\n    }\n    // recordings: their own bound'), 'drops-lists');
+  const dropper = M.load('src/server/browser-trace.js', editAnchor(osrc, needle, '      rewriteIndex(sc, list.filter((e) => !gone.has(e.id)));\n    }\n    // recordings: their own bound', "src/server/browser-trace.js"), 'drops-lists');
   const bad = legs(dropper);
   ok(bad.some((x) => !x.c), `CONTROL: a sweep that DROPS the swept actions' lists fails (${bad.filter((x) => !x.c).map((x) => x.n).join(' | ')})`);
   fs.rmSync(sd, { recursive: true, force: true }); fs.cpSync(snap, sd, { recursive: true });

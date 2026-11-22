@@ -30,6 +30,15 @@ const SND = require(path.join(REPO, 'src/sound-model.js')); // lane speaker-pass
 const STM = require(path.join(REPO, 'src/stream-model.js')); // lane speaker-passthrough-v1: THE RATE with the sound (videoKbpsOf) + statsOf's `audio`
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const decodePs = (argv) => Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le');
 const MUT = mutantCopies('mdmodel', REPO);
@@ -129,7 +138,7 @@ console.log('§5 THE TOGGLE (the verdict table)');
   const bad = "  if (type === 'restore') return { state: 'asking', action: 'ask', code: 'restore' };";
   const want = "  if (type === 'restore') return { state: 'off', action: s === 'live' ? 'stop' : s === 'asking' ? 'cancel' : null, code: 'restore' };";
   ok(src.includes(want), 'RED CONTROL anchor: the restore row is spelled once');
-  const M2 = MUT.load('src/mic-model.js', src.replace(want, bad), 'restore-reopens');
+  const M2 = MUT.load('src/mic-model.js', editAnchor(src, want, bad, "src/mic-model.js"), 'restore-reopens');
   const r2 = M2.micStep({ state: 'off' }, { type: 'restore' });
   ok(!(r2.state === 'off' && r2.action !== 'ask'), 'RED CONTROL: a mutant whose restore re-opens the microphone fails the never-auto-reopen row', r2);
 }
@@ -203,7 +212,7 @@ console.log('§9 the 「安装虚拟麦克风」 plans');
   const msrc = read('src/mic-install.js');
   const keep = "    '$moved = 0; foreach ($pass in 1, 2, 3) {";
   ok(msrc.includes(keep), 'RED CONTROL anchor: the restore line is spelled once');
-  const M3 = MUT.load('src/mic-install.js', msrc.replace(keep, "    '$moved = 0; foreach ($pass in @()) {"), 'no-restore');
+  const M3 = MUT.load('src/mic-install.js', editAnchor(msrc, keep, "    '$moved = 0; foreach ($pass in @()) {", "src/mic-install.js"), 'no-restore');
   const s3 = decodePs(M3.virtualMicInstallPlan({ platform: 'win32' }).argv);
   ok(!/foreach \(\$pass in 1, 2, 3\)/.test(s3), 'RED CONTROL: a starter that never puts the defaults back fails the defaults row');
 }
@@ -311,7 +320,7 @@ console.log('§15 THE TOGGLE 「声音」 (the verdict table) + the per-machine 
   const src = read('src/sound-model.js');
   const want = "  return restored || !activated ? 'tap' : 'on';";
   ok(src.includes(want), 'RED CONTROL anchor: the start verdict is spelled once');
-  const M2 = MUT.load('src/sound-model.js', src.replace(want, "  return !activated ? 'tap' : 'on';"), 'restored-unmutes');
+  const M2 = MUT.load('src/sound-model.js', editAnchor(src, want, "  return !activated ? 'tap' : 'on';", "src/sound-model.js"), 'restored-unmutes');
   const r2 = M2.soundStep({ state: 'unavailable' }, { type: 'ready', ok: true, remembered: true, restored: true, activated: true });
   ok(r2.action === 'start', 'RED CONTROL: a mutant that ignores `restored` STARTS a restored window\'s sound — the never-by-itself row catches it', r2);
   // THE MEMORY (the HDR switch's shape): per machine, on only, ≤ 32 machines, the newest kept

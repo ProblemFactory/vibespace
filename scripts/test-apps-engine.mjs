@@ -228,7 +228,7 @@ console.log('§5b verify-r1 F3 — every word a package source wrote reaches the
   ok(['plan', 'propose', 'wait', 'list'].every((k) => !raw(real[k])) && /Evil:1\/stable/.test(real.plan) && /XTerm/.test(real.wait) && /XTerm/.test(real.list), 'a source\'s origin words (the plan\'s origins + closure, the proposal\'s summary) and a .desktop Name (a done proposal\'s rows) reach the agent inert on every agent route — the words kept, the frame not', Object.fromEntries(Object.entries(real).map(([k, v]) => [k, raw(v)])));
   ok(raw(real.user), 'the USER\'s dialog gets the words as written (drawn as textContent)');
   const rSrc = fs.readFileSync(path.join(repo, 'src/routes/apps.js'), 'utf8');
-  const unbelted = MUT.load('src/routes/apps.js', rSrc.replace("function inertDeep(v, depth = 0) {\n  if (typeof v === 'string') return pkgWords(v, 300);", "function inertDeep(v, depth = 0) {\n  if (typeof v === 'string') return v;"), 'no-deep-belt');
+  const unbelted = MUT.load('src/routes/apps.js', editAnchor(rSrc, "function inertDeep(v, depth = 0) {\n  if (typeof v === 'string') return pkgWords(v, 300);", "function inertDeep(v, depth = 0) {\n  if (typeof v === 'string') return v;", "src/routes/apps.js"), 'no-deep-belt');
   const ctl = await probe(unbelted, 'p5bc');
   ok(raw(ctl.plan) && raw(ctl.wait) && raw(ctl.list) && raw(ctl.propose), 'CONTROL (no-deep-belt): the origin and the .desktop Name reach the agent with their frame', Object.fromEntries(Object.entries(ctl).map(([k, v]) => [k, raw(v)])));
   for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(r.pass, '§5b tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
@@ -332,7 +332,7 @@ console.log('§2b verify-r1 F2 — the same ask again is the open proposal; one 
   // lane chat-needs-you-card (amendment 1): ACTION_IDENTITY is THE registry's — the copy drops app-install's identity in its own line (a missing anchor throws)
   const identLine = "const { ACTION_IDENTITY } = require('./foryou-actions.js');";
   if (!uSrc.includes(identLine)) throw new Error('CONTROL anchor: src/user-todos.js no longer reads ACTION_IDENTITY from the registry');
-  const noIdent = MUT.load('src/user-todos.js', uSrc.replace(identLine, "const ACTION_IDENTITY = { ...require('./foryou-actions.js').ACTION_IDENTITY, 'app-install': undefined };"), 'no-ident');
+  const noIdent = MUT.load('src/user-todos.js', editAnchor(uSrc, identLine, "const ACTION_IDENTITY = { ...require('./foryou-actions.js').ACTION_IDENTITY, 'app-install': undefined };", "src/user-todos.js"), 'no-ident');
   const ctlB = await probe(E, noIdent.UserTodoManager || noIdent, 'f2b');
   ok(ctlB.srcCards === 1 && !ctlB.card1 && /b\.example/.test(ctlB.srcDetails.join(' ')), 'CONTROL (no-identity): the second source\'s card swallowed the first — the first proposal has no card, its words replaced', ctlB);
   // verify-r1 F8: the agent's why reaches the approval card (For you) and the dialog with no hidden / reordering character

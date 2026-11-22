@@ -376,7 +376,7 @@ console.log('§8c verify-r1 H1 — THE PIN of an approved source (a PURE table =
   ok(/`finish\(\) \{ pins; q > /.test(MANIFEST_SRC) && (A.APP_SCRIPT.match(/hook; rebase; restore/g) || []).length === 2 && /restore\(\) \{[\s\S]*?\n {2}pins\n\}/.test(A.APP_SCRIPT), 'every run ends with pins() (finish), both replay rungs start with restore() (sources, keys AND pins back before apt runs)');
   ok(/if srcs; then mkdir -p "\$T\/arch\/partial"; apt-get \$LOCK -o Dir::Cache::archives="\$T\/arch\/" --print-uris -y install "\$@"/.test(A.APP_SCRIPT) && /cp "\$T\/req"[^\n]*sort -u "\$T\/from" > "\$R\/entries\/\$ID\.pin\.tmp"/.test(A.APP_SCRIPT) && /rm -f "\$R\/entries\/\$ID\.list" "\$R\/entries\/\$ID\.desktop" "\$R\/entries\/\$ID\.pin"/.test(A.APP_SCRIPT), 'an install attributes what it fetches BEFORE apt runs (an empty archives dir: every .deb printed), the entry keeps it (.pin), a removal drops it');
   // CONTROL: a patched copy whose pins() writes nothing (the pre-fix script: no pin at all) — the parity above is red
-  const noPin = MUT.load('src/app-manifest.js', MANIFEST_SRC.replace("'pins() {',", "'pins() { return 0',"), 'no-pin');
+  const noPin = MUT.load('src/app-manifest.js', editAnchor(MANIFEST_SRC, "'pins() {',", "'pins() { return 0',", "src/app-manifest.js"), 'no-pin');
   const pc = pinRun(noPin.APP_SCRIPT, 'ctl');
   ok(pc.code === 0 && pc.fx === null && pc.fxSys === null && pc.fx !== wantFx, 'CONTROL (no-pin): the same run writes no pin — an approved source\'s every package would compete at apt\'s default 500', pc);
   // verify r1 — the pin's order and reach: every run re-pins BEFORE any apt (a source approved before .203 had no pin, so
@@ -690,7 +690,7 @@ module.exports = Object.freeze([
     let pl = null; try { pl = (await ap.plan({ kind: 'acme-root', thing: 'widget' })).plan; } catch (e) { pl = { error: String(e.message || e) }; }
     legs.plans = !!(pl && pl.ok && pl.mode === 'acme' && pl.packages[0] === 'widget' && /acme gets widget/.test(pl.commands[0]));
     // the dialog: a copy whose ONE index import names this run's index (the fake's copy / the real one)
-    const D = await import(MUT.write('src/lib/app-install-dialog.js', DSRC.replace("from '../app-kinds/index.js'", `from ${JSON.stringify(idxPath)}`), `dialog-${tag}`, { esm: true }));
+    const D = await import(MUT.write('src/lib/app-install-dialog.js', editAnchor(DSRC, "from '../app-kinds/index.js'", `from ${JSON.stringify(idxPath)}`, "src/lib/app-install-dialog.js"), `dialog-${tag}`, { esm: true }));
     globalThis.document = { createElement: node };
     try { legs.dialog = /\[acme\]/.test(D.appDialogTitle({ kind: 'acme-root' }, 'box')) && texts(D.appPlanBlock({ ...(pl && pl.ok ? pl : { kind: 'acme-root', packages: ['widget'] }), closure: [] })).some((x) => x === 'acme rows: widget'); } catch (e) { legs.dialog = false; } finally { delete globalThis.document; }
     // the CLI reads the declared rows (GET /api/agent/apps/kinds) — it accepts / refuses by them

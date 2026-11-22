@@ -22,6 +22,15 @@ const require = createRequire(import.meta.url);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const MUT = mutantCopies('machine-card-fold', REPO);
 const EC = require(path.join(REPO, 'src/encoded-command.js'));
 const E = require(path.join(REPO, 'src/exit-reach.js'));
@@ -229,7 +238,7 @@ await rsControl('peer-kind', "  if (machineCardOf(m)) return 'machine';", '', 'M
 const XPSRC = read('src/exit-proxy.js');
 {
   const from = "    if (encoded && encoded.hidden.length) throw";
-  const f = MUT.write('src/exit-proxy.js', XPSRC.replace(from, '    if (false) throw'), 'door-no-hidden');
+  const f = MUT.write('src/exit-proxy.js', editAnchor(XPSRC, from, '    if (false) throw', "src/exit-proxy.js"), 'door-no-hidden');
   const D1 = await door(f);
   ok(XPSRC.includes(from) && !D1.hid.startsWith('bad_command'), 'CONTROL door-no-hidden: without the encoded belt the U+202E script passes the door — ② goes red', D1);
 }

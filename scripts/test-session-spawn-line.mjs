@@ -40,6 +40,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 500) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const L = require(path.join(REPO, 'src/spawn/line.js'));
@@ -144,7 +153,7 @@ console.log('— ③ MUTANTS: each restores a pre-fix shape in a ws-create copy 
     ['the names off the env (the line built, its pairs dropped)', '            const r6Argv = r6Line.argv, r6Env = r6Base;\n', /the spawn's env misses/],
   ];
   for (const [name, line, want] of MUT) {
-    const mod = M.load('src/ws-create.js', src.replace(A, line), name.replace(/\W+/g, '-').slice(0, 40));
+    const mod = M.load('src/ws-create.js', editAnchor(src, A, line, "src/ws-create.js"), name.replace(/\W+/g, '-').slice(0, 40));
     const verdicts = [];
     for (const backend of Object.keys(EXE)) verdicts.push(judge(await drive(mod, { backend, extraArgs: ['--extra'] }), backend));
     ok(verdicts.every((v) => want.test(v)), `MUTANT ${name} ⇒ RED on every harness`, verdicts);
@@ -191,7 +200,7 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   // THE RED CONTROL: the release's spawn = a ws-create copy with the priority cut out of the line
   const src = read('src/ws-create.js'), M = mutantCopies('session-spawn-line-nice', REPO);
   const CUTP = '              exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,\n';
-  const rel = src.split(CUTP).length === 2 ? M.load('src/ws-create.js', src.replace(CUTP, '              exe: spawnCmd, args: spawnArgs,\n'), 'no-priority') : null;   // stale-pins: kept (the red control rebuilds the release's line)
+  const rel = src.split(CUTP).length === 2 ? M.load('src/ws-create.js', editAnchor(src, CUTP, '              exe: spawnCmd, args: spawnArgs,\n', "src/ws-create.js"), 'no-priority') : null;   // stale-pins: kept (the red control rebuilds the release's line)
   const XR = rel ? await drive(rel, { backend: 'claude' }) : null;
   const scrub = (x) => JSON.stringify(x.spawned[0] && x.spawned[0].args.map((w) => String(w).replace(/sess-\d+-\d+|cw-\d+-\d+/g, 'ID')));
   ok(XO.spawned[0] && XR && XR.spawned[0] && scrub(XO) === scrub(XR) && !XO.spawned[0].args.includes(NICE) && XO.session._cpuNice.why === 'off',
@@ -203,7 +212,7 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   SPRI._reset();
   // THE REAL JobManager (a copy whose child_process.spawn records — nothing executes): the wrapper's spawn carries it
   const JSRC = read('src/jobs.js'), SP0 = "const { spawn, execFile } = require('child_process');";
-  const jobsMod = JSRC.split(SP0).length === 2 ? M.load('src/jobs.js', JSRC.replace(SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);"), 'jobs-spawn-seam') : null;
+  const jobsMod = JSRC.split(SP0).length === 2 ? M.load('src/jobs.js', editAnchor(JSRC, SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);", "src/jobs.js"), 'jobs-spawn-seam') : null;
   const jobArgv = async (setting) => {
     const got = [];
     globalThis.__vsJobSpawn = (cmd, args) => { got.push([cmd, ...args]); return { pid: 4343, unref() { }, on() { }, once() { }, stdio: [], kill() { } }; };

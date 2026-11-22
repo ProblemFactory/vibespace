@@ -62,6 +62,15 @@ const C = require(path.join(REPO, 'src/lib/chain-layout.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
@@ -439,7 +448,7 @@ console.log('— ⑦ THE HELD CHAIN ACT (stage-blank verify r5: a record that pr
   const holdFind = "    const heldChain = new Set(this._heldChainIds(state));\n";
   ok(LJ.includes(holdFind), '⑦ control: the patched line exists in layout.js');
   if (LJ.includes(holdFind)) {
-    const f = M.write('src/lib/layout.js', LJ.replace(holdFind, "    const heldChain = new Set();\n"), 'no-chain-hold');
+    const f = M.write('src/lib/layout.js', editAnchor(LJ, holdFind, "    const heldChain = new Set();\n", "src/lib/layout.js"), 'no-chain-hold');
     const failed = await heldChainLegs((await import(f)).LayoutManager, { quiet: true });
     ok(failed.some((n) => /does NOT re-form it/.test(n)) && failed.some((n) => /stays where the user dropped it/.test(n)) && failed.some((n) => /merge's twin/.test(n)), `⑦ CONTROL: the hold never consulted turns the tear-off, the box and the merge legs RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 160)})`, J(failed));
   }
@@ -448,7 +457,7 @@ console.log('— ⑦ THE HELD CHAIN ACT (stage-blank verify r5: a record that pr
   if (relHead.test(LJ)) {
     // release-by-SAVE: the save (here: the re-send's scheduleAutoSave → the release, as the real _doAutoSave does) drops the hold —
     // then the agreeing-record leg still passes but a record deferred under the drag and applied after the save re-forms the group
-    const mut = LJ.replace(relHead, '$1    if (this._heldChainActs) this._heldChainActs.clear();\n');
+    const mut = editAnchor(LJ, relHead, '$1    if (this._heldChainActs) this._heldChainActs.clear();\n', "src/lib/layout.js");
     ok(mut !== LJ, '⑦ control: the release-by-save copy differs (the clear sits first, before any early return)');
     const f = M.write('src/lib/layout.js', mut, 'release-by-save');
     const { LayoutManager: LM2 } = await import(f);
@@ -527,7 +536,7 @@ console.log('— ⑧ A SAVE WAITS FOR THE DROP (stage-blank verify r5: a tab tor
   const gate = "    if (this._pointerDown) { this._saveWaitsForDrop = true; this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 300); return; }\n    if (this._saveWaitsForDrop || (this._dropAt && Date.now() - this._dropAt < 400)) { this._saveWaitsForDrop = false; this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 400); return; }";
   ok(LJ8.includes(gate), '⑧ control: the gate lines exist in layout.js');
   if (LJ8.includes(gate)) {
-    const f = M8.write('src/lib/layout.js', LJ8.replace(gate, ''), 'no-drop-wait');
+    const f = M8.write('src/lib/layout.js', editAnchor(LJ8, gate, '', "src/lib/layout.js"), 'no-drop-wait');
     const failed = await dropLegs((await import(f)).LayoutManager, { quiet: true });
     ok(failed.some((n) => /no save leaves while the pointer is down/.test(n)) && failed.some((n) => /released < 250 ms ago waits/.test(n)), `⑧ CONTROL: without the gate the save leaves under the held pointer and in the release…capture gap (${failed.length}: ${failed[0] || ''})`.slice(0, 220), J(failed));
   }
