@@ -3534,7 +3534,7 @@ await (async () => {
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('poolprov'); fsx.rmSync(scr, { recursive: true, force: true }); fsx.mkdirSync(scr, { recursive: true });
   const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
-  const pworld = ({ cross = null } = {}) => {
+  const pworld = ({ cross = null, engMod = null } = {}) => {
     const root = fsx.mkdtempSync(path.join(scr, 'w-'));
     const dataDir = path.join(root, 'data');
     const am = new AccountManager({ dataDir });
@@ -3555,7 +3555,7 @@ await (async () => {
       setStatus(id, status, by) { const it = items.find((x) => x.id === id); if (it) { it.status = status; it.by = by; } return it; },
       openItems() { return items.filter((x) => x.status === 'open'); }, onStatus() { },
     };
-    const eng = require(path.resolve('src/server/usage-pool-engine.js')).create({
+    const eng = (engMod || require(path.resolve('src/server/usage-pool-engine.js'))).create({   // (`engMod`: a red control's engine copy)
       app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
       wss: { clients }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t, o) => notices.push({ t, o }), serverSetting: () => undefined, getAccounts: () => am,
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
@@ -3642,13 +3642,13 @@ await (async () => {
       wn.eng._crossPlacementOwed.delete('cid-pool');
     }
     // (2) THE PERSON's LATER PIN WINS, and (3) THE MEMBER MUST STILL SERVE — each in a world of its own, after Allow once
-    const movedWorld = (sid) => { const w = pworld(); w.client(); w.mk(sid); w.pass(); const cd = w.items.find((x) => x.action && x.action.type === 'pool-cross-provider' && x.status === 'open'); const r = cd ? w.quiet(() => w.eng.answerCrossProviderAsk(cd.action.askId, { answer: 'once' })) : null; return { w, moved: !!(r && r.moved) }; };
+    const movedWorld = (sid, engMod = null) => { const w = pworld({ engMod }); w.client(); w.mk(sid); w.pass(); const cd = w.items.find((x) => x.action && x.action.type === 'pool-cross-provider' && x.status === 'open'); const r = cd ? w.quiet(() => w.eng.answerCrossProviderAsk(cd.action.askId, { answer: 'once' })) : null; return { w, moved: !!(r && r.moved) }; };
     {
       const { w, moved } = movedWorld('s5');
       const cleared = w.quiet(() => w.eng.setConversationPin('s5', null));
       const keptOnClear = w.eng._crossPlacementOwed.has('cid-s5');
       const pinned = w.quiet(() => w.eng.setConversationPin('s5', w.A));
-      ck('engine: THE LATER PIN WINS — after the move, pinning the conversation to another member ends the carry (clearing a pin does not)', moved && cleared.ok && keptOnClear && pinned.ok && !w.eng._crossPlacementOwed.has('cid-s5') && w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s5' }) !== w.B, J({ moved, keptOnClear, carry: [...w.eng._crossPlacementOwed] }));
+      ck('engine: THE LATER PIN WINS — after the move, pinning the conversation to another member ends the carry AND its owed line (clearing a pin does not)', moved && cleared.ok && keptOnClear && pinned.ok && !w.eng._crossPlacementOwed.has('cid-s5') && !w.eng._crossLinesOwed.has('cid-s5') && w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s5' }) !== w.B, J({ moved, keptOnClear, carry: [...w.eng._crossPlacementOwed] }));
     }
     {
       const { w, moved } = movedWorld('s6');
@@ -3656,8 +3656,27 @@ await (async () => {
       const cacheB = path.join(w.cacheDir, w.B + '.json');
       fsx.writeFileSync(cacheB, JSON.stringify({ fetchedAt: Date.now() - 1000, source: 'on-demand', fiveHour: { utilization: 1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 1, resetsAt: nowS + 3 * 86400 } }));
       const lines = []; const o = console.log; console.log = (...a) => lines.push(a.join(' '));
-      let r6; try { r6 = w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s6' }); } finally { console.log = o; }
-      ck('engine: THE MEMBER MUST STILL SERVE — B at its wall when the resume comes: the carry is dropped (and the line it owed), said once, the rules place the resume', moved && r6 !== w.B && !w.eng._crossPlacementOwed.has('cid-s6') && !w.eng._crossLinesOwed.has('cid-s6') && lines.some((l) => /does not land on .* — it cannot serve now/.test(l)), J({ moved, r6, lines: lines.filter((l) => /\[pool\]/.test(l)).slice(0, 3) }));
+      let r6; try { r6 = w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s6' }); w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s6' }); } finally { console.log = o; }
+      ck('engine: THE MEMBER MUST STILL SERVE — B at its wall when the resume comes: the carry is dropped (and the line it owed), said ONCE (a second ask says nothing), the rules place the resume', moved && r6 !== w.B && !w.eng._crossPlacementOwed.has('cid-s6') && !w.eng._crossLinesOwed.has('cid-s6') && lines.filter((l) => /does not land on .* — it cannot serve now/.test(l)).length === 1, J({ moved, r6, lines: lines.filter((l) => /\[pool\]/.test(l)).slice(0, 3) }));
+    }
+    // THE FAMILY (round wk9ee639n's must): the resume judges the moved-to member under the CONVERSATION's family — a spent scoped
+    // cap of ANOTHER family (B's Fable week, the conversation on Sonnet) is no «cannot serve»: the carry stands, the resume lands on B.
+    // RED: the check as it stood (no family) — an engine copy with the family argument cut reads every bucket and puts it back.
+    {
+      const famLeg = (engMod) => {
+        const { w, moved } = movedWorld('s8', engMod);
+        const nowS = Math.floor(Date.now() / 1000);
+        fsx.writeFileSync(path.join(w.cacheDir, w.B + '.json'), JSON.stringify({ fetchedAt: Date.now() - 1000, source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: nowS + 3 * 86400 }] }));
+        return { moved, r: w.quiet(() => w.eng.poolChooserForModel(w.Pl, { model: 'claude-sonnet-5', resumeOf: 'cid-s8' })), w };
+      };
+      const f1 = famLeg(null);
+      ck('engine: THE FAMILY — the moved-to member\'s Fable week spent while the conversation runs Sonnet: it still serves, the carry stands and the resume lands on B', f1.moved && f1.r === f1.w.B && f1.w.eng._crossPlacementOwed.has('cid-s8'), J({ moved: f1.moved, r: f1.r }));
+      const { mutantCopies: mcF } = await import('./mutant-copy.mjs');
+      const fsrc = fsx.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
+      const { anchored: anchoredF } = await import('./scratch.mjs');
+      const famCopy = anchoredF(fsrc, 'if (memberCanServe(poolId, to, null, null, Date.now(), fam)) return to;', 'if (memberCanServe(poolId, to)) return to; /* PATCHED: no family */', 'the carry check without the family');
+      const f2 = famLeg(mcF('carry-family', path.resolve('.')).load('src/server/usage-pool-engine.js', famCopy, 'no-family'));
+      ck('engine: CONTROL — the check with no family (as it stood) reads the other family\'s spent week as «cannot serve»: the resume goes back by the rules (red)', !!f2 && f2.moved && f2.r !== f2.w.B, J(f2 && { moved: f2.moved, r: f2.r }));
     }
     // Deny: nothing moves, not asked again
     const wd = pworld(); wd.client(); wd.mk('s2'); wd.pass();

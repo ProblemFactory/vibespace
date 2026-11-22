@@ -835,17 +835,17 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
   try {
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled') return null;
+    const fam = familyOfModel(model);
+    const cur = accounts.poolCurrent(poolId);
+    const base = poolReadCache(poolId);
+    const readCache = (id) => projectCacheForFamily(base(id), fam); // (a null family projects nothing — every bucket counts)
     // THE COLD MOVE LANDS (row B-d578, the pool's fallback unit (a), ruling r1516): a conversation applyCrossMove moved is RESUMED
     // under a NEW server id — its resume (`resumeOf`: the backend id it resumes) starts on the member it was moved to while the
     // carry lives (crossCarryFor) AND the member can still serve (memberCanServe — the pin's own judgement: signed in, not at its
     // wall, not parked); else the carry is dropped, said once, and the rules below place it. A pin the person set AFTER the move
     // ended the carry already (setConversationPin); a pin's own cross move IS the carry. The POOL's default (`forDefault`) is
     // never placed by one conversation's carry.
-    if (resumeOf && !forDefault) { const to = crossCarryFor(poolId, resumeOf); if (to) { if (memberCanServe(poolId, to)) return to; dropCrossCarry(poolId, resumeOf, to); } }
-    const fam = familyOfModel(model);
-    const cur = accounts.poolCurrent(poolId);
-    const base = poolReadCache(poolId);
-    const readCache = (id) => projectCacheForFamily(base(id), fam); // (a null family projects nothing — every bucket counts)
+    if (resumeOf && !forDefault) { const to = crossCarryFor(poolId, resumeOf); if (to) { if (memberCanServe(poolId, to, null, null, Date.now(), fam)) return to; dropCrossCarry(poolId, resumeOf, to); } }   // judged under THIS conversation's family (round wk9ee639n's must: another family's spent scoped cap is no «cannot serve»)
     // THE CONVERSATION'S PIN (2026-09-28): a resumed pinned conversation starts on its pin when
     // the pin can serve (the owner's choice, explicit — no warm or settle bar at a spawn); a pin
     // that cannot serve starts it where the automatic rules would (the pin kept on the session)
@@ -7281,7 +7281,7 @@ function applyCrossMove(poolId, sid, s2, fromId, d, now = Date.now(), { why = 'c
   const NOTE = i18nKey('Pool "{pool}": conversation "{title}" — switched from {from} ({fromProvider}) to {to} ({toProvider}), model {model} → {toModel}.');
   const text = fill(LINE);
   if (bsid) _crossLinesOwed.set(String(bsid), { text, i18n: { key: LINE, params }, at: now, fromSid: sid });
-  for (const [k, v] of _crossPlacementOwed) if (now - v.at > CROSS_CARRY_MS) _crossPlacementOwed.delete(k); // a resume that never came carries nothing (swept at each move)
+  for (const M of [_crossPlacementOwed, _crossLinesOwed]) for (const [k, v] of M) if (now - v.at > CROSS_CARRY_MS) M.delete(k); // a resume that never came carries nothing and is owed nothing (swept at each move)
   if (bsid) _crossPlacementOwed.set(String(bsid), { poolId, to: d.to, at: now, fromSid: sid }); // the RESUME starts on d.to (poolChooserForModel)
   serverNotice(`pool-cross-${poolId}-${sid}-${now}`, fill(NOTE) + ' Restarting the conversation to apply it.', { level: 1, i18n: { key: NOTE, params, then: { key: PIN_RESTART_KEY } } });
   console.log(`[pool] cross-provider switch ${poolId}/${sid}: ${fromId || '?'} (${x.fromId}) → ${d.to} (${x.toId}), model ${x.model || '?'} → ${x.toModel} (${why})`);
@@ -7586,7 +7586,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   }
   s._poolPin = pin;
   persistPoolPin(s, pin ? null : rec);
-  { const bsid = s.claudeSessionId || s.backendSessionId, c = bsid ? _crossPlacementOwed.get(String(bsid)) : null; if (c && memberId && memberId !== c.to) _crossPlacementOwed.delete(String(bsid)); } // the person's LATER pin wins over a cross move's carry (B-d578 (a) follow)
+  { const bsid = s.claudeSessionId || s.backendSessionId, c = bsid ? _crossPlacementOwed.get(String(bsid)) : null; if (c && memberId && memberId !== c.to) { _crossPlacementOwed.delete(String(bsid)); _crossLinesOwed.delete(String(bsid)); } } // the person's LATER pin wins over a cross move's carry — and its owed line (the move did not happen) (B-d578 (a) follow)
   const caps = capsOf(a.backend);
   const own = hasOwnPoolLink(poolId, sid);
   let current = null; try { current = own ? accounts.poolCurrentFor(poolId, sid) : (heldPoolMemberFor(s, poolId) || accounts.poolCurrent(poolId)); } catch { }
@@ -7639,15 +7639,15 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
  *  of the conversation's family view under its hard bar, not a member that just refused it.
  *  ONE judging site (gatherPlan and the held branch of memberRemoved both ask it). Facts only.
  *  → {ok, why} — `why` = the pin verdict's own name for the refusal. */
-function memberVerdictFor(poolId, memberId, session = null, sid = null, now = Date.now()) {
+function memberVerdictFor(poolId, memberId, session = null, sid = null, now = Date.now(), family = undefined) {
   try {
     const base = poolReadCache(poolId);
-    const fam = session ? projectionFamilyFor(session, sessionModelFor(session)) : null;
+    const fam = family !== undefined ? family : session ? projectionFamilyFor(session, sessionModelFor(session)) : null;   // `family`: a caller with the conversation's model and no session (the cross move's resume)
     const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: memberId, members: switchCandidates(poolId), readCache: (id) => projectCacheForFamily(base(id), fam), nowSec: nowSecOf(now), proactive: false, hot: true, pessimism: darkTaintedAccounts(now), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId) });
     return d && d.reason === 'pin' ? { ok: true, why: null } : { ok: false, why: (d && d.pinWhy) || 'pin-member-unknown' };
   } catch { return { ok: false, why: 'pin-member-unknown' }; }
 }
-function memberCanServe(poolId, memberId, session = null, sid = null, now = Date.now()) { return memberVerdictFor(poolId, memberId, session, sid, now).ok; }
+function memberCanServe(poolId, memberId, session = null, sid = null, now = Date.now(), family = undefined) { return memberVerdictFor(poolId, memberId, session, sid, now, family).ok; }
 /** "MOVE EVERY CONVERSATION HERE NOW", JUDGED BEFORE IT MOVES ANYTHING (verify r1, money). The
  *  act's row is never greyed (addendum 4), so it is reachable on a member that is out of quota:
  *  the route moved every conversation onto it — mid-turn included — and the next pool pass moved
