@@ -1721,6 +1721,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // (dtach → wrapper `env: process.env` → CLI), never argv — argv
                 // is world-readable in /proc/cmdline. No account → explicitly
                 // strip any ambient key so the CLI uses its global login.
+                // r2203: Integration OFF hands on NO hub address — an INHERITED one neither. A hub started by hand inside another VibeSpace
+                // (its terminal or job) carries that hub's VIBESPACE_API, and agentEnv keeps the name (the device agent's back-tunnel rides it),
+                // so this start drops it itself; ON, this hub's own address is set above. The hub's own env is untouched.
+                if (!integrationOn) delete env.VIBESPACE_API;
                 for (const n of require('./server/provider-spawn.js').ambientPlanNames(backend, env, undefined, process.env)) delete env[n];   // lane lg-providers U2 cure: no start inherits a provider's plan (address, key, models — told by its home, so BEFORE the deletes below) from the hub's env; a provider start lays its own below
                 delete env.ANTHROPIC_API_KEY;
                 delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;

@@ -8,6 +8,8 @@
 //     the delivery endpoints (task-context / prompt-context / stop-check)
 //     return empty even for the pre-toggle session's still-valid token.
 //  4. A session spawned while OFF has NO VIBESPACE_API and NO tools PATH,
+//     not even the OUTER hub's address the hub's own env carries (r2203: planted below, as a hub started by hand
+//     inside another VibeSpace's terminal or job inherits it — so the check holds whatever the runner's env holds),
 //     but KEEPS the session token (Ctrl+G editor auth — never model-visible).
 //  5. PATCH ON → hook re-registered.
 //  6. Boot convergence: settings flipped OFF while the server is down +
@@ -53,7 +55,10 @@ fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
 // silently red since that release (found during the 2.271.0 lag/CS audit
 // campaign; a red suite = zero coverage on the registration path). HOME is a
 // throwaway dir here, so forcing only ever touches the fake configs.
-const SRV_ENV = { ...process.env, ...VNC_ENV, HOME: home, PORT: String(PORT), VIBESPACE_FORCE_AGENT_HOOKS: '1' };
+// r2203: the hub runs as if started inside ANOTHER VibeSpace — that hub's address in its env. ON, a start names this hub's own;
+// OFF, it hands on none (src/ws-create.js r6Base). The box's job env carried one (row 215's red), so it is planted, never inherited.
+const OUTER_API = 'http://127.0.0.1:9/outer-hub';
+const SRV_ENV = { ...process.env, ...VNC_ENV, HOME: home, PORT: String(PORT), VIBESPACE_FORCE_AGENT_HOOKS: '1', VIBESPACE_API: OUTER_API };
 let srv = null;
 // A stale listener on our port would silently absorb every assertion (real
 // debugging cost: yesterday's crashed smoke servers still held the port).
@@ -131,6 +136,7 @@ const sid1 = await createShellSession();
 await sleep(800);
 const argv1 = dtachArgv(sid1);
 check('ON-spawn env has VIBESPACE_API', !!argv1 && argv1.includes('VIBESPACE_API='));
+check('ON-spawn env names THIS hub, never the outer one in its env', !!argv1 && argv1.includes(`VIBESPACE_API=http://127.0.0.1:${PORT}`) && !argv1.includes(OUTER_API), (argv1 || 'no argv').slice(0, 400));
 check('ON-spawn env has the tools PATH prefix', !!argv1 && argv1.includes(`PATH=${path.join(wt, 'data', 'bin')}`));
 const tok1 = argv1 && (argv1.match(/VIBESPACE_SESSION_TOKEN=(vsst_[\w-]+)/) || [])[1];
 check('ON-spawn env has the session token', !!tok1);
