@@ -949,6 +949,10 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
     ['narrow round: a list of hosts (a MongoDB replica set)', 'mongodb://admin:' + pw + '@h1.example:27017,h2.example:27017/db?replicaSet=rs0', 'mongodb://admin:' + REDACTED + '@h1.example:27017,h2.example:27017/db?replicaSet=rs0', [pw]],
     ['narrow round: a port, then a comma and prose', 'mysql://root:' + pw + '@db:3306, then', 'mysql://root:' + REDACTED + '@db:3306, then', [pw]],
     ['ASCII signs a generated password carries (^ { } | \\)', 'mysql://root:' + 'P^ss{1}|x' + '\\' + 'y' + '@db/x', 'mysql://root:' + REDACTED + '@db/x', ['P^ss{1}']],
+    // round wz8ibfxag (the follow, r1655 (2)): shapes the generator's alphabet never draws, one fixed row each
+    ['a pass-phrase holding a raw colon (the user part ends at the FIRST one)', 'git push https://ops:' + ['pa', ':ss', ':word9'].join('') + '@git.example/o/r', 'git push https://ops:' + REDACTED + '@git.example/o/r', ['pa:ss:word9', 'ss:word9']],
+    ['a pass-phrase of lowercase words', 'curl https://deploy:' + ['correct', 'horse', 'battery', 'staple'].join('-') + '@api.example/v1', 'curl https://deploy:' + REDACTED + '@api.example/v1', ['correct-horse-battery-staple', 'battery']],
+    ['a pass-phrase holding an equals sign', 'mysql://root:' + ['a', '=b', '=c9'].join('') + '@db/x', 'mysql://root:' + REDACTED + '@db/x', ['a=b=c9']],
   ];
   // THE SHAPES THAT MUST STAY, byte for byte (over-masking is a defect)
   const KEEP = [
@@ -1121,13 +1125,14 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
       }
       // (D, the coordinator's r1553): a query value glued to unspaced Chinese prose with a later at-sign in the same run is
       // R7's to read (since r2209 an ASCII-led value ends at the prose, and R9 hides the later pass-phrase on its own). Its
-      // check is weaker: no byte of any pass-phrase in the output, and nothing before that query value differs
+      // check (r1655 (1), round wz8ibfxag): the output IS the HIDDEN-WHOLE form read by the same road — every pass-phrase hidden
+      // whole first, then R7 — so a TAIL left after a cut differs (a whole-pass-phrase test let it pass); nothing before the value differs
       if (onDraw) onDraw(t, secrets, [], null);
       const classD = qAt >= 0 && laterAt;
       let fired = false;
       for (const [road, f] of [['head', (x) => S.redactSecrets(x).text], ['message', (x) => S.redactSecrets(x, { message: true }).text], ['name', (x) => S.redactByValue(x).text]]) {
         const out = f(t); if (out === want) continue;
-        if (classD && !passes.some((pp) => out.includes(pp)) && out.slice(0, qAt) === want.slice(0, qAt)) { fired = true; continue; }
+        if (classD && out === f(want) && out.slice(0, qAt) === want.slice(0, qAt)) { fired = true; continue; }
         bad.push({ road, t, out, want });
       }
       if (fired) classes.D++;
@@ -1138,7 +1143,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   console.log(`      the generator (seed 0x5eed1504): ${J(G.cover)} · the named classes: (A) glued host and port ${G.classes.A}, (B) image tag ${G.classes.B}, (C) raw at-sign's widening ${G.classes.C}, (D) R7's query value glued to Chinese prose ${G.classes.D}`);
   for (const b of G.bad.slice(0, 4)) console.log(`      ✗ ${b.road}: ${J(b.t)} → ${J(b.out)} (want ${J(b.want)})`);
   ok(!G.bad.length && G.cover.draws >= 2000 && G.cover.pass > 500 && G.cover.zh > 500 && G.cover.la > 500 && G.cover.port > 100 && G.cover.list > 50 && G.cover.v6 > 50 && G.cover.sentenceEnd > 100 && G.cover.mention > 200 && G.cover.mail > 100 && G.cover.twoAddr > 200 && G.classes.A > 50 && G.classes.B > 50 && G.classes.C > 50,
-    `THE LAW BY A SEEDED GENERATOR: ${G.cover.draws} draws × 3 roads — in every draw the pass-phrase is hidden WHOLE and nothing else differs (the three named classes each hidden as constructed: A ${G.classes.A}, B ${G.classes.B}, C ${G.classes.C}; (D) R7's glued query value ${G.classes.D}, no pass-phrase byte out and nothing before it differs)${G.bad.length ? ' — ' + G.bad.length + ' wrong' : ''}`);
+    `THE LAW BY A SEEDED GENERATOR: ${G.cover.draws} draws × 3 roads — in every draw the pass-phrase is hidden WHOLE and nothing else differs (the three named classes each hidden as constructed: A ${G.classes.A}, B ${G.classes.B}, C ${G.classes.C}; (D) R7's glued query value ${G.classes.D}, the hidden-whole form read by the same road and nothing before it differs)${G.bad.length ? ' — ' + G.bad.length + ' wrong' : ''}`);
   // THE REDS of the round, each RED by name: the generator against the walks of the two tips before (today's 4e85efb11 — the port test;
   // the one before, 831481e7d — no stop but a quote), each loaded in place of the law's walk
   const UI_I = SRC.indexOf('function userinfoAt('), UI_FN = SRC.slice(UI_I, SRC.indexOf('\n}\n', UI_I) + 3);
@@ -1183,7 +1188,7 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   // with a query, glued to unspaced Chinese prose that later holds a URL with a userinfo. R7's value runs to the next `& # ;` or blank,
   // so it swallowed the prose and cut the later pass-phrase at its `;`: the URL's scheme went with the cut, R9 never saw it, and the
   // tail stayed in plain. R9 now runs FIRST (both rules): every pass-phrase is hidden whole before R7 reads the value; R7 then reads
-  // that value up to the prose (r2209: an ASCII-led value ends at the CJK kind) (class D: no byte of a pass-phrase out, nothing before the query value differs)
+  // that value up to the prose (r2209: an ASCII-led value ends at the CJK kind) (class D: the hidden-whole form read by the same road, nothing before the query value differs)
   const Q7 = "    text = redactQuery(text, (head) => { n++; if (say) say(head); });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)\n";
   const pA = ['MS|*~', 'MWK\\', 'UZG%'].join(''), pB = ['D^%+@|', ';', 'U).8-3'].join(''), pC = ['CW^', '\\NN\\'].join('');
   const LEAKS = [['a later pass-phrase holding the «;» R7 cut at', '有问题（redis://app:' + pA + '@build.example:4301/db?replicaSet=rs0）！联系ops@corp.example日志里「HTTPS://ops:' + pB + '@mq.example」；看一下', [pA, pB, 'U).8-3', 'D^%+@|']],
@@ -1247,6 +1252,15 @@ console.log('B-da2d: R9 — a URL\'s password standing on its own: only it goes 
   ok(!ORDER_ONLY.redactSecrets(LEAKS[0][1]).text.includes('U).8-3'), 'R7 before R9 under R7\'s value-end law (r1554): the later pass-phrase stays hidden whole (the value ends at the prose, R9 then reads the address)');
   const tailOut = R7FIRST.redactSecrets(LEAKS[0][1]).text;
   ok(tailOut.includes('U).8-3') && !SS.redactSecrets(LEAKS[0][1]).text.includes('U).8-3'), 'RED CONTROL — R7 BEFORE R9 (the order of 4e85efb11 and before): the later pass-phrase\'s tail after the «;» is left in plain (' + J(tailOut.slice(tailOut.indexOf('?'))) + ')');
+  // r1655 (1) with lens 3: the GENERATOR ITSELF is red under that control (class D now compares the hidden-whole form, so a tail is caught)
+  const GR = genDraws(R7FIRST, { draws: 1000 }), grD = GR.bad.filter((b) => b.t.includes('?replicaSet='));
+  for (const b of grD.slice(0, 2)) console.log(`      under R7 first: ${b.road}: ${J(b.out.slice(b.out.indexOf('?')))} (want ${J(b.want.slice(b.want.indexOf('?')))})`);
+  ok(grD.length > 0, `RED CONTROL — THE GENERATOR under R7 before R9 with the release's value class: ${grD.length} draws of the named shape go red (class D holds the hidden-whole form: a tail after a cut differs)`);
+  // lens 3 (round wz8ibfxag): the NAME road's order has its own red — R7 at a name (nameQuery: its value class still runs into the prose) before R9
+  const NQ = "    row(nameQuery(text));   // r10 (B-a3fe, on 2.369.413): R7 at a name — the release's linear walk and its name grammar\n";
+  const R7NAME = mutantCopies('da2d-r7name', REPO).load('src/secret-shapes.js', anchored(SRC, R9V + NQ, NQ + R9V, 'R7 before R9 at a name'), 'r7name');
+  const nameTail = R7NAME.redactByValue(LEAKS[0][1]).text;
+  ok(nameTail.includes('U).8-3') && !SS.redactByValue(LEAKS[0][1]).text.includes('U).8-3'), 'RED CONTROL — R7 BEFORE R9 AT A NAME: the later pass-phrase\'s tail after the «;» is left in plain in a job\'s name (' + J(nameTail.slice(nameTail.indexOf('?'))) + ')');
   const NOMARK = mutantCopies('da2d-nomark', REPO).load('src/secret-shapes.js', anchored(SRC, "      if (c === 0xAB && d.startsWith(REDACTED, j)) { j += REDACTED.length - 1; continue; }   // the belts' own mark, read WHOLE\n", '', 'the mark not read whole'), 'nomark');
   ok(NOMARK.redactSecrets(MUSER).text.includes(pw), 'RED CONTROL — THE MARK ENDS THE WALK (« outside the alphabet): a user masked before lets its password through (' + J(NOMARK.redactSecrets(MUSER).text.replace(pw, '<the password>')) + ')');
 }
