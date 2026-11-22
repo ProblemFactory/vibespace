@@ -289,17 +289,37 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     if (!session.subagentWatchers) session.subagentWatchers = new Map(); // toolUseId → {watcher, offset}
 
     // Watch a subagent JSONL file for new messages (fills gap: text/thinking not in stream-json)
-    const startSubagentWatcher = (toolUseId, agentId, attempt = 0) => {
+    const startSubagentWatcher = (toolUseId, agentId, attempt = 0, found = undefined) => {
       if (session.subagentWatchers.has(toolUseId)) return;
-      // Find JSONL path
+      // THE FINDER (lane lg-recovery, 主开发 r2374, the unit's commit 2 — src/server/subagent-transcript.js): the place kept and the
+      // cwd's folder by ONE stat each (the release's first candidate); a file in another project folder, or one not written yet,
+      // through the hub's ONE listing of the projects root — asynchronous, shared, at most once a second for the hub (the release
+      // listed the root synchronously at every try of every watcher: every agent a workflow starts paid it). The watcher below is
+      // the release's; a start found by the listing goes on when it answers (`found`), this entry holding the place meanwhile
       const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-      const projDir = cwdToProjectDir(session.cwd || '');
-      const candidates = [];
-      if (session.claudeSessionId) {
-        candidates.push(path.join(projectsDir, projDir, session.claudeSessionId, 'subagents', `agent-${agentId}.jsonl`));
-        try { for (const dir of fs.readdirSync(projectsDir)) { const fp = path.join(projectsDir, dir, session.claudeSessionId, 'subagents', `agent-${agentId}.jsonl`); if (!candidates.includes(fp)) candidates.push(fp); } } catch {}
+      const T = require('../subagent-transcript');
+      let watchFile = found || null;
+      if (found === undefined && session.claudeSessionId) {
+        const exactDir = path.join(projectsDir, cwdToProjectDir(session.cwd || ''));
+        const exact = path.join(exactDir, session.claudeSessionId, 'subagents', `agent-${agentId}.jsonl`);
+        watchFile = [T.keptPlace(session.claudeSessionId, agentId), exact].find((f) => { try { return !!f && fs.existsSync(f); } catch { return false; } }) || null;
+        if (watchFile) T.keepPlace(session.claudeSessionId, agentId, watchFile);
+        else {
+          const looking = { watcher: null, retry: null, looking: true, lastActivity: Date.now() };
+          session.subagentWatchers.set(toolUseId, looking);
+          T.findAgentTranscript({ claudeSessionId: session.claudeSessionId, agentId, exactDir, root: projectsDir, workflows: false, shared: true })
+            .then((r) => r.fp, () => null)
+            .then((fp) => {
+              try {
+                if (session.subagentWatchers.get(toolUseId) !== looking) return;   // stopped (or replaced) while it looked
+                session.subagentWatchers.delete(toolUseId);
+                if (!activeSessions.has(id)) return;
+                startSubagentWatcher(toolUseId, agentId, attempt, fp || null);
+              } catch (e) { console.warn(`[stream] a helper's transcript finder failed (${toolUseId}): ${(e && e.message) || e}`); }
+            });
+          return;
+        }
       }
-      const watchFile = candidates.find(f => { try { return fs.existsSync(f); } catch { return false; } });
       if (!watchFile) {
         // File doesn't exist yet — retry with backoff, capped: an agent that
         // failed before writing its JSONL never gets a task_notification, so

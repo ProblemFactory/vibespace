@@ -13,6 +13,10 @@
 //      falls back to a read on the loop
 //   ⑤ THE ROUTE'S SAME: the release's cards, zero listings / whole reads on the loop, a refusal 503 by name; RED: a copy of the
 //      release's route
+//   ⑦ THE LIVE WATCHER'S FINDER (src/server/stdout/claude-stream-json.js, the unit's commit 2): a helper's file in another project
+//      folder is found with ZERO synchronous listings of the projects root (the kept place and the cwd's folder one stat each),
+//      the watcher armed when the walk answers; five watchers whose files are not written yet share ONE listing; a file at the
+//      cwd's folder still starts its watch at once (its first read synchronous, as before); RED: a copy of the release's finder
 //   ⑥ WHOLE: an agent past the histories' head + tail bound (2 MiB + 32 MiB) comes back entire; CONTROL: the bounded read hides its middle
 // Run: node scripts/test-subagent-transcript.mjs
 import fs from 'node:fs';
@@ -219,6 +223,63 @@ console.log('⑤ THE ROUTE\'S SAME — GET /api/subagent-messages through the he
   const redS = MUT.load('src/routes/sessions.js', anchored(SRC, NEW_BODY, OLD_BODY, 'the route through the helper'), 'release-route');
   const rr = await counted(() => ask(routeOf(redS), { claudeSessionId: SID, cwd: CWD, agentId: A5 }));
   ok(rr.code === 200 && J(rr.body.messages) === J(ref.messages) && syncOf('readdirSync') >= 290 && wholeReads() === 1, `RED CONTROL: the release's route answers the same cards with ${syncOf('readdirSync')} synchronous listings and ${wholeReads()} whole read on the loop — the leg above would be RED`);
+}
+
+console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s folder one stat each, the rest through the hub\'s ONE listing');
+{
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const CS_PATH = path.join(REPO, 'src/server/stdout/claude-stream-json.js');
+  const harness = (consumer) => {
+    const csSrc = fs.readFileSync(CS_PATH, 'utf-8');
+    const engine = { _vsuPending: new Map(), resolveUsageKey: () => '__global__', usageEstimator: { noteLive() {} }, modelsMatch: () => false, servedDefinesModel: () => false, rerouteAnnouncedBy: () => null };
+    for (const part of (/const \{([^}]*)\} = engine;/.exec(csSrc) || ['', ''])[1].split(',')) { const name = part.split(':')[0].replace(/\/\/.*$/, '').trim(); if (/^[A-Za-z_$][\w$]*$/.test(name) && !(name in engine)) engine[name] = () => {}; }
+    const activeSessions = new Map();
+    const { attach } = consumer.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'control_request', 'control_response', 'control_cancel_request']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(HOME, 'none'), checkClaudeGoalStatus() {}, noteModelSeen() {}, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
+    const bcast = [];
+    const helpers = { feedLive: N.feedLive, broadcastToSession: (x, id, m) => bcast.push(m), broadcastActiveSessions() {}, readSessionMeta: () => ({}), writeSessionMeta() {}, updateSessionTodos() {}, applyTaskToolUpdate() {}, emitTaskListTodos() {} };
+    const session = (k) => { const id = `sess-w${k}`; const s = { mode: 'chat', backend: 'claude', name: 'w', cwd: CWD, host: null, claudeSessionId: SID, backendSessionId: SID, sockName: `cw-w${k}`, buffer: '', createdAt: Date.now(), _webuiId: id, _taskRecords: {} }; s._normalizer = new MessageManager(id); activeSessions.set(id, s); const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} }; quiet(); try { attach(s, id, h, helpers); } finally { loud(); } return s; };
+    const told = (agentId) => bcast.filter((m) => m.type === 'subagent-message' && m.parentToolUseId === `tu-${agentId}`).length;
+    const close = () => { for (const s of activeSessions.values()) for (const w of (s.subagentWatchers || new Map()).values()) { try { if (w && w.retry) clearTimeout(w.retry); if (w && w.watcher && w.watcher.close) w.watcher.close(); } catch { } } activeSessions.clear(); };
+    return { session, told, close };
+  };
+  const EW = 'e0000000000000e1';
+  agent(SUB_OTHER, EW, 0.05);
+  T._resetForTest();
+  const H = harness(require(CS_PATH));
+  const s1 = H.session(1);
+  await counted(async () => { s1._startSubagentWatcher(`tu-${EW}`, EW); for (let i = 0; i < 200 && !H.told(EW); i++) await sleep(10); });
+  ok(H.told(EW) > 0 && syncOf('readdirSync') === 0 && syncOf('existsSync') <= 2 && T.stats().listings === 1, `a helper's file in another project folder: watched (${H.told(EW)} records told) with ZERO synchronous listings of the projects root (${syncOf('readdirSync')}), ${syncOf('existsSync')} stat(s) on the loop (the kept place, the cwd's folder), the root listed once off the loop`);
+  // five watchers of five helpers whose files are not written yet, started in the same moment: ONE listing for the hub
+  T._resetForTest();
+  const WAIT = Array.from({ length: 5 }, (_, k) => `f00000000000000${k}`);
+  const s2 = H.session(2);
+  await counted(async () => { for (const id of WAIT) s2._startSubagentWatcher(`tu-${id}`, id); await sleep(150); });
+  const st = T.stats();
+  ok(st.listings === 1 && st.listingsShared === WAIT.length - 1 && syncOf('readdirSync') === 0, `five watchers whose files are not there yet: the hub listed the projects root ONCE (${st.listings}, ${st.listingsShared} shared), nothing synchronous (${syncOf('readdirSync')})`);
+  // a file at the cwd's folder: the watch starts at once, its first read synchronous (the release's contract, test-helper-ask ㉒)
+  const AW = 'a00000000000000e'; agent(SUB, AW, 0.05);
+  const s3 = H.session(3);
+  s3._startSubagentWatcher(`tu-${AW}`, AW);
+  ok(H.told(AW) > 0 && s3.subagentWatchers.get(`tu-${AW}`) && s3.subagentWatchers.get(`tu-${AW}`).watcher, `a file at the cwd's folder is read at once — ${H.told(AW)} records told before the start returned`);
+  H.close();
+  // RED: the release's finder, planted in a copy of the parser module
+  const CS = fs.readFileSync(CS_PATH, 'utf-8');
+  // the replaced region starts AFTER the product's own projects-root line (the plant never spells a home of its own)
+  const a = CS.indexOf("      const T = require('../subagent-transcript');"), b = CS.indexOf('      if (!watchFile) {', a);
+  const NEW_FINDER = a >= 0 && b > a ? CS.slice(a, b) : 'THE FINDER';
+  const OLD_FINDER = `      const candidates = [];
+      if (session.claudeSessionId) {
+        candidates.push(path.join(projectsDir, cwdToProjectDir(session.cwd || ''), session.claudeSessionId, 'subagents', \`agent-\${agentId}.jsonl\`));
+        try { for (const dir of fs.readdirSync(projectsDir)) { const fp = path.join(projectsDir, dir, session.claudeSessionId, 'subagents', \`agent-\${agentId}.jsonl\`); if (!candidates.includes(fp)) candidates.push(fp); } } catch {}
+      }
+      const watchFile = candidates.find((f) => { try { return fs.existsSync(f); } catch { return false; } });
+`;
+  const red = MUT.load('src/server/stdout/claude-stream-json.js', anchored(CS, NEW_FINDER, OLD_FINDER, 'the watcher\'s finder'), 'release-finder');
+  const HR = harness(red);
+  const r1 = HR.session(4);
+  await counted(async () => { r1._startSubagentWatcher(`tu-${EW}`, EW); for (let i = 0; i < 100 && !HR.told(EW); i++) await sleep(10); });
+  ok(HR.told(EW) > 0 && syncOf('readdirSync') === 1 && syncOf('existsSync') >= 2, `RED CONTROL: the release's finder watches the same file after ${syncOf('readdirSync')} synchronous listing of the projects root and ${syncOf('existsSync')} stats on the loop — the leg above would be RED`);
+  HR.close();
 }
 
 console.log('⑥ WHOLE — an agent past the histories\' head + tail bound (2 MiB + 32 MiB) comes back entire');
