@@ -603,7 +603,7 @@ export function machineLoginLinkHint(name, vendor = 'Anthropic') {
 export function windowUnknownHtml(wu) {
   const other = (Array.isArray(wu && wu.otherNames) ? wu.otherNames : []).find((n) => typeof n === 'string' && n) || t('another account');
   // B-6a92 (主开发 r2561): held by the standing check — the row's window is ANOTHER account's to the second; said where a person looks
-  if (wu && wu.by === 'same-instant') return `<span class="acct-key-foreign acct-usage-foreign">${escHtml(t('This account’s weekly window is the same as {other}’s to the second, so it is shown as unknown until this account’s own usage is read — press the refresh', { other }))}</span>`;
+  if (wu && wu.by === 'same-instant') return `<span class="acct-key-foreign acct-usage-foreign">${escHtml(t('This account’s weekly window is the same as {other}’s to the second, so it is shown as unknown until this account’s own usage is read — press refresh', { other }))}</span>`;
   return `<span class="acct-key-foreign acct-usage-foreign">${escHtml(t('Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it', { other }))}</span>`;
 }
 export function unreadUsageHtml() {
@@ -1781,6 +1781,9 @@ export function installManageAgents(App, ctx = {}) {
     // B-6a92: the cell keeps the row's OWN last reading only; the words of its unknown window are the row's own line
     // (acct-key-foreign, under its name) — never squeezed into the cell, and never «no reading yet» (sessions DO use it)
     if (u.windowUnknown) {
+      // B-6a92 (主开发 r2688 (2)): held on ANOTHER account's instant — its last reading froze and may be that account's numbers;
+      // the pool reads none for it, and neither does the cell (the row's own line says why)
+      if (u.windowUnknown.by === 'same-instant') return '';
       const own = { ...u }; delete own.windowUnknown;
       const unread = !Array.isArray(own.windows) && quotaModel.memberProofState(own, Date.now()) === 'unread';
       return unread ? '' : this._acctUsageHtml(own, est, probeNote, backend);

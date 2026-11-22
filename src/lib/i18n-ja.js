@@ -13671,7 +13671,7 @@ export default {
   "reset · unconfirmed": "リセット済み · 未確認",
   "no reading yet — confirms when a session uses it": "まだ使用量の読み取りなし — セッションが使うと確定します",
   "Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it": "読み取りが「{other}」の週次ウィンドウを指しています — このアカウント自身のウィンドウは、自身の読み取りで確かめられるまで不明です",
-  "This account’s weekly window is the same as {other}’s to the second, so it is shown as unknown until this account’s own usage is read — press the refresh": "このアカウントの週次ウィンドウは「{other}」のものと秒単位まで同じため、このアカウント自身の使用量が読まれるまで不明と表示されます — 更新を押してください",
+  "This account’s weekly window is the same as {other}’s to the second, so it is shown as unknown until this account’s own usage is read — press refresh": "このアカウントの週次ウィンドウは「{other}」のものと秒単位まで同じため、このアカウント自身の使用量が読まれるまで不明と表示されます — 更新を押してください",
   "another account": "別のアカウント",
   "Open this browser's display in Desktop to act on Chrome's own window": "「デスクトップ」でこのブラウザーの画面を開くと、Chrome 自身のウィンドウを操作できます",
   "Open in Desktop": "デスクトップで開く",

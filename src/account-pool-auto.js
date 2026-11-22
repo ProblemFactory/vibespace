@@ -636,7 +636,7 @@ function evalGateOpen({ now, last = 0, force = false } = {}) {
 // a usable default is left for a settleable member with less SPARE lane (`reason:
 // 'spare-lane'`, see THE SPARE LANE). Omit it ⇒ byte-identical. A HOT pool's proactive pass
 // moves an idle running conversation the same way, past SPARE_MOVE_MARGIN_PCT (S5).
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, providerOf = null, conversationModel = null, crossProvider = 'never', offer = true, proving = null, readReading = null, roster = null, explain = false }) {
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, providerOf = null, conversationModel = null, crossProvider = 'never', offer = true, proving = null, readReading = null, roster = null, held = null, explain = false }) {
   const prioRank = priorityRankOf(priority);
   const order = priorityOrder(priority);
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
@@ -647,9 +647,14 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // THIS conversation (`exclude`) leaves as from any walled member. One predicate for ANY held mark (B-6a92's reviewed rule, .417)
   const restartedUnknown = (r) => { const sa = r && typeof r === 'object' ? r.startedAgain : null; return !!(sa && typeof sa === 'object' && !sa.enumerated); };
   const markedHeld = (r) => !!(r && typeof r === 'object' && (typeof r.held === 'string' || restartedUnknown(r)));
-  const isHeld = (id) => markedHeld(readCache(id)) || (typeof readReading === 'function' && markedHeld(readReading(id)));
+  const isHeld = (id) => (typeof held === 'function' && !!held(id)) || markedHeld(readCache(id)) || (typeof readReading === 'function' && markedHeld(readReading(id)));
   const curHeldStart = !!placing && isHeld(currentId);
   const curHeldWalled = !!excluded && excluded.has(currentId) && isHeld(currentId);
+  // B-6a92 (主开发 r2688 (2)): a member HELD on another account's weekly instant — its reading is the engine's mark { held:
+  // 'same-instant' } (a held string, as above), or the caller's `held(id)`: the pool reads NONE for it (its file froze and may be the
+  // other account's numbers). A START on it names that cause: held-unknown (a file that cannot be read: held-unread)
+  const sameInstant = (r) => !!(r && typeof r === 'object' && r.held === 'same-instant');
+  const curHeldSame = curHeldStart && ((typeof held === 'function' && !!held(currentId)) || sameInstant(readCache(currentId)) || (typeof readReading === 'function' && sameInstant(readReading(currentId))));
   const notMember = membership != null && !(typeof membership.has === 'function' ? membership : new Set(membership)).has(currentId);
   // `explain` keeps the historical contract (null = no switch) for every
   // existing caller and test, while letting the engine ask WHY nothing
@@ -773,7 +778,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const crossRows = [];
   for (const m of members) {
     if (m.id === currentId) continue;
-    if (isHeld(m.id)) continue;   // r3136: its reading cannot be told — never a target
+    if (isHeld(m.id)) continue;   // r3136 / B-6a92: its reading cannot be told (unread, or held on another account's instant) — never a target
     if (excluded && excluded.has(m.id)) { excludedN++; rejectedMembers.push({ id: m.id, name: m.name }); continue; } // just rejected this session — not a candidate
     let xRow = null;
     if (provOf) {
@@ -893,7 +898,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     for (const r of cands) {
       if (topRank != null && prioRank(r.id) !== topRank) continue;
       if (held(r.id)) continue;
-      if (isHeld(r.id)) continue;   // r3136: a held member is never proved (nothing it reads can be written)
+      if (isHeld(r.id)) continue;   // r3136 / B-6a92: a held member is never proved (nothing it reads can be written; a same-instant row's readings are archived)
       const c = readingOf(r.id);
       const state = memberProofState(c, nowMs);
       if (state === 'proven') continue;
@@ -990,8 +995,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     return { toLoginNear: { id: pick.id, name: pick.name, ...(loginBlocked.find((b) => b.id === pick.id) || {}) } };
   };
   const bestSettle = pool.find((r) => r.settleOk) || null;
-  // r3136: a START on a held default goes to the best measured member that can settle (with none it stays, as any unknown default)
-  if (curHeldStart && bestSettle) return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: null, toRemaining: bestSettle.remaining, reason: 'held-unread', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(bestSettle.id) < priority.length ? prioRank(bestSettle.id) + 1 : null } : {}) };
+  // r3136 / B-6a92 (r2688 (2)): a START on a held default goes to the best measured member that can settle (never ranked below the
+  // copy; with none it stays, as any unknown default)
+  if (curHeldStart && bestSettle) return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: null, toRemaining: bestSettle.remaining, reason: curHeldSame ? 'held-unknown' : 'held-unread', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(bestSettle.id) < priority.length ? prioRank(bestSettle.id) + 1 : null } : {}) };
   // which rule ORDERED the target (reporting — the notices say "(priority #2)"):
   // present only under a manual priority, so automatic verdicts are byte-identical
   const placed = (pick) => (prioRank ? { placedBy: 'priority', priorityRank: prioRank(pick.id) < priority.length ? prioRank(pick.id) + 1 : null } : {});

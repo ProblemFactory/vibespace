@@ -574,7 +574,7 @@ function findJournal(dataDir) {
 // phase, which would make every genuinely re-filable entry ambiguous.
 const MIN_OWN_READINGS = 5;   // fewer than this is a coincidence, not a window
 const OWN_DOMINANCE = 0.9;    // a stream whose own panel readings disagree with themselves establishes nothing
-const { weeklyNear, weeklyPhase, windowOf, windowFingerprint, apiWindowSidecarName, decideReadingTarget, sameInstant, provenOwnStamp } = require('./reading-lag.js');
+const { weeklyNear, weeklyPhase, windowOf, windowFingerprint, apiWindowSidecarName, decideReadingTarget, sameInstant, provenOwnStamp, eventPreciseStamp, eventPreciseWitness } = require('./reading-lag.js');
 // THE `.window-` SIDECAR is written ONLY through its owner's ONE writer, producer mandatory (lane oat-identity-fix-r3,
 // verify r3 F-R2: this file's own atomic write stamped it with no producer — hourly, on every row — and the census that
 // listed writers by hand never saw it). The writer carries the row's identity a non-login stamp replaces.
@@ -1359,7 +1359,9 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   // one, and a derived phase that IS one are left as they are: nothing confirmed, restamped, seeded or readmitted from its readings
   const groupOfId = (k) => { try { const g = typeof ownIdsOf === 'function' ? ownIdsOf(k) : null; return new Set([k, ...(Array.isArray(g) ? g : [])]); } catch { return new Set([k]); } };
   const standing = ids.map((k) => { let st = null, aw = null; try { st = windowStamp.readWindowStamp(cacheDir, k); } catch { } try { aw = _readCacheJson(path.join(cacheDir, apiWindowSidecarName(k))); } catch { } return { k, g: groupOfId(k), st, aw }; });
-  const othersOnInstant = (key, inst) => { const g = groupOfId(key); return standing.filter((o) => !g.has(o.k) && !o.g.has(key) && [o.st && o.st.sevenDay, o.aw && o.aw.sevenDay].some((x) => Number(x) > 0 && sameInstant(x, inst))).map((o) => o.k); };
+  // r2688 (3): only statements at EVENT precision are another group's instant — a panel prints a reset to the hour or the minute, and a
+  // row's event-precise phase is never refused because a panel-rounded statement of another group happens to equal its minute
+  const othersOnInstant = (key, inst) => { const g = groupOfId(key); return standing.filter((o) => !g.has(o.k) && !o.g.has(key) && [eventPreciseStamp(o.st) ? o.st.sevenDay : null, eventPreciseWitness(o.aw) ? o.aw.sevenDay : null].some((x) => Number(x) > 0 && sameInstant(x, inst))).map((o) => o.k); };
   for (const key of ids) {
     const apiwinPath = path.join(cacheDir, apiWindowSidecarName(key));
     const apiwin = _readCacheJson(apiwinPath);
@@ -1387,26 +1389,26 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     if (apiwin && apiwin.foreign && apiwin.foreign.by === 'same-instant') { row.sidecar = 'held (another account\'s instant)'; report.counts.sameInstant++; continue; }
     // …and the phase its readings name, when that is ANOTHER identity group's instant to the second, is never stamped onto it
     const apiShared = othersOnInstant(key, api);
-    const scOnOther = !!(sc && Number(sc.sevenDay) > 0 && !provenOwnStamp(sc) && othersOnInstant(key, sc.sevenDay).length);
     const sameInstantSkip = (what) => { row.sidecar = what; report.counts.sameInstant++; };
     const restood = (st) => { const o = standing.find((x) => x.k === key); if (o) o.st = st; };   // the others read this row as it now stands
+    const personName = (k) => { const n = nameOf(k); return typeof n === 'string' && n && !n.includes('@') && n !== k ? n : 'another account'; };   // r2688: names only
     const stamp = { ...apiWindow, at: now, source: 'api', verifiedAt: now, verifiedBy: 'rate-limit-events', scopedRule: 'same-phase-as-7d', n: ev.top.n, of: ev.total, seededBy: id };
     // WHO PRODUCED IT (fix r3 F-R2): the evidence rows (usage anchors, archived readings) name no producer, so a stamp or a
     // re-stamp is `null` — nobody can tell; agreeing with a stamp keeps that stamp's producer as `repair:<it>`. The ONE
     // writer carries the identity the stamp it replaces held: a repair never demotes a row's proven identity.
     if (!sc || !(Number(sc.sevenDay) > 0)) {
-      if (apiShared.length) { sameInstantSkip(`not seeded: the phase its readings name is ${apiShared.map(nameOf).join(', ')}'s to the second`); continue; }
+      if (apiShared.length) { sameInstantSkip(`not seeded: the phase its readings name is ${apiShared.map(personName).join(', ')}'s to the second`); continue; }
       windowStamp.writeWindowStamp(cacheDir, key, stamp, null); row.sidecar = 'stamped'; report.counts.stamped++; restood(stamp);
     }
     else if (weeklyNear(sc.sevenDay, api) === false) {
-      if (apiShared.length) { sameInstantSkip(`not restamped: the phase its readings name is ${apiShared.map(nameOf).join(', ')}'s to the second`); continue; }
+      if (apiShared.length) { sameInstantSkip(`not restamped: the phase its readings name is ${apiShared.map(personName).join(', ')}'s to the second`); continue; }
       archived.push({ migration: id, at: now, store: 'window-sidecar', key, action: 'restamped',
         reason: `the established-window sidecar of ${nameOf(key)} carried weekly phase ${weeklyPhase(sc.sevenDay)} (${windowFingerprint(sc)}, source ${sc.source || 'unknown'}) — not this account's API-derived phase ${ev.top.phase} (${windowFingerprint(apiWindow)}; ${ev.top.n} of ${ev.total} slot-verified rate-limit readings); the /usage panel that stamped it answered for another account`,
         entry: sc });
       windowStamp.writeWindowStamp(cacheDir, key, stamp, null); row.sidecar = 'restamped'; report.counts.restamped++; restood(stamp);
     } else if (sc.source !== 'api' || !sc.verifiedAt) {
-      // B-6a92 (r2543): an unproven anchor on another identity group's instant is never CONFIRMED by its own agreeing readings
-      if (scOnOther) { sameInstantSkip('not confirmed: its anchor is another account\'s instant to the second, unproven'); continue; }
+      // B-6a92 (r2543 / r2688): a confirm WRITES the phase its readings name — never when that is another group's event-precise instant
+      if (apiShared.length) { sameInstantSkip(`not confirmed: the phase its readings name is ${apiShared.map(personName).join(', ')}'s to the second`); continue; }
       windowStamp.writeWindowStamp(cacheDir, key, stamp, repairSourceOf(sc)); row.sidecar = 'confirmed'; report.counts.confirmed++;
     }
     else { row.sidecar = 'kept'; report.counts.kept++; }

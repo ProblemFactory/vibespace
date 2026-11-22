@@ -1029,7 +1029,11 @@ async function refreshViaCliPanel(key) {
       // folder could not be read: nobody can tell — the ONE writer then carries the row's identity, fix r3)
       const producer = (() => { try { const i = accounts.readSubCreds(key); return i && i.oatFile ? 'oat:' + (Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : '?') : 'login'; } catch { return null; } })();
       if (idv && idv.verified && (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length)) {
-        windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: idv.org === 'agree' ? 'cli-org' : (idv.verifiedBy || 'api-phase') }, producer);
+        // B-6a92 (主开发 r2688 (1)): the held door's lift in THIS call (idv.verifiedBy own-panel) and an own-panel stamp already on
+        // this phase keep their proof mark — a later ordinary read never demotes the row's own proven read
+        const prevSt = windowStamp.readWindowStamp(USAGE_CACHE_DIR, key);
+        const keepOwn = idv.verifiedBy === 'own-panel' || (!!prevSt && prevSt.verifiedBy === 'own-panel' && Number(w.sevenDay) > 0 && require('./reading-lag.js').weeklyNear(prevSt.sevenDay, w.sevenDay) === true);
+        windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: keepOwn ? 'own-panel' : idv.org === 'agree' ? 'cli-org' : (idv.verifiedBy || 'api-phase') }, producer);
         probeRec.sidecar = 'stamped';
       } else if (w.sevenDay || Object.keys(w.scoped).length) {
         // …UNLESS THE ONLY ANCHOR IS A LEGACY STAMP (inc-mu6djxxt-8166): with no

@@ -577,7 +577,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const SKIP2 = "        if (namedOthers(x, key, own).length) return false;   // B-6a92 r5: another known account's reading is never written back on this row\n";
   // r2619: since r2543 the repair never restamps a row onto another identity group's instant — a second barrier, so this control
   // cuts BOTH (the two skips and that guard) and says so in its name
-  const NORESTAMP = "      if (apiShared.length) { sameInstantSkip(`not restamped: the phase its readings name is ${apiShared.map(nameOf).join(', ')}'s to the second`); continue; }\n";
+  const NORESTAMP = "      if (apiShared.length) { sameInstantSkip(`not restamped: the phase its readings name is ${apiShared.map(personName).join(', ')}'s to the second`); continue; }\n";
   const mRep = rsrc.includes(SKIP1) && rsrc.includes(SKIP2) ? require(MUT.write(RREL, anchored(rsrc.split(SKIP1).join('').split(SKIP2).join(''), NORESTAMP, '', 'b6a92-release-repair-guard'), 'b6a92-release-repair')) : null;
   const GR = held();
   await run6(GR);
@@ -972,14 +972,15 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const binCount = path.join(binDir, 'claude-panel-si.sh'); fs.writeFileSync(binCount, `#!/bin/sh\necho ask >> '${asks}'\ncat <<'PANEL'\n${tP}PANEL\n`, { mode: 0o755 });
     const asked = () => { try { return fs.readFileSync(asks, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
     // THE OLDER RECORD AS IT ARRIVES: Vela's anchor and witness on `v` with NO hold in its kept file; Orin's on roP — then THE START
-    const arrive = (engMod, { v, vProven = false, oProven = false, logins = null, vNone = false } = {}) => {
-      const A0 = held(realEng, { ro: roP, logins });
+    const panelStampOf = (sevenDay, ageMs) => J({ sevenDay, fiveHour: null, scoped: {}, at: Date.now() - ageMs, source: 'on-demand', verifiedAt: Date.now() - ageMs, verifiedBy: 'cli-org', producer: 'login' });   // a panel's: rounded to the hour
+    const arrive = (engMod, { v, vProven = false, oProven = false, logins = null, vNone = false, rowOrg = null, routesMod = null, vStampJ = null, vWitJ = null, oStampJ = null, oWitJ = null, cli = binCount } = {}) => {
+      const A0 = held(realEng, { ro: roP, logins, rowOrg });
       const d = A0.cacheDir;
       if (vNone) for (const f of [readingLag.windowSidecarName(A0.V), readingLag.apiWindowSidecarName(A0.V)]) fs.rmSync(path.join(d, f), { force: true });
-      else { fs.writeFileSync(path.join(d, readingLag.windowSidecarName(A0.V)), stampOf(v, 60e3, vProven)); fs.writeFileSync(path.join(d, readingLag.apiWindowSidecarName(A0.V)), witOf(v, 60e3)); }
-      fs.writeFileSync(path.join(d, readingLag.windowSidecarName(A0.O)), stampOf(roP, 3600e3, oProven));
-      fs.writeFileSync(path.join(d, readingLag.apiWindowSidecarName(A0.O)), witOf(roP, 3600e3));
-      const A = held(engMod, { again: A0, cli: binCount });
+      else { fs.writeFileSync(path.join(d, readingLag.windowSidecarName(A0.V)), vStampJ || stampOf(v, 60e3, vProven)); fs.writeFileSync(path.join(d, readingLag.apiWindowSidecarName(A0.V)), vWitJ || witOf(v, 60e3)); }
+      fs.writeFileSync(path.join(d, readingLag.windowSidecarName(A0.O)), oStampJ || stampOf(roP, 3600e3, oProven));
+      fs.writeFileSync(path.join(d, readingLag.apiWindowSidecarName(A0.O)), oWitJ || witOf(roP, 3600e3));
+      const A = held(engMod, { again: A0, cli, routesMod });
       const said = [], o = console.log, w = console.warn; console.log = (...a) => said.push(a.join(' ')); console.warn = () => { };
       try { A.eng.repairIdentityAnchors('boot'); } finally { console.log = o; console.warn = w; }
       A.saidHeld = said.filter((l) => /window held \(the start\)/.test(l));
@@ -1038,6 +1039,62 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const l2 = await heldOn(L2);
     ok('B-6a92 r2561 THE ROW\'S OWN PROVEN READ LIFTS IT, ONCE A PAIR: Vela held at the start; its own /usage read (its folder holds its own login) lifts it, stamped by its own read; the next start holds it no more against Orin',
       !!lBefore.v && lr.v === true && !lAfter.v && !!lSt && lSt.verifiedBy === 'own-panel' && !l2.v && !l2.vu, { lBefore, v: lr.v, lAfter, st: lSt, l2 });
+    // (r2688 (3)) THE PANEL ROUNDS: two honest rows each anchored by a PANEL read in one hour (their events seconds apart) — NOBODY
+    // held: only instants stated at event precision are compared; the copy scene above (event-precise on two groups) is still held
+    const PH = arrive(realEng, { vStampJ: panelStampOf(roP, 60e3), vWitJ: witOf(roP + 10, 60e3), oStampJ: panelStampOf(roP, 3600e3), oWitJ: witOf(roP + 40, 3600e3) });
+    const ph = await heldOn(PH);
+    ok('B-6a92 r2688 THE PANEL ROUNDS: two honest rows anchored by panel reads on one hour (their events 30 s apart) hold NOBODY — only event-precise instants are compared; the copy scene (event-precise on both groups) is held above',
+      !ph.v && !ph.o && !ph.vu && !ph.ou && !!p2.v && !!p2.o, { ph, copyHeld: !!p2.v });
+    const EPS = "function eventPreciseStamp(st) { return !!st && typeof st === 'object' && st.verifiedBy === 'rate-limit-events'; }";
+    const rlPanel = MUT.write('src/reading-lag.js', anchored(rlsrcSI, EPS, "function eventPreciseStamp(st) { return !!st && typeof st === 'object'; }", 'b6a92-si-panel-compared'), 'b6a92-si-panel-compared');
+    const engPanel = require(MUT.write(ENG, anchored(esrc, "const readingLag = require('../reading-lag.js');", `const readingLag = require(${J(rlPanel)});`, 'b6a92-si-panel-eng'), 'b6a92-si-panel-eng'));
+    const PHx = arrive(engPanel, { vStampJ: panelStampOf(roP, 60e3), vWitJ: witOf(roP + 10, 60e3), oStampJ: panelStampOf(roP, 3600e3), oWitJ: witOf(roP + 40, 3600e3) }), phx = await heldOn(PHx);
+    ok('B-6a92 RED CONTROL (panel stamps compared, in a copy): the two honest rows on one panel hour are BOTH held — the leg above can fail', !!phx.v && !!phx.o, phx);
+    // (r2688 (1)) THE WAY OUT STAYS OPEN: Vela's own read lifts it WITH the organisation agreeing (its cache names its organisation, its
+    // folder holds its own login) — the route's second write keeps the lift's mark, and the next start holds it no more
+    // the panel's stand-in REPORTS the organisation the way the CLI does: it rewrites its isolated config — the SAME organisation
+    // under a refreshed address, so the route reads the login it reported (changed) and the organisation AGREES with the row's own
+    const binOrg = path.join(binDir, 'claude-panel-si-org.sh'); fs.writeFileSync(binOrg, `#!/bin/sh\necho ask >> '${asks}'\n[ -n "$CLAUDE_CONFIG_DIR" ] && printf '%s' '${J({ oauthAccount: { emailAddress: 'mail-vela-0002', organizationUuid: VELA.org } })}' > "$CLAUDE_CONFIG_DIR/.claude.json"\ncat <<'PANEL'\n${tP}PANEL\n`, { mode: 0o755 });
+    const LA = arrive(realEng, { v: roP, logins: { V: VELA, O: ORIN }, rowOrg: VELA.org, cli: binOrg });
+    const laBefore = await heldOn(LA);
+    const lar = await hush(() => LA.api.refreshViaCliPanel(LA.V));
+    await sleep(5);
+    const laAfter = await heldOn(LA), laSt = LA.stamp();
+    const LA2 = held(realEng, { again: LA, cli: binCount }); quiet(() => LA2.eng.repairIdentityAnchors('boot'));
+    const la2 = await heldOn(LA2);
+    ok('B-6a92 r2688 THE WAY OUT STAYS OPEN: Vela held at the start; its own read with the organisation agreeing lifts it, the route\'s second write keeps the own-panel mark, and neither that call nor the next start holds it again',
+      !!laBefore.v && lar.v === true && !laAfter.v && !!laSt && laSt.verifiedBy === 'own-panel' && !la2.v && !la2.vu, { why: String((LA.api.panelVerdictFor(LA.V) || {}).why).slice(0, 200), v: lar.v, st: laSt && laSt.verifiedBy, laAfter: !!laAfter.v, la2: !!la2.v, laBefore: !!laBefore.v });
+    const RTS2 = 'src/usage-routes.js', rtsrc2 = read(RTS2);
+    const CARRY = "verifiedBy: keepOwn ? 'own-panel' : idv.org === 'agree' ? 'cli-org' : (idv.verifiedBy || 'api-phase') }, producer);";
+    const rtNoCarry = require(MUT.write(RTS2, anchored(rtsrc2, CARRY, "verifiedBy: idv.org === 'agree' ? 'cli-org' : (idv.verifiedBy || 'api-phase') }, producer);", 'b6a92-si-no-carry'), 'b6a92-si-no-carry'));   // stale-pins: kept (the red control puts the route's line as it was back)
+    const LAx = arrive(engPanel, { v: roP, logins: { V: VELA, O: ORIN }, rowOrg: VELA.org, routesMod: rtNoCarry, cli: binOrg });
+    const larx = await hush(() => LAx.api.refreshViaCliPanel(LAx.V));
+    await sleep(5);
+    const laxAfter = await heldOn(LAx), laxSt = LAx.stamp();
+    ok('B-6a92 RED CONTROL (TWO CUTS: the carry dropped and panel stamps compared, in copies): the lift is demoted to the organisation\'s mark in the same call and the row is held again at once', larx.v === true && !!laxSt && laxSt.verifiedBy === 'cli-org' && !!laxAfter.v, { v: larx.v, st: laxSt, laxAfter });
+    // (r2688 (2)) THE POOL READS NONE for a held row, and a START never ranks the copy above a measured member
+    const pvV = P2.eng.poolReadCache(null)(P2.V), pvO = P2.eng.poolReadCache(null)(P2.O);
+    const prV = P2.eng.poolReadReading ? P2.eng.poolReadReading()(P2.V) : pvV;
+    ok('B-6a92 r2688 THE POOL READS NONE for both rows of a held pair (their files froze and may be the other account\'s numbers): the one decision door answers a MARK with no numbers — no identity sibling\'s file and no estimate stands in',
+      !!pvV && pvV.held === 'same-instant' && !pvV.sevenDay && !pvV.fiveHour && !!pvO && pvO.held === 'same-instant' && !pvO.sevenDay && !!prV && prV.held === 'same-instant', { pvV, pvO, prV });
+    {
+      const AP = require(path.join(REPO, 'src/account-pool-auto.js'));
+      const nowS = Math.floor(Date.now() / 1000);
+      const measured = { fetchedAt: Date.now() - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.1, resetsAt: nowS + 3600 }, sevenDay: { utilization: 0.2, resetsAt: nowS + 3 * 86400 } };
+      const MARK = { held: 'same-instant' };   // the engine's reading of a held row (poolReadReading / poolReadCache)
+      const decide = (members, heldIds, marked = true) => { const r = (id) => (heldIds.includes(id) ? (marked ? MARK : null) : id === 'm' ? measured : null); return AP.decidePoolSwitch({ currentId: members[0].id, members, readCache: r, readReading: r, nowSec: nowS, placing: true, proving: new Map(), explain: true }); };
+      const mem3 = [{ id: 'copy', name: 'Vela' }, { id: 'orin', name: 'Orin' }, { id: 'm', name: 'Mira' }];
+      const dStart = decide(mem3, ['copy', 'orin']), dAll = decide(mem3.slice(0, 2), ['copy', 'orin']), dRel = decide(mem3, ['copy', 'orin'], false);
+      ok('B-6a92 r2688 A START NEVER RANKS THE COPY ABOVE A MEASURED MEMBER: the pool\'s default held, a measured member beside it — the start goes to the measured member; a pool whose members are ALL held places on its first member (nothing to rank; the row says why its numbers are unknown)',
+        !!dStart && dStart.to === 'm' && !!dAll && dAll.to == null, { dStart, dAll });
+      ok('B-6a92 RED CONTROL (the held rows read as plain none, no mark — the chooser not told): the held default reads «unread» and the start lands on it to prove it', !!dRel && dRel.to !== 'm' && (dRel.to === 'copy' || dRel.to == null), dRel);
+      const engSrc = read(ENG);
+      // THE CHECK STARTS NO READ — by its own text, able to fail: holdSameInstants calls nothing on the read road
+      const bodyOf = (t) => { const a = t.indexOf('function holdSameInstants('); const b = a < 0 ? -1 : t.indexOf('\n}\n', a); return a >= 0 && b > a ? t.slice(a, b) : ''; };
+      const READ_ROAD = /refreshViaCliPanel|getQuotaProbe|cliRefresh|autoCli|quotaRefresh|probeUsage|\.tick\(/;
+      const own = bodyOf(engSrc), planted = own.replace('    const saidPairs', "    getQuotaProbe()?.ask?.('x');\n    const saidPairs");
+      ok('B-6a92 r2688 THE CHECK STARTS NO READ, by its own text: the standing check calls nothing on the read road (no refresh, probe or tick) — and a planted ask in a copy of its text is seen (the pin can fail)', own.length > 500 && !READ_ROAD.test(own) && READ_ROAD.test(planted), own.length);
+    }
     // (7) THE REPAIR never seeds a second row onto an instant, and never confirms an anchor on another account's instant from the
     // row's own readings (it may still restamp a row AWAY onto its own different phase — test-readings-attribution §20)
     {
@@ -1046,7 +1103,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         const dd = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-si-rep-')));
         const cache = path.join(dd, 'usage-cache'), anchors = path.join(dd, 'usage-anchors'); fs.mkdirSync(cache, { recursive: true }); fs.mkdirSync(anchors, { recursive: true });
         const nowMs = Date.now(), WO = Math.floor(nowMs / 1000) + 4 * 86400 + 7 * 3600 + 17;   // Orin's instant, to the second
-        fs.writeFileSync(path.join(cache, readingLag.windowSidecarName('acct-orin')), J({ sevenDay: WO, fiveHour: null, scoped: {}, at: nowMs - 3600e3, source: 'api', verifiedAt: nowMs - 3600e3, producer: 'login' }));
+        fs.writeFileSync(path.join(cache, readingLag.windowSidecarName('acct-orin')), J({ sevenDay: WO, fiveHour: null, scoped: {}, at: nowMs - 3600e3, source: 'api', verifiedAt: nowMs - 3600e3, verifiedBy: 'rate-limit-events', producer: 'login' }));   // event-precise (a ring's): r2688 compares only these
         if (velaStamp) fs.writeFileSync(path.join(cache, readingLag.windowSidecarName('acct-vela')), J(velaStamp(WO, nowMs)));
         // Vela's WRITTEN readings were Orin's (filed while it had no window to contradict): five rate-limit moves on Orin's instant
         const rows = Array.from({ length: 5 }, (_, i) => ({ ts: nowMs - (20 - i * 3) * 3600e3, fetchedAt: nowMs - (20 - i * 3) * 3600e3, source: 'rate-limit-event', accountId: 'acct-vela', identityKey: 'id-vela', buckets: { sevenDay: { u: 0.3 + i * 0.05, resetsAt: WO } } }));
@@ -1061,7 +1118,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       const before2 = fs.readFileSync(path.join(S2.cache, readingLag.windowSidecarName('acct-vela')), 'utf8');
       const r2 = repOf(RRm, S2), row2 = r2.identities.find((x) => x.key === 'acct-vela');
       ok('B-6a92 r2543 …AND NEVER CONFIRMS AN ANCHOR ON ANOTHER ACCOUNT\'S INSTANT FROM ITS OWN READINGS: Vela\'s unproven anchor on Orin\'s instant stays as it was, byte for byte', !!row2 && /^not confirmed/.test(row2.sidecar) && fs.readFileSync(path.join(S2.cache, readingLag.windowSidecarName('acct-vela')), 'utf8') === before2, row2);
-      const rrsrc = read('src/reading-repair.js'), SEED = "      if (apiShared.length) { sameInstantSkip(`not seeded: the phase its readings name is ${apiShared.map(nameOf).join(', ')}'s to the second`); continue; }\n";
+      const rrsrc = read('src/reading-repair.js'), SEED = "      if (apiShared.length) { sameInstantSkip(`not seeded: the phase its readings name is ${apiShared.map(personName).join(', ')}'s to the second`); continue; }\n";
       const RRx = require(MUT.write('src/reading-repair.js', anchored(rrsrc, SEED, '', 'b6a92-si-seed'), 'b6a92-si-seed'));
       const S3 = RRx ? plant() : null, s3 = S3 ? (repOf(RRx, S3), stampV(S3)) : null;
       ok('B-6a92 RED CONTROL (the repair seeding from its own readings, in a copy — the train before this unit): Vela is seeded onto Orin\'s instant to the second', !!s3 && s3.sevenDay === S3.WO && s3.seededBy === 'si-T', s3);

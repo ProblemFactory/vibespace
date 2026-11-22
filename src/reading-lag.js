@@ -420,10 +420,18 @@ function heldLiftVerdict({ rowKey = null, held = [], answer = null, onHeld = fal
 // on a window another known account holds (an older version re-anchored it; the standing repair seeded it from readings that were
 // another account's) passes every door, because its own readings then agree with the wrong anchor. Honest accounts' weekly windows
 // often sit close together — inside the tolerance a reading is matched with (JITTER_SEC: two ROADS stating ONE window) — so
-// nearness holds nobody. What a row that adopted another account's window carries is that window's INSTANT: the vendor states a
-// weekly reset with sub-second digits and every road here keeps it to the whole second (the panel's time floored, the event's own
-// second), so a copied window is equal to that second, and two accounts' own windows are not.
+// nearness holds nobody. What a row that adopted another account's window carries is that window's INSTANT: the rate-limit events
+// state a weekly reset to its own second, so a copied window is equal to that second, and two accounts' own windows are not. THE
+// PANEL DOES NOT (主开发 r2688 (3)): it prints a reset to the hour or the minute, and every stamp written from it carries that
+// rounding — two honest accounts reset in one minute, each anchored by a panel read, would be «equal to the second». So ONLY
+// instants stated at EVENT precision are compared; a stamp or a witness written from a panel neither holds a row nor clears one.
 const SAME_INSTANT_SEC = 1;   // the bound: one second of the week (a roll adds exactly WEEK_SEC) — NOT JITTER_SEC
+/** r2688 (3): a window stamp stated at EVENT precision — the ring's (a run of rate-limit events) and the standing repair's (the
+ *  newest such reading's own second): verifiedBy 'rate-limit-events'. Every panel road (cli-org, api-phase, isolated-panel,
+ *  own-panel, renewal-panel, a legacy stamp with none) is rounded to the hour or the minute. */
+function eventPreciseStamp(st) { return !!st && typeof st === 'object' && st.verifiedBy === 'rate-limit-events'; }
+/** …and a witness (the API-derived window) stated at event precision: the ring's, or the repair's from those readings */
+function eventPreciseWitness(w) { return !!w && typeof w === 'object' && (w.source === 'rate-limit-events' || w.source === 'repair'); }
 /** two weekly resets on the SAME instant of the week, to the second — never the reading-match tolerance */
 function sameInstant(a, b) {
   const p = weeklyPhase(Math.floor(Number(a))), q = weeklyPhase(Math.floor(Number(b)));
@@ -436,11 +444,12 @@ function sameInstant(a, b) {
  *  marks a token that is another account's). An organisation agreeing proves no account (several seats share one); a run of the
  *  sign-in folder's readings proves nothing about whose login the folder holds. */
 function provenOwnStamp(st) {
-  return !!st && typeof st === 'object' && (st.verifiedBy === 'own-panel' || (typeof st.producer === 'string' && st.producer.startsWith('oat:')));
+  // r2688 (1): a token's proof survives the ring's restamp when the sign-in proves the token's window (`tokenProof`, carried there)
+  return !!st && typeof st === 'object' && (st.verifiedBy === 'own-panel' || (typeof st.producer === 'string' && st.producer.startsWith('oat:')) || (typeof st.tokenProof === 'string' && st.tokenProof.startsWith('oat:')));
 }
 /** THE STANDING CHECK (PURE). rows: [{ key, own: [the ids of its identity group], anchor: { sevenDay, at, proven } | null,
- *  witness: { sevenDay, at } | null }] — the anchor is the row's window stamp, the witness its API-derived window (the event
- *  stream's statement: the panel and the events may state one window a minute apart, so the other row is read on both).
+ *  witness: { sevenDay, at } | null }], each statement with `exact` — stated at event precision (eventPreciseStamp /
+ *  eventPreciseWitness); only exact statements are compared (r2688 (3): a panel's rounding equals honest neighbours' minute).
  *  → [{ key, names, phase, at }]: every row to HOLD — its ANCHOR unproven and on the same instant as another identity group's anchor
  *  or witness. A proven anchor is never held. Of two unproven rows on one instant NEITHER is believed: both are held, each naming the
  *  other (主开发 r2561: a stamp's time is when it was last WRITTEN — every honest re-stamp moves it — so no clock tells which row
@@ -451,8 +460,8 @@ function sameInstantHolds(rows) {
   const apart = (a, b) => !(groupOf.get(a) || new Set([a])).has(b) && !(groupOf.get(b) || new Set([b])).has(a);
   const occ = [];
   for (const r of list) {
-    if (r.anchor && Number(r.anchor.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.anchor.sevenDay), at: Number(r.anchor.at) || 0, proven: !!r.anchor.proven, anchor: true });
-    if (r.witness && Number(r.witness.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.witness.sevenDay), at: Number(r.witness.at) || 0, proven: false, anchor: false });
+    if (r.anchor && r.anchor.exact === true && Number(r.anchor.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.anchor.sevenDay), at: Number(r.anchor.at) || 0, proven: !!r.anchor.proven, anchor: true });
+    if (r.witness && r.witness.exact === true && Number(r.witness.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.witness.sevenDay), at: Number(r.witness.at) || 0, proven: false, anchor: false });
   }
   const out = [];
   for (const a of occ) {
@@ -470,5 +479,5 @@ module.exports = {
   weeklyPhase, weeklyNear, windowOf, windowFingerprint, windowSidecarName, apiWindowSidecarName, compareWindows,
   decideLagShadow, decideReadingTarget, isolatedPanelAnchorVerdict,
   heldLiftVerdict, HELD_REFUSALS,
-  SAME_INSTANT_SEC, sameInstant, provenOwnStamp, sameInstantHolds,
+  SAME_INSTANT_SEC, sameInstant, provenOwnStamp, sameInstantHolds, eventPreciseStamp, eventPreciseWitness,
 };
