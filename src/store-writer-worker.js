@@ -143,30 +143,6 @@ function rewriteJob(m, fs) {
   }
   if (after) throw Object.assign(new Error(`the rewrite landed (renamed over the file); its directory's fsync did not: ${(after && (after.code || after.message)) || after}`), { code: 'ERENAMEDNOSYNC' });
 }
-/** THE WHOLE WRITE's COMMIT (the line 320 move onto the train, r2294): the store's file takes the synced temp's bytes — B-f276 1c's own-only
- *  check just before the rename (a file there that is not the store's own: refused EEXIST, by name), B-f276 1b's exclusive link, else
- *  the rename — and the own numbers of the file an own-only store made (→ {own}). writeJob's road and the PIECE road both end here */
-function commitWhole(fs, m) {
-  let res;
-  // B-f276 1c (主开发 r1143 (1)): an own-only store renames only over the file it made itself — CHECKED JUST BEFORE THE RENAME (the
-  // narrow window between the two: the head comment above) (a different file there: not its own,
-  // refused — its store reads and keeps it); a file gone since is created exclusively again
-  if (m.ownOnly && !m.exclusive) {
-    const cur = idOf(fs, m.file), mine = [m.own, OWN.get(m.file)].filter(Boolean);   // the store's own cell, then the thread's map (r1588 (3))
-    if (cur && !mine.some((x) => cur.ino === x.ino && cur.dev === x.dev)) throw notOwn(m.file);
-    const made0 = !cur ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): the temp's own numbers, read BEFORE the link (after it: the same inode)
-    if (!cur && linkedHere(fs, m.tmp, m.file)) { res = { own: made0 }; OWN.set(m.file, made0); return res; }
-  }
-  const made1 = m.exclusive && m.ownOnly ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): read from the temp, before the link
-  if (m.exclusive && linkedHere(fs, m.tmp, m.file)) {   // B-f276 1b: a store read missing — its first write never lands over a file that appeared
-    if (m.ownOnly) { res = { own: made1 }; OWN.set(m.file, made1); }
-    return res;
-  }
-  const made = m.ownOnly ? idOf(fs, m.tmp) : null;
-  fs.renameSync(m.tmp, m.file);   // THE commit point: the store's file is the old whole version or the new one, never half
-  if (made) { res = { own: made }; OWN.set(m.file, made); }
-  return res;
-}
 /** ONE job. A whole-file write: temp, every byte, fsync (B-9275), close (its error is the write's), rename — NOTHING is renamed
  *  over the store unless every byte was written, synced and the temp closed without error. An APPEND (the acts journal): every byte,
  *  fsync, close — a failure truncates back to the size before it (no torn line is left for a promise that resolved). */
@@ -234,7 +210,24 @@ function writeJob(m, fs = FS) {
   if (err) throw err;   // the caller removes the temp: the store keeps its previous whole version
   // `mode` applies when the temp file is CREATED; a leftover temp from a killed write keeps its old bits
   if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
-  return commitWhole(fs, m);   // the line 320 move (r2294): the knot's commit is ONE function — the piece road's last piece takes it too
+  // B-f276 1c (主开发 r1143 (1)): an own-only store renames only over the file it made itself — CHECKED JUST BEFORE THE RENAME (the
+  // narrow window between the two: the head comment above) (a different file there: not its own,
+  // refused — its store reads and keeps it); a file gone since is created exclusively again
+  if (m.ownOnly && !m.exclusive) {
+    const cur = idOf(fs, m.file), mine = [m.own, OWN.get(m.file)].filter(Boolean);   // the store's own cell, then the thread's map (r1588 (3))
+    if (cur && !mine.some((x) => cur.ino === x.ino && cur.dev === x.dev)) throw notOwn(m.file);
+    const made0 = !cur ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): the temp's own numbers, read BEFORE the link (after it: the same inode)
+    if (!cur && linkedHere(fs, m.tmp, m.file)) { res = { own: made0 }; OWN.set(m.file, made0); return res; }
+  }
+  const made1 = m.exclusive && m.ownOnly ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): read from the temp, before the link
+  if (m.exclusive && linkedHere(fs, m.tmp, m.file)) {   // B-f276 1b: a store read missing — its first write never lands over a file that appeared
+    if (m.ownOnly) { res = { own: made1 }; OWN.set(m.file, made1); }
+    return res;
+  }
+  const made = m.ownOnly ? idOf(fs, m.tmp) : null;
+  fs.renameSync(m.tmp, m.file);   // THE commit point: the store's file is the old whole version or the new one, never half
+  if (made) { res = { own: made }; OWN.set(m.file, made); }
+  return res;
 }
 
 /** A WHOLE WRITE IN PIECES (the writer unit, 主开发 r1328 — law 1, NO WHOLE WRITE HOLDS A TURN): the main thread hands one turn's
@@ -267,7 +260,25 @@ function pieceJob(m, cur, fs = FS) {
   if (cur.fd != null) { try { fs.closeSync(cur.fd); } catch (e) { if (!cur.err) cur.err = e; } cur.fd = null; }
   if (!cur.err && m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
   // THE commit point, after every piece and the sync — B-f276 1b, as writeJob: a store read missing lands by its EXCLUSIVE link
-  if (!cur.err) { try { const r = commitWhole(fs, m); cur.own = (r && r.own) || null; } catch (e) { cur.err = e; } }   // B-f276 1b + 1c, as writeJob: the ONE commit
+  // THE commit point, as writeJob's (line for line — the line 320 move onto the train, r2294): B-f276 1c's own-only check just before the
+  // rename (a file there that is not the store's own: refused EEXIST, by name), 1b's exclusive link, else the rename — and the own numbers
+  // of the file an own-only store made, handed back as writeJob's are
+  if (!cur.err) {
+    try {
+      let done = false;
+      if (m.ownOnly && !m.exclusive) {
+        const at = idOf(fs, m.file), mine = [m.own, OWN.get(m.file)].filter(Boolean);
+        if (at && !mine.some((x) => at.ino === x.ino && at.dev === x.dev)) throw notOwn(m.file);
+        const made0 = !at ? idOf(fs, m.tmp) : null;
+        if (!at && linkedHere(fs, m.tmp, m.file)) { cur.own = made0; OWN.set(m.file, made0); done = true; }
+      }
+      if (!done) {
+        const made1 = m.exclusive && m.ownOnly ? idOf(fs, m.tmp) : null;
+        if (m.exclusive && linkedHere(fs, m.tmp, m.file)) { if (m.ownOnly) { cur.own = made1; OWN.set(m.file, made1); } }
+        else { const made = m.ownOnly ? idOf(fs, m.tmp) : null; fs.renameSync(m.tmp, m.file); if (made) { cur.own = made; OWN.set(m.file, made); } }
+      }
+    } catch (e) { cur.err = e; }
+  }
   if (cur.err) { try { fs.unlinkSync(m.tmp); } catch { } }
   return { cur: null, done: { err: cur.err, ms: cur.ms + Number(process.hrtime.bigint() - t0) / 1e6, dropped: cur.dropped, own: cur.err ? null : (cur.own || null) } };
 }

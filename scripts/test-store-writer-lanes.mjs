@@ -413,12 +413,12 @@ parentPort.on('message', (m) => {
       W.linkedHere(recX(path.join(dir, 'other.json'), tmp, { unlinkFails: true }).fs, tmp, path.join(dir, 'other.json'));   // its removal refused: THIS module's temp is still linked
       return piecesOf(W, recX(file, tmp, { unlinkFails: true }), file, tmp, {});
     };
-    const NO_XLINK = M12.load('src/store-writer-worker.js', anchored(srcK, '  if (m.exclusive && linkedHere(fs, m.tmp, m.file)) {   // B-f276 1b', '  if (false) {   // B-f276 1b', 'the exclusive landing of the ONE commit (commitWhole: both roads)'), 'no-xlink');   // since the move onto the train (r2294) both roads end in commitWhole
+    const NO_XLINK = M12.load('src/store-writer-worker.js', anchored(srcK, '        if (m.exclusive && linkedHere(fs, m.tmp, m.file)) { if (m.ownOnly) { cur.own = made1; OWN.set(m.file, made1); } }', '        if (false) { }', 'the piece road\'s exclusive landing'), 'no-xlink');   // the piece road's own commit lines (as writeJob's, since the move onto the train)
     const NO_LCHECK = M12.load('src/store-writer-worker.js', anchored(srcK, '    if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) cur.err = ', '    if (false) cur.err = ', 'the piece road\'s linked-temp check'), 'no-lcheck');
     const x1 = exclusive(WK, 'missing', false), x2 = exclusive(WK, 'appeared', true), x0 = exclusive(NO_XLINK, 'red', true);
     ok(!x1.err && x1.disk === '{"x":1}' && /link temp > file/.test(x1.order) && !/rename/.test(x1.order) && !x1.tempLeft, `⑫ (o) the piece road lands a store read MISSING by its exclusive link, as writeJob does (${x1.order})`, x1);
     ok(x2.err === 'EEXIST' && x2.disk === 'appeared' && !x2.tempLeft, `⑫ (o) …and a file that APPEARED is kept: the write fails EEXIST (its store's «appeared» road), the temp removed (${x2.order})`, x2);
-    ok(x0.disk === '{"x":1}', `⑫ (o) RED (the ONE commit with no exclusive link: a plain rename at the last piece): the file that appeared was written over (${x0.order})`, x0);
+    ok(x0.disk === '{"x":1}', `⑫ (o) RED (the piece road with no exclusive link: a plain rename at the last piece): the file that appeared was written over (${x0.order})`, x0);
     const l1 = linkedTemp(WK, 'check'), l0 = linkedTemp(NO_LCHECK, 'red');
     ok(l1.err === 'ETEMPLINKED' && !/(open|write) temp/.test(l1.order) && l1.disk === 'old', `⑫ (o) a temp still a SECOND NAME of a store is never written through on the piece road: refused ETEMPLINKED, the store as it was (${l1.order})`, l1);
     ok(/write temp/.test(l0.order) || l0.err !== 'ETEMPLINKED', `⑫ (o) RED (no check): the piece road wrote through a temp that is still a second name (${l0.order}; ${l0.err})`, l0);
