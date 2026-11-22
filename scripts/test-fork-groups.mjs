@@ -166,6 +166,9 @@ async function driveFork(lifeSrc, fg) {
   const run = async (sessionInfo, tasksOf, ...args) => {
     const calls = [];
     const self = {
+      // the open's start (B-c87d r871: the fork's FIRST act reads it, before the harness offer's wait) — the mixin's own member, in the
+      // shape openStart answers: the person's press of Fork (the hosted run 44980743210: the stand-in had none, the method crashed)
+      _openStartNow: () => ({ at: Date.now(), by: 'act' }),
       maybeOfferHarnessService: async () => {},
       _defaultForkName: (s) => `${s.webuiName || 'Session'} (forked)`,
       settings: { get: () => 'chat' },
