@@ -104,7 +104,6 @@
   "test-browser-housekeeping": 5246,
   "test-browser-human-pins": 169,
   "test-browser-identity-census": 3492,
-  "test-browser-keeper": 16029,
   "test-browser-kept-pins": 32,
   "test-browser-kept-reads": 2971,
   "test-browser-live-pins": 30,

@@ -131,7 +131,8 @@ export const ROWS = Object.freeze({
   'scripts/test-ci-gate.mjs': 'a sentence naming the headless switch, and markers BUILT by concatenation for the gate\'s own census controls',
   'scripts/test-memory-pressure.mjs': 'process-table FIXTURES (P rows: pid, ppid, rss, name, a command line naming a Chrome) for the pressure reader',
   // read by the lane beyond 主开发's list (they hold Chrome's basic store flag literally, or are scripts/ modules a suite imports)
-  'scripts/test-browser-keeper.mjs': 'the PRODUCT\'s launch argv it asserts (WANT, argvVerdict, the sync census\'s planted literal) and the product\'s spawnChrome over a FAKE google-chrome in FAKE_BIN — never a real Chrome',
+  'scripts/test-browser-keeper.mjs': 'the PRODUCT\'s launch argv it asserts (WANT, argvVerdict, the sync census\'s planted literal) — never a real Chrome (B-7e49: its legs over the fake are in test-browser-keeper-launch)',
+  'scripts/test-browser-keeper-launch.mjs': 'the product\'s spawnChrome and the keeper\'s attach road over a FAKE google-chrome in FAKE_BIN (a node stand-in) — never a real Chrome (B-7e49: test-browser-keeper\'s launching legs, moved verbatim)',
   'scripts/test-desktop-apps.mjs': 'the desktop-app rung\'s FORBIDDEN-switch list and its url verdicts — data the PURE verdicts judge, nothing launched',
   'scripts/ci.mjs': 'the gate runner (a module suites import): the tier rule\'s own text — a `chrome` key whose description and regex name the markers, and the suite rows\' words',
   'scripts/test-architecture.mjs': 'the census\'s own controls: §47b\'s planted sources (strings) naming the markers',

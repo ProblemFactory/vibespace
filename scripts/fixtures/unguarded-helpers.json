@@ -155,6 +155,7 @@
   "test-browser-identity-census.mjs": 1,
   "test-browser-identity.mjs": 1,
   "test-browser-keeper.mjs": 1,
+  "test-browser-keeper-launch.mjs": 1,
   "test-browser-kept-reads.mjs": 1,
   "test-browser-kept.mjs": 1,
   "test-browser-live-fit.mjs": 1,
