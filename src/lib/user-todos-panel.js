@@ -732,7 +732,7 @@ export function installUserTodos(app) {
   const renderMini = () => {
     if (!mini) return;
     if (!mini.pop.isConnected) { mini = null; return; }
-    mini.keys = keysForWin(mini.winId) || mini.keys;
+    mini.keys = keysForWin(mini.win ? mini.win.id : mini.winId) || mini.keys;   // the window held (r2355)
     const { layout: next, entries } = miniInboxEntries(mini.layout, todos, mini.keys);
     mini.layout = next;
     const pk = primaryKey(mini.keys);
@@ -766,7 +766,7 @@ export function installUserTodos(app) {
       if (e.target.closest('.ut-mini-head > .ut-open-win')) { pop.remove(); app.openInbox({ sessionKey: primaryKey(mini?.keys || keys) }); }
     });
     wireMiniRows(pop, { close: () => pop.remove() });
-    mini = { pop, winId, keys, layout: null, rows, dot, name, empty };
+    mini = { pop, winId, win: app.wm?.windows?.get?.(winId) || null, keys, layout: null, rows, dot, name, empty };
     renderMini();
     return pop;
   };

@@ -1510,8 +1510,8 @@ class WindowManager {
     const frame = (ch && this.windows.get(ch.tabs[0])) || win, dm = this._app?.desktopManager, stage = this._app?.stage;
     const go = dm ? revealDesktop({ raise, desktopId: frame._desktopId || null, activeId: dm.activeDesktopId, stageId: STAGE_ID, stageActive: !!stage?.isActive, stageEnabled: !!stage?.enabled,
       stageKind: stageWindowKind({ type: frame.type, isPlaceholder: !!frame._isStagePlaceholder, onStage: !!frame._onStage, desktopId: frame._desktopId }, STAGE_ID), intercept: !!stage?.shouldIntercept?.(win), switched: _switched }) : { act: 'none' };
-    if (go.act === 'switch') {
-      Promise.resolve(go.to === STAGE_ID ? stage.enter() : dm.switchTo(go.to)).then(() => this.revealWindow(id, { raise, _switched: true }), () => this.revealWindow(id, { raise, _switched: true }));
+    if (go.act === 'switch') {   // the window HELD, its id read when the switch lands (r2355: a switch takes kept rows back by re-keying — rekeyWindow)
+      Promise.resolve(go.to === STAGE_ID ? stage.enter() : dm.switchTo(go.to)).then(() => this.revealWindow(win.id, { raise, _switched: true }), () => this.revealWindow(win.id, { raise, _switched: true }));
       return true;
     }
     if (go.act === 'tell') {
@@ -1990,7 +1990,6 @@ class WindowManager {
     const sess = this._app?.sessions?.get(oldId);
     if (sess) { this._app.sessions.delete(oldId); this._app.sessions.set(newId, sess); }
     this.followIdChange(oldId, newId);   // r1793 / r1958: every open list and the phone's notes follow the new id (THE one rule, below)
-    this._app?.updateTaskbar?.();   // r2250: AFTER the rule — a group button the strip rebuilds now finds its open chooser by the new host id
     return true;
   }
 
@@ -2000,7 +1999,10 @@ class WindowManager {
    *  the window by its stamp takes the new one (the phone's switcher rows; the desk's grouped chooser, «+N» and ⧉ rows), a grouped
    *  chooser opened for that host follows it (its title patch finds it by the host's id), and the phone's own notes follow
    *  (MobileNav.followRekey: the rows' waiting mark, the shown window, the split's pair). Every row's tap reads its window's id
-   *  live, off the instance the change keeps — the stamp is what a patch and a press's «inside» test read. */
+   *  live, off the instance the change keeps — the stamp is what a patch and a press's «inside» test read. The STRIP is drawn again
+   *  last (r2355): its tiles' and group buttons' handlers hold the ids they were built with, and its structure key is those ids — on
+   *  BOTH roads (the remap drew nothing: a window a restore built after its batch kept a tile of its first id); inside a restore's
+   *  batch (wm._restoring) the batch's one _notify draws it once at its end, never per window. */
   followIdChange(oldId, newId) {
     const o = String(oldId), n = String(newId);
     if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
@@ -2008,6 +2010,7 @@ class WindowManager {
       for (const pop of document.querySelectorAll('.taskbar-group-chooser')) if (pop._chooser && pop._chooser.hostId === o) pop._chooser.hostId = n;
     }
     this._app?._mobileNav?.followRekey?.(o, n);
+    if (!this._restoring) this._app?.updateTaskbar?.();   // r2355: the strip after the re-stamps (a group button rebuilt now finds its open chooser by the new host id — r2250)
   }
   /** A USER'S close of ONE window (a lone window's ✕, a tab ✕, the window menu, Ctrl+\\ x, the phone nav ✕; a WHOLE group's
    *  doors go through tab-group.js requestCloseGroup, which asks, then closes each member here — B-a67c): the window may answer
@@ -2230,7 +2233,7 @@ class WindowManager {
       // the new words need new measurements; the form it had is kept until the next frame decides (no flash of the full chip on every tab-bar rebuild)
       el.dataset.words = (isPooled ? 'pooled' : isApi ? 'api' : isUnknown ? 'unknown' : 'sub') + '\n' + words.full + '\n' + words.short;
       setChipMode(el, win._chipMode || 'full');
-      el.onclick = (e) => { e.stopPropagation(); this.app?.showBillingSwitcher?.(id, el); };
+      el.onclick = (e) => { e.stopPropagation(); this.app?.showBillingSwitcher?.(win.id, el); };   // the window held, its id read at the press (r2355)
       this._fitChipsSoon(win);
     };
     if (win._tabChain) {

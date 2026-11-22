@@ -902,10 +902,11 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
   ok(red(chainDropped, 'c2tab'), `§1D87 RED CONTROL — the one held-act predicate without its TAB-act term (the refusal road's old copy): the merged window is re-keyed under the person's hand (${red(chainDropped, 'c2tab')} red)`, chainDropped.failed);
   // rekeyWindow (window.js, ITS OWN TEXT): the focus and a resume's fence mark follow the window to its new id — RED: the release's text
   const rekeyOf = (src) => { const i = src.indexOf('\n  rekeyWindow('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).rekeyWindow;`)(); };
+  const followOf = (src) => { const i = src.indexOf('\n  followIdChange('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).followIdChange;`)(); };
   const follow = async (src) => {
     class L {} install1d87(L);
     const app = new L(); app.sessions = new Map(); app.updateTaskbar = () => {};
-    const wm = { windows: new Map([['w-old', { id: 'w-old' }]]), activeWindowId: 'w-old', _app: app };
+    const wm = { windows: new Map([['w-old', { id: 'w-old' }]]), activeWindowId: 'w-old', _app: app, followIdChange: followOf(src) };   // rekeyWindow calls THE rule (line 382: window.js followIdChange) — its own text too
     app._markResume('w-old'); // a resume's turn holds the window
     const moved = rekeyOf(src).call(wm, 'w-old', 'w-new');
     const r = { moved, focus: wm.activeWindowId, fencedNew: app._closeFenced('w-new', 'closeWindow'), fencedOld: app._closeFenced('w-old', 'closeWindow') };

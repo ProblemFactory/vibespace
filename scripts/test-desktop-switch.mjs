@@ -609,7 +609,7 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
     'the open sheet is PATCHED in place (its rows\' mark, words and titles line) — never rebuilt under a finger');
   ok(/const n = \(this\._folded \|\| \[\]\)\.includes\('desktops'\) \? \(this\.desktopsBtn\?\._door\?\.waiting \|\| 0\) : 0;/.test(mn) && /this\._paintWaitingMore\(\); \/\/ lane phone-take-photo[^\n]*\n    this\._barMo\?\.takeRecords\(\);/.test(mn),
     '⋯ says it only while it stands in for a FOLDED Desktops door (after every fold pass too)');
-  ok(/const wantId = show \|\| this\._shown\[desk\]/.test(mn) && /onSwitch\(r\.id, show \? \{ show \} : undefined\);/.test(sh),
+  ok(/const firstId = show \|\| this\._shown\[desk\]/.test(mn) && /onSwitch\(r\.id, show \? \{ show \} : undefined\);/.test(sh),
     'a row that says a conversation waits LANDS on it (the switch shows that conversation — its waiting then ends by its own road)');
 
   // ── ⑪ r2 (主开发 00:43Z) ──
@@ -717,7 +717,7 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
   {
     const mn = read('src/lib/mobile-nav.js');
     ok(/tab\.onclick = desk\.gone \? [^\n]*this\.switchDesktop\(desk\.id, \{ seeing: true \}\)\.then\(afterSwitch\);/.test(mn) && /switchDesktop\(id, \{ show = null, seeing = false \} = \{\}\)/.test(mn)
-      && /this\._showOnDesk\(id, show, seeing\), \(\) => this\._showOnDesk\(id, show, seeing\)/.test(mn) && /if \(show && wantId === show\) this\._seen\(show\); else if \(seeing && windowWaits\(want\)\) this\._seen\(wantId\);/.test(mn),
+      && /this\._showOnDesk\(id, show, seeing\), \(\) => this\._showOnDesk\(id, show, seeing\)/.test(mn) && /if \(show\) this\._seen\(wantId\); else if \(seeing && windowWaits\(want\)\) this\._seen\(wantId\);/.test(mn),
       'THE SWITCHER\'S DESKTOP TAB (it wore the dot): its landing on the desktop\'s remembered window IS seeing it when that is the waiting conversation (r3 ②; the Chrome leg in test-mobile-gaps #W)');
   }
   // ⑤ PIN THE EXCLUSION — each half on its own: the sheet's rows (sheetRows) and the closed door's count (doorWaiting) never count the one on show
@@ -754,7 +754,7 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
   // ② a landing through a door that said «it waits» IS seeing it (on this device); ④ ⋯ says the words
   {
     const mn = read('src/lib/mobile-nav.js');
-    ok(/if \(show && wantId === show\) this\._seen\(show\);/.test(mn) && /item\.addEventListener\('click', \(\) => \{ if \(item\.classList\.contains\('waiting'\)\) this\._seen\(win\.id\); \}\);/.test(mn)
+    ok(/if \(show\) this\._seen\(wantId\);/.test(mn) && /item\.addEventListener\('click', \(\) => \{ if \(item\.classList\.contains\('waiting'\)\) this\._seen\(win\.id\); \}\);/.test(mn)
       && /_seen\(id\) \{[\s\S]{0,260}v\._clearWaiting\(\);[\s\S]{0,120}v\._setWaiting\(false, \{ seen: true \}\);/.test(mn),
       'REACHING IT THROUGH A DOOR THAT SAID «IT WAITS» IS SEEING IT: the sheet\'s landing and the switcher row\'s tap acknowledge it through the view\'s own road');
     const TC = await import(new URL('../src/lib/title-chips.js', import.meta.url).href);

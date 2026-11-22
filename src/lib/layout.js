@@ -1242,8 +1242,8 @@ class LayoutManager {
       return;
     }
     // a phone keeps ITS window on show when another client opens one (§6b guard 10): the replay's focus is handed back
-    const wm = this.app.wm, shown = this.app.isMobile ? wm.activeWindowId : null;
-    const keepShown = () => { if (shown && wm.activeWindowId !== shown && wm.windows.has(shown)) wm.focusWindow(shown); };
+    const wm = this.app.wm, shown = this.app.isMobile ? wm.windows.get(wm.activeWindowId) || null : null;   // the WINDOW on show, held (its id read when it acts — r2355)
+    const keepShown = () => { if (shown && wm.windows.get(shown.id) === shown && wm.activeWindowId !== shown.id) wm.focusWindow(shown.id); };
 
     try {
       this.app.replayOpenSpec(spec, winId);

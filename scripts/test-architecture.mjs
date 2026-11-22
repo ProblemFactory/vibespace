@@ -3416,7 +3416,7 @@ await section(async () => {
   const pointerPin = (b) => b.length > 40 && /pressTab\(ch, /.test(b) && !/revealWindow|revealTab/.test(b);
   ok(pointerPin(fp), '§62 _focusFromPointer (a PRESS) asks PURE pressTab and never the door — a press keeps the tab on show');
   const pin = (f, name, re) => { const b = body(read(f), name); return b.length > 40 && re.test(b) && !/\.focusWindow\(/.test(strip(b)); };
-  ok(pin('src/lib/mobile-nav.js', '_openRow', /wm\.revealWindow\(win\.id\)/) && pin('src/lib/session-lifecycle.js', '_focusExistingSession', /this\.wm\.revealWindow\(winId, \{ replay \}\)/) && pin('src/lib/app.js', 'goToWinId', /this\.wm\.revealWindow\(winId\)/),
+  ok(pin('src/lib/mobile-nav.js', '_openRow', /wm\.revealWindow\(win\.id\)/) && pin('src/lib/session-lifecycle.js', '_focusExistingSession', /this\.wm\.revealWindow\(winId, \{ replay \}\)/) && pin('src/lib/app.js', 'goToWinId', /this\.wm\.revealWindow\(win\.id\)/),
     '§62 the incident\'s doors spell it: the phone switcher row, _focusExistingSession (sidebar card / palette), goToWinId — no bare focusWindow in their bodies');
   ok(/export function activateWindow\(app, id\) \{[^}]*app\.wm\.revealWindow\(id\);/.test(read('src/lib/taskbar.js')), '§62 activateWindow (every taskbar button) is the door');
   // NEGATIVE CONTROLS (string copies, nothing written): the pre-fix switcher row, a new bare focus in an unlisted file,

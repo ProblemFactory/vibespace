@@ -791,7 +791,8 @@ const tabGroupMethods = {
     el.setAttribute('aria-label', label);
     el.addEventListener('mousedown', (e) => e.stopPropagation());
     el.addEventListener('dblclick', (e) => e.stopPropagation());
-    el.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); this._app?.openMiniInbox?.(el, winId); });
+    const owner = this.windows.get(winId);   // r2355: the window held — a lone window's title-bar badge is not drawn again on a re-key
+    el.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); this._app?.openMiniInbox?.(el, owner ? owner.id : winId); });
     return el;
   },
 

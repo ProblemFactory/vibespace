@@ -925,9 +925,19 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
   ok(A.closes === 1 && A.revealed === 'win-row-taken' && A.said === 0, '§10 …its tap brings the window under the new id (the tap read the id live — as the release already did)', A);
   const R = await openList({ WM: (await mutantEsm('src/lib/window.js', FOLLOW, '')).WindowManager, patchAfter: true });
   ok(R.took === true && R.stamp === 'win-new-1' && R.dot === false && R.shown === 'win-new-1' && R.split === '' && R.desk === 'win-new-1' && R.host === 'win-new-1', `§10 RED: the release's rekeyWindow (no followIdChange) leaves the old stamps, host and notes — the list's next patch turns the dot off (stamp ${R.stamp} · dot ${R.dot} · shown ${R.shown} · desk ${R.desk})`, R);
-  const STRIP = "    this._app?.updateTaskbar?.();   // r2250: AFTER the rule — a group button the strip rebuilds now finds its open chooser by the new host id\n";
-  const RO = await openList({ WM: (await mutantEsm('src/lib/window.js', FOLLOW + STRIP, '    this._app?.updateTaskbar?.();\n' + FOLLOW)).WindowManager });   // stale-pins: kept — the release's order, the RED's own text
+  const DRAW = "    if (!this._restoring) this._app?.updateTaskbar?.();   // r2355: the strip after the re-stamps (a group button rebuilt now finds its open chooser by the new host id — r2250)\n";
+  // the release's order (r2250's first form): rekeyWindow drew the strip BEFORE the rule, and the rule drew nothing
+  const RELORDER = anchored(anchored(read('src/lib/window.js'), DRAW, '', 'the rule draws no strip, as released'), FOLLOW, '    this._app?.updateTaskbar?.();\n' + FOLLOW, 'the strip drawn before the rule, as released');   // stale-pins: kept — the release's order, the RED's own text
+  const RO = await openList({ WM: (await import(pathToFileURL(MUT.write('src/lib/window.js', RELORDER, 'b9', { esm: true })).href)).WindowManager });
   ok(RO.took === true && RO.host === 'win-row-taken' && RO.strip === 'win-new-1', `§10 RED: the release's order (the strip rebuilt BEFORE the rule) — at updateTaskbar the chooser still names the old host (${RO.strip}): a group button rebuilt then misses it`, RO);
+  { // r2355 (16): the rule draws the strip ITSELF — on both roads (the restore's remap called the rule and drew nothing: a window a
+    // restore built after its batch kept a strip tile of its first id) — and never inside a restore's batch (its one _notify draws it)
+    const draws = (WMx) => { let n = 0; const st = { _app: { updateTaskbar() { n++; } } }; WMx.prototype.followIdChange.call(st, 'w-x', 'w-y'); const out = n; st._restoring = true; WMx.prototype.followIdChange.call(st, 'w-x', 'w-y'); return { outside: out, inside: n - out }; };
+    const D = draws(WindowManager);
+    ok(D.outside === 1 && D.inside === 0, '§10 r2355 the rule draws the strip itself — on both roads (rekeyWindow and the restore remap) — and never inside a restore\'s batch (its one _notify draws it at the end)', D);
+    const RD2 = draws((await import(pathToFileURL(MUT.write('src/lib/window.js', anchored(read('src/lib/window.js'), DRAW, '', 'the rule as released'), 'b9', { esm: true })).href)).WindowManager);
+    ok(RD2.outside === 0, '§10 RED: the release\'s rule (it draws nothing) — the remap road leaves the strip as it was: a tile of the first id', RD2);
+  }
   const RP = await openList({ MN: (await mutantEsm('src/lib/mobile-nav.js', REPATCH, '')).MobileNav });
   ok(RP.stamp === 'win-row-taken' && RP.dot === null, `§10 RED: followRekey without its re-patch — the row is re-stamped but its mark is never read under the new id (dot ${RP.dot})`, RP);
   const D = await openList({ tapFirst: true });
@@ -1037,6 +1047,72 @@ await section('§10 r1793 the phone after a window takes a new id (the REAL reke
     const R2 = ['the ⧉ list row\'s right-click', 'the every-desktop row\'s stamp and tap', 'the other-desktops row\'s tap', 'the chooser\'s re-list'];
     ok(rel2 !== TB && R2.every((n) => miss(rel2).includes(n)), '§10 RED (r2250): the release\'s ⧉ right-click, every-desktop and other-desktops taps and the chooser\'s re-list (a captured id) fail the check by name', miss(rel2));
   }
+});
+// §11 (主开发 r2355 / r2396): a window id captured EARLIER, read by a LATER act — the three a person is likeliest to press (the page
+// bl-phone-ui/idcap/page-r2355.md), each over the REAL code with stand-ins, each with the release's RED
+await section('§11 r2355 the window menu left open across a change of id, the phone\'s desktop switch, a reveal across a desktop switch (the REAL windowMenuRows, _showOnDesk, revealWindow)', async () => {
+  const { WindowManager } = await import(pathToFileURL(path.join(LIB, 'window.js')).href);
+  const { MobileNav } = await import(pathToFileURL(path.join(LIB, 'mobile-nav.js')).href);
+  const TB = await import(pathToFileURL(path.join(LIB, 'taskbar.js')).href);
+  const { menuItems } = await import(pathToFileURL(path.join(LIB, 'contributions.js')).href);
+  const rekey = (wm, a, b) => WindowManager.prototype.rekeyWindow.call(wm, a, b);   // THE road of an id changed in place (B-1d87's adoption)
+  // (1) A WINDOW MENU LEFT OPEN ACROSS A CHANGE OF ID: Move, Minimize and Close act on the window, each
+  const menu = (rowsOf) => {
+    const out = {};
+    for (const cmd of ['window.move', 'window.minimizeOrRestore', 'window.close']) {
+      const calls = [];
+      const win = { id: 'win-m1', type: 'files', title: 'notes.md', isMinimized: false, element: mkEl() };
+      const wm = { windows: new Map([['win-m1', win]]), activeWindowId: 'win-m1', followIdChange() {}, startMoveMode: (id) => calls.push(id), witnessGeometry() {}, minimize: (id) => calls.push(id), restore: (id) => calls.push(id), requestClose: (id) => calls.push(id), requestCloseGroup: (id) => calls.push(id) };
+      const app = { wm, sessions: new Map(), sidebar: { _allSessions: [] }, isMobile: false };
+      wm._app = app;
+      const row = (rowsOf(app, win) || []).find((r) => r && r.command === cmd);   // the menu OPEN: its rows drawn
+      rekey(wm, 'win-m1', 'win-m1-taken');   // the id changes while it stands open
+      if (row) row.action();   // the person's press
+      out[cmd] = { row: !!row, acted: calls.join(), on: calls.length > 0 && wm.windows.get(calls[0]) === win };
+    }
+    return out;
+  };
+  const M = menu((app) => TB.windowMenuRows(app, 'win-m1'));
+  ok(Object.values(M).every((x) => x.row && x.on === true && x.acted === 'win-m1-taken'), '§11 r2355 a window menu left open across a change of id: Move, Minimize and Close each act on the window (taskbar.js windowMenuCtx: the id read off the window held)', M);
+  const RM = menu((app, win) => menuItems('window', { app, id: 'win-m1', win, s: null, switchSubmenu: false, closeLabel: '✕ Close', group: false }));   // the release's ctx: { app, id, win, … }, its id a value taken at the open
+  ok(Object.values(RM).every((x) => x.row && x.acted === 'win-m1' && x.on === false), '§11 RED: the release\'s ctx (its id a value taken at the open) — Move, Minimize and Close act on an id no window holds: nothing, nothing said', RM);
+  // (2) A PHONE'S DESKTOP SWITCH THAT RE-KEYS THE WINDOW IT SHOWED THERE (the switch takes its kept row back): it shows THAT window
+  const phoneSwitch = async (MN) => {
+    const mk = (id) => ({ id, _desktopId: 'desk-p', _hiddenByDesktop: false, _hiddenByStage: false, element: mkEl() });
+    const shownWin = mk('win-s1'), other = mk('win-s2'), focused = [];
+    const wm = { windows: new Map([['win-s1', shownWin], ['win-s2', other]]), activeWindowId: 'win-s2', focusWindow(id) { focused.push(id); wm.activeWindowId = id; }, _focusMostRecent() { focused.push('the most recent'); } };
+    const dm = { activeDesktopId: 'desk-w', _pendingSwitch: 'desk-p' };
+    const nav = Object.create(MN.prototype);
+    nav.app = { wm, desktopManager: dm, layoutManager: { _lastUserInputAt: 0 } };
+    nav._shown = { 'desk-p': 'win-s1' }; nav.updateTitle = () => {}; nav._seen = () => {}; nav._saveShown = () => {};
+    wm._app = { _mobileNav: nav }; wm.followIdChange = WindowManager.prototype.followIdChange;
+    nav._showOnDesk('desk-p');   // the switch asked: its desktop not on show yet — the look waits for it (250 ms)
+    rekey(wm, 'win-s1', 'win-s1-taken');   // the switch takes its kept row back: the window it showed there takes the row's id
+    dm.activeDesktopId = 'desk-p'; dm._pendingSwitch = null;   // the switch lands
+    await tick(400);
+    return { focused: focused.join(), active: wm.activeWindowId, noted: nav._shown['desk-p'] };
+  };
+  const S = await phoneSwitch(MobileNav);
+  ok(S.active === 'win-s1-taken' && S.focused.split(',')[0] === 'win-s1-taken', '§11 r2355 a phone\'s desktop switch that re-keys the window it showed there shows THAT window (mobile-nav _showOnDesk: the window held, its id read at each look)', S);
+  const RS = await phoneSwitch((await mutantEsm('src/lib/mobile-nav.js', '    const wantNow = () => (wantWin ? wantWin.id : firstId);\n', '    const wantNow = () => firstId;\n')).MobileNav);   // stale-pins: kept — the release's: the id taken at the switch
+  ok(RS.active === 'win-s2' && !RS.focused.includes('win-s1-taken'), `§11 RED: the release's _showOnDesk (the id taken at the switch) — another window stays in front, not the one it showed there (${RS.active})`, RS);
+  // (3) A REVEAL ACROSS A DESKTOP SWITCH THAT RE-KEYS THE WINDOW: it is revealed
+  const reveal = async (WMc) => {
+    const win = { id: 'win-r1', type: 'files', _desktopId: 'desk-b', isMinimized: false, element: mkEl() };
+    let land = null; const focused = [];
+    const dm = { activeDesktopId: 'desk-a', desktops: [{ id: 'desk-a', name: 'A' }, { id: 'desk-b', name: 'B' }], switchTo(d) { return new Promise((r) => { land = () => { dm.activeDesktopId = d; r(); }; }); } };
+    const wm = Object.create(WMc.prototype);
+    Object.assign(wm, { windows: new Map([['win-r1', win]]), activeWindowId: null, _app: { desktopManager: dm }, focusWindow(id) { focused.push(id); }, _bringBack() {}, followIdChange() {} });
+    const asked = wm.revealWindow('win-r1');   // a person's reveal of a window on another desktop: its desktop first
+    rekey(wm, 'win-r1', 'win-r1-taken');   // the switch takes its kept row back by re-keying it
+    land(); await tick(0); await tick(0);
+    return { asked, focused: focused.join(), held: wm.windows.get('win-r1-taken') === win };
+  };
+  const R = await reveal(WindowManager);
+  ok(R.asked === true && R.held && R.focused === 'win-r1-taken', '§11 r2355 a reveal across a desktop switch that re-keys the window reveals it (window.js revealWindow: the window held, its id read when the switch lands)', R);
+  const NEWTHEN = "      Promise.resolve(go.to === STAGE_ID ? stage.enter() : dm.switchTo(go.to)).then(() => this.revealWindow(win.id, { raise, _switched: true }), () => this.revealWindow(win.id, { raise, _switched: true }));\n";
+  const RR = await reveal((await mutantEsm('src/lib/window.js', NEWTHEN, NEWTHEN.replace(/this\.revealWindow\(win\.id,/g, 'this.revealWindow(id,'))).WindowManager);   // stale-pins: kept — the release's: the id taken before the switch
+  ok(RR.asked === true && RR.focused === '', `§11 RED: the release's revealWindow (the id taken before the switch) — the switch lands and the window is not revealed (focused: «${RR.focused}»)`, RR);
 });
 const HOUR = 3600000, DAY = 86400000;
 const ringName = (ms, seq) => 'layout-' + new Date(ms).toISOString().replace(/[:.]/g, '-') + '-' + seq.toString(36) + '.json';

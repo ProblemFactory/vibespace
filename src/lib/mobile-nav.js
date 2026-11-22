@@ -518,18 +518,21 @@ export class MobileNav {
 
   _showOnDesk(desk, show = null, seeing = false) {
     const app = this.app, wm = app.wm, dm = app.desktopManager;
-    const wantId = show || this._shown[desk], since = app.layoutManager?._lastUserInputAt || 0;
+    // the window to show HELD when it stands, its id read at each look (r2355: a switch takes kept rows back by re-keying them —
+    // rekeyWindow); one not built yet is waited for by its id (a held record's: it is built under it)
+    const firstId = show || this._shown[desk], wantWin = firstId ? wm.windows.get(firstId) || null : null, since = app.layoutManager?._lastUserInputAt || 0;
+    const wantNow = () => (wantWin ? wantWin.id : firstId);
     const here = (w) => !!w && w._desktopId === desk && !w._hiddenByDesktop && !w._hiddenByStage;
     let tries = 0;
     const look = () => {
       // another switch since — or this one queued behind a switch still settling (desktop-manager.js: a switch inside the
       // last one's second waits its turn, then lands with nobody showing its window: lane phone-six)
       if (dm.activeDesktopId !== desk) { if (dm._pendingSwitch === desk && ++tries < 16) setTimeout(look, 250); return; }
-      const want = wantId && wm.windows.get(wantId);
-      if (here(want)) { if (wm.activeWindowId !== wantId) wm.focusWindow(wantId); if (show && wantId === show) this._seen(show); else if (seeing && windowWaits(want)) this._seen(wantId); this.updateTitle(); return; } // r2 (主开发 ②): a landing on a waiting conversation is seeing it
+      const wantId = wantNow(), want = wantId && wm.windows.get(wantId);
+      if (here(want)) { if (wm.activeWindowId !== wantId) wm.focusWindow(wantId); if (show) this._seen(wantId); else if (seeing && windowWaits(want)) this._seen(wantId); this.updateTitle(); return; } // r2 (主开发 ②): a landing on a waiting conversation is seeing it
       if (!here(wm.windows.get(wm.activeWindowId))) wm._focusMostRecent();
       this.updateTitle();
-      if ((wantId || !here(wm.windows.get(wm.activeWindowId))) && ++tries < 16 && (app.layoutManager?._lastUserInputAt || 0) === since) setTimeout(look, 250);
+      if ((wantNow() || !here(wm.windows.get(wm.activeWindowId))) && ++tries < 16 && (app.layoutManager?._lastUserInputAt || 0) === since) setTimeout(look, 250);
     };
     look();
   }

@@ -1736,7 +1736,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       const cwd = live?.cwd || spec.cwd || '';
       const mode = live?.webuiMode || (win ? (win.type === 'terminal' ? 'terminal' : 'chat') : (this.settings.get('session.defaultMode') || 'chat'));
       const hostId = live?.host || undefined;
-      const winBounds = win ? this._snapshotWinBounds(this.wm.windows.get(winId)) : undefined;
+      const winBounds = win && this.wm.windows.get(win.id) === win ? this._snapshotWinBounds(win) : undefined;   // the window held (r2355: its id may have changed while the switcher stood open)
       // excludeWebuiId: we KILLED this webui id ourselves — resumeSession's
       // "already open in a live window" shortcut must not trust a stale
       // _allSessions entry still carrying it (2.241.0, userN's incident ws

@@ -5253,7 +5253,7 @@ class ChatView {
       if (!this._ownsWindow()) return; // its window went (or was re-made) during the flush — a disposed view never acts (r3 N4)
       // the window is the row: resumeSession re-opens it as itself (r2 N1) — the killed session is the one it replaces
       this.app.resumeSession(backendSessionId, cwd, name, {
-        mode: 'chat', backend, backendSessionId, fromWin: winId, excludeWebuiId: killed || undefined,
+        mode: 'chat', backend, backendSessionId, fromWin: this.winInfo?.id || winId, excludeWebuiId: killed || undefined,   // the id read after the wait (r2355)
         hostId: ids.host || undefined, winBounds, permission: mode, openAt: at,
       });
     }, 900); // let the CLI flush its transcript before --resume

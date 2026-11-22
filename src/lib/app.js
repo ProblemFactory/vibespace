@@ -2808,7 +2808,7 @@ class App {
       const host = win._tabChain ? this.wm.windows.get(win._tabChain.tabs[0]) : null;
       const targetId = host ? host.id : winId, targetWin = host || win;
       const dm = this.desktopManager;
-      const start = () => { this.wm.revealWindow(winId); this.wm.startMoveMode(targetId); };
+      const start = () => { this.wm.revealWindow(win.id); this.wm.startMoveMode(targetWin.id); };   // the windows held, their ids read when the switch lands (r2355)
       if (dm && targetWin._desktopId && targetWin._desktopId !== dm.activeDesktopId) {
         dm.switchTo(targetWin._desktopId).then(start);
       } else {
@@ -2840,7 +2840,7 @@ class App {
 
     const dm = this.desktopManager;
     const doFlash = () => {
-      this.wm.revealWindow(winId);
+      this.wm.revealWindow(win.id);   // the window held, its id read when the switch lands (r2355)
       targetWin.element.classList.add('window-find-flash');
       setTimeout(() => targetWin.element.classList.remove('window-find-flash'), 3000);
     };
@@ -2981,7 +2981,7 @@ class App {
       this.wm.setAuthBadge?.(winId, match.auth || null); // billing key in the title bar
       // Mobile has no window title bars → no badge; the chat status bar hosts
       // the identity chip there instead (same click-to-switch).
-      if (this.isMobile) session.setBillingIdentity?.(match.auth || null, (el) => this.showBillingSwitcher(winId, el));
+      if (this.isMobile) session.setBillingIdentity?.(match.auth || null, (el) => this.showBillingSwitcher(win.id, el));   // the window held (r2355)
       session.setCostBasis?.(match.auth || null); // lane door-healthy-chat: the cost chip's «· included in your subscription»
       if (win._openSpec) {
         // NEVER write the webui server id into backendSessionId: a session

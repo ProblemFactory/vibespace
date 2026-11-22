@@ -315,7 +315,7 @@ console.log('— §7 wiring: every door asks the one rule and says its refusal')
   ok(/if \(refusal\) \{[\s\S]{0,700}this\._putBackAfterRefusedDrop\(win, dragFrom[\s\S]{0,200}this\._app\?\.desktopManager\?\.sayStageRefusal\?\.\(refusal\);\s*return;/.test(W), '§7 …a refused drop puts the window back where the drag began and SAYS why');
   ok(!/dragToDesktopBlocked\?\.\(win\)\)\) hoverPreview = null;/.test(W), '§7 …the old silent null-out of the hovered preview is gone');
   ok(!/dragToDesktopBlocked\?\.\(win\) \|\| desktopId === '__stage__'\) return;/.test(D) && /if \(!v\.ok\) \{ if \(speak\) this\.sayStageRefusal\(v\); return v; \}/.test(D), '§7 desktop-manager: the silent `return;` is a typed, spoken refusal');
-  ok(/if \(winId\) this\.moveWindowToDesktop\(winId, desk\.id, \{ speak: true \}\);/.test(D) && /action: \(\) => this\.moveWindowToDesktop\(winId, d\.id, \{ speak: true \}\)/.test(D), '§7 …a taskbar item dropped on a preview and a menu row are user acts (speak)');
+  ok(/if \(winId\) this\.moveWindowToDesktop\(winId, desk\.id, \{ speak: true \}\);/.test(D) && /action: \(\) => this\.moveWindowToDesktop\(win\.id, d\.id, \{ speak: true \}\)/.test(D), '§7 …a taskbar item dropped on a preview and a menu row are user acts (speak)');
   ok(/dm\.moveWindowToDesktop\(wm\.activeWindowId, dm\.desktops\[next\]\.id, \{ speak: true \}\)/.test(CM), '§7 command mode\'s move-to-desktop keys speak');
   ok(/id: 'window\/move-to-desktop'[^\n]*getDesktopMenuItems\(c\.id\)/.test(TB), '§7 the window menu\'s "Move to Desktop ▸" reads getDesktopMenuItems (so the reason row reaches every window menu)');
   const TGS = read('src/lib/tab-group.js'), SMS = read('src/lib/stage-manager.js');

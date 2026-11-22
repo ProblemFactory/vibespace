@@ -1,0 +1,1469 @@
+{
+ "about": "test-idcap-census verdicts (主开发 r2355 / r2396): every later function in src/lib that reads a window id captured earlier, keyed by file · later kind · binding · how it was bound; verdict live | record | redrawn | not-a-window-id, never stale (a stale capture is cured, not listed)",
+ "rows": [
+  {
+   "key": "app.js · cb:setBillingIdentity · win.id · this.wm.windows.get(winId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts (r2355)"
+  },
+  {
+   "key": "app.js · local-fn:doFlash · targetWin · (win._tabChain && this.wm.windows.get(win._tabChain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "the frame held (an instance): .element read when it runs"
+  },
+  {
+   "key": "app.js · local-fn:doFlash · win.id · this.wm.windows.get(winId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts (r2355)"
+  },
+  {
+   "key": "app.js · local-fn:start · targetWin.id · host || win",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "app.js · local-fn:start · win.id · this.wm.windows.get(winId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "app.js · setTimeout · targetWin · (win._tabChain && this.wm.windows.get(win._tabChain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "the frame held (an instance): .element read when it runs"
+  },
+  {
+   "key": "app.js · then · winInfo.id · this.wm.createWindow({ title, type: 'editor', syncId: opts.s",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener:beforeinput · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener:blur · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener:compositionend · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener:compositionstart · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener:focusin · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener:paste · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · addEventListener:pointerdown · claimRec · () => ({ id: winInfo.id, owns: ownsKeyboard, yielded: yielde",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · after-await · target · into && into._browserLive ? into : otherLiveWindow(app, st.s",
+   "count": 1,
+   "verdict": "live",
+   "why": "a window instance; .id read when it runs"
+  },
+  {
+   "key": "browser-live-window.js · after-await · target.id · into && into._browserLive ? into : otherLiveWindow(app, st.s",
+   "count": 1,
+   "verdict": "live",
+   "why": "a window instance; .id read when it runs"
+  },
+  {
+   "key": "browser-live-window.js · after-await · win.id · param of foldBackLive",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:back · host.id · sessionWindowFor(app, l.sessionId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:claimRec · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:dispose · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:floorPane · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:iOwn · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:namesThisView · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:onDocKey · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:renderKbd · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:renderMode · claimRec · () => ({ id: winInfo.id, owns: ownsKeyboard, yielded: yielde",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:renderMode · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:renderOwner · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:renderTitle · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:settleDialogs · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:stripMenu · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:syncKeyboard · claimRec · () => ({ id: winInfo.id, owns: ownsKeyboard, yielded: yielde",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:syncKeyboard · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · local-fn:toggleBind · winInfo.id · param of createLiveView",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · on-prop:onclick · winInfo.id · param of createLiveView",
+   "count": 2,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-live-window.js · prop:ownsKeyboard · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · prop:state · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-live-window.js · setTimeout · iOwn · () => { const o = keyboardOwner(); return !!o && o.id === wi",
+   "count": 2,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "browser-replay-window.js · local-fn:load · winInfo.id · app.wm.createWindow({ title: replayTitle(nameOf(app, tg)), t",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-trace-view.js · local-fn:tqRender · winInfo.id · app.wm.createWindow({ title: t('Agent browser'), type: PANEL",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "browser-trace-view.js · setInterval · tqRender · (list) => { if (st.closed) return; const r = tq.render(list)",
+   "count": 1,
+   "verdict": "live",
+   "why": "reads winInfo.id when it runs"
+  },
+  {
+   "key": "browser-window.js · local-fn:navigate · winInfo.id · app.wm.createWindow({ title: startTitle, type: 'browser', sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "channel-window.js · local-fn:drawBar · winInfo.id · param of openGroupWindow",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "channel-window.js · local-fn:renderBar · winInfo.id · app.wm.createWindow({ title: t('Channel'), type: 'channel', ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "chat-view.js · local-fn:handler · attachWatchdog · setTimeout(() => { if (!this.app.wm.windows.has(winInfo.id) ",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a timer handle (its own watchdog), never a window id"
+  },
+  {
+   "key": "chat-view.js · local-fn:handler · handler · (msg) => { if (!this.app.wm.windows.has(winInfo.id)) { this.",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "chat-view.js · local-fn:handler · winInfo.id · this.app.wm.createWindow({ title, type: 'chat', openSpec, ti",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "chat-view.js · on-prop:onClose · attachWatchdog · setTimeout(() => { if (!this.app.wm.windows.has(winInfo.id) ",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a timer handle (its own watchdog), never a window id"
+  },
+  {
+   "key": "chat-view.js · setTimeout · winId · this.winInfo?.id",
+   "count": 1,
+   "verdict": "live",
+   "why": "the restart reads this.winInfo.id after its wait (r2355); the id taken before it only when the view has no window"
+  },
+  {
+   "key": "chat-view.js · setTimeout · winInfo.id · this.app.wm.createWindow({ title, type: 'chat', openSpec, ti",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "command-mode.js · local-fn:groupOf · activeWin · (app) => app.wm.windows.get(app.wm.activeWindowId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "reads activeWindowId when it runs"
+  },
+  {
+   "key": "command-mode.js · local-fn:moveWinDesktop · activeWin · (app) => app.wm.windows.get(app.wm.activeWindowId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "reads activeWindowId when it runs"
+  },
+  {
+   "key": "command-mode.js · other-fn · activeWin · (app) => app.wm.windows.get(app.wm.activeWindowId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "reads activeWindowId when it runs"
+  },
+  {
+   "key": "command-mode.js · prop:run · activeWin · (app) => app.wm.windows.get(app.wm.activeWindowId)",
+   "count": 3,
+   "verdict": "live",
+   "why": "reads activeWindowId when it runs"
+  },
+  {
+   "key": "design-tweaks.js · local-fn:drawRow · winInfo.id · param of mountDesignTweaks",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "design-window.js · cb:placeAgentWindow · existing.id · [...app.wm.windows.values()].find((w) => w._design && w._des",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "design-window.js · local-fn:load · winInfo.id · app.wm.createWindow({ title: baseName(d) || t('Design'), typ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · addEventListener:click · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · addEventListener:keydown · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · addEventListener:keydown · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · addEventListener:pointerdown · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · addEventListener:pointerdown · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:applyMin · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:applyMinNow · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:bindTo · render · () => { const m = mainWindowOf(app, id); app.wm.setTitle(win",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:decideExit · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:fitAfterRelaunch · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:forgotten · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:onAppMoveResize · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:onAppState · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:render · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:render · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · local-fn:retarget · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · new ResizeObserver · applyMin · () => { if (!fixedPane && winInfo.fixedSize) app.wm.setFixed",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "desktop-app-window.js · on-prop:onclick · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 2,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · prop:mayFocus · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · prop:onFixedSize · applyMin · () => { if (!fixedPane && winInfo.fixedSize) app.wm.setFixed",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "desktop-app-window.js · prop:onGone · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · prop:onMinSize · applyMin · () => { if (!fixedPane && winInfo.fixedSize) app.wm.setFixed",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "desktop-app-window.js · prop:onMoveResize · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · prop:onSatellite · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · prop:onState · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · prop:onTitle · render · () => { const m = mainWindowOf(app, id); app.wm.setTitle(win",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "desktop-app-window.js · setTimeout · winInfo.id · app.wm.createWindow({ title: title || t('Desktop app'), type",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-app-window.js · then · winInfo.id · app.wm.createWindow({ title: t('Desktop app'), type: 'deskto",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "desktop-manager.js · prop:action · win.id · this.app.wm.windows.get(winId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts (r2355)"
+  },
+  {
+   "key": "desktop-manager.js · setTimeout · winId · ws.winId || ws.id",
+   "count": 1,
+   "verdict": "record",
+   "why": "the RECORD's id — the four roads that change an id in place move a window TO a record's id and never re-key a window that is a row of its desktop's record (_takeKeptRow / takeRowsShown re-key the window NOT listed in the record, desktop-manager.js:598; the stage a stage-owned one, stage-manager.js:644; the remap one the restore just built, layout.js:1630): a wait by a record's id finds it"
+  },
+  {
+   "key": "doc-window.js · then · winInfo.id · app.wm.createWindow({ title: (h ? app.hostName(h) + ': ' : '",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "external-editor.js · then · targetWinInfo.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "file-viewer.js · after-await · winInfo.id · app.wm.createWindow({ title: hostPfx + fileName, type: 'view",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · addEventListener:focusin · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · addEventListener:pointerdown · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · local-fn:fit · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · local-fn:makeWindow · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · new MutationObserver · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · prop:active · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · prop:close · backTo.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "form-window.js · prop:close · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · prop:raise · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "form-window.js · prop:winId · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "gear-menu.js · prop:action · w.windowId · param of an anonymous function",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "jobs-panel.js · local-fn:render · winInfo.id · app.wm.createWindow({ title: t('Job input'), type: 'job-inte",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "layout.js · after-await · id · win.id",
+   "count": 2,
+   "verdict": "record",
+   "why": "a PLACEHOLDER's close asks first (layout.js:1339 _askRemovePlaceholder); a placeholder holds its record's id (the restore's remap), which no road re-keys — the RECORD's id — the four roads that change an id in place move a window TO a record's id and never re-key a window that is a row of its desktop's record (_takeKeptRow / takeRowsShown re-key the window NOT listed in the record, desktop-manager.js:598; the stage a stage-owned one, stage-manager.js:644; the remap one the restore just built, layout.js:1630): a wait by a record's id finds it"
+  },
+  {
+   "key": "layout.js · local-fn:checkWin · applyPosition · (winInfo, winState) => { if (!winInfo) return; // Remap wind",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a local function (its own uses are listed)"
+  },
+  {
+   "key": "layout.js · local-fn:keepShown · shown · this.app.isMobile ? wm.windows.get(wm.activeWindowId) || nul",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW on show, held: its id read when keepShown acts (r2355)"
+  },
+  {
+   "key": "layout.js · local-fn:keepShown · shown.id · this.app.isMobile ? wm.windows.get(wm.activeWindowId) || nul",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "layout.js · prop:rowHeld · heldIds · (state.windows || []).map((rw) => rw.winId || rw.id).filter(",
+   "count": 1,
+   "verdict": "record",
+   "why": "the RECORD's id — the four roads that change an id in place move a window TO a record's id and never re-key a window that is a row of its desktop's record (_takeKeptRow / takeRowsShown re-key the window NOT listed in the record, desktop-manager.js:598; the stage a stage-owned one, stage-manager.js:644; the remap one the restore just built, layout.js:1630): a wait by a record's id finds it"
+  },
+  {
+   "key": "layout.js · setTimeout · keepShown · () => { if (shown && wm.windows.get(shown.id) === shown && w",
+   "count": 1,
+   "verdict": "live",
+   "why": "keepShown reads the window held (shown.id) when it runs — r2355"
+  },
+  {
+   "key": "layout.js · setTimeout · winId · rw.winId || rw.id",
+   "count": 2,
+   "verdict": "record",
+   "why": "the RECORD's id — the four roads that change an id in place move a window TO a record's id and never re-key a window that is a row of its desktop's record (_takeKeptRow / takeRowsShown re-key the window NOT listed in the record, desktop-manager.js:598; the stage a stage-owned one, stage-manager.js:644; the remap one the restore just built, layout.js:1630): a wait by a record's id finds it"
+  },
+  {
+   "key": "layout.js · setTimeout · winInfo.id · param of an anonymous function",
+   "count": 2,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "layout.js · setTimeout · winInfo.id · this.app.attachSession(activeMatch.id, customName || activeM",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "layout.js · setTimeout · winInfo.id · this.app.attachSession(alive.id, customName || alive.name, a",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "machine-app.js · after-await · s · await post(`${STREAM_BASE}/stop`, { host: m.hostId, window: ",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a machine stream answer"
+  },
+  {
+   "key": "machine-app.js · cb:btn · w.id · param of an anonymous function",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "machine-app.js · cb:btn · winInfo.id · app.wm.createWindow({ title: t('{app} on {machine}', { app: ",
+   "count": 2,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "machine-app.js · local-fn:apply · winInfo.id · app.wm.createWindow({ title: t('{app} on {machine}', { app: ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "machine-app.js · local-fn:fit · winInfo.id · app.wm.createWindow({ title: t('{app} on {machine}', { app: ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "machine-app.js · prop:onSource · winInfo.id · app.wm.createWindow({ title: t('{app} on {machine}', { app: ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "machine-desktop.js · local-fn:drawTitle · winInfo.id · app.wm.createWindow({ title: t('{machine} — its desktop', { ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "machine-desktop.js · local-fn:setMode · drawTitle · () => { const r = mode === 'windows' ? rowOf(streamDisplay) ",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a local function (its own reads are listed: winInfo.id read when it runs)"
+  },
+  {
+   "key": "machine-desktop.js · prop:onSource · drawTitle · () => { const r = mode === 'windows' ? rowOf(streamDisplay) ",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a local function (its own reads are listed: winInfo.id read when it runs)"
+  },
+  {
+   "key": "mobile-nav.js · addEventListener:click · win.id · param of _buildWindowItem",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "mobile-nav.js · addEventListener:contextmenu · win.id · param of _buildWindowItem",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "mobile-nav.js · local-fn:go · want · this._shown[desk]",
+   "count": 1,
+   "verdict": "record",
+   "why": "restoreShown waits for the id this tab showed before the reload, the id its record holds — re-keys move windows TO it — the RECORD's id — the four roads that change an id in place move a window TO a record's id and never re-key a window that is a row of its desktop's record (_takeKeptRow / takeRowsShown re-key the window NOT listed in the record, desktop-manager.js:598; the stage a stage-owned one, stage-manager.js:644; the remap one the restore just built, layout.js:1630): a wait by a record's id finds it"
+  },
+  {
+   "key": "mobile-nav.js · local-fn:wantNow · wantWin.id · firstId ? wm.windows.get(firstId) || null : null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "mobile-nav.js · local-fn:yielded · sv · this.split?.offer(win.id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the split offer's verdict (no id); its action opens win.id read live"
+  },
+  {
+   "key": "mobile-nav.js · on-prop:onclick · sv · this.split?.offer(win.id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the split offer's verdict (no id); its action opens win.id read live"
+  },
+  {
+   "key": "mobile-nav.js · on-prop:onclick · win.id · param of _buildWindowItem",
+   "count": 4,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "mobile-nav.js · prop:action · win.id · param of _buildWindowItem",
+   "count": 2,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "phone-split-view.js · addEventListener:click · w.id · app.wm.windows.get(id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "phone-split-view.js · local-fn:apply · alive · () => [...app.wm.windows.values()].filter((w) => onDesk(w) &",
+   "count": 1,
+   "verdict": "live",
+   "why": "loops the live windows"
+  },
+  {
+   "key": "phone-split-view.js · local-fn:apply · frameOf · (id) => { const w = id && app.wm.windows.get(id); return w ?",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a local function taking an id (its callers pass activeWindowId read live)"
+  },
+  {
+   "key": "phone-split-view.js · local-fn:close · frameOf · (id) => { const w = id && app.wm.windows.get(id); return w ?",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a local function taking an id (its callers pass activeWindowId read live)"
+  },
+  {
+   "key": "phone-split-view.js · local-fn:offer · frameOf · (id) => { const w = id && app.wm.windows.get(id); return w ?",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a local function taking an id (its callers pass activeWindowId read live)"
+  },
+  {
+   "key": "phone-split-view.js · local-fn:open · frameOf · (id) => { const w = id && app.wm.windows.get(id); return w ?",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a local function taking an id (its callers pass activeWindowId read live)"
+  },
+  {
+   "key": "plugin-client.js · local-fn:onMessage · winInfo.id · app.wm.createWindow({ title: w.title, type: w.type, syncId, ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "plugin-client.js · local-fn:onMessage · windowId · param of open",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "the plugin manifest's window KIND (windows[].id), not a window instance"
+  },
+  {
+   "key": "plugin-client.js · prop:replay · w.windowId · param of _register",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "plugins-ui.js · prop:action · w.id · param of an anonymous function",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "search-window.js · on-prop:onkeydown · winInfo.id · app.wm.createWindow({ title: t('Search'), type: 'search', sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · cb:request · winInfo.id · this.wm.createWindow({ title: `${name} — ${cwd}`, type: isCh",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · cb:request · winInfo.id · this.wm.createWindow({ title: `[tmux] ${name}`, type: 'termi",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · cb:request · winInfo.id · this.wm.createWindow({ title: sessionName, type: winType, sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · cb:turnOf · winInfo.id · this.wm.createWindow({ title: sessionName, type: winType, sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · local-fn:doSwitch · win.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts (r2355)"
+  },
+  {
+   "key": "session-lifecycle.js · local-fn:finish · winBounds · win && this.wm.windows.get(win.id) === win ? this._snapshotW",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a bounds snapshot taken off the window held"
+  },
+  {
+   "key": "session-lifecycle.js · local-fn:handler · handler · (msg) => { if (!app.wm.windows.has(winInfo.id)) { app.ws.off",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "session-lifecycle.js · local-fn:handler · winInfo.id · app.wm.createWindow({ title, type: 'chat', syncId, openSpec:",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · local-fn:rescueViewOnly · winInfo.id · this.wm.createWindow({ title: sessionName, type: winType, sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · local-fn:retry · winInfo.id · this.wm.createWindow({ title: sessionName, type: winType, sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · local-fn:retryHere · winInfo.id · this.wm.createWindow({ title: sessionName, type: winType, sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · on-prop:onClose · handler · (msg) => { if (!app.wm.windows.has(winInfo.id)) { app.ws.off",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "session-lifecycle.js · on-prop:onClose · winInfo.id · app.wm.createWindow({ title, type: 'chat', syncId, openSpec:",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · on-prop:onClose · winInfo.id · param of _viewIntoWindow",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · on-prop:onClose · winInfo.id · param of _wireTerminalWindow",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · on-prop:onClose · winInfo.id · this.wm.createWindow({ title: `${name} — ${cwd}`, type: isCh",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · on-prop:onClose · winInfo.id · this.wm.createWindow({ title: sessionName, type: winType, sy",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · on-prop:onSessionExited · winInfo.id · param of _wireTerminalWindow",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · prop:retry · winInfo.id · this.wm.createWindow({ title: `${sessionName || t('History')",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-lifecycle.js · then · retryHere · () => this._winIs(winInfo) && (this._markResume(winInfo.id),",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "session-lifecycle.js · then · winInfo.id · this.wm.createWindow({ title: sessionName, type: winType, sy",
+   "count": 3,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-props.js · addEventListener:keydown · winInfo.id · app.wm.createWindow({ title: (sidebar.getCustomName(s0) || s",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "session-props.js · local-fn:render · winInfo.id · app.wm.createWindow({ title: (sidebar.getCustomName(s0) || s",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "stage-manager.js · after-await · winId · 'stage-' + Math.random().toString(36).slice(2, 9)",
+   "count": 1,
+   "verdict": "live",
+   "why": "a page-made stage id: a session window adopted at its creation tail (stage-manager.js:644 → :503) becomes its desktop record's window, which the 600 ms tag must NOT take for the stage — the miss is the right outcome"
+  },
+  {
+   "key": "stage-manager.js · setTimeout · winId · 'stage-' + Math.random().toString(36).slice(2, 9)",
+   "count": 1,
+   "verdict": "live",
+   "why": "a page-made stage id: a session window adopted at its creation tail (stage-manager.js:644 → :503) becomes its desktop record's window, which the 600 ms tag must NOT take for the stage — the miss is the right outcome"
+  },
+  {
+   "key": "stage-manager.js · setTimeout · winId · ws.winId || ws.id",
+   "count": 1,
+   "verdict": "record",
+   "why": "the RECORD's id — the four roads that change an id in place move a window TO a record's id and never re-key a window that is a row of its desktop's record (_takeKeptRow / takeRowsShown re-key the window NOT listed in the record, desktop-manager.js:598; the stage a stage-owned one, stage-manager.js:644; the remap one the restore just built, layout.js:1630): a wait by a record's id finds it"
+  },
+  {
+   "key": "tab-group.js · addEventListener:click · tabWinId · param of an anonymous function",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the tab strip is drawn again on a re-key: window.js rekeyWindow → this._renderTabBar(c) (:1986); on the layout road a chain forms after its windows' remap (layout.js onWindowCreated → _settlePendingChains)"
+  },
+  {
+   "key": "tab-group.js · addEventListener:click · winId · param of _inboxBadgeEl",
+   "count": 1,
+   "verdict": "live",
+   "why": "the badge's window held (owner), its id read at the press (r2355); the painted id only when no window stood under it"
+  },
+  {
+   "key": "tab-group.js · addEventListener:contextmenu · tabWinId · param of an anonymous function",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the tab strip is drawn again on a re-key: window.js rekeyWindow → this._renderTabBar(c) (:1986); on the layout road a chain forms after its windows' remap (layout.js onWindowCreated → _settlePendingChains)"
+  },
+  {
+   "key": "tab-group.js · addEventListener:mousedown · tabWinId · param of an anonymous function",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the tab strip is drawn again on a re-key: window.js rekeyWindow → this._renderTabBar(c) (:1986); on the layout road a chain forms after its windows' remap (layout.js onWindowCreated → _settlePendingChains)"
+  },
+  {
+   "key": "tab-group.js · addEventListener:pointerdown · host · () => this.windows.get(chain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "tab-group.js · addEventListener:pointerdown · winId · param of _setupTabDrag",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the tab drag is set up per tab (makeTab) — drawn again with its tab (window.js rekeyWindow → _renderTabBar)"
+  },
+  {
+   "key": "tab-group.js · local-fn:apply · host · () => this.windows.get(chain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "tab-group.js · local-fn:onUp · host · () => this.windows.get(chain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "a local function that reads the held window's id when called"
+  },
+  {
+   "key": "tab-group.js · local-fn:onUp · shieldKey · 'icon:' + winInfo.id",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a drag shield's own key (made from the id once, paired with itself; never finds a window)"
+  },
+  {
+   "key": "tab-group.js · local-fn:onUp · targetWin.id · null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "tab-group.js · local-fn:onUp · winId · param of _setupTabDrag",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the tab drag is set up per tab (makeTab) — drawn again with its tab (window.js rekeyWindow → _renderTabBar)"
+  },
+  {
+   "key": "tab-group.js · local-fn:onUp · winInfo.id · param of _setupIconDrag",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "tab-group.js · local-fn:processMove · reorderMove · (e) => { const host = this.windows.get(chain.tabs[0]); if (!",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the same tab drag"
+  },
+  {
+   "key": "tab-group.js · local-fn:processMove · shieldKey · 'icon:' + winInfo.id",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a drag shield's own key (made from the id once, paired with itself; never finds a window)"
+  },
+  {
+   "key": "tab-group.js · local-fn:processMove · winId · param of _setupTabDrag",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the tab drag is set up per tab (makeTab) — drawn again with its tab (window.js rekeyWindow → _renderTabBar)"
+  },
+  {
+   "key": "tab-group.js · local-fn:processMove · winInfo.id · param of _setupIconDrag",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "tab-group.js · local-fn:reorderMove · winId · param of _setupTabDrag",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the tab drag is set up per tab (makeTab) — drawn again with its tab (window.js rekeyWindow → _renderTabBar)"
+  },
+  {
+   "key": "tab-group.js · queueMicrotask · hostWin · this.windows.get(chain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held"
+  },
+  {
+   "key": "tab-group.js · queueMicrotask · last · this.windows.get(chain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held"
+  },
+  {
+   "key": "tab-group.js · queueMicrotask · last.id · this.windows.get(chain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held"
+  },
+  {
+   "key": "tab-group.js · queueMicrotask · winId · param of _detachFromChain",
+   "count": 1,
+   "verdict": "live",
+   "why": "a microtask after the detach: nothing re-keys in between"
+  },
+  {
+   "key": "tab-group.js · requestAnimationFrame · lastWin · this.windows.get(chain.tabs[0])",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held"
+  },
+  {
+   "key": "task-detail.js · local-fn:render · winInfo.id · app.wm.createWindow({ title: task?.title || t('Task Group'),",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "task-log.js · prop:onGone · winInfo.id · app.wm.createWindow({ title: (task?.title || t('Task Group')",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "task-log.js · prop:onTitle · winInfo.id · app.wm.createWindow({ title: (task?.title || t('Task Group')",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "taskbar.js · addEventListener:click · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · addEventListener:click · id · for-of entries",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the strip's tiles: the strip's structure key is the ids in order — updateTaskbar rebuilds them (taskbar.js:186 _rebuildTaskbarItems), called by rekeyWindow after the rule (window.js:1993); the layout road: see place L1"
+  },
+  {
+   "key": "taskbar.js · addEventListener:contextmenu · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · addEventListener:contextmenu · id · for-of entries",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the strip's tiles: the strip's structure key is the ids in order — updateTaskbar rebuilds them (taskbar.js:186 _rebuildTaskbarItems), called by rekeyWindow after the rule (window.js:1993); the layout road: see place L1"
+  },
+  {
+   "key": "taskbar.js · addEventListener:contextmenu · win.id · app.wm.windows.get(tid)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "taskbar.js · addEventListener:contextmenu · win.id · for-of app.wm.windows",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "taskbar.js · addEventListener:dragstart · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · addEventListener:keydown · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · addEventListener:pointerenter · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · addEventListener:pointerleave · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · addEventListener:pointermove · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · assign:action · onAction · param of showWindowContextMenu",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "the menu's onAction callback (no window id)"
+  },
+  {
+   "key": "taskbar.js · local-fn:act · activeTabOf · (chain) => chain.tabs[Math.min(chain.active, chain.tabs.leng",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the same group button"
+  },
+  {
+   "key": "taskbar.js · local-fn:act · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · local-fn:activeTabOf · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · local-fn:liveChain · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · local-fn:step · hostId · group.chain.tabs[0]",
+   "count": 1,
+   "verdict": "redrawn",
+   "why": "the group button: its chain's tab ids are in the strip's structure key — rebuilt by updateTaskbar after the rule (window.js:1993); on the layout road the chain forms after the remap"
+  },
+  {
+   "key": "taskbar.js · new MutationObserver · state.hostId · pop._chooser = { hostId, anchor, mode: hover ? 'hover' : 'cl",
+   "count": 1,
+   "verdict": "live",
+   "why": "the chooser's state: state.hostId is what followIdChange moves (r2250)"
+  },
+  {
+   "key": "taskbar.js · on-prop:onclick · w.id · r.built ? app.wm.windows.get(r.id) : null",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "taskbar.js · on-prop:onclick · win · app.wm.windows.get(tl.id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held (r1958)"
+  },
+  {
+   "key": "taskbar.js · on-prop:onclick · win.id · app.wm.windows.get(tid)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "taskbar.js · on-prop:onclick · win.id · app.wm.windows.get(tl.id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held (r1958)"
+  },
+  {
+   "key": "taskbar.js · on-prop:onclick · win.id · for-of app.wm.windows",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "taskbar.js · prop:action · w.id · for-of wm.windows",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts (r2355)"
+  },
+  {
+   "key": "taskbar.js · prop:id · win.id · app.wm.windows.get(id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts (r2355)"
+  },
+  {
+   "key": "taskbar.js · prop:relist · state.hostId · pop._chooser = { hostId, anchor, mode: hover ? 'hover' : 'cl",
+   "count": 1,
+   "verdict": "live",
+   "why": "the chooser's state: state.hostId is what followIdChange moves (r2250)"
+  },
+  {
+   "key": "taskbar.js · requestAnimationFrame · win · app.wm.windows.get(tl.id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held (r1958)"
+  },
+  {
+   "key": "taskbar.js · requestAnimationFrame · win.id · app.wm.windows.get(tl.id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held (r1958)"
+  },
+  {
+   "key": "trailing-bar.js · local-fn:onList · activeWin · () => app.wm?.windows?.get(app.wm.activeWindowId) || null",
+   "count": 1,
+   "verdict": "live",
+   "why": "reads activeWindowId when it runs"
+  },
+  {
+   "key": "trailing-bar.js · local-fn:update · activeWin · () => app.wm?.windows?.get(app.wm.activeWindowId) || null",
+   "count": 1,
+   "verdict": "live",
+   "why": "reads activeWindowId when it runs"
+  },
+  {
+   "key": "trailing-bar.js · on-prop:onclick · activeWin · () => app.wm?.windows?.get(app.wm.activeWindowId) || null",
+   "count": 4,
+   "verdict": "live",
+   "why": "reads activeWindowId when it runs"
+  },
+  {
+   "key": "user-todos-panel.js · local-fn:announce · annFlash · (it) => { for (const w of app.wm?.windows?.values?.() || [])",
+   "count": 1,
+   "verdict": "live",
+   "why": "loops the live windows"
+  },
+  {
+   "key": "window.js · addEventListener:contextmenu · winInfo.id · { id, element: el, titleBar, titleSpan, iconSpan, iconWrap, ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "window.js · addEventListener:dblclick · winInfo.id · { id, element: el, titleBar, titleSpan, iconSpan, iconWrap, ",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "window.js · assign:_cancelPointerDrag · shieldKey · 'drag:' + win.id",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a drag shield's own key (made from the id once, paired with itself; never finds a window)"
+  },
+  {
+   "key": "window.js · assign:_cancelPointerDrag · win.id · param of _setupDrag",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "window.js · local-fn:cancel · srcRect · document.querySelector(`.desktop-preview.active .desktop-pre",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a desktop preview's element, held for the drag"
+  },
+  {
+   "key": "window.js · local-fn:detach · shieldKey · 'resize:' + win.id",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a drag shield's own key (made from the id once, paired with itself; never finds a window)"
+  },
+  {
+   "key": "window.js · local-fn:endDrag · shieldKey · 'drag:' + win.id",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a drag shield's own key (made from the id once, paired with itself; never finds a window)"
+  },
+  {
+   "key": "window.js · local-fn:endDrag · win.id · param of _setupDrag",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "window.js · local-fn:onClick · win.id · this.windows.get(id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "window.js · local-fn:processMove · shieldKey · 'drag:' + win.id",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a drag shield's own key (made from the id once, paired with itself; never finds a window)"
+  },
+  {
+   "key": "window.js · local-fn:processMove · srcRect · document.querySelector(`.desktop-preview.active .desktop-pre",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "a desktop preview's element, held for the drag"
+  },
+  {
+   "key": "window.js · local-fn:processMove · win.id · param of _setupDrag",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "window.js · local-fn:startResize · win.id · param of _setupResize",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "window.js · on-prop:onclick · w.id · for-of overlapping",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  },
+  {
+   "key": "window.js · on-prop:onclick · win.id · this.windows.get(id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts (r2355)"
+  },
+  {
+   "key": "window.js · on-prop:onclick · winInfo.id · { id, element: el, titleBar, titleSpan, iconSpan, iconWrap, ",
+   "count": 3,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "window.js · setTimeout · win · this.windows.get(this.activeWindowId)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held"
+  },
+  {
+   "key": "window.js · then · raise · param of revealWindow",
+   "count": 1,
+   "verdict": "not-a-window-id",
+   "why": "revealWindow's raise flag (no window id)"
+  },
+  {
+   "key": "window.js · then · win.id · this.windows.get(id)",
+   "count": 1,
+   "verdict": "live",
+   "why": "the window held; its id read when it acts"
+  },
+  {
+   "key": "workflow-detail.js · local-fn:render · winInfo.id · app.wm.createWindow({ title: name || 'Workflow', type: 'work",
+   "count": 1,
+   "verdict": "live",
+   "why": "the WINDOW held; its .id read when the handler runs"
+  }
+ ]
+}

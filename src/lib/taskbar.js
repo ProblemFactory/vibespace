@@ -118,7 +118,7 @@ function switchWindowItems(app, selfId) {
     const otherDesk = scope === 'all' && w._desktopId && w._desktopId !== activeDesk && w._desktopId !== '__stage__';
     items.push({
       label: windowTitle(w) + (otherDesk ? `  — ${deskName(w._desktopId)}` : '') + (w.isMinimized ? ' ' + t('(minimized)') : ''),
-      action: () => app.goToWinId(wid),
+      action: () => app.goToWinId(w.id),   // the window held, its id read at the press (r2355)
     });
   }
   if (!items.length) items.push({ caption: t('(no windows)') });
@@ -566,7 +566,7 @@ function windowMenuCtx(app, id, { closeLabel = null, switchSubmenu = false, grou
   const sess = sessionForWin(app, win);
   const closeKeeps = !closeLabel && !group && !!closeKeepsWord(sess);   // P2-2: a running session's window — its Close is not its Terminate
   closeLabel = closeLabel || '✕ ' + (closeKeeps ? t('Close window — it keeps running') : t('Close'));
-  const ctx = { app, id, win, s: sess, switchSubmenu, closeLabel, group: !!group };
+  const ctx = { app, get id() { return win.id; }, win, s: sess, switchSubmenu, closeLabel, group: !!group };   // r2355: the id read off the window held (a menu left open across a re-key acts on the window)
   ctx.rowYielded = Array.isArray(rowYielded) ? rowYielded : null;   // lane phone-six: what a phone switcher row yielded (window/phone-row-yielded)
   ctx.closeKeeps = closeKeeps;   // closeStyle reads it (the line above is test-tab-close-confirm's pin)
   return ctx;

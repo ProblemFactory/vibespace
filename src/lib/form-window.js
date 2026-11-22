@@ -204,14 +204,14 @@ export function installFormHost(app) {
       /** its WINDOW (at the open, or a sheet re-hosted): front = the person's, behind = the system's / a typing person's / under a layer */
       const makeWindow = (place) => {
         nth = [...wm.windows.values()].filter((w) => w.type === 'form' && !w.isMinimized && !w._hiddenByDesktop).length;
-        backTo = wm.activeWindowId;   // the window it was opened over — the active one again when it closes (a person pressing into the form re-names it)
+        backTo = wm.windows.get(wm.activeWindowId) || null;   // the WINDOW it was opened over (held: its id read at the close — r2355) — the active one again when it closes (a person pressing into the form re-names it)
         const quiet = place === 'behind';   // no act of the person opened it: the automatic open's quiet (test-artifacts-auto-open's pass-through spelling)
         landed = quiet ? 'behind' : 'front';
         win = wm.createWindow({ title: String(title || ''), type: 'form', width: 480, height: 320, ...(quiet ? { quiet: true } : {}) });
         win.element.classList.add('window-form');
         if (id) win.element.dataset.form = id;
         if (quiet) { wm.placeBehind(win.id); wm.markArrived(win.id); }
-        win.element.addEventListener('pointerdown', () => { if (wm.activeWindowId && wm.activeWindowId !== win.id) backTo = wm.activeWindowId; }, true);
+        win.element.addEventListener('pointerdown', () => { if (wm.activeWindowId && wm.activeWindowId !== win.id) backTo = wm.windows.get(wm.activeWindowId) || backTo; }, true);
         // the window's ✕ (and every door that asks a window to close) is the person's dismissal — the shell's guard decides
         win.onCloseRequest = () => { if (bound) { bound.dismiss('close'); return false; } return true; };
         win.onClose = () => { unwatch(); OPEN.delete(handle); gone = true; if (bound) bound.closed(); try { app._checkWelcome?.(); } catch { } };
@@ -310,8 +310,8 @@ export function installFormHost(app) {
           wm.closeWindow(win.id);
           // THE ACTIVE WINDOW GOES BACK to the one the form was opened over (a dialog returns to its opener) — never the highest
           // other window the manager would pick (at a phone width only the active window is drawn: the card read went away)
-          const back = wasActive && backTo && backTo !== win.id ? wm.windows.get(backTo) : null;
-          if (back && !back.isMinimized && !back._hiddenByDesktop) wm.focusWindow(backTo);
+          const back = wasActive && backTo && backTo !== win && wm.windows.get(backTo.id) === backTo ? backTo : null;
+          if (back && !back.isMinimized && !back._hiddenByDesktop) wm.focusWindow(back.id);
         },
         active() { return mode === 'sheet' || (!!win && wm.activeWindowId === win.id); },
         /** where it landed: 'front' | 'behind' | 'sheet' */

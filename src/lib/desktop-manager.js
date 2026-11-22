@@ -2146,7 +2146,7 @@ export class DesktopManager {
       .filter(d => d.id !== win._desktopId)
       .map(d => ({
         label: storedNameWords('desktop', d.name, t),
-        action: () => this.moveWindowToDesktop(winId, d.id, { speak: true }),
+        action: () => this.moveWindowToDesktop(win.id, d.id, { speak: true }),   // the window held, its id read at the press (r2355)
       }));
   }
 
