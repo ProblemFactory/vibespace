@@ -5541,6 +5541,7 @@ export default {
   "✓ Connected — finish with the “Create & connect” button below.": "✓ 已连接 —— 点下面的「创建并连接」完成。",
   "The account record and its conversation list go away (the message logs stay on disk). Nothing is deleted on {provider}.": "账号记录和它的会话列表会被移除（消息记录留在磁盘上）。{provider} 上什么都不会被删除。",
   "Removed \"{name}\"": "已移除 \"{name}\"",
+  "Removed \"{name}\" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write": "已移除 \"{name}\" —— 它的部分已保存数据尚未从磁盘上抹去；磁盘接受下一次写入时会抹去",
   "reach: {who} may see the whole account": "可见性授权：{who} 可见整个账号",
   "outbox: {n} proposal(s) awaiting approval": "Outbox：{n} 条待审批的提议",
   "Cannot remove \"{name}\"": "无法移除 \"{name}\"",

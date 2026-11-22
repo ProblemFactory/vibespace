@@ -972,7 +972,10 @@ question about another machine is the failure the rule exists to stop.
     {kind:'outbox', id, key, state}]}}` while anything points at the account
     (assignments of its conversations, `scope.kind==='adapter'` reach grants,
     unsettled outbox proposals — agent groups never); otherwise `{ok,
-    removed:true, id}` (record + index rows; logs stay). Builtin `400`.
+    removed:true, id}` (record + index rows; logs stay) — and for an account whose adapter declares
+    `retention:'purge-on-remove'` whose index journal could not be rewritten now (B-360d, r1542) `{ok, removed:true, id,
+    journalOwed:true, note}`: the account is removed, some of its saved data is erased from disk only when the disk takes
+    the retried write (the panel says so). Builtin `400`.
   - `GET /api/channels/adapters/:id/config` — r4 D3, OWNER-ONLY (cookie auth;
     never broadcast, never logged, no agent route): `{config: {id, kind,
     label, credentialKey, client: {appId, secretSet, undecryptable} | null,

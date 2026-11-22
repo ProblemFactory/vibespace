@@ -1194,10 +1194,13 @@ function create(engineCtx) {
     cancelChainOf(rec.id);   // lane lark-consent-chain
     await retractFailure(rec);
     await retractSignin(rec, 'the account was removed');   // lane channel-reauth-visible
-    await removeRecord(rec);
+    const purged = await removeRecord(rec);
     log.log(`[channels] ${rec.id}: removed`);
     clientSwapCheck().catch(() => {});   // B-166e part 2 (1): the preset it was under has one account fewer
     notify([]);
+    // B-360d unit 1, 主开发 r1542 (1): «forget its data» whose journal could not be rewritten now says so to the PERSON — removed,
+    // with bytes of it still in the index's journal on disk until the storage takes the retry (never only a log line and an audit row)
+    if (purged && purged.purged && purged.journalClean === false) return { ok: true, removed: true, id: rec.id, journalOwed: true, note: 'removed — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write' };
     return { ok: true, removed: true, id: rec.id };
   }
   /** Remove ONE account: its live entry, its pending wake windows, its index
@@ -1222,7 +1225,7 @@ function create(engineCtx) {
       if (ix.patternAssignments) for (const [id, pa] of Object.entries(ix.patternAssignments)) if (pa && pa.adapterId === rec.id) delete ix.patternAssignments[id];
     }, { durable: true });
     await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); });
-    await purgeIfDeclared(rec);
+    return purgeIfDeclared(rec);   // r1542 (1): its answer reaches the person (remove())
   }
   /** design 012: THE SETUP REPORT an adapter writes into its record's state (`state.setup.probes` — the first real
    *  install's answers, by name): a closed list of names, each value a short word, a boolean or a list of scope names. */
@@ -1258,7 +1261,7 @@ function create(engineCtx) {
     if (!journalClean) log.warn(`[channels] ${rec.id}: removed — its rows left index.json, but the index's journal could not be rewritten now (the storage did not take it): its older lines leave at the next compaction`);
     log.log(`[channels] ${rec.id}: removed with its local copy (${r.logs ? 'message logs' : 'no logs'}, ${r.files ? 'fetched files' : 'no files'}, ${ended.length} ended proposal(s)) — the adapter declares purge-on-remove`);
     try { store.audit({ kind: 'account', op: journalClean ? 'purge' : 'purge-owed', id: rec.id, proposals: ended.length, at: now() }); } catch {}
-    return { purged: true, proposals: ended.length };
+    return { purged: true, proposals: ended.length, journalClean };   // r1542 (1): the person's answer says a failed compaction
   }
   /** DUPLICATE an account (r4 §8.1 #2, D4): a NEW record of the same type
    *  carrying EXACTLY `DUPLICATE_FIELDS` (the custom secret re-sealed), named

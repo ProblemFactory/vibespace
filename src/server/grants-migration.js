@@ -170,7 +170,7 @@ function plan({ dataDir, channelIndex = null, resolveBrowserKey = () => null, li
 
   // ── channels ──
   // B-360d unit 1 (law 8): the index FAMILY (index.json + its journal), never index.json alone (it lags its journal)
-  const ix = channelIndex || (() => { try { return require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch (e) { throw new Error(`data/channels/index.json is unreadable (${e.message}) — the grants were not carried over; nothing was written`); } })();
+  const ix = channelIndex || (() => { try { return require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch (e) { throw new Error(`data/channels/${(e && e.file) || 'index.json'} is unreadable (${e.message}) — the grants were not carried over; nothing was written`); } })();
   for (const d of ['channel-reach', 'channel-watch', 'channel-api']) tally(d);
   if (ix && typeof ix === 'object') {
     const ch = ChannelsGrants.rowsOfChannelIndex(ix, { F });

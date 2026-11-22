@@ -5540,6 +5540,7 @@ export default {
   "✓ Connected — finish with the “Create & connect” button below.": "✓ 接続しました — 下の「作成して接続」で完了します。",
   "The account record and its conversation list go away (the message logs stay on disk). Nothing is deleted on {provider}.": "アカウントの記録と会話一覧が削除されます（メッセージ履歴はディスクに残ります）。{provider} 側では何も削除されません。",
   "Removed \"{name}\"": "「{name}」を削除しました",
+  "Removed \"{name}\" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write": "「{name}」を削除しました — 保存データの一部はまだディスクから消えていません。ディスクが次の書き込みを受け付けたときに消えます",
   "reach: {who} may see the whole account": "閲覧権限：{who} がアカウント全体を閲覧可能",
   "outbox: {n} proposal(s) awaiting approval": "Outbox：承認待ちの提案 {n} 件",
   "Cannot remove \"{name}\"": "「{name}」を削除できません",

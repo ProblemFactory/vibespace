@@ -994,6 +994,8 @@ export async function removeAccount(app, a) {
   const r = await fetchJson(`/api/channels/adapters/${enc(a.id)}`, { method: 'DELETE' });
   if (r && r.code === 'account-referenced') { showRemoveRefusedDialog(app, a, (r.detail && r.detail.refs) || []); return false; }
   if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return false; }
+  // B-360d unit 1 (r1542 (1)): a removal whose journal is not rewritten yet says so — some of its data stays on disk until then
+  if (r && r.journalOwed) { showToast(tr('Removed "{name}" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write', { name }), { type: 'warn', duration: 9000 }); return true; }
   showToast(tr('Removed "{name}"', { name }));
   return true;
 }

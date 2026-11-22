@@ -337,7 +337,7 @@ function rowLine(key, value) {
   return s === undefined ? null : `  ${JSON.stringify(key)}: ${s.replaceAll('\n', '\n  ')}`;
 }
 const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-/** B-360d unit 1: a row's FINGERPRINT — FNV-1a 32 over its printed line (rowLine): what the store last PERSISTED of the row
+/** B-360d unit 1: a row's FINGERPRINT — a 53-bit print (cyrb53, below) of its printed line (rowLine): what the store last PERSISTED of the row
  *  (the base's layout, or its last journal line), compared at every update's end (law 3: QUIET IS FREE — measured against
  *  the persisted bytes, never a «before» taken at the first touch: a road that changes a row and touches it after would
  *  read as unchanged and the change would never reach the journal). */
@@ -386,14 +386,16 @@ function replayIndexJournal(ix, text, held) {
 }
 /** B-360d unit 1 (law 8): the index family READ WHOLE by a reader outside the store (a migration, a census): index.json
  *  parsed, then its journal replayed — never index.json alone (it lags its journal by up to the bound). → the index object
- *  (null when index.json is absent). */
+ *  (null when neither index.json nor its journal is there). */
 function readIndexFamily(dir) {
   let text = null;
-  try { text = fs.readFileSync(path.join(dir, 'index.json'), 'utf8'); } catch (e) { if (!(e && e.code === 'ENOENT')) throw e; }
+  const named = (e, file) => { try { e.file = file; } catch { } return e; };   // the refusal names the file that failed (r1542 (6))
+  try { text = fs.readFileSync(path.join(dir, 'index.json'), 'utf8'); } catch (e) { if (!(e && e.code === 'ENOENT')) throw named(e, 'index.json'); }
   let acts = null;
-  try { acts = fs.readFileSync(path.join(dir, 'index-acts.ndjson'), 'utf8'); } catch (e) { if (!(e && e.code === 'ENOENT')) throw e; }
+  try { acts = fs.readFileSync(path.join(dir, 'index-acts.ndjson'), 'utf8'); } catch (e) { if (!(e && e.code === 'ENOENT')) throw named(e, 'index-acts.ndjson'); }
   if (text === null && acts === null) return null;   // no index family at all
-  const ix = text === null ? { v: 1, conversations: {} } : JSON.parse(text);   // a store whose index was never written whole: its journal alone
+  let ix;
+  try { ix = text === null ? { v: 1, conversations: {} } : JSON.parse(text); } catch (e) { throw named(e, 'index.json'); }   // a store whose index was never written whole: its journal alone
   if (!ix || typeof ix !== 'object' || !ix.conversations || typeof ix.conversations !== 'object') return ix;
   replayIndexJournal(ix, acts || '', Number(ix.actsSeq) > 0 ? Number(ix.actsSeq) : 0);
   return ix;
@@ -682,6 +684,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // compared (the update's end compares each touched row's line in its own turn; measured on the test machine at ~800-byte
   // rows: 1 536 rows 31 ms quiet / 43 ms changed, 4 096 rows 89 / 149 ms, 16 384 rows 317 ms — over the loop's 250 ms law;
   // past the bound the road is the whole write, as the release made for every update)
+  // r1542 (7): THE ROW BOUND COUNTS ROWS, NOT BYTES — a row of several KB (big watcher maps) weighs more than the ~800 bytes
+  // measured, so the compare of 4 096 such rows can take longer than the 149 ms above; and a change that touches more rows than
+  // the bound is a whole write — a sign-in change on an account past 4 096 rows whose caps all change (rejudgeConvCaps) is one:
+  // lawful (the release made every update one). The loop's 250 ms law is per MACROTASK: updates chained without I/O between
+  // them run their ends in one turn, and their compares add up.
   const BURST_BYTES = ACTS_MAX_BYTES, BURST_ROWS = Math.max(64, Math.min(4096, Math.floor(ACTS_MAX_BYTES / 512)));
   const rowFp = new Map();   // key → fingerprint of its persisted line (set by serializeChunk and by a journaled line)
   let fpReady = false;       // every row's fingerprint known (the layout landed once): before, a touched row counts as changed
@@ -913,15 +920,19 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     for (const h of touchHooks) { try { h(key); } catch (e) { warn('[channels] index touch hook threw:', (e && e.message) || e); } }
   };
   let outsideTouched = new Set(), outsideArmed = false;
+  // r1763 (1): while the index is HELD a change outside an update asks no write at all — the refusal said ONCE (the family is held
+  // for the life: a big one is loaded at the next start), never a line a batch
+  let heldSaid = false;
+  const sayHeldOnce = () => { if (heldSaid) return; heldSaid = true; warn(`[channels] index-acts.ndjson and index.json not written while the index is held: ${ixLoad.blocked} — changes made now are kept in memory only`); };
   function touchKey(key) {
     dirtyKeys.add(key);
-    if (curTouch) { if (curTouch.before && !curTouch.before.has(key)) curTouch.before.set(key, hasOwn(ix.conversations, key) ? JSON.stringify(ix.conversations[key], INDEX_KEYS) : null); curTouch.add(key); }
-    else { fire(key); outsideTouched.add(key); if (!outsideArmed) { outsideArmed = true; Promise.resolve().then(() => { outsideArmed = false; const o = outsideTouched; outsideTouched = new Set(); if (closed || !o.size) return; try { const k = actOf(o, false); if (k === 'whole') oweWhole(); } catch (e) { warn('[channels] index-acts.ndjson: a touch outside an update was not journaled:', (e && e.message) || e); oweWhole(); } }); } }   // B-360d unit 1: a row touched outside an update rides the journal too
+    if (curTouch) { curTouch.add(key); }   // B-360d unit 1: no «before» kept (the end compares the persisted print)
+    else { fire(key); outsideTouched.add(key); if (!outsideArmed) { outsideArmed = true; Promise.resolve().then(() => { outsideArmed = false; const o = outsideTouched; outsideTouched = new Set(); if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; } try { const k = actOf(o, false); if (k === 'whole') oweWhole(); } catch (e) { warn('[channels] index-acts.ndjson: a touch outside an update was not journaled:', (e && e.message) || e); oweWhole(); } }); } }   // B-360d unit 1: a row touched outside an update rides the journal too
   }
   // B-360d unit 1: a census's tap — fn(why) AT the whole touch, in the scope that made it (its stack names it; the hooks
   // above hear it after the update ended, its scope gone). Nothing is kept: no tap, no cost.
   const wholeTaps = [];
-  function touchAll(why) { for (const h of wholeTaps) { try { h(why); } catch { } } if (!allDirty) flushStats.lastFull = why; allDirty = true; if (warm) warm.stale = true; if (curTouch) curTouch.all = true; else { fire(null); if (!closed) oweWhole(); } }
+  function touchAll(why) { for (const h of wholeTaps) { try { h(why); } catch { } } if (!allDirty) flushStats.lastFull = why; allDirty = true; if (warm) warm.stale = true; if (curTouch) curTouch.all = true; else { fire(null); if (!closed && !ixLoad.blocked) oweWhole(); } }
   // the view an update's fn receives: the live root, except that reaching `conversations` through it is a whole-map touch
   const touchView = new Proxy(ix, {
     get(t, p) { if (p === 'conversations') touchAll('update reached ix.conversations'); else if (curTouch) curTouch.top = true; return t[p]; },   // B-360d unit 1: a top-level table reached — the end compares the top
@@ -1044,6 +1055,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       kept.push(k);
       healRow(k, conv[k]);
       const line = rowLine(k, conv[k]);
+      // the print is taken when a write is PRODUCED: a row changed and touched in the same synchronous turn is safe; one changed,
+      // then touched only after an await inside which a produce ran, reads as quiet and waits for the next fold (every
+      // rows()-then-touch site of the engine is synchronous today — r1542 (7))
       if (line !== null) { lines.push(line); if (curTouch && curTouch.has(k)) rowFp.delete(k); else rowFp.set(k, fpOf(line)); }   // B-360d unit 1: a row an update in flight touched is not «persisted» by this write — its end journals it
     }
     const old = c.buf;
@@ -1324,6 +1338,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let bytes = 0;
     for (const k of t) {
       if (String(k).startsWith('_')) continue;
+      // ↑ a key beginning with '_' is RUNTIME ONLY: the index file never holds it (rowLine and INDEX_KEYS drop it), so its journal
+      // drops it too — the release's durable line wrote one, and its replay brought it back only until the next whole write
+      // dropped it again (r1542 (4): the reason said)
       const has = hasOwn(conv, k);
       // 主开发 r2081: a poll stamp written INTO the row (a write past the door) is healed into the side map — and its journal — HERE,
       // at the update's end, as the chunk's serializer does: the row's print omits stamps, so it may never be serialized before a fold
@@ -1354,6 +1371,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     for (const [k, f] of fps) { if (f === null) rowFp.delete(k); else rowFp.set(k, f); }
     if (topPart) { persistedTop = top; topLineSeq = actSeq + 1; }
     const seq = ++actSeq;
+    // r1850 (4): a row purged and born again inside ONE update with the same bytes gets no line (its print equals the persisted
+    // one) and reads unlanded until the next whole write — safe: those bytes are on disk already
     for (const [k, f] of fps) if (f !== null && unlanded.has(k) && !bornSeq.has(k)) bornSeq.set(k, seq);   // r1765: the line that carries this birth
     const lineText = `{"seq":${seq},"rows":{${rows.join(',')}}${topPart}}\n`;
     const line = { seq, text: lineText }; actLines.push(line);
@@ -1376,7 +1395,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // B-f276 1c (its read r1 M3, the meeting): an index held because a file of its came that is NOT its own answers BY NAME (EEXIST) — never
     // null: a durable act waits on THIS file now, and null would tell it «done»
     if (ixLoad.blocked && ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST' });
-    if (ixLoad.blocked) { warn('[channels] index-acts.ndjson not written: ' + ixLoad.blocked); return null; }   // r1542's law: the journal stands behind the index's hold
+    if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }   // r1763 (2): never «nothing to write» — the writer would read it as settled and tell a waiter done; its waiters wait (the writer's bound answers them «not on disk yet»)   // r1542's law: the journal stands behind the index's hold
     // law 10: NO JOURNAL JOB CARRIES MORE THAN THE BOUND — past it (the storage did not take the lines in time) the index's
     // whole write FOLDS them (its landing drops the lines it holds) and this file waits (LATER: its waiters wait — a job
     // must never be cut short, the writer answers every waiter of the version it wrote)
@@ -1452,7 +1471,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let e = ix.conversations[key];
     if (!e && !create) return null;
     if (!e) {
-      unlanded.add(key); bornSeq.delete(key);   // B-526c r937: not on the disk's index until a write that carries it lands (B-360d: its NEW line, or a whole write)
+      unlanded.add(key); bornSeq.delete(key); if (producedUnlanded) producedUnlanded.delete(key);   // B-526c r937: not on the disk's index until a write that carries it lands (B-360d: its NEW line, or a whole write) — r1850 (1): a whole write produced BEFORE this birth carries the old row, never this one
       if (layout && layout.chunkOf.has(key)) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order
       if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps
       e = ix.conversations[key] = {

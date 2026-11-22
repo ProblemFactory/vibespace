@@ -27,6 +27,13 @@
 //   ⑮ A ROW HAS LANDED (r1765, B-526c's set): when its journal line synced (a stall between the append and its sync) — never at
 //      its making, never after a failed append; held: never. REDs: landed at the making; only by a whole write; on any
 //      answer; a journal deaf to the hold.
+//   ⑬ THE FOLLOW (r1542 (2)): law 10's LATER road, law 4's byte bound alone, a row changed before its touch, ⑪'s guard at a
+//      produce, a fn that throws, the purge's failure through the real remove() — each with its red control.
+//   ⑭ THE STOP (r1542 (3)): paced lines owed at a SIGTERM are on disk after the hub's exit passes. RED: the rank-0 pass alone.
+//   ⑯ THE INDEX APPEARS MID-LIFE (r1763 (3)): read missing, its journal replayed, then the index appears — the older life's
+//      journal stays byte for byte. RED: the compaction's road deaf to the hold.
+//   ⑰ THE LANDING'S ROADS (r1850): a birth after a produced whole write, a rebirth with its old line in flight, the boot, a burst's
+//      whole road, the order across a fold and a compaction, the hold's own guard — with their red controls.
 //   ⑤ LAW 7 — A ROLLBACK FINDS EVERYTHING: the RELEASE'S OWN replay (scripts/fixtures/release-index-replay.cjs, frozen) over
 //      every kill copy equals the new store's map; after close(), index.json alone equals it.
 //   ⑱ AN IN-ROW STAMP (主开发 r2081): a poll stamp written into the row past the door reaches the stamp journal at the
@@ -57,10 +64,12 @@ const SRC = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
 const open = (mod, dir, opts = {}) => { const w = SW.create({ log: quiet }); const st = mod.createChannelStore({ dir, log: quiet, writer: w, ...opts }); return { w, st }; };
 const shut = (o) => { try { o.st.close(); } catch { } try { o.w.stop(); } catch { } };
 // THE KILL: the folder as it stands, copied with the store open, read by a second store (as the next boot reads it)
-// (file by file: a file the writer renames or removes while the copy runs is left as a kill would leave it — gone)
+// (file by file: a file the writer renames or removes while the copy runs is left as a kill would leave it — gone; in NAME
+// order — index-acts.ndjson before index.json — so the journal is always the older of the pair, a state a real kill can make:
+// r1542 (5))
 function kill(dir, tag) {
   const k = path.join(ROOT, `${tag}-kill-${n++}`);
-  const copy = (from, to) => { fs.mkdirSync(to, { recursive: true }); for (const e of fs.readdirSync(from, { withFileTypes: true })) { const f = path.join(from, e.name), t = path.join(to, e.name); try { if (e.isDirectory()) copy(f, t); else fs.copyFileSync(f, t); } catch (err) { if (!err || err.code !== 'ENOENT') throw err; } } };
+  const copy = (from, to) => { fs.mkdirSync(to, { recursive: true }); for (const e of fs.readdirSync(from, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) { const f = path.join(from, e.name), t = path.join(to, e.name); try { if (e.isDirectory()) copy(f, t); else fs.copyFileSync(f, t); } catch (err) { if (!err || err.code !== 'ENOENT') throw err; } } };
   copy(dir, k);
   return k;
 }
@@ -282,7 +291,8 @@ parentPort.on('message', (m) => {
   const dirOf = path.dirname(m.file), marker = path.join(dirOf, 'fault'), faulty = m.append && fs.existsSync(marker);
   let f = fs, cfg = {}; try { cfg = JSON.parse(fs.readFileSync(path.join(dirOf, 'fault.json'), 'utf8')); } catch { }
   if (m.ev === 'write' && /index-acts\\.ndjson$/.test(m.file)) fs.appendFileSync(path.join(dirOf, 'jobs.log'), (m.append ? 'append' : 'whole') + (faulty ? ' FAULT' : '') + '\\n');
-  if (m.ev === 'write' && /index-acts\\.ndjson$/.test(m.file) && fs.existsSync(path.join(dirOf, 'stall'))) { const t0 = Date.now(), z = new Int32Array(new SharedArrayBuffer(4)); while (fs.existsSync(path.join(dirOf, 'stall')) && Date.now() - t0 < 10000) Atomics.wait(z, 0, 0, 10); }   // ⑮: the journal's write held between its start and its sync
+  { const mk = m.ev !== 'write' ? null : /index-acts\\.ndjson$/.test(m.file) ? 'stall' : /index\\.json$/.test(m.file) ? 'stallix' : null;   // ⑮ ⑰: a journal (or index) write held between its start and its sync; a 'pass' file lets ONE through
+    if (mk && fs.existsSync(path.join(dirOf, mk))) { const t0 = Date.now(), z = new Int32Array(new SharedArrayBuffer(4)); while (fs.existsSync(path.join(dirOf, mk)) && Date.now() - t0 < 10000) { const pf = path.join(dirOf, mk + '.pass'); if (fs.existsSync(pf)) { try { fs.unlinkSync(pf); } catch { } break; } Atomics.wait(z, 0, 0, 10); } } }   // ⑮: the journal's write held between its start and its sync
   if (faulty) { fs.unlinkSync(marker); let n = 0; const fault = cfg.fault;
     f = { ...fs,
       writeSync: (fd, b, o = 0, l) => { const len = l == null ? b.length - o : l; if (fault === 'fsync') return fs.writeSync(fd, b, o, len); if (n >= 4096) { if (fault === 'short') return 0; throw Object.assign(new Error('no space left'), { code: 'ENOSPC' }); } const k = fs.writeSync(fd, b, o, Math.min(len, 4096 - n)); n += k; return k; },
@@ -386,6 +396,7 @@ const siteOf = (stack) => String(stack).split('\n').slice(1).map((x) => x.trim()
 async function engineLeg(EM, tag, rounds = 3) {
   const D = path.join(ROOT, `e-${tag}`); fs.cpSync(TPL_E, D, { recursive: true });
   refusing(true);
+  try {
   const clock = { t: TE }, e = mkEng(EM, D, clock), ix = e.store.index;
   const named = [];
   if (ix.flushStats().lastFull !== 'boot') named.push(`${ix.flushStats().lastFull} @ the engine's create (before the tap)`);   // a whole touch during create
@@ -407,8 +418,8 @@ async function engineLeg(EM, tag, rounds = 3) {
   const r = { named, wholeWrites: f1.writes - f0.writes, indexOwed: js.indexOwed, journaled: (f1.journaled || 0) - j0, journalBytes: js.journalBytes, refused, walked, lastRefusalKept: !!(sample && back && back.lastError && back.lastError.at === rows[sample].lane.lastError.at) };
   try { e.stop(); } catch { }
   try { await e.store.close?.(); } catch { }
-  refusing(false);
   return r;
+  } finally { refusing(false); }   // the fake put back whatever the leg does
 }
 {
   const r = await engineLeg(ENG, 'census');
@@ -479,7 +490,14 @@ async function heldLeg(mod, tag) {
   const r = await heldLeg(CS, 'held');
   ok(r.held && r.refused === 'store-blocked' && r.lines === 0 && r.fold === 'store-blocked' && r.jd === 'store-blocked' && r.chunks === 0 && r.ixSame && r.afSame,
     `⑫ THE HOLD: index.json damaged — the family held (${r.held}); an update refused by name (${r.refused}); a change outside an update made no journal line (${r.lines} lines); fold() ${r.fold}, journalDurable() ${r.jd}; no warm-up (${r.chunks} chunks laid out); after the stop index.json and the journal are byte-identical (${r.ixSame} · ${r.afSame})`, r);
-  const HM2 = M.load('src/channel-store.js', anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'the journal deaf to the hold'), 'held-lines');
+  const HM2 = M.load('src/channel-store.js', anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'the journal deaf to the hold'), "if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; }", "if (closed || !o.size) return;", 'the outside road deaf to the hold'), 'held-lines');
+  // r1763 (3): a red for each guard that can bite on this road — fold() and journalDurable() refused by name
+  const FG = M.load('src/channel-store.js', anchored(SRC, 'if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); markDirty(true); return W().durable(indexFile); }', 'markDirty(true); return W().durable(indexFile); }', 'fold deaf to the hold'), 'held-fold');
+  const rfg = await heldLeg(FG, 'held-fold-red');
+  ok(rfg.fold !== 'store-blocked', `⑫ RED CONTROL: fold() deaf to the hold — it answered «${rfg.fold}», not refused — the leg above would go red`, rfg);
+  const JG = M.load('src/channel-store.js', anchored(SRC, 'if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); askActs(); return W().durable(actsFile); },', 'askActs(); return W().durable(actsFile); },', 'journalDurable deaf to the hold'), 'held-jd');
+  const rjg = await heldLeg(JG, 'held-jd-red');
+  ok(rjg.jd !== 'store-blocked', `⑫ RED CONTROL: journalDurable() deaf to the hold — it answered «${rjg.jd}», not refused — the leg above would go red`, rjg);
   const red = await heldLeg(HM2, 'held-red');
   ok(red.lines > 0, `⑫ RED CONTROL: a journal deaf to the hold — the change outside an update made ${red.lines} journal line(s) beside the held index — the leg above would go red`, red);
 }
@@ -550,9 +568,310 @@ async function heldLandLeg(mod, tag, waitMs = 200) {
   ok(rf.afterFail === true, `⑮ (2) RED CONTROL: a row said landed on the writer's answer whatever it was — landed after a FAILED append (${rf.afterFail}) — the leg above would go red`, rf);
   const h = await heldLandLeg(CS, 'land-held');
   ok(h.landed === false && h.afBytes === 0, `⑮ (3) the family HELD: a row born outside an update is never said landed (${h.landed}); no journal byte written (${h.afBytes})`, h);
-  const MH = M.load('src/channel-store.js', anchored(anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'actOf deaf'), "    if (ixLoad.blocked) { warn('[channels] index-acts.ndjson not written: ' + ixLoad.blocked); return null; }", "    void 0;", 'produceActs deaf'), "      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),", "      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),", 'landed deaf'), 'land-held-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
+  const MH = M.load('src/channel-store.js', anchored(anchored(anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'actOf deaf'), "    if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }", "    void 0;", 'produceActs deaf'), "      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),", "      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),", 'landed deaf'), "if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; }", "if (closed || !o.size) return;", 'the outside road deaf'), 'land-held-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
   const rh = await heldLandLeg(MH, 'land-held-red', 2500);
   ok(rh.landed === true || rh.afBytes > 0, `⑮ (3) RED CONTROL: a journal deaf to the hold — a line written beside the held index (${rh.afBytes} bytes) and the row said landed (${rh.landed}) — the leg above would go red`, rh);
+}
+// ═══ ⑬ THE FOLLOW (主开发 r1542 (2)): the roads the round found without a red control ═══
+console.log('⑬ the LATER road, the byte bound alone, a row changed before its touch, the guard at a produce, a thrown fn, the purge\'s failure');
+// (a) LAW 10's LATER ROAD: 24 durable acts fired at once, ~4 KB each, under a 64 KB bound — their lines pass the bound before the
+// journal's first write; each act must be answered only when its row is ON DISK (the fold carries the lines). RED: a capped job.
+async function laterLeg(mod, tag) {
+  const dir = tmp(tag), said = [], w = SW.create({ log: quiet });
+  const st = mod.createChannelStore({ dir, log: { ...quiet, warn: (l) => said.push(String(l)) }, writer: w, actsMaxBytes: 64 * 1024 });
+  await seed(st, 40);
+  const big = 'x'.repeat(4000), seen = [];
+  const ps = [];
+  for (let i = 0; i < 24; i++) ps.push(st.index.update(() => { st.index.entry('a', `c${i}`).note = big + i; }, { durable: true }).then(() => { const m = familyMap(kill(dir, `${tag}-at`)) || {}; seen.push(!!(m[`a/c${i}`] && m[`a/c${i}`].note === big + i)); }, (e) => { seen.push((e && e.code) || 'threw'); }));
+  await Promise.all(ps);
+  const writes = st.index.flushStats().writes, owedSaid = said.filter((l) => /kept in memory, not on disk yet/.test(l)).length;
+  try { st.close(); } catch { } try { w.stop(); } catch { }
+  return { onDisk: seen.filter((x) => x === true).length, answers: seen.length, writes, owedSaid, other: seen.filter((x) => x !== true).slice(0, 3) };
+}
+// (b) LAW 4's BYTE BOUND ALONE: 100 rows (under the 128 the 64 KB bound allows) whose lines pass 64 KB — one whole write owed,
+// nothing journaled. RED: only the byte bound removed.
+async function byteLeg(mod, tag) {
+  const dir = tmp(tag), o = open(mod, dir, { actsMaxBytes: 64 * 1024 });
+  await seed(o.st, 200);
+  const f0 = o.st.index.flushStats(), j0 = f0.journaled || 0, b0 = f0.bursts || 0;
+  await o.st.index.update(() => { for (let i = 0; i < 100; i++) o.st.index.entry('a', `c${i}`).note = 'y'.repeat(1000) + i; });
+  const f1 = o.st.index.flushStats(), js = o.st.index.journalStats();
+  shut(o);
+  return { journaled: (f1.journaled || 0) - j0, bursts: (f1.bursts || 0) - b0, wholeOwed: js.wholeOwed > 0 };
+}
+// (d) ⑪'s GUARD AT A PRODUCE: an update whose fn awaits a whole write (a produce re-lays the row it changed) while index.json
+// cannot be written — the row must still reach the journal. RED: serializeChunk without the guard (its print taken at the produce).
+async function guardLeg(mod, tag) {
+  const dir = tmp(tag), w = SW.create({ log: quiet, workerPath: STANDJ });
+  const st = mod.createChannelStore({ dir, log: quiet, writer: w });
+  await seed(st, 40);
+  fs.writeFileSync(path.join(dir, 'blockix'), '1');   // from here index.json is unwritable
+  await st.index.update(async () => { st.index.entry('a', 'c5').title = 'changed-in-flight'; await st.index.fold().catch(() => false); });
+  await st.index.journalDurable().catch(() => false);
+  const k = kill(dir, tag); try { fs.rmSync(path.join(k, 'blockix'), { force: true }); } catch { }
+  const m = familyMap(k) || {};
+  try { st.close(); } catch { } try { w.stop(); } catch { }
+  return { kept: !!(m['a/c5'] && m['a/c5'].title === 'changed-in-flight') };
+}
+// (e) A FN THAT THROWS after changing a row: what it changed is journaled. RED: afterThrow without its compare.
+async function throwLeg(mod, tag) {
+  const dir = tmp(tag), o = open(mod, dir);
+  await seed(o.st, 40);
+  await o.st.index.update(() => { o.st.index.entry('a', 'c7').title = 'before-the-throw'; throw new Error('the fn threw'); }).catch(() => { });
+  await o.st.index.journalDurable();
+  const m = familyMap(kill(dir, tag)) || {};
+  shut(o);
+  return { kept: !!(m['a/c7'] && m['a/c7'].title === 'before-the-throw') };
+}
+// (f) THE PURGE'S FAILURE THROUGH THE REAL ROAD: an account that forgets its data (fake-poll given purge-on-remove), removed by
+// the engine's own remove() → removeRecord → purgeIfDeclared, whose journal the storage does not rewrite now (the store's
+// journalDurable answers false). The PERSON's reply says it (r1542 (1)), the log says it, the audit row is 'purge-owed'.
+// CONTROL: the same road with the compaction landed — a plain reply, the audit 'purge'.
+async function purgeLeg(fails, tag) {
+  const D = path.join(ROOT, `p-${tag}`); fs.cpSync(TPL_E, D, { recursive: true });
+  const caps = FAKE.fakePoll.caps, had = caps.retention, said = [], audits = [];
+  caps.retention = 'purge-on-remove';
+  try {
+    const clock = { t: TE };
+    const e = ENG.create({ dataDir: D, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now: () => clock.t, log: { ...quiet, warn: (...a) => said.push(a.join(' ')) }, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], censusTimer: () => ({ cancel() {} }), walk: { syncRows: 1e9 } });
+    const a0 = e.store.audit; e.store.audit = (rec) => { audits.push(rec); return a0 ? a0.call(e.store, rec) : undefined; };
+    e.store.index.journalDurable = () => Promise.resolve(!fails);   // the storage's answer to the compaction
+    let reply = null; try { reply = await e.remove(AE); } catch (err) { reply = { threw: (err && err.message) || String(err) }; }
+    try { e.stop(); } catch { } try { await e.store.close?.(); } catch { }
+    return { reply, owed: audits.some((x) => x && x.op === 'purge-owed'), clean: audits.some((x) => x && x.op === 'purge'), said: said.some((l) => /could not be rewritten now/.test(l)) };
+  } finally { if (had === undefined) delete caps.retention; else caps.retention = had; }
+}
+{
+  const r = await laterLeg(CS, 'later');
+  ok(r.answers === 24 && r.onDisk === 24 && r.owedSaid === 1, `⑬ (a) LAW 10's LATER ROAD: 24 durable acts past the 64 KB bound at once — ${r.onDisk} of ${r.answers} answered with their row on disk (the fold carried them: ${r.writes} whole writes); «kept in memory» said ${r.owedSaid} time(s)`, r);
+  const CAP = M.load('src/channel-store.js', anchored(SRC, 'if (all > ACTS_MAX_BYTES) { askFold(); return (LATER); } }', 'if (all > ACTS_MAX_BYTES && !compactOwed) { let b = 0; const cut = []; for (const x of actLines) { if (x.seq <= appendedSeq) continue; if (b + lb(x) > ACTS_MAX_BYTES) break; b += lb(x); cut.push(x); } if (cut.length) { actsWriting = { compact: false, upTo: cut[cut.length - 1].seq }; return { append: cut.map((x) => x.text).join(\'\') }; } } }', 'a capped journal job'), 'later-capped');
+  const rc = await laterLeg(CAP, 'later-red');
+  ok(rc.onDisk < rc.answers, `⑬ (a) RED CONTROL: a CAPPED journal job (the first read's must) — ${rc.answers - rc.onDisk} of ${rc.answers} durable acts answered before their row was on disk — the leg above would go red`, rc);
+  const b = await byteLeg(CS, 'bytes');
+  ok(b.journaled === 0 && b.bursts === 1 && b.wholeOwed, `⑬ (b) LAW 4's BYTE BOUND ALONE: 100 rows (under the row bound) whose lines pass 64 KB — ${b.journaled} journaled, ${b.bursts} burst, the whole write owed (${b.wholeOwed})`, b);
+  const BM = M.load('src/channel-store.js', anchored(SRC, "      if (bytes > BURST_BYTES) { flushStats.bursts = (flushStats.bursts || 0) + 1; return 'whole'; }", "      void 0;", 'the byte bound removed'), 'bytes-gone');
+  const br = await byteLeg(BM, 'bytes-red');
+  ok(br.journaled === 100, `⑬ (b) RED CONTROL: only the byte bound removed — the 100 rows journaled (${br.journaled}) — the leg above would go red`, br);
+  const TOUCH_LINE = SRC.split('\n').find((l) => l.startsWith('    if (curTouch) { curTouch.add(key); }'));
+  const TM = M.load('src/channel-store.js', anchored(SRC, TOUCH_LINE, TOUCH_LINE.replace('curTouch.add(key); }', 'curTouch.add(key); { const v0 = ix.conversations[key]; const l0 = v0 ? rowLine(key, v0) : null; if (l0 !== null) rowFp.set(key, fpOf(l0)); } }'), 'the print taken at the touch (the release\'s before)'), 'before-at-touch');
+  const tr3 = await lawThree(TM, 'three-red');
+  ok(!tr3.hazard, `⑬ (c) RED CONTROL for ②'s second half: the print taken at the TOUCH (the release's «before») — the row changed before its touch is lost (${tr3.hazard}) — ② would go red`, tr3);
+  const g = await guardLeg(CS, 'guard');
+  ok(g.kept, `⑬ (d) ⑪'s GUARD: a produce inside an update's await re-laid the row it changed while index.json could not be written — the row reached the journal (${g.kept})`, g);
+  const GM = M.load('src/channel-store.js', anchored(SRC, 'if (curTouch && curTouch.has(k)) rowFp.delete(k); else rowFp.set(k, fpOf(line)); }', 'rowFp.set(k, fpOf(line)); }', 'the guard removed'), 'guard-gone');
+  const gr = await guardLeg(GM, 'guard-red');
+  ok(!gr.kept, `⑬ (d) RED CONTROL: serializeChunk without the guard — its print taken at the produce, the change read as quiet and lost (${gr.kept}) — the leg above would go red`, gr);
+  const t = await throwLeg(CS, 'throw');
+  ok(t.kept, `⑬ (e) A FN THAT THREW after changing a row: the row reached the journal (${t.kept})`, t);
+  const XM = M.load('src/channel-store.js', anchored(SRC, "      const afterThrow = () => { done(); if (!closed) { const k = actOf(t, false); if (k === 'whole') oweWhole(); } };", "      const afterThrow = () => { done(); };", 'afterThrow without its compare'), 'throw-bare');
+  const tx = await throwLeg(XM, 'throw-red');
+  ok(!tx.kept, `⑬ (e) RED CONTROL: afterThrow without its compare — the row is lost (${tx.kept}) — the leg above would go red`, tx);
+  const pf = await purgeLeg(true, 'purge-fails');
+  ok(pf.reply && pf.reply.removed === true && pf.reply.journalOwed === true && /not erased from disk yet/.test(pf.reply.note || '') && pf.owed && !pf.clean && pf.said, `⑬ (f) THE PURGE'S FAILURE through the real remove(): the person's reply says it (journalOwed ${pf.reply && pf.reply.journalOwed}: «${pf.reply && pf.reply.note}»), the audit row is 'purge-owed' (${pf.owed}), the log says it (${pf.said})`, pf);
+  const pc = await purgeLeg(false, 'purge-lands');
+  ok(pc.reply && pc.reply.removed === true && !pc.reply.journalOwed && pc.clean && !pc.owed, `⑬ (f) CONTROL: the same road with the compaction landed — a plain reply (journalOwed ${pc.reply && pc.reply.journalOwed}), the audit row 'purge' (${pc.clean})`, pc);
+}
+
+// ═══ ⑭ THE STOP (主开发 r1542 (3)): paced lines owed at a SIGTERM are on disk after it ═══
+console.log('⑭ a SIGTERM with paced journal lines owed — the exit\'s passes write them');
+// A child process of this suite opens a store on the process's own writer, makes ten PACED changes (their lines owed: the
+// pace's 500 ms not run) and sends ITSELF SIGTERM in the same turn (no timing between two processes). The child's handler runs the hub's shutdown
+// order (server.js: beginExit, the rank-0 pass, … , the last pass over every store, exit). RED: an exit after the rank-0
+// pass alone (paced lines are rank 1).
+const STOPJ = path.join(ROOT, 'stopj.cjs');
+fs.writeFileSync(STOPJ, `'use strict';
+const CS = require(${JSON.stringify(path.join(REPO, 'src/channel-store.js'))}), SW = require(${JSON.stringify(path.join(REPO, 'src/store-writer.js'))});
+const [dir, mode] = process.argv.slice(2), quiet = { log() {}, info() {}, warn() {}, error() {} };
+const st = CS.createChannelStore({ dir, log: quiet });
+process.on('SIGTERM', () => { const SW0 = SW.storeWriter(); SW0.beginExit(); SW0.exitFlush({ only: 'rank0' }); const tDebt = Date.now(); if (mode !== 'rank0-only') SW0.exitFlush({ debtMs: Date.now() - tDebt }); process.exit(0); });
+(async () => {
+  await st.index.update(() => { for (let i = 0; i < 40; i++) Object.assign(st.index.entry('a', 'c' + i), { title: 't' + i }); }); st.index.flush();
+  for (let i = 0; i < 10; i++) await st.index.update(() => { st.index.entry('a', 'c' + i).note = 'paced-' + i; });
+  process.stdout.write('READY\\n');
+  process.kill(process.pid, 'SIGTERM');   // in the same turn as the changes: their lines are owed (the pace's 500 ms never ran)
+  setInterval(() => {}, 1000);
+})();
+`);
+async function stopLeg(mode, tag) {
+  const dir = tmp(tag);
+  const { spawn } = await import('node:child_process');
+  const ch = spawn(process.execPath, [STOPJ, dir, mode], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '', err = '';
+  ch.stderr.on('data', (d) => { err += d; });
+  const deadline = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 20000);   // a child that hangs never hangs the suite
+  ch.stdout.on('data', (d) => { out += d; });
+  const code = await new Promise((res) => { if (ch.exitCode !== null) res(ch.exitCode); else ch.on('exit', (c) => res(c)); });
+  clearTimeout(deadline);
+  const m = familyMap(dir) || {};
+  let kept = 0; for (let i = 0; i < 10; i++) if (m[`a/c${i}`] && m[`a/c${i}`].note === `paced-${i}`) kept++;
+  return { ready: /READY/.test(out), code, kept, err: err.slice(0, 300) };
+}
+{
+  const r = await stopLeg('hub', 'stop');
+  ok(r.ready && r.code === 0 && r.kept === 10, `⑭ THE STOP: a SIGTERM with ten PACED journal lines owed — after the hub's exit passes ${r.kept} of 10 changes are on disk (exit ${r.code})`, r);
+  const red = await stopLeg('rank0-only', 'stop-red');
+  ok(red.ready && red.kept < 10, `⑭ RED CONTROL: an exit after the rank-0 pass alone — ${red.kept} of 10 paced changes on disk (paced lines are rank 1) — the leg above would go red`, red);
+  const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const i0 = srv.indexOf("SW0.beginExit(); SW0.exitFlush({ only: 'rank0' });"), i1 = srv.indexOf("storeWriter().exitFlush({ debtMs: Date.now() - tDebt }); } catch {} process.exit(", i0);
+  ok(i0 > 0 && i1 > i0, '⑭ the hub\'s shutdown (server.js) runs that order: beginExit and the rank-0 pass, then the last pass over every store before its exit');
+}
+
+// ═══ ⑯ THE INDEX APPEARS MID-LIFE (主开发 r1763 (3)): the older life's journal stays byte for byte ═══
+console.log('⑯ an index read missing, its journal replayed, then the index appears — no journal write after');
+async function appearLeg(mod, tag) {
+  const dir = tmp(tag), af = path.join(dir, 'index-acts.ndjson'), ixf = path.join(dir, 'index.json');
+  // a journal of an older life and NO index.json (a mount that came late): its lines replayed at the load; one line cut short ⇒
+  // a compaction owed — a journal write that must never run once the index is held
+  fs.writeFileSync(af, [JSON.stringify({ seq: 1, rows: { 'a/old-1': { title: 'older life 1' } } }), JSON.stringify({ seq: 2, rows: { 'a/old-2': { title: 'older life 2' } } }), '{"seq":3,"rows":{"a/old-3"'].join('\n') + '\n');
+  const af0 = fs.readFileSync(af);
+  const o = open(mod, dir);
+  const replayed = !!o.st.index.peek('a/old-1');
+  fs.writeFileSync(ixf, JSON.stringify({ v: 1, conversations: { 'a/late': { title: 'the late mount' } } }));   // the index APPEARS
+  const first = await o.st.index.update(() => { o.st.index.entry('a', 'n-1').title = 'new'; }, { durable: true }).then(() => 'applied', (e) => (e && e.code) || 'refused');   // its exclusive create meets the file
+  const held = !!o.st.index.blocked();
+  const jd = await o.st.index.journalDurable().then(() => 'landed', (e) => (e && e.code) || 'refused');
+  await o.st.index.durable().catch(() => false);
+  try { o.st.index.entry('a', 'n-2').title = 'outside an update'; } catch { }
+  await new Promise((z) => setTimeout(z, 700));   // past the pace: a journal write asked would have run
+  try { o.st.index.flush(); } catch { }
+  shut(o);
+  let ixKept = false; try { ixKept = !!JSON.parse(read(ixf)).conversations['a/late']; } catch { }
+  return { replayed, first, held, jd, afSame: fs.readFileSync(af).equals(af0), ixKept };
+}
+{
+  const r = await appearLeg(CS, 'appear');
+  ok(r.replayed && r.first !== 'applied' && r.held && r.jd === 'store-blocked' && r.afSame && r.ixKept, `⑯ THE INDEX APPEARED mid-life (read missing, its journal replayed: ${r.replayed}): the act refused at its exclusive write (${r.first}), the family held (${r.held}), journalDurable() ${r.jd}; after durable(), a change outside an update and the stop, the older life's journal is byte for byte (${r.afSame}) and the appeared index kept (${r.ixKept})`, r);
+  // the moved form (B-f276 1c on the train): produceActs holds an APPEARED index by 1c's own answer (EEXIST, by name) before
+  // the held road's LATER — this scene IS the appeared case, so the deaf copy cuts both
+  const DM = M.load('src/channel-store.js', anchored(anchored(anchored(anchored(SRC, 'if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); askActs(); return W().durable(actsFile); },', 'askActs(); return W().durable(actsFile); },', 'jd deaf'), '  function askActs() { if (closed || ixLoad.blocked) return;', '  function askActs() { if (closed) return;', 'askActs deaf'), '    if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }', '    void 0;', 'produceActs deaf'), "    if (ixLoad.blocked && ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST' });", '    void 0;', 'produceActs deaf to an appeared index (1c\'s answer)'), 'appear-deaf');
+  const rd = await appearLeg(DM, 'appear-red');
+  ok(!rd.afSame, `⑯ RED CONTROL: the compaction's road deaf to the hold (the journal's wait, askActs and produceActs' two guards: 1c's answer for an appeared index and the held road) — the older life's journal rewritten (${!rd.afSame}) — the leg above would go red`, rd);
+}
+
+// ═══ ⑰ THE LANDING'S ROADS (主开发 r1850) ═══
+console.log('⑰ the landing: a birth after a produced whole write, a rebirth with its old line in flight, the boot, the whole road, the order, the hold');
+const pause = (ms) => new Promise((z) => setTimeout(z, ms));
+const waitFor = async (f, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (f()) return true; await pause(10); } return false; };
+const standSt = (mod, dir, opts = {}) => { const w = SW.create({ log: quiet, workerPath: STANDJ }); return { w, st: mod.createChannelStore({ dir, log: quiet, writer: w, ...opts }) }; };
+const stopSt = (o) => { try { o.st.close(); } catch { } try { o.w.stop(); } catch { } };
+// (1) a row purged AFTER a whole write was produced and born again BEFORE it lands: that landing carries the OLD row
+async function producedLeg(mod, tag) {
+  const dir = tmp(tag), o = standSt(mod, dir);
+  await seed(o.st, 20);
+  fs.writeFileSync(path.join(dir, 'stallix'), '1'); fs.writeFileSync(path.join(dir, 'stall'), '1');
+  await o.st.index.update(() => { o.st.index.entry('a', 'x').title = 'v1'; });   // born: its line made
+  const f = o.st.index.fold();   // a whole write PRODUCED now (it carries v1), held in flight
+  await waitFor(() => !o.st.index.isDirty(), 2000);
+  await o.st.index.update((ix) => { delete ix.conversations['a/x']; });   // purged
+  await o.st.index.update(() => { o.st.index.entry('a', 'x').title = 'v2'; });   // born AGAIN
+  fs.unlinkSync(path.join(dir, 'stallix'));
+  await f.catch(() => false);   // the produced write (v1) landed
+  const afterOld = o.st.index.landed('a/x');
+  fs.unlinkSync(path.join(dir, 'stall'));
+  // the reborn row's old place was laid out by that produce, so its birth is a whole touch (entry(): «a row re-born before its old
+  // place was rewritten») — its road is the NEXT whole write, which lands it
+  await o.st.index.fold().catch(() => false);
+  const afterNew = o.st.index.landed('a/x');
+  stopSt(o);
+  return { afterOld, afterNew };
+}
+// (2a) purged and born again while its OLD line's append is in flight: unlanded until the NEW line is on disk
+async function rebornLeg(mod, tag) {
+  const dir = tmp(tag), o = standSt(mod, dir);
+  await seed(o.st, 20);
+  fs.writeFileSync(path.join(dir, 'stall'), '1');
+  await o.st.index.update(() => { o.st.index.entry('a', 'y').title = 'v1'; });   // born: line L1
+  const jd = o.st.index.journalDurable();   // L1's append in flight, held
+  await pause(100);
+  await o.st.index.update((ix) => { delete ix.conversations['a/y']; });   // purged
+  await o.st.index.update(() => { o.st.index.entry('a', 'y').title = 'v2'; });   // born again: line L2
+  fs.writeFileSync(path.join(dir, 'stall.pass'), '1');   // ONE held write passes: L1's
+  await jd.catch(() => false);
+  const afterOld = o.st.index.landed('a/y');
+  fs.unlinkSync(path.join(dir, 'stall'));
+  await o.st.index.journalDurable().catch(() => false);
+  await waitFor(() => o.st.index.landed('a/y'), 1500);
+  const afterNew = o.st.index.landed('a/y');
+  stopSt(o);
+  return { afterOld, afterNew };
+}
+// (2b) the boot: a row only in the journal, replayed at a new open, is said landed
+async function bootLeg(tag) {
+  const dir = tmp(tag), o = open(CS, dir);
+  await seed(o.st, 20);
+  await o.st.index.update(() => { o.st.index.entry('a', 'z').title = 'only in the journal'; });
+  await o.st.index.journalDurable();
+  const k = kill(dir, tag); shut(o);
+  const inIndex = !!(JSON.parse(read(path.join(k, 'index.json'))).conversations || {})['a/z'];
+  const o2 = open(CS, k); const landed = o2.st.index.landed('a/z'); shut(o2);
+  return { inIndex, landed };
+}
+// (2c) born rows carried by a WHOLE write (a burst past the row bound): landed only through the whole road
+async function wholeRoadLeg(tag) {
+  const dir = tmp(tag), o = standSt(CS, dir, { actsMaxBytes: 64 * 1024 });
+  await seed(o.st, 20);
+  fs.writeFileSync(path.join(dir, 'stallix'), '1');
+  await o.st.index.update(() => { for (let i = 0; i < 200; i++) o.st.index.entry('a', `b${i}`).title = 'burst ' + i; });   // 200 born: a burst
+  const f = o.st.index.fold();
+  await pause(100);
+  const during = o.st.index.landed('a/b7'), lines = o.st.index.journalStats().lines;
+  fs.unlinkSync(path.join(dir, 'stallix'));
+  await f.catch(() => false);
+  const after = o.st.index.landed('a/b7');
+  stopSt(o);
+  return { during, after, lines };
+}
+// (2d) the order numbers across a fold and a compaction: every line past the index's actsSeq, strictly rising, the next after them
+async function orderLeg(tag) {
+  const dir = tmp(tag), o = open(CS, dir);
+  await seed(o.st, 20);
+  for (let i = 0; i < 5; i++) await o.st.index.update(() => { o.st.index.entry('a', `c${i}`).unread = i + 1; });
+  await o.st.index.fold(); await o.st.index.journalDurable();   // the fold, then the compaction
+  for (let i = 0; i < 3; i++) await o.st.index.update(() => { o.st.index.entry('a', `c${i}`).unread = 100 + i; });
+  await o.st.index.journalDurable();
+  const held = Number(JSON.parse(read(path.join(dir, 'index.json'))).actsSeq) || 0;
+  const seqs = read(path.join(dir, 'index-acts.ndjson')).split('\n').filter(Boolean).map((l) => JSON.parse(l).seq);
+  const k = kill(dir, tag); shut(o);
+  const o2 = open(CS, k);
+  await o2.st.index.update(() => { o2.st.index.entry('a', 'c9').unread = 9; }); await o2.st.index.journalDurable();
+  const after = read(path.join(k, 'index-acts.ndjson')).split('\n').filter(Boolean).map((l) => JSON.parse(l).seq);
+  shut(o2);
+  return { held, seqs, next: after[after.length - 1], rising: seqs.every((x, i) => x > held && (i === 0 || x > seqs[i - 1])) };
+}
+// (3) the HOLD's own guard: a held family holding a row NOT in the unlanded set (replayed before the index appeared)
+async function heldAccessorLeg(mod, tag) {
+  const dir = tmp(tag), af = path.join(dir, 'index-acts.ndjson'), ixf = path.join(dir, 'index.json');
+  fs.writeFileSync(af, JSON.stringify({ seq: 1, rows: { 'a/old-1': { title: 'older life' } } }) + '\n');
+  const o = open(mod, dir);
+  const before = o.st.index.landed('a/old-1');   // replayed at the load: on disk, said landed
+  fs.writeFileSync(ixf, JSON.stringify({ v: 1, conversations: { 'a/late': { title: 'the late mount' } } }));   // the index APPEARS
+  await o.st.index.update(() => { o.st.index.entry('a', 'n-1').title = 'new'; }, { durable: true }).catch(() => false);
+  const held = !!o.st.index.blocked(), during = o.st.index.landed('a/old-1');
+  shut(o);
+  return { before, held, during };
+}
+{
+  const p1 = await producedLeg(CS, 'produced');
+  ok(p1.afterOld === false && p1.afterNew === true, `⑰ (1) a row purged after a whole write was produced and born again before it landed: that landing (the OLD row) leaves it unlanded (${p1.afterOld}); its new line on disk lands it (${p1.afterNew})`, p1);
+  const PM = M.load('src/channel-store.js', anchored(SRC, 'unlanded.add(key); bornSeq.delete(key); if (producedUnlanded) producedUnlanded.delete(key);', 'unlanded.add(key); bornSeq.delete(key);', 'the produced set kept at a birth'), 'produced-kept');
+  const p1r = await producedLeg(PM, 'produced-red');
+  ok(p1r.afterOld === true, `⑰ (1) RED CONTROL: the produced set kept at a birth — the old row's landing said the new one landed (${p1r.afterOld}) — the leg above would go red`, p1r);
+  const r2 = await rebornLeg(CS, 'reborn');
+  ok(r2.afterOld === false && r2.afterNew === true, `⑰ (2) purged and born again with its old line in flight: the old line's sync leaves it unlanded (${r2.afterOld}); the NEW line's lands it (${r2.afterNew})`, r2);
+  const RM = M.load('src/channel-store.js', anchored(SRC, 'unlanded.add(key); bornSeq.delete(key); if (producedUnlanded)', 'unlanded.add(key); if (producedUnlanded)', 'the map\'s reset removed'), 'reborn-kept');
+  const r2r = await rebornLeg(RM, 'reborn-red');
+  ok(r2r.afterOld === true, `⑰ (2) RED CONTROL: the map's reset removed — the OLD line's sync said the reborn row landed (${r2r.afterOld}) — the leg above would go red`, r2r);
+  const b = await bootLeg('boot');
+  ok(!b.inIndex && b.landed === true, `⑰ (2) THE BOOT: a row only in the journal (not in index.json: ${!b.inIndex}), replayed at a new open, is said landed (${b.landed})`, b);
+  const wr = await wholeRoadLeg('whole-road');
+  ok(wr.during === false && wr.after === true && wr.lines === 0, `⑰ (2) born rows carried by a WHOLE write (a burst: ${wr.lines} journal lines): unlanded while it is in flight (${wr.during}), landed when it lands (${wr.after})`, wr);
+  const od = await orderLeg('order');
+  ok(od.rising && od.seqs.length === 3 && od.next === od.seqs[od.seqs.length - 1] + 1, `⑰ (2) THE ORDER across a fold and a compaction: the journal's lines ${JSON.stringify(od.seqs)} all past the index's actsSeq ${od.held}, strictly rising; after a reopen the next is ${od.next}`, od);
+  const h = await heldAccessorLeg(CS, 'held-accessor');
+  ok(h.before === true && h.held && h.during === false, `⑰ (3) THE HOLD's own guard: a row replayed before the index appeared (landed: ${h.before}) is not said landed once the family is held (${h.during})`, h);
+  const HA = M.load('src/channel-store.js', anchored(SRC, '      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),', '      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),', 'the accessor deaf to the hold'), 'held-accessor-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
+  const hr = await heldAccessorLeg(HA, 'held-accessor-red');
+  ok(hr.during === true, `⑰ (3) RED CONTROL: the accessor deaf to the hold — the replayed row said landed while the family is held (${hr.during}) — the leg above would go red`, hr);
 }
 
 // ═══ ⑱ A STAMP WRITTEN INTO A ROW IS HEALED AT THE UPDATE'S END (主开发 r2081) ═══
