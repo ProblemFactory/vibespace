@@ -1390,7 +1390,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (verb === 'text') {
       if (!body.ref) throw namedError('bad-request', 'text needs a ref (@e7) — one node of the last snapshot');
       const e = refEntry();
-      held();
+      held(); // no-await-before: the door's synchronous read (r1623) or the post-probe re-check precedes it with no await between (r1852)
       const r = await wt.actOnNode({ entry: e, verb: 'text', maxBytes: body.maxBytes, env: base, ...helperOpts() });
       // r2 (主开发 r1219, THE MUST): a READ hands bytes back — the SAME re-check after the helper's await as the snapshot's
       // (the stillHeld law): a take-over or a revoke while the helper read ⇒ the text is DROPPED, refused by name
