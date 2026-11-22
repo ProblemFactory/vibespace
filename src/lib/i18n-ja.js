@@ -2679,6 +2679,7 @@ export default {
   "Start empty…": "空から始める…",
   "Changes to {what} are not being saved: the storage refused the write. They are kept here and written again by themselves.": "{what}への変更が保存されていません：ストレージが書き込みを拒否しました。変更はここに残り、自動でもう一度書き込まれます。",
   "the rollback points of your desktops": "あなたのデスクトップのロールバックポイント", // B-225b's remainder (login-request-card)
+  "Noted here, but VibeSpace could not record it yet: the storage did not take the write. It is told again at the next start.": "ここでは確認済みですが、VibeSpace はまだ記録できません：ストレージが書き込みを受け付けませんでした。次回の起動時にもう一度お知らせします。",   // B-225b follow (login-request-card)
   "The rollback points of your desktops are not saved yet: the storage has not taken the write in time.": "あなたのデスクトップのロールバックポイントはまだ保存されていません：ストレージが時間内に書き込みを受け付けませんでした。", // B-225b's remainder (login-request-card)
   "The rollback points of your desktops are not being saved: the storage refused the write; the points made meanwhile are lost.": "あなたのデスクトップのロールバックポイントが保存されていません：ストレージが書き込みを拒否しました。その間のポイントは失われました。", // B-225b's remainder (login-request-card)
   "When VibeSpace last stopped, your latest desktop changes (made after {time}) had not reached the disk in time. The desktops shown are the last ones saved.": "VibeSpace が前回停止したとき、最近のデスクトップの変更（{time} 以降のもの）は時間内にディスクへ書き込まれていませんでした。表示されているのは最後に保存されたデスクトップです。", // B-225b's remainder (login-request-card)

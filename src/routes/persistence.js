@@ -114,6 +114,8 @@ function stampOfRead(doc, text) {
   const body = at > 0 ? text.slice(0, at) + '\n}' : typeof text === 'string' && text.startsWith(`{\n  "${STAMP}": `) ? '{}' : null;   // (a doc whose only name is the stamp)
   return { stamp: st, trusted: body !== null && typeof st.sum === 'string' && sumOf(body) === st.sum };
 }
+/** PURE: the mark names exactly the stamp the file carries (its run's start, or its last landing) — the KNOWN test (r1387 (3)) */
+function markNamesStamp(m, st) { return !!m && (m.base == null ? st == null : (!!st && m.base.run === st.run && Number(m.base.seq) === Number(st.seq))); }
 /** THE START'S VERDICT ON THE LAST STOP (PURE, 主开发 r1318 — two strengths, not one; r1387 (3) the mark's base) → null | { kind: 'known', since, savedAt, cause } |
  *  { kind: 'maynot', savedAt }.
  *   KNOWN: the last run's own owed mark (`mark` {run, seq, since}: written when a write could not land) is of the SAME run as the
@@ -123,8 +125,6 @@ function stampOfRead(doc, text) {
  *     after it had landed a write: said once and quietly, gone at this run's first landed write, never carried. A run that landed
  *     NOTHING and whose mark was refused too leaves the older run's clean stamp: nothing is told (no second storage could say it).
  *   Nothing: no stamp (a file this version never wrote), a stamp another reader kept (`trusted` false), a clean stop. */
-/** PURE: the mark names exactly the stamp the file carries (its run's start, or its last landing) — the KNOWN test (r1387 (3)) */
-function markNamesStamp(m, st) { return !!m && (m.base == null ? st == null : (!!st && m.base.run === st.run && Number(m.base.seq) === Number(st.seq))); }
 function stopVerdict({ stamp, trusted, mark }) {
   if (stamp && !trusted) return null;   // another reader rewrote the bytes under the stamp: it says nothing
   const st = stamp || null, m = mark && typeof mark === 'object' && 'base' in mark ? mark : null;
@@ -132,7 +132,11 @@ function stopVerdict({ stamp, trusted, mark }) {
   // when the file still carries exactly that stamp, nothing that run owed ever landed — whatever the stamp's `stop` says (a run whose
   // every write was refused leaves the older run's clean stamp beside its mark); a base that no longer matches is a stale mark: silent
   if (m && markNamesStamp(m, st)) {
-    return { kind: 'known', since: Number(m.since) || null, savedAt: st ? Number(st.at) || null : null, cause: m.code === 'queued' ? 'late' : 'refused' };
+    // r1798 (2): a mark this run wrote over the last run's KNOWN loss nobody noted CARRIES it (`prior`): the earliest moment is told,
+    // and a refusal outranks lateness — the older loss is never told with this run's time and cause
+    const pr = m.prior && typeof m.prior === 'object' ? m.prior : null, own = Number(m.since) || null, old = pr ? Number(pr.since) || null : null;
+    const late = m.code === 'queued' && (!pr || pr.cause === 'late');
+    return { kind: 'known', since: old && (!own || old < own) ? old : own, savedAt: st ? Number(st.at) || null : null, cause: late ? 'late' : 'refused' };
   }
   if (!st) return null;
   const savedAt = Number(st.at) || null;
@@ -233,6 +237,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _judgedSeq = 0;            // r1595 (a): the last seq of bytes made BEFORE the verdict (they carry no `unnoted`)
   let _oldKnown = null;          // r1595 (a): the last run's mark when it IS the KNOWN verdict — it follows this run's landings of such bytes
   let _startUnnoted = null;      // a KNOWN loss the start's own stamp carries: bytes made before the verdict carry it on (its road's (a))
+  let _pressPending = null;      // r1798 (1)/(2): a loss the person noted whose note has not landed yet — it is still the loss to carry
   let _judgedResolve = null;
   const _stopJudgedP = new Promise((r) => { _judgedResolve = r; });
   let _markChain = Promise.resolve();
@@ -246,7 +251,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (!live()) { m.trying = false; return; }   // the episode is over already
       const markTmp = `${OWED_MARK}.${process.pid}.tmp`;
       try {
-        await fs.promises.writeFile(markTmp, JSON.stringify({ run: m.run, seq: m.seq, since: m.since, base: m.base, code: m.code }));
+        await fs.promises.writeFile(markTmp, JSON.stringify({ run: m.run, seq: m.seq, since: m.since, base: m.base, code: m.code, ...(m.prior ? { prior: m.prior } : {}) }));
         await fs.promises.rename(markTmp, OWED_MARK);
         m.written = true;
         if (!live()) await fs.promises.unlink(OWED_MARK).catch(() => {});   // over while it was written: the removal is the last word
@@ -262,6 +267,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function markOver() {
     if (!_mark) return;
     _mark = null;
+    // r1798 (2): this run's episode wrote its mark over the last run's KNOWN mark that was following this run's landings — its end
+    // (landed, or ended by name) puts that mark back on the file's stamp, never only removes it (a kill would read «may not» or nothing)
+    if (_oldKnown && !_oldMarkGone && _markJudged) { followOld(_lastLanded ? { run: _lastLanded.run, seq: _lastLanded.seq } : null); return; }
     _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {}));
   }
   /** THE VERDICT, once the file's stamp is known (the first read with bytes) and the last run's mark is read (off the loop): every page
@@ -276,6 +284,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       _markJudged = true; _judgedSeq = _vsSeq;
       _oldKnown = v && v.kind === 'known' && markNamesStamp(mk, (st && st.trusted && st.stamp) || null) ? mk : null;
       if (_landedThisRun) oldMarkAfterLanding();   // a landing came first: judged only now
+      if (_mark && v && v.kind === 'known' && !_mark.prior) { _mark = { ..._mark, prior: { since: v.since, cause: v.cause }, written: false, trying: false }; writeMark(); }   // r1798 (2): an episode begun before the verdict
       if (v && !(v.kind === 'maynot' && _landedThisRun)) {   // (b) goes by itself at this run's first landing — even one before the verdict
         _stopFact = v;
         const when = (ms) => (ms ? new Date(ms).toISOString() : 'an unknown time');
@@ -309,7 +318,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     onSaved: (u) => { console.log(`[layouts] ${u.file} is written again — the desktops kept since ${new Date(u.since).toISOString()} are on disk`); storeWord('store-saved', { file: u.file }); },
     onOwedRefused: (e) => { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); },
     // B-225b's remainder: an owed episode's MARK (written off the loop at its first failure, removed when it is over)
-    onOwedBegin: (o) => { _mark = { run: RUN, seq: _vsSeq, since: (o && o.since) || Date.now(), base: _lastLanded ? { ..._lastLanded } : null, code: (o && o.code) || null, written: false, trying: false }; writeMark(); },
+    onOwedBegin: (o) => { _mark = { run: RUN, seq: _vsSeq, since: (o && o.since) || Date.now(), base: _lastLanded ? { ..._lastLanded } : null, code: (o && o.code) || null, prior: priorLoss(), written: false, trying: false }; writeMark(); },   // (r1798 (2): it carries the last run's loss nobody noted)
     onOwedOver: (o) => { markOver(); if (o && o.landed) { _lastLanded = { run: RUN, seq: _producedSeq }; layoutsLanded(); } },   // (the ladder's landing tells no onLanded: its stamp is the base all the same)
     // r1387 (1): EVERY landing of the desktops — an autosave nobody waits on too (landLayouts keeps no waiter for it) — is told here
     onLanded: () => { _lastLanded = { run: RUN, seq: _producedSeq }; layoutsLanded(); },
@@ -467,14 +476,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
    *  goes. Bytes made BEFORE it carry none: a KNOWN loss's mark FOLLOWS that landing (its base is the file's stamp now — kept as it
    *  was, it would name a stamp the file no longer has and read «may not»), written off the loop by the mark's one writer, so a kill
    *  before the next landing still reads KNOWN. Any other verdict: the mark goes. */
+  /** the last run's KNOWN mark, written again on `base` (the file's stamp now) by the mark's one writer, off the loop */
+  function followOld(base) {
+    const m = { run: _oldKnown.run, seq: _oldKnown.seq, since: _oldKnown.since, code: _oldKnown.code, base, ...(_oldKnown.prior ? { prior: _oldKnown.prior } : {}), written: false, trying: false };
+    _oldKnown = m;
+    writeMark(m, () => _oldKnown === m && !_oldMarkGone && !_mark);
+  }
+  /** r1798 (2): the last run's KNOWN loss nobody noted, for this run's own mark to carry ({since, cause}), or null */
+  function priorLoss() { const f = _stopFact && _stopFact.kind === 'known' ? _stopFact : _pressPending; return f ? { since: f.since, cause: f.cause } : null; }
   function oldMarkAfterLanding() {
     if (_oldMarkGone || !_markJudged || _mark) return;
-    if (_oldKnown && _producedSeq <= _judgedSeq && _lastLanded && _lastLanded.run === RUN) {
-      const m = { run: _oldKnown.run, seq: _oldKnown.seq, since: _oldKnown.since, code: _oldKnown.code, base: { run: _lastLanded.run, seq: _lastLanded.seq }, written: false, trying: false };
-      _oldKnown = m;
-      writeMark(m, () => _oldKnown === m && !_oldMarkGone && !_mark);
-      return;
-    }
+    if (_oldKnown && _producedSeq <= _judgedSeq && _lastLanded && _lastLanded.run === RUN) { followOld({ run: _lastLanded.run, seq: _lastLanded.seq }); return; }
     _oldMarkGone = true; _oldKnown = null; _markChain = _markChain.then(() => fs.promises.unlink(OWED_MARK).catch(() => {}));
   }
   // ── LAYOUT HISTORY (2.296.0, after a bug flattened a user's whole desktop
@@ -2012,14 +2024,23 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   });
   // B-225b's remainder (r1318 (a)): a PERSON notes the last stop's loss — «Understood» on the strip, every page told; a KNOWN loss then
   // rides no further write. Only the person, on this page (the tree's one verdict: an agent's bearer never dismisses the person's notice)
-  router.post('/api/stores/layouts.json/stop-noted', (req, res) => {
+  router.post('/api/stores/layouts.json/stop-noted', async (req, res) => {
     const why = require('../write-origin.js').ownerPageWhy(req);
     if (why) return res.status(403).json({ error: 'only the person, on this VibeSpace page, notes what the last stop lost', code: 'store_person_only', why });
     const was = _stopFact;
     _stopFact = null;
     if (was) { console.log(`[layouts] the last stop's notice (${was.kind}) was noted by the person`); storeWord('store-stop-over', { file: 'layouts.json', why: 'noted' }); }
-    if (was && was.kind === 'known' && _layoutsRead) { try { flushLayouts(); } catch { /* a held store writes nothing: its own hold says so */ } }   // r1595 (b): the note lands — a kill after the press never tells it again
-    res.json({ success: true, noted: !!was });
+    // r1595 (b): the note LANDS — a kill after the press never tells it again. r1798 (1): the press is told the truth: the reply waits for
+    // that write (within the door's bound); a store held unread, or a write that did not land, answers `recorded: false` (it is told
+    // again at the next start — right; the person's page says so)
+    let recorded = true;
+    if (was && was.kind === 'known') {
+      _pressPending = was;   // (a refused note's write begins an episode: its mark carries this loss, never this run's time for it)
+      recorded = !_layoutsRead || !_layoutsCache ? false : await new Promise((resolve) => { try { flushLayouts({ press: true }, (ok) => resolve(ok === true)); } catch { resolve(false); } });
+      if (recorded && _pressPending === was) _pressPending = null;
+      if (!recorded) console.warn('[layouts] the person noted the last stop\'s loss, but the note could not be written yet — it is told again at the next start');
+    }
+    res.json({ success: true, noted: !!was, recorded });
   });
   // the person's choice of an EMPTY store for a damaged one (R5, beside the rollback point and the import): set aside, then read again
   router.post('/api/stores/:file/empty', (req, res) => {

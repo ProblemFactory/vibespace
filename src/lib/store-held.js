@@ -166,7 +166,11 @@ async function startEmpty(row) {
 /** «Understood» on the last stop's loss: the PERSON notes it (the hub tells every page `store-stop-over`) */
 async function noteStopPressed() {
   const r = await fetchJson('/api/stores/layouts.json/stop-noted', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null);
-  if (r && r.success) noteStoreStopOver();
+  if (r && r.success) {
+    noteStoreStopOver();
+    // r1798 (1): noted here, but the note could not be written yet — the next start tells the loss again, and the press says so now
+    if (r.recorded === false) showToast(t('Noted here, but VibeSpace could not record it yet: the storage did not take the write. It is told again at the next start.'), { type: 'error' });
+  }
   else showToast((r && r.error) || t('It could not be noted — try again.'), { type: 'error' });
 }
 

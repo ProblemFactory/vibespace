@@ -1028,6 +1028,49 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     const F1x = await followScene(SF, 'first'), F2x = await followScene(SF, 'after');
     ok(!followRight(F1x) && !followRight(F2x) && !!F2x.vb && F2x.vb.kind === 'maynot', 'CONTROL (the mark removed at that landing, in a copy — the line as taken): the kill turns the KNOWN loss into «may not» — red', J({ F1x: F1x.vb, F2x: F2x.vb }));
   }
+  // r1798 (1): the PRESS IS TOLD THE TRUTH — a note whose write the storage refused answers `recorded: false`; the loss is told again at
+  // the next start with ITS OWN moment (the refused write's episode mark carries it, r1798 (2))
+  {
+    const pressRefused = async (src) => {
+      const dd = scratch(); await runOne(dd, { owe: true });
+      const m0 = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8'));
+      const A = hub(dd); still(() => A.R.readLayouts()); await stopOf(A); still(() => A.R.flushLayouts({ stop: true }));   // carried; nobody pressed
+      await new Promise((r) => setTimeout(r, 5));   // this run's own moment is a later one
+      const B = hub(dd, src); still(() => B.R.readLayouts()); await stopOf(B);
+      plant(tmpOf(dd, 'layouts.json'));   // the storage refuses the note's write
+      const pr = await still(() => B.call('post', '/api/stores/layouts.json/stop-noted', { headers: { 'sec-fetch-site': 'same-origin' } }));
+      await B.R.layoutsMarkSettled();
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      const C = hub(dd); still(() => C.R.readLayouts());   // B KILLED
+      return { body: pr.body, since0: m0.since, vc: await stopOf(C) };
+    };
+    const PR = await pressRefused(null);
+    ok(!!PR.body && PR.body.noted === true && PR.body.recorded === false && !!PR.vc && PR.vc.kind === 'known' && PR.vc.since === PR.since0,
+      'r1798 (1): «Understood» whose note the storage refused answers `recorded: false` (the page says so); after a kill the loss is told again with ITS OWN moment', J(PR));
+    const PRx = await pressRefused(cut('press-told-noted', "      recorded = !_layoutsRead || !_layoutsCache ? false : await new Promise(", "      recorded = true; await new Promise("));
+    ok(!!PRx.body && PRx.body.recorded === true, 'CONTROL (the press always told «noted», in a copy — the line as taken): a note never written is answered as recorded — red', J(PRx.body));
+  }
+  // r1798 (2): THE OLD LOSS UNDER A NEW EPISODE — this run's own owed mark is written over the last run's KNOWN mark: it CARRIES that
+  // loss, so a kill tells the OLD loss with its own moment (never this run's time and cause)
+  {
+    const overScene = async (src) => {
+      const dd = scratch(); await runOne(dd, { owe: true });   // the last run's loss, in its mark
+      const m0 = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8'));
+      await new Promise((r) => setTimeout(r, 5));
+      const C = hub(dd, src); still(() => C.R.readLayouts()); await stopOf(C);   // KNOWN; nothing landed yet
+      plant(tmpOf(dd, 'layouts.json'));
+      still(() => { C.R.writeLayouts(desk('w5')); C.R.flushLayouts(); }); await C.R.layoutsMarkSettled();   // this run's OWN episode: its mark over the last run's
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      let mk = null; try { mk = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8')); } catch { }
+      const D = hub(dd); still(() => D.R.readLayouts());   // C KILLED
+      return { since0: m0.since, run0: m0.run, mk, vd: await stopOf(D) };
+    };
+    const OV = await overScene(null);
+    ok(!!OV.mk && OV.mk.run !== OV.run0 && !!OV.mk.prior && OV.mk.prior.since === OV.since0 && !!OV.vd && OV.vd.kind === 'known' && OV.vd.since === OV.since0 && OV.vd.cause === 'refused',
+      'r1798 (2): this run\'s own owed mark, written over the last run\'s KNOWN one, carries that loss (`prior`) — after a kill the OLD loss is told with its own moment', J(OV));
+    const OVx = await overScene(cut('prior-not-carried', 'code: (o && o.code) || null, prior: priorLoss(), written: false', 'code: (o && o.code) || null, written: false'));   // stale-pins: kept (the red control puts the line as taken back)
+    ok(!!OVx.vd && OVx.vd.kind === 'known' && OVx.vd.since !== OVx.since0, 'CONTROL (this run\'s mark carrying nothing, in a copy — the line as taken): the old loss is told with THIS run\'s moment — red', J(OVx.vd));
+  }
   // r1595 (b): «Understood» asks a flush — a kill right after the press never tells the noted loss again
   {
     const pk = async (src) => {
@@ -1041,7 +1084,7 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     };
     const P1 = await pk(null);
     ok(!!P1.vb && P1.vb.kind === 'known' && P1.noted === true && !(P1.vc && P1.vc.kind === 'known'), 'r1595 (b): «Understood» asks a flush — a kill right after the press does not tell the noted loss again (the kill itself is told as one, «may not»)', J(P1));
-    const P1x = await pk(cut('press-no-flush', "    if (was && was.kind === 'known' && _layoutsRead) { try { flushLayouts(); }", '    if (false) { try { flushLayouts(); }'));
+    const P1x = await pk(cut('press-no-flush', 'try { flushLayouts({ press: true }, (ok) => resolve(ok === true)); }', 'try { resolve(true); }'));
     ok(!!P1x.vc && P1x.vc.kind === 'known', 'CONTROL (the press writes nothing, in a copy — the line as taken): the noted loss is told again after the kill — red', J(P1x.vc));
   }
   // the import's stamp: a layout that arrives WITH a stamp (an import of a file that held one) is written with THIS hub's stamp only
@@ -1091,12 +1134,30 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
       under && await under.onclick(); await settle(4);
       ok(!!under && under.textContent === 'Understood' && !!roll && opened === 1 && posts.some(([u, m]) => u === '/api/stores/layouts.json/stop-noted' && m === 'POST') && (strip === null || strip.dataset.stop === ''),
         '(8) THE PRESSES: «Understood» POSTs the person\'s note (stop-noted) and the strip goes; «Restore a previous layout…» opens the rollback dialog — where the earlier layouts are', J({ posts, opened, left: !!strip }));
-      const NOOVER = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), '  if (r && r.success) noteStoreStopOver();\n', '  if (r && r.success) { /* MUTANT: the press never ends the notice */ }\n', 'stop-press-over-cut'), 'stop-press-over-cut');
+      const NOOVER = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), '  if (r && r.success) {\n    noteStoreStopOver();\n', '  if (r && r.success) {\n    /* MUTANT: the press never ends the notice */\n', 'stop-press-over-cut'), 'stop-press-over-cut');
       NOOVER.setStoreDoors({}); NOOVER.noteStoreStop(KNOWN);
       const b2 = (strip ? strip.children : []).flatMap((x) => x.children || []).find((b) => /shs-stop-noted/.test(b.className || ''));
       b2 && await b2.onclick(); await settle(4);
       ok(!!strip && strip.dataset.stop === 'known', 'CONTROL (the press never ends the notice, in a copy): the strip stays after «Understood» — red');
       strip = null;
+      // r1798 (1): the reply says the note could NOT be written yet ⇒ the page says so (the loss is told again at the next start)
+      const SAYS = 'Noted here, but VibeSpace could not record it yet: the storage did not take the write. It is told again at the next start.';
+      const pressUnrecorded = async (M) => {
+        ROUTE = () => answer(200, { success: true, noted: true, recorded: false });
+        M.setStoreDoors({}); M.noteStoreStop(KNOWN); const n0 = toasts().length;
+        const b = (strip ? strip.children : []).flatMap((x) => x.children || []).find((x) => /shs-stop-noted/.test(x.className || ''));
+        // the PRESS runs on the suite's own document (D0 — the toast stack's stand-in every other toast of this suite uses): the strip's
+        // stand-in draws the strip only, and the toast the reply asks needs a stack
+        const DS = globalThis.document; globalThis.document = D0;
+        try { b && await b.onclick(); await settle(4); } finally { globalThis.document = DS; }
+        strip = null;
+        return added(n0);
+      };
+      const said3 = await pressUnrecorded(SH);
+      ok(said3.includes(SAYS), 'r1798 (1): a press whose note the storage did not take is TOLD so on the page — never «noted» alone', J(said3));
+      const MUTE = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "    if (r.recorded === false) showToast(", '    if (false) showToast(', 'press-unrecorded-unsaid'), 'press-unrecorded-unsaid');
+      const said3x = await pressUnrecorded(MUTE);
+      ok(!said3x.includes(SAYS), 'CONTROL (the reply\'s `recorded` unheard, in a copy — the line as taken): the press says nothing of a note never written — red', J(said3x));
     } finally { ROUTE = R0; globalThis.document = D0; SH.setStoreDoors({}); }
     const QUIET = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  const quiet = !!st && st.kind === 'maynot' && !held.length && !unsaved.length && sc !== 'lifted' && sc !== 'held';", '  const quiet = false;', 'quiet-cut'), 'quiet-cut');
     ok(QUIET.stripModel([], { stop: MAYNOT }).quiet === false, 'CONTROL (no quiet mode, in a copy): a lone «may not» is drawn as an alert — red');
