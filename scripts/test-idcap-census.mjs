@@ -8,7 +8,10 @@
 // redrawn (the surface is drawn again when an id changes — the why names the line), not-a-window-id. NEVER stale: a stale capture is
 // cured by the rule, not listed. RED: a place with no row (a new capture), a row no place has (shrink it), a stale verdict, a row
 // with no why. The page of the first census: bl-phone-ui/idcap/page-r2355.md (357 places, 16 cured).
-import './scratch.mjs';
+// A PLACE IS AN ID VALUE bound earlier and read later (主开发 r2559): the rule's own form — a HELD object's id read at the act (win.id,
+// state.hostId, el.dataset.winId) — and a function are NO place: the cured form needs no row, so no one learns to paste rows.
+// WHAT A GREEN CENSUS DOES NOT PROVE: a row's verdict is a person's word (checked by review) — the census proves every place HAS one.
+import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -167,7 +170,7 @@ function analyze(file, src = fs.readFileSync(path.join(LIB, file), 'utf8')) {
     const sink = ai >= 0 && ((ai === 0 && WM_ID_METHODS.has(cn) && wmRecv) || (ai === 1 && APP_ID_HELPERS.has(cn)) || (ai === 0 && ID0_HELPERS.has(cn)) || (ai === 0 && ['get', 'has', 'delete'].includes(cn) && /(?:^|\.)(?:wm\.windows|sessions)$|^this\.windows$/.test(recv) && (recv !== 'this.windows' || file === 'window.js' || file === 'tab-group.js')));
     const memberWin = how === 'member' && (WIN_OBJ.test(b.name) || /dataset\.winId$/.test(src.slice(n.start, n.end)) || /\._chooser$|^state$/.test(b.name) && nameOf(n) === 'hostId');
     const windowish = memberWin || (how === 'ident' && (b.winParam || ID_NAME.test(b.name) || (WM_FILES.has(file) && ID_NAME_WM.test(b.name) && (b.winParam || ID_INIT.test(b.init || '') || (b.loop && ID_LOOP.test(b.init || '')))) || ID_INIT.test(b.init || '') || (b.loop && ID_LOOP.test(b.init || '') && /id/i.test(b.name)))) || sink;
-    found.push({ file, line: n.loc.start.line, col: n.loc.start.column, how, name: how === 'member' ? text(n) : b.name, kind, fnLine, bline: b.line, binit: (b.init || '').slice(0, 90), use, sink, windowish, src: (lines[n.loc.start.line - 1] || '').trim().slice(0, 170) });
+    found.push({ file, line: n.loc.start.line, col: n.loc.start.column, how, name: how === 'member' ? text(n) : b.name, kind, fnLine, bline: b.line, binit: (b.init || '').slice(0, 90), fnValue: !!b.localFn || /^(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[\w$]+\s*=>)/.test(b.init || ''), winValue: /^\(?[^()]*\bwindows\.get\(|\bcreateWindow\(/.test(b.init || '') || (WIN_OBJ.test(b.name) && !/id$/i.test(b.name)), use, sink, windowish, src: (lines[n.loc.start.line - 1] || '').trim().slice(0, 170) });
   }
   visit(ast, null, null, { scopes: [], laterStack: [], fnStack: [], inPattern: false });
   // a local function that never escapes and is only called where it stands runs NOW: its uses leave the main list
@@ -175,12 +178,11 @@ function analyze(file, src = fs.readFileSync(path.join(LIB, file), 'utf8')) {
   return { file, found };
 }
 
-for (const f of FILES) { const t = fs.readFileSync(path.join(LIB, f), 'utf8'); if (/\bwm\.windows\b|\.activeWindowId\b|\brekeyWindow\b|\bwm\.(?:revealWindow|focusWindow|requestClose)\b/.test(t)) WM_FILES.add(f); }
-
 // ── the places: one later function × one captured binding; the key has no line number (an edit above it moves nothing)
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 60);
 function placesOf(found) {
-  const main = found.filter((x) => x.windowish && !(x.kind.startsWith('local-fn:') && x.localLater === false));
+  // an id VALUE only (r2559): a held object's member read at the act (the rule's own form), a held window itself and a function value are no place
+  const main = found.filter((x) => x.windowish && x.how === 'ident' && !x.fnValue && !x.winValue && !(x.kind.startsWith('local-fn:') && x.localLater === false));   // a held WINDOW (its value an instance) is the rule's own form too
   const by = new Map();
   for (const x of main) {
     const base = x.how === 'member' ? x.name.replace(/\?/g, '') : x.name;
@@ -192,9 +194,10 @@ function placesOf(found) {
   return keys;
 }
 const t0 = process.hrtime.bigint();
-for (const f of FILES) { const t = fs.readFileSync(path.join(LIB, f), 'utf8'); if (/\bwm\.windows\b|\.activeWindowId\b|\brekeyWindow\b|\bwm\.(?:revealWindow|focusWindow|requestClose)\b/.test(t)) WM_FILES.add(f); }
+const TEXT = new Map(FILES.map((f) => [f, fs.readFileSync(path.join(LIB, f), 'utf8')]));   // each file read ONCE (the window-manager list and the walk share it)
+for (const [f, t] of TEXT) if (/\bwm\.windows\b|\.activeWindowId\b|\brekeyWindow\b|\bwm\.(?:revealWindow|focusWindow|requestClose)\b/.test(t)) WM_FILES.add(f);
 const found = [], errors = [];
-for (const f of FILES) { const r = analyze(f); if (r.error) errors.push(`${f}: ${r.error}`); else found.push(...r.found); }
+for (const f of FILES) { const r = analyze(f, TEXT.get(f)); if (r.error) errors.push(`${f}: ${r.error}`); else found.push(...r.found); }
 const walkMs = Number(process.hrtime.bigint() - t0) / 1e6;
 const keys = placesOf(found);
 const fx = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
@@ -202,15 +205,23 @@ const rows = new Map((fx.rows || []).map((r) => [r.key, r]));
 console.log(`test-idcap-census: ${FILES.length} files of src/lib walked in ${walkMs.toFixed(0)} ms (the i18n tables left out; ${WM_FILES.size} use the window manager) · ${[...keys.values()].reduce((a, k) => a + k.count, 0)} places by ${keys.size} names · ${rows.size} rows`);
 console.log('§1 the walk itself');
 ok(errors.length === 0, `every file parses (${FILES.length})`, errors);
-ok(FILES.length >= 300 && WM_FILES.size >= 40 && keys.size >= 100, `the walk reaches the window code (${FILES.length} files, ${WM_FILES.size} that use the window manager, ${keys.size} names) — a walk that lost its files is no census`);
+const seen = found.filter((x) => x.windowish).length;   // every window-ish read the walk saw (a held window's id at the act included) — the places are a few of them
+ok(FILES.length >= 300 && WM_FILES.size >= 40 && seen >= 300, `the walk reaches the window code (${FILES.length} files, ${WM_FILES.size} that use the window manager, ${seen} window-ish reads seen, ${keys.size} of them places) — a walk that lost its files is no census`);
 console.log('§2 every place has its verdict, by name');
-const missing = [], over = [];
-for (const [k, v] of keys) { const r = rows.get(k); if (!r || r.count < v.count) missing.push(`${k}  (${v.count} here, ${r ? r.count : 0} in the fixture) — ${v.where.join(' | ')}`); }
-for (const [k, r] of rows) { const v = keys.get(k); if (!v || v.count < r.count) over.push(`${k}  (${r.count} in the fixture, ${v ? v.count : 0} here)`); }
+const missing = [], over = [], gone = [], fresh = [];
+for (const [k, v] of keys) { const r = rows.get(k); if (!r || r.count < v.count) { missing.push(`${k}  (${v.count} here, ${r ? r.count : 0} in the fixture) — ${v.where.join(' | ')}`); fresh.push({ k, n: v.count, r }); } }
+for (const [k, r] of rows) { const v = keys.get(k); if (!v || v.count < r.count) { over.push(`${k}  (${r.count} in the fixture, ${v ? v.count : 0} here)`); gone.push({ k, r }); } }
+// ONE RENAME: a «no row» and an «outlived» line of one file, the same later kind, and the same binding or the same bound form
+const part = (k) => k.split(' · '), renames = [];
+for (const f of fresh) for (const g of gone) { const [ff, fk, fb, fi] = part(f.k), [gf, gk, gb, gi] = part(g.k); if (ff === gf && fk === gk && (fb === gb || fi === gi) && !renames.some((x) => x.f === f || x.g === g)) renames.push({ f, g }); }
+const RULE = `A window id VALUE captured earlier and read by a later act: cure it by the rule (hold the WINDOW, read its .id when the act runs — that form needs no row), or, if this id is safe as it stands, add the row printed below to ${FIXTURE} with its verdict (live | record | redrawn | not-a-window-id) and its reason.`;
+if (missing.length || over.length) console.log('  WHAT TO DO: ' + RULE);
+for (const x of renames) console.log(`    ONE RENAME (a reworded name or initializer, one place): move the row's key in ${FIXTURE}\n      from: ${x.g.k}\n      to:   ${x.f.k}\n      (its verdict and reason stand)`);
+for (const f of fresh) if (!renames.some((x) => x.f === f)) console.log('    PASTE into the rows of ' + FIXTURE + ':\n      ' + JSON.stringify({ key: f.k, count: f.n, verdict: 'live | record | redrawn | not-a-window-id', why: 'why this id is safe as it stands' }));
 ok(missing.length === 0, `every later function reading a captured window id has a verdict row (${keys.size} names) — a NEW capture is red until its row says why it is safe, or it is cured by the rule (the window held, its id read when it acts)`, `${missing.length} with no row (each below)`);
 for (const m of missing) console.log('    NO ROW ' + m);
 ok(over.length === 0, 'no row outlives its place (a row the code no longer has: shrink the fixture)', `${over.length} rows outlive their place (each below)`);
-for (const m of over) console.log('    OUTLIVED ' + m);
+for (const m of over) console.log('    OUTLIVED ' + m + ' — remove the row (or lower its count) in ' + FIXTURE);
 const bad = [...rows.values()].filter((r) => !VERDICTS.has(r.verdict) || !r.why || typeof r.why !== 'string' || r.why.length < 12);
 ok(bad.length === 0 && ![...rows.values()].some((r) => /stale/i.test(r.verdict || '')), 'every row is live, record, redrawn or not-a-window-id, with its why — NEVER stale (a stale capture is cured, not listed)', bad.map((r) => r.key));
 console.log('§3 RED: a planted capture');
@@ -219,5 +230,17 @@ const planted = analyze('taskbar.js', fs.readFileSync(path.join(LIB, 'taskbar.js
 const pk = planted.found ? placesOf(planted.found) : new Map(), real = placesOf(found.filter((x) => x.file === 'taskbar.js'));
 const plantedKey = [...pk.keys()].find((k) => (pk.get(k).count > (real.get(k)?.count || 0)) && (!rows.has(k) || rows.get(k).count < pk.get(k).count));   // the planted place: one the real file lacks, and no row covers
 ok(!!plantedKey && /taskbar\.js · on-prop:onclick · id · for-of app\.wm\.windows/.test(plantedKey), `CONTROL: a click handler planted in taskbar.js that keeps a loop's window id is a place with no row — the census names it (${plantedKey || 'none'})`);
+const INNOCENT = "\nexport function __plantedHeld(app, el) { for (const w of app.wm.windows.values()) el.onclick = () => app.wm.revealWindow(w.id); }\nexport function __plantedOtherId(app, el) { for (const d of app.desktopManager.desktops) { const deskId = d.id; el.onclick = () => app.desktopManager.switchTo(deskId); } }\n";
+const innocent = analyze('taskbar.js', TEXT.get('taskbar.js') + INNOCENT), ik = innocent.found ? placesOf(innocent.found) : new Map();
+const wider = [...ik.keys()].filter((k) => ik.get(k).count > (real.get(k)?.count || 0));
+ok(!!innocent.found && wider.length === 0, 'INNOCENT CONTROL: a planted closure reading a HELD window\'s id at the act (the rule\'s own form) and one reading a non-window id (a desktop\'s) are NO place — a walk grown too wide would list them', wider);
+console.log('§4 the two cures no leg and no row can see undone (pins; each RED the release\'s text)');
+const CV = TEXT.get('chat-view.js'), UT = TEXT.get('user-todos-panel.js');
+const restartPin = (s) => /setTimeout\(\(\) => \{\n\s+if \(!this\._ownsWindow\(\)\) return;[\s\S]{0,400}?fromWin: this\.winInfo\?\.id \|\| winId,/.test(s);
+ok(restartPin(CV), 'chat-view: the permission change\'s restart reads its window\'s id AFTER its 900 ms wait (fromWin: this.winInfo.id)');
+ok(!restartPin(anchored(CV, 'fromWin: this.winInfo?.id || winId,', 'fromWin: winId,', 'the restart as released')), 'RED: the release\'s restart (the id taken before the wait) fails that pin');   // stale-pins: kept — the release's text, the RED's own
+const miniPin = (s) => /mini\.keys = keysForWin\(mini\.win \? mini\.win\.id : mini\.winId\)/.test(s) && /mini = \{ pop, winId, win: app\.wm\?\.windows\?\.get\?\.\(winId\) \|\| null,/.test(s);
+ok(miniPin(UT), 'user-todos-panel: the mini inbox holds its window and asks keysForWin by that window\'s id at each redraw');
+ok(!miniPin(anchored(UT, 'keysForWin(mini.win ? mini.win.id : mini.winId)', 'keysForWin(mini.winId)', 'the mini inbox as released')), 'RED: the release\'s mini inbox (the id taken at its open) fails that pin');   // stale-pins: kept — the release's text, the RED's own
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? ', ' + fail + ' failed' : ''}) · the walk ${walkMs.toFixed(0)} ms`);
 process.exit(fail ? 1 : 0);
