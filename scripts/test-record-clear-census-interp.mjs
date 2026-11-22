@@ -481,6 +481,11 @@ const I_RECV = {
   'src/lib/plugins-ui.js|meta': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|p': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|st': ['plugin', 'a plugin\'s status reason'],
   'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
   'src/lib/task-detail.js|info': ['path', 'lane task-group-context: the path field\'s commit (src/lib/path-field.js `info.text`) — the path the person typed into a Context row; never a record\'s words'],
+  // 主开发 r2068 (the block's hosted run): four receivers other lanes' lines added, each read at its sink — none carries a record's words
+  'src/lib/task-detail.js|vd': ['path', 'B-5736 (block line 155): the path field\'s own verdict (src/lib/path-field.js pathField().verdict().text — «… is not a folder», built from the path the person typed into the export box); never a record\'s words'],
+  'src/lib/desktop-app-launcher.js|vd': ['path', 'B-5736 (block line 155): the working-folder field\'s own verdict (src/lib/path-field.js pathField().verdict().text — built from the folder the person typed); never a record\'s words'],
+  'src/lib/sidebar-mounts.js|m': ['mount', 'B-323e (block line 291): a mount row\'s own name (or id) in the Disconnect refusal\'s Error — the mount\'s label, never a record\'s words'],
+  'src/channel-store.js|fam': ['file', 'B-360d (block line 267): a channel store FAMILY — its own file\'s name under data/, in the journal and the store-appeared Error; never a record\'s words'],
   'src/lib/user-todos-actions.js|card': ['setting', 'a proposed change\'s card (lane setting-doors pick 2, settingCardOf): card.label = the schema row\'s label in the press\'s toast — never an item\'s words'],
   'src/lib/settings-ui.js|schema': ['setting', 'a setting\'s label'], 'src/lib/sidebar-mounts.js|h': ['host', 'a machine name'], 'src/lib/sidebar-mounts.js|v': ['host', 'the Add-machine form\'s values — the name the person just typed, said back in the refusal «a machine named … already exists» (lane ui-language)'], 'src/lib/sidebar-mounts.js|s': ['share', 'a share name'], 'src/lib/sidebar-mounts.js|t': ['mount token', 'a token name'],
   'src/lib/window-share.js|r': ['session', 'an agent\'s name'],
