@@ -603,20 +603,25 @@ console.log('§6 the wiring — every door asks its rule');
   // CONTROLS: the flag planted back where piece 7 wrote it (the wake grants' save) — both laws red BY FILE AND LINE; an unread option in a
   // file the leg never names (the tab group's toast) and in a call through a bound name (the link door's io.toast) — LAW 1 red there
   // (a plant whose anchor is gone is a named red of the control, never a throw that stops the suite)
-  const plant = (f, from, to) => { const s = PAGE.get(f); if (!s || s.split(from).length !== 2) return { gone: `${f}: «${from.slice(0, 50)}»` }; const m = new Map(PAGE); m.set(f, s.replace(from, to)); return { m, line: s.slice(0, s.indexOf(from)).split('\n').length }; };
+  // EACH CONTROL JUDGES ITS PLANTED FILE ALONE (B-7e49, 主开发 r2466: the five walks of the whole page again were ~7 s of the suite):
+  // the census reads a file by itself — its aliases are the file's own, READS is showToast's signature, a named warn counts where
+  // its file is judged — so the rest of the page, held to LAW 1 and LAW 2 by the two checks above, adds nothing to a control's answer
+  const plant = (f, from, to) => { const s = PAGE.get(f); if (!s || s.split(from).length !== 2) return { gone: `${f}: «${from.slice(0, 50)}»` }; return { m: new Map([[f, s.replace(from, to)]]), line: s.slice(0, s.indexOf(from)).split('\n').length }; };
+  const alone = (m, warns = WARN_ON_PURPOSE) => toastCensus(m, warns.filter((w) => m.has(w[0])));
   const p1 = plant('src/lib/wake-grant-rows.js', "showToast((r && r.error) || t('Save failed'), { type: 'error' });", "showToast((r && r.error) || t('Save failed'), { error: true });");   // stale-pins: kept (piece 7's text, planted)
   const p2 = plant('src/lib/tab-group.js', "showToast(t('Grouped as tabs'), { action:", "showToast(t('Grouped as tabs'), { sticky: true, action:");
   const p3 = plant('src/lib/internal-link-ui.js', "io.toast(t('This session is running outside VibeSpace'), { type: 'error' });", "io.toast(t('This session is running outside VibeSpace'), { error: true });");
   const none = { unread: [], plain: [] }, gone = [p1, p2, p3].filter((p) => p.gone).map((p) => p.gone);
-  const c1 = p1.m ? toastCensus(p1.m) : none, c2 = p2.m ? toastCensus(p2.m) : none, c3 = p3.m ? toastCensus(p3.m) : none;
+  const c1 = p1.m ? alone(p1.m) : none, c2 = p2.m ? alone(p2.m) : none, c3 = p3.m ? alone(p3.m) : none;
   ok(!gone.length && c1.unread.join() === `src/lib/wake-grant-rows.js:${p1.line} «error»` && c1.plain.join() === `src/lib/wake-grant-rows.js:${p1.line} untyped`
     && c2.unread.join() === `src/lib/tab-group.js:${p2.line} «sticky»` && c3.unread.join() === `src/lib/internal-link-ui.js:${p3.line} «error»`,
     `CONTROL: the flag planted back in the wake grants' save — LAW 1 and LAW 2 red at ${c1.unread.join(' · ')}; an unread option planted in the tab group's toast (${c2.unread.join(' · ')}) and in the link door's io.toast (${c3.unread.join(' · ')}) — each red by file and line${gone.length ? ` — A PLANT'S ANCHOR IS GONE: ${gone.join(' · ')}` : ''}`, { gone, c1: [c1.unread, c1.plain], c2: c2.unread, c3: c3.unread });
   // CONTROLS of LAW 2 over the whole page: chat-view's sub-agent list toast back to plain (the third site, untyped before this cure) —
   // red at its file and line; a named warn struck from the list — red at its own call (the list is what keeps it, not the leg's blindness)
   const p4 = plant('src/lib/chat-view.js', "showToast(r.error, { type: 'error' }); return; }", "showToast(r.error); return; }");   // stale-pins: kept (the base's text, planted)
-  const c4 = p4.m ? toastCensus(p4.m) : none;
-  const c5 = toastCensus(PAGE, WARN_ON_PURPOSE.filter((w) => w[0] !== 'src/lib/browser-live-window.js'));
+  const c4 = p4.m ? alone(p4.m) : none;
+  const LIVE = 'src/lib/browser-live-window.js';
+  const c5 = PAGE.has(LIVE) ? alone(new Map([[LIVE, PAGE.get(LIVE)]]), WARN_ON_PURPOSE.filter((w) => w[0] !== LIVE)) : none;
   const liveAt = (() => { const s = PAGE.get('src/lib/browser-live-window.js') || '', i = s.indexOf(WARN_ON_PURPOSE[0][1]); return i < 0 ? 0 : s.slice(0, s.lastIndexOf('showToast(', i)).split('\n').length; })();
   ok(!p4.gone && c4.plain.join() === `src/lib/chat-view.js:${p4.line} untyped` && c5.plain.join() === `src/lib/browser-live-window.js:${liveAt} typed 'warn'`,
     `CONTROL: chat-view's failed sub-agent fetch back to a plain toast — LAW 2 red at ${c4.plain.join(' · ') || p4.gone}; the live view's refusal struck from the named warns — red at ${c5.plain.join(' · ')}`, { c4: c4.plain, c5: c5.plain, liveAt });
