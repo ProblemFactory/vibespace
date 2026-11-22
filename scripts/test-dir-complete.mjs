@@ -145,6 +145,22 @@ console.log('\n── ② never offered unasked: the product\'s own checkout (AD
   const dayOne = require('../src/day-one.js');
   ok('RED CONTROL: the census holds ~/vibespace, the folder with the most files (firstFilesFolder would pick it)', census.some((x) => x.name === 'vibespace') && dayOne.firstFilesFolder(dayOne.folderChips({ folders: census })) === path.join(HOME, 'vibespace'), census.map((x) => [x.name, x.files]));
   ok('GET /api/home-folders drops it — day one\'s chips start in work/', !hf.folders.some((x) => x.name === 'vibespace') && dayOne.firstFilesFolder(dayOne.folderChips({ folders: hf.folders })) === path.join(HOME, 'work'), hf.folders.map((x) => [x.name, x.files]));
+  // r1748 (a): THE ROUTE ON A COLD HUB — a fresh router and a fresh dir-slice (no home fact landed yet): its FIRST answer already drops
+  // ~/vibespace (the exclusion waited for inside a bound; an answer built while a fact was out is never kept). RED: the tip's route
+  // (self() as it stands — the facts behind it): the cold first answer offers the checkout
+  {
+    const MCh = mutantCopies('dir-complete-homefolders', REPO), fsrNow = read('src/routes/files.js');
+    const coldOn = async (src, name) => {
+      const R = require(MCh.write('src/routes/files.js', src, name, src === fsrNow ? { same: true } : undefined));   // (the real route, a fresh module: a deliberate unpatched copy)
+      const app2 = express(); app2.use(express.json()); app2.locals.safeFs = FILE_POOL; app2.use(R);
+      const srv = http.createServer(app2); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      try { const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/home-folders`); return ((await r.json()).folders || []).map((x) => x.name); } finally { srv.close(); }
+    };
+    const cold = await coldOn(fsrNow, 'hf-cold');
+    const tipR = await coldOn(anchored(fsrNow, '    const sw = await dirSliceOf(req).selfWhole(1500).catch(() => null);\n    const self = sw && sw.v;', '    const self = await dirSliceOf(req).self().catch(() => null), sw = { v: self, whole: true };', "the tip's route: self() as it stands"), 'hf-cold-tip');
+    ok(`r1748 (a): GET /api/home-folders on a COLD hub — its first answer already drops ~/vibespace (${cold.join(' ')})`, !cold.includes('vibespace') && cold.includes('work'), cold);
+    ok(`RED CONTROL (the tip's route: self() without the wait): the cold first answer OFFERS ~/vibespace (${tipR.join(' ')})`, tipR.includes('vibespace'), tipR);
+  }
 }
 
 console.log('\n── ③ the 500 ms budget (a stalled walk) ──');
@@ -222,9 +238,9 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
         return { stall: st, a: a.verdict && a.verdict.kind, b: b.verdict && b.verdict.kind, bUnread: !!b.rowsUnread, bSources: b.sourcesUnread || [], alive: P.stats().alive };
       } finally { try { P.close(); } catch { } }
     };
-    const cure = await idleRun(DS, 'dir-complete-idle');
+    // (the leg and its control run side by side: two pools of their own)
+    const [cure, rel] = await Promise.all([idleRun(DS, 'dir-complete-idle'), idleRun(mutant('d833-idle-out', [["const IDLE_ONLY = Object.freeze({ idleOnly: true });", 'const IDLE_ONLY = undefined;', 'the field\'s calls as on the release (no idleOnly)']]), 'dir-complete-idle-out')]);
     ok('B-d833 remainder: a healthy folder asked while the one worker is held by a hung, slower call is answered LATE at its reply\'s bound (refused by the pool and asked again while no worker freed — never sent into the held worker) — and asked once the stall ended, it EXISTS (never marked dead)', cure.a === 'late' && cure.b === 'exists' && !cure.bUnread, cure);
-    const rel = await idleRun(mutant('d833-idle-out', [["const IDLE_ONLY = Object.freeze({ idleOnly: true });", 'const IDLE_ONLY = undefined;', 'the field\'s calls as on the release (no idleOnly)']]), 'dir-complete-idle-out');
     // (the release's pool, B-23e5: the call whose deadline ends the held worker is the one MARKED; its siblings queued in that worker are
     // ended «storage worker restarted», unmarked — so the mark lands on whichever of the field's calls the slice sent first: the line's
     // ~/work, or the home's listing for its rows. Either is a HEALTHY folder marked dead behind a hung call: the fault)
@@ -263,12 +279,34 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
         return { typed: typed.verdict && typed.verdict.kind, pressed: pressed.verdict && pressed.verdict.kind, busy: busyCount, abort: { before, r1, r2, kind: ab.verdict && ab.verdict.kind, late: d.stats().noIdle.late } };
       } finally { holding = false; try { P.close(); } catch { } }
     };
-    const [m1, m1c] = await Promise.all([busyRun(DS, 'dir-complete-busy'), busyRun(mutant('d833-m1-at-once', [["if ((signal && signal.aborted) || !(Date.now() + REASK_MS <= boundAt)) {", 'if (true) {', 'a refusal answered LATE at once (idleOnly alone)']]), 'dir-complete-busy-at-once')]);
+    const [m1, m1c] = await Promise.all([busyRun(DS, 'dir-complete-busy'), busyRun(mutant('d833-m1-at-once', [["if (!(mono() + REASK_MS <= askOpen(ask))) {", 'if (true) {', 'a refusal answered LATE at once (idleOnly alone)']]), 'dir-complete-busy-at-once')]);
     ok(`B-d833 M1: a pool kept busy by short calls — the field's healthy folder is asked again until the worker frees and EXISTS inside its bound (typed: ${m1.typed}); a person's PRESS the same (${m1.pressed}); counted: ${JSON.stringify(m1.busy)}`,
       m1.typed === 'exists' && m1.pressed === 'exists' && m1.busy.reasked > 0 && m1.busy.freed > 0, m1);
     ok(`B-d833 M1: the waiting ends WITH ITS FIELD — the page aborted: no re-ask after its signal (${m1.abort.before} before, ${m1.abort.r1} → ${m1.abort.r2} after), the reply late (${m1.abort.kind}), counted late`,
       m1.abort.before > 0 && m1.abort.r2 === m1.abort.r1 && m1.abort.kind === 'late' && m1.abort.late > 0, m1.abort);
     ok(`RED CONTROL: idleOnly alone (3b79c841b) — a busy pool answers a healthy folder LATE (typed: ${m1c.typed}, pressed: ${m1c.pressed})`, m1c.typed === 'late' || m1c.pressed === 'late', m1c);
+    // r1748 MUST — A JOINED CALL BELONGS TO EVERY ASKER: the person types ~/work while the pool is busy; Enter's press JOINS the typed
+    // ask's calls and the page aborts the typed ask; a worker frees inside the PRESS's own bound — the press EXISTS. RED: the tip's
+    // once (every joiner rode the first asker's bound and signal): the press answered LATE
+    const joinRun = async (D, name) => {
+      const P = new SF({ poolSize: 1, name, timeouts: { __sleep: 2000, pathStat: 300, dirSlice: 300, dirIndex: 300 } });
+      try {
+        await P.call('pathStat', { path: HOME }).catch(() => null);   // the one worker up
+        const d = D.create({ home: HOME, repoDir: REPO, call: (op, pl, o) => P.call(op, pl, o) });
+        const held = P.call('__sleep', { ms: 450 }).catch(() => null);   // ordinary work holds the one worker ~450 ms
+        await sleep(20);
+        const acA = new AbortController();
+        const pA = d.slice({ text: '~/work', bases: [], budgetMs: 150, signal: acA.signal });   // the typed ask: its bound ends before the worker frees
+        await sleep(60);
+        const pB = d.slice({ text: '~/work', bases: [], budgetMs: 1500, press: true });         // Enter: the press joins the typed ask's calls
+        await sleep(15); acA.abort();                                                            // …and the page aborts the typed ask
+        const [a, b] = await Promise.all([pA, pB]); await held;
+        return { a: a.verdict && a.verdict.kind, b: b.verdict && b.verdict.kind, noIdle: d.stats().noIdle };
+      } finally { try { P.close(); } catch { } }
+    };
+    const [jr, jc] = await Promise.all([joinRun(DS, 'dir-complete-join'), joinRun(mutant('d833-join-first', [['  const joinAsk = (g, boundAt, signal) => { if (g) g.asks.push({ boundAt, signal }); };', '  const joinAsk = () => {};', 'a joiner rides the first asker'], ['if (s1.ask) s1.ask.asks.push(...ask.asks); return s1.p; }', 'return s1.p; }', '…at the grant too']]), 'dir-complete-join-first')]);
+    ok(`r1748: a press JOINED behind a typed ask the page aborted — a worker frees inside the press's own bound: the press EXISTS (${jr.b}; the typed ask, its own bound past: ${jr.a})`, jr.b === 'exists' && jr.a === 'late', jr);
+    ok(`RED CONTROL (the tip's once: every joiner rides the first asker's bound and signal): the press answered ${jc.b}`, jc.b === 'late', jc);
   }
 
   // ③b (B-0f3d, kept): a hung PROBE (a Task Group's folder on a dead mount) never holds the typed text — judged by its own stat
@@ -305,7 +343,7 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
     // RED CONTROLS (a 300 ms probe, a 150 ms budget, steps at 0 / 0.17 / 0.4 / 2.5 s): each rule removed from a copy of the shipped dir-slice.js —
     // the four scenes run AT ONCE (each its own slice, clock and stand-in)
     const CSTEPS = [['at0', 0, 0], ['at05', 170, 170], ['at1', 400, 400], ['at3', 2500, 450]];
-    const NOJOIN = mutant('s4-nojoin', [['    if (s0 && s0.hungAt == null && t - s0.at < PROBE_LATE_MS) return s0.p;\n', '', 'a call still out sent again']]);
+    const NOJOIN = mutant('s4-nojoin', [['    if (s0 && s0.hungAt == null && t - s0.at < PROBE_LATE_MS) { joinAsk(s0.ask, boundAt, signal); return s0.p; }\n', '', 'a call still out sent again']]);
     const NOLAND = mutant('s4-noland', [['    const t = now(), l = landed.get(a);\n    if (!l ||', '    const t = now(), l = null;\n    if (!l ||', 'the kept facts never used']]);
     const EXPIRE = mutant('s4-expire', [['    if (!l || t - l.at >= PROBE_LATE_MS || !(t - l.at < LANDED_FRESH_MS || l.late)) return null;', '    if (!l || t - l.at >= LANDED_FRESH_MS) return null;', 'kept facts dropped after 2 s']]);
     const [g, cj, cl, ce] = await Promise.all([scene(DS, 600, 450, STEPS), scene(NOJOIN, 300, 150, CSTEPS), scene(NOLAND, 300, 150, CSTEPS), scene(EXPIRE, 300, 150, CSTEPS)]);
@@ -548,6 +586,10 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
     const under = reach.seen.filter((q) => q !== K5 && q !== path.join(K5, '.git') && !fileKids.has(q));
     const kids0 = ((reach.res && reach.res.result.dirs[0]) || {}).kids || [];
     ok(`③e the worker's listing reads names and types only — no fs call under a kid (${under.length}: ${under.slice(0, 4).join(' ')}); a link is named «link: ''»`, under.length === 0 && kids0.some((k) => k.name === 'nas' && k.link == null && k.git === undefined) && kids0.filter((k) => k.link === '').map((k) => k.name).sort().join(',') === 'dangling,ln-notes,ln-proj', { under, kids0 });
+    const LKW = mutantCopies('dir-complete-5561-linkstat', REPO).load('src/safe-fs-worker.js', anchored(Wsrc5, "        if (e.isSymbolicLink()) { kids.push({ name: e.name, link: '' }); continue; }", "        if (e.isSymbolicLink()) { try { fs.statSync(path.join(d, e.name)); } catch { } kids.push({ name: e.name, link: '' }); continue; }", 'a link kid stated by the listing'), 'w-linkstat');
+    const reachL = reachOf(LKW.runOp, 'dirSlice', { dirs: [{ path: K5 }], files: true });
+    const underL = reachL.seen.filter((q) => q !== K5 && q !== path.join(K5, '.git') && !fileKids.has(q));
+    ok(`③e RED CONTROL (a listing that states its link kids): ${underL.length} fs call(s) under a kid — ${underL.slice(0, 3).join(' ')}`, underL.length > 0, underL.slice(0, 4));
     const scene = async (run, D2 = DS) => {
       const g = hold(), c = standIn({ dead: [{ path: NAS, g }], run }), d = D2.create({ home: K5, repoDir: REPO, call: c });
       const q = () => d.slice({ text: '~/', bases: ['~'], budgetMs: 450 });
@@ -562,7 +604,7 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
       const metBefore = c.touchedAt[NAS] || 0;
       g.open(deadlineOf()); await sleep(20);   // the pool's deadline ends the dead kid's call
       let a2 = await q(); for (let i = 0; i < 20 && (a2.factsLate || !(a2.listing.links || {})['~/ln-proj']); i++) { await sleep(25); a2 = await q(); }   // (the facts land behind it: bounded)
-      const a3 = await q(), a4 = a2;
+      const a3 = await q(), a4 = a3;   // (r1748: «nothing left that can land» read from the FRESH reply, never the poll's own exit)
       const pick = (r) => ({ kids: kidsOf(r), late: !!r.rowsLate, unread: !!r.rowsUnread, factsLate: !!r.factsLate, git: !!(r.listing.dirs['~/proj'] || {}).git, link: (r.listing.links || {})['~/ln-proj'] || null,
         dangling: kidsOf(r).includes('dangling') || !!(r.listing.links || {})['~/dangling'], files: ((r.listing.dirs['~'] || {}).fileCount), self: r.self && r.self.roots.includes(path.join(K5, 'vs')) });
       return { a1: pick(a1), a2: pick(a2), a3: pick(a3), a4: pick(a4), listMet, whileHung, metBefore, metAfter: (c.touchedAt[NAS] || 0) - metBefore, facts: d._counters.facts && d._counters.facts.cap };
@@ -600,6 +642,73 @@ console.log('\n── ③b the hung source and the slow one (B-0f3d, kept) · �
       s2(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const SELF_KEEP_MS = 10 * 60e3;', 'const SELF_KEEP_MS = 0;', 'no keep'), 'ds-no-keep'))]);
     ok(`③e S2: a home of 30 folders — ${k2.first} of their own facts asked by the first reply (the cap: 24), ${k2.all} after the next; past the exclusion's re-read ${k2.later} asked again (the home's time held); ~/f07 (vibespace) excluded`, k2.first === 24 && k2.all === 30 && k2.later === 0 && k2.excluded, k2);
     ok(`③e S2 RED CONTROLS: no cap — ${k2cap.first} asked at once; no keep — ${k2keep.later} asked again`, k2cap.first === 30 && k2keep.later > 0, { cap: k2cap, keep: k2keep });
+    // (the facts go out behind each answer through two slots: a leg reads its counts once they have all gone — a condition, bounded 3 s)
+    const settle = async (d) => { for (let i = 0; i < 120 && (d._counters.facts.busy || d._counters.facts.q.length); i++) await sleep(25); };
+    // S2's other half: the keep holds while the HOME's own time holds — the home's time moved (a folder replaced in it), past the
+    // exclusion's minute: its folders' facts are asked again. RED: the home-time compare taken out
+    const s2t = async (D2) => {
+      let ck = 1e12; const c = standIn(), d = D2.create({ home: K6, repoDir: REPO, call: c, now: () => ck });
+      const homeFacts = () => c.rec.filter((x) => /^pathStat:.*\/f\d\d$/.test(x)).length;
+      const q = () => d.slice({ text: '~/zzz', bases: ['~'], budgetMs: 450 });
+      await q(); await settle(d); await q(); await settle(d); const all = homeFacts();
+      const tt = Date.now() / 1000 + 7; fs.utimesSync(K6, tt, tt);   // the home's own time moves
+      ck += DS.SELF_TTL_MS + 1000;
+      await q(); await settle(d); return { all, again: homeFacts() - all };
+    };
+    const [kt, ktc] = [await s2t(DS), await s2t(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'if (sf && sf.homeAt === d.mtime && now() - sf.at < SELF_KEEP_MS)', 'if (sf && true && now() - sf.at < SELF_KEEP_MS)', 'the home-time compare taken out'), 'ds-no-hometime'))];
+    ok(`③e S2: the home's own time moved — its folders' facts asked again (${kt.again} after ${kt.all}) — RED CONTROL the home-time compare taken out: ${ktc.again}`, kt.all === 30 && kt.again > 0 && ktc.again === 0, { real: kt, control: ktc });
+    // r1748 (a): THE EXCLUSION NEVER SHRINKS — a home checkout's fact past its keep STANDS while its re-ask is out (here held). RED: the
+    // tip's self() (the stale verdict dropped): the checkout offered for that reply
+    const K9 = path.join(TMP, 'home-5561-keep');
+    for (let i = 0; i < 6; i++) fs.mkdirSync(path.join(K9, 'f0' + i), { recursive: true });
+    fs.writeFileSync(path.join(K9, 'f03', 'package.json'), JSON.stringify({ name: 'vibespace' }));
+    const stands = async (D2) => {
+      let ck = 1e12; const dead = [], g = hold(), F3 = path.join(K9, 'f03');
+      const c = standIn({ dead }), d = D2.create({ home: K9, repoDir: REPO, call: c, now: () => ck });
+      const q = () => d.slice({ text: '~/zzz', bases: ['~'], budgetMs: 450 });
+      await q(); await settle(d); const r1 = await q(); await settle(d);
+      dead.push({ path: F3, g, op: 'pathStat' });   // its fact's re-ask will be OUT
+      ck += DS.SELF_KEEP_MS + 1000;
+      const r2 = await q(); await sleep(30); const r3 = await q();
+      const out = c.touchedAt[F3] || 0; g.open();
+      return { before: r1.self.roots.includes(F3), during: r2.self.roots.includes(F3) && r3.self.roots.includes(F3), out };
+    };
+    const [ks, ksc] = await Promise.all([stands(DS), stands(M5.load('src/server/dir-slice.js', anchored(DSsrc5, '        if (sf && sf.pkg === PC.SELF_PACKAGE) roots.push(p);\n', '', 'the stale verdict dropped (the tip)'), 'ds-shrinks'))]);
+    ok(`r1748 (a): a home checkout's fact past its keep STANDS while its re-ask is out (out: ${ks.out}) — excluded before (${ks.before}) and during (${ks.during}); RED CONTROL the tip's self(): during ${ksc.during}`, ks.before && ks.during && ks.out >= 1 && ksc.before && !ksc.during, { real: ks, control: ksc });
+    // r1748 (b): A KID WHOSE FACTS CALL ERRS AT ONCE (twelve link loops, ELOOP) is kept AS SUCH: asked ONCE, the late flag settles, and
+    // the 13th link gets its slot (a LINK). RED: the tip's askFacts (an error never kept)
+    const K8 = path.join(TMP, 'home-loops'); fs.mkdirSync(path.join(K8, 'target'), { recursive: true }); fs.mkdirSync(path.join(K8, '.loop'), { recursive: true });
+    try { fs.symlinkSync('b', path.join(K8, '.loop', 'a')); fs.symlinkSync('a', path.join(K8, '.loop', 'b')); for (let i = 0; i < 12; i++) fs.symlinkSync(path.join(K8, '.loop', 'a'), path.join(K8, 'l' + String(i).padStart(2, '0'))); fs.symlinkSync(path.join(K8, 'target'), path.join(K8, 'lz')); } catch { }
+    const loops = async (D2) => {
+      const c = standIn(), d = D2.create({ home: K8, repoDir: REPO, call: c });
+      const q = () => d.slice({ text: '~/', bases: [], budgetMs: 450 });
+      let r = await q(); for (let i = 0; i < 6; i++) { await settle(d); r = await q(); }
+      return { asked: c.rec.filter((x) => x === 'pathStat:' + path.join(K8, 'l00')).length, lz: (r.listing.links || {})['~/lz'] || null, factsLate: !!r.factsLate };
+    };
+    const [lr, lc] = await Promise.all([loops(DS), loops(M5.load('src/server/dir-slice.js', anchored(DSsrc5, '      } else if (st && st.err) keepErr(st.err);\n', '      }\n', 'an erred fact never kept (the tip)'), 'ds-err-unkept'))]);
+    ok(`r1748 (b): twelve links that err at once (ELOOP) — each asked ${lr.asked}×, the 13th a LINK (${lr.lz}), factsLate ${lr.factsLate} — RED CONTROL the tip's askFacts: asked ${lc.asked}×, the 13th ${lc.lz}, factsLate ${lc.factsLate}`, lr.asked === 1 && lr.lz === '~/target' && !lr.factsLate && lc.asked > 1 && lc.lz === null && lc.factsLate, { real: lr, control: lc });
+    // the two caps of 12 (KID_FACTS, LINK_FACTS — PER ANSWER, over every listing it holds: the home's too): a folder of 30 folders and 30
+    // links, its whole listing asked once, under a home of its own with no kid (nothing of it shares the caps) — 12 of each asked.
+    // REDS: each cap 1000
+    const K10 = path.join(TMP, 'caps-12'), K10H = path.join(TMP, 'caps-home'); fs.mkdirSync(path.join(K10, 'tgt'), { recursive: true }); fs.mkdirSync(K10H, { recursive: true });
+    for (let i = 0; i < 30; i++) { const nn = String(i).padStart(2, '0'); fs.mkdirSync(path.join(K10, 'd' + nn), { recursive: true }); try { fs.symlinkSync(path.join(K10, 'tgt'), path.join(K10, 'k' + nn)); } catch { } }
+    const caps = async (D2) => {
+      const c = standIn(), d = D2.create({ home: K10H, repoDir: REPO, call: c });
+      await d.slice({ text: K10 + '/', bases: [], budgetMs: 450 }); await settle(d);
+      const nOf = (re) => c.rec.filter((x) => re.test(x)).length;
+      return { kids: nOf(/^pathStat:.*\/caps-12\/d\d\d$/), links: nOf(/^pathStat:.*\/caps-12\/k\d\d$/) };
+    };
+    const [cr, ccK, ccL] = await Promise.all([caps(DS), caps(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const KID_FACTS = 12;', 'const KID_FACTS = 1000;', 'no kid cap'), 'ds-no-kidcap')), caps(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const LINK_FACTS = 12;', 'const LINK_FACTS = 1000;', 'no link cap'), 'ds-no-linkcap'))]);
+    ok(`③e the two caps of 12: a folder of 30 folders and 30 links listed whole — ${cr.kids} folder facts and ${cr.links} link facts asked — RED CONTROLS: no kid cap ${ccK.kids}, no link cap ${ccL.links}`, cr.kids === 12 && cr.links === 12 && ccK.kids === 30 && ccL.links === 30, { real: cr, kidCap: ccK, linkCap: ccL });
+    // a MOUNT kid is named, never stated (askFacts' mount guard). RED: the guard taken out
+    const K11 = path.join(TMP, 'with-mount'); fs.mkdirSync(path.join(K11, 'mnt'), { recursive: true }); fs.mkdirSync(path.join(K11, 'plain'), { recursive: true });
+    const mg = async (D2) => {
+      const c = standIn(), MK = path.join(K11, 'mnt'), d = D2.create({ home: K5, repoDir: REPO, call: c, mounts: () => [{ path: MK, mounted: true, label: 'share' }] });
+      await d.slice({ text: K11 + '/', bases: [], budgetMs: 450 }); await settle(d);
+      return { mount: c.rec.filter((x) => x === 'pathStat:' + MK).length, plain: c.rec.filter((x) => x === 'pathStat:' + path.join(K11, 'plain')).length };
+    };
+    const [mr, mc] = await Promise.all([mg(DS), mg(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'if (factOf(p, t) || mountPaths.includes(p) || entranceAbove(p, t)) return false;', 'if (factOf(p, t) || entranceAbove(p, t)) return false;', 'the mount guard taken out'), 'ds-no-mountguard'))]);
+    ok(`③e a hub MOUNT among a listing's kids is named, never stated: its facts asked ${mr.mount}× (a plain kid's ${mr.plain}×) — RED CONTROL the mount guard taken out: ${mc.mount}×`, mr.mount === 0 && mr.plain === 1 && mc.mount >= 1, { real: mr, control: mc });
   }
   // THE FIELD'S SIDE: askedOf (late and failed probes marked nothing) · replyKind (skipped / failed) · THE ONE RESOLVER (model() reads the
   // verdict in hand; target, rankOf and Tab read model) — source pins with their controls
@@ -698,6 +807,7 @@ console.log('\n── ④ the listing cache per folder, mtime invalidation ─�
     let ck = 1e12; const sent = [];
     const RT = path.join(work, name); fs.mkdirSync(RT);
     const d = D2.create({ home: HOME, repoDir: REPO, now: () => ck, call: async (op, p) => { if (op === 'dirSlice') for (const x of p.dirs || []) if (x.path === RT) sent.push(x.known); return (await runOp(op, p)).result; } });
+    await sleep(1005 - (Date.now() % 1000));   // (r1748: just past a second's boundary — the read lands ~2 s inside the tick, never at its edge)
     const sec = Math.floor(Date.now() / 1000); fs.utimesSync(RT, sec, sec);   // the folder's mtime: a whole second of now (a coarse tick)
     const kidsOf = (r) => ((r.listing.dirs[`~/work/${name}`]) || {}).kids || [];
     const first = await d.slice({ text: `~/work/${name}/`, bases: [] });
@@ -707,7 +817,7 @@ console.log('\n── ④ the listing cache per folder, mtime invalidation ─�
     const again = await d.slice({ text: `~/work/${name}/`, bases: [] });
     return { racy, first: kidsOf(first), again: kidsOf(again), known: sent.slice(1), mtime: sec * 1000 };
   };
-  const [real, rel] = [await sameTick(DS, 'tick-real'), await sameTick(EXACT, 'tick-exact')];
+  const [real, rel] = await Promise.all([sameTick(DS, 'tick-real'), sameTick(EXACT, 'tick-exact')]);   // (two folders of their own: side by side)
   ok(`B-1c27: a folder made in the same timestamp tick as its parent's listing is in the rows once the window passes — the listing was read RACY (${real.racy}), no \`known\` sent again (${JSON.stringify(real.known)}), the kid listed`, real.racy && !real.first.includes('made-in-the-tick') && real.again.includes('made-in-the-tick') && real.known.length >= 1 && real.known.every((k) => k === undefined), real);
   ok('B-1c27 RED CONTROL (the exact compare, the release\'s): the cached mtime sent back as `known`, the worker answers `same` — the kid stays out of the rows', !rel.again.includes('made-in-the-tick') && rel.known.includes(rel.mtime), rel);
 }

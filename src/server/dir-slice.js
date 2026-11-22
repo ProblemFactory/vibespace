@@ -14,7 +14,11 @@
 const path = require('path');
 const os = require('os');
 const PC = require('../path-candidates.js');
-const { NO_IDLE } = require('../safe-fs.js');
+const { NO_IDLE, NO_WORKER } = require('../safe-fs.js');
+// M1: the pool has no worker free for the call — every worker busy (NO_IDLE), or every live one looking (NO_WORKER, bl-machines-a's
+// folder-rule look): asked again inside the bound, never «could not be read»
+const poolBusy = (err) => !!err && (err.code === NO_IDLE.code || err.code === NO_WORKER.code);
+const mono = () => performance.now();   // the re-ask's bound: the monotonic clock (a stepped wall clock never widens it)
 // B-d833's remainder: EVERY call of the field runs on an IDLE worker or not at all (SafeFs `idleOnly`) — a healthy folder's check
 // sent into a worker held by a hung, slower call waited there, ran out ITS OWN deadline and was marked dead for 30 s. A call the pool
 // refuses (every worker busy) is LATE: still looking, asked again by the field — never a mark, never «could not be read»
@@ -102,34 +106,42 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   /* the hung ENTRANCE at or above p (the pool's deadline ended its call) — its mark speaks for everything below it */
   function entranceAbove(p, t, except = null) { for (const m of sent.values()) if (m !== except && m.entrance && m.hungAt != null && t - m.hungAt < PROBE_LATE_MS && under(p, m.path)) return m; return null; }
   /* ONE CALL: joined while it is SENT; queued in its asker's counter otherwise; at the grant it joins a call sent by then */
+  /* M1 (the coordinator's r1748 must): A JOINED CALL BELONGS TO EVERY ASKER — a press joining the typed ask's call, a level shared by two
+     texts. Each asker brings its own bound and its own field's end; the call is asked again while ANY live asker's bound is open, and
+     ends LATE only past the latest live bound or once EVERY joined asker's field has ended (an asker with no signal never ends) */
+  const queuedAsk = new Map();   // counter + key → the ask group of a call still waiting for its slot
+  const joinAsk = (g, boundAt, signal) => { if (g) g.asks.push({ boundAt, signal }); };
+  const askOpen = (g) => { const live = g.asks.filter((a) => !(a.signal && a.signal.aborted)); return live.length ? live.reduce((m, a) => Math.max(m, a.boundAt || 0), 0) : 0; };
   function once(key, cn, p, run, { entrance = false, born = now(), through = null, boundAt = 0, signal = null }) {
     const t = now(), s0 = sent.get(key);
-    if (s0 && s0.hungAt == null && t - s0.at < PROBE_LATE_MS) return s0.p;
+    if (s0 && s0.hungAt == null && t - s0.at < PROBE_LATE_MS) { joinAsk(s0.ask, boundAt, signal); return s0.p; }
     if (s0 && s0 !== through && s0.hungAt != null && t - s0.hungAt < PROBE_LATE_MS) return Promise.resolve({ skipped: markEnd(s0), at: p });   // its OWN deadline mark: never sent again inside the window
     const qk = cn + '\n' + key;
-    if (queued.has(qk)) return queued.get(qk);
+    if (queued.has(qk)) { joinAsk(queuedAsk.get(qk), boundAt, signal); return queued.get(qk); }
+    const ask = { asks: [{ boundAt, signal }] };
+    queuedAsk.set(qk, ask);
     const qp = grant(C[cn]).then((free) => {
-      queued.delete(qk);
+      queued.delete(qk); queuedAsk.delete(qk);
       const t1 = now(), s1 = sent.get(key);
-      if (s1 && s1.hungAt == null) { free(); return s1.p; }   // sent by the other counter meanwhile: joined, the slot given back
+      if (s1 && s1.hungAt == null) { free(); if (s1.ask) s1.ask.asks.push(...ask.asks); return s1.p; }   // sent by the other counter meanwhile: joined (its askers with it), the slot given back
       // at its GRANT a call is judged again: a mark set while it waited (its own, or a dead entrance above it) and an age nobody waits for
       if (s1 && s1 !== through && s1.hungAt != null && t1 - s1.hungAt < PROBE_LATE_MS) { free(); return { skipped: markEnd(s1), at: p }; }
       const m = entranceAbove(p, t1, through); if (m) { free(); return { skipped: markEnd(m), at: m.path }; }
       if (t1 - born > QUEUE_MAX_MS) { free(); return null; }
-      const e = { key, path: p, entrance, at: t1, hungAt: null, p: null };
-      // M1: refused for no idle worker ⇒ asked again until a worker frees, up to the reply's bound (`boundAt`, the real clock) or its
-      // field's end (`signal`); a call with no bound (a kid's facts, behind every answer) is LATE at once, as before
+      const e = { key, path: p, entrance, at: t1, hungAt: null, p: null, ask };
+      // M1: refused for no free worker ⇒ asked again until a worker frees, up to the latest live asker's bound (the monotonic clock) or
+      // until every asker's field has ended; a call no bounded asker joined (a kid's facts, behind every answer) is LATE at once
       let reasked = 0;
       const attempt = () => Promise.resolve().then(run).then((r) => { if (reasked) busy.freed++; return r; }, (err) => {
-        if (!(err && err.code === NO_IDLE.code)) throw err;
+        if (!poolBusy(err)) throw err;
         if (!reasked) busy.refused++;
-        if ((signal && signal.aborted) || !(Date.now() + REASK_MS <= boundAt)) { busy.late++; throw err; }
+        if (!(mono() + REASK_MS <= askOpen(ask))) { busy.late++; throw err; }
         reasked++; busy.reasked++;
         return new Promise((res) => setTimeout(res, REASK_MS)).then(attempt);
       });
       e.p = attempt().then(
         (r) => { free(); if (sent.get(key) === e) sent.delete(key); return { ok: r }; },
-        (err) => { free(); if (sent.get(key) === e) { if (err && err.safeFsTimeout) e.hungAt = now(); else sent.delete(key); } if (err && err.code === NO_IDLE.code) return LATE; return { failed: String((err && (err.message || err.code)) || err || 'failed').slice(0, 200) }; });
+        (err) => { free(); if (sent.get(key) === e) { if (err && err.safeFsTimeout) e.hungAt = now(); else sent.delete(key); } if (poolBusy(err)) return LATE; return { failed: String((err && (err.message || err.code)) || err || 'failed').slice(0, 200) }; });
       sent.set(key, e);
       return e.p;
     });
@@ -180,14 +192,19 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   function askFacts(p) {
     const t = now();
     if (factOf(p, t) || mountPaths.includes(p) || entranceAbove(p, t)) return false;   // kept · a mount (named, never stated) · under a dead mark
+    // r1748 (b): a facts call that ERRS at once (a stale mount, a link loop, the pool's own refusal by its memory) is kept AS SUCH for
+    // the keep time — not asked again at every reply, its late flag settled, its slot never taken from the kids after it. A deadline
+    // (its mark) and a busy pool (asked again, or late) are not answers and are not kept
+    const keepFact = (f) => { kidFacts.set(p, { at: now(), f }); if (kidFacts.size > 4000) for (const k of [...kidFacts.keys()].slice(0, 1000)) kidFacts.delete(k); };
+    const keepErr = (err) => keepFact({ errored: true, exists: false, err: String((err && (err.message || err.code)) || err || 'failed').slice(0, 200) });
     once('stat:' + p, 'facts', p, () => call('pathStat', { path: p, facts: true }, IDLE_ONLY).then((x) => {
       const st = x && x.stat;
       if (st && st.facts && !st.err) {
-        kidFacts.set(p, { at: now(), f: st }); noteKnown(p, st); if (kidFacts.size > 4000) for (const k of [...kidFacts.keys()].slice(0, 1000)) kidFacts.delete(k);
-        if (path.dirname(p) === home) { const h = listCache.get(home); selfFacts.set(p, { at: now(), pkg: st.pkg || null, homeAt: h ? h.entry.mtime : null }); } // S2: the self fact, beside the home's time
-      }
+        keepFact(st); noteKnown(p, st);
+        if (path.dirname(p) === home) { const h = listCache.get(home); selfFacts.set(p, { at: now(), pkg: st.pkg || null, homeAt: h ? h.entry.mtime : null }); if (selfFacts.size > 2000) for (const k of [...selfFacts.keys()].slice(0, 500)) selfFacts.delete(k); } // S2: the self fact, beside the home's time (capped like the other maps)
+      } else if (st && st.err) keepErr(st.err);
       return st;
-    }), { entrance: true, born: t });
+    }, (err) => { if (!(err && (err.safeFsTimeout || poolBusy(err)))) keepErr(err); throw err; }), { entrance: true, born: t });
     return true;
   }
   /* a listing's kids WITH their kept facts (the page's shape: kids [{ name, git, link? }]): a folder kid's git; a symlink kid by its own
@@ -313,7 +330,11 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
         // S2: a home folder's own fact stands while the home's time has not moved (a new folder there moves it), at most SELF_KEEP_MS
         if (sf && sf.homeAt === d.mtime && now() - sf.at < SELF_KEEP_MS) { if (sf.pkg === PC.SELF_PACKAGE) roots.push(p); continue; }
         const kf = factOf(p); // a kid's own facts kept for the rows: its self fact too
-        if (kf) { selfFacts.set(p, { at: now(), pkg: kf.pkg || null, homeAt: d.mtime }); if (kf.pkg === PC.SELF_PACKAGE) roots.push(p); continue; }
+        if (kf && !kf.errored) { selfFacts.set(p, { at: now(), pkg: kf.pkg || null, homeAt: d.mtime }); if (kf.pkg === PC.SELF_PACKAGE) roots.push(p); continue; }
+        // r1748 (a): THE EXCLUSION NEVER SHRINKS — a home folder's fact past its keep STANDS while it is asked again, and while its own
+        // call errs (a checkout stays out of the rows until its own fresh fact says it is not one)
+        if (sf && sf.pkg === PC.SELF_PACKAGE) roots.push(p);
+        if (kf) continue;   // (r1748 (b): its call erred at once — kept as such for the keep time, not asked again)
         if (asked >= SELF_FACTS) { missing++; continue; } // (the rest at the next ask)
         if (askFacts(p)) { asked++; missing++; }
       }
@@ -378,7 +399,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const until = new Promise((r) => { tm = setTimeout(() => r(LATE), Math.max(50, budgetMs)); });
     const untilSoft = until.then(() => new Promise((r) => setImmediate(() => r(LATE))));   // an answer already in hand beats the deadline
     const okOf = (r) => (r && r !== LATE && r.ok ? r.ok : null);
-    const o = { until, untilSoft, files, press: !!press, budget: Math.max(50, budgetMs), boundAt: Date.now() + Math.max(50, budgetMs), signal };
+    const o = { until, untilSoft, files, press: !!press, budget: Math.max(50, budgetMs), boundAt: mono() + Math.max(50, budgetMs), signal };
     for (const [k, m] of sent) if (m.hungAt != null && now() - m.hungAt >= PROBE_LATE_MS) sent.delete(k);   // a mark lives PROBE_LATE_MS
     // THE LINE: the candidates ONE AT A TIME, in the bases' order — stop at the first exact hit or the first that does not answer
     const lineP = (async () => {
@@ -466,7 +487,18 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     return { listing, self: me, took: now() - t0, partial, ...(factsLate ? { factsLate: true } : {}), ...(verdict ? { verdict } : {}), ...(rowsLate ? { rowsLate: true } : {}), ...(rowsUnread ? { rowsUnread: true, sourcesUnread } : {}), ...(probesLate.length ? { probesLate } : {}), ...(probesFailed.length ? { probesFailed } : {}), ...(sourcesLate.length ? { sourcesLate } : {}) };
   }
 
-  return { slice, self, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts }, _counters: C };
+  /** r1748 (a): the exclusion WHOLE — self() asked again while any home folder's fact is still out, inside `boundMs` (the monotonic
+   *  clock). → { v, whole } — `whole: false` = a fact was still out at the bound (a caller that keeps an answer must not keep this one) */
+  async function selfWhole(boundMs = 1500) {
+    const until = mono() + Math.max(0, boundMs);
+    for (;;) {
+      const v = await self();
+      if (!selfCache.missing && selfCache.v === v) return { v, whole: true };
+      if (mono() >= until) return { v, whole: false };
+      await new Promise((r) => setTimeout(r, 40));
+    }
+  }
+  return { slice, self, selfWhole, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts }, _counters: C };
 }
 
 module.exports = { create, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS, FACT_SLOTS, KID_FACTS, LINK_FACTS };

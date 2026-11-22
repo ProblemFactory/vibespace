@@ -194,6 +194,7 @@ const OPS = {
       if (!st.isDirectory()) { out.push({ path: d, exists: true, isDir: false, size: st.size, mtime: st.mtimeMs }); continue; }
       if (want.known != null && want.known === st.mtimeMs) { out.push({ path: d, exists: true, isDir: true, same: true, mtime: st.mtimeMs }); continue; }
       let list = [];
+      const readAt = Date.now();   // (r1748: the read's own time, taken BEFORE the readdir — a slow listing never shrinks its racy window)
       try { list = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { out.push({ path: d, exists: true, isDir: true, mtime: st.mtimeMs, unreadable: String(e.code || e.message || e) }); continue; }
       list.sort((a, b) => a.name.localeCompare(b.name));
       const kids = []; const fl = []; let fileCount = 0; let more = false; let n = 0;
@@ -206,7 +207,7 @@ const OPS = {
           if (files) { let t = null; try { t = fs.statSync(path.join(d, e.name)); } catch { } fl.push({ name: e.name, size: t ? t.size : 0, mtime: t ? t.mtimeMs : 0 }); }
         }
       }
-      const racy = Date.now() - st.mtimeMs < RACY_TICK_MS;
+      const racy = readAt - st.mtimeMs < RACY_TICK_MS;
       out.push({ path: d, exists: true, isDir: true, mtime: st.mtimeMs, ...(racy ? { racy: true } : {}), git: gitOf(d), kids, ...(files ? { files: fl } : {}), fileCount, more });
     }
     const pr = [];

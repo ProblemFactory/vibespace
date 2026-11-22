@@ -232,11 +232,15 @@ router.get('/api/home-folders', async (req, res) => {
     const { folders } = await sfs(req).call('folderCensus', { path: home });
     // lane path-field (study round 4: a fresh pod PRESELECTED ~/vibespace, the product's own checkout — it holds the most
     // files): the instance's own checkout, its data dir and dot-folders are never offered (PURE isExcludedPath)
-    const self = await dirSliceOf(req).self().catch(() => null);
+    // (B-5561 / r1748 (a): each home folder's checkout fact is its OWN call, behind — the exclusion is waited for inside a bound, and an
+    // answer built while a fact was still out is never kept: the next ask asks again)
+    const sw = await dirSliceOf(req).selfWhole(1500).catch(() => null);
+    const self = sw && sw.v;
     const { isExcludedPath } = require('../path-candidates.js');
     const kept = (Array.isArray(folders) ? folders : []).filter((f) => !(f && f.path && isExcludedPath(f.path, self || { home, roots: [] })));
-    _homeFolders = { at: now, body: { home, folders: kept } };
-    res.json(_homeFolders.body);
+    const body = { home, folders: kept };
+    _homeFolders = sw && sw.whole ? { at: now, body } : { at: 0, body: null };
+    res.json(body);
   } catch (e) { res.status(e.status || 500).json({ home, folders: [], error: String((e && e.message) || e).slice(0, 160) }); }
 });
 
