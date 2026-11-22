@@ -55,6 +55,25 @@ import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// THE DECISION ROAD a stand-in accounts store owes the usage routes (B-360d, line 228: the accounts list reads no file on the
+// loop; 主开发 r2020 — the suite crashed at «accounts.decisionList is not a function»). The REAL store's shapes
+// (src/accounts.js): a row of the decision road carries `facts: { state: 'read', at }`; signinFactsSettled / signinFactsNow
+// answer { since, facts: Map(id → { state: 'read', auth, at, from, target }) }; displayReaderOf answers null for a folder with no
+// kept snapshot («no entry, no claim» — this stand-in names no sign-in file, as its subCredsPath names none). Every sign-in row
+// this stand-in lists is READ: its email is what its file would answer.
+function withDecisionRoad(store) {
+  const at = Date.now();
+  const signIn = (a) => !!a && (a.type === 'subscription' || a.type === 'pooled');
+  const rows = () => (store.list().accounts || []).map((a) => (signIn(a) ? { ...a, facts: { state: 'read', at } } : a));
+  const settled = async (ids = null) => ({ since: at, facts: new Map(rows().filter((a) => a.facts && (!Array.isArray(ids) || ids.includes(a.id))).map((a) => [a.id, { state: 'read', auth: { loggedIn: true, email: a.email || null }, at, from: at, target: null }])) });
+  return Object.assign(store, {
+    decisionList: () => ({ accounts: rows() }),
+    decisionRowOf: (id) => rows().find((a) => a.id === id) || null,
+    signinFactsSettled: settled,
+    signinFactsNow: settled,
+    displayReaderOf: () => null,
+  });
+}
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
@@ -2740,13 +2759,13 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const serveUsage = async (dd) => {
       const app = express();
       const emptyDir = (n) => { const q = path.join(dd, '..', n + '-' + Math.random().toString(36).slice(2)); fs.mkdirSync(q, { recursive: true }); return q; };
-      const accounts = {
+      const accounts = withDecisionRoad({
         list: () => ({ accounts: ACCT_MAIL }),
         codexGlobalStatus: () => ({ loggedIn: false, email: null }),
         subscriptionStatus: () => ({ loggedIn: true, email: EMAIL }),
         subCredsPath: () => path.join(dd, 'no-such-creds', '.credentials.json'),
         usageToken: () => null,
-      };
+      });
       setupUsage({
         app, accounts, hosts: { list: () => [] }, usageHistory: null, activeSessions: new Map(),
         serverSetting: () => false, ensureDir: (x) => fs.mkdirSync(x, { recursive: true }),
@@ -2797,7 +2816,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         const dd2 = withSibling('prod-order-' + (reload ? 'reload' : 'stale'));
         const app = express();
         const emptyDir = (n) => { const q = path.join(dd2, '..', n + '-' + Math.random().toString(36).slice(2)); fs.mkdirSync(q, { recursive: true }); return q; };
-        const accounts = { list: () => ({ accounts: ACCT_MAIL }), codexGlobalStatus: () => ({ loggedIn: false, email: null }), subscriptionStatus: () => ({ loggedIn: true, email: EMAIL }), subCredsPath: () => path.join(dd2, 'no-such-creds', '.credentials.json'), usageToken: () => null };
+        const accounts = withDecisionRoad({ list: () => ({ accounts: ACCT_MAIL }), codexGlobalStatus: () => ({ loggedIn: false, email: null }), subscriptionStatus: () => ({ loggedIn: true, email: EMAIL }), subCredsPath: () => path.join(dd2, 'no-such-creds', '.credentials.json'), usageToken: () => null });
         const usage = setupUsage({
           app, accounts, hosts: { list: () => [] }, usageHistory: null, activeSessions: new Map(),
           serverSetting: () => false, ensureDir: (x) => fs.mkdirSync(x, { recursive: true }),
