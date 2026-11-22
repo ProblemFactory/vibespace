@@ -153,6 +153,13 @@ console.log('② THE PLACE KEPT — found by the walk once, asked next with no l
   const again = ASYNC.filter(([f]) => f === 'readdir').length, stats2 = ASYNC.filter(([f]) => f === 'stat').length;
   ok(first.frame && first.frame.messages.length > 0 && walked >= 1 && SYNC.length === 0 && T.stats().walked === 1, `an agent outside the cwd's folder is found by the walk — asynchronous (${walked} listings off the loop until it was found, none synchronous: ${SYNC.length})`);
   ok(second.frame && J(second.frame.messages) === J(first.frame.messages) && again === 0 && stats2 === 1 && T.stats().kept === 1, `the next ask is ONE stat of the kept place (${stats2} stat, ${again} listings)`);
+  // r2594 (4): a kept place whose file is gone — the next ask walks again and finds the new place
+  const movedDir = path.join(PROJ, '-home-userL-proj-0003', SID, 'subagents'); fs.mkdirSync(movedDir, { recursive: true });
+  const from = path.join(SUB_OTHER, `agent-${BW}.jsonl`), to = path.join(movedDir, `agent-${BW}.jsonl`);
+  fs.renameSync(from, to); fs.renameSync(from.replace('.jsonl', '.meta.json'), to.replace('.jsonl', '.meta.json'));
+  const third = await counted(() => attachOf(H, BW));
+  ok(third.frame && J(third.frame.messages) === J(first.frame.messages) && T.keptPlace(SID, BW) === to && ASYNC.filter(([f]) => f === 'readdir').length >= 1, `a kept place whose file is gone: the next ask walks again and keeps the new place (${path.relative(PROJ, T.keptPlace(SID, BW) || '')})`);
+  fs.renameSync(to, from); fs.renameSync(to.replace('.jsonl', '.meta.json'), from.replace('.jsonl', '.meta.json'));
   const noKeep = MUT.load('src/server/subagent-transcript.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8'), 'const keep = (key, fp) => { _places.delete(key); _places.set(key, fp);', 'const keep = (key, fp) => { _places.delete(key);', 'the place kept'), 'no-keep');
   const look = async () => counted(() => noKeep.findAgentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ }));
   await look(); const lookAgain = await look(); const twice = ASYNC.filter(([f]) => f === 'readdir').length;
@@ -165,17 +172,29 @@ console.log('③ TEN WINDOWS RE-ATTACHED AT ONCE — each acked first and answer
   const H = hub(require(WSH_PATH));
   const ids = [...STORM, STORM[0], STORM[1], STORM[2]];   // seven agents, three of them in two windows
   const socks = ids.map(() => H.connect());
-  const outs = await counted(() => Promise.all(ids.map((id, k) => attachOf(H, id, { sock: socks[k] }))));
+  // r2594 (2): the sharing FORCED, never timed — the hub's first read is held by this leg's stand-in until the three duplicate
+  // windows have asked (each joins the read of its file still waiting in the one queue)
+  const realRead = CX.readJsonlBoundedParsedPagedAsync;
+  let heldFirst = false;
+  CX.readJsonlBoundedParsedPagedAsync = async (...a) => { if (!heldFirst) { heldFirst = true; for (let i = 0; i < 500 && T.stats().shared < 3; i++) await sleep(10); } return realRead(...a); };
+  let outs;
+  try { outs = await counted(() => Promise.all(ids.map((id, k) => attachOf(H, id, { sock: socks[k] })))); } finally { CX.readJsonlBoundedParsedPagedAsync = realRead; }
   const refs = await Promise.all(STORM.map(async (id) => [id, await releaseCards(path.join(SUB, `agent-${id}.jsonl`), { id: `sub-agent-${id}` })]));
   const refOf = new Map(refs);
   const st = T.stats();
   ok(outs.every((o) => o.frames[0] && o.frames[0].type === 'attach-ack'), 'every window is acked at once (its first frame), whatever its place in the queue');
   ok(outs.every((o, k) => o.frame && J(o.frame.messages) === J(refOf.get(ids[k]).messages)), 'every window is answered with ITS agent\'s cards');
-  ok(st.maxInFlight === 1 && st.shared >= 1 && st.reads + st.shared === ids.length, `ONE read at a time (at most ${st.maxInFlight} in flight, ${st.maxWaiting} waiting), ${st.reads} reads for ${ids.length} windows (${st.shared} shared a read of the same file)`);
+  ok(st.maxInFlight === 1 && st.shared === 3 && st.reads === STORM.length, `ONE read at a time (at most ${st.maxInFlight} in flight, ${st.maxWaiting} waiting), ${st.reads} reads for ${ids.length} windows — the three duplicates shared their file's read (${st.shared})`);
   ok(SYNC.length === 0, `nothing listed or read whole on the loop through the storm (${SYNC.length})`);
   const allAtOnce = MUT.load('src/server/subagent-transcript.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8'), 'const p = _chain.then(run, run);', 'const p = run();', 'one read at a time'), 'all-at-once');
   await Promise.all(STORM.map((id) => allAtOnce.agentTranscript({ claudeSessionId: SID, agentId: id, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ })));
   ok(allAtOnce.stats().maxInFlight > 1, `RED CONTROL: a copy without the one-at-a-time chain had ${allAtOnce.stats().maxInFlight} reads in flight at once — the leg above would be RED`);
+  // RED: a copy without the sharing, its first read held the same way (until all ten have asked)
+  const noShare = MUT.load('src/server/subagent-transcript.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8'), '  const same = _sharing.get(fp);', '  const same = null;', 'one read a file'), 'no-share');
+  let held2 = false;
+  const reader = async (...a) => { if (!held2) { held2 = true; for (let i = 0; i < 500 && noShare.stats().waiting < ids.length - 1; i++) await sleep(10); } return realRead(...a); };
+  await Promise.all(ids.map((id) => noShare.agentTranscript({ claudeSessionId: SID, agentId: id, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ, reader })));
+  ok(noShare.stats().shared === 0 && noShare.stats().reads === ids.length, `RED CONTROL: a copy without the sharing read the same files ${noShare.stats().reads} times for ${ids.length} windows — the leg above would be RED`);
 }
 
 console.log('④ THE POOL REFUSING — said by name in the window, nothing read on the loop');
@@ -193,6 +212,25 @@ console.log('④ THE POOL REFUSING — said by name in the window, nothing read 
   CX._setHistoryHeapMbForTest(1);
   try { await counted(() => fallback.agentTranscript({ claudeSessionId: SID, agentId: STORM[3], exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ })); } finally { CX._setHistoryHeapMbForTest(768); }
   ok(wholeReads() === 1, `RED CONTROL: a copy that falls back when the pool refuses reads the whole file on the loop (${wholeReads()}) — the leg above would be RED`);
+}
+
+console.log('④b THE META READ\'S BOUND — a meta file that never answers is refused by name, and the one queue goes on');
+{
+  T._resetForTest();
+  const never = () => new Promise(() => {});
+  const fp1 = path.join(SUB, `agent-${STORM[4]}.jsonl`), fp2 = path.join(SUB, `agent-${STORM[5]}.jsonl`);
+  const first = T.readAgentTranscript(fp1, { metaRead: never, metaBoundMs: 150 });
+  const next = T.readAgentTranscript(fp2);
+  const within = (p, ms) => Promise.race([p, sleep(ms).then(() => ({ late: true }))]);
+  const [a, b] = await Promise.all([within(first, 3000), within(next, 3000)]);
+  ok(a.refused && /meta file \(agent-c\d+\.meta\.json\) did not answer within 0\.15 s/.test(a.refused), `a meta file that never answers: refused by name — «${String(a.refused || '').slice(0, 80)}»`);
+  ok(Array.isArray(b.records) && b.records.length > 0, `…and the next read in the queue is answered (${(b.records || []).length} records), never held behind it`);
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
+  const unbounded = MUT.load('src/server/subagent-transcript.js', anchored(SRC, '        new Promise((res) => { timer = setTimeout(() => res(LATE), metaBoundMs); }),\n', '', 'the meta read\'s bound'), 'meta-unbounded');
+  const f1 = unbounded.readAgentTranscript(fp1, { metaRead: never, metaBoundMs: 150 });
+  const f2 = unbounded.readAgentTranscript(fp2);
+  const [ra, rb] = await Promise.all([within(f1, 800), within(f2, 800)]);
+  ok(ra.late && rb.late, 'RED CONTROL: a copy whose meta read has no bound holds that read and every read after it (neither answered in 0.8 s) — the leg above would be RED');
 }
 
 console.log('⑤ THE ROUTE\'S SAME — GET /api/subagent-messages through the helper');
@@ -237,7 +275,7 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
     const { attach } = consumer.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'control_request', 'control_response', 'control_cancel_request']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(HOME, 'none'), checkClaudeGoalStatus() {}, noteModelSeen() {}, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
     const bcast = [];
     const helpers = { feedLive: N.feedLive, broadcastToSession: (x, id, m) => bcast.push(m), broadcastActiveSessions() {}, readSessionMeta: () => ({}), writeSessionMeta() {}, updateSessionTodos() {}, applyTaskToolUpdate() {}, emitTaskListTodos() {} };
-    const session = (k) => { const id = `sess-w${k}`; const s = { mode: 'chat', backend: 'claude', name: 'w', cwd: CWD, host: null, claudeSessionId: SID, backendSessionId: SID, sockName: `cw-w${k}`, buffer: '', createdAt: Date.now(), _webuiId: id, _taskRecords: {} }; s._normalizer = new MessageManager(id); activeSessions.set(id, s); const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} }; quiet(); try { attach(s, id, h, helpers); } finally { loud(); } return s; };
+    const session = (k) => { const id = `sess-w${k}`; const s = { mode: 'chat', backend: 'claude', name: 'w', cwd: CWD, host: null, claudeSessionId: SID, backendSessionId: SID, sockName: `cw-w${k}`, buffer: '', createdAt: Date.now(), _webuiId: id, _taskRecords: {} }; s._normalizer = new MessageManager(id); activeSessions.set(id, s); const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} }; quiet(); try { attach(s, id, h, helpers); } finally { loud(); } s.__feed = (rec) => { quiet(); try { h.data(JSON.stringify(rec) + '\n'); } finally { loud(); } }; return s; };
     const told = (agentId) => bcast.filter((m) => m.type === 'subagent-message' && m.parentToolUseId === `tu-${agentId}`).length;
     const close = () => { for (const s of activeSessions.values()) for (const w of (s.subagentWatchers || new Map()).values()) { try { if (w && w.retry) clearTimeout(w.retry); if (w && w.watcher && w.watcher.close) w.watcher.close(); } catch { } } activeSessions.clear(); };
     return { session, told, close };
@@ -261,6 +299,17 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
   const s3 = H.session(3);
   s3._startSubagentWatcher(`tu-${AW}`, AW);
   ok(H.told(AW) > 0 && s3.subagentWatchers.get(`tu-${AW}`) && s3.subagentWatchers.get(`tu-${AW}`).watcher, `a file at the cwd's folder is read at once — ${H.told(AW)} records told before the start returned`);
+  // r2594 (1): the helper ends INSIDE the look (its task notification lands before the walk answers) — its lines are still told once
+  const EL = 'e0000000000000e2'; agent(SUB_OTHER, EL, 0.05);
+  const stopInLook = async (HH, k) => { const s = HH.session(k); s._startSubagentWatcher(`tu-${EL}`, EL); s.__feed({ type: 'system', subtype: 'task_notification', task_id: EL, tool_use_id: `tu-${EL}`, status: 'completed', summary: 'x' }); for (let i = 0; i < 150 && !HH.told(EL); i++) await sleep(10); return s; };
+  const s6 = await stopInLook(H, 6);
+  ok(H.told(EL) > 0 && !s6.subagentWatchers.has(`tu-${EL}`), `a stop that lands while the look runs: the helper's lines are read ONCE when the look returns (${H.told(EL)} told), no watch left armed`);
+  // r2594 (4): the shared listing is read again after its age (no red today)
+  T._resetForTest(); T._setListingMaxAgeForTest(100);
+  const look = () => T.findAgentTranscript({ claudeSessionId: SID, agentId: 'ffffffffffffff01', exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ, workflows: false, shared: true });
+  await look(); await look(); const once = T.stats().listings; await sleep(150); await look();
+  ok(once === 1 && T.stats().listings === 2 && T.stats().listingsShared === 1, `the hub's listing is read again after its age (${once} listing for two looks inside it, ${T.stats().listings} after it)`);
+  T._resetForTest();
   H.close();
   // RED: the release's finder, planted in a copy of the parser module
   const CS = fs.readFileSync(CS_PATH, 'utf-8');
@@ -275,6 +324,15 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
       const watchFile = candidates.find((f) => { try { return fs.existsSync(f); } catch { return false; } });
 `;
   const red = MUT.load('src/server/stdout/claude-stream-json.js', anchored(CS, NEW_FINDER, OLD_FINDER, 'the watcher\'s finder'), 'release-finder');
+  const la = CS.indexOf('                if (session.subagentWatchers.get(toolUseId) !== looking) {\n'), lb = CS.indexOf('                  return;\n                }\n', la);
+  const LAST_READ = la >= 0 && lb > la ? CS.slice(la, lb + '                  return;\n                }\n'.length) : 'THE LAST READ';
+  const dropped = MUT.load('src/server/stdout/claude-stream-json.js', anchored(CS, LAST_READ, '                if (session.subagentWatchers.get(toolUseId) !== looking) return;\n', 'the last read after a stop in the look'), 'no-last-read');
+  const HD = harness(dropped);
+  T._resetForTest();
+  const sd = HD.session(7); sd._startSubagentWatcher(`tu-${EL}`, EL); sd.__feed({ type: 'system', subtype: 'task_notification', task_id: EL, tool_use_id: `tu-${EL}`, status: 'completed', summary: 'x' });
+  await sleep(500);
+  ok(HD.told(EL) === 0, `RED CONTROL: a copy that drops the look's answer when the stop landed meanwhile tells none of the helper's lines (${HD.told(EL)}) — the leg above would be RED`);
+  HD.close();
   const HR = harness(red);
   const r1 = HR.session(4);
   await counted(async () => { r1._startSubagentWatcher(`tu-${EW}`, EW); for (let i = 0; i < 100 && !HR.told(EW); i++) await sleep(10); });

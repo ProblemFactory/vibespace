@@ -32,10 +32,11 @@ const projectsRoot = () => path.join(os.homedir(), '.claude', 'projects');
 // THE HUB'S ONE LISTING of the projects root for the live watchers' finder (commit 2, 主开发 r2374): asynchronous, shared, at most
 // once a second — every agent a workflow starts retries its finder while its file is not there yet; each try listed the root again
 const LISTING_MAX_AGE_MS = 1000;
+let listingMaxAgeMs = LISTING_MAX_AGE_MS;   // a suite may set it (_setListingMaxAgeForTest): the listing is read again after it
 let _listing = null;   // { root, at, p }
 function sharedListing(root) {
   const now = Date.now();
-  if (_listing && _listing.root === root && now - _listing.at < LISTING_MAX_AGE_MS) { _stats.listingsShared++; return _listing.p; }
+  if (_listing && _listing.root === root && now - _listing.at < listingMaxAgeMs) { _stats.listingsShared++; return _listing.p; }
   _stats.listings++;
   const p = fsp.readdir(root).catch(() => []);
   _listing = { root, at: now, p };
@@ -88,7 +89,11 @@ let _chain = Promise.resolve();
 const _sharing = new Map();   // the file → its read's promise, while it waits or runs
 /** The transcript's records, read and parsed by the transcript pool in pages — { records, meta } or { refused: why }. ONE read at a
  *  time; asks of the same file while its read waits or runs share it. `meta` = the agent's .meta.json beside it (read async). */
-function readAgentTranscript(fp, { reader = null } = {}) {
+// THE META READ'S BOUND (r2594 (3)): the agent's small .meta.json is read inside the ONE chain — a read that never returns would hold
+// every later sub-agent read of the hub with no word; past this bound the read is REFUSED by name (the pool has its own: 60 s a call)
+const META_BOUND_MS = 2000;
+const LATE = Symbol('late');
+function readAgentTranscript(fp, { reader = null, metaRead = null, metaBoundMs = META_BOUND_MS } = {}) {
   const same = _sharing.get(fp);
   if (same) { _stats.shared++; return same; }
   _stats.waiting++; _stats.maxWaiting = Math.max(_stats.maxWaiting, _stats.waiting);
@@ -101,8 +106,15 @@ function readAgentTranscript(fp, { reader = null } = {}) {
       const records = await read(fp, { tailOnly: false, whole: true, slot: 'subagent', note: false, onFail: (w) => { why = w; } });
       if (!Array.isArray(records)) { _stats.refused++; return { refused: why || 'the transcript pool did not answer' }; }
       _stats.reads++;
-      let meta = {};
-      try { meta = JSON.parse(await fsp.readFile(fp.replace(/\.jsonl$/, '.meta.json'), 'utf-8')); } catch { }
+      let meta = {}, timer = null;
+      const metaPath = fp.replace(/\.jsonl$/, '.meta.json');
+      const text = await Promise.race([
+        Promise.resolve().then(() => (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath)).catch(() => null),
+        new Promise((res) => { timer = setTimeout(() => res(LATE), metaBoundMs); }),
+      ]);
+      clearTimeout(timer);
+      if (text === LATE) { _stats.refused++; return { refused: `its meta file (${path.basename(metaPath)}) did not answer within ${metaBoundMs / 1000} s` }; }
+      if (typeof text === 'string') try { meta = JSON.parse(text); } catch { }
       return { records, meta };
     } finally { _stats.inFlight--; }
   };
@@ -127,6 +139,7 @@ const keptPlace = (claudeSessionId, agentId) => _places.get(`${claudeSessionId}\
 /** keep a place a caller found itself (the live watcher's one stat of the cwd's folder) */
 const keepPlace = (claudeSessionId, agentId, fp) => keep(`${claudeSessionId}\0${agentId}`, fp);
 
-function _resetForTest() { _places.clear(); _sharing.clear(); _chain = Promise.resolve(); _listing = null; for (const k of Object.keys(_stats)) _stats[k] = 0; }
+function _resetForTest() { _places.clear(); _sharing.clear(); _chain = Promise.resolve(); _listing = null; listingMaxAgeMs = LISTING_MAX_AGE_MS; for (const k of Object.keys(_stats)) _stats[k] = 0; }
+const _setListingMaxAgeForTest = (ms) => { listingMaxAgeMs = ms; };
 
-module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, keptPlace, keepPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, _resetForTest };
+module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, keptPlace, keepPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, _resetForTest, _setListingMaxAgeForTest };

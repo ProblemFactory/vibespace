@@ -311,7 +311,13 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             .then((r) => r.fp, () => null)
             .then((fp) => {
               try {
-                if (session.subagentWatchers.get(toolUseId) !== looking) return;   // stopped (or replaced) while it looked
+                if (session.subagentWatchers.get(toolUseId) !== looking) {
+                  // r2594 (1): a STOP that landed while it looked (the helper ended inside the look) — the release read the file before
+                  // the stop; here the one last read when the look returns: the watch armed and stopped at once (the stop's own last
+                  // read and its short last watch). Replaced by another start meanwhile: nothing (that watch is its own)
+                  if (looking.stopped && fp && !session.subagentWatchers.has(toolUseId) && activeSessions.has(id)) { startSubagentWatcher(toolUseId, agentId, attempt, fp); stopSubagentWatcher(toolUseId); }
+                  return;
+                }
                 session.subagentWatchers.delete(toolUseId);
                 if (!activeSessions.has(id)) return;
                 startSubagentWatcher(toolUseId, agentId, attempt, fp || null);
@@ -393,6 +399,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     const stopSubagentWatcher = (toolUseId) => {
       const entry = session.subagentWatchers.get(toolUseId);
       if (entry) {
+        if (entry.looking) entry.stopped = true;   // r2594 (1): the finder's look still running — it does the last read when it returns
         // THE LAST READ (B-b968's edge, its next): the helper's last records may not be told yet when its end is — read at once,
         // keep the watch SUBAGENT_LAST_READ_MS more (a transcript written a moment later; unref'd, never holding the process),
         // then read once more and close; a session gone by then is read no more
