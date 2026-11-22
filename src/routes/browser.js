@@ -666,7 +666,10 @@ router.get('/api/browser/providers', (req, res) => {
   const h = LOCAL.has(host) ? null : host;
   try {
     const rows = B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined });
-    res.json({ providers: rows, host: h, ...hostKnownView(k, h), forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [], road: typeof k.agentRoadFor === 'function' ? k.agentRoadFor(null, { host: h }).why : null });   // (lane chrome-157: the road a new profile here would take)
+    // B-19a9 (the coordinator's r2669 (3)): the road a new profile here would take FOR EACH PROVIDER (`roads`, by row id) — the dialog
+    // words the chosen provider's; `road` (the default row's) stays for an older client
+    const roadOf = (provider) => (typeof k.agentRoadFor === 'function' ? k.agentRoadFor(null, { host: h, provider }).why : null);
+    res.json({ providers: rows, host: h, ...hostKnownView(k, h), forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [], road: roadOf(null), roads: Object.fromEntries(rows.filter((r) => r && r.id).map((r) => [r.id, roadOf(r.id)])) });   // (lane chrome-157: the road a new profile here would take)
   } catch (e) { fail(res, e); }
 });
 router.get('/api/browser/profiles/:id', (req, res) => {

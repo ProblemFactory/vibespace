@@ -534,5 +534,23 @@ console.log('— ⑥ the allowlisting egress proxy (§7.2.1: enforcing, not obse
   }
 }
 
+// B-19a9 (the coordinator's r2669 (3)): the road a NEW profile takes, FOR EACH PROVIDER — the real keeper with a stand-in proxy (the
+// mediator's grantFor present ⇒ the proxy road is on), asked as the new-profile dialog's route asks it
+{
+  const med = { available: () => true, grantFor() { return null; }, repoint() { }, revoke() { }, admitTarget() { }, adopt: async () => { }, onTold: () => () => { }, onFolder: () => () => { }, port: () => 0, list: () => [] };
+  const kr = mkKeeper(new Set(), { mediator: med });
+  const r = (o) => kr.agentRoadFor(null, o);
+  const law = {
+    local: { chromium: r({ provider: 'chromium' }), cdp: r({ provider: 'cdp' }), cloud: r({ provider: 'cloud:browserbase' }), none: r({}) },
+    paired: { chromium: r({ host: 'dev-1', provider: 'chromium' }), cdp: r({ host: 'dev-1', provider: 'cdp' }), none: r({ host: 'dev-1' }) },
+  };
+  ok(law.local.chromium.why === 'shared' && !law.local.chromium.paired && law.local.cdp.why === 'external' && law.local.cloud.why === 'shared' && law.local.none.why === 'shared' && !law.local.none.paired
+    && law.paired.chromium.why === 'shared' && law.paired.chromium.paired === true && law.paired.cdp.why === 'external' && !law.paired.cdp.paired && law.paired.none.why === 'shared' && law.paired.none.paired === true,
+    'r2669 (3): a NEW profile\'s road is its PROVIDER\'s — chromium the scope road here and on a paired machine, a `cdp` row the OUTSIDE endpoint on both, a cloud row the scope road; no provider = the default row\'s, as before', law);
+  const k0 = mkKeeper(new Set());
+  ok(k0.agentRoadFor(null, { provider: 'cdp' }).why === 'no-proxy' && k0.agentRoadFor(null, { host: 'dev-1', provider: 'chromium' }).why === 'no-proxy', 'and with no proxy every provider is the raw road, said as today');
+  kr.shutdown(); k0.shutdown();
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

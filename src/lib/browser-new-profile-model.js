@@ -262,3 +262,12 @@ export function providerRowsShown(choices = [], providers = [], { host = null } 
   const never = (c) => c.state === 'not-a-profile' || (c.state === 'unavailable' && codeOf.get(c.id) !== 'provider_needs_consent');
   return { rows: choices.filter((c) => !never(c)), windowLeftOut: choices.some((c) => c.state === 'not-a-profile') };
 }
+
+/** B-19a9 (the coordinator's r2669 (3)): THE ROAD OF THE PROVIDER CHOSEN — the server's per-provider answer (`roads`, by row id:
+ *  GET /api/browser/providers, the same verdict the profile's leases will take); the machine-wide `road` only where the server
+ *  named none for that row (an older server). The «All agents» sentence is worded from this, never from one road for every
+ *  provider (an outside endpoint — a `cdp` row — is «external» on this computer and on a paired one alike). PURE. */
+export function roadOfChoice({ roads = null, road = null } = {}, provider = null) {
+  if (roads && typeof roads === 'object' && provider != null && Object.prototype.hasOwnProperty.call(roads, String(provider)) && roads[String(provider)]) return roads[String(provider)];
+  return road == null ? null : road;
+}

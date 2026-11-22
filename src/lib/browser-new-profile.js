@@ -19,7 +19,7 @@ import { folderTail } from './principal-picker-model.js';
 import { pickerRows, draftWho, EVERYONE_KEY, allAgentsSentence, refusalWords as whoRefusalWords } from './browser-who-model.js';   // + the who list's own refusals (主开发 05:42Z (4): the Task Groups hold in the page's words)
 import { nameHelpers } from './browser-who-dialog.js';
 import { providerNeedsOf, providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
-import { providerRowsShown } from './browser-new-profile-model.js'; // lane ui-controls-and-bugs: a row nobody can pick here is not drawn
+import { providerRowsShown, roadOfChoice } from './browser-new-profile-model.js'; // lane ui-controls-and-bugs: a row nobody can pick here is not drawn; B-19a9: the chosen provider's road
 import { buildRows, choiceOfRow, installHint, buildRefusalWords, buildRefusalDoorOf } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 import { enterSubmits } from './chat-enter-keys.js';
@@ -128,7 +128,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const whoMode = () => (picker.selected().includes(EVERYONE_KEY) ? 'all' : 'only');
   const syncWho = () => {
     const sentence = whoMode() === 'all'
-      ? allAgentsSentence(st.host ? st.hostRoad : st.road, t)   // (lane chrome-157: the road a new profile here would take)
+      ? allAgentsSentence(st.host ? roadOfChoice({ roads: st.hostRoads, road: st.hostRoad }, st.provider) : roadOfChoice({ roads: st.roads, road: st.road }, st.provider), t)   // (lane chrome-157: the road a new profile here would take — B-19a9 r2669 (3): FOR THE PROVIDER CHOSEN)
       : t('Pick conversations and Task Groups. A Task Group means every conversation in it — bound to it or started in its folders — now or later.');
     if (meaning.textContent !== sentence) meaning.textContent = sentence;
   };
@@ -233,6 +233,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     list.replaceChildren(...order);
     // one machine (this one) says nothing worth a choice — the section is shown only when there is something to pick
     machWrap.style.display = choices.length > 1 ? '' : 'none';
+    try { syncWho(); } catch { /* drawn before the picker */ }   // B-19a9 r2669 (3): the provider or the machine changed — the sentence follows ITS road
   }
 
   // lane dc-browser-providers: a Chrome build is offered by the picked row's `buildChoice` cell (the /providers rows) — no
@@ -340,6 +341,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   async function loadFacts() {
     const [pv, mv] = await Promise.all([fetchJson('/api/browser/providers'), fetchJson('/api/desktop/machines')]);
     st.road = pv && pv.road ? pv.road : null;   // (lane chrome-157: the road a new profile on this machine would take)
+    st.roads = pv && pv.roads && typeof pv.roads === 'object' ? pv.roads : null;   // B-19a9 r2669 (3): …for each provider
     try { syncWho(); } catch { /* drawn before the picker */ }
     if (st.closed) return;
     st.providers = pv && Array.isArray(pv.providers) ? pv.providers : [];
@@ -347,7 +349,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     // a paired machine's verdicts (the structural rules — a key that cannot leave this computer, a browser with no remote
     // transport — are the same on every paired machine): asked once, of the first machine that could run one
     const remote = st.machines.find((m) => m && m.hostId && m.hostId !== 'local');
-    if (remote) { const hv = await fetchJson(`/api/browser/providers?host=${encodeURIComponent(remote.hostId)}`); if (st.closed) return; st.hostRoad = hv && hv.road ? hv.road : 'remote'; st.hostRows = hv && Array.isArray(hv.providers) ? hv.providers : null; }
+    if (remote) { const hv = await fetchJson(`/api/browser/providers?host=${encodeURIComponent(remote.hostId)}`); if (st.closed) return; st.hostRoad = hv && hv.road ? hv.road : 'remote'; st.hostRoads = hv && hv.roads && typeof hv.roads === 'object' ? hv.roads : null; st.hostRows = hv && Array.isArray(hv.providers) ? hv.providers : null; }
     // lane remote-profile-start: can a browser run on each paired machine at all (its CLI, a Chrome) — its own answer, asked once per open
     const serving = st.machines.filter((m) => m && m.hostId && m.hostId !== 'local' && m.connected && Array.isArray(m.capabilities) && m.capabilities.includes('browser-serve'));
     if (serving.length) { const rs = await Promise.all(serving.map((m) => fetchJson(`/api/browser/builds?host=${encodeURIComponent(m.hostId)}`))); if (st.closed) return; st.ready = {}; serving.forEach((m, i) => { const r = rs[i]; if (r && !r.error && r.ready) st.ready[m.hostId] = r.ready; }); }

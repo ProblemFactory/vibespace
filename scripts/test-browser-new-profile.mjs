@@ -399,5 +399,25 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(cg.own.status === 200 && cg.own.adopted === true && cg.other.status === 200 && cg.other.adopted === true && !cg.keptStill[0] && !cg.keptStill[1], 'control (g): …an agent\'s bare adopt took its own AND another conversation\'s kept browser (the logins moved) — exactly what the r3 (Y4) leg catches', cg);
 }
 
+// B-19a9 (the coordinator's r2669 (3)): THE «All agents» SENTENCE FOLLOWS THE ROAD OF THE PROVIDER CHOSEN — never one road for every
+// provider (an outside endpoint, a `cdp` row, was told «each conversation in its own tab» on this computer and on a paired one)
+{
+  const Wm = await import('../src/lib/browser-who-model.js');
+  const roads = { chromium: 'shared', cdp: 'external', 'cloud:browserbase': 'shared' };
+  const pick = (p, o = { roads, road: 'shared' }) => M.roadOfChoice(o, p);
+  ok(pick('cdp') === 'external' && pick('chromium') === 'shared' && pick('cloud:browserbase') === 'shared' && pick('cloud:kernel') === 'shared' && pick('cdp', { roads: null, road: 'no-proxy' }) === 'no-proxy' && M.roadOfChoice({}, 'cdp') === null && M.roadOfChoice({ roads: { cdp: '' }, road: 'shared' }, 'cdp') === 'shared',
+    'PURE roadOfChoice: the server\'s road FOR the chosen provider; the machine-wide road only where the server named none for that row (an older server); nothing read ⇒ null');
+  const own = Wm.allAgentsSentence('shared'), ext = Wm.allAgentsSentence(pick('cdp'));
+  ok(ext !== own && /did not start/.test(ext) && !/its own tab/.test(ext) && Wm.allAgentsSentence(pick('chromium')) === own, 'a `cdp` row is worded as the outside endpoint (every conversation sees and drives every tab), never «each conversation in its own tab»; chromium keeps its own-tab sentence');
+  const dlg = read('src/lib/browser-new-profile.js');
+  const wired = (src) => src.includes("allAgentsSentence(st.host ? roadOfChoice({ roads: st.hostRoads, road: st.hostRoad }, st.provider) : roadOfChoice({ roads: st.roads, road: st.road }, st.provider), t)")
+    && src.includes("st.roads = pv && pv.roads && typeof pv.roads === 'object' ? pv.roads : null;") && src.includes("st.hostRoads = hv && hv.roads && typeof hv.roads === 'object' ? hv.roads : null;")
+    && /machWrap\.style\.display = choices\.length > 1 \? '' : 'none';\n    try \{ syncWho\(\); \} catch/.test(src)
+    && src.includes('input.onchange = () => { st.provider = c.id; drawProviders(); drawMachines(); drawBuilds(); };') && src.includes('input.onchange = () => { st.host = m.hostId; drawProviders(); drawMachines(); loadBuilds(); loadClones(); };');
+  const oneRoad = editAnchor(dlg, "allAgentsSentence(st.host ? roadOfChoice({ roads: st.hostRoads, road: st.hostRoad }, st.provider) : roadOfChoice({ roads: st.roads, road: st.road }, st.provider), t)", "allAgentsSentence(st.host ? st.hostRoad : st.road, t)", 'src/lib/browser-new-profile.js'); /* stale-pins: kept — the RED copy restores the one-road line */
+  const stale = editAnchor(dlg, "    try { syncWho(); } catch { /* drawn before the picker */ }   // B-19a9 r2669 (3)", "    // B-19a9 r2669 (3)", 'src/lib/browser-new-profile.js');
+  ok(wired(dlg) && !wired(oneRoad) && !wired(stale), 'the dialog words the CHOSEN provider\'s road (the route\'s `roads`, here and on the paired machine) and words it again when the provider or the machine changes (both pickers redraw the machines, which ends in syncWho); CONTROL (RED), each for one reason: one road for every provider; a sentence left stale after a change');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

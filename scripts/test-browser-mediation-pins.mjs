@@ -74,6 +74,18 @@ console.log('— B-19a9 (r1840 / r1846): THE ROAD VERDICT names each raw case by
   const oldLogin = anchored(kp, 'paired: roadFactsOf(p, rec).paired,', 'paired: remote && !external,', 'b19a9-login-self-paired'); /* stale-pins: kept — the RED copy restores the self-computed line */
   ok(selfPaired(kp) && !selfPaired(oldLogin), 'r2182 (2): the login road reads «paired» from the ONE helper (roadFactsOf), never works it out by itself; CONTROL (RED): the self-computed line in a copy');
   ok(!!rf && factsLaw(compileRF(rf[1])) && !factsLaw(compileRF(rfBad)), 'roadFactsOf (compiled from the keeper): a paired machine\'s started profile ⇒ paired; an outside endpoint (a `cdp` profile, a record not started here, a provider that does not start) ⇒ external; a local one ⇒ neither; CONTROL (RED): a copy that calls a paired profile external');
+  // r2669 (3): a NEW profile's road is asked FOR ITS PROVIDER through the SAME facts helper its leases use (the new-profile dialog words
+  // that road) — the machine-only spelling is gone; and the providers route answers one road PER ROW beside the default row's
+  const newRoad = (src) => src.includes('agentRoadFor: (id, { host = null, provider = null } = {}) => (id ? dialogRoadOf(')
+    && src.includes('ephemeral: false, ...roadFactsOf({ provider: provider || null, host: host || null }, null), agent: true })),')
+    && !src.includes('ephemeral: false, paired: !!host, agent: true })'); /* stale-pins: kept — the machine-only spelling must be ABSENT */
+  const oneRoad = anchored(kp, 'ephemeral: false, ...roadFactsOf({ provider: provider || null, host: host || null }, null), agent: true })),', 'ephemeral: false, paired: !!host, agent: true })),', 'b19a9-new-road-per-host'); /* stale-pins: kept — the RED copy restores the machine-only spelling */
+  ok(newRoad(kp) && !newRoad(oneRoad), 'r2669 (3): a NEW profile\'s road is its PROVIDER\'s — the keeper asks the verdict with roadFactsOf({ provider, host }), the facts its leases will use; CONTROL (RED): one road per machine (`paired: !!host`, the provider never asked) in a copy');
+  const rt = fs.readFileSync(path.join(REPO_DIR, 'src/routes/browser.js'), 'utf8');
+  const perRow = (src) => src.includes("const roadOf = (provider) => (typeof k.agentRoadFor === 'function' ? k.agentRoadFor(null, { host: h, provider }).why : null);")
+    && src.includes('road: roadOf(null), roads: Object.fromEntries(rows.filter((r) => r && r.id).map((r) => [r.id, roadOf(r.id)])) });');
+  const rtOne = anchored(rt, ', roads: Object.fromEntries(rows.filter((r) => r && r.id).map((r) => [r.id, roadOf(r.id)])) });', ' });', 'b19a9-route-one-road');
+  ok(perRow(rt) && !perRow(rtOne), 'r2669 (3): GET /api/browser/providers answers `roads` — the road a new profile here would take FOR EACH PROVIDER ROW (the keeper\'s verdict per row) — beside `road` (the default row\'s, for an older client); CONTROL (RED): the one-road answer in a copy');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

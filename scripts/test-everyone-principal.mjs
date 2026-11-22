@@ -364,7 +364,7 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
     ok(W.allAgentsSentence('external') === outside && W.allAgentsSentence('shared') === own && typeof zhD[outside] === 'string' && zhD[outside].length > 0 && typeof jaD[outside] === 'string' && jaD[outside].length > 0,
       'browser-who-model: an outside endpoint («external», the road verdict\'s own reason) is said by name — a browser VibeSpace did not start, every conversation sees every tab — with its zh and ja entries; a paired machine\'s shared profile is the scope road («shared»: each conversation in its own tab)');
     const dialog = fs.readFileSync(path.join(REPO, 'src/lib/browser-who-dialog.js'), 'utf8'), fresh = fs.readFileSync(path.join(REPO, 'src/lib/browser-new-profile.js'), 'utf8'), trace = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-    ok([dialog, fresh, trace].every((x) => !x.includes(`t('${own}')`)) && /allAgentsSentence\(view\.road, t\)/.test(dialog) && /allAgentsSentence\(st\.host \? st\.hostRoad : st\.road, t\)/.test(fresh) && /allAgentsSentence\(r && r\.agentRoad, t\)/.test(trace),
+    ok([dialog, fresh, trace].every((x) => !x.includes(`t('${own}')`)) && /allAgentsSentence\(view\.road, t\)/.test(dialog) && /allAgentsSentence\(st\.host \? roadOfChoice\(\{ roads: st\.hostRoads, road: st\.hostRoad \}, st\.provider\) : roadOfChoice\(\{ roads: st\.roads, road: st\.road \}, st\.provider\), t\)/.test(fresh) && /allAgentsSentence\(r && r\.agentRoad, t\)/.test(trace),
       'browser-who-model: the three dialogs word it ONLY through allAgentsSentence, keyed by the road the server sent — never a literal «own tab» promise');
     const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
     ok(zh.includes(JSON.stringify(shared) + ':') && ja.includes(JSON.stringify(shared) + ':'), 'browser-who-model: the shared-road sentence has its zh and ja');
@@ -373,7 +373,7 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
     const keeperSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     ok(W.allAgentsSentence('unavailable') === unavailable && zh.includes(JSON.stringify(unavailable) + ':') && ja.includes(JSON.stringify(unavailable) + ':')
       && /const dialogRoadOf = \(p\) => \{ const v = agentRoadOf\(p\); return p && isMediated\(p\) && !\(mediator && mediationOn\(\) && typeof mediator\.grantFor === 'function'\) \? \{ mode: v\.mode, why: 'unavailable' \} : v; \};/.test(keeperSrc)
-      && /agentRoad: dialogRoadOf\(p\)\.why/.test(keeperSrc) && /agentRoadFor: \(id, \{ host = null \} = \{\}\) => \(id \? dialogRoadOf\(/.test(keeperSrc),
+      && /agentRoad: dialogRoadOf\(p\)\.why/.test(keeperSrc) && /agentRoadFor: \(id, \{ host = null, provider = null \} = \{\}\) => \(id \? dialogRoadOf\(/.test(keeperSrc),
       'browser-who-model: a mediated profile on a hub with NO proxy is worded UNAVAILABLE (every agent lease there is refused mediation_unavailable) — the keeper\'s dialog road says so in the profile row and /use; en / zh / ja');
   }
   const view = { use: { mode: 'all', who: [{ kind: 'task', id: 'tg-1', title: 'Ops' }] } };

@@ -9191,9 +9191,12 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       return { ready, idle1h };
     },
     /** lane chrome-157: the road an agent's lease of profile `id` takes ({mode, why}) — or, with no id, the road a NEW profile on `host`
-     *  would take — the same verdict the leases use; the sharing dialogs word «each conversation in its own tab» only where it holds */
+     *  would take — the same verdict the leases use; the sharing dialogs word «each conversation in its own tab» only where it holds.
+     *  B-19a9 (the coordinator's r2669 (3)): a new profile's road is asked FOR ITS PROVIDER, through the SAME facts helper its leases
+     *  will use (roadFactsOf: an outside endpoint — a `cdp` row, or one that starts no browser — is «external»); no provider = the
+     *  default row, as before */
     onDownloadFolder: (fn) => { if (typeof fn !== 'function') return () => { }; folderListeners.add(fn); return () => folderListeners.delete(fn); },   // (lane chrome-157: THE WINDOW's notice road)
-    agentRoadFor: (id, { host = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, paired: !!host, agent: true })),
+    agentRoadFor: (id, { host = null, provider = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, ...roadFactsOf({ provider: provider || null, host: host || null }, null), agent: true })),
     list, profile, profileByRef, browserOf, browserIdentityOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
     engineFactOf, engineRowsView, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
