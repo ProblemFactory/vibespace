@@ -3734,6 +3734,8 @@ export default {
   "{n} reset credits left after this one.": "使用後、リセットクレジットは残り {n} 個です。",
   "This is the last stored reset credit.": "これが最後の保存済みリセットクレジットです。",
   "Use a stored reset credit on {account}?": "{account} で保存済みのリセットクレジットを使いますか？",
+  "The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do": "リセットクレジットの試行記録を読めません — 再び読めるまでリセットクレジットは使いません。読めるようになれば自然に回復します",   // B-f276's remainder (主开发 r1694): the held attempts file's For-you item
+  "The reset-credit attempt records could not be read — no reset credit is used until they read again: a request made before the restart may have gone out, and a second one could spend a second credit. This heals by itself when they read.": "リセットクレジットの試行記録を読めません — 再び読めるまでリセットクレジットは使いません：再起動前のリクエストが送信済みの可能性があり、もう一度送ると2つ目のクレジットを使うおそれがあります。読めるようになれば自然に回復します。",   // …and the reset-credit dialog's refusal
   "The reset-credit attempt records could not be read at start — before using a codex reset credit, refresh the account (⟳) first": "起動時に reset credit の試行記録を読み取れませんでした。codex の reset credit を使う前に、まずアカウントを更新(⟳)してください",
   "This agent offers no reset-credit interface VibeSpace can use.": "このエージェントには VibeSpace が使えるリセットクレジットのインターフェースがありません。",
   "Needs a running chat session on this account — the credit is spent through that session’s own CLI. Start one, then try again.": "このアカウントで実行中のチャットセッションが必要です——クレジットはそのセッション自身の CLI を通じて消費されます。起動してからもう一度お試しください。",

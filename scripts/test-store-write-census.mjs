@@ -988,7 +988,7 @@ const STORE_READS = [
   { file: 'src/hosts.js', store: 'hosts.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: \(v\) => !!v && typeof v === 'object' && !Array\.isArray\(v\) \}\)\)/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held, never written over
   { file: 'src/machine-mounts.js', store: 'machine-mounts.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: STORE_SHAPE \}\)\);/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held — no save, no legacy ingest, no token sweep
   { file: 'src/server/conversation-deliver.js', store: 'msg-retry.json', state: 'debt', why: 'a failed read is «no file»: the park starts empty and its next write overwrites', mark: /try \{ rawText = fs\.readFileSync\(retryFile, 'utf-8'\); \} catch \{ rawText = null; \}/ },
-  { file: 'src/server/usage-pool-engine.js', store: 'reset-credit-tries.json', state: 'debt', why: 'a failed read is «no attempts»: the next write overwrites', mark: /try \{ raw = fs\.readFileSync\(RESET_CREDIT_TRIES_FILE, 'utf8'\); \} catch \{ return 0; \}/ },
+  { file: 'src/server/usage-pool-engine.js', store: 'reset-credit-tries.json', state: 'answer', mark: /let a = SR\.storeAnswer\(read, \{ valid: TRIES_VALID \}\);/ },   // B-f276's remainder (bl-windows, 主开发 r1694 — the money store): a failed read HOLDS (every use refused by name, read again); a set-aside that fails holds too
   // job-notifications.json: torn bytes are set aside through jobs.js asideOf (its read again, off the loop) and an unreadable file is
   // HELD (the remainder of B-f276 — the row flipped to `answer`; it was named here without a set-aside before)
   // the browser registry (lane bl-jobs, the B-f276 remainder, its read r1 N9): through the store-read law — a failed read and torn bytes HOLD
@@ -1000,7 +1000,7 @@ const STORE_READS = [
   { file: 'src/server/job-secrets-door.js', store: 'job-secrets.leftover.json', state: 'answer', mark: /let a = SR\.storeAnswer\(read, \{ valid: REC_VALID \}\);/ },   // bl-vault B-ef1b (主开发 r333): the record of the copies a move made or left — bytes that do not parse set aside (the move refuses by name until a person looked), a failed read HELD (the move refuses, read again at the next press)
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'answer', mark: /this\._notifsAnswer\(SR\.storeAnswer\(read, \{ valid: NOTIFS_SHAPE \}\)\);/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held — the waiting notices never written over
 ];
-const READ_DEBT_CAP = 3;     // lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json, 6 → 5: job-notifications.json — bl-jobs B-f276's remainder, 5 → 4: user-todos.json — bl-windows B-44f3, 4 → 3: channels/*.json — bl-windows B-f276 unit 1)
+const READ_DEBT_CAP = 2;     // lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json, 6 → 5: job-notifications.json — bl-jobs B-f276's remainder, 5 → 4: user-todos.json — bl-windows B-44f3, 4 → 3: channels/*.json — bl-windows B-f276 unit 1, 3 → 2: reset-credit-tries.json — bl-windows B-f276's remainder)
 const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17): DEBT_CAP never passes it
 const STATES = new Set(['answer', 'right', 'names', 'debt']);
 const USES_HELPER = /require\(['"](?:\.{1,2}\/)+(?:[\w-]+\/)*store-read(?:\.js)?['"]\)/;

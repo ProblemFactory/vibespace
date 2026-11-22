@@ -3734,6 +3734,8 @@ export default {
   "{n} reset credits left after this one.": "用完后还剩 {n} 个 reset credit。",
   "This is the last stored reset credit.": "这是最后一个已存的 reset credit。",
   "Use a stored reset credit on {account}?": "要在 {account} 上使用一个已存的 reset credit 吗？",
+  "The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do": "无法读取重置额度的尝试记录——在能再次读取之前，不会使用任何重置额度；它会在记录能读取时自行恢复",   // B-f276's remainder (主开发 r1694): the held attempts file's For-you item
+  "The reset-credit attempt records could not be read — no reset credit is used until they read again: a request made before the restart may have gone out, and a second one could spend a second credit. This heals by itself when they read.": "无法读取重置额度的尝试记录——在能再次读取之前不会使用任何重置额度：重启前发出的请求可能已经送出，再发一次可能会多花一个额度。这会在记录能再次读取时自行恢复。",   // …and the reset-credit dialog's refusal
   "The reset-credit attempt records could not be read at start — before using a codex reset credit, refresh the account (⟳) first": "启动时无法读取 reset credit 的尝试记录——在使用 codex reset credit 之前, 请先刷新该账号(⟳)",
   "This agent offers no reset-credit interface VibeSpace can use.": "这个 agent 没有 VibeSpace 能用的 reset credit 接口。",
   "Needs a running chat session on this account — the credit is spent through that session’s own CLI. Start one, then try again.": "需要该账号上一个运行中的聊天会话——credit 经由那个会话自己的 CLI 消费。先启动一个，再试一次。",

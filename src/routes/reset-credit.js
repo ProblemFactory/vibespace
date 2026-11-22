@@ -32,7 +32,7 @@
  * repaints from. The GET preview names `via` ('session' | 'helper') and, for the
  * helper, `helperWhy` ('no-session' | 'wrapper-predates') — the dialog says it.
  */
-const STATUS = Object.freeze({ not_supported: 400, no_live_session: 409, no_credits: 409, in_flight: 409, unsettled: 409, restart_pending: 409, preview_changed: 409, cooldown: 429, spend_refused: 429, agent_forbidden: 403 });
+const STATUS = Object.freeze({ not_supported: 400, no_live_session: 409, no_credits: 409, in_flight: 409, unsettled: 409, restart_pending: 409, preview_changed: 409, attempts_unread: 409, cooldown: 429, spend_refused: 429, agent_forbidden: 403 });
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 const sid = (v) => (typeof v === 'string' && /^[\w.:-]{1,120}$/.test(v) ? v : null);
 

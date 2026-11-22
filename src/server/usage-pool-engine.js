@@ -4178,6 +4178,10 @@ function resetCreditTryRecord(t) {
   return { key, at, sentAt, sid, via, origin, resetsAtSec, lane, eventKey, idempotencyKey, identity: identity && typeof identity === 'object' ? { key: identity.key, name: identity.name } : null, charged: !!charged, outcome, outcomeAt, creditsAt, reportsSent, window, settled, ...(supersededAt ? { supersededAt } : {}), ...(readFirst ? { readFirst: true } : {}), ...(revivedAt ? { revivedAt } : {}), ...(reopenedAt ? { reopenedAt } : {}), ...(pressedAt ? { pressedAt } : {}), ...(sentGuessed ? { sentGuessed: true } : {}), prior: resetCreditTryRecord(t.prior) };
 }
 function persistResetCreditTries() {
+  if (_resetCreditTriesHeld) {   // B-f276's remainder: the file could not be read — NOTHING is written over it (said once a hold)
+    if (!_resetCreditTriesHeld.saidPersist) { _resetCreditTriesHeld.saidPersist = true; console.warn('[reset-credit] attempts not written: data/reset-credit-tries.json is HELD (it could not be read) — nothing is written over it until it reads'); }
+    return;
+  }
   try {
     const now = Date.now();
     const tries = [];
@@ -4218,20 +4222,91 @@ function fileResetCreditTriesLost() {
   } catch (e) { console.warn('[reset-credit] could not file the For-you notice about the unreadable attempts file:', e.message); }
   return L.filed;
 }
+// B-f276's remainder (lane bl-windows, 主开发 r1694 — the money store of the row): THE STORE READ (src/store-read.js). The release
+// read a FAILED read (EIO, EACCES, ETIMEDOUT…) as «no attempts»: the open and unknown attempts were forgotten, the next persist
+// wrote over the healthy file, and the next press minted a second key — a second credit spent. Now a read that failed is NO
+// ANSWER: the attempts are HELD — nothing is written over the file, EVERY reset-credit use refuses by name (`attempts_unread`: an
+// attempt made before this start may have gone out, and its floor is in that file), ONE For-you item says so, and the file is read
+// again — off the loop, at the next press (its preview) and at the pool's own evaluation pass, never by a timer of its own polling a
+// mount (主开发 r1702 (2)) — and once it reads its records come back and the hold lifts. Only bytes that
+// were READ and do not parse are set aside, as before — and a set-aside that fails leaves them HELD (their only copy).
+const SR = require('../store-read.js');
+const TRIES_VALID = (d) => !!d && typeof d === 'object' && d.v === 1 && Array.isArray(d.tries);
+let _resetCreditTriesHeld = null;   // { code, why, at, tries, filed, todoId, saidPersist } while the file could not be read
+let _resetCreditTriesReading = null;   // the held file's ONE read again in flight (a promise), or null
+const RESET_CREDIT_TRIES_HELD_TEXT = 'The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do';
+function fileResetCreditTriesHeld() {
+  const H = _resetCreditTriesHeld;
+  if (!H || H.filed) return false;
+  let todos = null;
+  try { todos = getUserTodos(); } catch { todos = null; }
+  if (!todos || typeof todos.add !== 'function') return false;
+  try {
+    const item = todos.add('webui:reset-credit', {
+      origin: 'pool',
+      text: RESET_CREDIT_TRIES_HELD_TEXT,
+      detail: `${path.basename(RESET_CREDIT_TRIES_FILE)} could not be read (${H.code}). It is kept as it is: nothing is written over it, and it is read again at the next reset-credit press and at the pool's next evaluation. Until it reads, every reset-credit use — a press and the automatic one — is refused: a request made before the restart may have gone out, and a second one could spend a second credit.`,
+      urgency: 'normal', kind: 'notice',
+      i18n: { text: { key: i18nKey('The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do'), params: {} } },
+    });
+    H.filed = !!(item && item.id); H.todoId = (item && item.id) || null;
+  } catch (e) { console.warn('[reset-credit] could not file the For-you notice about the held attempts file:', e.message); }
+  return H.filed;
+}
+function holdResetCreditTries(a) {
+  const was = _resetCreditTriesHeld;
+  _resetCreditTriesHeld = { code: String(a.code || 'unreadable'), why: String(a.why || 'the read failed'), at: was ? was.at : Date.now(), tries: (was ? was.tries : 0) + 1, filed: !!(was && was.filed), todoId: was ? was.todoId : null, saidPersist: !!(was && was.saidPersist) };
+  if (!was) console.warn(`[reset-credit] data/reset-credit-tries.json could not be read (${_resetCreditTriesHeld.code}) — HELD: kept as it is, nothing is written over it, and no reset credit is used until it reads (an attempt made before this start may have gone out); read again every few minutes`);
+  fileResetCreditTriesHeld();
+}
+/** the held file READ AGAIN — once at a time, off the loop (the next press, the pool's pass); its answer goes where the start's goes.
+ *  → the read's promise (null when nothing is held) */
+function rereadResetCreditTries() {
+  if (!_resetCreditTriesHeld) return null;
+  if (_resetCreditTriesReading) return _resetCreditTriesReading;
+  _resetCreditTriesReading = fs.promises.readFile(RESET_CREDIT_TRIES_FILE, 'utf8').then((text) => ({ text }), (error) => ({ error }))
+    .then((read) => { if (_resetCreditTriesHeld) applyResetCreditTriesRead(read); })
+    .catch((e) => console.warn('[reset-credit] the held attempts file\'s read again failed:', e.message))
+    .finally(() => { _resetCreditTriesReading = null; });
+  return _resetCreditTriesReading;
+}
+function liftResetCreditTriesHold(how) {
+  const H = _resetCreditTriesHeld;
+  if (!H) return;
+  _resetCreditTriesHeld = null;
+  console.log(`[reset-credit] data/reset-credit-tries.json ${how} — the hold is lifted (it was held ${Math.round((Date.now() - H.at) / 1000)} s)`);
+  if (H.todoId) { try { const todos = getUserTodos(); const it = todos && typeof todos.get === 'function' ? todos.get(H.todoId) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(H.todoId, 'done', 'the attempt records read again'); } catch (e) { console.warn('[reset-credit] the held attempts\' notice could not be resolved:', e.message); } }
+}
+/** a reset-credit use refused while the attempts are held → {ok:false, code, why} | null (the ONE writer of the verb asks it) */
+function resetCreditTriesRefusal() {
+  const H = _resetCreditTriesHeld;
+  return H ? { ok: false, code: 'attempts_unread', why: `the reset-credit attempt records could not be read (${H.code}) — no reset credit is used until they read again (it heals by itself when they do)`, detail: null } : null;
+}
 function loadResetCreditTries() {
-  let doc = null, raw = null;
-  try { raw = fs.readFileSync(RESET_CREDIT_TRIES_FILE, 'utf8'); } catch { return 0; } // no file = no attempts (the common first boot)
-  let why = null;
-  try { doc = JSON.parse(raw); } catch (e) { why = 'not JSON: ' + String(e.message).slice(0, 80); }
-  if (!why && (!doc || doc.v !== 1 || !Array.isArray(doc.tries))) why = 'not the attempts shape (v 1, tries[])';
+  let read;
+  try { read = { text: fs.readFileSync(RESET_CREDIT_TRIES_FILE, 'utf8') }; } catch (e) { read = { error: e }; }
+  return applyResetCreditTriesRead(read);
+}
+/** ONE read's outcome → the attempts it brings back (the load, and the held file's read again). → how many */
+function applyResetCreditTriesRead(read) {
+  let a = SR.storeAnswer(read, { valid: TRIES_VALID });
+  if (a.state === 'missing') { liftResetCreditTriesHold('is not there (no attempts on file)'); return 0; }   // no file = no attempts (the common first boot)
+  if (a.state === 'unreadable') { holdResetCreditTries(a); return 0; }
+  let doc = a.state === 'data' ? a.value : null;
+  let why = a.state === 'corrupt' ? (a.code === 'did not parse' ? 'not JSON: ' + String((a.error && a.error.message) || '').slice(0, 80) : 'not the attempts shape (v 1, tries[])') : null;
   if (why) {
     const asideAs = `${RESET_CREDIT_TRIES_FILE}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-    try { fs.renameSync(RESET_CREDIT_TRIES_FILE, asideAs); } catch (e) { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); }
+    let asideOk = false;
+    try { fs.renameSync(RESET_CREDIT_TRIES_FILE, asideAs); asideOk = true; } catch (e) { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); }
+    a = SR.afterSetAside(a, asideOk ? path.basename(asideAs) : null);
+    if (a.state === 'unreadable') { holdResetCreditTries({ code: 'set-aside failed', why: 'its bytes did not parse and could not be set aside' }); return 0; }   // their only copy: HELD, never written over
+    liftResetCreditTriesHold('did not parse — set aside');
     console.warn(`[reset-credit] data/reset-credit-tries.json is unreadable (${why}) — set aside as ${path.basename(asideAs)}; every reset-credit request open before this start is UNKNOWN now (a press on a codex account should refresh it first)`);
     _resetCreditTriesLost = { file: RESET_CREDIT_TRIES_FILE, asideAs, at: Date.now(), why, filed: false };
     fileResetCreditTriesLost();
     return 0;
   }
+  liftResetCreditTriesHold('reads again — its attempts are back');   // before the revive: a charged revive persists below
   const revive = (r) => {
     if (!r || typeof r !== 'object' || typeof r.key !== 'string' || !Number(r.at)) return null;
     const t = { ...r, hold: null, followers: new Map(), timer: null, ackTimer: null, prior: revive(r.prior) };
@@ -4849,6 +4924,7 @@ function resetCreditOffer(session) {
  * → {ok:true, identity} | {ok:false, why, detail} (why = the ceiling's refusal CODE, detail its sentence — which names the identity and the count; why null when it threw)
  */
 function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'auto', now = Date.now(), key = null, readFirst = false } = {}) {
+  { const held = resetCreditTriesRefusal(); if (held) { console.log(`[codex] reset credit refused for ${session._webuiId}: ${held.why}`); return held; } }   // B-f276's remainder: the floor is in a file that could not be read
   key = key || creditIdentityFor(session).key;
   // THE READ BEFORE A PERSON'S PRESS (verify r8 T0, the owner's yes): the verb asks the wrapper for ONE
   // `account/rateLimits/read` before its consume; the wrapper's push (`rate_limits_updated {beforeReset, idempotencyKey}`)
@@ -5136,6 +5212,7 @@ function spentWindowOf(snap) {
  */
 function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = {}) {
   try { fileResetCreditTriesLost(); } catch { } // verify r2: the boot's unreadable-file notice, filed once the inbox exists
+  try { fileResetCreditTriesHeld(); rereadResetCreditTries(); } catch { } // B-f276's remainder: the held file's notice (filed once the inbox exists) and its read again at the press
   key = String(key || '');
   try { const a = accounts.get(key); if (a && a.type === 'pooled') key = accounts.poolCurrent(key) || key; } catch { }
   const backend = quotaBackendFor(key);
@@ -5144,6 +5221,7 @@ function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = 
   // name null = the machine's own login (the client says so in its own words)
   const base = { key, name: recName, backend, vendor, creditsLeft: null, resetsAtSec: null, periodSec: null, remainingPct: null, sessionId: null, cooldownUntilSec: null };
   if (capsOf(backend).resetCredit !== true) return { ...base, code: 'not_supported', error: 'this agent has no reset-credit interface (Claude Code offers only the interactive /limit-reset)' };
+  if (_resetCreditTriesHeld) return { ...base, code: 'attempts_unread', error: `the reset-credit attempt records could not be read (${_resetCreditTriesHeld.code}) — no reset credit is used until they read again (it heals by itself: they are read again at this press): a request made before the restart may have gone out` };   // B-f276's remainder (主开发 r1694, r1702)
   // ONLY A WRAPPER THAT SENDS THE KEY carries a person's press (lane reset-path): an older one would
   // be refused by codex (the key is required on every measured CLI), so the press goes to the HELPER
   // (one bounded codex app-server child on this account's own login) — never a greyed button
@@ -5243,6 +5321,7 @@ function wrapperReadsFirst(s) {
   try { const wc = wrapperCaps(path.join(rootDir, 'data', 'session-buffers'), s._webuiId, s.socketPath); return !!(wc && wc.caps && wc.caps.resetCreditReadFirst === true); } catch { return false; }
 }
 function writeResetCreditViaHelper(key, { resetsAtSec = 0, now = Date.now() } = {}) {
+  { const held = resetCreditTriesRefusal(); if (held) return held; }   // B-f276's remainder: the floor is in a file that could not be read
   const h = resetCreditHelperFor(key);
   if (!h.ok) return { ok: false, code: 'no_live_session', why: null, detail: h.why };
   let av = null;
@@ -5582,7 +5661,7 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
     const wr = writeResetCredit(session, { resetsAtSec: R, lane, origin: 'auto', now, key });
     // the card NAMES the account the ceiling refused (r3 — the code alone said
     // "hour-cap" and only the journal said whose hour it was)
-    if (!wr.ok) { if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
+    if (!wr.ok) { if (wr.code === 'attempts_unread') { wallCard(wr.why); return 'skipped'; } if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
     const saved = v.waitSavedSec ? ` — saves a wait of ${resetCredit.fmtWait(v.waitSavedSec)}` : '';
     const leftTxt = creditsLeft > 0 ? `; ${creditsLeft - 1} left after this one` : '';
     serverNotice(`codex-reset-${session._webuiId}-${now}`, `Usage limit hit on ${nameOf(key)} — using a stored reset credit${saved}${leftTxt} (${warmth.inTurn || warmth.warm ? 'warm conversation: before switching accounts' : 'no pool member can take it'}).`, { i18n: { key: warmth.inTurn || warmth.warm ? i18nKey('Usage limit hit on {account} — using a stored reset credit (warm conversation: before switching accounts).') : i18nKey('Usage limit hit on {account} — using a stored reset credit (no pool member can take it).'), params: { account: nameOf(key) }, ...(v.waitSavedSec ? { then: { key: i18nKey('Saves a wait of {wait}.'), params: { wait: resetCredit.fmtWait(v.waitSavedSec) } } } : creditsLeft > 0 ? { then: creditsLeft - 1 === 1 ? { key: i18nKey('1 reset credit left after this one.'), params: {} } : { key: i18nKey('{n} reset credits left after this one.'), params: { n: creditsLeft - 1 } } } : {}) } });
@@ -6620,6 +6699,7 @@ function kickPoolEval({ kick = true } = {}) {
       }
     } catch { }
     try { sweepResetCreditAsks(); } catch { } // an ask item whose carrier is gone (r3)
+    try { rereadResetCreditTries(); } catch { } // B-f276's remainder (r1702 (2)): a held attempts file read again at the pool's own pass
   });
 }
 // WORKFLOW usage tailer (2.266.0, user question "不能拦截workflow agents吗"):
@@ -8577,7 +8657,7 @@ function maybeStopOnFallback(session, id, from, to) {
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
-    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
+    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, _resetCreditTriesHeld: () => _resetCreditTriesHeld, _resetCreditTriesReading: () => _resetCreditTriesReading, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test
