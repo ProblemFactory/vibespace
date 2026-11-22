@@ -111,7 +111,9 @@ function _readOAuthCreds() {
       if (kept && _oauthCreds && (!oauthPastLife(_oauthCreds) || Date.now() - _oauthExpiredReadAt < OAUTH_EXPIRED_REREAD_MS)) return _oauthCreds;
       if (kept && _oauthCreds) { _oauthExpiredReadAt = Date.now(); pastLifePass = true; }
       if (!(kept && _oauthSignedOut)) {   // a signed-out file unchanged since its read is not read again (macOS goes on to its Keychain)
-        const raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+        // r2700: a read that FAILS after the file's key changed (a torn write, EACCES) drops the kept sign-in — never the previous
+        // token served for that ask; the key is not advanced, so the next ask reads again
+        let raw; try { raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8')); } catch (e) { if (!kept) _oauthCreds = null; throw e; }
         const o = raw?.claudeAiOauth;
         if (o?.accessToken) { _oauthCreds = o; _oauthKey = key; _oauthSignedOut = false; _oauthExpiredReadAt = oauthPastLife(o) ? Date.now() : 0; return _oauthCreds; }
         // File parses but holds no token. TWO distinct causes (2.266.2 — the
@@ -130,7 +132,7 @@ function _readOAuthCreds() {
         _oauthSignedOut = true;
         _oauthCreds = null;   // r2575 (ALSO CURED): a kept sign-in never outlives the file's sign-out — the previous token is not used
       }
-    } else if (process.platform !== 'darwin') { _oauthCreds = null; _oauthKey = null; _oauthSignedOut = false; }   // r2575: a file GONE keeps no sign-in (its kept token is not used after it)
+    } else if (process.platform !== 'darwin') { _oauthCreds = null; _oauthKey = null; }   // r2575: a file GONE keeps no sign-in (its kept token is not used after it); r2700: its signed-out word stands as it was (the usage meter's warning reads it)
     // macOS: Keychain
     if (process.platform === 'darwin' && !pastLifePass) {
       // Re-read from Keychain each time (Claude Code may have refreshed)

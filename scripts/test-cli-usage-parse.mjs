@@ -163,6 +163,26 @@ console.log("§ the machine login's kept read (r2575)");
     inPlace(f, credsOf(A, T + 3600e3)); const first = get();
     fs.rmSync(f); return { first, after: get() };
   };
+  // (j) r2700: the file's key CHANGED and the read then FAILS (a torn write, EACCES): the kept sign-in is dropped for that ask, and the
+  // key not advanced, so the next ask reads again
+  const failScene = (src, tag) => {
+    const get = fresh(src, tag); clock = T; const f = home(tag);
+    inPlace(f, credsOf(A, T + 3600e3)); const first = get();
+    byRename(f, credsOf(B, T + 3600e3)); throwOnRead = true; const failed = get(); throwOnRead = false;
+    return { first, failed, next: get() };
+  };
+  // (k) r2700: emptied (signed out), then DELETED (Linux): the signed-out word the usage meter's warning reads stands — read through a
+  // copy whose only edit exports the module's flag (the export line, anchored)
+  const EXP = "module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe, getOAuthToken };";
+  const withFlag = (src, tag) => anchored(src, EXP, "module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe, getOAuthToken, signedOutForLegs: () => _oauthSignedOut };   /* PROBE: the flag read, nothing else */", tag);
+  const emptiedGoneScene = (src, tag) => {
+    const M = MJ.load(REL, withFlag(src, tag + '-flag'), tag); clock = T; const f = home(tag);
+    inPlace(f, credsOf(A, T + 3600e3)); const first = M.getOAuthToken();
+    fs.writeFileSync(f, JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0 } }));
+    const emptied = M.getOAuthToken(); const outEmptied = M.signedOutForLegs();
+    fs.rmSync(f); const gone = M.getOAuthToken();
+    return { first, emptied, outEmptied, gone, outGone: M.signedOutForLegs() };
+  };
   try {
     const R = renameScene(SRC, 'rename');
     ok(R.sameTime && R.newInode && R.first === A && R.second === B, 'two writes inside ONE tick by RENAME (time and size equal, a new inode): the kept read serves the second content', R);
@@ -206,10 +226,20 @@ console.log("§ the machine login's kept read (r2575)");
     ok(MX.kcAfter === 2, 'CONTROL (the guard cut, in a copy): the past-life pass starts the Keychain\'s child (red)', MX);
     const G = goneScene(SRC, 'gone');
     ok(G.first === A && G.after === null, 'a sign-in file GONE (Linux): its kept token is not used after it', G);
-    const GONE = "    } else if (process.platform !== 'darwin') { _oauthCreds = null; _oauthKey = null; _oauthSignedOut = false; }";
+    const GONE = "    } else if (process.platform !== 'darwin') { _oauthCreds = null; _oauthKey = null; }";
     ok(SRC.split(GONE).length === 2, 'control setup: the gone file\'s drop is found once');
     const GX = goneScene(anchored(SRC, GONE, "    } else if (false) { /* MUTANT: a gone file keeps its token */ }", 'oauth-gone-kept'), 'gone-keptx');
     ok(GX.after === A, 'CONTROL (the drop cut, in a copy): the deleted file\'s token still used (red)', GX);
+    const F = failScene(SRC, 'fail');
+    ok(F.first === A && F.failed === null && F.next === B, 'r2700: the file\'s key CHANGED and its read FAILS — that ask serves NO token (never the previous sign-in); the next ask reads again and serves the new one', F);
+    const DROP = "catch (e) { if (!kept) _oauthCreds = null; throw e; }";
+    ok(SRC.split(DROP).length === 2, 'control setup: the failed read\'s drop is found once');
+    const FX = failScene(anchored(SRC, DROP, "catch (e) { /* MUTANT: the previous sign-in kept */ throw e; }", 'oauth-fail-kept'), 'fail-keptx');
+    ok(FX.failed === A, 'CONTROL (the drop cut, in a copy): the previous sign-in served after the file changed (red)', FX);
+    const EG = emptiedGoneScene(SRC, 'emptied-gone');
+    ok(EG.first === A && EG.emptied === null && EG.outEmptied === true && EG.gone === null && EG.outGone === true, 'r2700: a file emptied (signed out) and then DELETED — no token, and the signed-out word the usage meter\'s warning reads stays TRUE', EG);
+    const EGX = emptiedGoneScene(anchored(SRC, GONE, "    } else if (process.platform !== 'darwin') { _oauthCreds = null; _oauthKey = null; _oauthSignedOut = false; }   /* MUTANT: 3108d3e37's gone branch */", 'oauth-gone-flips'), 'emptied-gonex');
+    ok(EGX.outEmptied === true && EGX.outGone === false, 'CONTROL (3108d3e37\'s gone branch, in a copy): the deletion flips the signed-out word back to false (red)', EGX);
     // (d) LAW 2: the read again is a FILE READ AND NOTHING ELSE — every scene above, the tree's and the copies', built no request and
     // started no child; the counter is live (a deliberate call is counted)
     const seen = { ...counts };
