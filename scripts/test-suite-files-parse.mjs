@@ -94,7 +94,9 @@ console.log('§1 THE TREE — every file under scripts/ that Node would load as 
   // law's own and serves both laws; no other reader in this process parses these files, and nothing is kept across runs
   const self = path.basename(fileURLToPath(import.meta.url));
   var EDITS = {}, HELPERS = {};   // eslint-disable-line no-var — §3 reads them
-  const r = unparseable(REPO, { visit: (rel, src, ast) => { const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel); if (!m || m[1] === self) return; const { edits: e, helpers: h } = scriptCensus(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; } });
+  // B-0d3e (主开发 r2677): the PLANTED site, met by this same walk and asked of the same censuses — kept apart from both lists
+  var PLANT_REL = 'scripts/fixtures/census-plant.mjs', PLANT = null;   // eslint-disable-line no-var — §3 reads them
+  const r = unparseable(REPO, { visit: (rel, src, ast) => { if (rel === PLANT_REL) { PLANT = { src, ...scriptCensus(src, { ast }) }; return; } const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel); if (!m || m[1] === self) return; const { edits: e, helpers: h } = scriptCensus(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; } });
   const ms = Math.round(performance.now() - t0);
   ok(r.files.length >= 1000 && r.files.includes('scripts/ci.mjs') && r.files.includes('scripts/test-suite-files-parse.mjs'),
     `the walk met ${r.files.length} files (${(r.bytes / 1e6).toFixed(1)} MB: ${r.kinds.module} ES modules, ${r.kinds.commonjs} CommonJS, ${r.kinds.detect} by Node's detection), this suite and scripts/ci.mjs among them`);
@@ -196,10 +198,17 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const overLines = (added, n, listed, items, say) => added.map((f) => `${f}: ${n[f]} > ${listed[f] || 0} — ${items[f].map(say).join(' · ')}`);
   const sayOver = (lines, log = console.log) => { for (const l of lines) log('      ' + l); };
   const j = judge(per, LISTED);
-  // non-vacuous BY THE LIST, never by a fixed number (B-0d3e's fall lowers both): a walk that read nothing would make every listed
-  // file «fall» in silence, so the live count must hold at least half of what the list holds, in at least half of its files
-  const listedSum = Object.values(LISTED).reduce((a, b) => a + b, 0), listedFiles = Object.keys(LISTED).length;
-  ok(total * 2 >= listedSum && Object.keys(per).length * 2 >= listedFiles, `${total} unanchored control edits in ${Object.keys(per).length} scripts — at least half of the list's ${listedSum} in ${listedFiles} (non-vacuous: the walk reads the tree)`);
+  // NON-VACUOUS BY A PLANT, never by a count of debt (主开发 r2677: «a census that goes red because the debt was paid is the wrong
+  // shape»; the floor it replaces asked the live count to hold half of the list, so the row's own fall would have reddened it).
+  // §1's walk parsed scripts/fixtures/census-plant.mjs like every file under scripts/ and both censuses answered there: its one
+  // planted helper — its own parameter the anchor of a product edit that reaches a loader and fails by no name — is ONE edit and
+  // ONE anchor helper. A walk, or a census, that read nothing finds nothing there. The plant stands outside both lists.
+  const plantSaid = (c) => (c ? `${c.edits.length} edit(s)${c.edits.length ? ' at line ' + c.edits.map((e) => e.line).join(', ') : ''}, ${c.helpers.length} helper(s)${c.helpers.length ? ' ' + c.helpers.map((h) => h.name).join(', ') : ''}` : 'the walk did not meet it');
+  const plantFound = (c) => !!c && c.edits.length === 1 && c.helpers.length === 1 && c.helpers[0].name === 'plantedCut' && c.edits[0].line === c.helpers[0].line;
+  ok(plantFound(PLANT), `the walk finds the PLANTED site in ${PLANT_REL} (${plantSaid(PLANT)}) — the census can see: non-vacuous by a plant, not by the list's debt (the live list: ${total} edits in ${Object.keys(per).length} scripts)`);
+  const unplanted = PLANT ? PLANT.src.split('\n').filter((l) => !l.startsWith('export const plantedCut')).join('\n') : '';
+  const UNP = PLANT ? scriptCensus(unplanted, { ast: acorn.parse(unplanted, OPTS.module) }) : null;
+  ok(!!PLANT && unplanted !== PLANT.src && !plantFound(UNP) && !UNP.edits.length && !UNP.helpers.length, `RED CONTROL: the same censuses over a copy of the plant with its site taken out find ${plantSaid(UNP)} — the leg above would go red`);
   const overE = overLines(j.added, per, LISTED, EDITS, (e) => `line ${e.line} ${e.text}`);
   ok(!overE.length, `the unanchored control edits never rise without a row's id beside it (the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(LISTED).length} files)${overE.length ? ` — ${overE.length} file(s) over their count, EVERY ONE on its own line below with all its edits: build the new edit with anchored() from scripts/scratch.mjs, or raise the file's count under YOUR backlog row's id in scripts/fixtures/unanchored-controls.json «rows» (a plain number is refused)` : ''}`);
   sayOver(overE);
