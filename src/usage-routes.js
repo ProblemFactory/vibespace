@@ -84,66 +84,55 @@ function spawnPanelProbe(bin, { root, env: identityEnv }, done) {
 /** The probe's working directory: an empty dir INSIDE the isolated config dir
  *  (no config dir = the machine login's own probe, in the shared tmpdir). */
 function probeCwdOf(probeConfigDir) { return probeConfigDir ? path.join(probeConfigDir, 'cwd') : os.tmpdir(); }
-function setupUsage({ app, accounts, hosts, spendGuard = null, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {
-const https = require('https');
-function readUsageCache() {
-  try {
-    const cached = JSON.parse(fs.readFileSync(USAGE_CACHE_FILE, 'utf-8'));
-    return cached?.claude || null;
-  } catch {
-    return null;
-  }
-}
-
-// B-360d part 3 U2 (主开发 r1459): data/usage-cache.json is a DERIVED copy — the boot's seed of _rateLimitCache; the reading
-// itself lives in usage-cache/__global__.json — so it is written by the STORE WRITER (memory is authoritative; a burst is one
-// write, off the loop; the folder made on its own thread), the latest state at its write; no state ⇒ nothing written, as
-// before. Its other writer, the identity repair (src/reading-repair.js repairGlobalFile), flushes this file before it judges it.
-function writeUsageCache() {
-  if (!_rateLimitCache) return;
-  try {
-    require('./store-writer.js').storeWriter().dirty(USAGE_CACHE_FILE, { name: 'usage-cache.write', makeDir: true, produce: () => (_rateLimitCache ? JSON.stringify({ claude: _rateLimitCache }, null, 2) : null) });
-  } catch {}
-}
-
-let _rateLimitCache = readUsageCache();
-let _codexRateLimitCache = null;
-let _codexRateLimitCacheAt = 0;
-
+// THE MACHINE LOGIN's KEPT READ (module scope since r2575: it reads nothing of setupUsage's; getOAuthToken is exported for its legs)
 let _oauthCreds = null; // { accessToken, refreshToken, expiresAt }
-let _oauthMtime = 0;
+// THE KEPT READ's KEY (主开发 r2575): the file's time AND size AND inode — two writes inside one tick of the file's time (1 ms measured on
+// a local disk: run a84994d06-20261122212331-box) read as unchanged by the time alone; a refresh written by rename has a new inode. The
+// residual (an in-place rewrite of the same size inside one tick) is closed by the read again past the kept sign-in's life (below)
+let _oauthKey = null;
+let _oauthExpiredReadAt = 0;   // the last read again of a kept sign-in past its own life — paced (never a loop on a file that stays old)
+const OAUTH_EXPIRED_REREAD_MS = 300000;   // the machine login's own poll pace (pollUsageActive: the global login at most every 5 min)
+const oauthKeyOf = (st) => `${st.mtimeMs}|${st.size}|${st.ino}`;
+const oauthPastLife = (o) => !!(o && o.expiresAt && Date.now() >= o.expiresAt - 60000);   // getOAuthToken's own 60 s skew
 let _oauthSignedOut = false; // credentials file present but emptied — see the cause split below
 let _oauthSignedOutCause = 'expired'; // 'console' (replaced by a Console /login) | 'expired' (idle machine login aged out)
 
 function _readOAuthCreds() {
+  let pastLifePass = false;   // r2575 law 2: the read again past a kept sign-in's life is a FILE read and nothing else (never the Keychain's child)
   try {
     // Linux: .credentials.json
     const credsPath = path.join(os.homedir(), '.claude', '.credentials.json');
     if (fs.existsSync(credsPath)) {
       const stat = fs.statSync(credsPath);
-      if (_oauthCreds && stat.mtimeMs === _oauthMtime) return _oauthCreds;
-      const raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
-      const o = raw?.claudeAiOauth;
-      if (o?.accessToken) { _oauthCreds = o; _oauthMtime = stat.mtimeMs; _oauthSignedOut = false; return _oauthCreds; }
-      // File parses but holds no token. TWO distinct causes (2.266.2 — the
-      // blanket "a Console login replaced it" wording was wrong for the real
-      // 2026-08-09 case): (a) a Console /login wiped it (primaryApiKey lands in
-      // ~/.claude.json); (b) the machine login sat IDLE until its refresh token
-      // expired — with named/pooled accounts handling every session nothing
-      // refreshes ~/.claude — and the CLI's failed refresh cleared the stored
-      // tokens (empty access+refresh, metadata kept). Cause derived once per
-      // creds-file change (never per poll — ~/.claude.json can be large).
-      if (!_oauthSignedOut || stat.mtimeMs !== _oauthMtime) {
-        try {
+      const key = oauthKeyOf(stat), kept = key === _oauthKey;
+      // r2575: the kept read stands while its key is the file's — unless the kept sign-in is past its own life: then the FILE is read
+      // again (a file read and NOTHING else: the hub never refreshes this sign-in, no vendor call, no timer), once at the expiry and
+      // then at the poll's own pace; a signed-out file unchanged since its read is not read again
+      if (kept && _oauthCreds && (!oauthPastLife(_oauthCreds) || Date.now() - _oauthExpiredReadAt < OAUTH_EXPIRED_REREAD_MS)) return _oauthCreds;
+      if (kept && _oauthCreds) { _oauthExpiredReadAt = Date.now(); pastLifePass = true; }
+      if (!(kept && _oauthSignedOut)) {   // a signed-out file unchanged since its read is not read again (macOS goes on to its Keychain)
+        const raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+        const o = raw?.claudeAiOauth;
+        if (o?.accessToken) { _oauthCreds = o; _oauthKey = key; _oauthSignedOut = false; _oauthExpiredReadAt = oauthPastLife(o) ? Date.now() : 0; return _oauthCreds; }
+        // File parses but holds no token. TWO distinct causes (2.266.2 — the
+        // blanket "a Console login replaced it" wording was wrong for the real
+        // 2026-08-09 case): (a) a Console /login wiped it (primaryApiKey lands in
+        // ~/.claude.json); (b) the machine login sat IDLE until its refresh token
+        // expired — with named/pooled accounts handling every session nothing
+        // refreshes ~/.claude — and the CLI's failed refresh cleared the stored
+        // tokens (empty access+refresh, metadata kept). Cause derived once per
+        // creds-file change (never per poll — ~/.claude.json can be large).
+        try {   // (inside this branch the file is new or changed: the cause is derived once a change, never a poll)
           const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8'));
           _oauthSignedOutCause = cfg?.primaryApiKey ? 'console' : 'expired';
         } catch { _oauthSignedOutCause = 'expired'; }
+        _oauthKey = key;
+        _oauthSignedOut = true;
+        _oauthCreds = null;   // r2575 (ALSO CURED): a kept sign-in never outlives the file's sign-out — the previous token is not used
       }
-      _oauthMtime = stat.mtimeMs;
-      _oauthSignedOut = true;
-    }
+    } else if (process.platform !== 'darwin') { _oauthCreds = null; _oauthKey = null; _oauthSignedOut = false; }   // r2575: a file GONE keeps no sign-in (its kept token is not used after it)
     // macOS: Keychain
-    if (process.platform === 'darwin') {
+    if (process.platform === 'darwin' && !pastLifePass) {
       // Re-read from Keychain each time (Claude Code may have refreshed)
       try {
         const user = os.userInfo().username;
@@ -174,6 +163,33 @@ function getOAuthToken(callback) {
   if (callback) { callback(token); return; }
   return token;
 }
+
+function setupUsage({ app, accounts, hosts, spendGuard = null, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {
+const https = require('https');
+function readUsageCache() {
+  try {
+    const cached = JSON.parse(fs.readFileSync(USAGE_CACHE_FILE, 'utf-8'));
+    return cached?.claude || null;
+  } catch {
+    return null;
+  }
+}
+
+// B-360d part 3 U2 (主开发 r1459): data/usage-cache.json is a DERIVED copy — the boot's seed of _rateLimitCache; the reading
+// itself lives in usage-cache/__global__.json — so it is written by the STORE WRITER (memory is authoritative; a burst is one
+// write, off the loop; the folder made on its own thread), the latest state at its write; no state ⇒ nothing written, as
+// before. Its other writer, the identity repair (src/reading-repair.js repairGlobalFile), flushes this file before it judges it.
+function writeUsageCache() {
+  if (!_rateLimitCache) return;
+  try {
+    require('./store-writer.js').storeWriter().dirty(USAGE_CACHE_FILE, { name: 'usage-cache.write', makeDir: true, produce: () => (_rateLimitCache ? JSON.stringify({ claude: _rateLimitCache }, null, 2) : null) });
+  } catch {}
+}
+
+let _rateLimitCache = readUsageCache();
+let _codexRateLimitCache = null;
+let _codexRateLimitCacheAt = 0;
+
 
 // Non-invasive usage/rate-limit polling via GET /api/oauth/usage.
 //
@@ -1864,4 +1880,4 @@ function usageAnswer(req, res) {
   return { refreshViaCliPanel, panelVerdictFor, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
-module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe };
+module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe, getOAuthToken };   // getOAuthToken: the machine login's kept read (r2575's legs, scripts/test-cli-usage-parse)
