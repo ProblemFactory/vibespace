@@ -61,9 +61,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/server/cli-cmd.js', 'resolveCmd', 'child:execFileSync', 1, DEBT, 'boot — module constants (dtach, xset, xauth) + per refreshXEnv: /usr/bin/which, 2 s'],
     ['src/codex-fork-ledger-purge.js', 'purgeCodexForkReplays', 'walk', 1, DEBT, 'boot, once — a migration (the run-at-most-once ledger)'],
     ['src/server/migrations.js', 'create > removeDesignKit > walk', 'walk', 1, DEBT, 'boot, once — a migration (the run-at-most-once ledger)'],
-    ['src/routes/files.js', 'route:GET /api/fonts', 'child:execFileSync', 1, DEBT, 'per act — the fonts list (fc-list), 3 s'],
     ['src/routes/files.js', 'route:POST /api/format > tryFormat', 'child:execFileSync', 1, DEBT, 'per act — format a file (prettier / ruff …)'],
-    ['src/server/ops-routes.js', 'create > route:GET /api/version', 'child:execFileSync', 1, DEBT, 'per process, ONCE — the first GET /api/version (the commit is memoised): git rev-parse, 3 s'],
     ['src/transcript-service.js', 'createTranscriptService > rescue', 'child:execFileSync', 1, DEBT, 'per act — a transcript rescue (fuser), 3 s'],
     ['src/hosts.js', 'HostManager.installAgentTools', 'child:execFileSync', 1, DEBT, 'per act — a machine\'s tool install (tar, 15 s)'],
     // round 2 — the four walks the census SEES now (the iterative shape)
@@ -78,7 +76,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
   // rows tell the truth on every road (safe-fs's inline road ×2, startToken's unbounded ps on Linux for an exited pid)
-  const DEBT_MAX = 21;   // B-323e (lane bl-keys-misc, r1351): vnc's `which` (asynchronous through the starter now) and installAgentd's tar (asynchronous) paid — 23 → 21; r1066 (lane bl-proposals, B-323e's family): the paste route's clipboard poll (xclip TARGETS, every 200 ms for up to 5 s) and macOS's osascript write run through the hub's starter — src/routes/files.js's paste starts no synchronous child (24 → 23; the macOS row was a fallback). B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
+  const DEBT_MAX = 19;   // B-360d part 1 (lane bl-loop-a, 主开发 r2303): the fonts list's fc-list and the version's git run through the hub's starter — 21 → 19. B-323e (lane bl-keys-misc, r1351): vnc's `which` (asynchronous through the starter now) and installAgentd's tar (asynchronous) paid — 23 → 21; r1066 (lane bl-proposals, B-323e's family): the paste route's clipboard poll (xclip TARGETS, every 200 ms for up to 5 s) and macOS's osascript write run through the hub's starter — src/routes/files.js's paste starts no synchronous child (24 → 23; the macOS row was a fallback). B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
   const key = (f, sc, k) => `${f}|${sc}|${k}`;
   const judge = (r) => {
     const by = new Map(); for (const st of r.sites) by.set(key(st.file, st.scope, st.kind), (by.get(key(st.file, st.scope, st.kind)) || 0) + 1);

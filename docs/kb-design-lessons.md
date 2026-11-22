@@ -470,7 +470,7 @@ Where a run lives (2.369.395, the incident of 2026-11-11): the CLI and node walk
 
 **Client-side detection**: `queryLocalFonts()` returns ALL local fonts. Monospace filtering via canvas measurement (`'i'` vs `'M'` width comparison). Requires user permission prompt (one-time).
 
-**Server-side fallback**: `GET /api/fonts` runs `fc-list :spacing=mono family`, filters emoji/sign-writing fonts, caches result. Used when `queryLocalFonts()` is unavailable (Firefox, Safari, or denied permission).
+**Server-side fallback**: `GET /api/fonts` runs `fc-list :spacing=mono family` through the hub's starter (src/server/child-starter.js, bounded 3 s, never on the loop — B-360d part 1), filters emoji/sign-writing fonts, caches result. Used when `queryLocalFonts()` is unavailable (Firefox, Safari, or denied permission).
 
 **Font list structure**: Web fonts first, separator, local system fonts, "System Default" last.
 

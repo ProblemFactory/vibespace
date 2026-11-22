@@ -3,7 +3,8 @@
 // UI-driven self-update op, and maintenance mode. Extracted VERBATIM. ORCH tier.
 const fs = require('fs');
 const path = require('path');
-const { execFileSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
+const { childStarter } = require('./child-starter');   // B-360d part 1 (r2303): the version's git starts in the small process, never the hub
 
 function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, throwaway = () => require('./throwaway-root.js').throwaway(rootDir), throwawayView = () => require('./throwaway-root.js').view() }) {   // `throwaway`: THE ONE TEST (B-ba47 shape H r1278), a seam for the suites
 // ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
@@ -11,6 +12,7 @@ function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, throwaway = () =
 // request only (never a background timer), cached 6h, best-effort: offline
 // instances just show the local version.
 const versionInfo = { fetchedAt: 0, latest: null, commit: null };
+let commitAsk = null;   // the first ask's git run, shared by every ask while it runs (B-360d part 1)
 // ONE reader of a file on the canonical repo's master (package.json for
 // /api/version, the user changelogs for /api/changelog-diff) → {ok, status,
 // text}; never throws. VIBESPACE_CHANGELOG_FIXTURE_DIR (TEST ONLY — a chrome
@@ -221,8 +223,15 @@ app.get('/api/ci-heavy', (req, res) => {
 app.get('/api/runtime', (req, res) => res.json(require('./runtime-boot.js').answer()));
 app.get('/api/version', async (req, res) => {
   if (versionInfo.commit === null) {
-    try { versionInfo.commit = execFileSync('git', ['-C', rootDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf-8', timeout: 3000 }).trim(); }
-    catch { versionInfo.commit = ''; }
+    // B-360d part 1 (主开发 r2303): git runs THROUGH THE HUB'S STARTER (src/server/child-starter.js), bounded 3 s, never on the
+    // loop: run synchronously it held the loop for its whole run at the first ask after a start (21–39 ms on a stand-in). The
+    // commit is KEPT as before (git's failure too: ''); the starter's «no answer» is no answer (the next ask runs it again); asks
+    // while it runs share the one run. Gated by scripts/test-first-ask-children.mjs.
+    commitAsk = commitAsk || childStarter().run('git', ['-C', rootDir, 'rev-parse', '--short', 'HEAD'], { timeoutMs: 3000, capture: true, envAdd: { PATH: process.env.PATH || '' } })
+      .then((r) => (!r || r.unknown ? null : r.code === 0 && !r.timedOut && !r.overflow ? String(r.stdout || '').trim() : ''), () => null)
+      .then((c) => { if (c !== null && versionInfo.commit === null) versionInfo.commit = c; })
+      .finally(() => { commitAsk = null; });
+    await commitAsk;
   }
   // 15min TTL (was 6h — during active release evenings the gear menu showed
   // "no update" for hours; real report). ?fresh=1 (the update dialog / menu

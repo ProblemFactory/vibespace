@@ -268,22 +268,26 @@ router.get('/api/file/locate', (req, res) => {
   });
 });
 
-// System monospace fonts via fc-list (cached)
-let _cachedMonoFonts = null;
-router.get('/api/fonts', (req, res) => {
+// System monospace fonts via fc-list (cached). B-360d part 1 (主开发 r2303): the lister runs THROUGH THE HUB'S STARTER
+// (src/server/child-starter.js: a small process forks it, never the hub), bounded 3 s, never on the loop: run synchronously it
+// held the loop for its whole run at the first ask after a start (25–54 ms on a stand-in). The list is KEPT as before (a failure
+// is not: the next ask tries again); asks while it runs share the one run. Gated by scripts/test-first-ask-children.mjs.
+let _cachedMonoFonts = null, _monoFontsAsk = null;
+router.get('/api/fonts', async (req, res) => {
   if (_cachedMonoFonts) return res.json({ fonts: _cachedMonoFonts });
-  try {
-    const out = execFileSync('fc-list', [':spacing=mono', 'family'], { encoding: 'utf-8', timeout: 3000 });
-    const fonts = [...new Set(
-      out.trim().split('\n')
-        .map(line => line.split(',')[0].trim())
-        .filter(f => f && !/emoji|sign/i.test(f))
-    )].sort((a, b) => a.localeCompare(b));
-    _cachedMonoFonts = fonts;
-    res.json({ fonts });
-  } catch {
-    res.json({ fonts: [] });
-  }
+  _monoFontsAsk = _monoFontsAsk || childStarter().run('fc-list', [':spacing=mono', 'family'], { timeoutMs: 3000, capture: true, envAdd: { PATH: process.env.PATH || '' } })
+    .then((r) => {
+      if (!r || r.code !== 0 || r.timedOut || r.overflow || r.unknown) return null;
+      const fonts = [...new Set(
+        String(r.stdout || '').trim().split('\n')
+          .map(line => line.split(',')[0].trim())
+          .filter(f => f && !/emoji|sign/i.test(f))
+      )].sort((a, b) => a.localeCompare(b));
+      _cachedMonoFonts = fonts;
+      return fonts;
+    }, () => null)
+    .finally(() => { _monoFontsAsk = null; });
+  res.json({ fonts: (await _monoFontsAsk) || [] });
 });
 
 // THE PATH FIELD's answer (lane path-field): one dir-slice per server (src/server/dir-slice.js — the listing cache per

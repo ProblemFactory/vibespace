@@ -149,12 +149,12 @@ export const SYNC_ROWS = Object.freeze([
   ['src/node-runtime.js', 'n', 'start', 1, 'the boot, a newer verified node only'],
   ['src/proc-identity.js', "'ps'", 'timer', 2, 'a recorded pid\'s identity on a hub WITHOUT /proc, read by the sweeps', 'hasProc(opts)|_procfs',
     'a hub without /proc only: one `ps` (≤3 s) per recorded pid checked, ON THE MAIN LOOP, from four sweeps (the writer sweep, jobs, mounts, the browser keeper) and the start tokens of a spawn'],
-  ['src/routes/files.js', "'fc-list'", 'start', 1, 'the first GET /api/fonts'],   // the paste's osascript / xclip: through the starter since line 74 (B-323e's family) — rows struck
+  // the paste's osascript / xclip: through the starter since line 74 (B-323e's family) — rows struck; the fonts list's fc-list and
+  // the version's git (src/server/ops-routes.js) too since B-360d part 1 (主开发 r2303) — rows struck
   ['src/routes/files.js', "cmd === 'ruff' ? 'ruff' : cmd", 'press', 1, 'Format in the code editor'],
   ['src/server/cli-cmd.js', "'/usr/bin/which'", 'start', 1, 'the boot\'s CLI lookups'],
   ['src/server/cli-env.js', 'xsetCmd', 'start', 1, 'the boot\'s display probe (and a paste\'s retry)'], ['src/server/cli-env.js', "resolveCmd('xauth')", 'start', 1, 'the same'],
   ['src/server/cli-env.js', "resolveCmd('xset')", 'start', 1, 'the same'], ['src/server/cli-env.js', 'CLAUDE_CMD', 'start', 1, 'the boot\'s claude --help'],
-  ['src/server/ops-routes.js', "'git'", 'start', 1, 'the first GET /api/version'],
   ['src/transcript-service.js', "'fuser'", 'press', 1, 'a session rescue'],
   ['src/usage-routes.js', "'security'", 'timer', 1, 'the macOS Keychain read in the opt-in 90 s usage poll', "process.platform === 'darwin'",
     'macOS only, with active usage polling on (opt-in): ≤1 per 5 min (the 90 s timer under the global login floor) + a ⟳ press, ≤3 s, ON THE MAIN LOOP'],
