@@ -644,10 +644,23 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   ok('B-6a92 RED CONTROL (r8\'s order, the hit before the proof): the honest seat is refused «signed in as Orin» and stays «unknown»', !!TSR && tsrr.v === false && /Vela's sign-in folder is signed in as Orin/.test(wordsOf(TSR)) && !!sideOf(TSR.usage(), TSR.V), { v: tsrr.v, why: TSR && wordsOf(TSR) });
   // BOUND 1 (r890): Vela's cache names NO organisation and its folder holds Orin's login — by the group Vela IS Orin's account under
   // a second name (one quota in the pool), so no hold forms: its window follows its readings and nothing reads «unknown»
+  // ON THE TRAIN's DECISION ROAD (B-360d, d229032f4 — «an account not confirmed is its own identity (no merge)»): the group merges by
+  // the folder's login only once the sign-in facts are CONFIRMED (the hub's boot and hourly runs, and a person's press, settle them):
+  // the bound is read on a confirmed world
   const M = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } });
+  await M.am.signinFactsSettled();
   await run6(M);
   const mWit = M.wit() || {}, mSt = M.stamp() || {};
   ok('B-6a92 BOUND 1: a row with no organisation of its own whose folder holds another row\'s login is that account by the group — no hold, its stamp follows its readings, the row says nothing «unknown»', !mWit.foreign && mSt.sevenDay === M.RO && !sideOf(M.usage(), M.V), { foreign: mWit.foreign, mSt });
+  // …and BEFORE the sign-in is confirmed (the decision road's own law, named and judged here): the row is its own identity, so a hold
+  // forms naming Orin; once the sign-in is confirmed the hold is NOT shown — a row is never held on a name of its own account, at every
+  // read of a hold (r8) — read by a fresh engine (its groups' 30 s memo new) over the same folder and accounts
+  const MU = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } });
+  await run6(MU);
+  const muWit = MU.wit() || {}, muBefore = sideOf(MU.usage(), MU.V);
+  await MU.am.signinFactsSettled();
+  const MU2 = held(realEng, { again: MU }), muAfter = sideOf(MU2.usage(), MU2.V);
+  ok('B-6a92 BOUND 1 BEFORE THE SIGN-IN IS CONFIRMED (B-360d\'s decision road): the row is its own identity — a hold forms naming Orin, and once the sign-in is confirmed it is not shown (never held on a name of its own account)', !!muWit.foreign && !!muBefore && !muAfter, J({ foreign: muWit.foreign, muBefore, muAfter }));
   // EACH REFUSAL CODE IN A WORLD (the table below covers every combination), each with its true remedy
   const U = held(realEng, { ro: roP, cli: binHeld });   // nothing names which account Vela is: no organisation, no login, no address
   await run6(U);
