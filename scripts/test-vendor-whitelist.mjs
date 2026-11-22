@@ -728,7 +728,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 //       run is 0 INET connects; every measured-and-REJECTED candidate carries
 //       its counts and its verdict and can never appear as a shipped oracle;
 //       the runner can only spawn registry argv and holds no vendor endpoint.
-//   (b) LIVE — when strace + the CLI are present, RE-MEASURE each shipped
+//   (b) LIVE — (in the heavy twin test-vendor-whitelist-live since 主开发 r2036) when strace + the CLI are present, RE-MEASURE each shipped
 //       oracle here and fail on any AF_INET/AF_INET6 connect. A NEGATIVE
 //       CONTROL (a deliberate loopback connect) proves the detector can see
 //       one, so a green run is never vacuous.
@@ -825,56 +825,17 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       'src/codex-thread-read.js records the measurement + the tool + the backlog id that owns the §ban-safety decision, instead of a reassurance nobody checked');
   }
 
-  // ── (b) the live re-measurement ──
-  const has = (bin) => { try { execFileSync('sh', ['-c', `command -v ${bin}`], { stdio: 'pipe' }); return true; } catch { return false; } };
-  const cmdPath = (bin) => { try { return execFileSync('sh', ['-c', `command -v ${bin}`], { encoding: 'utf-8' }).trim(); } catch { return ''; } };
-  const straceOk = has('strace');
-  if (process.env.VS_NO_REAL_CLI === '1') {
-    ok(true, 'SKIP live re-measurement: VS_NO_REAL_CLI=1 — the real oracles are not started here (B-ddb9); the recorded proofs above stand alone');
-  } else if (!straceOk) {
-    ok(true, 'SKIP live re-measurement: strace is not on PATH (`command -v strace` found nothing) — the recorded proofs above stand alone');
-  } else {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oracle-'));
-    const ENVBASE = { HOME: tmp, PATH: process.env.PATH || '/usr/bin:/bin', TERM: 'dumb' };
-    /** Run one command under strace and count INET connects. AF_UNIX and
-     *  AF_NETLINK are NOT network (every process does those). */
-    const inetConnects = (bin, argv, timeoutMs = 60000) => {
-      const out = path.join(tmp, 'trace-' + Math.random().toString(36).slice(2));
-      let timedOut = false;
-      try {
-        execFileSync('strace', ['-f', '-qq', '-e', 'trace=network', '-o', out, bin, ...argv],
-          { env: ENVBASE, stdio: 'ignore', timeout: timeoutMs });
-      } catch (e) {
-        // a non-zero exit is fine: the TRACE is the measurement — but only a
-        // trace of a command that EXITED (B-5f0b): a timeout kill is partial
-        if (e && (e.code === 'ETIMEDOUT' || (e.signal && e.status === null))) timedOut = true;
-      }
-      if (timedOut) { try { fs.unlinkSync(out); } catch { } return { timedOut: true, timeoutMs }; }
-      let text = ''; try { text = fs.readFileSync(out, 'utf-8'); } catch { return null; }
-      const lines = text.split('\n').filter((l) => /\bconnect\(/.test(l) && /AF_INET6?/.test(l));
-      return { n: lines.length, sample: lines.slice(0, 2).join(' | ') };
-    };
-    // NEGATIVE CONTROL FIRST: a deliberate LOOPBACK connect must be seen, or a
-    // green measurement below means nothing. Loopback, never a vendor — the
-    // rejected candidates stay un-run precisely because re-running them WOULD
-    // be the call this law forbids.
-    const ctl = inetConnects(process.execPath, ['-e', "const s=require('net').connect(1,'127.0.0.1');s.on('error',()=>process.exit(0));setTimeout(()=>process.exit(0),300)"]);
-    ok(ctl && ctl.n >= 1, `NEGATIVE CONTROL: the detector sees a deliberate loopback connect (${ctl?.n} INET connect lines) — a zero below is a measurement, not a blind spot`);
-    // THE TERMINAL SIGNAL (B-5f0b): a trace is a measurement only once the
-    // traced command EXITED. A run the 60 s timeout killed on a loaded box
-    // holds whatever had been traced by then, and its "zero" is vacuous.
-    // Driven deterministically: a loopback connect AFTER a 1.5 s wait, under a
-    // 400 ms budget — the trace ends before the connect ever happens.
-    const cut = inetConnects(process.execPath, ['-e', "setTimeout(()=>{const s=require('net').connect(1,'127.0.0.1');s.on('error',()=>process.exit(0))},1500)"], 400);
-    ok(cut && cut.timedOut === true, `TERMINAL SIGNAL: a trace the timeout cut short is reported as timedOut, never as a zero-connect measurement (${JSON.stringify(cut)})`);
-    for (const o of ORACLES) {
-      const bin = cmdPath(o.backend === 'codex' ? 'codex' : o.backend);
-      if (!bin) { ok(true, `SKIP live re-measurement of ${o.id}: ${o.backend} is not installed here (\`command -v ${o.backend}\` found nothing)`); continue; }
-      const got = inetConnects(bin, o.argv.slice());
-      if (got?.timedOut) { ok(true, `SKIP live re-measurement of ${o.id}: ${o.backend} ${o.argv.join(' ')} did not exit within ${got.timeoutMs} ms on this machine — a trace cut short is not a zero (B-5f0b)`); continue; }
-      ok(got && got.n === 0, `LIVE: ${o.id} (${o.backend} ${o.argv.join(' ')}) opened ZERO INET connections under strace${got && got.n ? ' — got ' + got.n + ': ' + got.sample : ''}`);
-    }
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
+  // ── (b) the live re-measurement — MOVED WHOLE to the heavy twin scripts/test-vendor-whitelist-live.mjs (主开发 r1875 / r2036, lane
+  // bl-release): it starts the REAL shipped oracles under strace, one real CLI a row (the slow part). This suite keeps (a), every
+  // census of a vendor construction and §10's live witness of the reset-credit helper (its tier pin unchanged).
+  {
+    const twin = fs.readFileSync(path.join(REPO, 'scripts/test-vendor-whitelist-live.mjs'), 'utf8');
+    const ciT = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
+    const code = twin.split('\n').filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).join('\n');   // its CODE: a gutted leg cannot stay green by its comments
+    ok(/for \(const o of ORACLES\)/.test(code) && /execFileSync\('strace', \['-f'/.test(code) && /ok\(!!ctl && ctl\.n >= 1,/.test(code) && /ok\(!!cut && cut\.timedOut === true,/.test(code)
+      && /ok\(!!got && got\.n === 0,/.test(code) && /process\.env\.VS_NO_REAL_CLI === '1'/.test(code) && /ok\(!onCI, onCI \? '[^']*strace is REQUIRED on a CI runner/.test(code)
+      && /\{\s*name:\s*'test-vendor-whitelist-live',\s*tier:\s*'heavy'/.test(ciT),
+      '§6 (b) LIVES IN THE HEAVY TWIN: test-vendor-whitelist-live re-measures every shipped oracle under strace, its two controls with it, strace required on a runner, a HEAVY row of scripts/ci.mjs');
   }
 }
 
@@ -1843,11 +1804,11 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
 // starts it and does not skip yet: named, a list that only shrinks; a debt row that now tests the flag is red until it is a
 // run row). A suite the universe finds without a row is red, and so is a row it no longer finds.
 console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_CLI');
-// real-cli-env: the (b) live re-measurement starts the shipped oracles with a child env built from nothing (ENVBASE: HOME, PATH, TERM) and skips under VS_NO_REAL_CLI; this census's controls spell the lookup shapes in strings (test-architecture §50)
+// real-cli-env: the (b) live re-measurement (the shipped oracles under strace, a child env built from nothing, skipped under VS_NO_REAL_CLI) lives in the heavy twin test-vendor-whitelist-live (r2036), whose lookup is by the registry's name (`command -v ${bin}`), not a literal the universe reads; this census's controls build the lookup shapes from two strings ("spawnSync(" + "'codex'…") so no line here reads as a start of a real program (r2036 (3))
 {
   const archLine = fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8').split('\n').find((l) => l.trim().startsWith('const REAL_CLI = /'));
   const REAL_CLI = archLine ? new Function(`return ${archLine.trim().replace(/^const REAL_CLI = /, '').replace(/;$/, '')};`)() : null;
-  ok(REAL_CLI instanceof RegExp && REAL_CLI.test("spawnSync('codex', ['--version'])"), 'the universe reads test-architecture §50\'s REAL_CLI shape (one shape, not a copy)');
+  ok(REAL_CLI instanceof RegExp && REAL_CLI.test("spawnSync(" + "'codex', ['--version'])"), 'the universe reads test-architecture §50\'s REAL_CLI shape (one shape, not a copy)');
   // the PROGRAM names come from §50's own `command -v (…)` alternative — one list, read, never retyped (a typed list here would be a
   // harness-keyed table to test-harness-add-census, and it would drift from §50's)
   const LOOKUP = REAL_CLI ? /^command -v \(([^()]*)\)\\b\|/.exec(REAL_CLI.source) : null;
@@ -1864,7 +1825,7 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
   const looksUp = (src) => byName(src) || code(src).some((l) => WALK.some((r) => r.test(l)));
   // what STARTS it by name: §50's shape without its `command -v` lookup alternative (derived from the same source, never retyped)
   const START = LOOKUP ? new RegExp(REAL_CLI.source.slice(LOOKUP[0].length)) : null;
-  ok(!!START && START.source !== REAL_CLI.source && !START.test('command -v claude') && START.test("execSync('codex --version')"), 'START is §50\'s shape without its command -v lookup');
+  ok(!!START && START.source !== REAL_CLI.source && !START.test('command -v ' + 'claude') && START.test("execSync(" + "'codex --version')"), 'START is §50\'s shape without its command -v lookup');
   const starts = (src) => !!START && code(src).some((l) => START.test(l));
   const HONOURS = /process\.env\.VS_NO_REAL_CLI\s*===\s*'1'/;
   const CLI_ROWS = {
@@ -1874,7 +1835,6 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
     'test-queue-steer.mjs': ['run', '⑥ / ⑩: the real `codex app-server` (its --version included; no turn started)'],
     'test-stdout-registry.mjs': ['run', 'the wire leg ⓕ, and ⓒ\'s --version of the binary it greps'],
     'test-record-shape.mjs': ['read', 'the installed binary\'s shapes and its version are READ off the binary (B-5e52, 2.369.410: never --version) — nothing is started'],
-    'test-vendor-whitelist.mjs': ['run', '(b) the live re-measurement of the shipped oracles under strace'],
     'test-pricing-tiers.mjs': ['read', '§3: the installed binary\'s model catalog as an oracle'],
     'test-claude-update-needs-nothing-hub.mjs': ['read', '§L: the installed claude\'s catalog read for real'],
     'test-record-clear-walk.mjs': ['hide', 'PATH_NO_CLAUDE for its hub (a system-wide install is still the hub resolver\'s to find)'],
@@ -1899,11 +1859,11 @@ console.log('— B-ddb9 a suite that runs the real agent CLI honours VS_NO_REAL_
   const judgeRow = (f, s) => { const k = CLI_ROWS[f]?.[0]; if (k === 'run') return HONOURS.test(s) ? null : 'a RUN row that never tests VS_NO_REAL_CLI'; if (k === 'debt') return HONOURS.test(s) ? 'a DEBT row that now tests the flag — make it a run row' : null; if (k === 'read' || k === 'hide') return starts(s) ? `a ${k.toUpperCase()} row that starts the CLI by name` : null; return null; };
   const bad = found.map((f) => [f, judgeRow(f, src(f))]).filter(([, w]) => w);
   ok(!bad.length, 'each row is what it says: a run row skips under VS_NO_REAL_CLI=1, a read / hide row never starts the CLI by name, a debt row is still owed', bad.map(([f, w]) => `${f}: ${w}`).join('; '));
-  ok(judgeRow('test-queue-steer.mjs', "  const which = spawnSync('codex', ['--version'], { encoding: 'utf8' });") !== null,
-    "RED CONTROL: test-queue-steer's ⑥ lookup as the release shipped it (a bare spawnSync('codex') with no flag test) fails its run row");
-  ok(judgeRow('test-pricing-tiers.mjs', "spawnSync('claude', ['--version'])") !== null && (() => { const d = CLI_ROWS['test-x-debt.mjs'] = ['debt', 'a planted debt row']; const r = judgeRow('test-x-debt.mjs', "if (process.env.VS_NO_REAL_CLI === '1') skip();"); delete CLI_ROWS['test-x-debt.mjs']; return d && r !== null; })(),
+  ok(judgeRow('test-queue-steer.mjs', "  const which = spawnSync(" + "'codex', ['--version'], { encoding: 'utf8' });") !== null,
+    "RED CONTROL: test-queue-steer's ⑥ lookup as the release shipped it (a bare spawnSync(" + "'codex') with no flag test) fails its run row");
+  ok(judgeRow('test-pricing-tiers.mjs', "spawnSync(" + "'claude', ['--version'])") !== null && (() => { const d = CLI_ROWS['test-x-debt.mjs'] = ['debt', 'a planted debt row']; const r = judgeRow('test-x-debt.mjs', "if (process.env.VS_NO_REAL_CLI === '1') skip();"); delete CLI_ROWS['test-x-debt.mjs']; return d && r !== null; })(),
     'RED CONTROL: a read row that starts the CLI by name, and a debt row that has learned the flag, are both red');
-  ok(looksUp("const cands = String(process.env.PATH || '').split(':').map((d) => path.join(d, 'claude'));") && looksUp("execSync('codex --version')") && !looksUp("// spawnSync('claude', ['-p'])") && !looksUp("const f = path.join(tmp, 'claude'); fs.writeFileSync(f, STUB);"),
+  ok(looksUp("const cands = String(process.env.PATH || '').split(':').map((d) => path.join(d, " + "'claude'));") && looksUp("execSync(" + "'codex --version')") && !looksUp("// spawnSync(" + "'claude', ['-p'])") && !looksUp("const f = path.join(tmp, " + "'claude'); fs.writeFileSync(f, STUB);"),
     'RED CONTROL: a PATH walk and an execSync string are lookups; a comment and a stand-in written into a scratch dir are not');
 }
 

@@ -2064,6 +2064,7 @@ src/browser-environment.js — PURE (B-9584 U1) THE CONTRACT of a profile's own 
 src/account-display-facts.js (NEW — B-360d, lane chrome-157) — THE ACCOUNTS LIST'S KEPT SIGN-IN FACTS: per account folder, read OFF the loop through SafeFs, CONFIRMED by stamp (size + time), three honest states, no secret kept ⇒ kb-file-structure.md
 src/accounts.js — + B-360d: list() / rowOf() answer from the kept facts (NO file on the loop); THE DECISION ROAD signinFacts / signinFactsSettled / decisionList / decisionRowOf / decisionLoginStateOf (DECIDE_WITHIN_MS 10 s; «unknown» decides nothing) ⇒ kb-file-structure.md
 scripts/test-accounts-list-reads.mjs (NEW, fast — B-360d) — 12 accounts + a pool, a stand-in file door holding each ask 60 ms (placed); RED the release's per-row reads; the decision road; the census of the sign-in readers ⇒ kb-file-structure.md
+scripts/test-vendor-whitelist-live.mjs — heavy twin (主开发 r1875 / r2036): test-vendor-whitelist §6 (b) moved whole — every shipped local oracle re-measured under strace for INET connects, its two controls; strace required on a runner. The fast suite keeps (a), every census and §10's live witness.
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
@@ -12632,7 +12633,7 @@ scripts/scratch.mjs `REHOMED` / `REAL_CLI_ALLOW` / `handedCli(cli)` / `HOME_WATC
     - not named and not found ⇒ a counted skip said by name.
   - The workflow names the claude it installs (the heavy job's «Name the installed claude» step). A skip is counted, printed by name and with its check count in the closing line: never a pass.
 - THE SUITES THAT LOOK A PROGRAM UP BY THEMSELVES (hub-home-census.mjs SELF_LOOKUP, held both ways by §113 (c5)) are no allow rows: a new row is the owner's to give.
-  - The box / binary / real-oracle rows: test-claude-update-needs-nothing-hub, test-codex-sandbox-net, test-harness-honesty, test-harness-settings, test-opencode-s9, test-permission-rules, test-pricing-tiers, test-queue-steer, test-record-shape, test-vendor-whitelist. Re-homed (the hosted runner, the push hook, the cut), they find a system copy or none and print a named SKIP.
+  - The box / binary / real-oracle rows: test-claude-update-needs-nothing-hub, test-codex-sandbox-net, test-harness-honesty, test-harness-settings, test-opencode-s9, test-permission-rules, test-pricing-tiers, test-queue-steer, test-record-shape (test-vendor-whitelist left this list with its oracles' live re-measurement: its heavy twin test-vendor-whitelist-live looks them up by the registry's name). Re-homed (the hosted runner, the push hook, the cut), they find a system copy or none and print a named SKIP.
   - The HIDE rows: test-record-clear-walk and test-toolbar-fold-ui drop the folders holding the program.
 - scripts/ci-remote.mjs is a NOT_REHOMED row: it drives the remote tier over ssh; the suites it runs there run under the test machine's lane homes (temp folders), so they are never re-homed.
 - PICK C (主开发 r1222, 2026-11-21): EVERY test-* / dbg-* file takes `import './scratch.mjs';` as its first import — one line a file, no «pure» class (a census that proves a file pure is one more reader that can be blind).

@@ -448,7 +448,6 @@ export const SELF_LOOKUP = Object.freeze({
   'test-queue-steer.mjs': 'codex — ⑥ / ⑩ the real `codex app-server`; re-homed, it says by name that it did not run',
   'test-record-clear-walk.mjs': 'claude — a HIDE row: its hub\u2019s PATH drops the folders holding it',
   'test-toolbar-fold-ui.mjs': 'claude, codex — a HIDE row: its hub\u2019s PATH drops the folders holding them',
-  'test-vendor-whitelist.mjs': 'the shipped oracles — (b) the live re-measurement under strace; re-homed, it says by name that it did not run',
 });
 /** THE NAMES THE KIT HANDS ITS SUITES (主开发 r1083 cure 1) — test-architecture §113 holds each as a row or a named NOT. The kit
  *  is OUTSIDE the tree, so this is a HAND LIST, read once (KIT_HANDED_READ) and able to go STALE: where the census can read the
