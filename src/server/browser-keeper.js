@@ -1606,9 +1606,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function stockEnvFor(p) {
     const envR = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p));
     const st = ENV.stockLaunchOf(envR, { languageTold: !!p.languageTold, machineTag: ENV.machineLanguageTag() });
-    const geolocation = geoPlanOf(envR.geolocation);   // B-9584 U2c: a place (the stored denial + the hold on top) or «blocked» (the stored denial alone); null ⇒ nothing written, nothing armed
+    const geolocation = geoPlanFor(p, envR);   // B-9584 U2c: a place (the stored denial + the hold on top) or «blocked» (the stored denial alone); null ⇒ nothing written, nothing armed — r1707 (4): ONE function for the record and the arm
+    const notApplied = !geolocation && !!envR.geolocation;   // an ephemeral or a paired machine's profile: nothing written, no hold — said as not applied, never «blocked» or «fixed»
     const says = !!p.environment || st.args.length > 0;
-    return { ...st, geolocation, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: geolocation ? (geolocation.kind === 'place' ? 'fixed' : 'blocked') : 'machine' }, confirmed: !geolocation || geolocation.kind === 'blocked', by: 'stock', unfollowed: envR.unfollowed } : null };   // «blocked» = the stored denial, written before its Chrome or the start is refused; a place is confirmed once held
+    return { ...st, geolocation, environment: says ? { applied: { timezone: st.env.TZ || null, language: st.language, location: geolocation ? (geolocation.kind === 'place' ? 'fixed' : 'blocked') : notApplied ? 'not-applied' : 'machine' }, ...(geolocation && geolocation.kind === 'place' ? { locationSaid: PLACE_SAID } : notApplied ? { locationSaid: NOT_APPLIED_SAID } : {}), confirmed: !notApplied && (!geolocation || geolocation.kind === 'blocked'), by: 'stock', unfollowed: envR.unfollowed } : null };   // «blocked» = the stored denial, written before its Chrome or the start is refused; a place is confirmed once held
   }
   // ── B-9584 U2c — THE PLACE ON THE STOCK BROWSER (road B: src/server/browser-geo-hold.js) ──
   // A stock profile whose location is a place or «blocked» gets the hold on its browser at its start, before the browser is anyone's
@@ -1618,10 +1619,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const geo = () => geoHoldOwn || (geoHoldOwn = (typeof geoHold === 'function' ? geoHold : GH.create)({ log, now, onEvent: onGeoEvent }));
   const geoSaid = new Map();   // profile id → the hold's notices filed for its browser's run (one of each)
   /** The plan a STOCK profile's browser is held to (a named profile on this machine, never an engine's — the kernel takes its own). */
-  function geoPlanFor(p) {
+  function geoPlanFor(p, envR = null) {
     if (!p || isEph(p) || p.host || (p.browser && p.browser.kind === 'plugin')) return null;
-    return geoPlanOf(ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p)).geolocation);
+    return geoPlanOf((envR || ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p))).geolocation);
   }
+  /** r1707 (4): THE RECORD TELLS THE TRUTH — «fixed» while no site may read the place says so in its own words; a profile this road
+   *  does not hold (an ephemeral one, a paired machine's) says its location is not applied. */
+  const PLACE_SAID = 'fixed on its tabs — every site is denied the location (the profile\'s own setting): no site is allowed the place';
+  const NOT_APPLIED_SAID = 'not applied — this browser is not held to a place or «blocked»: its sites get this machine\'s answer';
   /** U1's `geolocation` → this road's plan: «blocked» (the stored denial alone) or a place the hold can hold (GH.planOf); else null. */
   function geoPlanOf(g) { return g && g.kind === 'blocked' ? { kind: 'blocked' } : GH.planOf(g); }
   /** B-9584 U2c (主开发 r1264, MEASURED on a real Chrome): THE PROFILE'S OWN STORED DENIAL, written before its Chrome starts (no Chrome
@@ -1629,53 +1634,72 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  (src/browser-environment.js geoStoredDenial: a site allowed before would win over the default alone), the person's own values
    *  kept beside the profile FIRST (GEO_KEPT_FILE, 0600, once — never a later denial's over them); each file written to a temp
    *  SYNCED to disk before its rename (r1897). Back at «this machine's» with values
-   *  kept ⇒ given back (geoStoredRestore), the file removed. An untouched profile: one look for the file, nothing else. A file of
-   *  another shape is never overwritten: the start is refused by name instead. */
+   *  kept ⇒ given back (geoStoredRestore), the file removed. An untouched profile: one look for the file, nothing else — and NEVER a
+   *  refusal from this road (r1707 (2): a give-back that cannot run now is said and tried at its next start). A held launch with a
+   *  file of another shape, or one it cannot read or write: the start is refused by name (the file and what failed) — never overwritten. */
   const GEO_KEPT_FILE = 'vibespace-geo-kept.json';
   async function geoStoreAt(p, plan) {
     if (!p || !p.dir || isEph(p) || p.host || (p.browser && p.browser.kind === 'plugin')) return { ok: true, why: 'not a stock profile on this machine' };
     const file = path.join(p.dir, 'Default', 'Preferences'), keptFile = path.join(p.dir, GEO_KEPT_FILE);
-    let kept = null;
-    try { kept = JSON.parse(await fs.promises.readFile(keptFile, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') return { ok: false, why: `its kept values: ${e.code || 'not JSON'}` }; }
-    if (!plan && !kept) return { ok: true, why: 'nothing kept' };
+    // r1707 (2): a profile that asks for no place and no «blocked» is NEVER refused by this road — a give-back that cannot run now is
+    // said in the journal (no value) and tried again at its next start
+    const later = (why) => { log.warn?.(`[browser] ${p.id} "${p.label}": its own location values were not given back now — ${why}; tried again at its next start`); return { ok: true, why: `not given back now (${why})` }; };
+    const fail = (why) => (plan ? { ok: false, why } : later(why));
+    let kept = null, keptThere = false;
+    try { const raw = await fs.promises.readFile(keptFile, 'utf8'); keptThere = true; try { kept = JSON.parse(raw); } catch { return fail(`${GEO_KEPT_FILE}: not JSON`); } }
+    catch (e) { if (e.code !== 'ENOENT') return fail(`${GEO_KEPT_FILE}: unreadable (${e.code || 'unreadable'})`); }
+    if (keptThere && (!kept || typeof kept !== 'object' || Array.isArray(kept))) return fail(`${GEO_KEPT_FILE}: not of its shape`);   // never overwritten
+    if (!plan && !keptThere) return { ok: true, why: 'nothing kept' };
     let prefs = null;
-    try { const raw = await fs.promises.readFile(file, 'utf8'); try { prefs = JSON.parse(raw); } catch { return { ok: false, why: 'its Preferences are not JSON' }; } }
-    catch (e) { if (e.code !== 'ENOENT') return { ok: false, why: e.code || 'unreadable' }; }
+    try { const raw = await fs.promises.readFile(file, 'utf8'); try { prefs = JSON.parse(raw); } catch { return fail('Default/Preferences: not JSON'); } }
+    catch (e) { if (e.code !== 'ENOENT') return fail(`Default/Preferences: unreadable (${e.code || 'unreadable'})`); }
     const writeAtomic = async (f, obj) => {
       await fs.promises.mkdir(path.dirname(f), { recursive: true, mode: 0o700 });
       const tmp = `${f}.vibespace-${process.pid}.tmp`;
-      const fh = await fs.promises.open(tmp, 'w', 0o600);
-      try { await fh.writeFile(JSON.stringify(obj)); await fh.sync(); } finally { await fh.close(); }   // r1897: the temp's bytes ON DISK before its rename (awaited) — a torn Preferences after a power cut is a person's browser reset
-      await fs.promises.rename(tmp, f);
+      try {
+        const fh = await fs.promises.open(tmp, 'w', 0o600);
+        try { await fh.writeFile(JSON.stringify(obj)); await fh.sync(); } finally { await fh.close(); }   // r1897: the temp's bytes ON DISK before its rename (awaited) — a torn Preferences after a power cut is a person's browser reset
+        await fs.promises.rename(tmp, f);
+      }
+      catch (e) { await fs.promises.rm(tmp, { force: true, recursive: false }).catch(() => { }); throw e; }   // never a temp file left beside it
     };
+    const where = (f) => (f === keptFile ? GEO_KEPT_FILE : 'Default/Preferences');
+    let writing = keptFile;
     try {
       if (plan) {
         const v = ENV.geoStoredDenial(prefs);
-        if (!v.ok) return v;
-        if (!kept) await writeAtomic(keptFile, v.kept);   // the person's own values FIRST: a crash between the two writes loses nothing
+        if (!v.ok) return fail(`Default/Preferences: ${v.why}`);
+        // the person's own values FIRST (a crash between the two writes loses nothing); r1707 (3): at every LATER held launch a row the
+        // person allowed in Chrome's own settings meanwhile joins them (a row kept before keeps its FIRST value — never a denial's)
+        if (!kept) await writeAtomic(keptFile, v.kept); else { const m = ENV.geoKeptMerge(kept, v.kept); if (!m.ok) return fail(`${GEO_KEPT_FILE}: ${m.why}`); if (m.changed) await writeAtomic(keptFile, m.kept); }
+        writing = file;
         if (v.changed) await writeAtomic(file, v.prefs);
         return { ok: true, why: 'denied' };
       }
-      if (prefs) { const r = ENV.geoStoredRestore(prefs, kept); if (!r.ok) return r; if (r.changed) await writeAtomic(file, r.prefs); }
+      if (prefs) { const r = ENV.geoStoredRestore(prefs, kept); if (!r.ok) return later(`Default/Preferences: ${r.why}`); writing = file; if (r.changed) await writeAtomic(file, r.prefs); }
+      writing = keptFile;
       await fs.promises.rm(keptFile, { force: true });
       return { ok: true, why: 'given back' };
-    } catch (e) { return { ok: false, why: e.code || 'not written' }; }
+    } catch (e) { return fail(`${where(writing)}: not written (${e.code || 'failed'})`); }
   }
-  /** Arm the hold (bounded). Refused ⇒ the start is refused BY NAME and the browser is stopped once it settles — never left running
-   *  with this machine's place; the record's word becomes «confirmed» only once every open tab holds the place. */
+  /** Arm the hold (bounded). Refused AT A START ⇒ the start is refused BY NAME and the browser is stopped once it settles; refused at a
+   *  restart's ADOPTION ⇒ the person's running browser is LEFT running (r1707 (5): the stored denial holds — no stop without a safety
+   *  gain), said once a run. The record's word becomes «confirmed» only once every open tab holds the place. */
   async function armGeo(p, rec, plan, { after = null } = {}) {
     const r = await geo().arm(p.id, { url: () => ((reg.browsers[p.id] || {}).cdpUrl || rec.cdpUrl), plan, after });   // the record's CURRENT address: a relaunch moves it (r1264 must 2)
     if (r.ok) { if (rec.environment) rec.environment.confirmed = true; return r; }
     const what = plan.kind === 'blocked' ? 'its blocked location' : 'its place';
-    const msg = `"${p.label}" ${after === 'restart' ? 'was stopped at the restart' : 'was not started'}: ${what} could not be held on its browser (${r.error}) — it never runs with this machine's location; start it again, or set the location to «This machine's»`;
+    if (after === 'restart') { log.warn?.(`[browser] ${p.id} "${p.label}": ${what} could not be given to its tabs after the restart (${r.error}) — its browser goes on denied the location`); onGeoEvent({ kind: 'down', profileId: p.id, at: now(), after: 'restart' }); return r; }
+    const msg = `"${p.label}" was not started: ${what} could not be held on its browser (${r.error}) — it never runs with this machine's location; start it again`;
     log.warn?.(`[browser] ${p.id} ${msg}`);
     rec.lastError = msg; commit();
     const pid = p.id;
     setImmediate(() => { stop(pid, { why: 'place-not-held' }).catch((e) => log.warn?.(`[browser] ${pid}: the stop after its place could not be held failed — ${e && e.message}`)); });
     throw namedError('browser_place_not_held', msg);
   }
-  /** The hold's events, said where the person is: a tab closed (its place not taken in time), the place not held for a while (the
-   *  hold dropped, VibeSpace restarted) once it is held again, the hold that cannot come back (the browser is stopped). */
+  /** The hold's events, said where the person is: a tab that runs without its place (denied the location); the hold that cannot come
+   *  back (the browser goes on denied; a tab opening then may stay frozen). The place given again after a gap is a journal line only
+   *  (r1707 (6)): while no site can read the place, a notice would tell nothing to act on. */
   function onGeoEvent(ev) {
     if (!ev || !ev.profileId) return;
     const pid = String(ev.profileId);
@@ -1693,9 +1717,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (ev.kind === 'unplaced') {
       file('unplaced', `"${label}": a tab ${ev.opened ? 'opened' : 'was open'} without its place — sites there are denied the location`, `VibeSpace gives every tab of "${label}" its place before the tab runs. Its browser did not take the place on this one in time, so the tab runs with the profile's own setting: sites are denied the location — never given this machine's. Open the page again to get the place; if this keeps happening, restart the browser.`);
     } else if (ev.kind === 'held' && (ev.after === 'lost' || ev.after === 'restart')) {
-      file(`gap:${ev.lostAt || ev.at}`, `"${label}": ${what} was not given to its tabs for a while — ${ev.after === 'restart' ? 'VibeSpace restarted' : "VibeSpace's hold on its browser dropped"}; it is given again`, `While it was not given, sites were DENIED the location (the profile's own setting) — never given this machine's. Every tab has ${what} again from now on.`);
+      log.log?.(`[browser] ${pid} "${label}": ${what} given to its tabs again (${ev.after === 'restart' ? 'after a restart' : 'its hold dropped'}) — sites were denied the location meanwhile`);   // r1707 (6): QUIET — no For-you notice while no site can read the place (nothing to act on); the place's road brings it back
     } else if (ev.kind === 'down') {
-      file('down', `"${label}": ${what} cannot be given to its tabs right now — sites are denied the location`, `VibeSpace's hold on the browser dropped and could not be armed again. The browser goes on with the profile's own setting: sites are denied the location, never given this machine's. Restart the browser to have ${what} again.`);
+      file('down', `"${label}": ${what} cannot be given to its tabs right now — sites are denied the location`, `VibeSpace's hold on the browser ${ev.after === 'restart' ? 'could not be armed after VibeSpace restarted' : 'dropped and could not be armed again'}. The browser goes on with the profile's own setting: sites are denied the location, never given this machine's. A tab that was opening at that moment may stay frozen (blank) until the browser restarts. Restart the browser to have ${what} again.`);
     }
   }
   /** B-9584 U2b: the store's mark, set by the LAUNCH that tells a language — on each road right before its OWN synchronous landing
@@ -1766,7 +1790,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!v.ok && fetching && fetching.answered === false && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace has asked ${fetching.host} for it and has no answer yet; start the browser again in a moment`;
     else if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
     if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }
-    if (statesEnv !== true && typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === false) throw unread();   // the belt past the verdict (r1120: asked ONCE MORE — a plugin turned on meanwhile is no refusal): only a plain «does not state it»
+    if (statesEnv !== true && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === true)) throw unread();   // the belt past the verdict (r1120: asked ONCE MORE — a plugin turned on meanwhile is no refusal; r1707 (1): anything but a stated «true» refuses, as at the release — a list that cannot be read never starts an engine in this machine's environment
     // the exit check (the owner 2026-11-17): the profile's KEPT exit rides resolve-launch as `egress` {publicIp, country, timezone,
     // checkedAt, source} — the names settled with the plugin's conversation; absent when none is kept. NO request is made here.
     const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}), ...(p.egress && typeof p.egress === 'object' ? { egress: egressHandOf(p.egress) } : {}), ...(envR.told ? { environment: envR.told } : {}) });
@@ -5199,7 +5223,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
       const lk = await clearProfileLock(p, ns, prevRec);
       if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
-      { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation); if (!gs.ok) throw failed('browser_place_not_held', `"${p.label}" was not started: its location setting could not be written into its browser profile (${gs.why}) — it never runs where a site could read this machine's location; start it again, or set the location to «This machine's»`); }   // B-9584 U2c: FAIL CLOSED AT THE BROWSER (the profile's own stored denial), before its Chrome starts
+      { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation); if (!gs.ok) throw failed('browser_place_not_held', `"${p.label}" was not started: its location setting could not be written into its browser profile — ${gs.why}; it never runs where a site could read this machine's location`); }   // B-9584 U2c: FAIL CLOSED AT THE BROWSER (the profile's own stored denial), before its Chrome starts
       stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record — the witness the next pod reads
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
@@ -5501,7 +5525,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
     const lk = await clearProfileLock(p, ns, prevRec);
     if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
-    { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation); if (!gs.ok) throw failed('browser_place_not_held', `"${p.label}" was not started: its location setting could not be written into its browser profile (${gs.why}) — it never runs where a site could read this machine's location; start it again, or set the location to «This machine's»`); }   // B-9584 U2c: FAIL CLOSED AT THE BROWSER (the profile's own stored denial), before its Chrome starts
+    { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation); if (!gs.ok) throw failed('browser_place_not_held', `"${p.label}" was not started: its location setting could not be written into its browser profile — ${gs.why}; it never runs where a site could read this machine's location`); }   // B-9584 U2c: FAIL CLOSED AT THE BROWSER (the profile's own stored denial), before its Chrome starts
     const so = ATL.ensureSocketDir(AT.attachSocketDir({ base: attachSocketBase || B.SOCKET_DIR_BASE, uid: typeof process.getuid === 'function' ? process.getuid() : null, profileId }));
     if (!so.ok) throw failed(so.code, so.error);
     let ds = null;
@@ -8657,7 +8681,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         mediator.adopt(p.id, rec.cdpUrl).catch(() => { });
       }
       if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); if (rec.closed && rec.closed.code === 'browser_unstable' && rec.closed.unstable === 'failing') bootRejudge.add(rec.profileId); // lane browser-unstable-rejudge
-        log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); if (p) { const gp = geoPlanFor(p); if (gp && gp.kind === 'place') { try { await armGeo(p, rec, gp, { after: 'restart' }); } catch { /* refused by name: its stop is scheduled */ } } } }   // B-9584 U2c: a place held again (the stored denial stood while VibeSpace was down); inside the ready block — the release's else stays its own
+        log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); if (p) { const gp = geoPlanFor(p); if (gp && gp.kind === 'place') { try { await armGeo(p, rec, gp, { after: 'restart' }); } catch { /* a restart's arm never throws: refused, it leaves the browser running denied (r1707 (5)) */ } } } }   // B-9584 U2c: a place held again (the stored denial stood while VibeSpace was down); inside the ready block — the release's else stays its own
       else {
         rec.state = v.state; rec.lastError = v.lastError; rec.endedAt = now(); log.warn?.(`[browser] ${rec.profileId} ${v.state} at boot: ${v.lastError}`);
         if (isEph(p)) keptNote('stop', p, { why: 'restart' }); // lane browser-resume: it died while VibeSpace was down — its last persisted tabs are kept (D2: reopened at its next start)

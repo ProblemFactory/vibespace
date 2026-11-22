@@ -354,7 +354,7 @@ async function heldLeg(Dmod, tag) {
   let holders = [], leaseFn = null;
   const kH = { cdpEndpointFor: async () => ({ ok: true, url: ch.url }), notePermission: () => true, geoHeldFor: () => held, onLease: (fn) => { leaseFn = fn; return () => {}; } };
   const wH = Dmod.create({ keeper: kH, holdersOf: () => holders, log: { warn() {}, log() {}, error() {} } });
-  const PH = `bp-a00000${{ real: '09', red: '0a', red2: '0b', red3: '0c' }[tag]}`, tH = { profileId: PH, browserKey: 'bk-0000d1a9' };
+  const PH = `bp-a00000${{ real: '09', red: '0a', red2: '0b', red3: '0c', red4: '0d' }[tag]}`, tH = { profileId: PH, browserKey: 'bk-0000d1a9' };
   await wH.arm(PH); await sleep(60);
   const o = {};
   const since = (n) => ch.calls.slice(n);
@@ -408,6 +408,9 @@ async function heldLeg(Dmod, tag) {
   ok(hr.denyClear > 0, 'RED — a watch that ignores the hold: a deny CLEARS the held place on every tab (this machine\'s place then)', hr);
   const Dg = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "    if (!placeHeld(w.profileId) && [...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted'))", "    if ([...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted'))", 'prompts RED hand-over clears'), 'hand-over-clears');   // stale-pins: kept (the RED's own replacement: the release's hand-over)
   const hg = await heldLeg(Dg, 'red2');
+  const Dr = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "if (geo && !placeHeld(w.profileId)) call(w, 'Emulation.setGeolocationOverride'", "if (geo) call(w, 'Emulation.setGeolocationOverride'", 'prompts RED replay ignores the hold'), 'replay-ignores-hold');   // stale-pins: kept (the RED's own replacement: the replay without its guard)
+  const hrp = await heldLeg(Dr, 'red4');
+  ok(hrp.replayOverride > 0, 'RED — the replay without its guard (r1707 (8)): a grant made before the place replays ITS position over the held place on every new tab', hrp);
   ok(hg.handClear > 0, 'RED — the release\'s hand-over: the takeover CLEARS the held place on every open tab (then a site allowed earlier reads this machine\'s position)', hg);
   const Da = MUh.load('src/server/browser-dialogs.js', anchored(dsH, "    if (held && v.setting === 'granted') return { ok: false, code: 'place_held',", "    if (held && v.setting === 'granted' && held.kind === 'blocked') return { ok: false, code: 'place_held',", 'prompts RED place allowed'), 'place-allowed');   // stale-pins: kept (the RED's own replacement: the allow refused on «blocked» only)
   const ha = await heldLeg(Da, 'red3');

@@ -35,7 +35,7 @@
  *   · withEnvironmentArgs(args, extra) — a launch config's `args` (a list or the driver's comma / newline text) with the switches added
  *   · canonicalZone(v) / canonicalTag(v) — the hub's own two canonical forms: an engine's echo is compared through them, both sides
  *   · geoStoredDenial(prefs) / geoStoredRestore(prefs, kept) — U2c: the profile's OWN stored denial (fail closed at the browser) and
- *                                       the person's own values given back
+ *                                       the person's own values given back; geoKeptMerge(kept, found) — a row they allowed while held joins them
  * THE DEFAULT IS UNCHANGED: a profile with no `environment`, or one whose every setting is «this machine's», keeps nothing and hands
  * nothing (told null) — its start is the release's, byte for byte.
  * The runtime decides two facts: a zone name by its date formatter (src/browser-exit.js zoneVerdict, the exit check's one rule) and a
@@ -249,6 +249,20 @@ function geoStoredRestore(prefs, kept) {
   }
   return { ok: true, changed, prefs: p };
 }
+/** B-9584 U2c follow (主开发 r1707 (3)): THE PERSON'S OWN SETTINGS ARE NEVER LOST — a site the person allowed in Chrome's own settings
+ *  WHILE the profile was held is theirs too: at each later held launch a row the kept values lack, and whose setting is not «block»,
+ *  joins them (`found` = geoStoredDenial's `kept` of that launch). A row kept before keeps its FIRST value, never a denial's over it;
+ *  the default keeps its first. PURE → { ok, changed, kept }; kept values of another shape are refused, never merged into. */
+function geoKeptMerge(kept, found) {
+  if (!kept || typeof kept !== 'object' || Array.isArray(kept) || (kept.rows !== undefined && (!kept.rows || typeof kept.rows !== 'object' || Array.isArray(kept.rows)))) return { ok: false, why: 'the kept values are not of their shape' };
+  const out = { default: Object.prototype.hasOwnProperty.call(kept, 'default') ? kept.default : null, rows: { ...(kept.rows || {}) } };
+  let changed = false;
+  for (const [key, setting] of Object.entries((found && found.rows) || {})) {
+    if (Object.prototype.hasOwnProperty.call(out.rows, key) || setting === GEO_BLOCK) continue;
+    out.rows[key] = setting; changed = true;
+  }
+  return { ok: true, changed, kept: out };
+}
 /** THE HUB'S TWO CANONICAL FORMS (round wyx4vuerd 3) — a zone as the runtime's date formatter spells it (a legacy alias and its zone,
  *  another case: one name), a tag as Intl.getCanonicalLocales spells it; a value neither reads is kept as given (it then differs).
  *  An engine's echo is compared to what was told through these, on BOTH sides (src/browser-engines.js echoMismatch). */
@@ -276,4 +290,4 @@ function environmentLogView(environment) {
   return out;
 }
 
-module.exports = { stockLaunchOf, machineLanguageTag, canonicalZone, canonicalTag, geoStoredDenial, geoStoredRestore, GEO_BLOCK, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };
+module.exports = { stockLaunchOf, machineLanguageTag, canonicalZone, canonicalTag, geoStoredDenial, geoStoredRestore, geoKeptMerge, GEO_BLOCK, withEnvironmentArgs, MODES, PLACE_ACCURACY_M, KERNEL_TAG, LANGUAGE_ROWS, languageOfCountry, SETTINGS, SETTING_KEYS, environmentVerdict, keptExitOf, resolveEnvironment, environmentLogView, languageVerdict, placeVerdict, timezoneVerdict };

@@ -11,7 +11,7 @@
 //   ③ «BLOCKED» = the stored denial alone (no hold): the site allowed before reads «denied». RED: no stored denial ⇒ it keeps «granted».
 //   ④ REFUSED / ⑤ NEVER ANSWERED: the tab released UNPLACED inside the bound, said, and it reads «denied» — never this machine's.
 //   ⑥ THE HOLD DIES: (a) a paused tab stays paused; (b) the next arm places and releases it; (c) a tab opened while it is down reads
-//      «denied»; (d) a RUNNING tab under the hold's own dead socket reads «denied» (the leak the measure showed, closed).
+//      «denied»; (d) TODAY (no site allowed the place) a RUNNING placed tab reads «denied» before and after the hold's own socket dies.
 //   ⑦ ANOTHER CLIENT VISITS a held tab and leaves: the tab's next read is still the place.
 // Without a Chrome on PATH it SKIPS BY NAME (its closing line «SKIP: …», never a green).
 import fs from 'node:fs';
@@ -106,9 +106,14 @@ async function stop(c) {
 /** The hold's socket, wrapped: `ctl.place` = 'pass' | 'refuse' | 'swallow' | 'delay:<ms>' for the place it sends; `ctl.sockets` its sockets. */
 function wrapped(ctl) {
   return class extends WS.WebSocket {
-    constructor(...a) { super(...a); ctl.sockets.push(this); }
+    constructor(...a) {
+      super(...a); ctl.sockets.push(this);
+      this.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (m && m.method === 'Target.attachedToTarget' && m.params && m.params.targetInfo) ctl.attached.push({ tid: m.params.targetInfo.targetId, opener: m.params.targetInfo.openerId || null, sid: m.params.sessionId, waiting: !!m.params.waitingForDebugger }); });   // the hold's own attach events (r1707 (8): waited on, never a sleep)
+    }
     send(data, ...rest) {
       let m = null; try { m = JSON.parse(String(data)); } catch { m = null; }
+      if (m && m.method === 'Emulation.setGeolocationOverride' && m.sessionId) ctl.asked.add(m.sessionId);
+      if (m && m.method === 'Runtime.runIfWaitingForDebugger' && m.sessionId) ctl.released.add(m.sessionId);
       if (m && m.method === 'Emulation.setGeolocationOverride' && ctl.place !== 'pass') {
         if (ctl.place === 'refuse') { setImmediate(() => this.emit('message', Buffer.from(J({ id: m.id, error: { code: -32000, message: 'refused (a stand-in)' } })), false)); return; }
         if (ctl.place === 'swallow') return;
@@ -119,14 +124,25 @@ function wrapped(ctl) {
   };
 }
 async function holdOn(c, plan, { G = GH, boundMs = 1500, rearmMs = [60000] } = {}) {
-  const ctl = { place: 'pass', sockets: [] }, evs = [];
+  const ctl = { place: 'pass', sockets: [], attached: [], asked: new Set(), released: new Set() }, evs = [];
   const h = G.create({ WebSocketImpl: wrapped(ctl), log: quiet, boundMs, closeMs: 1500, armMs: 8000, rearmMs, onEvent: (e) => evs.push(e) });
   const r = await h.arm(`bp-${c.tag}`, { url: c.url, plan });
   return { h, ctl, evs, armed: r };
 }
 const openTabs = async (c, k, n, first = 0) => c.cdp.send('Target.createTarget', { url: `${ORIGIN}/opener?k=${k}&n=${n}&first=${first}` });
 /** The opener gets its place as any tab; the leg's mode is set only after it (the tab under test is the one it opens). */
-const openThenMode = async (c, ctl, k, mode) => { await openTabs(c, k, 1, 1500); await sleep(700); ctl.place = mode; };
+/** A wait whose test IS its read (a value, or null when the bound runs out). */
+const untilV = async (fn, ms) => { const t0 = Date.now(); let v = fn(); while (!v && Date.now() - t0 < ms) { await sleep(25); v = fn(); } return v || null; };
+/** The opener gets its place as any tab; the leg's mode is set only once the hold has RELEASED the opener (its own attach event, never a
+ *  sleep — r1707 (8)); the tab under test is the one it opens. → the opener's target id. */
+const openThenMode = async (c, ctl, k, mode) => {
+  const t = await openTabs(c, k, 1, 1500);
+  const seen = await untilV(() => { const a = ctl.attached.find((x) => x.tid === t.targetId); return a && ctl.released.has(a.sid) ? a : null; }, 8000);
+  ctl.place = mode;
+  return seen ? t.targetId : null;
+};
+/** The tab an opener opened, once the hold has asked its place (it waits in its pause): its own attach event, never a sleep. */
+const childAsked = (ctl, openerId, ms = 8000) => untilV(() => (openerId ? ctl.attached.find((x) => x.opener === openerId && ctl.asked.has(x.sid)) : null) || null, ms);
 const pageTargets = async (c) => ((await c.cdp.send('Target.getTargets')).targetInfos || []).filter((t) => t.type === 'page');
 const F = {};
 const MUT = mutantCopies('geo-hold-chrome-reds', REPO);
@@ -184,8 +200,8 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
 {
   const c = await chrome();
   const { h, ctl } = await holdOn(c, PLACE, { boundMs: 60000, rearmMs: [600000] });
-  await openThenMode(c, ctl, 'death', 'swallow');
-  await sleep(1800);   // the opener's tab opens (1.5 s after its load) and waits in its pause: its place never answered
+  const op = await openThenMode(c, ctl, 'death', 'swallow');
+  await childAsked(ctl, op);   // the opener's tab opened (1.5 s after its load) and waits in its pause: its place never answered
   for (const s of ctl.sockets) { try { s.terminate(); } catch { /* gone */ } }
   const early = await reportsOf((x) => x.k === 'death', 1, 3000);
   F.deathPaused = { readWithin3000ms: early.length > 0 };
@@ -196,8 +212,8 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
 {
   const c = await chrome();
   const { h, ctl, evs } = await holdOn(c, PLACE, { boundMs: 20000, rearmMs: [3000] });
-  await openThenMode(c, ctl, 'rearm', 'swallow');
-  await sleep(1800);
+  const op = await openThenMode(c, ctl, 'rearm', 'swallow');
+  await childAsked(ctl, op);
   for (const s of ctl.sockets) { try { s.terminate(); } catch { /* gone */ } }
   const t0 = Date.now();
   ctl.place = 'pass';   // the next arm's place goes through
@@ -218,8 +234,9 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
   ok(got.length === 1 && got[0].err === 1 && got[0].perm === 'denied', `⑥ (c) a tab OPENED while the hold is down is not paused and reads «denied» (the profile's own setting) — never this machine's position (${J(got[0] || null)})`, F.down);
   h.dispose(); await stop(c);
 }
-// ⑥ (d) THE HOLD'S OWN SOCKET DIES under a RUNNING tab (every hub restart; the measure: the overrides go with the socket): the tab reads
-// again and gets «denied» from the profile's own setting — never this machine's position
+// ⑥ (d) TODAY (no site is allowed the place): a RUNNING placed tab reads «denied» before AND after the hold's own socket dies (every hub
+// restart) — the profile's own stored denial, whatever of ours is down. (That the socket's overrides go with it is measure (a)'s fact,
+// test-browser-geo-hold-measure; a grant given beside the place is the place's road, a later unit — r1707 (8), said as what it shows.)
 {
   const c = await chrome({ grant: false });
   const { h, ctl } = await holdOn(c, PLACE, { rearmMs: [600000] });
@@ -233,7 +250,7 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
   await c.cdp.send('Runtime.evaluate', { expression: 'window.again(1)' }, own.sessionId);
   const got = await reportsOf((x) => x.k === 'running', 2, 6000);
   F.running = { before: r0 || null, after: got[1] || null };
-  ok(!!r0 && got.length === 2 && got[1].err === 1 && got[1].perm === 'denied', `⑥ (d) the hold's OWN socket dies under a running tab: its next read is «denied» (the profile's own setting) — the leak the measure showed (every hub restart) is closed (${J(F.running)})`, F.running);
+  ok(!!r0 && r0.err === 1 && r0.perm === 'denied' && got.length === 2 && got[1].err === 1 && got[1].perm === 'denied', `⑥ (d) TODAY (no site allowed the place): a running placed tab reads «denied» before and after the hold's own socket dies — the profile's own setting, never this machine's position (${J(F.running)})`, F.running);
   h.dispose(); await stop(c);
 }
 // ⑦ another client visits a held tab and leaves: the place stands

@@ -2034,7 +2034,7 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
   // REDs: the keeper with each rule taken back (anchored, THE one door for a red control's edit)
   const MUTe = mutantCopies('envm-builds', REPO);
   const ksE = read('src/server/browser-keeper.js');
-  const Kno = MUTe.load('src/server/browser-keeper.js', anchored(anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (false) throw unread();', '⑦e RED unread (early)'), '    if (statesEnv !== true && typeof engs().statesEnvironment', '    if (false && typeof engs().statesEnvironment', '⑦e RED unread (belt)'), 'env-unread-off');
+  const Kno = MUTe.load('src/server/browser-keeper.js', anchored(anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (false) throw unread();', '⑦e RED unread (early)'), '    if (statesEnv !== true && !(typeof engs().statesEnvironment', '    if (false && !(typeof engs().statesEnvironment', '⑦e RED unread (belt)'), 'env-unread-off');
   const rn = await roadOf(Kno, 'red-unread');
   ok(!rn.ee && rn.asked === 1, '⑦e RED — the keeper without the stated-word check: the start ASKS the launch of an engine that does not read the environment (a browser in the machine\'s own zone)', { ee: rn.ee && rn.ee.code, asked: rn.asked });
   const Kal = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '...(envR.told ? { environment: envR.told } : {})', 'environment: envR.told', '⑦e RED always'), 'env-always');
@@ -2152,11 +2152,15 @@ console.log('— ⑦e B-9584 U2a: a profile\'s own environment on an engine — 
       if (!e) await kb.stop(pb.id, { why: 'user' });
       return e ? e.code : 'started';
     };
-    const b1 = await beltOf(K, 'race', [null, true]), b2 = await beltOf(K, 'plain', [null, false]);
+    const b1 = await beltOf(K, 'race', [null, true]), b2 = await beltOf(K, 'plain', [null, false]), b4 = await beltOf(K, 'unread', [null, null]);
+    ok(b4 === 'browser_engine_environment_unread', `⑦e r1707 (1): a list that cannot be read at BOTH reads (null, null) is refused «update the browser plugin» as at the release — never an engine started in this machine's environment (${b4})`, b4);
     ok(b1 === 'started' && b2 === 'browser_engine_environment_unread', `⑦e r1120 (1): the belt past the verdict asks ONCE MORE — a plugin that states the word by then starts (${b1}); a plain «does not state it» is refused (${b2})`, { b1, b2 });
-    const Kbelt = MUTe.load('src/server/browser-keeper.js', anchored(ksE, "    if (statesEnv !== true && typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === false) throw unread();", '    if (statesEnv !== true) throw unread();', '⑦e RED belt once'), 'env-belt-once');   // stale-pins: kept (the RED's own replacement: the belt reusing the early answer)
+    const Kbelt = MUTe.load('src/server/browser-keeper.js', anchored(ksE, "    if (statesEnv !== true && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === true)) throw unread();", '    if (statesEnv !== true) throw unread();', '⑦e RED belt once'), 'env-belt-once');   // stale-pins: kept (the RED's own replacement: the belt reusing the early answer)
     const b3 = await beltOf(Kbelt, 'red-race', [null, true]);
-    ok(b3 === 'browser_engine_environment_unread', '⑦e RED — the belt that reuses the early answer: a plugin turned on between the two reads is refused «update the browser plugin»', b3); }
+    ok(b3 === 'browser_engine_environment_unread', '⑦e RED — the belt that reuses the early answer: a plugin turned on between the two reads is refused «update the browser plugin»', b3);
+    const Kplain = MUTe.load('src/server/browser-keeper.js', anchored(ksE, "    if (statesEnv !== true && !(typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === true)) throw unread();", "    if (statesEnv !== true && typeof engs().statesEnvironment === 'function' && engs().statesEnvironment(c.id) === false) throw unread();", '⑦e RED belt plain false'), 'env-belt-plain-false');   // stale-pins: kept (the RED's own replacement: the plain-false belt)
+    const b5 = await beltOf(Kplain, 'red-unread', [null, null]);
+    ok(b5 === 'started', '⑦e RED — the belt that refuses only a plain «false» (r1707 (1)): a list that cannot be read starts the engine, told an environment it is not listed as reading (a place there would run in this machine\'s position)', b5); }
   // REDs (anchored)
   const Kdoor = MUTe.load('src/server/browser-keeper.js', anchored(ksE, '    if (statesEnv === false) throw unread();', '    if (statesEnv !== true) throw unread();', '⑦e RED early check'), 'env-door-early');   // stale-pins: kept (the RED's own replacement: today's early check)
   const drR = await doorOf(Kdoor, 'red');
@@ -2252,11 +2256,11 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
   const prefsOf = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'Default', 'Preferences'), 'utf8')); } catch { return null; } };
   const keptOf = (dir) => fs.existsSync(path.join(dir, 'vibespace-geo-kept.json'));
   const geoOf = (pr) => { const p = (pr || {}).profile || {}; return { default: (p.default_content_setting_values || {}).geolocation ?? null, maps: ((((p.content_settings || {}).exceptions || {}).geolocation || {})['https://maps.example:443,*'] || {}).setting ?? null }; };
-  const geoRoad = async (Kmod, tag, { refuse = false } = {}) => {
-    const log = { makers: 0, arms: [], disarms: [], order: [] };
+  const geoRoad = async (Kmod, tag, { refuse = false, quick = false } = {}) => {   // quick: the place profile alone (a RED's own leg)
+    const log = { makers: 0, arms: [], disarms: [], order: [], rearms: [], held: new Set(), onEvent: null };
     let kg2 = null;
-    const stub = { arm: async (pid, o) => { log.arms.push({ pid, plan: o.plan, after: o.after || null, url: typeof o.url, stateAtArm: (kg2._reg().browsers[pid] || {}).state || null }); log.order.push('arm'); return refuse ? { ok: false, code: 'place_not_held', error: 'a stand-in refusal' } : { ok: true }; }, disarm: (pid) => { log.disarms.push(pid); return true; }, heldOf: () => null, factOf: () => null, rearmNow: () => false, dispose() { } };
-    kg2 = mkKeeper(path.join(ROOT, `data-geo-${tag}`), { geoHold: (o) => { log.makers++; return stub; } }, Kmod);
+    const stub = { arm: async (pid, o) => { log.arms.push({ pid, plan: o.plan, after: o.after || null, url: typeof o.url, stateAtArm: (kg2._reg().browsers[pid] || {}).state || null }); log.order.push('arm'); if (!refuse) log.held.add(pid); return refuse ? { ok: false, code: 'place_not_held', error: 'a stand-in refusal' } : { ok: true }; }, disarm: (pid) => { log.disarms.push(pid); log.held.delete(pid); return true; }, heldOf: (pid) => (log.held.has(pid) ? { kind: 'place' } : null), factOf: () => null, rearmNow: (pid) => { log.rearms.push(pid); return true; }, dispose() { } };
+    kg2 = mkKeeper(path.join(ROOT, `data-geo-${tag}`), { geoHold: (o) => { log.makers++; log.onEvent = o && o.onEvent; return stub; } }, Kmod);
     kg2.onLease((ev) => { if (ev && ev.kind) log.order.push(ev.kind); });
     const pu = kg2.createProfile({ label: `Geo untouched ${tag}` }), pz = kg2.createProfile({ label: `Geo zone only ${tag}` }), pp = kg2.createProfile({ label: `Geo place ${tag}` }), pb = kg2.createProfile({ label: `Geo blocked ${tag}` });
     const profOf = (id) => kg2._reg().profiles.find((x) => x && x.id === id);
@@ -2267,8 +2271,8 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
     fs.mkdirSync(path.join(profOf(pp.id).dir, 'Default'), { recursive: true });
     fs.writeFileSync(path.join(profOf(pp.id).dir, 'Default', 'Preferences'), J({ profile: { content_settings: { exceptions: { geolocation: { 'https://maps.example:443,*': { setting: 1 } } } } } }));
     const out = { log };
-    await kg2.start(pu.id, { why: 'test' }); await kg2.stop(pu.id, { why: 'user' });
-    await kg2.start(pz.id, { why: 'test' }); await kg2.stop(pz.id, { why: 'user' });
+    if (!quick) { await kg2.start(pu.id, { why: 'test' }); await kg2.stop(pu.id, { why: 'user' });
+    await kg2.start(pz.id, { why: 'test' }); await kg2.stop(pz.id, { why: 'user' }); }
     out.makersUntouched = log.makers; out.armsUntouched = log.arms.length;
     out.prefsU = prefsOf(profOf(pu.id).dir); out.keptU = keptOf(profOf(pu.id).dir) || keptOf(profOf(pz.id).dir);
     log.order.length = 0;
@@ -2276,8 +2280,24 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
     out.orderP = log.order.slice();
     out.recP = (kg2._reg().browsers[pp.id] || {}).environment || null;
     out.geoP = geoOf(prefsOf(profOf(pp.id).dir)); out.keptP = keptOf(profOf(pp.id).dir);
-    if (!out.ep) await kg2.stop(pp.id, { why: 'user' }); else { const t0s = Date.now(); while ((kg2._reg().browsers[pp.id] || {}).state === 'ready' && Date.now() - t0s < 5000) await new Promise((r) => setTimeout(r, 25)); }   // the stop runs once the refused start settles
-    out.stateP = (kg2._reg().browsers[pp.id] || {}).state;
+    if (out.keptP) out.keptMode = fs.statSync(path.join(profOf(pp.id).dir, 'vibespace-geo-kept.json')).mode & 0o777;
+    if (!out.ep) {
+      // r1707 (8) THE HEAL'S RE-ARM: the record's address gone (a relaunch), the next lease asks the driver again — the hold is re-armed THERE
+      const recH = kg2._reg().browsers[pp.id]; if (recH) recH.cdpUrl = null;
+      try { await kg2.attach({ profileId: pp.id, browserKey: KEY_A, sessionId: 'sess-geo', by: 'user' }); } catch (e) { out.healErr = (e && e.code) || String(e && e.message); }
+      out.rearms = log.rearms.slice();
+      // r1707 (8) THE NOTICES (the hold's events through the keeper's listener): one a run, the label only, never a value; the gap QUIET
+      const tN = todos.length; if (log.onEvent) { log.onEvent({ kind: 'unplaced', profileId: pp.id, why: 'refused', opened: true, at: 1 }); log.onEvent({ kind: 'unplaced', profileId: pp.id, why: 'refused', opened: true, at: 2 }); }
+      out.todoUnplaced = todos.slice(tN); const tG = todos.length;
+      if (log.onEvent) log.onEvent({ kind: 'held', profileId: pp.id, after: 'restart', at: 3, lostAt: 3 });
+      out.todoGap = todos.slice(tG); const tD = todos.length;
+      if (log.onEvent) log.onEvent({ kind: 'down', profileId: pp.id, at: 4, lostAt: 3 });
+      out.todoDown = todos.slice(tD);
+      await kg2.stop(pp.id, { why: 'user' });
+    } else { const t0s = Date.now(); while (!log.order.includes('browser-stopped') && Date.now() - t0s < 3000) await new Promise((r) => setTimeout(r, 25)); }   // the stop runs once the refused start settles
+    out.stateP = (kg2._reg().browsers[pp.id] || {}).state; out.stopRan = log.order.includes('browser-stopped');
+    if (refuse && !out.stopRan) { try { await kg2.stop(pp.id, { why: 'user' }); } catch { /* a RED's own copy: ended here */ } }
+    if (quick) return out;
     const armsBefore = log.arms.length;
     out.eb = await thr(() => kg2.start(pb.id, { why: 'test' }));
     out.recB = (kg2._reg().browsers[pb.id] || {}).environment || null;
@@ -2297,16 +2317,22 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
   const aP = g0.log.arms[0] || {};
   ok(J(aP.plan) === J({ kind: 'place', latitude: 35.6762, longitude: 139.6503, accuracy: 100 }) && aP.url === 'function' && aP.stateAtArm === 'starting' && g0.orderP.indexOf('browser-ready') > g0.orderP.indexOf('arm'),
     '⑦g a place: the hold is armed with the plan BEFORE the browser is anyone\'s — the record still «starting» (ahead of ready and the mediator\'s repoint), its address read live (a relaunch moves it)', { arm: aP, order: g0.orderP });
-  ok(!!g0.recP && g0.recP.applied.location === 'fixed' && g0.recP.confirmed === true && !/35\.67|139\.65/.test(J(g0.recP)),
-    '⑦g the record says «fixed», confirmed once held — never the place\'s numbers', g0.recP);
+  ok(!!g0.recP && g0.recP.applied.location === 'fixed' && g0.recP.confirmed === true && /every site is denied the location/.test(String(g0.recP.locationSaid)) && !/35\.67|139\.65/.test(J(g0.recP)),
+    '⑦g the record says «fixed», confirmed once held — and in its own words that every site is denied the location (r1707 (4): no site is allowed the place yet); never the place\'s numbers', g0.recP);
+  ok(g0.keptMode === 0o600, `⑦g the person's kept values beside the profile are the owner's alone (mode ${g0.keptMode !== undefined ? g0.keptMode.toString(8) : 'none'})`, g0.keptMode);
+  ok(!g0.healErr && J(g0.rearms) === J([aP.pid]), '⑦g r1707 (8) THE HEAL: the record\'s address gone (a relaunch), the next lease takes the driver\'s new one and re-arms the hold THERE at once (rearmNow)', { rearms: g0.rearms, err: g0.healErr });
+  ok(g0.todoUnplaced.length === 1 && /without its place/.test(g0.todoUnplaced[0].text) && /denied the location/.test(g0.todoUnplaced[0].text) && g0.todoGap.length === 0 && g0.todoDown.length === 1 && /may stay frozen/.test(String(g0.todoDown[0].detail)) && !/35\.67|139\.65/.test(J([g0.todoUnplaced, g0.todoDown])),
+    '⑦g r1707 (8) THE NOTICES: a tab without its place — ONE For-you line a run (twice said once), its words «denied the location»; the place given again after a restart files NOTHING (r1707 (6): quiet while no site can read it); the hold down for good says a tab may stay frozen (r1707 (5)); no value of the place in any', { unplaced: g0.todoUnplaced, gap: g0.todoGap, down: g0.todoDown });
+  { const ks4 = read('src/server/browser-keeper.js');
+    ok((ks4.match(/const geolocation = geoPlanFor\(p, envR\);/g) || []).length === 1 && /notApplied \? 'not-applied' : 'machine'/.test(ks4), '⑦g r1707 (4) THE RECORD TELLS THE TRUTH (by its source — the keeper\'s ephemeral start re-creates its profile, no fast seam): the record\'s location word comes from the ONE plan the arm reads (geoPlanFor), an ephemeral or a paired machine\'s environment said «not-applied»', null); }
   ok(!g0.eb && g0.armsForBlocked === 0 && g0.geoB.default === 2 && !!g0.recB && g0.recB.applied.location === 'blocked' && g0.recB.confirmed === true,
     '⑦g «blocked» is the profile\'s OWN stored denial ALONE — written before its Chrome, NO hold armed (nothing of ours needs to be alive), recorded confirmed', { geo: g0.geoB, arms: g0.armsForBlocked, rec: g0.recB });
   ok(g0.geoP2.default === null && g0.geoP2.maps === 1 && !g0.keptP2,
     '⑦g back at «this machine\'s»: the person\'s own values GIVEN BACK at the next start (the site allowed before allowed again, no default of ours), the kept file gone', g0.geoP2);
   ok(g0.log.disarms.includes(aP.pid), '⑦g the stop disarms the hold (it ends with its browser)', g0.log.disarms);
   const gr = await geoRoad(K, 'refused', { refuse: true });
-  ok(!!gr.ep && gr.ep.code === 'browser_place_not_held' && /never runs with this machine's location/.test(String(gr.ep.message)) && gr.stateP !== 'ready' && !gr.orderP.includes('browser-ready'),
-    '⑦g a refused arm ⇒ the start refused BY NAME (browser_place_not_held), no browser-ready, the browser stopped once the start settles', { code: gr.ep && gr.ep.code, state: gr.stateP, order: gr.orderP });
+  ok(!!gr.ep && gr.ep.code === 'browser_place_not_held' && /never runs with this machine's location/.test(String(gr.ep.message)) && !/This machine's/.test(String(gr.ep.message)) && gr.stateP !== 'ready' && !gr.orderP.includes('browser-ready') && gr.stopRan,
+    '⑦g a refused arm ⇒ the start refused BY NAME (browser_place_not_held; no door named that does not exist yet), no browser-ready, and the stop RAN once the start settled (browser-stopped)', { code: gr.ep && gr.ep.code, state: gr.stateP, order: gr.orderP, stopRan: gr.stopRan });
   // REDs (anchored): the arm taken out; the hold asked for every start; the stored denial not written
   const MUTg = mutantCopies('geo-builds', REPO), ksG = read('src/server/browser-keeper.js');
   const ARM_LINE = "      if (stockEnv && stockEnv.geolocation && stockEnv.geolocation.kind === 'place') await armGeo(p, rec, stockEnv.geolocation);";
@@ -2319,6 +2345,96 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
   const Knostore = MUTg.load('src/server/browser-keeper.js', anchored(ksG, "      { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation);", "      { const gs = { ok: true, why: 'skipped' }; void geoStoreAt;", '⑦g RED no store'), 'geo-no-store');
   const gs = await geoRoad(Knostore, 'red-nostore');
   ok(gs.geoP.maps === 1 && gs.geoP.default === null, '⑦g RED — the start without the stored denial: the site allowed before keeps «allow» (with nothing of ours alive it reads this machine\'s position — measured)', gs.geoP);
+  const Knostop = MUTg.load('src/server/browser-keeper.js', anchored(ksG, "    setImmediate(() => { stop(pid, { why: 'place-not-held' })", "    void (() => { stop(pid, { why: 'place-not-held' })", '⑦g RED no stop'), 'geo-no-stop');
+  const gt = await geoRoad(Knostop, 'red-nostop', { refuse: true, quick: true });
+  ok(!gt.stopRan, '⑦g RED — the refused arm without its stop: the refused start leaves a started Chrome under a «starting» record (the stop leg goes red)', { stopRan: gt.stopRan, state: gt.stateP });
+  const Knoheal = MUTg.load('src/server/browser-keeper.js', anchored(ksG, '    if (geoHoldOwn && geoHoldOwn.heldOf(profileId)) geoHoldOwn.rearmNow(profileId);', '    void 0;', '⑦g RED no heal re-arm'), 'geo-no-heal');
+  const gh = await geoRoad(Knoheal, 'red-noheal', { quick: true });
+  ok(J(gh.rearms) === '[]', '⑦g RED — the heal without its re-arm: a Chrome relaunched on a new address is never held again (the heal leg goes red)', gh.rearms);
+  const Kgap = MUTg.load('src/server/browser-keeper.js', anchored(ksG, "      log.log?.(`[browser] ${pid} \"${label}\": ${what} given to its tabs again", "      file('gap:' + (ev.lostAt || ev.at), 'gap', 'gap'), log.log?.(`[browser] ${pid} \"${label}\": ${what} given to its tabs again", '⑦g RED gap notice'), 'geo-gap-notice');
+  const gq = await geoRoad(Kgap, 'red-gap', { quick: true });
+  ok(gq.todoGap.length === 1, '⑦g RED — the gap notice back: every hub restart files a For-you line per place profile that tells nothing to act on (the quiet leg goes red)', gq.todoGap);
+  // r1707 (3) THE PERSON'S OWN SETTINGS: a site they allow in Chrome's own settings WHILE held is kept at the next held launch, given back after
+  const geoOf2 = (pr) => { const g = ((((pr || {}).profile || {}).content_settings || {}).exceptions || {}).geolocation || {}; return { maps: (g['https://maps.example:443,*'] || {}).setting ?? null, shop: (g['https://shop.example:443,*'] || {}).setting ?? null, default: ((((pr || {}).profile || {}).default_content_setting_values) || {}).geolocation ?? null }; };
+  const PLACEV = ENVm.environmentVerdict({ location: { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } } }).value;
+  const okStub = () => ({ arm: async () => ({ ok: true }), disarm: () => true, heldOf: () => null, factOf: () => null, rearmNow: () => false, dispose() { } });
+  const twice = async (Kmod, tag) => {
+    const kq = mkKeeper(path.join(ROOT, `data-geo2-${tag}`), { geoHold: okStub }, Kmod);
+    const pq = kq.createProfile({ label: `Geo twice ${tag}` }); const pr = kq._reg().profiles.find((x) => x && x.id === pq.id);
+    pr.environment = PLACEV;
+    const pf = path.join(pr.dir, 'Default', 'Preferences'); fs.mkdirSync(path.dirname(pf), { recursive: true });
+    fs.writeFileSync(pf, J({ profile: { content_settings: { exceptions: { geolocation: { 'https://maps.example:443,*': { setting: 1 } } } } } }));
+    const e1 = await thr(() => kq.start(pq.id, { why: 'test' })); if (!e1) await kq.stop(pq.id, { why: 'user' });
+    const mid = prefsOf(pr.dir) || {}; (((mid.profile = mid.profile || {}).content_settings = mid.profile.content_settings || {}).exceptions = mid.profile.content_settings.exceptions || {}).geolocation = { ...(mid.profile.content_settings.exceptions.geolocation || {}), 'https://shop.example:443,*': { setting: 1 } };
+    fs.writeFileSync(pf, J(mid));   // while held, the person allowed another site in Chrome's own settings (Chrome wrote its row)
+    const e2 = await thr(() => kq.start(pq.id, { why: 'test' })); if (!e2) await kq.stop(pq.id, { why: 'user' });
+    const held2 = geoOf2(prefsOf(pr.dir));
+    delete pr.environment;
+    const e3 = await thr(() => kq.start(pq.id, { why: 'test' })); if (!e3) await kq.stop(pq.id, { why: 'user' });
+    return { errs: [e1, e2, e3].map((e) => e && e.code), held2, back: geoOf2(prefsOf(pr.dir)) };
+  };
+  const tw = await twice(K, 'real');
+  ok(tw.errs.every((e) => !e) && tw.held2.maps === 2 && tw.held2.shop === 2 && tw.back.maps === 1 && tw.back.shop === 1 && tw.back.default === null,
+    '⑦g r1707 (3) THE SECOND HELD LAUNCH: a site the person allowed in Chrome\'s own settings while held is denied at the next held launch AND kept — at «this machine\'s» both sites are allowed again (the first value of the one kept before, never a denial)', tw);
+  const Konce = MUTg.load('src/server/browser-keeper.js', anchored(ksG, 'if (!kept) await writeAtomic(keptFile, v.kept); else {', '{ await writeAtomic(keptFile, v.kept); } if (false) {', '⑦g RED once-only cut'), 'geo-kept-every-launch');
+  const tw1 = await twice(Konce, 'red-once');
+  ok(tw1.back.maps === 2, '⑦g RED — the once-only guard cut: the second held launch keeps the DENIED values as the person\'s, and the give-back restores «block» everywhere (the second-launch leg goes red)', tw1.back);
+  const Knomerge = MUTg.load('src/server/browser-keeper.js', anchored(ksG, 'if (m.changed) await writeAtomic(keptFile, m.kept); }', 'void m; }', '⑦g RED no merge'), 'geo-kept-no-merge');
+  const tw2 = await twice(Knomerge, 'red-nomerge');
+  ok(tw2.back.maps === 1 && tw2.back.shop === 2, '⑦g RED — no merge: the site allowed while held stays «block» after the give-back (the person\'s own setting lost)', tw2.back);
+  // r1707 (2) + (8) THE STORE'S REFUSALS: a held launch whose kept file or Preferences cannot be read, or whose write fails, is refused BY NAME
+  // (the file and what failed, no door that does not exist); a profile that asks for no place and no «blocked» is NEVER refused by this road
+  const storeLegs = async (Kmod, tag, which) => {
+    const ksx = mkKeeper(path.join(ROOT, `data-geo3-${tag}`), { geoHold: okStub }, Kmod);
+    const one = async (label, place, plant) => {
+      const p = ksx.createProfile({ label: `Geo store ${label} ${tag}` }); const pr = ksx._reg().profiles.find((x) => x && x.id === p.id);
+      if (place) pr.environment = PLACEV;
+      fs.mkdirSync(path.join(pr.dir, 'Default'), { recursive: true }); plant(pr.dir);
+      const e = await thr(() => ksx.start(p.id, { why: 'test' }));
+      if (!e) await ksx.stop(p.id, { why: 'user' });
+      return e ? { code: e.code, message: String(e.message) } : { started: true };
+    };
+    const r = {};
+    if (which.includes('kept')) r.kept = await one('kept', true, (d) => fs.mkdirSync(path.join(d, 'vibespace-geo-kept.json')));   // unreadable: a folder there
+    if (which.includes('prefs')) r.prefs = await one('prefs', true, (d) => fs.writeFileSync(path.join(d, 'Default', 'Preferences'), '[1]'));
+    if (which.includes('write')) r.write = await one('write', true, (d) => { fs.writeFileSync(path.join(d, 'Default', 'Preferences'), J({ profile: { content_settings: { exceptions: { geolocation: { 'https://maps.example:443,*': { setting: 1 } } } } } })); fs.mkdirSync(path.join(d, 'Default', `Preferences.vibespace-${process.pid}.tmp`)); });
+    if (which.includes('untouched')) r.untouched = await one('untouched', false, (d) => fs.mkdirSync(path.join(d, 'vibespace-geo-kept.json')));
+    return r;
+  };
+  const sr = await storeLegs(K, 'real', ['kept', 'prefs', 'write', 'untouched']);
+  const named = (x, re) => !!x && x.code === 'browser_place_not_held' && re.test(x.message) && !/This machine's/.test(x.message);
+  ok(named(sr.kept, /vibespace-geo-kept\.json: unreadable \(EISDIR\)/) && named(sr.prefs, /Default\/Preferences: its Preferences are not an object/) && named(sr.write, /Default\/Preferences: not written \(EISDIR\)/),
+    '⑦g r1707 (8) THE STORE\'S THREE REFUSALS: a kept file it cannot read, Preferences of another shape, a write that fails — each refuses the held start BY NAME, saying the file and what failed (and no door that does not exist)', sr);
+  ok(!!sr.untouched && sr.untouched.started === true, '⑦g r1707 (2) a profile that asks for no place and no «blocked» is NEVER refused by this road: its kept file unreadable, it starts (said in the journal, given back at a later start)', sr.untouched);
+  const STORE_FAIL = '    const fail = (why) => (plan ? { ok: false, why } : later(why));';
+  const Klax = MUTg.load('src/server/browser-keeper.js', anchored(ksG, STORE_FAIL, '    const fail = (why) => later(why);', '⑦g RED store lax'), 'geo-store-lax');
+  const srL = await storeLegs(Klax, 'red-lax', ['kept']);
+  ok(!!srL.kept && srL.kept.started === true, '⑦g RED — the store\'s refusals taken out: a place profile whose kept file cannot be read STARTS (its denial not written)', srL.kept);
+  const Kstrict = MUTg.load('src/server/browser-keeper.js', anchored(ksG, STORE_FAIL, '    const fail = (why) => ({ ok: false, why });', '⑦g RED store strict'), 'geo-store-strict');
+  const srS = await storeLegs(Kstrict, 'red-strict', ['untouched']);
+  ok(!!srS.untouched && srS.untouched.code === 'browser_place_not_held', '⑦g RED — the release\'s strictness: an untouched profile whose kept file cannot be read is REFUSED at its start (r1707 (2)\'s leg goes red)', srS.untouched);
+  // r1707 (5) + (8) THE ADOPTION: a restart's arm refused leaves the person's running browser running (the stored denial holds) and says so once
+  const adoptOf = async (Kmod, tag, { red = false } = {}) => {
+    const dir = path.join(ROOT, `data-geo4-${tag}`);
+    const ka = mkKeeper(dir, { geoHold: okStub }, Kmod);
+    const pa = ka.createProfile({ label: `Geo adopt ${tag}` }); ka._reg().profiles.find((x) => x && x.id === pa.id).environment = PLACEV;
+    const e = await thr(() => ka.start(pa.id, { why: 'test' }));
+    ka.shutdown();
+    const arms = [], t0 = todos.length;
+    const kb2 = mkKeeper(dir, { geoHold: () => ({ ...okStub(), arm: async (pid, o) => { arms.push({ pid, after: (o && o.after) || null }); return { ok: false, code: 'place_not_held', error: 'a stand-in refusal' }; } }) }, Kmod);
+    await kb2.boot();
+    if (red) { const tR = Date.now(); while ((kb2._reg().browsers[pa.id] || {}).state === 'ready' && Date.now() - tR < 6000) await new Promise((r) => setTimeout(r, 25)); } else await new Promise((r) => setTimeout(r, 400));
+    const state = (kb2._reg().browsers[pa.id] || {}).state, items = todos.slice(t0);
+    try { await kb2.stop(pa.id, { why: 'user' }); } catch { /* ended */ }
+    kb2.shutdown();
+    return { e: e && e.code, arms, state, items };
+  };
+  const ad = await adoptOf(K, 'real');
+  ok(!ad.e && ad.arms.length === 1 && ad.arms[0].after === 'restart' && ad.state === 'ready' && ad.items.length === 1 && /could not be armed after VibeSpace restarted/.test(String(ad.items[0].detail)) && /may stay frozen/.test(String(ad.items[0].detail)) && !/35\.67|139\.65/.test(J(ad.items)),
+    '⑦g r1707 (5) THE ADOPTION: a restart\'s arm refused does NOT stop the person\'s running browser (the stored denial holds) — ONE For-you line says the place cannot be given and that a tab may stay frozen', ad);
+  const Krestop = MUTg.load('src/server/browser-keeper.js', anchored(ksG, "    if (after === 'restart') { log.warn?.(", "    if (false) { log.warn?.(", '⑦g RED restart stops'), 'geo-restart-stops');
+  const adR = await adoptOf(Krestop, 'red-stop', { red: true });
+  ok(adR.state !== 'ready', '⑦g RED — the release\'s adoption: a restart\'s refused arm STOPS the person\'s browser, tabs and all, for no safety gain (the adoption leg goes red)', { state: adR.state });
   // r1897 THE STORED DENIAL'S WRITES ARE SYNCED: the person's kept values FIRST, then the profile's Preferences — each temp's bytes on
   // disk BEFORE its rename (awaited). The leg watches the keeper's own calls (the fs module it shares) on this profile's folder only
   const syncOrder = async (Kmod, tag) => {

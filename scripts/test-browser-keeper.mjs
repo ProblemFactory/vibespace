@@ -840,6 +840,35 @@ console.log('— B-9584 U2b: the attach road with a profile\'s own language and 
   try { K.create = Km.create; const DATA_R = path.join(S, 'data-env-attach-red'); fs.mkdirSync(DATA_R, { recursive: true }); rB = await startAttach(mk({ dataDir: DATA_R }), 'Env attach red', set); }
   finally { K.create = realCreateE; }
   ok(rB.launch === 'attach' && !rB.args.some((x) => /^--(?:accept-)?lang=/.test(x)) && rB.TZ === null, 'RED — the attach road without the push and the zone: a profile with a language and a zone starts with neither, its browser in the machine\'s own zone (the leg above goes red on it)', { args: rB.args, TZ: rB.TZ });
+  // B-9584 U2c, r1707 (8): THE ATTACH ROAD, FAIL CLOSED — a place writes the profile's OWN stored denial before its Chrome (a site the
+  // person allowed before rewritten to «block») and arms the hold before the browser is anyone's (the record still «starting»).
+  // RED: one copy of the keeper without the attach road's store and arm (anchored) — both legs go red on it
+  const placeA = ENVm.environmentVerdict({ location: { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } } }).value;
+  const geoAttach = async (Kmod, tag) => {
+    const D = path.join(S, `data-geo-attach-${tag}`); fs.mkdirSync(D, { recursive: true });
+    const arms = []; let kA = null, r = null;
+    const stubA = { arm: async (pid, o) => { arms.push({ pid, after: (o && o.after) || null, state: (kA._reg().browsers[pid] || {}).state || null }); return { ok: true }; }, disarm: () => true, heldOf: () => null, factOf: () => null, rearmNow: () => false, dispose() { } };
+    const realC = K.create;
+    try {
+      K.create = Kmod.create; kA = mk({ dataDir: D, geoHold: () => stubA });
+      const pp = kA.createProfile({ label: `Geo attach ${tag}` }, { owner: { kind: 'instance', id: null } });
+      const pr = kA._reg().profiles.find((x) => x && x.id === pp.id); pr.environment = placeA;
+      fs.mkdirSync(path.join(pr.dir, 'Default'), { recursive: true });
+      fs.writeFileSync(path.join(pr.dir, 'Default', 'Preferences'), JSON.stringify({ profile: { content_settings: { exceptions: { geolocation: { 'https://maps.example:443,*': { setting: 1 } } } } } }));
+      await kA.start(pp.id, { why: 'test' });
+      const rec = kA._reg().browsers[pp.id] || {};
+      let maps = null; try { const pf = JSON.parse(fs.readFileSync(path.join(pr.dir, 'Default', 'Preferences'), 'utf8')); maps = ((((pf.profile || {}).content_settings || {}).exceptions || {}).geolocation || {})['https://maps.example:443,*'].setting; } catch { maps = 'unread'; }
+      r = { launch: rec.launch, maps, arms: arms.slice() };
+      try { await kA.stop(pp.id, { why: 'user' }); } catch { /* gone */ }
+    } finally { K.create = realC; }
+    return r;
+  };
+  const gA = await geoAttach(K, 'real');
+  ok(!!gA && gA.launch === 'attach' && gA.maps === 2 && gA.arms.length === 1 && gA.arms[0].state === 'starting',
+    'the attach road (r1707 (8)), a place: the profile\'s own stored denial written before its Chrome (the site allowed before now «block») and the hold armed while the record is still «starting» — fail closed on this road too', gA);
+  const noGeoA = anchored(anchored(ksrcE, "\n    { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation);", "\n    { const gs = { ok: true }; void geoStoreAt;", 'keeper RED attach store'), "\n    if (stockEnv && stockEnv.geolocation && stockEnv.geolocation.kind === 'place') await armGeo(p, rec, stockEnv.geolocation);", "\n    if (false) await armGeo(p, rec, stockEnv.geolocation);", 'keeper RED attach arm');
+  const gAR = await geoAttach(MUTE.load('src/server/browser-keeper.js', noGeoA, 'geo-attach-off'), 'red');
+  ok(!!gAR && gAR.launch === 'attach' && gAR.maps === 1 && gAR.arms.length === 0, 'RED — the attach road without its store and its arm: the site allowed before keeps «allow» and no place is armed (both legs go red on it)', gAR);
   for (const c of copiesCensus(MUTE.files, MUTE.dir, REPO, { label: 'B-9584 attach controls: ' })) ok(c.pass, c.name, c.detail);
 }
 

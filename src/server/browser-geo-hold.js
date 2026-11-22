@@ -127,6 +127,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
         await Promise.allSettled([...h.pending]);
         clearTimeout(tArm);
         if (h.state === 'gone') return done({ ok: false, code: 'place_not_held', error: 'disarmed' });
+        if (h.ws !== ws || ws.readyState !== 1) return done({ ok: false, code: 'place_not_held', error: 'the browser closed the place hold' });   // r1707 (7): it went meanwhile — never a false «held» (its close re-arms)
         const after = h.state === 'lost' ? 'lost' : h.after || null;
         h.state = 'held'; h.heldAt = now(); h.after = null;
         emit({ kind: 'held', profileId: h.profileId, at: h.heldAt, after, lostAt: h.lostAt || null });
@@ -136,7 +137,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
   }
 
   function lost(h, ws) {
-    if (h.ws !== ws || h.state === 'gone') return;
+    if (h.ws !== ws || h.state === 'gone') return;   // rearmNow passes the hold's own (closed) socket after «down»
     const was = h.state;
     if (was === 'arming') return;   // the first arm's own failure is its answer (the start is refused by name)
     h.state = 'lost'; h.lostAt = h.lostAt || now();
@@ -188,7 +189,9 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
   function rearmNow(profileId) {
     const h = holds.get(String(profileId || ''));
     if (!h || h.state === 'gone') return false;
-    try { h.ws && (h.ws.terminate ? h.ws.terminate() : h.ws.close()); } catch { /* gone */ }   // its close re-arms (lost) on the getter's address
+    const ws = h.ws;
+    if (ws && (ws.readyState === 0 || ws.readyState === 1)) { try { ws.terminate ? ws.terminate() : ws.close(); } catch { /* gone */ } return true; }   // its close re-arms (lost) on the getter's address
+    if (h.state !== 'arming' && !h.rearming) lost(h, ws);   // r1707 (7): «down», or a socket already closed — no close will come: the re-arm starts HERE
     return true;
   }
   function dispose() { for (const pid of [...holds.keys()]) disarm(pid, 'disposed'); }

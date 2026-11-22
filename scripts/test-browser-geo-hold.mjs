@@ -9,9 +9,11 @@
 //      this machine's position) and SAID — never closed, never held for good; a socket dead mid-job says nothing false.
 //   ⑤ THE HOLD LOST ⇒ said, armed again; every open tab placed again and released («held» after «lost»); its tries spent ⇒ «down».
 //   r1264 must 2 — the browser relaunched on a NEW address ⇒ the re-arm reaches it there; the arm's timer ends its own socket.
+//   r1707 — the timer on the RE-ARM path; rearmNow after «down» reaches the relaunched browser; a socket gone while its tabs are placed
+//      is never «held».
 //   ⑥ planOf: a place in range with its accuracy only («blocked» is the stored denial alone, no hold).
 //   REDs (anchored): released before its place; no bound; a re-arm judged by state; a mid-job death said as unplaced; the re-arm on
-//   the address it was armed with.
+//   the address it was armed with; the timer that keeps its socket; rearmNow that only ends a socket; the open handler's race.
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -103,7 +105,7 @@ async function legsOf(G, only = null) {
     const t0 = Date.now(), sid = f.open('T3');
     await until(() => idx(f, 'Runtime.runIfWaitingForDebugger', (c) => c.sessionId === sid) >= 0, 1000);
     const ms = Date.now() - t0;
-    out[`${mode}Released`] = idx(f, 'Runtime.runIfWaitingForDebugger', (c) => c.sessionId === sid) >= 0 && ms < (mode === 'never' ? 300 + 400 : 250);
+    out[`${mode}Released`] = idx(f, 'Runtime.runIfWaitingForDebugger', (c) => c.sessionId === sid) >= 0 && ms < (mode === 'never' ? 300 + 400 : 300);   // a refusal released before its bound (300 ms) would have run out
     out[`${mode}NeverClosed`] = of(f, 'Target.closeTarget').length === 0;
     out[`${mode}Said`] = e2.some((e) => e.kind === 'unplaced' && e.why === (mode === 'never' ? 'not answered' : 'refused') && e.opened === true) && h.factOf('bp-00000003').unplaced === 1;
     out[`${mode}Ms`] = ms;
@@ -147,6 +149,48 @@ async function legsOf(G, only = null) {
     out.timerEnds = r.ok === false && f.gone === 1;
     h.dispose(); await f.close();
   }
+  // r1707 (8): the arm's timer on the RE-ARM path ends its own socket — never a second auto-attach left open beside the next try
+  if (run('retimer')) {
+    const f = await fakeBrowser();
+    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: 2000, closeMs: 300, armMs: 150, rearmMs: [40, 300] });   // a call's bound far past the arm's timer: only the TIMER can end a re-arm's socket in time (else the open handler's own refusal closes it, and the RED could not bite)
+    const r = await h.arm('bp-00000008', { url: f.url, plan: PLACE });
+    f.mode.autoAttach = 'never';
+    f.dropAll();                                  // lost: its re-arms' auto-attach is never answered
+    await until(() => f.conns >= 3, 3000);        // the second try connected (the first try's timer ran out well before)
+    await sleep(50);
+    out.retimerOpen = f.conns - f.gone;           // the sockets still open on the browser: the second try's alone
+    out.retimerEnds = r.ok === true && f.conns >= 3 && out.retimerOpen === 1;
+    h.dispose(); await f.close();
+  }
+  // r1707 (7): rearmNow after «down» (every try spent) starts the re-arm itself and reaches the relaunched browser
+  if (run('downmoved')) {
+    const f1 = await fakeBrowser(), f2 = await fakeBrowser();
+    let cur = f1.url;
+    const e5 = [];
+    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: 300, closeMs: 300, armMs: 1000, rearmMs: [40, 80], onEvent: (e) => e5.push(e) });
+    await h.arm('bp-00000009', { url: () => cur, plan: PLACE });
+    f1.refuseConnect = true; f1.dropAll();
+    await until(() => e5.some((e) => e.kind === 'down'), 3000);
+    cur = f2.url;                                 // the heal relaunched Chrome on a new address
+    h.rearmNow('bp-00000009');
+    await until(() => e5.some((e) => e.kind === 'held' && e.after === 'lost'), 1500);   // a held browser comes back in ~100 ms here; the RED spends this bound
+    out.downMovedHeld = e5.some((e) => e.kind === 'down') && f2.conns === 1 && e5.some((e) => e.kind === 'held' && e.after === 'lost') && (h.factOf('bp-00000009') || {}).state === 'held';
+    h.dispose(); await f1.close(); await f2.close();
+  }
+  // r1707 (7): the open handler's race — a re-arm whose socket goes WHILE its tabs are being placed is never said «held»
+  if (run('race')) {
+    const f = await fakeBrowser();
+    const e6 = [];
+    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: 1500, closeMs: 300, armMs: 4000, rearmMs: [40, 80], onEvent: (e) => e6.push(e) });
+    await h.arm('bp-0000000a', { url: f.url, plan: PLACE });
+    f.mode.place = 'never';
+    f.dropAll();                                                                   // lost: the re-arm's tab waits on a place never answered
+    await until(() => f.calls.some((c) => c.conn === 2 && c.method === 'Emulation.setGeolocationOverride'), 2000);
+    f.refuseConnect = true; f.dropAll();                                           // its socket goes while the open handler waits on that job
+    await until(() => e6.some((e) => e.kind === 'down'), 2000);
+    out.raceQuiet = e6.some((e) => e.kind === 'down') && !e6.some((e) => e.kind === 'held' && e.after === 'lost');
+    h.dispose(); await f.close();
+  }
   // an arm with no loopback address or nothing to hold — never armed; «blocked» is no hold (the stored denial alone)
   if (run('refused')) {
     const h = G.create({ WebSocketImpl: WebSocket, log: quiet });
@@ -174,6 +218,9 @@ ok(R.lostSaid && R.heldAgain && R.rearmReleased && R.noValueInEvents, '⑤ the h
 ok(R.down, '⑤ its tries spent (the browser takes no new socket) ⇒ «down» (said; the tabs stay on the stored denial)', R);
 ok(R.movedHeld, 'r1264 must 2: the browser relaunched on a NEW address ⇒ the re-arm reaches it THERE (the record\'s address, read at each try), never «down» against the dead one', R);
 ok(R.timerEnds, 'the arm\'s timer ends its own socket (never a second auto-attach beside the next try)', R);
+ok(R.retimerEnds, `r1707 (8): the arm's timer on the RE-ARM path ends its own socket — one socket open on the browser while the next try runs (${R.retimerOpen})`, R);
+ok(R.downMovedHeld, 'r1707 (7): rearmNow after «down» (every try spent) starts the re-arm itself and reaches the relaunched browser — its place held again', R);
+ok(R.raceQuiet, 'r1707 (7): a re-arm whose socket goes while its tabs are placed is never said «held» over a dead socket (no false «given again»)', R);
 ok(R.refusedArm, 'an arm with no loopback address, nothing to hold, or «blocked» ⇒ refused by name (place_not_held), nothing held', R);
 
 // REDs — copies of the hold, anchored
@@ -189,5 +236,11 @@ const midSaid = MUT.load('src/server/browser-geo-hold.js', anchored(src, "    if
 ok(!(await legsOf(midSaid, ['midjob'])).midJobQuiet, 'RED — a socket that died mid-job read as a refusal: a FALSE «unplaced» is said', null);
 const stale = MUT.load('src/server/browser-geo-hold.js', anchored(src, "      const url = typeof h.url === 'function' ? h.url() : h.url;", "      const url = typeof h.url === 'function' ? (h.url0 = h.url0 || h.url()) : h.url;", 'geo RED stale address'), 'stale-address');
 ok(!(await legsOf(stale, ['moved'])).movedHeld, 'RED — the re-arm on the address it was ARMED with: the relaunched browser is never reached (down against the dead one)', null);
+const reTerm = MUT.load('src/server/browser-geo-hold.js', anchored(src, 'const tArm = timer(() => { try { ws.terminate ? ws.terminate() : ws.close(); } catch { /* gone */ } done(', 'const tArm = timer(() => { done(', 'geo RED timer keeps its socket'), 'timer-keeps');
+ok(!(await legsOf(reTerm, ['retimer'])).retimerEnds, 'RED — the arm\'s timer that leaves its socket open: on the re-arm path a second auto-attach stays beside the next try', null);
+const downStuck = MUT.load('src/server/browser-geo-hold.js', anchored(src, "    if (h.state !== 'arming' && !h.rearming) lost(h, ws);", '    void ws;', 'geo RED rearm after down'), 'down-stuck');
+ok(!(await legsOf(downStuck, ['downmoved'])).downMovedHeld, 'RED — rearmNow that only ends a socket: after «down» there is none to end, the relaunched browser is never held again', null);
+const raceHeld = MUT.load('src/server/browser-geo-hold.js', anchored(src, '        if (h.ws !== ws || ws.readyState !== 1) return done(', '        if (false) return done(', 'geo RED race said held'), 'race-held');
+ok(!(await legsOf(raceHeld, ['race'])).raceQuiet, 'RED — the open handler without its socket check: a FALSE «held» (the place «given again») over a dead socket', null);
 for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: 'geo hold REDs: ' })) ok(c.pass, c.name, c.detail);
 report();
