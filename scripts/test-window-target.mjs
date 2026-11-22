@@ -87,9 +87,12 @@ let a11yLauncher = null;   // r2305: the accessibility bus this child started (i
 const SEC3_CHILD = process.argv.includes('--sec3-child');
 if (SEC3_CHILD) {
   console.log('§3 REAL (child, a private session bus + the accessibility bus on it, HOME ' + process.env.HOME + ')');
-  await section3();
-  if (a11yLauncher) { try { process.kill(-a11yLauncher.pid, 'SIGTERM'); } catch { } }
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+  try { await section3(); }
+  finally {
+    // r2334: this child made the launcher's group, so this child ends it — in a finally, a throw inside section 3 too; never left to the bus going away
+    if (a11yLauncher) { try { process.kill(-a11yLauncher.pid, 'SIGTERM'); } catch { } }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+  }
   console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
   cleanup();
   process.exit(fail ? 1 : 0);
