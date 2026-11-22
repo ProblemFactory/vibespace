@@ -75,6 +75,15 @@ const chromeDir = scratch('chan-e2e-chrome');
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // item 8 (store-writer follow-up): A READ OF THE SPAWNED SERVER'S DISK IS A BOUNDED POLL ON THE FACT ITSELF. Since the
 // .396 store writer, index.json reaches the disk on the writer's thread at its pace (500 ms after its first unwritten
@@ -1143,7 +1152,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const SHORT_RE = /return short \? (t\([^;]*?\)) : (t\([^;]*?\));/g;
   const shortForms = [...capsSrc.matchAll(SHORT_RE)];
   ok(shortForms.length >= 2, `the pill's short forms are spelled \`return short ? t(…) : t(…);\` (${shortForms.length}) — the control's edit reverts each to its sentence`, String(shortForms.length));
-  const capsPre = MUT.load('src/channel-caps.js', capsSrc.replace(SHORT_RE, (m, a, b) => (/'\{age\} ago'/.test(a) ? m : `return ${b};`)), 'r3-words');
+  const capsPre = MUT.load('src/channel-caps.js', editAnchor(capsSrc, SHORT_RE, (m, a, b) => (/'\{age\} ago'/.test(a) ? m : `return ${b};`), "src/channel-caps.js"), 'r3-words');
   const cssNow = fs.readFileSync(path.join(wt, 'public/style.css'), 'utf8');
   const CSS_EDITS = [
     // int214 (call B): the pill lives on line 2 beside the last message — the r4 cap's two rules, spelled there

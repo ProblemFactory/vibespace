@@ -531,7 +531,7 @@ console.log('— ⑥ controls');
 {
   const MUT = mutantCopies('badm-clipin', REPO);
   const src = read('src/browser-verbs.js');
-  const late = src.replace("  if (typeof pinned === 'string' && pinned.startsWith('/')) {", "  if (false) {");
+  const late = editAnchor(src, "  if (typeof pinned === 'string' && pinned.startsWith('/')) {", "  if (false) {", "src/browser-verbs.js");
   ok(late !== src, 'control (a): the patch (a resolver with no pinned rung) applies');
   const Vl = MUT.load('src/browser-verbs.js', late, 'no-pin');
   ok(judgeRungs(Vl).length > 0, 'control (a): …and ①\'s rung order goes red on it', judgeRungs(Vl));
@@ -550,7 +550,7 @@ console.log('— ⑥ controls');
   ok(!second && npmCalls().length === n0 + 2, 'control (b): …two npm installs ran at once — exactly what ②\'s "THE slot is ONE" catches');
   await waitFor(async () => !(await kt.cliFacts()).install.running, 6000);
   // verify r1 (F2): a keeper that reads the folder WITHOUT its witness ⇒ the half-written package is pinned mid-install
-  const noWitness = ks.replace("    const w = cliWitnessRead(f.prefix);\n    if (!w || w.version !== String(version) || w.path !== f.path) return", "    const w = null;\n    if (false) return");
+  const noWitness = editAnchor(ks, "    const w = cliWitnessRead(f.prefix);\n    if (!w || w.version !== String(version) || w.path !== f.path) return", "    const w = null;\n    if (false) return", "src/server/browser-keeper.js");
   ok(noWitness !== ks, 'control (c): the patch (an install read off the folder alone, no witness) applies');
   const Kw = MUT.load('src/server/browser-keeper.js', noWitness, 'no-witness');
   const Dw = path.join(ROOT, 'data-cw'); fs.mkdirSync(Dw, { recursive: true });
@@ -564,7 +564,7 @@ console.log('— ⑥ controls');
   ok(fw.install.running && fw.pinned.installed === true && fw.pinned.path.endsWith('agent-browser.js') && fs.existsSync(path.join(Dw, 'browser-tools', 'cli-pin.json')), 'control (c): …the half-written package\'s LAUNCHER was pinned while npm still ran (the pin file written) — exactly what ②\'s mid-install leg catches', { install: fw.install, pinned: fw.pinned });
   await waitFor(async () => !(await kw.cliFacts()).install.running, 6000);
   // verify r1 (F4): a pin served off the memo alone ⇒ a wiped install still reads "installed"
-  const memoOnly = ks.replace("      if (!cliMemo.pin.path || usableExe(cliMemo.pin.path)) return cliMemo.pin;\n      cliGen++;", "      return cliMemo.pin;");
+  const memoOnly = editAnchor(ks, "      if (!cliMemo.pin.path || usableExe(cliMemo.pin.path)) return cliMemo.pin;\n      cliGen++;", "      return cliMemo.pin;", "src/server/browser-keeper.js");
   ok(memoOnly !== ks, 'control (e): the patch (a pin that never re-checks its program) applies');
   const Km = MUT.load('src/server/browser-keeper.js', memoOnly, 'memo-only');
   const Dm = path.join(ROOT, 'data-cm'); fs.mkdirSync(Dm, { recursive: true });
@@ -592,7 +592,7 @@ console.log('— ⑥ controls');
   ok(!fu.inProcess.ended && !fu.inProcess.slotFree && fu.reattach.re === 'running' && !fu.reattach.ended && !fu.reattach.slotFree, 'control (f): …a hung npm held THE slot past its deadline, before and after a restart — exactly what ②\'s slot-bound legs catch', fu);
   // verify r2 (H1): a keeper that runs the CURRENT `browser.cli` on every call (the pre-ruling wiring) ⇒ its own call on a
   // browser launched under 0.38.0 runs 0.38.1 and the fake daemon restarts; a removed install falls silently to PATH
-  const noKeep = ks.replace("      const c = await cliOptReady(browserRecordForCall(ns, opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {}));", "      const c = null;");
+  const noKeep = editAnchor(ks, "      const c = await cliOptReady(browserRecordForCall(ns, opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {}));", "      const c = null;", "src/server/browser-keeper.js");
   ok(noKeep !== ks, 'control (h): the patch (every keeper call on the current CLI) applies');
   const hk = await h1Leg(MUT.load('src/server/browser-keeper.js', noKeep, 'no-keep'), 'no-keep');
   ok(hk.streamCalls.some((v) => v === '0.38.1') && hk.restarts.length > 0 && !(hk.stream2 && /browser_cli_gone/.test(String(hk.stream2.error))), 'control (h): …the keeper\'s stream call ran 0.38.1 and the daemon RESTARTED; the removed install was not refused — exactly what ⑤b\'s keeper legs catch', { streamCalls: hk.streamCalls, restarts: hk.restarts.length, stream2: hk.stream2 });
@@ -605,7 +605,7 @@ console.log('— ⑥ controls');
   // verify r3 (Y1): a keeper whose doors judge off the sync reading (a never-asked binary = "gone") ⇒ the same version put
   // back at the same path is refused once
   // (B-7a30: the asking moved into the ONE async judge — the cut is its line there)
-  const noAsk = ks.replace("    for (const x of cands) if (x.version == null && x.path) x.version = await cliVersionAt(x.path).catch(() => null);\n", "");
+  const noAsk = editAnchor(ks, "    for (const x of cands) if (x.version == null && x.path) x.version = await cliVersionAt(x.path).catch(() => null);\n", "", "src/server/browser-keeper.js");
   ok(noAsk !== ks, 'control (j): the patch (the doors refuse an unasked binary instead of asking it) applies');
   const hj = await sameVersionLeg(MUT.load('src/server/browser-keeper.js', noAsk, 'no-ask'), require('../src/routes/browser.js'), 'no-ask');
   ok(hj.stream && hj.stream.code === 'browser_cli_gone' && hj.streamCalls.length === 0, 'control (j): …the keeper\'s call on a browser whose binary was re-installed (the same version) was refused browser_cli_gone — exactly what the r3 (Y1) leg catches', { stream: hj.stream && hj.stream.code, calls: hj.streamCalls });

@@ -988,12 +988,12 @@ async function fileLeg(ENGM, name) {
   ok(r.s3.stash === r.s1.stash && r.s3.writes === 0, 'a thread reply under an UNRELATED file share reaches nobody (no proposal moved)', JSON.stringify(r.s3));
   ok(r.s4.stash === 'agent-1,agent-1' && r.p4.result.vendorMessageId === '1700000100.000100' && r.p4.result.parts[1].vendorMessageId === '1700000400.000400' && JSON.stringify(r.p4.result.fileIds) === '["F0SEND001","F0SEND002"]' && r.ledger.includes('1700000100.000100') && r.ledger.includes('1700000400.000400'), 'the SECOND file (its own share message, one per file on Slack) re-keys its part; a reply under it reaches agent-1; the sentBy ledger carries both share ts', JSON.stringify({ s4: r.s4, result: r.p4.result, ledger: r.ledger }));
   const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-  const noKey = engSrc.replace('    try { await learnSentFiles(rec, convId, fresh0); }', '    try { /* no re-key */ }');
+  const noKey = editAnchor(engSrc, '    try { await learnSentFiles(rec, convId, fresh0); }', '    try { /* no re-key */ }', "src/server/channels-engine.js");
   const rc = await fileLeg(MUT.load('src/server/channels-engine.js', noKey, 'no-file-rekey'), 'e9f-c1');
   ok(noKey !== engSrc && rc.s1.stash === '' && rc.p1.result.vendorMessageId === 'F0SEND001', 'CONTROL: an engine copy WITHOUT the ingest re-key — the reply under the file share reaches nobody (the leg above would be red)', JSON.stringify({ s1: rc.s1, vid: rc.p1.result.vendorMessageId }));
   const obSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-outbound.js'), 'utf8');
-  const again = obSrc.replace('if (r1) { q.result = r1; moved.push(id); }', 'if (r1) { q.result = { ...r1, vendorMessageId: q.result.vendorMessageId, parts: q.result.parts }; moved.push(id); }');
-  const engAgain = engSrc.replace("const ChannelsOutbound = require('./channels-outbound.js');", `const ChannelsOutbound = require(${JSON.stringify(MUT.write('src/server/channels-outbound.js', again, 'file-key-again'))});`);
+  const again = editAnchor(obSrc, 'if (r1) { q.result = r1; moved.push(id); }', 'if (r1) { q.result = { ...r1, vendorMessageId: q.result.vendorMessageId, parts: q.result.parts }; moved.push(id); }', "src/server/channels-outbound.js");
+  const engAgain = editAnchor(engSrc, "const ChannelsOutbound = require('./channels-outbound.js');", `const ChannelsOutbound = require(${JSON.stringify(MUT.write('src/server/channels-outbound.js', again, 'file-key-again'))});`, "src/server/channels-engine.js");
   const ra = await fileLeg(MUT.load('src/server/channels-engine.js', engAgain, 'file-key-again'), 'e9f-c2');
   ok(again !== obSrc && engAgain !== engSrc && ra.s1.stash === '' && ra.p1.result.vendorMessageId === 'F0SEND001', 'CONTROL: an outbox door that keys the result by the FILE id again — the reply reaches nobody (red)', JSON.stringify({ s1: ra.s1, vid: ra.p1.result.vendorMessageId }));
 }
@@ -1039,9 +1039,9 @@ async function lookBackLeg(ENGM, name) {
   ok(JSON.stringify(r.seen) === '["1700000500.000500"]' && r.replayWrites === 0 && r.ledger.includes('1700000500.000500') && !r.ledger.includes('F0SEND005'), 'ONE write: the result was never stored under the file id (the re-key rode the sent transition); the same share again writes nothing; the sentBy ledger carries the ts', JSON.stringify({ seen: r.seen, replayWrites: r.replayWrites, ledger: r.ledger }));
   ok(r.reached === 'agent-1', 'the thread reply under the share reaches the drafter (agent-1) alone', JSON.stringify({ reached: r.reached }));
   const obSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-outbound.js'), 'utf8');
-  const noLook = obSrc.replace("? sharedSince(p.adapterId, p.convId, t0) : null;", '? null : null;');
+  const noLook = editAnchor(obSrc, "? sharedSince(p.adapterId, p.convId, t0) : null;", '? null : null;', "src/server/channels-outbound.js");
   const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-  const engNo = engSrc.replace("const ChannelsOutbound = require('./channels-outbound.js');", `const ChannelsOutbound = require(${JSON.stringify(MUT.write('src/server/channels-outbound.js', noLook, 'no-look-back'))});`);
+  const engNo = editAnchor(engSrc, "const ChannelsOutbound = require('./channels-outbound.js');", `const ChannelsOutbound = require(${JSON.stringify(MUT.write('src/server/channels-outbound.js', noLook, 'no-look-back'))});`, "src/server/channels-engine.js");
   const rc = await lookBackLeg(MUT.load('src/server/channels-engine.js', engNo, 'no-look-back'), 'e9g-c');
   ok(noLook !== obSrc && engNo !== engSrc && rc.state === 'sent' && (rc.q1.result || {}).vendorMessageId === 'F0SEND005' && rc.reached === '', 'CONTROL: an outbox WITHOUT the look-back — the share ingested mid-send never re-keys it and the reply reaches nobody (red)', JSON.stringify({ state: rc.state, vid: (rc.q1.result || {}).vendorMessageId, reached: rc.reached }));
 }
@@ -1161,7 +1161,7 @@ console.log('⑪ lane dm-reply-infers (B-6b4b): a plain reply judged ONCE by the
   ok(no.first === 1 && no.second === 1 && no.delivered === 0 && no.n.J.judged.length === 2 && no.n.J.judged[1].r.memo === true && again.ok && again.memo === true && again.answers[0].probability === 0.2, 'judged NO ⇒ no wake; the SAME record again ⇒ answered by the memo, no second call; a restart (a new engine over the same data) remembers the no', JSON.stringify({ first: no.first, second: no.second, delivered: no.delivered, again: again.memo }));
   const src = engineSource(REPO);
   const MEMO = "{ questions: [DM.REPLY_INFER_QUESTION], memo: { id: String(r0.id), sent: String(c.sent.id) }, accountNever: rec.judge === 'never' }";
-  const rejudge = MUT.load('src/server/channels-engine.js', src.replace(MEMO, "{ questions: [DM.REPLY_INFER_QUESTION], memo: null, accountNever: rec.judge === 'never' }"), 'infer-rejudge');
+  const rejudge = MUT.load('src/server/channels-engine.js', editAnchor(src, MEMO, "{ questions: [DM.REPLY_INFER_QUESTION], memo: null, accountNever: rec.judge === 'never' }", "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'infer-rejudge');
   const nm = await noLeg(rejudge, 'e11-no-mut');
   ok(src.split(MEMO).length === 2 && nm.second === 2, 'CONTROL: an engine that asks WITHOUT the memo re-judges the same record on the second pass (2 calls) — the memo leg above goes RED', JSON.stringify({ first: nm.first, second: nm.second }));
   // ── OUTSIDE THE SCOPE ⇒ never judged (judge() is not even asked) ──
@@ -2273,7 +2273,7 @@ try {
   ok(J2s(g.presses.map((p) => p.skipped)) === J2s([1, 1, 1]) && g.presses.every((p) => p.delivered === false && p.stillHeld === 60 && p.status === 'open') && g.said === 1,
     `(e) one torn entry over three refused presses ⇒ skipped ${g.presses.map((p) => p.skipped).join(', ')}; the journal said it ${g.said}× (beb0cc795: 1, 2, 3)`, J2s(g));
   const src = engineSource(REPO), S16 = '    if (!only && entries > 0) h.convs = convs;';
-  const r = await skipLeg16(MUT.load('src/server/channels-engine.js', src.split(S16).length === 2 ? src.replace(S16, '') : src, 'held-skip-again'), 'e16-skip-red');
+  const r = await skipLeg16(MUT.load('src/server/channels-engine.js', src.split(S16).length === 2 ? editAnchor(src, S16, '', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)") : src, 'held-skip-again'), 'e16-skip-red');
   ok(src.split(S16).length === 2 && J2s(r.presses.map((p) => p.skipped)) === J2s([1, 2, 3]), `CONTROL «the entry kept» (beb0cc795): skipped ${r.presses.map((p) => p.skipped).join(', ')}`, J2s(r));
 } catch (e) { ok(false, '⑬ (e) threw on this tree: ' + ((e && e.stack) || e)); }
 

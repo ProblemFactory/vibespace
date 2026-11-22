@@ -836,8 +836,8 @@ console.log('— ① the PURE rules over the captured 0.32.0 shapes');
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const MS = mutantCopies('browser-live-pure', repo);
     const ssrc = fs.readFileSync(path.join(repo, 'src/browser-stream.js'), 'utf8');
-    const m1 = ssrc.replace("  if (syncId) return { act: 'create', syncId };", "  return { act: 'create', syncId: syncId || null };");
-    const m2 = ssrc.replace("  if (String(profileRef || '').startsWith(CHILD_REF_PREFIX)) {", "  if (false) {");
+    const m1 = editAnchor(ssrc, "  if (syncId) return { act: 'create', syncId };", "  return { act: 'create', syncId: syncId || null };", "src/browser-stream.js");
+    const m2 = editAnchor(ssrc, "  if (String(profileRef || '').startsWith(CHILD_REF_PREFIX)) {", "  if (false) {", "src/browser-stream.js");
     const S1 = m1 !== ssrc ? MS.load('src/browser-stream.js', m1, 'open-new') : null, S2 = m2 !== ssrc ? MS.load('src/browser-stream.js', m2, 'no-child') : null;
     ok(S1 && S1.liveViewPlan({ views: V, sessionId: 's1' }).act === 'create', 'CONTROL: the pre-fix open (every click creates a window) in a patched copy ⇒ the focus leg goes red');
     ok(S2 && S2.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.2'] }).child !== true, 'CONTROL: a copy without the child ref resolves `~child:` to something else (not the helper\'s browser) ⇒ the finding-4 leg goes red');
@@ -1723,7 +1723,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     if (rd.launchFailed) skip(`F2 real leg (default shape): the real browser did not launch: ${String(rd.launchFailed).slice(0, 160)}`);
     else ok(rd.mid === 'starting' && rd.v.ok && rd.ssAfterOpen && !rd.ssRestarted && !rd.verbRestarted && rd.daemons.length === 1 && rd.daemons[0].pid === rd.recordedPid && rd.launchIdle === 600000 && rd.daemons[0].idle === '600000', `lane P verify r2 F2 (REAL ${ver}, the default shape): the view mid-launch, then the agent's verb — ONE daemon, the recorded pid, carrying the 600000 the launch passed, never restarted (${rd.order.join(' → ')})`, JSON.stringify(rd));
     if (ksrc.includes(W2)) {
-      const rc = await run(MKL.load('src/server/browser-keeper.js', ksrc.replace(W2, '        const launchIdle = idleMs();\n'), 'launch-idle-setting'), 'ctl');
+      const rc = await run(MKL.load('src/server/browser-keeper.js', editAnchor(ksrc, W2, '        const launchIdle = idleMs();\n', "src/server/browser-keeper.js"), 'launch-idle-setting'), 'ctl');
       if (rc.launchFailed) skip(`F2 real CONTROL: the real browser did not launch: ${String(rc.launchFailed).slice(0, 160)}`);
       else ok(rc.ssRestarted && !rc.daemons.some((d) => d.pid === rc.recordedPid), `lane P verify r2 F2 CONTROL (REAL ${ver}): the pre-fix launch (the setting, 600000) under pairs naming 900000 — the view's \`stream status\` RESTARTS the daemon the keeper just launched (restartedBackground:true; the recorded pid ${rc.recordedPid} is gone, the survivor carries ${rc.daemons.map((d) => d.idle).join()}) — the leg above is red on it`, JSON.stringify(rc));
     }
@@ -1864,7 +1864,7 @@ await (async () => {
   // copy of src/browser-stream.js: the claim becomes both the picture (the letterbox) and the page (the scale). The
   // control runs the fixed client's own two calls (frameGeometry → pointerToDevice) through the patched module.
   const SRC = fs.readFileSync(path.join(repo, 'src/browser-stream.js'), 'utf8');
-  const S0 = M.load('src/browser-stream.js', SRC.replace('  const pw = posNum(picW), ph = posNum(picH);\n', '  if (meta && meta.width && meta.height) return { picW: meta.width, picH: meta.height, cssW: meta.width, cssH: meta.height, source: \'metadata\' };\n  const pw = posNum(picW), ph = posNum(picH);\n'));
+  const S0 = M.load('src/browser-stream.js', editAnchor(SRC, '  const pw = posNum(picW), ph = posNum(picH);\n', '  if (meta && meta.width && meta.height) return { picW: meta.width, picH: meta.height, cssW: meta.width, cssH: meta.height, source: \'metadata\' };\n  const pw = posNum(picW), ph = posNum(picH);\n', "src/browser-stream.js"));
   { const arg = { picW: 713, picH: 720, page: { clientWidth: 1265, clientHeight: 1277 }, meta: { width: 1280, height: 720 } };
     ok(S0.frameGeometry(arg).cssW === 1280 && S0.frameGeometry(arg).picW === 1280 && S.frameGeometry(arg).cssW === 1265 && S.frameGeometry(arg).picW === 713, 'control: the patched copy really believes the metadata (census of the patch: 1280×720 for the picture AND the page)', JSON.stringify([S0.frameGeometry(arg), S.frameGeometry(arg)])); }
   const HOME5 = scratchHome('browser-live-real', fs);

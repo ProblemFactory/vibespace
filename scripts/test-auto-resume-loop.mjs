@@ -1032,7 +1032,7 @@ if (!probe) {
       const r = await fire(MG.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(esrc, cut, '', "src/server/usage-pool-engine.js"), last, '    const lv = null;\n', "src/server/usage-pool-engine.js"), 'no-redecide'));
       ok('§4i RED CONTROL: without the re-decision AND the last check the SAME fire continues into m-spare — the member its own fresh probe just called spent (the wall again)', r && r.did === true && r.link === 'm-spare', JSON.stringify(r));
       // THE FIRE'S LAST CHECK IS THE LINK'S MEMBER (acceptance r3): with the re-decision out, the belt alone still holds it
-      const h = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, ''), 'no-redecide-belt'));
+      const h = await fire(MG.load('src/server/usage-pool-engine.js', editAnchor(esrc, cut, '', "src/server/usage-pool-engine.js"), 'no-redecide-belt'));
       ok('§4i THE LAST CHECK (acceptance r3): with the re-decision taken out, the pool\'s «usable via m-ok» is no licence — the link\'s member m-spare is spent on the same reading ⇒ the continue is HELD and said, never sent into the wall', h && h.did === false && h.lines.some((l) => /continue held at the fire — m-spare, the member its link names, cannot serve/.test(l)), JSON.stringify(h && { did: h.did, link: h.link }));
     }
     // ── §4j ONE PROBE PER TARGET, SHARED; ONE CANDIDATE PREDICATE (acceptance r3, reproduced: repro/accept-r2/
@@ -1289,7 +1289,7 @@ if (!probe) {
   const src = read('src/server/auto-resume.js');
   const NEEDLE = "    if (r0 && r0.edgeSpent && r0.edgeSpent === wall) return { ...v, open: false, why: 'already-refuted', wallOpen: true, fired: false };";
   const rewired = src.replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`);
-  const mutated = rewired.replace(NEEDLE, '    // PRE-FIX: no single-shot guard');
+  const mutated = editAnchor(rewired, NEEDLE, '    // PRE-FIX: no single-shot guard', "src/server/auto-resume.js");
   // THE SETUP ASSERT MUST SEE THE GUARD REPLACEMENT ITSELF. `mutated !== src`
   // was satisfied by the require-rewrite alone, so when this needle drifted
   // (r3 renamed `wallKeyOf(a)` to the hoisted `wall`) the "control" silently
@@ -1432,7 +1432,7 @@ if (!probe) {
   const asrc = read('src/server/auto-resume.js');
   const x1 = "    if (a.cause && a.cause.kind === 'removed-member' && why === 'turn completed normally') return;\n";
   ok('§7 CONTROL 2: the patch (auto-resume without the hold\'s exception) hits', asrc.split(x1).length === 2);
-  const arNo = M7.load('src/server/auto-resume.js', asrc.replace(x1, ''), 'noexception');
+  const arNo = M7.load('src/server/auto-resume.js', editAnchor(asrc, x1, '', "src/server/auto-resume.js"), 'noexception');
   const wx = mkWorld({ arModule: arNo });
   wx.writeCache(wx.SPARE, cacheOf(0.99, Math.floor(Date.now() / 1000) + 600, 0.35, wx.R7));
   wx.session._isStreaming = true; wx.session._turnState = 'running'; wx.session._turnStateSeen = false;

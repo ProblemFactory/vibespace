@@ -33,6 +33,15 @@ const check = (name, cond, extra) => {
   if (cond) console.log(`  ✓ ${name}`);
   else { failed++; console.error(`  ✗ ${name}${extra ? ' — ' + extra : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const fake = {
   // must survive untouched
@@ -213,7 +222,7 @@ const { SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP } = require('../src/agent-env.
     const M = mutantCopies('agent-env', REPO);
     const hsrc = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
     const anchor = "{ env: this.sshEnv(), timeout: timeoutMs, maxBuffer,";
-    const hmM = mkHm(M.load('src/hosts.js', hsrc.replace(anchor, '{ timeout: timeoutMs, maxBuffer,'), 'no-ssh-env').HostManager);
+    const hmM = mkHm(M.load('src/hosts.js', editAnchor(hsrc, anchor, '{ timeout: timeoutMs, maxBuffer,', "src/hosts.js"), 'no-ssh-env').HostManager);
     await hmM._ssh(host, 'echo x'); const gotM = envs();
     check('CONTROL: the _ssh anchor applies once', hsrc.split(anchor).length === 2);
     check('CONTROL: a copy of hosts.js whose _ssh hands no env ⇒ every planted name reaches ssh ⇒ RED', gotM.length === 1 && Object.entries(PLANT).every(([k, v]) => gotM[0].e[k] === v));

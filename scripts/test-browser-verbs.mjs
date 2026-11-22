@@ -1322,7 +1322,7 @@ try {
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const M = mutantCopies('browser-verbs-r5', REPO);
     const fsrc = fs.readFileSync(path.join(REPO, 'src/browser-facts.js'), 'utf8');
-    const fpre = fsrc.replace('maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }', 'maxBuffer: 4 * 1024 * 1024 }');
+    const fpre = editAnchor(fsrc, 'maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }', 'maxBuffer: 4 * 1024 * 1024 }', "src/browser-facts.js");
     const Fpre = M.load('src/browser-facts.js', fpre, 'nocwd');
     const here = process.cwd(); process.chdir(REPO);
     try { await Fpre.createBrowserRuntime({ env: { PATH: process.env.PATH }, execFileImpl: viaFake }).launch(null, {}); } finally { process.chdir(here); }

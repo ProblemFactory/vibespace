@@ -72,6 +72,15 @@ const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await pred(); if (v) return v; await sleep(every); } return pred(); };
@@ -174,7 +183,7 @@ const M = mutantCopies('bli', REPO);
   ok(n > 280 && bad === 0 && refused === 0, `the chunker types ${n} seeded texts (CJK, emoji + ZWJ, combining marks, tabs, line breaks) EXACTLY into the real textarea (${bad} wrong, ${refused} refused)`, JSON.stringify(bads));
   const src = fs.readFileSync(path.join(REPO, 'src/browser-stream.js'), 'utf8');
   const PRE = "    if (cur.length + cp.length > cap || (cp === '\\n' && /[^\\n]/.test(cur))) flush();";
-  const Spre = M.load('src/browser-stream.js', src.replace(PRE, '    if (Array.from(cur).length >= 200) flush();'), 'pre-fix-200');
+  const Spre = M.load('src/browser-stream.js', editAnchor(src, PRE, '    if (Array.from(cur).length >= 200) flush();', "src/browser-stream.js"), 'pre-fix-200');
   await A.ev(`(() => { const e = document.getElementById('b'); e.value = ''; e.focus(); return 1; })()`);
   let preRefused = 0; for (const x of Spre.textRecords('hello world').records) { const res = await A.call('Input.dispatchKeyEvent', { type: 'char', text: x.text, modifiers: 0 }); if (res.error) preRefused++; }
   ok(src.split(PRE).length === 2 && preRefused === 1 && (await A.ev('document.getElementById("b").value')) === '', 'NEGATIVE CONTROL: the pre-fix record (the whole paste in ONE `char`) is refused by the real Chromium — the textarea stays empty');

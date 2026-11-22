@@ -4419,7 +4419,7 @@ async function gateCostRun(EM, DM, tag) {
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const MM = '        try { v = fn(cid, e, memo) || null; }';
   ok(esrc.split(LV).length === 2 && dsrc.split(MM).length === 2, 'CONTROL setup: stillSees reads the live entry once, and the ladder hands its gates one memo per pass');
-  const ctl = await gateCostRun(MUTE.load('src/server/channels-engine.js', esrc.replace(LV, LV.replace('store.index.live()[', 'store.index.snapshot().conversations[')), 'gate-cost-clone'), MUTE.load('src/server/conversation-deliver.js', dsrc.replace(MM, '        try { v = fn(cid, e) || null; }'), 'gate-cost-nomemo'), 'ctl');
+  const ctl = await gateCostRun(MUTE.load('src/server/channels-engine.js', esrc.replace(LV, LV.replace('store.index.live()[', 'store.index.snapshot().conversations[')), 'gate-cost-clone'), MUTE.load('src/server/conversation-deliver.js', editAnchor(dsrc, MM, '        try { v = fn(cid, e) || null; }', "src/server/conversation-deliver.js"), 'gate-cost-nomemo'), 'ctl');
   ok(ctl.got === 30 && ctl.clones >= 30 && ctl.rosterCalls >= 30, `CONTROL: the r3-first gate (convFor as it was then — a whole-index clone — and no memo) clones the whole index ${ctl.clones}× and walks the roster ${ctl.rosterCalls}× for ONE read — the leg above would be red`, JSON.stringify(ctl));
 }
 
@@ -5238,7 +5238,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     const csrc = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
     const LONEL = "  const lone = f.backoffWhy === 'failed' && (Number(f.strikes) || 0) < FEED_LOUD_STRIKES && freshOk;";
     ok(csrc.split(LONEL).length === 2 && /const FAILURES_BEFORE_LOUD = 3;/.test(esrcF) && Cw.FEED_LOUD_STRIKES === 3, 'CONTROL setup: the lone-miss rule is spelled once; channel-caps\' FEED_LOUD_STRIKES is the engine\'s FAILURES_BEFORE_LOUD');
-    const capsNoLone = MUTE.load('src/channel-caps.js', csrc.replace(LONEL, '  const lone = false;'), 'caps-no-lone-miss');
+    const capsNoLone = MUTE.load('src/channel-caps.js', editAnchor(csrc, LONEL, '  const lone = false;', "src/channel-caps.js"), 'caps-no-lone-miss');
     const al0 = await alternate(ENG, 'mut', capsNoLone);
     ok(al0.downShare >= 90, `CONTROL: the caps copy without the lone-miss rule reads "not answering" on ${al0.downShare} % of ticks while a window completes every 30 s`, JSON.stringify(al0));
   }
@@ -5525,7 +5525,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf-8');
   const NAMEL = '        const title = peerName(r.title, TITLE_MAX);';
   ok(isrc.split(NAMEL).length === 2, 'CONTROL setup: the describe title line is spelled once');
-  const CHpre = MUTE.load('src/channels/index.js', isrc.replace(NAMEL, "        const title = typeof r.title === 'string' && r.title.trim() ? r.title.trim().slice(0, TITLE_MAX) : null;"), 'describe-name-unguarded');
+  const CHpre = MUTE.load('src/channels/index.js', editAnchor(isrc, NAMEL, "        const title = typeof r.title === 'string' && r.title.trim() ? r.title.trim().slice(0, TITLE_MAX) : null;", "src/channels/index.js"), 'describe-name-unguarded');
   const hn0 = await hostileName(CHpre, 'mut');
   // lane peer-census verify r1 (F2): the agent's list and read judge every title on the way OUT now (agentTitle), so a
   // registry copy that skips the ingest door no longer shows in the answers — the control judges what the copy WROTE

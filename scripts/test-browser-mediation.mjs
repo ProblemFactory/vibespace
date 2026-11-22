@@ -173,7 +173,7 @@ console.log('— ② the mediation rules: scope, session gate, paused, whole-bro
     const msrc = fs.readFileSync(path.resolve(new URL('..', import.meta.url).pathname, 'src/browser-mediation.js'), 'utf8');
     const RWX = "    if (ow.rewritten) return { kind: 'forward', pending: { method, params: ow.params, sessionId: sid }, rewrite: ow.params };\n";
     ok(msrc.includes(RWX), 'control setup: the rewrite is found in the judge');
-    const Mx = MUTW.load('src/browser-mediation.js', msrc.replace(RWX, ''), 'no-window-rewrite');
+    const Mx = MUTW.load('src/browser-mediation.js', editAnchor(msrc, RWX, '', "src/browser-mediation.js"), 'no-window-rewrite');
     const vx = Mx.judge({ id: 92, method: 'Target.createTarget', params: { url: 'about:blank' } }, Mx.newScope({ targets: ['T-A'] }));
     ok(vx.kind === 'forward' && vx.rewrite === undefined && !vx.pending.params.newWindow, 'NEGATIVE CONTROL: a judge copy without the rewrite forwards the plain create — the U1 rows above can go red');
     for (const r of copiesCensus(MUTW.files, MUTW.dir, path.resolve(new URL('..', import.meta.url).pathname), { minCopies: 1, label: 'U1 windows ' })) ok(r.pass, r.name, r.detail);
@@ -245,7 +245,7 @@ console.log('— ②r3 verify r3: Input.setIgnoreInputEvents refused on every le
   const n1 = "setIgnoreInputEvents: { cls: 'refused', since: '2026-09-26', why:", n2 = "focus: 'input',";
   ok(censusSrc.split(n1).length === 2 && censusSrc.split(n2).length === 2 && medSrc.split("require('./cdp-census.js')").length === 2, '②r3 control setup: both r3 rows are found once in src/cdp-census.js, the rules module requires the census once');
   const demoted = MUT2.write('src/cdp-census.js', editAnchor(editAnchor(censusSrc, n1, "setIgnoreInputEvents: { cls: 'harmless', since: '2026-09-26', why:", "src/cdp-census.js"), n2, "focus: 'read',", "src/cdp-census.js"), 'no-r3');
-  const mut = MUT2.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(demoted)})`), 'no-r3');
+  const mut = MUT2.load('src/browser-mediation.js', editAnchor(medSrc, "require('./cdp-census.js')", `require(${JSON.stringify(demoted)})`, "src/browser-mediation.js"), 'no-r3');
   ok(code(mut, IGN, {}) === 'forward' && code(mut, { id: 41, method: 'DOM.focus', params: { nodeId: 3 }, sessionId: 'S-A' }, { paused: true }) === 'forward', '②r3 CONTROL (the two rows demoted in a census copy): the deaf-page arm and DOM.focus while paused are ADMITTED — the holes the rows close');
   for (const r of copiesCensus(MUT2.files, MUT2.dir, REPO_R3, { minCopies: 2, label: '②r3 ' })) ok(r.pass, r.name, r.detail);
 }
@@ -273,7 +273,7 @@ console.log('— ②r4 identity r4: Target.setAutoAttach {waitForDebuggerOnStart
   const medSrc4 = fs.readFileSync(path.join(REPO_R4, 'src/browser-mediation.js'), 'utf8');
   const needle = "if (method === 'Target.setAutoAttach' && !sid && params.autoAttach && params.waitForDebuggerOnStart === true) return";
   ok(medSrc4.split(needle).length === 2, '②r4 control setup: the rule is found once in src/browser-mediation.js');
-  const mut4 = MUT4.load('src/browser-mediation.js', medSrc4.replace(needle, "if (false) return"), 'no-r4');
+  const mut4 = MUT4.load('src/browser-mediation.js', editAnchor(medSrc4, needle, "if (false) return", "src/browser-mediation.js"), 'no-r4');
   ok(code(mut4, ARM) === 'forward', '②r4 CONTROL (the rule removed in a copy): the browser-level pause is FORWARDED — the freeze reaches the shared browser');
   for (const r of copiesCensus(MUT4.files, MUT4.dir, REPO_R4, { minCopies: 1, label: '②r4 ' })) ok(r.pass, r.name, r.detail);
 }
@@ -353,15 +353,15 @@ console.log('— ⑥ the CDP census: every method of the pinned protocol has a r
   const medSrc = fs.readFileSync(path.join(REPO6, 'src/browser-mediation.js'), 'utf8');
   const rowAnchor = "dispatchKeyEvent: ['input', '2026-09-21'],", unkAnchor = "  if (!CENSUS.hasRow(method)) {   // (lane chrome-157: both driving states; r2: one Set lookup a message, the name's SHAPE judged first)\n    if (!methodShaped(method)) return { kind: 'refuse', why: 'malformed', reply: refusal(id, 'bad_message', malformedWords(method), sid) };\n    return { kind: 'refuse', why: 'unclassified', reply: refusal(id, UNCLASSIFIED_CODE, unclassifiedWords(method, browser), sid) };\n  }", swAnchor = "'page-mutation': 'refuse',";
   ok(censusSrc.split(rowAnchor).length === 2 && medSrc.split(unkAnchor).length === 2 && censusSrc.split(swAnchor).length === 2, '⑥ control setup: the dispatchKeyEvent row, the unknown rule and the page-mutation rule are each spelled once');
-  const bound = (censusPath) => medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(censusPath)})`);
-  const demotedCensus = MUT6.write('src/cdp-census.js', censusSrc.replace(rowAnchor, "dispatchKeyEvent: ['read', '2026-09-21'],"), 'demoted');
+  const bound = (censusPath) => editAnchor(medSrc, "require('./cdp-census.js')", `require(${JSON.stringify(censusPath)})`, "src/browser-mediation.js");
+  const demotedCensus = MUT6.write('src/cdp-census.js', editAnchor(censusSrc, rowAnchor, "dispatchKeyEvent: ['read', '2026-09-21'],", "src/cdp-census.js"), 'demoted');
   const c1 = MUT6.load('src/browser-mediation.js', bound(demotedCensus), 'demoted');
   ok(verdict(c1, 'Input.dispatchKeyEvent', 'S-A', { paused: true }) === 'forward' && verdict(M, 'Input.dispatchKeyEvent', 'S-A', { paused: true }) === 'browser_interrupted:input', '⑥ CONTROL 1 (Input.dispatchKeyEvent demoted to read in a census copy): the agent\'s key is ADMITTED while the user drives — the row is the fence');
-  const c2 = MUT6.load('src/browser-mediation.js', medSrc.replace(unkAnchor, "  /* MUTANT: the census consulted only when paused */"), 'census-only-when-paused');
+  const c2 = MUT6.load('src/browser-mediation.js', editAnchor(medSrc, unkAnchor, "  /* MUTANT: the census consulted only when paused */", "src/browser-mediation.js"), 'census-only-when-paused');
   ok(verdict(c2, 'Page.zzzFutureMethod', 'S-A', {}) === 'forward' && verdict(M, 'Page.zzzFutureMethod', 'S-A', {}) === 'method_unclassified:unclassified', '⑥ CONTROL 2 (lane chrome-157 — the census consulted only when paused, as before the ruling): a method with no row is FORWARDED while the agent drives — the hole a newer Chrome opened');
   // CONTROL 3 = the OLD D6 PAUSE (script evaluation open while the user drives — the r4 default): a census copy whose
   // page-mutation rule is back to 'allow' admits the agent's Runtime.evaluate / DOM edit on the page the user drives
-  const d6Census = MUT6.write('src/cdp-census.js', censusSrc.replace(swAnchor, "'page-mutation': 'allow',"), 'old-d6');
+  const d6Census = MUT6.write('src/cdp-census.js', editAnchor(censusSrc, swAnchor, "'page-mutation': 'allow',", "src/cdp-census.js"), 'old-d6');
   const c3 = MUT6.load('src/browser-mediation.js', bound(d6Census), 'old-d6');
   ok(verdict(c3, 'Runtime.evaluate', 'S-A', { paused: true }) === 'forward' && verdict(c3, 'DOM.setOuterHTML', 'S-A', { paused: true }) === 'forward' && verdict(M, 'Runtime.evaluate', 'S-A', { paused: true }) === 'browser_interrupted:page-mutation' && verdict(M, 'DOM.setOuterHTML', 'S-A', { paused: true }) === 'browser_interrupted:page-mutation', '⑥ CONTROL 3 (the old D6 pause — page-mutation open while the user drives, in a census copy): Runtime.evaluate and DOM.setOuterHTML pass on the page the user drives — the row rule is what interrupts them');
   for (const r of copiesCensus(MUT6.files, MUT6.dir, REPO6, { minCopies: 4, label: '⑥ ' })) ok(r.pass, r.name, r.detail);
@@ -675,7 +675,7 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
   const c7 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW, 'no-answer-bound', medSrcW.replace(boundA, "        const t = { unref() { } };   /* MUTANT: no answer bound */")), only: only([['closingOrdered', 'putBackLost'], ['closingLapse', 'putBackLost']]) });
   ok(redOf(c7).length === 2, '⑥e CONTROL (F1): without the answer\'s bound a closing whose put-back is not answered never ends — those cells RED', say(c7.results));
   {
-    const SSx = MUTW.load('src/session-status.js', ssSrc.replace(oneA, "const ONE_STATE_KINDS = new Set([]);   /* MUTANT */"), 'no-one-state');
+    const SSx = MUTW.load('src/session-status.js', editAnchor(ssSrc, oneA, "const ONE_STATE_KINDS = new Set([]);   /* MUTANT */", "src/session-status.js"), 'no-one-state');
     const dirX = scratch('mediation-notices-x'); fs.rmSync(dirX, { recursive: true, force: true }); fs.mkdirSync(dirX, { recursive: true });
     const ssx = new SSx.SessionStatusManager({ dataDir: dirX });
     ssx.pushNotice('k1', { kind: 'browser-takeover', label: 'Team', n: 0, verbs: [], at: 1 });
@@ -955,9 +955,9 @@ console.log('— ③c a lease revoked / re-pointed / shut down while its client 
   const termLine = src.split('\n').find((l) => l.includes('for (const pk of [...g.pendingUps])')) + '\n';
   const checkLines = src.split('\n').filter((l) => l.startsWith('      const why = park.why ||') || l.startsWith('      if (why) { try { up.close(); }')).map((l) => l + '\n');
   ok(src.split(termLine).length === 2 && checkLines.length === 2 && checkLines.every((l) => src.split(l).length === 2), 'CONTROL setup: the parked-upstream termination and the open-time grant check are spelled once each');
-  const noTerm = MUT3.load('src/server/cdp-mediator.js', src.replace(termLine, '\n'), 'noterm');
+  const noTerm = MUT3.load('src/server/cdp-mediator.js', editAnchor(src, termLine, '\n', "src/server/cdp-mediator.js"), 'noterm');
   const noCheck = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => t.replace(l, '\n'), src), 'nocheck');
-  const preFix = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => t.replace(l, '\n'), src.replace(termLine, '\n')), 'prefix');
+  const preFix = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => t.replace(l, '\n'), editAnchor(src, termLine, '\n', "src/server/cdp-mediator.js")), 'prefix');
   const [a1, a2] = [await revokeLeg(noTerm), await revokeLeg(noCheck)];
   ok(/^503 /.test(a1.status) && a1.opened === a1.closed && /^503 /.test(a2.status) && a2.opened === a2.closed, `each layer ALONE refuses the revoked lease's parked client (check only: "${a1.status}", ${a1.opened}/${a1.closed}; termination only: "${a2.status}", ${a2.opened}/${a2.closed})`, JSON.stringify({ a1, a2 }));
   const [p1, p2, p3] = [await revokeLeg(preFix), await repointLeg(preFix), await shutdownLeg(preFix)];
@@ -1267,7 +1267,7 @@ console.log('— ⑦ the owner\'s ruling ("直接打断所有脚本和agent操�
   const medSrc7 = fs.readFileSync(path.join(REPO7, 'src/server/cdp-mediator.js'), 'utf8');
   const anchor7 = "  function interrupt({ profileId, browserKey } = {}) {\n    const g = grantOf(profileId, browserKey);\n";
   ok(medSrc7.split(anchor7).length === 2, '⑦ control setup: the interrupt is spelled once');
-  const OLD = MUT7.load('src/server/cdp-mediator.js', medSrc7.replace(anchor7, anchor7 + "    return { aborted: [], terminated: 0, at: now() }; // CONTROL: the old pause — nothing in flight is touched\n"), 'old-pause');
+  const OLD = MUT7.load('src/server/cdp-mediator.js', editAnchor(medSrc7, anchor7, anchor7 + "    return { aborted: [], terminated: 0, at: now() }; // CONTROL: the old pause — nothing in flight is touched\n", "src/server/cdp-mediator.js"), 'old-pause');
   const fake7c = await fakeBrowser();
   const medC = OLD.create({ log: { log() { }, warn() { } } });
   const kC = mk7(medC, path.join(ROOT, 'data7c'), { ...rtEnv7, FAKE_CDP_URL: fake7c.url, FAKE_AB_STATE: AB_STATE });

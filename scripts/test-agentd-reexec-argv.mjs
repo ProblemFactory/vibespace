@@ -29,6 +29,15 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // ── (a) the pure helper preserves flags ──
 const { reExecArgv } = require('../src/agentd/reexec.js');
@@ -99,7 +108,7 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   // (the landing's source pins of src/agentd/agentd.js: MOVED to the fast scripts/test-agentd-reexec-argv-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // CONTROL (scripts/mutant-copy.mjs): the Windows branch removed (the pre-fix repoint everywhere) — the FIX legs go red
   const rsrc = fs.readFileSync(path.join(repo, 'src/agentd/reexec.js'), 'utf-8');
-  const mut = rsrc.replace("if (platform === 'win32') {", 'if (false) {');
+  const mut = editAnchor(rsrc, "if (platform === 'win32') {", 'if (false) {', "src/agentd/reexec.js");
   check('(control) the patch applies', mut !== rsrc);
   const M = mutantCopies('reexec', repo).load('src/agentd/reexec.js', mut, 'nowin');
   check('CONTROL: without the Windows branch the repoint throws EPERM on Windows\' rules — the FIX legs go red', codeOf(() => M.repointCurrent(installed(), { root, dir, platform: 'win32' }, pw)) === 'EPERM');
@@ -179,9 +188,9 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   // (the hand-over / listen wiring pins of src/agentd/agentd.js: MOVED to the fast scripts/test-agentd-reexec-argv-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // CONTROLS (scripts/mutant-copy.mjs): each half removed — its leg goes red
   const rsrc = fs.readFileSync(path.join(repo, 'src/agentd/reexec.js'), 'utf-8');
-  const mut1 = rsrc.replace("try { server.close(() => { timers.clearTimeout(t); go('upgrade hand-over: listener closed — starting the successor'); }); }", "try { timers.clearTimeout(t); go('pre-fix: no close'); }");
-  const mut2 = rsrc.replace('if (ours && now() - t0 < forMs) {', 'if (false) {');
-  const mut3 = rsrc.replace('const ours = lockIsOurs();', 'const ours = true;');
+  const mut1 = editAnchor(rsrc, "try { server.close(() => { timers.clearTimeout(t); go('upgrade hand-over: listener closed — starting the successor'); }); }", "try { timers.clearTimeout(t); go('pre-fix: no close'); }", "src/agentd/reexec.js");
+  const mut2 = editAnchor(rsrc, 'if (ours && now() - t0 < forMs) {', 'if (false) {', "src/agentd/reexec.js");
+  const mut3 = editAnchor(rsrc, 'const ours = lockIsOurs();', 'const ours = true;', "src/agentd/reexec.js");
   check('(controls) the patches apply', mut1 !== rsrc && mut2 !== rsrc && mut3 !== rsrc);
   const MC = mutantCopies('handover', repo);
   const k1 = hop(MC.load('src/agentd/reexec.js', mut1, 'spawnfirst'), { oldCode: 'fix', newCode: 'pre-fix' });

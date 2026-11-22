@@ -57,6 +57,15 @@ const VNC_ENV = await vncEnv();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const S = JSON.stringify;
 
 const [PORT, CDP_PORT] = await freePorts(2);
@@ -95,7 +104,7 @@ am.setDefault(POOL, 'claude');
 const M = mutantCopies('badge', wt);
 const accSrc = fs.readFileSync(path.join(wt, 'src/accounts.js'), 'utf8');
 const NOTIFY_LINE = /\n[ \t]*this\._notifyLinks\(\);[^\n]*(\n[ \t]*return link;)/;
-const preSrc = accSrc.replace(NOTIFY_LINE, '$1');
+const preSrc = editAnchor(accSrc, NOTIFY_LINE, '$1', "src/accounts.js");
 const PRE = M.write('src/accounts.js', preSrc, 'pre-fix');
 {
   const body = (src) => (/ensureSessionPoolLink\(poolId, sessKey, memberId[^]*?\n  \}\n/.exec(src) || [''])[0];

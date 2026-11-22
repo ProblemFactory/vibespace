@@ -294,7 +294,7 @@ try {
     const dsrc5 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
     const n5 = "      if (!(r && r.error && /not attached to an active page/i.test(String(r.error.message || '')))) break;";
     ok(dsrc5.includes(n5), 'control setup: the retry rule is found in src/server/browser-dialogs.js');
-    const D5 = MUT.load('src/server/browser-dialogs.js', dsrc5.replace(n5, '      break;'), 'r4-no-stop-retry');
+    const D5 = MUT.load('src/server/browser-dialogs.js', editAnchor(dsrc5, n5, '      break;', "src/server/browser-dialogs.js"), 'r4-no-stop-retry');
     const d5 = D5.create({ keeper, log: quiet, holdersOf, leaseCountOf: (pid) => new Set(holdersOf(pid).map((h) => h.browserKey)).size }); // a bare patched watch over the same keeper (never a rebuilt world: the routes stay on W)
     await d5.arm(own.id);
     await chrome.replay(OWNP, 'T1', LOOP, { speed: 32 });
@@ -533,7 +533,7 @@ try {
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const kNeedle = '{ if (l.targetId) out.add(String(l.targetId)); for (const t of (Array.isArray(l.tabs) ? l.tabs : [])) if (t) out.add(String(t)); }';
     ok(ksrc.includes(kNeedle), 'control setup: the persisted witness read is found in src/server/browser-keeper.js holderTabs');
-    const cb = await rebuilt(MUT.load('src/server/browser-keeper.js', ksrc.replace(kNeedle, '{ if (l.targetId) out.add(String(l.targetId)); }'), 'r3-no-persisted-witness'));
+    const cb = await rebuilt(MUT.load('src/server/browser-keeper.js', editAnchor(ksrc, kNeedle, '{ if (l.targetId) out.add(String(l.targetId)); }', "src/server/browser-keeper.js"), 'r3-no-persisted-witness'));
     ok(cb.armed && !cb.a.includes('S10') && cb.ownB === 'ok' && cb.loop === false && cb.st !== 'stopped', 'CONTROL: a keeper whose holderTabs reads no persisted witness leaves the rebuilt watch blind to A\'s tab (the r2 shape after a restart) — the row above reddens on it', cb);
     chrome.removeTab(SP, 'S10'); chrome.removeTab(SP, 'S11'); await sleep(80);
     const gone = await (async () => { for (let i = 0; i < 50; i++) { if (!keeper.holderTabs(shared.id, sA._browserKey).includes('S10')) return true; await sleep(20); } return false; })();
@@ -558,7 +558,7 @@ try {
       const ksrc3 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
       const pn = "      const kept = l.tabs.filter((t) => live.has(String(t)));";
       ok(ksrc3.includes(pn), 'control setup: the prune is found in src/server/browser-keeper.js pruneOwnTabs');
-      const Kc3 = MUT.load('src/server/browser-keeper.js', ksrc3.replace(pn, '      const kept = l.tabs;'), 'r4-no-prune');
+      const Kc3 = MUT.load('src/server/browser-keeper.js', editAnchor(ksrc3, pn, '      const kept = l.tabs;', "src/server/browser-keeper.js"), 'r4-no-prune');
       keeper.noteOwnTab(shared.id, sA._browserKey, 'GHOST3');
       { const r0 = require('../src/store-writer.js').storeWriter().flushSync(); if (r0.deferred || (r0.left && r0.left.length)) throw new Error('the registry did not land before the restart: ' + JSON.stringify(r0.left)); }
       const kc = Kc3.create({ dataDir: DATA, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB, FAKE_AB_CDP_PORT: String(chrome.port) }), serverSetting: (k) => settings[k], liveKeys: () => new Set([...active.values()].map((s) => s._browserKey)), install: false, log: quiet, hostKnown: () => false, driveHoldMs: 200 });
@@ -580,7 +580,7 @@ try {
       // (own browser, mediated, remote), so these rows drive a CLI copy without the fence — the path that ack exists for
       const cliSrcU = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
       ok(cliSrcU.includes("const tabFenced = r.kind === 'attachment' && !r.mediated;"), 'control setup: the tab fence is found in data/bin/vibespace-browser (the unfenced copy)');
-      const binU = MUT.write('data/bin/vibespace-browser', cliSrcU.replace("const tabFenced = r.kind === 'attachment' && !r.mediated;", 'const tabFenced = false;'), 'r4-unfenced', { esm: false });
+      const binU = MUT.write('data/bin/vibespace-browser', editAnchor(cliSrcU, "const tabFenced = r.kind === 'attachment' && !r.mediated;", 'const tabFenced = false;', "data/bin/vibespace-browser"), 'r4-unfenced', { esm: false });
       await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['open', 'https://app.bank.test/slow'], wrapper: true }, as(sA)); // A in flight (no audit yet)
       await sleep(215); // the suite's 200 ms drive hold lapses (one driver at a time); A's verb is still IN FLIGHT for the witness (no audit)
       const opens0 = fake.opens().length;
