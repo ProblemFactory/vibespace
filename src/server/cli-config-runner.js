@@ -28,6 +28,7 @@ const { parseReceiptLines, decodePlan } = require('../harness-config');
 
 const BOUND_MS = 10000;      // how long a start waits for a landing (r1407: «within your bound»)
 const RUN_TIMEOUT_MS = 30000; // one helper run's own bound (the starter answers `unknown` past it + its guard)
+const STARTER_GUARD_MS = 5000; // r1876: the starter's own answer is awaited at most this much past the run's bound
 
 function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath, home = null, journal = (l) => console.log(l), warn = (l) => console.warn(l), timeoutMs = RUN_TIMEOUT_MS, boundMs = BOUND_MS, stat = (p) => fsp.stat(p) } = {}) {
   if (!starter || typeof starter.run !== 'function') throw new Error('cli-config-runner: a starter (run) is required');
@@ -43,12 +44,15 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   /** ONE helper run (never two at once — the queue below guarantees it). → a landing */
   async function runOnce(planB64, { reason, uninstall = false, status = false } = {}) {
     const files = status ? [] : filesOf(planB64);
-    const before = await Promise.all(files.map((f) => exists(f.file)));
+    // r1876: EVERY LOOK UNDER THE PERSON's HOME IS BOUNDED — one that does not come back counts as «not known», said by name
+    const look = async () => { const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? null : r.value; };
+    const before = await look();
+    if (before === null) return { at: Date.now(), reason, ok: false, receipts: [], created: [], why: `the plan's files under the home could not be read within ${timeoutMs} ms (a home that does not answer) — the helper was not run, nothing written by this hub` };
     const args = [helperPath, ...(uninstall ? ['--uninstall'] : []), ...(status ? ['--status'] : [])];
     const envAdd = { VIBESPACE_CLI_CONFIG: String(planB64 || ''), ...(home ? { HOME: home } : {}) };
-    let r;
-    try { r = await starter.run(nodeBin, args, { timeoutMs, capture: true, maxBuffer: 1024 * 1024, envAdd }); }
-    catch (e) { r = { unknown: true, why: (e && e.message) || String(e) }; }
+    // the starter's answer is bounded too (its own bound + its guard): a starter that never answers is «did not answer»
+    const ran = await bounded(() => starter.run(nodeBin, args, { timeoutMs, capture: true, maxBuffer: 1024 * 1024, envAdd }), timeoutMs + STARTER_GUARD_MS);
+    const r = ran.timedOut ? { unknown: true, why: `no answer within ${timeoutMs + STARTER_GUARD_MS} ms` } : ran.error ? { unknown: true, why: said(ran.error) } : ran.value;
     const at = Date.now();
     const failed = (why) => ({ at, reason, ok: false, receipts: [], created: [], why });
     if (!r || r.unknown) return failed(`the starter did not answer${r && r.why ? ` (${r.why})` : ''} — nothing was written by this hub, asked again at the next change`);
@@ -58,7 +62,8 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     const whole = receipts.find((x) => x.harness === null && x.state !== 'unknown');
     if (r.code !== 0) return failed(`the helper exited ${r.code}${r.stderr ? `: ${String(r.stderr).trim().split('\n').pop().slice(0, 200)}` : ''}`);
     if (whole) return { ...failed(`the helper refused the plan: ${String(whole.reason || whole.state).slice(0, 200)}`), receipts };
-    const after = await Promise.all(files.map((f) => exists(f.file)));
+    const after = await look();
+    if (after === null) return { ...failed(`the plan's files under the home could not be read within ${timeoutMs} ms after the helper ran (a home that does not answer) — what landed is not known`), receipts };
     const created = files.filter((f, k) => !before[k] && after[k]);
     const bad = receipts.filter((x) => x.state === 'error' || x.state === 'refused');
     return { at, reason, ok: bad.length === 0, receipts, created, why: bad.length ? bad.map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`).join('; ') : null };
@@ -72,28 +77,55 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
    *  `before()` (optional) runs at the run's start, before the helper, its answer handed back on the landing (`landing.before`);
    *  `after(landing)` (optional, r1675) runs INSIDE the job, after the helper and BEFORE the next queued request starts — a
    *  request's own check of the files reads them as ITS run left them (`landing.after`). Two requests of one kind that join
-   *  share one run, so they share one `before` / `after` answer: the later caller's functions are the ones run. */
-  function apply(planOf, reason = 'apply', { uninstall = false, kind = uninstall ? 'strip' : 'apply', before = null, after = null } = {}) {
+   *  share one run, so they share one `before` / `after` answer: the later caller's functions are the ones run. `when()`
+   *  (optional, r1813) is asked at the job's own start: anything but true and the helper is NOT run (the landing says
+   *  `skipped` — a request that was no longer wanted by its turn); a request with a `when` is its own kind (the caller names it).
+   *  A JOB ENDS WITHIN ITS BOUND WHATEVER THE HOME DOES (r1813 / r1876): EVERY await inside it is bounded — the «still asked»
+   *  reads, `before`, the look at the plan's files before the helper, the starter's answer (its own bound + STARTER_GUARD_MS),
+   *  the look after it, `after` — and nothing else in a job awaits; a step that does not answer is said by name. */
+  function apply(planOf, reason = 'apply', { uninstall = false, kind = uninstall ? 'strip' : 'apply', before = null, after = null, when = null } = {}) {
     return new Promise((resolve) => {
       const tail = queue[queue.length - 1];
-      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.resolvers.push(resolve); return; }
-      queue.push({ kind, planOf, reason, uninstall, before, after, resolvers: [resolve] });
+      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.whens.push(when); tail.resolvers.push(resolve); return; }   // r1876: a joining request carries its own «still asked» read
+      queue.push({ kind, planOf, reason, uninstall, before, after, whens: [when], resolvers: [resolve] });
       pump();
     });
   }
   const broke = (job, why) => ({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why });
+  // one step inside a job, bounded by the run's own bound → { value } | { error } | { timedOut }
+  const bounded = (fn, ms = timeoutMs) => new Promise((resolve) => {
+    let done = false;
+    const end = (r) => { if (!done) { done = true; clearTimeout(t); resolve(r); } };
+    const t = setTimeout(() => end({ timedOut: true }), ms);
+    t.unref?.();
+    Promise.resolve().then(fn).then((value) => end({ value }), (error) => end({ error }));
+  });
+  const said = (e) => (e && e.message) || String(e);
   function pump() {
     if (inFlight || !queue.length) return;
     const job = queue.shift();
     inFlight = (async () => {
+      // «is it still asked?» — every joined request's own read (r1876); a request with no condition, or ONE read that says yes, runs
+      // the job; a read that ran out of time or failed (and none said yes) is a FAILED landing with its reason, never a skip
+      if (!job.whens.some((w) => typeof w !== 'function')) {
+        const reads = await Promise.all(job.whens.map((w) => bounded(w)));
+        if (!reads.some((x) => x.value === true)) {
+          const bad = reads.find((x) => x.timedOut || x.error);
+          if (bad) return broke(job, bad.timedOut ? `not run: whether it was still asked did not answer within ${timeoutMs} ms` : `not run: whether it was still asked could not be read (${said(bad.error)})`);
+          return { at: Date.now(), reason: job.reason, ok: true, receipts: [], created: [], why: null, skipped: 'not run: no longer asked when its turn came' };
+        }
+      }
       let before;
-      if (typeof job.before === 'function') { try { before = await job.before(); } catch { before = undefined; } }
+      if (typeof job.before === 'function') { const b = await bounded(job.before); before = b.value; }   // a before that did not answer in the bound: the run goes on without it
       let planB64 = null;
       try { planB64 = typeof job.planOf === 'function' ? job.planOf() : job.planOf; } catch { planB64 = null; }
       if (planB64 == null) return broke(job, 'the plan could not be built');
       const ran = await runOnce(planB64, { reason: job.reason, uninstall: job.uninstall });
       const landing = before === undefined ? ran : { ...ran, before };
-      if (typeof job.after === 'function') { try { landing.after = await job.after(landing); } catch (e) { landing.after = { error: (e && e.message) || String(e) }; } }
+      if (typeof job.after === 'function') {
+        const a = await bounded(() => job.after(landing));
+        landing.after = a.timedOut ? { error: `the check of the files did not finish within ${timeoutMs} ms (a home that does not answer)` } : a.error ? { error: `the check after the landing broke: ${said(a.error)}` } : a.value;
+      }
       return landing;
     })()
       .catch((e) => broke(job, `the run broke (${(e && e.message) || e}) — nothing is known to have landed`))

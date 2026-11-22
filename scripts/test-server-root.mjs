@@ -154,7 +154,7 @@ const GUARD = /ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|refusalNow\(\)|\(refus
 const SITES = [
   // B-ddf3 unit 2 line 1: THIS machine's writes all go through applyThisMachine (the shipped helper, through the starter)
   { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: auto \? 'hooks'/, what: 'ensureAgentHooks — register our hook entries in ~/.claude/settings.json + ~/.codex/hooks.json (through the shipped helper)' },
-  { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: 'hooks removed', strip: true[ ,]/, what: 'stripAgentHookEntries — strip them (Integration OFF / Remove; the helper\'s --uninstall)' },
+  { file: 'src/server/agent-tool-generators.js', re: /applyThisMachine\(\{ reason: ifOptedOut \? 'hooks removed \(a start: still opted out\)' : 'hooks removed', strip: true,/, what: 'stripAgentHookEntries — strip them (Integration OFF / Remove; the helper\'s --uninstall)' },
   { file: 'src/server/harness-config-sync.js', re: /return applyThisMachine\(\{ reason \}\)/, what: 'syncCliConfig — the managed keys at boot and on every settings write (onSettingsWrite; through the shipped helper)' },
   { file: 'src/hosts.js', re: /VIBESPACE_CLI_CONFIG=\$\{this\._cliConfigPlanB64\(\)\} "\$VS_NODE" "\$HOME\/\.vibespace\/bin\/vibespace-hook-register\.mjs" 2>/, what: 'hosts.installAgentTools — the remote register' },
   { file: 'src/hosts.js', re: /vibespace-hook-register\.mjs" --uninstall/, what: 'hosts.uninstallAgentTools — the remote strip' },

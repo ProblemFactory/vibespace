@@ -15,6 +15,7 @@
 //     nothing else in the file moves (compared key by key).
 //   ⑦ (b) THE SETTINGS ANSWER AT THE LANDING (src/server/landing-answer.js): landed / failed / still writing past the bound /
 //     refused, each by name; no landing → the plain answer.             RED: an answer that never waits
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -69,8 +70,8 @@ const R = require(path.join(REPO, RUNNER_REL));
 
 console.log('①b r1518 (the full round\'s must): a request is NEVER replaced by one of another kind — each kind asked runs, in order');
 // THE TIP's MERGE (c90929dc8): one waiting slot, the newest request's kind written over the waiting one's — rebuilt for the red
-const TAIL = '      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.resolvers.push(resolve); return; }';
-const MERGED = '      if (tail) { tail.kind = kind; tail.uninstall = uninstall; tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.resolvers.push(resolve); return; }';   // stale-pins: kept (the tip's merge, rebuilt for the red control)
+const TAIL = '      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.whens.push(when); tail.resolvers.push(resolve); return; }';
+const MERGED = '      if (tail) { tail.kind = kind; tail.uninstall = uninstall; tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; if (after) tail.after = after; tail.whens.push(when); tail.resolvers.push(resolve); return; }';   // stale-pins: kept (the tip's merge, rebuilt for the red control)
 async function kindLegs(Rm) {
   const st = handStarter(), r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
   const inflight = r.apply(() => 'PLAN-0', 'a save', { kind: 'apply' });
@@ -140,9 +141,73 @@ async function afterLegs(Rm) {
   const a = await afterLegs(R);
   ok(a.order.indexOf('check of PLAN-S') >= 0 && a.order.indexOf('check of PLAN-S') < a.order.indexOf('run PLAN-R') && JSON.stringify(a.after) === '["read"]',
     'Remove then Install inside one run: the removal\'s check reads the files BEFORE the registration\'s helper starts, its answer on its own landing', a);
-  const AFTER = "      if (typeof job.after === 'function') { try { landing.after = await job.after(landing); }";
-  const am = await afterLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), AFTER, "      if (typeof job.after === 'function') { inFlight = null; pump(); try { landing.after = await job.after(landing); }", 'the check after the queue moved on'), 'after-late')));
+  const AFTER = '        const a = await bounded(() => job.after(landing));';
+  const am = await afterLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), AFTER, '        inFlight = null; pump(); const a = await bounded(() => job.after(landing));', 'the check after the queue moved on'), 'after-late')));
   ok(am.order.indexOf('run PLAN-R') >= 0 && am.order.indexOf('run PLAN-R') < am.order.indexOf('check of PLAN-S'), 'RED (the check after the queue moved on — the cure\'s form): the registration\'s helper runs BEFORE the removal\'s check reads the files', am);
+}
+
+console.log('①d r1813: every step inside a job is BOUNDED by the run\'s own bound — a check that never answers holds the queue that long at most');
+async function stallLegs(Rm) {
+  const order = [], st = handStarter(), r = Rm.createCliConfigRunner({ starter: { run: (cmd, args, o) => { order.push('run ' + o.envAdd.VIBESPACE_CLI_CONFIG); return st.run(cmd, args, o); } }, helperPath: '/x/helper.mjs', timeoutMs: 80, stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+  const stalled = r.apply(() => 'PLAN-S', 'hooks removed', { uninstall: true, after: () => new Promise(() => {}) });   // a home whose reads never answer
+  const next = r.apply(() => 'PLAN-N', 'hooks (asked)', { kind: 'apply+hooks' });
+  for (let k = 0; k < 100 && !order.includes('run PLAN-N'); k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }   // ≤ 1 s (the bound is 80 ms)
+  for (const call of st.calls) call.finish(okRun);
+  const s1 = await Promise.race([stalled, new Promise((res) => setTimeout(() => res(null), 200))]);
+  return { order, after: s1 && s1.after, nextRan: order.includes('run PLAN-N'), next: !!next };
+}
+{
+  const s = await stallLegs(R);
+  ok(!!(s.nextRan && s.after && /the check of the files did not finish within 80 ms/.test(s.after.error || '')), 'a check that never answers: at the run\'s bound the job ends, its reply says the check did not finish, and the next request RUNS', s);
+  const sm = await stallLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), '        const a = await bounded(() => job.after(landing));', '        const a = { value: await job.after(landing) };', 'an unbounded check'), 'after-unbounded')));
+  ok(!sm.nextRan, 'RED (an unbounded check — the r1675 form): the stalled check holds the queue — the next Install never runs', sm);
+}
+
+console.log('①e r1876 (the must): A JOB ENDS WITHIN ITS BOUND WHATEVER THE HOME DOES — the look at the plan\'s files is bounded too');
+const HCJ = require(path.join(REPO, 'src/harness-config.js'));
+const planAt = (dir) => HCJ.encodePlan({ v: 1, files: [{ harness: 'claude', id: 'settings', rel: [dir, 'settings.json'], format: 'json', set: [] }] });
+async function lookLegs(Rm) {
+  const order = [], st = handStarter();
+  const r = Rm.createCliConfigRunner({ starter: { run: (cmd, args, o) => { order.push('run ' + (o.envAdd.VIBESPACE_CLI_CONFIG === planAt('.ok') ? 'NEXT' : 'STALLED')); return st.run(cmd, args, o); } }, helperPath: '/x/helper.mjs', home: ROOT, timeoutMs: 80,
+    stat: (p) => (String(p).includes(`${path.sep}.stall${path.sep}`) ? new Promise(() => {}) : Promise.reject(new Error('none'))), journal: () => {}, warn: () => {} });   // a home whose reads never answer, for the first plan's file
+  const stalled = r.apply(() => planAt('.stall'), 'a save', { kind: 'apply' });
+  const next = r.apply(() => planAt('.ok'), 'hooks (asked)', { kind: 'apply+hooks' });
+  for (let k = 0; k < 100 && !order.includes('run NEXT'); k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }   // ≤ 1 s (the bound is 80 ms)
+  for (const call of st.calls) call.finish(okRun);
+  const s1 = await Promise.race([stalled, new Promise((res) => setTimeout(() => res(null), 200))]);
+  return { order, stalled: s1 && { ok: s1.ok, why: s1.why }, nextRan: order.includes('run NEXT'), next: !!next };
+}
+{
+  const l = await lookLegs(R);
+  ok(!!(l.nextRan && l.stalled && l.stalled.ok === false && /the plan's files under the home could not be read within 80 ms/.test(l.stalled.why || '') && !l.order.includes('run STALLED')),
+    'a look under the home that never answers: the job ends at the bound — «the plan\'s files … could not be read», the helper not run — and the NEXT request runs', l);
+  const LOOK = "    const look = async () => { const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? null : r.value; };";
+  const lm = await lookLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), LOOK, '    const look = async () => Promise.all(files.map((f) => exists(f.file)));', 'an unbounded look'), 'look-unbounded')));
+  ok(!lm.nextRan, 'RED (an unbounded look — the follow\'s first form): the stalled look holds the queue — the next request never runs', lm);
+}
+
+console.log('①f r1876 (the smalls): a «still asked» read that fails is a FAILED landing with its reason; a joining request carries its own read');
+{
+  const st = handStarter(), r = R.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', timeoutMs: 80, stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+  const unreadable = await r.apply(() => 'PLAN-U', 'hooks removed (a start)', { uninstall: true, kind: 'strip-if-still-asked', when: async () => { throw Object.assign(new Error('EACCES: the mark cannot be read'), { code: 'EACCES' }); } });
+  const silent = await r.apply(() => 'PLAN-T', 'hooks removed (a start)', { uninstall: true, kind: 'strip-if-still-asked', when: () => new Promise(() => {}) });
+  ok(unreadable.ok === false && /could not be read \(EACCES: the mark cannot be read\)/.test(unreadable.why || '') && !unreadable.skipped && silent.ok === false && /did not answer within 80 ms/.test(silent.why || '') && st.calls.length === 0,
+    'an unreadable or silent «still asked» read: not run, and answered NOT-ok with its reason — never «ok, skipped»', { unreadable, silent });
+}
+async function joinLegs(Rm) {
+  const st = handStarter(), r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+  const inflight = r.apply(() => 'PLAN-0', 'a save', { kind: 'apply' });
+  await tick();
+  const x = r.apply(() => 'PLAN-X', 'a start', { kind: 'k', when: async () => false }), y = r.apply(() => 'PLAN-Y', 'a press', { kind: 'k', when: async () => true });
+  for (let k = 0; k < 6; k++) { for (const call of st.calls) call.finish(okRun); await tick(); }
+  const all = await Promise.race([Promise.all([inflight, x, y]), new Promise((res) => setTimeout(() => res(null), 2000))]);
+  return { runs: st.calls.map((c) => c.o.envAdd.VIBESPACE_CLI_CONFIG), y: all && { ok: all[2].ok, skipped: all[2].skipped || null } };
+}
+{
+  const j = await joinLegs(R);
+  ok(!!(j.runs.includes('PLAN-Y') && j.y && j.y.ok === true && !j.y.skipped), 'a request that joins a waiting one of its kind carries its OWN «still asked» read: one says yes ⇒ the job runs', j);
+  const jm = await joinLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), ' tail.whens.push(when); tail.resolvers.push(resolve);', ' tail.resolvers.push(resolve);', 'the joiner\'s read dropped'), 'join-no-when')));
+  ok(!!(!jm.runs.includes('PLAN-Y') && jm.y && jm.y.skipped), 'RED (the joiner\'s read dropped — the follow\'s first form): the press is answered «not run: no longer asked»', jm);
 }
 
 console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created read off the loop, the env, the hook command key by key');
@@ -279,7 +344,39 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const GENO = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), OPT_NOW, '  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });', 'the cure\'s early return'), 'opt-out-early')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });   // stale-pins: kept (the cure's line, rebuilt for the red control)
       const opm = await optLegs(GENO);
       ok(opm.r.optedOut === true && !opm.r.removed && opm.left, 'RED (the cure\'s early return): opted out, nothing removed — our rows stay in the person\'s file', opm);
+      // r1813 (2): an Install pressed WHILE the start reads the mark and the rows (outside the queue): the start's removal reads the
+      // mark again INSIDE its job — the Install, answered «ok», is never stripped after it
+      const pressLegs = async (G) => {
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
+        fs.writeFileSync(G.HOOK_OPTOUT_FILE, new Date().toISOString() + '\n');
+        const [st, inst] = await Promise.all([G.ensureAgentHooks({ auto: true }), G.ensureAgentHooks({ auto: false })]);   // the press in the start's wait
+        const left = oursIn(JSON.parse(fs.readFileSync(sf, 'utf8')));
+        fs.rmSync(G.HOOK_OPTOUT_FILE, { force: true });
+        return { start: st && { optedOut: st.optedOut, removed: st.removed && { ok: st.removed.ok, skipped: st.removed.skipped || null } }, install: inst.claude && inst.claude.ok, left };
+      };
+      const pl = await pressLegs(GEN);
+      ok(!!(pl.install === true && pl.left && pl.start && pl.start.removed && /no longer asked/.test(pl.start.removed.skipped || '')), 'r1813: an Install pressed during the start\'s wait is answered ok and STAYS — the start\'s removal finds the mark gone in its own job and is not run', pl);
+      const WHEN = "when: ifOptedOut ? stillOptedOut : null,";
+      const GENW = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), WHEN, 'when: null,', 'the mark read outside the queue'), 'no-when')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });
+      const plm = await pressLegs(GENW);
+      ok(plm.install === true && !plm.left, 'RED (the mark read outside the queue — the r1675 form): the Install is answered ok, then the start\'s removal strips it', plm);
+      // r1813 (3) the true words: a run that broke BEFORE its check says the run's own reason, never «the check … broke»
+      const GENB = require(path.join(REPO, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, applyThisMachine: async () => ({ at: 1, ok: false, receipts: [], created: [], why: 'the plan could not be built' }) });
+      const rb = await GENB.ensureAgentHooks({ auto: false });
+      ok(!!(rb.claude && rb.claude.ok === false && rb.claude.error === 'the plan could not be built'), 'r1813: a run that broke before its check tells each CLI the RUN\'s reason («the plan could not be built»)', rb);
     } finally { console.warn = warn0; console.log = log0b; delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; }
+    // r1813 (3): a removal the refusal door stopped (this suite's own env refuses: VIBESPACE_SKIP_AGENT_HOOKS) is ANSWERED as a refusal
+    const rf = await GEN.stripAgentHookEntries();
+    ok(!!(rf && rf.ok === false && rf.refused && typeof rf.why === 'string' && rf.why.length > 0), 'r1813: a removal stopped by the refusal door answers ok:false with the refusal by name (the uninstall route then says it, never «success»)', rf);
+    // r1813 (3): the Apply press says a queued removal's own reason (a landing carries `why`), never «removed: undefined»
+    {
+      const routes = {}, app = { post: (pp, fn) => { routes[pp] = fn; } };
+      require(path.join(REPO, 'src/server/hooks-late.js')).create({ activeSessions: new Map(), getSessionStatus: () => null, getUserTodos: () => null, sessionStatusKey: () => null, harnesses: { list: () => [] }, log: () => { }, warn: () => { } })
+        .registerApplyRoute(app, { ensureAgentHooks: async () => ({ optedOut: true, removed: { ok: false, why: 'our hook entries are still in ~/.claude/settings.json' } }), agentHooksStatus: () => ({}), integrationEnabled: () => true, harnessConfig: { syncCliConfig: async () => ({ receipts: [] }), cliConfigStatus: () => ({}) }, hookRegistrationSafe: () => true });
+      let body = null; const res = { status() { return res; }, json(x) { body = x; return res; } };
+      await routes['/api/cli-config/apply']({ body: {}, query: {}, headers: {} }, res);
+      ok(!!(body && body.ok === false && /removed: our hook entries are still in ~\/\.claude\/settings\.json/.test(body.error || '') && !/undefined/.test(body.error || '')), 'r1813: the Apply press says the queued removal\'s own reason', body);
+    }
     const SJ = src('server.js'), hc = SJ.slice(SJ.indexOf('function checkAgentHookHealth()'), SJ.indexOf('function checkAgentHookHealth()') + 1600);
     ok(/if \(info\.stale \|\| !info\.installed \|\| scriptMissing\) \{[\s\S]*?ensureAgentHooks\(\{ auto: true \}\)/.test(hc) && (hc.match(/ensureAgentHooks\(/g) || []).length === 1,
       'WIRING (d): the six-hourly check asks the helper only inside «stale, not installed, or the hook script missing»');

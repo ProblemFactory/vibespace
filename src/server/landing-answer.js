@@ -20,7 +20,7 @@ function notLanded(r) {
   if (r.landing && r.landing.ok === false) return String(r.landing.why || 'not applied');
   if ('ok' in r || 'receipts' in r) return null;
   const bad = Object.entries(r).filter(([, v]) => v && typeof v === 'object' && v.ok === false && v.missing !== 'no-dir');
-  return bad.length ? bad.map(([k, v]) => `${k}: ${v.error || 'not applied'}`).join('; ') : null;
+  return bad.length ? bad.map(([k, v]) => `${k}: ${v.error || v.why || 'not applied'}`).join('; ') : null;   // r1813: a nested landing carries `why`
 }
 function answerAtLanding(res, body, landing, { boundMs = LANDING_BOUND_MS, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   if (!landing || typeof landing.then !== 'function') return res.json(body);
