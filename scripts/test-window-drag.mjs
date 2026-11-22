@@ -588,7 +588,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
     const PATCH_WIN = [[/buttons: e\.buttons, pointerId: e\.pointerId \}, feedState\)\.end\) \{ end/g, 'buttons: 1, pointerId: e.pointerId }, feedState).end) { end']];
     const PATCH_TG = [[/buttons: e\.buttons, pointerId: e\.pointerId \}, feedState\)\.end\) \{ onUp/g, 'buttons: 1, pointerId: e.pointerId }, feedState).end) { onUp']];
     const missed = [];
-    const apply = (text, patches) => { for (const [re, rp] of patches) { if (!new RegExp(re.source).test(text)) missed.push(String(re)); text = text.replace(re, rp); } return text; };
+    const apply = (text, patches) => { for (const [re, rp] of patches) { if (!new RegExp(re.source).test(text)) missed.push(String(re)); text = editAnchor(text, re, rp, "the text handed to apply()"); } return text; };
     const dfPath = MUT.write('src/lib/drag-feed.js', apply(dfSrc, PATCH_DF), 'prefix-feed', { esm: true }); copies.push(dfPath);
     const dfUrl = pathToFileURL(dfPath).href;
     const tgPath = MUT.write('src/lib/tab-group.js', apply(tgSrc, PATCH_TG).replace("from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`), 'prefix-feed', { esm: true }); copies.push(tgPath);

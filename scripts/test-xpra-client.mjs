@@ -1302,7 +1302,7 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
 {
   // a PRE-FIX trio: copies of proto/client/view (imports rewired to each other) with named levers pulled back
   const mkTrio = async (tag, { proto = [], client = [], view = [] } = {}) => {
-    const edit = (src, subs, file) => { for (const [from, to] of subs) { if (src.split(from).length !== 2) throw new Error(`${file}: lever not spelled exactly once: ${from.slice(0, 80)}`); src = src.replace(from, to); } return src; };
+    const edit = (src, subs, file) => { for (const [from, to] of subs) { if (src.split(from).length !== 2) throw new Error(`${file}: lever not spelled exactly once: ${from.slice(0, 80)}`); src = editAnchor(src, from, to, `src/lib/xpra-${file}.js`); } return src; };
     const xp = MUTXC.write('src/lib/xpra-proto.js', edit(read('src/lib/xpra-proto.js'), proto, 'proto'), tag, { same: !proto.length }); // an unedited member of the trio says so (B-0d3e); `edit` throws on a missing lever
     const xc = MUTXC.write('src/lib/xpra-client.js', edit(read('src/lib/xpra-client.js'), client, 'client').replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), tag);
     const xv = MUTXC.write('src/lib/xpra-view.js', edit(read('src/lib/xpra-view.js'), view, 'view').replace("from './xpra-client.js'", `from '${fileUrl(xc)}'`).replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), tag);

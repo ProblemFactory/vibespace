@@ -41,6 +41,15 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
   const { mutantCopies } = await import('./mutant-copy.mjs');
   let pass = 0, fail = 0;
   const ok = (c, name, extra) => { if (typeof name !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof name} — the arguments are swapped?`); if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 600) : ''}`); } };
+  // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+  // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+  // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+  function editAnchor(text, from, to, file, mode = 'one') {
+    const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+    const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+    if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+    return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+  }
   const SS = require(path.join(REPO, 'src/session-store.js'));
   const cwd = '/tmp/task-scan-loop-proj', sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee1';
   // the child's home is the throwaway one its parent made (TASK_SCAN_LOOP_CHILD names it): every transcript is written THERE —
@@ -98,7 +107,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
   console.log('② counts: no transcript byte read on the main thread for a task-state answer');
   ok(n1 === 0 && n2 === 0, `the first warm (tail + task scan) + taskState(): ${n1} byte reads of the transcript on the main thread; after an append, the task scan + taskState(): ${n2}`);
   const src = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), CALL = "require('./adapters/codex').transcriptWorkerCall('taskLines', { fp, offset }, () => null)";
-  const Rel = mutantCopies('task-scan-inline', REPO).load('src/session-store.js', src.replace(CALL, 'Promise.resolve(taskLinesSince(fp, offset))'), 'inline');
+  const Rel = mutantCopies('task-scan-inline', REPO).load('src/session-store.js', editAnchor(src, CALL, 'Promise.resolve(taskLinesSince(fp, offset))', "src/session-store.js"), 'inline');
   const relSm = () => new Rel.SessionMessages({ backend: 'claude', backendSessionId: sid, claudeSessionId: sid, cwd }, null, { buffersDir: path.join(os.homedir(), 'buf'), permissionModes: [] });
   const nRel = await reading(async () => { await Rel.warmTaskEvents(sid, fp, st()); });
   const tr = (relSm().taskState() || {}).todos || [];
@@ -177,11 +186,11 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const SEQ = '...(prev.pending ? { pending: true } : {}) } : {});';
       const dropped = await scene(plantW('pending-dropped', [[SEQ, ' } : {});']]), 6);
       ok(wshSrc.split(SEQ).length === 2 && dropped.probeAhead, 'RED CONTROL (a resize during the waits rebuilds the entry without its pending flag — r3): the stamped frame reached the new socket AHEAD of its `attached`', dropped);
-      const noSkip = await scene(require(path.join(REPO, 'src/ws-handler.js')), 5, MCW.load('src/server/session-broadcast.js', sbSrc.replace(SKIP, '      if (false) continue;'), 'no-pending-skip'));
+      const noSkip = await scene(require(path.join(REPO, 'src/ws-handler.js')), 5, MCW.load('src/server/session-broadcast.js', editAnchor(sbSrc, SKIP, '      if (false) continue;', "src/server/session-broadcast.js"), 'no-pending-skip'));
       ok(sbSrc.split(SKIP).length === 2 && noSkip.probeAhead, 'RED CONTROL (the choke point without its pending skip): the stamped frame reached the pending socket AHEAD of its `attached`', noSkip);
     } finally { H.store.warmTaskState = realWts; }
     const twSrc = fs.readFileSync(path.join(REPO, 'src/transcript-worker.js'), 'utf8'), SHIP = "require('path').join(__dirname, 'transcript-worker.js')";
-    const Dev = mutantCopies('task-scan-device', REPO).load('src/transcript-worker.js', twSrc.replace(SHIP, "require('path').join(__dirname, 'transcript-worker-not-shipped.js')"), 'device');
+    const Dev = mutantCopies('task-scan-device', REPO).load('src/transcript-worker.js', editAnchor(twSrc, SHIP, "require('path').join(__dirname, 'transcript-worker-not-shipped.js')", "src/transcript-worker.js"), 'device');
     const r = Dev.runOp('taskLines', { fp, offset: 0 });
     ok(twSrc.split(SHIP).length === 2 && r && r.result && Array.isArray(r.result.items) && r.result.items.length > 0 && TW.runOp('taskLines', { fp, offset: 0 }).result === null,
       `a bundle that ships no transcript worker script (the device agent's): the op reads in place on its own loop (${r && r.result && r.result.items.length} items), as the release did there; the hub's checkout answers null on its main thread`);
@@ -216,7 +225,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     const tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
     const WARM_NOW = "const warm = harnessOf(r.backend || 'claude').store?.warmTaskState; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host, bulk: bulkOf(r) });";   // B-cd4b r1035: the conversation's bulk mark rides it
     // RED: cadb07780's road planted back — the task-state and status roads call the harness's TRANSCRIPT warm
-    const RelTS = mutantCopies('a2-transcript-warm', REPO).load('src/transcript-service.js', tsSrc.replace(WARM_NOW, () => WARM_NOW.replace('warmTaskState', 'warmTranscript')), 'transcript-warm');
+    const RelTS = mutantCopies('a2-transcript-warm', REPO).load('src/transcript-service.js', editAnchor(tsSrc, WARM_NOW, () => WARM_NOW.replace('warmTaskState', 'warmTranscript'), "src/transcript-service.js"), 'transcript-warm');
     const green = await scene({ createTranscriptService }, standIn('codex-green'));
     const red = await scene(RelTS, standIn('codex-red'));
     ok(tsSrc.split(WARM_NOW).length === 2 && green.nTask === 0 && !green.ran && ran(path.join(HOME_FAKE, 'codex-red')) && !ran(path.join(HOME_FAKE, 'codex-green')) && Array.isArray(green.ans && green.ans.todos),
@@ -425,10 +434,10 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     };
     const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'), TSREQ = "const { createTranscriptService } = require('../transcript-service');";
     const GATE = "    const viaDev = fromTranscript ? await tryDevice(r, 'taskState', {}) : undefined;\n    if (viaDev) return viaDev;\n    const hostFetchError = fromTranscript ? await refreshRemote(r) : null;";
-    const tsNoGate = mutantCopies('a2-route-gate', REPO).write('src/transcript-service.js', tsSrc.replace(GATE, () => "    const viaDev = await tryDevice(r, 'taskState', {});\n    if (viaDev) return viaDev;\n    const hostFetchError = await refreshRemote(r);"), 'no-gate');   // stale-pins: kept (dec3d0da0's road, planted back as the RED control)
+    const tsNoGate = mutantCopies('a2-route-gate', REPO).write('src/transcript-service.js', editAnchor(tsSrc, GATE, () => "    const viaDev = await tryDevice(r, 'taskState', {});\n    if (viaDev) return viaDev;\n    const hostFetchError = await refreshRemote(r);", "src/transcript-service.js"), 'no-gate');   // stale-pins: kept (dec3d0da0's road, planted back as the RED control)
     const R0 = require(path.join(REPO, 'src/routes/sessions.js'));
     const cGreen = await routeOf(R0, 'codex'), clGreen = await routeOf(R0, 'claude');
-    const cRed = await routeOf(mutantCopies('a2-route-gate-r', REPO).load('src/routes/sessions.js', rsrc.replace(TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsNoGate)});`), 'no-gate-route'), 'codex');
+    const cRed = await routeOf(mutantCopies('a2-route-gate-r', REPO).load('src/routes/sessions.js', editAnchor(rsrc, TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsNoGate)});`, "src/routes/sessions.js"), 'no-gate-route'), 'codex');
     ok(tsSrc.split(GATE).length === 2 && rsrc.split(TSREQ).length === 2 && rsrc.includes('sessionId: rid, cwd, host: host || null, webuiId:') && cGreen.asked === '' && cGreen.todos.length === 0 && cGreen.n === 0 && !cGreen.ran && clGreen.asked === 'm1:taskState:claude' && clGreen.todos[0]?.content === 'held on m1' && cRed.asked.includes('m1:taskState:codex'),
       `GET /api/session-todos on m1: a codex conversation answered here as the release did (${cGreen.todos.length} steps; asked of m1: «${cGreen.asked}»; ${cGreen.n} listings, nothing started); a claude one asked of m1 (${clGreen.asked}); RED (no descriptor rule — dec3d0da0): the codex one asked of m1 (${cRed.asked})`, { cGreen, clGreen, cRed });
     // its TAKEN verdict (small 1): the machine rule reads the descriptor's OWN field (taskStateFromTranscript), never the warm hook
@@ -436,8 +445,8 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     // service that reads the warm hook ⇒ the warm alone sends a codex conversation's ask to m1
     {
       const HX = require(path.join(REPO, 'src/harnesses/codex.js')), FIELD = "store?.taskStateFromTranscript === true;";
-      const tsWarmRule = mutantCopies('a2-route-field', REPO).write('src/transcript-service.js', tsSrc.replace(FIELD, () => "store?.warmTaskState ? true : false;"), 'warm-rule');
-      const RW = mutantCopies('a2-route-field-r', REPO).load('src/routes/sessions.js', rsrc.replace(TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsWarmRule)});`), 'warm-rule-route');
+      const tsWarmRule = mutantCopies('a2-route-field', REPO).write('src/transcript-service.js', editAnchor(tsSrc, FIELD, () => "store?.warmTaskState ? true : false;", "src/transcript-service.js"), 'warm-rule');
+      const RW = mutantCopies('a2-route-field-r', REPO).load('src/routes/sessions.js', editAnchor(rsrc, TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsWarmRule)});`, "src/routes/sessions.js"), 'warm-rule-route');
       const had = { w: HX.store.warmTaskState, f: HX.store.taskStateFromTranscript };
       let warmOnly = null, declared = null, warmRed = null;
       try {
@@ -512,7 +521,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     // suite's source for writes rooted at the real ~/.claude and would read this planted text's bindings as this suite's own
     const RELEASE = "function getSubagentMetas(claudeSessionId, cwd) {\n  const projectsDir = path.join(os.homedir" + "(), '.claude', 'projects');\n  const projDir = cwdToProjectDir(cwd || '');\n  const candidates = [];\n  if (cwd) candidates.push(path.join(projectsDir, projDir, claudeSessionId, 'subagents'));\n  try {\n    for (const dir of fs.readdirSync(projectsDir)) {\n      const fp = path.join(projectsDir, dir, claudeSessionId, 'subagents');\n      if (!candidates.includes(fp)) candidates.push(fp);\n    }\n  } catch {}\n  for (const subDir of candidates) {\n    try {\n      if (!fs.existsSync(subDir)) continue;\n      const metas = [];\n      for (const f of fs.readdirSync(subDir)) {\n        if (!f.endsWith('.meta.json')) continue;\n        try {\n          const meta = JSON.parse(fs.readFileSync(path.join(subDir, f), 'utf-8'));\n          const agentId = f.replace('agent-', '').replace('.meta.json', '');\n          metas.push({ agentId, description: meta.description || '', agentType: meta.agentType || '' });\n        } catch {}\n      }\n      return metas;\n    } catch {}\n  }\n  return [];\n}"; // stale-pins: kept (the release's walk, planted back as the RED control)
     const ssrc = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), NOW_LINE = 'subagentMetas: [], // B-299b A4: no reader (the walk that filled it held the loop)';
-    const RS = mutantCopies('a4-release-metas', REPO).load('src/session-store.js', ssrc.replace(NOW_LINE, `subagentMetas: (${RELEASE.replace('function getSubagentMetas', 'function')})(getHistorySessionId(this._session), this._session.cwd),`), 'release');
+    const RS = mutantCopies('a4-release-metas', REPO).load('src/session-store.js', editAnchor(ssrc, NOW_LINE, `subagentMetas: (${RELEASE.replace('function getSubagentMetas', 'function')})(getHistorySessionId(this._session), this._session.cwd),`, "src/session-store.js"), 'release');
     const rsm = (id) => new RS.SessionMessages({ backend: 'claude', backendSessionId: id, claudeSessionId: id, cwd }, null, { buffersDir: path.join(os.homedir(), 'buf'), permissionModes: [] });
     let rst = null; probing(() => { rst = rsm(sid).chatStatus(); });
     // the usual conversation has NO helper folder: the release probed every project folder for it
@@ -638,7 +647,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
   console.log('⑦b the position index is counted (the cure, small): the transcript tails\' census row carries the indexes their merges keep');
   {
     const ssrcB = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), ROW = 'liveRow.bytes = liveB + ix.bytes + ts.bytes;';   // B-360d (A) r1374: the live row counts the indexes (the single row is gone)
-    const RelC = mutantCopies('a5-census', REPO).load('src/session-store.js', ssrcB.replace(ROW, () => 'liveRow.bytes = liveB + ts.bytes;'), 'uncounted');   // RED: cadb07780's count (the tails without their indexes), planted in the live row
+    const RelC = mutantCopies('a5-census', REPO).load('src/session-store.js', editAnchor(ssrcB, ROW, () => 'liveRow.bytes = liveB + ts.bytes;', "src/session-store.js"), 'uncounted');   // RED: cadb07780's count (the tails without their indexes), planted in the live row
     const NC = 400;
     const sceneC = async (M, k) => {
       const sidC = `cccccccc-0000-4000-8000-0000000c${String(k).padStart(4, '0')}`, fC = path.join(projDir, sidC + '.jsonl');
@@ -664,7 +673,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       return { n: pB.n, held };
     };
     const UNIX = '    if (i >= 0) { v.splice(i, 1); pos.n--; }\n';
-    const nNow = nTrue(SS), nRed = nTrue(mutantCopies('a5-census-n', REPO).load('src/session-store.js', ssrcB.replace(UNIX, () => '    if (i >= 0) { v.splice(i, 1); }\n'), 'n-kept'));
+    const nNow = nTrue(SS), nRed = nTrue(mutantCopies('a5-census-n', REPO).load('src/session-store.js', editAnchor(ssrcB, UNIX, () => '    if (i >= 0) { v.splice(i, 1); }\n', "src/session-store.js"), 'n-kept'));
     ok(ssrcB.split(UNIX).length === 2 && nNow.n === nNow.held && nNow.held > 0 && nRed.n > nRed.held, `the census's ordinal count across a slide = the ordinals held (${nNow.n} = ${nNow.held}); RED (the unindex never lowers it): ${nRed.n} counted for ${nRed.held} held`, { nNow, nRed });
     ok(ssrcB.split(ROW).length === 2 && c.keys === 2 * NC && c.ords === 2 * NC && c.ixBytes === c.keys * SS.POS_KEY_BYTES + c.ords * SS.POS_ORD_BYTES && c.grew === c.ixBytes && /position indexes/.test(c.basis) && r.keys === 2 * NC && r.grew === 0,
       `a merge over a cached tail of ${NC} records builds its index (${c.keys} keys, ${c.ords} ordinals ≈ ${c.ixBytes} B): the transcript tails' census row grew by exactly that and names it; RED (cadb07780's row): the same index (${r.keys} keys), the row grew ${r.grew} B`, { c, r });
