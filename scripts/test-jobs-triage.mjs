@@ -2375,6 +2375,26 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   ok(JSRC.split(GN_A).length === 2, 'control setup: the ✕\'s hand-off arming logsGone is found once');
   const GNX = await goneScene(MJb.load('src/jobs.js', anchored(JSRC, GN_A, "    /* MUTANT: not armed at the hand-off */ handed.then(", 'archive-gone-unarmed'), 'archive-gone-unarmed'), 'gonex');
   ok(GNX.inFlight && GNX.inFlight.gone === true, 'CONTROL (not armed at the hand-off, in a copy): logsGone() says «gone» while the ✕ is in flight and its folder was never handed to the remover (red)', GNX);
+  // (11b) r2001: a ✕ whose removal the STORAGE HELD is OWED — logsGone() says «still being deleted» whenever it is asked, never the map's
+  // default «gone» once the held answer settled (the heavy suite's three held legs asked late). RED: the owed answer cut
+  const heldScene = async (Mod, tag) => {
+    const { g, J, AF } = scene(Mod, tag);
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
+    const id = J.archivedList()[0].id;
+    J._logsRm = { whole: async () => ({ error: 'held', held: true, gone: [] }), sweep: async () => ({}), settled: () => Promise.resolve(), busy: () => false, held: () => true, state: async () => ({}), forget: () => { }, stop() { } };   // the storage holds the removal
+    J._logsKeepOwed = () => { };   // the owed RECORD's write is the heavy suite's leg; this one reads the answer
+    J.rmArchived(id, () => { }); g.land(AF);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));   // the held answer settles
+    const late = await J.logsGone(id, 1000), owed = J._logsOwed.has(id);
+    try { J.shutdown(); } catch { }
+    return { late, owed };
+  };
+  const HL = await heldScene({ JobManager }, 'held');
+  ok(HL.owed && HL.late && HL.late.pending === true, 'a ✕ the storage held is OWED, and logsGone() asked after its answer settled still says «still being deleted» — never «gone»', HL);
+  const HL_A = "if (!p) return Promise.resolve(this._logsOwed && this._logsOwed.has(id) ? { pending: true } : { gone: true });";
+  ok(JSRC.split(HL_A).length === 2, 'control setup: logsGone\'s owed answer is found once');
+  const HLX = await heldScene(MJb.load('src/jobs.js', anchored(JSRC, HL_A, "if (!p) return Promise.resolve({ gone: true });   /* MUTANT: the owed answer cut */", 'archive-held-gone'), 'archive-held-gone'), 'heldx');
+  ok(HLX.owed && HLX.late && HLX.late.gone === true, 'CONTROL (the owed answer cut, in a copy): a removal the storage held reads «gone» once its answer settled (red)', HLX);
   // (5) THE LOOP NO LONGER WAITS FOR THE ARCHIVE: the REAL store writer (its own thread), 300 ms placed in each main-thread rename /
   // fsync of the scene's folder; judged against the red's own figure (the release's write at the call, in a copy)
   const SWr = require(path.join(ROOT, 'src/store-writer.js'));

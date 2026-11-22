@@ -4752,7 +4752,7 @@ class JobManager {
    *  it: OWED in the record, durably — re-sent before every pass) */
   logsGone(id, ms = 10_000) {
     const p = this._logsGone.get(id);
-    if (!p) return Promise.resolve({ gone: true });
+    if (!p) return Promise.resolve(this._logsOwed && this._logsOwed.has(id) ? { pending: true } : { gone: true });   // r2001: a removal the storage held is OWED — «still being deleted» whenever it is asked, never the map's default
     return new Promise((resolve) => { const t = setTimeout(() => resolve({ pending: true }), ms); t.unref?.(); p.then((v) => { clearTimeout(t); resolve(v && typeof v === 'object' ? v : { pending: true }); }); });
   }
 

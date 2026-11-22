@@ -52,8 +52,11 @@ const sweepAt = async (jm, at) => { if (typeof jm.sweepLogs === 'function') awai
 const landJobs = (jm) => { if (jm.readOnly) return; const r = require('../src/store-writer.js').storeWriter().flushSync([jm.file, jm.notifsFile]); if (r.deferred || (r.left && r.left.length)) console.log(`    (the jobs store did not land here — a held store's write stays owed, as the product keeps it: ${JSON.stringify(r.left).slice(0, 300)})`); };   // (never a throw: a held store's gc must still never throw — H5d; the leg after it is the red by name)
 const gcAt = async (jm, at) => { await jm._gc({ now: at }); landJobs(jm); await settle(jm); };   // THE HOURLY ROAD with its clock
 // B-0248 step 3: the ✕ of an archived row LANDS LATER — its archive write rides the store writer, and its log folder goes to the remover AT
-// THAT LANDING (_rmLanded). The routes wait for rmArchived's answer before they ask logsGone; so does every leg here (bounded, the landing said)
-const rmLanded = async (jm, id, ms = 20000) => { let land = null; const r = jm.rmArchived(id, (x) => { land = x; }); if (!r || !r.ok) return r; await until(() => land !== null, ms, 5); return { ...r, landed: land }; };
+// THAT LANDING (_rmLanded). The routes ask logsGone INSIDE rmArchived's answer — the same run as the landing's step that armed it — and so
+// does every leg here: `gone` is THAT promise (r2001: asked later — this helper's first form polled the answer — a removal that had
+// settled read the map's default; the box's three held legs). goneOf(rmLanded(…)) → what logsGone answered, the route's own read
+const rmLanded = async (jm, id, ms = 20000) => { let land = null, gone = null; const r = jm.rmArchived(id, (x) => { land = x; if (x && x.ok) gone = jm.logsGone(id); }); if (!r || !r.ok) return r; await until(() => land !== null, ms, 5); return { ...r, landed: land, gone }; };
+const goneOf = async (p) => { const x = await p; return (x && x.gone ? await x.gone : null) || { notAsked: true, rm: x || null }; };
 const T0 = Date.now(); const lap = (name) => console.log(`${name}  (+${Date.now() - T0} ms)`);
 // the store's English fill (src/user-todos.js fillWords): an INSTANT param a UTC stamp, a WORDS param its own key filled (K10, .399)
 const fill = (w) => String(w.key).replace(/\{(\w+)\}/g, (m, k) => { const v = w.params ? w.params[k] : undefined; return v === undefined ? m : v && typeof v === 'object' ? (typeof v.key === 'string' ? fill(v) : Number.isFinite(v.at) ? new Date(v.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : m) : String(v); });
@@ -212,7 +215,8 @@ try {
   try { rmA = await rmLanded(J1, arcId); } finally { Object.assign(fs, realRm); }   // the stub stays until the landing: its step (the dir handed to the worker) is the ✕'s too
   const byMain = mainRm.filter((p) => p === arcRun || p.startsWith(arcRun + path.sep) || p === path.dirname(arcRun));
   ok(rmA && rmA.ok && rmA.landed && rmA.landed.ok && !byMain.length, 'the ✕ answers its record\'s removal with no removal on the main thread — none of its fs removals touched the run\'s dir', `ok=${rmA && rmA.ok} landed=${JSON.stringify(rmA && rmA.landed)} main-thread removals there: ${JSON.stringify(byMain)}`);
-  ok(typeof J1.logsGone === 'function' && (await J1.logsGone(arcId)).gone === true && !has(d1, 'job-logs', arcId), '…and logsGone() resolves once the remover\'s worker has removed it (the routes answer the person then)');
+  const gA = rmA && rmA.gone ? await rmA.gone : { notAsked: true };
+  ok(typeof J1.logsGone === 'function' && gA.gone === true && !has(d1, 'job-logs', arcId), '…and logsGone() resolves once the remover\'s worker has removed it (the routes answer the person then)', gA);
   // a whole-dir verdict never takes a live run: the gc's leg (a) over a done task past 14 days with a live stray run
   const gcT = 'jb-9c0de0aa', live2 = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(live2);
   await until(() => PI.identityOf(live2.pid) != null, 3000);
@@ -229,8 +233,8 @@ try {
   J1._writeArchive([{ id: arc3, kind: 'task', name: 'archived-three', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
   const arc3Run = seedRun(d1, arc3, Date.now() - DAY);
   J1._logsRm = { whole: async () => ({ error: 'held', held: true, gone: [] }), sweep: (...a) => realRm.sweep(...a), settled: () => realRm.settled(), busy: () => realRm.busy(), held: () => true, stop() { } };
-  await rmLanded(J1, arc3); const gone3 = await J1.logsGone(arc3);
-  ok(gone3 && gone3.pending === true && has(arc3Run) && J1._logsOwed && J1._logsOwed.has(arc3), 'a ✕ the remover could not do (HELD): answered false (the routes say logsPending), its dir owed');
+  const gone3 = await goneOf(rmLanded(J1, arc3));
+  ok(gone3 && gone3.pending === true && has(arc3Run) && J1._logsOwed && J1._logsOwed.has(arc3), 'a ✕ the remover could not do (HELD): answered false (the routes say logsPending), its dir owed', { gone3, dir: has(arc3Run), owed: !!(J1._logsOwed && J1._logsOwed.has(arc3)) });
   J1._logsRm = realRm; await sweepAt(J1, Date.now());
   ok(!has(d1, 'job-logs', arc3) && !J1._logsOwed.has(arc3), '…and the next pass re-sends it first: gone, nothing owed');
   } else ok(false, 'a ✕ the remover could not do is owed and re-sent (no remover on this tree)');
@@ -612,8 +616,8 @@ try {
       const un = b.items.filter((n) => n && n.fact === 'records-unread-unnoted');
       ok(un.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: a read or write error \(EIO\)\), and no note of it could be written yet/.test(fill(un[0].words)) && b.logs.filter((l) => /job-logs clean-up HELD: jobs\.json could not be read and no note of it is on disk/.test(l)).length === 1, 'its item says so ONCE (the failure\'s moment, never «when VibeSpace started»), and the journal\'s HELD line once');
       J._writeArchive([{ id: 'jb-a8c0ffb1', kind: 'task', name: 'x', state: 'done', owner, access: acc, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
-      seedRun(n1, 'jb-a8c0ffb1', Date.now() - DAY); await rmLanded(J, 'jb-a8c0ffb1');
-      ok((await J.logsGone('jb-a8c0ffb1')).gone === true && !has(n1, 'job-logs', 'jb-a8c0ffb1'), '…while the ✕ (a removal a person asks for) still removes its logs: the hold is the pass\'s');
+      seedRun(n1, 'jb-a8c0ffb1', Date.now() - DAY); const gB = await goneOf(rmLanded(J, 'jb-a8c0ffb1'));
+      ok(gB.gone === true && !has(n1, 'job-logs', 'jb-a8c0ffb1'), '…while the ✕ (a removal a person asks for) still removes its logs: the hold is the pass\'s');
       fs.unlinkSync(noteGate);   // THE STORAGE IS BACK
       await sweepAt(J, Date.now());
       ok(has(n1, 'jobs.json.corrupt-unread') && !owedOf(J, 'store') && b.items.filter((n) => n && n.fact === 'records-unread').length === 1 && has(svOld) && has(orphan), 'the note is tried again before each pass: once the storage takes it, `jobs.json.corrupt-unread` is on disk, its item filed once, and the NOTE holds the pass');
@@ -798,15 +802,15 @@ try {
     await sleep(120); await sweepAt(PE, Date.now()); await gcAt(PE, Date.now());
     ok(has(peRun) && LPE.filter((l) => /job-logs clean-up paused by the setting jobs\.logsSweep/.test(l)).length === 1, 'PAUSED (the setting off): the boot pass, a direct pass and the hourly gc remove nothing — said ONCE');
     const peArc = 'jb-a8c0ffee'; PE._writeArchive([{ id: peArc, kind: 'task', name: 'arch', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
-    seedRun(pe, peArc, Date.now() - DAY); await rmLanded(PE, peArc);
-    ok(typeof PE.logsGone === 'function' && (await PE.logsGone(peArc)).gone === true && !has(pe, 'job-logs', peArc), '…while the ✕ (a removal a person asks for) still removes its logs');
+    seedRun(pe, peArc, Date.now() - DAY); const gP = await goneOf(rmLanded(PE, peArc));
+    ok(typeof PE.logsGone === 'function' && gP.gone === true && !has(pe, 'job-logs', peArc), '…while the ✕ (a removal a person asks for) still removes its logs', gP);
     // round 3 §7: A PERSON'S REMOVAL IS NOT PAUSED — a ✕ the storage held, owed, is finished by the next hourly gc while paused
     if (typeof PE._logsRemover === 'function') {
       const realE = PE._logsRemover(); PE._logsRm = { ...realE, whole: async () => ({ error: 'held', held: true, gone: [] }), state: (...a) => realE.state(...a), sweep: (...a) => realE.sweep(...a), forget: (...a) => realE.forget(...a), settled: () => realE.settled(), busy: () => realE.busy(), held: () => true, stop: () => realE.stop() };
       PE._writeArchive([{ id: 'jb-a8c0ffe7', kind: 'task', name: 'arch7', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
-      const owed7 = seedRun(pe, 'jb-a8c0ffe7', Date.now() - DAY); await rmLanded(PE, 'jb-a8c0ffe7'); const v7 = await PE.logsGone('jb-a8c0ffe7');
+      const owed7 = seedRun(pe, 'jb-a8c0ffe7', Date.now() - DAY); const v7 = await goneOf(rmLanded(PE, 'jb-a8c0ffe7'));
       PE._logsRm = realE; await gcAt(PE, Date.now());
-      ok(v7.pending && !has(owed7) && !PE._logsOwed.has('jb-a8c0ffe7') && has(peRun), 'A PERSON\'S REMOVAL IS NOT PAUSED: a held ✕, owed, is finished by the next hourly gc while the clean-up stays paused (the clean-up\'s own run dir is still kept)');
+      ok(v7.pending && !has(owed7) && !PE._logsOwed.has('jb-a8c0ffe7') && has(peRun), 'A PERSON\'S REMOVAL IS NOT PAUSED: a held ✕, owed, is finished by the next hourly gc while the clean-up stays paused (the clean-up\'s own run dir is still kept)', { v7, dir: has(owed7), owed: PE._logsOwed.has('jb-a8c0ffe7'), kept: has(peRun) });
     } else ok(false, 'a person\'s removal is not paused (no remover on this tree)');
     on = true; await gcAt(PE, Date.now());
     ok(!has(peRun), 'turned ON again: the next hourly pass resumes and removes');
@@ -837,18 +841,17 @@ try {
       X._writeArchive([rec('jb-a9c0ffe1'), rec('jb-a9c0ffe2')]);
       seedRun(x, 'jb-a9c0ffe1', Date.now() - 2 * DAY, { stamp: stampOf(liveX.pid) });
       { const d2 = seedRun(x, 'jb-a9c0ffe2', Date.now() - 2 * DAY, { stamp: null, files: ['current.log'] }); fs.writeFileSync(path.join(d2, 'pid.json'), '{}'); }
-      await Promise.all([rmLanded(X, 'jb-a9c0ffe1'), rmLanded(X, 'jb-a9c0ffe2')]);   // both handed in this order, then both landings
-      const v1 = await X.logsGone('jb-a9c0ffe1'), v2 = await X.logsGone('jb-a9c0ffe2');
-      ok(v1.kept === 'running' && v2.kept === 'unjudgeable', `THE ✕ SAYS WHAT STAYS AND WHY: a run still running ⇒ «${v1.kept}», a stamp that cannot be judged ⇒ «${v2.kept}» (never «still being deleted» for a dir that will not go)`);
+      const [v1, v2] = await Promise.all([goneOf(rmLanded(X, 'jb-a9c0ffe1')), goneOf(rmLanded(X, 'jb-a9c0ffe2'))]);   // both handed in this order, then both landings; each read inside its answer
+      ok(v1.kept === 'running' && v2.kept === 'unjudgeable', `THE ✕ SAYS WHAT STAYS AND WHY: a run still running ⇒ «${v1.kept}», a stamp that cannot be judged ⇒ «${v2.kept}» (never «still being deleted» for a dir that will not go)`, { v1, v2 });
       liveX.kill('SIGKILL');
       // what is OWED survives a restart: a HELD ✕ → the record keeps it durably → a new engine's first pass removes it
       const real = X._logsRemover(); X._logsRm = { ...real, whole: async () => ({ error: 'held', held: true, gone: [] }), sweep: (...a) => real.sweep(...a), state: (...a) => real.state(...a), settled: () => real.settled(), busy: () => real.busy(), held: () => true, stop: () => real.stop() };
       X._writeArchive([rec('jb-a9c0ffe3')]); const owedRun = seedRun(x, 'jb-a9c0ffe3', Date.now() - DAY);
-      await rmLanded(X, 'jb-a9c0ffe3'); const v3 = await X.logsGone('jb-a9c0ffe3');
+      const v3 = await goneOf(rmLanded(X, 'jb-a9c0ffe3'));
       if (X._logsStateP) await X._logsStateP;
       await W.storeWriter().durable(path.join(x, 'jobs-logs-sweep.json'));
       let rec3 = null; try { rec3 = JSON.parse(fs.readFileSync(path.join(x, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
-      ok(v3.pending && rec3 && (rec3.owed || []).includes('jb-a9c0ffe3'), 'a ✕ the storage held is OWED in the record, on disk (the «still being deleted» promise survives a restart)');
+      ok(v3.pending && rec3 && (rec3.owed || []).includes('jb-a9c0ffe3'), 'a ✕ the storage held is OWED in the record, on disk (the «still being deleted» promise survives a restart)', { v3, owed: rec3 && rec3.owed });
       X._logsRm = real; X.shutdown();
       const { jm: X2 } = boot(x, { bootDelayMs: 20 });
       // B-d24c: the dir goes on the worker's thread BEFORE the main thread reads the worker's answer and clears what is owed —
