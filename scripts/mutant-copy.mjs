@@ -129,6 +129,9 @@ export function mutantCopies(name, repo) {
   return { dir, files, write, load, pathFor };
 }
 
+// ONE ancestor stack, pushed and popped (a copy per node made the walk quadratic in a long suite) — the walk of both censuses
+// below and of scriptCensus, which walks once for both (B-7e49): a callback sees each node with its ancestors, no subtree pruned
+const walkAst = (n, fn, anc = []) => { if (!n || typeof n.type !== 'string') return; fn(n, anc); anc.push(n); for (const k in n) { if (k === 'type' || k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') walkAst(x, fn, anc); } else if (v && typeof v.type === 'string') walkAst(v, fn, anc); } anc.pop(); };
 /** B-0d3e: THE UNANCHORED EDITS of a script — every `.replace(` / `.replaceAll(` / `.split(…).join(` on a product file's
  *  text (a binding read from src/, server.js or data/bin) whose result reaches a LOADER (a mutant copy's write / load, a
  *  `_compile`, a vm run, `new Function`, a written copy), directly or through the one const it is bound to — each the
@@ -139,16 +142,15 @@ export function mutantCopies(name, repo) {
  *  text still — so a second edit appended to a cured chain (`editAnchor(src, a, b, f).replace(c, d)`) is counted like any other.
  *  Only a REBASE of module paths is left out (`rebase` below: every match, a relative path and no module's name in the pattern, a
  *  replacement that re-roots each path the same way, choosing nothing); a lookup, a swap, a first match, prose stay counted. */
-export function unanchoredEdits(src, { ast: given = null } = {}) {
+export function unanchoredEdits(src, { ast: given = null, plan = false } = {}) {
   // the cheap door first: no line that reads a product file, or no edit, or no loader ⇒ nothing to parse
-  if (!/\.(?:replace|replaceAll|join)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\(/.test(src)) return [];
-  if (!src.split('\n').some((l) => /\b(?:readFileSync|readRepo|readSrc|readTree|readText|readFile|read)\s*\(/.test(l) && /['"`](?:src\/|server\.js|data\/bin\/|src['"`])/.test(l))) return [];
+  if (!/\.(?:replace|replaceAll|join)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\(/.test(src)) return plan ? null : [];
+  if (!src.split('\n').some((l) => /\b(?:readFileSync|readRepo|readSrc|readTree|readText|readFile|read)\s*\(/.test(l) && /['"`](?:src\/|server\.js|data\/bin\/|src['"`])/.test(l))) return plan ? null : [];
   let ast = given;
   if (!ast) for (const sourceType of ['module', 'script']) { try { ast = req('acorn').parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { } }
-  if (!ast) return [];
+  if (!ast) return plan ? null : [];
   const text = (n) => src.slice(n.start, n.end);
-  // ONE ancestor stack, pushed and popped (a copy per node made the walk quadratic in a long suite)
-  const walk = (n, fn, anc = []) => { if (!n || typeof n.type !== 'string') return; fn(n, anc); anc.push(n); for (const k in n) { if (k === 'type' || k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') walk(x, fn, anc); } else if (v && typeof v.type === 'string') walk(v, fn, anc); } anc.pop(); };
+  const walk = walkAst;
   const READ = /\b(?:readFileSync|readRepo|readSrc|readTree|readText|readFile|read)\s*\(/, PRODUCT = /['"`](?:src\/|server\.js|data\/bin\/|src['"`])/;
   const LOADER = /(?:^|\.)(?:load|write|_compile|runInThisContext|runInNewContext|compileFunction|writeFileSync)$/;
   // ONE walk: the product bindings, the identifiers handed to a loader, and every candidate edit with what it reaches
@@ -207,7 +209,7 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
   };
   const ids = (n, into) => walk(n, (x) => { if (x.type === 'Identifier') into.add(x.name); });
   const curedOf = (x) => { if (!x || x.type !== 'CallExpression' || x.callee.type !== 'Identifier' || !CURED.has(x.callee.name)) return false; const b = baseOf(x); return !!b && b.type === 'Identifier' && product.has(b.name); };
-  walk(ast, (n, anc) => {
+  const visit = (n, anc) => {
     if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && READ.test(text(n.init)) && PRODUCT.test(text(n.init))) product.add(n.id.name);
     else if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier' && READ.test(text(n.right)) && PRODUCT.test(text(n.right))) product.add(n.left.name);
     // a cured link's result held in a name is the product's text still (`const c = editAnchor(src, …)`; then `c.replace(…)`)
@@ -224,10 +226,15 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
     let inLoader = false, decl = null;
     for (let i = anc.length - 1; i >= 0; i--) { if (!inLoader && isLoader(anc[i])) inLoader = true; if (!decl && anc[i].type === 'VariableDeclarator' && anc[i].id.type === 'Identifier') decl = anc[i].id.name; }
     cands.push({ n, base: base.name, inLoader, decl });
-  });
+  };
+  const finish = () => {
   const out = [];
   for (const c of cands) if (product.has(c.base) && (c.inLoader || (c.decl && loaderArgs.has(c.decl)))) out.push({ line: src.slice(0, c.n.start).split('\n').length, text: text(c.n).replace(/\s+/g, ' ').slice(0, 100) });
   return out;
+  };
+  if (plan) return { visit, finish };   // B-7e49: scriptCensus walks the AST once for both censuses
+  walk(ast, visit);
+  return finish();
 }
 /** THE ANCHOR HELPERS (B-0d3e — the row's «every helper that builds a control from an anchor»): every function in a script
  *  whose OWN PARAMETER is the anchor of a `.replace` / `.replaceAll` / `.split` and whose body reaches a loader (a mutant
@@ -241,19 +248,19 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
  *  is one — the anchor's edit or test, a comparison of one, or a variable whose value is one (`const m = src.replace(from, to)`
  *  ⇒ `ok(m !== src, …)`). A message naming the anchor tests nothing; an unrelated throw (a missing file) or check
  *  (`ok(true, 'loaded')`) no longer lets a helper that answers null pass. anchored() stays the door (it fails by name itself). */
-export function anchorHelpers(src, { ast: given = null } = {}) {
-  if (!/\.(?:replace|replaceAll|split)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\s*\(/.test(src)) return [];
+export function anchorHelpers(src, { ast: given = null, plan = false } = {}) {
+  if (!/\.(?:replace|replaceAll|split)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\s*\(/.test(src)) return plan ? null : [];
   let ast = given;
   if (!ast) for (const sourceType of ['module', 'script']) { try { ast = req('acorn').parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { } }
-  if (!ast) return [];
+  if (!ast) return plan ? null : [];
   const text = (n) => src.slice(n.start, n.end);
-  const walk = (n, fn, anc = []) => { if (!n || typeof n.type !== 'string') return; fn(n, anc); anc.push(n); for (const k in n) { if (k === 'type' || k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) walk(x, fn, anc); } else if (v && typeof v.type === 'string') walk(v, fn, anc); } anc.pop(); };
+  const walk = walkAst;
   const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
   const LOADER = /(?:^|\.)(?:load|write|_compile|runInThisContext|runInNewContext|runInContext|compileFunction|writeFileSync)$|^require$/;
   const params = (fn) => { const out = new Set(); for (let q of fn.params) { if (q.type === 'AssignmentPattern') q = q.left; if (q.type === 'Identifier') out.add(q.name); } return out; };
   const found = new Map(), anchorsOf = new Map();
   const isEditCall = (n) => n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && !n.callee.computed && /^(?:replace|replaceAll|split)$/.test(n.callee.property.name || '') && n.arguments[0] && n.arguments[0].type === 'Identifier';
-  walk(ast, (n, anc) => {
+  const visit = (n, anc) => {
     if (!isEditCall(n)) return;
     const a = n.arguments[0];
     for (let i = anc.length - 1; i >= 0; i--) {
@@ -263,7 +270,8 @@ export function anchorHelpers(src, { ast: given = null } = {}) {
       if (!found.has(anc[i])) { const up = anc[i - 1]; found.set(anc[i], (anc[i].id && anc[i].id.name) || (up && up.type === 'VariableDeclarator' && up.id.type === 'Identifier' && up.id.name) || (up && up.type === 'Property' && up.key && (up.key.name || up.key.value)) || (up && up.type === 'AssignmentExpression' && text(up.left).slice(0, 40)) || '(anonymous)'); }
       break;
     }
-  });
+  };
+  const finish = () => {   // the answer, from what the walk gathered
   const out = [];
   for (const [fn, name] of found) {
     let loads = false, names = false;
@@ -301,6 +309,20 @@ export function anchorHelpers(src, { ast: given = null } = {}) {
     if (loads && !names) out.push({ line: src.slice(0, fn.start).split('\n').length, name: String(name) });
   }
   return out;
+  };
+  if (plan) return { visit, finish };   // B-7e49: scriptCensus walks the AST once for both censuses
+  walk(ast, visit);
+  return finish();
+}
+/** B-7e49 (lane lg-recovery, 主开发 r2206): BOTH censuses of one script over ONE walk of its AST — each its own doors,
+ *  visitor and answer (unanchoredEdits and anchorHelpers above, called in their plan form), the whole-AST walk shared: the same
+ *  nodes in the same order with the same ancestor stack, so each answer is the one its own call gives. → { edits, helpers } */
+export function scriptCensus(src, { ast }) {
+  const e = unanchoredEdits(src, { ast, plan: true }), h = anchorHelpers(src, { ast, plan: true });
+  if (e && h) walkAst(ast, (n, anc) => { e.visit(n, anc); h.visit(n, anc); });
+  else if (e) walkAst(ast, e.visit);
+  else if (h) walkAst(ast, h.visit);
+  return { edits: e ? e.finish() : [], helpers: h ? h.finish() : [] };
 }
 
 /** rv-browser F7 (lane dc-browser-installs): the REAL keeper over PATCHED install files — a closed world of copies: each

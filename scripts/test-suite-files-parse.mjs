@@ -21,7 +21,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratchDir, anchored } from './scratch.mjs';
-import { mutantCopies, unanchoredEdits, anchorHelpers } from './mutant-copy.mjs';
+import { mutantCopies, unanchoredEdits, anchorHelpers, scriptCensus } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const acorn = createRequire(path.join(REPO, 'package.json'))('acorn');
@@ -90,9 +90,11 @@ console.log('§1 THE TREE — every file under scripts/ that Node would load as 
 {
   const t0 = performance.now();
   // §3's census rides this pass: every suite / lib module under scripts/ (not this file: its plants spell edits in strings)
+  // B-7e49 (主开发 r2206): both of §3's censuses over ONE walk an AST (scripts/mutant-copy.mjs scriptCensus): the parse is the
+  // law's own and serves both laws; no other reader in this process parses these files, and nothing is kept across runs
   const self = path.basename(fileURLToPath(import.meta.url));
   var EDITS = {}, HELPERS = {};   // eslint-disable-line no-var — §3 reads them
-  const r = unparseable(REPO, { visit: (rel, src, ast) => { const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel); if (!m || m[1] === self) return; const e = unanchoredEdits(src, { ast }); if (e.length) EDITS[m[1]] = e; const h = anchorHelpers(src, { ast }); if (h.length) HELPERS[m[1]] = h; } });
+  const r = unparseable(REPO, { visit: (rel, src, ast) => { const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel); if (!m || m[1] === self) return; const { edits: e, helpers: h } = scriptCensus(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; } });
   const ms = Math.round(performance.now() - t0);
   ok(r.files.length >= 1000 && r.files.includes('scripts/ci.mjs') && r.files.includes('scripts/test-suite-files-parse.mjs'),
     `the walk met ${r.files.length} files (${(r.bytes / 1e6).toFixed(1)} MB: ${r.kinds.module} ES modules, ${r.kinds.commonjs} CommonJS, ${r.kinds.detect} by Node's detection), this suite and scripts/ci.mjs among them`);
@@ -223,6 +225,16 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const nC = unanchoredEdits(P("const code = src.replace(/\\/\\/.*$/gm, ''); ok(code.includes('x'), 'read'); const real = MUT.load('src/x.js', src, 'as-is', { same: true });")).length;
   const nD = unanchoredEdits(P("const p = src.replace('a', 'b').replace('c', 'd'); const f = new Function(p);")).length;
   ok(nA === 1 && nB === 0 && nC === 0 && nD === 2, `CONTROL: the walk finds a replace-then-load (1), never an anchored() edit (0) nor a read that feeds no loader (0), and each link of a chain bound once and loaded (2) — ${[nA, nB, nC, nD].join(' / ')}`);
+  // B-7e49 (主开发 r2206): THE ONE WALK — §1 reads both censuses through scriptCensus (one walk an AST); planted scripts, one a door
+  // each way, answer there exactly what the two calls answer — the planted edit and the planted helper found, neither lost
+  const BOTH = P("const cut = (from, to) => { if (src.split(from).length !== 2) return null; return MUT.load('src/x.js', src.replace(from, to), 't'); };");
+  const E_ONLY = P("const m = MUT.load('src/x.js', [src, ';'].join(''), 't');");   // the edits' door only (a product read, a join, a loader)
+  const H_ONLY = "const t = 'x';\nconst cut = (from, to) => { if (t.split(from).length !== 2) return null; return MUT.load('src/x.js', t.replace(from, to), 't'); };\n";
+  const NONE = 'const x = 1;\n';
+  const one = (t) => { const f = scriptCensus(t, { ast: acorn.parse(t, OPTS.module) }); return { e: f.edits, h: f.helpers, same: JSON.stringify(f.edits) === JSON.stringify(unanchoredEdits(t)) && JSON.stringify(f.helpers) === JSON.stringify(anchorHelpers(t)) }; };
+  const fb = one(BOTH), fe = one(E_ONLY), fh = one(H_ONLY), fn0 = one(NONE);
+  ok(fb.same && fb.e.length === 1 && fb.h.length === 1 && fe.same && fe.e.length === 0 && fe.h.length === 0 && fh.same && fh.e.length === 0 && fh.h.length === 1 && fn0.same && !fn0.e.length && !fn0.h.length,
+    `CONTROL (B-7e49): the ONE walk answers what the two calls answer — a script both doors admit ${fb.e.length} edit / ${fb.h.length} helper (the plants found), the edits' door alone ${fe.e.length} / ${fe.h.length}, the helpers' door alone ${fh.e.length} / ${fh.h.length}, neither ${fn0.e.length} / ${fn0.h.length}`);
   // B-0d3e's reach (lane lg-text-legs-2): a chain is followed to its read THROUGH a cured link (a suite's editAnchor, scratch.mjs
   // anchored()), inline or held in a name — before it, a call base was no name and an edit appended after a cure was invisible
   // (2.369.414 held nine in five suites, test-cli-level-scan's path-only control among them). Only a REBASE of module paths is
