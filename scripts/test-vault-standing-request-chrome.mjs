@@ -706,6 +706,18 @@ try {
   // MINOR 3: ✕ Team (a narrowing — no prompt) and a policy typed; the page's 验证是你 window gone (its clock past it), the
   // policy's prompt CANCELLED — the dialog stays open and says the members were saved; then Team picked again ⇒ posted
   await A.evalJs(`(() => { if (!window.__realNow) window.__realNow = Date.now.bind(Date); Date.now = () => window.__realNow() + 12 * 60e3; return true; })()`);
+  // r1957 (the box's red at rows 171 / 174, placed): the page's window is GONE only once the PAGE has forgotten it — the Vault
+  // window's own tick sees its time over at the moved clock and forgets it (src/lib/vault-reveal.js forgetReveal: no later list
+  // load can reopen it). A list load that lands AFTER the move — the 90-day Save's own refresh, or the debounced reload its
+  // vault-contents notice drove, still on their way (the wait above sees the first redraw only) — notes the hub's window, still
+  // open in real time, over the moved clock: the policy's Save then
+  // carried the window and saved with no 验证是你 (the box: no prompt, the dialog closed — never the cancelled road). So the
+  // clock moves on until the page has forgotten it: a STATE (the window's timer hidden), never a time
+  let hForgot = false;
+  for (let i = 0; i < 3 && !hForgot; i++) {
+    hForgot = !!(await A.until(`(() => { const t = document.querySelector('.vw-timer'); return t && t.hidden ? true : null; })()`, { timeout: 3000 }));
+    if (!hForgot && i < 2) await A.evalJs(`(() => { const off = Date.now() - window.__realNow(); Date.now = () => window.__realNow() + off + 12 * 60e3; return true; })()`);   // a late note reopened it: move on again
+  }
   const hOpen = await openUse();
   await resetPosts();
   const hX = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const c = d && [...d.querySelectorAll('.pp-chip')].find((x) => !x.closest('.pp-except') && /Team/.test(x.textContent)); const x = c && c.querySelector('.pp-chip-x'); if (!x) return null; x.click(); const p = d.querySelector('.vw-use-policy-in'); p.value = 'only read-only calls to x.example'; p.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
@@ -714,12 +726,12 @@ try {
   await A.evalJs(`(() => { const b = document.querySelector('#vault-reveal-dialog .btn-cancel'); if (b) b.click(); return !!b; })()`);
   await A.until(`!document.getElementById('vault-reveal-dialog') || null`, { timeout: 8000 });
   const hSaid = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return { closed: true }; const e = d.querySelector('.vault-secret-error'); if (!e || !e.textContent) return null; e.scrollIntoView({ block: 'center' }); return { closed: false, words: e.textContent }; })()`, { timeout: 8000 });
-  const hRows1 = await postsOf('/api/vault/use-grants');
+  const hRows1 = await postsOf('/api/vault/use-grants'), hPol1 = await postsOf('/api/vault/use-policy');   // r1957's read: the policy's own posts in the facts (a save with no prompt and no post at all read alike)
   await sleep(400);
   await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
   await A.shot('vsr-31-members-saved-policy-not-desktop.png');
   const hRow1 = await A.evalJs(rowFacts);
-  check('(r11, MINOR 3) Team ✕\'d and a policy typed, Save: the row lands (a narrowing), the policy\'s 验证是你 is CANCELLED — the dialog stays open and says «成员已保存；策略没有保存» (7e99ef689: no words), the Vault row has no Team', hOpen && !!hX && hPw === 'pw' && !!hSaid && hSaid.closed === false && hSaid.words === '成员已保存；策略没有保存' && Array.isArray(hRows1) && hRows1.length === 1 && !!hRow1 && !hRow1.chips.some((c) => /^Team · /.test(c)), { hX, hPw, hSaid, posts: hRows1 && hRows1.length, hRow1 });
+  check('(r11, MINOR 3) Team ✕\'d and a policy typed, Save: the row lands (a narrowing), the policy\'s 验证是你 is CANCELLED — the dialog stays open and says «成员已保存；策略没有保存» (7e99ef689: no words), the Vault row has no Team', hForgot && hOpen && !!hX && hPw === 'pw' && !!hSaid && hSaid.closed === false && hSaid.words === '成员已保存；策略没有保存' && Array.isArray(hRows1) && hRows1.length === 1 && !!hRow1 && !hRow1.chips.some((c) => /^Team · /.test(c)), { hForgot, hX, hPw, hSaid, posts: hRows1 && hRows1.length, polPosts: hPol1 && hPol1.length, hRow1 });
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-policy-in'); if (p) { p.value = ''; p.dispatchEvent(new Event('input', { bubbles: true })); } const box = d && d.querySelector('.pp-input'); if (box) { box.focus(); box.dispatchEvent(new Event('focus')); } return true; })()`);
   await sleep(300);
   const hPick = await A.until(`(() => { const row = [...document.querySelectorAll('.pp-row')].find((x) => x.isConnected && !x.closest('.pp-except') && /Team/.test(x.textContent)); if (!row) return null; row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); row.click(); return true; })()`, { timeout: 8000 });
