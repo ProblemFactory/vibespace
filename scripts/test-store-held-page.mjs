@@ -1071,6 +1071,80 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     const OVx = await overScene(cut('prior-not-carried', 'code: (o && o.code) || null, prior: priorLoss(), written: false', 'code: (o && o.code) || null, written: false'));   // stale-pins: kept (the red control puts the line as taken back)
     ok(!!OVx.vd && OVx.vd.kind === 'known' && OVx.vd.since !== OVx.since0, 'CONTROL (this run\'s mark carrying nothing, in a copy — the line as taken): the old loss is told with THIS run\'s moment — red', J(OVx.vd));
   }
+  // r2254 (the round w9i2z96h7's MUST): a press told «could not record it yet» whose note LANDS LATER no longer carries the loss —
+  // a second episode of this run, then a kill: the next start tells THIS episode's own moment, never the noted loss's
+  {
+    const laterLanded = async (src) => {
+      const dd = scratch(); await runOne(dd, { owe: true });
+      const m0 = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8'));
+      const A = hub(dd); still(() => A.R.readLayouts()); await stopOf(A); still(() => A.R.flushLayouts({ stop: true }));   // carried; nobody pressed
+      await new Promise((r) => setTimeout(r, 5));
+      const C = hub(dd, src); still(() => C.R.readLayouts()); await stopOf(C);
+      plant(tmpOf(dd, 'layouts.json'));
+      const pr = await still(() => C.call('post', '/api/stores/layouts.json/stop-noted', { headers: { 'sec-fetch-site': 'same-origin' } }));   // refused: not recorded yet
+      await C.R.layoutsMarkSettled();
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      still(() => { C.R.writeLayouts(desk('w7')); C.R.flushLayouts(); }); await C.R.layoutsMarkSettled();   // the storage is back: the note LANDS
+      await new Promise((r) => setTimeout(r, 5));
+      plant(tmpOf(dd, 'layouts.json'));
+      still(() => { C.R.writeLayouts(desk('w8')); C.R.flushLayouts(); }); await C.R.layoutsMarkSettled();   // a SECOND episode of this run
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      let mk = null; try { mk = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8')); } catch { }
+      const D = hub(dd); still(() => D.R.readLayouts());   // C KILLED
+      return { recorded: pr.body && pr.body.recorded, since0: m0.since, mk, vd: await stopOf(D) };
+    };
+    const LL = await laterLanded(null);
+    ok(LL.recorded === false && !!LL.mk && !LL.mk.prior && !!LL.vd && LL.vd.kind === 'known' && LL.vd.since === LL.mk.since && LL.vd.since !== LL.since0,
+      'r2254 (the must): a press told «could not record it yet» whose note LANDS later carries the noted loss no more — this run\'s second episode, then a kill: the next start tells that episode\'s own moment, never the noted loss\'s', J(LL));
+    const LLx = await laterLanded(cut('press-never-cleared', '    if (_pressPending && _producedSeq >= _pressSeq) _pressPending = null;\n', ''));
+    ok(!!LLx.vd && LLx.vd.since === LLx.since0, 'CONTROL (the pending press never cleared, in a copy — the line as taken): the noted, recorded loss is told again with its old moment — red', J(LLx.vd));
+  }
+  // r2254 (2): an episode BEGUN BEFORE the verdict learns its prior once the verdict is KNOWN — a kill tells the old loss's moment
+  {
+    const beganEarly = async (src) => {
+      const dd = scratch(); await runOne(dd, { owe: true });
+      const m0 = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8'));
+      await new Promise((r) => setTimeout(r, 5));
+      const C = hub(dd, src);
+      plant(tmpOf(dd, 'layouts.json'));
+      still(() => { C.R.readLayouts(); C.R.writeLayouts(desk('w4')); C.R.flushLayouts(); });   // refused BEFORE the verdict: this run's own episode, no prior yet
+      const vc = await stopOf(C); await C.R.layoutsMarkSettled();
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      let mk = null; try { mk = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8')); } catch { }
+      const D = hub(dd); still(() => D.R.readLayouts());   // C KILLED
+      return { since0: m0.since, vc, mk, vd: await stopOf(D) };
+    };
+    const BE = await beganEarly(null);
+    ok(!!BE.vc && BE.vc.kind === 'known' && !!BE.mk && !!BE.mk.prior && BE.mk.prior.since === BE.since0 && !!BE.vd && BE.vd.kind === 'known' && BE.vd.since === BE.since0,
+      'r2254 (2): an episode begun BEFORE the start\'s verdict learns its prior once the verdict is KNOWN (its mark written again) — after a kill the old loss is told with its own moment', J(BE));
+    const BEx = await beganEarly(cut('prior-not-learned', "      if (_mark && v && v.kind === 'known' && !_mark.prior) {", "      if (false) {"));
+    ok(!!BEx.vd && BEx.vd.since !== BEx.since0, 'CONTROL (the verdict not handed to the running episode, in a copy — the line as taken): the old loss is told with this run\'s moment — red', J(BEx.vd));
+  }
+  // r2254 (2): an episode ENDED BY NAME (a file appeared where the start found none) puts the last run's followed KNOWN mark back — a kill
+  // still tells that loss (removing it with the episode left nothing to tell)
+  {
+    const endedByName = async (src) => {
+      const dd = scratch();
+      const B = hub(dd); plant(tmpOf(dd, 'layouts.json'));
+      still(() => { B.R.readLayouts(); B.R.writeLayouts(desk('w1')); B.R.flushLayouts(); }); await B.R.layoutsMarkSettled();   // its create refused: a KNOWN loss on no file
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      const m0 = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8'));
+      const C = hub(dd, src); still(() => C.R.readLayouts()); const vc = await stopOf(C);   // KNOWN: the mark names «no file», and there is none
+      plant(tmpOf(dd, 'layouts.json'));
+      still(() => { C.R.writeLayouts(desk('w2')); C.R.flushLayouts(); }); await C.R.layoutsMarkSettled();   // this run's own episode, over the followed mark
+      fs.rmSync(tmpOf(dd, 'layouts.json'), { recursive: true, force: true });
+      fs.writeFileSync(path.join(dd, 'layouts.json'), J(desk('w9')));   // a file APPEARS where the start found none
+      still(() => { C.R.writeLayouts(desk('w3')); C.R.flushLayouts(); }); await settle(4); await C.R.layoutsMarkSettled();   // refused by name: the episode ENDS, nothing landed
+      let mk = null; try { mk = JSON.parse(fs.readFileSync(path.join(dd, 'layouts.owed.json'), 'utf8')); } catch { }
+      const D = hub(dd); still(() => D.R.readLayouts());   // C KILLED
+      return { since0: m0.since, run0: m0.run, vc, mk, vd: await stopOf(D) };
+    };
+    const EN = await endedByName(null);
+    ok(!!EN.vc && EN.vc.kind === 'known' && !!EN.mk && EN.mk.run === EN.run0 && !!EN.vd && EN.vd.kind === 'known' && EN.vd.since === EN.since0,
+      'r2254 (2): an episode of this run ENDED BY NAME (a file appeared where the start found none) puts the last run\'s KNOWN mark back — after a kill that loss is told with its own moment', J(EN));
+    const ENx = await endedByName(cut('ended-by-name-removes', "    if (_oldKnown && !_oldMarkGone && _markJudged) { followOld(_lastLanded ? { run: _lastLanded.run, seq: _lastLanded.seq } : null); return; }\n", ''));
+    ok(!(ENx.vd && ENx.vd.kind === 'known' && ENx.vd.since === ENx.since0), 'CONTROL (the episode\'s end removing the mark, in a copy — the line as taken): nothing is told of the last run\'s loss after the kill — red', J(ENx.vd));
+  }
   // r1595 (b): «Understood» asks a flush — a kill right after the press never tells the noted loss again
   {
     const pk = async (src) => {
@@ -1141,7 +1215,7 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
       ok(!!strip && strip.dataset.stop === 'known', 'CONTROL (the press never ends the notice, in a copy): the strip stays after «Understood» — red');
       strip = null;
       // r1798 (1): the reply says the note could NOT be written yet ⇒ the page says so (the loss is told again at the next start)
-      const SAYS = 'Noted here, but VibeSpace could not record it yet: the storage did not take the write. It is told again at the next start.';
+      const SAYS = 'Noted here, but VibeSpace could not record it yet: the storage did not take the write. It is recorded once the storage takes it; until then the next start tells it again.';
       const pressUnrecorded = async (M) => {
         ROUTE = () => answer(200, { success: true, noted: true, recorded: false });
         M.setStoreDoors({}); M.noteStoreStop(KNOWN); const n0 = toasts().length;

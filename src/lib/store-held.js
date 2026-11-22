@@ -169,7 +169,7 @@ async function noteStopPressed() {
   if (r && r.success) {
     noteStoreStopOver();
     // r1798 (1): noted here, but the note could not be written yet — the next start tells the loss again, and the press says so now
-    if (r.recorded === false) showToast(t('Noted here, but VibeSpace could not record it yet: the storage did not take the write. It is told again at the next start.'), { type: 'error' });
+    if (r.recorded === false) showToast(t('Noted here, but VibeSpace could not record it yet: the storage did not take the write. It is recorded once the storage takes it; until then the next start tells it again.'), { type: 'error' });
   }
   else showToast((r && r.error) || t('It could not be noted — try again.'), { type: 'error' });
 }

@@ -238,6 +238,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _oldKnown = null;          // r1595 (a): the last run's mark when it IS the KNOWN verdict — it follows this run's landings of such bytes
   let _startUnnoted = null;      // a KNOWN loss the start's own stamp carries: bytes made before the verdict carry it on (its road's (a))
   let _pressPending = null;      // r1798 (1)/(2): a loss the person noted whose note has not landed yet — it is still the loss to carry
+  let _pressSeq = 0;             // r2254: the seq of the press's own bytes — a landing of those (or later) bytes records the note
   let _judgedResolve = null;
   const _stopJudgedP = new Promise((r) => { _judgedResolve = r; });
   let _markChain = Promise.resolve();
@@ -469,13 +470,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
    *  page told), the last run's mark is removed off the loop (its verdict is made; a KNOWN loss rides this run's stamp from here) */
   function layoutsLanded() {
     _landedThisRun = true;
+    // r2254 (the must): the press's note LANDED — those bytes, or later ones (they carry no loss either): the loss is no longer this run's to carry
+    if (_pressPending && _producedSeq >= _pressSeq) _pressPending = null;
     if (_stopFact && _stopFact.kind === 'maynot') { _stopFact = null; storeWord('store-stop-over', { file: 'layouts.json', why: 'written' }); }
     oldMarkAfterLanding();   // (r1387 (7): never a mark not yet judged)
   }
-  /** r1595 (a): the last run's mark after a landing of THIS run. Bytes made AFTER the verdict carry a KNOWN loss (`unnoted`): the mark
-   *  goes. Bytes made BEFORE it carry none: a KNOWN loss's mark FOLLOWS that landing (its base is the file's stamp now — kept as it
-   *  was, it would name a stamp the file no longer has and read «may not»), written off the loop by the mark's one writer, so a kill
-   *  before the next landing still reads KNOWN. Any other verdict: the mark goes. */
   /** the last run's KNOWN mark, written again on `base` (the file's stamp now) by the mark's one writer, off the loop */
   function followOld(base) {
     const m = { run: _oldKnown.run, seq: _oldKnown.seq, since: _oldKnown.since, code: _oldKnown.code, base, ...(_oldKnown.prior ? { prior: _oldKnown.prior } : {}), written: false, trying: false };
@@ -484,6 +483,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
   /** r1798 (2): the last run's KNOWN loss nobody noted, for this run's own mark to carry ({since, cause}), or null */
   function priorLoss() { const f = _stopFact && _stopFact.kind === 'known' ? _stopFact : _pressPending; return f ? { since: f.since, cause: f.cause } : null; }
+  /** r1595 (a): the last run's mark after a landing of THIS run. Bytes made AFTER the verdict carry a KNOWN loss (`unnoted`): the mark
+   *  goes. Bytes made BEFORE it carry none: a KNOWN loss's mark FOLLOWS that landing (its base is the file's stamp now — kept as it
+   *  was, it would name a stamp the file no longer has and read «may not»), written off the loop by the mark's one writer, so a kill
+   *  before the next landing still reads KNOWN. Any other verdict: the mark goes. */
   function oldMarkAfterLanding() {
     if (_oldMarkGone || !_markJudged || _mark) return;
     if (_oldKnown && _producedSeq <= _judgedSeq && _lastLanded && _lastLanded.run === RUN) { followOld({ run: _lastLanded.run, seq: _lastLanded.seq }); return; }
@@ -2035,7 +2038,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // again at the next start — right; the person's page says so)
     let recorded = true;
     if (was && was.kind === 'known') {
-      _pressPending = was;   // (a refused note's write begins an episode: its mark carries this loss, never this run's time for it)
+      _pressPending = was; _pressSeq = _vsSeq + 1;   // (a refused note's write begins an episode: its mark carries this loss, never this run's time for it)
       recorded = !_layoutsRead || !_layoutsCache ? false : await new Promise((resolve) => { try { flushLayouts({ press: true }, (ok) => resolve(ok === true)); } catch { resolve(false); } });
       if (recorded && _pressPending === was) _pressPending = null;
       if (!recorded) console.warn('[layouts] the person noted the last stop\'s loss, but the note could not be written yet — it is told again at the next start');
