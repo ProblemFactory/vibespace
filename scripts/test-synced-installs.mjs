@@ -25,28 +25,32 @@ try {
   // the sandbox PATH: stand-ins first, the box's own tools after
   const BIN = path.join(T0, 'bin'); fs.mkdirSync(BIN);
   const stub = (name, body) => { fs.writeFileSync(path.join(BIN, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(BIN, name), 0o755); };
-  stub('install', 'while [ $# -gt 2 ]; do shift; done; echo "install $2" >> "$LOG"; cp "$1" "$2"');
+  stub('install', 'while [ $# -gt 2 ]; do shift; done; echo "install $2" >> "$LOG"; [ -z "$INSTALL_FAIL" ] || exit 1; cp "$1" "$2"');
   stub('visudo', 'echo "visudo $*" >> "$LOG"; [ -z "$VISUDO_FAIL" ]');
   stub('sync', 'echo "sync $*" >> "$LOG"; [ -z "$SYNC_FAIL" ]');
-  stub('mv', `echo "mv $*" >> "$LOG"; exec ${real('mv')} "$@"`);
+  stub('mv', `echo "mv $*" >> "$LOG"; [ -z "$MV_FAIL" ] || exit 1; exec ${real('mv')} "$@"`);
   stub('stat', `case "$*" in *%u*) echo 0 ;; *%a*) echo 755 ;; *) exec ${real('stat')} "$@" ;; esac`);
-  const sh = (script, env = {}) => { const log = path.join(T0, `log-${Math.random().toString(36).slice(2)}`); fs.writeFileSync(log, ''); const r = cp.spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, LOG: log, ...env } }); return { rc: r.status, out: r.stdout + r.stderr, log: fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) }; };
+  const sh = (script, env = {}) => { const log = path.join(T0, `log-${Math.random().toString(36).slice(2)}`); fs.writeFileSync(log, ''); const r = cp.spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, LOG: log, ...env } }); return { rc: r.status, out: r.stdout + r.stderr, err: r.stderr, log: fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) }; };
   const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
   // ① THE SUDOERS DROP-IN AND THE ROOT HELPER (INSTALL_SCRIPT's two install lines)
   console.log('① the sudoers drop-in and the root helper: the file that takes the name checked, synced, then moved');
   const lineOf = (script, re) => String(script).split('\n').find((l) => re.test(l)) || '';
+  // r1716 (4): every scene runs under its script's OWN head (its first line: set -eu), as production does
+  const HEAD_I = String(AS.INSTALL_SCRIPT).split('\n')[0], HEAD_S = String(AS.SYS_SCRIPT).split('\n')[0];
+  ok(/^set -[a-z]*e[a-z]*$/.test(HEAD_I) && /^set -[a-z]*e[a-z]*$/.test(HEAD_S) && HEAD_I.includes('u') && HEAD_S.includes('u'), `the scenes run under the scripts' own heads (${HEAD_I} · ${HEAD_S})`, { HEAD_I, HEAD_S });
   const HELPER = lineOf(AS.INSTALL_SCRIPT, /^if cmp -s "\$T\/h" "\$H"/), SUDOERS = lineOf(AS.INSTALL_SCRIPT, /^if cmp -s "\$T\/s" "\$SD"/);
   ok(!!HELPER && !!SUDOERS, 'the install script\'s two install lines are found', { HELPER: !!HELPER, SUDOERS: !!SUDOERS });
-  const install = (lines, { helperSame = false, oldSudoers = null, env = {} } = {}) => {
+  const install = (lines, { helperSame = false, oldHelper = null, oldSudoers = null, digest = null, env = {} } = {}) => {
     const d = fs.mkdtempSync(path.join(T0, 'inst-')), T = path.join(d, 't'); fs.mkdirSync(T); fs.mkdirSync(path.join(d, 'sudoers.d'));
     fs.writeFileSync(path.join(T, 'h'), '#!/bin/sh\necho helper\n'); fs.writeFileSync(path.join(T, 's'), '#1000 ALL=(root) NOPASSWD:NOSETENV: /h\n');
     const H = path.join(d, 'helper'), SD = path.join(d, 'sudoers.d', '~vibespace-sysroot');
     if (helperSame) fs.copyFileSync(path.join(T, 'h'), H);
+    if (oldHelper !== null) fs.writeFileSync(H, oldHelper);
     if (oldSudoers !== null) fs.writeFileSync(SD, oldSudoers);
     const hd = cp.spawnSync('sh', ['-c', `sha256sum < ${shq(path.join(T, 'h'))} | cut -d" " -f1`], { encoding: 'utf8' }).stdout.trim();
-    const r = sh(`say() { printf '= %s\\n' "$*"; }; T=${shq(T)}; H=${shq(H)}; SD=${shq(SD)}; set -- x y ${hd} 0; ${lines.join('\n')}`, env);
-    return { ...r, sd: fs.existsSync(SD) ? fs.readFileSync(SD, 'utf8') : null, sdNew: fs.existsSync(SD + '.new'), hNew: fs.existsSync(H + '.new'), H, SD };
+    const r = sh(`${HEAD_I}; say() { printf '= %s\\n' "$*"; }; T=${shq(T)}; H=${shq(H)}; SD=${shq(SD)}; set -- x y ${digest || hd} 0; ${lines.join('\n')}`, env);
+    return { ...r, sd: fs.existsSync(SD) ? fs.readFileSync(SD, 'utf8') : null, sdNew: fs.existsSync(SD + '.new'), hNew: fs.existsSync(H + '.new'), h: fs.existsSync(H) ? fs.readFileSync(H, 'utf8') : null, H, SD };
   };
   const a = install([HELPER, SUDOERS]);
   const order = (r) => r.log.map((l) => l.split(r.SD).join('SD').split(r.H).join('H')).join(' · ');   // every path of the scene named, each time
@@ -57,6 +61,22 @@ try {
   ok(c.rc === 125 && /= refused sudoers-not-installed/.test(c.out) && c.sd === 'the old drop-in\n' && !c.sdNew && !c.log.some((l) => /^(sync|mv) /.test(l)), `① a failed CHECK of the file that takes the name: refused, the old drop-in kept, nothing synced or moved (${order(c)})`, { out: c.out, log: c.log });
   const e = install([HELPER, SUDOERS], { env: { SYNC_FAIL: '1' } });
   ok(e.rc === 125 && /= refused helper-not-installed/.test(e.out) && !e.hNew, `① the helper's failed sync: refused by name (helper-not-installed), its new copy removed (${order(e)})`, { out: e.out, log: e.log });
+  // r1716 (1): EVERY STEP OF BOTH CHAINS FAILED IN TURN — the install, the check, the sync, the mv: each ends with the .new
+  // removed, the refusal said, exit 125, and the live file as it was
+  const OLD_H = '#!/bin/sh\necho the old helper\n', OLD_SD = 'the old drop-in\n', WRONG = 'f'.repeat(64);
+  for (const [step, opt] of [['install', { env: { INSTALL_FAIL: '1' } }], ['digest check', { digest: WRONG }], ['sync', { env: { SYNC_FAIL: '1' } }], ['mv', { env: { MV_FAIL: '1' } }]]) {
+    const x = install([HELPER, SUDOERS], { oldHelper: OLD_H, ...opt });
+    ok(x.rc === 125 && /= refused helper-not-installed/.test(x.out) && !x.hNew && x.h === OLD_H && !/= helper installed/.test(x.out), `① the helper's failed ${step}: refused by name (helper-not-installed), exit 125, its new copy removed, the live helper as it was (${order(x)})`, { out: x.out, log: x.log });
+  }
+  for (const [step, opt] of [['install', { env: { INSTALL_FAIL: '1' } }], ['visudo check', { env: { VISUDO_FAIL: '1' } }], ['sync', { env: { SYNC_FAIL: '1' } }], ['mv', { env: { MV_FAIL: '1' } }]]) {
+    const x = install([HELPER, SUDOERS], { helperSame: true, oldSudoers: OLD_SD, ...opt });
+    ok(x.rc === 125 && /= refused sudoers-not-installed/.test(x.out) && !x.sdNew && x.sd === OLD_SD && !/= sudoers installed/.test(x.out), `① the drop-in's failed ${step}: refused by name (sudoers-not-installed), exit 125, its .new removed, the live drop-in as it was (${order(x)})`, { out: x.out, log: x.log });
+  }
+  // r1716 (2): the helper's SECOND digest check (on the copy that takes the name) — its leg is the «digest check» above; its RED,
+  // the line with that check cut: a copy whose bytes are not this release's takes the name
+  const NO_SECOND = anchored(HELPER, '[ "$(sha256sum < "$H.new" | cut -d" " -f1)" = "$3" ] && ', '', 'the helper\'s second digest check');
+  const n2 = install([NO_SECOND, SUDOERS], { oldHelper: OLD_H, digest: WRONG });
+  ok(/= helper installed/.test(n2.out) && n2.h !== OLD_H, `① RED (the second digest check cut): a copy whose bytes are not this release's took the helper's name (${order(n2)})`, { out: n2.out, log: n2.log });
   // RED: the release's own lines (no check of the file that takes the name, no sync)
   const OLD_HELPER = 'if cmp -s "$T/h" "$H"; then say helper same; else install -m 0755 -o root -g root "$T/h" "$H.new"; mv -f "$H.new" "$H"; say helper installed; fi';   // stale-pins: kept (the release's line, the RED)
   const OLD_SUDOERS = 'if cmp -s "$T/s" "$SD"; then say sudoers same; else install -m 0440 -o root -g root "$T/s" "$SD.new"; mv -f "$SD.new" "$SD"; say sudoers installed; fi';   // stale-pins: kept (the release's line, the RED)
@@ -69,12 +89,18 @@ try {
   const put = (line, env = {}) => {
     const d = fs.mkdtempSync(path.join(T0, 'put-')), dir = path.join(d, 'etc'); fs.mkdirSync(dir);
     const src = path.join(d, 'src.conf'); fs.writeFileSync(src, 'new\n'); fs.writeFileSync(path.join(dir, 'app.conf'), 'old\n');
-    const r = sh(`say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }; ${line}\nput ${shq(src)} ${shq(fs.realpathSync(dir))} app.conf; say put-done`, env);
+    const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }; ${line}\nput ${shq(src)} ${shq(fs.realpathSync(dir))} app.conf; say put-done`, env);
     return { ...r, file: fs.readFileSync(path.join(dir, 'app.conf'), 'utf8'), vs: fs.existsSync(path.join(dir, '.app.conf.vs')), order: r.log.map((l) => l.replace(/ \S*\//g, ' ')).join(' · ') };
   };
   const p1 = put(PUT), p2 = put(PUT, { SYNC_FAIL: '1' });
   ok(!!PUT && p1.rc === 0 && /= put-done/.test(p1.out) && p1.file === 'new\n' && p1.order === 'install .app.conf.vs · sync -- .app.conf.vs · mv -fT .app.conf.vs app.conf', `② put(): synced before its move (${p1.order})`, p1);
   ok(p2.rc === 125 && /= refused not-synced \S*app\.conf/.test(p2.out) && p2.file === 'old\n' && !p2.vs, `② put()'s failed sync: refused by name (not-synced), the old file kept, the temp removed (${p2.order})`, p2);
+  // r1716 (3): a failure that is NOT the sync (here the install) is still said link-in-userland — never «not-synced»
+  const p3 = put(PUT, { INSTALL_FAIL: '1' });
+  ok(p3.rc === 125 && /= refused link-in-userland \S*app\.conf/.test(p3.out) && !/not-synced/.test(p3.out) && p3.file === 'old\n' && !p3.vs, `② put()'s failed install: still refused as link-in-userland (only a failed sync is «not-synced»), the old file kept (${p3.order})`, p3);
+  const ALL_NS = anchored(PUT, '[ $r != 3 ] || refuse not-synced "$2/$3"; refuse link-in-userland "$2/$3";', 'refuse not-synced "$2/$3";', 'put()\'s failure told apart by its code');
+  const p4 = put(ALL_NS, { INSTALL_FAIL: '1' });
+  ok(/= refused not-synced/.test(p4.out) && !/link-in-userland/.test(p4.out), `② RED (every failure read as not-synced): the failed install is said «not-synced» — the leg above catches it (${p4.out.trim().split('\n').pop()})`, p4);
   const OLD_PUT = 'put() { ( cd "$2" && [ "$(pwd -P)" = "$2" ] && [ "$(stat -c %u .)" = 0 ] && [ $(( 0$(stat -c %a .) & 022 )) -eq 0 ] && install -m 0644 -o root -g root "$1" "./.$3.vs" && mv -fT "./.$3.vs" "./$3" ) || refuse link-in-userland "$2/$3"; }';   // stale-pins: kept (the release's line, the RED)
   const p0 = put(OLD_PUT);
   ok(p0.rc === 0 && p0.order === 'install .app.conf.vs · mv -fT .app.conf.vs app.conf', `② RED (the release's put): moved unsynced (${p0.order})`, p0);
@@ -85,9 +111,12 @@ try {
   const iCheck = at(/sha256sum -c --status/), iSync = at(/sync -- "\$K"/), iMove = at(/^mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/);
   ok(iCheck >= 0 && iSync > iCheck && iMove > iSync, `③ the key's steps: the pinned check (${iCheck}), its sync (${iSync}), then the move (${iMove})`, steps);
   const k = path.join(T0, 'xpra.asc.new'), keySync = steps[iSync].split('/usr/share/keyrings/xpra.asc.new').join(k);
-  fs.writeFileSync(k, 'key'); const k1 = sh(keySync); const kept1 = fs.existsSync(k);
-  const k2 = sh(keySync, { SYNC_FAIL: '1' });
-  ok(k1.rc === 0 && kept1 && k2.rc === 3 && !fs.existsSync(k) && /could not be written to disk/.test(k2.out), `③ the key's sync: on its success the checked file stays for the move; on a failure it is removed, said («${k2.out.trim().slice(0, 80)}»), exit 3`, { k1, k2 });
+  // r1716 (4): the plan's own head (planLines: its script's first line)
+  const HEAD_P = String(DA.xpraInstallPlan({ platform: 'linux', apt: '/usr/bin/apt-get', distro: 'debian', like: [], codename: 'bookworm', sudo: true, aptXpra: '3.2' }).script || '').split('\n')[0];
+  ok(/^set -[a-z]*e/.test(HEAD_P), `the key's scene runs under the plan's own head (${HEAD_P})`, HEAD_P);
+  fs.writeFileSync(k, 'key'); const k1 = sh(`${HEAD_P}; ${keySync}`); const kept1 = fs.existsSync(k);
+  const k2 = sh(`${HEAD_P}; ${keySync}`, { SYNC_FAIL: '1' });
+  ok(k1.rc === 0 && kept1 && k2.rc === 3 && !fs.existsSync(k) && /could not be written to disk/.test(k2.err) && !/could not be written to disk/.test(k2.out.slice(0, k2.out.length - k2.err.length)), `③ the key's sync: on its success the checked file stays for the move; on a failure it is removed, said ON STDERR like its two neighbours («${k2.err.trim().slice(0, 80)}»), exit 3`, { k1, k2 });
 
   // ④ THE AGY WRAPPER'S ALLOW RULE (a wrapper boots at load: its function is driven from its own text, with a recording fs)
   console.log('④ the agy wrapper\'s allow rule: the account\'s settings synced before they take the name');

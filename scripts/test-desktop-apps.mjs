@@ -1270,6 +1270,10 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
   ok(df.includes(`&& ${srcLine} \\\n`) && df.includes(`&& ${pinLine}\n`), 'the image writes the plan\'s deb822 source + pin lines verbatim (xpraRepoSteps(bookworm): XPRA_REPO_URL, XPRA_PIN_MAJOR)');
   const pl = M.xpraInstallPlan({ platform: 'linux', apt: true, distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true });
   ok(pl.ok && M.xpraRepoSteps('bookworm').every((l) => pl.script.includes(l)), 'the machine plan runs exactly xpraRepoSteps');
+  // B-bcb8 unit A's follow (r1716 (5)): THE COUNT of the copied commands lives HERE, with the pure function's own suite (the heavy
+  // test-desktop-serve keeps its own pin): xpra.org's plan is ten steps — the keyring folder, the key's fetch, its pinned check,
+  // its SYNC, its move, the source, the pin, apt-get update, the install, xpra --version — each one copied line
+  ok(pl.commands.length === 10 && pl.commands.some((c) => /sync -- /.test(c)) && pl.commands.findIndex((c) => /sha256sum -c/.test(c)) < pl.commands.findIndex((c) => /sync -- /.test(c)) && pl.commands.findIndex((c) => /sync -- /.test(c)) < pl.commands.findIndex((c) => /mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/.test(c)), `xpra.org's plan copies TEN commands, the key synced between its check and its move (${pl.commands.length})`, pl.commands);
 }
 
 { // lane app-display-portal: a sandboxed app's own bus + portal — the PURE plan
