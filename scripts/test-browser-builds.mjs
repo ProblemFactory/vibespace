@@ -2309,6 +2309,29 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
   const Knostore = MUTg.load('src/server/browser-keeper.js', anchored(ksG, "      { const gs = await geoStoreAt(p, stockEnv && stockEnv.geolocation);", "      { const gs = { ok: true, why: 'skipped' }; void geoStoreAt;", '⑦g RED no store'), 'geo-no-store');
   const gs = await geoRoad(Knostore, 'red-nostore');
   ok(gs.geoP.maps === 1 && gs.geoP.default === null, '⑦g RED — the start without the stored denial: the site allowed before keeps «allow» (with nothing of ours alive it reads this machine\'s position — measured)', gs.geoP);
+  // r1897 THE STORED DENIAL'S WRITES ARE SYNCED: the person's kept values FIRST, then the profile's Preferences — each temp's bytes on
+  // disk BEFORE its rename (awaited). The leg watches the keeper's own calls (the fs module it shares) on this profile's folder only
+  const syncOrder = async (Kmod, tag) => {
+    const kz = mkKeeper(path.join(ROOT, `data-geo5-${tag}`), { geoHold: () => ({ arm: async () => ({ ok: true }), disarm: () => true, heldOf: () => null, factOf: () => null, rearmNow: () => false, dispose() { } }) }, Kmod);
+    const pq = kz.createProfile({ label: `Geo synced ${tag}` }); const pr = kz._reg().profiles.find((x) => x && x.id === pq.id);
+    pr.environment = ENVm.environmentVerdict({ location: { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } } }).value;
+    fs.mkdirSync(path.join(pr.dir, 'Default'), { recursive: true });
+    fs.writeFileSync(path.join(pr.dir, 'Default', 'Preferences'), J({ profile: { content_settings: { exceptions: { geolocation: { 'https://maps.example:443,*': { setting: 1 } } } } } }));
+    const seq = [], realOpen = fs.promises.open, realRename = fs.promises.rename;
+    const mine = (p) => String(p).startsWith(pr.dir);
+    fs.promises.open = async function (p, ...a) { const fh = await realOpen.call(this, p, ...a); if (mine(p)) { const s = fh.sync.bind(fh); fh.sync = async () => { seq.push(`sync ${path.basename(String(p))}`); return s(); }; } return fh; };
+    fs.promises.rename = async function (a, b) { if (mine(a)) seq.push(`rename ${path.basename(String(b))}`); return realRename.call(this, a, b); };
+    let e = null;
+    try { e = await thr(() => kz.start(pq.id, { why: 'test' })); } finally { fs.promises.open = realOpen; fs.promises.rename = realRename; }
+    if (!e) await kz.stop(pq.id, { why: 'user' });
+    return { e: e && e.code, seq };
+  };
+  const so = await syncOrder(K, 'real');
+  const wantSeq = [`sync vibespace-geo-kept.json.vibespace-${process.pid}.tmp`, 'rename vibespace-geo-kept.json', `sync Preferences.vibespace-${process.pid}.tmp`, 'rename Preferences'];
+  ok(!so.e && J(so.seq) === J(wantSeq), `⑦g r1897 THE WRITES ARE SYNCED: the person's kept values FIRST, then the profile's Preferences — each temp synced to disk BEFORE its rename (a power cut never leaves a torn Preferences): ${J(so.seq)}`, so);
+  const Knosync = MUTg.load('src/server/browser-keeper.js', anchored(ksG, 'await fh.writeFile(JSON.stringify(obj)); await fh.sync();', 'await fh.writeFile(JSON.stringify(obj));', '⑦g RED no sync'), 'geo-no-sync');
+  const sn = await syncOrder(Knosync, 'red-nosync');
+  ok(!sn.e && !sn.seq.some((x) => x.startsWith('sync ')) && sn.seq.includes('rename Preferences'), '⑦g RED — the write without its sync: each file renamed with its bytes not yet on disk (the order leg goes red)', sn);
 }
 
 // ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════

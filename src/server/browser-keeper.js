@@ -1627,7 +1627,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** B-9584 U2c (主开发 r1264, MEASURED on a real Chrome): THE PROFILE'S OWN STORED DENIAL, written before its Chrome starts (no Chrome
    *  holds the folder: its lock was judged just before). A place or «blocked» ⇒ the default and EVERY stored geolocation row «block»
    *  (src/browser-environment.js geoStoredDenial: a site allowed before would win over the default alone), the person's own values
-   *  kept beside the profile FIRST (GEO_KEPT_FILE, 0600, once — never a later denial's over them). Back at «this machine's» with values
+   *  kept beside the profile FIRST (GEO_KEPT_FILE, 0600, once — never a later denial's over them); each file written to a temp
+   *  SYNCED to disk before its rename (r1897). Back at «this machine's» with values
    *  kept ⇒ given back (geoStoredRestore), the file removed. An untouched profile: one look for the file, nothing else. A file of
    *  another shape is never overwritten: the start is refused by name instead. */
   const GEO_KEPT_FILE = 'vibespace-geo-kept.json';
@@ -1640,7 +1641,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     let prefs = null;
     try { const raw = await fs.promises.readFile(file, 'utf8'); try { prefs = JSON.parse(raw); } catch { return { ok: false, why: 'its Preferences are not JSON' }; } }
     catch (e) { if (e.code !== 'ENOENT') return { ok: false, why: e.code || 'unreadable' }; }
-    const writeAtomic = async (f, obj) => { await fs.promises.mkdir(path.dirname(f), { recursive: true, mode: 0o700 }); const tmp = `${f}.vibespace-${process.pid}.tmp`; await fs.promises.writeFile(tmp, JSON.stringify(obj), { mode: 0o600 }); await fs.promises.rename(tmp, f); };
+    const writeAtomic = async (f, obj) => {
+      await fs.promises.mkdir(path.dirname(f), { recursive: true, mode: 0o700 });
+      const tmp = `${f}.vibespace-${process.pid}.tmp`;
+      const fh = await fs.promises.open(tmp, 'w', 0o600);
+      try { await fh.writeFile(JSON.stringify(obj)); await fh.sync(); } finally { await fh.close(); }   // r1897: the temp's bytes ON DISK before its rename (awaited) — a torn Preferences after a power cut is a person's browser reset
+      await fs.promises.rename(tmp, f);
+    };
     try {
       if (plan) {
         const v = ENV.geoStoredDenial(prefs);

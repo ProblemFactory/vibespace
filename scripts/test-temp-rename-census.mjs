@@ -235,6 +235,7 @@ const ROWS = [
   ["src/server/browser-display-config.js", "unsynced", "derived", "a generated wrapper, made again when it differs", "create > engineWrapperFor"],
   ["src/server/browser-env.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/browser-keeper.js", "unsynced", "store", "", "writeJsonAtomic", "create > lineageLedger"],
+  ["src/server/browser-keeper.js", "synced", "self-synced", "a browser profile's own Preferences and the person's kept geolocation values beside it (B-9584 U2c, r1897): each temp synced before its rename, awaited", "create > geoStoreAt > writeAtomic"],
   ["src/server/browser-keeper.js", "move", "move", "", "create > adoptScratch"],
   ["src/server/browser-kept.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/browser-kept.js", "move", "move", "", "create > load", "create > moveAside"],
