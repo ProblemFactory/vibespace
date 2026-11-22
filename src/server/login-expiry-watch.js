@@ -291,7 +291,10 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
 
   /** ONE pass over every subscription account. Returns { emitted, resolved }
    *  (the suite asserts on this; production ignores it). */
-  function sweep({ since } = {}) {   // `since`: the instant the timer's own settle confirmed from (round wldn7whag: passed through)
+  // `factsSince`: the instant the timer's own settle confirmed from (round wldn7whag: passed through). It is NEVER the module's
+  // `since` — the ledger's birth, «watching since»: a parameter of that name shadowed it, so the birth was never persisted and
+  // every death after it read as pre-existing, filed silent (主开发 r2067)
+  function sweep({ since: factsSince } = {}) {
     const emitted = [], resolved = [];
     let rows = [];
     try { rows = accounts.list().accounts || []; } catch (e) { log('[login-expiry] roster read failed:', e.message); return { emitted, resolved }; }
@@ -307,7 +310,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
       let info = null;
       // THE DECISION ROAD (B-360d, 主开发 r1221 — the timer row): the kept facts confirmed within its bound (the timer awaited the
       // confirmation off the loop); null = not read / unreadable / not confirmed: NO notice and NO retraction this sweep
-      try { info = accounts.decisionLoginStateOf(a.id, t, since != null ? { since } : {}); } catch { info = null; }
+      try { info = accounts.decisionLoginStateOf(a.id, t, factsSince != null ? { since: factsSince } : {}); } catch { info = null; }
       if (!info) continue;
       const name = a.name || a.id;
       const exp = info.refreshExpiresAt ?? null;

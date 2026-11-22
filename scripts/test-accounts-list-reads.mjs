@@ -422,6 +422,29 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
 
 // ── ⑥ the census ─────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('\n⑥ the census — each reader of a row\'s sign-in fields, one kind (DISPLAY / TURN / PERSON / TIMER):');
+// ── ⑨ the expiry sweep's TWO instants (主开发 r2067): the settle's `since` (what the decision road may read) is not the ledger's
+// birth («watching since»: what the grace gate reads). A parameter named `since` shadowed the birth, so the birth was never
+// persisted and a login that died AFTER the hub began watching read as a pre-existing death: recorded, SILENT
+console.log('\n⑨ the expiry sweep keeps the ledger\'s birth apart from the settle\'s instant (主开发 r2067):');
+{
+  const LE = require(path.join(REPO, 'src/login-expiry.js'));
+  const watch = require(path.join(REPO, 'src/server/login-expiry-watch.js'));
+  const dirW = fs.mkdtempSync(path.join(ROOT, 'lew-'));
+  let tw = 1_800_000_000_000, deadAt = null;
+  const live = (t) => ({ claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt: t + 6 * 3600e3, refreshTokenExpiresAt: t + 25 * 86400e3, scopes: ['user:inference'] } });
+  const wiped = () => ({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: deadAt, scopes: ['user:inference'] } });
+  const acctW = { list: () => ({ accounts: [{ id: 'sub-w1', name: 'W1', type: 'subscription', backend: 'claude' }] }), decisionLoginStateOf: (id, t) => LE.loginState(deadAt != null ? wiped() : live(t), t) };
+  const filedW = [];
+  const wW = watch.create({ accounts: acctW, userTodos: { add: (k, i) => filedW.push(i), resolve: () => { } }, dataDir: dirW, now: () => tw, log: () => { } });
+  const t0 = tw;
+  wW.sweep({ since: tw - 5 });   // the timer's settle: confirmed just before the sweep
+  const filedBirth = (() => { try { return JSON.parse(fs.readFileSync(path.join(dirW, 'login-expiry.json'), 'utf8')).since; } catch { return undefined; } })();
+  ck('(a) the ledger\'s BIRTH is the first sweep\'s own instant and it is persisted, whatever settle instant the timer hands', wW.watchingSince() === t0 && filedBirth === t0, JSON.stringify({ birth: wW.watchingSince(), filed: filedBirth, t0 }));
+  tw += 2 * 3600e3; deadAt = tw - 3600e3;   // the login dies an hour ago: AFTER the birth, before this settle's instant
+  wW.sweep({ since: tw - 5 });
+  ck('(b) a login that dies AFTER the hub began watching is SAID (an item filed), never recorded as a pre-existing death', filedW.length === 1, JSON.stringify(filedW.map((i) => i.text || i.title || '?')));
+}
+
 const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const CENSUS = [
   { f: 'src/accounts.js', kind: 'DISPLAY', who: 'list() / rowOf() and their broadcast', has: ['_rowsOf(this._state.accounts)', 'rowOf(id) { const a = this.get(id); return a ? this._rowsOf([a])[0] : null; }'], unread: 'facts {state: unread}, loggedIn null', unreadable: 'facts {state: unreadable, reason}' },
