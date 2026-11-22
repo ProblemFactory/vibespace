@@ -1737,7 +1737,7 @@ await (async () => {
   // every conversation's meta is ON DISK before the store first lists its folder (as a hub's are at boot): a patch then takes
   // the store's paced road — a file made behind its back would be its «first version», written here and now by design
   fs.writeFileSync(path.join(META, 'fl-own-1.json'), JSON.stringify({ sockName: 'fl-own-1', webuiSessionId: 'w-own-1', backend: 'claude' }));
-  const SETS = [2, 5, 50, 5, 50].map((N, k) => { const t = 't' + (k + 1); for (let i = 0; i < N; i++) { const sock = `fl-${t}-${i}`; fs.writeFileSync(path.join(META, sock + '.json'), JSON.stringify({ sockName: sock, webuiSessionId: `w-${t}-${i}`, backend: 'claude', name: 'n' + i })); } return { t, N }; });
+  const SETS = [2, 5, 50, 5, 50, 5].map((N, k) => { const t = 't' + (k + 1); for (let i = 0; i < N; i++) { const sock = `fl-${t}-${i}`; fs.writeFileSync(path.join(META, sock + '.json'), JSON.stringify({ sockName: sock, webuiSessionId: `w-${t}-${i}`, backend: 'claude', name: 'n' + i })); } return { t, N }; });
   const flip = async (mod, pf, { t, N }) => {
     const dir = path.join(tmpF, 'ar-' + t); fs.mkdirSync(dir);
     const active = new Map();
@@ -1746,13 +1746,26 @@ await (async () => {
     let armedOn = 0; const a0 = attrib;
     const inLoop = await count(async () => { ar.setEnabledAll(true); armedOn = [...active.keys()].filter((id) => ar.statusFor(id).armed).length; ar.setEnabledAll(false); });
     const after = await count(() => new Promise((r) => setTimeout(r, 500)));   // the reads off the loop land, the writer's thread writes
-    const last = JSON.parse(fs.readFileSync(path.join(META, `fl-${t}-${N - 1}.json`), 'utf8'));
-    return { inLoop, after, armedOn, flag: last.autoResume, name: last.name, attrib: attrib - a0 };
+    // r2226 (1): THE LAST FLAG READ BY STATE. The OFF patch's write is the store writer's PACED write: when the ON patch's write
+    // lands first (its read off the loop came late, as under five lanes), the OFF write waits its gap (½ s for a small file), and a
+    // fixed read at 500 ms saw ON. The disk is read until the flag is OFF (bounded): the leg judges the flip, not the pace
+    const fp = path.join(META, `fl-${t}-${N - 1}.json`), rd = () => { try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; } };
+    const at500 = rd();
+    let last = at500; for (const t0 = Date.now(); !(last && last.autoResume === false) && Date.now() - t0 < 10000;) { await new Promise((r) => setTimeout(r, 20)); last = rd(); }
+    last = last || {};
+    return { inLoop, after, armedOn, flag: last.autoResume, name: last.name, attrib: attrib - a0, at500: at500 ? at500.autoResume : null };
   };
   await flip(require(AR_PATH), curedPF, SETS[0]);   // warm: the meta folder is listed once per process (the store's first-version rule)
   const c5 = await flip(require(AR_PATH), curedPF, SETS[1]), c50 = await flip(require(AR_PATH), curedPF, SETS[2]);
   ok('17c. LAW 2: ONE flip ON + OFF over 5 and over 50 conversations makes the SAME number of synchronous file calls (the arms saved once per flip, no meta read, no directory check per write) — in the loop and after it; and a flag patch does NO usage attribution (on a pooled hub: a scan of every session per write)', c5.inLoop === c50.inLoop && c5.after === c50.after && c5.inLoop <= 8 && c5.attrib === 0 && c50.attrib === 0, JSON.stringify({ c5, c50 }));
   ok('17c. …and it still DID it: the stopped ones were armed by ON (the U1 switch), and the last flag on disk is OFF with the meta\'s other fields kept', c50.armedOn === 25 && c50.flag === false && c50.name === 'n49', JSON.stringify(c50));
+  // THE HELD READS (r2226 (1)): the meta store's reads off the loop held 300 ms (the sighting's slow reads under five lanes) — read by
+  // state, the last flag is OFF and the meta's other fields are kept. This does NOT place the sighted order (ON on disk, then OFF
+  // waiting its pace gap): a patch that finds a copy pending in memory patches THAT copy without a read, so held reads coalesce ON
+  // and OFF (the box at d2ce84357: OFF already on disk at 500 ms). The order stays a reading; the leg reads by state either way
+  const slowReads = async (fn) => { const o = fs.promises.readFile; fs.promises.readFile = async (q, ...a) => { if (String(q).startsWith(META)) await new Promise((r) => setTimeout(r, 300)); return o.call(fs.promises, q, ...a); }; try { return await fn(); } finally { fs.promises.readFile = o; } };
+  const stall = await slowReads(() => flip(require(AR_PATH), curedPF, SETS[5]));
+  ok('17c. HELD READS: the meta reads held 300 ms — read by state the last flag is OFF with the meta\'s other fields kept', stall.flag === false && stall.name === 'n4', JSON.stringify(stall));
   liveF.set('w-own-1', {});   // the meta's owner is a LIVE conversation
   const okOther = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-someone-else' });
   const okMine = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-own-1' });

@@ -284,8 +284,11 @@ console.log('round 6\'s amend: a wait for a write ends when the write ends; the 
         rows.push({ i, onDisk: fs.existsSync(f), waits: answers.length, timedOut: answers.filter((x) => x === 'timed-out').length, writeMs: st ? st.lastMs : null });
       }
     } finally { Atomics.wait = realWait; }
-    const bad = rows.filter((r) => r.timedOut > 0), waits = rows.reduce((n, r) => n + r.waits, 0);
-    ok(rows.every((r) => r.onDisk) && !bad.length, `THE ONE FIX: 20 runtime flushSync of fast writes on the writer's real thread — ${waits} waits, ${bad.length} of the 20 flushes had a wait end by its 50 ms poll (d468bf5b1: 20 of 20)`, { bad: bad.slice(0, 5), rows: rows.slice(0, 3) });
+    // r2226 (2): THE LAW BY WHAT THE WRITER REPORTS, not a wall-clock poll under load: a wait may end by its 50 ms poll only for each
+    // 50 ms the thread's OWN write took (a 56 ms write on a loaded machine: one) — the red (the notify on the wrong cell) still ends
+    // EVERY fast write's wait by its poll
+    const bad = rows.filter((r) => r.timedOut > Math.floor((Number(r.writeMs) || 0) / 50)), waits = rows.reduce((n, r) => n + r.waits, 0);
+    ok(rows.every((r) => r.onDisk) && !bad.length, `THE ONE FIX: 20 runtime flushSync of fast writes on the writer's real thread — ${waits} waits, ${bad.length} of the 20 flushes had a wait end by its 50 ms poll beyond its own write's time (a wait per 50 ms the thread's write took; d468bf5b1: 20 of 20)`, { bad: bad.slice(0, 5), rows: rows.slice(0, 3) });
     w.stop();
   }
   // ITEM 2 — a store a write's own callback dirties DURING the exit's last pass is written; one that keeps changing is named
