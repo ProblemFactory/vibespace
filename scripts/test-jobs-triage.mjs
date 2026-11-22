@@ -2371,15 +2371,20 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     const logs2 = [];   // the unread backoff set past the leg (60 s): the read again must come from the LANDING itself
     const J2 = new Mod2.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: (...a) => logs2.push(a.join(' ')), archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 }, unreadRetry: { firstMs: 60e3, maxMs: 60e3 } });
     const n0 = J2.archivedCount(), held = (J2._unread.archive && J2._unread.archive.code) || null, flushed = flushes;
+    const clearWords = ((J2.clearJobs(['jb-0000c1e0'], { by: 'owner' }) || {}).archiveUnread) || '';   // r2255 (2): a clear met while it holds
     g.W.flushSync = fs0;
     g.land(AF);                                                   // the first engine's write lands
     for (let i = 0; i < 200 && J2._unread.archive; i++) await new Promise((r) => setTimeout(r, 10));
     const n = J2.archivedCount(), noted = !!(J2._logsNoteOwed && J2._logsNoteOwed.archive), saidFailed = logs2.some((l) => /could not be read/.test(l));
     try { J.shutdown(); } catch { } try { J2.shutdown(); } catch { }
-    return { n0, held, flushed, n, readAgain: !J2._unread.archive, noted, saidFailed };
+    return { n0, held, flushed, n, readAgain: !J2._unread.archive, noted, saidFailed, clearWords };
   };
   const OW = await owedScene({ JobManager }, 'owed');
-  ok(OW.n0 === 0 && OW.held === 'EOWED' && OW.flushed === 0 && OW.readAgain && OW.n > 0 && !OW.noted && !OW.saidFailed, 'an archive write this process still owes is never read past and never flushed on the loop: a second engine holds the archive unread (EOWED) — none of a failed read\'s notes — and reads it again off the loop at THAT write\'s landing', OW);
+  ok(OW.n0 === 0 && OW.held === 'EOWED' && OW.flushed === 0 && OW.readAgain && OW.n > 0 && !OW.noted && !OW.saidFailed && /has not landed yet/.test(OW.clearWords) && !/For you/.test(OW.clearWords), 'an archive write this process still owes is never read past and never flushed on the loop: a second engine holds the archive unread (EOWED) — none of a failed read\'s notes, a clear meanwhile says the write has not landed — and reads it again off the loop at THAT write\'s landing', OW);
+  const OWC_A = "this._unread.archive.owed ? `Background Work: archived records could not be reached";
+  ok(JSRC.split(OWC_A).length === 2, 'control setup: the owed hold\'s own clear words are found once');
+  const OWC = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWC_A, "false /* MUTANT: the failed read's words */ ? `Background Work: archived records could not be reached", 'archive-owed-clear-words'), 'archive-owed-clear-words'), 'owedc');
+  ok(/For you/.test(OWC.clearWords), 'CONTROL (the owed hold\'s own words cut, in a copy): a clear meanwhile says «could not be read … For you says what to check» — no such item exists (red)', OWC.clearWords);
   const OWED_A = "if (typeof W.pending === 'function' && W.pending(this.archiveFile)) owedStill = 'its write has not landed yet';";
   ok(JSRC.split(OWED_A).length === 2, 'control setup: the archive load\'s owed check is found once');
   const OWX = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWED_A, "if (false) owedStill = 'x';   /* MUTANT: the owed write read past */", 'archive-read-past'), 'archive-read-past'), 'owedx');
@@ -2390,10 +2395,34 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   ok(JSRC.split(OWH_A).length === 2, 'control setup: the owed write\'s light hold is found once');
   const OWM = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWH_A, "    if (owedStill) { this._archiveAnswer(SR.storeAnswer({ error: Object.assign(new Error('owed'), { code: 'EOWED' }) }, { valid: Array.isArray })); return this.archive; }   /* MUTANT: a failed read's machinery */\n", 'archive-owed-as-failed'), 'archive-owed-as-failed'), 'owedm');
   ok(OWM.noted === true || OWM.saidFailed === true, 'CONTROL (the owed write held as a FAILED read, in a copy — the follow as first built): «could not be read» (and its notes) for a write that only had not landed (red)', OWM);
-  const OWR_A = "    this._ride(this.archiveFile, 'the owed archive read again', () => {\n";
+  const OWR_A = "    this._ride(this.archiveFile, 'the owed archive read again', again);\n    return [];";
   ok(JSRC.split(OWR_A).length === 2, 'control setup: the owed archive\'s read again at the landing is found once');
-  const OWR = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWR_A, "    void (0, () => {   /* MUTANT: not read again at the landing */\n", 'archive-owed-never-read'), 'archive-owed-never-read'), 'owedr');
+  const OWR = await owedScene(MJb.load('src/jobs.js', anchored(JSRC, OWR_A, "    /* MUTANT: not read again at the landing */\n    return [];", 'archive-owed-never-read'), 'archive-owed-never-read'), 'owedr');
   ok(OWR.readAgain === false && OWR.n === 0, 'CONTROL (not read again at the landing, in a copy): the second engine stays held past the write\'s landing — its archive empty until the backoff (red)', OWR);
+  // (4b) r2255 (2): the read again looks at the writer ONCE MORE before it loads — a write this process handed while it read (the first
+  // engine's next archive) is waited for at ITS landing; the older file is never loaded. RED: the second look cut
+  const owedRace = async (Mod2, tag) => {
+    const g = gatedJobsWriter(); const { d, J, AF } = scene({ JobManager }, tag, g);
+    J.archiveSweep({ now: T0 + 25 * H });   // write 1, handed
+    const J2 = new Mod2.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 }, unreadRetry: { firstMs: 60e3, maxMs: 60e3 } });
+    J2.archivedCount();                      // held (EOWED)
+    g.land(AF);                              // write 1 lands: the second engine's read again starts (off the loop)
+    const n1 = JSON.parse(fs.readFileSync(AF, 'utf8')).length;
+    J._writeArchive(J._archiveNext().slice(1));   // write 2 (one record fewer), handed WHILE that read runs
+    for (let i = 0; i < 50; i++) { await new Promise((r) => setTimeout(r, 10)); if (!J2._unread.archive) break; }   // the read finishes (a copy that loads it lifts the hold: the wait ends there)
+    const midway = { held: !!J2._unread.archive, n: J2.archivedCount() };
+    g.land(AF);                              // write 2 lands
+    for (let i = 0; i < 200 && J2._unread.archive; i++) await new Promise((r) => setTimeout(r, 10));
+    const after = { held: !!J2._unread.archive, n: J2.archivedCount() };
+    try { J.shutdown(); } catch { } try { J2.shutdown(); } catch { }
+    return { n1, midway, after };
+  };
+  const OR = await owedRace({ JobManager }, 'owed-race');
+  ok(OR.n1 > 1 && OR.midway.held && OR.midway.n === 0 && !OR.after.held && OR.after.n === OR.n1 - 1, 'a write handed while the owed read again reads is waited for at ITS landing — the second engine never loads the older file, and reads the newer once it lands', OR);
+  const ORA_A = "        if (owedNow()) { this._ride(this.archiveFile, 'the owed archive read again', again); return; }   // handed while it read";
+  ok(JSRC.split(ORA_A).length === 2, 'control setup: the read again\'s second look is found once');
+  const ORX = await owedRace(MJb.load('src/jobs.js', anchored(JSRC, ORA_A, "        /* MUTANT: no second look */   // handed while it read", 'archive-owed-no-second-look'), 'archive-owed-no-second-look'), 'owedracex');
+  ok(ORX.midway.held === false && ORX.midway.n === ORX.n1, 'CONTROL (the second look cut, in a copy): the second engine loads the older file while a newer write is owed (red)', ORX);
   // (6) A RECORD CHANGED IN THE WINDOW STAYS THE STORE's (the read's MUST): ran again, removed or edited between the hand-off and the
   // landing — kept live, its handed copy taken out of the archive again by a follow-up write; never listed twice. RED: the as-handed check cut
   const changedScene = (Mod, tag) => {
@@ -2771,7 +2800,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
     const id = J.archivedList()[0].id; let ans = null;
     J.rmArchived(id, (x) => { ans = x; });
-    await new Promise((r) => setTimeout(r, 300));
+    for (let i = 0; i < 100 && ans === null; i++) await new Promise((r) => setTimeout(r, 10));   // r2255 (4): waits on the answer itself (a cut bound never answers: the wait ends, the control reads null)
     const atBound = ans;
     let later = null; J.logsGone(id, 60e3).then((x) => { later = x; });   // r1963: a later ask, the write still not landed
     for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));   // answered AT ONCE (a few turns), or it waits with the write

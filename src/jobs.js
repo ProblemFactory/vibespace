@@ -958,14 +958,21 @@ class JobManager {
     const base = path.basename(this.archiveFile);
     const hold = this._unread.archive = { code: 'EOWED', why: `the last write of ${base} is still owed (${why})`, at: now(), owed: true };
     this.d.log(`[jobs] ${base}: a write this process still owes has not landed — held unread until it lands, then read again off the loop`);
-    this._ride(this.archiveFile, 'the owed archive read again', () => {
+    // r2255 (2): the read again looks at the writer once more BEFORE it loads — a write this process handed meanwhile (another engine's)
+    // is waited for again at ITS landing, never loaded past
+    const owedNow = () => { try { const W = this._writer(); return typeof W.pending === 'function' && W.pending(this.archiveFile); } catch { return false; } };
+    const again = () => {
+      if (this._unread.archive !== hold || this._archiveDisarmed) return;
+      if (owedNow()) { this._ride(this.archiveFile, 'the owed archive read again', again); return; }
       fs.promises.readFile(this.archiveFile, 'utf-8').then((text) => ({ text }), (error) => ({ error })).then((read) => {
         if (this._unread.archive !== hold || this._archiveDisarmed) return;
-        this._unread.archive = null; this.archive = null;
+        if (owedNow()) { this._ride(this.archiveFile, 'the owed archive read again', again); return; }   // handed while it read: read at THAT landing
+        this._unread.archive = null; this.archive = null; this._unreadSweepSaid = false;   // (a later real hold says its sweep line again)
         const late = SR.storeAnswer(read, { valid: Array.isArray }); this._archiveAnswer(late);   // a read that FAILS now is a failed read: its own road
         try { this.d.broadcast('jobs-updated', { archived: [] }); } catch { }
       });
-    });
+    };
+    this._ride(this.archiveFile, 'the owed archive read again', again);
     return [];
   }
   _archiveAnswer(a, pre = null) {
@@ -1181,7 +1188,7 @@ class JobManager {
   clearJobs(ids, { by = 'owner', at = now(), allow = null } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     const out = { cleared: [], already: [], unknown: [], refused: [] };
-    if (this._unread.archive) out.archiveUnread = this.unreadWords('archived records could not be reached, so their words were not cleared — clear them again once it reads', 'archive');   // cure r2
+    if (this._unread.archive) out.archiveUnread = this._unread.archive.owed ? `Background Work: archived records could not be reached, so their words were not cleared — a write of ${path.basename(this.archiveFile)} this process made has not landed yet; it is read again by itself the moment it lands, then clear them again` : this.unreadWords('archived records could not be reached, so their words were not cleared — clear them again once it reads', 'archive');   // cure r2; r2255 (2): an OWED write's hold says its own words (no For-you item, no read every few minutes)
     const want = new Set((Array.isArray(ids) ? ids : [ids]).map(String));
     const arch = this._archiveNext();   // B-0248 step 3: the builders' base (an archive handed, not landed yet, else what landed); its door answers through persisted()
     const family = (j) => want.has(j.id) || (j.cronParent && want.has(j.cronParent));
