@@ -7,6 +7,9 @@
 //      beside anything but a place, a place or «blocked» on a paired machine's profile (r2172 (a): where it is set), sites on an
 //      engine's profile (r2311); all «this machine's» keeps nothing. RED: the door without the paired refusal.
 //   ② THE ROUTE (src/routes/browser.js): a person's cookie door only — the agent's token refused before anything; its status table.
+//   ③ THE FORM (src/lib/browser-environment-form.js, PURE): a kept environment round-trips through the fields; «this machine's» or
+//      «Blocked» drops the list of sites (r2497 (5)); the page's own check is U1's verdict; «Automatic» said from the kept exit.
+//   ④ THE WORDS (src/lib/browser-environment-words.js): every code the verdict and the door can answer has the page's sentence.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -82,5 +85,41 @@ console.log('— ② the route: a person\'s cookie door only');
   const table = (/const ENV_STATUS = Object\.freeze\(\{([^}]*)\}\)/.exec(RB) || [])[1] || '';
   ok(/browser_place_unsupported: 409/.test(table) && /env_sites_engine: 409/.test(table) && /env_sites_unoffered: 409/.test(table) && /'not-found': 404/.test(table) && /ENV_STATUS\[r\.code\] \|\| 400/.test(RB),
     '② its status table: the refusals of where it is set 409, no profile 404, the verdict\'s own codes 400', table);
+}
+
+console.log('— ③ the form: the fields round-trip, the list dropped beside «this machine\'s» or «Blocked», Automatic said from the kept exit');
+{
+  const F = await import(new URL('../src/lib/browser-environment-form.js', import.meta.url).href);
+  const ENVm = require('../src/browser-environment.js');
+  const kept = { timezone: { mode: 'value', value: 'Asia/Kolkata' }, language: { mode: 'auto' }, location: { mode: 'value', value: { latitude: 12.5, longitude: 45.25 }, sites: ['https://a.example', 'https://b.example'] } };
+  const r = { id: 'bp-000000e1', label: 'Env', environment: kept };
+  const f = F.fieldsOf(r), back = F.bodyOf(f), v = ENVm.environmentVerdict(back.environment);
+  ok(f.timezone.mode === 'value' && f.language.mode === 'auto' && f.location.mode === 'value' && f.location.sites === 'https://a.example\nhttps://b.example' && v.ok && J(v.value.location.sites) === J(kept.location.sites)
+    && v.value.timezone.value === 'Asia/Kolkata' && v.value.language.mode === 'auto' && !F.changedFrom(r, f), '③ a kept environment round-trips: fields from it, the body back, U1\'s verdict keeps the same; nothing changed', { f, back, v });
+  const machine = F.bodyOf({ ...f, location: { ...f.location, mode: 'machine' } }), blocked = F.bodyOf({ ...f, location: { ...f.location, mode: 'block' } });
+  ok(machine.environment.location === null && J(blocked.environment.location) === J({ mode: 'block' }) && F.changedFrom(r, { ...f, location: { ...f.location, mode: 'block' } }),
+    '③ r2497 (5): location «this machine\'s» or «Blocked» DROPS the list of sites from the body (never a silent keep, never a refused save)', { machine, blocked });
+  const badZone = F.checkOf({ ...f, timezone: { mode: 'value', value: 'Mars/Olympus' } }), badSite = F.checkOf({ ...f, location: { ...f.location, sites: '*.example.com' } });
+  ok(!badZone.ok && badZone.code === 'env_timezone_invalid' && !badSite.ok && /^env_site/.test(badSite.code), '③ the page\'s own check is U1\'s verdict on the very body it would send (a zone it does not know, a wildcard site)', { badZone, badSite });
+  ok(J(F.sitesOf(' https://a.example ,\n\nhttps://b.example\n')) === J(['https://a.example', 'https://b.example']) && F.SITES_LIMIT === ENVm.SITES_MAX, '③ one site a line (a comma too), blanks dropped; the limit is U1\'s');
+  const withExit = { ...r, egress: { publicIp: '203.0.113.9', country: 'FR', timezone: 'Asia/Kolkata', checkedAt: 1, source: 'measured' } };
+  const aE = F.autoSaidOf(withExit), aN = F.autoSaidOf(r);
+  ok(aE.timezone.from === 'exit' && aE.timezone.value === 'Asia/Kolkata' && aE.language.from === 'exit' && !!aE.language.value && aN.timezone.value === null && aN.timezone.said === 'no_exit' && aN.language.value === null,
+    '③ «Automatic» said RIGHT NOW from the kept exit (U1\'s resolver: its zone, its country\'s language); none kept ⇒ nothing to follow, said', { aE, aN });
+}
+
+console.log('— ④ the words: every code the verdict and the door can answer has the page\'s sentence');
+{
+  const Wd = await import(new URL('../src/lib/browser-environment-words.js', import.meta.url).href);
+  const T = (k, v) => String(k).replace(/\{(\w+)\}/g, (_, n) => (v && v[n] !== undefined ? String(v[n]) : `{${n}}`));
+  const ENVsrc = read('src/browser-environment.js'), KS = read('src/server/browser-keeper.js');
+  const door = (() => { const i = KS.indexOf('  function setEnvironment(profileId'); const j = KS.indexOf('\n  }\n', i); return i < 0 ? '' : KS.slice(i, j); })();
+  const codes = new Set([...ENVsrc.matchAll(/refuse\('(env_[a-z_]+)'/g)].map((m) => m[1]).concat([...door.matchAll(/code: '([a-z_-]+)'/g)].map((m) => m[1]), ['agent_forbidden']));
+  const missing = [...codes].filter((c) => !Wd.envWords(c, T).known);
+  ok(codes.size >= 12 && missing.length === 0 && Wd.envWords('zzz_new', T).known === false && /zzz_new/.test(Wd.envWords('zzz_new', T).text), `④ every code (${codes.size}) the verdict and the door answer has the page's sentence; an unknown code is named by its code`, { codes: [...codes], missing });
+  ok(/Automatic now: Asia\/Kolkata/.test(Wd.autoWords({ value: 'Asia/Kolkata', from: 'exit' }, T)) && /none is kept yet/.test(Wd.autoWords({ value: null, said: 'no_exit' }, T)), '④ Automatic\'s line: its value now and whence, or that nothing is kept');
+  const DLG = read('src/lib/browser-environment-dialog.js');
+  ok(/`\/api\/browser\/profiles\/\$\{encodeURIComponent\(r\.id\)\}\/environment`, \{ method: 'POST'/.test(DLG) && /const f = read\(\), v = checkOf\(f\);\n      if \(!v\.ok\) \{ sayCode\(v\.code, v\.error\); return; \}/.test(DLG) && !/\.disabled = true;(?![^\n]*busy)/.test(DLG.replace('busy = true; save.disabled = true;', '')),
+    '④ the dialog posts to the keeper\'s one door after the page\'s own check; no control greyed but the save while it is sent', null);
 }
 report();

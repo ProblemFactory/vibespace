@@ -64,6 +64,7 @@ import { createTakeoverSection, takeoverWindowTitle } from './browser-takeover-q
 import { openProxyDialog, sayProxyRefusal } from './browser-proxy-dialog.js'; // B-8b87: a profile's proxy and its login (kept in the vault)
 import { PROXY_REFUSALS } from './browser-proxy-model.js'; // B-8b87 cure: a proxy refusal in the page's words (B-7aef: said by browser-proxy-dialog.js's sayProxyRefusal)
 import { openExitDialog } from './browser-exit-dialog.js'; // the exit check (the owner 2026-11-17)
+import { openEnvironmentDialog } from './browser-environment-dialog.js'; // B-9584 U3: the profile's environment
 import { registerBrowserProfileCommands } from './browser-profile-commands.js'; // B-acb9: a plugin's window opens this card's «Proxy…» / «Check the exit…»
 import { techFold } from './plain-words.js';   // r3104: where a damaged list's bytes are kept — in the fold, never on the face
 
@@ -995,6 +996,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     proxy: (r) => openProxyDialog(app, r, { onDone: () => load() }),
     // the exit check (the owner 2026-11-17): a person's press, through this profile's own proxy; kept only on Keep
     'exit-check': (r) => openExitDialog(app, r, { onDone: () => load() }),
+    // B-9584 U3: Environment… — time zone, language, location and its sites; the person's save, applied at the next start
+    environment: (r) => openEnvironmentDialog(app, r, { onDone: () => load() }),
     'proxy-move': async (r) => {
       const res = await fetchJson('/api/vault/proxy-logins/move', jsonInit('POST', { profileId: r.id }));
       if (!res || res.error || res.ok === false) { sayProxyRefusal(res && { ...res, profileId: r.id }, t('Could not move the password'), { act: 'move' }); load(); return; }   // B-8b87 cure: the move's own words + press

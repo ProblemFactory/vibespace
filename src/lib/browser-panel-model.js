@@ -127,6 +127,8 @@ export function rowMenu(r, x = {}) {
     // the exit check (the owner 2026-11-17): a person's press, through this profile's own proxy
     out.push({ id: 'exit-check', label: t('Check the exit…'), title: t('Read this profile\'s public address, country and time zone through its own proxy — kept only when you press Keep') });
   }
+  // B-9584 U3: the profile's environment (time zone, language, location and the sites that may read it) — the person's, at the next start
+  if (!notOurs(r)) out.push({ id: 'environment', label: t('Environment…'), title: t('This profile\'s time zone, language and location — what its browser tells the sites it opens; applied at its next start') });
   out.push({ id: 'rename', label: t('Rename…') });
   if (r.live) out.push({ id: 'stop', label: t('Stop'), title: t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)') });
   if (hung(r, x)) { /* Restart is the row's primary (never twice) */ } else if (x.stuck && x.stuck.action && r.live && !r.host) out.push({ id: 'restart', label: String(x.stuck.action), title: String(x.stuck.tooltip || '') });
