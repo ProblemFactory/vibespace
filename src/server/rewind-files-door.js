@@ -176,7 +176,8 @@ async function filesConfirmOf({ session, msgId, by, hosts = null, stat = null, d
   const choices = F.choicesOf({ checkpoints: true, dry: j.dry });
   if (choices.length === 1) return { ...plain, said: j.dry.ok ? (j.dry.filesKnown ? null : 'files-unknown') : j.dry.reason };
   const keep = await KD.keepableOf({ session, conv, files: j.dry.files, hosts, by, ...keepOpts });   // can every file be kept?
-  return { ok: true, choices, default: keep.ok ? F.defaultChoiceOf(choices, j.judged) : 'conversation', files: j.judged, plus: j.dry.plus, minus: j.dry.minus, keep };
+  const machine = keep.machine ? KD.machineNameOf(hosts, keep.machine) : null;   // r2245 (6): «kept on <that machine>», named
+  return { ok: true, choices, default: keep.ok ? F.defaultChoiceOf(choices, j.judged) : 'conversation', files: j.judged, plus: j.dry.plus, minus: j.dry.minus, keep, machine };
 }
 
 /** THE PRESS with a choice → {ok, steps, outcome, results} | a refusal. «both» = tier one's dry run first (nothing written when
@@ -188,14 +189,14 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
   if (typeof choice !== 'string' || !Object.prototype.hasOwnProperty.call(F.STEPS, choice)) return { ok: false, reason: 'not-a-choice', cls: F.FILES_REFUSALS['not-a-choice'] };
   if (choice === 'conversation') {   // the conversation only: tier one's own door, as it is
     const r = requestRewind({ session, msgId, lastSeenUuid, by, expectTaken, reqId, now: Date.now() });
-    return r.ok ? { ok: true, steps: F.STEPS.conversation, results: { conversation: { ...r, asked: true } }, outcome: F.outcomeOf(F.STEPS.conversation, { conversation: r }) } : r;
+    return r.ok ? { ok: true, steps: F.STEPS.conversation, results: { conversation: { ...r, asked: true } }, outcome: F.outcomeOf(F.STEPS.conversation, { conversation: r }) } : { ...r, step: 'conversation' };   // r2245 (10): tier one's refusal, said in its words
   }
   if (session._fileCheckpoints !== true) return { ok: false, reason: 'files-off', cls: F.FILES_REFUSALS['files-off'] };   // DARK until U1
   if (rewindOut(session, Date.now())) return { ok: false, reason: 'pending', cls: REWIND_REFUSALS.pending };
   if (F.STEPS[choice].includes('conversation')) {   // «both»: the conversation's whole verdict BEFORE anything is written
     const c = requestRewind({ session, msgId, lastSeenUuid, by, dryRun: true, now: Date.now() });
-    if (!c.ok) return c;
-    if (Number.isFinite(expectTaken) && expectTaken !== c.taken) return { ok: false, reason: 'changed-since', cls: REWIND_REFUSALS['changed-since'] || F.FILES_REFUSALS['changed-since'] };
+    if (!c.ok) return { ...c, step: 'conversation' };   // r2245 (10): the CONVERSATION's refusal — the page says it in tier one's words
+    if (Number.isFinite(expectTaken) && expectTaken !== c.taken) return { ok: false, reason: 'changed-since', cls: REWIND_REFUSALS['changed-since'] || F.FILES_REFUSALS['changed-since'], step: 'conversation' };
   }
   const mark = { id: null, at: Date.now(), files: true, pty: session.pty || null };   // tied to the CLI process it waits on
   setFilesOut(session, mark);   // ONE REWIND AT A TIME: from here to the press's answer, every other rewind and the person's send wait
@@ -213,36 +214,41 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
       setFilesOut(session, null);   // this press's own mark aside for ONE synchronous dry run (no await between: nothing slips in)
       const c2 = requestRewind({ session, msgId, lastSeenUuid, by, dryRun: true, now: Date.now() });
       setFilesOut(session, mark);
-      if (!c2.ok) return c2;
-      if (Number.isFinite(expectTaken) && expectTaken !== c2.taken) return { ok: false, reason: 'changed-since', cls: REWIND_REFUSALS['changed-since'] || F.FILES_REFUSALS['changed-since'] };
+      if (!c2.ok) return { ...c2, step: 'conversation' };
+      if (Number.isFinite(expectTaken) && expectTaken !== c2.taken) return { ok: false, reason: 'changed-since', cls: REWIND_REFUSALS['changed-since'] || F.FILES_REFUSALS['changed-since'], step: 'conversation' };
     }
     mark.at = Date.now();   // the person's fence counts from the press itself (the dry run and the stats came before it)
     const results = {};
     // THE LAW (r1247 (2)): every listed file KEPT and read back before anything is put back — else nothing is sent
     const kept = await KD.keepFor({ session, conv, files: j.dry.files, hosts, by, ...keepOpts });
     if (!kept.ok) return { ok: false, reason: 'not-kept', cls: 'cannot', keep: kept.refusals };
-    results.kept = { press: kept.press, where: kept.where, machine: kept.machine, check: kept.check, files: j.dry.files.length };   // U3: its line counts them
-    const onLate = (answer) => {   // the press's answer after its bound: journalled, and the mark is released
-      clearTimeout(hold);
-      try { console.warn(`[rewind-files] the press's late answer (${String(mark.id).slice(0, 40)}): ${JSON.stringify(answer).slice(0, 200)}`); } catch { }
-      release();
-    };
-    let hold = null;
-    const ask = await askCli(session, F.filesRequestOf(f.msg.uuid), { timeoutMs: pressMs, onLate });
-    mark.id = ask.requestId || null;
-    if (ask.sent && !ask.answered) {   // not answered in its bound: the CLI may still be writing — the mark HOLDS (bounded)
-      held = true;
-      hold = setTimeout(() => { const w = WAITS.get(session); if (w && mark.id) w.delete(mark.id); release(); }, holdMs);
-      if (hold && typeof hold.unref === 'function') hold.unref();
+    results.kept = { press: kept.press, where: kept.where, machine: kept.machine, check: kept.check, files: j.dry.files.length, msgAt: Number(f.msg.ts) || null };   // U3: its line counts them and says WHICH rewind (the message's time)
+    try {   // r2245 (7): a throw AFTER the keep — the copy stands: the answer says what is known, and its line (afterFilesPress) is written
+      const onLate = (answer) => {   // the press's answer after its bound: journalled, and the mark is released
+        clearTimeout(hold);
+        try { console.warn(`[rewind-files] the press's late answer (${String(mark.id).slice(0, 40)}): ${JSON.stringify(answer).slice(0, 200)}`); } catch { }
+        release();
+      };
+      let hold = null;
+      const ask = await askCli(session, F.filesRequestOf(f.msg.uuid), { timeoutMs: pressMs, onLate });
+      mark.id = ask.requestId || null;
+      if (ask.sent && !ask.answered) {   // not answered in its bound: the CLI may still be writing — the mark HOLDS (bounded)
+        held = true;
+        hold = setTimeout(() => { const w = WAITS.get(session); if (w && mark.id) w.delete(mark.id); release(); }, holdMs);
+        if (hold && typeof hold.unref === 'function') hold.unref();
+      }
+      const a = ask.answer ? F.filesAnswerOf(ask.answer) : { ok: false, reason: ask.why, cls: 'failed', text: null };
+      results.files = { ...a, sent: ask.sent };
+      if (v.steps.includes('conversation') && results.files.ok) {
+        release();   // the files are back: the conversation step is tier one's own press (its own mark, its own checks)
+        const r = requestRewind({ session, msgId, lastSeenUuid, by, expectTaken, reqId, now: Date.now() });   // the page's own id (tier one's: bound before it sends)
+        results.conversation = r.ok ? { ...r, asked: true } : r;
+      }
+      return { ok: true, steps: v.steps, results, outcome: F.outcomeOf(v.steps, results, { cli: cliOf(session) }) };
+    } catch (e) {
+      try { console.warn(`[rewind-files] the press failed after its keep (${String((e && (e.code || e.message)) || e).slice(0, 120)}) — the copy stands`); } catch { }
+      return { ok: false, reason: 'door-failed', cls: 'failed', results, outcome: F.outcomeOf(v.steps, results, { cli: cliOf(session) }) };
     }
-    const a = ask.answer ? F.filesAnswerOf(ask.answer) : { ok: false, reason: ask.why, cls: 'failed', text: null };
-    results.files = { ...a, sent: ask.sent };
-    if (v.steps.includes('conversation') && results.files.ok) {
-      release();   // the files are back: the conversation step is tier one's own press (its own mark, its own checks)
-      const r = requestRewind({ session, msgId, lastSeenUuid, by, expectTaken, reqId, now: Date.now() });   // the page's own id (tier one's: bound before it sends)
-      results.conversation = r.ok ? { ...r, asked: true } : r;
-    }
-    return { ok: true, steps: v.steps, results, outcome: F.outcomeOf(v.steps, results, { cli: cliOf(session) }) };
   } finally { if (!held) release(); }
 }
 

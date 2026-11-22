@@ -108,8 +108,9 @@ const OPS = {
   // kept folder (data/rewind-kept/<conversation>/lines.json): never a press folder, so no sweep takes it; written synced
   readLines({ root } = {}) {
     let text = null;
-    try { text = fs.readFileSync(path.join(root, K.LINES_FILE), 'utf8'); } catch (e) { if (e && e.code === 'ENOENT') return { lines: [] }; throw e; }
-    try { const j = JSON.parse(text); return { lines: Array.isArray(j && j.lines) ? j.lines : [] }; } catch { return { lines: [], torn: true }; }
+    // a record that cannot be read is SAID (`unreadable` / `torn`), never an empty one: its writer refuses to write over it (r2245 (8))
+    try { text = fs.readFileSync(path.join(root, K.LINES_FILE), 'utf8'); } catch (e) { if (e && e.code === 'ENOENT') return { lines: [] }; return { lines: [], unreadable: String((e && e.code) || 'error').slice(0, 40) }; }
+    try { const j = JSON.parse(text); return Array.isArray(j && j.lines) ? { lines: j.lines } : { lines: [], torn: true }; } catch { return { lines: [], torn: true }; }
   },
   writeLines({ root, lines = [] } = {}) {
     if (typeof root !== 'string' || !path.isAbsolute(root)) throw Object.assign(new Error('not a kept folder'), { code: 'EBADPRESS' });

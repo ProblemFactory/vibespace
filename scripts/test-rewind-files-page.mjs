@@ -1,16 +1,21 @@
 #!/usr/bin/env node
-// test-rewind-files-page (fast, in-process — row B-437e, the files tier's PAGE, U3; lane lg-rewind 2026-11-22, 主开发 r1988):
+// test-rewind-files-page (fast, in-process — row B-437e, the files tier's PAGE, U3; lane lg-rewind 2026-11-22, 主开发 r1988, r2245):
 //   ① THE WORDS (src/lib/rewind-files-words.js, PURE): which confirm (DARK = today's), the confirm's model from the server's facts
 //      (the choices it drew — one that cannot act ABSENT with one sentence, never greyed —, its default, each file's state), every
-//      reason of src/rewind-files.js and src/rewind-kept.js in words, the outcome (never «all files restored»), the kept line (its
-//      door only while its copy stands), the put-back's plan and answer
+//      reason of src/rewind-files.js and src/rewind-kept.js in words, the outcome (never «all files restored»; a press that failed
+//      after its keep), the kept line (WHICH rewind, what its files step did, a partial put-back, its door only while its copy
+//      stands), the strip's order, the put-back's plan (bounded) and answer
 //   ② THE VIEW (src/lib/chat-view.js, its U3 block and tier one's door, lifted over stand-ins): dark ⇒ ONE request and today's
-//      confirm word for word; the files fact on ⇒ the files dry run beside tier one's, the files confirm (its extra node: the radio
-//      group, the default, the rows, the keep); the files ask unanswered within its bound ⇒ today's confirm; the press frame (its
-//      choice, `drawn`, the page's ids) with the conversation step bound as tier one's; the kept lines drawn, again after a redraw,
-//      their door only while the copy stands; a second press of one put-back on this page SAID, never a dead button
+//      confirm word for word; the files fact on ⇒ the files dry run beside tier one's, «Checking the files…» while it is out, the
+//      files confirm (its extra node: the radio group, the default, the rows, the keep); a window closed meanwhile draws no dialog;
+//      the files ask unanswered ⇒ today's confirm; the press frame with the conversation step bound as tier one's, its watchdog
+//      armed by the answer; the conversation's own refusal in tier one's words; THE KEPT LINES from the SERVER's own frames (the
+//      real door on scratch files: a files press's told line, an attach's whole record) through the view's live meta: their own
+//      place above the list, the live ones first, a close for this view, back at an attach while a copy stands; a second press of
+//      one put-back SAID; the wiring no other leg reads (the hub's attach field and after-calls, the page's meta parse, the history
+//      loads' redraw) and the strip's CSS (its bound, its own scroll; what floats over the list moves down by its height)
 //   RED CONTROLS (anchored copies): the view's dark gate off; the default not the server's; a press without `drawn`; a door on a
-//   copy that is gone
+//   copy that is gone; the press's watchdog never armed; the kept-lines meta not wired; the left-behind line back over the strip
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,6 +36,18 @@ const caps = require(path.join(REPO, 'src/backend-caps.js'));
 const door = require(path.join(REPO, 'src/rewind-door.js'));
 const WSRC = fs.readFileSync(path.join(REPO, 'src/lib/rewind-files-words.js'), 'utf8');
 const VSRC = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+const CSS = fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8');
+/** the strip's CSS (r2245 (3)): its own row, its lines bounded with their own scroll, what floats over the list moved down by its height */
+const ruleOf = (css, sel) => { const m = css.match(new RegExp('^' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}', 'm')); return m ? m[1] : ''; };
+const cssOk = (css) => {
+  const strip = ruleOf(css, '.chat-rewind-kept'), lines = ruleOf(css, '.chat-rewind-kept-lines');
+  const phone = /\.chat-rewind-kept-lines \{ max-height: (\d+(?:\.\d+)?)em; \}/.exec(css);
+  const floats = ['.chat-left-behind', '.chat-history-status', '.chat-pos-indicator', '.chat-run-bar'].filter((x) => !/top: [^;]*var\(--chat-kept-h, 0px\)/.test(ruleOf(css, x)));
+  return { own: !/position:\s*absolute/.test(strip) && /flex: none/.test(strip), scroll: /max-height:/.test(lines) && /overflow-y: auto/.test(lines), phone: !!phone && Number(phone[1]) <= 5, floats };
+};
+const KD = require(path.join(REPO, 'src/server/rewind-kept-door.js'));
+const KW = require(path.join(REPO, 'src/server/rewind-keep-worker.js'));
+const kcall = (op, payload) => Promise.resolve().then(() => KW.runOp(op, payload).result);   // the keep pool's own ops, inline
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rwpage-'));
 process.on('exit', () => { try { fs.rmSync(SCRATCH, { recursive: true, force: true }); } catch { } });
 /** a copy of the words module with one line changed, imported as its own module (its import of ./i18n.js pointed at the real one) */
@@ -73,19 +90,39 @@ console.log('— ① the words');
   const part = W.filesOutcomeWords({ ok: true, results: { files: { ok: false } }, outcome: { failed: 'files', maybePartial: true } });
   const none = W.filesOutcomeWords({ ok: true, results: { files: { ok: false, reason: 'checkpoints-off' } }, outcome: { failed: 'files', maybePartial: false } });
   const moved = W.filesOutcomeWords({ ok: false, reason: 'changed-since' });
-  ok(ok1 === t('Files put back or removed: {n}.', { n: 2 }) && /may have been put back/.test(part) && none === t('Nothing was put back.') && /changed since this was opened/.test(moved),
-    '① THE OUTCOME of the files step, on its own: put back or removed (a count), some may have been put back, nothing put back, a refusal by name', { ok1, part, none, moved });
+  const afterKeep = W.filesOutcomeWords({ ok: false, reason: 'door-failed', results: { kept: { files: 1 } }, outcome: { failed: 'files', maybePartial: true } });
+  ok(ok1 === t('Files put back or removed: {n}.', { n: 2 }) && /may have been put back/.test(part) && none === t('Nothing was put back.') && /changed since this was opened/.test(moved) && /may have been put back/.test(afterKeep),
+    '① THE OUTCOME of the files step, on its own: put back or removed (a count), some may have been put back, nothing put back, a refusal by name; a press that failed AFTER its keep says what is known (r2245 (7))', { ok1, part, none, moved, afterKeep });
   const fmt = (ms) => `D${ms}`;
-  const kept = W.keptLineModel({ press: 'kp-x', state: 'kept', door: true, files: 3, until: 9, machine: null }, { fmt });
-  const back = W.keptLineModel({ press: 'kp-x', state: 'put-back', putBackAt: 7, door: false }, { fmt });
-  const gone = W.keptLineModel({ press: 'kp-x', state: 'gone', door: false }, { fmt });
-  const stale = W.keptLineModel({ press: 'kp-x', state: 'kept', door: false, until: 9 }, { fmt });
-  ok(kept.door && /until D9/.test(kept.words) && !back.door && /put back as they were on D7/.test(back.words) && !gone.door && /is gone/.test(gone.words) && !stale.door,
-    '① THE KEPT LINE (r1988 law 1): its door ONLY while its copy stands; put back, or gone after its seven days, the line SAYS so — never a greyed door', { kept, back, gone });
+  const L = (over) => ({ press: 'kp-x', at: 3, until: 9, files: 3, machine: null, msgAt: 2, ...over });
+  const which = t('the rewind to your message of {when}', { when: 'D2' }), here = t('on this computer');
+  const kept = W.keptLineModel(L({ state: 'kept', door: true, step: 'done' }), { fmt });
+  const part2 = W.keptLineModel(L({ state: 'kept', door: true, step: 'partial' }), { fmt });
+  const none2 = W.keptLineModel(L({ state: 'kept', door: true, step: 'none' }), { fmt });
+  const first = W.keptLineModel(L({ state: 'kept', door: true, of: 'put-back', msgAt: null }), { fmt });
+  const tried = W.keptLineModel(L({ state: 'kept', door: true, step: 'done', triedAt: 5, notPut: 1 }), { fmt });
+  const back = W.keptLineModel(L({ state: 'put-back', door: false, putBackAt: 7 }), { fmt });
+  const gone = W.keptLineModel(L({ state: 'gone', door: false }), { fmt });
+  const stale = W.keptLineModel(L({ state: 'kept', door: false }), { fmt });
+  const lost = W.keptLineModel(L({ state: 'kept', door: true, step: 'done', unrecorded: true }), { fmt });
+  const onLab = W.keptLineModel(L({ state: 'kept', door: true, step: 'done', machine: 'the lab machine' }), { fmt });
+  ok(kept.door && kept.words === t('Files were put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.', { which, n: 3, where: here, date: 'D9' })
+    && part2.door && part2.words.startsWith(t('Some files may have been put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.', { which, n: 3, where: here, date: 'D9' }))
+    && none2.door && none2.words === t('No files were put back by {which} — the copy of {n} file(s) kept before it stays {where} until {date}.', { which, n: 3, where: here, date: 'D9' })
+    && first.door && first.words.includes(t('the put-back of {when}', { when: 'D3' })) && onLab.words.includes(t('on {machine}', { machine: 'the lab machine' })),
+    '① THE KEPT LINE names WHICH rewind (the message\'s date; a put-back\'s keep-first: the put-back\'s) and what its files step did — put back · may have put some back · put nothing back (r2245 (3), (7)); the machine named', { kept, part2, none2, first });
+  ok(tried.door && tried.words.includes(t('A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.', { date: 'D5', m: 1 }))
+    && !back.door && back.words === t('The copy kept for {which} was put back on {date}.', { which, date: 'D7' }) && !gone.door && gone.words === t('The copy kept for {which} is gone (it was kept seven days).', { which }) && !stale.door
+    && lost.door && lost.words.endsWith(t('This line could not be saved: the conversation\'s record of kept files could not be read.')),
+    '① its door ONLY while its copy stands; a PARTIAL put-back keeps the door and says how many were not put back (r2245 (2)); put back or gone, the line SAYS so — never a greyed door; a line not recorded says so (r2245 (8))', { tried, back, gone, lost });
+  const ord = W.keptOrderOf([{ press: 'a', at: 1, door: false }, { press: 'b', at: 2, door: true }, { press: 'c', at: 3, door: false }, { press: 'd', at: 0, door: true }]);
+  ok(ord.map((x) => x.press).join() === 'b,d,c,a', '① THE STRIP\'s ORDER (r2245 (3)): the lines whose copy still stands first, then the newest first', ord.map((x) => x.press));
   const plan = W.putBackPlanWords(K.PUT_BACK_ACTS.map((act) => ({ path: `/w/${act}.js`, act, why: act === 'refused' ? 'kept-changed' : null })));
   const refused = W.putBackOutcomeWords({ ok: false, reason: 'pending' });
   ok(plan.length === K.PUT_BACK_ACTS.length && plan.every((p) => !/not known/.test(p)) && /already being put back/.test(refused) && W.putBackOutcomeWords({ ok: true, rows: [{ done: true }, { done: false, act: 'overwrite' }] }) === t('Put back as they were: {n} file(s); {m} not put back — the kept copy still holds them.', { n: 1, m: 1 }),
     '① THE PUT-BACK: each act named before it acts; a second client\'s press of one put-back said in a person\'s words (pending); what was not put back counted', { plan, refused });
+  const bounded = W.putBackPlanWords(Array.from({ length: 20 }, (_, i) => ({ path: `/w/p${i}.js`, act: 'overwrite' })));
+  ok(bounded.length === W.SHOWN_MAX + 1 && bounded[W.SHOWN_MAX] === t('and {n} more', { n: 20 - W.SHOWN_MAX }), `① THE PUT-BACK's CONFIRM is bounded as the files confirm is (r2245 (11)): ${W.SHOWN_MAX} rows, «and N more»`, bounded.length);
   const d = W.drawnOf(FILES());
   ok(JSON.stringify(d.files) === '["/w/a.js","/w/b.js"]' && d.judged[1].state === 'changed' && d.plus === 12, '① the press\'s `drawn` = the files, their states and counts as the confirm drew them (the server refuses changed-since otherwise)', d);
 }
@@ -93,7 +130,11 @@ console.log('— ① the words');
 console.log('— ② the view');
 /** a minimal DOM: elements with children, attributes, a checked radio, and «connected» = under the view's root */
 class El {
-  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.className = ''; this._text = ''; this.title = ''; this.attrs = {}; this.checked = false; this.root = false; }
+  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.className = ''; this._text = ''; this.title = ''; this.attrs = {}; this.checked = false; this.root = false; this.offsetHeight = 0; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } }; }
+  get parentNode() { return this.parent; }
+  set innerHTML(v) { this._html = String(v); }
+  get innerHTML() { return this._html || ''; }
+  insertBefore(c, ref) { if (c.parent) c.remove(); c.parent = this; const i = this.children.indexOf(ref); if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); return c; }
   get textContent() { return this._text; }
   set textContent(v) { for (const c of this.children) c.parent = null; this.children = []; this._text = String(v); }   // as the DOM: setting it removes the children
   append(...k) { for (const c of k) this.appendChild(c); }
@@ -111,7 +152,7 @@ const clock = { now: 0, timers: [], n: 0 };
 const stubSet = (fn, ms) => { const id = ++clock.n; clock.timers.push({ id, fn, at: clock.now + ms }); return id; };
 const stubClear = (id) => { clock.timers = clock.timers.filter((x) => x.id !== id); };
 const store = { m: new Map(), getItem(k) { return this.m.has(k) ? this.m.get(k) : null; }, setItem(k, v) { this.m.set(k, String(v)); }, removeItem(k) { this.m.delete(k); }, get length() { return this.m.size; }, key(i) { return [...this.m.keys()][i] || null; } };
-const said = [];
+const said = [], toasts = [];
 const FROM = "  // ── B-437e U3: THE FILES TIER's PAGE", TO = '  // Fork a new session from a specific assistant message (the chat fork button).';
 const liftView = (src, words = W) => {
   const a = src.indexOf(FROM), b = src.indexOf(TO, a + 1);
@@ -119,9 +160,9 @@ const liftView = (src, words = W) => {
   const deps = { backendFeatureCaps: (b2) => ({ checkpoints: caps.capsOf(b2).checkpoints }), rewindPointOf: door.rewindPointOf, rewindPlanOf: door.rewindPlanOf, rewindAnswerOf: door.rewindAnswerOf, t,
     REWIND_LIFE_MS: door.REWIND_LIFE_MS, POINT_FIELDS: door.POINT_FIELDS, REWIND_REQUEST_PREFIX: door.REWIND_REQUEST_PREFIX, textOf: door.textOf, setTimeout: stubSet, clearTimeout: stubClear, sessionStorage: store,
     openClock: () => clock.now, PAGE_START: 0, lateFocus: () => true, document: documentStub, dateOf, REWIND_FILES_ASK_MS: 20000, REWIND_FILES_PRESS_MS: 150000,
-    showToast: (m, o) => said.push([m, o && o.type]),
+    showToast: (m, o) => { said.push([m, o && o.type]); const el = { removed: false, remove() { this.removed = true; } }; toasts.push([m, el, o || {}]); return el; },
     showConfirmDialog: (o) => { said.push(['confirm', o]); return Promise.resolve(view && view._yes); },
-    confirmModel: words.confirmModel, drawnOf: words.drawnOf, filesOutcomeWords: words.filesOutcomeWords, pressRefusalWords: words.pressRefusalWords, keptLineModel: words.keptLineModel,
+    confirmModel: words.confirmModel, drawnOf: words.drawnOf, filesOutcomeWords: words.filesOutcomeWords, pressRefusalWords: words.pressRefusalWords, keptLineModel: words.keptLineModel, keptOrderOf: words.keptOrderOf, UI_ICONS: { close: '<svg></svg>' },
     putBackDoorWords: words.putBackDoorWords, putBackPlanWords: words.putBackPlanWords, putBackOutcomeWords: words.putBackOutcomeWords };
   const names = Object.keys(deps);
   return new Function(...names, `return class { ${src.slice(a, b)} }`)(...names.map((k) => deps[k]));
@@ -135,11 +176,34 @@ const fresh = (V, { files = false } = {}) => {
   const reqs = [];
   const v = new V();
   const root = new El('div'); root.root = true;
-  Object.assign(v, { sessionId: 'sess-1', _readOnly: false, _disposed: false, _yes: true, _container: root, _messages: convo, _fileCheckpoints: files,
+  const list = root.appendChild(new El('div'));   // the message list: the view's own child (the strip takes its place ABOVE it)
+  clock.timers = [];   // a fresh page: no timer of another leg's view (the watchdog leg reads ITS timer)
+  Object.assign(v, { sessionId: 'sess-1', _readOnly: false, _disposed: false, _yes: true, _container: root, _messageList: list, _messages: convo, _fileCheckpoints: files,
     _chatInput: { isStreaming: false, putBack: () => 'none' }, _getSessionIds: () => ({ backend: 'claude' }), _keepRewind: () => { }, _sayRewindRefusal: (r) => said.push(['refusal', r]),
     ws: { connected: true, request: (msg, match, opts) => { const q = { msg, match, opts }; reqs.push(q); return () => { q.done = true; }; } } });
-  return { v, reqs, root };
+  return { v, reqs, root, list };
 };
+/** the view's live meta, as src/lib/chat-view.js dispatches it (its one line, lifted) */
+const META_ANCHOR = "if (op.subtype === 'rewind-kept-line' || op.subtype === 'rewind-kept-lines')";
+const metaOf = (src) => { const line = src.split('\n').find((l) => l.includes(META_ANCHOR)); if (!line) throw new Error('lift: the kept-lines meta line not found'); return new Function('op', line); };
+/** a files press through the view up to its frame → {s, press} */
+const pressThrough = async (V) => {
+  const s = fresh(V, { files: true }); view = s.v; said.length = 0; s.v._yes = true;
+  s.v._rewindFromMessage(person); await tick();
+  const fq = s.reqs.find((q) => q.msg.type === 'rewind-files');
+  dryAnswer(tierOne(s.reqs)); fq.match({ type: 'rewind-files-result', sessionId: 'sess-1', reqId: fq.msg.reqId, ...FILES() }); await tick(); await tick(); await tick();
+  return { s, press: s.reqs.find((q) => q.msg.type === 'rewind-files' && !q.msg.dryRun) };
+};
+/** THE SERVER's own frames for one conversation: a real keep on scratch files, the files press's told line, an attach's record */
+const KROOT = fs.mkdtempSync(path.join(SCRATCH, 'kept-')), KWORK = fs.mkdtempSync(path.join(SCRATCH, 'work-')), KO = { dataRoot: KROOT, call: kcall };
+const serverFrames = async (hex8, { now, msgAt }) => {
+  const f = path.join(KWORK, `${hex8}.txt`); fs.writeFileSync(f, 'as it was\n');
+  const kept = await KD.keepFor({ session: { mode: 'chat' }, conv: 'sess-1', files: [f], by: { kind: 'human', actBy: null }, now, hex8, ...KO });
+  const told = [];
+  await KD.afterFilesPress({ mode: 'chat' }, 'sess-1', { ok: true, results: { kept: { press: kept.press, machine: null, files: 1, msgAt }, files: { ok: true } } }, { broadcastToSession: (sx, id, fr) => told.push(fr), now, ...KO });
+  return { kept, told };
+};
+const attachFrame = async (now) => { const sent = []; await KD.sendKeptLines({ readyState: 1, send: (x) => sent.push(JSON.parse(x)) }, 'sess-1', { ...KO, now }); return sent[0] || null; };
 const tierOne = (reqs) => reqs.find((q) => q.msg.type === 'rewind' && q.msg.dryRun === true);
 const dryAnswer = (q) => q.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: q.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false });
 {
@@ -178,29 +242,81 @@ const dryAnswer = (q) => q.match({ type: 'rewind-result', sessionId: 'sess-1', r
   ok(!!press && press.msg.choice === 'both' && JSON.stringify(press.msg.drawn) === JSON.stringify(W.drawnOf(FILES())) && press.msg.expectTaken === 3 && press.msg.lastSeenUuid === U(34) && bound && s.v._rewindLive === door.REWIND_REQUEST_PREFIX + press.msg.reqId,
     '② THE PRESS («both»): one frame with its choice, `drawn` (what the confirm drew), the page\'s newest uuid and the count; the conversation step BOUND before it is sent, under the CLI\'s own id (tier one\'s rule)', press && press.msg);
   said.length = 0;
+  const before = clock.timers.length;
   press.match({ type: 'rewind-files-result', sessionId: 'sess-1', reqId: press.msg.reqId, ok: true, steps: ['files', 'conversation'], results: { files: { ok: true }, kept: { press: 'kp-mwq6g800-0000aaaa', files: 2 }, conversation: { ok: true, asked: true } }, outcome: { done: ['files', 'conversation'] } });
-  ok(said.some((x) => x[0] === t('Files put back or removed: {n}.', { n: 2 })) && s.v._rewindInFlight === true && clock.timers.length > 0,
-    '② its answer: the files step SAID on its own (put back or removed); the conversation step still waits its own answer (tier one\'s minute from now)', said);
-  // THE KEPT LINES: drawn, again after a redraw; the door only while the copy stands; a second press SAID
+  const armed = before === 0 ? clock.timers.find((x) => x.id === s.v._rewindAnswerTimer) : null;
+  ok(said.some((x) => x[0] === t('Files put back or removed: {n}.', { n: 2 })) && s.v._rewindInFlight === true && !!armed && armed.at === clock.now + door.REWIND_LIFE_MS,
+    '② its answer: the files step SAID on its own (put back or removed); the conversation step still waits its own answer — tier one\'s minute, ARMED by this answer (its own timer; r2245 (11))', said);
+  // r2245 (4): a person's press is ATTENDED — «Checking the files…» while the files dry run is out; a window closed meanwhile: no dialog
+  s = fresh(V, { files: true }); view = s.v; said.length = 0; toasts.length = 0; s.v._yes = false;
+  s.v._rewindFromMessage(person); await tick();
+  dryAnswer(tierOne(s.reqs)); await tick();
+  const checking = toasts.find((x) => x[0] === t('Checking the files…')), noDialogYet = !said.some((x) => x[0] === 'confirm');
+  s.v._disposed = true;
+  const fq3 = s.reqs.find((q) => q.msg.type === 'rewind-files');
+  fq3.match({ type: 'rewind-files-result', sessionId: 'sess-1', reqId: fq3.msg.reqId, ...FILES() }); await tick(); await tick();
+  ok(!!checking && checking[2].pinned === true && noDialogYet && checking[1].removed === true && !said.some((x) => x[0] === 'confirm') && s.v._rewindInFlight === false,
+    '② A PRESS IS ATTENDED (r2245 (4)): «Checking the files…» stands while the files dry run is out (taken away when it answers); a window closed meanwhile draws NO dialog', { checking: !!checking, removed: checking && checking[1].removed });
+  // r2245 (10): «both» refused by the CONVERSATION — tier one's words, never «the files changed»
+  const pc = await pressThrough(V); said.length = 0;
+  pc.press.match({ type: 'rewind-files-result', sessionId: 'sess-1', reqId: pc.press.msg.reqId, ok: false, reason: 'changed-since', cls: 'moved', step: 'conversation' });
+  ok(said.some((x) => x[0] === 'refusal' && x[1] === 'changed-since') && !said.some((x) => x[0] === W.pressRefusalWords('changed-since')) && pc.s.v._rewindInFlight === false,
+    '② «BOTH» REFUSED BY THE CONVERSATION (r2245 (10)): said in tier one\'s words (the conversation moved), never «the files changed since this was opened»', said);
+  // THE KEPT LINES, from the SERVER's own frames through the view's live meta (r2245 (1): no door fed by hand)
+  const T = Date.now();
+  const kOne = await serverFrames('0000abab', { now: T - 1000, msgAt: T - 3600e3 });
   s = fresh(V, { files: true }); view = s.v; said.length = 0;
-  s.v._sayKeptLine({ press: 'kp-mwq6g800-0000bbbb', state: 'kept', door: true, files: 2, at: 5, until: 9e12 });
-  s.v._sayKeptLine({ press: 'kp-mwq6g800-0000cccc', state: 'put-back', door: false, at: 4, putBackAt: 6 });
-  const strip = s.root.children.find((c) => c.className === 'chat-rewind-kept');
-  const doors = () => s.root.all().filter((e) => e.tagName === 'BUTTON');
-  const before = strip ? strip.children.length : 0, doorsBefore = doors().length;
-  strip.remove(); s.v._redrawKeptLines();
-  const again = s.root.children.find((c) => c.className === 'chat-rewind-kept');
-  ok(before === 2 && doorsBefore === 1 && !!again && again.children.length === 2 && doors().length === 1 && again.children[0].innerText.includes('2 file(s)'),
-    '② THE KEPT LINES (r1988 laws 1 + 3): drawn in the conversation, the door on the one whose copy stands only; a history redraw (a compaction view, a rewind past it) draws them AGAIN', { before, doorsBefore });
+  const meta = metaOf(VSRC);
+  meta.call(s.v, kOne.told[0]);
+  const stripNow = () => s.root.children.find((c) => c.className === 'chat-rewind-kept') || null;
+  const doors = () => s.root.all().filter((e) => e.tagName === 'BUTTON' && e.className !== 'chat-rewind-kept-close');
+  const st1 = stripNow();
+  ok(kOne.kept.ok && kOne.told.length === 1 && kOne.told[0].data.door === true && !!st1 && s.root.children.indexOf(st1) < s.root.children.indexOf(s.list) && !s.list.all().includes(st1) && doors().length === 1
+    && st1.innerText.includes(t('the rewind to your message of {when}', { when: dateOf(T - 3600e3, { words: true }) })) && !!s.root.style.props['--chat-kept-h'],
+    '② A FILES PRESS\'s TOLD LINE (the server\'s own frame, r2245 (1)): drawn WITH its door, naming which rewind; in its OWN place above the message list (a sibling before it, never inside it), its height given to what floats over the list (r2245 (3))', { told: kOne.told[0].data, at: st1 && s.root.children.indexOf(st1) });
+  const kTwo = await serverFrames('0000acac', { now: T - 500, msgAt: T - 1800e3 });
+  await KD.afterPutBack({ mode: 'chat' }, 'sess-1', kTwo.kept.press, { ok: true, rows: [{ path: '/w/x', act: 'overwrite', done: true }] }, { broadcastToSession: () => { }, now: T - 400, ...KO });
+  const att = await attachFrame(T);
+  s = fresh(V, { files: true }); view = s.v; said.length = 0;
+  meta.call(s.v, att);
+  const box = () => (stripNow() ? stripNow().children.find((c) => c.className === 'chat-rewind-kept-lines') : null);
+  const order = box() ? box().children.map((c) => c.innerText) : [];
+  ok(!!att && att.data.lines.length === 2 && order.length === 2 && order[0].includes(W.putBackDoorWords()) && /was put back on/.test(order[1]) && doors().length === 1,
+    '② AN ATTACH draws the whole record (the server\'s frame): the line whose copy stands FIRST, with its door; the put-back kOne after it, no door', order);
+  const close = stripNow().children.find((c) => c.className === 'chat-rewind-kept-close');
+  close.onclick();
+  const closed = !stripNow() && s.root.style.props['--chat-kept-h'] === '0px';
+  meta.call(s.v, await attachFrame(T));
+  ok(!!close && close.attrs['aria-label'] === t('Close') && closed && !!stripNow() && doors().length === 1,
+    '② ITS CLOSE is for this view only: the strip goes (what floats over the list moves back up) and comes back at the next attach while a copy stands (r2245 (3))', { closed });
   const door1 = doors()[0];
   door1.onclick(); door1.onclick();
   const pbs = s.reqs.filter((q) => q.msg.type === 'rewind-files-put-back');
   ok(pbs.length === 1 && pbs[0].msg.dryRun === true && s.root.all().some((e) => e.className === 'chat-rewind-kept-said' && /already being put back/.test(e.textContent)) && doors().length === 1,
     '② TWO PRESSES of one put-back on this page: ONE ask; the second press is SAID (the button stays live, never greyed)', pbs.length);
+  stripNow().remove(); s.v._redrawKeptLines();
+  ok(!!stripNow() && s.root.children.indexOf(stripNow()) < s.root.children.indexOf(s.list), '② a strip dropped from the page is drawn again in its place by a redraw (a history load calls it)');
+  // THE WIRING no other leg reads (r2245 (11)): the hub's attach field and after-calls; the page's meta parse; the history loads' redraw
+  const WS = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  const WIRES = [['the attach payload\'s files fact', 'fileCheckpoints: session._fileCheckpoints === true,'],
+    ['the record sent at an attach', "require('./server/rewind-kept-door.js').sendKeptLines(ws, data.sessionId)"],
+    ['the line after a files press (any answer that kept)', "if (data.dryRun !== true) require('./server/rewind-kept-door.js').afterFilesPress(session, conv, r, { broadcastToSession, hosts, msgId: data.msgId })"],
+    ['the lines after a put-back', "require('./server/rewind-kept-door.js').afterPutBack(session, data.sessionId, data.press, r, { broadcastToSession, hosts })"]];
+  const unwired = WIRES.filter(([, x]) => WS.split(x).length !== 2).map(([n]) => n);
+  const parseLine = VSRC.split('\n').find((l) => l.includes("if ('fileCheckpoints' in meta)"));
+  const pv = {}, parse = new Function('meta', parseLine || 'throw new Error("no parse line")');
+  parse.call(pv, { fileCheckpoints: true }); const p1 = pv._fileCheckpoints; parse.call(pv, { fileCheckpoints: 'yes' }); const p2 = pv._fileCheckpoints;
+  const vl = VSRC.split('\n'), redraws = vl.filter((l, i) => l.includes('this._redrawKeptLines();') && /meta\.leftBehind/.test(vl[i - 1] || '')).length;
+  ok(!unwired.length && p1 === true && p2 === false && redraws === 2,
+    '② THE WIRING (r2245 (11)): the hub sends the files fact at an attach, the record after it, a line after every press that kept and after every put-back (src/ws-handler.js); the page reads the fact ONLY as true; both history loads draw the lines again', { unwired, p1, p2, redraws });
+  // the strip's CSS (r2245 (3)): its own place, its bound and scroll; what floats over the list's top edge moves down by its height
+  const cs = cssOk(CSS);
+  ok(cs.own && cs.scroll && cs.phone && !cs.floats.length, '② THE STRIP\'s CSS (r2245 (3)): its own row of the view (never an overlay), its lines bounded with their own scroll (about three lines at phone width); the left-behind line, the history status, the position pill and the run bar move down by its height', cs);
 }
 
 console.log('— red controls');
 {
+  const V0 = liftView(VSRC);
   const darkOff = liftView(anchored(VSRC, "    const files = this._fileCheckpoints === true ? this._askRewindFiles(msg) : null;", "    const files = this._askRewindFiles(msg);", 'page: the dark gate off'));
   const s = fresh(darkOff); view = s.v; said.length = 0;
   s.v._rewindFromMessage(person); await tick();
@@ -214,8 +330,18 @@ console.log('— red controls');
   dryAnswer(tierOne(s2.reqs)); fq.match({ type: 'rewind-files-result', sessionId: 'sess-1', reqId: fq.msg.reqId, ...FILES() }); await tick(); await tick(); await tick();
   const p2 = s2.reqs.find((q) => q.msg.type === 'rewind-files' && !q.msg.dryRun);
   ok(!!p2 && p2.msg.drawn === undefined, 'RED CONTROL (a press without `drawn`): the press goes out with no record of what the confirm drew');
-  const doorGone = await wordsWith("  if (line && line.state === 'kept' && line.door) return", "  if (line && line.state !== 'put-back') return", 'page: a door on a gone copy');
+  const doorGone = await wordsWith("  if (l.state === 'kept' && l.door) {", "  if (l.state !== 'put-back') {", 'page: a door on a gone copy');
   ok(doorGone.keptLineModel({ press: 'kp-x', state: 'gone', door: false, until: 9 }).door === true, 'RED CONTROL (a door on a copy that is gone): the line offers «Put my files back» after the copy is swept');
+  const noWatch = liftView(anchored(VSRC, "        clearTimeout(this._rewindAnswerTimer);   // the conversation step was ASKED: tier one's minute, from now\n        this._rewindAnswerTimer = setTimeout(", "        clearTimeout(this._rewindAnswerTimer);\n        void (", 'page: the press\'s watchdog never armed'));
+  const nw = await pressThrough(noWatch);
+  nw.press.match({ type: 'rewind-files-result', sessionId: 'sess-1', reqId: nw.press.msg.reqId, ok: true, steps: ['files', 'conversation'], results: { files: { ok: true }, kept: { press: 'kp-mwq6g800-0000aaaa', files: 2 }, conversation: { ok: true, asked: true } }, outcome: { done: ['files', 'conversation'] } });
+  ok(!clock.timers.some((x) => x.id === nw.s.v._rewindAnswerTimer), 'RED CONTROL (the press\'s watchdog never armed): the conversation step waits with no minute — the leg\'s own-timer read sees it (it could not, with a shared clock)');
+  const unwiredMeta = metaOf(anchored(VSRC, "{ this._onKeptMeta(op); return; }", "{ void op; return; }", 'page: the kept-lines meta not wired'));
+  const uw = fresh(V0, { files: true }); view = uw.v;
+  unwiredMeta.call(uw.v, (await serverFrames('0000adad', { now: Date.now() - 100, msgAt: Date.now() - 9e5 })).told[0]);
+  ok(!uw.root.children.some((c) => c.className === 'chat-rewind-kept'), 'RED CONTROL (the kept-lines meta not wired): a second client is told a kept line and draws nothing');
+  const over = cssOk(anchored(CSS, '.chat-left-behind { position: absolute; top: calc(40px + var(--chat-kept-h, 0px));', '.chat-left-behind { position: absolute; top: 40px;', 'css: the left-behind line over the strip'));   // stale-pins: kept (a red control: it plants the old text)
+  ok(over.floats.includes('.chat-left-behind'), 'RED CONTROL (the left-behind line back at its fixed top): it would sit over the strip — the CSS leg names it', over.floats);
 }
 
 report();

@@ -13,7 +13,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t, tc } from './i18n.js';
-import { confirmModel, drawnOf, filesOutcomeWords, pressRefusalWords, keptLineModel, putBackDoorWords, putBackPlanWords, putBackOutcomeWords } from './rewind-files-words.js'; // B-437e U3: the files tier's page (PURE)
+import { confirmModel, drawnOf, filesOutcomeWords, pressRefusalWords, keptLineModel, keptOrderOf, putBackDoorWords, putBackPlanWords, putBackOutcomeWords } from './rewind-files-words.js'; // B-437e U3: the files tier's page (PURE)
 import { pressVerdict } from './press-arm.js'; // B-ef04: a card row that opens a conversation counts a press only on what sat still
 /** B-ef04: the transcript's rows that OPEN A CONVERSATION — a channel card's row, a peer's name — a press on one that the list just
  *  moved under a still pointer is refused */
@@ -2177,8 +2177,8 @@ class ChatView {
   /** the files dry run beside tier one's → a promise of its facts, or null (unanswered within its bound, a closed view, no socket):
    *  null draws today's confirm — the conversation step is never held by the files ask past its bound */
   _askRewindFiles(msg) {
-    return new Promise((resolve) => {
-      let done = false;
+    let done = false;
+    const asked = new Promise((resolve) => {
       const end = (v) => { if (!done) { done = true; resolve(v); } };
       const reqId = 'rwf-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       try {
@@ -2187,6 +2187,8 @@ class ChatView {
           { isAlive: () => !this._disposed, timeoutMs: REWIND_FILES_ASK_MS, onTimeout: () => end(null) });
       } catch { end(null); }
     });
+    Object.defineProperty(asked, 'settled', { get: () => done });   // answered (or given up) already: no «checking» line
+    return asked;
   }
   /** the FILES confirm when the server drew a files choice → true (drawn here) | false (today's confirm draws instead) */
   _confirmRewindFiles(msg, plan, said, facts) {
@@ -2245,7 +2247,15 @@ class ChatView {
       { type: 'rewind-files', sessionId: this.sessionId, msgId: msg.id, reqId, choice, drawn: drawnOf(facts), lastSeenUuid: now.ok ? now.lastSeenUuid : plan.lastSeenUuid, expectTaken: said.taken },
       (m) => {
         if (!m || m.type !== 'rewind-files-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
-        if (!m.ok) { if (withConversation) unbind(); settle(); const w = pressRefusalWords(m.reason); if (w) showToast(w, { type: 'error' }); else this._sayRewindRefusal(m.reason, m.cls); return true; }
+        if (!m.ok) {
+          if (withConversation) unbind();
+          settle();
+          // r2245 (10): the CONVERSATION refused or moved («both»'s own dry run) — tier one's words; else the files step's own: a refusal
+          // by name, or (r2245 (7)) a press that failed after its keep says what is known
+          if (m.step === 'conversation' || (!pressRefusalWords(m.reason) && !(m.outcome && m.outcome.maybePartial))) this._sayRewindRefusal(m.reason, m.cls);
+          else showToast(filesOutcomeWords(m), { type: 'error' });
+          return true;
+        }
         if (choice !== 'conversation') showToast(filesOutcomeWords(m), { type: m.results && m.results.files && m.results.files.ok ? 'info' : 'error' });
         const conv = m.results && m.results.conversation;
         if (!withConversation) { settle(); return true; }
@@ -2261,35 +2271,65 @@ class ChatView {
       { isAlive: () => !this._disposed, timeoutMs: REWIND_FILES_PRESS_MS, onTimeout: () => { settle(); showToast(t('No answer to the files rewind yet — VibeSpace may still be putting them back. The kept copy holds them as they were.'), { type: 'error' }); } },
     );
   }
-  /** A KEPT LINE (src/server/rewind-kept-door.js): what a rewind did to this conversation's files — kept by the hub, drawn again after a
-   *  reload, told live to every client. The view keeps them: a history redraw (a compaction view, a rewind of the conversation past
-   *  it) draws them again. The door only while its copy stands; after that the line SAYS so (never a greyed door) */
-  _sayKeptLine(d) {
+  /** THE KEPT LINES (src/server/rewind-kept-door.js): what each rewind did to this conversation's files — kept by the hub, drawn again
+   *  after a reload, told live to every client AS A PAGE DRAWS IT (its door computed there). THEIR OWN PLACE (r2245 (3)): a strip ABOVE
+   *  the message list (never over messages), bounded to about three lines at phone width with its own scroll, the lines whose copy
+   *  stands first, a close for this view only (it comes back at the next attach while a copy stands, or when a new copy is told);
+   *  everything that floats over the list's top edge moves down by its height (--chat-kept-h), so it never meets the left-behind line */
+  _onKeptMeta(op) {
+    const d = op.data || {};
+    if (op.subtype === 'rewind-kept-line') { this._sayKeptLine(d, { told: true }); return; }
+    const lines = Array.isArray(d.lines) ? d.lines : [];   // an attach's: the whole record again
+    this._keptTorn = d.torn === true;
+    if (lines.some((l) => l && l.door === true)) this._keptClosed = false;
+    for (const l of lines) this._sayKeptLine(l, { draw: false });
+    this._drawKeptStrip();
+  }
+  _sayKeptLine(d, { told = false, draw = true } = {}) {
     if (!d || typeof d.press !== 'string' || !d.press) return;
-    (this._keptLines || (this._keptLines = new Map())).set(d.press, d);
-    if (!this._keptStrip || !this._keptStrip.isConnected) {
-      this._keptStrip = document.createElement('div');
-      this._keptStrip.className = 'chat-rewind-kept';
-      this._container.appendChild(this._keptStrip);
+    const lines = this._keptLines || (this._keptLines = new Map());
+    lines.set(d.press, { ...(lines.get(d.press) || {}), ...d });
+    if (told && d.door === true) this._keptClosed = false;   // a copy just kept is shown, even after a close
+    if (draw) this._drawKeptStrip();
+  }
+  _drawKeptStrip() {
+    const any = (this._keptLines && this._keptLines.size) || this._keptTorn;
+    if (this._keptClosed || !any) { if (this._keptStrip) this._keptStrip.remove(); this._keptHeight(); return; }
+    if (!this._keptStrip) {
+      const strip = document.createElement('div'), box = document.createElement('div'), x = document.createElement('button');
+      strip.className = 'chat-rewind-kept'; box.className = 'chat-rewind-kept-lines';
+      x.type = 'button'; x.className = 'chat-rewind-kept-close'; x.setAttribute('aria-label', t('Close')); x.innerHTML = UI_ICONS.close;
+      x.onclick = () => { this._keptClosed = true; this._drawKeptStrip(); };   // this view only: the record stays on the hub
+      strip.append(box, x);
+      this._keptStrip = strip; this._keptBox = box;
+      if (typeof ResizeObserver === 'function') { try { new ResizeObserver(() => this._keptHeight()).observe(strip); } catch { } }   // a width change wraps its lines
     }
-    const els = this._keptEls || (this._keptEls = new Map());
-    let line = els.get(d.press);
-    if (!line || !line.isConnected) { line = document.createElement('div'); line.className = 'chat-system chat-rewind-kept-line'; this._keptStrip.prepend(line); els.set(d.press, line); }
-    const m = keptLineModel(d, { fmt: (ms) => dateOf(ms, { words: true }) });   // page-time: the ONE formatter (a date inside a sentence: its words form)
-    line.textContent = '';
-    const words = document.createElement('span'); words.textContent = m.words; line.appendChild(words);
-    const said = this._keptSaid && this._keptSaid.get(d.press);
-    if (said) { const s = document.createElement('span'); s.className = 'chat-rewind-kept-said'; s.textContent = said; line.appendChild(s); }   // the LATEST outcome, in place
-    if (m.door) { const b = document.createElement('button'); b.type = 'button'; b.textContent = putBackDoorWords(); b.onclick = () => this._putBackFiles(d.press); line.appendChild(b); }
+    const strip = this._keptStrip, box = this._keptBox, list = this._messageList;
+    if (!strip.isConnected) { if (list && list.parentNode === this._container) this._container.insertBefore(strip, list); else this._container.appendChild(strip); }
+    box.textContent = '';
+    const lineOf = (text) => { const line = document.createElement('div'), words = document.createElement('span'); line.className = 'chat-system chat-rewind-kept-line'; words.textContent = text; line.appendChild(words); box.appendChild(line); return line; };
+    if (this._keptTorn) lineOf(t('The record of this conversation\'s kept files could not be read — it is left as it is.'));
+    for (const d of keptOrderOf([...(this._keptLines || new Map()).values()])) {
+      const m = keptLineModel(d, { fmt: (ms) => dateOf(ms, { words: true }) });   // page-time: the ONE formatter (a date inside a sentence: its words form)
+      const line = lineOf(m.words);
+      const said = this._keptSaid && this._keptSaid.get(d.press);
+      if (said) { const s = document.createElement('span'); s.className = 'chat-rewind-kept-said'; s.textContent = said; line.appendChild(s); }   // the LATEST outcome, in place
+      if (m.door) { const b = document.createElement('button'); b.type = 'button'; b.textContent = putBackDoorWords(); b.onclick = () => this._putBackFiles(d.press); line.appendChild(b); }
+    }
+    this._keptHeight();
+  }
+  /** the strip's height, for what floats over the list's top edge (public/chat.css: the history status, the position pill, the run bar, the left-behind line) */
+  _keptHeight() {
+    const st = this._container && this._container.style;
+    if (!st || typeof st.setProperty !== 'function') return;
+    st.setProperty('--chat-kept-h', `${this._keptStrip && this._keptStrip.isConnected ? Number(this._keptStrip.offsetHeight) || 0 : 0}px`);
   }
   _redrawKeptLines() {
-    if (!this._keptLines) return;
-    for (const d of [...this._keptLines.values()].sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0))) this._sayKeptLine(d);   // newest on top
+    if (this._keptLines || this._keptTorn) this._drawKeptStrip();
   }
   _keptSay(press, words) {
     (this._keptSaid || (this._keptSaid = new Map())).set(press, words);
-    const d = this._keptLines && this._keptLines.get(press);
-    if (d) this._sayKeptLine(d); else showToast(words);
+    if (this._keptLines && this._keptLines.has(press) && !this._keptClosed) this._drawKeptStrip(); else showToast(words);
   }
   /** «PUT MY FILES BACK AS THEY WERE»: the plan first (each path's act named), then the act with that plan. A press while one is out on
    *  this page is SAID, never a dead button; two clients on one press: the hub refuses the second (`pending`), said in words */
@@ -2336,7 +2376,9 @@ class ChatView {
       (m) => {
         if (!m || m.type !== 'rewind-result' || m.sessionId !== this.sessionId || m.reqId !== dryId) return false;
         if (!m.ok) { free(); this._sayRewindRefusal(m.reason, m.cls); return true; }
-        if (files) files.then((f) => this._confirmRewind(msg, plan, m, f)); else this._confirmRewind(msg, plan, m);   // still one in flight while the confirm is open (one dialog)
+        if (!files) { this._confirmRewind(msg, plan, m); return true; }   // still one in flight while the confirm is open (one dialog)
+        const note = files.settled ? null : showToast(t('Checking the files…'), { pinned: true });   // r2245 (4): a person's press is attended while the files dry run is out (≤ 20 s)
+        files.then((f) => { if (note && typeof note.remove === 'function') note.remove(); if (this._disposed) { free(); return; } this._confirmRewind(msg, plan, m, f); });   // a window closed meanwhile draws no dialog
         return true;
       },
       { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { this._rewindCancel?.(); if (this._disposed) return; free(); showToast(t('No answer to the rewind yet — the conversation is as you see it.'), { type: 'error' }); } },
@@ -5492,8 +5534,7 @@ class ChatView {
     // B-bba6 cure: a put-back at the conversation's END (no Stop — its process ended; text only): its own one toast
     // B-69a7: what a settled Stop's command tool left running — said once, «End them» on THIS machine (a person's press)
     if (op.subtype === 'left-behind') { this._sayLeftBehind(op.data || {}); return; }
-    if (op.subtype === 'rewind-kept-line') { this._sayKeptLine(op.data || {}); return; }   // B-437e U3: a kept line, told live to every client
-    if (op.subtype === 'rewind-kept-lines') { for (const l of (op.data && Array.isArray(op.data.lines) ? op.data.lines : [])) this._sayKeptLine(l); return; }   // a reload's
+    if (op.subtype === 'rewind-kept-line' || op.subtype === 'rewind-kept-lines') { this._onKeptMeta(op); return; }   // B-437e U3: a kept line told live to every client; an attach's whole record
     if (op.subtype === 'queue-putback' && op.by === 'exit' && op.n > 0) {
       const said = [t('The conversation ended — {n} queued message(s) put back into the input box', { n: op.n })];
       if (op.cut > 0) said.push(t('{m} message(s) came back shortened', { m: op.cut }));

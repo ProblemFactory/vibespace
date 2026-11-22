@@ -124,26 +124,43 @@ export const pressRefusalWords = (reason) => PRESS_REFUSALS()[reason] || null;
 
 /** THE PRESS's OUTCOME for its files step → one sentence (the conversation step's answer is said as tier one says it) */
 export function filesOutcomeWords(r) {
-  if (!r || r.ok !== true) return pressRefusalWords(r && r.reason) || t('Nothing was put back.');
+  const partial = () => t('Some files may have been put back — the files step did not finish. The kept copy holds them as they were.');
+  if (!r || r.ok !== true) return r && r.outcome && r.outcome.maybePartial ? partial() : pressRefusalWords(r && r.reason) || t('Nothing was put back.');   // a press that failed AFTER its keep says what is known (r2245 (7))
   const f = r.results && r.results.files;
   const o = r.outcome || {};
   if (f && f.ok === true) {
     const n = Number(r.results && r.results.kept && r.results.kept.files) || (Array.isArray(f.files) ? f.files.length : 0);
     return n ? t('Files put back or removed: {n}.', { n }) : t('The files were put back or removed.');
   }
-  if (o.maybePartial) return t('Some files may have been put back — the files step did not finish. The kept copy holds them as they were.');
+  if (o.maybePartial) return partial();
   return t('Nothing was put back.');
 }
 
-/** A KEPT LINE (src/server/rewind-kept-door.js linesOf) → {words, door: bool} — the door ONLY while its copy stands; after its seven
- *  days, or once put back, the line SAYS so (never a greyed door). `fmt(ms)` = the view's own date words */
+/** A KEPT LINE (src/server/rewind-kept-door.js linesRead — told live in the same form) → {words, door: bool}. It names WHICH rewind
+ *  (the rewound message's date; a put-back's keep-first: the put-back's) and what the files step did (r2245 (3), (7)); the door ONLY
+ *  while its copy stands — after its seven days, or once every file is put back, the line SAYS so (never a greyed door); a put-back
+ *  that left files behind keeps the door and says how many (r2245 (2)). `fmt(ms)` = the view's own date words */
 export function keptLineModel(line, { fmt = (ms) => dateOf(ms, { words: true }) } = {}) {
-  const n = Number(line && line.files) || 0;
-  const where = line && line.machine ? t('on {machine}', { machine: line.machine }) : t('on this computer');
-  if (line && line.state === 'put-back') return { door: false, words: t('Files rewound here — they were put back as they were on {date}.', { date: fmt(Number(line.putBackAt) || Number(line.at)) }) };
-  if (line && line.state === 'kept' && line.door) return { door: true, words: t('Files rewound here — a copy of {n} file(s) as they were is kept {where} until {date}.', { n, where, date: fmt(Number(line.until)) }) };
-  return { door: false, words: t('Files rewound here — the copy kept of them is gone (it was kept seven days).') };
+  const l = line || {};
+  const n = Number(l.files) || 0;
+  const where = l.machine ? t('on {machine}', { machine: l.machine }) : t('on this computer');
+  const which = l.of === 'put-back' ? t('the put-back of {when}', { when: fmt(Number(l.at)) })
+    : Number(l.msgAt) > 0 ? t('the rewind to your message of {when}', { when: fmt(Number(l.msgAt)) }) : t('the rewind of {when}', { when: fmt(Number(l.at)) });
+  const said = (...words) => [...words, ...(l.unrecorded ? [t('This line could not be saved: the conversation\'s record of kept files could not be read.')] : [])].join(' ');
+  if (l.state === 'put-back') return { door: false, words: said(t('The copy kept for {which} was put back on {date}.', { which, date: fmt(Number(l.putBackAt) || Number(l.at)) })) };
+  if (l.state === 'kept' && l.door) {
+    const w = { n, which, where, date: fmt(Number(l.until)) };
+    const head = l.of === 'put-back' ? t('A copy of {n} file(s) as they stood before {which} is kept {where} until {date}.', w)
+      : l.step === 'partial' ? t('Some files may have been put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.', w)
+        : l.step === 'none' ? t('No files were put back by {which} — the copy of {n} file(s) kept before it stays {where} until {date}.', w)
+          : t('Files were put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.', w);
+    const tried = Number(l.notPut) > 0 ? [t('A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.', { date: fmt(Number(l.triedAt) || Number(l.at)), m: Number(l.notPut) })] : [];
+    return { door: true, words: said(head, ...tried) };
+  }
+  return { door: false, words: said(t('The copy kept for {which} is gone (it was kept seven days).', { which })) };
 }
+/** THE STRIP's order (r2245 (3)): the lines whose copy still stands first, then the newest first */
+export const keptOrderOf = (lines) => (Array.isArray(lines) ? lines.filter(Boolean) : []).slice().sort((a, b) => (b.door === true) - (a.door === true) || (Number(b.at) || 0) - (Number(a.at) || 0));
 export const putBackDoorWords = () => t('Put my files back as they were');
 
 const PUT_WHY = () => ({
@@ -154,9 +171,11 @@ const PUT_WHY = () => ({
   unreadable: t('it could not be read'),
   'agent-too-old': t('that machine\'s agent is an older version'),
 });
-/** «PUT MY FILES BACK»: each path's act named BEFORE it acts → [sentence] */
+/** «PUT MY FILES BACK»: each path's act named BEFORE it acts → [sentence], at most SHOWN_MAX and «and N more» (r2245 (11): the
+ *  put-back's confirm bounded as the files confirm is) */
 export function putBackPlanWords(rows) {
-  return (Array.isArray(rows) ? rows : []).map((r) => {
+  const all = Array.isArray(rows) ? rows : [];
+  const said = all.slice(0, SHOWN_MAX).map((r) => {
     const p = shortPath(r.path);
     if (r.act === 'overwrite') return t('{path} — put back over what is there now (that is kept first)', { path: p });
     if (r.act === 'create') return t('{path} — put back (it is not there now)', { path: p });
@@ -164,6 +183,7 @@ export function putBackPlanWords(rows) {
     if (r.act === 'unchanged') return t('{path} — already as it was', { path: p });
     return t('{path} — not put back: {why}', { path: p, why: PUT_WHY()[r.why] || t('not known') });
   });
+  return all.length > SHOWN_MAX ? said.concat([t('and {n} more', { n: all.length - SHOWN_MAX })]) : said;
 }
 const PUT_REFUSALS = () => ({
   pending: t('These files are already being put back (another window pressed it) — wait for its answer.'),

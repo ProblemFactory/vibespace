@@ -255,9 +255,9 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
   const klLs = { mode: 'chat' };
   const klL1 = await KD.afterFilesPress(klLs, 'conv-l', { ok: true, results: { kept: { press: klLk.press, where: klLk.where, machine: null, check: 'sha256', files: 1 }, files: { ok: true } } }, { broadcastToSession: klBcast, msgId: 'p1', now: T0, ...KA(klLroot) });
   const klSeen1 = await KD.linesOf('conv-l', { now: T0 + 1000, ...KA(klLroot) });
-  ok(klLk.ok && klL1 && klL1.state === 'kept' && klL1.until === T0 + K.KEEP.lifeMs && klL1.files === 1 && klL1.msgId === 'p1' && klTold.length === 1 && klTold[0][0] === klLs && klTold[0][2].op === 'meta' && klTold[0][2].subtype === 'rewind-kept-line' && klTold[0][2].data.press === klLk.press
-    && klSeen1.length === 1 && klSeen1[0].door === true && fs.existsSync(path.join(klLroot, 'conv-l', K.LINES_FILE)),
-    '② A KEPT LINE (r1988): a files press that kept copies writes its line (data/rewind-kept/<conversation>/lines.json, synced) and tells EVERY client of the conversation live; its door stands while its copy does', { klL1, klSeen1 });
+  ok(klLk.ok && klL1 && klL1.state === 'kept' && klL1.until === T0 + K.KEEP.lifeMs && klL1.files === 1 && klL1.msgId === 'p1' && klL1.step === 'done' && klTold.length === 1 && klTold[0][0] === klLs && klTold[0][2].op === 'meta' && klTold[0][2].subtype === 'rewind-kept-line' && klTold[0][2].data.press === klLk.press
+    && klTold[0][2].data.door === true && klTold[0][2].data.state === 'kept' && klSeen1.length === 1 && klSeen1[0].door === true && fs.existsSync(path.join(klLroot, 'conv-l', K.LINES_FILE)),
+    '② A KEPT LINE (r1988): a files press that kept copies writes its line (data/rewind-kept/<conversation>/lines.json, synced) and tells EVERY client of the conversation live AS A PAGE DRAWS IT — its door on the told line itself (r2245 (1)); the door stands while its copy does', { klL1, told: klTold[0] && klTold[0][2].data, klSeen1 });
   // a put-back: its line reads «put back»; its keep-klFirst (what stood there) is a line of its own, with its door
   fs.writeFileSync(klLf, 'l after\n');
   const klLp = await KD.putBack({ session: klLs, conv: 'conv-l', press: klLk.press, by: HUMAN, dryRun: true, ...KA(klLroot) });
@@ -266,8 +266,10 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
   await KD.afterPutBack(klLs, 'conv-l', klLk.press, klLd, { broadcastToSession: klBcast, now: T0 + 2000, ...KA(klLroot) });
   const klSeen2 = await KD.linesOf('conv-l', { now: T0 + 3000, ...KA(klLroot) });
   const klWas = klSeen2.find((x) => x.press === klLk.press), klFirst = klSeen2.find((x) => x.press !== klLk.press);
-  ok(klLd.ok && klWas && klWas.state === 'put-back' && klWas.door === false && klWas.putBackAt === T0 + 2000 && klFirst && klFirst.state === 'kept' && klFirst.door === true && klTold.length === 2,
-    '② the put-back: its line stays and SAYS «put back» (no door); what stood there, kept first, is a line of its own with its door; both told live', klSeen2);
+  const klToldOf = (press) => (klTold.find((x) => x[2].data.press === press) || [])[2];
+  ok(klLd.ok && klWas && klWas.state === 'put-back' && klWas.door === false && klWas.putBackAt === T0 + 2000 && klFirst && klFirst.state === 'kept' && klFirst.door === true && klFirst.of === 'put-back' && klTold.length === 2
+    && klToldOf(klFirst.press).data.door === true && klToldOf(klLk.press).data.door === false && klToldOf(klLk.press).data.state === 'put-back',
+    '② the put-back: its line stays and SAYS «put back» (no door); what stood there, kept first, is a line of its own with its door; both told live, the keep-first WITH its door (r2245 (1))', klSeen2);
   // the copy gone, or its seven days past: the line stays and says so — never a door
   const klSeen3 = await KD.linesOf('conv-l', { now: T0 + 2000 + K.KEEP.lifeMs + 1, ...KA(klLroot) });
   fs.rmSync(path.join(klLroot, 'conv-l', klFirst.press), { recursive: true, force: true });
@@ -289,6 +291,73 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
   const klFrame = klSentSome[0] ? JSON.parse(klSentSome[0]) : null;
   ok(klBefore === 0 && !klSentNone.length && klFrame && klFrame.op === 'meta' && klFrame.subtype === 'rewind-kept-lines' && klFrame.data.lines.length === 2 && klPoolCalls > 0,
     '② AN ATTACH draws them again (their own meta, read off the loop); a conversation that never kept anything asks no keep pool (one async look for its lines file)', { klBefore, sent: klFrame && klFrame.data.lines.length });
+  {   // r2245: the round wj16ir2eu's legs (their own names)
+  // r2245 (2): A PARTIAL PUT-BACK — one row fails: the line stays KEPT (its door while the copy stands) and records the try
+  const at2 = (tag) => fs.mkdtempSync(path.join(SCRATCH, tag + '-'));
+  const pr = at2('plr'), pw = at2('plw'), pa = path.join(pw, 'a.txt'), pb = path.join(pw, 'b.txt');
+  fs.writeFileSync(pa, 'a then\n'); fs.writeFileSync(pb, 'b then\n');
+  const pk = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-pl', files: [pa, pb], by: HUMAN, now: T0, hex8: '0000d1d1', ...KA(pr) });
+  const ps = { mode: 'chat' }, pTold = [], pB = (sess, id, fr) => pTold.push(fr.data);
+  await KD.afterFilesPress(ps, 'conv-pl', { ok: true, results: { kept: { press: pk.press, machine: null, files: 2, msgAt: T0 - 60000 }, files: { ok: true } } }, { broadcastToSession: pB, now: T0, ...KA(pr) });
+  fs.writeFileSync(pa, 'a now\n'); fs.writeFileSync(pb, 'b now\n');
+  const failB = (op, payload) => (op === 'putOne' && payload && payload.row && payload.row.path === pb ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })) : call(op, payload));
+  const pplan = await KD.putBack({ session: ps, conv: 'conv-pl', press: pk.press, by: HUMAN, dryRun: true, ...KA(pr) });
+  const pdone = await KD.putBack({ session: ps, conv: 'conv-pl', press: pk.press, by: HUMAN, expect: pplan.rows, now: T0 + 1000, hex8: '0000d2d2', dataRoot: pr, call: failB });
+  pTold.length = 0;
+  await KD.afterPutBack(ps, 'conv-pl', pk.press, pdone, { broadcastToSession: pB, now: T0 + 1000, ...KA(pr) });
+  const pl = (await KD.linesOf('conv-pl', { now: T0 + 2000, ...KA(pr) })).find((x) => x.press === pk.press), plTold = pTold.find((x) => x.press === pk.press);
+  ok(pdone.ok && pdone.rows.filter((x) => x.done === true).length === 1 && fs.readFileSync(pa, 'utf8') === 'a then\n' && fs.readFileSync(pb, 'utf8') === 'b now\n'
+    && !!pl && pl.state === 'kept' && pl.door === true && pl.notPut === 1 && pl.triedAt === T0 + 1000 && pl.msgAt === T0 - 60000 && !!plTold && plTold.door === true && plTold.notPut === 1,
+    '② A PARTIAL PUT-BACK (r2245 (2)): one row fails — the line stays KEPT, its door stands while the copy does, and it records how many were not put back and when (told so live)', { pl, rows: pdone.rows.map((x) => [x.act, x.done]) });
+  const pplan2 = await KD.putBack({ session: ps, conv: 'conv-pl', press: pk.press, by: HUMAN, dryRun: true, ...KA(pr) });
+  const pdone2 = await KD.putBack({ session: ps, conv: 'conv-pl', press: pk.press, by: HUMAN, expect: pplan2.rows, now: T0 + 3000, hex8: '0000d3d3', ...KA(pr) });
+  await KD.afterPutBack(ps, 'conv-pl', pk.press, pdone2, { broadcastToSession: pB, now: T0 + 3000, ...KA(pr) });
+  const pl2 = (await KD.linesOf('conv-pl', { now: T0 + 4000, ...KA(pr) })).find((x) => x.press === pk.press);
+  ok(pdone2.ok && fs.readFileSync(pb, 'utf8') === 'b then\n' && pl2.state === 'put-back' && pl2.door === false && pl2.putBackAt === T0 + 3000,
+    '② …its door puts back the rest: once every row that had an act is done, the line reads «put back»', { pl2, rows: pdone2.rows.map((x) => [x.act, x.done]) });
+  // r2245 (7): a keep whose files step put nothing back, or may have put some back, still has its line and door — its step said
+  const sr = at2('step'), stw = at2('stepw'), sf = path.join(stw, 's.txt'); fs.writeFileSync(sf, 's\n');
+  const sk1 = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-s', files: [sf], by: HUMAN, now: T0, hex8: '0000f4f4', ...KA(sr) });
+  const sk2 = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-s', files: [sf], by: HUMAN, now: T0 + 1, hex8: '0000f5f5', ...KA(sr) });
+  const s1 = await KD.afterFilesPress(ps, 'conv-s', { ok: false, reason: 'door-failed', results: { kept: { press: sk1.press, files: 1 } }, outcome: { failed: 'files', maybePartial: true } }, { broadcastToSession: () => { }, now: T0, ...KA(sr) });
+  const s2 = await KD.afterFilesPress(ps, 'conv-s', { ok: true, results: { kept: { press: sk2.press, files: 1 }, files: { ok: false, reason: 'checkpoints-off', sent: true } }, outcome: { failed: 'files', maybePartial: false } }, { broadcastToSession: () => { }, now: T0 + 1, ...KA(sr) });
+  ok(!!s1 && s1.step === 'partial' && s1.door === true && !!s2 && s2.step === 'none' && s2.door === true,
+    '② A KEEP WHOSE FILES STEP DID NOT PUT THEM BACK (r2245 (7)): its line is written with its door, and says what the step did (may have put some back · put nothing back) — never «Files rewound» for a step that was refused', { s1: s1 && s1.step, s2: s2 && s2.step });
+  // r2245 (5): THE CAP drops the oldest SETTLED line — never a line whose copy still stands
+  const capCase = async (door, tag) => {
+    const cr = at2(tag), live0 = K.pressIdOf(T0 - 5000, '0000e0e0');
+    const settledLines = Array.from({ length: KD.LINES_MAX - 1 }, (_, i) => ({ press: K.pressIdOf(T0 - 4000 + i, (0xe100 + i).toString(16).padStart(8, '0')), at: T0 - 4000 + i, until: T0 + K.KEEP.lifeMs, state: 'put-back', putBackAt: T0 }));
+    await call('writeLines', { root: path.join(cr, 'conv-cap'), lines: [{ press: live0, at: T0 - 5000, until: T0 + K.KEEP.lifeMs, state: 'kept', files: 1 }, ...settledLines] });
+    const capNew = K.pressIdOf(T0, '0000efef');
+    await door.noteLine('conv-cap', { press: capNew, at: T0, until: T0 + K.KEEP.lifeMs, state: 'kept', files: 1 }, { now: T0, ...KA(cr) });
+    const after = (await call('readLines', { root: path.join(cr, 'conv-cap') })).lines;
+    return { after, live0, capNew, first: settledLines[0].press };
+  };
+  const cap = await capCase(KD, 'cap');
+  ok(cap.after.length === KD.LINES_MAX && cap.after[0].press === cap.live0 && cap.after.some((l) => l.press === cap.capNew) && !cap.after.some((l) => l.press === cap.first),
+    `② THE CAP (r2245 (5)): past ${KD.LINES_MAX} lines the oldest SETTLED line leaves — the oldest line, whose copy still stands, is kept (its door is the only way back to it)`, cap.after.length);
+  // r2245 (8): a record that cannot be read is never written over — the press's line is told NOT recorded; an attach says so
+  const tr = at2('torn'), torn = '{"v":1,"lines":[{"press"';
+  fs.mkdirSync(path.join(tr, 'conv-t'), { recursive: true }); fs.writeFileSync(path.join(tr, 'conv-t', K.LINES_FILE), torn);
+  const tw = at2('tornw'), tf = path.join(tw, 't.txt'); fs.writeFileSync(tf, 't\n');
+  const tk = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-t', files: [tf], by: HUMAN, now: T0, hex8: '0000f1f1', ...KA(tr) });
+  const tTold = [], tSent = [];
+  const tl = await KD.afterFilesPress({ mode: 'chat' }, 'conv-t', { ok: true, results: { kept: { press: tk.press, machine: null, files: 1 }, files: { ok: true } } }, { broadcastToSession: (sx, ix, fr) => tTold.push(fr.data), now: T0, ...KA(tr) });
+  await KD.sendKeptLines({ readyState: 1, send: (x) => tSent.push(JSON.parse(x)) }, 'conv-t', { dataRoot: tr, call, now: T0 });
+  ok(fs.readFileSync(path.join(tr, 'conv-t', K.LINES_FILE), 'utf8') === torn && !!tl && tl.unrecorded === true && tl.door === true && !!tTold[0] && tTold[0].unrecorded === true && !!tSent[0] && tSent[0].data.torn === true,
+    '② A RECORD THAT CANNOT BE READ (r2245 (8)): never treated as empty — not written over; the press\'s line is told live and SAID not recorded; an attach says the record could not be read', { tl, sent: tSent[0] && tSent[0].data });
+  // r2245 (9): the record goes with its conversation — through the one remover every end path reads (src/server/wrapper-files.js)
+  const WF = require(path.join(REPO, 'src/server/wrapper-files.js'));
+  const fdata = at2('fdata'), fbuf = path.join(fdata, 'buffers'), froot = path.join(fdata, 'rewind-kept'), fpress = K.pressIdOf(T0, '0000f3f3');
+  fs.mkdirSync(fbuf, { recursive: true });
+  for (const c of ['conv-f', 'conv-g']) await call('writeLines', { root: path.join(froot, c), lines: [{ press: K.pressIdOf(T0, '0000f2f2'), at: T0, until: T0 + 1, state: 'put-back' }] });
+  fs.mkdirSync(path.join(froot, 'conv-g', fpress));   // a press folder of that conversation still standing
+  WF.removeWrapperFiles(fbuf, 'conv-f'); WF.removeWrapperFiles(fbuf, 'conv-g');
+  const KDnow = require(path.join(REPO, 'src/server/rewind-kept-door.js'));   // the door the remover loads (the restart leg above loaded it afresh)
+  await Promise.all(['conv-f', 'conv-g'].map((c) => KDnow.chainOf(c)));
+  ok(!fs.existsSync(path.join(froot, 'conv-f')) && !fs.existsSync(path.join(froot, 'conv-g', K.LINES_FILE)) && fs.existsSync(path.join(froot, 'conv-g', fpress)),
+    '② THE CONVERSATION ENDS FOR GOOD (r2245 (9)): its lines record goes with it, through the one remover every end path reads (a kill, the exit teardown, a duplicate retired at boot); a press folder still standing stays for its own seven days', fs.existsSync(froot) ? fs.readdirSync(froot) : []);
+  }
   // THE REAL POOL (no `call`): the «rewind-keep» worker thread does the keep and its read-back
   const poolRoot = fs.mkdtempSync(path.join(SCRATCH, 'pool-'));
   const rp = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-pool', files: [a], by: HUMAN, now: T0, hex8: '0000b7b7', dataRoot: poolRoot });
@@ -478,11 +547,16 @@ console.log('— red controls');
   const wu = await walkUnbound.keepableOf({ session: wses, conv: 'c-wb', files: [wf], by: WBY, now: T0, dataRoot: wh, call, dm: standIn({ home: whome, slowPress: 60 }), allMs: 40 });
   ok(wu.ok === true, 'RED CONTROL (one conversation\'s walk unbound): its slow press folders are all listed past the one bound and the confirm answers');
   // U3's red: a line never written to its record does not survive the hub's restart
-  const noWrite = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "    await hub.writeLines(i >= 0 ? lines.map((l, k) => (k === i ? line : l)) : lines.concat([line]).slice(-LINES_MAX));\n", '', 'kept: lines never written'), 'no-write');
+  const noWrite = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "    await hub.writeLines(i >= 0 ? lines.map((l, k) => (k === i ? line : l)) : cappedOf(lines.concat([line]), Number(opts.now) || Date.now()));\n", '', 'kept: lines never written'), 'no-write');
   const nr = hubAt('nwl'), nw = hubAt('nwlw'), nf = path.join(nw, 'n.txt'); fs.writeFileSync(nf, 'n\n');
   const nk = await noWrite.keepFor({ session: { mode: 'chat' }, conv: 'c-nw', files: [nf], by: HUMAN, now: T0, hex8: '0000cbcb', ...KA(nr) });
   await noWrite.afterFilesPress({ mode: 'chat' }, 'c-nw', { ok: true, results: { kept: { press: nk.press, machine: null, files: 1 }, files: { ok: true } } }, { broadcastToSession: () => { }, now: T0, ...KA(nr) });
   ok((await KD.linesOf('c-nw', { now: T0 + 1, ...KA(nr) })).length === 0, 'RED CONTROL (a kept line never written to its record): after the hub restarts the conversation shows no line of what was done to its files');
+  const noCap = M.load('src/server/rewind-kept-door.js', anchored(DSRC, 'cappedOf(lines.concat([line]), Number(opts.now) || Date.now())', 'lines.concat([line]).slice(-LINES_MAX)', 'kept: the cap drops the oldest whatever it holds'), 'no-cap');   // stale-pins: kept (a red control: it plants the old text)
+  const cr2 = hubAt('capr'), live9 = K.pressIdOf(T0 - 5000, '0000e0e0');
+  await call('writeLines', { root: path.join(cr2, 'conv-cap'), lines: [{ press: live9, at: T0 - 5000, until: T0 + K.KEEP.lifeMs, state: 'kept', files: 1 }, ...Array.from({ length: KD.LINES_MAX - 1 }, (_, i) => ({ press: K.pressIdOf(T0 - 4000 + i, (0xe100 + i).toString(16).padStart(8, '0')), at: T0 - 4000 + i, until: T0 + K.KEEP.lifeMs, state: 'put-back' }))] });
+  await noCap.noteLine('conv-cap', { press: K.pressIdOf(T0, '0000efef'), at: T0, until: T0 + K.KEEP.lifeMs, state: 'kept', files: 1 }, { now: T0, ...KA(cr2) });
+  ok(!(await call('readLines', { root: path.join(cr2, 'conv-cap') })).lines.some((l) => l.press === live9), 'RED CONTROL (the cap drops the oldest whatever it holds): a line whose copy still stands loses its only door');
 }
 
 report();

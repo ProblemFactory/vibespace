@@ -191,7 +191,7 @@ async function keepableOf({ session, conv, files, hosts = null, by = null, now =
     const entries = await road.listAll();
     const used = entries.filter((e) => !K.sweepOf([e], now).length).reduce((s, e) => s + (Number(e.bytes) || 0), 0);
     const plan = K.keepPlanOf(await road.facts(files), { used, paired: road.paired });
-    return { ok: plan.ok, refusals: plan.refusals, check: road.paired ? 'size' : 'sha256' };
+    return { ok: plan.ok, refusals: plan.refusals, check: road.paired ? 'size' : 'sha256', machine: road.machine || null };   // r2245 (6): the confirm names a paired machine
   } catch (e) { return { ok: false, refusals: [{ path: null, why: timedOut(e) ? 'no-time' : notAllowed(e) ? 'files-not-allowed' : 'unreadable' }] }; }
 }
 
@@ -282,9 +282,10 @@ async function putBack({ session, conv, press, by, hosts = null, dryRun = false,
 
 // ── U3 (主开发 r1988): THE KEPT LINES — one per keep of a person's files (a files press, a put-back's keep-first), a RECORD of what a
 // rewind did to them: data/rewind-kept/<conversation>/lines.json on THIS hub for every machine (a paired press's manifest is the
-// hub's too), written synced by the keep pool, so a hub restart keeps them and no sweep takes them. A page draws them in the
-// conversation, again after a reload; every client of the conversation is told a change live. The door («Put my files back as they
-// were») stands ONLY while its copy does: after the seven days, or once put back, the line stays and SAYS so (never a greyed door).
+// hub's too), written synced by the keep pool, so a hub restart keeps them and no sweep takes them. A page draws them above the
+// conversation, again after a reload; every client of the conversation is told a change live — AS A PAGE DRAWS IT (its door
+// computed, r2245 (1)). The door («Put my files back as they were») stands ONLY while its copy does: after the seven days, or once
+// every file is put back, the line stays and SAYS so (never a greyed door). The record goes with its conversation (forgetLines).
 const LINES_MAX = 32;
 const LINE_CHAIN = new Map();   // conversation → its last line write (one after another: two notes never race one file)
 function chained(conv, fn) {
@@ -294,52 +295,99 @@ function chained(conv, fn) {
   next.finally(() => { if (LINE_CHAIN.get(conv) === next) LINE_CHAIN.delete(conv); }).catch(() => { });
   return next;
 }
-/** one line written (merged by its press) → the line as it stands | null */
+/** a line whose copy may still stand: kept, inside its seven days */
+const standing = (l, now) => !!l && l.state === 'kept' && Number(now) < Number(l.until);
+/** THE CAP (r2245 (5)): past LINES_MAX the SETTLED lines leave first, oldest first (put back, gone, past their days); a line whose
+ *  copy may still stand is never dropped (its door is the only way back to that copy) */
+function cappedOf(lines, now, max = LINES_MAX) {
+  let over = lines.length - max;
+  return over <= 0 ? lines : lines.filter((l) => (over > 0 && !standing(l, now) ? (over--, false) : true));
+}
+/** one line written (merged by its press) → the line as it stands | the line NOT recorded ({…, unrecorded}: the record could not be
+ *  read — it is never written over, r2245 (8)) | null */
 function noteLine(conv, patch, opts = {}) {
   if (typeof conv !== 'string' || !CONV_RE.test(conv) || !patch || !K.PRESS_RE.test(String(patch.press || ''))) return Promise.resolve(null);
   return chained(conv, async () => {
     const hub = hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call });
-    const { lines } = await hub.readLines();
+    const read = await hub.readLines();
+    if (read.torn || read.unreadable) {
+      try { console.warn(`[rewind-kept] the kept lines of ${conv} could not be read (${read.torn ? 'torn' : read.unreadable}) — left as they are, this line not recorded`); } catch { }
+      return { ...patch, unrecorded: true };
+    }
+    const lines = read.lines;
     const i = lines.findIndex((l) => l && l.press === patch.press);
     const line = { ...(i >= 0 ? lines[i] : {}), ...patch };
-    await hub.writeLines(i >= 0 ? lines.map((l, k) => (k === i ? line : l)) : lines.concat([line]).slice(-LINES_MAX));
+    await hub.writeLines(i >= 0 ? lines.map((l, k) => (k === i ? line : l)) : cappedOf(lines.concat([line]), Number(opts.now) || Date.now()));
     return line;
   });
 }
-/** the lines as a page draws them now → [{press, at, until, machine, files, msgId, state: 'kept' | 'put-back' | 'gone', door}] —
- *  `door` only while its press's copy stands on this hub's record and its seven days have not passed */
-async function linesOf(conv, { now = Date.now(), ...opts } = {}) {
-  if (typeof conv !== 'string' || !CONV_RE.test(conv)) return [];
+/** what a page draws of one stored line now: `door` only while its press's copy stands on this hub's record (`here`) and its seven
+ *  days have not passed; a kept line past that reads 'gone' */
+const viewOf = (l, here, now) => {
+  const live = standing(l, now) && here.has(l.press);
+  return { ...l, state: l.state === 'kept' && !live ? 'gone' : l.state, door: live };
+};
+const hereOf = async (hub) => new Set((await hub.list()).filter((e) => e && e.manifest).map((e) => e.name));
+/** the record as a page draws it → {lines: [{press, at, until, machine, files, msgId, msgAt, step, of, state: 'kept' | 'put-back' |
+ *  'gone', door, …}], torn: bool} */
+async function linesRead(conv, { now = Date.now(), ...opts } = {}) {
+  if (typeof conv !== 'string' || !CONV_RE.test(conv)) return { lines: [], torn: false };
   const hub = hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call });
-  const [{ lines }, presses] = await Promise.all([hub.readLines(), hub.list()]);
-  const here = new Set(presses.filter((e) => e && e.manifest).map((e) => e.name));
-  return lines.filter((l) => l && K.PRESS_RE.test(String(l.press || ''))).map((l) => {
-    const live = l.state === 'kept' && here.has(l.press) && Number(now) < Number(l.until);
-    return { ...l, state: l.state === 'kept' && !live ? 'gone' : l.state, door: live };
-  });
+  const [read, here] = await Promise.all([hub.readLines(), hereOf(hub)]);
+  return { lines: read.lines.filter((l) => l && K.PRESS_RE.test(String(l.press || ''))).map((l) => viewOf(l, here, now)), torn: !!(read.torn || read.unreadable) };
 }
-const lineOfKeep = (kept, { at, msgId = null, machine = null, files = 0 } = {}) => ({ press: kept.press, at, until: at + K.KEEP.lifeMs, msgId: typeof msgId === 'string' ? msgId : null, machine, files: Number(files) || 0, state: 'kept' });
+const linesOf = async (conv, opts = {}) => (await linesRead(conv, opts)).lines;
+/** a keep's line: `step` = what the files step did after it ('done' put back · 'partial' may have put some back · 'none' put nothing
+ *  back, r2245 (7)); `of` = 'put-back' for a put-back's keep-first; `msgAt` = the rewound message's own time (WHICH rewind) */
+const lineOfKeep = (kept, { at, msgId = null, msgAt = null, machine = null, files = 0, step = null, of = null } = {}) => ({ press: kept.press, at, until: at + K.KEEP.lifeMs,
+  msgId: typeof msgId === 'string' ? msgId : null, msgAt: Number.isFinite(Number(msgAt)) && Number(msgAt) > 0 ? Number(msgAt) : null, machine, files: Number(files) || 0, step, of, state: 'kept' });
 const nameOf2 = (hosts, id) => { if (!id) return null; try { const h = hosts && typeof hosts.get === 'function' ? hosts.get(id) : null; return (h && (h.name || h.label)) || String(id); } catch { return String(id); } };
 const told = (broadcastToSession, session, conv, line) => { if (!line || typeof broadcastToSession !== 'function' || !session) return; try { broadcastToSession(session, conv, { type: 'msg', sessionId: conv, op: 'meta', subtype: 'rewind-kept-line', data: line }); } catch { } };
-/** after a FILES PRESS answered (src/ws-handler.js, the rewind-files case): a keep made ⇒ its line, told to every client */
-function afterFilesPress(session, conv, r, { broadcastToSession, hosts = null, msgId = null, now = Date.now(), ...opts } = {}) {
-  const kept = r && r.ok && r.results && r.results.kept;
-  if (!kept || !K.PRESS_RE.test(String(kept.press || ''))) return Promise.resolve(null);
-  const files = Number(kept.files) || 0;
-  return noteLine(conv, lineOfKeep(kept, { at: now, msgId, machine: nameOf2(hosts, kept.machine), files }), opts).then((line) => { told(broadcastToSession, session, conv, line); return line; }, () => null);
+/** the lines just written, TOLD as a page draws them (r2245 (1): the door computed exactly as an attach's) */
+async function tellLines(session, conv, lines, { broadcastToSession, now, ...opts }) {
+  const got = lines.filter(Boolean);
+  if (!got.length) return got;
+  let here = null;
+  try { here = await hereOf(hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call })); } catch { here = new Set(); }
+  const views = got.map((l) => ({ ...viewOf(l, here, now), ...(l.unrecorded ? { unrecorded: true } : {}) }));
+  for (const v of views) told(broadcastToSession, session, conv, v);
+  return views;
 }
-/** after a PUT-BACK acted: its line reads «put back», and its keep-first (what stood there) is a line of its own */
+/** after a FILES PRESS answered (src/ws-handler.js, the rewind-files case): a keep made ⇒ its line, told to every client — whatever
+ *  the files step did after it (r2245 (7): a seven-day copy with no line is a lost door), its words from that step */
+function afterFilesPress(session, conv, r, { broadcastToSession, hosts = null, msgId = null, now = Date.now(), ...opts } = {}) {
+  const kept = r && r.results && r.results.kept;
+  if (!kept || !K.PRESS_RE.test(String(kept.press || ''))) return Promise.resolve(null);
+  const f = r.results.files, step = f && f.ok === true ? 'done' : r.outcome && r.outcome.maybePartial ? 'partial' : 'none';
+  return noteLine(conv, lineOfKeep(kept, { at: now, msgId, msgAt: kept.msgAt, machine: nameOf2(hosts, kept.machine), files: kept.files, step }), { ...opts, now })
+    .then((line) => tellLines(session, conv, [line], { broadcastToSession, now, ...opts }).then((v) => v[0] || null), () => null);
+}
+/** after a PUT-BACK acted: its line reads «put back» ONLY when every row that had an act was done (r2245 (2)) — else it stays kept
+ *  (its door while the copy stands) and records the try (`triedAt`, `notPut`); its keep-first (what stood there) is a line of its own */
 function afterPutBack(session, conv, press, r, { broadcastToSession, hosts = null, now = Date.now(), ...opts } = {}) {
   if (!r || r.ok !== true || r.dryRun === true || !K.PRESS_RE.test(String(press || ''))) return Promise.resolve(null);
-  const jobs = [noteLine(conv, { press, state: 'put-back', putBackAt: now }, opts)];
-  if (r.kept && K.PRESS_RE.test(String(r.kept.press || ''))) jobs.push(noteLine(conv, lineOfKeep(r.kept, { at: now, machine: nameOf2(hosts, r.kept.machine), files: Array.isArray(r.rows) ? r.rows.filter((x) => x.act === 'overwrite' || x.act === 'remove').length : 0 }), opts));
-  return Promise.all(jobs).then((lines) => { for (const l of lines) told(broadcastToSession, session, conv, l); return lines; }, () => null);
+  const rows = Array.isArray(r.rows) ? r.rows : [], acted = rows.filter((x) => x && x.act !== 'unchanged'), notPut = acted.filter((x) => x.done !== true).length;
+  const jobs = [noteLine(conv, notPut ? { press, triedAt: now, notPut } : { press, state: 'put-back', putBackAt: now }, { ...opts, now })];
+  if (r.kept && K.PRESS_RE.test(String(r.kept.press || ''))) jobs.push(noteLine(conv, lineOfKeep(r.kept, { at: now, of: 'put-back', machine: nameOf2(hosts, r.kept.machine), files: rows.filter((x) => x.act === 'overwrite' || x.act === 'remove').length }), { ...opts, now }));
+  return Promise.all(jobs).then((lines) => tellLines(session, conv, lines, { broadcastToSession, now, ...opts }), () => null);
 }
 /** an ATTACH (a reload): the conversation's lines sent again as their own meta, read off the loop — and only where it HAS a lines
- *  file (one async look: a conversation that never kept anything starts no keep pool) */
+ *  file (one async look: a conversation that never kept anything starts no keep pool); a record that cannot be read is SAID */
 function sendKeptLines(ws, conv, { dataRoot = DATA_ROOT, ...opts } = {}) {
   if (typeof conv !== 'string' || !CONV_RE.test(conv)) return Promise.resolve([]);
-  return fsp.access(path.join(dataRoot, conv, K.LINES_FILE)).then(() => linesOf(conv, { dataRoot, ...opts }), () => []).then((lines) => { if (lines.length && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'msg', sessionId: conv, op: 'meta', subtype: 'rewind-kept-lines', data: { lines } })); return lines; }, () => []);
+  return fsp.access(path.join(dataRoot, conv, K.LINES_FILE)).then(() => linesRead(conv, { dataRoot, ...opts }), () => ({ lines: [], torn: false })).then(({ lines, torn }) => {
+    if ((lines.length || torn) && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'msg', sessionId: conv, op: 'meta', subtype: 'rewind-kept-lines', data: { lines, ...(torn ? { torn: true } : {}) } }));
+    return lines;
+  }, () => []);
 }
+/** THE CONVERSATION ENDED FOR GOOD (src/server/wrapper-files.js removeWrapperFiles — every end path reads it, r2245 (9)): its lines
+ *  record goes with it, after any note in flight; its press folders stay for their own seven days (the sweep takes them), so its
+ *  folder goes only when nothing else is in it */
+function forgetLines(conv, { dataRoot = DATA_ROOT } = {}) {
+  if (typeof conv !== 'string' || !CONV_RE.test(conv) || conv === '.' || conv === '..') return Promise.resolve(false);
+  const dir = path.join(dataRoot, conv);
+  return chained(conv, () => fsp.rm(path.join(dir, K.LINES_FILE), { force: true }).then(() => fsp.rmdir(dir).catch(() => { })).then(() => true, () => false));
+}
+const chainOf = (conv) => LINE_CHAIN.get(conv) || null;   // a leg's wait for the writes in flight
 
-module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, closePool, noteLine, linesOf, afterFilesPress, afterPutBack, sendKeptLines, LINES_MAX, DATA_ROOT };
+module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, closePool, noteLine, linesOf, linesRead, afterFilesPress, afterPutBack, sendKeptLines, forgetLines, chainOf, cappedOf, machineNameOf: nameOf2, LINES_MAX, DATA_ROOT };

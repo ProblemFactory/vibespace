@@ -160,8 +160,8 @@ console.log('— ④ the press');
   const behind = conv({ answers: [DRY(), PRESS] }), cnt = conv({ answers: [DRY(), PRESS] });
   const rb = await D.pressFiles({ session: behind.session, msgId: behind.pid, by: HUMAN, ...KA, choice: 'both', drawn, lastSeenUuid: U(9), stat: stat(MT) });
   const rc = await D.pressFiles({ session: cnt.session, msgId: cnt.pid, by: HUMAN, ...KA, choice: 'both', drawn, lastSeenUuid: U(1), expectTaken: 99, stat: stat(MT) });
-  ok(!rb.ok && rb.reason === 'page-behind' && behind.written.length === 0 && !rc.ok && rc.reason === 'changed-since' && cnt.written.length === 0,
-    '④ «both» asks the CONVERSATION\'s own dry run first (the reader\'s MAJOR 2): a page behind the conversation, a count that moved — refused, and NOTHING was written (no file put back)', { rb, rc });
+  ok(!rb.ok && rb.reason === 'page-behind' && behind.written.length === 0 && !rc.ok && rc.reason === 'changed-since' && cnt.written.length === 0 && rb.step === 'conversation' && rc.step === 'conversation',
+    '④ «both» asks the CONVERSATION\'s own dry run first (the reader\'s MAJOR 2): a page behind the conversation, a count that moved — refused, and NOTHING was written (no file put back); each refusal marked the CONVERSATION\'s (r2245 (10): the page says it in tier one\'s words, never «the files changed»)', { rb, rc });
   // MAJOR 3: DARK at the press too
   const dk = conv({ fact: false, answers: [DRY(), PRESS] });
   const pf = await D.pressFiles({ session: dk.session, msgId: dk.pid, by: HUMAN, ...KA, choice: 'files', drawn, stat: stat(MT) });
@@ -265,6 +265,36 @@ console.log('— ④ the press');
     '④ THE KEPT COPY (r1247 (2)): the press KEEPS every listed file first and names where (sealed, sha256); a file that cannot be kept: the press refused not-kept, NOTHING pressed; the confirm says so and draws «the conversation only»', { rk: rk.results && rk.results.kept, rf2, cf: cf.keep });
 }
 
+{
+  // r2245 (6) + (7): the confirm NAMES a paired machine (its keep's own); a press that throws AFTER its keep says what is known and
+  // its line still gets its door (a seven-day copy with no door is a lost door)
+  const drawn = { files: ['/w/a.js'], judged: [{ path: '/w/a.js', state: 'same', why: null }], plus: 2, minus: 1 };
+  const PRESS = { canRewind: true, skippedLinks: 0 };
+  const KD = require(path.join(REPO, 'src/server/rewind-kept-door.js'));   // the door's own module (its confirm asks it)
+  const keepable = KD.keepableOf;
+  let cm = null;
+  KD.keepableOf = async () => ({ ok: true, refusals: [], check: 'size', machine: 'h-2' });   // a paired machine's keep, as its road says it
+  try { const c = conv({ answers: [DRY()] }); cm = await D.filesConfirmOf({ session: c.session, msgId: c.pid, by: HUMAN, ...KA, hosts: { get: (id) => (id === 'h-2' ? { name: 'the lab machine' } : null) }, stat: stat(MT) }); }
+  finally { KD.keepableOf = keepable; }
+  const ch = conv({ answers: [DRY()] }), chm = await D.filesConfirmOf({ session: ch.session, msgId: ch.pid, by: HUMAN, ...KA, stat: stat(MT) });
+  ok(!!cm && cm.ok && cm.machine === 'the lab machine' && chm.ok && chm.machine === null,
+    '④ THE CONFIRM NAMES THE MACHINE (r2245 (6)): a copy kept on a paired machine reads «kept on <its name>» (the hosts\' own name); this hub\'s: no machine', { cm: cm && cm.machine, chm: chm.machine });
+  const made = F.filesRequestOf;
+  let th = null;
+  const tc = conv({ answers: [DRY(), PRESS] });
+  F.filesRequestOf = (uuid, o) => { if (o && o.dryRun) return made(uuid, o); throw new Error('planted: the press failed after its keep'); };
+  try { th = await D.pressFiles({ session: tc.session, msgId: tc.pid, by: HUMAN, ...KA, choice: 'files', drawn, stat: stat(MT) }); }
+  finally { F.filesRequestOf = made; }
+  const told = [];
+  const tl = th && th.results && th.results.kept ? await KD.afterFilesPress(tc.session, 'rf-door', th, { broadcastToSession: (s, i, fr) => told.push(fr), now: Date.now(), dataRoot: KEEP_ROOT, call: keepCall }) : null;
+  ok(!!th && th.ok === false && th.reason === 'door-failed' && !!th.results.kept && Number(th.results.kept.msgAt) > 0 && th.outcome.maybePartial === true && RQ.filesOutOf(tc.session) === null
+    && !!tl && tl.door === true && tl.step === 'partial' && told.length === 1 && told[0].data.door === true,
+    '④ A PRESS THAT THROWS AFTER ITS KEEP (r2245 (7)): the answer says the copy stands and that some files may have been put back; its line is written and told WITH its door; the mark released', { th: th && { reason: th.reason, outcome: th.outcome }, tl });
+  const oc = conv({ answers: [DRY()] });
+  const ro = await D.pressFiles({ session: oc.session, msgId: oc.pid, by: HUMAN, ...KA, choice: 'conversation', lastSeenUuid: U(9), stat: stat(MT) });
+  ok(!ro.ok && ro.reason === 'page-behind' && ro.step === 'conversation', '④ «THE CONVERSATION ONLY» refused by tier one\'s door: marked the conversation\'s too (r2245 (10)) — the page says it in tier one\'s words', ro);
+}
+
 console.log('— ⑤ file times');
 {
   const hosts = (dm) => ({ deviceBounded: async () => dm });
@@ -350,7 +380,7 @@ console.log('— red controls');
   ok(dp.sent().some((q) => q.request && q.request.subtype === 'rewind_files' && !q.request.dry_run), 'RED CONTROL (the press without BOTH dark gates — its own and the verdict\'s fact): a conversation without the checkpoint fact has its files put back');
   // the second follow re-asks the conversation right before the files: removing the FIRST ask alone is caught there (nothing put back);
   // the half-done press MAJOR 2 named needs BOTH asks gone
-  const noFirst = M.load('src/server/rewind-files-door.js', anchored(anchored(SRC, '    if (!c.ok) return c;\n', '', 'both without the conversation first'), '      if (!c2.ok) return c2;\n', '', 'nor its re-ask'), 'no-conversation-first');
+  const noFirst = M.load('src/server/rewind-files-door.js', anchored(anchored(SRC, "    if (!c.ok) return { ...c, step: 'conversation' };", '', 'both without the conversation first'), "      if (!c2.ok) return { ...c2, step: 'conversation' };", '', 'nor its re-ask'), 'no-conversation-first');
   const nf = conv({ answers: [DRY(), PRESS] });
   const rnf = await noFirst.pressFiles({ session: nf.session, msgId: nf.pid, by: HUMAN, ...KA, choice: 'both', drawn, lastSeenUuid: U(9), stat: stat(MT) });
   ok(nf.sent().some((q) => q.request && q.request.subtype === 'rewind_files' && !q.request.dry_run) && rnf.ok && rnf.outcome.failed === 'conversation',
@@ -360,7 +390,7 @@ console.log('— red controls');
   const ud = conv(); RQ.setFilesOut(ud.session, { id: 'vsf-y', at: Date.now(), files: true, pty: ud.session.pty });
   const passed = senderOf(unfenced, 'rf-unf', ud.session).send('rf-unf', '/compact', { origin: 'dispatch' }); RQ.setFilesOut(ud.session, null);
   ok(passed.code !== 'rewind_out', 'RED CONTROL (an agent\'s dispatch unfenced): a compaction goes out while a files press puts files back');
-  const noRecheck = M.load('src/server/rewind-files-door.js', anchored(SRC, "      if (!c2.ok) return c2;\n", '', 'no re-check before the press'), 'no-recheck');
+  const noRecheck = M.load('src/server/rewind-files-door.js', anchored(SRC, "      if (!c2.ok) return { ...c2, step: 'conversation' };", '', 'no re-check before the press'), 'no-recheck');
   let open3 = null, reached3 = null;
   const gate3 = new Promise((r) => { open3 = r; }), atStat3 = new Promise((r) => { reached3 = r; });
   const nr = conv({ answers: [DRY(), PRESS] });
