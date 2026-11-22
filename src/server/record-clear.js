@@ -98,7 +98,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     for (const { kind, container, ids } of groups.values()) {
       let r;
       try { r = await clearOne(kind, container, ids, { caller, by, at }); }
-      catch (e) { log(`[clear] ${kind}${container ? ' ' + container : ''} — FAILED: ${e && e.message}`); r = { error: e && e.code === 'TASK_GROUPS_UNREAD' ? { ...RC.refuse('unavailable'), code: 'TASK_GROUPS_UNREAD', why: String(e.message) } : RC.refuse('failed'), cleared: [], already: [], unknown: [], refused: [] }; }   // THE STORE HELD UNREAD (lane bl-windows): the hold's words, never «failed»
+      catch (e) { log(`[clear] ${kind}${container ? ' ' + container : ''} — FAILED: ${e && e.message}`); r = { error: e && e.code === 'EVSARCHIVEBUSY' ? { ...RC.refuse('unavailable'), code: 'EVSARCHIVEBUSY', why: String(e.message) } : e && e.code === 'TASK_GROUPS_UNREAD' ? { ...RC.refuse('unavailable'), code: 'TASK_GROUPS_UNREAD', why: String(e.message) } : RC.refuse('failed'), cleared: [], already: [], unknown: [], refused: [] }; }   // THE STORE HELD UNREAD (lane bl-windows): the hold's words, never «failed»
       if (r.error) { for (const id of ids) res.refused.push({ kind, id, ...pick(r.error) }); continue; }
       res.cleared += r.cleared.length;
       res.already += r.already.length;

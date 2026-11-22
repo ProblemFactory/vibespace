@@ -283,6 +283,9 @@ const ARCHIVE_CHUNK = 128 * 1024;          // ≥ one entry's line (note 2000 + 
 const ARCHIVE_READ_BUDGET = 4 * 1024 * 1024; // bytes one page may read from the archive
 const monthOf = (at) => { const d = new Date(Number(at) || 0); return isNaN(d) ? '1970-01' : d.toISOString().slice(0, 7); };
 const archivableId = (id) => typeof id === 'string' && /^[\w-]{1,80}$/.test(id);
+// B-0248 step 3 (c) follow (r1821 (1)): a clear's or an import's month rewrite, or a group's removal, while an archive append is still
+// on its way past the writer's bound — REFUSED BY NAME, nothing changed (the person tries again; the append lands meanwhile)
+const ARCHIVE_BUSY = (why) => Object.assign(new Error(`the Activity log's storage is still writing (${why}) — nothing was changed; try again in a moment`), { code: 'EVSARCHIVEBUSY' });
 const parseLine = (ln) => { try { const p = JSON.parse(ln); return p && typeof p === 'object' && p.id ? p : null; } catch { return null; } };
 function readAt(fd, pos, len) { const b = Buffer.alloc(len); const n = fs.readSync(fd, b, 0, len, pos); return b.subarray(0, n); }
 /** the first whole line starting at or after `pos` (pos 0 = the file's first line): {start, end, at} or null */
@@ -3231,13 +3234,13 @@ class TaskGroupManager {
   _archiveProduce(file) {
     if (this._unread) throw Object.assign(new Error('task-groups.json is held (its read failed) — nothing is appended until it reads'), { code: 'EHELD' });
     const q = this._archQ.get(file);
-    if (!q || !q.ids.size) return null;
+    if (!q || !q.ids.size) { if (q && !q.flying) this._archQ.delete(file); return null; }   // nothing owed: no empty entry left behind (r1821 (4))
     const t = this._state.tasks[q.gid];
     const live = new Map(((t && t.progress) || []).filter((p) => p && p.id).map((p) => [p.id, p]));
     const sent = [], lines = [];
     for (const id of q.ids) { const p = live.get(id); if (p) { sent.push({ id, clearedAt: p.clearedAt || null }); lines.push(JSON.stringify(p) + '\n'); } }
     q.ids.clear();
-    if (!lines.length) return null;
+    if (!lines.length) { if (!q.flying) this._archQ.delete(file); return null; }
     q.flying = sent;
     return { append: lines.join('') };
   }
@@ -3249,40 +3252,44 @@ class TaskGroupManager {
     q.flying = null;
     if (!ok) {
       for (const x of fly) q.ids.add(x.id);
-      if (!this._archOwedSaid) { this._archOwedSaid = true; console.warn(`[tasks] an Activity-log archive append was not written (${(e && (e.code || e.message)) || 'an error'}) — its entries stay in the live list, the store writer retries`); }
+      if (!this._archiveFailSaid) { this._archiveFailSaid = true; console.warn(`[tasks] an Activity-log archive append was not written (${(e && (e.code || e.message)) || 'an error'}) — its entries stay in the live list, the store writer retries`); }
       if (q.ids.size) this._archiveAsk(file);
       return;
     }
-    if (this._archOwedSaid && fly.length) { this._archOwedSaid = false; console.warn('[tasks] the Activity-log archive is written again'); }
+    if (this._archiveFailSaid && fly.length) { this._archiveFailSaid = false; console.warn('[tasks] the Activity-log archive is written again'); }
     const t = this._state.tasks[q.gid];
     if (t && fly.length && Array.isArray(t.progress)) {
       const byId = new Map(t.progress.filter((p) => p && p.id).map((p) => [p.id, p]));
       // cleared while its append flew: the file holds the words it had — cleared there now (the clear's own one-file rewrite)
-      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(q.gid, q.month, new Set([x.id]), { by: p.clearedBy || 'owner', at: p.clearedAt }, { settle: false }); }
+      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(q.gid, q.month, new Set([x.id]), { by: p.clearedBy || 'owner', at: p.clearedAt }); }
       const landed = new Set(fly.map((x) => x.id));
       t.progress = t.progress.filter((p) => !(p && landed.has(p.id)));   // MOVED: on disk in its month file
       this._save();
     }
     if (!q.ids.size && !q.flying) this._archQ.delete(file);
   }
-  /** what this store still owes `file` (a month file about to be rewritten) lands first — a named wait (test-store-write-census WAITS):
-   *  a clear's and an import's one-file rewrite never races an append of the same file */
+  /** what this store still owes `files` (month files about to be rewritten or removed; all of them when null) lands first — a named
+   *  wait (test-store-write-census WAITS), under the writer's own bound. → null when nothing of them is owed or on its way any more;
+   *  else WHY (r1821 (1): A SETTLE THAT RAN OUT OF ITS BOUND IS NOT A SETTLE — an append still in flight would land in a rewritten
+   *  file's old copy, or make a removed group's folder again: the caller refuses BY NAME, ARCHIVE_BUSY, before anything moves) */
   _archiveSettle(files) {
     const W = this._writer();
     const owed = (files || [...this._archQ.keys()]).filter((f) => W.pending(f));
-    if (owed.length) W.flushSync(owed);
+    if (!owed.length) return null;
+    const r = W.flushSync(owed) || {};
+    if (r.deferred) return 'the hub is stopping';
+    const miss = (r.left || []).find((x) => owed.includes(x.file));
+    if (miss) return String(miss.why || 'its write has not landed');
+    return owed.some((f) => W.pending(f) && this._archQ.has(f) && this._archQ.get(f).flying) ? 'its write has not landed' : null;
   }
   /** a group's removal: what it still owes its archive is DROPPED (never written after its folder went); an append on its way lands
    *  first (an append that lands after the removal would make the folder again — a group made again under the same id inheriting it) */
   _archiveDrop(id) {
     const W = this._writer();
-    for (const [file, q] of [...this._archQ]) {
-      if (q.gid !== id) continue;
-      q.ids.clear();
-      if (q.flying) this._archiveSettle([file]);
-      W.forget(file);
-      this._archQ.delete(file);
-    }
+    const mine = [...this._archQ].filter(([, q]) => q.gid === id);
+    const why = this._archiveSettle(mine.filter(([, q]) => q.flying).map(([f]) => f));   // an append on its way lands FIRST — or nothing is removed
+    if (why) throw ARCHIVE_BUSY(why);
+    for (const [file, q] of mine) { q.ids.clear(); W.forget(file); this._archQ.delete(file); }
   }
   _archiveMonths(id) {
     if (!archivableId(id)) return [];
@@ -3308,9 +3315,8 @@ class TaskGroupManager {
     return [];
   }
   /** a clear's archive half: every line of month `m` whose id is in `ids` cleared, the ONE file rewritten (tmp + rename) → the ids changed */
-  _archiveClear(id, m, ids, { by, at }, { settle = true } = {}) {
-    const f = path.join(this._archiveRoot, id, m + '.ndjson');
-    if (settle) this._archiveSettle([f]);   // B-0248 step 3 (c): an append owed to this month lands before the file is rewritten
+  _archiveClear(id, m, ids, { by, at }) {
+    const f = path.join(this._archiveRoot, id, m + '.ndjson');   // its callers settle the month first (clearProgress, before anything moves)
     let text;
     try { text = fs.readFileSync(f, 'utf8'); } catch { return []; }
     const changed = new Set();
@@ -3416,6 +3422,7 @@ class TaskGroupManager {
     }
     // ARCHIVE FIRST: each month file a target may sit in is rewritten once — a failed write changes nothing live
     const archived = new Set();
+    if (archivableId(id) && months.size) { const why = this._archiveSettle([...months.keys()].map((m) => path.join(this._archiveRoot, id, m + '.ndjson'))); if (why) throw ARCHIVE_BUSY(why); }   // B-0248 step 3 (c): every month this clear rewrites is settled, or nothing moves
     for (const [m, ids] of archivableId(id) ? months : []) for (const x of this._archiveClear(id, m, ids, { by, at })) archived.add(x);
     for (const { p, live } of targets) {
       const r = live ? applyClear(p, { kind: 'activity', by, at }) : { changed: false };
@@ -3494,7 +3501,7 @@ class TaskGroupManager {
   // after this the structured store is the truth (never re-parsed live).
   importFromFile(absPath) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
-    this._archiveSettle();   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten
+    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten — or nothing moves
     if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
     let text;
     try { text = fs.readFileSync(absPath, 'utf-8'); } catch (e) { if (e && e.code === 'EVSMOUNTSYNC') throw e; throw new Error('cannot read ' + absPath); } // lane hub-fuse-sync-guard: a refusal is said by name, never as a missing file
@@ -3621,8 +3628,14 @@ class TaskGroupManager {
   exportBundle() {
     this._refuseUnread('a backup of Task Groups'); // THE STORE HELD UNREAD: never a backup that silently holds no groups
     const archive = {};
-    for (const id of Object.keys(this._state.tasks)) for (const f of this._archiveMonths(id)) {
-      try { (archive[id] = archive[id] || {})[f.slice(0, 7)] = fs.readFileSync(path.join(this._archiveRoot, id, f), 'utf8'); } catch { /* gone meanwhile */ }
+    // B-0248 step 3 (c) follow (r1821 (3)): an entry sits in both places while its append is owed or after a crash between the append and
+    // the trim — the bundle carries it ONCE: a month's lines deduped by id (a cleared copy wins), an id still live left to the live list
+    for (const id of Object.keys(this._state.tasks)) {
+      const live = new Set(((this._state.tasks[id] && this._state.tasks[id].progress) || []).map((p) => p && p.id).filter(Boolean));
+      for (const f of this._archiveMonths(id)) {
+        const kept = this._monthEntries(id, f).filter((p) => !live.has(p.id)).sort((a, b) => a.at - b.at);
+        if (kept.length) (archive[id] = archive[id] || {})[f.slice(0, 7)] = kept.map((p) => JSON.stringify(p) + '\n').join('');
+      }
     }
     return { version: 1, tasks: Object.values(this._state.tasks), ...(Object.keys(archive).length ? { archive } : {}) };
   }
@@ -3649,7 +3662,7 @@ class TaskGroupManager {
 
   importBundle(bundle, { bearer = false, log = (m) => console.log(m) } = {}) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
-    this._archiveSettle();   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten
+    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten — or nothing moves
     const items = Array.isArray(bundle?.tasks) ? bundle.tasks : [];
     // every group's archived months read STRICTLY first (主开发 00:41Z (e)): one that could not be read refuses the import before ANY group is applied — and what was read is what the loop merges (never a second read that could fail half-way)
     const pre = new Map();

@@ -91,7 +91,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   });
   app.delete('/api/tasks/:id', (req, res) => {
     try { tasks.remove(req.params.id); onDisk(res, { success: true }, { code: 'finishes-on-landing' }); }   // the moved2 cure 2: its Activity log and grant follow by themselves at the landing
-    catch (e) { res.status(404).json({ error: e.message }); }
+    catch (e) { res.status(e && e.code === 'EVSARCHIVEBUSY' ? 409 : 404).json({ error: e.message, ...(e && e.code === 'EVSARCHIVEBUSY' ? { code: e.code } : {}) }); }   // B-0248 step 3 (c) follow: an archive append still on its way — refused by name, the group stays
   });
   // Granular tag ops (atomic server-side — concurrent clients can't clobber
   // each other's read-modify-write of the sessions array)

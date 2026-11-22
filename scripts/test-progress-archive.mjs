@@ -11,6 +11,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { anchored } from './scratch.mjs';   // a control's edit through the one door (B-0248 step 3 (c) follow)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,6 +39,14 @@ const land = () => { for (let i = 0; i < 4; i++) SW.flushSync(); };
 const monthKey = (at) => new Date(at).toISOString().slice(0, 7);
 /** a crash between the append and the trim: `p` written straight into its month file while it is still live */
 const crashDup = (w, p) => { fs.mkdirSync(archDir(w), { recursive: true }); fs.appendFileSync(path.join(archDir(w), monthKey(p.at) + '.ndjson'), JSON.stringify(p) + '\n'); };
+// the belts of a clear of an entry still owed, as anchors for the controls (each belt alone holds; all three cut is red)
+const SETTLE_LINE = "    if (archivableId(id) && months.size) { const why = this._archiveSettle([...months.keys()].map((m) => path.join(this._archiveRoot, id, m + '.ndjson'))); if (why) throw ARCHIVE_BUSY(why); }";
+const BELT = {
+  snap: [['      q.ids.add(p.id); this._archQ.set(file, q);', '      q.ids.add(p.id); (q.snap || (q.snap = new Map())).set(p.id, { ...p }); this._archQ.set(file, q);'], ["    const live = new Map(((t && t.progress) || []).filter((p) => p && p.id).map((p) => [p.id, p]));", '    const live = q.snap || new Map();']],
+  settle: [[SETTLE_LINE, '    void 0;']],
+  late: [['      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', '      for (const x of []) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(']],
+};
+const cuts = (pairs, tag) => MUT.load('src/task-groups.js', pairs.reduce((src, [a, b]) => { if (src.split(a).length !== 2) throw new Error('control anchor gone: ' + tag); return src.replace(a, b); }, SRC), tag);
 const walk = (w, limit = 100) => { const all = []; let before = null, pages = 0, r; do { r = w.tg.readProgress(w.id, { before, limit }); all.push(...r.entries); if (r.entries.length) before = r.entries[r.entries.length - 1].at; pages++; } while (r.more && pages < 500); return { all, pages }; };
 
 console.log('① the overflow is MOVED, never dropped (written before the trim; a failed write keeps it live)');
@@ -123,8 +132,10 @@ const ruleQueuedClear = (M) => { const w = mk(M); seed(w, 500); const t = w.tg._
   w.tg.addProgress(w.id, { note: 'z' }); const r = w.tg.clearProgress(w.id, ['P-100000'], { by: 'owner' }); land();
   const raw = fs.readFileSync(path.join(archDir(w), '2026-09.ndjson'), 'utf8'); return { cleared: r.cleared.join(), words: raw.includes('QUEUED'), sentence: raw.includes(RC.CLEARED_TEXT), live: w.tg.get(w.id).progress.length }; };
 { const r = ruleQueuedClear(REAL); check('an entry cleared while its append was owed reaches the file CLEARED (the sentence, never its words); then it leaves the live list', r.cleared === 'P-100000' && !r.words && r.sentence && r.live === 500, r); }
-{ const M = MUT.load('src/task-groups.js', [['      q.ids.add(p.id); this._archQ.set(file, q);', '      q.ids.add(p.id); (q.snap || (q.snap = new Map())).set(p.id, { ...p }); this._archQ.set(file, q);'], ["    const live = new Map(((t && t.progress) || []).filter((p) => p && p.id).map((p) => [p.id, p]));", '    const live = q.snap || new Map();'], ['    if (settle) this._archiveSettle([f]);', '    if (settle) { }'], ['      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', '      for (const x of []) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(']].reduce((src, [a, b]) => { if (src.split(a).length !== 2) throw new Error('control anchor gone: snap'); return src.replace(a, b); }, SRC), 'snap-at-queue');
+{ const M = cuts([...BELT.snap, ...BELT.settle, ...BELT.late], 'snap-at-queue');
   const r = ruleQueuedClear(M); check('CONTROL (a copy that takes the bytes when the entry is QUEUED, rewrites a month without settling it first, and never clears a landed entry late — the three belts all gone): the cleared entry\'s words reach the archive — red', r.words, r); }
+for (const [keep, cut] of [['the settle', [...BELT.snap, ...BELT.late]], ['the bytes made at the write', [...BELT.settle, ...BELT.late]], ['the late clear', [...BELT.snap, ...BELT.settle]]]) {
+  const r = ruleQueuedClear(cuts(cut, 'belt-' + keep.replace(/\W+/g, '-'))); check(`EACH BELT ALONE HOLDS — only ${keep} left (a copy without the other two): the cleared entry reaches the file cleared`, !r.words && r.sentence && r.live === 500, r); }
 // an entry cleared while its append FLEW: once it landed, the month file is cleared too (the clear's own one-file rewrite)
 const ruleFlyingClear = (M) => { const w = mk(M); seed(w, 500); const t = w.tg._state.tasks[w.id]; t.progress[0].note = 'FLYING-words';
   w.tg.addProgress(w.id, { note: 'z' }); const file = path.join(archDir(w), '2026-09.ndjson');
@@ -145,7 +156,8 @@ const holdWriter = () => {
     pending: (f) => st.owed.has(f) || !!(st.flying && st.flying.file === f),
     take: (f) => { const o = st.owed.get(f); st.owed.delete(f); st.flying = { file: f, o, bytes: o.produce() }; },   // the writer's thread took the bytes
     landFlying: () => { const x = st.flying; if (!x) return; st.flying = null; writeOut(x.file, x.o, x.bytes); },
-    flushSync: (files) => { if (st.flying && (!files || files.includes(st.flying.file))) W.landFlying(); for (const f of files || [...st.owed.keys()]) { const o = st.owed.get(f); if (!o) continue; st.owed.delete(f); writeOut(f, o, o.produce()); } return { written: [], left: [] }; } };
+    landLost: () => { const x = st.flying; if (!x) return; st.flying = null; if (x.o.onWritten) x.o.onWritten(true); },   // it lands in a REPLACED file's old copy: its bytes reach no file the store reads
+    flushSync: (files) => { if (st.flying && (!files || files.includes(st.flying.file))) { if (st.holdPast) return { written: [], left: [{ file: st.flying.file, why: 'its write was still held by the storage after 10.0 s (a stand-in)' }] }; W.landFlying(); } for (const f of files || [...st.owed.keys()]) { const o = st.owed.get(f); if (!o) continue; st.owed.delete(f); writeOut(f, o, o.produce()); } return { written: [], left: [] }; } };
   return W;
 };
 const ruleFlyingDelete = (M) => { const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir };
@@ -157,6 +169,64 @@ const ruleFlyingDelete = (M) => { const W = holdWriter(), dir = freshDir(); cons
 { const M = patched('this._archiveDrop(id); fs.rmSync(', 'fs.rmSync(', 'no-drop'); const r = ruleFlyingDelete(M); check('CONTROL (a copy that does not settle what flies): the append lands after the removal and makes the folder again — red', r.after, r); }
 { const w = mk(); seed(w, 505); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); w.tg.remove(w.id); land();
   check('a group removed with its archive append still OWED (not taken): nothing is written after the removal', !fs.existsSync(archDir(w))); }
+
+// r1821 (1): A SETTLE THAT RAN OUT OF ITS BOUND IS NOT A SETTLE — an append held PAST the writer's bound: a clear's rewrite, an import's
+// rewrite and a group's removal are each REFUSED BY NAME (EVSARCHIVEBUSY), nothing changed; once it lands, nothing is lost
+const heldScene = (M, act) => { const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir };
+  seed(w, 505); tg._state.tasks[g.id].progress = tg._keepLive(g.id, tg._state.tasks[g.id].progress); W.flushSync();   // 5 archived, 500 live
+  const bundle = JSON.parse(JSON.stringify(tg.exportBundle()));
+  tg.addProgress(g.id, { note: 'one more' }); const file = path.join(archDir(w), '2026-09.ndjson'); W.take(file); W.st.holdPast = true;   // P-100005's append on its way, held past the bound
+  let code = null; try { if (act === 'clear') tg.clearProgress(g.id, ['P-100001'], { by: 'owner' }); else if (act === 'import') tg.importBundle(bundle, { log: () => {} }); else tg.remove(g.id); } catch (e) { code = e.code || e.message; }
+  const atAct = { code, group: !!tg._state.tasks[g.id], cleared: archLines(w).some((p) => p.id === 'P-100001' && p.note === RC.CLEARED_TEXT) };
+  W.st.holdPast = false; if (code || act === 'remove') W.landFlying(); else W.landLost();   // refused: its append lands as it would; a rewrite gone on over it: it lands in the replaced file's old copy; a removal gone on over it: it lands at its path (the folder made again)
+  const t = tg._state.tasks[g.id]; const inLive = !!(t && t.progress.some((p) => p.id === 'P-100005')), inFile = archLines(w).some((p) => p.id === 'P-100005');
+  return { ...atAct, inLive, inFile, folder: fs.existsSync(archDir(w)) };
+};
+{ const r = heldScene(REAL, 'clear'); check('a CLEAR whose month an append still flies into (past the bound) is refused BY NAME (EVSARCHIVEBUSY), nothing cleared; once it lands the entry is in the file', r.code === 'EVSARCHIVEBUSY' && !r.cleared && r.inFile, r); }
+{ const r = heldScene(cuts([[SETTLE_LINE, "    this._archiveSettle([...months.keys()].map((m) => path.join(this._archiveRoot, id, m + '.ndjson')));"]], 'clear-overtakes'), 'clear'); check('CONTROL (a copy whose clear goes on over the held append): the append lands in the rewritten file\'s old copy and the entry is in NEITHER place — red', r.code === null && !r.inLive && !r.inFile, r); }
+{ const r = heldScene(REAL, 'import'); check('an IMPORT while an append still flies (past the bound) is refused BY NAME (EVSARCHIVEBUSY), nothing imported; once it lands the entry is in the file', r.code === 'EVSARCHIVEBUSY' && r.inFile, r); }
+{ const IMP = '    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }';
+  const M = MUT.load('src/task-groups.js', anchored(SRC, IMP, '    this._archiveSettle();', 'import-overtakes', { count: 2 }), 'import-overtakes');   // the control writes the old text back on purpose — stale-pins: kept
+  const r = heldScene(M, 'import'); check('CONTROL (a copy whose import goes on over the held append): the entry is in NEITHER place — red', r.code === null && !r.inLive && !r.inFile, r); }
+{ const r = heldScene(REAL, 'remove'); check('a REMOVAL while an append still flies (past the bound) is refused BY NAME (EVSARCHIVEBUSY): the group stays; once it lands the entry is in its file', r.code === 'EVSARCHIVEBUSY' && r.group && r.inFile, r); }
+{ const r = heldScene(cuts([['    if (why) throw ARCHIVE_BUSY(why);\n    for (const [file, q] of mine)', '    for (const [file, q] of mine)']], 'remove-overtakes'), 'remove'); check('CONTROL (a copy whose removal goes on over the held append): the append lands after it and makes the removed group\'s folder again (a ghost archive) — red', r.code === null && !r.group && r.folder, r); }
+
+// r1821 (3): A KILL BETWEEN THE APPEND AND THE TRIM, on the real road: the append landed, the trim's save never did — the next start reads
+// the entry live AND in the archive, and every reader gives it once; the next overflow appends it again (a line twice, read once)
+{ const dir = freshDir(); const w = mk(REAL, dir); seed(w, 500); land(); w.tg.addProgress(w.id, { note: 'at the bound' });
+  const file = path.join(archDir(w), '2026-09.ndjson'); SW.flushSync([file]);   // the append lands (and its trim dirties the store)…
+  SW.forget(w.tg._file);   // …and the process is killed before the store's write: what it owed is gone
+  const tg2 = new REAL.TaskGroupManager({ dataDir: dir, onChange: () => {} }); const w2 = { tg: tg2, id: w.id, dir };
+  const live2 = tg2.get(w.id).progress.some((p) => p.id === 'P-100000'), arch2 = archLines(w2).filter((p) => p.id === 'P-100000').length;
+  const ids = walk(w2).all.map((p) => p.id);
+  tg2.addProgress(w.id, { note: 'after the restart' }); land();
+  const ids3 = walk(w2).all.map((p) => p.id);
+  check('a kill between the append and the trim: the entry is live AND archived at the next start, read ONCE; the next overflow appends it again and it is still read once', live2 && arch2 === 1 && ids.filter((x) => x === 'P-100000').length === 1 && archLines(w2).filter((p) => p.id === 'P-100000').length === 2 && ids3.filter((x) => x === 'P-100000').length === 1 && new Set(ids3).size === ids3.length, { live2, arch2 }); }
+
+// r1821 (3): A BUNDLE NEVER CARRIES AN ENTRY TWICE — one in both places (owed, or a crash duplicate) rides in its live list only
+const ruleExportOnce = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks[w.id].progress = w.tg._keepLive(w.id, w.tg._state.tasks[w.id].progress); land();
+  crashDup(w, w.tg.get(w.id).progress[0]); crashDup(w, archLines(w)[0]);   // a live entry's duplicate in the archive, and an archived line twice
+  const b = w.tg.exportBundle(); const live = b.tasks.find((t) => t.id === w.id).progress.map((p) => p.id);
+  const arch = Object.values((b.archive || {})[w.id] || {}).flatMap((text) => text.split('\n').filter(Boolean).map((l) => JSON.parse(l).id));
+  const all = [...live, ...arch]; return { n: all.length, uniq: new Set(all).size }; };
+{ const r = ruleExportOnce(REAL); check('exportBundle carries every entry ONCE (an entry live and archived, and an archived line twice: one each)', r.n === r.uniq && r.uniq === 505, r); }
+{ const NEW = "      for (const f of this._archiveMonths(id)) {\n        const kept = this._monthEntries(id, f).filter((p) => !live.has(p.id)).sort((a, b) => a.at - b.at);\n        if (kept.length) (archive[id] = archive[id] || {})[f.slice(0, 7)] = kept.map((p) => JSON.stringify(p) + '\\n').join('');\n      }";
+  const OLD = "      for (const f of this._archiveMonths(id)) { try { (archive[id] = archive[id] || {})[f.slice(0, 7)] = fs.readFileSync(path.join(this._archiveRoot, id, f), 'utf8'); } catch { } }";
+  const r = ruleExportOnce(cuts([[NEW, OLD]], 'export-verbatim')); check('CONTROL (the release\'s verbatim month copy): the bundle carries entries twice — red', r.n > r.uniq, r); }
+
+// r1821 (3): A BURST OF 200 NOTES AT THE BOUND costs a BOUNDED number of writes: ONE append job per month file and at most two writes of
+// task-groups.json per write turn (the notes' saves coalesce; the trims' saves coalesce) — counted over a stand-in that writes when asked
+{ const W = holdWriter(), dir = freshDir(); const tg = new REAL.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'burst' }); const w = { tg, id: g.id, dir };
+  seed(w, 500); W.flushSync(); const n = { appends: 0, saves: 0 }; const wo = W.flushSync; let turn = 0;
+  const flushCounted = () => { const owed = [...W.st.owed.entries()]; for (const [f, o] of owed) { W.st.owed.delete(f); const b = o.produce(); if (b && typeof b === 'object' && 'append' in b) { n.appends++; fs.mkdirSync(path.dirname(f), { recursive: true }); fs.appendFileSync(f, b.append); } else if (b != null) { n.saves++; fs.writeFileSync(f, b); } if (o.onWritten) o.onWritten(true); } turn++; };
+  for (let i = 0; i < 200; i++) tg.addProgress(g.id, { note: `burst ${i}` });
+  flushCounted(); const first = { ...n }; flushCounted(); void wo;
+  check('a burst of 200 notes at the bound: ONE append job per month file (2: September and October) and at most two writes of the store over two write turns; 500 live after, 200 archived', first.appends === 2 && n.appends === 2 && n.saves <= 2 && tg.get(g.id).progress.length === 500 && archLines(w).length === 200, { first, n, turn }); }
+
+// r1821 (4): nothing owed leaves NO empty entry in the owed map
+const ruleNoEmpty = (M) => { const w = mk(M); seed(w, 501); const t = w.tg._state.tasks[w.id]; t.progress = w.tg._keepLive(w.id, t.progress); t.progress = t.progress.slice(1); land(); return { left: w.tg._archQ.size }; };
+{ const r = ruleNoEmpty(REAL); check('an owed append whose entry left the live list meanwhile writes nothing and leaves no empty entry in the owed map', r.left === 0, r); }
+{ const r = ruleNoEmpty(cuts([['    if (!q || !q.ids.size) { if (q && !q.flying) this._archQ.delete(file); return null; }', '    if (!q || !q.ids.size) return null;'], ['    if (!lines.length) { if (!q.flying) this._archQ.delete(file); return null; }', '    if (!lines.length) return null;']], 'empty-left')); check('CONTROL (a copy that keeps the empty entry): it stays in the owed map — red', r.left === 1, r); }   // the control writes the old text back on purpose — stale-pins: kept
 
 console.log('⑥ the doors: the route, the Task log window');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
