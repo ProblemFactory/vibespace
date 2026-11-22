@@ -870,19 +870,27 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
     const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
     let openList = null; gate.p = new Promise((r) => { openList = r; });
     const qp = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F2]), why: 'two' });   // passes the wait (no press yet), stalls in the list read
+    const entered = Date.now();   // its ONE deadline was set at its entry, before its first await: no later than entered + 300
+    let answered = null; qp.then((v) => { answered = v; });
     await tick();
     let release = null; slow = new Promise((r) => { release = r; });
     const pr = press(w, p.id, { grant: [F1.id] });   // a press starts DURING the list read and stalls at the door
     await tick();
-    setTimeout(() => { gate.p = null; openList(); }, 200);
-    setTimeout(() => { release(); slow = null; }, 400);   // between the call's deadline (300) and a re-entry's own (200 + 300): 100 ms each side
+    // r2049's sighting (a box-zone run under load): the scene was held by TWO TIMERS (the list opened at 200 ms, the press released at
+    // 400 ms, 100 ms each side of a re-entry's own deadline) and a stall let both fall due together. HELD BY STATE now: the list opens
+    // once the call's own deadline HAS passed (the clock read against its entry), and the press is released once the re-entry has met it
+    for (let left; (left = entered + 300 - Date.now()) >= 0;) await new Promise((r) => setTimeout(r, left + 1));
+    gate.p = null; openList();
+    await tick(); await tick();   // the re-entry has run to its wait on the press, or answered at once (its deadline already gone)
+    const before = answered;
+    release(); slow = null;
     const q = await qp; await pr;
-    return { q };
+    return { q, before };
   };
   const d1 = await dl();
-  ok(d1.q.ok === false && d1.q.code === 'answering', 'ONE DEADLINE FOR THE WHOLE CALL: the re-entry after a press that started in the list read keeps the first deadline — BUSY by name at the limit, the press still running', d1.q);
+  ok(d1.q.ok === false && d1.q.code === 'answering' && !!d1.before && d1.before.code === 'answering', 'ONE DEADLINE FOR THE WHOLE CALL: the re-entry after a press that started in the list read keeps the first deadline — BUSY by name at the limit, answered BEFORE the press was released (the press still running)', { q: d1.q, before: d1.before });
   const d1r = await dl((src) => src.replace("propose({ targets, why }, { caller, reach }, depth + 1, deadline);", "propose({ targets, why }, { caller, reach }, depth + 1);").replace("proposeWakeGrant(caller, { rows: given, why }, depth + 1, deadline, true);", "proposeWakeGrant(caller, { rows: given, why }, depth + 1, 0, true);"));   // stale-pins: kept — a red control whose mutant REBUILDS the old re-entry (its own deadline)
-  ok(d1r.q.ok === true, 'RED CONTROL: a re-entry that starts its own deadline waits past the limit and FILES after the command gave up — the leg above would read it', d1r.q);
+  ok(d1r.q.ok === true && d1r.before === null, 'RED CONTROL: a re-entry that starts its own deadline waits past the limit and FILES after the command gave up (still waiting when the press was released) — the leg above would read it', { q: d1r.q, before: d1r.before });
   // a press that STARTS AND ENDS inside the list read is seen (the proposer's presses counted before and after) — here it granted
   // the very job proposed: «already granted», no card drawing it «not granted»
   const inside = async (mutate) => {
