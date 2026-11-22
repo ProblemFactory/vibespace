@@ -57,6 +57,7 @@
   "test-agy-after-turn-read.mjs": 1,
   "test-agy-attach-chrome.mjs": 1,
   "test-agy-cli-probe.mjs": 1,
+  "test-agy-harness-wrappers.mjs": 1,
   "test-agy-harness.mjs": 1,
   "test-agy-models-door.mjs": 4,
   "test-agy-status-bar-chrome.mjs": 1,
