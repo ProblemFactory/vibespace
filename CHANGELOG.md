@@ -150,6 +150,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Opening a sub-agent's log from its card or a workflow window no longer pauses VibeSpace while it reads a long log.
 - Starting many sub-agents at once no longer makes VibeSpace pause while it looks for their logs.
 - If VibeSpace starts while its data folder is not there yet (a late mount or a moved folder), it now stays shut and says why instead of opening with no sign-in.
+- When the home folder stops answering, VibeSpace no longer freezes checking its hooks or starting a Claude terminal; Manage agents says the file was not read.
 
 ## 2.369.415 — 2026-11-21
 
