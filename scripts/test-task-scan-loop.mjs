@@ -439,8 +439,8 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
           return { found: got.filter((x) => x.fp).length, none: got.filter((x) => !x.fp && x.known).length, unknown: got.filter((x) => !x.known).length, ok: A.rolloutIndexStats().last && A.rolloutIndexStats().last.ok, failed };
         });
       };
-      const WALK_ON = "      if ((!st.ok || late) && !onDone) return;\n    }\n    // the cache:";
-      const g10 = await walkOn(AD), r10 = await walkOn(adCopy('a60e-walk-stops', anchored(adSrc, WALK_ON, "      if (!st.ok || (late && !onDone)) return;\n    }\n    // the cache:", 'a60e-walk-stops')));
+      const WALK_ON = "      if ((!st.ok || late) && !onDone) { cut = late; return; }\n    }\n    // the cache:";
+      const g10 = await walkOn(AD), r10 = await walkOn(adCopy('a60e-walk-stops', anchored(adSrc, WALK_ON, "      if (!st.ok || (late && !onDone)) { cut = late; return; }\n    }\n    // the cache:", 'a60e-walk-stops')));
       ok(g10.ok === false && g10.none === 0 && g10.unknown === 30 - g10.found && g10.found >= 10 && r10.found < g10.found,
         `one folder below the root cannot be listed (${path.relative(csess, String(g10.failed))}): the walk went on — ${g10.found} of 30 found, ${g10.unknown} «not known yet», ${g10.none} «none»; RED (the walk stops there): ${r10.found} found`);
       // (11) MUST 3 — THE FLAG TRAVELS: the service's status and page (the paired machine's transcript ops ARE these) of a conversation
@@ -563,6 +563,45 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       };
       const g18 = await chainRoad(require(path.join(REPO, 'src/resume-store.js'))), r18 = await chainRoad(mutantCopies('a60e-sync-chain', REPO).load('src/resume-store.js', anchored(rsSrc, ASYNC_CHAIN, 'st.forkChain(resumeId) : st.forkChain(resumeId)', 'a60e-sync-chain'), 'sync-chain'));
       ok(g18 === `${tP},${tC}` && r18 === tC, `the resume's fork chain (a rollout written after the last walk): «${g18}»; RED (the synchronous chain on that road): «${r18}»`);
+      // (19) ROUND wlatrwrv3's MUST (主开发 r1953): A WALK THAT STOPPED AT ITS BOUND IS NEVER WHOLE — for itself and for everyone who
+      // adopts it. Slow storage: the index's first walk fails once (a folder), tid2 is missed «not known yet»; a ONE-OFF walk (the
+      // channels' sweep's shape) starts, its root's listing held past its bound (cut); while it is out the index (asked, in the leg's order), the channels'
+      // liveness reader and the attachments' index all wait on it and adopt it. (i) tid2 (in a folder that walk never listed): «not
+      // known yet», never «none»; (ii) the channels-style reader: a local conversation is NOT judged gone; (iii) the attachments-style
+      // reader: «unknown». RED: the settled result without the late term (a cut walk said whole)
+      // (iii) reads the attachments' door, whose «absent» needs the CLAUDE tree read whole too: a stand-in holds that half whole on
+      // BOTH roads (the green and the RED), so the door's answer is the codex half's alone — never the child's own projects tree
+      const claudeWhole = mutantCopies('a60e-claude-whole', REPO).write('src/session-store.js', 'module.exports = { claudeTranscriptIndex: async () => ({ ok: true, topReadable: true, has: () => false }) };\n', 'claude-whole');
+      const caSrc = anchored(fs.readFileSync(path.join(REPO, 'src/server/chat-attachments.js'), 'utf8'), "require('../session-store.js')", `require(${JSON.stringify(claudeWhole)})`, 'a60e-claude-half-whole'), cwSrc0 = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf8');
+      const CA0 = mutantCopies('a60e-ca-green', REPO).load('src/server/chat-attachments.js', caSrc, 'ca-green'), CW0 = require(path.join(REPO, 'src/server/channels-wiring.js'));
+      const cutRoad = async (A, CAm, CWm) => {
+        A._resetRolloutIndexForTests(); A._setRolloutTimingForTests({ retryMs: 60000 });   // no retry timer fires inside the leg: the index is ASKED below, while the cut walk is out
+        let failing = true, release = () => { }; const gate = new Promise((r) => { release = r; });   // tid2's folder refuses EVERY listing until the first ask is answered (a walker of another leg may list it first: one refusal is not enough)
+        try {
+          return await withReaddir((p0) => (failing && p0 === rdir ? 'fail' : null), async () => {
+            const first = await A.codexRolloutLookupAsync(tid2, { boundMs: 2000 });   // the index's walk fails at tid2's folder (tid2 missed BEFORE the one-off walk begins)
+            failing = false; A._setRolloutTimingForTests({ retryMs: 0 });   // the folder lists again; the failed walk's wait is over: the next ask walks (the order of the leg, never a timer's)
+            const slow = { ...fs.promises, readdir: (p0, o) => (p0 === csess ? gate.then(() => fs.promises.readdir(p0, o)) : fs.promises.readdir(p0, o)), stat: fs.promises.stat };
+            const sweep = A.codexTranscriptIndex({ boundMs: 80, fsp: slow });   // the one-off walk: its root held 300 ms, its bound 80 ms ⇒ CUT
+            const ch = (async () => { const rd = CWm.livenessReader({ liveSessions: () => [], readUserState: () => ({}), convIndex: () => null, metaDir, transcriptIndex: {} }); const j = await rd.forSweep(); return j(tQ); })();
+            const at = CAm.transcriptIndexes();
+            // THE INDEX asks while the cut walk is out: it waits on it and adopts it. What it knows is read AT the adoption (the same microtask
+            // chain): a later ask may walk for itself after a cut walk, as it should, and an asker outside this leg may make one
+            const idx = A.refreshCodexRolloutIndex().then(() => ({ s0: A.rolloutIndexStats(), look: A.codexRolloutLookup(tid2) }));
+            setTimeout(release, 300);
+            const [sw, chv, atv, ad] = await Promise.all([sweep, ch, at, idx]);
+            const s0 = ad.s0;
+            return { first: first.known, swOk: sw.ok, swCut: sw.cut, look: ad.look, walks: s0.walks, ch: chv && chv.state, at: atv.has(tQ), lastOk: s0.last && s0.last.ok, lastFromSweep: !!(s0.last && s0.last.rollouts === 0) };
+          });
+        } finally { release(); A._setRolloutTimingForTests({}); A._resetRolloutIndexForTests(); }   // the leg's own asks detached
+      };
+      const SETTLED = '    const full = { ok: whole(), cut, ';
+      const adCut = mutantCopies('a60e-cut-whole', REPO); const adCutPath = adCut.write('src/adapters/codex.js', anchored(adSrc, SETTLED, '    const full = { ok: st.ok, cut, ', 'a60e-cut-said-whole'), 'cut-said-whole');
+      const wire = (src, tag) => adCut.load(tag === 'ca' ? 'src/server/chat-attachments.js' : 'src/server/channels-wiring.js', anchored(src, "require('../adapters/codex.js')", `require(${JSON.stringify(adCutPath)})`, 'a60e-cut-' + tag, { count: 'any' }), 'cut-' + tag);
+      const g19 = await cutRoad(AD, CA0, CW0), r19 = await cutRoad(require(adCutPath), wire(caSrc, 'ca'), wire(cwSrc0, 'cw'));
+      ok(!g19.first && g19.swOk === false && g19.lastFromSweep && g19.lastOk === false && g19.look.known === false && g19.ch !== 'gone' && g19.at === null
+        && r19.look.known === true && !r19.look.fp && r19.ch === 'gone' && r19.at === false,
+        `a one-off walk cut at its bound (its return ok ${g19.swOk}; its settled result, adopted: ok ${g19.lastOk}), adopted by the index and the two other readers: (i) tid2 «not known yet» (known ${g19.look.known}${g19.look.fp ? ' at ' + path.basename(g19.look.fp) : ''}; first ${g19.first}, from the cut walk ${g19.lastFromSweep}, walks ${g19.walks}), (ii) the channels' liveness ${g19.ch}, (iii) the attachments' index ${g19.at}; RED (the settled result without the late term): «none» (known ${r19.look.known}), ${r19.ch}, ${r19.at}`);
       AD._resetRolloutIndexForTests();
       fs.rmSync(rfile, { force: true });
     }

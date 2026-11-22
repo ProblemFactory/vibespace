@@ -241,7 +241,10 @@ async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessio
   const keys = new Set(), stems = [], fps = [], cached = new Set();
   const firstOf = new Map(), hostsSeen = [], hostDirs = [];   // key → { plain, zst } (the first of each in the walk's order) · [{ dir, names }] in listing order
   const st = { ok: true, dirs: 0, entries: 0, rollouts: 0 };   // ok: no listing failed
-  let late = false;   // past the bound
+  let late = false, cut = false, finished = false;   // past the bound · a one-off walk STOPPED at its bound · the walk ran to its end
+  // THE ONE PLACE THAT DECIDES «WHOLE» (主开发 r1953): no listing failed AND the walk ran to its end — a walk that stopped at its
+  // bound is never whole, for itself and for everyone who adopts it; its return, its settled result and the adopted copy read this
+  const whole = () => st.ok && finished && !cut;
   const listOf = async (dir, { quiet = [] } = {}) => {
     try { st.dirs++; const ents = await fsp.readdir(dir, { withFileTypes: true }); st.entries += ents.length; return ents; }
     catch (e) { if (e && quiet.includes(e.code)) return []; st.ok = false; return []; }
@@ -283,9 +286,9 @@ async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessio
         if (e.isDirectory()) stack.push({ dir: path.join(dir, e.name), top: false });
         else if (e.isFile()) note(e.name, dir);
       }
-      // a listing failed, or past the bound: a one-off read stops (unknown); THE INDEX's walk goes on to its end and past a folder it
-      // cannot list (主开发 r1638 must 2: one such folder never hides every rollout after it — the walk is only never a «none»)
-      if ((!st.ok || late) && !onDone) return;
+      // a listing failed, or past the bound: a one-off read stops (unknown — CUT, never whole); THE INDEX's walk goes on to its end and
+      // past a folder it cannot list (主开发 r1638 must 2: one such folder never hides every rollout after it — the walk is only never a «none»)
+      if ((!st.ok || late) && !onDone) { cut = late; return; }
     }
     // the cache: findCodexSessionJsonlPath asks existsSync(<host>/codex/<id>.jsonl | .jsonl.zst) — an exact name, of any
     // kind, a link followed (a dangling one finds nothing); a host without a codex directory has none
@@ -297,23 +300,24 @@ async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessio
         cached.add(e.name); names.add(e.name);
       }
       hostDirs.push(d); if (names.size) hostsSeen.push({ dir: d, names });
-      if ((!st.ok || late) && !onDone) return;
+      if ((!st.ok || late) && !onDone) { cut = late; return; }
     }
+    finished = true;
   })();
   const startedAt = Date.now();
   let doneSettle = null; const done = new Promise((r) => { doneSettle = r; });
   CODEX_WALKS_OUT.set(key, { since: startedAt, said: false, done });
   walk.then(() => {}, () => { st.ok = false; }).finally(() => {
     if (CODEX_WALKS_OUT.get(key)?.done === done) CODEX_WALKS_OUT.delete(key);
-    const full = { ok: st.ok, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf, hostDirs: hostDirs.slice(), startedAt };   // the walk's own start: «none» is judged by it
+    const full = { ok: whole(), cut, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf, hostDirs: hostDirs.slice(), startedAt };   // whole() — never a cut walk said whole; the walk's own start: «none» is judged by it
     if (typeof onDone === 'function') { try { onDone(full); } catch { } }
     doneSettle(full);
   });
   let timer = null;
   const bound = new Promise((r) => { timer = setTimeout(() => { late = true; r(); }, boundMs); });
   try { await Promise.race([walk.catch(() => { st.ok = false; }), bound]); } finally { clearTimeout(timer); }
-  const ok = st.ok && !late;   // a late walk that finishes after the bound changes nothing handed out
-  return { ok, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf, hostDirs: hostDirs.slice(), startedAt };
+  const ok = whole();   // at the bound the walk has not ended (not whole); a late walk that finishes after it changes nothing handed out
+  return { ok, cut, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf, hostDirs: hostDirs.slice(), startedAt };
 }
 const CODEX_WALKS_OUT = new Map();   // roots → { since, said, done: the walk's whole result when it ends }
 
@@ -385,7 +389,7 @@ const keepBounded = (m, k, v) => { m.delete(k); m.set(k, v); if (m.size > CODEX_
 function requestRolloutWalk() {
   if (ROLLOUT_INDEX.running) return ROLLOUT_INDEX.running;
   const last = ROLLOUT_INDEX.last;
-  if (last && !last.ok) {
+  if (last && !last.ok && !last.cut) {   // a FAILED walk waits its retry; one only cut at its bound (an adopted one-off) does not
     const due = last.endedAt + Math.min(ROLLOUT_TIMING.retryMs * 2 ** Math.max(0, ROLLOUT_INDEX.failStreak - 1), CODEX_WALK_RETRY_MAX_MS);
     if (Date.now() < due) {
       if (!ROLLOUT_INDEX.retry) {
@@ -407,7 +411,7 @@ function requestRolloutWalk() {
     if (idx) {   // ONLY A WALK THAT RAN moves the epoch (r1638: a bounce never did any work to re-read)
       ROLLOUT_INDEX.ended++;
       ROLLOUT_INDEX.last = { ...idx, startedAt: idx.startedAt || startedAt, endedAt: Date.now() };
-      ROLLOUT_INDEX.failStreak = idx.ok ? 0 : ROLLOUT_INDEX.failStreak + 1;
+      ROLLOUT_INDEX.failStreak = idx.ok ? 0 : idx.cut ? ROLLOUT_INDEX.failStreak : ROLLOUT_INDEX.failStreak + 1;
     }
     settle(ROLLOUT_INDEX.last);
   };
