@@ -112,6 +112,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The one-time repair of older usage records no longer counts as done when it could not read that record; it runs again at the next start.
 - A large workflow that is still running no longer slows VibeSpace each time its card or window refreshes.
 - A command an agent runs with a vault value no longer holds VibeSpace while its output is checked for that value.
+- A signed-out visitor could load the app's own page files (never your data) through an address written with «..»; such an address is now refused.
 
 ## 2.369.415 — 2026-11-21
 
