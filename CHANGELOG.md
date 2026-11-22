@@ -98,6 +98,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A save that meets a folder that does not answer keeps your text and says which file is not saved and what you can do.
 - Closing a code editor, a document window or a terminal's editor pane that holds unsaved text now asks first.
 - In a Task Group with a full Activity log, each new note no longer holds VibeSpace still while older entries are moved to its archive.
+- After a restart, an agent whose approval for a stored secret ended with it now says so and asks again, instead of saying the secret is not switched on.
 
 ## 2.369.415 — 2026-11-21
 
