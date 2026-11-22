@@ -135,7 +135,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   });
   app.post('/api/tasks/import', (req, res) => {
     try { onDisk(res, { success: true, task: tasks.importFromFile(req.body?.path) }); }
-    catch (e) { res.status(400).json({ error: e.message }); }
+    catch (e) { res.status(e && e.code === 'EVSARCHIVEBUSY' ? 409 : 400).json({ error: e.message, ...(e && e.code === 'EVSARCHIVEBUSY' ? { code: e.code } : {}) }); }
   });
   return { convOps };
 }

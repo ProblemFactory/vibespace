@@ -3241,7 +3241,7 @@ class TaskGroupManager {
     for (const id of q.ids) { const p = live.get(id); if (p) { sent.push({ id, clearedAt: p.clearedAt || null }); lines.push(JSON.stringify(p) + '\n'); } }
     q.ids.clear();
     if (!lines.length) { if (!q.flying) this._archQ.delete(file); return null; }
-    q.flying = sent;
+    q.flying = sent; q.flyingSince = Date.now(); q.heldAt = null;   // on its way from now (the settle's «already older than the bound»)
     return { append: lines.join('') };
   }
   /** an append's outcome: landed ⇒ its entries leave the live list (one save); failed ⇒ owed again, said once until one lands */
@@ -3249,7 +3249,7 @@ class TaskGroupManager {
     const q = this._archQ.get(file);
     if (!q) return;
     const fly = q.flying || [];
-    q.flying = null;
+    q.flying = null; q.flyingSince = null; q.heldAt = null;
     if (!ok) {
       for (const x of fly) q.ids.add(x.id);
       if (!this._archiveFailSaid) { this._archiveFailSaid = true; console.warn(`[tasks] an Activity-log archive append was not written (${(e && (e.code || e.message)) || 'an error'}) — its entries stay in the live list, the store writer retries`); }
@@ -3273,15 +3273,25 @@ class TaskGroupManager {
    *  else WHY (r1821 (1): A SETTLE THAT RAN OUT OF ITS BOUND IS NOT A SETTLE — an append still in flight would land in a rewritten
    *  file's old copy, or make a removed group's folder again: the caller refuses BY NAME, ARCHIVE_BUSY, before anything moves) */
   _archiveSettle(files) {
-    const W = this._writer();
-    const owed = (files || [...this._archQ.keys()]).filter((f) => W.pending(f));
-    if (!owed.length) return null;
-    const r = W.flushSync(owed) || {};
+    // r2104 (c): THE FILE'S OWN FLIGHT is judged — a month only OWED is safe (its append is made after a rewrite, into the new file), so
+    // it is neither flushed nor refused (another store's held write never refuses a person's clear)
+    const flying = (files || [...this._archQ.keys()]).filter((f) => { const q = this._archQ.get(f); return !!(q && q.flying); });
+    if (!flying.length) return null;
+    const W = this._writer(), bound = Math.round((Number.isFinite(W.graceMs) && W.graceMs > 0 ? W.graceMs : 90000) / 3);   // the writer's own synchronous bound (store-pace syncBoundMs)
+    // r2104 (a): NO HOLD A PRESS — an append already older than the bound, or held at its file's last settle, is refused AT ONCE
+    for (const f of flying) { const q = this._archQ.get(f), age = Date.now() - (q.flyingSince || Date.now()); if (q.heldAt || age >= bound) return `its write has been held by the storage for ${Math.max(1, Math.round(age / 1000))} s`; }
+    const r = W.flushSync(flying) || {};
     if (r.deferred) return 'the hub is stopping';
-    const miss = (r.left || []).find((x) => owed.includes(x.file));
-    if (miss) return String(miss.why || 'its write has not landed');
-    return owed.some((f) => W.pending(f) && this._archQ.has(f) && this._archQ.get(f).flying) ? 'its write has not landed' : null;
+    const still = flying.filter((f) => { const q = this._archQ.get(f); return !!(q && q.flying); });
+    if (!still.length) return null;   // r2104 (b): landed, or FAILED — a failed append is no flight (nothing on its way; its entries stay owed and live): the act goes on
+    for (const f of still) this._archQ.get(f).heldAt = Date.now();
+    const miss = (r.left || []).find((x) => still.includes(x.file));
+    return String((miss && miss.why) || 'its write has not landed');
   }
+  /** the configuration import's question, asked BEFORE any section is applied (r2104): an Activity-log append still on its way past its
+   *  bound → the refusal's words (code EVSARCHIVEBUSY: the import is refused WHOLE); else null */
+  archiveBusy() { const why = this._archiveSettle(); return why ? ARCHIVE_BUSY(why).message : null; }
+
   /** a group's removal: what it still owes its archive is DROPPED (never written after its folder went); an append on its way lands
    *  first (an append that lands after the removal would make the folder again — a group made again under the same id inheriting it) */
   _archiveDrop(id) {

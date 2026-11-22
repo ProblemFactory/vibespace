@@ -412,6 +412,7 @@ export function installSidebarTasks(SidebarClass) {
         // engineer reading the report — NOTHING. Always name the status, and
         // leave a telemetry breadcrumb so it is diagnosable after the fact.
         if (data && data.code === 'TASK_GROUPS_UNREAD') { showToast(tr("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do."), { type: 'error' }); if (!this._tasksUnread) this._fetchTasks(); return null; }   // THE STORE HELD UNREAD: worded HERE, in the person's language (主开发 00:41Z (c)); the mirror learns the hold
+        if (data && data.code === 'EVSARCHIVEBUSY') { showToast(tr('The Activity log is still being written to its storage — nothing was changed. Try again in a moment.'), { type: 'error' }); return null; }   // B-0248 step 3 (c) (r2104): a delete refused while an Activity-log append is on its way
         let said = false;
         if (typeof onRefused === 'function') { try { said = onRefused(data, res.status) === true; } catch { } }   // a refusal that carries the store's state hands it on first
         if (said) return null;   // B-0248 step 3: the caller SAID it in its own words (a backlog row gone: by its text)

@@ -125,29 +125,17 @@ const ruleDelete = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks[w.i
 { const M = patched("return { version: 1, tasks: Object.values(this._state.tasks), ...(Object.keys(archive).length ? { archive } : {}) };", 'return { version: 1, tasks: Object.values(this._state.tasks) };', 'no-export'); const a = mk(M); seed(a, 530); a.tg._state.tasks[a.id].progress = a.tg._keepLive(a.id, a.tg._state.tasks[a.id].progress); land(); check('CONTROL: a bundle without the archive leaves the 30 behind — red', !a.tg.exportBundle().archive); }
 
 console.log('⑦ B-0248 step 3 (c): what is still OWED to the archive — a clear, a removal');
-// an entry CLEARED while its append is owed reaches the file cleared — three belts: the clear's one-month rewrite settles what is owed
-// to that month first, the bytes are made at the write from the live entry, and a landed entry cleared meanwhile is cleared in the file
-// (any one alone holds; the control removes all three)
+// an entry CLEARED while its append is owed reaches the file cleared — TWO belts since r2104 (c) (the settle judges a month's own FLIGHT,
+// so a month only owed is not settled: the settle guards an append already on its way): the bytes are made at the write from the live
+// entry, and a landed entry cleared meanwhile is cleared in the file (either alone holds; the control removes both, and the settle)
 const ruleQueuedClear = (M) => { const w = mk(M); seed(w, 500); const t = w.tg._state.tasks[w.id]; t.progress[0].note = 'QUEUED-words'; t.progress[0].detail = 'QUEUED-detail';
   w.tg.addProgress(w.id, { note: 'z' }); const r = w.tg.clearProgress(w.id, ['P-100000'], { by: 'owner' }); land();
   const raw = fs.readFileSync(path.join(archDir(w), '2026-09.ndjson'), 'utf8'); return { cleared: r.cleared.join(), words: raw.includes('QUEUED'), sentence: raw.includes(RC.CLEARED_TEXT), live: w.tg.get(w.id).progress.length }; };
 { const r = ruleQueuedClear(REAL); check('an entry cleared while its append was owed reaches the file CLEARED (the sentence, never its words); then it leaves the live list', r.cleared === 'P-100000' && !r.words && r.sentence && r.live === 500, r); }
 { const M = cuts([...BELT.snap, ...BELT.settle, ...BELT.late], 'snap-at-queue');
-  const r = ruleQueuedClear(M); check('CONTROL (a copy that takes the bytes when the entry is QUEUED, rewrites a month without settling it first, and never clears a landed entry late — the three belts all gone): the cleared entry\'s words reach the archive — red', r.words, r); }
-for (const [keep, cut] of [['the settle', [...BELT.snap, ...BELT.late]], ['the bytes made at the write', [...BELT.settle, ...BELT.late]], ['the late clear', [...BELT.snap, ...BELT.settle]]]) {
+  const r = ruleQueuedClear(M); check('CONTROL (a copy that takes the bytes when the entry is QUEUED, rewrites a month without settling it first, and never clears a landed entry late — every belt gone): the cleared entry\'s words reach the archive — red', r.words, r); }
+for (const [keep, cut] of [['the bytes made at the write', [...BELT.settle, ...BELT.late]], ['the late clear', [...BELT.snap, ...BELT.settle]]]) {
   const r = ruleQueuedClear(cuts(cut, 'belt-' + keep.replace(/\W+/g, '-'))); check(`EACH BELT ALONE HOLDS — only ${keep} left (a copy without the other two): the cleared entry reaches the file cleared`, !r.words && r.sentence && r.live === 500, r); }
-// an entry cleared while its append FLEW: once it landed, the month file is cleared too (the clear's own one-file rewrite)
-const ruleFlyingClear = (M) => { const w = mk(M); seed(w, 500); const t = w.tg._state.tasks[w.id]; t.progress[0].note = 'FLYING-words';
-  w.tg.addProgress(w.id, { note: 'z' }); const file = path.join(archDir(w), '2026-09.ndjson');
-  const bytes = w.tg._archiveProduce(file);   // the writer's thread took them: the append is on its way
-  w.tg.clearProgress(w.id, ['P-100000'], { by: 'owner' });
-  fs.mkdirSync(archDir(w), { recursive: true }); fs.appendFileSync(file, bytes.append); w.tg._archiveLanded(file, true);   // …and it landed, with the words it had
-  land(); const raw = fs.readFileSync(file, 'utf8'); return { words: raw.includes('FLYING'), sentence: raw.includes(RC.CLEARED_TEXT), live: w.tg.get(w.id).progress.length }; };
-{ const r = ruleFlyingClear(REAL); check('an entry cleared while its append flew: once it landed, the month file holds the sentence, never its words; it leaves the live list', !r.words && r.sentence && r.live === 500, r); }
-{ const M = patched('      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', '      for (const x of []) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', 'no-late-clear');
-  const r = ruleFlyingClear(M); check('CONTROL (a copy without the late clear): the words it flew with stay in the archive — red', r.words, r); }
-// a group REMOVED: an append still owed makes no bytes (its group is gone), and one already ON ITS WAY lands BEFORE the folder goes —
-// an append that landed after the removal would make the folder again, and a group made again under the same id would inherit it.
 // A HOLDING writer (a stand-in) keeps one append in flight: its thread took the bytes, the landing is the scene's.
 const holdWriter = () => {
   const st = { owed: new Map(), flying: null };
@@ -157,9 +145,25 @@ const holdWriter = () => {
     take: (f) => { const o = st.owed.get(f); st.owed.delete(f); st.flying = { file: f, o, bytes: o.produce() }; },   // the writer's thread took the bytes
     landFlying: () => { const x = st.flying; if (!x) return; st.flying = null; writeOut(x.file, x.o, x.bytes); },
     landLost: () => { const x = st.flying; if (!x) return; st.flying = null; if (x.o.onWritten) x.o.onWritten(true); },   // it lands in a REPLACED file's old copy: its bytes reach no file the store reads
-    flushSync: (files) => { if (st.flying && (!files || files.includes(st.flying.file))) { if (st.holdPast) return { written: [], left: [{ file: st.flying.file, why: 'its write was still held by the storage after 10.0 s (a stand-in)' }] }; W.landFlying(); } for (const f of files || [...st.owed.keys()]) { const o = st.owed.get(f); if (!o) continue; st.owed.delete(f); writeOut(f, o, o.produce()); } return { written: [], left: [] }; } };
+    flushSync: (files) => { if (st.otherHeld) return { written: [], left: (files || [...st.owed.keys()]).map((file) => ({ file, why: 'the writer thread was still held by the storage (another store, a stand-in)' })) };
+      if (st.flying && st.failNext && (!files || files.includes(st.flying.file))) { const x = st.flying; st.flying = null; st.failNext = false; if (x.o.onWritten) x.o.onWritten(false, Object.assign(new Error('a stand-in'), { code: 'EDQUOT' })); return { written: [], left: [{ file: x.file, why: 'the write failed (EDQUOT; 1 attempt)' }] }; }
+      if (st.flying && (!files || files.includes(st.flying.file))) { if (st.holdPast) return { written: [], left: [{ file: st.flying.file, why: 'its write was still held by the storage after 10.0 s (a stand-in)' }] }; W.landFlying(); } for (const f of files || [...st.owed.keys()]) { const o = st.owed.get(f); if (!o) continue; st.owed.delete(f); writeOut(f, o, o.produce()); } return { written: [], left: [] }; } };
   return W;
 };
+// an entry cleared while its append FLIES (r2104): the clear's settle lets that append land FIRST, then the month file is rewritten
+// cleared; two belts for it — the settle, and the late clear of a landed entry cleared meanwhile (either alone holds; red: both cut)
+const ruleFlyingClear = (M) => { const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir };
+  seed(w, 500); W.flushSync(); tg._state.tasks[g.id].progress[0].note = 'FLYING-words';
+  tg.addProgress(g.id, { note: 'z' }); const file = path.join(archDir(w), '2026-09.ndjson'); W.take(file);   // its append is on its way, with the words it had
+  let code = null; try { tg.clearProgress(g.id, ['P-100000'], { by: 'owner' }); } catch (e) { code = e.code || e.message; }
+  W.landFlying(); W.flushSync();   // whatever was still on its way lands
+  const raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''; return { code, words: raw.includes('FLYING'), sentence: raw.includes(RC.CLEARED_TEXT), live: tg.get(g.id).progress.length }; };
+{ const r = ruleFlyingClear(REAL); check('an entry cleared while its append flies: the clear lets the append land first, then the month file holds the sentence, never its words; it leaves the live list', r.code === null && !r.words && r.sentence && r.live === 500, r); }
+for (const [keep, cut] of [['the settle', BELT.late], ['the late clear', BELT.settle]]) {
+  const r = ruleFlyingClear(cuts(cut, 'fly-' + keep.replace(/\W+/g, '-'))); check(`…EACH BELT ALONE HOLDS for a flying entry — only ${keep} left: the month file holds the sentence`, !r.words && r.sentence, r); }
+{ const r = ruleFlyingClear(cuts([...BELT.settle, ...BELT.late], 'fly-none')); check('CONTROL (a copy without the settle AND the late clear): the words it flew with stay in the archive — red', r.words, r); }
+// a group REMOVED: an append still owed makes no bytes (its group is gone), and one already ON ITS WAY lands BEFORE the folder goes —
+// an append that landed after the removal would make the folder again, and a group made again under the same id would inherit it.
 const ruleFlyingDelete = (M) => { const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir };
   seed(w, 505); tg._state.tasks[g.id].progress = tg._keepLive(g.id, tg._state.tasks[g.id].progress);
   const file = path.join(archDir(w), '2026-09.ndjson'); W.take(file);   // its append is on its way
@@ -201,6 +205,8 @@ const heldScene = (M, act) => { const W = holdWriter(), dir = freshDir(); const 
   const ids = walk(w2).all.map((p) => p.id);
   tg2.addProgress(w.id, { note: 'after the restart' }); land();
   const ids3 = walk(w2).all.map((p) => p.id);
+  { const Mx = MUT.load('src/task-groups.js', anchored(SRC, '      if (p.id && seen.has(p.id)) return;\n', '', 'no-dedup'), 'no-dedup'); const tgx = new Mx.TaskGroupManager({ dataDir: dir, onChange: () => {} }); const idsx = walk({ tg: tgx, id: w.id, dir }).all.map((p) => p.id);
+    check('CONTROL (a copy whose page reader does not drop a second copy by id): the entry in both places is read TWICE after the kill — red', idsx.filter((x) => x === 'P-100000').length >= 2, idsx.filter((x) => x === 'P-100000').length); }
   check('a kill between the append and the trim: the entry is live AND archived at the next start, read ONCE; the next overflow appends it again and it is still read once', live2 && arch2 === 1 && ids.filter((x) => x === 'P-100000').length === 1 && archLines(w2).filter((p) => p.id === 'P-100000').length === 2 && ids3.filter((x) => x === 'P-100000').length === 1 && new Set(ids3).size === ids3.length, { live2, arch2 }); }
 
 // r1821 (3): A BUNDLE NEVER CARRIES AN ENTRY TWICE — one in both places (owed, or a crash duplicate) rides in its live list only
@@ -222,11 +228,65 @@ const ruleExportOnce = (M) => { const w = mk(M); seed(w, 505); w.tg._state.tasks
   for (let i = 0; i < 200; i++) tg.addProgress(g.id, { note: `burst ${i}` });
   flushCounted(); const first = { ...n }; flushCounted(); void wo;
   check('a burst of 200 notes at the bound: ONE append job per month file (2: September and October) and at most two writes of the store over two write turns; 500 live after, 200 archived', first.appends === 2 && n.appends === 2 && n.saves <= 2 && tg.get(g.id).progress.length === 500 && archLines(w).length === 200, { first, n, turn }); }
+// …its red (r2104 smalls): a copy that writes ONE entry an append job — the archive lags a burst (one month file's job a turn carries one entry)
+{ const M = MUT.load('src/task-groups.js', anchored(SRC, '    q.ids.clear();\n    if (!lines.length)', '    { const keep = sent.slice(1).map((x) => x.id); q.ids.clear(); for (const k of keep) q.ids.add(k); sent.length = Math.min(sent.length, 1); lines.length = Math.min(lines.length, 1); }\n    if (!lines.length)', 'one-a-job'), 'one-a-job');
+  const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'burst' }); const w = { tg, id: g.id, dir };
+  seed(w, 500); W.flushSync(); for (let i = 0; i < 200; i++) tg.addProgress(g.id, { note: `burst ${i}` }); W.flushSync(); W.flushSync();
+  check('CONTROL (a copy that carries one entry an append job): two turns archive 2 of the 200 — the bound above is the code\'s, not the stand-in\'s (red)', archLines(w).length < 200, { arch: archLines(w).length }); }
 
 // r1821 (4): nothing owed leaves NO empty entry in the owed map
 const ruleNoEmpty = (M) => { const w = mk(M); seed(w, 501); const t = w.tg._state.tasks[w.id]; t.progress = w.tg._keepLive(w.id, t.progress); t.progress = t.progress.slice(1); land(); return { left: w.tg._archQ.size }; };
 { const r = ruleNoEmpty(REAL); check('an owed append whose entry left the live list meanwhile writes nothing and leaves no empty entry in the owed map', r.left === 0, r); }
 { const r = ruleNoEmpty(cuts([['    if (!q || !q.ids.size) { if (q && !q.flying) this._archQ.delete(file); return null; }', '    if (!q || !q.ids.size) return null;'], ['    if (!lines.length) { if (!q.flying) this._archQ.delete(file); return null; }', '    if (!lines.length) return null;']], 'empty-left')); check('CONTROL (a copy that keeps the empty entry): it stays in the owed map — red', r.left === 1, r); }   // the control writes the old text back on purpose — stale-pins: kept
+
+// r2104 (a)(b)(c): THE SETTLE JUDGES THE FILE'S OWN FLIGHT — (a) a press after a held settle, or over an append already older than the
+// bound, is refused AT ONCE (no second hold of the hub); (b) a FAILED append is no flight: the clear goes on; (c) a month only OWED while
+// another store's write is held is safe: the clear goes on
+const settleScene = (M, mode) => { const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir };
+  seed(w, 505); tg._state.tasks[g.id].progress = tg._keepLive(g.id, tg._state.tasks[g.id].progress); W.flushSync();
+  tg.addProgress(g.id, { note: 'one more' }); const file = path.join(archDir(w), '2026-09.ndjson');
+  let flushes = 0; const fs0 = W.flushSync; W.flushSync = (...a) => { flushes++; return fs0(...a); };
+  const press = () => { try { tg.clearProgress(g.id, ['P-100001'], { by: 'owner' }); return 'cleared'; } catch (e) { return e.code || e.message; } };
+  const out = { mode };
+  if (mode === 'held') { W.take(file); W.st.holdPast = true; out.first = press(); out.f1 = flushes; out.second = press(); out.f2 = flushes;
+    W.st.holdPast = false; W.landFlying(); flushes = 0; tg.addProgress(g.id, { note: 'and one more' }); W.take(file); tg._archQ.get(file).flyingSince = Date.now() - 31 * 60e3; out.old = press(); out.f3 = flushes; W.landFlying(); }
+  else if (mode === 'failed') { W.take(file); W.st.failNext = true; out.first = press(); out.owed = tg._archQ.has(file) && tg._archQ.get(file).ids.has('P-100005'); out.live = tg.get(g.id).progress.some((p) => p.id === 'P-100005'); }
+  else { W.st.otherHeld = true; out.first = press(); W.st.otherHeld = false; }
+  return out; };
+{ const r = settleScene(REAL, 'held'); check('(a) a held settle refuses BY NAME; the NEXT press is refused AT ONCE (no second hold: no flush asked), and an append already older than the bound is refused without a flush', r.first === 'EVSARCHIVEBUSY' && r.second === 'EVSARCHIVEBUSY' && r.f1 === 1 && r.f2 === 1 && r.old === 'EVSARCHIVEBUSY' && r.f3 === 0, r); }
+{ const r = settleScene(cuts([['if (q.heldAt || age >= bound) return', 'if (false) return']], 'no-at-once'), 'held'); check('CONTROL (a copy without the at-once refusal): every press holds the hub for the bound again (a second flush) — red', r.f2 === 2 || r.f3 === 1, r); }
+{ const r = settleScene(REAL, 'failed'); check('(b) a FAILED append is no flight: the clear goes on (nothing on its way), the entry stays owed and live, retried', r.first === 'cleared' && r.owed && r.live, r); }
+{ const r = settleScene(REAL, 'owed'); check('(c) a month only OWED while another store\'s write is held is safe: the clear goes on (no flush, no refusal)', r.first === 'cleared', r); }
+{ const NEW_SETTLE = SRC.slice(SRC.indexOf('  _archiveSettle(files) {'), SRC.indexOf("  /** the configuration import's question"));
+  const OLD_SETTLE = "  _archiveSettle(files) {\n    const W = this._writer();\n    const owed = (files || [...this._archQ.keys()]).filter((f) => W.pending(f));\n    if (!owed.length) return null;\n    const r = W.flushSync(owed) || {};\n    if (r.deferred) return 'the hub is stopping';\n    const miss = (r.left || []).find((x) => owed.includes(x.file));\n    if (miss) return String(miss.why || 'its write has not landed');\n    return owed.some((f) => W.pending(f) && this._archQ.has(f) && this._archQ.get(f).flying) ? 'its write has not landed' : null;\n  }\n";   // the control writes the settle of 76703d7b5 back on purpose — stale-pins: kept
+  const M = MUT.load('src/task-groups.js', anchored(SRC, NEW_SETTLE, OLD_SETTLE, 'settle-of-76703d7b5'), 'settle-old');
+  const rb = settleScene(M, 'failed'), rc = settleScene(M, 'owed');
+  check('CONTROL (the settle of 76703d7b5, judging the writer\'s whole answer): a failed append and an owed month beside another store\'s held write are both REFUSED — red', rb.first === 'EVSARCHIVEBUSY' && rc.first === 'EVSARCHIVEBUSY', { rb, rc }); }
+
+// r2104 THE MUST: THE CONFIGURATION IMPORT (Backup & migrate) is refused WHOLE before any section is applied — the ROUTE driven (src/routes/
+// persistence.js on a fake app): a bundle with settings and Task Groups, imported while an Activity-log append is held past its bound
+const PRS = fs.readFileSync(path.join(repo, 'src/routes/persistence.js'), 'utf8');
+const configImport = async (Pmod, tag) => {
+  const D = freshDir(); fs.writeFileSync(path.join(D, 'settings.json'), JSON.stringify({ language: 'en' }));
+  const W = holdWriter(); const tg = new REAL.TaskGroupManager({ dataDir: D, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir: D };
+  seed(w, 505); tg._state.tasks[g.id].progress = tg._keepLive(g.id, tg._state.tasks[g.id].progress); W.flushSync();
+  Pmod.setup({ dataDir: D, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => [], getTasks: () => tg, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+  const door = (p) => Pmod.router.stack.find((l) => l.route && l.route.path === p && l.route.methods.post).route.stack[0].handle;
+  const call = (p, body) => new Promise((resolve) => { const out = { status: 200 }; const res = { status(c) { out.status = c; return this; }, set() { return this; }, setHeader() { }, get() { return undefined; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); } };
+    try { door(p)({ body, headers: { 'sec-fetch-site': 'same-origin' }, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out)); } catch (e) { out.status = 'threw'; out.code = e && e.code; resolve(out); } });
+  const ex = await call('/api/config/export', { sections: ['settings', 'tasks'] });
+  const file = ex.body; if (file && file.sections && file.sections.settings) file.sections.settings = { ...file.sections.settings, language: 'ja' };
+  tg.addProgress(g.id, { note: 'one more' }); W.take(path.join(archDir(w), '2026-09.ndjson')); W.st.holdPast = true;   // an append held past its bound
+  const im = await call('/api/config/import', { file, sections: ['settings', 'tasks'], includeSensitive: [] });
+  land(); W.st.holdPast = false; W.landFlying();
+  const again = await call('/api/config/export', { sections: ['settings'] });
+  return { exported: ex.status, hadSettings: !!(ex.body && ex.body.sections && ex.body.sections.settings), status: im.status, code: (im.body && im.body.code) || im.code || null, applied: (im.body && im.body.applied) || null, language: again.body && again.body.sections && again.body.sections.settings && again.body.sections.settings.language };
+};
+{ const r = await configImport(require(path.join(repo, 'src/routes/persistence.js')), 'real');
+  check('THE MUST: a configuration import while an Activity-log append is held past its bound is refused WHOLE by name (409 EVSARCHIVEBUSY), and NO section is applied (the settings stay as they were)', r.exported === 200 && r.hadSettings && r.status === 409 && r.code === 'EVSARCHIVEBUSY' && !r.applied && r.language === 'en', r); }
+{ const BUSY = "    { const busy = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.archiveBusy?.() : null;";
+  const r = await configImport(MUT.load('src/routes/persistence.js', anchored(PRS, BUSY, "    { const busy = null;", 'import-busy-cut'), 'import-busy-cut'), 'red');
+  check('CONTROL (a copy of the route without the whole refusal): the settings are applied first and the Task Groups refused after them — the import is HALF applied (red; the tasks line\'s belt names what was applied)', r.language === 'ja' && r.code === 'EVSARCHIVEBUSY' && Array.isArray(r.applied) && r.applied.length > 0, r); }
 
 console.log('⑥ the doors: the route, the Task log window');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

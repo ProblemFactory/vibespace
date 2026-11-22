@@ -771,6 +771,8 @@ export default {
   "VibeSpace cannot read its Task Groups right now — these wait for the Task Groups store; judged at the conversation’s next turn once it reads": "VibeSpace は今タスクグループを読み込めません——これらはタスクグループの保存先を待っています。読み込めるようになった後、この会話の次のターンで判定されます",
   "a Task Group (the list cannot be read right now)": "タスクグループ（一覧を今は読み込めません）",
   "Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.": "タスクグループを今は読み込めません——何も記録されていません。理由と対処法は「あなた宛て」にあります。",
+  "The Activity log is still being written to its storage — nothing was changed. Try again in a moment.": "アクティビティログはまだストレージに書き込み中です——何も変更されていません。少し待ってからもう一度お試しください。", // B-0248 step 3 (c) (r2104): the archive's busy refusal
+  "The Activity log is still being written to its storage — the Task Groups were not imported (already applied: {applied}). Try again in a moment.": "アクティビティログはまだストレージに書き込み中です——タスクグループはインポートされていません（適用済み：{applied}）。少し待ってからもう一度お試しください。", // B-0248 step 3 (c) (r2104): the archive's busy refusal
   "Task Groups cannot be read right now — For you says why": "タスクグループを今は読み込めません——理由は「あなた宛て」にあります",
   "Task Groups cannot be read right now — this window stays and fills in when they read again": "タスクグループを今は読み込めません——このウィンドウは残り、読み込めるようになると表示されます",
   "Task Groups cannot be read — {file} in VibeSpace's data folder is damaged": "タスクグループを読み込めません — VibeSpace のデータフォルダーの {file} が壊れています",

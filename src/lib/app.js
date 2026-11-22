@@ -1258,6 +1258,7 @@ class App {
             body: JSON.stringify({ file, sections, includeSensitive, passphrase }),
           });
           const d = await res.json().catch(() => ({}));
+          if (!res.ok && d.code === 'EVSARCHIVEBUSY') { err.textContent = (d.applied || []).length ? t('The Activity log is still being written to its storage — the Task Groups were not imported (already applied: {applied}). Try again in a moment.', { applied: d.applied.join(', ') }) : t('The Activity log is still being written to its storage — nothing was changed. Try again in a moment.'); return; }   // B-0248 step 3 (c) (r2104): the archive's busy refusal in the page's words
           if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (credentialDoorWords(d) || d.error || t('Import failed')); return; }
           if (d.clientPrefs) {
             for (const [k, v] of Object.entries(d.clientPrefs)) {

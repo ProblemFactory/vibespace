@@ -42,7 +42,8 @@ export function clearErrorText(code, fallback = '') {
     case 'not_found': return t('no such record');
     case 'archive_unread': return t('this record may be among the archived job records, which could not be reached; clear it again when the archive reads (after a restart, or once the storage answers again)');   // B-20b6's smalls (1)
     case 'unavailable': return t('the records are not available right now — try again in a moment');
-    case 'TASK_GROUPS_UNREAD': return t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.");   // THE STORE HELD UNREAD (lane bl-windows): the hold (503) in the page's words — never «try again in a moment» for a damaged file
+    case 'TASK_GROUPS_UNREAD': return t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.");
+    case 'EVSARCHIVEBUSY': return t('The Activity log is still being written to its storage — nothing was changed. Try again in a moment.');   // B-0248 step 3 (c) (r2104): an Activity-log append still on its way — the clear refused, nothing changed   // THE STORE HELD UNREAD (lane bl-windows): the hold (503) in the page's words — never «try again in a moment» for a damaged file
     case 'failed': return t('it could not be saved — nothing was changed');
     case 'ambiguous': return t('several entries share that time — reopen the window and try again');
     case 'unreachable': return t('server unreachable');
