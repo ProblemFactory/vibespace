@@ -16,8 +16,9 @@
 //   SCOPED (judged): sessions SA and SB, each handed a scope grant of the tree's own cdp-mediator over the suite's Chrome. The
 //     trial's tab is made on the browser socket and ADMITTED to SA (the keeper's mediator.admitTarget before its bind); SB's
 //     churn tabs are SB's own (admitted by their own create). THE LAW: no bind and no navigate of SA over 5 s, and SA's daemon
-//     log holds no «failed to prepare new page session»; the scope's own control: SA's tab list never shows SB's tab, where the
-//     bare A's does.
+//     log holds no «failed to prepare new page session»; the scope's own control: SA's tab list holds none of SB's tabs, where
+//     the bare A's holds them all — BY TARGET ID (r4, box row 124: a bare holder's `open` drives a tab it discovered, so a url
+//     names no holder; and each answer is read whole).
 //   BARE (printed — the CONTROL): sessions A and B `--cdp` to the suite's Chrome itself, as both box runs measured (the stall 3 of
 //     8 binds there). Its daemons see every tab of the browser, the scoped phase's too: a wait they meet is the same cause.
 //   In both: B's loop WARMED first (3 cycles, ≤ 6 s) and the bind started only while B's `tab new` is IN FLIGHT (r2, the
@@ -136,7 +137,7 @@ const drive = (w, args, timeout) => new Promise((resolve) => {
   const t0 = Date.now();
   execFile(REAL_AB, ['--cdp', w.cdpUrl, ...args], { encoding: 'utf8', timeout, killSignal: 'SIGKILL', cwd: w.cwd, maxBuffer: 8 * 1024 * 1024,
     env: { ...BASE_ENV, HOME: w.home, TMPDIR: w.tmp, XDG_RUNTIME_DIR: w.xdg, AGENT_BROWSER_NAMESPACE: w.ns, AGENT_BROWSER_SESSION: `vs-${w.name}`, AGENT_BROWSER_JSON: '1', ...(w.debug ? { AGENT_BROWSER_DEBUG: '1' } : {}) } },
-    (err, stdout, stderr) => resolve({ ms: Date.now() - t0, code: err ? (err.killed ? 'timeout' : (err.code || 1)) : 0, out: String(stdout || '').slice(-1500), err: String(stderr || '').slice(-4000) }));
+    (err, stdout, stderr) => resolve({ ms: Date.now() - t0, code: err ? (err.killed ? 'timeout' : (err.code || 1)) : 0, out: String(stdout || '').slice(-262144) /* r4: the WHOLE answer — a bare holder's tab list (every tab of the browser) outgrew a 1500-char tail and its JSON was cut (box row 124) */, err: String(stderr || '').slice(-4000) }));
 });
 // the driver's --json answer (its last stdout line): its error is said THERE, not on stderr
 const answerOf = (r) => { try { return JSON.parse(String(r.out || '').trim().split('\n').filter(Boolean).pop()); } catch { return null; } };
@@ -161,9 +162,9 @@ const churn = (b) => {
 };
 const until = async (fn, ms, step = 25) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await sleep(step); } return !!fn(); };
 // a way starts only with room for its worst case by its own bounds: the warm-up, the wait for B's command, the bind, the
-// navigate, and B's last command at the stop (tab new 15 s + tab close 10 s); the end's two tab lists keep END_MS — so the
+// navigate, and B's last command at the stop (tab new 15 s + tab close 10 s); the end's three tab lists keep END_MS — so the
 // cap holds by construction
-const WARM_CYCLES = 3, WARM_MS = 6000, INFLIGHT_MS = 2000, NAV_MS = 25000, B_LAST_MS = 25000, END_MS = 30000, WAY_MS = WARM_MS + INFLIGHT_MS + BIND_MS + NAV_MS + B_LAST_MS;
+const WARM_CYCLES = 3, WARM_MS = 6000, INFLIGHT_MS = 2000, NAV_MS = 25000, B_LAST_MS = 25000, END_MS = 45000, WAY_MS = WARM_MS + INFLIGHT_MS + BIND_MS + NAV_MS + B_LAST_MS;
 const slowLines = (w, r) => (r.ms > SLOW_MS ? { stderr: r.err.split('\n').filter(Boolean).slice(-30), files: Object.fromEntries(filesOf(w).map((f) => [path.relative(ROOT, f), tailOf(f, 30).split('\n').filter(Boolean)])) } : null);
 const brief = (r) => { if (!r) return null; const j = r.code !== 0 ? answerOf(r) : null; return { ms: r.ms, code: r.code, ...(r.code !== 0 ? { why: r.err.split('\n').filter(Boolean).slice(-2), answer: j && j.error != null ? String(j.error).slice(0, 300) : null } : {}) }; };
 /** ONE way of a trial on ONE road: the churn warmed (the other holder's loop running), the tab made on the browser socket (and
@@ -201,9 +202,11 @@ outer: for (let i = 1; i <= TRIALS; i++) {
 if (capped) console.log(`B-19a9 MEASURE: stopped at the cap — ${ROADS.map((r) => `${r.name} ${r.ways.length}`).join(', ')} way(s) in ${Math.round((Date.now() - T0) / 1000)} s (the leg's own clock, ${CAP_MS / 60000} min)`);
 
 // the end's reads: each road's holder lists its tabs — the scope's own control (SB's warm tab is in the browser all along)
-const listOf = async (w) => { const r = await drive(w, ['tab', 'list', '--json'], 15000); const j = answerOf(r); const tabs = j && j.data && Array.isArray(j.data.tabs) ? j.data.tabs : null; return { code: r.code, urls: tabs ? tabs.map((t) => String(t.url || '')) : null }; };
-const listSA = await listOf(SA), listA = await listOf(A);
-const SB_TAB = PAGE('sb0');
+// r4 (box row 124): the lists are compared by TARGET ID, never by url — a bare holder's `open` drives a tab it discovered (the
+// bare A's warm-up navigated SA's own tab to A's page), so a url names no holder. SB's tabs are what SB's own scoped list holds.
+const listOf = async (w) => { const r = await drive(w, ['tab', 'list', '--json'], 15000); const j = answerOf(r); const tabs = j && j.data && Array.isArray(j.data.tabs) ? j.data.tabs : null; return { code: r.code, n: tabs ? tabs.length : null, ids: tabs ? tabs.map((t) => String(t.targetId || '').toUpperCase()).filter(Boolean) : null, urls: tabs ? tabs.map((t) => String(t.url || '')) : null, ...(tabs ? {} : { unread: String(r.out || '').slice(0, 300), bytes: String(r.out || '').length }) }; };
+const listSB = await listOf(SB), listSA = await listOf(SA), listA = await listOf(A);
+const SB_IDS = Array.isArray(listSB.ids) ? listSB.ids : [];
 const fails = { SA: prepareFailsOf(SA), A: prepareFailsOf(A) };
 
 const okWays = (road) => road.ways.filter((w) => w && !w.error);
@@ -216,7 +219,7 @@ ok(allWays.length > 0 && allWays.every((w) => w.inFlightAtBind && w.cyclesAtBind
 const sw = okWays(SCOPED);
 ok(sw.length > 0 && sw.every((w) => w.bind.code === 0 && w.bind.ms <= SLOW_MS && w.nav && w.nav.ms <= SLOW_MS), `THE LAW — the scoped road (the product's, for an agent's lease on a local shared profile): every bind of SA answered within 5 s and every navigate after it too, under SB's churn (binds ${sw.map((w) => w.bind.ms).join(' ')} ms; navigates ${sw.map((w) => (w.nav ? `${w.nav.ms}${w.nav.code === 0 ? '' : '/' + w.nav.code}` : '—')).join(' ')} ms)`, sw.filter((w) => !(w.bind.code === 0 && w.bind.ms <= SLOW_MS && w.nav && w.nav.ms <= SLOW_MS)).slice(0, 3).map((w) => ({ bind: w.bind, nav: w.nav })));
 ok(fails.SA === 0, `…and SA's daemon log holds no «${PREPARE_FAIL}» — SB's tabs never reached its drain (the bare A's log: ${fails.A} such line(s))`, fails.SA);
-ok(listSA.code === 0 && Array.isArray(listSA.urls) && !listSA.urls.includes(SB_TAB) && listA.code === 0 && Array.isArray(listA.urls) && listA.urls.includes(SB_TAB), 'THE SCOPE HELD — SA\'s tab list never shows SB\'s tab, where the bare A\'s list does (the same browser: the control that this check can fail)', { SA: listSA, A: listA });
+ok(listSB.code === 0 && SB_IDS.length >= 1 && listSA.code === 0 && Array.isArray(listSA.ids) && !SB_IDS.some((t) => listSA.ids.includes(t)) && listA.code === 0 && Array.isArray(listA.ids) && SB_IDS.every((t) => listA.ids.includes(t)), `THE SCOPE HELD — SA's tab list holds none of SB's tabs (by target id), where the bare A's list holds them all (the same browser: the control that this check can fail) — SB ${SB_IDS.length}, SA ${listSA.n}, bare A ${listA.n} tab(s)`, { SB: listSB, SA: listSA, A: listA });
 
 try { bws.close(); } catch { /* */ }
 try { srv.close(); } catch { /* */ }
