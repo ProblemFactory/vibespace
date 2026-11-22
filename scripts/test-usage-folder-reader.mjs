@@ -12,6 +12,8 @@
 //  ④ A REFRESH THAT FAILS KEEPS THE LAST REPLY AND SAYS ITS AGE: an error, then a read that never replies — the groups' view
 //     stays the last reply, `state()` says held, since when, as of when; `fresh()` answers within its bound.
 //     RED: a reader that empties its reply on a failed read.
+//  THE LEGS' HOLD (r2405): a leg that holds a read at its file waits for the hold itself (bounded, and said), over a listing
+//     slowed by SLOW_LIST loop turns. RED: the release's twenty-turn wait over that listing finds no hold.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -98,6 +100,25 @@ const F_SRC = fs.readFileSync(path.join(REPO, 'src/usage-cache-folder.js'), 'utf
 const W_SRC = fs.readFileSync(path.join(REPO, 'src/usage-cache-write.js'), 'utf8');
 const every = (src, a, b, n, why) => { const parts = src.split(a); if (parts.length - 1 !== n) throw new Error(`ANCHOR (${why}): ${parts.length - 1} of ${n}`); return parts.join(b); };
 const tick = () => new Promise((z) => setImmediate(z));
+// THE HOLD (r2405): a leg that holds the read at its file waits for that hold ITSELF, never for a count of loop turns. The listing
+// is a real fs.promises.readdir (the thread pool), which a loaded machine answers after any number of turns (int361's census gate
+// at 59594edc9, the box zone: twenty turns found no hold and ⑥'s control crashed on «held.shift(...) is not a function»). The
+// legs run on a listing slowed by SLOW_LIST turns — the loaded machine's stand-in, every run.
+const SLOW_LIST = 60;
+function heldReads({ listTurns = SLOW_LIST } = {}) {
+  const held = []; let say = null; const first = new Promise((z) => { say = z; });
+  const fsp = {
+    readdir: (d) => fs.promises.readdir(d).then(async (names) => { for (let k = 0; k < listTurns; k++) await tick(); return names; }),
+    readFile: (f) => new Promise((res) => { held.push(() => res(fs.readFileSync(f, 'utf8'))); say('held'); }),
+  };
+  return { held, fsp, first };
+}
+// the wait: the hold, or the read's end without one, or its bound (a listing that never answers) — each SAID, never a crash
+async function untilHeld(h, read, boundMs = 10000) {
+  let t = null;
+  const bound = new Promise((z) => { t = setTimeout(() => z(`no hold within ${boundMs / 1000} s`), boundMs); });
+  try { return await Promise.race([h.first, read.then(() => 'the read ended with no hold', () => 'the read failed with no hold'), bound]); } finally { clearTimeout(t); }
+}
 
 // ① THE ROADS MAKE NO WHOLE-FOLDER READ ON THE LOOP
 {
@@ -176,12 +197,11 @@ const tick = () => new Promise((z) => setImmediate(z));
 async function overlayLeg(mod) {
   const dir = fs.mkdtempSync(path.join(ROOT, 'own-'));
   fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 1 }));
-  const held = [];
-  const fsp = { readdir: (d) => fs.promises.readdir(d), readFile: (f) => new Promise((res) => held.push(() => res(fs.readFileSync(f, 'utf8')))) };
-  const r = mod.create(dir, { fsp, fillSync: false });
+  const h = heldReads();
+  const r = mod.create(dir, { fsp: h.fsp, fillSync: false });
   const p = r.refresh();
-  for (let k = 0; k < 20 && !held.length; k++) await tick();
-  held.shift()();                                                   // the read takes the file's OLD bytes …
+  const how = await untilHeld(h, p); if (how !== 'held') return how;
+  h.held.shift()();                                                   // the read takes the file's OLD bytes …
   r.noteWritten('a.json', JSON.stringify({ fetchedAt: 2 }));        // … then the hub writes, before the reply lands
   await p;
   return JSON.parse(r.via.readText(path.join(dir, 'a.json'))).fetchedAt;
@@ -276,14 +296,13 @@ async function unreadableLeg(mod) {
 async function laterLeg(mod) {
   const dir = fs.mkdtempSync(path.join(ROOT, 'later-'));
   fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 1 }));
-  const held = [];
-  const fsp = { readdir: (d) => fs.promises.readdir(d), readFile: (f) => new Promise((res) => held.push(() => res(fs.readFileSync(f, 'utf8')))) };
-  const r = mod.create(dir, { fsp, fillSync: false });
+  const h = heldReads();
+  const r = mod.create(dir, { fsp: h.fsp, fillSync: false });
   const pr = r.refresh();
   r.noteWritten('a.json', JSON.stringify({ fetchedAt: 2 }));                   // the hub writes while the read is in flight …
   fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 3 })); // … then another process writes a LATER reading, which the read takes
-  for (let k = 0; k < 20 && !held.length; k++) await tick();
-  held.shift()();
+  const how = await untilHeld(h, pr); if (how !== 'held') return how;
+  h.held.shift()();
   await pr;
   return JSON.parse(r.via.readText(path.join(dir, 'a.json'))).fetchedAt;
 }
@@ -337,22 +356,32 @@ async function laterLeg(mod) {
 async function replaceLeg(mod) {
   const dir = fs.mkdtempSync(path.join(ROOT, 'replace-'));
   fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 5, foreign: true }));   // a foreign reading on disk (newer)
-  const held = [];
-  const fsp = { readdir: (d) => fs.promises.readdir(d), readFile: (f) => new Promise((res) => held.push(() => res(fs.readFileSync(f, 'utf8')))) };
-  const r = mod.create(dir, { fsp, fillSync: false });
+  const h = heldReads();
+  const r = mod.create(dir, { fsp: h.fsp, fillSync: false });
   const pr = r.refresh();
-  for (let k = 0; k < 20 && !held.length; k++) await tick();
-  held.shift()();                                                                              // the read takes the foreign text …
+  const how = await untilHeld(h, pr); if (how !== 'held') return { noHold: how };
+  h.held.shift()();                                                                              // the read takes the foreign text …
   r.noteWritten('a.json', JSON.stringify({ fetchedAt: 3, own: true }), { replace: true });   // … then a repair REPLACES it with the account's own older snapshot
   await pr;
   return JSON.parse(r.via.readText(path.join(dir, 'a.json')));
 }
 {
   const got = await replaceLeg(F);
-  ok(!!(got.own === true && got.fetchedAt === 3), `⑥ a repair's replace during a read stands over the foreign reading the read took (fetchedAt ${got.fetchedAt})`);
+  ok(!!(got.own === true && got.fetchedAt === 3), `⑥ a repair's replace during a read stands over the foreign reading the read took (fetchedAt ${got.noHold || got.fetchedAt})`);
   const NoReplace = M.load('src/usage-cache-folder.js', anchored(F_SRC, 'texts.set(n, o.replace ? o.text : laterOf(texts.get(n), o.text));', 'texts.set(n, laterOf(texts.get(n), o.text));', 'a replace judged as a reading'), 'no-replace');
   const r2 = await replaceLeg(NoReplace);
   ok(!!(r2.foreign === true), 'CONTROL (a replace judged as a reading): the foreign reading the repair replaced stands for one more refresh — red', r2);
+}
+{
+  // CONTROL (r2405, the legs' own wait): the release's wait — twenty loop turns — over the slowed listing finds no hold (the box
+  // run's crash); the wait for the hold itself finds it
+  const dir = fs.mkdtempSync(path.join(ROOT, 'wait-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 1 }));
+  const h = heldReads(), r = F.create(dir, { fsp: h.fsp, fillSync: false }), pr = r.refresh();
+  for (let k = 0; k < 20 && !h.held.length; k++) await tick();
+  const byTurns = h.held.length, how = await untilHeld(h, pr);
+  h.held.splice(0).forEach((go) => go()); await pr;
+  ok(!!(byTurns === 0 && how === 'held'), `CONTROL (the legs' release wait: twenty loop turns) over a listing that answers after ${SLOW_LIST} finds no hold (${byTurns} held) — red; the wait for the hold itself finds it («${how}»)`);
 }
 async function bootSkipLeg(mod) {
   const dir = fs.mkdtempSync(path.join(ROOT, 'bootskip-'));
