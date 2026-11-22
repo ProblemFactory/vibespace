@@ -249,12 +249,31 @@ function sitesOf(text, rel) {
   visit(ast);
   return { sites: out };
 }
+// ONE PARSE A FILE (B-7e49, 主开发 r2508): the census runs nine times (the real tree, seven patched copies, the zh mutant) and each
+// census acorn-parsed every one of the 74 files again. The sites a file's text yields are a PURE function of (file, text), so they are
+// kept by the file and then by the text OBJECT (two levels: V8 keeps a string's hash on the string — a joined key would re-hash the
+// whole text at every look) and handed on: a patched copy re-parses only the file it patched. What each census JUDGES is untouched.
+const SITES_MEMO = new Map();   // rel → Map(text → { sites } | { error })
+let parses = 0;
+// …and so is the prefilter's answer (is it JS, does it word a locked vault at all): over the 1 323 tracked files, nine times, it was
+// 0.7 s of one regex in the profile — kept by the same two levels
+const WORDS_MEMO = new Map();   // rel → Map(text → boolean)
+function wordsAtAll(rel, text) {
+  let m = WORDS_MEMO.get(rel); if (!m) WORDS_MEMO.set(rel, m = new Map());
+  let v = m.get(text); if (v === undefined) m.set(text, v = !!(isJs(rel, text) && (PHRASE.test(text) || /agentWords\(/.test(text) || EXTRA[rel])));
+  return v;
+}
+function sitesOfOnce(text, rel) {
+  let m = SITES_MEMO.get(rel); if (!m) SITES_MEMO.set(rel, m = new Map());
+  let r = m.get(text); if (!r) { parses++; m.set(text, r = sitesOf(text, rel)); }
+  return r;
+}
 /** THE CENSUS over `files` (rel → text) and the dictionaries → { red: [...], sites, rows } */
 function census(files, dicts) {
   const red = [], sites = [], judged = new Map();
   for (const [rel, text] of files) {
-    if (!isJs(rel, text) || !(PHRASE.test(text) || /agentWords\(/.test(text) || EXTRA[rel])) continue;
-    const r = sitesOf(text, rel);
+    if (!wordsAtAll(rel, text)) continue;
+    const r = sitesOfOnce(text, rel);
     if (r.error) { red.push('UNPARSED ' + r.error); continue; }
     for (const s of r.sites) sites.push({ rel, ...s });
     for (const needle of EXTRA[rel] || []) { const i = text.indexOf(needle); if (i < 0) red.push(`${rel}: the named site «${needle}» is gone`); else { const line = text.slice(0, i).split('\n').length; const lt = text.split('\n')[line - 1]; sites.push({ rel, kind: 'extra', words: lt, line, lineText: lt }); } }
@@ -327,6 +346,7 @@ const zh2 = { ...zh, [K1]: '保险库已锁定——先解锁' };
 const rz = census(FILES, { zh: zh2, ja });
 ok(rz.red.some((l) => /the zh words/.test(l)), 'MUTANT «the zh words of the channels card lose For you»: RED (a person reads it in Chinese too)', rz.red.slice(0, 2));
 
+console.log(`  (nine censuses, ${parses} acorn parses: each file once, and each patched copy's one file)`);
 console.log('⑥ M3 DOC REFUSAL CENSUS — every login_* code in the 6 docs is in BL.REFUSALS / paste login codes (no invented login_focus_hijacked)');
 const BL = require(path.join(REPO, 'src/browser-login.js'));
 const P = require(path.join(REPO, 'src/vault-paste.js'));
