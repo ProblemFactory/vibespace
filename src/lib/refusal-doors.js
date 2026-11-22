@@ -12,13 +12,14 @@
  *  cannot close, never a close or a «done» over a refused save the person did not choose. (The release closed at once and told
  *  the CLI «done» whatever the save answered: the edits were lost.) A programmatic close is never refused; its refused save tells
  *  the CLI nothing (the hub re-delivers the pending edit at the next attach).
- *  `ed` = { save(): Promise<boolean>, text(): string, signal(), close(), ready(): boolean, confirmDiscard(): Promise<boolean> }
+ *  `ed` = { save(): Promise<boolean>, text(): string, signal(), close(), ready(): boolean, confirmDiscard(): Promise<boolean>, busy?(): boolean, sayBusy?(), settled?(): Promise<boolean> }
  *  → { onCloseRequest(), onClose() } */
 export function saveCloseDoors(ed) {
   let pending = false, closing = false, gone = false;
   return {
     onCloseRequest() {
       if (!ed.ready()) return true;              // nothing loaded yet: nothing to save
+      if (typeof ed.busy === 'function' && ed.busy()) { if (typeof ed.sayBusy === 'function') ed.sayBusy(); return false; }   // r2221 LAW C: a save still out answers the ✕ first — nothing sent, nothing asked
       if (pending) return false;                 // a save or the question is out: one at a time
       pending = true;
       const sent = ed.text();
@@ -35,6 +36,8 @@ export function saveCloseDoors(ed) {
     },
     onClose() {
       gone = true;
+      // r2299 ★14 (B-23e5): a close while a save is out waits on THAT save's answer — the CLI is told when it landed what the box held
+      if (!closing && typeof ed.busy === 'function' && ed.busy() && typeof ed.settled === 'function') return Promise.resolve(ed.settled()).then((ok) => (ok ? ed.signal() : undefined), () => undefined);
       if (closing) return ed.signal();           // saved (the text on screen), or discarded by the person
       return Promise.resolve().then(() => ed.save()).then((ok) => (ok ? ed.signal() : undefined), () => undefined);
     },

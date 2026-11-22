@@ -395,14 +395,14 @@ console.log('①c the person\'s words: the files router says a remembered dead p
       ['src/lib/file-explorer-ops.js', "this.app.openFile(fullPath, dataset.name, { host: this._host || undefined, attended: true }) });", 'the context menu\'s Open of a file'],
       ['src/lib/file-explorer-ops.js', "this.app.openEditor(fullPath, dataset.name, { host: this._host || undefined, attended: true }) });", 'the context menu\'s Edit'],
       ['src/lib/file-explorer-ops.js', "{ hex: true, host: this._host || undefined, attended: true }) });", 'the context menu\'s Open as Hex'],
-      ['src/lib/code-editor.js', "import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';", 'its import'],
+      ['src/lib/code-editor.js', "import { fsErrorText, ATTENDED_HEADERS, namesText, stillSavingWords } from './file-explorer-ops.js';", 'its import'],
       ['src/lib/code-editor.js', "pressed ? { headers: ATTENDED_HEADERS } : undefined);", 'the code editor\'s open by a press (its first load, once)'],
       ['src/lib/code-editor.js', "opts.auto ? undefined : { headers: ATTENDED_HEADERS });", 'the code editor\'s PRESSED reload (the button, the disk chip — never the watch\'s {auto})'],
       ['src/lib/code-editor.js', "headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body:JSON.stringify({path:this.filePath,content", 'the code editor\'s save (the button, Mod-s, save-and-close)'],
-      ['src/lib/doc-window-ui.js', "import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';", 'its import'],
+      ['src/lib/doc-window-ui.js', "import { fsErrorText, ATTENDED_HEADERS, stillSavingWords } from './file-explorer-ops.js';", 'its import'],
       ['src/lib/doc-window-ui.js', "const chk = await fetch('/api/file/info?' + q(host, path), { headers: ATTENDED_HEADERS })", 'the document window\'s save, its OWN CHECK — the press\'s one try (refused ⇒ no write)'],
       ['src/lib/doc-window-ui.js', "headers: { 'Content-Type': 'application/json', ...ATTENDED_HEADERS }, body: JSON.stringify({ path, content: text", 'the document window\'s save'],
-      ['src/lib/external-editor.js', "import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';", 'its import'],
+      ['src/lib/external-editor.js', "import { fsErrorText, ATTENDED_HEADERS, namesText, stillSavingWords } from './file-explorer-ops.js';", 'its import'],
       ['src/lib/external-editor.js', "headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body: JSON.stringify({ path: filePath, content: newContent", 'the pane editor\'s save (the button, Mod-s / Mod-g, the terminal\'s Ctrl+G finish)'],
       // the rebuild (r1396): the open's FIRST call for every viewer, and the presses its first build missed
       ['src/lib/file-viewer.js', "import { ATTENDED_HEADERS } from './file-explorer-ops.js';", 'its import'],
@@ -432,7 +432,7 @@ console.log('①c the person\'s words: the files router says a remembered dead p
       ['src/lib/artifact-card.js', "action: () => app.openFileExplorer(dir, { host: b.host || undefined, attended: true }) });", 'an artifact card\'s Show in Files, pressed'],
       ['src/lib/artifacts-window.js', "if (cv) return cv._openArtifact(b, { pressed });", 'an Artifacts row hands its press to the chat\'s one door'],
       ['src/lib/artifacts-window.js', "openArtifactRow(app, sessionId, r._afRow, { pressed: true }); });", 'an Artifacts row pressed'],
-      ['src/lib/chat-renderers.js', "import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';", 'its import'],
+      ['src/lib/chat-renderers.js', "import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';", 'its import'],   // stale-pins: kept (chat-renderers.js's own import — the text the editors' imports no longer hold)
       ['src/lib/chat-renderers.js', "{ host: b.host || undefined, attended: true, from: this._sourceWinId()", 'an artifact card\'s open with no chat door (the card pressed)'],
       ['src/lib/chat-renderers.js', "const open = () => rel ? this._openRelTarget(link, rel, { pressed: true }) : this._openLinkTarget(link, url, fp, { pressed: true });", 'a chat path link pressed (Ctrl+click, the touch menu\'s Open)'],
       ['src/lib/chat-renderers.js', "action: () => rel ? this._openRelTarget(link, rel, { pressed: true }) : this._openLinkTarget(link, url, fp, { pressed: true }) },", 'a chat path link\'s context menu Open'],
@@ -743,7 +743,7 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
   // the document window's and the pane editor's saves: the same law, read from their source — the FULL words (where the text IS and what
   // to do); the pane keeps them (no reset) and never signals the CLI over a refused save
   const FULL = "t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(";
-  ok(dw.includes("} catch (e) { say(" + FULL + "path).split('/').pop() || path, why: e.message })); }") && /throw new Error\(data\.error \? fsErrorText\(data\) : `HTTP \$\{res\.status\}`\);/.test(dw)
+  ok(dw.includes("say(e && e.name === 'AbortError' ? t('{name}: no reply — it may still have been saved', { name: String(path).split('/').pop() || path }) : " + FULL + "path).split('/').pop() || path, why: e.message })); }") && /throw new Error\(data\.error \? fsErrorText\(data\) : `HTTP \$\{res\.status\}`\);/.test(dw)
       && !/saveBtn\.textContent = '✕/.test(ee) /* stale-pins: kept (a deliberate absence: the button keeps its label) */ && ee.includes("say(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name, why }), 'var(--red)');")   // r2198: the pane's words on its path line, its button keeps its label
       && ee.indexOf("if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);") > 0 && ee.indexOf("if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);") < ee.indexOf("const sig = await fetch('/api/editor/signal'") && !/setTimeout\(\(\) => \{ saveBtn\.textContent/.test(ee),   // stale-pins: kept (the release's 4 s reset — a deliberate absence check)
     'the document window\'s and the pane editor\'s saves: a refusal says the file, where the text is and what to do (the window stays; the pane keeps its words — no reset — and does not signal the CLI)');
@@ -791,7 +791,7 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
       const wm = { requestClose: (id, op) => closes.push([id, op && op.discardAsked]) };
       let fn;
       if (kind === 'code') fn = new Function('t', 'showConfirmDialog', 'prevAsk', `return function (o) {\n${body}\n};`)(tt, ask, undefined).bind({ modified: dirty, filePath: '/scratch-b23e5/dead/notes.txt', winInfo: { id: 'w1' }, app: { wm } });
-      else if (kind === 'pane') fn = new Function('t', 'showConfirmDialog', 'prevAsk', 'unsavedPane', 'app', 'targetWinInfo', `return function (o) {\n${body}\n};`)(tt, ask, undefined, () => (dirty ? { name: 'notes.txt' } : null), { wm }, { id: 'w1' });
+      else if (kind === 'pane') fn = new Function('t', 'showConfirmDialog', 'prevAsk', 'unsavedPane', 'busyPane', 'app', 'targetWinInfo', `return function (o) {\n${body}\n};`)(tt, ask, undefined, () => (dirty ? { name: 'notes.txt' } : null), () => null, { wm }, { id: 'w1' });   // r2221 LAW C: no save out here (①p drives it)
       else fn = new Function('t', 'showConfirmDialog', 'winInfo', 'name', 'app', `return function (o) {\n${body}\n};`)(tt, ask, { id: 'w1', _editorDirty: () => dirty }, 'notes.md', { wm });
       const go = fn(o); await sleep(0);
       out.push({ what, go, asked: asked.length ? asked[0] : '', closed: closes.length ? closes[0][1] : null, safe: safe.every(Boolean) });
@@ -810,7 +810,7 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
   const inst = (ee.match(/\n(      const panes = targetWinInfo\._editorPanes[\s\S]*?\n      \}\n)/) || [])[1];
   const twoPanes = (block) => {
     const asked = [], win = { id: 'w1' }, wm = { requestClose: () => {} };
-    const install = new Function('targetWinInfo', 'editorView', 'marked', 'filePath', 'showConfirmDialog', 't', 'app', block);   // r2198 law 2: each pane's own mark (`marked`, set by its keystrokes)
+    const install = new Function('targetWinInfo', 'editorView', 'marked', 'filePath', 'showConfirmDialog', 't', 'app', 'saveOut', 'pathSpan', 'stillSavingWords', block);   // r2221 LAW C: no save out here (①p drives it)   // r2198 law 2: each pane's own mark (`marked`, set by its keystrokes)
     const view = (text) => ({ dom: { isConnected: true }, state: { doc: { toString: () => text } } });
     const A = view('typed in A'), B = view('B as loaded'), C = view('typed in C');
     install(win, A, true, '/scratch-b23e5/a.md', (q) => { asked.push(q.message); return Promise.resolve(false); }, tt, { wm });
@@ -846,7 +846,7 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
   ok(!!cc && cc.join() === 'sig-B' && !!ccR && ccR.join() === '' && !!ccR2 && ccR2.join() === 'sig-A',
     `B-23e5's LEFT (1): the CLI's close removes ITS pane even after an older pane's save cleared the window's state (${cc && cc.join()}); REDs (lifted): the window matched by its state finds none (${ccR && (ccR.join() || 'none')}), the first pane picked removes the left-behind one (${ccR2 && ccR2.join()})`, { cc, ccR, ccR2 });
   ok(!!tpR && tpR.r2 === false, 'RED CONTROL (a removed pane still counted, in a lifted copy): the window asks forever about text that is gone', tpR);
-  const redG = cg ? await drive('code', cg.replace('(o && o.discardAsked)', '(o && (o.discardAsked || o.asked))')) : null;
+  const redG = cg ? await drive('code', cg.replace('if (!this.modified || (o && o.discardAsked))', 'if (!this.modified || (o && (o.discardAsked || o.asked)))')) : null;
   const redGd = dg ? await drive('doc', dg.replace('(o && o.discardAsked)', '(o && (o.discardAsked || o.asked))')) : null, redGp = pg ? await drive('pane', pg.replace('!(o && o.discardAsked)', '!(o && (o.discardAsked || o.asked))')) : null;   // stale-pins: kept (the planted REDs)
   ok(!!redG && redG.find((r) => r.what.includes('group')).go === true && !!redGd && redGd.find((r) => r.what.includes('group')).go === true && !!redGp && redGp.find((r) => r.what.includes('group')).go === true,
     'RED CONTROLS (the group\'s «asked» taken as the person\'s Discard, in lifted copies of each of the three guards): an unsaved window closes at a group\'s close-all unasked — a silent loss', { redG, redGd, redGp });
@@ -1164,207 +1164,306 @@ console.log('①n r1442 (a): the helper-opened presses, driven lifted from sourc
   ok(!!art && !!art.pressed && !!art.auto && !!art.plain && art.pressed.attended && !art.auto.attended && art.auto.quiet && !art.plain.attended, `THE CHAT'S ARTIFACT DOOR: a card or a chip's row pressed opens marked (${art && art.pressed.attended}); the AUTO open (quiet) never (${art && art.auto.attended}), nor a call that is no press (${art && art.plain.attended})`, art);
 }
 
-console.log('①p r2006 / r2198 (the save\'s laws): one save out at a time; the mark cleared only by a matching «saved»; every reply said, 45 s the only bound; the Ctrl+G pane\'s three conditions; a refused load opens no pane; the viewers\' refused Reload');
+console.log('①p r2006 / r2198 / r2221 / r2222 (the save\'s laws): A one write of a file at a time at the hub; B no pane with typing removed unasked; C a save out answers every press; the reply names its text; the typed load; the viewers\' Reload');
 {
   const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-  const ce = rd('src/lib/code-editor.js'), ee = rd('src/lib/external-editor.js'), fv = rd('src/lib/file-viewer.js');
+  const ce = rd('src/lib/code-editor.js'), ee = rd('src/lib/external-editor.js'), fv = rd('src/lib/file-viewer.js'), ops = rd('src/lib/file-explorer-ops.js'), fwSrc = rd('src/server/file-writes.js');
+  const fr = rd('src/routes/files.js'), edr = rd('src/routes/editor.js'), sfsSrc = rd('src/safe-fs.js'), DOORS_SRC = rd('src/lib/refusal-doors.js');
   const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
   const H = { 'X-VibeSpace-Attended': '1' };   // stale-pins: kept (the constant's value, handed to lifted bodies)
-  const TRYING = { error: 'this folder or file is still being tried — wait for the answer to the first press', code: 'storage_path_trying' };
-  const LANDED = { ok: true, status: 200, json: async () => ({ ok: true }) }, REFUSED = { ok: false, status: 503, json: async () => TRYING };
-  const FAILED = { ok: false, status: 500, json: async () => ({ error: 'EIO: i/o error' }) };
   const tick = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r)); };
   const stuck = (p) => Promise.race([p, sleep(300).then(() => 'stuck')]);
+  const cut = (body, a, b) => (body && body.split(a).length === 2 ? body.replace(a, b) : null);
+  const FW = createRequire(import.meta.url)(path.join(REPO, 'src/server/file-writes.js'));
+  // the page's own digest and «names the text» test, LIFTED from src/lib/file-explorer-ops.js (an ES module that loads the page's i18n)
+  const TD = (ops.match(/\nexport function textDigest\(text\) \{\n([\s\S]*?)\n\}\n/) || [])[1];
+  const pageDigest = TD ? new Function('text', TD) : null;
+  const NT = (ops.match(/\nexport const namesText = (\(data, text\) => [^\n]*);\n/) || [])[1];
+  const namesText = NT && pageDigest ? new Function('textDigest', `return ${NT};`)(pageDigest) : null;
+  const SSW = (ops.match(/\nexport const stillSavingWords = (\(name\) => [^\n]*);\n/) || [])[1];
+  const stillSavingWords = SSW ? new Function('t', `return ${SSW};`)(tt) : null;
+  const STILL = 'notes.md: still saving…', NOREPLY = 'notes.md: no reply — it may still have been saved';
   const ANOTHER = 'another press on this file or its folder is still being tried';
   const STILL_HERE = '. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.';
   const TYPED_ON = 'notes.md is saved as it was when you pressed save — what you typed after is not saved yet: save again';
-  const END = 45000;
-  const fire = (timers, ms) => { for (const [f, m] of timers.splice(0)) if (m === ms) f(); };
-  const aborted = () => Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' });
-  // a stand-in hub: each write takes the next answer — 'land', 'refuse' (another press holds the path), 'fail', 'never' (no reply: only
-  // the page's end stops it), or 'hold' / 'hold-refuse' / 'hold-fail' (out until the leg lets it answer); it counts writes OUT AT ONCE
+  const fsErr = (d) => d && d.error;   // the real one's branches are pinned below
+  // (0) THE DIGEST — the hub's (src/server/file-writes.js digestOf) and the page's agree on every text, the long and the astral too
+  const samples = ['', 'a', 'the person\'s text', '中文 ✓ 🙂 — «Ω»', 'x'.repeat(50000) + '\n\u{1F600}'];
+  const same = !!pageDigest && samples.every((x) => pageDigest(x) === FW.digestOf(x));
+  const TDR = TD && TD.includes('0xdeadbeef') ? new Function('text', TD.replace('0xdeadbeef', '0xdeadbeee')) : null;   // stale-pins: kept (RED: another seed)
+  ok(same && !!namesText && namesText({ saved: FW.savedOf('héllo') }, 'héllo') && !namesText({ saved: FW.savedOf('héllo') }, 'hello') && !namesText({}, '') && !!TDR && TDR('a') !== FW.digestOf('a'),
+    'THE REPLY NAMES ITS TEXT (r2221 item 6): the hub\'s digest and the page\'s agree on every sample (empty, CJK, astral, 50 000 chars); a reply naming another text, or none, is no «saved»; RED (another seed on the page): the two differ', { same });
+  // (1) LAW A (final, r2299) — THE HUB's ONE QUEUE A FILE (the real module): the first write held, the second does not start; the first
+  // ends — landed, or UNKNOWN (A2: an unknown end releases the file too) — and only then the second lands; a third lands after it.
+  // RED (no queue, a copy): the second runs at once and the older text lands over the newer
+  const queueRun = async (M, firstEnds = 'land') => {
+    const disk = { text: 'the text on disk' }, said = (p) => p.then((v) => `saved ${v}`, (e) => `${M.outcomeOf(e)}`);
+    let release = null; const held = new Promise((r) => { release = r; }); const key = `scratch-b23e5\n/scratch-b23e5/notes-${Math.random()}.md`;
+    const w1 = said(M.orderedWrite(key, async () => { await held; if (firstEnds === 'unknown') throw Object.assign(new Error('storage worker restarted'), { mayHaveRun: true }); disk.text = 'A (older)'; return 'A'; })); await tick();
+    const w2 = said(M.orderedWrite(key, async () => { disk.text = 'B (newer)'; return 'B'; })); await tick();
+    const beforeFirst = disk.text;
+    release(); const w1a = await stuck(w1), w2a = await stuck(w2), afterBoth = disk.text;
+    const w3 = await stuck(said(M.orderedWrite(key, async () => { disk.text = 'C (third)'; return 'C'; })));
+    return { beforeFirst, w1a, w2a, afterBoth, w3, end: disk.text };
+  };
+  const QLINE = '  const answer = prev.then(() => run());';
+  const noQueue = fwSrc.split(QLINE).length === 2 ? mutantCopies('safe-fs-path-memory-fw', REPO).load('src/server/file-writes.js', anchored(fwSrc, QLINE, '  const answer = Promise.resolve().then(() => run());', 'no-queue'), 'no-queue') : null;
+  // A1 / A5 on the real pool: a call that ran out its deadline WHILE QUEUED never started; the one the worker was running may have run
+  const poolMarks = async (Mod, tag) => {
+    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-marks-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText });
+    try {
+      await untilLive(pool, 1);
+      const pa = pool.call('__sleep', { ms: 700 }, { timeoutMs: 5000 }).then(() => null, (e) => e);
+      const pb = pool.call('__sleep', { ms: 1 }, { timeoutMs: 150 }).then(() => null, (e) => e);
+      const [a1, b1] = await Promise.all([pa, pb]);
+      return { a: a1 && { msg: String(a1.message).slice(0, 40), mayHaveRun: !!a1.mayHaveRun, out: FW.outcomeOf(a1) }, b: b1 && { msg: String(b1.message).slice(0, 40), neverStarted: !!b1.neverStarted, out: FW.outcomeOf(b1) } };
+    } finally { pool.close(); }
+  };
+  const MARKLINE = '      if (running === undefined ? oldest : call === running) e.mayHaveRun = true; else e.neverStarted = true;';
+  const unmarked = sfsSrc.split(MARKLINE).length === 2 ? mutantCopies('safe-fs-path-memory-marks', REPO).load('src/safe-fs.js', anchored(sfsSrc, MARKLINE, '', 'marks-cut'), 'marks-cut') : null;
+  const [qNow, qUnk, qR, pmNow, pmR] = await Promise.all([queueRun(FW), queueRun(FW, 'unknown'), noQueue ? queueRun(noQueue) : null, poolMarks(SF, 'now'), unmarked ? poolMarks(unmarked, 'red') : null]);
+  const ans = (e) => { const a = FW.answerOf(e, 'this machine'); return a ? `${a.status} ${a.body.code}` : 'failed: the road\'s words'; };
+  const answers = { never: ans({ neverStarted: true }), sibling: ans({ mayHaveRun: true }), deadline: ans({ deadline: true }), device: ans({ writeUnknown: true }), storage: ans(new Error('EACCES: permission denied')) };
+  console.log('    law A: ' + JSON.stringify({ qNow, qUnk, qR, pmNow, pmR, answers }));
+  ok(qNow.beforeFirst === 'the text on disk' && qNow.w1a === 'saved A' && qNow.w2a === 'saved B' && qNow.afterBoth === 'B (newer)' && qNow.w3 === 'saved C' && qNow.end === 'C (third)'
+      && qUnk.w1a === 'unknown' && qUnk.w2a === 'saved B' && qUnk.afterBoth === 'B (newer)' && !!qR && qR.w2a === 'saved B' && qR.afterBoth === 'A (older)',
+    `LAW A (the hub's queue, src/server/file-writes.js): a second write of one file does not start while the first is out; the first lands, then the second (the file ends «${qNow.afterBoth}»), a third after; an UNKNOWN end releases the file too (A2: «${qUnk.w1a}» then «${qUnk.w2a}»); RED (no queue, a copy): the newer lands, then the OLDER over it («${qR && qR.afterBoth}»)`, { qNow, qUnk, qR });
+  ok(!!pmNow.a && pmNow.a.mayHaveRun && pmNow.a.out === 'unknown' && !!pmNow.b && pmNow.b.neverStarted && pmNow.b.out === 'never' && !!pmR && pmR.a && pmR.a.out === 'failed'
+      && answers.never === '503 write_never_started' && answers.sibling === '503 write_unknown' && answers.deadline === '503 write_unknown' && answers.device === '503 write_unknown' && answers.storage === 'failed: the road\'s words'
+      && fr.includes("FW.orderedWrite(`${R.host}\\n${p}`, () => R.fs.write(R.host, p, Buffer.from(content)))") && fr.includes("FW.orderedWrite(`\\n${p}`, () => sfs(req).call('writeFile', { path: p, content }))")
+      && (fr.match(/res\.json\(\{ success: true, saved: FW\.savedOf\(content\) \}\)/g) || []).length === 2 && (fr.match(/FW\.answerOf\(/g) || []).length === 2,
+    `LAW A1 / A5 (the real pool, the module's answers): a call that ran out its deadline while QUEUED never started («${pmNow.b && pmNow.b.out}» ⇒ «not saved: it never started»); the one its worker was running may have run («${pmNow.a && pmNow.a.out}» ⇒ «may have been saved»); a sibling's restart, a deadline, a device timer are UNKNOWN, a storage's own error FAILED; RED (the marks cut, a copy): the running write said «failed» — «not saved» over a write that may have landed`, { pmNow, pmR, answers });
+  // A4 + ★7 on a paired machine — remote-fs's write and its «not there», LIFTED: a sent device write the hub gave up on never takes the ssh
+  // road; the file's OWN stat says «not there», never a folder listing
+  const rfsSrc = rd('src/remote-fs.js');
+  const NS = (rfsSrc.match(/\nconst writeNotSent = ([^\n]*);\n/) || [])[1], WM = (rfsSrc.match(/\nconst writeMarked = ([^\n]*);\n/) || [])[1];
+  const writeNotSent = NS ? new Function(`return ${NS};`)() : null, writeMarked = WM && writeNotSent ? new Function('writeNotSent', `return ${WM};`)(writeNotSent) : null;
+  const WRITE = (rfsSrc.match(/\n  async write\(id, filePath, contentBuffer\) \{\n([\s\S]*?)\n  \}\n/) || [])[1];
+  const devWrite = async (body, err) => { const roads = []; const self = { _win: async () => null, _dev: async () => ({ fsWrite: async () => { roads.push('device'); throw err; } }), _devAbs: async () => '/scratch-b23e5/dead/notes.md', _actBy: 'human:scratch', hosts: { get: () => ({ transport: 'ssh' }) }, _sshWrite: async () => { roads.push('ssh'); return { success: true }; } };
+    const out = await new Function('writeNotSent', 'writeMarked', `return async function (id, filePath, contentBuffer) {\n${body}\n};`)(writeNotSent, writeMarked).call(self, 'm1', '/scratch-b23e5/dead/notes.md', Buffer.from('x')).then(() => 'answered', (e) => FW.outcomeOf(e));
+    return { roads: roads.join('+'), out }; };
+  const A4 = '        if (abs !== null && !writeNotSent(e)) throw writeMarked(e);';
+  const [dTimer, dLost, dNotSent, dOwn, dTimerR] = await Promise.all([
+    WRITE ? devWrite(WRITE, new Error('fs-op timeout')) : null, WRITE ? devWrite(WRITE, new Error('device link lost')) : null,
+    WRITE ? devWrite(WRITE, Object.assign(new Error('not connected'), { stage: 'connect' })) : null, WRITE ? devWrite(WRITE, new Error('EACCES: permission denied, open \'/scratch-b23e5/dead/notes.md\'')) : null,
+    WRITE && WRITE.split(A4).length === 2 ? devWrite(WRITE.replace(A4 + '\n', ''), new Error('fs-op timeout')) : null,   // stale-pins: kept (RED: the release's fallback after a sent write)
+  ]);
+  const NT0 = (rfsSrc.match(/\n  async _notThere\(id, filePath\) \{\n([\s\S]*?)\n  \}\n/) || [])[1];
+  const notThere = async (body, statErr, listing) => new Function('shq', `return async function (id, filePath) {\n${body}\n};`)((x) => `'${x}'`).call({ _win: async () => null, _dev: async () => ({ fsStat: async () => { if (statErr) throw statErr; return { stat: { size: 3 } }; }, fsList: async () => ({ entries: listing || [] }) }), _devAbs: async () => '/scratch-b23e5/tmp/prompt.md', _run: async () => Buffer.from('there') }, 'm1', '/scratch-b23e5/tmp/prompt.md');
+  const LISTING = "      const abs = await this._devAbs(id, dm, filePath); const l = await dm.fsList(abs.slice(0, abs.lastIndexOf('/'))); return Array.isArray(l && l.entries) && !l.entries.some((x) => x && x.name === abs.slice(abs.lastIndexOf('/') + 1));";   // 767bde791's listing, planted
+  const STATLINE = (NT0 || '').split('\n').find((l) => l.startsWith('      try { await dm.fsStat(')) || '';
+  const capped = Array.from({ length: 5000 }, (_, i) => ({ name: `f-${i}` }));
+  const [ntGone, ntThere, ntHiccup, ntR] = await Promise.all([NT0 ? notThere(NT0, new Error('ENOENT: no such file or directory, stat \'/scratch-b23e5/tmp/prompt.md\'')) : null, NT0 ? notThere(NT0, null, capped) : null,
+    NT0 ? notThere(NT0, new Error('fs-op timeout')) : null, NT0 && STATLINE ? notThere(NT0.replace(STATLINE, LISTING), null, capped) : null]);   // stale-pins: kept (RED: 767bde791's capped listing)
+  console.log('    a paired machine: ' + JSON.stringify({ dTimer, dLost, dNotSent, dOwn, dTimerR, ntGone, ntThere, ntHiccup, ntR }));
+  ok(!!dTimer && dTimer.roads === 'device' && dTimer.out === 'unknown' && !!dLost && dLost.roads === 'device' && dLost.out === 'unknown' && !!dNotSent && dNotSent.roads === 'device+ssh' && dNotSent.out === 'answered'
+      && !!dOwn && dOwn.roads === 'device' && dOwn.out === 'failed' && !!dTimerR && dTimerR.roads === 'device+ssh'
+      && ntGone === true && ntThere === false && ntHiccup === false && ntR === true
+      && rfsSrc.includes("reject(said || Object.assign(new Error(err.trim() || `write failed (${code})`), code === 255 ? { writeUnknown: true } : {}));"),
+    `A4 + ★7 (a paired machine, lifted): a device write the hub's timer gave up on, or whose link broke, is UNKNOWN and takes NO second road; only a write refused before sending goes the ssh road; the machine's own error is FAILED; «not there» comes from the file's OWN stat (a hiccup is no verdict); REDs: the release's fallback (an ssh write after a sent one); 767bde791's capped listing («not there» for a file that is there)`, { dTimer, dTimerR, ntGone, ntThere, ntR });
+  ok(edr.includes("boundTimer = setTimeout(() => answer(504, { error: 'not told yet — it may still arrive', code: 'telling_out' }), require('../server/file-writes').BOUND_MS);") && edr.includes("    answer(200, { success: true });") && FW.BOUND_MS === 30000
+      && /if \(d && d\.code === 'write_unknown'\) return t\('the write did not reply — it may have been saved'\);/.test(ops) && /if \(d && d\.code === 'write_never_started'\) return t\('it never started'\);/.test(ops) && /if \(d && d\.code === 'file_not_there'\) return t\('there is no such file yet'\);/.test(ops),
+    'the telling\'s ANSWER is bounded at the hub\'s 30 s («not told yet — it may still arrive», never stopped); the page words UNKNOWN, «never started» and «not there» in the reader\'s words');
+  // (2) THE CODE EDITOR — its save LIFTED and driven over a stand-in hub whose writes NAME their text (law 2, item 6)
+  const named = (content) => ({ ok: true, status: 200, json: async () => ({ success: true, saved: FW.savedOf(content) }) });
   const hub = () => {
     const q = [], gates = [], writes = []; let open = 0, overlap = 0;
     const write = (content, signal) => new Promise((resolve, reject) => {
       writes.push(content); open++; if (open > 1) overlap++;
       let settled = false; const done = (v, err) => { if (settled) return; settled = true; open--; if (err) reject(v); else resolve(v); };
-      if (signal) signal.addEventListener('abort', () => done(aborted(), true), { once: true });
+      if (signal) signal.addEventListener('abort', () => done(Object.assign(new Error('aborted'), { name: 'AbortError' }), true), { once: true });
       const a = q.shift() || 'land';
+      const answer = () => done(a.endsWith('refuse') ? { ok: false, status: 503, json: async () => ({ error: 'still tried', code: 'storage_path_trying' }) }
+        : a.endsWith('unknown') ? { ok: false, status: 503, json: async () => ({ error: 'the write to this machine did not answer — it may have been saved', code: 'write_unknown', params: { machine: 'this machine' } }) }
+        : a.endsWith('unnamed') ? { ok: true, status: 200, json: async () => { throw new Error('the body could not be read'); } }
+        : a.endsWith('fail') ? { ok: false, status: 500, json: async () => ({ error: 'EIO: i/o error' }) } : named(content));
       if (a === 'never') return;
-      const answer = () => done(/refuse/.test(a) ? REFUSED : /fail/.test(a) ? FAILED : LANDED);
       if (a.startsWith('hold')) gates.push(answer); else answer();
     });
     return { q, writes, write, release: () => { const g = gates.shift(); if (g) g(); }, overlap: () => overlap };
   };
-  const cut = (body, a, b) => (body && body.split(a).length === 2 ? body.replace(a, b) : null);
-  // (1) THE CODE EDITOR's SAVE, LIFTED and driven (its typing is the editor's update listener: the text changes, the mark goes on)
   const saveBody = (ce.match(/\n  async save\(\) \{\n([\s\S]*?)\n  \}\n\n  \/\/ lane artifacts-model/) || [])[1];
   const edWorld = (body, { modified = true } = {}) => {
-    const h = hub(), timers = [], toasts = [], said = []; let doc = 'the person\'s text';
-    const ind = { style: {}, title: '', _t: '' }; Object.defineProperty(ind, 'textContent', { get() { return this._t; }, set(v) { this._t = v; said.push(v); } });
-    const ed = { editorView: { state: { doc: { toString: () => doc } } }, saveIndicator: ind, filePath: '/scratch-b23e5/dead/notes.md', _host: '', _diskChip: { style: {} }, _noteArtifactSave() {}, _baselineMtime() {}, modified, _onDisk: 'the person\'s text' };
-    const save = new Function('t', 'fsErrorText', 'ATTENDED_HEADERS', 'fetch', 'setTimeout', 'showToast', `return async function save() {\n${body}\n};`)(tt, (d) => d.error, H, (url, init) => h.write(JSON.parse(init.body).content, init.signal), (f, ms) => { timers.push([f, ms]); return 0; }, (m, o) => toasts.push([m, o && o.type]));
-    return { h, ed, timers, toasts, said, press: () => save.call(ed), type: (more) => { doc += more; ed.modified = true; ind.textContent = '● Unsaved'; }, words: () => ind.textContent };
+    const h = hub(), timers = [], toasts = []; let doc = 'the person\'s text';
+    const ed = { editorView: { state: { doc: { toString: () => doc } } }, saveIndicator: { textContent: '', style: {}, title: '' }, filePath: '/scratch-b23e5/dead/notes.md', _host: '', _diskChip: { style: {} }, _noteArtifactSave() {}, _baselineMtime() {}, modified, _onDisk: 'the person\'s text', _unknownLine: { style: { display: 'none' } } };
+    const save = new Function('t', 'fsErrorText', 'ATTENDED_HEADERS', 'fetch', 'setTimeout', 'showToast', 'namesText', 'stillSavingWords', `return async function save() {\n${body}\n};`)(tt, fsErr, H, (url, init) => h.write(JSON.parse(init.body).content, init.signal), (f, ms) => { timers.push([f, ms]); return 0; }, (m, o) => toasts.push([m, o && o.type]), namesText, stillSavingWords);
+    return { h, ed, timers, toasts, press: () => save.call(ed), type: (more) => { doc += more; ed.modified = true; }, words: () => ed.saveIndicator.textContent };
   };
-  const secondPress = async (body) => {
-    const w = edWorld(body); w.h.q.push('hold');
-    const p1 = w.press(); await tick(); const o2 = await stuck(w.press()); const during = w.words(), sentDuring = w.h.writes.length;
-    w.h.release(); const o1 = await p1; await tick(); const after = w.words();
-    fire(w.timers, 2000);
-    return { o1, o2, during, sentDuring, writes: w.h.writes.length, overlap: w.h.overlap(), after, later: w.words() };
-  };
-  const refusedOverTyping = async (body) => {
-    const w = edWorld(body); w.h.q.push('hold-refuse');
-    const p = w.press(); await tick(); w.type(' — and a word typed while it was out'); w.h.release(); const out = await p;
-    const [toast = '', type] = w.toasts[0] || [];
-    return { out, modified: w.ed.modified, words: w.words(), toast, type, title: w.ed.saveIndicator.title };
-  };
-  const ended = async (body) => {   // a request with no reply: the page ENDS it at 45 s — said, and presses work again
-    const w = edWorld(body); w.h.q.push('never');
-    const p1 = w.press(); await tick(); fire(w.timers, END); const o1 = await stuck(p1); const words1 = w.words(), mark1 = w.ed.modified;
-    const o2 = await stuck(w.press()); return { o1, words1, mark1, o2, writes: w.h.writes.length, words2: w.words() };
-  };
-  const typedOn = async (body) => { const w = edWorld(body); w.h.q.push('hold'); const p = w.press(); await tick(); w.type(' — more'); w.h.release(); const out = await p; return { out, words: w.words(), modified: w.ed.modified }; };
-  const onePress = async (body, o, answer = 'refuse') => { const w = edWorld(body, o); w.h.q.push(answer); const out = await w.press(); const [toast = '', type] = w.toasts[0] || []; return { out, text: w.words(), title: w.ed.saveIndicator.title, toast, type, modified: w.ed.modified }; };
-  const { saveCloseDoors } = await import(pathToFileURL(path.join(REPO, 'src/lib/refusal-doors.js')).href);
-  const doorsWhileOut = async (body) => {   // Mod-s out, then the window's ✕ (save-and-close): it asks by the mark, its words saying a save is out
-    const w = edWorld(body); w.h.q.push('hold');
-    let asked = 0, reason = '', closed = 0;
-    const doors = saveCloseDoors({ save: () => w.press(), text: () => w.ed.editorView.state.doc.toString(), signal: () => {}, close: () => { closed++; }, ready: () => true, confirmDiscard: async () => { asked++; reason = w.ed._lastSaveError; return false; } });
-    const p1 = w.press(); await tick(); doors.onCloseRequest(); await tick(); await sleep(20);
-    const writesThen = w.h.writes.length; w.h.release(); await p1; await tick();
-    return { asked, reason, closed, writesThen, overlap: w.h.overlap() };
-  };
-  const GUARD = (ce.match(/this\.winInfo\.onCloseRequest = \(o\) => \{\n([\s\S]*?)\n    \}; \}/) || [])[1];
-  const guardAsk = (body, saveOut) => { const asked = []; const fn = new Function('t', 'showConfirmDialog', 'prevAsk', `return function (o) {\n${body}\n};`)(tt, (q) => { asked.push(q.message); return Promise.resolve(false); }, undefined).bind({ modified: true, _saveOut: saveOut, filePath: '/scratch-b23e5/dead/notes.md', winInfo: { id: 'w1' }, app: { wm: { requestClose() {} } } }); fn({}); return asked[0] || ''; };
-  const OUTLINE = (saveBody || '').split('\n').find((l) => l.startsWith('    if (this._saveOut) {')) || '';
+  const fire = (timers, ms) => { for (const [f, m] of timers.splice(0)) if (m === ms) f(); };
+  const ceSecond = async (body) => { const w = edWorld(body); w.h.q.push('hold'); const p1 = w.press(); await tick(); const o2 = await stuck(w.press()); const during = w.words(), sent = w.h.writes.length; w.h.release(); await p1; return { o2, during, sent, writes: w.h.writes.length, overlap: w.h.overlap() }; };
+  const ceRefuseTyped = async (body) => { const w = edWorld(body); w.h.q.push('hold-refuse'); const p = w.press(); await tick(); w.type(' — a word typed while it was out'); w.h.release(); await p; return { words: w.words(), modified: w.ed.modified }; };
+  const ceUnnamed = async (body) => { const w = edWorld(body); w.h.q.push('unnamed'); await w.press(); return { words: w.words(), modified: w.ed.modified, toasts: w.toasts.length, standing: w.ed._unknownLine.style.display }; };
+  const ceEnded = async (body) => { const w = edWorld(body); w.h.q.push('never'); const p = w.press(); await tick(); fire(w.timers, 45000); const o = await stuck(p); const words1 = w.words(), mark1 = w.ed.modified; await stuck(w.press()); return { o, words1, mark1, writes: w.h.writes.length, words2: w.words() }; };
+  const ceUnknown = async (body) => { const w = edWorld(body); w.h.q.push('unknown'); const out = await w.press(); return { out, words: w.words(), modified: w.ed.modified, color: w.ed.saveIndicator.style.color, standing: w.ed._unknownLine.style.display, unknown: !!w.ed._saveUnknown }; };
+  const ceLanded = async (body) => { const w = edWorld(body); await w.press(); return { words: w.words(), modified: w.ed.modified }; };
+  const LAW1 = (saveBody || '').split('\n').find((l) => l.startsWith('    if (this._saveOut) {')) || '';
+  const NAMED = '      if (!namesText(data, content)) throw Object.assign(new Error(\'no reply\'), { noReply: true });';
   const OTHER = "      if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));";
-  const LINE311 = "      if (data && data.code === 'storage_path_trying') { this.saveIndicator.textContent = '… ' + t('{name}: the save before this one is still being tried — wait for its answer', { name }); return false; }";   // the release's (line 311's) claim
   const CAPTURED = "      if (data && data.code === 'storage_path_trying' && content === this._onDisk) { this.modified = false; this.saveIndicator.textContent = t('{name} has no unsaved changes', { name }); return true; }\n";   // 929f015a5's captured-box test, planted
   const ENDLINE = 'const ctl = new AbortController(), end = setTimeout(() => ctl.abort(), 45000);';
-  const SAYS_OUT = "this._saveOut ? t('{name} has unsaved changes and a save of it is still out — close it and discard what is not saved?', { name: String(this.filePath).split('/').pop() || this.filePath }) : ";
-  const [two, refT, end, typed, other, doorsNow, twoR, refTR, endR, otherR, doorsR] = await Promise.all([
-    saveBody ? secondPress(saveBody) : null, saveBody ? refusedOverTyping(saveBody) : null, saveBody ? ended(saveBody) : null, saveBody ? typedOn(saveBody) : null,
-    saveBody ? onePress(saveBody) : null, saveBody ? doorsWhileOut(saveBody) : null,
-    OUTLINE && cut(saveBody, OUTLINE + '\n', '') ? secondPress(cut(saveBody, OUTLINE + '\n', '')) : null,   // stale-pins: kept (RED: law 1's line cut — a second write races the first)
-    cut(saveBody, OTHER, CAPTURED + OTHER) ? refusedOverTyping(cut(saveBody, OTHER, CAPTURED + OTHER)) : null,   // stale-pins: kept (RED: 929f015a5's captured-box test planted)
-    cut(saveBody, ENDLINE, 'const ctl = new AbortController(), end = 0;') ? ended(cut(saveBody, ENDLINE, 'const ctl = new AbortController(), end = 0;')) : null,   // stale-pins: kept (RED: no end — the request hangs, presses dead)
-    cut(saveBody, OTHER, LINE311) ? onePress(cut(saveBody, OTHER, LINE311)) : null,   // stale-pins: kept (RED: line 311's sentence planted back)
-    OUTLINE && cut(saveBody, OUTLINE + '\n', '') ? doorsWhileOut(cut(saveBody, OUTLINE + '\n', '')) : null,   // stale-pins: kept (RED: the doors' press sends a second write)
+  const UNKNOWNLINE = "      if (data && data.code === 'write_unknown') throw Object.assign(new Error('unknown'), { noReply: true });   // r2299 A1/A3: the hub could not know — said as unknown\n";
+  const [c2, cRT, cUN, cEN, cEA, cLA, c2R, cRTR, cUNR, cENR, cEAR] = await Promise.all([
+    saveBody ? ceSecond(saveBody) : null, saveBody ? ceRefuseTyped(saveBody) : null, saveBody ? ceUnnamed(saveBody) : null, saveBody ? ceEnded(saveBody) : null, saveBody ? ceUnknown(saveBody) : null, saveBody ? ceLanded(saveBody) : null,
+    LAW1 && cut(saveBody, LAW1 + '\n', '') ? ceSecond(cut(saveBody, LAW1 + '\n', '')) : null,   // stale-pins: kept (RED: law 1's line cut)
+    cut(saveBody, OTHER, CAPTURED + OTHER) ? ceRefuseTyped(cut(saveBody, OTHER, CAPTURED + OTHER)) : null,   // stale-pins: kept (RED: 929f015a5's captured-box test planted)
+    cut(saveBody, NAMED + '   // r2221 item 6: «saved» names the text it saved; a body that does not is no reply', '') ? ceUnnamed(cut(saveBody, NAMED + '   // r2221 item 6: «saved» names the text it saved; a body that does not is no reply', '')) : null,   // stale-pins: kept (RED: an unnamed reply taken as saved)
+    cut(saveBody, ENDLINE, 'const ctl = new AbortController(), end = 0;') ? ceEnded(cut(saveBody, ENDLINE, 'const ctl = new AbortController(), end = 0;')) : null,   // stale-pins: kept (RED: no end)
+    cut(saveBody, UNKNOWNLINE, '') ? ceUnknown(cut(saveBody, UNKNOWNLINE, '')) : null,   // stale-pins: kept (RED: the hub's UNKNOWN said as «not saved»)
   ]);
-  const gNow = GUARD ? guardAsk(GUARD, true) : null, gIdle = GUARD ? guardAsk(GUARD, false) : null, gR = GUARD && cut(GUARD, SAYS_OUT, '') ? guardAsk(cut(GUARD, SAYS_OUT, ''), true) : null;   // stale-pins: kept (RED: the release's question while a save is out)
-  console.log('    the code editor: ' + JSON.stringify({ two, refT, end, typed, other, doorsNow, gNow, twoR, refTR, endR, otherR: otherR && otherR.text, doorsR, gR }));
-  ok(!!two && two.during === '… notes.md: still saving…' && two.sentDuring === 1 && two.o2 === false && two.o1 === true && two.writes === 1 && two.after === '✓ Saved' && two.later === ''
-      && !!twoR && twoR.overlap === 1 && twoR.writes === 2,
-    `LAW 1 (lifted): a press while a save is out SENDS NOTHING and says «${two && two.during}»; nothing is sent later by itself (${two && two.writes} write); the save's own answer is said («${two && two.after}», cleared after); RED (law 1's line cut): a second write races the first (${twoR && twoR.overlap} out at once)`, { two, twoR });
-  ok(!!refT && refT.modified === true && refT.out === false && refT.words === '✕ notes.md is not saved — ' + ANOTHER && refT.toast === 'notes.md is not saved — ' + ANOTHER + STILL_HERE && refT.type === 'error'
-      && !!refTR && refTR.modified === false,
-    `LAW 2 (lifted): a refusal — another press holding the path — KEEPS the mark over text typed while it was out (mark ${refT && refT.modified}) and says «${refT && refT.words}» with the toast; RED (929f015a5's captured-box test planted): the mark cleared over the typed word (${refTR && refTR.modified})`, { refT, refTR });
-  ok(!!end && end.o1 === false && end.words1 === '✕ notes.md is not saved — no reply' && end.mark1 === true && end.o2 === true && end.writes === 2 && end.words2 === '✓ Saved'
-      && !!endR && endR.o1 === 'stuck' && endR.writes === 1,
-    `LAW 3's BOUND (lifted): a request with no reply is ENDED at 45 s — «${end && end.words1}», the mark kept — and the next press is sent and answered («${end && end.words2}»); RED (no end): the request hangs and the next press sends nothing (${endR && endR.writes} write)`, { end, endR });
-  ok(!!typed && typed.out === false && typed.modified === true && typed.words === '● ' + TYPED_ON
-      && !!other && other.out === false && other.text === '✕ notes.md is not saved — ' + ANOTHER && other.title === '/scratch-b23e5/dead/notes.md is not saved — ' + ANOTHER && !!otherR && otherR.text === '… notes.md: the save before this one is still being tried — wait for its answer',
-    `LAW 3's WORDS (lifted): saved while the person typed on — «${typed && typed.words.slice(0, 60)}…», the mark on (law 4: the typing went on); refused by another press's hold — «${other && other.text}»; RED (line 311's sentence planted back): «${otherR && otherR.text}»`, { typed, other, otherR });
-  ok(!!doorsNow && doorsNow.asked === 1 && doorsNow.reason === 'a save of this file is still out' && doorsNow.writesThen === 1 && doorsNow.overlap === 0 && doorsNow.closed === 0
-      && gNow === 'notes.md has unsaved changes and a save of it is still out — close it and discard what is not saved?' && gIdle === 'notes.md has unsaved changes — they are only in this window. Close it and discard them?'
-      && !!doorsR && doorsR.overlap === 1 && gR === gIdle,
-    `LAW 6 (lifted, the tree's own doors): save-and-close while a save is out sends nothing and asks by the mark — «Your edits were not saved: ${doorsNow && doorsNow.reason}…»; the window's ✕ asks «${gNow}»; REDs: law 1's line cut (the doors' press races the first); the release's question while a save is out («…only in this window…»)`, { doorsNow, doorsR, gNow, gR });
-  // (2) THE Ctrl+G PANE's SAVE, LIFTED with its declarations (the mark, the save out, the hand-back) and its close guard's line
+  console.log('    the code editor: ' + JSON.stringify({ c2, cRT, cUN, cEN, cEA, cLA, c2R, cRTR, cUNR, cENR, cEAR }));
+  ok(!!c2 && c2.o2 === false && c2.during === STILL && c2.sent === 1 && c2.writes === 1 && c2.overlap === 0 && !!c2R && c2R.overlap === 1
+      && !!cRT && cRT.modified === true && cRT.words === '✕ notes.md is not saved — ' + ANOTHER && !!cRTR && cRTR.modified === false
+      && !!cEA && cEA.out === false && cEA.words === NOREPLY && cEA.color === 'var(--yellow)' && cEA.modified === true && cEA.standing === '' && cEA.unknown && !!cEAR && /^✕ notes\.md is not saved — /.test(cEAR.words) && !!cLA && cLA.words === '✓ Saved' && cLA.modified === false,
+    `LAWS 1–3 (the code editor, lifted): a press while its save is out sends nothing — «${c2 && c2.during}»; a refusal keeps the mark over a word typed meanwhile; the hub's UNKNOWN is said as unknown («${cEA && cEA.words}», its own colour, the mark kept) with the standing line (A3); a reply naming its text is «${cLA && cLA.words}»; REDs: law 1's line cut (two writes out); 929f015a5's captured-box test (the mark cleared over typing); the UNKNOWN line cut («not saved» over a save that may have landed)`, { c2, c2R, cRT, cRTR, cEA, cEAR, cLA });
+  ok(!!cUN && cUN.words === NOREPLY && cUN.modified === true && cUN.toasts === 0 && cUN.standing === '' && !!cUNR && cUNR.words === '✓ Saved' && cUNR.modified === false
+      && !!cEN && cEN.o === false && cEN.words1 === NOREPLY && cEN.mark1 === true && cEN.writes === 2 && cEN.words2 === '✓ Saved' && !!cENR && cENR.o === 'stuck' && cENR.writes === 1,
+    `ITEM 6 + THE PAGE's LAST GUARD (lifted): a 2xx whose body names no text is no reply — «${cUN && cUN.words}», the mark kept; a request with no reply is ended at 45 s, said the same, and the next press is sent; REDs: the reply test cut (an unread body taken as «✓ Saved», the mark cleared); no end (presses dead behind it)`, { cUN, cUNR, cEN, cENR });
+  // (3) LAW C — every other press a save still out answers first: the code editor's Reload, its ✕, the save-and-close doors (the standalone
+  // Ctrl+G window's close), the pane's ✕ — each sends nothing and says the one sentence (stillSavingWords); typing keeps the saving word
+  const RELOAD = (ce.match(/\n  async reloadFromDisk\(opts = \{\}\) \{\n([\s\S]*?)\n  \}\n/) || [])[1];
+  const reloadWhileOut = async (body) => { const calls = []; const ed = { _saveOut: true, _reloading: false, editorView: {}, modified: true, filePath: '/scratch-b23e5/dead/notes.md', saveIndicator: { textContent: '', style: {} } };
+    const fn = new Function('t', 'fetch', 'showConfirmDialog', 'stillSavingWords', 'fsErrorText', 'ATTENDED_HEADERS', 'EditorSelection', `return async function (opts = {}) {\n${body}\n};`)(tt, async (u) => { calls.push(u); return { json: async () => ({ content: 'x' }) }; }, async () => { calls.push('asked'); return true; }, stillSavingWords, fsErr, H, { cursor: () => ({}) });
+    await fn.call(ed, {}).catch(() => {}); return { calls: calls.length, words: ed.saveIndicator.textContent }; };
+  const RLAW = (RELOAD || '').split('\n').find((l) => l.startsWith('    if (this._saveOut) {')) || '';
+  const GUARD = (ce.match(/this\.winInfo\.onCloseRequest = \(o\) => \{\n([\s\S]*?)\n    \}; \}/) || [])[1];
+  const guardWhileOut = (body) => { const asked = []; const ed = { modified: true, _saveOut: true, filePath: '/scratch-b23e5/dead/notes.md', winInfo: { id: 'w1' }, app: { wm: { requestClose() {} } }, saveIndicator: { textContent: '', style: {} } };
+    const go = new Function('t', 'showConfirmDialog', 'prevAsk', 'stillSavingWords', `return function (o) {\n${body}\n};`)(tt, (q) => { asked.push(q.message); return Promise.resolve(false); }, undefined, stillSavingWords).call(ed, {}); return { go, asked: asked.length, words: ed.saveIndicator.textContent }; };
+  const GLAW = (GUARD || '').split('\n').find((l) => l.startsWith('      if (this._saveOut && !(o && o.discardAsked)) {')) || '';
+  const MC = mutantCopies('safe-fs-path-memory-doors', REPO);
+  const doorsWhileOut = async (D) => { let saves = 0, asked = 0, closed = 0, said = ''; const d = D.saveCloseDoors({ save: async () => { saves++; return false; }, busy: () => true, sayBusy: () => { said = STILL; }, text: () => 'x', signal() {}, close: () => { closed++; }, ready: () => true, confirmDiscard: async () => { asked++; return false; } });
+    const go = d.onCloseRequest(); await tick(); await sleep(10); return { go, saves, asked, closed, said }; };
+  const BUSY = (DOORS_SRC.split('\n').find((l) => l.startsWith("      if (typeof ed.busy === 'function' && ed.busy()) {")) || '') + '\n';
+  // ★14: a close while a save is out WAITS on that save's answer and tells the terminal when it landed (never a second save, never silence)
+  const closeWhileOut = async (D) => { let signals = 0, saves = 0; const d = D.saveCloseDoors({ save: async () => { saves++; return false; }, busy: () => true, sayBusy() {}, settled: () => Promise.resolve(true), text: () => 'x', signal: () => { signals++; }, close() {}, ready: () => true, confirmDiscard: async () => false }); await d.onClose(); return { signals, saves }; };
+  const ONCLOSE = (DOORS_SRC.split('\n').find((l) => l.startsWith("      if (!closing && typeof ed.busy === 'function' && ed.busy() && typeof ed.settled === 'function')")) || '') + '\n';
+  const [rlNow, rlR, gNow, gR, dNow, dR, cwNow, cwR] = await Promise.all([
+    RELOAD ? reloadWhileOut(RELOAD) : null, RLAW && cut(RELOAD, RLAW + '\n', '') ? reloadWhileOut(cut(RELOAD, RLAW + '\n', '')) : null,   // stale-pins: kept (RED: the Reload not answered by the save out)
+    GUARD ? guardWhileOut(GUARD) : null, GLAW && cut(GUARD, GLAW + '\n', '') ? guardWhileOut(cut(GUARD, GLAW + '\n', '')) : null,   // stale-pins: kept (RED: the ✕ answered by the mark)
+    import(pathToFileURL(path.join(REPO, 'src/lib/refusal-doors.js')).href).then(doorsWhileOut),
+    BUSY.trim() && DOORS_SRC.split(BUSY).length === 2 ? import(MC.write('src/lib/refusal-doors.js', anchored(DOORS_SRC, BUSY, '', 'doors-no-busy'), 'doors-no-busy', { esm: true })).then(doorsWhileOut) : null,   // stale-pins: kept (RED: the doors' busy line cut)
+    import(pathToFileURL(path.join(REPO, 'src/lib/refusal-doors.js')).href).then(closeWhileOut),
+    ONCLOSE.trim() && DOORS_SRC.split(ONCLOSE).length === 2 ? import(MC.write('src/lib/refusal-doors.js', anchored(DOORS_SRC, ONCLOSE, '', 'doors-close-no-wait'), 'doors-close-no-wait', { esm: true })).then(closeWhileOut) : null,   // stale-pins: kept (RED: the close does not wait — the terminal never told)
+  ]);
+  console.log('    law C, the code editor\'s presses: ' + JSON.stringify({ rlNow, rlR, gNow, gR, dNow, dR, cwNow, cwR }));
+  ok(!!rlNow && rlNow.calls === 0 && rlNow.words === STILL && !!rlR && rlR.calls > 0
+      && !!gNow && gNow.go === false && gNow.asked === 0 && gNow.words === STILL && !!gR && gR.asked === 1
+      && !!dNow && dNow.go === false && dNow.saves === 0 && dNow.asked === 0 && dNow.closed === 0 && dNow.said === STILL && !!dR && dR.saves === 1
+      && !!cwNow && cwNow.signals === 1 && cwNow.saves === 0 && !!cwR && cwR.signals === 0 && cwR.saves === 1
+      && ce.includes("self.saveIndicator.textContent = self._saveOut ? '● ' + t('Saving…') : '● ' + t('Unsaved');"),
+    `LAW C (lifted): while a save is out, the Reload, the code editor's ✕ and the save-and-close doors (the standalone Ctrl+G window's close) each send nothing, ask nothing and say «${STILL}»; typing keeps the saving word; a close while a save is out waits on it and tells the terminal when it landed (★14); REDs (each line cut): the Reload reads the file; the ✕ asks by the mark; the doors save again; the close does not wait (the terminal never told)`, { rlNow, rlR, gNow, gR, dNow, dR, cwNow, cwR });
+  // (4) THE Ctrl+G PANE — its save LIFTED with its declarations; closePane, the lock and the hub stand in
   const doSaveBody = (ee.match(/\n      const doSave = async \(\) => \{\n([\s\S]*?)\n      \};\n\n      saveBtn\.onclick = doSave;/) || [])[1];
-  const DECL = ee.split('\n').find((l) => l.startsWith('      let marked = false, saveOut = false, handing = false;')) || '';
-  const ADD = ee.split('\n').find((l) => l.startsWith('      panes.add({ view: editorView, ')) || '';
-  const paneWorld = (body, { add = ADD } = {}) => {
+  const DECL = ee.split('\n').find((l) => l.startsWith('      let marked = false, saveOut = false, handing = false, orphaned = false;')) || '';
+  const paneWorld = (body) => {
     const h = hub(), calls = [], timers = []; let doc = 'the person\'s text', locked = false, signalHook = null;
-    const editorView = { state: { doc: { toString: () => doc } }, dispatch: ({ effects }) => { locked = !!(effects && effects.lock === true); }, destroy: () => calls.push('destroy'), dom: { isConnected: true } };
-    const editorPane = { isConnected: true, remove: () => { editorPane.isConnected = false; editorView.dom.isConnected = false; calls.push('remove'); } };
-    const fetchStub = async (url, init) => { if (url === '/api/editor/signal') { calls.push('signal'); return (signalHook && (await signalHook(init))) || LANDED; } return h.write(JSON.parse(init.body).content, init.signal); };
-    const pathSpan = { textContent: '/scratch-b23e5/dead/notes.md', style: {} }, saveBtn = { textContent: 'Save & Close', style: {} }, panes = new Set();
-    const made = new Function('openClock', 'editorView', 'filePath', 'fetch', 'ATTENDED_HEADERS', 'host', 't', 'fsErrorText', 'signalPath', 'saveBtn', 'pathSpan', 'targetWinInfo', 'editorPane', 'contentEl', 'splitResizer', 'termContainer', 'termSession', 'lateFocus', 'content', 'lockComp', 'EditorState', 'panes', 'setTimeout',
-      `${DECL}\n${add}\nconst doSave = async () => {\n${body}\n};\nreturn { doSave, mark: () => { marked = true; } };`)(
-      () => 0, editorView, '/scratch-b23e5/dead/notes.md', fetchStub, H, '', tt, (d) => d.error, '/scratch-b23e5/sig', saveBtn, pathSpan, {}, editorPane, { querySelectorAll: () => [], style: {} }, { destroy() {} }, { style: {} }, null, () => {}, 'what the disk held',
-      { reconfigure: (x) => ({ lock: x }) }, { readOnly: { of: (v) => v } }, panes, (f, ms) => { timers.push([f, ms]); return 0; });
-    const said = () => ({ path: pathSpan.textContent, btn: saveBtn.textContent, red: saveBtn.style.background || '', signals: calls.filter((c) => c === 'signal').length, closed: calls.includes('remove'), writes: h.writes.length, overlap: h.overlap(), unsaved: [...panes][0].dirty(), box: doc, locked });
-    // typing is the pane's update listener: refused while the box is read-only, else the text changes and the mark goes on
-    return { h, timers, press: made.doSave, type: (more) => { if (!locked) { doc += more; made.mark(); } }, setBox: (text) => { if (!locked) { doc = text; made.mark(); } }, onSignal: (f) => { signalHook = f; }, said, path: () => pathSpan.textContent };
+    const editorView = { state: { doc: { toString: () => doc } }, dispatch: ({ effects }) => { locked = !!(effects && effects.lock === true); } };
+    const fetchStub = async (url, init) => { if (url === '/api/editor/signal') { calls.push('signal'); return (signalHook && (await signalHook(init))) || { ok: true, status: 200, json: async () => ({ success: true }) }; } return h.write(JSON.parse(init.body).content, init.signal); };
+    const pathSpan = { textContent: '/scratch-b23e5/dead/notes.md', style: {} }, unknownSpan = { style: { display: 'none' } };
+    const made = new Function('openClock', 'editorView', 'filePath', 'fetch', 'ATTENDED_HEADERS', 'host', 't', 'fsErrorText', 'signalPath', 'pathSpan', 'closePane', 'lockComp', 'EditorState', 'setTimeout', 'namesText', 'stillSavingWords', 'unknownSpan',
+      `${DECL}\nconst doSave = async () => {\n${body}\n};\nreturn { doSave, mark: () => { marked = true; }, orphan: () => { orphaned = true; }, marked: () => marked };`)(
+      () => 0, editorView, '/scratch-b23e5/dead/notes.md', fetchStub, H, '', tt, fsErr, '/scratch-b23e5/sig', pathSpan, () => calls.push('close'), { reconfigure: (x) => ({ lock: x }) }, { readOnly: { of: (v) => v } }, (f, ms) => { timers.push([f, ms]); return 0; }, namesText, stillSavingWords, unknownSpan);
+    const said = () => ({ path: pathSpan.textContent, signals: calls.filter((c) => c === 'signal').length, closed: calls.includes('close'), writes: h.writes.length, overlap: h.overlap(), unsaved: made.marked(), locked, standing: unknownSpan.style.display });
+    return { h, timers, made, press: made.doSave, type: (more) => { if (!locked) { doc += more; made.mark(); } }, onSignal: (f) => { signalHook = f; }, said, path: () => pathSpan.textContent };
   };
-  const pType = async (body, o) => { const w = paneWorld(body, o); w.type(' — typed'); return w; };   // the person typed: the mark on
-  const pAllThree = async (body) => { const w = await pType(body); await w.press(); return w.said(); };
-  const pNotSaved = async (body) => { const w = await pType(body); w.h.q.push('fail'); await w.press(); return w.said(); };
-  const pRefused = async (body) => { const w = await pType(body); w.h.q.push('refuse'); await w.press(); return w.said(); };
-  const pTypedDuring = async (body, o) => { const w = await pType(body, o); w.h.q.push('hold'); const p = w.press(); await tick(); w.type(' — and more, typed while the save was out'); w.h.release(); await p; return w; };
-  const pTold = async (body, hook) => { const w = await pType(body); w.onSignal(hook); const p = w.press(); await tick(); fire(w.timers, END); await stuck(p); return w.said(); };
-  const pSecond = async (body) => { const w = await pType(body); w.h.q.push('hold'); const p1 = w.press(); await tick(); await w.press(); const during = w.said(); w.h.release(); await p1; return { during, after: w.said() }; };
-  const pHandBack = async (body) => { const w = await pType(body); let atPress = '', typedThen = ''; w.onSignal(async () => { await w.press(); atPress = w.path(); w.type(' — typed while the terminal was told'); typedThen = w.said().box; }); await w.press(); return { atPress, typedThen, ...w.said() }; };
-  const pEnded = async (body) => { const w = await pType(body); w.h.q.push('never'); const p = w.press(); await tick(); fire(w.timers, END); const o = await stuck(p); const s1 = w.said(); await w.press(); return { o, s1, s2: w.said() }; };
-  const pFailThenLabel = async (body) => { const w = await pType(body); w.h.q.push('fail'); await w.press(); return w.said(); };
-  const NOTSAVED = "          if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);";
+  const pT = (body) => { const w = paneWorld(body); w.type(' — typed'); return w; };
+  const pAll = async (body) => { const w = pT(body); await w.press(); return w.said(); };
+  const pRef = async (body) => { const w = pT(body); w.h.q.push('refuse'); await w.press(); return w.said(); };
+  const pFail = async (body) => { const w = pT(body); w.h.q.push('fail'); await w.press(); return w.said(); };
+  const pDuring = async (body) => { const w = pT(body); w.h.q.push('hold'); const p = w.press(); await tick(); w.type(' — and more'); w.h.release(); await p; return w.said(); };
+  const pTold = async (body, hook) => { const w = pT(body); w.onSignal(hook); const p = w.press(); await tick(); fire(w.timers, 45000); await stuck(p); return w.said(); };
+  const pSecond = async (body) => { const w = pT(body); w.h.q.push('hold'); const p1 = w.press(); await tick(); await w.press(); const during = w.said(); w.h.release(); await p1; return { during, after: w.said() }; };
+  const pHand = async (body) => { const w = pT(body); let at = '', box = ''; w.onSignal(async () => { await w.press(); at = w.path(); w.type(' — typed while the terminal was told'); box = String(w.said().unsaved); return null; }); await w.press(); return { at, typedTook: box, ...w.said() }; };
+  const pUnnamed = async (body) => { const w = pT(body); w.h.q.push('unnamed'); await w.press(); return w.said(); };
+  const pOrphan = async (body) => { const w = pT(body); w.made.orphan(); await w.press(); return w.said(); };
+  const NOTSAVED = "          if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);   // B-3b03 follow-up: a refusal in the reader's language\n";
+  const PNAMED = (doSaveBody || '').split('\n').find((l) => l.startsWith('          if (!namesText(data, newContent)) throw')) || '';
   const KEEP = (doSaveBody || '').split('\n').find((l) => l.startsWith('          if (editorView.state.doc.toString() !== newContent) {')) || '';
   const SIGOK = (doSaveBody || '').split('\n').find((l) => l.startsWith('          if (!sig.ok) {')) || '';
   const POUT = (doSaveBody || '').split('\n').find((l) => l.startsWith('        if (saveOut) {')) || '';
   const LOCK = 'handing = true; editorView.dispatch({ effects: lockComp.reconfigure(EditorState.readOnly.of(true)) });';
-  const PEND = 'c.timer = setTimeout(() => c.abort(), 45000);';
-  const ADD_RELEASE = ADD.replace('dirty: () => editorView.dom.isConnected && marked });', 'dirty: () => editorView.dom.isConnected && editorView.state.doc.toString() !== content });');   // stale-pins: kept (line 262's guard, a text compare — a RED's planted line)
-  const BTN_RELEASE = "saveBtn.textContent = '✕ ' + t('{name} is not saved — {why}', { name, why: err.message || t('Error') }) + ' — ' + t('retry'); ";
-  const SAYFULL = "          say(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name, why }), 'var(--red)');";
+  const ORPH = '          if (orphaned) { closePane(at); return; }';
   const pc = (a, b) => cut(doSaveBody, a, b);
-  const typedBack = async (body, o) => { const w = await pTypedDuring(body, o); w.setBox('what the disk held'); return w.said(); };   // typed back to the LOADED text after a save
-  const [pAll, pNS, pRef, pTD, pT400, pTThrow, pTNoReply, pTwo, pHB, pEnd, pBtn, pBack, pNSR, pTDR, pT400R, pTwoR, pHBR, pHBLockR, pEndR, pBtnR, pBackR] = await Promise.all([
-    doSaveBody ? pAllThree(doSaveBody) : null, doSaveBody ? pNotSaved(doSaveBody) : null, doSaveBody ? pRefused(doSaveBody) : null, doSaveBody ? pTypedDuring(doSaveBody).then((w) => w.said()) : null,
-    doSaveBody ? pTold(doSaveBody, async () => ({ ok: false, status: 400, json: async () => ({ error: 'EACCES: permission denied' }) })) : null,
-    doSaveBody ? pTold(doSaveBody, async () => { throw new Error('the hub did not answer'); }) : null,
-    doSaveBody ? pTold(doSaveBody, (init) => new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(aborted()), { once: true }))) : null,
-    doSaveBody ? pSecond(doSaveBody) : null, doSaveBody ? pHandBack(doSaveBody) : null, doSaveBody ? pEnded(doSaveBody) : null, doSaveBody ? pFailThenLabel(doSaveBody) : null, doSaveBody ? typedBack(doSaveBody) : null,
-    pc(NOTSAVED + '   // B-3b03 follow-up: a refusal in the reader\'s language', '') ? pNotSaved(pc(NOTSAVED + '   // B-3b03 follow-up: a refusal in the reader\'s language', '')) : null,   // stale-pins: kept (RED: the not-saved check cut — a failed write closes the pane)
-    KEEP && pc(KEEP + '\n', '') ? pTypedDuring(pc(KEEP + '\n', '')).then((w) => w.said()) : null,   // stale-pins: kept (RED: line 262's close over later text)
-    SIGOK && pc(SIGOK + '\n', '') ? pTold(pc(SIGOK + '\n', ''), async () => ({ ok: false, status: 400, json: async () => ({ error: 'EACCES: permission denied' }) })) : null,   // stale-pins: kept (RED: the hub's refusal unread)
-    POUT && pc(POUT + '\n', '') ? pSecond(pc(POUT + '\n', '')) : null,   // stale-pins: kept (RED: law 1's line cut — a second write races the first)
-    pc('if (saveOut) { if (!handing) say(', 'if (saveOut) { if (true) say(') ? pHandBack(pc('if (saveOut) { if (!handing) say(', 'if (saveOut) { if (true) say(')) : null,   // stale-pins: kept (RED: «still saving…» over «is saved — handing it back»)
-    pc(LOCK, 'handing = true;') ? pHandBack(pc(LOCK, 'handing = true;')) : null,   // stale-pins: kept (RED: the lock cut — a key typed then is closed away)
-    pc(PEND, 'c.timer = 0;') ? pEnded(pc(PEND, 'c.timer = 0;')) : null,   // stale-pins: kept (RED: no end — the pane's presses dead behind a hung request)
-    pc(SAYFULL, '          ' + BTN_RELEASE + '\n' + SAYFULL) ? pFailThenLabel(pc(SAYFULL, '          ' + BTN_RELEASE + '\n' + SAYFULL)) : null,   // stale-pins: kept (RED: the release's button words planted back)
-    doSaveBody && ADD_RELEASE !== ADD ? typedBack(doSaveBody, { add: ADD_RELEASE }) : null,   // stale-pins: kept (RED: line 262's guard — a text compare, not the mark)
+  const json400 = async () => ({ ok: false, status: 400, json: async () => ({ error: 'EACCES: permission denied' }) });
+  const json504 = async () => ({ ok: false, status: 504, json: async () => ({ error: 'not told yet — it may still arrive', code: 'telling_out' }) });
+  const neverTold = (init) => new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true }));
+  const [pa, pr, pf, pd, p400, p504, pNo, p2, ph, pu, po, prR, pdR, p400R, p2R, phR, phLockR, poR] = await Promise.all([
+    doSaveBody ? pAll(doSaveBody) : null, doSaveBody ? pRef(doSaveBody) : null, doSaveBody ? pFail(doSaveBody) : null, doSaveBody ? pDuring(doSaveBody) : null, doSaveBody ? pTold(doSaveBody, json400) : null, doSaveBody ? pTold(doSaveBody, json504) : null, doSaveBody ? pTold(doSaveBody, neverTold) : null,
+    doSaveBody ? pSecond(doSaveBody) : null, doSaveBody ? pHand(doSaveBody) : null, doSaveBody ? pUnnamed(doSaveBody) : null, doSaveBody ? pOrphan(doSaveBody) : null,
+    PNAMED && cut(pc(NOTSAVED, ''), PNAMED + '\n', '') ? pFail(cut(pc(NOTSAVED, ''), PNAMED + '\n', '')) : null,   // stale-pins: kept (RED: the release's road — the not-saved and named-reply checks cut: a failed write closes the pane)
+    KEEP && pc(KEEP + '\n', '') ? pDuring(pc(KEEP + '\n', '')) : null,   // stale-pins: kept (RED: line 262's close over later text)
+    SIGOK && pc(SIGOK + '\n', '') ? pTold(pc(SIGOK + '\n', ''), json400) : null,   // stale-pins: kept (RED: the hub's refusal unread)
+    POUT && pc(POUT + '\n', '') ? pSecond(pc(POUT + '\n', '')) : null,   // stale-pins: kept (RED: law 1's line cut)
+    pc('if (saveOut) { if (!handing) say(', 'if (saveOut) { if (true) say(') ? pHand(pc('if (saveOut) { if (!handing) say(', 'if (saveOut) { if (true) say(')) : null,   // stale-pins: kept (RED: «still saving…» over the hand-back)
+    pc(LOCK, 'handing = true;') ? pHand(pc(LOCK, 'handing = true;')) : null,   // stale-pins: kept (RED: the lock cut)
+    pc(ORPH + '   // r2221 LAW B: its terminal took the text already — «Save again» saved the rest; nobody to tell', '') ? pOrphan(pc(ORPH + '   // r2221 LAW B: its terminal took the text already — «Save again» saved the rest; nobody to tell', '')) : null,   // stale-pins: kept (RED: «Save again» tells the terminal again)
   ]);
-  console.log('    the Ctrl+G pane: ' + JSON.stringify({ pAll, pNS, pRef, pTD, pT400, pTThrow, pTNoReply, pTwo, pHB, pEnd, pBtn, pBack, pNSR, pTDR, pT400R, pTwoR, pHBR, pHBLockR, pEndR, pBtnR, pBackR }));
-  ok(!!DECL && !!ADD && !!pAll && pAll.signals === 1 && pAll.closed && pAll.unsaved === false
-      && !!pNS && !pNS.signals && !pNS.closed && pNS.unsaved && pNS.path === 'notes.md is not saved — EIO: i/o error' + STILL_HERE && !!pRef && !pRef.closed && pRef.unsaved && pRef.path === 'notes.md is not saved — ' + ANOTHER + STILL_HERE
-      && !!pTD && !pTD.signals && !pTD.closed && pTD.unsaved && pTD.path === '● ' + TYPED_ON
-      && !!pT400 && !pT400.closed && pT400.path === 'notes.md is saved, but the terminal was not told — EACCES: permission denied' && !pT400.locked && !!pTThrow && !pTThrow.closed && pTThrow.path === 'notes.md is saved, but the terminal was not told — the hub did not answer'
-      && !!pTNoReply && !pTNoReply.closed && pTNoReply.path === 'notes.md is saved, but the terminal was not told — no reply'
-      && !!pNSR && pNSR.closed && !!pTDR && pTDR.closed && !!pT400R && pT400R.closed,
-    `LAW 5 (the pane, lifted): it closes ONLY when all three hold — saved, the box = what was saved, the terminal told with a good reply (closed ${pAll && pAll.closed}); EACH ALONE FAILING keeps it: not saved («${pNS && pNS.path.slice(0, 40)}…», «${pRef && pRef.path.slice(0, 50)}…»); typed during the save («${pTD && pTD.path.slice(0, 40)}…», the mark on); the terminal not told — the hub's 400, a throw, no reply at 45 s («${pT400 && pT400.path}»); REDs (each its line cut): a failed write closes; line 262's close over later text; the hub's refusal unread`, { pAll, pNS, pRef, pTD, pT400, pTThrow, pTNoReply, pNSR, pTDR, pT400R });
-  ok(!!pTwo && pTwo.during.path === '… notes.md: still saving…' && pTwo.during.writes === 1 && pTwo.after.writes === 1 && pTwo.after.closed && !!pTwoR && pTwoR.after.overlap === 1
-      && !!pHB && pHB.atPress === '✓ notes.md is saved — handing it back to the terminal…' && pHB.closed && pHB.box === pHB.typedThen && pHB.box.endsWith(' — typed') && !!pHBR && pHBR.atPress === '… notes.md: still saving…' && !!pHBLockR && pHBLockR.closed && /typed while the terminal was told$/.test(pHBLockR.box),
-    `LAWS 1 + 5 (the pane): a press while its save is out sends nothing and says «${pTwo && pTwo.during.path}»; in the hand-back the line keeps «${pHB && pHB.atPress}» and the box takes no key (the only lock); REDs: law 1's line cut (two writes out); «still saving…» over the hand-back; the lock cut (a key typed then is closed away)`, { pTwo, pTwoR, pHB, pHBR, pHBLockR });
-  ok(!!pEnd && pEnd.o !== 'stuck' && pEnd.s1.path === 'notes.md is not saved — no reply' + STILL_HERE && pEnd.s1.unsaved && pEnd.s2.closed && !!pEndR && pEndR.o === 'stuck' && !pEndR.s2.closed
-      && !!pBtn && pBtn.btn === 'Save & Close' && !pBtn.red && !!pBtnR && pBtnR.btn !== 'Save & Close'
-      && !!pBack && pBack.unsaved === true && !!pBackR && pBackR.unsaved === false,
-    `LAWS 2 + 3 (the pane): a request with no reply is ENDED at 45 s and said («${pEnd && pEnd.s1.path.slice(0, 40)}…»), the next press closes it; the button keeps «${pBtn && pBtn.btn}» (its words on the path line); the close guard reads the MARK — typed back to the loaded text after a save is still unsaved (${pBack && pBack.unsaved}); REDs: no end (presses dead); the release's button words; line 262's guard, a text compare (${pBackR && pBackR.unsaved})`, { pEnd, pEndR, pBtn, pBtnR, pBack, pBackR });
-  // (3) LAW 8, THE RELEASE's PANE: a refused load opens NO pane; a file not there yet opens, empty, to be created — the chain's head and its door
+  console.log('    the Ctrl+G pane: ' + JSON.stringify({ pa, pr, pf, pd, p400, p504, pNo, p2, ph, pu, po, prR, pdR, p400R, p2R, phR, phLockR, poR }));
+  ok(!!DECL && !!pa && pa.closed && pa.signals === 1 && pa.unsaved === false
+      && !!pr && !pr.closed && pr.unsaved && pr.path === 'notes.md is not saved — ' + ANOTHER + STILL_HERE && !!pf && !pf.closed && pf.unsaved && pf.path === 'notes.md is not saved — EIO: i/o error' + STILL_HERE && !!pd && !pd.closed && !pd.signals && pd.unsaved && pd.path === '● ' + TYPED_ON
+      && !!p400 && !p400.closed && p400.path === 'notes.md is saved, but the terminal was not told — EACCES: permission denied' && !p400.locked
+      && !!p504 && !p504.closed && p504.path === 'notes.md is saved — the terminal is not told yet; it may still arrive' && !!pNo && !pNo.closed && pNo.path === 'notes.md is saved — the terminal is not told yet; it may still arrive'
+      && !!prR && prR.closed && !!pdR && pdR.closed && !!p400R && p400R.closed,
+    `LAW 5 (the pane, lifted): it closes ONLY when all three hold (saved, the box = what was saved, the terminal told with a good reply); EACH ALONE FAILING keeps it — refused («${pr && pr.path.slice(0, 40)}…»), failed («${pf && pf.path.slice(0, 40)}…»), typed during the save, the telling refused / still in flight at the hub's bound («${p504 && p504.path}») / with no reply; REDs: the release's road (a failed write closes); line 262's close over later text; the hub's refusal unread`, { pa, pr, pf, pd, p400, p504, pNo, prR, pdR, p400R });
+  ok(!!p2 && p2.during.path === STILL && p2.during.writes === 1 && p2.after.writes === 1 && p2.after.closed && !!p2R && p2R.after.overlap === 1
+      && !!ph && ph.at === '✓ notes.md is saved — handing it back to the terminal…' && ph.closed && ph.typedTook === 'false' && !!phR && phR.at === STILL && !!phLockR && phLockR.typedTook === 'true'
+      && !!pu && !pu.closed && pu.unsaved && pu.path === NOREPLY && pu.standing === '' && !!po && po.closed && po.signals === 0 && !!poR && poR.signals === 1,
+    `LAWS 1, 5, B (the pane): a press while its save is out says «${p2 && p2.during.path}» and sends nothing; the hand-back keeps its words and takes no key; an unnamed reply is no reply («${pu && pu.path}»); after law B's orphaning «Save again» saves and closes WITHOUT telling the terminal again; REDs: law 1's line cut; «still saving…» over the hand-back; the lock cut; «Save again» tells the terminal again`, { p2, p2R, ph, phR, phLockR, pu, po, poR });
+  // LAW B — an editor-close that arrives (late, another device's, the terminal's own) never removes a pane holding typing: it stays, says so,
+  // offers «Save again» and «Discard»; LAW C — the terminal window's ✕ while its pane's save is out: nothing asked, the one sentence
+  const cee = (ee.match(/\nexport function closeExternalEditor\(app, signalPath\) \{\n([\s\S]*?)\n\}\n/) || [])[1];
+  const closeArrives = (body, unsaved) => { const removed = [], orphaned = []; const pane = { dataset: { signal: 'sig-A' }, remove() { removed.push('A'); }, _vsUnsaved: () => unsaved, _vsOrphan: () => orphaned.push('A') };
+    const win = { _editorState: null, content: { style: {}, querySelectorAll: (q) => (q === '.editor-container' ? (removed.length ? [] : [pane]) : []), querySelector: () => null } };
+    new Function('app', 'signalPath', body)({ wm: { windows: new Map([['w1', win]]) }, sessions: new Map() }, 'sig-A'); return { removed: removed.length, orphaned: orphaned.length }; };
+  const BLINE = (cee || '').split('\n').find((l) => l.startsWith("    if (typeof editorPane._vsUnsaved === 'function' && editorPane._vsUnsaved()) {")) || '';
+  const ORPHB = (ee.match(/\n      editorPane\._vsOrphan = \(\) => \{\n([\s\S]*?)\n      \};\n/) || [])[1];
+  const orphanSays = (body) => { let locked = true, veil = 'on'; const pathSpan = { textContent: '', style: {} }, saveBtn = { textContent: 'Save & Close' }, discardBtn = { style: { display: 'none' } };
+    const win = { _editorState: { signalPath: '/scratch-b23e5/sig' }, _editorDoSave: () => {}, _editorTermVeil: { remove: () => { veil = 'gone'; } } };
+    new Function('t', 'editorView', 'lockComp', 'pathSpan', 'saveBtn', 'discardBtn', 'targetWinInfo', 'signalPath', `let orphaned = false, handing = true;\n${body}\nreturn orphaned;`)(tt, { dispatch: ({ effects }) => { locked = effects.lock === true; } }, { reconfigure: (x) => ({ lock: x }) }, pathSpan, saveBtn, discardBtn, win, '/scratch-b23e5/sig');
+    return { words: pathSpan.textContent, btn: saveBtn.textContent, discard: discardBtn.style.display, locked, state: win._editorState, binding: win._editorDoSave, veil }; };
+  const RELEASE4 = (ORPHB || '').split('\n').find((l) => l.startsWith('        if (targetWinInfo._editorState && targetWinInfo._editorState.signalPath === signalPath) {')) || '';
+  // ★5 / ★11: «Discard» and the window's ✕ answered by a save out — the hand-back keeps its own words (lifted lines)
+  const SBP = ee.split('\n').find((l) => l.startsWith('      const sayBusyPane = () => {')) || '';
+  const DISC = ee.split('\n').find((l) => l.startsWith('      discardBtn.onclick = () => {')) || '';
+  const paneSmall = (sbp, disc, { saveOut, handing }) => { const pathSpan = { textContent: '✓ notes.md is saved — handing it back to the terminal…', style: {} }, discardBtn = {}; let closed = 0;
+    new Function('filePath', 'pathSpan', 'stillSavingWords', 'discardBtn', 'closePane', 'openClock', 'saveOut', 'handing', `${sbp}\n${disc}`)('/scratch-b23e5/dead/notes.md', pathSpan, stillSavingWords, discardBtn, () => { closed++; }, () => 0, saveOut, handing);
+    discardBtn.onclick(); return { path: pathSpan.textContent, closed }; };
+  const inst = (ee.match(/\n(      const panes = targetWinInfo\._editorPanes[\s\S]*?\n      \}\n)/) || [])[1];
+  const paneXWhileOut = (block) => { const asked = [], win = { id: 'w1' }; let said = 0;
+    new Function('targetWinInfo', 'editorView', 'marked', 'filePath', 'showConfirmDialog', 't', 'app', 'saveOut', 'pathSpan', 'stillSavingWords', 'sayBusyPane', block)(win, { dom: { isConnected: true }, state: { doc: { toString: () => 'x' } } }, true, '/scratch-b23e5/dead/notes.md', (q) => { asked.push(q.message); return Promise.resolve(false); }, tt, { wm: { requestClose() {} } }, true, { style: {} }, stillSavingWords, () => { said++; });
+    const go = win.onCloseRequest({}); return { go, asked: asked.length, said }; };
+  const XLINE = (inst || '').split('\n').find((l) => l.startsWith('          const b = busyPane(); if (b) {')) || '';
+  const bNow = cee ? closeArrives(cee, true) : null, bClean = cee ? closeArrives(cee, false) : null, bR = BLINE && cut(cee, BLINE + '\n', '') ? closeArrives(cut(cee, BLINE + '\n', ''), true) : null;   // stale-pins: kept (RED: the law B line cut)
+  const oNow = ORPHB ? orphanSays(ORPHB) : null;
+  const oR = RELEASE4 ? orphanSays(ORPHB.replace(RELEASE4 + '\n', '')) : null;   // stale-pins: kept (RED: the orphan left as the terminal's editor)
+  const dOut = SBP && DISC ? paneSmall(SBP, DISC, { saveOut: true, handing: false }) : null, dHand = SBP && DISC ? paneSmall(SBP, DISC, { saveOut: true, handing: true }) : null, dIdle = SBP && DISC ? paneSmall(SBP, DISC, { saveOut: false, handing: false }) : null;
+  const discR = SBP && DISC ? paneSmall(SBP, "      discardBtn.onclick = () => closePane(openClock());", { saveOut: true, handing: false }) : null;   // stale-pins: kept (RED: 767bde791's Discard)
+  const hR = SBP && DISC ? paneSmall(SBP.replace('if (handing) return; ', ''), DISC, { saveOut: true, handing: true }) : null;   // stale-pins: kept (RED: the hand-back's words overwritten)
+  const xNow = inst ? paneXWhileOut(inst) : null, xR = XLINE && cut(inst, XLINE + '\n', '') ? paneXWhileOut(cut(inst, XLINE + '\n', '')) : null;   // stale-pins: kept (RED: the pane's ✕ asked by the mark)
+  console.log('    law B / the pane\'s ✕: ' + JSON.stringify({ bNow, bClean, bR, oNow, oR, xNow, xR, dOut, dHand, dIdle, discR, hR }));
+  ok(!!bNow && bNow.removed === 0 && bNow.orphaned === 1 && !!bClean && bClean.removed === 1 && !!bR && bR.removed === 1
+      && !!oNow && oNow.words === 'the terminal took the saved text — what you typed after is only here' && oNow.btn === 'Save again' && oNow.discard === '' && oNow.locked === false && oNow.state === null && oNow.binding === null && oNow.veil === 'gone' && !!oR && oR.state !== null
+      && !!xNow && xNow.go === false && xNow.asked === 0 && xNow.said === 1 && !!xR && xR.asked === 1
+      && !!dOut && dOut.closed === 0 && dOut.path === STILL && !!dHand && dHand.closed === 0 && dHand.path === '✓ notes.md is saved — handing it back to the terminal…' && !!dIdle && dIdle.closed === 1 && !!discR && discR.closed === 1 && !!hR && hR.path === STILL,
+    `LAW B (lifted): an editor-close that arrives over a pane holding typing leaves it — «${oNow && oNow.words}», «${oNow && oNow.btn}» and «Discard» offered, the box open; a pane with nothing unsaved closes; LAW C: the terminal window's ✕ while its pane's save is out asks nothing and says «${STILL}»; and it is no longer the terminal's editor (★4: its window state, Ctrl+G binding and veil released); «Discard» and the ✕ while a save is out say «${STILL}» (★5) and the hand-back keeps its words (★11); REDs: the law B line cut (the typing removed unasked); the orphan left as the terminal's editor; the ✕ asked by the mark; 767bde791's Discard (closes under a save out); the hand-back's words overwritten`, { bNow, bClean, bR, oNow, oR, xNow, xR, dOut, dHand, dIdle, discR, hR });
+  // (5) THE TYPED LOAD (r2221 ★7): only the read's own «not there» (typed by the hub) opens an empty pane; every other failure, the door
   const HEAD = (ee.match(/\n    \.then\(data => \{\n((?:      \/\/[^\n]*\n)*      if \(data && data\.error && [^\n]*\n      const content = data\.content \|\| '';\n)/) || [])[1];
   const CATCH = (ee.match(/\n    \.catch\(\(err\) => \{\n([\s\S]*?)\n    \}\);\n\}/) || [])[1];
-  const loadRoad = async (head, answer) => {
-    const urls = [], pathSpan = { textContent: '', style: {} }, saveBtn = { textContent: 'Save & Close', style: {}, onclick: null };
+  const loadRoad = async (head, answer) => { const urls = [], pathSpan = { textContent: '', style: {} }, saveBtn = { textContent: 'Save & Close', style: {}, onclick: null };
     const run = new Function('fetch', 'fsErrorText', 'pathSpan', 'saveBtn', 'openClock', 'signalPath', 'filePath', 'host', 'targetWinInfo', 'editorPane', 'contentEl', 'splitResizer', 'termContainer', 'termSession', 'lateFocus', 'setTimeout', 't', 'answer',
       `return Promise.resolve(answer).then(data => {\n${head}\nreturn 'a pane over «' + content + '»';\n}).catch((err) => {\n${CATCH}\nreturn 'the door';\n});`)(
-      async (u) => { urls.push(u); return LANDED; }, (d) => d.error, pathSpan, saveBtn, () => 0, '/scratch-b23e5/sig', '/scratch-b23e5/dead/prompt.md', '', {}, { remove() {} }, { querySelectorAll: () => [], style: {} }, { destroy() {} }, { style: {} }, null, () => {}, () => {}, tt, answer);
-    const road = await run; if (saveBtn.onclick) await saveBtn.onclick();
-    return { road, words: pathSpan.textContent, btn: saveBtn.textContent, urls };
-  };
-  const SAID = { error: 'this folder or file did not answer in time — try again in 30 s', code: 'storage_path_hung' }, BIG = { error: 'File too large (12 MB > 10 MB)' }, NOACCESS = { error: 'EACCES: permission denied, open \'/scratch-b23e5/dead/prompt.md\'' }, NOTYET = { error: 'ENOENT: no such file or directory, open \'/scratch-b23e5/dead/prompt.md\'' };
+      async (u) => { urls.push(u); return { ok: true }; }, (d) => d.error, pathSpan, saveBtn, () => 0, '/scratch-b23e5/sig', '/scratch-b23e5/dead/prompt.md', '', {}, { remove() {} }, { querySelectorAll: () => [], style: {} }, { destroy() {} }, { style: {} }, null, () => {}, () => {}, tt, answer);
+    const road = await run; if (saveBtn.onclick) await saveBtn.onclick(); return { road, words: pathSpan.textContent, btn: saveBtn.textContent, urls }; };
   const IFLINE = (HEAD || '').split('\n').find((l) => l.startsWith('      if (data && data.error && ')) || '';
-  const BROAD = '      if (data && data.error) throw new Error(fsErrorText(data));';   // 929f015a5's head: every error a door
-  const [ld, ldBig, ldNoAccess, ldNew, ldOk, ldR, ldBroadR] = await Promise.all([
-    HEAD && CATCH ? loadRoad(HEAD, SAID) : null, HEAD && CATCH ? loadRoad(HEAD, BIG) : null, HEAD && CATCH ? loadRoad(HEAD, NOACCESS) : null, HEAD ? loadRoad(HEAD, NOTYET) : null, HEAD ? loadRoad(HEAD, { content: 'the CLI\'s text' }) : null,
-    HEAD && CATCH && IFLINE ? loadRoad(HEAD.replace(IFLINE + '\n', ''), SAID) : null,   // stale-pins: kept (RED: the release's head, the refusal unread)
-    HEAD && CATCH && IFLINE ? loadRoad(HEAD.replace(IFLINE, BROAD), NOTYET) : null,   // stale-pins: kept (RED: 929f015a5's head — a file not there yet gets the door)
-  ]);
-  console.log('    the pane\'s load: ' + JSON.stringify({ ld, ldBig, ldNoAccess, ldNew, ldOk, ldR, ldBroadR }));
-  ok(!!ld && ld.road === 'the door' && ld.words === 'Failed to load /scratch-b23e5/dead/prompt.md: this folder or file did not answer in time — try again in 30 s' && ld.btn === 'Close editor' && ld.urls.join() === '/api/editor/signal'
-      && !!ldBig && ldBig.road === 'the door' && ldBig.words === 'Failed to load /scratch-b23e5/dead/prompt.md: File too large (12 MB > 10 MB)' && !!ldNoAccess && ldNoAccess.road === 'the door' && /EACCES/.test(ldNoAccess.words) && ldNoAccess.urls.join() === '/api/editor/signal' && !!ldNew && ldNew.road === 'a pane over «»' && !!ldOk && ldOk.road === 'a pane over «the CLI\'s text»'
-      && !!ldR && ldR.road === 'a pane over «»' && !!ldBroadR && ldBroadR.road === 'the door',
-    `LAW 8 (the release's fault, lifted): a refused load opens NO pane — «${ld && ld.words}», the only door «${ld && ld.btn}», which tells the terminal and writes nothing (${ld && ld.urls.join()}); the read cap and no access the same (r2200); a file NOT THERE YET opens, empty, to be created; REDs: the release's head (an empty pane over a refusal); 929f015a5's head (a new file gets the door)`, { ld, ldBig, ldNoAccess, ldNew, ldOk, ldR, ldBroadR });
-  // (4) THE VIEWERS' ⟳ RELOAD, LIFTED: refused by the storage it says its words (typed error) and leaves the view as it was
+  const REGEX_HEAD = "      if (data && data.error && !/ENOENT|no such file/i.test(String(data.error))) throw new Error(fsErrorText(data));";   // stale-pins: kept (1f5173b72's head, planted in a RED)
+  const NOTYET = { error: 'ENOENT: no such file or directory', code: 'file_not_there' }, ENOENT_WORDS = { error: 'spawn ssh ENOENT' }, SAID = { error: 'this folder or file did not answer in time — try again in 30 s', code: 'storage_path_hung' };
+  const [ldNew, ldWords, ldSaid, ldOk, ldR] = await Promise.all([HEAD ? loadRoad(HEAD, NOTYET) : null, HEAD && CATCH ? loadRoad(HEAD, ENOENT_WORDS) : null, HEAD && CATCH ? loadRoad(HEAD, SAID) : null, HEAD ? loadRoad(HEAD, { content: 'the CLI\'s text' }) : null,
+    HEAD && CATCH && IFLINE ? loadRoad(HEAD.replace(IFLINE, REGEX_HEAD), ENOENT_WORDS) : null]);   // stale-pins: kept (RED: 1f5173b72's words test)
+  console.log('    the pane\'s load: ' + JSON.stringify({ ldNew, ldWords, ldSaid, ldOk, ldR }));
+  ok(!!ldNew && ldNew.road === 'a pane over «»' && !!ldWords && ldWords.road === 'the door' && ldWords.urls.join() === '/api/editor/signal' && !!ldSaid && ldSaid.road === 'the door' && ldSaid.btn === 'Close editor' && !!ldOk && ldOk.road === 'a pane over «the CLI\'s text»'
+      && !!ldR && ldR.road === 'a pane over «»'
+      && fr.includes("...(err && err.code === 'ENOENT' ? { code: 'file_not_there' } : {})") && rd('src/remote-fs.js').includes("if (gone) throw Object.assign(new Error(`${filePath}: no such file yet`), { code: 'file_not_there' });"),
+    `THE TYPED LOAD (r2221 ★7, lifted): the read's own «not there» opens an empty pane to create the file; any other failure — words that only mention ENOENT («spawn ssh ENOENT»), a storage's refusal — takes the door, which writes nothing; RED (1f5173b72's words test): «spawn ssh ENOENT» opens an empty pane over a file that may be there`, { ldNew, ldWords, ldSaid, ldOk, ldR });
+  // (6) THE VIEWERS' ⟳ RELOAD, LIFTED: refused by the storage it says its words (typed error) and leaves the view as it was
   const RL = (fv.match(/\n    btnReload\.onclick = async \(\) => \{\n([\s\S]*?)\n    \};\n/) || [])[1];
   const reload = async (body, status) => {
     const toasts = [], renders = [], container = { innerHTML: 'the view as it was' };
@@ -1375,11 +1474,11 @@ console.log('①p r2006 / r2198 (the save\'s laws): one save out at a time; the 
     return { toast, type, view: container.innerHTML, renders: renders.length };
   };
   const RET = "{ type: 'error' }); return; }";
-  const [rlNo, rlOk, rlR] = await Promise.all([RL ? reload(RL, 503) : null, RL ? reload(RL, 200) : null, RL && RL.split(RET).length === 2 ? reload(RL.replace(RET, "{ type: 'error' }); }"), 503) : null]);   // stale-pins: kept (RED: the return cut)
-  console.log('    the viewers\' Reload: ' + JSON.stringify({ rlNo, rlOk, rlR }));
+  const [rlNo, rlOk, rlRed] = await Promise.all([RL ? reload(RL, 503) : null, RL ? reload(RL, 200) : null, RL && RL.split(RET).length === 2 ? reload(RL.replace(RET, "{ type: 'error' }); }"), 503) : null]);   // stale-pins: kept (RED: the return cut)
+  console.log('    the viewers\' Reload: ' + JSON.stringify({ rlNo, rlOk, rlRed }));
   ok(!!rlNo && rlNo.toast === 'a.png was not reloaded — this folder or file did not answer in time — try again in 30 s; the view shows it as before' && rlNo.type === 'error' && rlNo.view === 'the view as it was' && rlNo.renders === 0
-      && !!rlOk && rlOk.renders === 1 && !!rlR && rlR.renders === 1 && rlR.view === '',
-    `THE VIEWERS' REFUSED ⟳ RELOAD (lifted): «${rlNo && rlNo.toast}» (typed ${rlNo && rlNo.type}) and the view stays as it was; answered, it re-renders; RED (the return cut): the view is emptied under the refusal`, { rlNo, rlOk, rlR });
+      && !!rlOk && rlOk.renders === 1 && !!rlRed && rlRed.renders === 1 && rlRed.view === '',
+    `THE VIEWERS' REFUSED ⟳ RELOAD (lifted): «${rlNo && rlNo.toast}» (typed ${rlNo && rlNo.type}) and the view stays as it was; answered, it re-renders; RED (the return cut): the view is emptied under the refusal`, { rlNo, rlOk, rlRed });
 }
 
 console.log('② the cost of one parked thread, measured (printed, never asserted)');

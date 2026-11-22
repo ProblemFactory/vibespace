@@ -582,7 +582,7 @@ ok(c1.unnamed.join() === `${NEW_FILE}:1 box.focus()` && !!c2 && c2.miscount.some
 const BARE = {
   'src/lib/chat-view.js': [1, 'the rewind answer\'s start, read at the press and kept across a reload in the tab\'s storage; the press is in the window\'s own message, so no field elsewhere holds the keys'],
   'src/lib/desktop-app-window.js': [4, 'the first connect\'s start (the window\'s own making — a restore or a press) and the satellite\'s (the app showed a window, nobody pressed): unhanded ON PURPOSE; «Resume here» and «Take over» are read at the press (the press is inside the window)'],
-  'src/lib/external-editor.js': [3, 'the pane\'s open on the CLI\'s signal: unhanded ON PURPOSE (no person\'s press; the pane sits in the terminal\'s own window); its two closes are read at the person\'s press, inside that window'],
+  'src/lib/external-editor.js': [4, 'the pane\'s open on the CLI\'s signal: unhanded ON PURPOSE (no person\'s press; the pane sits in the terminal\'s own window); its three closes (Save & Close, the load-failure door, B-23e5 r2221 law B\'s «Discard») are read at the person\'s press, inside that window'],
   'src/lib/terminal.js': [4, 'the terminal\'s paste roads, read at the paste or the tap (the terminal itself holds the keys: inside its window); the pad\'s fallback is unhanded'],
 };   // r945: the link door reads its start through the act (it left this table)
 {

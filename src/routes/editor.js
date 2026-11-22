@@ -62,8 +62,14 @@ app.post('/api/editor/signal', async (req, res) => {
   const remoteFs0 = getRemoteFs(); // server.js defines it after these routes register
   // lane device-act-audit: the person saved / closed the editor in their browser — the remote writes name their sign-in
   const remoteFs = remoteFs0 && typeof remoteFs0.as === 'function' ? remoteFs0.as(require('../device-audit.js').byOfReq(req)) : remoteFs0;
+  // B-23e5 line 311's musts — 主开发 r2222 (5): THE TELLING gets the hub's bound for its ANSWER only (src/server/file-writes.js BOUND_MS):
+  // told, or not told with why, within it; a telling still in flight at the bound is answered «not told yet — it may still arrive» and
+  // goes on — never stopped (its late arrival, the editor-close below, is law B's on the page: a pane holding typing is never removed unasked)
+  let answered = false, boundTimer = null;
+  const answer = (status, body) => { if (answered) return; answered = true; res.status(status).json(body); };
   try {
     if (host && remoteFs) {
+      boundTimer = setTimeout(() => answer(504, { error: 'not told yet — it may still arrive', code: 'telling_out' }), require('../server/file-writes').BOUND_MS);
       // remote Ctrl+G: the CLI polls the signal file ON ITS machine
       if (content !== undefined) await remoteFs.write(String(host), filePath, Buffer.from(content));
       await remoteFs.write(String(host), signalPath, Buffer.from('done'));
@@ -84,8 +90,8 @@ app.post('/api/editor/signal', async (req, res) => {
     wss.clients.forEach(client => {
       if (client.readyState === WS_OPEN) { try { client.send(msg); } catch {} }
     });
-    res.json({ success: true });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    answer(200, { success: true });
+  } catch (err) { answer(400, { error: err.message }); } finally { clearTimeout(boundTimer); }
 });
 }
 

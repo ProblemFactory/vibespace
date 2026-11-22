@@ -32,7 +32,7 @@ import { clockOf } from './page-time.js'; // lane ui-language: the ONE formatter
 import { Plugin, NodeSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
-import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';   // B-23e5: a refused save in the reader's language; a person's save marked
+import { fsErrorText, ATTENDED_HEADERS, stillSavingWords } from './file-explorer-ops.js';   // B-23e5: a refused save in the reader's language; a person's save marked
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
 import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD, linkBarModel, linkPlan, sendAllLabel, sendWords } from './doc-window-model.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -318,7 +318,9 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   const cmtsWords = mk('span'); cmtsChip.appendChild(cmtsWords);
   const saveDot = mk('button', 'doc-save-btn'); saveDot.type = 'button'; saveDot.hidden = true; saveDot.dataset.state = 'clean'; saveDot.title = t('Save') + ' (Ctrl+S)';
   const stamp = mk('span', 'doc-stamp'); saveDot.appendChild(stamp);
-  status.append(chip, conflict, cmtsChip, saveDot);
+  // B-23e5 r2299 A3: ONE standing line after a save that ended UNKNOWN — until the file is reloaded or the window closed
+  const unknownLine = mk('span', 'doc-pill doc-unknown'); unknownLine.hidden = true; unknownLine.textContent = t('An earlier save of this file never replied — if it lands late it can replace newer text: reload to check');
+  status.append(chip, conflict, cmtsChip, saveDot, unknownLine);
   const main = mk('div', 'doc-main');
   const pane = mk('div', 'doc-pane'); const page = mk('div', 'doc-page'); pane.appendChild(page);
   const rawPane = mk('div', 'doc-raw'); rawPane.hidden = true;
@@ -370,7 +372,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const state = S.dirty ? 'dirty' : S.note ? 'saved' : 'clean';
     saveDot.hidden = state === 'clean'; saveDot.dataset.state = state;
     patch(stamp, state === 'dirty' ? (S.at ? t('Unsaved · last {time}', { time: S.at }) : t('Unsaved')) : state === 'saved' ? S.note : '');
-    status.hidden = chip.hidden && conflict.hidden && cmtsChip.hidden && saveDot.hidden;
+    status.hidden = chip.hidden && conflict.hidden && cmtsChip.hidden && saveDot.hidden && unknownLine.hidden;
   }
   const say = (text) => { chip.textContent = text || ''; chip.hidden = !text; renderStatus(); };
   const showConflict = (on) => { conflict.hidden = !on; renderStatus(); };
@@ -904,12 +906,13 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
 
   // ── save + the edit note ──
   async function save() {
-    if (S.mode !== 'rich' || !S.ed || S.busy) return;
+    if (S.saving) { say(stillSavingWords(String(path).split('/').pop() || path)); return; }   // r2221 LAW C (item 12): a press while its save is out sends nothing and says so
+    if (S.mode !== 'rich' || !S.ed || S.busy) return;   // r2299 ★9: a load or a repaint in flight (S.busy) is not a save — the release's quiet return
     const patched = saveDoc(S.source, S.loaded, current()); // BLOCK PATCHING: only the blocks you changed are rewritten
     if (!patched.ok) { say(patched.code === 'lossy' ? t('This block would change on save (line {n}) — edit it in Raw', { n: patched.line }) : fidelityWords({ code: patched.code })); return; }
     const text = patched.text;
     const sentJson = JSON.stringify(S.ed.getJSON());   // r1733 (1): what the box held when the save went out
-    S.busy = true;
+    S.busy = true; S.saving = true; let endTimer = null;   // r2299 ★9: the save's own flag (law C reads it, never load()'s)
     try {
       // B-23e5's remainder (r1442 (C)): the save's OWN check is the press's one try (marked); refused by the storage ⇒ the save ends here
       // with the words — never a write after it (one press, one try); the text stays in the editor, marked unsaved
@@ -921,14 +924,16 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
         if (!ok) return;
         S.confirmed = disk;
       }
-      const res = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json', ...ATTENDED_HEADERS }, body: JSON.stringify({ path, content: text, host: host || undefined }) });   // B-23e5: a person's save, marked
+      const ctl = new AbortController(); endTimer = setTimeout(() => ctl.abort(), 45000);   // r2221 (item 12): the page's last guard — the hub orders this file's writes (law A)
+      const res = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json', ...ATTENDED_HEADERS }, body: JSON.stringify({ path, content: text, host: host || undefined }), signal: ctl.signal });   // B-23e5: a person's save, marked
       const data = await res.json().catch(() => ({}));
+      if (data && data.code === 'write_unknown') throw Object.assign(new Error('unknown'), { name: 'AbortError' });   // r2299 A1/A3: the hub could not know — said as unknown
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       const before = S.source;
       S.source = text; S.loaded = loadDoc(text); S.base = await info(); S.kept = 0; S.confirmed = 0; conflict.hidden = true;
       S.at = hhmm(); S.note = t('Saved {time}', { time: S.at }); S.dirty = JSON.stringify(S.ed.getJSON()) !== sentJson; renderStatus();   // typed while it was out: still unsaved (a close asks)
       noteEdit(before, text);
-    } catch (e) { say(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(path).split('/').pop() || path, why: e.message })); } finally { S.busy = false; }   // B-23e5 (the save law): the text stays, the window stays, the words say where
+    } catch (e) { if (e && e.name === 'AbortError') { unknownLine.hidden = false; renderStatus(); } say(e && e.name === 'AbortError' ? t('{name}: no reply — it may still have been saved', { name: String(path).split('/').pop() || path }) : t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(path).split('/').pop() || path, why: e.message })); } finally { clearTimeout(endTimer); S.busy = false; S.saving = false; }   // B-23e5 (the save law): the text stays, the window stays, the words say where
   }
   saveDot.addEventListener('click', () => { if (S.dirty) save(); }, { signal });
   async function noteEdit(before, after) {
@@ -946,7 +951,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (v === 'repaint') await load();
     else if (v === 'bar') showConflict(true);
   }
-  btnReload.addEventListener('click', () => { setDirty(false); load({ pressed: true }); }, { signal });   // B-23e5: the Reload pressed
+  btnReload.addEventListener('click', () => { if (S.saving) { say(stillSavingWords(String(path).split('/').pop() || path)); return; } unknownLine.hidden = true; setDirty(false); load({ pressed: true }); }, { signal });   // B-23e5: the Reload pressed; r2299: a save still out answers it first (law C); reloaded, the standing line goes (A3)
   btnKeep.addEventListener('click', async () => { S.kept = await info(); showConflict(false); }, { signal });
   const timer = host ? 0 : setInterval(check, POLL_MS);
   window.addEventListener('focus', check, { signal });

@@ -405,12 +405,12 @@ router.get('/api/file/info', async (req, res) => {
 // Read text file content (limit raised to 10MB)
 router.get('/api/file/content', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.readText(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ ...fsErrorBody(e), size: e.size }); } }
+  if (R) { try { return res.json(await R.fs.readText(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ ...fsErrorBody(e), size: e.size, ...(e && e.code === 'file_not_there' ? { code: 'file_not_there' } : {}) }); } }   // r2221 ★7: the machine's own «not there», typed
   const filePath = safePath(req.query.path);
   try {
     const r = await sfs(req).call('readText', { path: filePath, maxSize: 10 * 1024 * 1024 });
     res.json({ path: filePath, content: r.content, size: r.size });
-  } catch (err) { res.status(err.status || 400).json({ error: err.message, size: err.size }); }
+  } catch (err) { res.status(err.status || 400).json({ error: err.message, size: err.size, ...(err && err.code === 'ENOENT' ? { code: 'file_not_there' } : {}) }); }   // r2221 ★7: the read's OWN verdict that the entry does not exist, typed
 });
 
 // Read binary file chunk as raw bytes
@@ -579,11 +579,28 @@ router.post('/api/mkdir', async (req, res) => {
   catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
 });
 
+// B-23e5 line 311's musts — 主开发 r2221 / r2222 / r2299 LAW A: ONE WRITE OF ONE FILE AT A TIME, AT THE HUB (src/server/file-writes.js):
+// a write starts only after the one before it of that file (machine + the path as asked) ENDED — LANDED, FAILED or UNKNOWN; UNKNOWN
+// (its deadline, a sibling's, a restarted worker, the device request's timer, a broken link) is answered as unknown, «it may have been
+// saved» — never «not saved» — and releases the file like the others; a write the pool shows NEVER STARTED is «not saved: it never
+// started». A landed write's reply names the text it saved (length + digest) — the page compares it with its box (law 2).
+const FW = require('../server/file-writes');
 router.post('/api/file/write', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.write(R.host, remotePath(req.body.path), Buffer.from(req.body.content || ''))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
-  try { await sfs(req).call('writeFile', { path: safePath(req.body.path), content: req.body.content || '' }); res.json({ success: true }); }
-  catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
+  const content = req.body.content || '';
+  if (R) {
+    const p = remotePath(req.body.path), machine = String(R.host);   // the machine by its id: no hosts lookup on this road (the page words it without the name)
+    try { await FW.orderedWrite(`${R.host}\n${p}`, () => R.fs.write(R.host, p, Buffer.from(content))); return res.json({ success: true, saved: FW.savedOf(content) }); }
+    catch (e) { const a = FW.answerOf(e, machine); return a ? res.status(a.status).json(a.body) : res.status(400).json(fsErrorBody(e)); }
+  }
+  try {
+    const p = safePath(req.body.path);
+    await FW.orderedWrite(`\n${p}`, () => sfs(req).call('writeFile', { path: p, content }));
+    res.json({ success: true, saved: FW.savedOf(content) });
+  } catch (err) {
+    const a = FW.answerOf(err, 'this machine'); if (a) return res.status(a.status).json(a.body);
+    res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) });
+  }
 });
 
 // B-3767 (lane bl-scratch, 2026-11-18): A TEMP FILE THE HUB NAMES — «open in editor» on a chat block. The client used to write

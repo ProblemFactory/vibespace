@@ -248,11 +248,11 @@ console.log('⑤ the page: the Files view words the refusal by its code');
     rf._sshWrite = async () => { sshTried++; if (sshOk) return { success: true }; throw new Error('ssh: write failed (No space left on device)'); };
     try { return { r: await rf.write('h-1', '/w/big.bin', Buffer.alloc(8)), sshTried }; } catch (e) { return { e, sshTried }; }
   };
-  const w1 = await writeVia(overLine(), 'dial', false), w2 = await writeVia(overLine(), 'ssh', true), w3 = await writeVia(overLine(), 'ssh', false), w4 = await writeVia(new Error('link lost'), 'ssh', false);
+  const w1 = await writeVia(overLine(), 'dial', false), w2 = await writeVia(overLine(), 'ssh', true), w3 = await writeVia(overLine(), 'ssh', false), w4 = await writeVia(new Error('device link lost'), 'ssh', false), w5 = await writeVia(Object.assign(new Error('not connected'), { stage: 'connect' }), 'ssh', false);
   const body1 = w1.e ? fsErrorBody(w1.e) : null;
   ok(!!body1 && body1.code === 'control-line-too-large' && body1.params.size === '66.8 MiB' && body1.params.cap === '64.0 MiB' && w1.sshTried === 0, `a write refused over the line on a DIALED machine (no ssh road): the page gets the refusal by its code and params (${JSON.stringify(body1)}), no ssh attempt`, { body1, sshTried: w1.sshTried });
-  ok(!!w2.r && w2.r.success === true && !!w3.e && /No space left/.test(w3.e.message) && !fsErrorBody(w3.e).code && !!w4.e && /No space left/.test(w4.e.message),
-    'a machine WITH an ssh road: that road writes it (the working road kept), and when it fails its OWN words are said (a full disk is never hidden behind the line\'s refusal); any other device error falls to the ssh road as before', { w2: w2.r, w3: w3.e && w3.e.message, w4: w4.e && w4.e.message });
+  ok(!!w2.r && w2.r.success === true && !!w3.e && /No space left/.test(w3.e.message) && !fsErrorBody(w3.e).code && !!w4.e && /^device link lost/.test(w4.e.message) && w4.sshTried === 0 && w4.e.writeUnknown === true && !!w5.e && /No space left/.test(w5.e.message) && w5.sshTried === 1,
+    'a machine WITH an ssh road: that road writes it (the working road kept), and when it fails its OWN words are said (a full disk is never hidden behind the line\'s refusal); B-23e5 r2299 A4: a write the device was SENT (its link lost after) takes NO second road and is UNKNOWN; one refused before sending (not connected) falls to the ssh road', { w2: w2.r, w3: w3.e && w3.e.message, w4: w4.e && w4.e.message, w5: w5.e && w5.e.message });
   const UP = read('src/routes/files.js');
   ok(UP.includes("      return res.status(400).json(fsErrorBody(e));   // B-7f0b D8: a refusal by code"), 'the upload road answers a refusal by its code too (the explorer\'s upload words it with fsErrorText)');
 }

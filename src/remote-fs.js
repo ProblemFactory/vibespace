@@ -73,6 +73,11 @@ function parseArchiveListing(kind, out) {
 }
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// B-23e5 r2299 A1 / A4: where a device write ended — never SENT (refused at the send point: not connected, the gate, the line's bound —
+// another road may be tried), UNKNOWN (sent, then the hub's own timer or a lost link ended its wait — it may still land), else the
+// machine's own error for THIS write (FAILED). The client marks its never-sent refusals (src/agentd/client.js `stage`, its codes).
+const writeNotSent = (e) => !!e && (e.stage === 'connect' || e.stage === 'gate' || e.code === 'request-not-sent' || e.code === 'control-line-too-large');
+const writeMarked = (e) => { if (e && typeof e === 'object' && !writeNotSent(e) && (/ timeout$/.test(String(e.message)) || /^device link lost/.test(String(e.message)))) { try { e.writeUnknown = true; } catch { } } return e; };
 // shq for PATHS: a quoted `~` never expands ('~/Downloads/x' landed in a
 // literal ./~ directory on the remote — audit 2.192.0), so emit the tilde
 // prefix as an unquoted "$HOME" and quote only the rest. The dial fast path
@@ -334,7 +339,28 @@ class RemoteFs {
     return { path: filePath, size: parseInt(size) || 0, modified: (parseInt(mtime) || 0) * 1000, isBinary, isDirectory };
   }
 
+  // r2221 ★7 (B-23e5): a file NOT THERE is said only by the machine's own verdict that the entry does not exist — typed
+  // `file_not_there`, asked only when the read failed (a device's / a Windows agent's listing of the folder; a shell's own test);
+  // every other failure stays its own error (a reader that could not start, a storage's hiccup: the editor's «Failed to load»)
   async readText(id, filePath, maxBytes = 10 * 1024 * 1024) {
+    try { return await this._readText(id, filePath, maxBytes); } catch (e) {
+      if (!e || e.size) throw e;   // the read cap is its own answer
+      let gone = false; try { gone = await this._notThere(id, filePath); } catch { gone = false; }
+      if (gone) throw Object.assign(new Error(`${filePath}: no such file yet`), { code: 'file_not_there' });
+      throw e;
+    }
+  }
+  async _notThere(id, filePath) {
+    const w = await this._win(id);
+    const dm = w || await this._dev(id);
+    if (dm) {
+      // r2299 ★7: THE FILE's OWN STAT — the device's (or Windows agent's) answer that this entry does not exist; never a folder listing
+      try { await dm.fsStat(await this._devAbs(id, dm, filePath)); return false; } catch (e) { return /^ENOENT: no such file or directory, stat /.test(String(e && e.message)); }
+    }
+    const out = (await this._run(id, `if [ -e ${shq(filePath)} ] || [ -L ${shq(filePath)} ]; then echo there; else echo not-there; fi`)).toString().trim();
+    return out === 'not-there';
+  }
+  async _readText(id, filePath, maxBytes = 10 * 1024 * 1024) {
     const w = await this._win(id);
     const dm = w || await this._dev(id);
     if (dm) {
@@ -368,17 +394,21 @@ class RemoteFs {
   }
 
   async write(id, filePath, contentBuffer) {
-    const w = await this._win(id); if (w) { await w.fsWrite(filePath, contentBuffer, { by: this._actBy }); return { success: true }; }
+    const w = await this._win(id); if (w) { try { await w.fsWrite(filePath, contentBuffer, { by: this._actBy }); } catch (e) { throw writeMarked(e); } return { success: true }; }
     const dm = await this._dev(id);
     if (dm) {
+      let abs = null;
       try {
-        const abs = await this._devAbs(id, dm, filePath);
+        abs = await this._devAbs(id, dm, filePath);
         await dm.fsWrite(abs, contentBuffer, { by: this._actBy });
         return;
       } catch (e) {
         // B-7f0b D8 (r310 (3)): a write over the device link's line, on a machine with NO ssh road (dialed), is said by name —
         // never an ssh attempt; a machine with ssh writes it by its ssh road below, which answers with its own words
         if (e && e.code === 'control-line-too-large') { let dial = false; try { dial = this.hosts.get(id)?.transport === 'dial'; } catch { } if (dial) throw e; }
+        // B-23e5 r2299 A4: NO SECOND ROAD FOR A WRITE THAT WAS SENT — the ssh road only when the device refused BEFORE sending it (not
+        // connected, the send point's own refusal, its path not resolved); a sent write the hub's timer gave up on is UNKNOWN (A1)
+        if (abs !== null && !writeNotSent(e)) throw writeMarked(e);
         /* legacy */
       }
     }
@@ -393,7 +423,9 @@ class RemoteFs {
       let err = '';
       child.stderr.on('data', d => { err += d; });
       child.on('error', reject);
-      child.on('close', (code) => code === 0 ? resolve() : reject(sshRefusal(h, { code }, err, fed) || new Error(err.trim() || `write failed (${code})`)));
+      // r2299 A1: ssh's own failure (255) that is not a refusal before the command ran (sshRefusal) is a link that broke during the
+      // write — UNKNOWN; the command's own error (cat / mkdir) is FAILED
+      child.on('close', (code) => { if (code === 0) return resolve(); const said = sshRefusal(h, { code }, err, fed); reject(said || Object.assign(new Error(err.trim() || `write failed (${code})`), code === 255 ? { writeUnknown: true } : {})); });
       const fed = feedStdin(child, contentBuffer);
     });
     return { success: true };

@@ -28,7 +28,7 @@ import prettierYaml from 'prettier/plugins/yaml';
 import prettierGraphql from 'prettier/plugins/graphql';
 import { onFileChanged, sameFile } from './file-changed.js'; // §7.9: the server's file-changed signal
 import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the HTML preview's frame
-import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js'; // lane file-preview-mount r2: a load / save refusal in the reader's language; B-23e5: a person's press marked
+import { fsErrorText, ATTENDED_HEADERS, namesText, stillSavingWords } from './file-explorer-ops.js'; // lane file-preview-mount r2: a load / save refusal in the reader's language; B-23e5: a person's press marked
 import { saveCloseDoors } from './refusal-doors.js'; // B-3b03 follow-up: a save-and-close window closes only after its save landed
 
 const PRETTIER_PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss, prettierMarkdown, prettierTypescript, prettierYaml, prettierGraphql];
@@ -213,6 +213,10 @@ class CodeEditor {
       { label: t('Reload from disk'), kind: 'primary', door: 'disk-reload', run: () => this.reloadFromDisk() },
       { label: t('Keep my changes'), kind: 'secondary', door: 'disk-keep', run: () => { this._diskKept = this._diskSeen || Date.now(); this._diskChip.style.display = 'none'; } }] });
     this._diskChip.style.display = 'none';
+    // B-23e5 r2299 A3: ONE standing line after a save that ended UNKNOWN — until the file is reloaded or the editor closed
+    this._unknownLine = document.createElement('div'); this._unknownLine.className = 'code-editor-unknown-line';
+    this._unknownLine.style.cssText = 'display:none;padding:2px 8px;font-size:12px;color:var(--yellow);';
+    this._unknownLine.textContent = t('An earlier save of this file never replied — if it lands late it can replace newer text: reload to check');
     toolbarLeft.append(this.saveIndicator);   // the disk notice is its OWN row under the toolbar (the 500 px picture: one toolbar row crushed its doors)
 
     const toolbarRight = document.createElement('div'); toolbarRight.className = 'editor-toolbar-right';
@@ -281,7 +285,7 @@ class CodeEditor {
 
     this.editorBody = document.createElement('div'); this.editorBody.className = 'editor-body';
     this._previewBody = document.createElement('div'); this._previewBody.className = 'markdown-preview editor-body'; this._previewBody.style.display = 'none'; this._previewBody.style.overflow = 'auto';
-    container.append(toolbar, this._diskChip, this.editorBody, this._previewBody);
+    container.append(toolbar, this._diskChip, this._unknownLine, this.editorBody, this._previewBody);
     winInfo.content.appendChild(container);
 
     this._langCompartment = new Compartment();
@@ -401,7 +405,7 @@ class CodeEditor {
           ]),
           // the dirty mark is t('Unsaved') — not t('Modified'): that row is the file list's «修改时间» column (lane ui-language)
           EditorView.updateListener.of((update) => {
-            if (update.docChanged && !self._reloading) { self.modified = true; self.saveIndicator.textContent = '● ' + t('Unsaved'); self.saveIndicator.style.color = 'var(--yellow)'; }
+            if (update.docChanged && !self._reloading) { self.modified = true; self.saveIndicator.textContent = self._saveOut ? '● ' + t('Saving…') : '● ' + t('Unsaved'); self.saveIndicator.style.color = 'var(--yellow)'; }   // r2221 LAW C: typing while a save is out keeps the saving word, the mark beside it
           }),
           ...(this._isReadOnly ? [EditorState.readOnly.of(true)] : []),
         ],
@@ -437,15 +441,16 @@ class CodeEditor {
     const prevOnClose = this.winInfo.onClose;
     // B-3b03 follow-up (a MUST of its round's point 5): a save-and-close window's ✕ saves first; a refused save asks before it
     // closes — never a close or a «done» over a refused save the person did not choose (src/lib/refusal-doors.js)
-    const doors = this.onSaveAndClose ? saveCloseDoors({ save: () => this.save(), text: () => this.editorView.state.doc.toString(), signal: () => this.onSaveAndClose(), close: () => this.app?.wm?.closeWindow?.(this.winInfo.id), ready: () => !!this.editorView,
-      confirmDiscard: () => showConfirmDialog({ title: t('Close without saving?'), message: t('Your edits were not saved: {msg}. Close the editor and discard them?', { msg: this._lastSaveError || t('Error') }), confirmText: t('Discard'), danger: true, cancelDefault: true }) }) : null;
+    const doors = this.onSaveAndClose ? saveCloseDoors({ save: () => this.save(), busy: () => !!this._saveOut, sayBusy: () => { this.saveIndicator.textContent = stillSavingWords(String(this.filePath).split('/').pop() || this.filePath); this.saveIndicator.style.color = ''; }, settled: () => this._saveSettled || Promise.resolve(!this.modified), text: () => this.editorView.state.doc.toString(), signal: () => this.onSaveAndClose(), close: () => this.app?.wm?.closeWindow?.(this.winInfo.id), ready: () => !!this.editorView,
+      confirmDiscard: () => showConfirmDialog({ title: t('Close without saving?'), message: this._saveUnknown ? t('{name}: the last save did not reply — it may have been saved. Close the editor anyway?', { name: String(this.filePath).split('/').pop() || this.filePath }) : t('Your edits were not saved: {msg}. Close the editor and discard them?', { msg: this._lastSaveError || t('Error') }), confirmText: t('Discard'), danger: true, cancelDefault: true }) }) : null;   // r2299 A3: an UNKNOWN save asked as unknown, never «not saved»
     if (doors) { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest()); }
     // B-23e5's remainder (r1378 (3)): THE DIRTY MARK STAYS ON THE WINDOW — a window holding unsaved text ASKS before it closes (its ✕, a
     // tab's ✕, a group's close-all, whose question names no unsaved text): never a silent loss; a save-and-close window asks by its doors
     else { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => {
       if (typeof prevAsk === 'function' && prevAsk(o) === false) return false;
+      if (this._saveOut && !(o && o.discardAsked)) { this.saveIndicator.textContent = stillSavingWords(String(this.filePath).split('/').pop() || this.filePath); this.saveIndicator.style.color = ''; return false; }   // r2221 LAW C: a save still out answers the ✕ first
       if (!this.modified || (o && o.discardAsked)) return true;
-      showConfirmDialog({ title: t('Close without saving?'), message: this._saveOut ? t('{name} has unsaved changes and a save of it is still out — close it and discard what is not saved?', { name: String(this.filePath).split('/').pop() || this.filePath }) : t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: String(this.filePath).split('/').pop() || this.filePath }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps (the safe default)
+      showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: String(this.filePath).split('/').pop() || this.filePath }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps (the safe default)
         .then((ok) => { const wm = this.app && this.app.wm; if (ok && wm) wm.requestClose(this.winInfo.id, { discardAsked: true }); });
       return false;
     }; }
@@ -500,6 +505,7 @@ class CodeEditor {
 
   async reloadFromDisk(opts = {}) {
     if (this._reloading || !this.editorView) return;
+    if (this._saveOut) { if (!opts.auto) { this.saveIndicator.textContent = stillSavingWords(String(this.filePath).split('/').pop() || this.filePath); this.saveIndicator.style.color = ''; } return; }   // r2221 LAW C: a save still out answers a Reload first (the freshness watch's auto reload waits too)
     if (this.modified) {
       if (opts.auto) return; // never auto-discard edits
       const ok = await showConfirmDialog({ title: t('Reload from disk'), message: t('This file has unsaved changes. Reloading from disk will discard them. Continue?'), confirmText: t('Reload'), danger: true });
@@ -517,7 +523,7 @@ class CodeEditor {
       const prevHead = Math.min(view.state.selection.main.head, content.length);
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, selection: EditorSelection.cursor(prevHead) });
       view.scrollDOM.scrollTop = prevScroll;
-      this.modified = false;
+      this.modified = false; this._saveUnknown = false; this._unknownLine.style.display = 'none';   // r2299 A3: reloaded — the standing line goes
       this._diskChip.style.display = 'none';
       if (this._previewing) this._renderPreviewNow();
       this._formatStatus('⟳ ' + t('Reloaded from disk'), 'var(--green)', 2000);
@@ -619,13 +625,14 @@ class CodeEditor {
   async save() {
     const name = String(this.filePath).split('/').pop() || this.filePath;
     // r2198 law 1: ONE save of this editor is out at a time — a press while one is out SENDS NOTHING and says so; nothing waits, nothing is
-    // queued, nothing is sent later by itself. It answers by the mark (law 6: save-and-close asks by it, its words saying a save is still out)
-    if (this._saveOut) { this.saveIndicator.textContent = '… ' + t('{name}: still saving…', { name }); this.saveIndicator.style.color = ''; this._wordsOf = 0; this._lastSaveError = t('a save of this file is still out'); return !this.modified; }
+    // queued, nothing is sent later by itself (r2221 LAW C: answered by that fact, never by the mark; the hub orders the file's writes, law A)
+    if (this._saveOut) { this.saveIndicator.textContent = stillSavingWords(name); this.saveIndicator.style.color = ''; this._wordsOf = 0; return false; }   // r2221 LAW C: answered by that fact, never by the mark
     const content = this.editorView.state.doc.toString();
     const seq = this._saveSeq = (this._saveSeq || 0) + 1;
-    this._saveOut = true;
+    this._saveOut = true; let settle = null; this._saveSettled = new Promise((r) => { settle = r; });   // r2299 ★14: a close while it is out waits on its answer
     this.saveIndicator.textContent = t('Saving…'); this.saveIndicator.style.color = ''; this._wordsOf = seq;   // B-3b03 follow-up: a save that is out says so
-    // r2198 law 3: a request with no reply inside 45 s is ENDED by the page — «not saved: no reply», and presses work again (the only bound)
+    // r2222 (4): the page's 45 s is the LAST guard — for a write that started and has not replied (the hub answers within its own 30 s);
+    // ended, it says «no reply — it may still have been saved», the mark stays, and presses work again
     const ctl = new AbortController(), end = setTimeout(() => ctl.abort(), 45000);
     try {
       // fetch only rejects on network errors — server-side write failures
@@ -636,7 +643,9 @@ class CodeEditor {
       const data = await res.json().catch(() => ({}));
       // r2198 law 3: «still trying» — another press on this file or its folder holds it (this editor's own saves never overlap): NOT saved
       if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));
+      if (data && data.code === 'write_unknown') throw Object.assign(new Error('unknown'), { noReply: true });   // r2299 A1/A3: the hub could not know — said as unknown
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
+      if (!namesText(data, content)) throw Object.assign(new Error('no reply'), { noReply: true });   // r2221 item 6: «saved» names the text it saved; a body that does not is no reply
       this.saveIndicator.title = '';   // B-23e5: a refusal's hover goes with the good save
       // r2198 law 2: THE MARK IS CLEARED BY ONE THING ONLY — this «saved» reply, when its text is what the box holds AT THIS MOMENT; text typed
       // while the save was out is not saved, and its mark stays (law 4: the person kept typing)
@@ -649,7 +658,9 @@ class CodeEditor {
       setTimeout(() => { if (!this.modified && this._wordsOf === seq) this.saveIndicator.textContent = ''; }, 2000);
       return !this.modified;   // the save-and-close door reads the mark (never «done» over text the disk does not hold)
     } catch (err) {
-      const why = ctl.signal.aborted ? t('no reply') : (err.message || t('Error'));
+      // r2222 (4): the page's 45 s guard, or a reply that names no text — it may still have been saved; the mark stays, no «not saved»
+      if (ctl.signal.aborted || (err && err.noReply)) { this.saveIndicator.textContent = t('{name}: no reply — it may still have been saved', { name }); this.saveIndicator.style.color = 'var(--yellow)'; this.saveIndicator.title = ''; this._lastSaveError = ''; this._saveUnknown = true; this._unknownLine.style.display = ''; this._wordsOf = seq; return false; }   // r2299 A3: UNKNOWN, its own words and colour, never «not saved»; the standing line
+      const why = err.message || t('Error'); this._saveUnknown = false;
       // B-23e5 (the save law): the text stays in the editor, the editor stays open, and the words say WHERE it is not saved
       this.saveIndicator.textContent = '✕ ' + t('{name} is not saved — {why}', { name, why }); this.saveIndicator.style.color = 'var(--red)';
       this.saveIndicator.title = t('{path} is not saved — {why}', { path: this.filePath, why });
@@ -657,7 +668,7 @@ class CodeEditor {
       if (this.modified) showToast(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name, why }), { type: 'error', duration: 8000 });
       this._lastSaveError = why; this._wordsOf = seq;
       return !this.modified;   // B-3b03 follow-up: the save-and-close door reads it (never «done» over a refused save with unsaved text)
-    } finally { clearTimeout(end); this._saveOut = false; }
+    } finally { clearTimeout(end); this._saveOut = false; settle(!this.modified); }
   }
 
   // lane artifacts-model: a save in an editor opened FROM a chat counts on that conversation's deliverable row (by: user)

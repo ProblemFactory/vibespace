@@ -283,11 +283,15 @@ class SafeFs {
     console.error(`[safe-fs] ${this._words}: a worker ended ${START_FAILS_SAID} times in a row before it answered (${why}) — every call is refused by name until one answers; it is tried again, the wait doubling up to 30 s`);
   }
 
-  _rejectInflight(rec, message) {
+  _rejectInflight(rec, message, running) {
+    let oldest = true;
     for (const [, call] of rec.inflight) {
       clearTimeout(call.timer);
       const e = new Error(message);
       e.status = 503;
+      // r2299 (B-23e5 law A1, A5): the call the worker was RUNNING (the oldest it took, unless named) may have run; every other one never started
+      if (running === undefined ? oldest : call === running) e.mayHaveRun = true; else e.neverStarted = true;
+      oldest = false;
       call.reject(e);
     }
     rec.inflight.clear();
@@ -614,15 +618,17 @@ class SafeFs {
     if (running) this._noteHung(running.payload, running.op, running !== call ? Math.max(call.timeoutMs || 0, monoNow() - (running.sentAt || monoNow())) : Math.min(running.timeoutMs || Infinity, monoNow() - (running.sentAt || monoNow())), { early: running !== call });   // the time since it was sent without an answer; ended EARLY by a queued call ⇒ only that long
     // r275: a person's press (attended) that ends its worker too hears the renewed memory's own words — tried, and not asked again for N s
     const told = call.attended && running === call ? this._hungOf(call.payload, call.op, 0) : null;
-    call.reject(told ? Object.assign(pathHungRefusal(told.path, told.ms), { deadline: true, tried: true }) : e);
-
     const w = rec.worker;
+    // r2299 (B-23e5 law A1, A5): a call that ran out its deadline WHILE QUEUED never started (neverStarted); the one the worker was
+    // running may have run — its siblings are marked the same way below
+    call.reject(Object.assign(told ? Object.assign(pathHungRefusal(told.path, told.ms), { deadline: true, tried: true }) : e, running && running !== call ? { neverStarted: true } : {}));
+
     rec.alive = false;
     rec.worker = null;
     // stop our own listeners so the imminent terminate()/exit doesn't double-respawn
     try { w?.removeAllListeners(); } catch {}
     // reject any remaining siblings queued behind the wedged op
-    this._rejectInflight(rec, 'storage worker restarted');
+    this._rejectInflight(rec, 'storage worker restarted', running);
     this._restarts++;
     try { global.__vsMetric?.('srv-safefs-restart', 1); } catch {}
     // terminate in the background (a truly D-state-stuck OS thread may linger,

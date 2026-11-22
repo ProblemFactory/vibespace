@@ -8,7 +8,7 @@ import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEdito
 import { isTouchDevice } from './utils.js';
 import { t } from './i18n.js';
 import { showConfirmDialog } from './utils.js';
-import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';   // B-3b03 follow-up: the pane's refused save in the reader's language; B-23e5: its save marked
+import { fsErrorText, ATTENDED_HEADERS, namesText, stillSavingWords } from './file-explorer-ops.js';   // B-3b03 follow-up: the pane's refused save in the reader's language; B-23e5: its save marked
 import { Resizer } from './resizer.js';
 import { lateFocus, openClock } from './late-focus.js'; // B-c87d: the terminal takes its keys back through THE door (the keyboard stays where the person last put it)
 import { EditorView, basicSetup } from 'codemirror';
@@ -129,6 +129,11 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
   pathSpan.className = 'file-path';
   pathSpan.textContent = filePath;
   toolbar.appendChild(pathSpan);
+  // B-23e5 r2299 A3: ONE standing line after a save that ended UNKNOWN — until the pane is closed
+  const unknownSpan = document.createElement('span');
+  unknownSpan.style.cssText = 'display:none;margin-left:8px;font-size:11px;color:var(--yellow);';
+  unknownSpan.textContent = t('An earlier save of this file never replied — if it lands late it can replace newer text');
+  toolbar.appendChild(unknownSpan);
 
   const edSettings = loadEditorSettings();
   const mkBtn = (text) => { const b = document.createElement('button'); b.className = 'editor-setting-btn'; b.textContent = text; return b; };
@@ -146,9 +151,14 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
   saveBtn.className = 'btn-create';
   saveBtn.style.cssText = 'padding:3px 12px;font-size:11px;';
   saveBtn.textContent = 'Save & Close';
+  // r2221 LAW B: a pane whose terminal took the saved text while it holds later typing STAYS — «Save again» or this «Discard»
+  const discardBtn = document.createElement('button');
+  discardBtn.className = 'btn-create';
+  discardBtn.style.cssText = 'padding:3px 12px;font-size:11px;display:none;';
+  discardBtn.textContent = t('Discard');
 
   const sep = document.createElement('span'); sep.className = 'editor-toolbar-sep';
-  toolbar.append(sep, btnWrap, btnFontDown, fontDisplay, btnFontUp, btnTheme, saveBtn);
+  toolbar.append(sep, btnWrap, btnFontDown, fontDisplay, btnFontUp, btnTheme, saveBtn, discardBtn);
 
   const editorBody = document.createElement('div');
   editorBody.className = 'editor-body';
@@ -177,11 +187,12 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
   fetch(`/api/file/content?path=${encodeURIComponent(filePath)}${hq}`)
     .then(r => r.json())
     .then(data => {
-      // r2198 law 8 (the release's): a load the storage or the hub REFUSED takes the «Failed to load» door — never an EMPTY pane whose Save &
-      // Close writes nothing over the file; a file not there yet (ENOENT) still opens, empty, to be created
-      if (data && data.error && !/ENOENT|no such file/i.test(String(data.error))) throw new Error(fsErrorText(data));
+      // r2198 law 8 / r2221 ★7 (the release's): a failed load takes the «Failed to load» door — never an EMPTY pane whose Save & Close
+      // writes nothing over the file; only the read's OWN verdict that the entry does not exist (typed `file_not_there` by the hub's
+      // read, src/routes/files.js / src/remote-fs.js) opens it, empty, to be created
+      if (data && data.error && data.code !== 'file_not_there') throw new Error(fsErrorText(data));
       const content = data.content || '';
-      let marked = false, saveOut = false, handing = false;   // r2198: the pane's unsaved mark (law 2), its one save out (law 1), the hand-back stretch (law 5)
+      let marked = false, saveOut = false, handing = false, orphaned = false;   // r2198: the pane's unsaved mark (law 2), its one save out (law 1), the hand-back stretch (law 5); r2221 law B: the terminal took the text, later typing kept
       const langExtensions = getLangExtension(detectLang(filePath));
       const edSettings = loadEditorSettings();
 
@@ -218,13 +229,16 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
       // ONE guard a window, over EVERY pane it holds (a pane left behind by an interrupted CLI counts too): a pane whose text is not on
       // disk and whose editor is still in the window is unsaved; a removed pane never is (its delta read: no guard over a guard, none lost)
       const panes = targetWinInfo._editorPanes || (targetWinInfo._editorPanes = new Set());
-      panes.add({ view: editorView, name: String(filePath).split('/').pop() || filePath, dirty: () => editorView.dom.isConnected && marked });   // r2198 law 2: «nothing unsaved» IS the mark
+      panes.add({ view: editorView, name: String(filePath).split('/').pop() || filePath, dirty: () => editorView.dom.isConnected && marked,
+        busy: () => saveOut, sayBusy: () => sayBusyPane() });   // r2221 LAW C: while its save is out, the window's ✕ is answered by that fact   // r2198 law 2: «nothing unsaved» IS the mark
       if (!targetWinInfo._editorPaneGuard) {
         targetWinInfo._editorPaneGuard = true;
         const prevDirty = targetWinInfo._editorDirty, prevAsk = targetWinInfo.onCloseRequest;
         const unsavedPane = () => { const names = []; for (const x of panes) { if (!x.view.dom.isConnected) panes.delete(x); else if (x.dirty()) names.push(x.name); } return names.length ? { name: names.join(', ') } : null; };   // every unsaved pane named
         targetWinInfo._editorDirty = () => !!unsavedPane() || (typeof prevDirty === 'function' && prevDirty());
+        const busyPane = () => [...panes].find((x) => x.view.dom.isConnected && typeof x.busy === 'function' && x.busy()) || null;
         targetWinInfo.onCloseRequest = (o) => {
+          const b = busyPane(); if (b) { b.sayBusy(); return false; }   // r2221 LAW C: a save still out answers the ✕ first, never the mark
           const d = unsavedPane();
           if (d && !(o && o.discardAsked)) {
             showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: d.name }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps
@@ -262,46 +276,20 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         saveEditorSettings(edSettings);
       };
 
-      const doSave = async () => {
-        const at = openClock();   // B-c87d: the close began NOW (the person's Save & Close); the save answers later
-        const name = String(filePath).split('/').pop() || filePath;
-        const say = (words, color = '') => { pathSpan.textContent = words; pathSpan.style.color = color; };   // r2006 (1): the words go on the path line; the button keeps its label
-        // r2198 law 1: ONE save of this pane is out at a time — a press while one is out SENDS NOTHING and says so (in the hand-back the line
-        // already says it is saved and being handed back); nothing waits, nothing is queued, nothing is sent later by itself
-        if (saveOut) { if (!handing) say('… ' + t('{name}: still saving…', { name })); return; }
-        saveOut = true;
-        const newContent = editorView.state.doc.toString();
-        // r2198 law 3: a request with no reply inside 45 s is ENDED by the page — said «no reply»; presses work again (the only bound, on each request)
-        const endAt = () => { const c = new AbortController(); c.timer = setTimeout(() => c.abort(), 45000); return c; };
-        let saved = false, ctl = endAt();
-        say('… ' + t('Saving…'));
-        try {
-          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }), signal: ctl.signal });   // B-23e5: a person's save, marked
-          const data = await res.json().catch(() => ({}));
-          // r2198 law 3: «still trying» — another press on this file or its folder holds it (this pane's own saves never overlap): NOT saved
-          if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));
-          if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);   // B-3b03 follow-up: a refusal in the reader's language
-          saved = true;
-          // r2198 laws 2 + 5 (r2006's second must): text typed while the save was out is not on the disk — the pane stays, its mark on, the CLI
-          // not told; only a saved reply whose text is the box's AT THIS MOMENT clears the mark
-          if (editorView.state.doc.toString() !== newContent) { say('● ' + t('{name} is saved as it was when you pressed save — what you typed after is not saved yet: save again', { name }), 'var(--yellow)'); return; }
-          marked = false;
-          // r2198 law 5: from this check to the close the pane takes no typing and SAYS so — the only lock anywhere
-          handing = true; editorView.dispatch({ effects: lockComp.reconfigure(EditorState.readOnly.of(true)) });
-          say('✓ ' + t('{name} is saved — handing it back to the terminal…', { name }), 'var(--green)');
-          clearTimeout(ctl.timer); ctl = endAt();   // the telling is its own request, with its own 45 s
-          const sig = await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }), signal: ctl.signal });
-          if (!sig.ok) { const sd = await sig.json().catch(() => ({})); throw new Error(sd.error || `HTTP ${sig.status}`); }   // the hub's refusal is read and said
-        } catch (err) {
-          const why = ctl.signal.aborted ? t('no reply') : (err.message || t('Error'));
-          handing = false; editorView.dispatch({ effects: lockComp.reconfigure([]) });
-          // r2198 law 5: a telling the hub refuses or that fails KEEPS the pane — the file IS saved, the terminal was not told, and why
-          if (saved) { say(t('{name} is saved, but the terminal was not told — {why}', { name, why }), 'var(--yellow)'); return; }
-          // Write failed — keep the editor open with the user's edits instead of tearing down and unblocking Claude with a stale file;
-          // B-23e5 (the save law, r1378 (3)): where it is not saved, where the text IS and what to do — the words STAY until the next press
-          say(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name, why }), 'var(--red)');
-          return;
-        } finally { clearTimeout(ctl.timer); saveOut = false; }
+      // r2221 LAW B: an editor-close that arrives (this page's own telling answered late, another device's Save & Close, the terminal's own)
+      // removes this pane only when its box holds no typing the disk lacks — else it STAYS, says so, and offers «Save again» or «Discard»
+      editorPane._vsUnsaved = () => marked;
+      editorPane._vsOrphan = () => {
+        orphaned = true; handing = false; editorView.dispatch({ effects: lockComp.reconfigure([]) });
+        // r2299 ★4: no longer the terminal's editor — its Ctrl+G binding, the window's editor state (a layout reload reopens none) and the veil go
+        if (targetWinInfo._editorState && targetWinInfo._editorState.signalPath === signalPath) { targetWinInfo._editorState = null; targetWinInfo._editorDoSave = null; targetWinInfo._editorTermVeil?.remove(); targetWinInfo._editorTermVeil = null; }
+        pathSpan.textContent = t('the terminal took the saved text — what you typed after is only here'); pathSpan.style.color = 'var(--yellow)';
+        saveBtn.textContent = t('Save again'); discardBtn.style.display = '';
+      };
+      // r2221 LAW C / r2299 ★11: a save still out answers the window's ✕ and «Discard» — the hand-back keeps its own words
+      const sayBusyPane = () => { if (handing) return; pathSpan.textContent = stillSavingWords(String(filePath).split('/').pop() || filePath); pathSpan.style.color = ''; };
+      // the pane's close — a saved and handed-back text, or r2221 law B's «Discard»
+      const closePane = (at) => {
         // Remove editor pane + resizer, restore terminal to full height — B-23e5's LEFT (1): the window's state is cleared only when it is
         // THIS pane's, and the split stays while another pane (one left behind by an interrupted CLI) is still shown
         if (targetWinInfo._editorState && targetWinInfo._editorState.signalPath === signalPath) {
@@ -327,8 +315,59 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
           }, 150);
         }
       };
+      const doSave = async () => {
+        const at = openClock();   // B-c87d: the close began NOW (the person's Save & Close); the save answers later
+        const name = String(filePath).split('/').pop() || filePath;
+        const say = (words, color = '') => { pathSpan.textContent = words; pathSpan.style.color = color; };   // r2006 (1): the words go on the path line; the button keeps its label
+        // r2198 law 1: ONE save of this pane is out at a time — a press while one is out SENDS NOTHING and says so (in the hand-back the line
+        // already says it is saved and being handed back); nothing waits, nothing is queued, nothing is sent later by itself
+        if (saveOut) { if (!handing) say(stillSavingWords(name)); return; }
+        saveOut = true;
+        const newContent = editorView.state.doc.toString();
+        // r2198 law 3: a request with no reply inside 45 s is ENDED by the page — said «no reply»; presses work again (the only bound, on each request)
+        const endAt = () => { const c = new AbortController(); c.timer = setTimeout(() => c.abort(), 45000); return c; };
+        let saved = false, ctl = endAt();
+        say(t('Saving…'));
+        try {
+          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }), signal: ctl.signal });   // B-23e5: a person's save, marked
+          const data = await res.json().catch(() => ({}));
+          // r2198 law 3: «still trying» — another press on this file or its folder holds it (this pane's own saves never overlap): NOT saved
+          if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));
+          if (data && data.code === 'write_unknown') throw Object.assign(new Error('unknown'), { noReply: true });   // r2299 A1/A3: the hub could not know — said as unknown
+          if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);   // B-3b03 follow-up: a refusal in the reader's language
+          if (!namesText(data, newContent)) throw Object.assign(new Error('no reply'), { noReply: true });   // r2221 item 6: «saved» names the text it saved; a body that does not is no reply
+          saved = true;
+          // r2198 laws 2 + 5 (r2006's second must): text typed while the save was out is not on the disk — the pane stays, its mark on, the CLI
+          // not told; only a saved reply whose text is the box's AT THIS MOMENT clears the mark
+          if (editorView.state.doc.toString() !== newContent) { say('● ' + t('{name} is saved as it was when you pressed save — what you typed after is not saved yet: save again', { name }), 'var(--yellow)'); return; }
+          marked = false;
+          if (orphaned) { closePane(at); return; }   // r2221 LAW B: its terminal took the text already — «Save again» saved the rest; nobody to tell
+          // r2198 law 5: from this check to the close the pane takes no typing and SAYS so — the only lock anywhere
+          handing = true; editorView.dispatch({ effects: lockComp.reconfigure(EditorState.readOnly.of(true)) });
+          say('✓ ' + t('{name} is saved — handing it back to the terminal…', { name }), 'var(--green)');
+          clearTimeout(ctl.timer); ctl = endAt();   // the telling is its own request, with its own 45 s
+          const sig = await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }), signal: ctl.signal });
+          if (!sig.ok) { const sd = await sig.json().catch(() => ({})); throw Object.assign(new Error(sd.error || `HTTP ${sig.status}`), { code: sd.code }); }   // the hub's refusal is read and said
+        } catch (err) {
+          const noReply = ctl.signal.aborted || !!(err && err.noReply), why = noReply ? t('no reply — it may still have been saved') : (err.message || t('Error'));
+          handing = false; editorView.dispatch({ effects: lockComp.reconfigure([]) });
+          // r2198 law 5: a telling the hub refuses or that fails KEEPS the pane — the file IS saved, the terminal was not told, and why;
+          // r2222 (5): a telling still in flight at the hub's bound — «not told yet, it may still arrive» (its late arrival is law B's)
+          if (saved && ((err && err.code === 'telling_out') || noReply)) { say(t('{name} is saved — the terminal is not told yet; it may still arrive', { name }), 'var(--yellow)'); return; }   // r2299 ★10: the telling's own words
+          if (saved) { say(t('{name} is saved, but the terminal was not told — {why}', { name, why }), 'var(--yellow)'); return; }
+          // r2222 (4): the page's 45 s guard (or a reply that names no text) — it may still have been saved; the mark stays
+          if (noReply) { say(t('{name}: no reply — it may still have been saved', { name }), 'var(--yellow)'); unknownSpan.style.display = ''; return; }   // r2299 A3: UNKNOWN, never «not saved»; the standing line
+          // Write failed — keep the editor open with the user's edits instead of tearing down and unblocking Claude with a stale file;
+          // B-23e5 (the save law, r1378 (3)): where it is not saved, where the text IS and what to do — the words STAY until the next press
+          say(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name, why }), 'var(--red)');
+          return;
+        } finally { clearTimeout(ctl.timer); saveOut = false; }
+        closePane(at);
+
+      };
 
       saveBtn.onclick = doSave;
+      discardBtn.onclick = () => { if (saveOut) { sayBusyPane(); return; } closePane(openClock()); };   // r2221 LAW B: the later typing dropped by the person's own press; r2299 ★5: a save still out answers it first
       targetWinInfo._editorDoSave = doSave;
     })
     .catch((err) => {
@@ -366,6 +405,9 @@ export function closeExternalEditor(app, signalPath) {
     // cleared it while this pane still shows), and only that pane goes
     const editorPane = [...((win.content && win.content.querySelectorAll) ? win.content.querySelectorAll('.editor-container') : [])].find((el) => el.dataset.signal === signalPath);
     if (!editorPane) continue;
+    // r2221 LAW B: an editor-close (this page's telling answered late, another device's Save & Close, the terminal's own) never removes a
+    // pane holding typing the disk lacks — it STAYS, says the terminal took the saved text, and offers «Save again» or «Discard»
+    if (typeof editorPane._vsUnsaved === 'function' && editorPane._vsUnsaved()) { if (typeof editorPane._vsOrphan === 'function') editorPane._vsOrphan(); break; }
     {
       const termContainer = win.content.querySelector('.terminal-container');
       const mine = win._editorState?.signalPath === signalPath;

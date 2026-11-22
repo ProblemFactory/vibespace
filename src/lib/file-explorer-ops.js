@@ -26,6 +26,21 @@ export const fsErrorAction = (d, host = null) => (d && isAgentOld(d.code) ? agen
  *  toolbar button, its folded toolbar menu, its context menu; the door census in test-safe-fs-path-memory names each); the hub asks
  *  such a call once even when it remembers the path as dead */
 export const ATTENDED_HEADERS = Object.freeze({ 'X-VibeSpace-Attended': '1' });
+// B-23e5 line 311's musts — r2221 item 6 / r2222 (6): a «saved» reply NAMES the text it saved (its length and digest); the page
+// compares it with the text it sent — a reply that does not (a proxy's page, a body that could not be read) is no reply. The digest is
+// the hub's own (src/server/file-writes.js digestOf: cyrb53 over UTF-16 code units — a plain-http page has no Web Crypto).
+export function textDigest(text) {
+  const s = String(text);
+  let h1 = 0xdeadbeef ^ s.length, h2 = 0x41c6ce57 ^ s.length;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+export const namesText = (data, text) => !!(data && data.saved && data.saved.length === String(text).length && data.saved.digest === textDigest(text));
+// r2221 LAW C: ONE sentence for every press a save still out answers — Save, Save & Close, Reload, the code editor's ✕, the pane's ✕
+export const stillSavingWords = (name) => t('{name}: still saving…', { name });
+
 export function fsErrorText(d) {
   const p = (d && d.params) || {};
   if (d && d.code === 'device_agent_outdated') return t("this machine's agent is {version}, too old to browse files on Windows — rerun the device's install command (Remote → {machine} → Pairing command)", { version: p.version || t('an older version'), machine: p.machine || '?' });
@@ -37,7 +52,12 @@ export function fsErrorText(d) {
   // B-3b03: the file pool had no live worker (its readers restart after a storage that did not answer) — refused, never run on the hub's loop
   if (d && d.code === 'storage_no_worker') return t('the file readers are restarting — try again in a moment');
   if (d && d.code === 'storage_path_trying') return t('this folder or file is still being tried — wait for the answer to the first press');   // B-23e5's remainder
-  if (d && d.code === 'storage_busy') return t('the file readers are all busy — try again in a moment');   // r1733 (6): the looks hold every worker: one press, one worker
+  if (d && d.code === 'storage_busy') return t('the file readers are all busy — try again in a moment');
+  // r2299 LAW A (src/server/file-writes.js): a write that ended UNKNOWN — it may have been saved (never «not saved»); one the pool shows
+  // never started; the read's own «not there» (r2221 ★7)
+  if (d && d.code === 'write_unknown') return t('the write did not reply — it may have been saved');
+  if (d && d.code === 'write_never_started') return t('it never started');
+  if (d && d.code === 'file_not_there') return t('there is no such file yet');   // r1733 (6): the looks hold every worker: one press, one worker
   if (d && d.code === 'storage_path_hung') return t('this folder or file did not answer in time — try again in {s} s', { s: (d.params && d.params.s) || 30 });   // B-23e5
   // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
   if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });
