@@ -27,6 +27,7 @@
 // that same write-back ahead of it, and the close then has nothing pending: no second write of the bytes. On a share mounted
 // `nocto` the close does not write back, and there the sync is what puts the bytes on the server before the rename.
 // Run: node scripts/test-temp-rename-census.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -36,6 +36,7 @@
 //  ④ THE DAEMON (主开发 r1185: it stays a direct start in this unit — one a down mount a 10-minute retry, and a person's own press):
 //     its NUMBER printed — the loop's hold by its start and the longest loop gap across the reconnect, with this process's size
 // Run: node scripts/test-mount-act-starts.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

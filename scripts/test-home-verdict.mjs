@@ -719,6 +719,8 @@ const legsRowLink = (r) => [{ name: '8a a LINK named like a not-re-homed row (ci
 console.log('— the runner\'s egress file reaches a re-homed suite\'s forked child (B-9dd0 × the re-home)');
 {
   const SAMPLER = path.join(REPO, 'scripts/egress-sampler.cjs');
+  const CARRIED_ROW = (JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/egress-carried-rows.json'), 'utf8')).carried || [])[0];
+  ok(typeof CARRIED_ROW === 'string' && /^test-[\w-]+$/.test(CARRIED_ROW), 'the egress list names a carried row to run the probe under', CARRIED_ROW);
   const CHILD = path.join(DIR, 'egress-child.cjs');
   fs.writeFileSync(CHILD, "const net = require('net'); const s = net.connect({ host: 'egress-child.invalid', port: 9 }); s.on('error', () => {}); s.destroy(); setTimeout(() => process.exit(0), 20);\n");
   const probeSrc = (scratchUrl) => `import ${JSON.stringify(scratchUrl)};\nimport { fork } from 'node:child_process';\nconst c = fork(${JSON.stringify(CHILD)}, [], { stdio: 'ignore' });\nc.on('exit', (code) => { process.stdout.write(JSON.stringify({ code, home: process.env.HOME, file: process.env.VIBESPACE_SUITE_EGRESS_FILE || null }) + '\\n'); });\n`;
@@ -734,7 +736,11 @@ console.log('— the runner\'s egress file reaches a re-homed suite\'s forked ch
     return { scratchUrl: pathToFileURL(path.join(sd, 'scratch.mjs')).href, dir: sd };
   })();
   const egressRun = (tag, scratchUrl, dir) => new Promise((resolve) => {
-    const file = path.join(DIR, `egress-${tag}.ndjson`), probe = path.join(dir, `test-hv-egress-${tag}.mjs`);
+    // the probe runs under a CARRIED row's name: on the root (B-9dd0, 主开发 r1246) a row scripts/egress-carried-rows.json does not
+    // name is a census row, whose node children the reader never follows (counted unread 'census') — what this leg reads is the
+    // egress file's road through the re-home down to a forked child, so the suite must be one whose children are read
+    const file = path.join(DIR, `egress-${tag}.ndjson`), pd = path.join(dir, `egress-${tag}`); fs.mkdirSync(pd, { recursive: true });
+    const probe = path.join(pd, `${CARRIED_ROW}.mjs`);
     fs.writeFileSync(probe, probeSrc(scratchUrl));
     const c = spawn(process.execPath, ['--require', SAMPLER, probe], { env: { ...process.env, ...handed, VIBESPACE_SUITE_EGRESS_FILE: file }, timeout: 60000 });
     let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });

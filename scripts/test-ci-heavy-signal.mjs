@@ -19,6 +19,7 @@
 //       the lock released, no verdict.
 //   ⑥ the wiring: one loopTurn before each question, nothing else of heavyGate's order moved.
 // Real processes: each scene a real `ci.mjs --heavy --isolate` over its own stub repository, lock and markers; all side by side.
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,7 +42,7 @@ for (const [sig, n] of [['SIGINT', 2], ['SIGTERM', 15]]) process.once(sig, () =>
 const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
 const stallOn = (env) => `{ const f = process.env.${env}; if (f && fs.existsSync(f)) { try { fs.writeFileSync(f + '.in', String(process.pid)); } catch { } while (fs.existsSync(f)) sleepSync(20); } }`;
 const WT_LINE = "      wt = addScratchWorktree(sha, 'heavy');\n";
-const BUILD_SPAWN = "  const r = spawnSync('npm', ['run', 'build'], { cwd, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, encoding: 'utf-8', env });\n";
+const BUILD_SPAWN = "  const r = spawnSync('npm', ['run', 'build'], { cwd, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, encoding: 'utf-8', env: { ...env, npm_config_logs_dir: path.join(npmDir, 'logs'), npm_config_cache: path.join(npmDir, 'cache'), npm_config_update_notifier: 'false' } });\n";   // B-ba47 pick B: the build's npm writes its logs and cache in the run's own folders
 const PRE_TURN = '    await loopTurn();\n    let abandonedWhy = abandoned();\n';
 const POST_TURN = '    if (!abandonedWhy) await loopTurn();\n';
 const planted = (src, tag) => anchored(anchored(src, WT_LINE, WT_LINE + '      ' + stallOn('VS_SIG_STALL_PRE') + '   // PLANTED: the window before the build\n', tag + ': pre'),

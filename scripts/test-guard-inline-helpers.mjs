@@ -21,6 +21,7 @@
 //     (never adds, never raises); a second run says NOTHING TO DO      RED: the census-unreadable guard (the apply is refused)
 //   ⑩ the CLI's refusal: --apply without --coordinator-word, an unknown flag
 // Fixture helpers are spelled in pieces (K + ' ok = …') so the census (test-ci-gate-tiers §7b) reads none in this file.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

@@ -170,6 +170,19 @@ function homeOf(s, v, at, depth = 0) {
   if (IDENT.test(v)) { const d = defOf(s, v, at, /^(?:null|undefined|''|"")$/); return d ? homeOf(s, d.rhs, d.at, depth + 1) : 'unresolved'; }
   return 'unresolved';
 }
+/** a top-level conditional `c ? a : b` → [c, a, b] (never `?.` or `??`; a nested one inside a branch is that branch's), else null */
+function ternaryOf(e) {
+  let d = 0, q = null, qi = -1, nest = 0;
+  for (let j = 0; j < e.length; j++) {
+    const c = e[j];
+    if (q) { if (c === '\\') { j++; continue; } if (c === q) q = null; continue; }
+    if (c === "'" || c === '"' || c === '`') { q = c; continue; }
+    if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) d--;
+    else if (d === 0 && c === '?' && e[j + 1] !== '.' && e[j + 1] !== '?' && e[j - 1] !== '?') { if (qi < 0) qi = j; else nest++; }
+    else if (d === 0 && c === ':' && qi >= 0) { if (nest) nest--; else return [e.slice(0, qi).trim(), e.slice(qi + 1, j).trim(), e.slice(j + 1).trim()]; }
+  }
+  return null;
+}
 /** the class of an env expression (an object literal, a name, a pass-through call) read at position `at` */
 export function envClass(s, e, at = Infinity, depth = 0) {
   if (e == null) return 'inherits';
@@ -207,6 +220,10 @@ export function envClass(s, e, at = Infinity, depth = 0) {
       }
     }
   }
+  // a CONDITIONAL env (`c ? A : B` — the root's piped start word, B-ba47 on 0cc12963d): each branch is read; a branch adding
+  // no HOME yields the other, else the worse of the two
+  { const t = ternaryOf(e);
+    if (t) { const a = envClass(s, t[1], at, depth + 1), b = envClass(s, t[2], at, depth + 1); return a === 'no-home' ? b : b === 'no-home' ? a : worst([a, b]); } }
   if (e.startsWith('{') && close(e, 0) === e.length) {
     let cls = 'no-home';
     for (const part of splitTop(e.slice(1, -1))) {

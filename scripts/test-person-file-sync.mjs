@@ -13,6 +13,7 @@
 //     RED: today's rescue (the sync taken out): the swap happens with nothing synced, and a failed sync is never seen.
 // The census of the renames (test-temp-rename-census) reads both sites «synced» (OWED_MAX 148 → 147: the mail copy was a
 // «derived» row). A CLI's own settings file (src/harness-config.js) is the next unit: its writer runs on the hub's loop.
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

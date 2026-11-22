@@ -6,5 +6,6 @@
 // census of every heavy row's product input (with that census's own predicate control): ~8 s of its ~15 s; the stub-tree legs
 // of the same rules stay in the fast row. Nothing else differs:
 // this file runs the WHOLE suite with them — its own legs, the kit's counter, its own exit code (the suite ends with process.exit).
+import './scratch.mjs';
 process.env.CI_GATE_TIERS_DEEP = '1';
 await import('./test-ci-gate-tiers.mjs');

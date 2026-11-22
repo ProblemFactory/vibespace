@@ -8415,6 +8415,7 @@ await section(async () => {
     'the passwd home': `${B}{ env: { ...process.env, HOME: os.userInfo().homedir } });`,
     'a launcher-wrapped boot with no HOME': "spawn(DBUS, ['--', process.execPath, 'server.js'], { env: { PORT } });",
     'a named env built without the process env': `const srvEnv = { PATH: '/usr/bin', PORT: '1' };\n${B}{ env: srvEnv });`,
+    'a HOME literal in one branch of a conditional spread': `${B}{ env: { ...process.env, ...(c ? { HOME: '/home/someone' } : {}) } });`,
   };
   const goods = {
     inherits: `${B}{ cwd: wt, stdio: 'ignore' });`,
@@ -8424,6 +8425,8 @@ await section(async () => {
   };
   const redBad = Object.entries(reds).filter(([, t]) => { const c = cls(t); return !c || HUB_OK.includes(c); }).map(([k]) => k);
   const goodBad = Object.entries(goods).filter(([k, t]) => cls(t) !== k).map(([k, t]) => `${k}: ${cls(t)}`);
+  const condGood = cls(`const env = { ...process.env, PORT: '1' };\n${B}{ cwd: wt, env: { ...env, PORT: '2', ...(piped ? { VIBESPACE_START_FD: '3' } : {}) } });`);
+  if (condGood !== 'process') goodBad.push(`a conditional spread adding no HOME (the piped start word): ${condGood}`);
   ok(redBad.length === 0 && goodBad.length === 0 && cls(`const f = "${B}{ env: { PORT } });";`) === '',
     `§113 CONTROLS: ${Object.keys(reds).length} red shapes are red, the four good classes pass, a boot spelled inside a string is data${redBad.length || goodBad.length ? ' — ' + [...redBad, ...goodBad].join(' | ') : ''}`);
   const mod = (m) => (m === 'boot-x.mjs' ? "import { scratch } from './scratch.mjs';" : '');

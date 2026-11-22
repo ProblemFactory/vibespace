@@ -5,5 +5,6 @@
 // derived from the table's own suite sources), round 5 (b) (their pushes, end to end), round 5 (c) (the commit being pushed is
 // what the tier gates) and round 6 (one fast subject per push — the multi-ref pushes): ~8 s of its ~15 s, §4 running the real pre-push hook some 35 times. Nothing else differs: this file runs
 // the WHOLE suite with them — its own legs, the kit's counter, its own exit code (the suite ends with process.exit).
+import './scratch.mjs';
 process.env.CI_GATE_PUSH_DEEP = '1';
 await import('./test-ci-gate-push.mjs');
