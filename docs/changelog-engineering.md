@@ -1728,6 +1728,12 @@ This file is the engineers' record of every release: the lanes, the verification
   - (3) true words: read again at a press and at the pool's pass (no timer); a cause that does not pass says «until the file can be read» and names the file and its access, in en, zh and ja.
   - Smalls: a read again that never settles is bounded (a press past 30 s, two at most); the last run's open notice is resolved at a clean start; the writer's code is passed through.
 - LEFT of the row: msg-retry.json, desktop-apps-hosts.json (off the census), browser-kept.json, in that order of harm.
+- ROUND wasolxh7h (r2425): TAKEN as block line 433; its witness, box row 322 with no locale, was green (the IME, é key and chromium title legs ticks). The small follow, one commit:
+  - kb: two limits, one clause each: a placeholder locale the environment NAMES (LANG=C, LC_ALL=POSIX) is kept as named, so its faults stay; the Agent browser's own Chrome is started by the browser keeper from its own environment and gets no character type from this step (unmeasured). And which child's character type the title needed is not placed (the row proves the outcome, not the child);
+  - the journal line for «no UTF-8 locale found» is said once a run of the hub (latched), as the kb says;
+  - `x11EnvFor`'s comment made true: the hub's env as it is, no added character type; its text helpers apply their own UTF-8 rule;
+  - leg ⑫ reads the helper's environment from a REAL child started from ctx.x11Env, as it reads the application's and the display server's;
+  - the three Fixed rows name the window's title too.
 
 ## 2.369.415 — 2026-11-21
 

@@ -138,7 +138,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace's transcript reader cannot come back, a conversation's history still loads after a few seconds, a little at a time, without freezing VibeSpace.
 - When a conversation's file stops answering, its history now says so and when it tries again, and fills in by itself once it can, without reopening the window.
 - With «Actively poll subscription usage» on, a usage repair no longer puts this machine's older reading back over a newer one.
-- On a machine whose environment names no language, letters typed into an app window with an input method (é, Chinese) no longer arrive as replacement marks.
+- On a machine whose environment names no language, an app window's title follows the app again and text typed with an input method (é, Chinese) arrives whole.
 - Opening a file or folder from a chat link, a search result, an artifact or the sidebar is also tried once even if that folder just did not answer.
 - A terminal editor (Ctrl+G) whose file could not be read no longer opens empty, where Save & Close could wipe it; a file not there yet still opens to be made.
 - A save says what happened: «still saving…» while one is out, «may have been saved» if no reply came (a note stays till you reload), or the terminal not told.
