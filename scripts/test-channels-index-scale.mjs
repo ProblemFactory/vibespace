@@ -348,7 +348,7 @@ console.log('⑧ the engine\'s own writers are incremental');
 {
   const e8 = ENG.create({ dataDir: path.join(ROOT, 'writers'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now, log: quiet });
   const x8 = e8.store.index;
-  const step = async (what, run) => { x8.flush(); const a = x8.flushStats(); await run(); x8.flush(); const b = x8.flushStats(); return { what, full: b.full - a.full, incremental: b.incremental - a.incremental, why: b.lastFull }; };
+  const step = async (what, run) => { x8.flush(); const a = x8.flushStats(); await run(); x8.flush(); const b = x8.flushStats(); return { what, full: b.full - a.full, incremental: b.incremental - a.incremental, journaled: (b.journaled || 0) - (a.journaled || 0), owed: x8.isDirty(), why: b.lastFull }; };
   const first = await step('the first pass', () => e8.pass(A, { force: true }));
   const rows = [];
   for (const k of [1, 2]) { offset += 61e3; rows.push(await step(`steady pass ${k} (discovery complete, ingest)`, () => e8.pass(A, { force: true }))); }
@@ -359,7 +359,11 @@ console.log('⑧ the engine\'s own writers are incremental');
   offset -= 122e3;
   ok(first.full === 1, 'fixture: the boot\'s first write is a whole one');
   // a pass walks the listing: its rows are flushed before the walk's cursor is recorded (keepDisc), then the pass's own write
-  for (const r of rows) { const want = /\bpass\b/.test(r.what) ? 2 : 1; ok(r.full === 0 && r.incremental === want, `${r.what}: ${want === 2 ? 'two incremental writes (the listed rows before the walk\'s cursor — keepDisc — then the pass\'s own), never a whole one' : 'an incremental write'}`, JSON.stringify(r)); }
+  // B-360d unit 1 (line 267): a step's rows ride the index's JOURNAL (keepDisc's ordering write answers on its line), so the index
+  // itself is written by the step's own flush at most — the law this leg holds is «never a whole one», and the changes on disk
+  // (nothing owed after the step's flush). A refresh that brings nothing new changes no row's print (QUIET IS FREE): it is
+  // judged by «nothing owed», its counts said; every other step changed rows: an index write or a journaled row
+  for (const r of rows) { const quiet = r.what === 'a refresh'; ok(r.full === 0 && !r.owed && (quiet || r.incremental + r.journaled >= 1), `${r.what}: never a whole write; ${quiet ? 'a refresh that brought nothing new' : 'its changes on disk'} — ${r.incremental} incremental index write(s), ${r.journaled} row(s) journaled (keepDisc's ordering write answers on its journal line), ${r.owed ? 'the index STILL OWED' : 'nothing owed'} after its flush`, JSON.stringify(r)); }
   const ctl = await step('the pre-fix unlisting scan', () => x8.update((x) => { for (const en of Object.values(x.conversations)) if (en && en.adapterId === 'nobody') en.unlistedAt = 1; }));
   ok(ctl.full === 1 && /ix\.conversations/.test(ctl.why), `CONTROL: an update reaching ix.conversations (the pre-fix unlisting scan) makes the write a whole one (${ctl.why})`);
   try { e8.stop && e8.stop(); } catch {}
