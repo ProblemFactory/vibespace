@@ -217,7 +217,7 @@ const STATUS = Object.freeze({
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, grant_expired: 403, entry_too_short_to_mask: 403, use_not_granted: 403, run_not_admitted: 403,   // B-a14b: + grant_expired · B-bc3b: + run_not_admitted
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, ask_redrawn: 409, restore_failed: 500, caller_gone: 410, too_many_runs: 429,   // r4: + ask_redrawn (the card drawn again at the press) · restore_failed (a partial write not put back — by name)
-  spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
+  spawn_failed: 500, run_unanswered: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
   request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
   too_many_askers: 429,   // B-4934
   scope_required: 400, command_unreadable: 400, command_has_hosts: 400, standing_bad_host: 400, command_not_pinnable: 400, standing_bad_tool: 400, tool_required: 400,   // lane vault-standing-request (+ r2)
@@ -225,6 +225,7 @@ const STATUS = Object.freeze({
 // the door's sentence for the run's storage (a PARKED mount's own words when it is one — B-5ce7's cure), + where and that nothing ran
 const storageWords = (p) => `${DOOR.sentenceFor(p)} (the run's folder, its program or a template is on it) — nothing ran`;
 const MORE_WORDS = Object.freeze({
+  run_unanswered: 'the command RAN, but its answer could not be written: its output is lost — do not run it again blindly; its receipt and its use are recorded',   // r1919 (2)
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
   card_too_long: `the card that shows this run to the user would be cut (over ${DETAIL_MAX} characters) — a shorter command or template`,
   unauthorized: 'only a conversation\'s own session token runs a command with a stored secret',
@@ -2321,7 +2322,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // verdict re-reads the vault state, and we re-check the state + the signal BY NAME (a lock ⇒ vault_locked, a gone caller ⇒
     // caller_gone — nothing spawned, never spawn-then-stop). The open fd is handed to spawnRun (it exec's the SAME inode) or
     // closed here on any early return (the finally).
-    let toolFd = null, fdHandedOff = false, lateConsumed = null;
+    let toolFd = null, fdHandedOff = false, lateConsumed = null, scrubOfRun = null;   // scrubOfRun: the run's scrubber worker once it started — closed in the finally below when the spawn was not reached (r1919 (5))
     const closeTool = () => { if (toolFd != null) { try { fs.closeSync(toolFd); } catch { } toolFd = null; } };
     const lg0 = lockGen;
     // round 23 (MINOR, your own r16 rule): a late «allow once» pass is spent at the verdict; if the run is then REFUSED (too_many_runs /
@@ -2532,7 +2533,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       startingBy.set(sconv, (startingBy.get(sconv) || 0) + 1); startingAll++;
       let scrub;
       try { scrub = await startScrub(); } finally { const n = (startingBy.get(sconv) || 1) - 1; if (n > 0) startingBy.set(sconv, n); else startingBy.delete(sconv); startingAll--; }
-      if (scrub.refused) { giveBackLate(); if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); } note('spawn_failed', { ...head, why: `the scrubber (${scrub.refused})` }); return named('spawn_failed', { why: 'the scrubber could not start' }); }   // the caller gone first (the read's #22)
+      if (scrub.refused) { giveBackLate(); if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); } if (lockGen !== lg0 || vaultState() !== 'unlocked') { note('vault_locked', head); return named('vault_locked'); } note('spawn_failed', { ...head, why: `the scrubber (${scrub.refused})` }); return named('spawn_failed', { why: 'the scrubber could not start' }); }   // the caller gone first (the read's #22)
+      scrubOfRun = scrub;   // r1919 (5): a started worker only (a refused start is no scrubber: its worker already ended)
       const unscrub = (r) => { scrub.close(); return r; };
       if (lockGen !== lg0 || vaultState() !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } note('vault_locked', head); return unscrub(named('vault_locked')); }
       if (signal && signal.aborted) { giveBackLate(); note('caller_gone', head); return unscrub(named('caller_gone')); }
@@ -2561,6 +2563,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       return out && typeof out.then === 'function' ? out.finally(() => scrub.close()).then(restoreOnce).then(nextOf) : nextOf(restoreOnce(unscrub(out)));   // THE SCAN OFF THE LOOP: the worker never outlives the run — every road out of spawnRun ends it (a no-op after its end)
     } finally {
       if (!fdHandedOff) closeTool();   // round 14: an early return before the hand-off releases the open tool fd
+      if (!fdHandedOff && scrubOfRun) scrubOfRun.close();   // r1919 (5): no road out of run() that never reached the spawn leaves its worker alive (a no-op after its end)
     }
   }
 
@@ -2617,7 +2620,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       }
     } catch (e) { shredDir(dir); scrub.close(); values = null; note('spawn_failed', { ...head, why: `a run file (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'a run file could not be written' }); }
     return new Promise((resolve) => {
-      const rec = { conv: caller.conversationId, name: caller.name || null, child: null, stopped: null, hard: null, timer: null, dir, mark, piped: false };
+      const rec = { conv: caller.conversationId, name: caller.name || null, child: null, stopped: null, hard: null, timer: null, dir, mark, piped: false, closeScrub: () => scrub.close() };   // closeScrub: the lock ends the worker of a run that waits for its end (r1919 (1))
       const dec = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
       const parts = { out: [], err: [] };
       const handOn = (o) => { parts.out.push(o.out); parts.err.push(o.err); };   // what the run's scrubber hands on, each to the stream it came on
@@ -2636,7 +2639,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         done = true; rec.done = true;   // THE SCAN OFF THE LOOP (the read's #6): stop() is a no-op from here — the run's end is decided NOW, its line written when the worker answers
         if (rec.offAbort) rec.offAbort();
         closeTool();   // round 13: the open tool fd (held from the hash through the exec) is released with the run
-        runs.delete(rec);
+        // r1919 (1): the run STAYS in `runs` until its worker has answered its end — the caps count a worker that still holds values,
+        // and a lock in that wait finds the run: it ends the worker (the output withheld by name) and the run answers the lock's line
         try { timers.clear(rec.timer); } catch { }
         try { timers.clear(rec.hard); } catch { }
         // THE RUN ENDS WHOLE: its group's leftovers (a backgrounded `cmd &`) and every process still carrying its mark (setsid,
@@ -2648,14 +2652,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         // SCRUBBED — scrub.end(cut) masks every complete value in it and masks the one trailing partial-value prefix a cut can leave
         // (was: the tail dropped for good, so bytes vanished; a naive raw flush leaked the half value — the masker now does both)
         const cut = truncated || !!rec.stopped || rec.piped;   // + the pipes cut 2 s after the child's exit (the review)
-        const stoppedBy = rec.stopped, spawnErr = spawnError;   // the read's #6: what ended the run is what it was at its end, not when the worker answers
+        const stoppedAt = rec.stopped, spawnErr = spawnError;   // the read's #6: what ended the run is what it was at its end, not when the worker answers
         for (const k of ['out', 'err']) scrub.push(k, dec[k].end());
         scrub.end(cut).then((e) => {   // THE SCAN OFF THE LOOP: the line and the answer wait for the worker's end (or its loss: withheld by name)
+          runs.delete(rec);   // r1919 (1): gone from the caps and the lock's walk only now, its worker ended
           handOn(e);
           lastScrub = { ...scrub.stats };
           values = null;
           const ms = now() - t0;
-          const c = e.counts;
+          const c = e.counts, stoppedBy = rec.lockedInEnd ? 'lock' : stoppedAt;   // r1919 (1): a lock that landed while the worker answered the end gives the lock's line
           // round 21 (fb-93219e801a): the run's output scrubber is VALUE-based ONLY — createRunMasker (`scrub`) above masked the
           // injected values and their encodings; the NAME-based secret-shapes rules (R2/R5/R6/R7/R8) do NOT run over a child's own
           // output — a JSON field named `key`/`auth`/`token` the tool returns is the tool's data, not a secret (unless its VALUE is
@@ -2667,11 +2672,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
           const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: stoppedBy === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
           if (spawnErr) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnErr }); resolve(named('spawn_failed', { why: spawnErr })); return; }   // no child ran: no receipt, no use
-          if (stoppedBy === 'lock') { note('vault_locked', { ...line, killed: true }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: true })); return; }
+          if (stoppedBy === 'lock') { note('vault_locked', { ...line, killed: stoppedAt === 'lock' }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: stoppedAt === 'lock' })); return; }
           if (stoppedBy === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
           note('ran', line);
           resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes, ...(scrubbed.withheld ? { withheld: scrubbed.withheld } : {}) }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
-        }).catch((x) => { log(`vault-run: the run's answer could not be written (${(x && x.message) || x})`); resolve(named('spawn_failed', { why: 'the run could not be answered' })); });   // the read's #9: never a run whose answer hangs
+        }).catch((x) => {   // the read's #9: never a run whose answer hangs
+          runs.delete(rec); values = null;
+          try { log(`vault-run: the run's answer could not be written (${(x && x.message) || x})`); } catch { }
+          // r1919 (2): a child that RAN answers its own code, outside BURNED (a spent once-grant never comes back), its use line
+          // written (a receipt on the note); a child that never spawned stays spawn_failed (nothing ran: the grant is given back)
+          if (spawnErr) { try { note('spawn_failed', { ...head, why: spawnErr }); } catch { } resolve(named('spawn_failed', { why: spawnErr })); return; }
+          try { note('run_unanswered', { ...head, receipt, why: 'the answer could not be written' }); } catch { }
+          resolve(named('run_unanswered', { receipt }));
+        });
       };
       let child;
       try {
@@ -2709,7 +2722,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 
   // THE LOCK (decision ③): every running child ends BY NAME, every card settles, the seen shapes and the 8-hour «always» go
   function onLocked(why = 'lock') {
-    for (const rec of [...runs]) { log(`the vault locked (${why}): stopping the run of ${rec.name || rec.conv}`); stop(rec, 'lock'); shredDir(rec.dir); }   // its files go AT ONCE (the child is being stopped)
+    for (const rec of [...runs]) {
+      if (rec.done) { rec.lockedInEnd = true; log(`the vault locked (${why}): ending the scrubber of the run of ${rec.name || rec.conv}, which waited for its end`); rec.closeScrub(); continue; }   // r1919 (1): its child already ended; its worker still held the values
+      log(`the vault locked (${why}): stopping the run of ${rec.name || rec.conv}`); stop(rec, 'lock'); shredDir(rec.dir);   // its files go AT ONCE (the child is being stopped)
+    }
     for (const q of [...asks.values()]) settle(q, 'vault_locked', 'locked');
     asking.batch = true;   // B-4934: one recount after the whole withdrawal, not one per request
     try { for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked'); } finally { asking.batch = false; }   // lane vault-manual-and-lock: every open request is withdrawn

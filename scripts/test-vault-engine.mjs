@@ -730,7 +730,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     ['view', 'a lock that leaves the reveal window open', { contentsMod: patch('src/server/vault-contents.js', CSRC, "vault.onLock(() => { windows.clear(); });", "vault.onLock(() => { });", 'view') }],
     ['asks', 'a lock that leaves an agent\'s request open', { doorMod: patch('src/server/vault-run-door.js', DSRC, "for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked');", '', 'asks') }],
     ['grants', 'a lock that does not end the one-time grants', { doorMod: patch('src/server/vault-run-door.js', DSRC, 'seen.clear(); shortAlways.clear(); grants.clear();', 'seen.clear(); shortAlways.clear();', 'grants') }],
-    ['runs', 'a lock that does not stop the running child', { doorMod: patch('src/server/vault-run-door.js', DSRC, "for (const rec of [...runs]) { log(`the vault locked (${why}): stopping the run of ${rec.name || rec.conv}`); stop(rec, 'lock'); shredDir(rec.dir); }", '', 'runs') }],
+    ['runs', 'a lock that does not stop the running child', { doorMod: patch('src/server/vault-run-door.js', DSRC, "log(`the vault locked (${why}): stopping the run of ${rec.name || rec.conv}`); stop(rec, 'lock'); shredDir(rec.dir);", '', 'runs') }],
   ];
   for (const [c, name, mods] of MUT) {
     const loaded = Object.values(mods).every(Boolean);

@@ -287,6 +287,19 @@ const perScope = (s) => Array.isArray(s.scopes) && s.scopes.length > 0;
 const scopeEnd = (x) => (x.until ? ` (until ${whenAt(x.until)})` : '');
 const standingScope = (s) => perScope(s) ? [...(s.scopes.some((x) => x.kind === 'window') ? [`any run (the 1-hour approval${scopeEnd(s.scopes.find((x) => x.kind === 'window')).replace(/^ \(/, ', ').replace(/\)$/, '')})`] : []), ...(s.scopes.some((x) => x.kind === 'host') ? [`hosts ${s.scopes.filter((x) => x.kind === 'host').map((x) => x.scope + scopeEnd(x)).join(', ')}`] : []), ...(s.scopes.some((x) => x.kind === 'command') ? [`the command ${s.scopes.filter((x) => x.kind === 'command').map((x) => x.scope + scopeEnd(x)).join(', ')}`] : [])].join(' + ') : [...(s.hosts && s.hosts.length ? [`hosts ${s.hosts.join(', ')}`] : []), ...(s.commands && s.commands.length ? [`the command ${s.commands.join(', ')}`] : s.command ? [`the command ${s.command}`] : [])].join(' + ') || '-';
 
+/** THE RUN'S SUMMARY WORDS — ONE table (主开发 r1919 (3)). A withheld output says the command RAN: an agent must not run a command
+ *  that cannot be repeated again blindly because its output did not come back. */
+const RUN_SAID = Object.freeze({
+  withheld: Object.freeze({   // by the record's `scrubbed.withheld` (kb-api); a code this CLI does not know yet says the same without its cause
+    __proto__: null,
+    scrub_worker_gone: 'the command ran; its scrubber stopped, so the output after the words is withheld (scrub_worker_gone) — do not run it again blindly',
+    scrub_work_bound: 'the command ran; scrubbing its output met its work bound, so the output after the words is withheld (scrub_work_bound) — do not run it again blindly',
+  }),
+  withheldOther: 'the command ran; the output after the words is withheld — do not run it again blindly',
+  hits: (n) => `${n} occurrence(s) of a stored secret blanked`,
+  truncated: 'the output was cut at 2 MiB',
+  timedOut: 'stopped at its timeout',
+});
 async function runCmd(rest) {
   // the hub parses the words (the CLI ships to other hosts — one spelling of the flags, src/vault-run.js parseRunArgs)
   const note = setTimeout(() => console.error('# vibespace-vault run: still waiting — a new command shape waits for the user\'s answer on the card in this conversation or in For you (up to 60 s), or the command is still running'), 3000);   // lane chat-needs-you-card: the note names the card
@@ -297,10 +310,10 @@ async function runCmd(rest) {
   if (d.stdout) process.stdout.write(d.stdout);
   if (d.stderr) process.stderr.write(d.stderr);
   const said = [];
-  if (d.scrubbed && d.scrubbed.withheld) said.push(d.scrubbed.withheld === 'scrub_worker_gone' ? 'the scrubber stopped — the output after the words is withheld (scrub_worker_gone)' : 'scrubbing met its work bound — the output after the words is withheld (scrub_work_bound)');   // 主开发 r1216: the record's field, said (its hits count the withheld stretches too)
-  else if (d.scrubbed && d.scrubbed.hits) said.push(`${d.scrubbed.hits} occurrence(s) of a stored secret blanked`);
-  if (d.truncated) said.push('the output was cut at 2 MiB');
-  if (d.timedOut) said.push('stopped at its timeout');
+  if (d.scrubbed && d.scrubbed.withheld) said.push(RUN_SAID.withheld[d.scrubbed.withheld] || RUN_SAID.withheldOther);   // 主开发 r1216: the record's field, said (its hits count the withheld stretches too)
+  else if (d.scrubbed && d.scrubbed.hits) said.push(RUN_SAID.hits(d.scrubbed.hits));
+  if (d.truncated) said.push(RUN_SAID.truncated);
+  if (d.timedOut) said.push(RUN_SAID.timedOut);
   if (said.length) console.error(`# vibespace-vault run: ${said.join(' · ')}`);
   if (d.next) console.error(`# vibespace-vault run: ${d.next}`);   // lane vault-standing-request: a run the user let through once names the standing road
   if (d.receipt) console.error(`# vibespace-vault run: receipt ${d.receipt}`);   // the audit line the user sees carries the same one

@@ -236,6 +236,27 @@ console.log('④ the agent side has no unlock');
   ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through the run\'s ONE scrubber (createRunMasker\'s push, the end\'s tail too — one place, handOn), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
   ok(!scrubbedOnly(door.replace('if (text) scrub.push(k, text);', 'if (text) parts[k].push(text);')) && !scrubbedOnly(door.replace('if (text) scrub.push(k, text);', "if (text) handOn({ out: k === 'out' ? text : '', err: k === 'err' ? text : '' });")) && !scrubbedOnly(door, scrubWorker.replace("m = VR.createRunMasker(msg.secrets, ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']")),
     'MUTANTS: a stream chunk handed on without the scrubber (straight into parts, or into handOn), or a worker whose masker holds none of the run\'s values ⇒ RED');
+  // 主开发 r1919 (4): THE ONE FEED of the hand-on is inside the worker's start (startScrub): a piece's reply, in order, is the only
+  // `onOut(` call, and an end resolves with the worker's end reply or the loss's withheld words, nothing else; THE WORKER'S REPLY
+  // ITSELF is what its one masker answered — `msg.text` goes only into m.push, each reply posts `o.out` / `o.err`
+  const feedOnly = (t) => {
+    const s0 = t.indexOf('function startScrub('), s1 = t.indexOf('\n  async function run(', s0), body = s0 >= 0 && s1 > s0 ? t.slice(s0, s1) : '';
+    const feeds = [...t.matchAll(/\bonOut\(([^;]*)\);/g)].map((m) => m[1]), ends = [...body.matchAll(/\b(?:f|resolveEnd)\(([^;]*)\);/g)].map((m) => m[1]);
+    return feeds.length === 1 && feeds[0] === '{ out: msg.out, err: msg.err }'
+      && /if \(msg\.seq !== answered \+ 1\) \{ lose\('order'\); return; \}[^\n]*\n\s*answered\+\+; st\.inflight -= sizes\.shift\(\) \|\| 0; sc\.onOut\(\{ out: msg\.out, err: msg\.err \}\);/.test(body)
+      && ends.length === 4 && ends.filter((x) => x === 'lossOut()').length === 3 && ends.filter((x) => x === '{ out: msg.out, err: msg.err, counts: last, lost: false }').length === 1
+      && /const lossOut = \(\) => \(\{ out: SCRUB_CUT_PH, err: SCRUB_GONE_WORDS,/.test(body);
+  };
+  const replyOnly = (wk) => {
+    const posts = [...wk.matchAll(/parentPort\.postMessage\(([^;]*)\);/g)].map((m) => m[1]);
+    return posts.length === 4 && [...wk.matchAll(/msg\.text/g)].length === 1 && posts.filter((x) => /\b(?:out|err):/.test(x)).length === 2
+      && /if \(msg\.type === 'push'\) \{ const o = m\.push\(msg\.stream, msg\.text\); parentPort\.postMessage\(\{ type: 'out', seq: msg\.seq, out: o\.out, err: o\.err, counts: counts\(\) \}\); return; \}/.test(wk)
+      && /if \(msg\.type === 'end'\) \{ const o = m\.end\(!!msg\.cut\); parentPort\.postMessage\(\{ type: 'end', seq: msg\.seq, out: o\.out, err: o\.err, counts: counts\(\) \}\); \}/.test(wk);
+  };
+  ok(feedOnly(door) && replyOnly(scrubWorker), 'r1919 (4): THE ONE FEED of the run\'s hand-on is inside its worker\'s start — a piece\'s reply in order is the only onOut call, an end resolves with the worker\'s end reply or the loss\'s withheld words; and THE WORKER\'S REPLY is its masker\'s answer (the piece\'s text goes only into m.push; each reply posts o.out / o.err)');
+  const feedTwice = anchored(door, "if (post({ type: 'push', seq, stream, text }) && !timer) arm();", "if (post({ type: 'push', seq, stream, text }) && !timer) arm(); sc.onOut({ out: stream === 'out' ? text : '', err: stream === 'err' ? text : '' });", 'test-vault-law r1919 (4): a second feed of the raw piece');
+  const replyRaw = anchored(scrubWorker, "parentPort.postMessage({ type: 'out', seq: msg.seq, out: o.out, err: o.err, counts: counts() });", "parentPort.postMessage({ type: 'out', seq: msg.seq, out: msg.stream === 'out' ? msg.text : '', err: msg.stream === 'err' ? msg.text : '', counts: counts() });", 'test-vault-law r1919 (4): the reply posts the raw piece');
+  ok(!feedOnly(feedTwice) && !replyOnly(replyRaw), 'r1919 (4) MUTANTS: a second feed handing the raw piece on at its post, and a worker whose reply posts the raw piece ⇒ RED');
   ok(!/vaultReveal|valueOf\(/.test(routes.slice(routes.indexOf("'/api/agent/vault/runnable'"), routes.indexOf("'/api/agent/vault/runnable'") + 700)), 'runnable answers names — it never asks a store for a value');
   // lane vault-mint-put (q-043 §9): + MINT / PUT — CREATE-only doors in the session's OWN namespace; neither reads a value
   // back (there is no agent reveal door; the owner reveals in the Vault window), and both refuse a locked vault by name.
