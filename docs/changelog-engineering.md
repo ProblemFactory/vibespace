@@ -1754,6 +1754,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### bl-machines-b — B-323e: which-kept's same millisecond (主开发 r2473 / r2480; picked after line 316 and its follow)
 - A person's press (maxAgeMs 0) never reads the kept answer — the age test «at most 0» was true in the answer's own millisecond, so a no-reply was said as «not installed» (test-starts-via-starter ⑥ crossed once on the train, UTC zone, by chance). «An answer came» is a count of answers recorded for the name, never a time unequal to the last (two answers in one millisecond: a real «not found» said «could not check»). Legs: ⑥ both Starts under one frozen clock, a fresh copy of the module each scene; RED a press reads the kept answer; RED answered by time.
+- ROUND wflkgs0xh (主开发 r2489, line 449's smalls): the retry runs only on OUR X server still the same process (stop()'s check; RED: r2262's «set once» check starts a session on a display not ours); the no-reply mark is kept beside the display's record, so a hub restart keeps the toast's recipe true (RED: a mark in memory only); the walk keeps PATH order (an earlier folder past its bound = no reply; RED: a later folder's tmux); a leg for the 200-character cut.
 
 ## 2.369.415 — 2026-11-21
 
