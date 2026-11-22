@@ -218,6 +218,10 @@ function runOp(op, payload = {}) {
       for (const line of content.split('\n')) { const msg = parseTailLine(line, dropSub); if (msg !== undefined) records.push(msg); }
       return { result: records };
     }
+    case 'probe': { // 主开发 r2344 (1): the storage retry's short look at a file whose record says «the storage» — its first bytes read
+      // (fileIsZst: an open, 4 bytes, a close); that it answers is all it says (the caller's short bound is the verdict)
+      return { result: { answered: true, zst: _codex().fileIsZst(payload.fp) } };
+    }
     case 'jsonlTail': {
       // perf chunk C: the async warm's cold read — readJsonlTail's FULL path
       // (no previous entry here: the cache lives on the main thread), so the

@@ -808,15 +808,16 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
   pumpWarm();
   return { p, job };
 }
-// r935 (a)'s rule for every put of a WHOLE read that waited (the main process's slices, the storage's retry — the move's read): never
-// over a NEWER entry of the same file (the same inode, a size at least the read's: an append folded in meanwhile stays)
-// r935 (a) — NEVER OVER A NEWER ENTRY OF THE SAME FILE: the cached copy wins only when it is the same inode, at least as large AND
-// strictly later by its modification time (主开发 r2246: a transcript cut shorter IN PLACE — an editor's save, a redirect — is a
-// newer file of the same inode; by its size alone its stale copy stayed, and the page was told «ready» over a history still «not
-// loaded», again and again). The SAFE side is to take the read: two times that are equal (a rewrite inside one clock tick, a
-// storage with coarse times) put the read — the parse's own stat then folds in anything newer as an append. A read that raced a
-// growth carries mtimeMs -1 and never displaces a cached copy at least as large.
-const putUnlessNewer = (id, entry) => { const c = _jsonlCache.get(id); if (!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0))) _warmPut(id, entry); };   // B-80cb cure: every warm's put is the warm's — the cache, or (not admitted) the handoff to the next parse
+// r935 (a) — every put of a WHOLE read that waited (a warm's, the main process's slices, the storage's retry): NEVER OVER A NEWER ENTRY
+// OF THE SAME FILE. A read that carries its TIME is the file as it was read (readJsonlTail says -1 when the file moved under the read)
+// and it is TAKEN, whatever its time against the cached copy's (主开发 r2246 / r2344 (2)): a later time (a transcript cut shorter IN
+// PLACE — an editor's save, a redirect), an equal one (one clock tick, a storage with coarse times: the safe side), an OLDER one (a
+// restore that keeps the old time, a clock stepped back). By size, or by a later time alone, the stale larger copy stayed and the page
+// was told «ready» over a history still «not loaded», again and again. An append that landed after that read is folded in by the
+// parse's own stat, one read later — never a wrong history. Only a read with NO time (it raced a growth: mtimeMs -1, the copy may be
+// partial) keeps a cached copy of the same inode at least as large — the size rule (r2344 (3): two raced reads, both -1, too)
+const cachedCopyWins = (c, entry) => !!(c && entry && entry.mtimeMs === -1 && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0));   // PURE — the rule above
+const putUnlessNewer = (id, entry) => { if (!cachedCopyWins(_jsonlCache.get(id), entry)) _warmPut(id, entry); };   // B-80cb cure: every warm's put is the warm's — the cache, or (not admitted) the handoff to the next parse
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 // ONE WARM A SESSION AT A TIME: a second ask while one is in flight joins it (the parse's 2 s re-warm, an attach, a page) — never a
 // second history read of the same file sent to the pool (the whole-state read: unjoined re-warms queued reads whose deadlines ended
@@ -850,11 +851,15 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     const t0 = performance.now();
     let r = null;
     if (C().poolGone()) { try { r = await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }); } catch { return false; } }
-    // the POOL UP (主开发 r2246, the round's MUST): a file whose record says «the storage» NEVER holds the line the other conversations
-    // wait in — its retry is the one-shot on the GENERAL pool (two workers; a deadline there is remembered by the pool's path memory,
-    // so the next retry is refused at the door at once), never B-cd4b's warm line (one warm at a time on the hub) and its history lane
-    // (one worker, a 60 s page that the lane's memory never notes): one dead file held every other conversation's history
-    else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }
+    // the POOL UP (主开发 r2246's MUST, r2344 (1)): a file whose record says «the storage» never holds a line the other conversations
+    // wait in. Its retry first PROBES the file — one small read (its first bytes) under a short bound, on the general pool: a file that
+    // does not answer costs that bound and nothing else (its deadline is remembered by the pool's path memory for calls that short: the
+    // next retry's probe is refused at the door). A file that ANSWERS joins B-cd4b's paged warm line like any other (person first): read
+    // in pages, never one whole clone; the line is held by no dead file, and two dead files in step never hold both general workers
+    else {
+      try { await C().probeTranscriptAsync(known); } catch { return false; }
+      try { r = await warmPaged(known, { bulk }).p; } catch { return false; }
+    }
     if (!r || !r.entry) return false;
     _stampJsonlParse(r.bytes, performance.now() - t0);
     putUnlessNewer(claudeSessionId, r.entry);
@@ -2200,7 +2205,7 @@ function dedupWebuiSockets(entries) {
 }
 
 module.exports = { setJsonlHeld, noteJsonlView, dropJsonlView, dropJsonlViews, jsonlCacheTrim, jsonlCacheTestPut, jsonlHas, claudeTranscriptIndex, stuckSaid,
-  warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus, onHistoryReadable, warmHandoffStats, _warmHandoffTestSeam, warmLineStats,   // B-80cb cure
+  warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus, onHistoryReadable, cachedCopyWins, warmHandoffStats, _warmHandoffTestSeam, warmLineStats,   // B-80cb cure
   taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _taskScanCounts, _taskStateCensus: taskStateCensus, _spanFromStart: spanFromStart, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
   extractSessionMeta,
   SESSIONS_DIR,
