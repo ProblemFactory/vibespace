@@ -18,6 +18,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a tablet held upright, when its top bar is full, search moves into the bar's «⋯» menu as «Search this conversation».
 - On an instance with a memory limit, a Background Work job that does not fit beside what the running jobs use is not started; you are told which jobs use it.
 - A page left open from before this update cannot approve a proposal that names people until you reload it.
+- A copy of VibeSpace started from a git worktree now uses a home of its own and says so when it starts; a clone keeps its home.
+- A clone of VibeSpace kept in a temporary folder and run with your own home now checks for updates and registers its hooks like any install.
 
 ### Fixed
 - When a Channels file cannot be read, the sidebar shows a warning and the panel says what is paused; nothing is fetched, sent or written over until it reads.
