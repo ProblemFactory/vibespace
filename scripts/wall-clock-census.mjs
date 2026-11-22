@@ -72,7 +72,7 @@ export const LITERAL_FLOOR_MS = 1000;   // a literal upper bound under this is R
 function walk(n, p, f) {
   if (!n || typeof n.type !== 'string') return;
   n._p = p; f(n);
-  for (const k of Object.keys(n)) {
+  for (const k in n) {   // an acorn node's own keys in Object.keys order (its prototype has none enumerable), no array per node
     if (k === '_p') continue;
     const v = n[k];
     if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') walk(c, n, f); }
@@ -97,7 +97,7 @@ const TIMERS = /^(?:setTimeout|setInterval|sleep|delay|wait\w*|tick|timers\.\w+)
 function visit(n, f) {
   if (!n || typeof n.type !== 'string') return;
   f(n);
-  for (const k of Object.keys(n)) {
+  for (const k in n) {   // (as walk's)
     if (k === '_p') continue;
     const v = n[k];
     if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') visit(c, f); }
@@ -225,9 +225,18 @@ function flow(src, { seed = [], injected = new Set(), ast = null } = {}) {
     if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && fnOf(n.init)) fnDefs.set(n.id.name, [...(fnDefs.get(n.id.name) || []), n.init]);
   }
   const sizeOf = () => marks.size + spans.size + spanFields.size + spanFns.size + spanArrays.size + spanArrayFields.size + clockFns.size + spanMaps.size + [...tupleArrays.values()].reduce((a, t) => a + t.size, 0);
+  // THE FIXED POINT READS ONLY THESE NODE KINDS (every statement of its body opens with one of them; B-54a9, 主开发 r2572 (3)):
+  // each pass visits them alone, the rest of the tree is never stepped through again — the same marks, spans and fields
+  const FLOW_KINDS = new Set(['VariableDeclarator', 'AssignmentExpression', 'FunctionDeclaration', 'AssignmentPattern', 'CallExpression', 'ForOfStatement', 'Property']);
+  const kin = all.filter((n) => FLOW_KINDS.has(n.type));
+  const bind = (id, v) => {   // (once per flow, not once per node and pass)
+    if (!v || !id || id.type !== 'Identifier') return;
+    if (isClock(v) || (un(v).type === 'Identifier' && marks.has(un(v).name))) marks.add(id.name);
+    if (isSpan(v)) spans.add(id.name);
+  };
   for (let size = -1; size !== sizeOf();) {
     size = sizeOf();
-    for (const n of all) {
+    for (const n of kin) {
       if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && fnOf(n.init) && returnsClock(n.init)) clockFns.add(n.id.name);
       if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && isCallResult(n.init)) callBound.add(n.id.name);
       if (n.type === 'AssignmentExpression' && n.operator === '=' && un(n.left).type === 'Identifier' && isCallResult(n.right)) callBound.add(un(n.left).name);
@@ -289,11 +298,6 @@ function flow(src, { seed = [], injected = new Set(), ast = null } = {}) {
       }
       if (n.type === 'FunctionDeclaration' && n.id && returnsSpan(n)) spanFns.add(n.id.name);
       if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type) && returnsSpan(n.init)) spanFns.add(n.id.name);
-      const bind = (id, v) => {
-        if (!v || !id || id.type !== 'Identifier') return;
-        if (isClock(v) || (un(v).type === 'Identifier' && marks.has(un(v).name))) marks.add(id.name);
-        if (isSpan(v)) spans.add(id.name);
-      };
       if (n.type === 'VariableDeclarator') bind(n.id, n.init);
       if (n.type === 'AssignmentExpression' && n.operator === '=') {
         bind(n.left, n.right);
