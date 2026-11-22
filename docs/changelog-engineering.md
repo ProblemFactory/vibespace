@@ -1234,6 +1234,11 @@ This file is the engineers' record of every release: the lanes, the verification
   - a later filing keeps the wordless words;
   - a refile after a restart takes the ladder's own outage start.
 
+### lg-providers B-d578 pool unit (a) — a cold move to another provider LANDS (the shape r1516: first, as its own unit, with a real-chooser leg)
+- WHY: applyCrossMove re-points the OLD server id's link and asks a client to restart; the restart is a resume under a NEW server id, whose spawn asks the pool's chooser afresh — and the chooser decides under crossProvider 'never' (providerIn with no session), so the resumed process went back to the old provider's member. test-pool-auto faked that step with a link set by hand.
+- usage-pool-engine: `_crossPlacementOwed` (backend id → pool, member, at, the server id it left), set beside the owed line; `poolChooserForModel({ resumeOf })` starts the resume on that member via `crossCarryFor` (this pool only, 30 min, the member still listed; never for `forDefault`); the carry ends where the resumed conversation is seen (feedOwedCrossLine). ws-create's chooseMember passes `resumeOf` = the resume's backend id (never on a fork).
+- LEG (test-pool-auto, the provider world): the resume placed by the REAL chooser through resolveForSpawn's per-session link lands on Member B; CONTROL: a resume naming no backend id lands on Member A (the release's road); a fork / the pool's default / another pool never read the carry; the carry ends at the next pass, the conversation stays on B.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
