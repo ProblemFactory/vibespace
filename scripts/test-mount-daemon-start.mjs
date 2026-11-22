@@ -17,6 +17,7 @@
 //  ⑦ LAW 5: a start that could not be made (no such program) or that got no answer reads «could not be started» — the person's words
 //     today's («rclone exited before mounting»), never «died», nothing watched
 // Run: node scripts/test-mount-daemon-start.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
