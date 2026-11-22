@@ -808,7 +808,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           }
           // A THIRD-PARTY PROVIDER serves only ITS OWN rows (lane lg-providers U2 r1): the model this session starts with is
           // re-resolved against them — an alias onto its row, nothing ⇒ its default; one it does not serve is REFUSED by name
-          const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? ((r) => { if (!(r && !r.ok && r.code === 'model-not-served' && /^(instance|harness)$/.test(String(data._modelOrigin || '')))) return r; const bare = String(data.model || '').replace(/\[1m\]$/i, ''); const a = bare !== String(data.model || '') ? accounts.providerModelFor(data.accountId, backend, bare) : null; return a && a.ok ? a : accounts.providerModelFor(data.accountId, backend, ''); })(accounts.providerModelFor(data.accountId, backend, data.model)) : null;   // an instance / harness DEFAULT the provider does not serve (through its aliases) is no pick at a third party: its own default (U2 cure)
+          const pvModelOf = (id) => (accounts && typeof accounts.providerModelFor === 'function' ? ((r) => { if (!(r && !r.ok && r.code === 'model-not-served' && /^(instance|harness)$/.test(String(data._modelOrigin || '')))) return r; const bare = String(data.model || '').replace(/\[1m\]$/i, ''); const a = bare !== String(data.model || '') ? accounts.providerModelFor(id, backend, bare) : null; return a && a.ok ? a : accounts.providerModelFor(id, backend, ''); })(accounts.providerModelFor(id, backend, data.model)) : null);   // an instance / harness DEFAULT the provider does not serve (through its aliases) is no pick at a third party: its own default (U2 cure)
+          const pvModel = pvModelOf(data.accountId);   // (the same rule for a pooled create the store places on a provider member: pool unit (d), below)
           if (pvModel && !pvModel.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pvModel.code, message: pvModel.message })); break; }
           if (pvModel) data.model = pvModel.model;
           // A MACHINE WHOSE MANAGED CLAUDE SETTINGS SET A KEY HELPER, OR AN ANTHROPIC CREDENTIAL OR ADDRESS (主开发 23:45Z, as if a must —
@@ -835,7 +836,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           let catalog = null;
           if (data._lockContext && !data.hostId) { try { catalog = require('./server/cli-model-catalog.js').view(); } catch { catalog = null; } }   // a remote machine's CLI is not this catalog's: not judged
           const cmdOf = LOCKCTX.commandOf(data.model, data._lockContext, catalog);
-          const commandModel = data._lockContext ? cmdOf.model : data.model;
+          let commandModel = data._lockContext ? cmdOf.model : data.model;   // (`let`: pool unit (d) re-commands a pooled provider placement's model below)
           data._spawnContext = LOCKCTX.contextOf(commandModel);   // what the spawn COMMANDED (a later Lock on this process reads it)
           // SAID after the start registered (batch 21's cure: below, beside the settings-file notices) — a resume refused on the way
           // never «resumed with the standard context»
@@ -988,6 +989,29 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 return;
               }
               spawnAccount = null; // = the host's own login
+            }
+            // POOL UNIT (d) (row B-d578, ruling r1516): a POOLED create the store placed on a third-party PROVIDER member is judged
+            // against THAT provider — the create named the pool, so the two checks a provider account takes above (its model
+            // re-resolved against its own rows or refused by name; the machine's managed Claude settings) met no provider: they run
+            // here, now that the member is known, before anything spawns
+            const pooledPv = !data.hostId && spawnAccount && spawnAccount.pooled && spawnAccount.kind === 'provider' && /^pv-/.test(String(spawnAccount.poolTarget || '')) ? String(spawnAccount.poolTarget) : null;
+            if (pooledPv) {
+              const pm = pvModelOf(pooledPv);
+              if (pm && !pm.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pm.code, message: pm.message })); return; }
+              if (pm) {   // the member's own row is what the spawn COMMANDS (the command was fixed before the member was known)
+                data.model = pm.model;
+                const cmdPool = LOCKCTX.commandOf(data.model, data._lockContext, catalog);
+                commandModel = data._lockContext ? cmdPool.model : data.model;
+                data._spawnContext = LOCKCTX.contextOf(commandModel);
+              }
+              if (harness && harness.creds && harness.creds.keyHelper) {
+                const mhPool = await MANAGED.managedHelperFact({ dir: typeof managedClaudeDir === 'string' ? managedClaudeDir : null });
+                if (mhPool.named !== false) {
+                  const said = MANAGED.refusalOf(mhPool, (() => { try { return accounts?.providerRecordOf?.(pooledPv)?.label || pooledPv; } catch { return pooledPv; } })());
+                  ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: said.code, message: said.message, i18n: said.i18n }));
+                  return;
+                }
+              }
             }
             if (spawnAccount?.remoteCreds && !spawnAccount.secret && data.hostId && !data.accountId) {
               let allowShip = false;

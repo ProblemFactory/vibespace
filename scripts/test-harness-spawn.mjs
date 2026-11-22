@@ -552,6 +552,27 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const MCHECK = 'if (!data.hostId && pvModel && harness && harness.creds && harness.creds.keyHelper) {\n            const mh = await MANAGED.managedHelperFact(';
   const mCtl = await mstart(mdir({ 'managed-settings.json': HELPER }), { backend: 'claude', accountId: ds.id }, M.load('src/ws-create.js', anchored(src, MCHECK, MCHECK.replace('if (!data.hostId && pvModel', 'if (false && pvModel'), 'the create without the managed check'), 'pv-nomanaged'));
   ok(mCtl.x.spawned.length === 1 && !mCtl.err, 'CONTROL: the create without the managed-settings check spawns the DeepSeek conversation under the managed helper ⇒ the refusal leg goes RED', mCtl.err);
+  // POOL UNIT (d) (row B-d578, ruling r1516): a POOLED create the store places on a third-party PROVIDER member is judged against
+  // THAT provider — the create named the pool (no provider), so before (d) both checks met nothing: its model is re-resolved against
+  // the provider's own rows and the managed settings' helper refuses it by name, nothing spawned. The store's pooled road onto a
+  // provider member is the fallback member itself (after this unit): here a stand-in store answers the pool with that placement.
+  const POOLID = 'pool-' + 'd'.repeat(12);
+  const amPool = new Proxy(am, { get(t, k) {
+    if (k === 'resolveForSpawn') return (id, be, opts) => (id === POOLID ? { ...t.resolveForSpawn(ds.id, be, opts), id: POOLID, pooled: true, kind: 'provider', poolTarget: ds.id } : t.resolveForSpawn(id, be, opts));
+    if (k === 'get') return (id) => (id === POOLID ? { id: POOLID, type: 'pooled', name: 'Pool D', backend: 'claude' } : t.get(id));
+    const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
+  } });
+  const INST = { backend: 'claude', accountId: POOLID, model: 'opus', spawnOriginHint: { model: 'instance' } };   // the instance's default, no pick (the provider's own default stands in)
+  const pstart = async (dir, mod = wsCreate, data = INST) => { const x = await drive(mod, data, { accounts: amPool, managedClaudeDir: dir }); return { x, err: x.sent.find((m) => m.type === 'error') || null }; };
+  const pModel = (x) => { const a = (x.spawned[0] || { args: [] }).args; const i = a.indexOf('--model'); return i >= 0 ? a[i + 1] : null; };
+  const pOk = await pstart(path.join(scratchDir('hspawn-pool-d'), 'no-managed'));
+  ok(pOk.x.spawned.length === 1 && !pOk.err && pModel(pOk.x) === 'deepseek-chat', 'POOL UNIT (d): a POOLED create the store placed on the DeepSeek member re-resolves the instance\'s default (opus, no pick) against THE MEMBER: DeepSeek\'s own default (deepseek-chat), never the pool\'s «opus»', { err: pOk.err, model: pModel(pOk.x) });
+  const pPick = await pstart(path.join(scratchDir('hspawn-pool-d2'), 'no-managed'), wsCreate, { backend: 'claude', accountId: POOLID, model: 'sonnet' });
+  ok(pPick.x.spawned.length === 0 && pPick.err && pPick.err.code === 'model-not-served' && /DeepSeek/.test(pPick.err.message), 'POOL UNIT (d): …a model the PERSON picked that the member does not serve (sonnet) is REFUSED BY NAME against the member (model-not-served, DeepSeek), nothing spawns', pPick.err);
+  const pRef = await pstart(mdir({ 'managed-settings.json': HELPER }));
+  ok(pRef.x.spawned.length === 0 && pRef.err && pRef.err.code === 'provider-managed-helper' && pRef.err.i18n && pRef.err.i18n.params.provider === 'DeepSeek', 'POOL UNIT (d): …and when the managed settings name a key helper that pooled start is REFUSED BY NAME (provider-managed-helper, DeepSeek), nothing spawns', pRef.err);
+  const pCut = await pstart(mdir({ 'managed-settings.json': HELPER }), M.load('src/ws-create.js', anchored(src, '            if (pooledPv) {', '            if (false) {', 'the create before pool unit (d)'), 'pool-d-cut'));
+  ok(pCut.x.spawned.length === 1 && !pCut.err, 'CONTROL: the create before pool unit (d) spawns that pooled DeepSeek start under the managed helper (the organisation\'s credential toward the provider\'s address): the refusal leg goes RED', pCut.err);
   // THE MANAGED ENV BLOCK (its reader's MUST): the CLI copies a managed `env` over the spawn's own — an Anthropic credential there
   // goes to the provider, an address there sends the provider's key to the organisation: both refuse like a helper
   const ORG_TOKEN = ['org', 'bearer', 'from', 'policy'].join('-');
