@@ -122,6 +122,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - With lowering off, Session Properties no longer says a conversation on another machine runs at this server's own CPU priority.
 - VibeSpace no longer stops responding while it writes the CLIs' own settings on a machine whose home folder answers slowly.
 - VibeSpace no longer pauses for a moment each time a job changes while the Jobs list is open, or every few seconds while sessions are listed.
+- After a restart, a run card's 8-hour «Always» no longer reads as ended while it still works, and an agent is told when a pasted key's approval ended.
 
 ## 2.369.415 — 2026-11-21
 
