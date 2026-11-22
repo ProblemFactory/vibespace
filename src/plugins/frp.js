@@ -24,6 +24,25 @@ const FRP_VERSION = process.env.VIBESPACE_FRP_VERSION || '0.70.0';
 const FRP_PORT_MIN = Number(process.env.VIBESPACE_FRP_PORT_MIN || 20000);
 const FRP_PORT_MAX = Number(process.env.VIBESPACE_FRP_PORT_MAX || 25000);
 
+/** B-1217 (主开发 r1775, lane bl-machines-b): IS THE RELAY CLIENT THE PID FILE NAMES THIS MANAGER'S OWN RUN? The relay folder
+ *  (~/.vibespace/plugins/frp) is the HOME's: two instances under one home — a second instance beside the one that runs, a worktree
+ *  hub started by hand — share its pid file, its log and its config, and the release let the second one's login watch read the
+ *  first one's client, restart it under ITS OWN identity, and take the first instance's published address away. A manager that
+ *  recorded a run (`frpcRun`, written at its own start) owns only that run: the same pid and — once recorded — the same start time.
+ *  No recorded run is this manager's ONLY when its record shows a start of its own from before runs were recorded (`legacy`:
+ *  an older build's start left desiredUp) — an instance that never started a client (a fresh data folder) owns none. A run
+ *  recorded by another data folder (`by`: a copy of data/ that runs elsewhere carries the same pid and start) is not this one's.
+ *  PURE: `startOf(pid)` answers the process's start time, or null when it cannot be read (then the pid decides) */
+function ownRunOf(run, pid, startOf, { legacy = false, by = '' } = {}) {
+  if (!pid) return false;
+  if (!run || !run.pid) return !!legacy;
+  if (run.pid !== pid) return false;
+  if (run.by && by && run.by !== by) return false;
+  if (run.start == null) return true;
+  const st = startOf(pid);
+  return st == null || st === run.start;
+}
+
 module.exports = {
   id: 'frp',
   label: 'Public URLs (frp)',
@@ -146,6 +165,21 @@ module.exports = {
       if (rec.enabled === true) return true;
       return frpCfg().fromEnv; // cluster default-on
     };
+    // B-1217 (r1775): THE RUN THIS MANAGER OWNS (ownRunOf) — its pid, else null; another run's client is LEFT ALONE (never judged,
+    // restarted or signalled from here) and SAID once (another instance holds this home's relay folder)
+    const startOf = (pid) => { try { return require('../proc-identity.js').starttimeOf(pid); } catch { return null; } };
+    const dataFolder = () => { try { return h.dataDir ? path.resolve(h.dataDir) : ''; } catch { return ''; } };
+    const heldElsewhere = () => !!frpDaemonPid() && !ownRunPid();
+    const heldRefusal = () => Object.assign(new Error('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone'), { code: 'relay_held_elsewhere' });
+    let otherSaid = 0;
+    const ownRunPid = () => {
+      const pid = frpDaemonPid();
+      if (!pid) return null;
+      const p = h.peek();
+      if (ownRunOf(p.frpcRun, pid, startOf, { legacy: p.desiredUp === true, by: dataFolder() })) return pid;
+      if (otherSaid !== pid) { otherSaid = pid; console.log(`[plugins] frp: another instance holds this home's relay folder — its relay client (pid ${pid}) is not this instance's run; this instance leaves it alone (no judgement, no restart, no signal)`); }
+      return null;
+    };
     const frpDaemonPid = () => {
       try {
         const pid = Number(fs.readFileSync(frpPidFile(), 'utf-8').trim());
@@ -190,6 +224,7 @@ module.exports = {
       try { text = fs.readFileSync(frpConf(), 'utf-8'); } catch { return false; }
       if (!/^auth\.token = "(?!\{\{)/m.test(text)) return false;
       if (frpCfg().vaultLocked || !frpConfigured()) return false;   // the token cannot be read now: the next open scrubs it
+      if (frpDaemonPid() && !ownRunPid()) return false;   // B-1217: another instance's run holds the folder — its config is left alone
       const running = !!frpDaemonPid();
       if (running) { try { verbs.stop(); } catch { } }
       frpWriteConf();
@@ -370,7 +405,7 @@ module.exports = {
      *  never records the relay as no longer asking (lane frp-token-proof — only a proxy that ran does: relayPublished). */
     const observe = () => {
       const p = h.peek();
-      if (!frpDaemonPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) { endDrop(); return null; }
+      if (!ownRunPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) { endDrop(); return null; }   // B-1217: only its OWN run's log is judged
       const ls = loginState();
       if (ls && !ls.ok && ls.code === 'knock_refused' && p.frpcKnock === true && !(Date.now() - (p.knockTrialAt || 0) < 600e3)) {
         const w = h.rec(); w.knockTrialAt = Date.now(); h.save();
@@ -385,6 +420,7 @@ module.exports = {
     let restarting = null;
     const restartSoon = (opts = {}, why = 'a relay change') => {
       if (restarting) return restarting;
+      if (frpDaemonPid() && !ownRunPid()) return Promise.resolve();   // B-1217: another instance's run is never restarted from here
       const pid = frpDaemonPid();
       try { verbs.stop(); } catch { }
       restarting = (async () => {
@@ -457,7 +493,7 @@ module.exports = {
     };
     /** the Relay card's facts — never the token (the registration line carries its sha256 only) */
     const relayStatus = (c) => {
-      const r = relayRead(), rec = r.rec, ident = c.ident, p = h.peek(), running = !!frpDaemonPid();
+      const r = relayRead(), rec = r.rec, ident = c.ident, p = h.peek(), running = !!ownRunPid();   // B-1217: its own run's login and run
       const lines = !rec ? [] : rec.revokedAt ? [RT.registrationLine(rec, sha256, 'revoke')] : [RT.registrationLine(rec, sha256, 'add'), ...(rec.rotatedAt ? [RT.registrationLine(rec, sha256, 'rotate')] : [])];
       return {
         kind: ident.kind, file: r.state, user: ident.user || null, instanceId: rec ? rec.instanceId : null, label: rec ? rec.label : null,
@@ -529,7 +565,7 @@ module.exports = {
         // run (a login proves nothing: frps 0.70.0 takes a vouched login and drops it); r2: never a TRIAL run (restartsAtUnlock)
         try { retireLegacy(); } catch (e) { console.warn('[plugins] frp: the shared relay token was not retired:', e.message); }
         const p = h.peek();
-        if (frpDaemonPid() && restartsAtUnlock(p)) {   // r3b: the one predicate (unlocked now: the token is readable)
+        if (ownRunPid() && restartsAtUnlock(p)) {   // r3b: the one predicate (unlocked now: the token is readable); B-1217: its own run
           restartSoon({}, 'with the shared token');
           return sealed;
         }
@@ -538,7 +574,7 @@ module.exports = {
       },
       /** a relay row changed (the settings store's write hook): a running relay restarts into it */
       applySettings() {
-        if (frpDaemonPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 800); }
+        if (ownRunPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 800); }   // B-1217: its own run only
       },
 
       // The cluster injects the relay env + wants it default-ON, so frp replays
@@ -548,7 +584,7 @@ module.exports = {
         if (restarting) return;   // a relay restart in flight starts it
         try { frpScrubConf(); } catch (e) { console.warn('[plugins] frp: the config scrub failed:', e.message); }
         try { if (relayAdopt()) return; } catch (e) { console.warn('[plugins] frp: the relay identity was not adopted:', e.message); }
-        if (frpDaemonPid()) watchLogin(true);   // a frpc a previous life started: its login is watched again
+        if (ownRunPid()) watchLogin(true);   // a frpc a previous life started: its login is watched again (B-1217: its own run only)
         if (!frpEffectiveEnabled() || !frpConfigured()) return;   // a LOCKED vault with a sealed override reads as unconfigured here — the unlock's sealSecrets replays it
         (async () => {
           try {
@@ -589,7 +625,7 @@ module.exports = {
         if (!frpConfigured()) throw new Error('the frp relay is not configured on this instance (set VIBESPACE_FRPS_ADDR/TOKEN)');
         const bin = frpBin();
         if (!bin) throw new Error('frpc not installed — run install first');
-        if (frpDaemonPid()) return { running: true };
+        if (frpDaemonPid()) { ownRunPid(); return { running: true }; }   // (B-1217: another instance's run is said, never doubled)
         const knock = withKnock ? cfg.token : '';
         frpWriteConf(cfg, !!knock);
         const logFrom = logSize();
@@ -607,7 +643,7 @@ module.exports = {
         rec.frpcKnock = !!knock; rec.frpcIdentity = cfg.ident.token ? cfg.ident.kind : 'none'; rec.frpcLogFrom = logFrom;   // what THIS frpc logs in with
         // lane frp-token-proof: THIS run (the proof is stamped with it) and why it sends no knock — `locked` = the vault kept
         // the shared token closed: during the grace the relay drops such a frpc, so the unlock restarts it WITH the token
-        rec.frpcRun = { pid: child.pid, at: Date.now() };
+        rec.frpcRun = { pid: child.pid, at: Date.now(), start: startOf(child.pid), by: dataFolder() };   // B-1217: its start time and its data folder too — the pid alone may come back as another run
         if (knock) delete rec.frpcKnockless; else rec.frpcKnockless = cfg.knockLocked ? 'locked' : cfg.knockOff ? 'off' : !withKnock && cfg.token ? 'trial' : 'none';
         h.save();
         if (!knock && cfg.knockLocked) console.log('[plugins] frp: frpc starts without the shared relay token (the vault is locked) — the relay may drop it until the unlock, which restarts frpc with the token');
@@ -619,9 +655,10 @@ module.exports = {
       stop() {
         watchLogin(false);
         endDrop();   // the episode ends with its run (a restart WITH the token, a settings change, the relay stopped)
-        const pid = frpDaemonPid();
+        const any = frpDaemonPid(), pid = ownRunPid();   // B-1217: the kill law — never another instance's run
+        if (any && !pid) { watchLogin(false); throw heldRefusal(); }   // said by name: the relay this page shows is another instance's
         if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
-        try { fs.unlinkSync(frpPidFile()); } catch { }
+        if (pid || !any) { try { fs.unlinkSync(frpPidFile()); } catch { } }   // another run's pid file is its own
         const rec = h.rec();
         rec.desiredUp = false;
         h.save();
@@ -647,8 +684,9 @@ module.exports = {
           publicHost: c.serverAddr || null,
           subDomainHost: c.subDomainHost || null,     // subdomain mode when set
           fromEnv: c.fromEnv,                          // relay came from the cluster env
-          running: !!frpDaemonPid(),
-          pid: frpDaemonPid() || undefined,
+          running: !!ownRunPid(),   // B-1217: its OWN run — another instance's client is not this instance's relay
+          pid: ownRunPid() || undefined,
+          heldElsewhere: heldElsewhere(),   // B-1217: another instance in this home runs the relay client (the card says so)
           enabled: frpEffectiveEnabled(),        // default-on when cluster-injected
           desiredUp: !!rec.desiredUp,
           selfDialSub: rec.selfDialSub || '',          // stable subdomain for double-NAT self-publish (B-5c1e)
@@ -671,6 +709,7 @@ module.exports = {
         if (cfg0.vaultLocked) throw lockedRefusal('publish a public URL');
         if (cfg0.ident.kind === 'revoked') throw Object.assign(new Error(revokedWords), { code: 'relay_revoked' });
         if (!frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
+        if (heldElsewhere()) throw heldRefusal();   // B-1217: never another instance's client (its proxies folder, its reload)
         if (!frpDaemonPid()) { verbs.start(); await new Promise((r) => setTimeout(r, 1500)); }
         try { observe(); } catch { }   // r2: no refusal before a try — publish() always tries ONE NewProxy (a proxy that runs ends the episode)
         const cfg = frpCfg();
@@ -768,6 +807,7 @@ module.exports = {
       },
 
       async unpublish(name) {
+        if (heldElsewhere()) throw heldRefusal();   // B-1217: another instance's proxy file is its own
         const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
         try { fs.unlinkSync(path.join(frpProxiesDir(), safe + '.toml')); } catch { }
         if (frpDaemonPid()) { try { await frpReload(); } catch { } }

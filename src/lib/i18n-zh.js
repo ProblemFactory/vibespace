@@ -2999,6 +2999,8 @@ export default {
   "Public URLs (frp)": "公网 URL (frp)",
   "Expose a machine’s dev server on the public internet via the frp relay — share a preview link. Off by default; needs the relay configured.": "经 frp 中继把机器上的开发服务器暴露到公网——分享预览链接。默认关闭；需要配置中继。",
   "relay not configured on this instance": "本实例未配置中继",
+  "Another VibeSpace instance in this home runs the relay client — this instance leaves it alone": "这个主目录下的另一个 VibeSpace 实例在运行中继客户端——这个实例不去动它",   // B-1217 (lane bl-machines-b)
+  "another VibeSpace instance in this home runs the relay — this one leaves it alone": "这个主目录下的另一个 VibeSpace 实例在运行中继——这个实例不去动它",   // B-1217 (lane bl-machines-b)
   "Relay": "中继",
   "publishes forwarded ports to {host}": "把转发的端口发布到 {host}",
   "Public URLs from this instance will stop working until you start it again.": "本实例的公网 URL 会停止工作，直到再次启动。",

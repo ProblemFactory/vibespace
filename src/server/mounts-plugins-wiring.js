@@ -845,10 +845,10 @@ app.post('/api/plugins/:id/install', async (req, res) => {
   try { res.json(await plugins.install(req.params.id)); } catch (e) { pluginRefusal(res, e); }
 });
 app.post('/api/plugins/:id/start', async (req, res) => {
-  try { res.json(await plugins.start(req.params.id)); } catch (e) { pluginRefusal(res, e); }
+  try { res.json(await plugins.start(req.params.id)); } catch (e) { if (e && e.code && e.code !== 'plugins_unread') res.status(400).json({ error: e.message, code: e.code }); else pluginRefusal(res, e); }   // B-1217: a refusal's code (the page words it); a held plugins.json through pluginRefusal
 });
 app.post('/api/plugins/:id/stop', async (req, res) => {
-  try { res.json(await plugins.stop(req.params.id)); } catch (e) { pluginRefusal(res, e); }
+  try { res.json(await plugins.stop(req.params.id)); } catch (e) { if (e && e.code && e.code !== 'plugins_unread') res.status(400).json({ error: e.message, code: e.code }); else pluginRefusal(res, e); }   // B-1217: a refusal's code (the page words it); a held plugins.json through pluginRefusal
 });
 app.post('/api/plugins/:id/login', async (req, res) => {
   try { res.json(await plugins.loginStart(req.params.id)); } catch (e) { pluginRefusal(res, e); }

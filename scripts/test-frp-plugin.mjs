@@ -141,7 +141,7 @@ const ts = () => { const d = new Date(), z = (n, w) => String(n).padStart(w || 2
 const L = (line) => fs.appendFileSync(log, ts() + ' ' + line + '\\n');
 const LOGIN = () => { L('[I] [client/service.go:308] try to connect to server...'); L('[I] [client/service.go:328] [fake] login to server success, get run id [fake]'); };
 fs.appendFileSync(${JSON.stringify(SAW)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(1), knockSha: sha(knock), relaySha: sha(relay), user, conf: text, tokenEnv: Object.keys(process.env).filter((k) => /TOKEN/.test(k)).sort(), envKeys: Object.keys(process.env).sort(), envSha: Object.values(process.env).map(sha).filter(Boolean) }) + '\\n');
-if (loggedIn) LOGIN(); else { L('[I] [client/service.go:308] try to connect to server...'); L("[W] [client/service.go:319] connect to server error: token in login doesn't match token from configuration"); }
+if (loggedIn) { if (m0.lateLogin) setTimeout(LOGIN, m0.lateLogin); else LOGIN(); } else { L('[I] [client/service.go:308] try to connect to server...'); L("[W] [client/service.go:319] connect to server error: token in login doesn't match token from configuration"); }
 // the incident's cadence (3 fast retries ~200 ms, then 1 s, then the cap — frpc's 20 s scaled to 2 s), until frpc is stopped
 if (dropped) { const gaps = [200, 200, 200, 1000]; let k = 0; const next = () => setTimeout(() => { LOGIN(); next(); }, gaps[k++] || 2000); next(); }
 const started = new Set();
@@ -535,6 +535,9 @@ async function hubLegs() {
       old.unref(); fs.writeFileSync(path.join(PDIR, 'frpc.pid'), String(old.pid));
       const sawOld = await nextSaw(n0);
       O.v.close();
+      // B-1217: what a 2.369.324 START left in this instance's record beside its client — desiredUp (its own start), no run recorded:
+      // the mark that the client the pid file names is this instance's own (a FRESH instance has none and owns no client)
+      { const pjF = path.join(DO, 'plugins.json'), j = JSON.parse(fs.readFileSync(pjF, 'utf8')); j.plugins.frp.desiredUp = true; fs.writeFileSync(pjF, JSON.stringify(j, null, 2)); }
       const O2 = boot({ dataDir: DO });   // the upgraded hub: its vault LOCKED, the old frpc still running
       const n1 = sawAll().length;
       O2.pm.bootReplay();
@@ -682,10 +685,22 @@ async function hubLegs() {
         I0 = await firstBoot('trial');
         for (const f of fs.readdirSync(path.join(PDIR, 'proxies'))) fs.rmSync(path.join(PDIR, 'proxies', f), { force: true });   // nothing published: the trial run starts no proxy
         await killFrpc();
-        setMode({ refuseKnock: true, prefix: true });   // the grace ended: frps auth.token = "" — the shared token refused by name, a frpc without it taken
+        setMode({ refuseKnock: true, prefix: true, lateLogin: 6000 });   // (B-1217: a client that logs in writes its line 6 s late — the window below held open) the grace ended: frps auth.token = "" — the shared token refused by name, a frpc without it taken
         const n = sawAll().length;
         I0.pm.bootReplay();   // frpc WITH the token (the vault is unlocked) — refused; the watch reads it and starts the trial without it
         const trial = await nextSaw(n + 1, 8000);
+        // B-1217 (主开发 r1775): A MANAGER NEVER JUDGES NOR RESTARTS A RELAY CLIENT THAT IS NOT ITS OWN RUN — the scene a person meets with
+        // two instances under one home: B (this home's older manager, its own run long ended, its last start WITH the shared token)
+        // replays its boot while the trial client's own login line is still to come (the placed stall above), so the newest line in
+        // the home's log is the refusal of the client before it: the release's B re-armed its watch, read that refusal as ITS own,
+        // restarted the trial client under B's identity — and this instance's publish below never found its own proxy
+        { const saidB = [], l0 = console.log; console.log = (...a) => { saidB.push(a.map(String).join(' ')); l0(...a); };
+          const nB = sawAll().length;
+          try { B.pm.bootReplay(); await sleep(1000); } finally { console.log = l0; }
+          const after = await nextSaw(nB, 1000);
+          // (counted by the trial client's own pid: every older manager of this suite with its real 60-s watch says it at its next tick)
+          check('i2 (B-1217) an OLDER manager of this home replays its boot over the trial client — another instance\'s run: left alone (it lives, no new client), said', !!trial && alive(trial.pid) && !after && saidB.some((l) => l.includes('another instance holds this home\'s relay folder') && l.includes(`(pid ${trial.pid})`)),
+            { trialAlive: !!trial && alive(trial.pid), restarted: !!after, said: saidB.filter((l) => l.includes('relay')) }); }
         await sleep(300);
         const pjT = pjOf(I0.D), stT = I0.pm.status('frp');
         check('i0 the watch reads the refusal by name and restarts frpc WITHOUT the token — the TRIAL (frpcKnockless trial); no proxy runs in it', !!trial && trial.knockSha === null && pjT.frpcKnockless === 'trial' && !!stT.relay.run && stT.relay.run.proxies === 0, { trial: trial && trial.knockSha, knockless: pjT.frpcKnockless, run: stT.relay.run });

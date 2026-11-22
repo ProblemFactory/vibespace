@@ -2999,6 +2999,8 @@ export default {
   "Public URLs (frp)": "公開 URL (frp)",
   "Expose a machine’s dev server on the public internet via the frp relay — share a preview link. Off by default; needs the relay configured.": "frp リレー経由でマシンの開発サーバーをインターネットに公開 — プレビューリンクを共有。既定はオフ。リレーの設定が必要です。",
   "relay not configured on this instance": "このインスタンスにリレーが未設定です",
+  "Another VibeSpace instance in this home runs the relay client — this instance leaves it alone": "このホームの別の VibeSpace インスタンスがリレークライアントを動かしています — このインスタンスは手を触れません",   // B-1217 (lane bl-machines-b)
+  "another VibeSpace instance in this home runs the relay — this one leaves it alone": "このホームの別の VibeSpace インスタンスがリレーを動かしています — このインスタンスは手を触れません",   // B-1217 (lane bl-machines-b)
   "Relay": "リレー",
   "publishes forwarded ports to {host}": "転送されたポートを {host} に公開します",
   "Public URLs from this instance will stop working until you start it again.": "このインスタンスの公開 URL は、再度開始するまで機能しなくなります。",

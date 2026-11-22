@@ -206,7 +206,7 @@ export function installPluginsUI(App) {
         const isRelay = provides(p, 'relay');
         const isServe = provides(p, 'serve'), isTunnel = provides(p, 'tunnel'), isDictation = provides(p, 'dictation'), isDecision = provides(p, 'decision');
         const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
-          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(heldWordsOf(x) || x.error); return x; });   // a held plugins.json: worded by its code
+          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.code === 'relay_held_elsewhere' ? t('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone') : (heldWordsOf(x) || x.error)); return x; });   // B-1217: the refusal in the page's language; a held plugins.json: worded by its code
         const act = async (fn) => { try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); } render(); };
         let chip, tone = '', chipTitle = '', onChip = null, swOn = !!p.enabled, swDisabled = false, onSwitch, install = null, fact = null;
         if (isDecision) {
@@ -255,10 +255,12 @@ export function installPluginsUI(App) {
           chip = p.checking ? (p.statusError ? t('Status unknown — it could not be read') : t('Checking…')) : p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
             : isRelay && p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)')   // lane vault-e2e-password-fix-r2: the sealed relay token
             : isRelay && p.configured === false ? t('relay not configured on this instance')
+            : isRelay && p.heldElsewhere ? t('another VibeSpace instance in this home runs the relay — this one leaves it alone')   // B-1217 (lane bl-machines-b)
               : isTunnel && running && p.cli === false ? t('running — its tailscale command is missing, so its sign-in state is unknown')
               : loginNeeded ? t('Log in…') : running ? t('connected') : p.installed ? t('stopped') : t('not installed');
           tone = isTunnel && running && p.cli === false ? 'warn' : running && !loginNeeded ? 'ok' : loginNeeded ? 'warn' : '';
           if (isRelay && p.vaultLocked) { tone = 'warn'; onChip = () => window.dispatchEvent(new CustomEvent('vs-vault-door')); }
+          else if (isRelay && p.heldElsewhere && p.configured !== false) tone = 'warn';   // B-1217: another instance's relay — said, not «stopped»
           else if (isRelay && p.configured === false) {
             const miss = (p.missing || []).map((k) => ({ serverAddr: t('relay address'), token: t('relay token') }[k] || k));
             chipTitle = miss.length ? t('Missing: {fields} — set it in the plugin\'s settings (⚙), or set VIBESPACE_FRPS_ADDR/_PORT/_TOKEN.', { fields: miss.join(', ') }) : t('Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.');
