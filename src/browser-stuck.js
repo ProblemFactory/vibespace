@@ -1153,6 +1153,23 @@ const PRINT_TEXT = 'The page tried to print — no print window works in this br
 function printNote(n) { return n && n.at ? `${PRINT_TEXT} (at ${hhmm(n.at)})` : PRINT_TEXT; }
 function printWords(tIn) { const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill; return t('The page tried to print — closed; the agent saves a PDF with vibespace-browser pdf'); }
 
+/** B-19a9 (the coordinator's r1840 / r1846 (e)): THE «tab gone» NOTE SAYS WHAT IS TRUE. The driver answers `tab_gone: bound tab
+ *  is gone (target <ID>, last url …)` also of a tab that LIVES: a daemon that sees other sessions' tabs come and go loses its own
+ *  binding (a raw CDP url — box row 124: four navigates said it of living tabs). The CLI looks ONCE, bounded, at the conversation's
+ *  own url; these say what that look found. PURE. */
+const TAB_GONE_WAYS = '`vibespace-browser tab list` names your tabs; `vibespace-browser tab <id>` switches to one, `vibespace-browser tab new <url>` opens one';
+/** The target id a `tab_gone` answer names (upper-case, 32 hex), else null. */
+function tabGoneTargetOf(text) {
+  const m = /\btab_gone\b[^\n]*?\btarget\s+([0-9A-Fa-f]{32})\b/.exec(String(text || ''));
+  return m ? m[1].toUpperCase() : null;
+}
+/** The note for what the look found: false ⇒ it was closed; true ⇒ it is still open (the driver lost it); anything else ⇒ neither claim. */
+function tabGoneNoteText(lives) {
+  if (lives === false) return `your tab is gone (it was closed) — ${TAB_GONE_WAYS} [tab_gone]`;
+  if (lives === true) return 'your tab is still open — the browser driver lost track of it (other sessions\' tabs came and went); `vibespace-browser tab list` names it and `vibespace-browser tab <id>` binds it again [tab_gone]';
+  return `the browser driver lost your tab — whether it was closed could not be read now; ${TAB_GONE_WAYS} [tab_gone]`;
+}
+
 module.exports = {
   MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, OK_RECENT_MS, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
   FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, FRAME_WITHHELD, foldFrames, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
@@ -1175,4 +1192,5 @@ module.exports = {
   OTHER_SITE_FRAMES_SHOWN, OTHER_SITE_FRAME_WORDS, tabFrameTargets, otherSiteFrameOrigins, otherSiteFrameText, frameMissText, frameFieldsListed, // B-5f2e (line 2 + r150): a frame of another site, said as it is
   // lane browser-ui-prompts-r2: permissions decided ahead (the agent's per-origin flip) + the print preview released and told
   PERMISSION_KINDS, PERMISSION_DEFAULT, permissionPlan, permissionVerdict, permissionNote, permissionWords, PRINT_PREVIEW_RE, printTargetVerdict, PRINT_RELEASE_EXPR, PRINT_TEXT, printNote, printWords,
+  TAB_GONE_WAYS, tabGoneTargetOf, tabGoneNoteText, // B-19a9 (r1846 (e)): the «tab gone» note says what one look found
 };

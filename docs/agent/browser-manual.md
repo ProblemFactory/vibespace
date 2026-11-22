@@ -691,7 +691,9 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   command — your open pages are gone. Your next command then answers
   `tab_gone` ("bound tab is gone" — the note names this tool's way out,
   `[tab_gone]`): run `vibespace-browser tab new <url>` (or `tab list`, then
-  `tab <id>` to one of yours) and carry on. If it answers `browser_closed`, it could not be started again
+  `tab <id>` to one of yours) and carry on. The note says what is true: on a browser other sessions share, the
+  driver can lose a tab that is still OPEN — the note then says «your tab is still open — the browser driver lost track of
+  it», and `tab list` + `tab <id>` bind it again (nothing was closed). If it answers `browser_closed`, it could not be started again
   (or it died right after starting): run your command once more — a command
   retries at once — and if it still answers `browser_closed`, tell the user
   to stop it from the Browser panel, then run your command again.

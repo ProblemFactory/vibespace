@@ -655,6 +655,27 @@ function daemonCwd() {
 
 /** Read all of stdin (a batch whose lines arrive there). */
 function readStdin() { try { return fs.readFileSync(0, 'utf8'); } catch { return ''; } }
+/** B-19a9 (the coordinator's r1840 / r1846 (e)): ONE look, BOUNDED, at the conversation's OWN CDP url — the session's
+ *  AGENT_BROWSER_CDP as the hub handed it (the browser's own loopback url or the lease's scope grant; LOOPBACK ONLY, never dialled
+ *  anywhere else): does the target a `tab_gone` answer names still live? ONE `Target.getTargets`, nothing else asked.
+ *  → true | false | null (no url / no id / no WebSocket in this Node / no answer within `ms`: neither claim is made) */
+const TAB_LOOK_MS = 1000;
+function targetLives(cdpUrl, targetId, ms) {
+  return new Promise((resolve) => {
+    const url = String(cdpUrl || '');
+    if (!targetId || typeof WebSocket !== 'function' || !/^ws:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+\//.test(url)) { resolve(null); return; }
+    let ws = null, done = false, timer = null;
+    const end = (v) => { if (done) return; done = true; if (timer) clearTimeout(timer); try { if (ws) ws.close(); } catch { /* gone */ } resolve(v); };
+    timer = setTimeout(() => end(null), ms);
+    try { ws = new WebSocket(url); } catch { end(null); return; }
+    ws.onopen = () => { try { ws.send(JSON.stringify({ id: 1, method: 'Target.getTargets' })); } catch { end(null); } };
+    ws.onmessage = (e) => { let m = null; try { m = JSON.parse(String(e && e.data)); } catch { return; } if (!m || m.id !== 1) return; const list = m.result && Array.isArray(m.result.targetInfos) ? m.result.targetInfos : null; end(list ? list.some((t) => String((t && t.targetId) || '').toUpperCase() === targetId) : null); };
+    ws.onerror = () => end(null);
+    ws.onclose = () => end(null);
+  });
+}
+/** B-19a9: an install without the words file (src/browser-stuck.js) says neither claim */
+const TAB_GONE_FALLBACK = 'the browser driver lost your tab — `vibespace-browser tab list` names your tabs; `vibespace-browser tab <id>` switches to one, `vibespace-browser tab new <url>` opens one [tab_gone]';
 
 /** lane browser-takeover-queue: A PERSON IS ASKED to take over this browser (`ask-human`) — the verb WAITS for their
  *  handback, bounded: the server's own wait (`request.waitMs`, under the agent harness's tool cap) in long-polls of
@@ -1184,6 +1205,9 @@ async function runPage(c) {
     const needScrub = !!(r.scrubOutput && (outText || errText));
     const scrubCapOk = !needScrub || (Buffer.byteLength(outText, 'utf8') <= 16 * 1024 * 1024 && Buffer.byteLength(errText, 'utf8') <= 16 * 1024 * 1024);
     let au = null;
+    // B-19a9 (r1846 (e)): a `tab_gone` answer starts ONE bounded look at the conversation's own url HERE, beside the audit's own hub
+    // call below; the note waits only for what is left of its bound. An answer of any other kind starts nothing.
+    const tabGoneLook = code !== 0 && /\btab_gone\b/.test(outText + errText) && DS && typeof DS.tabGoneTargetOf === 'function' ? targetLives(env && env.AGENT_BROWSER_CDP, DS.tabGoneTargetOf(outText + '\n' + errText), TAB_LOOK_MS) : null;
     const nav = navVerb && code === 0 ? navFacts(outText) : null; // lane browser-propose: the final url + title the server judges for the sign-in hint
     // verify r4 #1 + vault-login r22: `tab new` and `tab <id>` report the resulting active targetId so the watch binds / tracks the aimed tab; `snapshot` reports parsed `@ref` lines so Hub builds its own backendNodeId map
     const isTabNew = words[0] === 'tab' && words[1] === 'new';
@@ -1291,9 +1315,9 @@ async function runPage(c) {
     }
     // lane tailnet-names (LAW 2): a navigation that failed on a tailnet host — why, through Tailscale, by name
     if (navVerb && au && !au._failed && au.tailnet && au.tailnet.text) console.error(`note: ${au.tailnet.text} [tailnet]`);
-    // lane browser-resume C: the tab this session was bound to is GONE (closed — by the user while he drove, by you, or with the
-    // browser) — the binary's own words name its hidden CLI; the way out is this tool's
-    if (code !== 0 && /\btab_gone\b/.test(outText + errText)) console.error('note: your tab is gone (it was closed) — `vibespace-browser tab list` names your tabs; `vibespace-browser tab <id>` switches to one, `vibespace-browser tab new <url>` opens one [tab_gone]');
+    // lane browser-resume C: the tab this session was bound to is GONE — the binary's own words name its hidden CLI; the way out is this
+    // tool's. B-19a9 (r1846 (e)): «it was closed» only when the look found it gone; a tab that lives is said to live (the driver lost it)
+    if (code !== 0 && /\btab_gone\b/.test(outText + errText)) console.error(`note: ${DS && typeof DS.tabGoneNoteText === 'function' ? DS.tabGoneNoteText(tabGoneLook ? await tabGoneLook : null) : TAB_GONE_FALLBACK}`);
     const interrupted = au && !au._failed && au.interrupted ? au.interrupted : null; // said LAST (after a close's own bookkeeping), exit 1
     if (open) { if (interrupted) printInterrupted(interrupted, code); process.exit(1); }
     if (rest[0] === 'close' && profileId && r.kind === 'attachment') {

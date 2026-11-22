@@ -9,6 +9,7 @@
 // ci.mjs's affected rule selects this suite on a change of any of them.
 // Run: node scripts/test-browser-stuck-pins.mjs
 import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
+import { anchored, deadPort } from './scratch.mjs'; // B-19a9: the release-note control is built by anchor (a moved line throws by name); the look's stand-in url on a free port (§81)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -136,6 +137,62 @@ console.log('— ⑤ generatedConfigParts holds dialogs when asked (PURE + a pin
 {
   const B = require('../src/browser-profiles.js');
   ok(B.generatedConfigParts({ userConfig: {}, holdDialogs: true }).config.noAutoDialog === true && B.generatedConfigParts({ userConfig: { noAutoDialog: false } }).config.noAutoDialog === false && /holdDialogs: true/.test(fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8')), 'generatedConfigParts: ours when asked (a new spawn\'s config — browser-env asks), the user\'s value otherwise');
+}
+
+console.log('— B-19a9 (r1846 (e)): the «tab gone» note says what ONE bounded look found — the PURE words, the CLI\'s look (a compiled copy over a fake socket and a fake timer), its wiring');
+{
+  // the driver's own answer, as box row 134 printed it (its last url replaced by a documentation host: no fixed endpoint, §81)
+  const ID = '1C968AF8601617F9B1EB1A828F07DAE3';
+  const LINE = `tab_gone: bound tab is gone (target ${ID}, last url https://example.org/p1b). Run \`agent-browser tab new <url>\` to bind a new tab, or \`agent-browser tab list\` to pick an existing one`;
+  ok(ST.tabGoneTargetOf(LINE) === ID && ST.tabGoneTargetOf(LINE.replace(ID, ID.toLowerCase())) === ID && ST.tabGoneTargetOf('bound tab is gone (target ' + ID + ')') === null && ST.tabGoneTargetOf('tab_gone: bound tab is gone') === null && ST.tabGoneTargetOf(LINE.replace(ID, ID.slice(1))) === null,
+    'the target a `tab_gone` answer names: its 32 hex (upper-case); no `tab_gone` word, no target, or 31 hex ⇒ null');
+  const gone = ST.tabGoneNoteText(false), lives = ST.tabGoneNoteText(true), unread = [null, undefined, 'x'].map((v) => ST.tabGoneNoteText(v));
+  const waysOk = (s) => /\[tab_gone\]$/.test(s) && /`vibespace-browser tab list`/.test(s) && /`vibespace-browser tab <id>`/.test(s);
+  const livesLaw = (s) => /still open/.test(s) && !/closed/.test(s.replace(/whether it was closed/, '')) && waysOk(s);
+  ok(/it was closed/.test(gone) && waysOk(gone), 'the look found it GONE ⇒ «your tab is gone (it was closed)» and this tool\'s ways out');
+  ok(livesLaw(lives) && /lost track of it/.test(lives), 'the look found it LIVING ⇒ «your tab is still open — the browser driver lost track of it», never «closed»');
+  ok(unread.every((s) => s === unread[0] && !/is gone \(it was closed\)|still open/.test(s) && /could not be read now/.test(s) && waysOk(s)), 'the look read nothing ⇒ NEITHER claim: «whether it was closed could not be read now»'); /* stale-pins: kept — an absence check over the words' own text */
+  const RELEASE = 'your tab is gone (it was closed) — `vibespace-browser tab list` names your tabs; `vibespace-browser tab <id>` switches to one, `vibespace-browser tab new <url>` opens one [tab_gone]'; /* stale-pins: kept — the release's own sentence, the RED control's input */
+  ok(!livesLaw(RELEASE), 'CONTROL (RED): the release\'s one sentence fails the living tab\'s law — it says «closed» of a tab that lives');
+
+  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
+  const fm = /\nfunction targetLives\(cdpUrl, targetId, ms\) \{[\s\S]*?\n\}\n/.exec(cli);
+  const mk = (Ws) => { const timers = []; const fn = fm ? new Function('WebSocket', 'setTimeout', 'clearTimeout', fm[0] + '\nreturn targetLives;')(Ws, (f) => { timers.push(f); return timers.length; }, () => {}) : async () => 'missing'; return { fn, fire: () => timers.splice(0).forEach((f) => f()) }; };
+  const fake = (plan) => {
+    const made = [];
+    class W { constructor(u) { this.url = u; this.sent = []; this.closed = false; made.push(this); if (plan.open !== false) queueMicrotask(() => this.onopen && this.onopen()); }
+      send(d) { const q = JSON.parse(d); this.sent.push(q); if (plan.reply) queueMicrotask(() => this.onmessage && this.onmessage({ data: JSON.stringify(plan.reply(q)) })); }
+      close() { this.closed = true; } }
+    return { W, made };
+  };
+  const URL0 = `ws://127.0.0.1:${await deadPort()}/devtools/browser/x`; // never dialled: the fake socket stands in (§81: no fixed fixture endpoint)
+  const listing = (ids) => (q) => ({ id: q.id, result: { targetInfos: ids.map((t) => ({ targetId: t, type: 'page' })) } });
+  const alive = fake({ reply: listing([ID.toLowerCase(), 'B'.repeat(32)]) }), absent = fake({ reply: listing(['B'.repeat(32)]) });
+  const r1 = await mk(alive.W).fn(URL0, ID, 1000), r2 = await mk(absent.W).fn(URL0, ID, 1000);
+  ok(!!fm && r1 === true && r2 === false && alive.made.length === 1 && alive.made[0].url === URL0 && alive.made[0].sent.length === 1 && alive.made[0].sent[0].method === 'Target.getTargets' && alive.made[0].closed && absent.made[0].closed,
+    'the look (the CLI\'s own targetLives, compiled): ONE `Target.getTargets` on the url it is handed — the target listed ⇒ true, absent ⇒ false; the socket closed after', { r1, r2, sent: alive.made[0] && alive.made[0].sent });
+  const silent = fake({}); const m3 = mk(silent.W); const p3 = m3.fn(URL0, ID, 1000); await new Promise((r) => setImmediate(r)); m3.fire(); const r3 = await p3;
+  const err = fake({ reply: (q) => ({ id: q.id, error: { code: -32000, message: 'refused' } }) }); const r4 = await mk(err.W).fn(URL0, ID, 1000);
+  ok(r3 === null && silent.made[0].closed && r4 === null, 'BOUNDED: a socket that never answers ⇒ null when its own timer fires (the socket closed); an error answer ⇒ null — neither claim');
+  const off = fake({ reply: listing([ID]) });
+  const offs = await Promise.all([mk(off.W).fn('ws://192.0.2.1:9222/devtools/browser/x', ID, 1000), mk(off.W).fn('wss://example.org/x', ID, 1000), mk(off.W).fn('', ID, 1000), mk(off.W).fn(URL0, null, 1000), mk(undefined).fn(URL0, ID, 1000)]);
+  ok(offs.every((x) => x === null) && off.made.length === 0, 'it DIALS NOTHING but a loopback url: off the loopback (a documentation address), wss, no url, no target id, or no WebSocket in this Node ⇒ null with no socket made', offs);
+
+  // THE WIRING: the look starts ONLY on a `tab_gone` answer, with the conversation's OWN url (the driver's env), BEFORE the audit's
+  // hub call (beside it, never after); the note says the look's verdict; the bound is one second at most; the release's sentence is gone
+  const wired = (src) => {
+    const start = src.indexOf("const tabGoneLook = code !== 0 && /\\btab_gone\\b/.test(outText + errText) && DS && typeof DS.tabGoneTargetOf === 'function' ? targetLives(env && env.AGENT_BROWSER_CDP, DS.tabGoneTargetOf(outText + '\\n' + errText), TAB_LOOK_MS) : null;");
+    const audit = src.indexOf("await call('POST', '/api/agent/browser/audit'", start > 0 ? start : 0); // the exit handler's OWN audit call, after the look (the CLI holds others before it)
+    const bound = /\nconst TAB_LOOK_MS = (\d+);/.exec(src);
+    return start > 0 && audit > start && audit - start < 4000 && !!bound && Number(bound[1]) > 0 && Number(bound[1]) <= 1000
+      && src.includes('DS.tabGoneNoteText(tabGoneLook ? await tabGoneLook : null)') && !src.includes("console.error('note: your tab is gone (it was closed)"); /* stale-pins: kept — the release's sentence must be ABSENT */
+  };
+  ok(wired(cli), 'the CLI: the look starts only on a `tab_gone` answer, with the driver\'s own AGENT_BROWSER_CDP, before the audit\'s hub call; the note says its verdict; its bound ≤ 1 s; the release\'s sentence is gone');
+  const NOTE_NOW = "console.error(`note: ${DS && typeof DS.tabGoneNoteText === 'function' ? DS.tabGoneNoteText(tabGoneLook ? await tabGoneLook : null) : TAB_GONE_FALLBACK}`);";
+  const rel = anchored(cli, NOTE_NOW, "console.error('note: " + RELEASE + "');", 'b19a9-release-note'); /* stale-pins: kept — the RED copy restores the release's note */
+  const late = anchored(cli, 'const TAB_LOOK_MS = 1000;', 'const TAB_LOOK_MS = 5000;', 'b19a9-long-look');
+  ok(!wired(rel) && !wired(late), 'CONTROL (RED): the release\'s note in a copy, and a look bounded at 5 s, each fail the wiring');
+  ok(!/it was closed|still open/.test(cli.match(/const TAB_GONE_FALLBACK = '([^']*)';/)?.[1] || 'it was closed'), 'an install without the words file says neither claim (the CLI\'s own fallback)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
