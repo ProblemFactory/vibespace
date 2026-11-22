@@ -829,6 +829,7 @@ try {
     'src/agent-routes.js', 'src/agentd/agentd.js', 'src/agentd/client.js', 'src/agentd/stream-mac.js',
     'src/agentd/stream-window-source.js', 'src/app-serve.js', 'src/auth.js', 'src/channel-outbox-files.js',
     'src/claude-oat-probe.js', 'src/ctx-sync.js', 'src/desktop-mic.js', 'src/exit-proxy.js', 'src/incident.js', 'src/jobs.js',
+    'src/account-material.js', // r2697 (lane bl-loop-b): sha256 of a member's credential file's bytes AS READ, kept in a WeakMap beside the read's stat in MEMORY only and compared on the moved file before an act — never written, logged or answered; the file's writers are the oat acts' own
     'src/gmail-sync.js', // B-e40d: sha256 of a sign-in's refresh token keys keepSignIn's IN-MEMORY map (a day, at most 16) — never written; the file's writers are the mail folder's own
     'src/kept-copies.js', 'src/mounts.js', 'src/node-runtime.js', 'src/plugins/frp.js',
     'src/server/rewind-keep-worker.js', // row B-437e the kept copy: sha256 of a listed file's OWN bytes (its copy's read-back, recorded in the press's manifest) — no secret of the hub's; the person's file itself is what the kept copy keeps (0600 in a 0700 folder, as the CLI's own file-history keeps it)

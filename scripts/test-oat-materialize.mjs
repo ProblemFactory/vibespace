@@ -1177,6 +1177,138 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
   const T2m = {};
   if (mF2r) for (const k of ['remint:old-rename', 'clear:old-unlink', 'strip:old-rename']) T2m[k] = await toc(mF2r, k);
   ok(!!mF2r && Object.values(T2m).every((x) => x.landed && x.fresh === 'LOST'), 'RED control (F2): c9fea70ad\'s check-then-rename / check-then-unlink — a login landing after the stat guard is LOST in all three acts (the legs above catch it)', T2m);
+  // ── r2697 THE CONTENT GUARD (lane bl-loop-b): a refresh of the SAME SIZE inside ONE FROZEN tick (both writes' times pinned to one whole
+  // second) keeps the inode (in place), the time and the size equal; the guard compares the BYTES (a sum kept in memory only): ours is
+  // not written, the fresher file stands, said ONCE in the journal by the member's name; by rename too; the sum never in any text ──
+  {
+    const PINNED_S = 1800000000;
+    const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
+    const sameSize = (txt) => txt.replace(/"accessToken":"([^"]+)"/, (_, v) => '"accessToken":"' + [...v].reverse().join('') + '"');   // the same length, other bytes
+    // at: 'aside' = the refresh lands right before the move aside (the one rename of a swap / a remove); 'archive' = right before the
+    // archive's rename of a dead login (the first token's write); 'reread' = right before the remover's own read again of the file.
+    // linkless: link(2) refused EPERM (a filesystem without hard links). twice: a second act on the same row, a refresh again.
+    const ARCH = /\.credentials\.json\.dead-\d+(-\d+)?$/;
+    const tick = async (M, kind, how, { at = 'aside', linkless = false, twice = false } = {}) => {
+      const am = mk8(M); await nv(am, '2.1.296');
+      const name = 'Tick' + kind + how.replace(/[^a-z]/g, '') + at + (linkless ? 'Nl' : '') + (twice ? 'Tw' : '');
+      const m = am.createSubscription({ name }).id; put(am, m, login(NOW, { dead: true }));
+      if (at !== 'archive') await so(am, m, OAT);
+      const p = credsOf(am, m);
+      if (kind === 'strip') { const j = readJ(p); j.mcpOAuth = { s: 1 }; cliWrite(p, j); await am.syncOatFiles(); }
+      fs.utimesSync(p, PINNED_S, PINNED_S);   // the act's read sees this time; the refresh keeps it (the frozen tick)
+      const before = fs.readFileSync(p, 'utf8'); let fresh = null, landed = 0, armed = false;
+      const land = () => {
+        if (!armed) return; armed = false; landed++; fresh = sameSize(fs.readFileSync(p, 'utf8'));
+        if (how === 'in-place') fs.writeFileSync(p, fresh); else { const t = p + '.cli-' + crypto.randomBytes(3).toString('hex'); fs.writeFileSync(t, fresh, { mode: 0o600 }); fs.renameSync(t, p); }
+        fs.utimesSync(p, PINNED_S, PINNED_S);
+      };
+      const uns = [at === 'reread'
+        ? hook(fsp8, 'open', function (o0, q, ...r) { if (String(q) === p && /removeCredentialFile/.test(String(new Error().stack))) land(); return o0.call(this, q, ...r); })
+        : hook(fsp8, 'rename', function (r0, s, d, ...r) { if (String(s) === p && (at === 'archive' ? ARCH : /\.dead-\d+-a/).test(String(d))) land(); return r0.call(this, s, d, ...r); })];
+      if (linkless) uns.push(hook(fsp8, 'link', function () { return Promise.reject(errOf('EPERM')); }));
+      // every console door is read for the member's line and searched for the sums (a 16-character prefix of each)
+      const logs = [], kept = {};
+      for (const k of ['log', 'error', 'warn', 'info']) { kept[k] = console[k]; console[k] = (...a) => { logs.push(a.join(' ')); }; }
+      let reply = null, reply2 = null; const arch0 = allArch(am, m).length;   // the setup's first token archived the dead login: count only what the act leaves
+      try {
+        armed = true; reply = kind === 'remint' ? await so(am, m, at === 'archive' ? OAT : OAT2) : (await co(am, m), null);
+        if (twice) { armed = true; reply2 = await am.syncOatFile(m).catch((e) => ({ threw: String(e && e.code) })); }
+      } finally { for (const u of uns) u(); for (const k of Object.keys(kept)) console[k] = kept[k]; }
+      const now = (() => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } })();
+      const f = am._oatFileFacts.get(m);
+      const texts = [logs.join('\n'), JSON.stringify(reply || null), JSON.stringify(reply2 || null), JSON.stringify(f || null), fs.readFileSync(path.join(am.dataDir, 'accounts.json'), 'utf8')].join('\n');
+      return { landed, sameSize: fresh != null && fresh.length === before.length && fresh !== before, freshStands: fresh != null && now === fresh, fact: f && { verdict: f.verdict, code: f.code },
+        said: logs.filter((l) => l.includes(name) && /changed or went since it was read/.test(l)).length, arch: allArch(am, m).length - arch0,
+        sumInText: [before, fresh].filter((t) => t != null).some((t) => texts.includes(sha(t).slice(0, 16))) };
+    };
+    const TK = {};
+    for (const k of ['remint', 'clear', 'strip']) TK[k] = await tick(undefined, k, 'in-place');
+    ok(Object.values(TK).every((x) => x.landed === 1 && x.sameSize && x.freshStands && x.fact.code === 'changed' && x.said === 1 && !x.sumInText),
+      'r2697: a SAME-SIZE refresh written IN PLACE inside one frozen tick (inode, time and size equal) right before the move aside — a re-mint, a clear, a strip: the bytes differ, ours is NOT written, the fresher file stands, said ONCE by the member\'s name; no content sum (nor its first 16 characters) in any console line, the reply, the facts or accounts.json', TK);
+    const CMP = "  if (!(await sameBytes(aside, expect))) { await putBack(aside, p); throw changed(); }\n";
+    const mTK = mutantStore({ mat: [[CMP, '']] });
+    const TKX = {};
+    if (mTK) for (const k of ['remint', 'clear', 'strip']) TKX[k] = await tick(mTK, k, 'in-place');
+    ok(!!mTK && Object.values(TKX).length === 3 && Object.values(TKX).every((x) => x.landed === 1 && !x.freshStands), 'RED control (the content compare cut — the stat guard alone): the same-size in-place refresh is written over, taken out or stripped, in all three acts (red)', TKX);
+    const TR = await tick(undefined, 'remint', 'by-rename');
+    ok(TR.landed === 1 && TR.freshStands && TR.fact.code === 'changed' && !TR.sumInText, '…and a same-size refresh BY RENAME inside the same frozen tick: refused too (another inode, other bytes), the fresher file stands', TR);
+    const mTR = mutantStore({ mat: [[CMP, ''], ['st.ino !== expect.ino || st.mtimeMs', 'st.mtimeMs']] });
+    const TRX = mTR ? await tick(mTR, 'remint', 'by-rename') : null;
+    ok(!!TRX && TRX.landed === 1 && !TRX.freshStands, 'RED control (the inode AND the content cut): the renamed refresh is written over (red)', TRX);
+    // THE ARCHIVE'S ROAD: a dead login refreshed in place at the same size right before it is archived — it goes back, ours is not written
+    const TA = await tick(undefined, 'remint', 'in-place', { at: 'archive' });
+    ok(TA.landed === 1 && TA.sameSize && TA.freshStands && TA.arch === 0 && TA.fact.code === 'changed' && TA.said === 1 && !TA.sumInText, 'r2697 the archive\'s road: a dead login refreshed IN PLACE at the same size inside the frozen tick right before its archive rename — the bytes differ, it goes back to its name (nothing left archived), ours is NOT written, said once', TA);
+    const mTA = mutantStore({ mat: [['st.size !== expect.size || !(await sameBytes(dst, expect))) {', 'st.size !== expect.size) {']] });
+    const TAX = mTA ? await tick(mTA, 'remint', 'in-place', { at: 'archive' }) : null;
+    ok(!!TAX && TAX.landed === 1 && !TAX.freshStands, 'RED control (the archive\'s content compare cut): the refreshed login is archived and ours written over its name (red)', TAX);
+    // THE REMOVER'S READ AGAIN: the refresh lands before the remover reads the file again — the bytes then and now differ: refused
+    const TQ = await tick(undefined, 'clear', 'in-place', { at: 'reread' });
+    ok(TQ.landed === 1 && TQ.freshStands && TQ.fact.code === 'changed' && TQ.said === 1 && !TQ.sumInText, 'r2697 the remover\'s own read again: a same-size refresh landing right before it (inode, time and size equal) — the bytes read then and now differ, the file is NOT taken out', TQ);
+    const mTQ = mutantStore({ mat: [['  if (expect && (!READ_SUMS.get(expect) || READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat))) throw changed();', '']] });
+    const TQX = mTQ ? await tick(mTQ, 'clear', 'in-place', { at: 'reread' }) : null;
+    ok(!!TQX && TQX.landed === 1 && !TQX.freshStands, 'RED control (the remover\'s content compare cut): the move aside checks against the read AGAIN, so the refreshed file is taken out (red)', TQX);
+    // SAID ONCE: two refused acts back to back on one row — one journal line
+    const TW = await tick(undefined, 'remint', 'in-place', { twice: true });
+    ok(TW.landed === 2 && TW.freshStands && TW.fact.code === 'changed' && TW.said === 1 && !TW.sumInText, 'r2697 said ONCE an episode: two refused acts back to back (a refresh before each move aside) — one journal line by the member\'s name', TW);
+    const SAY = "      if (out.code === 'changed' && this._oatFileFacts.get(id)?.code !== 'changed') console.log(";
+    const mSAY1 = mutantStore({ acc: [[SAY, "      if (out.code === 'changed') console.log("]] });
+    const TWX = mSAY1 ? await tick(mSAY1, 'remint', 'in-place', { twice: true }) : null;
+    ok(!!TWX && TWX.landed === 2 && TWX.said === 2, 'RED control (the once-an-episode clause cut): the second refusal says it again (red)', TWX);
+    const mSAY = mutantStore({ acc: [[SAY, "      if (false) console.log("]] });
+    const TSX = mSAY ? await tick(mSAY, 'remint', 'in-place') : null;
+    ok(!!TSX && TSX.freshStands && TSX.said === 0, 'RED control (the journal line cut): the refusal says nothing by the member\'s name (red)', TSX);
+    const mSUM = mutantStore({ mat: [[CMP, "  if (!(await sameBytes(aside, expect))) { console.warn('[debug] ' + READ_SUMS.get(expect).slice(0, 16)); await putBack(aside, p); throw changed(); }   // MUTANT: a sum prefix in a warning\n"]] });
+    const TUX = mSUM ? await tick(mSUM, 'remint', 'in-place') : null;
+    ok(!!TUX && TUX.sumInText, 'RED control (16 characters of the sum planted in a console WARNING): the search of every console door finds it (red)', TUX);
+    // NO HARD LINKS (its fresh read's must): the put-back after a refusal is an EXCLUSIVE copy into the empty name — the fresher file at its name
+    const TL = await tick(undefined, 'remint', 'in-place', { linkless: true });
+    ok(TL.landed === 1 && TL.freshStands && TL.arch === 0 && TL.fact.code === 'changed' && TL.said === 1, 'r2697 a filesystem WITHOUT hard links (link EPERM): the refused act\'s put-back copies the fresher file back into its EMPTY name (never a replace) — it stands at its name, nothing left at a .dead name', TL);
+    const mTL = mutantStore({ mat: [["    if (LINKLESS.includes(e && e.code)) { try { back = await copyInto(aside, p); } catch { } }\n", '']] });
+    const TLX = mTL ? await tick(mTL, 'remint', 'in-place', { linkless: true }) : null;
+    ok(!!TLX && TLX.landed === 1 && !TLX.freshStands && TLX.arch === 1, 'RED control (the copy back cut — 63901f549\'s put-back): the fresher sign-in rests at a .dead name and its own name is EMPTY (red: the next tick writes ours)', TLX);
+    const TLA = await tick(undefined, 'remint', 'in-place', { at: 'archive', linkless: true });
+    ok(TLA.landed === 1 && TLA.freshStands && TLA.arch === 0 && TLA.fact.code === 'changed', '…the archive\'s put-back too, with no hard links: the refreshed login is copied back to its name', TLA);
+    // …and ours INTO the empty name with no hard links: an exclusive copy, so a sign-in that took the name meanwhile stays
+    const emptyName = async (M, { landing = true } = {}) => {
+      const am = mk8(M); await nv(am, '2.1.296');
+      const m = am.createSubscription({ name: 'EmptyName' }).id; put(am, m, login(NOW, { dead: true })); await so(am, m, OAT);
+      const p = credsOf(am, m), fr = login(NOW); let landed = false;
+      const land = (s, d) => { if (landing && !landed && String(d) === p && /\.tmp$/.test(String(s))) { landed = true; fs.writeFileSync(p, JSON.stringify(fr), { mode: 0o600 }); } };
+      const uns = [hook(fsp8, 'link', function () { return Promise.reject(errOf('EPERM')); }),
+        hook(fsp8, 'copyFile', function (c0, s, d, ...r) { land(s, d); return c0.call(this, s, d, ...r); }),
+        hook(fsp8, 'rename', function (r0, s, d, ...r) { land(s, d); return r0.call(this, s, d, ...r); })];
+      try { await so(am, m, OAT2); } finally { for (const u of uns) u(); }
+      const f = am._oatFileFacts.get(m);
+      return { landed, fresh: where(am, m, fr), fact: f && { verdict: f.verdict, code: f.code }, ours: JSON.stringify(readJ(p) || null).includes(OAT2),
+        mode: (() => { try { return fs.statSync(p).mode & 0o777; } catch { return null; } })(), litter: fs.readdirSync(am.subDir(m)).filter((n) => /\.tmp$/.test(n)).length };
+    };
+    const EN0 = await emptyName(undefined, { landing: false });
+    ok(!EN0.landed && EN0.ours && EN0.fact.verdict !== 'write-failed' && EN0.mode === 0o600 && EN0.litter === 0, 'r2697 no hard links, nothing landing: ours goes into the empty name by an exclusive copy (0600, no temp left)', EN0);
+    const EN = await emptyName();
+    ok(EN.landed && EN.fresh === 'in place' && EN.fact.code === 'changed', 'r2697 no hard links: a sign-in that took the EMPTY name right before ours goes in stays in place (the exclusive copy refuses: changed)', EN);
+    const mEN = mutantStore({ mat: [['    else taken = !(await copyInto(tmp, dest));\n', '    else { await stillSame(dest, null); await fsp.rename(tmp, dest); }\n']] });
+    const ENX = mEN ? await emptyName(mEN) : null;
+    ok(!!ENX && ENX.landed && ENX.fresh === 'LOST', 'RED control (the check-then-rename fallback before r2697): the sign-in that took the empty name between the check and the rename is LOST (red)', ENX);
+    // AN EXPECT WITH NO SUM (a copied stat) is no proof: refused, never a silent fall back to the stat alone
+    const noSum = async (MAT, n) => {
+      const d = path.join(tmp, 'nosum-' + n); fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+      const p = path.join(d, '.credentials.json'); fs.writeFileSync(p, JSON.stringify(login(NOW)), { mode: 0o600 });
+      const was = fs.readFileSync(p, 'utf8'); let w = null, r = null;
+      const s1 = await MAT.readCredentialFile(d);
+      try { await MAT.writeCredentialFile(d, { claudeAiOauth: { accessToken: 'x' } }, { expect: { ...s1.stat } }); w = 'wrote'; } catch (e) { w = String(e && e.code); }
+      const kept = fs.readFileSync(p, 'utf8') === was;
+      const s2 = await MAT.readCredentialFile(d);
+      try { r = String(await MAT.removeCredentialFile(d, { isOurs: () => true, expect: { ...s2.stat } })); } catch (e) { r = String(e && e.code); }
+      return { w, kept, r, stays: fs.existsSync(p) };
+    };
+    const MATn = require(path.join(REPO, 'src/account-material.js'));
+    const NS = await noSum(MATn, 'g');
+    ok(NS.w === 'changed' && NS.kept && NS.r === 'changed' && NS.stays, 'r2697: an expect that carries no content sum (a copied stat, every field equal) is refused by the swap and by the remover — never a silent fall back to the stat alone', NS);
+    const NSW = await noSum(compileWith('src/account-material.js', '  if (!want) return false;', '  if (!want) return true;'), 'w');
+    ok(NSW.w === 'wrote', 'RED control (no sum read as «the same»): the swap writes over the file (red)', NSW);
+    const NSR = await noSum(compileWith('src/account-material.js', '  if (expect && (!READ_SUMS.get(expect) || READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat))) throw changed();', '  if (expect && READ_SUMS.get(expect) && READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat)) throw changed();'), 'r');
+    ok(NSR.r === 'true' && !NSR.stays, 'RED control (the remover skipping a missing sum): the file is taken out (red)', NSR);
+  }
   { // what the rename-aside costs: the name is absent between the move aside and the link-in (a reader there sees ENOENT)
     const am = mk8(); await nv(am, '2.1.296');
     const m = am.createSubscription({ name: 'W' }).id; put(am, m, login(NOW, { dead: true })); await so(am, m, OAT);

@@ -33,7 +33,7 @@
  *
  * pool-oat-materialize verify r1: the oat's acts run off the event loop's back
  * (fs.promises — the never-block-the-loop law, F13) and each is GUARDED: the
- * file must still be the one the verdict read (inode + mtime + size — F7), a
+ * file must still be the one the verdict read (inode + mtime + size — F7; and its BYTES since r2697: a sum of the read, memory only), a
  * member dir that is a symlink is refused (F8), a body that is not an object is
  * refused (F4). readCredentialFile is their one read (a failed read names its
  * errno — never "unreadable", F2).
@@ -113,20 +113,37 @@ async function writePrivateFileAsync(dest, bytes, { expect } = {}) {
   }
 }
 
-const statOf = (st) => ({ ino: st.ino, mtimeMs: st.mtimeMs, size: st.size });
+// r2697 THE CONTENT A GUARD COMPARES: the sha256 of the bytes READ, kept in MEMORY ONLY beside the stat object it was read with (a
+// WeakMap — never written, logged, answered, broadcast or put in an error text; never the bytes themselves). A rewrite of the same size
+// inside one tick of the file's time (1 ms measured on a local disk) keeps inode, time and size equal: only the bytes tell.
+const READ_SUMS = new WeakMap();
+const sumOf = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+const statOf = (st, buf = null) => { const s = { ino: st.ino, mtimeMs: st.mtimeMs, size: st.size }; if (buf != null) READ_SUMS.set(s, sumOf(buf)); return s; };
+/** the bytes now at `p` are the bytes `expect` was read with — read on the file the act decides on. An `expect` that carries no sum (a
+ *  copied or rebuilt stat) is not trusted: a change (its fresh read's small: never a silent fallback to the stat alone) */
+async function sameBytes(p, expect) {
+  const want = expect ? READ_SUMS.get(expect) : null;
+  if (!want) return false;
+  let b; try { b = await fsp.readFile(p); } catch { return false; }
+  return sumOf(b) === want;
+}
 const changed = () => Object.assign(new Error('the credential file changed since it was read'), { code: 'changed' });
 const symlinked = () => Object.assign(new Error('the credential file is a symlink'), { code: 'symlink' });
 /** `tmp` into the EMPTY name `dest`: link(2) never replaces (EEXIST = a file landed ⇒ 'changed'); a filesystem
- *  without hard links falls back to the stat guard + rename. */
+ *  without hard links falls back to an exclusive copy (r2697: never a replace either). */
 async function linkInto(tmp, dest) {
+  let taken = false;
   try { await fsp.link(tmp, dest); } catch (e) {
-    if (e.code === 'EEXIST') { let sl = false; try { sl = (await fsp.lstat(dest)).isSymbolicLink(); } catch { } throw sl ? symlinked() : changed(); } // a dangling symlink there says so too
-    if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV'].includes(e.code)) throw e;
-    await stillSame(dest, null); await fsp.rename(tmp, dest); // a filesystem without hard links: the stat guard alone
+    if (e.code === 'EEXIST') taken = true;
+    else if (!LINKLESS.includes(e.code)) throw e;
+    // a filesystem without hard links: an EXCLUSIVE copy into the empty name (r2697, its fresh read's must: the check-then-rename could
+    // replace a sign-in that landed between them); a file there ⇒ 'changed'
+    else taken = !(await copyInto(tmp, dest));
   }
+  if (taken) { let sl = false; try { sl = (await fsp.lstat(dest)).isSymbolicLink(); } catch { } throw sl ? symlinked() : changed(); } // a dangling symlink there says so too
 }
 /** F2 (pool-oat verify r2) — THE ONE ATOMIC STEP of a replace or a remove: a rename moves exactly ONE inode, so
- *  `p` goes aside FIRST and what moved is checked AFTER (inode + mtime + size vs `expect`): a login that landed
+ *  `p` goes aside FIRST and what moved is checked AFTER (inode + mtime + size AND its bytes vs `expect`, r2697): a login that landed
  *  before the rename is what moved (it goes back, the act is refused 'changed'); one landing after it lands in an
  *  empty name and stays. The aside carries an archive name, so a file that cannot go back is ARCHIVED, never lost.
  *  → the aside's path. */
@@ -135,15 +152,35 @@ async function moveAside(p, expect) {
   try { await fsp.rename(p, aside); } catch (e) { throw e.code === 'ENOENT' ? changed() : e; }
   const st = await fsp.lstat(aside);
   if (!expect || st.isSymbolicLink() || st.ino !== expect.ino || st.mtimeMs !== expect.mtimeMs || st.size !== expect.size) { await putBack(aside, p); throw st.isSymbolicLink() ? symlinked() : changed(); }
+  // r2697: …and its BYTES: the inode MOVED is out of the name, so the compare decides on the file the act acts on. A refresh after the
+  // rename lands at the name (link(2) of ours then refuses EEXIST, or the CLI's own rename replaces ours: the fresher file stands)
+  if (!(await sameBytes(aside, expect))) { await putBack(aside, p); throw changed(); }
   return aside;
 }
 /** The aside back into its EMPTY name (link(2) never replaces); a name a third write took meanwhile leaves it where
  *  it is — an archive (0600). */
 async function putBack(aside, p) {
-  try { await fsp.link(aside, p); } catch { try { await fsp.chmod(aside, 0o600); } catch { } return; }
+  let back = false;
+  try { await fsp.link(aside, p); back = true; } catch (e) {
+    // r2697 (its fresh read's must): a filesystem WITHOUT hard links — the aside goes back by an EXCLUSIVE copy into the empty name (never
+    // a replace: EEXIST = a third write took it, the aside stays archived), so the fresher file stands at its name, not at a .dead name
+    if (LINKLESS.includes(e && e.code)) { try { back = await copyInto(aside, p); } catch { } }
+  }
+  if (!back) { try { await fsp.chmod(aside, 0o600); } catch { } return; }   // never throws: the refusal's own code is what the caller says
   try { await fsp.unlink(aside); } catch { }
 }
-/** F7: `p` is still exactly what was read (`expect` = statOf, or null = it was absent). */
+const LINKLESS = ['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV'];
+/** `src`'s bytes into the EMPTY name `dest` — the no-hard-link twin of link(2): an EXCLUSIVE copy (COPYFILE_EXCL never replaces),
+ *  0600, SYNCED before the caller removes the source (a crash never leaves the name half-written with its source gone)
+ *  → true | false (a file is there) */
+async function copyInto(src, dest) {
+  try { await fsp.copyFile(src, dest, fs.constants.COPYFILE_EXCL); } catch (e) { if (e && e.code === 'EEXIST') return false; throw e; }
+  const fh = await fsp.open(dest, 'r+');
+  try { await fh.chmod(0o600); await fh.sync(); } finally { await fh.close(); }
+  return true;
+}
+/** F7: `p` is still exactly what was read (`expect` = statOf, or null = it was absent) — the cheap stat check; the BYTES are compared by
+ *  sameBytes at each act, on the file the act decides on (r2697) */
 async function stillSame(p, expect) {
   let st = null;
   try { st = await fsp.lstat(p); } catch (e) { if (e.code !== 'ENOENT') throw e; }
@@ -161,8 +198,10 @@ async function readCredentialFile(dir) {
   let fh;
   try { fh = await fsp.open(path.join(dir, '.credentials.json'), 'r'); } catch (e) { return e.code === 'ENOENT' ? out('dir', 'absent') : out('dir', 'read-failed', { code: String(e.code || 'error') }); }
   try {
-    const stat = statOf(await fh.stat());
-    const txt = await fh.readFile('utf8');
+    const buf = await fh.readFile();
+    const st0 = await fh.stat();   // AFTER the read (its fresh read's small): a write between pairs a newer time with the bytes read — a refusal, never a pass
+    const stat = statOf(st0, buf);   // r2697: the read's content sum kept beside it, in memory only
+    const txt = buf.toString('utf8');
     let file = null;
     try { file = JSON.parse(txt); } catch { file = null; }
     if (!file || typeof file !== 'object' || Array.isArray(file)) return out('dir', 'unreadable', { stat });
@@ -199,8 +238,8 @@ async function archiveCredentialFile(dir, at = Date.now(), { expect } = {}) {
   // straight back (link(2): only into an empty name — a third write leaves it archived, never lost)
   if (expect) {
     const st = await fsp.lstat(dst);
-    if (st.ino !== expect.ino || st.mtimeMs !== expect.mtimeMs || st.size !== expect.size) {
-      try { await fsp.link(dst, src); await fsp.unlink(dst); } catch { }
+    if (st.ino !== expect.ino || st.mtimeMs !== expect.mtimeMs || st.size !== expect.size || !(await sameBytes(dst, expect))) {   // r2697: and its bytes
+      await putBack(dst, src);   // link back, or (no hard links) an exclusive copy back: the fresher file at its name
       throw changed();
     }
   }
@@ -219,6 +258,7 @@ async function removeCredentialFile(dir, { isOurs, rest = null, expect } = {}) {
   if (seen.fileState === 'absent') return false;
   if (seen.fileState !== 'present' || !isOurs(seen.file)) throw Object.assign(new Error('not ours: the credential file stays'), { code: 'not-ours' });
   if (expect !== undefined && (!expect || expect.ino !== seen.stat.ino || expect.mtimeMs !== seen.stat.mtimeMs || expect.size !== seen.stat.size)) throw changed();
+  if (expect && (!READ_SUMS.get(expect) || READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat))) throw changed();   // r2697: the bytes read then and now (no sum: no trust)
   const keep = rest ? rest(seen.file) : null;
   if (keep && typeof keep === 'object' && Object.keys(keep).length) { await writePrivateFileAsync(p, JSON.stringify(keep), { expect: seen.stat }); return 'stripped'; }
   await fsp.unlink(await moveAside(p, seen.stat)); // F2: rename aside → check → unlink (never the name itself)

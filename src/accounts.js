@@ -2011,7 +2011,12 @@ class AccountManager {
         // members' files on a CLI update with no line at all — whatever the reason, the journal names the account
         if (out.removed) console.log(`[oat-file] took ${this.get(id)?.name || id}'s long-lived-token file back out of its folder — ${v.verdict}; the pool cannot place it until its token is written again or it logs in`);
       }
-    } catch (e) { out.verdict = 'write-failed'; out.code = String((e && e.code) || 'error'); }
+    } catch (e) {
+      out.verdict = 'write-failed'; out.code = String((e && e.code) || 'error');
+      // r2697: the file CHANGED since it was read (the vendor's program wrote it): ours is not written, the fresher file stands — said
+      // ONCE an episode in the journal, by the member's name (never a token, a content sum or the file's bytes)
+      if (out.code === 'changed' && this._oatFileFacts.get(id)?.code !== 'changed') console.log(`[oat-file] ${a.name || id}: its credential file changed or went since it was read — ours is not written; what is there stands`);
+    }
     const was = this._oatFileFacts.get(id);
     this._oatFileFacts.set(id, { verdict: out.verdict, at: now, ...(out.code ? { code: out.code } : {}), ...(out.reason ? { reason: out.reason } : {}), ...(out.held ? { held: true } : {}) });
     out.doorMoved = !!(out.wrote || out.removed) || !was || was.verdict !== out.verdict || was.code !== out.code || was.reason !== out.reason || !!was.held !== !!out.held;
