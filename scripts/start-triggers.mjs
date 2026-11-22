@@ -33,7 +33,6 @@ export const KINDS = Object.freeze(['press', 'start', 'long', 'timer', 'not-hub'
 export const hubFile = (f) => !/^(src\/agentd\/|data\/bin\/|src\/lib\/)/.test(f);
 const LINK = 'only while a machine\'s device link is down: an ssh road on the shared master — a NAMED DEBT, not moved (主开发 r1351 (b))';
 const MOUNT = 'a connect or teardown the mount sweep\'s auto-reconnect can still reach (60 s, backed off 1/2/5/10 min) — lane bl-machines-b\'s line 141 moved its probes and its sixteen';
-const PULL = 'the pull mount\'s own timers (src/device-mount.js is lane bl-machines-b\'s, r1351 (a))';
 /** [file, cmd (the first argument as the scan writes it), kind, count, what fires it] — the hub's ASYNC direct starts */
 export const ROWS = Object.freeze([
   ['src/agy-discover.js', 'bin', 'timer', 1, 'the sessions list\'s poll: ≤1 per 15 s per agy root, when its database changed'],
@@ -51,11 +50,7 @@ export const ROWS = Object.freeze([
   ['src/desktop-display.js', 'exec', 'press', 1, 'RemoteApp «first connection» trust'],
   ['src/desktop-mic.js', 'file', 'not-hub', 1, 'the device agent'], ['src/desktop-mic.js', 'ff', 'not-hub', 1, 'the device agent'], ['src/desktop-mic.js', 'sp.file', 'not-hub', 1, 'the device agent'],
   ['src/desktop-sound.js', 'ff', 'not-hub', 1, 'the device agent'], ['src/desktop-sound.js', 'h.exe', 'not-hub', 1, 'the device agent'],
-  ['src/device-mount.js', "'fusermount3'", 'timer', 1, 'releaseStale at every pull attempt (the 90 s sweep\'s retry) — ' + PULL],
-  ['src/device-mount.js', "'fusermount'", 'timer', 1, 'the same, without fusermount3 — ' + PULL],
-  ['src/device-mount.js', 'rcloneBin', 'long', 1, 'the pull mount\'s rclone daemon (the detach unit)'],
-  ['src/device-mount.js', "'sh'", 'timer', 1, 'the held-file read loop, 5 s per live pull mount — ' + PULL],
-  ['src/device-mount.js', "'ls'", 'timer', 1, 'waitMounted\'s 250 ms poll at a pull mount\'s start — ' + PULL],
+  ['src/device-mount.js', 'rcloneBin', 'long', 1, 'the pull mount\'s rclone daemon (the detach unit)'],   // its four timer starts (releaseStale\'s fusermount3 / fusermount, the held-file read loop\'s sh, waitMounted\'s ls) moved by lane bl-machines-b\'s B-323e Disconnect line (3b9625657 + 5880a9459): rows struck
   ['src/exit-shell.js', 'p.file', 'not-hub', 1, 'the Windows device agent'],
   ['src/hosts.js', "'ssh'", 'press', 6, 'add a machine, its tools, keys, OpenCode on a host, bootstrap'],
   ['src/hosts.js', "'ssh'", 'start', 1, 'the agent\'s install at a machine\'s first connect'],
@@ -76,7 +71,7 @@ export const ROWS = Object.freeze([
   ['src/mounts.js', "'unzip'", 'start', 1, 'the pinned rclone\'s unpack'],
   ['src/mounts.js', 'local', 'start', 1, '`rclone version` at every restore (boot, each vault unlock)'],
   ['src/mounts.js', 'this.rcloneBin()', 'timer', 1, 'a connect\'s stale-daemon ask (rc core/stats) — ' + MOUNT],
-  ['src/mounts.js', 'this.rcloneBin()', 'long', 2, 'the rclone mount daemon, `rclone authorize`'],
+  ['src/mounts.js', 'this.rcloneBin()', 'long', 1, '`rclone authorize` (the mount daemon starts through the starter\'s detached ask since lane bl-machines-b\'s 3b9625657)'],
   ['src/mounts.js', 'this.rcloneBin()', 'press', 1, 'the Shared-Drive picker'],
   ['src/mounts.js', "'sudo'", 'timer', 2, 'a CephFS mount / unmount — ' + MOUNT],
   ['src/mounts.js', "'rm'", 'timer', 1, 'a moved cache\'s removal after a connect — ' + MOUNT],
@@ -107,9 +102,10 @@ export const ROWS = Object.freeze([
   ['src/server/browser-builds-keeper.js', 'cmd', 'press', 1, 'a Chrome build\'s install'],
   ['src/server/browser-cli-install.js', 'npm', 'long', 1, 'the browser CLI\'s npm install'], ['src/server/browser-cli-install.js', 'i.path', 'press', 1, 'its --version after the install'],
   ['src/server/browser-installs.js', 'cmd', 'press', 1, 'a Chrome build\'s unpack'],
-  ['src/server/child-starter-proc.js', 'cmd', 'not-hub', 1, 'the starter\'s own small process'],
+  ['src/server/child-starter-proc.js', 'cmd', 'not-hub', 2, 'the starter\'s own small process (its ask and its detached ask)'],
   ['src/server/child-starter.js', 'process.execPath', 'long', 1, 'the starter itself (once per boot; one replacement after a fault)'],
   ['src/server/child-starter.js', 'cmd', 'timer', 1, 'the OLD ROAD after two faults (≤ an hour a re-arm): every starter request'],
+  ['src/server/child-starter.js', 'cmd', 'long', 1, 'the OLD ROAD\'s detached start after two faults: the rclone mount daemon (the start src/mounts.js\'s long row named before lane bl-machines-b\'s 3b9625657)'],
   ['src/server/claude-signin.js', 'file', 'press', 1, 'an account\'s sign-in (a PTY)'],
   ['src/server/cli-cmd.js', "'/usr/bin/which'", 'timer', 1, 'a MISSING CLI\'s login-shell ask, ≤1 per 30 s while backend-status is polled'],
   ['src/server/cli-cmd.js', 'shell', 'timer', 1, 'the same (the login shell)'],
@@ -149,6 +145,7 @@ export const SYNC_ROWS = Object.freeze([
   ['src/discovery-facts.js', "'lsof'", 'timer', 1, 'the codex open-threads walk off Linux, while the sessions list polls', "process.platform === 'linux'",
     'macOS / BSD only: ≤1 per 10 s while a page lists the sessions (codex-session-store\'s 10 s cache), up to 45 s (LSOF_BUDGET_MS) — in the transcript WORKER thread: the main loop runs on, the fork still copies the hub\'s page tables'],
   ['src/hosts.js', "'tar'", 'press', 1, 'an agent tools install'],
+  ['src/job-logs-sweep-worker.js', "'ps'", 'not-hub', 1, 'the job-log remover\'s own one-batch child (lane bl-jobs, line 140: started through the starter, it throws without --once): its parent check on a machine with no /proc — it holds that child, never the hub'],
   ['src/node-runtime.js', 'n', 'start', 1, 'the boot, a newer verified node only'],
   ['src/proc-identity.js', "'ps'", 'timer', 2, 'a recorded pid\'s identity on a hub WITHOUT /proc, read by the sweeps', 'hasProc(opts)|_procfs',
     'a hub without /proc only: one `ps` (≤3 s) per recorded pid checked, ON THE MAIN LOOP, from four sweeps (the writer sweep, jobs, mounts, the browser keeper) and the start tokens of a spawn'],
@@ -163,7 +160,7 @@ export const SYNC_ROWS = Object.freeze([
     'macOS only, with active usage polling on (opt-in): ≤1 per 5 min (the 90 s timer under the global login floor) + a ⟳ press, ≤3 s, ON THE MAIN LOOP'],
 ]);
 /** THE DEBT: the sum of every timer row's count — it only shrinks (lower it when a row is lowered) */
-export const TIMER_DEBT_SUM = 29;   // 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18
+export const TIMER_DEBT_SUM = 25;   // 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
 /** a guard is a PLATFORM FACT — the OS, or /proc — never a setting, a flag, an env word */
 export const PLATFORM_GUARD = /^(?:[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)(?:\|[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)*$/;
 const NOT_PLATFORM = /setting|serverSetting|process\.env|\bflag\b|VS_[A-Z_]+|VIBESPACE_[A-Z_]+/i;
