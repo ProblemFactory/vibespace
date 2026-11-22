@@ -481,7 +481,7 @@ parentPort.on('message', (m) => {
     // retried append refused as a file that appeared, for good
     const plantOpen = (src) => anchored(src, '    try { fd = openA(); } catch (e) {', "    if (FS.existsSync(m.file + '.failopen')) { FS.unlinkSync(m.file + '.failopen'); throw Object.assign(new Error('a planted open failure'), { code: 'EMFILE' }); }\n    try { fd = openA(); } catch (e) {", 'an append that fails at its open');
     const STALE = M12.write('src/store-writer-worker.js', plantOpen(asThread(srcK0)), 'stale');
-    const STALE_RED = M12.write('src/store-writer-worker.js', anchored(plantOpen(asThread(srcK0)), '  const ownNow = (m, own, was) => own || (m.ownOnly && m.file && OWN.get(m.file) !== was ? OWN.get(m.file) || null : null);', '  const ownNow = (m, own) => own || (m.ownOnly && m.file ? OWN.get(m.file) || null : null);', 'the map entry handed back whatever the job\'s end'), 'stale-red');
+    const STALE_RED = M12.write('src/store-writer-worker.js', anchored(plantOpen(asThread(srcK0)), '  const ownNow = (m, own, was) => own || (m.ownOnly && m.file && OWN.get(m.file) !== was ? OWN.get(m.file) || null : null);', '  const ownNow = (m, own) => own || (m.ownOnly && m.file ? OWN.get(m.file) || null : null);', 'the map entry handed back whatever the job\'s end'), 'stale-red');   // stale-pins: kept (the line before r2593, the RED copy)
     const staleScene = async (workerPath, tag) => {
       const dir = path.join(T12, `p-stale-${tag}`); fs.mkdirSync(dir); const f = path.join(dir, 'acts.ndjson'), said = [];
       const w = SW.create({ log: { warn: (l) => said.push(String(l)), log: () => { }, error: () => { } }, workerPath });
@@ -517,7 +517,7 @@ parentPort.on('message', (m) => {
         return { mode, made, told: told.join(','), b: b.written.length, disk: fs.readFileSync(f, 'utf8'), refused: said.some((l) => /appeared since/.test(l)) };
       } finally { try { w.stop(); } catch { } }
     };
-    const NO_MAIN_OWN = M12.load('src/store-writer.js', anchored(srcW, '    } catch (e) { if (e && e.own) s.own = e.own; if (!p.append)', '    } catch (e) { if (!p.append)', 'writeHere\'s catch that records no numbers'), 'no-main-own');
+    const NO_MAIN_OWN = M12.load('src/store-writer.js', anchored(srcW, '    } catch (e) { if (e && e.own) s.own = e.own; if (!p.append)', '    } catch (e) { if (!p.append)', 'writeHere\'s catch that records no numbers'), 'no-main-own');   // stale-pins: kept (the line before r2593, the RED copy)
     const [staleOk, staleRed, mainOk, mainRed] = await Promise.all([staleScene(STALE, 'stale'), staleScene(STALE_RED, 'stale-red'), mainScene(SW, 'main'), mainScene(NO_MAIN_OWN, 'main-red')]);
     ok(staleOk.made && staleOk.compacted && staleOk.failed === false && staleOk.disk === 'compacted\nline 2\n' && !staleOk.refused, `⑫ (p3) a compaction on the whole-write thread, an append failing at its open on the append thread: the append retried THERE lands (${JSON.stringify(staleOk.disk)}) — no stale pair handed back`, staleOk);
     ok(staleRed.refused && staleRed.disk === 'compacted\n', `⑫ (p3) RED (the map entry handed back whatever the job's end): the retried append refused its store's own file for good (${JSON.stringify(staleRed.disk)})`, staleRed);
