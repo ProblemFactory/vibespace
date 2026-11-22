@@ -483,11 +483,25 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // stamp (max(now, newest + 1)): after a clock step back an approval given after an OFF can read as before it — the end is then
   // hidden as entry_not_runnable, which errs safe (the entry IS off)
   const offSinceOf = (d, id) => Math.max(offAt.get(id) || 0, d && d.touched ? Number(d.touched[id]) || 0 : 0);
+  // r1700 (2): the entries DELETED in this life (id → when): an end of a grant given before the delete is never written — a grant
+  // given after it (an entry made again under the id) is written as any. And the once-grants a run SPENT whose run has not come
+  // back yet (a delete ends their record «used» at the spend: nothing of theirs is live, their run is)
+  const goneAt = new Map(), inFlight = new Set();
+  // r1700 (1): a BURNED run (nothing ran) takes back the «used» its spend wrote — that approval's own end only
+  // (the read) a NEW approval of a pair deletes the pair's end (no longer the news) — a once-grant of that pair whose run is in
+  // flight ends on its record «used» at its spend first (the ends store keeps one end a pair; the record is that approval's own)
+  function endInFlight(scope, id) { for (const g of [...inFlight]) if (g && g.conv === scope && Array.isArray(g.entries) && g.entries.includes(id)) grantEnded(g, 'used'); }
+  function unsayUse(g) {
+    let n = 0;
+    for (const id of (g && Array.isArray(g.entries) ? g.entries : [])) { const p = pairOf(g.conv, id), e = endedGrants.get(p); if (e && e.endedBy === 'used' && e.grantAt === (Number(g.at) || 0) && endedGrants.delete(p)) n++; }
+    if (n) endsSave();
+  }
   const offAt = new Map();   // entry id → when the owner last switched it OFF (≤ ENDED_MAX): an end of a grant given BEFORE that OFF is not the news
   function noteEnded(g, endedBy, endedAt) {
     if (!g || !g.conv || !Array.isArray(g.entries) || !g.entries.length || !ENDS_SAID.has(endedBy)) return;
     for (const id of g.entries) {
       if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;   // the owner switched it OFF after this approval: the OFF is the news (its own words), never an end said after a restart
+      if (goneAt.has(id) && (goneAt.get(id) || 0) >= (Number(g.at) || 0)) continue;   // r1700 (2): the entry was deleted after this approval — no end for an entry that is gone
       const p = pairOf(g.conv, id);
       endedGrants.delete(p);
       endedGrants.set(p, { conv: g.conv, id, endedAt: Number(endedAt) || now(), endedBy, once: !!g.once, purpose: g.purpose || '', grantAt: Number(g.at) || 0 });
@@ -1370,6 +1384,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const [k, p] of [...hostPasses]) if (p && p.id === key) { hostPasses.delete(k); dropped++; }
     for (const [pair, lp] of [...lateOnce]) if (lp && (lp.entries || []).includes(key)) { lateOnce.delete(pair); dropped++; }
     for (const lq of [...lateAsks.values()]) if ((lq.entries || []).includes(key)) { removeLate(lq, 'ask-over', 'vault'); dropped++; }
+    // r1700 (2): a LIVE grant to the entry ends HERE, its record too («revoked», the OFF's word); a once-grant whose run is in flight
+    // ends on its record «used» at its spend — a later restart writes no end for an entry that no longer exists, and `uses` offers
+    // no «ask again» for it
+    goneAt.delete(key); goneAt.set(key, now()); while (goneAt.size > ENDED_MAX) goneAt.delete(goneAt.keys().next().value);
+    for (const [p, g] of [...grants]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { grants.delete(p); grantEnded(g, 'revoked'); dropped++; }
+    for (const [p, g] of [...shortAlways]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { shortAlways.delete(p); grantEnded(g, 'revoked'); dropped++; }
+    for (const g of [...inFlight]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { grantEnded(g, 'used'); dropped++; }
+    for (const [p, x] of [...seen]) if (x && Array.isArray(x.entries) && x.entries.includes(key)) { seen.delete(p); dropped++; }   // (the read) a shape the owner allowed once this unlock — as the OFF takes it: never a value pasted later under the name
     let gone = 0; for (const [p, e] of [...endedGrants]) if (e && e.id === key && endedGrants.delete(p)) gone++;
     if (gone) endsSave();
     return { ok: true, dropped };
@@ -1834,6 +1856,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
       if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), changes: auditChangesOf(so.changes) });   // r4 (D): what the write added, replaced and ended — the write's own result, never the card's guess
+      endInFlight(q.scope, q.id);
       if (endedGrants.delete(q.quietPair)) endsSave();   // B-a14b: a standing approval of the pair — the old end is no longer the news; r13 should: keyed as the record is, the SCOPE × the entry (q.quietPair = pairOf(scope, id)) — q.conv is the conversation's own id, which a fork's scope is not
       settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor: 'standing', until: null });
       return { ok: true, outcome: 'granted', grantedFor: 'standing', grant: so.grants[0] || null };
@@ -1843,6 +1866,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (prev) grantEnded(prev, 'replaced', t);
     const g = { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose, todoId: q.todoId || null };
     grants.set(q.pair, g);
+    endInFlight(q.scope, q.id);
     if (endedGrants.delete(q.pair)) endsSave();   // B-a14b: a new approval of the pair — the old end is no longer the news
     armGrantEnd(q.pair, g);
     audit('vault-grant', { ...said, answer: a, until });
@@ -2399,14 +2423,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (grants.get(a.pair) !== a.g || !(a.g.until > now())) { note('use_not_granted', head); return named('use_not_granted'); }
         if (a.g.once) spent.push(a);
       }
-      for (const a of spent) { grants.delete(a.pair); a.g.spent = true; a.g.spentAt = now(); }
+      for (const a of spent) { grants.delete(a.pair); a.g.spent = true; a.g.spentAt = now(); noteEnded(a.g, 'used', a.g.spentAt); inFlight.add(a.g); }   // r1700 (1): the spend is written as its end «used» AT the spend, by the one writer of use ends — a restart while its run runs says the earlier truth (a burned run takes it back: restoreOnce)
+      while (inFlight.size > ENDED_MAX) inFlight.delete(inFlight.values().next().value);
       // L3 (int331) + round 14: a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
       const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed']);
-      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; }   // nothing ran: not spent. It comes back only when nothing ENDED it meanwhile: the owner's OFF of an entry it holds (an OFF landing between the spend and here — the asynchronous spawn error's road) ends it «revoked» at the OFF, as each grant the OFF ended (r901); a lock ends it «lock» at the lock — it was out of `grants` when onLocked ended the live ones and cleared every end timer — as each grant the lock ended; the FIRST of the two is its end (the first end stands; its For-you record and `uses` say so)
+      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; } for (const a of spent) inFlight.delete(a.g); if (burned) for (const a of spent) unsayUse(a.g);   // nothing ran: not spent. It comes back only when nothing ENDED it meanwhile: the owner's OFF of an entry it holds (an OFF landing between the spend and here — the asynchronous spawn error's road) ends it «revoked» at the OFF, as each grant the OFF ended (r901); a lock ends it «lock» at the lock — it was out of `grants` when onLocked ended the live ones and cleared every end timer — as each grant the lock ended; the FIRST of the two is its end (the first end stands; its For-you record and `uses` say so)
       const open = burned && lockGen === lg0 && vaultState() === 'unlocked', lockT = lockGen !== lg0 ? lockedAt : now();
-      if (!burned) for (const a of spent) grantEnded(a.g, 'used'); else for (const a of spent) { const offT = offTimeOf(a.g); if (offT && (open || offT <= lockT)) grantEnded(a.g, 'revoked', offT); else if (!open) grantEnded(a.g, 'lock', lockT); else if (a.g.until > now()) grants.set(a.pair, a.g); }
+      if (!burned) for (const a of spent) grantEnded(a.g, 'used'); else for (const a of spent) { const offT = offTimeOf(a.g); if (offT && (open || offT <= lockT)) grantEnded(a.g, 'revoked', offT); else if (!open) grantEnded(a.g, 'lock', lockT); else if (a.g.until > now()) { if (!a.g.endedBy) grants.set(a.pair, a.g); } }
       if (open) giveBackLate(); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
       if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" })); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
@@ -2580,7 +2605,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // conversation × entry (the ends store): `uses` lists it, the next run is refused grant_expired saying the restart (it read
       // entry_not_runnable — «not switched on» — before). A record from before (no conversation / entry in its facts) is ended on
       // the record only
-      try { const t0 = tBoot; for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { try { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) { userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); if (typeof f.conv === 'string' && f.conv && f.conv.length <= 200 && typeof f.entry === 'string' && f.entry && f.entry.length <= 400) noteEnded({ conv: f.conv, entries: [f.entry], once: f.grantedFor === 'once', at: Number(f.at) || 0, purpose: SS.redactSecrets(typeof f.purpose === 'string' ? f.purpose : '').text.slice(0, 400) }, 'restart', t0); } } catch (e) { log(`a live approval's record could not be ended at the start (${(e && e.message) || e}) — the next record goes on`); } } } catch { }   // one record at a time; bounded and belted as the ends file's load (the read)
+      // r1700 (1): an approval whose run SPENT it said «used» at the spend (the ends store, read above) — the first end stands: its
+      // record ends «used» at the spend and no «restart» is written over it. r1700 (3): a record that cannot be ended is COUNTED —
+      // one line for the whole sweep (a store with no whenRead, not read yet, refuses every record)
+      try { const t0 = tBoot; let live = 0, failed = 0, why = ''; for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { try { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) { live++; const keyed = typeof f.conv === 'string' && f.conv && f.conv.length <= 200 && typeof f.entry === 'string' && f.entry && f.entry.length <= 400; const used = keyed ? endedGrants.get(pairOf(f.conv, f.entry)) : null; if (used && used.endedBy === 'used' && used.grantAt === (Number(f.at) || 0)) { userTodos.noteFact(it.id, { endedAt: used.endedAt, endedBy: 'used' }); continue; } userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); if (keyed) noteEnded({ conv: f.conv, entries: [f.entry], once: f.grantedFor === 'once', at: Number(f.at) || 0, purpose: SS.redactSecrets(typeof f.purpose === 'string' ? f.purpose : '').text.slice(0, 400) }, 'restart', t0); } } catch (e) { if (!failed++) why = (e && e.message) || String(e); } } if (failed) log(`${failed} of ${live} live approval record(s) could not be ended at the start (the first: ${why})`); } catch { }   // one record at a time; bounded and belted as the ends file's load (the read)
       try { const t0 = tBoot; for (const it of userTodos.resolvedOf(ACTION_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'always' && f.alwaysFor === '8h' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }   // an 8-hour «always» is memory too
     };
     if (typeof userTodos.whenRead === 'function') userTodos.whenRead(endGrants, 'a restart ends every grant'); else endGrants();

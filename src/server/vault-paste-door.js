@@ -439,6 +439,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(rowId, { label, why: 'revoked' }); } catch { } } return named('store_failed'); }   // the second adversarial read: its approvals are gone already — its jobs stop (taken back), never run on unapproved
     if (r.already) return named('entry_unknown_id');
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
+    try { if (vaultRun && typeof vaultRun.forgetEntry === 'function') vaultRun.forgetEntry(rowId); } catch (e) { log(`${entry}: the run door could not forget it — ${e.message}`); }   // B-a14b follow (r1700 (2), its read): as the agent entry's delete — a live grant to it (a pasted one) ends here, its passes and shapes go with it
     if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); } catch (e) { log(`${entry}: its Background jobs could not be stopped — ${e.message}`); } }   // every job that names it stops (a waiting one is refused)
     return { ok: true, entry };
   }

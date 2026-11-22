@@ -1813,7 +1813,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const rse = await restartEnds(DOOR);
     ok(rse.answered && rse.facts.conv && rse.facts.entry && rse.facts.purpose && rse.liveEnded === 0 && rse.afterRestart && rse.afterRestart.endedBy === 'restart' && rse.afterRestart.purpose === 'a restart in between' && rse.afterRestart.entry === M1 && rse.code === 'grant_expired' && rse.restartWords && rse.recordEnd === 'restart',
       `B-a14b's remainder: a RESTART ends a live approval and the agent is told — \`uses\` lists «restart», the next run is refused grant_expired saying the hub restarted, the record says so — ${JSON.stringify(rse)}`, rse);
-    const mrse = M.load('src/server/vault-run-door.js', anchored(SRCa, " if (typeof f.conv === 'string' && f.conv && f.conv.length <= 200 && typeof f.entry === 'string' && f.entry && f.entry.length <= 400) noteEnded({ conv: f.conv, entries: [f.entry], once: f.grantedFor === 'once', at: Number(f.at) || 0, purpose: SS.redactSecrets(typeof f.purpose === 'string' ? f.purpose : '').text.slice(0, 400) }, 'restart', t0);", '', 'test-vault-run B-a14b remainder: the start writes no end'), 'a14b-restart');
+    const mrse = M.load('src/server/vault-run-door.js', anchored(SRCa, " if (keyed) noteEnded({ conv: f.conv, entries: [f.entry], once: f.grantedFor === 'once', at: Number(f.at) || 0, purpose: SS.redactSecrets(typeof f.purpose === 'string' ? f.purpose : '').text.slice(0, 400) }, 'restart', t0);", '', 'test-vault-run B-a14b remainder: the start writes no end'), 'a14b-restart');
     const rser = await restartEnds(mrse);
     ok(rser.recordEnd === 'restart' && !rser.afterRestart && rser.code !== 'grant_expired', `RED control: the start writes no end (the release) ⇒ \`uses\` silent after a restart and the run refused as ${rser.code} — never «your approval ended» — ${JSON.stringify(rser)}`, rser);
     const rso = await restartEnds(DOOR, { old: true });
@@ -1827,6 +1827,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const h = await runHeld(wq);   // a once-grant approved and spent by a run held open
       clk.t += 1000;
       const off = wq.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner's OFF, a second after the approval, while the run runs
+      await SW.durable(path.join(wq.dataDir, 'vault-grant-ends.json'));   // (r1700's read) the spend writes its end now — what the OFF dropped has landed before the restart reads the file
       wq.door = wq.mk(mod, { now: () => clk.t, timers: { set: () => 0, clear: () => { } } });   // THE RESTART before the run ended
       const recOf = () => (wq.userTodos.resolvedOf('vault-grant-ask') || []).find((x) => x.resolvedBy === 'granted');
       for (let k = 0; k < 200 && !((recOf() || {}).resolvedFact || {}).endedAt; k++) await new Promise((r) => setImmediate(r));   // the start's sweep ended the approval's record
@@ -1840,6 +1841,119 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const motr = M.load('src/server/vault-run-door.js', anchored(SRCa, '  const offSinceOf = (d, id) => Math.max(offAt.get(id) || 0, d && d.touched ? Number(d.touched[id]) || 0 : 0);', '  const offSinceOf = (d, id) => offAt.get(id) || 0;', 'test-vault-run B-a14b remainder: the OFF from memory alone'), 'a14b-off-restart');
     const otrR = await offThenRestart(motr);
     ok(otrR.listed.join() === 'restart' && otrR.code === 'grant_expired' && otrR.offWords, `RED control: the OFF read from memory alone ⇒ after the restart «restart» is said over the owner's OFF, with «it already was when they approved» — false — ${JSON.stringify(otrR)}`, otrR);
+    // r1700 (1): a once-grant SPENT by a run still running at the restart — its spend said «used» (the first end stands), so the start
+    // writes no «restart» over it: `uses` lists «used» dated at the spend, the run is refused saying its one run was used, the record
+    // says «used» at the spend. RED: no end written at the spend ⇒ «restart». r1700 (2), the run in flight: the entry DELETED while
+    // that run runs (the door's forget — both of the paste door's deletes call it: a free entry's and an agent's own), then the restart: nothing listed for the gone entry,
+    // the record «used» at the spend. RED: the delete that skips the run in flight ⇒ «restart» listed for an entry that is gone.
+    // (the read) a SECOND approval of the pair (8 hours) while that run runs, then the restart: the first record «used» at its spend,
+    // the second «restart». RED: the new approval that drops the pair's end alone ⇒ the first record «restart»
+    const spentRestart = async (mod, { forget = false, again = false } = {}) => {
+      const wq = await world(), clk = { t: Date.now() }, endsF = path.join(wq.dataDir, 'vault-grant-ends.json');
+      wq.door = wq.mk(mod, { now: () => clk.t, timers: { set: () => 0, clear: () => { } } });
+      const h = await runHeld(wq);   // approved and spent at clk.t, its run held open
+      const spentAt = clk.t;
+      clk.t += 1000;
+      const fe = forget ? wq.door.forgetEntry('mounts:m1#secretKey') : null;
+      const q2 = again ? wq.door.request({ caller: c8, entry: M1, purpose: 'a second approval meanwhile' }) : null;
+      const a2 = q2 ? wq.door.answerRequest(q2.askId, { answer: '8h', reauthed: true, person: true }) : null;
+      await SW.durable(endsF);   // what the spend (and the delete) wrote has landed: a restart reads the file
+      wq.door = wq.mk(mod, { now: () => clk.t, timers: { set: () => 0, clear: () => { } } });   // THE RESTART while the run still runs
+      const recOf = (gf = 'once') => (wq.userTodos.resolvedOf('vault-grant-ask') || []).find((x) => x.resolvedBy === 'granted' && (x.resolvedFact || {}).grantedFor === gf);
+      for (let k = 0; k < 200 && !(((recOf() || {}).resolvedFact || {}).endedAt && (!again || ((recOf('8h') || {}).resolvedFact || {}).endedAt)); k++) await new Promise((r) => setImmediate(r));   // the records have their ends
+      const e0 = wq.door.usesFor(c8).ended[0] || null;
+      const r = forget || again ? null : await wq.door.run({ caller: c8, args: ENV('env'), cwd: wq.work });
+      const f = (recOf() || {}).resolvedFact || {}, f2 = again ? (recOf('8h') || {}).resolvedFact || {} : null;
+      h.ac.abort(); await h.pr;   // the old run ends (its door's own business)
+      return { running: h.running, forgot: forget ? !!(fe && fe.ok) : null, listed: e0 ? { endedBy: e0.endedBy, atSpend: Date.parse(e0.endedAt) === spentAt } : null, code: r ? r.code : null, usedWords: !!(r && typeof r.words === 'string' && /its one run was used at/.test(r.words)), recordEnd: f.endedBy || null, recordAtSpend: Number(f.endedAt) === spentAt, ...(again ? { again: !!(a2 && a2.ok), againEnd: f2.endedBy || null } : {}) };
+    };
+    const spr = await spentRestart(DOOR);
+    ok(spr.running && spr.listed && spr.listed.endedBy === 'used' && spr.listed.atSpend && spr.code === 'grant_expired' && spr.usedWords && spr.recordEnd === 'used' && spr.recordAtSpend,
+      `r1700 (1): a once-grant spent by a run still running at the restart — the first end stands: «used» dated at the spend in \`uses\`, the run told its one run was used, the record «used» — ${JSON.stringify(spr)}`, spr);
+    const mspr = M.load('src/server/vault-run-door.js', anchored(SRCa, " noteEnded(a.g, 'used', a.g.spentAt); inFlight.add(a.g); }", ' inFlight.add(a.g); }', 'test-vault-run r1700: no end written at the spend'), 'a14b-spent-restart');
+    const sprR = await spentRestart(mspr);
+    ok(sprR.running && sprR.listed && sprR.listed.endedBy === 'restart' && sprR.recordEnd === 'restart', `RED control: no end written at the spend ⇒ the restart is said over the run that used it — ${JSON.stringify(sprR)}`, sprR);
+    const spf = await spentRestart(DOOR, { forget: true });
+    ok(spf.running && spf.forgot && !spf.listed && spf.recordEnd === 'used' && spf.recordAtSpend, `r1700 (2): the entry deleted while a run that spent its once-grant runs, then a restart — nothing listed for the gone entry, the record «used» at the spend — ${JSON.stringify(spf)}`, spf);
+    const mspf = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const g of [...inFlight]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { grantEnded(g, 'used'); dropped++; }\n", '', 'test-vault-run r1700: the delete skips the run in flight'), 'a14b-spent-forget');
+    const spfR = await spentRestart(mspf, { forget: true });
+    ok(spfR.running && spfR.listed && spfR.listed.endedBy === 'restart' && spfR.recordEnd === 'restart', `RED control: the delete that skips the run in flight ⇒ after the restart «restart» is listed for an entry that no longer exists — ${JSON.stringify(spfR)}`, spfR);
+    const spa = await spentRestart(DOOR, { again: true });
+    ok(spa.running && spa.again && spa.recordEnd === 'used' && spa.recordAtSpend && spa.againEnd === 'restart' && spa.listed && spa.listed.endedBy === 'restart', `(the read) a second approval of the pair while the run that spent the first runs, then a restart — the first record «used» at its spend, the second «restart» (\`uses\`: the newest, «restart») — ${JSON.stringify(spa)}`, spa);
+    const mspa = M.load('src/server/vault-run-door.js', anchored(SRCa, '    grants.set(q.pair, g);\n    endInFlight(q.scope, q.id);\n', '    grants.set(q.pair, g);\n', 'test-vault-run r1700 read: the new approval drops the pair end alone'), 'a14b-spent-again');
+    const spaR = await spentRestart(mspa, { again: true });
+    ok(spaR.running && spaR.again && spaR.recordEnd === 'restart' && spaR.againEnd === 'restart', `RED control: the new approval that drops the pair's end alone ⇒ the first record says «restart» over the run that used it — ${JSON.stringify(spaR)}`, spaR);
+    // (the second read) EVERY road where an approval deletes its pair's end ends a spent in-flight once-grant of that pair first —
+    // the 8-hour / once road (the leg above) AND the standing road (its approval needs the use-grants store this world does not
+    // build): a census of the door's text — each `endedGrants.delete(q.…)` stands right after `endInFlight(q.scope, q.id);`. RED:
+    // the standing road without it
+    const inFlightCensus = (src) => { const ls = String(src).split('\n'), at = ls.map((l, i) => (/endedGrants\.delete\(q\./.test(l) ? i : -1)).filter((i) => i >= 0); return { sites: at.length, bare: at.filter((i) => !/^\s*endInFlight\(q\.scope, q\.id\);\s*$/.test(ls[i - 1] || '')).map((i) => ls[i].trim().slice(0, 70)) }; };
+    const icz = inFlightCensus(SRCa);
+    ok(icz.sites === 2 && icz.bare.length === 0, `(the second read) both roads that delete a pair's end on a new approval (the 8-hour / once road, the standing road) end a spent in-flight once-grant of the pair first — ${JSON.stringify(icz)}`, icz);
+    const iczR = inFlightCensus(anchored(SRCa, '      endInFlight(q.scope, q.id);\n      if (endedGrants.delete(q.quietPair)) endsSave();', '      if (endedGrants.delete(q.quietPair)) endsSave();', 'test-vault-run r1700 read 2: the standing road without endInFlight'));
+    ok(iczR.sites === 2 && iczR.bare.length === 1 && /q\.quietPair/.test(iczR.bare[0] || ''), `RED control: the standing road without endInFlight ⇒ the census names it — ${JSON.stringify(iczR)}`, iczR);
+    // r1700 (1), its take-back: a BURNED run (nothing ran — its run folder never made) gives its once-grant back, and takes back the
+    // «used» its spend wrote: a restart then ends that live approval «restart», never «used». RED: no take-back ⇒ «used» said of a
+    // run that never ran
+    const burnedRestart = async (mod) => {
+      const wb3 = await world(); let burn = false;
+      wb3.door = wb3.mk(mod, { runRoot: () => (burn ? path.join(wb3.dir, 'run-never-made') : wb3.runRoot), timers: { set: () => 0, clear: () => { } } });
+      const qb3 = wb3.door.request({ caller: c8, entry: M1, purpose: 'a run that burns, then a restart' });
+      wb3.door.answerRequest(qb3.askId, { answer: 'once', reauthed: true, person: true });
+      burn = true;
+      const code = (await runAnswered(wb3, ENV('env'), { caller: c8 })).r.code;
+      burn = false;
+      const givenBack = [...wb3.door._grants.values()].filter((g) => g.conv === c8.scope && g.once).length;
+      await SW.durable(path.join(wb3.dataDir, 'vault-grant-ends.json'));
+      wb3.door = wb3.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART
+      const recOf = () => (wb3.userTodos.resolvedOf('vault-grant-ask') || []).find((x) => x.resolvedBy === 'granted');
+      for (let k = 0; k < 200 && !((recOf() || {}).resolvedFact || {}).endedAt; k++) await new Promise((r) => setImmediate(r));
+      return { code, givenBack, recordEnd: ((recOf() || {}).resolvedFact || {}).endedBy || null, listed: wb3.door.usesFor(c8).ended.map((e) => e.endedBy) };
+    };
+    const brs = await burnedRestart(DOOR);
+    ok(brs.code === 'spawn_failed' && brs.givenBack === 1 && brs.recordEnd === 'restart' && brs.listed.join() === 'restart', `r1700 (1): a burned run takes back the «used» its spend wrote — the approval given back ends «restart» at the restart — ${JSON.stringify(brs)}`, brs);
+    const mbrs = M.load('src/server/vault-run-door.js', anchored(SRCa, ' if (burned) for (const a of spent) unsayUse(a.g);', '', 'test-vault-run r1700: no take-back'), 'a14b-burned-restart');
+    const brsR = await burnedRestart(mbrs);
+    ok(brsR.code === 'spawn_failed' && brsR.recordEnd === 'used' && brsR.listed.join() === 'used', `RED control: no take-back on a burned run ⇒ the restart says «its one run was used» of a run that never ran — ${JSON.stringify(brsR)}`, brsR);
+    // r1700 (2): an entry DELETED while a grant to it is live: the grant and its record end there («revoked»); a later restart writes
+    // no end for the entry and `uses` offers no «ask again» for it. RED: the delete that leaves the live grant ⇒ «restart» listed
+    const deletedLive = async (mod) => {
+      const wd2 = await world();
+      wd2.door = wd2.mk(mod, { timers: { set: () => 0, clear: () => { } } });
+      const qd = wd2.door.request({ caller: c8, entry: M1, purpose: 'an entry deleted meanwhile' });
+      wd2.door.answerRequest(qd.askId, { answer: '8h', reauthed: true, person: true });
+      const g = [...wd2.door._grants.values()].find((x) => x.conv === c8.scope), todoId = g ? g.todoId : null;
+      const recEnd = () => (((wd2.userTodos.get(todoId) || {}).resolvedFact || {}).endedBy) || null;
+      wd2.door._seen.set('pair-seen-r1700', { at: Date.now(), entries: ['mounts:m1#secretKey'] });   // a shape the owner allowed once this unlock, naming the entry
+      const fe = wd2.door.forgetEntry('mounts:m1#secretKey');   // the entry deleted (the door's forget — both of the paste door's deletes call it: a free entry's and an agent's own)
+      const afterForget = { grants: [...wd2.door._grants.values()].filter((x) => x.conv === c8.scope).length, recordEnd: recEnd(), seen: wd2.door._seen.has('pair-seen-r1700') };
+      wd2.door = wd2.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART
+      for (let k = 0; k < 200 && !recEnd(); k++) await new Promise((r) => setImmediate(r));   // the record has its end (at the delete, or at the start)
+      return { todo: !!todoId, forgot: !!(fe && fe.ok), afterForget, recordEnd: recEnd(), listed: wd2.door.usesFor(c8).ended.map((e) => e.endedBy) };
+    };
+    const dlv = await deletedLive(DOOR);
+    ok(dlv.todo && dlv.forgot && dlv.afterForget.grants === 0 && !dlv.afterForget.seen && dlv.afterForget.recordEnd === 'revoked' && dlv.recordEnd === 'revoked' && dlv.listed.length === 0, `r1700 (2): an entry deleted while a grant to it is live — the grant and its record end there («revoked»); after a restart \`uses\` offers nothing for the gone entry — ${JSON.stringify(dlv)}`, dlv);
+    const mdlv = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const [p, g] of [...grants]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { grants.delete(p); grantEnded(g, 'revoked'); dropped++; }\n", '', 'test-vault-run r1700: the delete leaves the live grant'), 'a14b-deleted-live');
+    const dlvR = await deletedLive(mdlv);
+    ok(dlvR.afterForget.grants === 1 && dlvR.recordEnd === 'restart' && dlvR.listed.join() === 'restart', `RED control: the delete that leaves the live grant ⇒ after a restart «restart» is listed for an entry that no longer exists — ${JSON.stringify(dlvR)}`, dlvR);
+    const mdls = M.load('src/server/vault-run-door.js', anchored(SRCa, "    for (const [p, x] of [...seen]) if (x && Array.isArray(x.entries) && x.entries.includes(key)) { seen.delete(p); dropped++; }", '', 'test-vault-run r1700 read: the delete leaves the seen shape'), 'a14b-deleted-seen');
+    const dlsR = await deletedLive(mdls);
+    ok(dlsR.afterForget.seen && dlsR.afterForget.grants === 0, `RED control: the delete that leaves the seen shape ⇒ a shape the owner allowed for the gone entry outlives it (a value pasted later under the name would run it with no card) — ${JSON.stringify(dlsR.afterForget)}`, dlsR);
+    // r1700 (3): a For-you store with NO whenRead that is not read yet (every noteFact refused): the start's sweep says ONE line for
+    // all its records, their count named. RED: a line a record
+    const sweepLog = async (mod) => {
+      const wl3 = await world(), lines = [];
+      const t1 = Date.now(), recs = [1, 2, 3].map((n) => ({ id: `rec-${n}`, status: 'done', resolvedBy: 'granted', action: { type: 'vault-grant-ask', askId: `ask-${n}` }, resolvedFact: { grantedFor: '8h', until: t1 + 3600e3, conv: c8.scope, entry: 'mounts:m1#secretKey', at: t1 - 1000, purpose: 'p' } }));
+      const ut = new Proxy(wl3.userTodos, { get: (tt, k) => (k === 'whenRead' ? undefined : k === 'noteFact' ? () => { throw new Error('the For-you store is not read yet'); } : k === 'resolvedOf' ? (type) => (type === 'vault-grant-ask' ? recs.map((x) => ({ ...x })) : tt.resolvedOf(type)) : typeof tt[k] === 'function' ? tt[k].bind(tt) : tt[k]) });
+      wl3.mk(mod, { userTodos: ut, log: (m) => lines.push(String(m)), timers: { set: () => 0, clear: () => { } } });
+      const said = lines.filter((m) => /could not be ended at the start/.test(m));
+      return { said: said.length, lines: said };
+    };
+    const swl = await sweepLog(DOOR);
+    ok(swl.said === 1 && /^3 of 3 live approval record\(s\) could not be ended at the start \(the first: the For-you store is not read yet\)$/.test(swl.lines[0] || ''), `r1700 (3): a store not read yet refuses every record — ONE line for the whole sweep, its count named — ${JSON.stringify(swl)}`, swl);
+    const mswl = M.load('src/server/vault-run-door.js', anchored(SRCa, "catch (e) { if (!failed++) why = (e && e.message) || String(e); }", "catch (e) { if (!failed++) why = (e && e.message) || String(e); log(`a live approval's record could not be ended at the start (${(e && e.message) || e})`); }", 'test-vault-run r1700: a line a record'), 'a14b-sweep-log');
+    const swlR = await sweepLog(mswl);
+    ok(swlR.said === 4, `RED control: a line a record ⇒ the log says it four times for three records — ${JSON.stringify({ said: swlR.said })}`, swlR);
     // …and EVERY end the door can say has the agent CLI's words (data/bin/vibespace-vault `uses`): a census of the two lists.
     // RED: the CLI without the restart's words
     const endsSaidOf = (src) => { const m = /ENDS_SAID = new Set\(\[([^\]]*)\]\)/.exec(src); return m ? [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]) : null; };

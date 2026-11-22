@@ -1842,6 +1842,30 @@ async function runRoad(name, { door, routes } = {}) {
   ok(aForget.passKept && !aForget.wordsOpen, 'MUTANT B-3fb5 the delete without the run door\'s forgetEntry ⇒ the owner\'s host pass outlives the entry (RED — a value minted later under the name would go there with no card)', aForget);
   const aWords = await agentRoad('m-agent-words', { door: mutant('src/server/vault-paste-door.js', "    index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');", "    index();") });
   ok(aWords.wordsOpen && !aWords.passKept, 'MUTANT B-3fb5 the delete without settling its words proposal ⇒ the card stays open over a gone entry (RED)', aWords);
+  // B-a14b follow (r1700 (2), its read's must): a FREE entry's delete (the Vault window's 删除 — dropEntry) forgets what the run
+  // door holds by its id, as the agent entry's delete does: a live grant to it (the pasted one: 8 hours, no record), a host pass, a
+  // seen shape — so no end is said for a gone entry and nothing of it carries over to a value pasted later under the name. RED: the
+  // free entry's delete without the run door's forget ⇒ the grant, the pass and the shape outlive the entry
+  async function freeRoad(name, { door } = {}) {
+    const w = makeWorld(name, { door });
+    await w.vault.setup(PW);
+    const s = await serve(w);
+    const free = await s.hit('/api/vault/secrets', { body: { label: 'a pasted one', value: ['v', 'r1700'].join('-') } });
+    const entry = String((free.json && free.json.entry) || ''), id = `secrets:${entry}#secret`;
+    const pg = w.vaultRun.grantPasted({ scope: 'cid-asker-1', ref: `vault://secrets/${entry}/secret`, purpose: 'a pasted key' });
+    w.vaultRun._hostPasses.set(`cid-asker-1\n${id}\nb.example.test`, { scope: 'cid-asker-1', id, host: 'b.example.test', at: Date.now() });
+    w.vaultRun._seen.set('pair-r1700', { at: Date.now(), entries: [id] });
+    const live = [...w.vaultRun._grants.values()].some((g) => g.entries.includes(id));
+    const del = await s.hit(`/api/vault/secrets/${encodeURIComponent(entry.replace(/^secret:/, ''))}`, { method: 'DELETE' });
+    const out = { added: free.status === 200 && !!entry, pasted: !!(pg && pg.ok), live, deleted: del.status === 200 && !w.vault.secretNames().some((x) => x.name === entry),
+      grantKept: [...w.vaultRun._grants.values()].some((g) => g.entries.includes(id)), passKept: [...w.vaultRun._hostPasses.values()].some((p) => p.id === id), seenKept: w.vaultRun._seen.has('pair-r1700') };
+    s.srv.close();
+    return out;
+  }
+  const fBase = await freeRoad('m-free-base');
+  ok(fBase.added && fBase.pasted && fBase.live && fBase.deleted && !fBase.grantKept && !fBase.passKept && !fBase.seenKept, 'B-a14b follow: a FREE entry\'s delete forgets what the run door holds by its id — the live pasted grant, the host pass and the seen shape go with it', fBase);
+  const fForget = await freeRoad('m-free-forget', { door: mutant('src/server/vault-paste-door.js', "    try { if (vaultRun && typeof vaultRun.forgetEntry === 'function') vaultRun.forgetEntry(rowId); }", '    try { }') });
+  ok(fForget.deleted && fForget.grantKept && fForget.passKept && fForget.seenKept, 'MUTANT B-a14b follow: the free entry\'s delete without the run door\'s forget ⇒ its live grant, pass and shape outlive the entry (RED — its 8 hours would then say an end for a gone entry)', fForget);
   // B-ef1b: the job-secrets door, each guard taken away
   async function jsRoad(name, { jsDoor, doc } = {}) {
     const w = makeWorld(name, { jsDoor });
