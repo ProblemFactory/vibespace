@@ -1681,6 +1681,20 @@ This file is the engineers' record of every release: the lanes, the verification
 ### lg-group-parents — B-360d part 3 U3's suite: the legs wait for the read's hold itself (主开发 r2405)
 - THE RED: int361's census gate at 59594edc9, the box zone — test-usage-folder-reader crashed in ⑥'s control: «held.shift(...) is not a function». Three legs (③ the write over a read in flight, ⑤ the later reading, ⑥ a repair's replace) held the read at its file and waited TWENTY loop turns for the hold; the listing before it is a real fs.promises.readdir, which a loaded machine answers after more. The product's order is unchanged (the folder reader and the suite were byte for byte the moved form's at that tip).
 - THE CURE (tests only): one wait for the hold itself — the hold, the read's end without one, or a bound, each said, never a crash — and the legs run on a listing slowed by sixty turns every run. RED CONTROL: the release's twenty-turn wait over that listing finds no hold.
+- ITS SMALL FOLLOW (round w5daqaxxs, 主开发 r1940), one commit:
+  - (1) The release's order: the asker's OWN folder first (the cwd's, then its id across project dirs), then the kept place, then the walk.
+  - (2) The rewrite in place: its bound is said in the kb (below).
+  - (3) A line that never ends is kept to 8 MiB. Past that its bytes are dropped (its first 4 KiB kept), and the answer SAYS so (`journalTailUnread`). Once it ends, the line is folded from its head (its type and agent), so a result is never parsed whole.
+  - (4) The kept places leave by least recent USE.
+  - (5) §9 (c) has its own red copies: no walk ⇒ «not found»; no kept place ⇒ the second poll walks again.
+  - (6) A snapshot filed under ANOTHER conversation than its run dir is found. A found run with none beside it walks for one at most once a minute (never once a poll), and the place found is kept. Leg §9 (d). (a) now judges a running run's second poll; its first walks once.
+- ITS FOLLOW's CURE (round w5hvsu2v5, 主开发 r2339 — the must: the follow had put synchronous listings of the projects folder back on the poll):
+  - A POLL ASKS ONLY KNOWN PATHS: the cwd's folder, the place kept for THIS asker and run, the snapshot beside a found run dir.
+  - Anything that LISTS the projects folder is THE HUB's LOOK: asynchronous, eight lanes, debounced so the runs wanted together ride ONE look, at most one start a minute for the hub. It answers with every place it found, the asker's own conversation first.
+  - Until it answers, a poll of a run it has not placed says «locating» (a running view with no agents: the window keeps polling); «nowhere» after it is the release's 404.
+  - The tail bound is 1 MiB (the kept tails' worst sum ≈ 96 MiB). journalTailUnread is in kb-api. The head fold's assumption is in its comment. The kb names the stopped over-long tail and the later-move reset.
+  - Legs (test-workflow-disk §9), each with its red copy: twenty polls of a running run make 0 synchronous listings, the root counted (red: the release's walk put back); a fork is «locating», then placed by the look, then 0 listings (red: no look); two runs polled together ride ONE root listing (red: a look a poll); a run nowhere is a 404 after the look; (d) a snapshot under another conversation is found by the look.
+  - Censuses: sessions.js reader sites 26 → 24; the sync-fs rows of the two finders' own listings are gone.
 
 ## 2.369.415 — 2026-11-21
 
