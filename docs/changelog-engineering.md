@@ -1425,6 +1425,14 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE RATCHET: OWED_MAX stays 147, each step by name (−1 the layouts and settings, +1 the owed mark). The region rows: data/bin 30 (the codex wrapper's said journal +1), shell 31.
 - THE BLOCK's HOSTED RUN (44980743210) and the integrator's proof gate: test-ci-gate CRASHED, «ANCHOR GONE «heavy-oat-plain»». The control «the heavy sign-in handed plainly on the axis job» anchored on the heavy sign-in line followed at once by VS_UI_SHOTS_DIR, and the chain's move onto 1cd4db2d5 put B-ba47's two comment lines between them. The lane's gate hid it: its ✗ lines matched the root's, and the crash was no ✗ line. Cured (tests only, r2070): the line is named by its own comment line above it (`heavy 7 (test-ci-gate §2r).`).
 
+### bl-loop-b — B-0248 step 3: the jobs archive's whole write off the hub's loop
+- src/jobs.js `_writeArchive` hands jobs-archive.json to the store writer as an act (`jobs-archive.write`, rank 0), its bytes frozen at the hand-off; a refusal by name (read-only, an unread archive) answers at once.
+- The sweep's records leave the store only at the archive's LANDING (then jobs.json's save, then the cap's dropped log folders once that save landed); readers see the landed archive, builders the one handed; a refused archive keeps every record.
+- The ✕ of an archived row answers at its landing (src/server/jobs-wiring.js, src/agent-routes.js: 503 not-durable past the bound); a clear's answer waits for the archive through `persisted()`; an owed archive write is never read past.
+- Its second fresh read's cures: a record handed by a sweep in flight is never handed twice (in neither file otherwise); a copy being taken out is hidden until its follow-up lands, the pages told; persisted() waits on the archive only for its own clear's write (src/server/record-clear.js passes the sequence); the gc never reads a stale copy of a live record; a live removal takes a stale archived copy with it.
+- Its own fresh read's cures (in the unit): the release and the ✕'s end ride the writer's REAL landing (never a bound); a record changed in the window stays the store's and its copy is taken out again; persisted() waits on the archive only for a clear; «being removed» on a repeat ✕; the held-notice judge reads the handed archive.
+- Gate: scripts/test-jobs-triage.mjs §B-0248 step 3 — the release at the landing, a refusal keeps (and the write again lands), the ✕ at its landing, the owed write, a record changed in the window, «being removed», persisted only for a clear, the loop's measure on the real writer, each with its red; census rows: src/jobs.js «*» 16 → 15, DEBT_MAX 847 → 846, the jobs waits 2 → 3.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
