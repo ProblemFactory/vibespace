@@ -693,18 +693,17 @@ await (async () => {
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('poolproj'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
-  // PATCHED COPIES live in a SCRATCH copy of src/ (never in the tree): the
-  // relative requires resolve inside the copy, node_modules through a symlink.
+  // PATCHED COPIES live beside the original (the mutant-copy road, never in the tree): their relative requires resolve to the
+  // tree's own files.
+  // B-7e49 (lane lg-remote-hardening): the patched ENGINE loaded beside the original by the mutant-copy road (its requires resolve
+  // to the tree's own files, as this suite's other engine mutants already do) — no copy of the whole src/ tree a mutant
+  const { mutantCopies: mutantCopiesE } = await import('./mutant-copy.mjs');
+  const ME = mutantCopiesE('pool-engine-' + path.basename(scr), path.resolve('.'));
   const mutEngine = (tag, from, to) => {
-    const root = path.join(scr, 'mut-' + tag);
-    fs.cpSync(path.resolve('src'), path.join(root, 'src'), { recursive: true });
-    fs.copyFileSync(path.resolve('package.json'), path.join(root, 'package.json'));
-    try { fs.symlinkSync(path.resolve('node_modules'), path.join(root, 'node_modules')); } catch { }
-    const fp = path.join(root, 'src/server/usage-pool-engine.js');
-    const src = fs.readFileSync(fp, 'utf8');
-    if (!okAnchor(src.split(from).length - 1, tag, 'src/server/usage-pool-engine.js', from)) return { hit: false };
-    fs.writeFileSync(fp, src.replace(from, to));
-    return { hit: true, mod: require(fp) };
+    const rel = 'src/server/usage-pool-engine.js';
+    const src = fs.readFileSync(path.resolve(rel), 'utf8');
+    if (!okAnchor(src.split(from).length - 1, tag, rel, from)) return { hit: false };
+    return { hit: true, mod: ME.load(rel, src.replace(from, to), tag) };
   };
   const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
   const world = (engMod, { burnA = 0.012, extra = [], metaStore = null } = {}) => {
@@ -3851,16 +3850,15 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('pool-roster-r2'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
+  // B-7e49 (lane lg-remote-hardening): the patched ENGINE loaded beside the original by the mutant-copy road (its requires resolve
+  // to the tree's own files, as this suite's other engine mutants already do) — no copy of the whole src/ tree a mutant
+  const { mutantCopies: mutantCopiesE } = await import('./mutant-copy.mjs');
+  const ME = mutantCopiesE('pool-engine-' + path.basename(scr), path.resolve('.'));
   const mutEngine = (tag, from, to) => {
-    const root = path.join(scr, 'mut-' + tag);
-    fs.cpSync(path.resolve('src'), path.join(root, 'src'), { recursive: true });
-    fs.copyFileSync(path.resolve('package.json'), path.join(root, 'package.json'));
-    try { fs.symlinkSync(path.resolve('node_modules'), path.join(root, 'node_modules')); } catch { }
-    const fp = path.join(root, 'src/server/usage-pool-engine.js');
-    const src = fs.readFileSync(fp, 'utf8');
-    if (!okAnchor(src.split(from).length - 1, tag, 'src/server/usage-pool-engine.js', from)) return { hit: false };
-    fs.writeFileSync(fp, src.replace(from, to));
-    return { hit: true, mod: require(fp) };
+    const rel = 'src/server/usage-pool-engine.js';
+    const src = fs.readFileSync(path.resolve(rel), 'utf8');
+    if (!okAnchor(src.split(from).length - 1, tag, rel, from)) return { hit: false };
+    return { hit: true, mod: ME.load(rel, src.replace(from, to), tag) };
   };
   const live = (am, id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
   const wiped = (am, id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
