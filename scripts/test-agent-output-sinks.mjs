@@ -293,7 +293,7 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as 
   ok(unclassified([...INBOX_ORIGINS, 'ghost']).join() === 'ghost', 'CONTROL: one more origin the census does not know is RED by name');
   // …EXTENDED TO THE WRITERS (lane job-notify-user r3, claim r2-0 (a)): a filer of a FIELDS origin outside the listed set is red
   // by name — a planted second filer with origin 'jobs' stayed green under §93 (it counts the belt's callers, not the filers)
-  const FIELDS_FILERS = { 'src/server/jobs-wiring.js': 3 };   // notifyUser (every copy the engine files) + noticeDropped + noticeWakeWaiting (B-6721)
+  const FIELDS_FILERS = { 'src/server/jobs-wiring.js': 4 };   // notifyUser (every copy the engine files) + noticeDropped + noticeWakeWaiting (B-6721) + noticeMachineAway (B-2566's remainder: one item a machine an outage; its params belted as fields)
   const files = {};
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.posix.join(d, e.name); if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) files[rel] = fs.readFileSync(path.join(REPO, rel), 'utf8'); } };
   walk('src'); files['server.js'] = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
