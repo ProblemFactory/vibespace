@@ -400,6 +400,7 @@ const iRecvOf = (read) => read.endsWith('()') ? read : read.replace(/\.[^.]+$/, 
 // carrier the per-site class is in I_SITES. A (file, receiver) the table does not name is RED; a row the tree no longer has is RED.
 const I_RECORD_KINDS = new Set([...RC.RECORD_KINDS, 'carrier']);
 const I_RECV = {
+  'src/channel-store.js|fam': ['words', 'B-f276 (lane bl-windows): a channels family’s own FILE NAME (index.json, groups.json, poll-stamps.json …) in its hold’s Error — the store’s constant, never a record’s text'],
   'src/lib/telemetry-client.js|x': ['words', 'B-402f: a PURE verdict over a window error (windowErrorEntry) — the error\'s own message / place / stack, or the browser\'s ResizeObserver note\'s words; never a record\'s'],
   // ── the five kinds and their carriers ──
   'src/agent-routes.js|e': ['carrier', 'a stash entry drained into the agent\'s next turn (the ladder\'s and the jobs engine\'s) — drawn as the chat card of what the agent received'],

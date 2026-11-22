@@ -69,7 +69,9 @@ const sameFile = (fs, a, b) => { try { const [x, y] = [a, b].map((p) => fs.statS
 // main thread writing while it could not — never refuses the store's own file over the map of an older life; the thread's map is the
 // fresher one for a job sent before the last reply came back (its own write just landed here). TWO NARROW LIMITS (kb): a file that takes the name between the check and the rename is renamed
 // over (no rename primitive closes that window; a mount over the whole folder takes the temp with it: ENOENT), and a file removed and
-// copied back under a running hub can be given the freed inode number again (ext4), so it reads as the store's own
+// copied back under a running hub can be given the freed inode number again (ext4), so it reads as the store's own. A THIRD (its round
+// wp3niroz5): a writer thread that dies between a rename (or a first 'ax' append) and its reply takes its map with it, and the store's
+// cell is one write old — the requeued job refuses the store's own file, and the family is held «appeared» for nothing until a restart
 const OWN = new Map();
 const idOf = (fs, p) => { try { const s = fs.statSync(p, { bigint: true }); return { dev: s.dev, ino: s.ino }; } catch (e) { if (e && e.code === 'ENOENT') return null; throw e; } };
 const notOwn = (file) => Object.assign(new Error(`${file} is not the file its store made (a mount that came late?) — not written over`), { code: 'EEXIST' });
@@ -147,6 +149,9 @@ function rewriteJob(m, fs) {
  *  over the store unless every byte was written, synced and the temp closed without error. An APPEND (the acts journal): every byte,
  *  fsync, close — a failure truncates back to the size before it (no torn line is left for a promise that resolved). */
 function writeJob(m, fs = FS) {
+  // its round wp3niroz5 (3): A REWRITE NEVER RUNS UNDER THE OWN-FILE LAW — it copies its file by name, so a job that asks both is refused by
+  // name (no channels family asks one: the OTel stash's trim is the one rewrite; this line makes that a law)
+  if (m.rewrite && (m.ownOnly || m.exclusive)) throw Object.assign(new Error(`${m.file}: a rewrite is never run for a store under the own-file law (exclusive / own-only)`), { code: 'EREWRITEOWN' });
   if (m.rewrite) return rewriteJob(m, fs);
   let res;
   if (m.append) {

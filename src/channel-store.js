@@ -538,18 +538,20 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     holds.set(fam.file, { fam });
     warn(`[channels] ${fam.blocked}`);
   }
-  function holdAppeared(fam) {
-    fam.held = true; fam.blocked = `${fam.name} appeared since the start (it was not there when it was read — or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start; every change to it is refused until then`;
-    fam.q = { file: fam.name, to: null, why: 'appeared since the start', kind: 'appeared', at: now(), held: true, lifts: 'next-start', readsAt: null, loadedAt: null };
+  function holdAppeared(fam, came = null) {   // `came`: its round wp3niroz5 (2) — the COMPANION that came (the journal, the stamps log), named in every word
+    fam.held = true; fam.blocked = came
+      ? `${came} (beside ${fam.name}) appeared since the start (it is not the file this store made — or its storage does not keep file numbers stable) — ${fam.name} is kept as it is and loaded at the next start; every change to it is refused until then`
+      : `${fam.name} appeared since the start (it was not there when it was read — or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start; every change to it is refused until then`;
+    fam.q = { file: fam.name, ...(came ? { came } : {}), to: null, why: came ? `appeared since the start (${came})` : 'appeared since the start', kind: 'appeared', at: now(), held: true, lifts: 'next-start', readsAt: null, loadedAt: null };
     quarantined.push(fam.q);
   }
-  function tookAppeared(fam) {
+  function tookAppeared(fam, came = null) {
     if (fam.appearing) return fam.appearing;
     relistAside();
     if (fam.big) {
-      holdAppeared(fam);
+      holdAppeared(fam, came);
       fam.appearedAt = now();
-      warn(`[channels] ${fam.name} appeared since the start — kept as it is, loaded at the next start; the change that found it was not made`);
+      warn(`[channels] ${came ? `${came} (beside ${fam.name})` : fam.name} appeared since the start — kept as it is, ${fam.name} loaded at the next start; the change that found it was not made`);
       heldSay({ file: fam.name, state: 'appeared', q: fam.q });
       fam.appearing = Promise.resolve();
       return fam.appearing;
@@ -574,7 +576,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     })();
     return fam.appearing;
   }
-  const appearedError = (fam) => Object.assign(new Error(`${fam.name} appeared since the start (or its storage does not keep file numbers stable) — ${fam.big ? 'it is kept as it is and loaded at the next start' : 'it is read and kept'}; this change was not made`), { code: 'store-appeared', status: 409 });
+  const appearedError = (fam) => Object.assign(new Error(`${fam.q && fam.q.came ? `${fam.q.came} (beside ${fam.name})` : fam.name} appeared since the start (or its storage does not keep file numbers stable) — ${fam.big ? 'it is kept as it is and loaded at the next start' : 'it is read and kept'}; this change was not made`), { code: 'store-appeared', status: 409 });
   /** THE DAMAGED DOOR (主开发 r809: torn bytes follow the store hold — held, ONE door): a person's choice to start a damaged family EMPTY:
    *  its bytes are set aside under a dated name (never deleted), the family starts empty IN PLACE (nothing of it was loaded — empty for
    *  empty, the index too), and its first write is the exclusive create. → { ok, state: 'pass' | 'none', aside? } */
@@ -982,7 +984,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (ixLoad.blocked) {
       // B-f276 1c (its read r1 M3): an index held because a file of its came that is NOT its own answers BY NAME — never null («equal to
       // the disk»: a durable act waiting on the index would be told done for a change nothing will write)
-      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST' });
+      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST', familyHeld: true });
       warn('[channels] index.json not written: ' + ixLoad.blocked); dirty = false; return null;
     }
     const full = fullOwed; fullOwed = false;
@@ -1032,6 +1034,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // a failed write THROWS, as the inline write did (the writer keeps it owed and retries): a caller ordering a cursor
     // after the rows never advances it past rows that are not on disk
     const miss = r.left.find((x) => x.file === indexFile);
+    if (miss && ixLoad.blocked) return false;   // its round wp3niroz5 (6): a write the writer refused as «appeared» held the index by name (its hold says why) — not written, never a throw at a close
     if (miss) throw Object.assign(new Error(`index.json not written: ${miss.why}`), { code: 'EINDEXWRITE' });
     return r.written.length > 0;
   }
@@ -1042,9 +1045,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (closed) { try { flush(); return Promise.resolve(true); } catch { return Promise.resolve(false); } }
     if (ixLoad.blocked) {   // r1542's law: held — the train's road for a whole write (its produce refuses by name)
       // B-f276 1c moved (its read r1 M3, the meeting): a paced change rides the journal now, so a held index need not be dirty — an index held
-      // «appeared» answers FALSE by its hold (what this life changed since is never written), never «done» because nothing is pending
-      if (ixLoad.q && ixLoad.q.kind === 'appeared') return Promise.resolve(false);
-      if (dirty) markDirty(true); return W().durable(indexFile);
+      // «appeared» answers FALSE by its hold (what this life changed since is never written), never «done» because nothing is pending;
+      // its round wp3niroz5 (5): so does EVERY hold (unreadable, damaged, a companion's) — never «done» while the index is not written
+      return Promise.resolve(false);
     }
     // B-360d unit 1 (law 2): the index's state is on disk once ITS JOURNAL'S LINES are — a whole write only when the index
     // itself is owed (a whole-map change, a burst, the journal's bound)
@@ -1405,7 +1408,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function produceActs() {
     // B-f276 1c (its read r1 M3, the meeting): an index held because a file of its came that is NOT its own answers BY NAME (EEXIST) — never
     // null: a durable act waits on THIS file now, and null would tell it «done»
-    if (ixLoad.blocked && ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST' });
+    if (ixLoad.blocked && ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST', familyHeld: true });   // familyHeld (its round wp3niroz5 (1)): FINAL at the writer, whatever the journal's own law (a journal read at the start is not own-only)
     // 主开发 r2455 (6): no leg reaches this LATER — the index family is big (no adopt): a hold lasts the process's life and is
     // set at the start (before any waiter) or as «appeared» (answered by name above); no reachable scene queues a waiter, THEN holds
     if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }   // r1763 (2): never «nothing to write» — the writer would read it as settled and tell a waiter done; its waiters wait (the writer's bound answers them «not on disk yet»)   // r1542's law: the journal stands behind the index's hold
@@ -1420,7 +1423,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return { append: fresh.map((x) => x.text).join('') };
   }
   function actsWritten(ok, err) {
-    if (!ok && err && err.code === 'EEXIST' && ixLoad.readMissing) { actsWriting = null; tookAppeared(ixLoad); return; }   // B-f276 1c: the journal there is not the one this store made — the index held, the journal kept
+    if (!ok && err && err.code === 'EEXIST' && ixLoad.readMissing) { actsWriting = null; tookAppeared(ixLoad, err.familyHeld ? null : 'index-acts.ndjson'); return; }   // B-f276 1c: the journal there is not the one this store made — the index held, the journal kept
     const w = actsWriting; actsWriting = null;
     // round 3 (law 4): THE JOURNAL'S TAIL IS ALWAYS A WHOLE LINE BEFORE THE NEXT APPEND — after ANY failed append its tail is
     // unknown (the thread truncates back, but a truncate can fail too: ENOSPC after 4 KB + ftruncate EIO left a fragment the
@@ -3001,7 +3004,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       while (o < b.length) o += fs.writeSync(journalFd, b, o, b.length - o);
       journalTorn = false; journalStats.lines += Array.isArray(keys) ? keys.length : 1; journalStats.bytes += b.length;
     } catch (e) {
-      if (e && e.code === 'EEXIST' && (psLoad.missing || psLoad.readMissing)) { tookAppeared(psLoad); return; }   // B-f276 1c follow (r1588 (2)): the life-long flag the open asks — never a once-a-minute retry nobody hears of   // the journal APPEARED: the stamps held at once (loaded at the next start)
+      if (e && e.code === 'EEXIST' && (psLoad.missing || psLoad.readMissing)) { tookAppeared(psLoad, 'poll-stamps.log'); return; }   // B-f276 1c follow (r1588 (2)): the life-long flag the open asks — never a once-a-minute retry nobody hears of   // the journal APPEARED: the stamps held at once (loaded at the next start)
       journalTorn = true;
       if (now() - journalSaidAt >= 60e3) { journalSaidAt = now(); warn(`[channels] poll-stamps.log not written (${(e && e.code) || (e && e.message) || e}) — the stamp is kept in memory and in the side file's next write`); }
     }
@@ -3321,7 +3324,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     heldOf, whenRead,   // B-f276 A2: THE ONE PAUSE (both engines)
     // B-f276 A3: what lifts a family's pause — null (not held) | 'by-itself' (a small family, read again) | 'next-start' (the index, the
     // poll stamps) | 'blocked' (torn bytes that could not be set aside: fixed or moved by hand)
-    familyKind: (n) => { const f = FAMILIES[n] && FAMILIES[n](); return f && f.blocked && f.q ? f.q.kind || null : null; },   // B-f276 1b (its read r1 N1): damaged | appeared | unreadable
+    familyKind: (n) => { const f = FAMILIES[n] && FAMILIES[n](); return f && f.blocked && f.q ? f.q.kind || null : null; },
+    familyCame: (n) => { const f = FAMILIES[n] && FAMILIES[n](); return f && f.blocked && f.q ? f.q.came || null : null; },   // its round wp3niroz5 (2): the companion that came, by name   // B-f276 1b (its read r1 N1): damaged | appeared | unreadable
     familyState: (n) => { const f = FAMILIES[n] && FAMILIES[n](); if (!f || !f.blocked) return null; return (f.q && f.q.lifts) || (f.big ? 'next-start' : 'by-itself'); },   // B-f276 1b: 'by-itself' | 'next-start' | 'a-person' (damaged: the one door)
     wallHeld: (name) => heldOf(HELD_WALLS[name] || Object.keys(FAMILIES)).length > 0,   // a cleanup's own wall (an unknown name = every family)
     // B-f276: fn({ file, state: 'loaded' | 'reads-again', q }) after a held family read again (the engine's words + start passes)

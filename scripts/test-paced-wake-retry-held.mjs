@@ -447,6 +447,9 @@ await leg(149, async () => {
   const MHF = mutantCopies('paced-held-1cf', REPO);
   const glx = await liftRun(MHF.load('src/server/conversation-deliver.js', anchored(DSRC1, '      if (!e.waitsHeld) continue;\n', '      continue;\n', 'the door never lifts'), 'door-never-lifts-f'), 'cut');
   ok(glx.after.posts === 0, 'B-f276 1c follow (r1588 (1)) CONTROL (the door never lifts, in a copy): the wake is never posted after the lift (dropped) — red', JSON.stringify(glx));
+  // its round wp3niroz5 (4): THE BILLED WAKE, NEVER TWICE — a copy whose lift road sends the wake's post twice (the lift and a retry meeting)
+  const glt = await liftRun(MHF.load('src/server/conversation-deliver.js', anchored(DSRC1, '    try { r = await peerMsg.postToPeer(peer, frame.text); } catch (err) {', '    try { await peerMsg.postToPeer(peer, frame.text); r = await peerMsg.postToPeer(peer, frame.text); } catch (err) {', 'the lift road posts twice'), 'door-posts-twice'), 'twice');
+  ok(glt.after.posts > 1 || glt.later > 1, 'its round wp3niroz5 (4) CONTROL (the lift road posts the wake twice, in a copy): the BILLED wake is posted twice and the leg\'s «exactly once» goes red — red', JSON.stringify(glt));
 });
 
 

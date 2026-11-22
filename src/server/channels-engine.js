@@ -556,7 +556,7 @@ function create(deps = {}) {
   const PAUSED_WORDS = 'the channels are paused: the list of conversations (index.json) could not be read — nothing is fetched or sent until it reads again and VibeSpace is restarted (it is loaded at the next start)';
   const pausedWords = () => {
     const first = store.heldOf(CHAN_FAMILIES)[0] || 'index.json';
-    if (store.familyKind && store.familyKind(first) === 'appeared') return `the channels are paused: ${first === 'index.json' ? 'the list of conversations (index.json)' : first} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is; nothing is fetched or sent until VibeSpace is restarted (it is loaded then)`;   // B-f276 1b (its reads r1 N1, r2 N5)
+    if (store.familyKind && store.familyKind(first) === 'appeared') return `the channels are paused: ${(store.familyCame && store.familyCame(first)) ? `${store.familyCame(first)} (beside ${first})` : first === 'index.json' ? 'the list of conversations (index.json)' : first} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is; nothing is fetched or sent until VibeSpace is restarted (it is loaded then)`;   // B-f276 1b (its reads r1 N1, r2 N5)
     if (first === 'index.json') return store.familyState && store.familyState(first) === 'a-person' ? 'the channels are paused: the list of conversations (index.json) could not be read as itself (damaged) — nothing is fetched or sent until a person starts it empty (For you) or puts a good copy back and restarts VibeSpace' : PAUSED_WORDS;
     const how = store.familyState ? store.familyState(first) : 'by-itself';
     if (how === 'a-person') return `the channels are paused: ${first} could not be read as itself (damaged) — nothing is fetched or sent until a person starts it empty (For you) or puts a good copy back`;
@@ -619,11 +619,11 @@ function create(deps = {}) {
     const tail = appeared ? APPEARED_DETAIL : damaged ? DAMAGED_DETAIL : paused ? PAUSED_DETAIL : q.lifts === 'next-start' ? HELD_STAMPS : q.groups ? HELD_GROUPS : HELD_BY_ITSELF;   // the store says which files are the groups' (it owns their names)
     try {
       userTodos.add(INBOX_KEY, {
-        origin: 'channels', text: fillHead(head, q.file),
+        origin: 'channels', text: fillHead(head, q.came || q.file),   // its round wp3niroz5 (2): the file that CAME, by name
         detail: `${q.file} was ${q.why}.\n${tail}`,
         urgency: 'high', by: 'agent', sessionName: 'Channels',
         ...(damaged ? { action: { type: 'channel-store-damaged', file: q.file } } : {}),   // the one door (src/foryou-actions.js)
-        i18n: { text: { key: head, params: { file: q.file } }, detail: [{ key: tail }], source: INBOX_SOURCE },
+        i18n: { text: { key: head, params: { file: q.came || q.file } }, detail: [{ key: tail }], source: INBOX_SOURCE },
       });
     } catch (e) { log.warn(`[channels] could not file the held-file notice for ${q.file}: ${(e && e.message) || e}`); }
   }

@@ -559,8 +559,11 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     };
     const m3 = await m3Run(createChannelStore, 'head');
     ok(m3.code === 'store-appeared' && m3.done === false, 'r1 M3: the index held (a journal not its own) — a durable ask of the index answers FALSE by its hold (a paced change rides the journal now: the index need not be dirty), never «done» for a change nothing will write', JSON.stringify(m3));
-    const m3x = await m3Run(MC.load('src/channel-store.js', anchored(anchored(SSRC, "      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST' });\n", '', 'the held index answers null'), "      if (ixLoad.q && ixLoad.q.kind === 'appeared') return Promise.resolve(false);\n", '', 'the held durable ask answers as if nothing were owed'), 'r1c-m3').createChannelStore, 'cut');
+    const m3x = await m3Run(MC.load('src/channel-store.js', anchored(anchored(SSRC, "      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST', familyHeld: true });\n", '', 'the held index answers null'), "      // its round wp3niroz5 (5): so does EVERY hold (unreadable, damaged, a companion's) — never «done» while the index is not written\n      return Promise.resolve(false);\n", "      if (dirty) markDirty(true); return W().durable(indexFile);\n", 'the held durable ask answers as if nothing were owed'), 'r1c-m3').createChannelStore, 'cut');   // stale-pins: kept (the control restores the train's line)
     ok(m3x.done === true, 'r1 M3 CONTROL (a held index answers «nothing to write», the 1c tip before its read): the durable ask is told DONE — red', JSON.stringify(m3x));
+    // its round wp3niroz5 (7): the meeting's line ALONE carries the law (produceIndex's own refusal kept)
+    const m3y = await m3Run(MC.load('src/channel-store.js', anchored(SSRC, "      // its round wp3niroz5 (5): so does EVERY hold (unreadable, damaged, a companion's) — never «done» while the index is not written\n      return Promise.resolve(false);\n", "      if (dirty) markDirty(true); return W().durable(indexFile);\n", 'the held durable ask asks the train\'s road'), 'r1c-m3-alone').createChannelStore, 'cut-alone');   // stale-pins: kept (the control restores the train's line)
+    ok(m3y.done === true, 'r1 M3 CONTROL (the meeting\'s line alone cut: a held index\'s durable ask takes the train\'s whole-write road with nothing pending): told DONE — red', JSON.stringify(m3y));
     // ── 主开发 r1143 (2), AS IF A MUST: a COMPANION read that FAILS (not «not there») holds its family — never «no text»
     const companionRun = async (mk, tag) => {
       const d = path.join(ROOT, `store-companion-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
@@ -648,13 +651,17 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
       try { await s19.index.update(() => { s19.index.entry('fake', 'j1').title = 'one'; }, { durable: true }); } catch (e) { first = (e && e.code) || 'threw'; }
       const jf = path.join(d, 'index-acts.ndjson'), made = fs.existsSync(jf);
       fs.writeFileSync(jf + '.other', FOREIGN); fs.renameSync(jf + '.other', jf);   // a journal of another's takes the name
-      try { await s19.index.update(() => { s19.index.entry('fake', 'j2').title = 'two'; }, { durable: true }); } catch (e) { second = (e && e.code) || 'threw'; }
+      let words = '';
+      try { await s19.index.update(() => { s19.index.entry('fake', 'j2').title = 'two'; }, { durable: true }); } catch (e) { second = (e && e.code) || 'threw'; words = String((e && e.message) || ''); }
       const q = (s19.quarantined || []).find((x) => x.file === 'index.json' && x.kind === 'appeared') || {};
       try { s19.close(); } catch { }
-      return { first, made, second, kind: q.kind || null, kept: fs.readFileSync(jf, 'utf8') === FOREIGN };
+      return { first, made, second, kind: q.kind || null, came: q.came || null, words: words.slice(0, 120), kept: fs.readFileSync(jf, 'utf8') === FOREIGN };
     };
     const ja = await journalAppearRun(createChannelStore, 'head');
-    ok(ja.first === 'ok' && ja.second === 'store-appeared' && ja.kind === 'appeared' && ja.kept, 'B-f276 1c moved (the meeting, r1568 (1a / 2a)): after the first act (index.json made whole), a journal not its own that takes the name meets the next durable act — a journal LINE now — refused BY NAME (store-appeared), the index held «appeared», the journal kept byte for byte', JSON.stringify(ja));
+    ok(ja.first === 'ok' && ja.made === false && ja.second === 'store-appeared' && ja.kind === 'appeared' && ja.kept, 'B-f276 1c moved (the meeting, r1568 (1a / 2a); the scene, its round wp3niroz5 (7): a journal APPEARED WHERE NONE WAS — its exclusive create): after the first act (index.json made whole, no journal yet), a journal not its own that takes the name meets the next durable act — a journal LINE now — refused BY NAME (store-appeared), the index held «appeared», the journal kept byte for byte', JSON.stringify(ja));
+    ok(ja.came === 'index-acts.ndjson' && /^index-acts\.ndjson \(beside index\.json\) appeared since the start/.test(ja.words), 'its round wp3niroz5 (2): THE WORDS NAME THE FILE THAT CAME — the hold and the act\'s refusal say index-acts.ndjson, never «index.json appeared»', JSON.stringify(ja));
+    const jaw = await journalAppearRun(MC.load('src/channel-store.js', anchored(SSRC, "tookAppeared(ixLoad, err.familyHeld ? null : 'index-acts.ndjson'); return; }", "tookAppeared(ixLoad); return; }", 'the journal\'s hold named as the index\'s'), 'f-jwords').createChannelStore, 'words');   // stale-pins: kept (the control restores the line before this follow)
+    ok(jaw.kind === 'appeared' && !jaw.came && /^index\.json appeared/.test(jaw.words), 'its round wp3niroz5 (2) CONTROL (the hold named as the index\'s): a person is told index.json came — the wrong file — red', JSON.stringify(jaw));
     const jax = await journalAppearRun(MC.load('src/channel-store.js', anchored(SSRC, 'mode: 0o600, rank: durable ? 0 : 1, allowEmpty: true, ...actsOwn() });', 'mode: 0o600, rank: durable ? 0 : 1, allowEmpty: true, onWritten: actsWritten });', 'the act\'s journal line by name only'), 'f-jappear').createChannelStore, 'cut');   // stale-pins: kept (the control restores the train\'s line)
     ok(!jax.kept && jax.second !== 'store-appeared', 'B-f276 1c moved (r1568 (1a)) CONTROL (the act\'s line appended by name, the train before this move): the second act is appended to the journal that came — red', JSON.stringify(jax));
     // r1568 (5b): a JOURNAL-ONLY family at open (a life that journaled and was killed before any fold: no index.json) is a store WITH
@@ -676,6 +683,90 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     ok(jo.had && jo.act === 'ok' && jo.fold === 'ok' && !jo.appeared && jo.index, 'B-f276 1c moved (the meeting, r1568 (5b)): a JOURNAL-ONLY family at open — its lines replayed, an act appended to the journal it read, the fold creates index.json holding both rows; nothing held', JSON.stringify(jo));
     const jox = await journalOnlyRun(MC.load('src/channel-store.js', anchored(SSRC, 'const actsOwn = () => ({ ownOnly: !!ixLoad.readMissing && !actsAtStart, onWritten: actsWritten });', 'const actsOwn = () => ({ ownOnly: !!ixLoad.readMissing, onWritten: actsWritten });', 'the journal read at the start taken for another\'s'), 'f-jonly').createChannelStore, 'cut');
     ok(jox.act !== 'ok' && jox.appeared, 'B-f276 1c moved (r1568 (5b)) CONTROL (the journal read at the start held to the own-only law): the act is refused as «appeared» over the store\'s own data — red', JSON.stringify(jox));
+    // its round wp3niroz5 (7): index.json comes BETWEEN the replay and the first whole write of a journal-only family — the exclusive create meets
+    // it: refused by name, the index held «appeared», the file that came AND the journal kept byte for byte
+    const jBetweenRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-jbetween-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
+      const s24 = mk({ dir: d, log: qlog });
+      const had = s24.index.has('fake/old');
+      fs.writeFileSync(path.join(d, 'index.json'), IX);   // index.json CAME after the replay
+      let code = 'ok'; try { await s24.index.update(() => { s24.index.entry('fake', 'b1').title = 'between'; }, { durable: true }); } catch (e) { code = (e && e.code) || 'threw'; }
+      const q = (s24.quarantined || []).find((x) => x.file === 'index.json' && x.kind === 'appeared') || {};
+      try { s24.close(); } catch { }
+      return { had, code, kind: q.kind || null, kept: fs.readFileSync(path.join(d, 'index.json'), 'utf8') === IX, journal: fs.readFileSync(path.join(d, 'index-acts.ndjson'), 'utf8') === OLD_ACTS };
+    };
+    const jb = await jBetweenRun(createChannelStore, 'head');
+    ok(jb.had && jb.code === 'store-appeared' && jb.kind === 'appeared' && jb.kept && jb.journal, 'its round wp3niroz5 (7): index.json comes BETWEEN the replay and the first whole write of a journal-only family — refused by name, held «appeared», the file that came and the journal kept byte for byte', JSON.stringify(jb));
+    const jbx = await jBetweenRun(MC.load('src/channel-store.js', anchored(SSRC, 'return { exclusive: !!fam.missing, ownOnly: !!fam.readMissing, onWritten:', 'return { exclusive: false, ownOnly: false, onWritten:', 'neither exclusive nor own-only'), 'f-jbetween').createChannelStore, 'cut');
+    ok(!jbx.kept, 'its round wp3niroz5 (7) CONTROL (the first whole write neither exclusive nor own-only): the index.json that came is written over — red', JSON.stringify(jbx));
+    // its round wp3niroz5 (1): a JOURNAL-ONLY family whose index is then held because a file CAME — a journal write already queued is refused
+    // for its held family, and that refusal is FINAL: the writer never says «kept in memory, retrying» for the life
+    const finalRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-jfinal-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
+      const said = [], cw = console.warn, cl = console.log;
+      console.warn = (...a) => said.push(a.join(' ')); console.log = (...a) => said.push(a.join(' '));
+      let s21 = null, out = null;
+      try {
+        s21 = mk({ dir: d, log: { warn: (...a) => said.push(a.join(' ')), log() {}, info() {} } });
+        await s21.index.update(() => { s21.index.entry('fake', 'f1').title = 'one'; }, { durable: true });   // index.json made whole (its exclusive create)
+        await s21.index.update(() => { s21.index.entry('fake', 'f1').title = 'two'; });   // a PACED change: its journal line queued (the pace)
+        const ixf = path.join(d, 'index.json');
+        fs.writeFileSync(ixf + '.other', IX); fs.renameSync(ixf + '.other', ixf);   // another index.json takes the name
+        try { s21.index.flush(); } catch { }   // the index's whole write meets it: held «appeared»
+        await new Promise((z) => setTimeout(z, 1600));   // the queued journal write's turn, and a retry's
+        const q = (s21.quarantined || []).find((x) => x.file === 'index.json' && x.kind === 'appeared') || {};
+        out = { kind: q.kind || null, retrying: said.filter((l) => /channels-acts\.write not written \(/.test(l)).length, final: said.filter((l) => /channels-acts\.write not written: its file appeared/.test(l)).length };
+      } finally { console.warn = cw; console.log = cl; try { s21 && s21.close(); } catch { } }
+      return out;
+    };
+    const fn1 = await finalRun(createChannelStore, 'head');
+    ok(fn1.kind === 'appeared' && fn1.retrying === 0 && fn1.final >= 1, 'its round wp3niroz5 (1): the queued journal write of a journal-only family whose index came is refused BY NAME and FINAL — never «kept in memory, retrying»', JSON.stringify(fn1));
+    const fn1x = await finalRun(MC.load('src/channel-store.js', anchored(SSRC, "{ code: 'EEXIST', familyHeld: true });   // familyHeld (its round", "{ code: 'EEXIST' });   // familyHeld (its round", 'the journal\'s refusal unmarked'), 'f-jfinal').createChannelStore, 'cut');
+    ok(fn1x.retrying >= 1, 'its round wp3niroz5 (1) CONTROL (the refusal unmarked): the writer takes it as an ordinary failure and retries for the life, «kept in memory, retrying» — red', JSON.stringify(fn1x));
+    // its round wp3niroz5 (7): THE ACT'S FAILURE WORDS BY THE HOLD, whatever the writer's own record says (a stand-in writer whose record
+    // reads EIO while the index's write met a file that came)
+    const wordsRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-words-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const last = new Map();
+      const stand = {
+        dirty: (file, o) => { last.set(file, o); },
+        pending: () => false,
+        flushSync: () => ({ written: [], left: [], ms: 0, budgetMs: 0 }),
+        whyNotDurable: () => ({ why: 'failed', code: 'EIO' }),   // the writer's own record is NOT «already there»
+        durable: (file) => { const o = last.get(file); if (o && typeof o.onWritten === 'function') o.onWritten(false, Object.assign(new Error('EEXIST'), { code: 'EEXIST' })); return Promise.resolve(false); },
+      };
+      const s23 = mk({ dir: d, log: qlog, writer: stand });
+      let code = 'ok'; try { await s23.index.update(() => { s23.index.entry('fake', 'w').title = 'x'; }, { durable: true }); } catch (e) { code = (e && e.code) || 'threw'; }
+      const q = (s23.quarantined || []).find((x) => x.kind === 'appeared') || {};
+      try { s23.close(); } catch { }
+      return { code, kind: q.kind || null };
+    };
+    const wd = await wordsRun(createChannelStore, 'head');
+    ok(wd.code === 'store-appeared' && wd.kind === 'appeared', 'its round wp3niroz5 (7): the act\'s failure words by the HOLD — store-appeared by name even when the writer\'s own record reads another code (EIO)', JSON.stringify(wd));
+    const wdx = await wordsRun(MC.load('src/channel-store.js', anchored(SSRC, "if ((wn && wn.code === 'EEXIST') || (ixLoad.q && ixLoad.q.kind === 'appeared')) throw", "if (wn && wn.code === 'EEXIST') throw", 'the words by the record alone'), 'f-words').createChannelStore, 'cut');   // stale-pins: kept (the control restores the line before the meeting)
+    ok(wdx.code === 'not-durable', 'its round wp3niroz5 (7) CONTROL (the words by the writer\'s record alone): the act is told «not on disk yet … written when the storage can» over a file that came — red', JSON.stringify(wdx));
+    // its round wp3niroz5 (7): APPEND, THE COMPACTION, APPEND THROUGH THE STORE — the compaction a fold asks rides the law; its numbers come back
+    // in the reply, so the next line is never refused as «not its own»
+    const storeCompactRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-scompact-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s25 = mk({ dir: d, log: qlog });
+      const act = async (k, v) => { try { await s25.index.update(() => { s25.index.entry('fake', k).title = v; }, { durable: true }); return 'ok'; } catch (e) { return (e && e.code) || 'threw'; } };
+      const out = [];
+      out.push(await act('c1', 'one'));   // index.json made whole
+      out.push(await act('c1', 'two'));   // a line: the journal's exclusive create
+      out.push((await s25.index.fold()) ? 'ok' : 'false');   // the fold lands: the compaction is owed
+      out.push((await s25.index.journalDurable()) ? 'ok' : 'false');   // the compaction lands (a whole write over its own journal)
+      out.push(await act('c1', 'three'));   // a line: checked against the compaction's numbers
+      const appeared = (s25.quarantined || []).some((x) => x.kind === 'appeared');
+      try { s25.close(); } catch { }
+      return { out: out.join(), appeared };
+    };
+    const sc = await storeCompactRun(createChannelStore, 'head');
+    ok(sc.out === 'ok,ok,ok,ok,ok' && !sc.appeared, 'its round wp3niroz5 (7): append, the compaction, append THROUGH THE STORE — every write lands, nothing held', JSON.stringify(sc));
+    const scx = await storeCompactRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, "allowEmpty: true, ...actsOwn() }); }   // B-f276 1c: the compaction under the index's law", "allowEmpty: true, ownOnly: false, onWritten: actsWritten }); }   // B-f276 1c: the compaction under the index's law", 'the compaction by name'), "...actsOwn() }); }   // B-f276 1c (the meeting with B-360d unit 1)", "ownOnly: false, onWritten: actsWritten }); }   // B-f276 1c (the meeting with B-360d unit 1)", 'the journal asked by name (askActs)'), 'f-scompact').createChannelStore, 'cut');   // stale-pins: kept (the control restores the train's line)
+    ok(/store-appeared$/.test(scx.out) && scx.appeared, 'its round wp3niroz5 (7) CONTROL (the compaction by name at both its doors — the fold\'s ask and askActs — its numbers never recorded): the next line refuses the store\'s own journal — the family held for nothing — red', JSON.stringify(scx));
     // (6b): a family STARTED EMPTY by the damaged door is own-only again — after its first write lands, a file that is not its own
     // takes the name: the next write is refused by name, the file kept
     const doorOwnRun = async (mk, tag) => {
@@ -819,6 +910,17 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
       step({ file: f, append: true, parts: ['{"seq":3}\n'], ownOnly: true, own });
       return { out: out.join(), text: fs.readFileSync(f, 'utf8') };
     };
+    // its round wp3niroz5 (3): the writer refuses BY NAME a job that asks a rewrite under the own-file law
+    const rewriteRun = (WK, tag) => {
+      const d = path.join(ROOT, `store-rewriteown-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'acts.ndjson'); fs.writeFileSync(f, '{"seq":1}\n');
+      let code = 'ok'; try { WK.writeJob({ file: f, tmp: `${f}.tmp-${process.pid}-w`, parts: [], rewrite: { ranges: [0, 10], size: 10 }, ownOnly: true }); } catch (e) { code = (e && e.code) || 'threw'; }
+      return { code, same: fs.readFileSync(f, 'utf8') === '{"seq":1}\n' };
+    };
+    const rw = rewriteRun(fresh('rewriteown'), 'head');
+    ok(rw.code === 'EREWRITEOWN' && rw.same, 'its round wp3niroz5 (3): a job asking BOTH a rewrite and the own-file law is refused by name (EREWRITEOWN), its file untouched', JSON.stringify(rw));
+    const rwx = rewriteRun(MC.load('src/store-writer-worker.js', anchored(WSRC, "  if (m.rewrite && (m.ownOnly || m.exclusive)) throw", "  if (false) throw", 'the rewrite asks no law'), 'f-rewriteown'), 'cut');
+    ok(rwx.code !== 'EREWRITEOWN', 'its round wp3niroz5 (3) CONTROL (the rewrite asks no law): the job goes to the rewrite road by name — red', JSON.stringify(rwx));
     const cmp = compactLegRun(fresh('compact'), 'head');
     ok(cmp.out === 'ok,ok,ok' && cmp.text === '{"seq":1}\n{"seq":2}\n{"seq":3}\n', 'B-f276 1c moved (the meeting, r1568 (4b)): append, the compaction over its own journal, append — the last line checked against the compaction\'s own numbers lands', JSON.stringify(cmp));
     const cmpx = compactLegRun(MC.load('src/store-writer-worker.js', anchored(WSRC, '  if (made) { res = { own: made }; OWN.set(m.file, made); }\n', '', 'the rename keeps the old numbers'), 'f-compact'), 'cut');   // stale-pins: kept (the control cuts its own unit\'s line)

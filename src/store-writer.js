@@ -515,7 +515,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   /** why a durable act of this store is not on disk yet — {why: 'queued' | 'failed', ahead?, lastMs?} — for its caller's line */
   function whyNotDurable(file) { const s = stores.get(file); return s && s.notDurable ? { ...s.notDurable } : null; }
   function fail(s, since, err) {
-    if ((s.exclusive || s.ownOnly) && err && err.code === 'EEXIST') { appearedHere(s, err); return; }   // B-f276 1c: or not its own file
+    if (err && err.code === 'EEXIST' && (s.exclusive || s.ownOnly || err.familyHeld)) { appearedHere(s, err); return; }   // B-f276 1c: or not its own file; its round wp3niroz5 (1): or a producer refusing for its family held «appeared» — FINAL, never retried
     s.failures++; s.failedAt = now(); s.notDurable = { why: 'failed', code: (err && (err.code || err.message)) || null };
     if (!s.dirty) { s.dirty = true; s.dirtySince = since != null ? since : now(); } else if (since != null && since < s.dirtySince) s.dirtySince = since;
     // the waiters hear it NOW (false — the change stays owed and the writer retries; the caller says so) — AFTER the store is
@@ -594,13 +594,13 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (!p.rewrite) s.lane = l.name; if (p.append) s.appends = true;   // round wgxur2rci (4): a rewrite leaves its append store's lane guess
     if (l.inflight && !settleInflight(l, deadline, waitedBy)) return 'held';   // its OWN lane's job first (an append never waits on W)
     if (l.mainOnly || !startWorker(l) || !l.S) { const wp = mainParts(s, p, since); return wp && writeHere(s, wp, since) ? 'ok' : 'failed'; }
-    const f0 = s.failures;
+    const f0 = s.failures, a0 = s.appeared;
     post(l, s, p, since);
     if (!l.inflight) return s.failures > f0 ? 'failed' : 'ok';   // the bytes could not go: failed, said
     if (l.feed) drainPieces(l);   // a write in pieces: every piece in this call, in order
     if (exiting) publishExit();   // round 6's amend: the keeper's line names this write as IN FLIGHT, not «still owed»
     if (!settleInflight(l, deadline, waitedBy)) return 'held';
-    return s.failures > f0 ? 'failed' : 'ok';
+    return s.failures > f0 || (s.appeared && s.appeared !== a0) ? 'failed' : 'ok';   // its round wp3niroz5 (6): a write refused as «appeared» is no «ok»
   }
   /** THE SYNCHRONOUS FLUSH of the stores of these FILES (all when `names` is null): every OTHER dirty store first, in the
    *  exit ORDER (what cannot be re-derived first, then the smaller, then the oldest change), then the file whose write is
