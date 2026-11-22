@@ -1,4 +1,5 @@
 import { App } from './lib/app.js';
+import { sharedGets } from './lib/shared-gets.js';
 import { applyUiPrefs, getStateSync } from './lib/utils.js';
 import { applyI18nToDom, t } from './lib/i18n.js';
 import { showToast } from './lib/utils.js';
@@ -8,6 +9,10 @@ import { continueExit } from './lib/mobile-back.js';
 import { wakeKind, fellBehind, WAKE_GAP_MS, CATCH_UP_SETTLE_MS } from './lib/page-wake.js'; // B-8165: the wake's kind, and whether the page fell behind (PURE)
 // lane phone-back-reload (round 2): an older VibeSpace page the phone's exit LANDED on goes on back and never boots the
 // app — the promise settles only if this page stays (its ONE named load)
+// B-360d part 1 (主开发 r2197): THE PAGE ASKS EACH ROUTE ONCE — a GET in flight is shared by every caller that asks the same read
+// before it lands (the load asked sixteen routes twice); nothing is kept after it lands, writes are never shared (src/lib/shared-gets.js).
+// Installed FIRST, before anything of the page fetches
+try { window.fetch = sharedGets(window.fetch.bind(window)); } catch { }
 const exitHop = continueExit();
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 installLongTaskWatch(); // main-thread stall ring — feeds the suspend-vs-block verdict below
