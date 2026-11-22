@@ -325,11 +325,15 @@ function writeJsonAtomic(file, obj) {
   try { fs.writeSync(fd, JSON.stringify(obj, null, 1) + '\n'); try { fs.fsyncSync(fd); } catch { /* best effort */ } } finally { fs.closeSync(fd); }
   try { fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
 }
-/** Overwrite a run file's bytes and unlink it (never through a link). */
+// r1436 (the sweep's smalls): THE OVERWRITE IS BOUNDED. The one-level shred runs on the loop (a run's end, the boot's sweep), so a
+// file over SHRED_OVERWRITE_MAX is unlinked WITHOUT the overwrite: never a value of the door's (a run file is one template of at most
+// TEMPLATE_MAX = 64 KB with its values put in), only what the run's program left beside them — each file's overwrite stays ≤ 1 MiB
+const SHRED_OVERWRITE_MAX = 1024 * 1024;
+/** Overwrite a run file's bytes and unlink it (never through a link); a file over SHRED_OVERWRITE_MAX is unlinked as it is. */
 function shredFile(file) {
   try {
     const st = fs.lstatSync(file);
-    if (st.isFile() && st.size > 0) { const fd = fs.openSync(file, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0)); try { fs.writeSync(fd, crypto.randomBytes(st.size), 0, st.size, 0); try { fs.fsyncSync(fd); } catch { } } finally { fs.closeSync(fd); } }
+    if (st.isFile() && st.size > 0 && st.size <= SHRED_OVERWRITE_MAX) { const fd = fs.openSync(file, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0)); try { fs.writeSync(fd, crypto.randomBytes(st.size), 0, st.size, 0); try { fs.fsyncSync(fd); } catch { } } finally { fs.closeSync(fd); } }
   } catch { /* gone, or not ours to write: unlinked below all the same */ }
   try { fs.unlinkSync(file); } catch { }
 }
@@ -3083,4 +3087,4 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 }
 
 const statusOf = (code) => STATUS[code] || 400;
-module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, SEAL_NOWHERE, rootOwnedNoWrite, sha256File, sha256Fd, sealDirReal, sealedToolReal, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, LATE_TTL_MS, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };
+module.exports = { create, classOf, statusOf, STATUS, SHRED_OVERWRITE_MAX, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, SEAL_NOWHERE, rootOwnedNoWrite, sha256File, sha256Fd, sealDirReal, sealedToolReal, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, LATE_TTL_MS, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };

@@ -1029,6 +1029,31 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
   const n = sw.door.sweep();
   await sleep(30);
   ok(n === 1 && !fs.existsSync(gone) && fs.existsSync(kept) && fs.existsSync(path.join(kept, 'f0')) && !alive(orphan.pid), 'the BOOT SWEEP: the folder of a hub that is GONE is shredded after its marked orphan child (deaf to SIGTERM) is ended; the folder of a hub that LIVES (another hub on the box) is never touched', { n, gone: fs.existsSync(gone), kept: fs.existsSync(kept), orphan: alive(orphan.pid) });
+  // r1436 — THE SHRED's OVERWRITE IS BOUNDED (it runs on the loop): a dead owner's folder holding the door's value file and a file
+  // over SHRED_OVERWRITE_MAX that the run's program left — the value is OVERWRITTEN before its unlink, the big file unlinked AS IT IS
+  // (a second name of each, made before the sweep, reads the difference); RED: a copy without the bound overwrites the big file too
+  {
+    const boundOf = async (doorMod, tag) => {
+      const bw = await world({ doorMod });
+      const d = path.join(bw.runRoot, DOOR.RUN_DIR_PREFIX + tag); fs.mkdirSync(d, { mode: 0o700 });
+      fs.writeFileSync(path.join(d, DOOR.OWNER_FILE), JSON.stringify(deadId));
+      fs.writeFileSync(path.join(d, 'f0'), VALUE, { mode: 0o600 });
+      const big = Buffer.alloc(DOOR.SHRED_OVERWRITE_MAX + 1, 0x61);
+      fs.writeFileSync(path.join(d, 'left.bin'), big, { mode: 0o600 });
+      const l0 = path.join(bw.runRoot, '..', tag + '-f0.link'), l1 = path.join(bw.runRoot, '..', tag + '-big.link');
+      fs.linkSync(path.join(d, 'f0'), l0); fs.linkSync(path.join(d, 'left.bin'), l1);
+      const n = bw.door.sweep();
+      const v = fs.readFileSync(l0), b = fs.readFileSync(l1);
+      fs.unlinkSync(l0); fs.unlinkSync(l1);
+      return { n, gone: !fs.existsSync(d), valueOverwritten: v.length === Buffer.byteLength(VALUE) && v.toString() !== VALUE, bigAsIs: b.equals(big) };
+    };
+    const bd = await boundOf(DOOR, 'bound01');
+    const DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const NB = M.load('src/server/vault-run-door.js', anchored(DSRC, '    if (st.isFile() && st.size > 0 && st.size <= SHRED_OVERWRITE_MAX) {', '    if (st.isFile() && st.size > 0) {', 'test-vault-run r1436 no bound'), 'r1436-nobound');   // the control writes the unbounded shred back on purpose — stale-pins: kept
+    const bdc = await boundOf(NB, 'bound02');
+    ok(bd.n === 1 && bd.gone && bd.valueOverwritten && bd.bigAsIs, `r1436: the shred's overwrite is BOUNDED — the door's value file is overwritten before its unlink, a file over ${DOOR.SHRED_OVERWRITE_MAX} bytes the run's program left is unlinked as it is (the folder gone)`, bd);
+    ok(bdc.gone && bdc.valueOverwritten && !bdc.bigAsIs, 'CONTROL a copy without the bound: the big file is overwritten on the loop too — the leg above can tell', bdc);
+  }
   // r1152 — A SWEEP REMOVES ONLY WHAT IT CAN PROVE IS ITS OWN DEAD THING: a folder of the door's name that carries NO owner mark
   // is not the door's to judge (another program's, a suite's scratch, a second hub's before its mark) — LEFT, its file untouched;
   // beside it a MARKED folder of a dead owner is still shredded and a live one's kept (the plant proves itself before the sweep)
