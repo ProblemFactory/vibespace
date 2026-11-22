@@ -63,6 +63,12 @@
 //      B-54d9 the r4 nits — one abort wait per phone switcher row (the REAL _buildWindowItem), the tile door's search says
 //        what the person's status filter hides (the REAL Sidebar), two pins on the heavy chrome suite (its shot order, its
 //        own data/bin)
+//   §10 r1793 the phone after a window takes a new id (B-1d87: the REAL wm.rekeyWindow under an open list of the REAL
+//      _buildWindowItem's rows): the row re-stamped, its waiting dot re-read, a press on it inside that window (the REAL late-focus
+//      insideWindow — a row its own tap took off the page too), this tab's notes by id moved (the shown window, the split's pair);
+//      a GONE window's row says so and the list is drawn again, a window REBUILT under the same id is revealed — each with its RED
+//      (the release's rekeyWindow, followRekey without its re-patch, insideWindow by stamp alone, the release's row tap); it runs
+//      after the mutant helpers it builds the REDs with
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -857,6 +863,88 @@ const MUT = mutantCopies('lsw-b9', REPO);
 const mutantSrc = (rel, find, repl) => { const src = read(rel); if (!src.includes(find)) throw new Error('mutant anchor missing in ' + rel + ': ' + find.slice(0, 120)); return src.replace(find, repl); };
 const mutantModule = (rel, find, repl) => MUT.load(rel, mutantSrc(rel, find, repl), 'b9');
 const mutantEsm = async (rel, find, repl) => import(pathToFileURL(MUT.write(rel, mutantSrc(rel, find, repl), 'b9', { esm: true })).href);
+
+// §10 (r1793) runs HERE, after the mutant helpers it builds its REDs with (the release's rekeyWindow, row tap, re-patch, insideWindow)
+await section('§10 r1793 the phone after a window takes a new id (the REAL rekeyWindow, _buildWindowItem, followRekey, late-focus insideWindow, the split\'s rekey) and a gone window\'s row', async () => {
+  const { MobileNav } = await import(pathToFileURL(path.join(LIB, 'mobile-nav.js')).href);
+  const { WindowManager } = await import(pathToFileURL(path.join(LIB, 'window.js')).href);
+  const LF = await import(pathToFileURL(path.join(LIB, 'late-focus.js')).href);
+  const { installPhoneSplit } = await import(pathToFileURL(path.join(LIB, 'phone-split-view.js')).href);
+  const FOLLOW = '    this._app?._mobileNav?.followRekey?.(oldId, newId);   // r1793: the phone\'s open window list and its notes by id follow the new id (the one rule: mobile-nav.js)\n';
+  const REPATCH = '    if (moved) this._patchSwitcherWaiting();\n';
+  const INSTANCE = '  if (item && item._win === win) return true;   // r1793: the phone list\'s row names its window by INSTANCE (a row its tap took off the page, its stamp from before a re-key)\n';
+  const GUARD = "    if (!win || !wm.windows.has(win.id)) {\n      showToast(t('That window is no longer open — the list now shows what is open.'), { type: 'info' });\n      if (typeof rerender === 'function') rerender();\n      return false;\n    }\n";
+  const WORDS = 'That window is no longer open — the list now shows what is open.';
+  const said = () => document.body.textContent.split(WORDS).length - 1;
+  // ONE open list on the stand-in page (the switcher the page's own query finds), its row the REAL row builder's; `act` = what
+  // happens to the row's window while the list stands: the re-key (B-1d87), gone (closed by any road), rebuilt under the same id
+  const openList = async ({ WM = WindowManager, MN = MobileNav, ins = LF.insideWindow, act = 'rekey', patchAfter = false, tapFirst = false } = {}) => {
+    const rec = NAMES.map((_, i) => answered(i));
+    const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+    await W.lm.restoreState({ windows: rec });
+    const wm = W.app.wm, win = wm.windows.get('win-new-1');
+    win.element.classList.contains = (c) => c === 'window-waiting';   // it waits for the person (its row's dot says so)
+    wm.activeWindowId = 'win-new-0';
+    const nav = Object.create(MN.prototype); nav.app = W.app; nav._shown = { 'desk-p': 'win-new-1', 'desk-w': 'win-other' };
+    const dots = []; nav._waitDot = (el, on) => dots.push([el.dataset.winId, on]);
+    const splitCalls = []; nav.split = { offer: () => null, rekey: (x, y) => { splitCalls.push(x, y); return true; } };   // offer: no «Split» beside the row
+    wm._app = { _mobileNav: nav, updateTaskbar() {}, sessions: new Map() };
+    const revealed = []; wm.revealWindow = (id) => { revealed.push(id); return true; };
+    let closes = 0, redraws = 0;
+    const row = nav._buildWindowItem(win, wm, () => { closes++; }, () => { redraws++; });
+    row.closest = (sel) => (sel === '[data-win-id]' ? row : null);   // the row IS its [data-win-id] element (the stand-in has no closest)
+    const pop = mkEl(); pop.className = 'mobile-win-switcher'; pop.append(row);
+    pop.querySelectorAll = (sel) => (sel === '.mobile-win-row[data-win-id]' ? pop.children.filter((c) => c && c.dataset && c.dataset.winId) : []);
+    const q0 = document.querySelector; document.querySelector = (sel) => (sel === '.mobile-win-switcher' ? pop : q0(sel));
+    try {
+      if (tapFirst) { row.onclick(); pop.children = []; }   // the row's OWN tap first: the list closes, the row leaves the page — then the re-key
+      const d0 = dots.length, w0 = said();
+      let took = null;
+      if (act === 'gone') wm.windows.delete('win-new-1');
+      else if (act === 'rebuilt') wm.windows.set('win-new-1', { ...win, element: mkEl() });   // a dead view rebuilt live under the same id
+      else took = WM.prototype.rekeyWindow.call(wm, 'win-new-1', 'win-row-taken');
+      if (patchAfter) nav._patchSwitcherWaiting();   // the list's next live patch (any waiting change runs it)
+      const mine = dots.slice(d0).filter((d) => d[0] === row.dataset.winId);
+      const r0 = revealed.length, c0 = closes;
+      if (!tapFirst) row.onclick();
+      return { took, stamp: row.dataset.winId, dot: mine.length ? mine.at(-1)[1] : null, inside: ins(win, row), winId: win.id, shown: nav._shown['desk-p'], other: nav._shown['desk-w'], split: splitCalls.join(), revealed: revealed.slice(r0).join(), closes: closes - c0, redraws, said: said() - w0 };
+    } finally { document.querySelector = q0; }
+  };
+  const A = await openList();
+  ok(A.took === true && A.stamp === 'win-row-taken' && A.winId === 'win-row-taken', '§10 a re-key under the open list RE-STAMPS its row: the row names the new id (wm.rekeyWindow calls the one rule, MobileNav.followRekey)', A);
+  ok(A.dot === true, '§10 …followRekey re-reads its waiting mark under the new id: the dot stays on', A);
+  ok(A.inside === true, '§10 …a press on that row is a press ON that window (late-focus insideWindow: its late focus is not dropped)', A);
+  ok(A.shown === 'win-row-taken' && A.other === 'win-other' && A.split === 'win-new-1,win-row-taken', '§10 …this tab\'s notes by id follow: the window on show per desktop moves to the new id (the other desktop\'s untouched), the split is told', A);
+  ok(A.closes === 1 && A.revealed === 'win-row-taken' && A.said === 0, '§10 …its tap brings the window under the new id (the tap read the id live — as the release already did)', A);
+  const R = await openList({ WM: (await mutantEsm('src/lib/window.js', FOLLOW, '')).WindowManager, patchAfter: true });
+  ok(R.took === true && R.stamp === 'win-new-1' && R.dot === false && R.shown === 'win-new-1' && R.split === '', `§10 RED: the release's rekeyWindow (no followRekey) leaves the old stamp and notes — the list's next patch turns the dot off (stamp ${R.stamp} · dot ${R.dot} · shown ${R.shown})`, R);
+  const RP = await openList({ MN: (await mutantEsm('src/lib/mobile-nav.js', REPATCH, '')).MobileNav });
+  ok(RP.stamp === 'win-row-taken' && RP.dot === null, `§10 RED: followRekey without its re-patch — the row is re-stamped but its mark is never read under the new id (dot ${RP.dot})`, RP);
+  const D = await openList({ tapFirst: true });
+  ok(D.took === true && D.stamp === 'win-new-1' && D.inside === true, '§10 a row its own tap took off the page, then the re-key: a press on it is still a press on that window (late-focus knows the row by its window\'s instance)', D);
+  const RD = await openList({ tapFirst: true, ins: (await mutantEsm('src/lib/late-focus.js', INSTANCE, '')).insideWindow });
+  ok(RD.inside === false, '§10 RED: the release\'s insideWindow (the stamp alone) counts that press as a press elsewhere', RD);
+  const G = await openList({ act: 'gone' });
+  ok(G.closes === 0 && G.revealed === '' && G.redraws === 1 && G.said === 1, '§10 a row whose window is GONE: its tap says so in words and the list is drawn again (it never closes onto nothing)', G);
+  const RG = await openList({ act: 'gone', MN: (await mutantEsm('src/lib/mobile-nav.js', GUARD, '')).MobileNav });
+  ok(RG.closes === 1 && RG.said === 0 && RG.redraws === 0, `§10 RED: the release's row tap on a gone window closes the list and says nothing (closes ${RG.closes} · words ${RG.said} · redraws ${RG.redraws})`, RG);
+  const B = await openList({ act: 'rebuilt' });
+  ok(B.closes === 1 && B.revealed === 'win-new-1' && B.said === 0, '§10 a window REBUILT under the same id (a dead view made live) is that row\'s window: the tap reveals it, no words', B);
+  { // the split's own rekey: the pair it saved for the tab names the pane under its new id
+    const store2 = new Map([['vibespace.phoneSplit', J({ 'desk-p': ['win-new-1', 'win-new-2'], 'desk-w': ['a', 'b'] })]]);
+    const had = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+    Object.defineProperty(globalThis, 'sessionStorage', { value: { getItem: (k) => (store2.has(k) ? store2.get(k) : null), setItem: (k, v) => store2.set(k, String(v)) }, configurable: true, writable: true });
+    try {
+      const W = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
+      const S = installPhoneSplit(W.app);
+      const hit = S.rekey('win-new-1', 'win-row-taken'), miss = S.rekey('win-not-held', 'x');
+      const saved = JSON.parse(store2.get('vibespace.phoneSplit'));
+      ok(hit === true && miss === false && saved['desk-p'].join() === 'win-row-taken,win-new-2' && saved['desk-w'].join() === 'a,b', '§10 the split\'s saved pair names a re-keyed pane under its new id (phone-split-view rekey — never ended as «closed»); a window it does not hold changes nothing', { hit, miss, saved });
+    } finally { if (had) Object.defineProperty(globalThis, 'sessionStorage', had); else delete globalThis.sessionStorage; }
+  }
+  const LY = read('src/lib/layout.js'), at = LY.indexOf('      // Remap window ID to saved ID for cross-client sync\n'), blk = at < 0 ? '' : LY.slice(at, LY.indexOf('\n      }\n', at));
+  ok(/\n        this\.app\._mobileNav\?\.followRekey\?\.\(oldId, winState\.winId\);/.test(blk), '§10 layout.js\'s restore remap — the other road that changes a window\'s id in place — calls the same rule (followRekey)', blk.slice(0, 240));
+});
 const HOUR = 3600000, DAY = 86400000;
 const ringName = (ms, seq) => 'layout-' + new Date(ms).toISOString().replace(/[:.]/g, '-') + '-' + seq.toString(36) + '.json';
 /** the async prunes have finished: the ring's file count stands still for three looks (≤ 5 s) */

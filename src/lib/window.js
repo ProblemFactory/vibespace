@@ -1989,6 +1989,7 @@ class WindowManager {
     const sess = this._app?.sessions?.get(oldId);
     if (sess) { this._app.sessions.delete(oldId); this._app.sessions.set(newId, sess); }
     this._app?.updateTaskbar?.();
+    this._app?._mobileNav?.followRekey?.(oldId, newId);   // r1793: the phone's open window list and its notes by id follow the new id (the one rule: mobile-nav.js)
     return true;
   }
 

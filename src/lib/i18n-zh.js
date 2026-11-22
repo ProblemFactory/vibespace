@@ -4749,6 +4749,7 @@ export default {
   "{why} — the window stays where it is": "{why} — 窗口留在原处",
   "Every change here saves as you make it — there is nothing to press at the end.": "这里的每项改动都会立即保存 — 最后不需要再按保存。",
   "No windows on this desktop": "此桌面没有窗口",
+  "That window is no longer open — the list now shows what is open.": "那个窗口已经不在了 — 列表现在显示仍打开的窗口。",
   "Minimized": "已最小化",
   "Copy screen (the visible terminal text)": "复制屏幕（终端当前可见文本）",
   "Nothing on screen to copy": "屏幕上没有可复制的内容",

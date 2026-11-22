@@ -62,6 +62,7 @@ export function insideWindow(win, target) {
   if (!win || !target || typeof target !== 'object') return false;
   // its OWN taskbar item is inside it (raising the window while it opens is no act elsewhere — r364); a group's item names its tabs
   const item = typeof target.closest === 'function' ? target.closest('[data-win-id]') : null;
+  if (item && item._win === win) return true;   // r1793: the phone list's row names its window by INSTANCE (a row its tap took off the page, its stamp from before a re-key)
   if (item && win.id != null && item.dataset && (item.dataset.winId === String(win.id) || String(item.dataset.groupTabs || '').split(',').includes(String(win.id)))) return true;
   const el = win.element || null, content = win.content || null;
   if (content && typeof content.contains === 'function' && content.contains(target)) return true;

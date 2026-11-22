@@ -139,5 +139,16 @@ export function installPhoneSplit(app) {
     app._updateMobileNavTitle?.();
   }
   try { new ResizeObserver(() => apply()).observe(document.getElementById('workspace')); } catch { }
-  return { apply, offer, open, close, panes: () => (painted ? [painted.left, painted.right] : null) };
+  /** A pane's window took a new id (MobileNav.followRekey — wm.rekeyWindow, layout.js's restore remap; r1793): the pair, the
+   *  painted panes and the seen set name it under the new id — a pane re-keyed is never ended as «closed». → whether it named it */
+  const rekey = (oldId, newId) => {
+    const o = String(oldId), n = String(newId);
+    let hit = false;
+    for (const d of Object.keys(pairs)) if (Array.isArray(pairs[d]) && pairs[d].includes(o)) { pairs[d] = pairs[d].map((id) => (id === o ? n : id)); hit = true; }
+    if (painted) for (const k of ['left', 'right']) if (painted[k] === o) { painted[k] = n; hit = true; }
+    if (seen.delete(o)) { seen.add(n); hit = true; }
+    if (hit) save();
+    return hit;
+  };
+  return { apply, offer, open, close, rekey, panes: () => (painted ? [painted.left, painted.right] : null) };
 }

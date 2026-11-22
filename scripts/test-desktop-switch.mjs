@@ -175,7 +175,7 @@ console.log('⑦ §6b guard 10 across a switch — MobileNav._noteShown, run on 
   globalThis.sessionStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
   const run = (body) => {
     const noteShown = new Function(body); // eslint-disable-line no-new-func — the method's own text, `this` bound below
-    const self = { _shownBooted: true, _shown: { d1: 'w1' }, app: { desktopManager: { activeDesktopId: 'd2' }, wm: { activeWindowId: 'w1', windows: new Map([['w1', { _desktopId: 'd1' }], ['w2', { _desktopId: 'd2' }]]) } } };
+    const self = { _shownBooted: true, _shown: { d1: 'w1' }, _saveShown() {}, app: { desktopManager: { activeDesktopId: 'd2' }, wm: { activeWindowId: 'w1', windows: new Map([['w1', { _desktopId: 'd1' }], ['w2', { _desktopId: 'd2' }]]) } } };
     noteShown.call(self); // the in-between: the new desktop d2 active, d1's window w1 still the active window
     const between = { ...self._shown };
     self.app.wm.activeWindowId = 'w2'; noteShown.call(self); // the switch's own focus lands on d2's window
@@ -492,7 +492,8 @@ console.log('⑪ ROUND 3 — a list\'s listeners live while it is in the page; t
   // the window switcher: ONE close (abort + remove) — its toggle, an outside tap, both row taps call it; its two listeners
   // (the remote-change redraw, the outside-press watch) on its signal; a road that only removes it aborts them (untilGone)
   const sw = (mn.match(/\n  _showWindowSwitcher\(anchor = this\._titleEl\) \{\n[\s\S]*?\n  \}\n/) || [''])[0], item = (mn.match(/\n  _buildWindowItem\([^)]*\) \{\n[\s\S]*?\n  \}\n/) || [''])[0];
-  const lifeCensus = (s, it) => {
+  const road = (mn.match(/\n  _openRow\(win, wm, close, rerender\) \{\n[\s\S]*?\n  \}\n/) || [''])[0];   // r1793: both row taps take the rows' ONE road
+  const lifeCensus = (s, it, ro = road) => {
     const bad = [];
     if (!/const close = \(\) => \{ ctl\.abort\(\); pop\.remove\(\); \};/.test(s)) bad.push('no ONE close (abort + remove)');
     if (!/if \(existing\) \{ existing\._close\(\); return; \}/.test(s)) bad.push('the title toggle removes the list without its close');
@@ -501,18 +502,19 @@ console.log('⑪ ROUND 3 — a list\'s listeners live while it is in the page; t
     if (!/onOutsidePress\(pop, close, \{[^\n]*signal: ctl\.signal \}\);/.test(s)) bad.push('an outside tap does not call the close (its watch outlives the list)');
     const removes = (s.match(/\bpop\.remove\(\)/g) || []).length + (it.match(/\bpop\.remove\(\)/g) || []).length;
     if (removes !== 1) bad.push(`${removes} bare pop.remove() — the close must be the only one`);
-    if (!/item\.onclick = \(\) => \{ close\(\); wm\.revealWindow\(win\.id\); \};/.test(it) || !/item\.onclick = \(\) => \{ close\(\); wm\.revealWindow\(win\.id\); \};/.test(s)) bad.push('a row tap does not call the close');
+    if (!/item\.onclick = \(\) => this\._openRow\(win, wm, close, rerender\);/.test(it) || !/item\.onclick = \(\) => this\._openRow\(win, wm, close, rerender\);/.test(s) || !/\n    close\(\);\n    wm\.revealWindow\(win\.id\);\n/.test(ro)) bad.push('a row tap does not call the close');
     return bad;
   };
   const swBad = lifeCensus(sw, item);
-  ok(!!sw && !!item && swBad.length === 0, 'r3 ①: the window switcher has ONE close — its title toggle, an outside tap and both row taps call it; its vs-desktops listener and outside-press watch hang on its signal; a road that only removes it aborts them too', swBad);
+  ok(!!sw && !!item && !!road && swBad.length === 0, 'r3 ①: the window switcher has ONE close — its title toggle, an outside tap and both row taps call it; its vs-desktops listener and outside-press watch hang on its signal; a road that only removes it aborts them too', swBad);
+  ok(lifeCensus(sw, item, road.replace('    close();\n', '')).includes('a row tap does not call the close'), 'RED CONTROL (r1793): a row road (_openRow) that never calls the list\'s close fails the census by name');
   ok(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items, 'context-menu', \{ placesItself: true \}\);[^\n]*\n  menu\.classList\.add\('mdesk-menu'\);\n  untilGone\(menu, ctl\);/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  return menu;/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  \}\);/.test(sh),
     'r3 ①: the sheet\'s listeners (its rows\' long press, its vs-desktops) hang on its controller, aborted on EVERY road that takes it out (an outside press, Esc, a row\'s tap, the doors\' menu, the next open — 25151f0b: only the next open)');
   { // RED CONTROL — 25151f0b's switcher: a self-removing listener with no controller, three bare removes
-    const I2 = item.replace('item.onclick = () => { close(); wm.revealWindow(win.id); };', 'item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };');
+    const I2 = item.replace('item.onclick = () => this._openRow(win, wm, close, rerender);', 'item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };');
     const S2 = sw.replace(/    const ctl = new AbortController\(\);\n    const close = [^\n]*\n    pop\._close = close;\n/, '').replace('if (existing) { existing._close(); return; }', 'if (existing) { existing.remove(); return; }').replace('    untilGone(pop, ctl);\n', '')
       .replace("window.addEventListener('vs-desktops', () => renderContent(true), { signal: ctl.signal });", "const follow = () => { if (!pop.isConnected) { window.removeEventListener('vs-desktops', follow); return; } renderContent(true); };\n    window.addEventListener('vs-desktops', follow);")
-      .replace(/onOutsidePress\(pop, close, \{([^\n]*), signal: ctl\.signal \}\);/, 'onOutsidePress(pop, () => pop.remove(), {$1 });').replace('item.onclick = () => { close(); wm.revealWindow(win.id); };', 'item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };');
+      .replace(/onOutsidePress\(pop, close, \{([^\n]*), signal: ctl\.signal \}\);/, 'onOutsidePress(pop, () => pop.remove(), {$1 });').replace('item.onclick = () => this._openRow(win, wm, close, rerender);', 'item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };');
     const red = lifeCensus(S2, I2);
     ok(S2 !== sw && red.length === 7, `RED CONTROL: 25151f0b's switcher fails the census (${red.length}: ${red.join(' · ')})`, red);
   }

@@ -487,6 +487,26 @@ export class MobileNav {
     for (const tab of p.querySelectorAll('.mobile-desk-tab[data-desktop-id]')) { const on = [...wm.windows.values()].some((w) => w._desktopId === tab.dataset.desktopId && waits(w)); tab.classList.toggle('waiting', on); this._waitDot(tab, on); }
   }
 
+  /** THE PHONE FOLLOWS A WINDOW's NEW ID (主开发 r1793 — B-1d87 lets a window take another page's id). The two roads that change a
+   *  window's id in place — wm.rekeyWindow (where the focus, the sessions map, the tab chain and the taskbar follow) and layout.js's
+   *  restore remap — call this, so the rule lives here once: the open title switcher's row of that window takes the new stamp and its
+   *  waiting mark is read under it again (_patchSwitcherWaiting and warmth's row repaint read the stamp); this tab's own notes by id
+   *  follow too — the window on show per desktop (§6b guard 10, saved for the tab) and the split's pair (phone-split-view rekey: a
+   *  pane re-keyed is never «closed»). The row's taps read the window's id live, and late-focus knows the row by its window's
+   *  instance (`item._win`), so a row its own tap took off the page still names it. → whether an open row followed */
+  followRekey(oldId, newId) {
+    const o = String(oldId), n = String(newId);
+    let moved = 0;
+    const p = document.querySelector('.mobile-win-switcher');
+    if (p) for (const row of p.querySelectorAll('.mobile-win-row[data-win-id]')) if (row.dataset.winId === o) { row.dataset.winId = n; moved++; }
+    if (moved) this._patchSwitcherWaiting();
+    let noted = false;
+    for (const d of Object.keys(this._shown || {})) if (this._shown[d] === o) { this._shown[d] = n; noted = true; }
+    if (noted) this._saveShown();
+    this.split?.rekey?.(o, n);
+    return moved > 0;
+  }
+
   /** Switch this tab to desktop `id` by the manager's road (the Stage left first, as the taskbar's preview does), then show
    *  that desktop's window on show (§6b guard 10): the one this tab showed there, else its topmost — a lazy replay lands
    *  later, so it looks again for a few seconds unless the person picked a window meanwhile. */
@@ -597,8 +617,10 @@ export class MobileNav {
     const w = this.app.wm.windows.get(id);
     if (desk && w?._desktopId && w._desktopId !== desk) return; // a switch's in-between: the old desktop's window is still the active one
     this._shown[desk] = id;
-    try { sessionStorage.setItem(SHOWN_KEY, JSON.stringify(this._shown)); } catch { }
+    this._saveShown();
   }
+  /** The tab's note of the window on show per desktop, saved — its ONE write (the note and a re-key's move, followRekey). */
+  _saveShown() { try { sessionStorage.setItem(SHOWN_KEY, JSON.stringify(this._shown)); } catch { } }
 
   /** After the boot's restore (layout.js loadAutoSave): show the window this tab showed before the reload, once it is
    *  built (a lazy replay lands later) — unless the person picked another one meanwhile. */
@@ -841,7 +863,7 @@ export class MobileNav {
         for (const win of minimized) {
           const item = this._buildWindowItem(win, wm, close, rerender);
           item.classList.add('mobile-win-minimized');
-          item.onclick = () => { close(); wm.revealWindow(win.id); }; // restores the group AND shows this tab (a host too)
+          item.onclick = () => this._openRow(win, wm, close, rerender); // restores the group AND shows this tab (a host too) — the rows' ONE road
           winList.appendChild(item);
         }
       }
@@ -861,10 +883,28 @@ export class MobileNav {
     onOutsidePress(pop, close, { ignore: (t) => t === anchor || !!anchor.contains?.(t) || !!personDialogOf(t), signal: ctl.signal });
   }
 
+  /** A ROW's TAP — the title switcher's ONE road to a window (its window rows and its Minimized rows): the list's one close, then
+   *  the window revealed. A row whose window is GONE — no window stands under its id any more (closed by a record or any other road
+   *  while the list stood open — r1793: the tap used to close the list and reveal nothing, a person's tap that did nothing,
+   *  silently) — says so in words and the list is drawn again with what is open now. A window rebuilt under the same id (a dead
+   *  view rebuilt live, a re-opened row) IS that row's window: the tap reveals it. `win.id` is read live (a re-key keeps the
+   *  instance). → whether it opened */
+  _openRow(win, wm, close, rerender) {
+    if (!win || !wm.windows.has(win.id)) {
+      showToast(t('That window is no longer open — the list now shows what is open.'), { type: 'info' });
+      if (typeof rerender === 'function') rerender();
+      return false;
+    }
+    close();
+    wm.revealWindow(win.id);
+    return true;
+  }
+
   _buildWindowItem(win, wm, close, rerender) {
     const item = document.createElement('div');
     item.className = 'mobile-win-row';
     item.dataset.winId = win.id;
+    item._win = win;   // r1793: the row's window by INSTANCE (late-focus insideWindow) — a row its tap took off the page keeps naming it across a re-key
     // the waiting fact (lane phone-take-photo): a conversation that waits for the person blinks here as on the desk's chooser —
     // never the one on show; _patchSwitcherWaiting keeps it live while the list is open
     if (win.id !== wm.activeWindowId && windowWaits(win)) { item.classList.add('waiting'); this._waitDot(item, true); } // r2: a standing dot too (reduced motion keeps it)
@@ -970,7 +1010,7 @@ export class MobileNav {
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
     // THE ROW NAMES THE WINDOW — reveal it as itself (inc-muiq348r-jwb5: a tab group's HOST row, tapped while the group
     // showed a guest, only raised the frame — the guest stayed on screen under the host's title and highlight)
-    item.onclick = () => { close(); wm.revealWindow(win.id); };
+    item.onclick = () => this._openRow(win, wm, close, rerender);
     return item;
   }
 

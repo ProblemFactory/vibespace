@@ -4748,6 +4748,7 @@ export default {
   "Switch desktop — {name}": "デスクトップを切り替え — {name}",
   "Every change here saves as you make it — there is nothing to press at the end.": "ここでの変更はすべてその場で保存されます — 最後に押すボタンはありません。",
   "No windows on this desktop": "このデスクトップにウィンドウはありません",
+  "That window is no longer open — the list now shows what is open.": "そのウィンドウはもう開いていません — 一覧は今開いているウィンドウを表示します。",
   "Minimized": "最小化済み",
   "Copy screen (the visible terminal text)": "画面をコピー（ターミナルの表示中テキスト）",
   "Nothing on screen to copy": "画面にコピーできる内容がありません",

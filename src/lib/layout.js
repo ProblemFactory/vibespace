@@ -1623,6 +1623,7 @@ class LayoutManager {
         wm.windows.set(winState.winId, winInfo);
         this.onWindowCreated(winInfo); // the record's id appeared: a pending chain naming it reconciles
         if (wm.activeWindowId === oldId) wm.activeWindowId = winState.winId; // the focus follows the re-key (it named a window that no longer existed — v2 verify r1 ⑦)
+        this.app._mobileNav?.followRekey?.(oldId, winState.winId);   // r1793: the phone's open window list and its notes by id follow it too (the one rule: mobile-nav.js)
       }
       const a = arrangementFor(layers, winState); // this page's arrangement of the entry (a phone's: the minimize only)
       if (a && a.gridBounds) {

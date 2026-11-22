@@ -3369,7 +3369,7 @@ await section(async () => {
   };
   // THE DOORS: [revealWindow calls, where]
   const DOORS = {
-    'src/lib/mobile-nav.js': [2, 'the phone switcher\'s window row + its Minimized row (the incident)'],
+    'src/lib/mobile-nav.js': [1, 'the phone switcher\'s rows — its window rows and its Minimized rows, ONE road (_openRow, r1793) (the incident)'],
     'src/lib/phone-split-view.js': [1, '«Split» beside a minimized window restores it first (lane phone-six r2 — never a pair naming a window that cannot stand)'],
     'src/lib/taskbar.js': [4, 'activateWindow (every taskbar button), the grouped chooser\'s row, the window list\'s row, the window list\'s «Other desktops» row (a built window — lane desktop-switch-phone; a held one is the desktop\'s deferred reveal, desktop-manager revealHeld, whose `wm.revealWindow?.(id)` reveals it once its switch built it — r8 of userW inc-mw1ogdno-5jny)'],
     'src/lib/window.js': [3, 'the overlap switcher\'s row + the door\'s own second pass after a desktop switch (inc-muv3qfo7-96tm: resolved / refused)'],
@@ -3415,13 +3415,13 @@ await section(async () => {
   const pointerPin = (b) => b.length > 40 && /pressTab\(ch, /.test(b) && !/revealWindow|revealTab/.test(b);
   ok(pointerPin(fp), '§62 _focusFromPointer (a PRESS) asks PURE pressTab and never the door — a press keeps the tab on show');
   const pin = (f, name, re) => { const b = body(read(f), name); return b.length > 40 && re.test(b) && !/\.focusWindow\(/.test(strip(b)); };
-  ok(pin('src/lib/mobile-nav.js', '_buildWindowItem', /wm\.revealWindow\(win\.id\)/) && pin('src/lib/session-lifecycle.js', '_focusExistingSession', /this\.wm\.revealWindow\(winId, \{ replay \}\)/) && pin('src/lib/app.js', 'goToWinId', /this\.wm\.revealWindow\(winId\)/),
+  ok(pin('src/lib/mobile-nav.js', '_openRow', /wm\.revealWindow\(win\.id\)/) && pin('src/lib/session-lifecycle.js', '_focusExistingSession', /this\.wm\.revealWindow\(winId, \{ replay \}\)/) && pin('src/lib/app.js', 'goToWinId', /this\.wm\.revealWindow\(winId\)/),
     '§62 the incident\'s doors spell it: the phone switcher row, _focusExistingSession (sidebar card / palette), goToWinId — no bare focusWindow in their bodies');
   ok(/export function activateWindow\(app, id\) \{[^}]*app\.wm\.revealWindow\(id\);/.test(read('src/lib/taskbar.js')), '§62 activateWindow (every taskbar button) is the door');
   // NEGATIVE CONTROLS (string copies, nothing written): the pre-fix switcher row, a new bare focus in an unlisted file,
   // a door silently turned back into a raise, a pointer path that switches tabs
   const mn = srcs['src/lib/mobile-nav.js'];
-  const preFix = { ...srcs, 'src/lib/mobile-nav.js': mn.replace('item.onclick = () => { close(); wm.revealWindow(win.id); };', 'item.onclick = () => { close(); wm.focusWindow(win.id); };') };
+  const preFix = { ...srcs, 'src/lib/mobile-nav.js': mn.replace('    close();\n    wm.revealWindow(win.id);\n    return true;\n', '    close();\n    wm.focusWindow(win.id);\n    return true;\n') };   // the switcher rows' one road (_openRow), turned back into a raise
   const planted = { ...srcs, 'src/lib/zz-new-panel.js': 'export function openZz(app) { for (const [, w] of app.wm.windows) if (w.type === "zz") { app.wm.focusWindow(w.id); return w; } }\n' };
   const raised = { ...srcs, 'src/lib/settings-ui.js': srcs['src/lib/settings-ui.js'].replace('this.app.wm.revealWindow(existing.id, { replay: !!syncId });', 'this.app.wm.focusWindow(existing.id);') };
   const commented = { ...srcs, 'src/lib/zz-new-panel.js': '// app.wm.focusWindow(w.id) is how this used to read\n/* wm.restore(x) */\n' };
