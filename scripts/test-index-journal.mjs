@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import './scratch.mjs';   // §113's order (主开发 r1845): the first import after node's own
 import { checker } from './lib/check.mjs';
 import { anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
