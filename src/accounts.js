@@ -15,6 +15,7 @@
  * how the CLI's own trust list (customApiKeyResponses) fingerprints keys.
  */
 const fs = require('fs');
+const accountIdentity = require('./account-identity.js'); // PURE (row B-87fd unit 2): the ONE identity record + the ONE «same account?» comparison
 const DISPLAY = require('./account-display-facts.js'); // B-360d (lane chrome-157): the list's sign-in facts, read OFF the loop and kept a folder
 // B-360d, THE DECISION ROAD's bound (主开发 r1221): a DECIDER counts a folder's kept sign-in facts only while the snapshot that read
 // or confirmed them (each sign-in file's stamp: size + time) started within this — a sign-in changed under the hub from a terminal is
@@ -497,11 +498,11 @@ class AccountManager {
     if (this._display.stale(dir, this._displayMaxAgeMs)) this._displayRead(a);
     return this._display.get(dir);
   }
-  _displayFilesOf(a) { const be = this._acctBackend(a), creds = this._credsOf(be), dir = this._acctDir(be, a.id); return { creds, dir, files: typeof creds.displayFiles === 'function' ? creds.displayFiles(dir) : [], keep: typeof creds.displayKeep === 'function' ? creds.displayKeep : null }; }
+  _displayFilesOf(a) { const be = this._acctBackend(a), creds = this._credsOf(be), dir = this._acctDir(be, a.id); return { creds, dir, files: typeof creds.displayFiles === 'function' ? creds.displayFiles(dir) : [], keep: typeof creds.displayKeep === 'function' ? creds.displayKeep : null, ident: typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf : null }; }
   _displayRead(a, { after = 0, ensure = false, urgent = false } = {}) {
     try {
-      const { creds, dir, files, keep } = this._displayFilesOf(a);
-      const p = this._display[ensure ? 'ensure' : 'refresh'](dir, files, (rd) => creds.parseAuth(dir, rd), { link: this._acctType(a) === 'pooled', after, keep, urgent });
+      const { creds, dir, files, keep, ident } = this._displayFilesOf(a);
+      const p = this._display[ensure ? 'ensure' : 'refresh'](dir, files, (rd) => creds.parseAuth(dir, rd), { link: this._acctType(a) === 'pooled', after, keep, urgent, identity: ident ? (rd) => ident(dir, rd) : null });
       p.catch(() => { });
       return p;
     } catch { return Promise.resolve(null); }
@@ -512,14 +513,14 @@ class AccountManager {
    *  an off-loop read then only confirms */
   _displaySeed(a) {
     // the confirming read starts AFTER the seed (a read already in flight began before the act: it never overwrites the seed)
-    try { const { creds, dir, files, keep } = this._displayFilesOf(a); this._display.seed(dir, files, (rd) => creds.parseAuth(dir, rd), RR, { keep }); this._displayRead(a, { after: this._display.clock() }); } catch { }
+    try { const { creds, dir, files, keep, ident } = this._displayFilesOf(a); this._display.seed(dir, files, (rd) => creds.parseAuth(dir, rd), RR, { keep, identity: ident ? (rd) => ident(dir, rd) : null }); this._displayRead(a, { after: this._display.clock() }); } catch { }
   }
   /** the switch: the pool's folder now shows `subId`'s files — seeded from the member the switch has just checked, target set */
   _displaySeedPool(pool, subId) {
     try {
       const m = this.get(subId); if (!m) return;
-      const { creds, dir: mdir, files, keep } = this._displayFilesOf(m);
-      this._display.seed(this._acctDir(this._acctBackend(pool), pool.id), files, (rd) => creds.parseAuth(mdir, rd), RR, { target: subId, keep });
+      const { creds, dir: mdir, files, keep, ident } = this._displayFilesOf(m);
+      this._display.seed(this._acctDir(this._acctBackend(pool), pool.id), files, (rd) => creds.parseAuth(mdir, rd), RR, { target: subId, keep, identity: ident ? (rd) => ident(mdir, rd) : null });
       this._displayRead(pool, { after: this._display.clock() });
     } catch { }
   }
@@ -594,6 +595,18 @@ class AccountManager {
   }
   /** the kept facts' reader of account `id`'s folder (run-reads' shape, scrubbed) — null = not read yet / unreadable: no claim */
   displayReaderOf(id) { const a = this.get(id); if (!a) return null; const d = this._displayOf(a); return d.state === 'read' ? d.rd : null; }
+  /** THE IDENTITY RECORD of row `id` (row B-87fd unit 2, src/account-identity.js): its harness, the address the person declared
+   *  (setEmail) and WHO its folder is signed in as (the harness's folderIdentityOf, read off the loop with the kept facts), on the
+   *  DECISION ROAD — confirmed within the bound like signinFacts (`opts.since` / `opts.withinMs`) — or null: no sign-in folder of
+   *  its own (a pool, an API key, a gone row), not read within the bound, unreadable — no claim (sameAccount answers «unproven»).
+   *  Built at each ask, held by nobody: a seat's or an organisation's id stays in memory — never in a row, a push or a journal
+   *  line (r1477) */
+  identityRecordOf(id, opts = {}) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription' || this.signinFacts(id, opts).state !== 'read') return null;
+    const be = this._acctBackend(a);
+    return accountIdentity.identityRecordOf({ harness: be, declared: a.email || null, auth: this._display.identityOf(this._acctDir(be, a.id)) });
+  }
   /** the facts a row carries: { state: 'read', at } | { state: 'unread' } | { state: 'unreadable', at, reason } */
   _factsOf(d) { return d.state === 'read' ? { state: 'read', at: d.at } : d.state === 'unreadable' ? { state: 'unreadable', at: d.at, reason: d.reason } : { state: 'unread' }; }
   /** loginStateOf's display twin: the harness's own reader over the KEPT, scrubbed snapshot, its clock the caller's; a folder

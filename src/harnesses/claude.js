@@ -77,6 +77,23 @@ function parseClaudeAuth(dir, rd = RR) {   // rd: the reader — run-reads (the 
   } catch { return { loggedIn: false }; }
 }
 
+/** WHO THIS SIGN-IN FOLDER IS SIGNED IN AS (row B-87fd unit 2, src/account-identity.js): the address, and the SEAT as the
+ *  CLI's own record names it (.claude.json oauthAccount) — the person's account IN its organisation (accountUuid with
+ *  organizationUuid: one person holds a seat in each organisation; a record naming no organisation names no seat) — or null
+ *  when no sign-in is there. Read over the SAME snapshot as parseClaudeAuth (the kept facts' landing, src/account-display-
+ *  facts.js) and never part of parseAuth's answer: that answer reaches the person's page (finalize); the ids stay in memory */
+function claudeFolderIdentity(dir, rd = RR) {
+  try {
+    const o = JSON.parse(rd.facts(path.join(dir, '.credentials.json')).text)?.claudeAiOauth;
+    if (!o?.accessToken) return null;
+    let acct = null;
+    try { acct = JSON.parse(rd.readText(path.join(dir, '.claude.json')))?.oauthAccount || null; } catch { }
+    const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    const person = s(acct?.accountUuid), org = s(acct?.organizationUuid);
+    return { email: s(o.email) || s(o.emailAddress) || s(acct?.emailAddress), seat: person && org ? `${person}/${org}` : null, orgId: org };
+  } catch { return null; }
+}
+
 /** LOGIN LIFETIME of an account dir (2026-09-07). The SAME file parseAuth
  *  already reads, asked a different question: not "is there a token" but "when
  *  does this LOGIN SESSION end". Read-only, never refreshes. A dir with no
@@ -328,6 +345,8 @@ module.exports = {
     displayFiles: (dir) => [path.join(dir, '.credentials.json'), path.join(dir, '.claude.json')],
     // …and what the list KEEPS of each after the parse (round wldn7whag): only what its list-time readers read — the login's own
     // shape (claudeLoginState) and our long-lived-token mark; the settings file keeps NO text (parseAuth read its identity at landing)
+    // …and WHO the folder is signed in as, read in the same landing and kept in memory only (row B-87fd unit 2)
+    folderIdentityOf: claudeFolderIdentity,
     displayKeep: (p) => (path.basename(p) === '.credentials.json' ? (o) => (o && typeof o === 'object' ? { claudeAiOauth: o.claudeAiOauth, ...(o[OAT_FILE_MARK] ? { [OAT_FILE_MARK]: o[OAT_FILE_MARK] } : {}) } : null) : null),
   },
   // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08: auto-resume is generic,

@@ -93,6 +93,22 @@ function parseCodexAuthFile(file, rd = null) {   // rd: the accounts list's kept
   } catch { return { loggedIn: false }; }
 }
 const parseCodexAuth = (dir, rd = null) => parseCodexAuthFile(path.join(dir, 'auth.json'), rd);
+/** WHO THIS SIGN-IN FOLDER IS SIGNED IN AS (row B-87fd unit 2, src/account-identity.js): the id_token's address, and the SEAT —
+ *  the ChatGPT user IN its workspace (chatgpt_user_id, else user_id, with chatgpt_account_id: one person holds a seat in each
+ *  workspace; a token naming no workspace names no seat) — or null (no id_token: an API key names no person). Read over the
+ *  SAME snapshot as parseCodexAuthFile and never part of its answer (finalize sends that to the person's page): the ids stay
+ *  in memory */
+function codexFolderIdentity(dir, rd = null) {
+  try {
+    const file = path.join(dir, 'auth.json');
+    const raw = JSON.parse(rd ? rd.readText(file) : fs.readFileSync(file, 'utf-8'));
+    if (!raw?.tokens?.id_token) return null;
+    const c = jwtPayload(raw.tokens.id_token), auth = c['https://api.openai.com/auth'] || {};
+    const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    const person = s(auth.chatgpt_user_id) || s(auth.user_id), ws = s(auth.chatgpt_account_id);
+    return { email: s(c.email), seat: person && ws ? `${person}/${ws}` : null, orgId: ws };
+  } catch { return null; }
+}
 
 // THE CLI config files VibeSpace may write for codex (design-harness-settings
 // §2): paths spelled ONCE in the PURE table's `files`, resolved here. Both
@@ -249,6 +265,7 @@ module.exports = {
     parseAuth: parseCodexAuth,
     parseAuthFile: parseCodexAuthFile,
     displayFiles: (dir) => [path.join(dir, 'auth.json')],   // the file parseAuth opens — read OFF the loop for the accounts list (B-360d)
+    folderIdentityOf: codexFolderIdentity,   // WHO the folder is signed in as, read in the same landing, kept in memory only (row B-87fd unit 2)
   },
   // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08) — see the claude
   // descriptor for the law. FORM 'turn-start': the wrapper owns the app-server

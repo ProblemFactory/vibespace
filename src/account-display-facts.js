@@ -16,6 +16,10 @@
  *                            when that is inside its own short bound (主开发 r1221: the sign-in files' stamp confirmed lately)
  *                            `rd` answers the harness's OWN readers (facts / readText / stat, run-reads' shape) from the kept,
  *                            SCRUBBED snapshot — the login state's reader runs over it at each list (its clock is the list's)
+ *   identityOf(folder)     — WHO the folder is signed in as (row B-87fd unit 2): the harness's `folderIdentityOf` over the SAME raw
+ *                            snapshot the parse reads, at the landing → { email, seat, orgId } | null. Kept in memory beside the
+ *                            facts, never in get()'s answer nor in the «changed» test (no row shows it); an unreadable or dropped
+ *                            folder has none. Its one reader is the decision road (AccountManager.identityRecordOf)
  *   drop(folder)           — forgets (a switch, a removal, a sign-in the hub wrote: the writer drops in the same step)
  *   stale(folder, maxAgeMs)— a kept read older than the stated age (the list then asks a bounded re-read; it never waits)
  *
@@ -87,7 +91,7 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
   /** a file's STAMP (its kind, size and time, or its error code) — the same stamp ⇒ the kept facts still hold */
   const stampOf = (x) => (x ? (x.ok ? `${x.isFile ? 'f' : 'd'}:${x.size}:${x.mtimeMs}` : `!${x.code}`) : null);
   const NO_TOKEN = (o) => { if (!o || typeof o !== 'object') return o; const out = {}; for (const [k, v] of Object.entries(o)) if (!/token$/i.test(k)) out[k] = v; return out; };
-  const slot = (folder) => { let f = kept.get(folder); if (!f) { f = { state: 'unread', at: 0, from: 0, files: null, auth: null, target: null, reason: null, inflight: null, startedAt: 0, sig: null }; kept.set(folder, f); } return f; };
+  const slot = (folder) => { let f = kept.get(folder); if (!f) { f = { state: 'unread', at: 0, from: 0, files: null, auth: null, identity: null, target: null, reason: null, inflight: null, startedAt: 0, sig: null }; kept.set(folder, f); } return f; };
   /** WHAT IS KEPT of a file after the parse (round wldn7whag): `keep(path)` (the harness's displayKeep) → null = no text at all
    *  (its stamp only), or a picker (obj) → the part its list-time readers read; none given = the whole text. What is kept is
    *  SCRUBBED either way. */
@@ -100,20 +104,22 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
   /** a snapshot lands: the harness's own parse over the RAW texts, once — then only what is kept stays. THE «CHANGED» TEST is what
    *  a ROW shows (the parse's answer, a pool's target, the kept texts and their files' times — a login's own file), never a
    *  rewrite of a file nothing keeps (a CLI rewrites its settings at every start: no broadcast). → whether the kept facts changed */
-  function land(f, out, parse, target, from, keep) {
+  function land(f, out, parse, target, from, keep, identity) {
     let auth = null;
     if (typeof parse === 'function') { try { auth = NO_TOKEN(parse(readerOf(out, 'raw'))); } catch { auth = { loggedIn: false }; } }
+    let ident = null;   // who the folder is signed in as — read over the raw texts BEFORE only what is kept stays (identityOf)
+    if (typeof identity === 'function') { try { ident = identity(readerOf(out, 'raw')) || null; } catch { ident = null; } }
     for (const [p, x] of out) if (x.ok && x.isFile && x.raw != null) { x.text = keptTextOf(p, x.raw, keep).text; delete x.raw; }
     const sig = JSON.stringify([auth, target, [...out].map(([p, x]) => [p, x.ok ? (x.text != null ? [x.text, x.mtimeMs] : 'ok') : '!' + x.code])]);
     const changed = f.state !== 'read' || sig !== f.sig;
-    f.files = out; f.auth = auth; f.target = target; f.state = 'read'; f.reason = null; f.at = now(); f.from = from; f.sig = sig;
+    f.files = out; f.auth = auth; f.identity = ident; f.target = target; f.state = 'read'; f.reason = null; f.at = now(); f.from = from; f.sig = sig;
     return changed;
   }
   /** A WRITER THAT KNOWS THE FACTS SETS THEM IN ITS OWN STEP (主开发 r1217): a person's own sign-in, re-authorisation or switch
    *  has just read or written what the keeper would read — through `rd` (run-reads: this synchronous run's answers, the files
    *  its own act already asked) it sets them now, so the next list shows them at once; an off-loop read then only confirms.
    *  A read error that is not «absent» states NOTHING as a fact: the folder is unreadable by name (round wldn7whag). */
-  function seed(folder, files, parse, rd, { target = null, keep = null } = {}) {
+  function seed(folder, files, parse, rd, { target = null, keep = null, identity = null } = {}) {
     const out = new Map(), from = clock(), f = slot(folder);
     for (const s of (files || []).map(specOf)) {
       try {
@@ -121,19 +127,19 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
         else { const x = rd.facts(s.path); out.set(s.path, { ok: true, isFile: true, mtimeMs: x.mtimeMs, size: x.size, raw: x.text }); }
       } catch (e) {
         const code = (e && e.code) || 'error';
-        if (code !== 'ENOENT') { const changed = f.state !== 'unreadable' || f.reason !== code; f.state = 'unreadable'; f.reason = code; f.at = now(); f.from = from; f.files = null; f.auth = null; f.sig = null; return changed; }
+        if (code !== 'ENOENT') { const changed = f.state !== 'unreadable' || f.reason !== code; f.state = 'unreadable'; f.reason = code; f.at = now(); f.from = from; f.files = null; f.auth = null; f.identity = null; f.sig = null; return changed; }
         out.set(s.path, { ok: false, code: 'ENOENT' });
       }
     }
-    return land(f, out, parse, target, from, keep);
+    return land(f, out, parse, target, from, keep, identity);
   }
   /** Read the folder's files OFF the loop: each file's stamp first; when every stamp (and a pool's link) is the one kept, the
    *  kept facts are CONFIRMED (no text read, no parse); else every read file's text is read and parsed. One read a folder in
    *  flight; `after` = a read that started before it does not count (the caller's act came later: one more read is chained).
    *  A LANDING NEVER REPLACES FACTS NEWER THAN ITS OWN START (a writer's seed made while it was in flight stands). */
-  function refresh(folder, files, parse = null, { link = false, after = 0, keep = null, urgent = false } = {}) {
+  function refresh(folder, files, parse = null, { link = false, after = 0, keep = null, urgent = false, identity = null } = {}) {
     const f = slot(folder);
-    if (f.inflight) { if (urgent) promote(f); return f.startedAt >= after ? f.inflight : f.inflight.then(() => refresh(folder, files, parse, { link, after, keep, urgent })); }
+    if (f.inflight) { if (urgent) promote(f); return f.startedAt >= after ? f.inflight : f.inflight.then(() => refresh(folder, files, parse, { link, after, keep, urgent, identity })); }
     const sf = door();
     if (!sf) { f.state = 'unreadable'; f.reason = 'no-reader'; f.at = now(); f.from = clock(); return Promise.resolve(f); }
     const from = clock();
@@ -155,13 +161,13 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
           const out = new Map();
           for (const s of specs) { const x = st.get(s.path); out.set(s.path, s.stat ? x : await textOne(sf, s.path, x)); }
           if (kept.get(folder) !== f || f.from > from) return f;
-          if (land(f, out, parse, target, from, keep)) { try { onLanded(folder); } catch { } }
+          if (land(f, out, parse, target, from, keep, identity)) { try { onLanded(folder); } catch { } }
         }
       } catch (e) {
         if (kept.get(folder) !== f || f.from > from) return f;
         const reason = e && (e.safeFsTimeout || e.code === 'ETIMEDOUT' || /not responding|timed? ?out/i.test(String(e.message))) ? 'timeout' : (e && e.code) || 'error';
         const changed = f.state !== 'unreadable' || f.reason !== reason;
-        f.state = 'unreadable'; f.reason = reason; f.at = now(); f.from = from; f.files = null; f.auth = null; f.sig = null;
+        f.state = 'unreadable'; f.reason = reason; f.at = now(); f.from = from; f.files = null; f.auth = null; f.identity = null; f.sig = null;
         if (changed) { try { onLanded(folder); } catch { } }
       } finally { release(); f.inflight = null; }
       return f;
@@ -196,9 +202,11 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
   /** a read whose snapshot started at or after `t` is in flight or done (a decider's ask then waits for it, or has it) */
   const askedSince = (folder, t) => { const f = kept.get(folder); return !!f && (f.inflight ? f.startedAt >= t : (f.state !== 'unread' && f.from >= t)); };
   const drop = (folder) => { kept.delete(folder); };
+  /** who the folder is signed in as (the harness's folderIdentityOf at its last landing) — only while its facts are read */
+  const identityOf = (folder) => { const f = kept.get(folder); return f && f.state === 'read' && f.files ? f.identity || null : null; };
   /** every read in flight landed — a read CHAINED after one (an ask that came while an older read was in flight) included */
   const settled = async () => { for (let i = 0; i < 64; i++) { const p = [...kept.values()].map((f) => f.inflight).filter(Boolean); if (!p.length) return; await Promise.all(p); } };
-  return { refresh, ensure, seed, get, stale, askedSince, drop, settled, clock, size: () => kept.size };
+  return { refresh, ensure, seed, get, identityOf, stale, askedSince, drop, settled, clock, size: () => kept.size };
 }
 
 module.exports = { create, scrub, KEPT };
