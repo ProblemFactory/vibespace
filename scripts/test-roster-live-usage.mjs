@@ -417,6 +417,28 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
   const umNote = await patchedImport('src/lib/usage-meter.js', 'claude-pool-note', [["      if (defAcct) usageNote = claudeDefRow && claudeDefRow.type === 'pooled' ? t('The pool\\'s current member · refreshes when you run it in a terminal session') : t('Default account · refreshes when you run it in a terminal session');", "      if (defAcct) usageNote = t('Default account · refreshes when you run it in a terminal session');"]]); // stale-pins: kept — the RED plants the release's note line
   const wNoteRed = umNote ? autoWorld(umNote, { def: 'P', cur: 'A' }) : null;
   ok('B-2d35 RED (the note): the release\'s line says «Default account» for the pool — the leg sees it', !!wNoteRed && defNote.test(wNoteRed.pop) && !poolNote.test(wNoteRed.pop), wNoteRed ? wNoteRed.pop.slice(0, 200) : 'the patched line is not there');
+  // r2047 (5): the CODEX pool default's note too — «The pool's current member · refreshes as its sessions run», never «Default account»
+  const codexPoolWorld = (UM) => {
+    for (const k of Object.keys(els)) delete els[k];
+    class AppC { }
+    UM.installUsageMeter(AppC, {});
+    const app = new AppC();
+    app.settings = { get: () => undefined };
+    const ids = { A: 'cxs-auto-a', P: 'pool-cx-p' };
+    app._accounts = { accounts: [{ id: ids.A, backend: 'codex', type: 'subscription', name: 'Cx A' }, { id: ids.P, backend: 'codex', type: 'pooled', pooled: true, name: 'Cx Pool', members: [ids.A], current: ids.A }], defaultAccountId: null, defaultCodexAccountId: ids.P };
+    app._accountUsage = {}; app._rateLimit = null; app._usageGlobal = {}; app._usageCodexGlobal = {};
+    app._codexAccountUsage = { [ids.A]: R2d(0.3) };
+    app._usageAcctSel = 'auto'; app._usageAcctSelCodex = 'auto'; app._usageEstimates = {};
+    let err = null;
+    try { app._renderUsage(); } catch (e) { err = e.message; }
+    const txt = String(el('usage-popup').innerHTML || '').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+    return { err, txt };
+  };
+  const cw = codexPoolWorld(UM);
+  ok('B-2d35 the CODEX pool default\'s note says «The pool\'s current member · refreshes as its sessions run», never «Default account» (r2047 (5))', !cw.err && /current member · refreshes as its sessions run/.test(cw.txt) && !/Default account · refreshes as its sessions run/.test(cw.txt), cw.err || cw.txt.slice(0, 300));
+  const umCxNote = await patchedImport('src/lib/usage-meter.js', 'codex-pool-note', [["      if (defAcct) codexNote = codexDefRow && codexDefRow.type === 'pooled' ? t('The pool\\'s current member · refreshes as its sessions run') : t('Default account · refreshes as its sessions run');", "      if (defAcct) codexNote = t('Default account · refreshes as its sessions run');"]]); // stale-pins: kept — the RED plants the release's codex note line
+  const cwr = umCxNote ? codexPoolWorld(umCxNote) : null;
+  ok('B-2d35 RED (the codex note): the release\'s line says «Default account» for the codex pool — the leg sees it', !!cwr && /Default account · refreshes as its sessions run/.test(cwr.txt), cwr ? cwr.txt.slice(0, 200) : 'the patched line is not there');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(r.name, r.pass, r.detail);
 }
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -2393,7 +2393,7 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
     };
     const bs = bootNoStore(guardMod);
     ok('§3h THE MUST (r1801): the guard built BEFORE the For-you store — nothing filed then; the 60 s ask, the folder still refusing, files EXACTLY ONE item (a second ask none)', bs.before === 0 && bs.open === 1 && bs.still, JSON.stringify(bs));
-    const redOrder = copyOf("    let ut = null; try { ut = getUserTodos(); } catch { ut = null; }\n    if (!ut || typeof ut.add !== 'function') return false;   // the store comes later in boot: the 60 s ask files it then\n", '    unlockedFiled = true;\n', "B-ef83 r1801: the tip's order (the flag first)"); // stale-pins: kept — the RED plants the tip's order
+    const redOrder = copyOf("    let ut = null; try { ut = getUserTodos(); } catch { ut = null; }\n    if (!ut || typeof ut.add !== 'function') return false;   // the store comes later in boot: the 60 s ask files it then\n", '    const ut = null;\n    unlockedFiled = true;\n', "B-ef83 r1801: the tip's order (the flag first)"); // stale-pins: kept — the RED plants the tip's order
     ok('§3h CONTROL: the anchored copy (the flag set before the filing) is built', !redOrder.err, redOrder.err || '');
     if (!redOrder.err) { const ro = bootNoStore(redOrder); ok('§3h CONTROL: in that copy the owner gets NO item at a real boot (RED: the flag set, nothing filed)', ro.open === 0, JSON.stringify(ro)); }
     // (p) r1801 (4): AN EARLIER RUN's item closes when a later boot makes the lock AT ONCE — once the store answers (the beat asks)
@@ -2408,6 +2408,84 @@ console.log('\n§3h B-ef83: one hub process keeps the ledger; a reset notice onl
       for (let i = 0; i < 200 && inP[0].status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
       ok('§3h an EARLIER RUN\'s «kept without the lock» item CLOSES when a later boot makes the lock at once — at the first beat after the store answers (r1801 (4))', openAtBoot && inP[0].status !== 'open' && !!gP.snapshot() && gP.snapshot().ledgerHeldBy === null, JSON.stringify({ openAtBoot, status: inP[0].status }));
     }
+    // ── r2047's FOLLOW (round wt5inp00k) ──
+    // (m3) THREE OUTCOMES: an add that THROWS (a full list) sets no filed mark — the next 60 s ask files it (exactly one item)
+    const bootAddThrows = (mod) => {
+      const dT = tmpdir('vs-spend-3h-unmade-addthrows-');
+      const tT = [], inT = []; let throwOnce = true;
+      const st = () => { const b = store(inT); return { ...b, add: (k, it) => { if (throwOnce) { throwOnce = false; throw new Error('the list is full'); } return b.add(k, it); } }; };
+      const undo = refuseLock(lockTmpIn(dT));
+      try {
+        const gT = mk(mod, dT, inT, [], { getUserTodos: st, lockSchedule: (fn, ms) => { tT.push({ fn, ms }); return tT.length; } });
+        const after = inT.filter((x) => x.itemKey === 'spend-ledger-unlocked').length;
+        const rT = tT.find((x) => x.ms === guardMod.LOCK_UNMADE_RETRY_MS); if (rT) rT.fn();
+        return { after, open: inT.filter((x) => x.itemKey === 'spend-ledger-unlocked' && x.status === 'open').length, unmade: !!gT.snapshot().ledgerLockUnmade };
+      } finally { undo(); }
+    };
+    const bt = bootAddThrows(guardMod);
+    ok('§3h r2047 (1): the episode item\'s add THREW at the boot — no filed mark; the next 60 s ask files it: exactly ONE item', bt.after === 0 && bt.open === 1 && bt.unmade, JSON.stringify(bt));
+    const redThrow = copyOf("    if (!filed && !owedToRead) return false;   // the add threw: NOT filed — asked again at the next 60 s ask\n", '', "B-ef83 r2047 (1): a thrown add counted as filed"); // stale-pins: kept — the RED takes the third outcome out
+    ok('§3h CONTROL: the anchored copy (a thrown add counted as filed) is built', !redThrow.err, redThrow.err || '');
+    if (!redThrow.err) { const rt = bootAddThrows(redThrow); ok('§3h CONTROL: in that copy the owner gets NO item (RED: the thrown add marked filed)', rt.open === 0, JSON.stringify(rt)); }
+    // (p2) r2047 (2): a boot that started HELD later takes the lock — an earlier run's «kept without the lock» item closes (the beat)
+    {
+      const dH2 = tmpdir('vs-spend-3h-held-then-take-');
+      fs.writeFileSync(LF(dH2, 'spend-budget.lock'), lockOf(4242, null, { host: 'another-machine.example', ns: 'pid:[1]' }));
+      const tH2 = [], inH2 = [{ key: 'accounts', id: 'ut-1', status: 'open', itemKey: 'spend-ledger-unlocked', text: 'an earlier run' }]; let readyH2 = false;
+      const gH2 = mk(guardMod, dH2, inH2, [], { getUserTodos: () => (readyH2 ? store(inH2) : null), lockSchedule: (fn, ms) => { tH2.push({ fn, ms }); return tH2.length; } });
+      const heldAtBoot = !!gH2.snapshot().ledgerHeldBy;
+      fs.rmSync(LF(dH2, 'spend-budget.lock')); readyH2 = true;
+      const tookH2 = gH2.lockAgain(Date.now() + 1000);
+      const beatH2 = tH2.filter((x) => x.ms === guardMod.LOCK_BEAT_MS).pop(); if (beatH2) beatH2.fn();
+      for (let i = 0; i < 200 && inH2[0].status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
+      ok('§3h r2047 (2): a boot that started HELD takes the lock later — an earlier run\'s «kept without the lock» item CLOSES at the next beat', heldAtBoot && tookH2 === true && inH2[0].status !== 'open', JSON.stringify({ heldAtBoot, tookH2, status: inH2[0].status }));
+    }
+    // (p3) r2047 (2): the lock LOST before the store answered — the held retry closes the earlier item once the store answers
+    {
+      const dL3 = tmpdir('vs-spend-3h-lost-before-store-');
+      const tL3 = [], inL3 = [{ key: 'accounts', id: 'ut-1', status: 'open', itemKey: 'spend-ledger-unlocked', text: 'an earlier run' }]; let readyL3 = false;
+      const gL3 = mk(guardMod, dL3, inL3, [], { getUserTodos: () => (readyL3 ? store(inL3) : null), lockSchedule: (fn, ms) => { tL3.push({ fn, ms }); return tL3.length; } });
+      fs.writeFileSync(LF(dL3, 'spend-budget.lock'), lockOf(4242, null, { host: 'another-machine.example', ns: 'pid:[1]' }));   // another process's lock now
+      const beatL3 = tL3.find((x) => x.ms === guardMod.LOCK_BEAT_MS); if (beatL3) beatL3.fn();
+      for (let i = 0; i < 200 && !gL3.snapshot().ledgerHeldBy; i++) await new Promise((r) => setTimeout(r, 25));
+      const heldNow = !!gL3.snapshot().ledgerHeldBy, stillOpen = inL3[0].status === 'open';
+      readyL3 = true;
+      const retryL3 = tL3.filter((x) => x.ms === guardMod.LOCK_RETRY_MS).pop(); if (retryL3) retryL3.fn();
+      ok('§3h r2047 (2): the lock LOST before the store answered (another process took it) — the HELD retry closes the earlier run\'s item once the store answers', heldNow && stillOpen && !!retryL3 && inL3[0].status !== 'open', JSON.stringify({ heldNow, stillOpen, retry: !!retryL3, status: inL3[0].status }));
+    }
+    // (s) r2047 (5): THE LOCK REMADE BY ANOTHER PROCESS meanwhile (boot unmade; another hub made it): the 60 s ask finds it — HELD by
+    // that process (its name), the ledger no longer kept without a lock, the episode's item closed
+    {
+      const dS2 = tmpdir('vs-spend-3h-unmade-other-made-');
+      const tS2 = [], inS2 = [];
+      const undo = refuseLock(lockTmpIn(dS2));
+      try {
+        const gS2 = mk(guardMod, dS2, inS2, [], { lockSchedule: (fn, ms) => { tS2.push({ fn, ms }); return tS2.length; } });
+        const openBefore = inS2.filter((x) => x.itemKey === 'spend-ledger-unlocked' && x.status === 'open').length;
+        fs.writeFileSync(LF(dS2, 'spend-budget.lock'), lockOf(4242, null, { host: 'another-machine.example', ns: 'pid:[1]' }));   // another process made it meanwhile
+        const rS2 = tS2.find((x) => x.ms === guardMod.LOCK_UNMADE_RETRY_MS); if (rS2) rS2.fn();
+        const v = gS2.authorize({ reason: 'auto-resume', identity: ID, now: t3h });
+        const snap = gS2.snapshot();
+        ok('§3h r2047 (5): the lock REMADE BY ANOTHER PROCESS while this one kept the ledger without it — HELD by that process (ledger-held-elsewhere, cause «another-process»), no longer kept without a lock, the episode\'s item closed',
+          openBefore === 1 && v.ok === false && v.why === 'ledger-held-elsewhere' && !!snap.ledgerHeldBy && snap.ledgerHeldBy.cause === 'another-process' && snap.ledgerLockUnmade === null && inS2.filter((x) => x.itemKey === 'spend-ledger-unlocked' && x.status === 'open').length === 0,
+          JSON.stringify({ openBefore, why: v.why, cause: snap.ledgerHeldBy && snap.ledgerHeldBy.cause, unmade: snap.ledgerLockUnmade }));
+      } finally { undo(); }
+    }
+    // r2047 (3): RED controls for the earlier run's item closed at the first beat (p) and for the snapshot's cause
+    const redCloseOwed = copyOf("      unlockedCloseOwed = true;   // r1801 (4): an earlier run's «kept without the lock» item closes (the store answers later in boot)\n", '', "B-ef83 r2047 (3): the boot's owed close taken out"); // stale-pins: kept — the RED takes the owed close out
+    ok('§3h CONTROL: the anchored copy (no owed close at a boot that took the lock) is built', !redCloseOwed.err, redCloseOwed.err || '');
+    if (!redCloseOwed.err) {
+      const dPr = tmpdir('vs-spend-3h-unlocked-earlier-red-');
+      const tPr = [], inPr = [{ key: 'accounts', id: 'ut-1', status: 'open', itemKey: 'spend-ledger-unlocked', text: 'an earlier run' }]; let readyPr = false;
+      mk(redCloseOwed, dPr, inPr, [], { getUserTodos: () => (readyPr ? store(inPr) : null), lockSchedule: (fn, ms) => { tPr.push({ fn, ms }); return tPr.length; } });
+      readyPr = true;
+      const beatPr = tPr.find((x) => x.ms === guardMod.LOCK_BEAT_MS); if (beatPr) beatPr.fn();
+      for (let i = 0; i < 40 && inPr[0].status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
+      ok('§3h CONTROL: in that copy the earlier run\'s untrue item STAYS OPEN at the beat (RED: the (p) leg sees it)', inPr[0].status === 'open', inPr[0].status);
+    }
+    const redCause = copyOf("cause: heldBy.lockUnwritable ? 'lock-unwritable' : heldBy.lockUnreadable ? 'lock-unreadable' : 'another-process' }", "cause: 'another-process' }", "B-ef83 r2047 (3): the snapshot's cause flattened"); // stale-pins: kept — the RED flattens the cause
+    ok('§3h CONTROL: the anchored copy (the snapshot\'s cause always «another-process») is built', !redCause.err, redCause.err || '');
+    if (!redCause.err) { const rc2 = await removedRefused(redCause); ok('§3h CONTROL: in that copy the lock-unwritable hold reads as another process\'s in the snapshot (RED: the (n) leg\'s cause sees it)', rc2.cause === 'another-process', String(rc2.cause)); }
     // (r) r1801 (1): AT BOOT the folder refuses the temp write AND a lock is THERE but cannot be read: HELD (it may be a live keeper's) —
     // by THAT reason, never «another process (pid ?)»; healed by the retry once it reads
     const unreadableBehindRefused = async (mod) => {

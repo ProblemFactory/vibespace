@@ -926,12 +926,16 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     armUnmadeRetry();
   }
   /** → true when the item is FILED (or owed to For you's read, which files it); false while no store answers (still owed) */
+  /** r2047 (1): THREE outcomes — 'filed' (a real add), 'owed' (to For you's read: fileInbox's own owed road files it there), 'failed'
+   *  (no store yet, or the add threw — a full list): only the first two set the filed mark; a failed one is asked again at the next 60 s ask */
   function fileUnlocked(error) {
     let ut = null; try { ut = getUserTodos(); } catch { ut = null; }
     if (!ut || typeof ut.add !== 'function') return false;   // the store comes later in boot: the 60 s ask files it then
+    const owedToRead = !!ut && typeof ut.isHeldUnread === 'function' && ut.isHeldUnread() && typeof ut.whenRead === 'function';
     const words = i18nKey('VibeSpace counts turns nobody typed without the lock of their record — the data folder refuses it ({code}). A second VibeSpace process on this folder would count its own; VibeSpace asks again every minute.');
-    fileInbox(words.replace('{code}', error), `data/spend-budget.lock could not be made (${error}) and no other process holds it: this process keeps the ledger data/spend-budget.json without the lock. It asks again every ${LOCK_UNMADE_RETRY_MS / 1000} s; this notice closes when the lock is made.`,
+    const filed = fileInbox(words.replace('{code}', error), `data/spend-budget.lock could not be made (${error}) and no other process holds it: this process keeps the ledger data/spend-budget.json without the lock. It asks again every ${LOCK_UNMADE_RETRY_MS / 1000} s; this notice closes when the lock is made.`,
       'normal', null, { text: { key: words, params: { code: error } } }, null, UNLOCKED_ITEM, { sig: 'unlocked|' + error, at: Date.now() });
+    if (!filed && !owedToRead) return false;   // the add threw: NOT filed — asked again at the next 60 s ask
     unlockedFiled = true;   // filed — or owed to the store's read (fileInbox's own owed road files it there)
     return true;
   }
@@ -970,7 +974,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   }
   function armLockRetry() {
     if (!heldBy || lockTimer) return;
-    lockTimer = lsched(() => { lockTimer = null; lockAgain(); if (heldBy) armLockRetry(); }, LOCK_RETRY_MS);
+    lockTimer = lsched(() => { lockTimer = null; lockAgain(); if (unlockedCloseOwed && closeItemsNow(UNLOCKED_ITEM)) unlockedCloseOwed = false; if (heldBy) armLockRetry(); }, LOCK_RETRY_MS);   // r2047 (2): a lock lost before the store answered — the held retry closes the earlier item
   }
   /** B-ef83: ask for the lock again; taken ⇒ the record the other process kept IS the record: read again (beside the stamps made
    *  here meanwhile), judged against its marker, written. → true when this process keeps the ledger now */
@@ -990,6 +994,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     }
     const was = heldBy;
     heldBy = null; lockOurs = true; releaseAtExit(lockFile, myToken);
+    unlockedCloseOwed = true;   // r2047 (2): a boot that started HELD takes the lock — an earlier run's «kept without the lock» item is no longer true
     if (lockTimer) { try { lunsched(lockTimer); } catch { } lockTimer = null; }
     log(`[spend] this process keeps data/spend-budget.json now${was && was.lockUnwritable ? ` (its lock could be written again: it could not since ${new Date(was.since).toISOString()}, ${was.lockUnwritable})` : was ? ` (the process that kept it, pid ${was.pid || '?'}, ended)` : ''}${staleTaken ? ` — its lock named a process that is gone (pid ${staleTaken.pid || '?'})` : ''}: the record is read again, and turns nobody typed are counted and allowed`);
     const ld = parseLedger(readText());
