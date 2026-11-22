@@ -576,7 +576,39 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
     for (const [k, x] of own) { const s = start.get(k); if (s < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(s)); } }   // ONLY the uncertain trailing window becomes a placeholder (and counts one hit); a clean tail adds nothing
     return out;
   }
+  /** A SETTLE TURN (stage L3, round wi8mtvm6c's MUST — 主开发 r2600; the job wrapper's quiet, never the run door's): what is CERTAIN
+   *  is handed on now — every complete value masked, as an end would — and only the trailing run that could still be the start of a
+   *  value (the cut's own uncertain tail: a proper prefix of some spelling, an unfinished view piece, a broken character) stays
+   *  held, in arrival order. NEVER an end: the masker lives on, and a value whose first piece is kept is masked whole when the rest
+   *  comes. A turn that leaves nothing held leaves the masker as a fresh one (the run's step figure begins again — r2600 (3)). */
+  function settleStep() {
+    if (st.over) return none();   // THE SCAN'S BUDGET: after the mark nothing is handed on (its retirement is the wrapper's)
+    if (!st.inTurn) return turn(() => settleStep());
+    if (!re) { const out = step(true); st.fresh = 0; return out; }   // no secrets: nothing a value could begin — all is certain
+    const own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
+    const start = new Map(); for (const [k, x] of own) start.set(k, cutTailStart(x));
+    const ar = own.size > 1 ? arrivalOf(held) : null;
+    if (ar) { const q = cutTailStart(ar.all); for (let i = q; i < ar.all.length; i++) { const k = ar.streamAt[i]; if (ar.idxAt[i] < start.get(k)) start.set(k, ar.idxAt[i]); } }
+    const finds = [];
+    for (const [k, x] of own) for (const f of scan(x, true).finds) finds.push([[k, f.s, f.e]]);
+    if (ar) for (const f of scan(ar.all, true, ar.idxAt).finds) finds.push(ar.rangesOf(f.s, f.e));
+    settleCuts(finds, start, spend);   // a complete value reaching into a tail pulls that tail back to its start — never handed on in part
+    const used = new Map(), certain = [], kept = [];
+    const add = (list, k, x) => { if (!x) return; const p = list[list.length - 1]; if (p && p[0] === k) p[1] += x; else list.push([k, x]); };
+    for (const [k, x] of held) {
+      const u = used.get(k) || 0, cut = Math.max(0, Math.min(x.length, start.get(k) - u));
+      used.set(k, u + x.length);
+      add(certain, k, x.slice(0, cut)); add(kept, k, x.slice(cut));
+    }
+    held = certain;
+    const out = step(true);   // the certain prefixes, every complete value in them masked (one split between the pipes too)
+    held = kept;   // the uncertain tails stay held — the masker lives on
+    st.fresh = 0;
+    if (!kept.length) { st.runSteps = 0; st.read = 0; }   // nothing held: the same state as a fresh masker — its run figure begins again
+    return out;
+  }
   return {
+    settle: () => settleStep(),   // the job wrapper's quiet (data/bin/job-wrapper.js) — the run door never calls it
     push(stream, chunk) {
       if (!names.includes(stream)) throw new TypeError(`no such stream: ${stream}`);
       const t = String(chunk == null ? '' : chunk);

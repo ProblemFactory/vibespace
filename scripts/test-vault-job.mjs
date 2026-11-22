@@ -70,6 +70,11 @@ try { again = fs.readFileSync(fd, 'utf8'); } catch (e) { again = 'ERR:' + e.code
 let fd3 = ''; try { fd3 = fs.readlinkSync('/proc/self/fd/3'); } catch { fd3 = ''; } // node keeps its own fds (eventpoll …) — a SOCKET at 3 is the hub's channel
 const gotF = path.join(out, 'got-' + process.pid + '.json');   // int374 (B-b1f5): written whole, then renamed in — the suite polls this dir
 fs.writeFileSync(gotF + '.tmp', JSON.stringify({ v, again, fd3, pid: process.pid })); fs.renameSync(gotF + '.tmp', gotF);
+if (process.env.QUIETLINE) {   // r2600's MUST: ONE short line (a service's «listening on …», a task's until-marker), then a quiet
+  process.stdout.write(process.env.QUIETLINE + String.fromCharCode(10));
+  for (let i = 0; i < 600 && !fs.existsSync(path.join(out, 'release')); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
+  process.exit(0);
+}
 if (process.env.CHILDHALF) {   // F11 (stage L3, 主开发 r2552): the main writes a long lead and the value's first half and ENDS 100 ms later; a child of its group writes the second half when the end's drain signals it
   const half = Math.floor(v.length / 2), h2 = path.join(out, 'half2'), ready = path.join(out, 'child-ready');
   fs.writeFileSync(h2, v.slice(half));
@@ -210,8 +215,8 @@ async function legPieces(wrap = null) {
   const atQuiet = logOf(), mine = atQuiet.slice(Math.max(0, atQuiet.indexOf('lead ')));
   rows.quietHalf = atQuiet.includes(S.slice(0, half));
   const lag = written1.length - mine.length;
-  row(released.ok && written1.startsWith(mine) && !rows.quietHalf && lag >= half + 1 && lag <= 4000,
-    'F10 — AT A QUIET the log lags by the tail a value could still begin in: the lead\'s head is released, the value\'s first piece is NOT (the log is a prefix of what was written, short of it)', { released, lag, half, logged: mine.length, written: written1.length });
+  row(released.ok && written1.startsWith(mine) && !rows.quietHalf && lag === half,
+    'F10 + r2600 — AT A QUIET the masker SETTLES: everything certain is in the log — the whole lead and its space — and ONLY the value\'s first piece (the run that could begin a value) is kept back', { released, lag, half, logged: mine.length, written: written1.length });
   fs.writeFileSync(path.join(W.root, 'out', 'piece2'), '1');
   const second = await W.untilMs(() => logOf().includes(' rest'), 4000);
   const afterTwo = logOf();
@@ -240,6 +245,27 @@ async function legChildHalf(wrap = null) {
   rows.whole = log.includes(S);
   row(ended.ok && wrote && !rows.whole && formsAbsent(log, S) && log.includes(' [vault:TOK] rest'), 'F11 — a value whose second half the job\'s CHILD writes AFTER THE MAIN ENDED (at the end\'s drain, under the old 400 ms quiet) is masked WHOLE: one masker for the pipes\' whole life, ended at their end', { ended, state: job.state, rest: log.includes(' rest'), placeholder: log.includes('[vault:TOK]') });
   W.end();
+  return rows;
+}
+// round wi8mtvm6c's MUST (主开发 r2600): A QUIET RELEASES TEXT — a short last line before a quiet is in the log within the quiet's
+// second (a service's «listening on …»), and a task's until-marker before a quiet FIRES (the until scan reads the log). RED: the
+// quiet that releases nothing (the settle cut)
+async function legQuietLine(wrap = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(wrap ? 'qlinem' : 'qline', wrap ? { wrap } : {}), S = SENT('qline');
+  W.put(S);
+  const svc = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'listens', env: { QUIETLINE: 'listening on 127.0.0.1:8080' } }).job.id);
+  const task = W.jm.jobs.get(W.create({ name: 'marks', untilOutput: 'UNTIL-READY-MARK', env: { QUIETLINE: 'UNTIL-READY-MARK' } }).job.id);
+  await W.until(() => W.got().length === 2);
+  const logOf = (j) => { try { return fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { return ''; } };
+  const t0 = Date.now();
+  const line = await W.untilMs(() => logOf(svc).includes('listening on 127.0.0.1:8080'), 1600);
+  const hit = await W.untilMs(() => task._untilHit === true, 2600 - (Date.now() - t0));
+  rows.line = line.ok; rows.hit = hit.ok;
+  if (wrap) { W.release(); W.end(); return rows; }
+  row(line.ok && line.ms <= 1600, 'r2600 — a short last line before a QUIET is in the log within the quiet\'s second (a service\'s «listening on …» — never missing for its whole life)', line);
+  row(hit.ok, 'r2600 — a task\'s until-marker before a quiet FIRES (the until scan reads the log: the task ends as it did in 2.369.415)', { hit, untilHit: task._untilHit });
+  W.release(); W.end();
   return rows;
 }
 async function legLocked() {
@@ -1478,7 +1504,9 @@ const leak = "vj.door.payload(vj).frame.toString('latin1').replace(/[^\\x20-\\x7
 // F11's control: THE RELEASE'S FLUSH AT THE MAIN'S EXIT EVENT — the masker ended there, a fresh one takes what the drain brings
 const EXIT_FLUSH = (() => { try { return swap(WRAP_SRC, '  // protocol 3: the value masker does NOT end at the exit event', '  if (VAL) { const f = flushMask(); if (f.length) writeLog(f); }\n  // protocol 3: the value masker does NOT end at the exit event'); } catch { return null; } })();
 // F10's control: THE RELEASE'S QUIET FLUSH — every 400 ms quiet ends the masker (its tail passed out) and a fresh one takes the rest
-const QUIET_FLUSH = (() => { try { return swap(WRAP_SRC, '  if (vmask && vmask.over) { vquiet = setTimeout(() => { vquiet = null; if (vmask && vmask.over) {', '  if (true) { vquiet = setTimeout(() => { vquiet = null; if (true) {'); } catch { return null; } })();
+const QUIET_FLUSH = (() => { try { return swap(WRAP_SRC, '  if (vmask.over) { const f = flushMask(); if (f.length) writeLog(f); return; }', '  if (true) { const f = flushMask(); if (f.length) writeLog(f); return; }'); } catch { return null; } })();
+// r2600's control: THE QUIET THAT RELEASES NOTHING (942cb0908's form — the settle cut): the short line and the marker stay held
+const QUIET_NONE = (() => { try { return swap(WRAP_SRC, '  try { o = vmask.settle(); } catch { o = null; }', '  o = null;'); } catch { return null; } })();
 const MUTANTS = [
   ['the value in spec.env', { jobs: swap(JOBS_SRC, ENV_AT, `...(vj ? { ...VJ.envOf(vj.plan), TOK_COPY: ${leak} } : {})`) }, (f) => f.procs.includes(f.S)],
   ['the value in the spec file', { jobs: swap(JOBS_SRC, SPEC_AT, `...(vj ? { vault: VJ.specOf(vj.plan), copy: ${leak} } : {}),`) }, (f) => f.written],
@@ -1545,10 +1573,11 @@ const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'fun
 const MUT_NOSLOT = dmut('    if (lateHere || !(await take())) throw LATE;', '    if (lateHere) throw LATE;');
 const MUT_VALUEPROG = dmut('function pastWrapper(argv, i) {\n', "function pastWrapper(argv, i) {\n  if (argv[i + 1] === '-s') return i + 2;\n");
 const [oneSlot, oneSlotMut, heldSaid, wrapMut] = await Promise.all([legOneSlot(), MUT_NOSLOT ? legOneSlot(MUT_NOSLOT) : null, legHeldSaid(), MUT_VALUEPROG ? legWrapperSkip(MUT_VALUEPROG) : null]);
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
   legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {},
-  legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {}]);
+  legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {},
+  legQuietLine(), QUIET_NONE ? legQuietLine(QUIET_NONE) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1560,6 +1589,8 @@ print('①b A VALUE IN TWO PIECES WITH A QUIET BETWEEN THEM (F10 of stage L3, �
 ok(!!QUIET_FLUSH && piecesMut.quietHalf === true && piecesMut.whole === true, 'CONTROL — the release\'s quiet flush (every 400 ms quiet ends the masker): the first piece is written at the quiet and the value lands WHOLE in the log — RED on the copy', QUIET_FLUSH ? { quietHalf: piecesMut.quietHalf, whole: piecesMut.whole } : 'the copy could not be built (its anchor is missing)');
 print('①c A VALUE WHOSE SECOND HALF THE JOB\'S CHILD WRITES AFTER THE MAIN ENDED (F11 of stage L3, 主开发 r2552)', childHalf);
 ok(!!EXIT_FLUSH && childHalfMut.whole === true, 'CONTROL — the release\'s flush at the MAIN\'s exit event (the masker ended there, a fresh one for the drain): the value lands WHOLE in the log — RED on the copy', EXIT_FLUSH ? { whole: childHalfMut.whole } : 'the copy could not be built (its anchor is missing)');
+print('①d A QUIET RELEASES TEXT (round wi8mtvm6c\'s MUST, 主开发 r2600) — the settle turn', quietLine);
+ok(!!QUIET_NONE && quietNoneMut.line === false && quietNoneMut.hit === false, 'CONTROL — the quiet that releases nothing (the settle cut, 942cb0908\'s form): the short line is NOT in the log and the until-marker never fires — RED on the copy', QUIET_NONE ? { line: quietNoneMut.line, hit: quietNoneMut.hit } : 'the copy could not be built (its anchor is missing)');
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);
 console.log('④ A LOCKED BOOT WAITS (the frp class)');

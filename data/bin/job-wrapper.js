@@ -237,21 +237,27 @@ function maskChunk(buf) {
   return out === text ? buf : Buffer.from(out, 'utf8');
 }
 // THE VALUE MASKER (protocol 3): this run's values in every spelling, both pipes in arrival order (createRunMasker — the run
-// door's own), then the shapes. What it keeps back — the tail a value could still begin in (its last window: the longest
-// spelling's length less one, and until a window's worth has come) — waits for the NEXT PIECE or the PIPES' END, never for a
-// clock: a quiet releases nothing of it (stage L3's F10, 主开发 r2524: a value the job wrote in two pieces with a 400 ms quiet
-// between them was flushed at the quiet — its first piece unmasked — and a fresh masker took the rest: the value landed WHOLE
-// in the log; the design keeps the window for exactly that split, the run door's masker ends only at its run's end). The log
-// lags by that tail at a quiet; a value never lands. ONE MASKER FOR THE PIPES' WHOLE LIFE (主开发 r2552, stage L3's F11 — the
+// door's own), then the shapes. A QUIET (400 ms with no output) is a SETTLE TURN of a healthy masker, never an end (round
+// wi8mtvm6c's MUST, 主开发 r2600: a quiet that released nothing left a short last line — a service's «listening on …», a task's
+// until-marker — out of the log for good): what is CERTAIN is handed on, every complete value masked, and only the trailing run
+// that could still be the START of a value (a proper prefix of some spelling, an unfinished view piece) stays held for the next
+// piece — after a line end that is normally nothing (stage L3's F10, 主开发 r2524: the release ENDED the masker at the quiet — the
+// first piece of a value written in two pieces went out unmasked, a fresh masker took the rest, the value landed WHOLE; now that
+// first piece is exactly the run a settle keeps). The log lags by that run at a quiet; a value never lands. ONE MASKER FOR THE
+// PIPES' WHOLE LIFE (主开发 r2552, stage L3's F11 — the
 // release also ended it at the MAIN's exit event and a fresh masker took what the job's group wrote during the drain: a value
 // whose second half a child wrote after the main ended landed whole): it ends ONCE, at the PIPES' END — the child's `close`, every
-// writer of them gone (bounded by PIPES_END_MS after the drain: a writer that escaped holds them open) — a natural end there: a
-// trailing text that merely BEGINS like a value is the job's own words; nothing the pipes bring after that end is written. The
-// one quiet it keeps: a masker past its scan's work bound (`over` — it handed on its words once, keeps nothing and hands on
-// nothing: what it withheld is gone, so no part of a value carries over) is retired at the next quiet and a fresh one takes what
-// comes after, so a service's log goes on. Text only: a job given values has its log decoded as UTF-8 (a value is text).
+// writer of them gone (bounded after the drain, and below the engine's kill step: a writer that escaped holds them open) — a
+// natural end there (a trailing text that merely BEGINS like a value is the job's own words); when that wait ran out (a writer
+// still holds them) the end is a CUT: the uncertain tail is withheld by its placeholder. Nothing the pipes bring after the end is
+// written. THE ONE RESTART (主开发 r2600 (3), ruled): a masker past its scan's work bound (`over` — it handed on its withheld words
+// once, a line of their own, keeps nothing and hands on nothing) is retired at the next quiet and a fresh one takes what comes
+// after, so a service's log goes on. Its residual, said: a value whose first piece fell in the withheld stretch has its REST —
+// up to all but one character of one spelling — written as it came after that quiet (never the whole value). Text only: a job
+// given values has its log decoded as UTF-8 (a value is text).
 let VAL = null, vmask = null, vdec = null, vquiet = null, vEnded = false;
-const PIPES_END_MS = 2000;   // F11: after the drain, how long the masker's ONE end waits for the pipes' end (every writer gone)
+const PIPES_END_MS = 2000;   // F11: after the drain, how long the masker's ONE end waits for the pipes' end (every writer gone) — on a stop capped below the engine's kill step (r2600 (2b))
+const KILL_STEP_MARGIN_MS = 400;   // the engine kills the wrapper at the grace + 1 s after its stop (src/jobs.js _killStepMs): the flush, the exit line and the record go before it
 let pipesClosed = false;
 const pipeWaiters = [];
 const pipesEnd = (ms) => (pipesClosed ? Promise.resolve(true) : new Promise((res) => { const t = setTimeout(() => res(false), ms); pipeWaiters.push(() => { clearTimeout(t); res(true); }); }));
@@ -264,25 +270,37 @@ function vaultMasker() {
   return vmask;
 }
 const shaped = (t) => (t ? maskChunk(Buffer.from(t, 'utf8')) : Buffer.alloc(0));
-function flushMask() {
+function flushMask(cut = false) {
   if (vquiet) { clearTimeout(vquiet); vquiet = null; }
   if (!vmask) return Buffer.alloc(0);
   const m = vmask, rest = { out: vdec.out.end(), err: vdec.err.end() };
   vmask = null; vdec = null;
   let t = '';
   for (const k of ['out', 'err']) if (rest[k]) { const o = m.push(k, rest[k]); t += (o.out || '') + (o.err || ''); }
-  const o = m.end(false); // a natural end, never a cut: a trailing text that merely BEGINS like a value is the job's own words
+  // a natural end at the pipes' end (every writer gone: a trailing text that merely BEGINS like a value is the job's own words); a CUT
+  // when the wait for that end ran out — a writer still holds them, so the uncertain tail is withheld by its placeholder (r2600 (2a))
+  const o = m.end(cut === true);
   return shaped(t + (o.out || '') + (o.err || ''));
+}
+/** THE QUIET'S TURN (r2600): a healthy masker SETTLES — the certain text handed on, only a run that could begin a value kept; a masker
+ *  past its work bound (`over`) is retired (the one restart) */
+function quietTurn() {
+  vquiet = null;
+  if (!vmask || vEnded) return;
+  if (vmask.over) { const f = flushMask(); if (f.length) writeLog(f); return; }
+  let o = null;
+  try { o = vmask.settle(); } catch { o = null; }
+  const f = o ? shaped((o.out || '') + (o.err || '')) : Buffer.alloc(0);
+  if (f.length) writeLog(f);
 }
 function maskOut(k, b) {
   if (!VAL) return maskChunk(b);
-  if (vEnded) return Buffer.alloc(0);   // F11: after the masker's ONE end nothing more is written (a fresh window would hand on a value's rest)
+  if (vEnded) return Buffer.alloc(0);   // F11: after the masker's ONE end nothing more is written (a fresh window would hand on a value's rest) — a belt: the end is the wrapper's last act before its exit, so no pipe event reaches here today
   let o;
   try { const m = vaultMasker(); const text = vdec[k].write(b); o = text ? m.push(k, text) : {}; }
   catch { return Buffer.from('[job-wrapper] output withheld: the value masker failed on it\n'); }
   if (vquiet) { clearTimeout(vquiet); vquiet = null; }
-  // ONLY a masker past its work bound is retired at a quiet: it keeps nothing (its end gives nothing) — a healthy one keeps its tail
-  if (vmask && vmask.over) { vquiet = setTimeout(() => { vquiet = null; if (vmask && vmask.over) { const f = flushMask(); if (f.length) writeLog(f); } }, 400); vquiet.unref?.(); }
+  vquiet = setTimeout(quietTurn, 400); vquiet.unref?.();   // THE QUIET: a settle turn (healthy) or the retirement (over) — never an end of a healthy masker
   return shaped((o.out || '') + (o.err || ''));
 }
 process.on('exit', () => { if (VAL) for (const v of VAL) v.fill(0); });
@@ -1162,7 +1180,11 @@ async function ended(code, signal) {
   const named = memory.cause === 'oom-bound' ? ` — stopped: used more than ${memory.mb >= 1024 ? Math.round(memory.mb / 102.4) / 10 + ' GB' : memory.mb + ' MB'} (${memory.how})`
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
   const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '');
-  if (VAL) { await pipesEnd(PIPES_END_MS); const f = flushMask(); vEnded = true; if (f.length) writeLog(f); } // protocol 3: THE ONE END of the value masker, at the pipes' end — what it held back, masked
+  if (VAL) {   // protocol 3: THE ONE END of the value masker, at the pipes' end — what it held back, masked
+    const budget = stopping && stopAt ? Math.max(0, Math.min(PIPES_END_MS, stopAt + stopMs + 1000 - KILL_STEP_MARGIN_MS - Date.now())) : PIPES_END_MS;   // r2600 (2b): never past the engine's kill step
+    const closed = await pipesEnd(budget);
+    const f = flushMask(!closed); vEnded = true; if (f.length) writeLog(f);   // r2600 (2a): a writer still holding them ⇒ a CUT
+  }
   try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
   writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(mainWasHub ? { hubMain: true } : {}), ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: drained.scopeUnread } : {}) } : {}) });
   process.exit(code === null ? 143 : code);
