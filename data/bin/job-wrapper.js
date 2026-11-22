@@ -239,9 +239,11 @@ function maskChunk(buf) {
 // THE VALUE MASKER (protocol 3): this run's values in every spelling, both pipes in arrival order (createRunMasker — the run
 // door's own), then the shapes. A QUIET (400 ms with no output) is a SETTLE TURN of a healthy masker, never an end (round
 // wi8mtvm6c's MUST, 主开发 r2600: a quiet that released nothing left a short last line — a service's «listening on …», a task's
-// until-marker — out of the log for good): what is CERTAIN is handed on, every complete value masked, and only the trailing run
-// that could still be the START of a value (a proper prefix of some spelling, an unfinished view piece) stays held for the next
-// piece — after a line end that is normally nothing (stage L3's F10, 主开发 r2524: the release ENDED the masker at the quiet — the
+// until-marker — out of the log for good): what is CERTAIN is handed on, every complete value masked. A COMPLETED LINE IS CERTAIN
+// (round wtlm3ig4w, ruled by 主开发 r2600): only the UNFINISHED last line's trailing run that could still be the START of a value
+// (a proper prefix of some spelling, or a view piece still UNFINISHED — a colour code, an entity, an escape cut short; a finished
+// one is text) stays held for the next piece. Its residual, said: a value WRAPPED across lines whose lines come with a quiet
+// between them lands line by line (one written in a burst is still masked whole) (stage L3's F10, 主开发 r2524: the release ENDED the masker at the quiet — the
 // first piece of a value written in two pieces went out unmasked, a fresh masker took the rest, the value landed WHOLE; now that
 // first piece is exactly the run a settle keeps). The log lags by that run at a quiet; a value never lands. ONE MASKER FOR THE
 // PIPES' WHOLE LIFE (主开发 r2552, stage L3's F11 — the
@@ -844,7 +846,7 @@ const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'S
 // (a stop before our stamp, an engine gone between the two) is a stop nobody delivered — we deliver it. Said in the job's log and
 // in exit.json (`stopBy`: engine | signal | intent)
 const INTENT_FRESH_MS = 2000;
-let stopBy = '', heard = null, mainBy = '';
+let stopBy = '', heard = null, mainBy = '', stopIntentAt = 0;   // stopIntentAt: an engine intent's own time (the masker's end counts the engine's kill step from it)
 // THE STOP — the engine's signal to our group, or (round 7) ITS INTENT: stop.json beside pid.json, written before it signals. The
 // child's end and our own handler land at once, in either order: a wrapper that handles the end first still knows a stop is in
 // flight (a service's leftovers stopped with it — never kept, unsaid: heavy ㉒, 1 pair in 12). Said in the job's log
@@ -1170,7 +1172,7 @@ async function ended(code, signal) {
   if (!stopping) {
     const s0 = stopIntent(), s = s0 && s0.at > refusedAt ? s0 : null;   // B-2c5c: a stop refused while the hub was the main is no stop at its end
     if (s) { await new Promise((res) => { heard = res; setTimeout(res, Math.min(500, stopMs / 2)); }); heard = null; } // (a held timer: nothing else keeps us alive now)
-    if (s && !stopping) onStop(s.sig, Date.now(), 'intent');
+    if (s && !stopping) { stopIntentAt = Number(s.at) || 0; onStop(s.sig, Date.now(), 'intent'); }
   }
   if (ansTimer) clearInterval(ansTimer);
   if (pressureTimer) clearInterval(pressureTimer);
@@ -1181,7 +1183,10 @@ async function ended(code, signal) {
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
   const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '');
   if (VAL) {   // protocol 3: THE ONE END of the value masker, at the pipes' end — what it held back, masked
-    const budget = stopping && stopAt ? Math.max(0, Math.min(PIPES_END_MS, stopAt + stopMs + 1000 - KILL_STEP_MARGIN_MS - Date.now())) : PIPES_END_MS;   // r2600 (2b): never past the engine's kill step
+    // r2600 (2b): never past the engine's kill step — counted from the ENGINE's time (its stop's, or its intent's own); a stop no engine
+    // gave (a signal) has no kill step to meet; a floor of 50 ms, so a pipe that closes at once is not read as held (round wtlm3ig4w)
+    const killBase = stopBy === 'signal' ? 0 : stopBy === 'intent' ? (stopIntentAt || stopAt) : stopAt;
+    const budget = stopping && killBase ? Math.max(50, Math.min(PIPES_END_MS, killBase + stopMs + 1000 - KILL_STEP_MARGIN_MS - Date.now())) : PIPES_END_MS;
     const closed = await pipesEnd(budget);
     const f = flushMask(!closed); vEnded = true; if (f.length) writeLog(f);   // r2600 (2a): a writer still holding them ⇒ a CUT
   }

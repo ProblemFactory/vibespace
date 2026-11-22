@@ -173,6 +173,15 @@ const UTF8_NEED = (b) => (b >= 0xc2 && b <= 0xdf ? 1 : b >= 0xe0 && b <= 0xef ? 
  * spans, end }: sk[i] stands for buf[at[i], to[i]); `spans` = [start, end) of every run a token-made character covers (a
  * stream never cuts inside one); `end` moves back over a trailing UTF-8 character still missing a byte (not `final`).
  */
+/** THE SETTLE'S UNFINISHED PIECES (round wtlm3ig4w's MUST ONE): each view's token cut short — a proper prefix of what its `re`
+ *  decodes; a finished one (or text that can never become one) is no end for the settle (the cut's road does not read this) */
+const UNFINISHED_PIECE = Object.freeze({
+  qp: (s) => /^=(?:[0-9A-Fa-f]|\r)?$/.test(s),
+  escape: (s) => /^\\(?:x[0-9A-Fa-f]?|[0-3][0-7]?|u\{[0-9A-Fa-f]{0,6}|u[0-9A-Fa-f]{0,3}|U[0-9A-Fa-f]{0,7})?$/.test(s),
+  entity: (s) => /^&(?:#[0-9]{0,7}|#[xX][0-9A-Fa-f]{0,6}|a|am|amp|l|lt|g|gt|q|qu|quo|quot|ap|apo|apos)?$/.test(s),
+  ansi: (s) => /^\x1b(?:\[[0-9;:?]{0,32}|[()])?$/.test(s),
+  wrap: () => false,
+});
 function readView(vw, buf, end, final) {
   let sk = '', i = 0, any = false, m;
   const at = [], to = [], spans = [], bytes = [];
@@ -461,7 +470,8 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
   // these is flushed CLEAN and counts NO hit (round 23: the old code replaced the WHOLE held window — up to W, unbounded over blank
   // lines / colour codes — and counted a scrubbed hit where no value was). A normal end has no partial, so `cut` leaves it alone.
   const CUT_PH = placeholderOf({ label: '\u2026' });   // the cut tail's placeholder «[vault:\u2026]» — the uncertain trailing window, not any one value
-  function cutTailStart(buf) {
+  function cutTailStart(buf, opt = null) {
+    const unfinishedOnly = !!(opt && opt.unfinished);   // the SETTLE's road only (round wtlm3ig4w's MUST ONE): a view token counts as an end only while it is UNFINISHED — the cut's road unchanged
     const L = buf.length;
     if (!L) return L;
     const s0 = st.steps; spend(2 * L * (1 + VIEWS.length));   // THE SCAN'S BUDGET: the cut's reads — the text through every view, the broken characters' walk
@@ -523,7 +533,7 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
     // as U+FFFD) — the text BEFORE such an end may end with a value's head, which the old reading (to the very end) never saw
     let start = L;
     const ends = new Set([L]);
-    for (const vw of VIEWS) for (let q = Math.max(0, L - vw.max + 1); q < L; q++) if (vw.triggers.includes(buf[q])) { if (q < start) start = q; ends.add(q); break; }
+    for (const vw of VIEWS) for (let q = Math.max(0, L - vw.max + 1); q < L; q++) if (vw.triggers.includes(buf[q])) { if (unfinishedOnly && !unfinishedPiece(vw.form, buf.slice(q))) continue; if (q < start) start = q; ends.add(q); break; }
     let fffd = -1;
     { let q = L; while (q > 0 && buf[q - 1] === '\uFFFD') q--; if (q < L) ends.add(q), fffd = q; }   // a character the cut broke — only an END (the third read: as the tail itself, every binary output cut at the bound counted a scrubbed hit where no value was)
     for (const e of ends) { const p = prefixStart(buf, e, e === fffd); if (p < e && p < start) start = p; }   // a raw / encoded form half present before an end (prefixStart answers the end itself for none: an end is no tail by itself — read 4)
@@ -581,14 +591,22 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
    *  value (the cut's own uncertain tail: a proper prefix of some spelling, an unfinished view piece, a broken character) stays
    *  held, in arrival order. NEVER an end: the masker lives on, and a value whose first piece is kept is masked whole when the rest
    *  comes. A turn that leaves nothing held leaves the masker as a fresh one (the run's step figure begins again — r2600 (3)). */
+  /** a trailing view piece that is still UNFINISHED — a proper prefix of a token its view decodes (the settle's road: a finished colour
+   *  code, entity, escape or soft break is certain text; only one that more output could still complete is kept back) */
+  function unfinishedPiece(form, rest) { const f = UNFINISHED_PIECE[form]; return typeof f === 'function' ? f(rest) : true; }
   function settleStep() {
     if (st.over) return none();   // THE SCAN'S BUDGET: after the mark nothing is handed on (its retirement is the wrapper's)
     if (!st.inTurn) return turn(() => settleStep());
     if (!re) { const out = step(true); st.fresh = 0; return out; }   // no secrets: nothing a value could begin — all is certain
     const own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
-    const start = new Map(); for (const [k, x] of own) start.set(k, cutTailStart(x));
+    // AT A SETTLE A COMPLETED LINE IS CERTAIN (主开发 r2600's ruling on round wtlm3ig4w's MUST TWO): nothing up to the last line end is
+    // kept back — only the UNFINISHED last line's own trailing run that could begin a value (the view that joins wrapped lines never
+    // reaches across that end); its residual, said: a value WRAPPED across lines whose lines come with a quiet between them lands line
+    // by line (one written in a burst is still masked whole)
+    const lastLine = (x) => { const ln = x.lastIndexOf('\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };
+    const start = new Map(); for (const [k, x] of own) start.set(k, lastLine(x));
     const ar = own.size > 1 ? arrivalOf(held) : null;
-    if (ar) { const q = cutTailStart(ar.all); for (let i = q; i < ar.all.length; i++) { const k = ar.streamAt[i]; if (ar.idxAt[i] < start.get(k)) start.set(k, ar.idxAt[i]); } }
+    if (ar) { const q = lastLine(ar.all); for (let i = q; i < ar.all.length; i++) { const k = ar.streamAt[i]; if (ar.idxAt[i] < start.get(k)) start.set(k, ar.idxAt[i]); } }
     const finds = [];
     for (const [k, x] of own) for (const f of scan(x, true).finds) finds.push([[k, f.s, f.e]]);
     if (ar) for (const f of scan(ar.all, true, ar.idxAt).finds) finds.push(ar.rangesOf(f.s, f.e));

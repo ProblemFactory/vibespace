@@ -184,7 +184,8 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
     t = t.slice(0, a) + "    const keepFrom = new Map(); for (const [k, x] of own) keepFrom.set(k, cutTailStart(x));\n    held = [];\n    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx > 0) held.push([k, x.slice(0, sIdx)]); }\n    const out = step(true);\n" + t.slice(z);   // stale-pins: kept (the release's own lines, put back to rebuild its function)
     if (t.includes('const start = new Map(); for (const [k, x] of own) start.set(k, cutTailStart(x));')) throw new Error('⑦g the release\'s endStep: the copy still holds the new tails');
     t = anchored(t, "    for (const [k, x] of own) { const s = start.get(k); if (s < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(s)); } }", "    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(sIdx)); } }", "⑦g the release's cut placeholder line");   // stale-pins: kept (the release's own line, put back)
-    const ctA = t.indexOf('  function cutTailStart(buf) {'), ctZ = t.indexOf("  // THE CUT'S TWO FAULTS (lane lg-vault-file, r858");
+    // the settle's road added cutTailStart's `opt` (round wtlm3ig4w); the release's function takes none and is put in whole
+    const ctA = t.indexOf('  function cutTailStart(buf, opt = null) {'), ctZ = t.indexOf("  // THE CUT'S TWO FAULTS (lane lg-vault-file, r858");
     if (ctA < 0 || ctZ < ctA) throw new Error('ANCHOR GONE «⑦g the release\'s cutTailStart» — the function is not where the copy expects it');
     t = t.slice(0, ctA) + RELEASE_CUT_TAIL_START + t.slice(ctZ);
     const f = path.join(dir, 'src', `${path.basename(SRC, '.js')}-release.js`);

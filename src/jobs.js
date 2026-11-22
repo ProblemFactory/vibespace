@@ -4282,15 +4282,19 @@ class JobManager {
       const logPath = path.join(this._ctlDir(job, run.startedAt), 'current.log');
       const st = fs.statSync(logPath);
       job._untilCursor = job._untilCursor || 0;
-      if (st.size < job._untilCursor) job._untilCursor = 0; // rotated
+      if (st.size < job._untilCursor) { job._untilCursor = 0; job._untilCarry = ''; } // rotated
       if (st.size === job._untilCursor) return;
       const len = Math.min(st.size - job._untilCursor, 65536); // per-tick byte budget
       const fd = fs.openSync(logPath, 'r');
       const buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, job._untilCursor); fs.closeSync(fd);
       job._untilCursor += len;
-      // literal substring on capped-length text (no agent regex on the main loop)
-      if (buf.toString('utf-8').split('\n').some((l) => l.slice(0, 4096).includes(job.untilOutput))) {
+      // literal substring on capped-length text (no agent regex on the main loop). THE UNTERMINATED LAST LINE IS CARRIED into the next
+      // read (stage L3's settle round, 主开发 r2600 / round wtlm3ig4w): a marker a read boundary — a tick's byte budget, or the log
+      // masker's settle holding a line's last characters back — cut in two fires when its line completes
+      const lines = ((job._untilCarry || '') + buf.toString('utf-8')).split('\n');
+      job._untilCarry = lines[lines.length - 1].slice(-4096);
+      if (lines.some((l) => l.slice(0, 4096).includes(job.untilOutput))) {
         if (this._hubIsMain(job, run)) { run._untilRefused = true; this._hubMainRefusal(job, run, 'its until-marker'); return; }   // B-2c5c: THE MAIN DOOR — never said «completing», never marked hit (its end would read «until-output»); the run marked: no scan again
         job._untilHit = true;
         this._event(job, 'until-marker hit — completing after grace');
