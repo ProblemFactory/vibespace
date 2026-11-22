@@ -147,7 +147,9 @@ const holdWriter = () => {
     landLost: () => { const x = st.flying; if (!x) return; st.flying = null; if (x.o.onWritten) x.o.onWritten(true); },   // it lands in a REPLACED file's old copy: its bytes reach no file the store reads
     flushSync: (files) => { if (st.otherHeld) return { written: [], left: (files || [...st.owed.keys()]).map((file) => ({ file, why: 'the writer thread was still held by the storage (another store, a stand-in)' })) };
       if (st.flying && st.failNext && (!files || files.includes(st.flying.file))) { const x = st.flying; st.flying = null; st.failNext = false; if (x.o.onWritten) x.o.onWritten(false, Object.assign(new Error('a stand-in'), { code: 'EDQUOT' })); return { written: [], left: [{ file: x.file, why: 'the write failed (EDQUOT; 1 attempt)' }] }; }
-      if (st.flying && (!files || files.includes(st.flying.file))) { if (st.holdPast) return { written: [], left: [{ file: st.flying.file, why: 'its write was still held by the storage after 10.0 s (a stand-in)' }] }; W.landFlying(); } for (const f of files || [...st.owed.keys()]) { const o = st.owed.get(f); if (!o) continue; st.owed.delete(f); writeOut(f, o, o.produce()); } return { written: [], left: [] }; } };
+      if (st.flying && (!files || files.includes(st.flying.file))) { if (st.holdPast) return { written: [], left: [{ file: st.flying.file, why: 'its write was still held by the storage after 10.0 s (a stand-in)' }] }; W.landFlying(); } const left = []; for (const f of files || [...st.owed.keys()]) { const o = st.owed.get(f); if (!o) continue; st.owed.delete(f); const b = o.produce();
+        if (st.failOwed && b != null && f.endsWith('.ndjson')) { if (o.onWritten) o.onWritten(false, Object.assign(new Error('a stand-in'), { code: 'EDQUOT' })); left.push({ file: f, why: 'the write failed (EDQUOT; 1 attempt)' }); continue; }   // r2292: the storage keeps failing
+        writeOut(f, o, b); } return { written: [], left }; } };
   return W;
 };
 // an entry cleared while its append FLIES (r2104): the clear's settle lets that append land FIRST, then the month file is rewritten
@@ -189,8 +191,8 @@ const heldScene = (M, act) => { const W = holdWriter(), dir = freshDir(); const 
 { const r = heldScene(REAL, 'clear'); check('a CLEAR whose month an append still flies into (past the bound) is refused BY NAME (EVSARCHIVEBUSY), nothing cleared; once it lands the entry is in the file', r.code === 'EVSARCHIVEBUSY' && !r.cleared && r.inFile, r); }
 { const r = heldScene(cuts([[SETTLE_LINE, "    this._archiveSettle([...months.keys()].map((m) => path.join(this._archiveRoot, id, m + '.ndjson')));"]], 'clear-overtakes'), 'clear'); check('CONTROL (a copy whose clear goes on over the held append): the append lands in the rewritten file\'s old copy and the entry is in NEITHER place — red', r.code === null && !r.inLive && !r.inFile, r); }
 { const r = heldScene(REAL, 'import'); check('an IMPORT while an append still flies (past the bound) is refused BY NAME (EVSARCHIVEBUSY), nothing imported; once it lands the entry is in the file', r.code === 'EVSARCHIVEBUSY' && r.inFile, r); }
-{ const IMP = '    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }';
-  const M = MUT.load('src/task-groups.js', anchored(SRC, IMP, '    this._archiveSettle();', 'import-overtakes', { count: 2 }), 'import-overtakes');   // the control writes the old text back on purpose — stale-pins: kept
+{ const IMP = '    { const no = this._archiveImportSettle(); if (no) throw no; }';
+  const M = MUT.load('src/task-groups.js', anchored(SRC, IMP, '    this._archiveImportSettle();', 'import-overtakes', { count: 2 }), 'import-overtakes');
   const r = heldScene(M, 'import'); check('CONTROL (a copy whose import goes on over the held append): the entry is in NEITHER place — red', r.code === null && !r.inLive && !r.inFile, r); }
 { const r = heldScene(REAL, 'remove'); check('a REMOVAL while an append still flies (past the bound) is refused BY NAME (EVSARCHIVEBUSY): the group stays; once it lands the entry is in its file', r.code === 'EVSARCHIVEBUSY' && r.group && r.inFile, r); }
 { const r = heldScene(cuts([['    if (why) throw ARCHIVE_BUSY(why);\n    for (const [file, q] of mine)', '    for (const [file, q] of mine)']], 'remove-overtakes'), 'remove'); check('CONTROL (a copy whose removal goes on over the held append): the append lands after it and makes the removed group\'s folder again (a ghost archive) — red', r.code === null && !r.group && r.folder, r); }
@@ -257,16 +259,46 @@ const settleScene = (M, mode) => { const W = holdWriter(), dir = freshDir(); con
 { const r = settleScene(cuts([['if (q.heldAt || age >= bound) return', 'if (false) return']], 'no-at-once'), 'held'); check('CONTROL (a copy without the at-once refusal): every press holds the hub for the bound again (a second flush) — red', r.f2 === 2 || r.f3 === 1, r); }
 { const r = settleScene(REAL, 'failed'); check('(b) a FAILED append is no flight: the clear goes on (nothing on its way), the entry stays owed and live, retried', r.first === 'cleared' && r.owed && r.live, r); }
 { const r = settleScene(REAL, 'owed'); check('(c) a month only OWED while another store\'s write is held is safe: the clear goes on (no flush, no refusal)', r.first === 'cleared', r); }
-{ const NEW_SETTLE = SRC.slice(SRC.indexOf('  _archiveSettle(files) {'), SRC.indexOf("  /** the configuration import's question"));
+{ const NEW_SETTLE = SRC.slice(SRC.indexOf('  _archiveSettle(files, { owed = false } = {}) {'), SRC.indexOf("  /** THE TWO IMPORT DOORS' settle"));
   const OLD_SETTLE = "  _archiveSettle(files) {\n    const W = this._writer();\n    const owed = (files || [...this._archQ.keys()]).filter((f) => W.pending(f));\n    if (!owed.length) return null;\n    const r = W.flushSync(owed) || {};\n    if (r.deferred) return 'the hub is stopping';\n    const miss = (r.left || []).find((x) => owed.includes(x.file));\n    if (miss) return String(miss.why || 'its write has not landed');\n    return owed.some((f) => W.pending(f) && this._archQ.has(f) && this._archQ.get(f).flying) ? 'its write has not landed' : null;\n  }\n";   // the control writes the settle of 76703d7b5 back on purpose — stale-pins: kept
   const M = MUT.load('src/task-groups.js', anchored(SRC, NEW_SETTLE, OLD_SETTLE, 'settle-of-76703d7b5'), 'settle-old');
   const rb = settleScene(M, 'failed'), rc = settleScene(M, 'owed');
   check('CONTROL (the settle of 76703d7b5, judging the writer\'s whole answer): a failed append and an owed month beside another store\'s held write are both REFUSED — red', rb.first === 'EVSARCHIVEBUSY' && rc.first === 'EVSARCHIVEBUSY', { rb, rc }); }
 
+// r2292: THE IMPORT DOORS WRITE WHAT IS OWED FIRST — an import REPLACES a group's live list: an entry only OWED to its month file
+// (overflowed, its append not made yet: inside the writer's pause, or after a FAILED append) would no longer be found by its append
+// after it — in NEITHER place. The doors flush it first (a flush, not a refusal); a write that keeps failing refuses the import BY NAME
+const importOwed = (M, mode) => { const W = holdWriter(), dir = freshDir(); const tg = new M.TaskGroupManager({ dataDir: dir, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir };
+  seed(w, 3); const older = JSON.parse(JSON.stringify(tg.exportBundle()));   // an OLDER backup of the same group: its first three notes
+  seed(w, 505); tg._state.tasks[g.id].progress = tg._keepLive(g.id, tg._state.tasks[g.id].progress); W.flushSync();   // 5 archived (the backup's three among them), 500 live
+  tg.addProgress(g.id, { note: 'one more' });   // P-100005 overflows: OWED to its month file, its append not made yet
+  const file = path.join(archDir(w), '2026-09.ndjson'), owed = !!(tg._archQ.get(file) && tg._archQ.get(file).ids.has('P-100005') && !tg._archQ.get(file).flying);
+  if (mode === 'failing') W.st.failOwed = true;
+  let code = null; try { tg.importBundle(older, { log: () => {} }); } catch (e) { code = e.code || e.message; }
+  W.st.failOwed = false; const t = tg._state.tasks[g.id], liveN = t ? t.progress.length : 0, live = !!(t && t.progress.some((p) => p.id === 'P-100005'));
+  W.flushSync();   // whatever is still owed is written now
+  return { code, owed, liveN, live, inFile: archLines(w).some((p) => p.id === 'P-100005') };
+};
+{ const r = importOwed(REAL, 'owed'); check('an OLDER backup imported while an entry is only OWED to the archive: the import writes it first (a flush, not a refusal) — it is in its month file after the import', r.owed && r.code === null && r.liveN === 3 && r.inFile, r); }
+{ const DOOR = '    { const no = this._archiveImportSettle(); if (no) throw no; }';
+  const M = MUT.load('src/task-groups.js', anchored(SRC, DOOR, '    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }', 'import-flight-only', { count: 2 }), 'import-flight-only');   // the control writes the doors' settle of 62ebdb2fa back on purpose — stale-pins: kept
+  const r = importOwed(M, 'owed'); check('CONTROL (the doors\' settle of 62ebdb2fa, judging flights only): the owed entry is in NEITHER place after the import — red', r.owed && r.code === null && !r.live && !r.inFile, r); }
+{ const r = importOwed(REAL, 'failing'); check('an import while the owed write KEEPS FAILING is refused BY NAME (EVSARCHIVEFAILING), nothing replaced: the entry stays live and owed, and lands once the storage writes again', r.code === 'EVSARCHIVEFAILING' && r.liveN === 501 && r.live && r.inFile, r); }
+{ const r = importOwed(cuts([['    const unmade = owed ? due.filter(', '    const unmade = false ? due.filter(']], 'import-over-failing'), 'failing');
+  check('CONTROL (a copy whose import goes on over the failed write): the owed entry is in NEITHER place — red', r.code === null && !r.live && !r.inFile, r); }
+const taskImportOwed = (M) => { const w = mk(M); seed(w, 3); const fsrc = path.join(w.dir, 'group.md'); fs.writeFileSync(fsrc, `---\nvibespace_task: ${w.id}\ntitle: arch\n---\n\n## Objective\nthe same group, from a file\n`); const W = w.tg._writer(); const f0 = W.flushSync;
+  let asked = null; W.flushSync = (files, ...a) => { if (files && asked === null) asked = files.slice(); return f0(files, ...a); };
+  const t = w.tg._state.tasks[w.id]; t.progress = Array.from({ length: 501 }, (_, i) => ({ id: 'P-' + (0x100000 + i).toString(16), at: Date.UTC(2026, 8, 30, 23, 0) + i * 60e3, note: `n ${i}` })); t.progress = w.tg._keepLive(w.id, t.progress);
+  let code = null; try { w.tg.importFromFile(fsrc); } catch (e) { code = e.code || e.message; } finally { W.flushSync = f0; } land();
+  return { code, asked, flushed: Array.isArray(asked) && asked.some((f) => f.endsWith('2026-09.ndjson')), inFile: archLines(w).some((p) => p.id === 'P-100000') }; };
+{ const r = taskImportOwed(REAL); check('the TASK import (a group file) takes the same door: the month an entry is owed to is written before it (its flush asks for that month)', r.flushed && r.inFile, r); }
+{ const r = taskImportOwed(MUT.load('src/task-groups.js', anchored(SRC, '    { const no = this._archiveImportSettle(); if (no) throw no; }', '    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }', 'task-import-flight-only', { count: 2 }), 'task-import-flight-only'));   // the doors' settle of 62ebdb2fa written back on purpose — stale-pins: kept
+  check('CONTROL (the doors\' settle of 62ebdb2fa): the task import asks no flush for an owed month — red', !r.flushed, r); }
+
 // r2104 THE MUST: THE CONFIGURATION IMPORT (Backup & migrate) is refused WHOLE before any section is applied — the ROUTE driven (src/routes/
 // persistence.js on a fake app): a bundle with settings and Task Groups, imported while an Activity-log append is held past its bound
 const PRS = fs.readFileSync(path.join(repo, 'src/routes/persistence.js'), 'utf8');
-const configImport = async (Pmod, tag) => {
+const configImport = async (Pmod, tag, mode = 'held') => {
   const D = freshDir(); fs.writeFileSync(path.join(D, 'settings.json'), JSON.stringify({ language: 'en' }));
   const W = holdWriter(); const tg = new REAL.TaskGroupManager({ dataDir: D, onChange: () => {}, writer: W }); const g = tg.create({ title: 'arch' }); const w = { tg, id: g.id, dir: D };
   seed(w, 505); tg._state.tasks[g.id].progress = tg._keepLive(g.id, tg._state.tasks[g.id].progress); W.flushSync();
@@ -276,9 +308,9 @@ const configImport = async (Pmod, tag) => {
     try { door(p)({ body, headers: { 'sec-fetch-site': 'same-origin' }, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out)); } catch (e) { out.status = 'threw'; out.code = e && e.code; resolve(out); } });
   const ex = await call('/api/config/export', { sections: ['settings', 'tasks'] });
   const file = ex.body; if (file && file.sections && file.sections.settings) file.sections.settings = { ...file.sections.settings, language: 'ja' };
-  tg.addProgress(g.id, { note: 'one more' }); W.take(path.join(archDir(w), '2026-09.ndjson')); W.st.holdPast = true;   // an append held past its bound
+  tg.addProgress(g.id, { note: 'one more' }); if (mode === 'failing') W.st.failOwed = true; else { W.take(path.join(archDir(w), '2026-09.ndjson')); W.st.holdPast = true; }   // an append held past its bound — or (r2292) an owed one whose write keeps failing
   const im = await call('/api/config/import', { file, sections: ['settings', 'tasks'], includeSensitive: [] });
-  land(); W.st.holdPast = false; W.landFlying();
+  land(); W.st.holdPast = false; W.st.failOwed = false; W.landFlying();
   const again = await call('/api/config/export', { sections: ['settings'] });
   return { exported: ex.status, hadSettings: !!(ex.body && ex.body.sections && ex.body.sections.settings), status: im.status, code: (im.body && im.body.code) || im.code || null, applied: (im.body && im.body.applied) || null, language: again.body && again.body.sections && again.body.sections.settings && again.body.sections.settings.language };
 };
@@ -287,6 +319,14 @@ const configImport = async (Pmod, tag) => {
 { const BUSY = "    { const busy = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.archiveBusy?.() : null;";
   const r = await configImport(MUT.load('src/routes/persistence.js', anchored(PRS, BUSY, "    { const busy = null;", 'import-busy-cut'), 'import-busy-cut'), 'red');
   check('CONTROL (a copy of the route without the whole refusal): the settings are applied first and the Task Groups refused after them — the import is HALF applied (red; the tasks line\'s belt names what was applied)', r.language === 'ja' && r.code === 'EVSARCHIVEBUSY' && Array.isArray(r.applied) && r.applied.length > 0, r); }
+
+{ const PR = path.join(repo, 'src/routes/persistence.js'); delete require.cache[require.resolve(PR)];   // a fresh module: its router is module-level — a second setup's routes would sit behind the first's
+  const r = await configImport(require(PR), 'real-failing', 'failing');
+  check('r2292: a configuration import while an OWED archive write keeps failing is refused WHOLE by name (503 EVSARCHIVEFAILING), and NO section is applied', r.status === 503 && r.code === 'EVSARCHIVEFAILING' && !r.applied && r.language === 'en', r); }
+{ const BUSY = "    { const busy = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.archiveBusy?.() : null;";
+  const BELT_LINE = "if (e && (e.code === 'EVSARCHIVEBUSY' || e.code === 'EVSARCHIVEFAILING')) return afterAll(";
+  const r = await configImport(MUT.load('src/routes/persistence.js', anchored(anchored(PRS, BUSY, '    { const busy = null;', 'import-busy-cut2'), BELT_LINE, 'if (false) return afterAll(', 'import-busy-belt-cut'), 'import-busy-belt-cut'), 'red2');
+  check('CONTROL (a copy without the whole refusal AND without the belt — the release): the refusal leaves the route unanswered (the server\'s bare 500; the page says only «Import failed») after the settings were applied — red', r.status === 'threw' && r.code === 'EVSARCHIVEBUSY' && !r.applied && r.language === 'ja', r); }
 
 console.log('⑥ the doors: the route, the Task log window');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

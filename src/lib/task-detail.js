@@ -864,7 +864,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       try {
         const res = await fetch('/api/tasks/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
         const d = await res.json().catch(() => ({}));
-        if (res.ok) { showToast(t('Imported {id}', { id: d.task?.id || '' })); sayNotOnDisk(d); } else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : d.code === 'EVSARCHIVEBUSY' ? t('The Activity log is still being written to its storage — nothing was changed. Try again in a moment.') : (d.error || t('Import failed')), { type: 'error' });
+        if (res.ok) { showToast(t('Imported {id}', { id: d.task?.id || '' })); sayNotOnDisk(d); } else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : d.code === 'EVSARCHIVEBUSY' ? t('The Activity log is still being written to its storage — nothing was changed. Try again in a moment.') : d.code === 'EVSARCHIVEFAILING' ? t("The Activity log's archive write keeps failing — nothing was imported. Its entries are kept, and the write is retried.") : (d.error || t('Import failed')), { type: 'error' });
       } catch { showToast(t('Import failed — server unreachable'), { type: 'error' }); }
     };
     repoWrap.append(repoPf.el, exportBtn, importBtn);

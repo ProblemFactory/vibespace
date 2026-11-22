@@ -774,6 +774,8 @@ export default {
   "Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.": "任务组暂时无法读取——没有记录任何内容。原因和处理办法见「待你处理」。",
   "The Activity log is still being written to its storage — nothing was changed. Try again in a moment.": "活动日志仍在写入存储——什么都没有改变。请稍后再试。", // B-0248 step 3 (c) (r2104): the archive's busy refusal
   "The Activity log is still being written to its storage — the Task Groups were not imported (already applied: {applied}). Try again in a moment.": "活动日志仍在写入存储——任务组没有导入（已应用：{applied}）。请稍后再试。", // B-0248 step 3 (c) (r2104): the archive's busy refusal
+  "The Activity log's archive write keeps failing — nothing was imported. Its entries are kept, and the write is retried.": "活动日志的归档写入一直失败——什么都没有导入。其中的条目都保留着，写入会自动重试。", // B-0248 step 3 (c) (r2292): an import whose owed archive write keeps failing
+  "The Activity log's archive write keeps failing — the Task Groups were not imported (already applied: {applied}). Its entries are kept, and the write is retried.": "活动日志的归档写入一直失败——任务组没有导入（已应用：{applied}）。其中的条目都保留着，写入会自动重试。", // B-0248 step 3 (c) (r2292): an import whose owed archive write keeps failing
   "Task Groups cannot be read right now — For you says why": "任务组暂时无法读取——原因见「待你处理」",
   "Task Groups cannot be read right now — this window stays and fills in when they read again": "任务组暂时无法读取——这个窗口保留，读取恢复后会自动填充",
   "Task Groups cannot be read — {file} in VibeSpace's data folder is damaged": "任务组无法读取——VibeSpace 数据文件夹里的 {file} 已损坏",

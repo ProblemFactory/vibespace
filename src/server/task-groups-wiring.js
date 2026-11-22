@@ -135,7 +135,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   });
   app.post('/api/tasks/import', (req, res) => {
     try { onDisk(res, { success: true, task: tasks.importFromFile(req.body?.path) }); }
-    catch (e) { res.status(e && e.code === 'EVSARCHIVEBUSY' ? 409 : 400).json({ error: e.message, ...(e && e.code === 'EVSARCHIVEBUSY' ? { code: e.code } : {}) }); }
+    catch (e) { const ar = !!e && (e.code === 'EVSARCHIVEBUSY' || e.code === 'EVSARCHIVEFAILING'); res.status(ar ? (e.code === 'EVSARCHIVEFAILING' ? 503 : 409) : 400).json({ error: e.message, ...(ar ? { code: e.code } : {}) }); }   // r2292: the archive's owed write first — held (409) or failing (503), refused by name
   });
   return { convOps };
 }

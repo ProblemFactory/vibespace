@@ -773,6 +773,8 @@ export default {
   "Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.": "タスクグループを今は読み込めません——何も記録されていません。理由と対処法は「あなた宛て」にあります。",
   "The Activity log is still being written to its storage — nothing was changed. Try again in a moment.": "アクティビティログはまだストレージに書き込み中です——何も変更されていません。少し待ってからもう一度お試しください。", // B-0248 step 3 (c) (r2104): the archive's busy refusal
   "The Activity log is still being written to its storage — the Task Groups were not imported (already applied: {applied}). Try again in a moment.": "アクティビティログはまだストレージに書き込み中です——タスクグループはインポートされていません（適用済み：{applied}）。少し待ってからもう一度お試しください。", // B-0248 step 3 (c) (r2104): the archive's busy refusal
+  "The Activity log's archive write keeps failing — nothing was imported. Its entries are kept, and the write is retried.": "アクティビティログのアーカイブへの書き込みが失敗し続けています——何もインポートされていません。エントリはすべて保持され、書き込みは再試行されます。", // B-0248 step 3 (c) (r2292): an import whose owed archive write keeps failing
+  "The Activity log's archive write keeps failing — the Task Groups were not imported (already applied: {applied}). Its entries are kept, and the write is retried.": "アクティビティログのアーカイブへの書き込みが失敗し続けています——タスクグループはインポートされていません（適用済み：{applied}）。エントリはすべて保持され、書き込みは再試行されます。", // B-0248 step 3 (c) (r2292): an import whose owed archive write keeps failing
   "Task Groups cannot be read right now — For you says why": "タスクグループを今は読み込めません——理由は「あなた宛て」にあります",
   "Task Groups cannot be read right now — this window stays and fills in when they read again": "タスクグループを今は読み込めません——このウィンドウは残り、読み込めるようになると表示されます",
   "Task Groups cannot be read — {file} in VibeSpace's data folder is damaged": "タスクグループを読み込めません — VibeSpace のデータフォルダーの {file} が壊れています",

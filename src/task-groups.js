@@ -286,6 +286,8 @@ const archivableId = (id) => typeof id === 'string' && /^[\w-]{1,80}$/.test(id);
 // B-0248 step 3 (c) follow (r1821 (1)): a clear's or an import's month rewrite, or a group's removal, while an archive append is still
 // on its way past the writer's bound — REFUSED BY NAME, nothing changed (the person tries again; the append lands meanwhile)
 const ARCHIVE_BUSY = (why) => Object.assign(new Error(`the Activity log's storage is still writing (${why}) — nothing was changed; try again in a moment`), { code: 'EVSARCHIVEBUSY' });
+// r2292: an IMPORT whose owed archive months could not be written first (the storage keeps failing) — refused by name, nothing imported
+const ARCHIVE_FAILING = (why) => Object.assign(new Error(`the Activity log's archive write keeps failing (${why}) — nothing was imported; its entries stay in the live list and the store writer retries`), { code: 'EVSARCHIVEFAILING' });
 const parseLine = (ln) => { try { const p = JSON.parse(ln); return p && typeof p === 'object' && p.id ? p : null; } catch { return null; } };
 function readAt(fd, pos, len) { const b = Buffer.alloc(len); const n = fs.readSync(fd, b, 0, len, pos); return b.subarray(0, n); }
 /** the first whole line starting at or after `pos` (pos 0 = the file's first line): {start, end, at} or null */
@@ -3252,10 +3254,12 @@ class TaskGroupManager {
     q.flying = null; q.flyingSince = null; q.heldAt = null;
     if (!ok) {
       for (const x of fly) q.ids.add(x.id);
+      q.failWhy = String((e && (e.code || e.message)) || 'an error');   // r2292: an import's settle names a write that keeps failing
       if (!this._archiveFailSaid) { this._archiveFailSaid = true; console.warn(`[tasks] an Activity-log archive append was not written (${(e && (e.code || e.message)) || 'an error'}) — its entries stay in the live list, the store writer retries`); }
       if (q.ids.size) this._archiveAsk(file);
       return;
     }
+    q.failWhy = null;
     if (this._archiveFailSaid && fly.length) { this._archiveFailSaid = false; console.warn('[tasks] the Activity-log archive is written again'); }
     const t = this._state.tasks[q.gid];
     if (t && fly.length && Array.isArray(t.progress)) {
@@ -3272,25 +3276,40 @@ class TaskGroupManager {
    *  wait (test-store-write-census WAITS), under the writer's own bound. → null when nothing of them is owed or on its way any more;
    *  else WHY (r1821 (1): A SETTLE THAT RAN OUT OF ITS BOUND IS NOT A SETTLE — an append still in flight would land in a rewritten
    *  file's old copy, or make a removed group's folder again: the caller refuses BY NAME, ARCHIVE_BUSY, before anything moves) */
-  _archiveSettle(files) {
+  _archiveSettle(files, { owed = false } = {}) {
     // r2104 (c): THE FILE'S OWN FLIGHT is judged — a month only OWED is safe (its append is made after a rewrite, into the new file), so
     // it is neither flushed nor refused (another store's held write never refuses a person's clear)
+    // r2292: …but an IMPORT REPLACES a group's live list: an entry only owed would no longer be found by its append — in NEITHER place.
+    // The import doors pass `owed`: what is owed is WRITTEN first (a flush, not a refusal); a write not made is the door's refusal
     const flying = (files || [...this._archQ.keys()]).filter((f) => { const q = this._archQ.get(f); return !!(q && q.flying); });
-    if (!flying.length) return null;
+    const due = owed ? (files || [...this._archQ.keys()]).filter((f) => { const q = this._archQ.get(f); return !!(q && (q.flying || q.ids.size)); }) : flying;
+    if (!due.length) return null;
     const W = this._writer(), bound = Math.round((Number.isFinite(W.graceMs) && W.graceMs > 0 ? W.graceMs : 90000) / 3);   // the writer's own synchronous bound (store-pace syncBoundMs)
     // r2104 (a): NO HOLD A PRESS — an append already older than the bound, or held at its file's last settle, is refused AT ONCE
     for (const f of flying) { const q = this._archQ.get(f), age = Date.now() - (q.flyingSince || Date.now()); if (q.heldAt || age >= bound) return `its write has been held by the storage for ${Math.max(1, Math.round(age / 1000))} s`; }
-    const r = W.flushSync(flying) || {};
+    for (const f of due) this._archQ.get(f).failWhy = null;   // r2292: a failure is judged by THIS flush
+    const r = W.flushSync(due) || {};
     if (r.deferred) return 'the hub is stopping';
-    const still = flying.filter((f) => { const q = this._archQ.get(f); return !!(q && q.flying); });
-    if (!still.length) return null;   // r2104 (b): landed, or FAILED — a failed append is no flight (nothing on its way; its entries stay owed and live): the act goes on
+    const still = due.filter((f) => { const q = this._archQ.get(f); return !!(q && q.flying); });
+    const unmade = owed ? due.filter((f) => { const q = this._archQ.get(f); return !!(q && !q.flying && q.ids.size); }) : [];   // r2292: still only owed — its write failed, or the writer stayed held
+    if (!still.length && !unmade.length) return null;   // r2104 (b): landed, or FAILED — a failed append is no flight (nothing on its way; its entries stay owed and live): the act goes on (an import excepted: r2292)
     for (const f of still) this._archQ.get(f).heldAt = Date.now();
-    const miss = (r.left || []).find((x) => still.includes(x.file));
-    return String((miss && miss.why) || 'its write has not landed');
+    const miss = (r.left || []).find((x) => (still.length ? still : unmade).includes(x.file));
+    return String((miss && miss.why) || (still.length ? 'its write has not landed' : 'its write was not made'));
   }
-  /** the configuration import's question, asked BEFORE any section is applied (r2104): an Activity-log append still on its way past its
-   *  bound → the refusal's words (code EVSARCHIVEBUSY: the import is refused WHOLE); else null */
-  archiveBusy() { const why = this._archiveSettle(); return why ? ARCHIVE_BUSY(why).message : null; }
+  /** THE TWO IMPORT DOORS' settle (r2292): an import replaces a group's live list, so what its archive is only OWED (overflowed entries
+   *  not written yet: inside the writer's pause, or after a FAILED append) is WRITTEN first — else those entries reach NEITHER place.
+   *  → null when nothing is owed or on its way any more; else the refusal, nothing imported: EVSARCHIVEFAILING when an owed write
+   *  failed in this flush (the storage keeps failing), else EVSARCHIVEBUSY (an append held on its way, or the writer held elsewhere) */
+  _archiveImportSettle() {
+    const why = this._archiveSettle(null, { owed: true });
+    if (!why) return null;
+    const qs = [...this._archQ.values()];
+    return !qs.some((q) => q.flying) && qs.some((q) => q.ids.size && q.failWhy) ? ARCHIVE_FAILING(why) : ARCHIVE_BUSY(why);
+  }
+  /** the configuration import's question, asked BEFORE any section is applied (r2104; r2292: the import doors' own settle — what is
+   *  owed is written first) → the refusal (an Error with its code, EVSARCHIVEBUSY or EVSARCHIVEFAILING: the import is refused WHOLE); else null */
+  archiveBusy() { return this._archiveImportSettle(); }
 
   /** a group's removal: what it still owes its archive is DROPPED (never written after its folder went); an append on its way lands
    *  first (an append that lands after the removal would make the folder again — a group made again under the same id inheriting it) */
@@ -3511,7 +3530,7 @@ class TaskGroupManager {
   // after this the structured store is the truth (never re-parsed live).
   importFromFile(absPath) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
-    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten — or nothing moves
+    { const no = this._archiveImportSettle(); if (no) throw no; }   // B-0248 step 3 (c), r2292: what the archive is owed is WRITTEN before a group is replaced (else NEITHER place) — or nothing moves, refused by name
     if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
     let text;
     try { text = fs.readFileSync(absPath, 'utf-8'); } catch (e) { if (e && e.code === 'EVSMOUNTSYNC') throw e; throw new Error('cannot read ' + absPath); } // lane hub-fuse-sync-guard: a refusal is said by name, never as a missing file
@@ -3672,7 +3691,7 @@ class TaskGroupManager {
 
   importBundle(bundle, { bearer = false, log = (m) => console.log(m) } = {}) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
-    { const why = this._archiveSettle(); if (why) throw ARCHIVE_BUSY(why); }   // B-0248 step 3 (c): every owed archive append lands before an archive month is read or rewritten — or nothing moves
+    { const no = this._archiveImportSettle(); if (no) throw no; }   // B-0248 step 3 (c), r2292: what the archive is owed is WRITTEN before a group is replaced (else NEITHER place) — or nothing moves, refused by name
     const items = Array.isArray(bundle?.tasks) ? bundle.tasks : [];
     // every group's archived months read STRICTLY first (主开发 00:41Z (e)): one that could not be read refuses the import before ANY group is applied — and what was read is what the loop merges (never a second read that could fail half-way)
     const pre = new Map();
