@@ -739,8 +739,8 @@ async function ourRowsOnDisk() {
 // Install pressed meanwhile (it removes the mark) is never stripped after its «ok»
 function stripAgentHookEntries({ ifOptedOut = false } = {}) {
   // r1813 (the true words): a refusal is ANSWERED as one (by name), never as a removal that happened
-  { const r = refuseOwnerWrite(); if (r) return Promise.resolve({ ok: false, refused: r, receipts: [], created: [], why: r.line || r.why || 'refused on this server — nothing removed' }); } // a worktree / temp server: never edit the owner's CLI configs
-  if (settingsHeldNow()) return Promise.resolve({ ok: false, settingsHeld: true, receipts: [], created: [], why: 'the settings could not be read — the hooks were not removed; nothing was written' });   // B-225b: the settings HELD — the switch's value is unknown, the person's CLI configs are not written
+  { const r = refuseOwnerWrite(); if (r) return Promise.resolve({ ok: false, skipped: true, refused: r, receipts: [], created: [], why: r.line || r.why || 'refused on this server — nothing removed' }); } // a worktree / temp server: never edit the owner's CLI configs
+  { const held = settingsHeldNow(); if (held) return Promise.resolve({ ok: false, skipped: true, settingsHeld: { kind: held.kind, code: held.code || null }, receipts: [], created: [], why: 'the settings could not be read — the hooks were not removed; nothing was written' }); }   // r2109: ONE shape for a held refusal on both roads (the registration's: skipped + settingsHeld {kind, code})   // B-225b: the settings HELD — the switch's value is unknown, the person's CLI configs are not written
   if (typeof applyThisMachine !== 'function') return Promise.resolve({ ok: false, receipts: [], created: [], why: 'no helper road on this server — nothing removed' });
   // the helper's --uninstall run strips ONLY our entries (never a managed key) — through the starter, like every write here. The
   // helper prints KEY receipts only (a removal has none), so the OUTCOME is read on the files, off the loop, before «removed» is

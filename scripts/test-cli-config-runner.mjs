@@ -141,8 +141,8 @@ async function afterLegs(Rm) {
   const a = await afterLegs(R);
   ok(a.order.indexOf('check of PLAN-S') >= 0 && a.order.indexOf('check of PLAN-S') < a.order.indexOf('run PLAN-R') && JSON.stringify(a.after) === '["read"]',
     'Remove then Install inside one run: the removal\'s check reads the files BEFORE the registration\'s helper starts, its answer on its own landing', a);
-  const AFTER = '        const a = await bounded(() => job.after(landing));';
-  const am = await afterLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), AFTER, '        inFlight = null; pump(); const a = await bounded(() => job.after(landing));', 'the check after the queue moved on'), 'after-late')));
+  const AFTER = '        const a = homeStuck > 0 ? { held: true } : await bounded(() => job.after(landing));';
+  const am = await afterLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), AFTER, '        inFlight = null; pump(); const a = homeStuck > 0 ? { held: true } : await bounded(() => job.after(landing));', 'the check after the queue moved on'), 'after-late')));
   ok(am.order.indexOf('run PLAN-R') >= 0 && am.order.indexOf('run PLAN-R') < am.order.indexOf('check of PLAN-S'), 'RED (the check after the queue moved on — the cure\'s form): the registration\'s helper runs BEFORE the removal\'s check reads the files', am);
 }
 
@@ -150,17 +150,18 @@ console.log('①d r1813: every step inside a job is BOUNDED by the run\'s own bo
 async function stallLegs(Rm) {
   const order = [], st = handStarter(), r = Rm.createCliConfigRunner({ starter: { run: (cmd, args, o) => { order.push('run ' + o.envAdd.VIBESPACE_CLI_CONFIG); return st.run(cmd, args, o); } }, helperPath: '/x/helper.mjs', timeoutMs: 80, stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
   const stalled = r.apply(() => 'PLAN-S', 'hooks removed', { uninstall: true, after: () => new Promise(() => {}) });   // a home whose reads never answer
-  const next = r.apply(() => 'PLAN-N', 'hooks (asked)', { kind: 'apply+hooks' });
-  for (let k = 0; k < 100 && !order.includes('run PLAN-N'); k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }   // ≤ 1 s (the bound is 80 ms)
+  let nextLanding = null; const next = r.apply(() => 'PLAN-N', 'hooks (asked)', { kind: 'apply+hooks' }).then((l) => { nextLanding = l; });
+  for (let k = 0; k < 100 && !nextLanding; k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }   // ≤ 1 s (the bound is 80 ms)
   for (const call of st.calls) call.finish(okRun);
   const s1 = await Promise.race([stalled, new Promise((res) => setTimeout(() => res(null), 200))]);
-  return { order, after: s1 && s1.after, nextRan: order.includes('run PLAN-N'), next: !!next };
+  return { order, after: s1 && s1.after, next: nextLanding && { ok: nextLanding.ok, why: nextLanding.why }, nextAsked: order.includes('run PLAN-N'), pending: !!next };
 }
 {
   const s = await stallLegs(R);
-  ok(!!(s.nextRan && s.after && /the check of the files did not finish within 80 ms/.test(s.after.error || '')), 'a check that never answers: at the run\'s bound the job ends, its reply says the check did not finish, and the next request RUNS', s);
-  const sm = await stallLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), '        const a = await bounded(() => job.after(landing));', '        const a = { value: await job.after(landing) };', 'an unbounded check'), 'after-unbounded')));
-  ok(!sm.nextRan, 'RED (an unbounded check — the r1675 form): the stalled check holds the queue — the next Install never runs', sm);
+  ok(!!(s.after && /the check of the files did not finish within 80 ms/.test(s.after.error || '') && s.next && s.next.ok === false && /the home still has not answered an earlier read/.test(s.next.why || '') && !s.nextAsked),
+    'a check that never answers: at the run\'s bound the job ends, its reply says the check did not finish; the next request ENDS at once, by name («the home still has not answered»), asking the home nothing (r2109)', s);
+  const sm = await stallLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), '        const a = homeStuck > 0 ? { held: true } : await bounded(() => job.after(landing));', '        const a = { value: await job.after(landing) };', 'an unbounded check'), 'after-unbounded')));
+  ok(!sm.next, 'RED (an unbounded check — the r1675 form): the stalled check holds the queue — the next Install never ends', sm);
 }
 
 console.log('①e r1876 (the must): A JOB ENDS WITHIN ITS BOUND WHATEVER THE HOME DOES — the look at the plan\'s files is bounded too');
@@ -171,28 +172,36 @@ async function lookLegs(Rm) {
   const r = Rm.createCliConfigRunner({ starter: { run: (cmd, args, o) => { order.push('run ' + (o.envAdd.VIBESPACE_CLI_CONFIG === planAt('.ok') ? 'NEXT' : 'STALLED')); return st.run(cmd, args, o); } }, helperPath: '/x/helper.mjs', home: ROOT, timeoutMs: 80,
     stat: (p) => (String(p).includes(`${path.sep}.stall${path.sep}`) ? new Promise(() => {}) : Promise.reject(new Error('none'))), journal: () => {}, warn: () => {} });   // a home whose reads never answer, for the first plan's file
   const stalled = r.apply(() => planAt('.stall'), 'a save', { kind: 'apply' });
-  const next = r.apply(() => planAt('.ok'), 'hooks (asked)', { kind: 'apply+hooks' });
-  for (let k = 0; k < 100 && !order.includes('run NEXT'); k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }   // ≤ 1 s (the bound is 80 ms)
+  let nextLanding = null; const next = r.apply(() => planAt('.ok'), 'hooks (asked)', { kind: 'apply+hooks' }).then((l) => { nextLanding = l; });
+  for (let k = 0; k < 100 && !nextLanding; k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }   // ≤ 1 s (the bound is 80 ms)
   for (const call of st.calls) call.finish(okRun);
   const s1 = await Promise.race([stalled, new Promise((res) => setTimeout(() => res(null), 200))]);
-  return { order, stalled: s1 && { ok: s1.ok, why: s1.why }, nextRan: order.includes('run NEXT'), next: !!next };
+  return { order, stalled: s1 && { ok: s1.ok, why: s1.why }, next: nextLanding && { ok: nextLanding.ok, why: nextLanding.why }, pending: !!next };
 }
 {
   const l = await lookLegs(R);
-  ok(!!(l.nextRan && l.stalled && l.stalled.ok === false && /the plan's files under the home could not be read within 80 ms/.test(l.stalled.why || '') && !l.order.includes('run STALLED')),
-    'a look under the home that never answers: the job ends at the bound — «the plan\'s files … could not be read», the helper not run — and the NEXT request runs', l);
-  const LOOK = "    const look = async () => { const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? null : r.value; };";
-  const lm = await lookLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), LOOK, '    const look = async () => Promise.all(files.map((f) => exists(f.file)));', 'an unbounded look'), 'look-unbounded')));
-  ok(!lm.nextRan, 'RED (an unbounded look — the follow\'s first form): the stalled look holds the queue — the next request never runs', lm);
+  ok(!!(l.stalled && l.stalled.ok === false && /the plan's files under the home could not be read within 80 ms/.test(l.stalled.why || '') && !l.order.includes('run STALLED') && l.next && l.next.ok === false && /the home still has not answered an earlier read/.test(l.next.why || '')),
+    'a look under the home that never answers: the job ends at the bound — «the plan\'s files … could not be read», the helper not run — and the NEXT request ENDS at once, by name (r2109)', l);
+  const LOOK = "    const look = async () => { if (homeStuck > 0) return { held: true }; const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? { timedOut: true } : { value: r.value }; };";
+  const lm = await lookLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), LOOK, '    const look = async () => ({ value: await Promise.all(files.map((f) => exists(f.file))) });', 'an unbounded look'), 'look-unbounded')));
+  ok(!lm.next, 'RED (an unbounded look — the follow\'s first form): the stalled look holds the queue — the next request never ends', lm);
 }
 
 console.log('①f r1876 (the smalls): a «still asked» read that fails is a FAILED landing with its reason; a joining request carries its own read');
-{
-  const st = handStarter(), r = R.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', timeoutMs: 80, stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+async function failedReadLegs(Rm) {
+  const st = handStarter(), r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', timeoutMs: 80, stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
   const unreadable = await r.apply(() => 'PLAN-U', 'hooks removed (a start)', { uninstall: true, kind: 'strip-if-still-asked', when: async () => { throw Object.assign(new Error('EACCES: the mark cannot be read'), { code: 'EACCES' }); } });
   const silent = await r.apply(() => 'PLAN-T', 'hooks removed (a start)', { uninstall: true, kind: 'strip-if-still-asked', when: () => new Promise(() => {}) });
-  ok(unreadable.ok === false && /could not be read \(EACCES: the mark cannot be read\)/.test(unreadable.why || '') && !unreadable.skipped && silent.ok === false && /did not answer within 80 ms/.test(silent.why || '') && st.calls.length === 0,
-    'an unreadable or silent «still asked» read: not run, and answered NOT-ok with its reason — never «ok, skipped»', { unreadable, silent });
+  return { unreadable, silent, runs: st.calls.length };
+}
+{
+  const f = await failedReadLegs(R);
+  ok(!!(f.unreadable.ok === false && /could not be read \(EACCES: the mark cannot be read\)/.test(f.unreadable.why || '') && !f.unreadable.skipped && f.silent.ok === false && /did not answer within 80 ms/.test(f.silent.why || '') && f.runs === 0),
+    'an unreadable or silent «still asked» read: not run, and answered NOT-ok with its reason — never «ok, skipped»', f);
+  // r2109: its RED — a failed read mapped to a skip (the line that answers it not-ok taken out)
+  const BAD = "          if (bad) return broke(job, bad.timedOut ? `not run: whether it was still asked did not answer within ${timeoutMs} ms` : `not run: whether it was still asked could not be read (${said(bad.error)})`);\n";
+  const fm = await failedReadLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), BAD, '', 'a failed read mapped to a skip'), 'read-as-skip')));
+  ok(!!(fm.unreadable.ok === true && fm.unreadable.skipped), 'RED (a failed read mapped to a skip): the unreadable mark is answered «ok, not run: no longer asked»', fm.unreadable);
 }
 async function joinLegs(Rm) {
   const st = handStarter(), r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
@@ -208,6 +217,25 @@ async function joinLegs(Rm) {
   ok(!!(j.runs.includes('PLAN-Y') && j.y && j.y.ok === true && !j.y.skipped), 'a request that joins a waiting one of its kind carries its OWN «still asked» read: one says yes ⇒ the job runs', j);
   const jm = await joinLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), ' tail.whens.push(when); tail.resolvers.push(resolve);', ' tail.resolvers.push(resolve);', 'the joiner\'s read dropped'), 'join-no-when')));
   ok(!!(!jm.runs.includes('PLAN-Y') && jm.y && jm.y.skipped), 'RED (the joiner\'s read dropped — the follow\'s first form): the press is answered «not run: no longer asked»', jm);
+}
+
+console.log('①g r2109: while an earlier read of the home is still out, a job asks the home NOTHING more — it fails at once, by name');
+async function heldLegs(Rm) {
+  let stats = 0; const st = handStarter();
+  const r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', home: ROOT, timeoutMs: 80, stat: () => { stats++; return new Promise(() => {}); }, journal: () => {}, warn: () => {} });   // a home that never answers (held)
+  const first = await r.apply(() => planAt('.held'), 'a save', { kind: 'apply' });
+  const statsAfterFirst = stats;
+  const second = await Promise.race([r.apply(() => planAt('.held'), 'a press', { kind: 'apply+hooks' }), new Promise((res) => setTimeout(() => res(null), 1500))]);
+  return { first: { ok: first.ok, why: first.why }, second: second && { ok: second.ok, why: second.why }, statsAfterFirst, stats, runs: st.calls.length };
+}
+{
+  const h = await heldLegs(R);
+  ok(!!(h.first.ok === false && /could not be read within 80 ms/.test(h.first.why || '') && h.second && h.second.ok === false && /the home still has not answered an earlier read \(1 still out\)/.test(h.second.why || '') && h.stats === h.statsAfterFirst && h.runs === 0),
+    'a held home: the first job ends at its bound; the NEXT job fails at once by name («the home still has not answered») and issues NO new read', h);
+  const JOB_GUARD = "      if (homeStuck > 0) return broke(job, `not run: the home still has not answered an earlier read (${homeStuck} still out) — nothing written by this hub, asked again at the next request`);   // r2109: no new read\n";
+  const LOOK_GUARD = 'if (homeStuck > 0) return { held: true }; ';
+  const hm = await heldLegs(require(MC.write(RUNNER_REL, anchored(anchored(src(RUNNER_REL), JOB_GUARD, '', 'no job guard'), LOOK_GUARD, '', 'no look guard'), 'held-asks-again')));
+  ok(hm.stats > hm.statsAfterFirst, 'RED (no guard — the follow\'s second form): the next job issues a NEW read into the held home (one more stranded in the pool)', hm);
 }
 
 console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created read off the loop, the env, the hook command key by key');
