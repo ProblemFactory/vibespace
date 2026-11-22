@@ -656,7 +656,7 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
         && vals1.u === 'alice' && vals1.pw === PW_ALICE && vals1.otp === OTP_VAL && totpCalls === 1
         && !cPass.out.includes(PW_ALICE) && !cPass.err.includes(PW_ALICE) && !cOtp.out.includes(OTP_VAL)
         && /Receipt vr-[0-9a-f]{12}\./.test(cPass.out),
-        'RULING 4 & 5a + r26: `fill @ref --vault` resolves Hub backendNodeId with ZERO agent-browser spawns, mints OTP once (totpCalls===1), populates main-world input.value, and leaks zero secret',
+        'RULING 4 & 5a + r26 (restated by r2711): `fill @ref --vault` resolves Hub backendNodeId and inserts the value itself — NO agent-browser spawn carries the value (over this stub keeper: none at all; the real keeper\'s one spawn, the current tab\'s `tab list`, is asserted in test-browser-front-tab), mints OTP once (totpCalls===1), populates main-world input.value, and leaks zero secret',
         { spawnsDelta: abSpawns() - spawns0, vals1, out: cPass.out.trim() });
 
       // Ruling 4: live-fill read fence blocks eval/get/screenshot with 409 login_fill_live while allowing click/press
@@ -1419,14 +1419,50 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
     w4.shutdown();
     ok(!!(r3 && r3.code === 'current_tab_unreadable' && /did not answer/.test(r3.error) && r3t && r3t.code === 'current_tab_unreadable' && r4 && r4.code === 'current_tab_unreadable') && valOf(tidS) === '' && valOf(tidO) === '',
       'B-21cc: a current tab that cannot be read — its read refused, its read threw, no reader at all — the fill is REFUSED BY NAME (current_tab_unreadable), nothing filled: no guess', { r3: r3 && r3.code, r3t: r3t && r3t.code, r4: r4 && r4.code });
-    // the order: a conversation with no tab of its own in scope is refused BEFORE its session is asked (a never-used session's `tab list` binds a tab)
-    const bdSrcC = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-    const fnC = bdSrcC.slice(bdSrcC.indexOf('  async function fillVaultField('), bdSrcC.indexOf('  async function fillVaultField(') + 9000);
-    ok(fnC.indexOf('if (!hasScopedTab(w, target))') > 0 && fnC.indexOf('if (!hasScopedTab(w, target))') < fnC.indexOf('keeper.currentTabOf(') && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); const a = rs.indexOf('const r = await D.fillVaultField(t, {'); const b = rs.indexOf('});', a); return a > 0 && b > a && !/targetId/.test(rs.slice(a, b)); })(),
-      'B-21cc: the fill asks the current tab only once the conversation has a tab of its own in scope; the route hands the fill no tab of the caller\'s');
-    // RED: the release's pick (the watch's own entry, else «most recently seen») — the sign-in tab current, the OTHER judged
     const MC = mutantCopies('b21cc-current-tab', REPO);
-    const relSrc = anchored(bdSrcC, fnC.slice(fnC.indexOf('    let fillTid = targetId;\n'), fnC.indexOf("    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ?")), '    const e = pickScopedTabFor(w, target, { targetId });\n', 'B-21cc control: the release\'s pick');
+    const bdSrcC = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    // round w41hvnm5h's must: THE SNAPSHOT's REFERENCES go to the CURRENT tab, through the same read — the route's own note names no
+    // tab (the driver's snapshot answer carries none), the watch's entry stands on the OTHER tab; then a fill BY REFERENCE lands
+    const w5 = await worldOn(Dm);
+    curAnswer = { ok: true, targetId: tidS };
+    const ns5 = await w5.noteSnapshot(T, { parsedRefs: [{ ref: '@e7', role: 'textbox', name: 'Password', nth: 0 }] }); // as the route passes it: no tab
+    const r5 = await w5.fillVaultField(T, { target: '@e7', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc'] } });
+    ok(!!(ns5 && ns5.ok && r5 && r5.ok) && valOf(tidS) === PW_C && valOf(tidO) === '',
+      'B-21cc (round w41hvnm5h): the route\'s snapshot note (no tab) writes the references to the CURRENT tab through the same read, though the watch\'s entry stands on the other — a fill BY REFERENCE then lands there', { ns5, r5: r5 && { ok: r5.ok, code: r5.code, error: r5.error } });
+    fkC.setDom(tidS, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+    // the read fails ⇒ nothing is written (the fill then refuses by name); the current tab NOT in scope ⇒ refused before any judgment
+    curAnswer = { ok: false, code: 'current_tab_unreadable', error: 'VibeSpace could not read which tab this conversation is on (its tab list did not answer) — nothing was filled; try again' };
+    const ns6 = await w5.noteSnapshot(T, { parsedRefs: [{ ref: '@e9', role: 'textbox', name: 'Password', nth: 0 }] });
+    curAnswer = { ok: true, targetId: 'F'.repeat(32) };
+    const r6 = await fillC(w5);
+    ok(!!(ns6 && !ns6.ok && ns6.count === 0 && ns6.code === 'current_tab_unreadable' && r6 && r6.code === 'target_not_found' && /not one of its own pages here/.test(r6.error || '')) && valOf(tidS) === '' && valOf(tidO) === '',
+      'B-21cc (round w41hvnm5h): an unreadable current tab writes NO references; a current tab that is not one of this conversation\'s is refused target_not_found before any judgment — nothing filled', { ns6, r6: r6 && { code: r6.code, error: r6.error } });
+    // the required small: the fill hands the tab it JUDGED (the refusal's frame sentence is asked of it); no tab judged ⇒ none
+    curAnswer = { ok: true, targetId: tidS };
+    const j7 = {}; const r7 = await w5.fillVaultField(T, { target: '#nope', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc'] }, judged: j7 });
+    curAnswer = { ok: false, code: 'current_tab_unreadable', error: 'unreadable' };
+    const j8 = {}; const r8 = await w5.fillVaultField(T, { target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc'] }, judged: j8 });
+    ok(!!(r7 && !r7.ok && j7.targetId === tidS && r8 && r8.code === 'current_tab_unreadable' && j8.targetId === undefined),
+      'B-21cc (round w41hvnm5h): a refusal after the judgment hands the tab it JUDGED (the frame sentence\'s only tab); an unreadable current tab judged none — no frame sentence', { r7: r7 && r7.code, j7, r8: r8 && r8.code, j8 });
+    w5.shutdown();
+    // RED: the release's snapshot note (the old pick) — the references land on the watch's entry, the OTHER tab; the fill by reference on the current one then fails
+    const snapRel = anchored(bdSrcC, '    const ct = await currentTabFor(w, target, targetId);\n    if (!ct.ok) return { ok: false, count: 0, code: ct.code };\n    const e = pickScopedTabFor(w, target, { targetId: ct.targetId });\n', '    const e = pickScopedTabFor(w, target, { targetId });\n', 'B-21cc control: the release\'s snapshot pick');
+    const DmSnap = MC.load('src/server/browser-dialogs.js', snapRel, 'release-snapshot-pick');
+    const wS = await worldOn(DmSnap);
+    curAnswer = { ok: true, targetId: tidS };
+    const nsS = await wS.noteSnapshot(T, { parsedRefs: [{ ref: '@e7', role: 'textbox', name: 'Password', nth: 0 }] });
+    const rS = await wS.fillVaultField(T, { target: '@e7', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc'] } });
+    ok(!!(rS && !rS.ok && rS.code === 'target_not_found') && valOf(tidS) === '',
+      'RED CONTROL (B-21cc, round w41hvnm5h): the release\'s snapshot note — the references were written to the watch\'s entry (the OTHER tab), so the fill BY REFERENCE on the current tab is refused target_not_found: the agent\'s retry loop', { nsS, rS: rS && { code: rS.code, error: rS.error } });
+    wS.shutdown();
+    // the order: a conversation with no tab of its own in scope is refused BEFORE its session is asked (a never-used session's `tab list` binds a tab)
+    const fnC = bdSrcC.slice(bdSrcC.indexOf('  async function fillVaultField('), bdSrcC.indexOf('  async function fillVaultField(') + 9000);
+    const ctC = bdSrcC.slice(bdSrcC.indexOf('  async function currentTabFor('), bdSrcC.indexOf('  async function currentTabFor(') + 1600);
+    const nsC = bdSrcC.slice(bdSrcC.indexOf('  async function noteSnapshot('), bdSrcC.indexOf('  async function noteSnapshot(') + 1600);
+    ok(ctC.indexOf('if (!hasScopedTab(w, target))') > 0 && ctC.indexOf('if (!hasScopedTab(w, target))') < ctC.indexOf('keeper.currentTabOf(') && fnC.includes('const ct = await currentTabFor(w, target, targetId);') && nsC.includes('const ct = await currentTabFor(w, target, targetId);') && !nsC.includes('pickScopedTabFor(w, target, { targetId })') && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); return /judged\.targetId && typeof D\.otherSiteFramesFor === 'function'\) \{ try \{ framed = D\.otherSiteFramesFor\(t, \{ targetId: judged\.targetId, kind: 'vault' \}\)/.test(rs); })() && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); const a = rs.indexOf('const r = await D.fillVaultField(t, {'); const b = rs.indexOf('});', a); return a > 0 && b > a && !/targetId/.test(rs.slice(a, b)); })(),
+      'B-21cc: ONE read feeds the fill AND its snapshot\'s references (currentTabFor, asked only once the conversation has a tab of its own in scope); the route hands the fill no tab of the caller\'s, and asks the refusal\'s frame sentence of the tab the fill JUDGED only');
+    // RED: the release's pick (the watch's own entry, else «most recently seen») — the sign-in tab current, the OTHER judged
+    const relSrc = anchored(bdSrcC, fnC.slice(fnC.indexOf('    const ct = await currentTabFor(w, target, targetId);\n'), fnC.indexOf("    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ?")), '    const e = pickScopedTabFor(w, target, { targetId });\n', 'B-21cc control: the release\'s pick');
     const DmRel = MC.load('src/server/browser-dialogs.js', relSrc, 'release-pick');
     fkC.setDom(tidS, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
     const wR = await worldOn(DmRel);
@@ -1619,8 +1655,8 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
       '      if (preferRef && !(e && e.snapshotRefs?.specs?.has(preferRef))) { const withRef = [...w.targets.values()].find((x) => x.sid && x.snapshotRefs?.specs?.has(preferRef)); if (withRef) return withRef; }\n      return e && inScope(scope, e.targetId) && e.sid ? e : null;'
     , "src/server/browser-dialogs.js"),
     // B-21cc (r2491): the fill names ONE tab (the conversation's current one), so the cross-tab fallback is planted where it now looks
-      '    const e = pickScopedTabFor(w, target, { targetId: fillTid });',
-      '    const e = pickScopedTabFor(w, target, { targetId: fillTid, preferRef: isRef ? tgtStr : null });'
+      '    if (!ct.ok) return ct;\n    const e = pickScopedTabFor(w, target, { targetId: ct.targetId });',
+      '    if (!ct.ok) return ct;\n    const e = pickScopedTabFor(w, target, { targetId: ct.targetId, preferRef: isRef ? tgtStr : null });'
     , "src/server/browser-dialogs.js");
   const BD_M7 = m7BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m7BdSrc, 'cross-tab-ref-fallback') : null;
   // Mutant 9 (M1): skip `precheckVaultFill` -> locked vault sends CDP calls and returns `login_phishing` on wrong-origin tab!
@@ -1665,7 +1701,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
       const tidB2 = fkM.addTarget('https://shop.example.test/b');
       fkM.setDom(tidA, { url: 'https://shop.example.test/login', elements: [{ id: 'u', tag: 'input', type: 'email', name: 'Email' }, { id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
       fkM.setDom(tidB2, { url: 'https://shop.example.test/b', elements: [{ id: 'q', tag: 'input', type: 'text', name: 'Search' }] });
-      const w7 = BD_M7 ? BD_M7.create({ keeper: sk, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-m', sessionId: 's-m' }], leaseCountOf: () => 1, logins: logM }) : null;
+      const w7 = BD_M7 ? withCurrentTab(BD_M7).create({ keeper: sk, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-m', sessionId: 's-m' }], leaseCountOf: () => 1, logins: logM }) : null;
       if (w7) {
         await w7.arm('bp-m7');
         for (let i = 0; i < 20; i++) {

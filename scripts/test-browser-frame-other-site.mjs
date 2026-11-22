@@ -246,9 +246,9 @@ console.log('— ④ the doors: the audit, the CLI, the vault fill, the stale ad
     && cli.includes("if (said) console.error(`note: ${said} [frame_other_site]`);") && !cli.includes('console.error(`note: ${au.otherSiteFrame.text} [frame_other_site]`)'),   // stale-pins: kept — an absence check (the false sentence must not come back)
     'the CLI words the note BY THE REPLY: a snapshot by its own listing (listed / unlisted), a «not found» the selector\'s recipe — never the hub\'s one sentence for every reply');
   const fv = (route.match(/router\.post\('\/api\/agent\/browser\/fill-vault'[\s\S]*?\n\}\);\n/) || [''])[0];
-  ok(/\(r\.code === 'login_in_frame' \|\| r\.code === 'target_not_found'\) && typeof D\.otherSiteFramesFor === 'function'/.test(fv) && /error: framed && framed\.text \? `\$\{text\} — \$\{framed\.text\}` : text/.test(fv),
+  ok(/\(r\.code === 'login_in_frame' \|\| r\.code === 'target_not_found'\) && judged\.targetId && typeof D\.otherSiteFramesFor === 'function'/.test(fv) && /error: framed && framed\.text \? `\$\{text\} — \$\{framed\.text\}` : text/.test(fv),
     'the vault fill: a login_in_frame or target_not_found on a tab with a frame of another site carries the sentence');
-  ok(/framed = D\.otherSiteFramesFor\(t, \{ targetId: word\(body\.targetId, 64\) \|\| null, kind: 'vault' \}\)/.test(fv), 'r150: the vault\'s refusal carries the VAULT kind — only what is true of the vault');
+  ok(/framed = D\.otherSiteFramesFor\(t, \{ targetId: judged\.targetId, kind: 'vault' \}\)/.test(fv), 'r150: the vault\'s refusal carries the VAULT kind — only what is true of the vault');
   const walkFiles = (rel) => fs.readdirSync(path.join(REPO, rel), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walkFiles(path.join(rel, d.name)) : (/\.(m?js|md)$/.test(d.name) ? [path.join(rel, d.name)] : [])));
   const stale = walkFiles('src').concat(walkFiles('docs/agent')).filter((f) => /\bopen the frame's own address in a top-level tab/.test(read(f)));   // stale-pins: kept — an absence check (the stale advice must not come back)
   ok(stale.length === 0, 'the stale advice «open the frame\'s own address in a top-level tab» is gone (the ticket cannot come back to the page)', stale);

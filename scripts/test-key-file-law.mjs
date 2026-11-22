@@ -923,7 +923,7 @@ try {
       { id: 'np', tag: 'input', type: 'password', axRole: 'textbox', axName: 'New password' },
     ],
   });
-  await w5.noteSnapshot({ profileId: pf5.id, browserKey: 'bk-kfl5' }, '- textbox "Current password" [ref=e1]\n- textbox "New password" [ref=e2]');
+  await w5.noteSnapshot({ profileId: pf5.id, browserKey: 'bk-kfl5' }, { parsedRefs: require('../src/browser-verbs.js').parseSnapshotRefs('- textbox "Current password" [ref=e1]\n- textbox "New password" [ref=e2]'), targetId: tid5 }); // B-21cc: the snapshot's tab, named (this world's keeper reads no session)
   const fillCur5 = await w5.fillVaultField(
     { profileId: pf5.id, browserKey: 'bk-kfl5', ephemeral: false },
     { targetId: tid5, target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
@@ -1001,7 +1001,7 @@ try {
     const w5M4 = mkWatch5(Dm5M4, keeper5M4);
     await w5M4.arm(pf5M4.id, { budgetMs: 3000 });
     logins5.confirmOwn(entry5, { who: 'owner' });
-    await w5M4.noteSnapshot({ profileId: pf5M4.id, browserKey: 'bk-kfl5' }, '- textbox "Current password" [ref=e1]');
+    await w5M4.noteSnapshot({ profileId: pf5M4.id, browserKey: 'bk-kfl5' }, { parsedRefs: require('../src/browser-verbs.js').parseSnapshotRefs('- textbox "Current password" [ref=e1]'), targetId: tid5 }); // B-21cc: the snapshot's tab, named
     await w5M4.fillVaultField(
       { profileId: pf5M4.id, browserKey: 'bk-kfl5', ephemeral: false },
       { targetId: tid5, target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },

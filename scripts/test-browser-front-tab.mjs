@@ -142,7 +142,7 @@ const raw = process.argv.slice(2);
 const pin = raw.includes('--pin-tab');
 const argv = raw.filter((x) => x !== '--pin-tab' && x !== '--json');
 const [a, b] = argv;
-fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ ns, sess, argv: raw }) + '\\n');
+fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ ns, sess, argv: raw, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('AGENT_BROWSER_'))) }) + '\\n');
 if (a === '--version') { console.log('agent-browser 0.38.1'); process.exit(0); }
 let s = read();
 const live = !!(s && alive(s.pid));
@@ -421,6 +421,19 @@ async function keeperCreateLeg(X, KTid, tbId) {
   const cB = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KB });
   const none = await C.k.currentTabOf({ profileId: C.p.id, browserKey: 'bk-0000fc03' });
   const eph = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA, ephemeral: true });
+  // r2711's ruling: the fill's ONE spawn is this read — its argv and env carry neither an entry's name nor a value (asserted on THIS
+  // real keeper, over the stand-in driver's own log of each call)
+  const logLines = () => fs.readFileSync(path.join(C.DATA, '..', 'ab', 'cmds.log'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const n0 = logLines().length;
+  const cR = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
+  const spawned = logLines().slice(n0);
+  const blob = JSON.stringify(spawned);
+  ok(!!(cR.ok && spawned.length === 1 && JSON.stringify(spawned[0].argv) === JSON.stringify(['tab', 'list', '--json']) && spawned[0].env.AGENT_BROWSER_CDP && !/web-login:|vault|password|#alice/i.test(blob)),
+    'B-21cc (r2711\'s ruling): on a REAL keeper the fill\'s one spawn is the current tab\'s read — exactly `tab list --json` under the lease\'s own url; its argv and env hold no entry name and no value', { spawned });
+  // no row marked current (the session bound to a tab gone from the list) ⇒ refused by name
+  C.edit(C.NS, (s) => { s.sessions['vs-' + KA] = 'E'.repeat(32); });
+  const noRow = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
+  ok(!noRow.ok && noRow.code === 'current_tab_unreadable' && /no tab is marked current/.test(noRow.error), 'B-21cc (round w41hvnm5h): a list with NO row marked current is refused by name, never the first row', noRow);
   C.edit(C.NS, (s) => { s.pid = 2147483646; }); // the stand-in's browser gone: the lease's url answers nothing
   const dead = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
   ok(!!(c1.ok && c1.targetId === second && second && second !== C.aTab && c2.ok && c2.targetId === C.aTab && cB.ok && cB.targetId === C.bTab),

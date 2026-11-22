@@ -4236,17 +4236,19 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  never a guess. Its caller (the vault fill) asks only when the conversation already has a tab of its own in scope: a
    *  never-used session's `tab list` would bind a new tab (measured). An EPHEMERAL browser never reaches here on the vault fill's
    *  road (the login-channel law refuses it first: browser-mediation leaseRoadVerdict, ephemeral ⇒ no mode); asked anyway, it is
-   *  refused by name (its own list would be read through its pairs, as userTabAct reads it). → { ok, targetId } | { ok: false, code, error } */
+   *  refused by name (its own list would be read through its pairs, as userTabAct reads it). On a MEDIATED lease (the fill's road)
+   *  the list comes through the proxy's scoped url, so it holds only this conversation's tabs. → { ok, targetId } | { ok: false, code, error } */
   async function currentTabOf({ profileId = '', browserKey = '', ephemeral = false } = {}) {
     ensureLoaded();
     const bk = String(browserKey || '');
-    const no = (why) => ({ ok: false, code: 'current_tab_unreadable', error: `VibeSpace could not read which tab this conversation is on (${why}) — nothing was filled; try again` });
+    // round w41hvnm5h: a refusal a retry cannot cure names its door instead of «try again»
+    const no = (why, next = 'try again') => ({ ok: false, code: 'current_tab_unreadable', error: `VibeSpace could not read which tab this conversation is on (${why}) — nothing was filled; ${next}` });
     const p = profile(String(profileId || ''));
     if (!p) return no('no such browser');
     if (ephemeral || isEph(p)) return no('a browser of its own is not read on this road');
     const rec = reg.browsers[p.id];
-    if (p.host || !B.isLiveBrowser(rec) || !isLocalRec(rec)) return no('the browser is not running on this machine');
-    if (!B.findLease(reg.leases, p.id, bk)) return no('this conversation holds no lease on it');
+    if (p.host || !B.isLiveBrowser(rec) || !isLocalRec(rec)) return no('the browser is not running on this machine', `start it (\`vibespace-browser use ${p.label || p.id}\`), then fill again`);
+    if (!B.findLease(reg.leases, p.id, bk)) return no('this conversation holds no lease on it', `\`vibespace-browser use ${p.label || p.id}\` first`);
     const o = await leaseCliOpts(p.id, bk);
     if (!o) return no('the browser answered no CDP url');
     const rows = await tabListUnder(nsOf(p.id), { ...o, timeout: CURRENT_TAB_READ_MS });

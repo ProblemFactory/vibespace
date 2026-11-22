@@ -4806,6 +4806,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
   }
 
+  /** B-21cc (r2491; round w41hvnm5h): THE CONVERSATION's CURRENT TAB for every road that feeds a vault fill — the fill itself and
+   *  its snapshot's references (`noteSnapshot`): a tab an in-process caller names, else the keeper's own read (`currentTabOf`: the
+   *  session's own `tab list`, the row marked active). A conversation with no tab of its own in scope is refused before its session
+   *  is asked (a never-used session's `tab list` would bind a tab); unreadable ⇒ refused by name. Never the old pick.
+   *  → { ok: true, targetId } | { ok: false, code, error } */
+  async function currentTabFor(w, target, targetId = null) {
+    if (targetId) return { ok: true, targetId };
+    if (!hasScopedTab(w, target)) return { ok: false, code: 'target_not_found', error: 'no active tab in scope to fill — open a page first' };
+    let cur = null;
+    try { cur = keeper && typeof keeper.currentTabOf === 'function' ? await keeper.currentTabOf({ profileId: String((target && target.profileId) || ''), browserKey: (target && target.browserKey) || '', ephemeral: Boolean(target && target.ephemeral) }) : null; } catch { cur = null; }
+    if (!cur || !cur.ok || !cur.targetId) return { ok: false, code: 'current_tab_unreadable', error: (cur && cur.error) || 'VibeSpace could not read which tab this conversation is on — nothing was filled; try again' };
+    if (w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
+    return { ok: true, targetId: cur.targetId };
+  }
   /** B-21cc (r2491): whether the conversation has ANY tab of its own in scope here (asked before its session is). */
   function hasScopedTab(w, target) {
     const scope = scopeFor(target);
@@ -4837,7 +4851,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const parsedRefs = normOpts.parsedRefs;
     const targetId = normOpts.targetId || null;
     if (!w || w.state !== 'open' || !Array.isArray(parsedRefs)) return { ok: false, count: 0 };
-    const e = pickScopedTabFor(w, target, { targetId });
+    // B-21cc (round w41hvnm5h's must): the references are written to the conversation's CURRENT tab, through the SAME read the fill
+    // uses (currentTabFor; the route's note names no tab — the driver's snapshot answer carries none); unreadable ⇒ nothing is
+    // written, and the fill then refuses by name — never the old pick
+    const ct = await currentTabFor(w, target, targetId);
+    if (!ct.ok) return { ok: false, count: 0, code: ct.code };
+    const e = pickScopedTabFor(w, target, { targetId: ct.targetId });
     if (!e || !e.sid) return { ok: false, count: 0 };
     const specs = new Map();
     for (const pr of parsedRefs.slice(0, 16384)) {
@@ -4946,6 +4965,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     subagent = false,
     remoteSession = false,
     agentFacts = null,
+    judged = null, // B-21cc (round w41hvnm5h): an object the caller passes; `targetId` = the tab this fill judged
   } = {}) {
     const pid = String((target && target.profileId) || '');
     const tgtStr = String(elemTarget || '').trim();
@@ -4973,22 +4993,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!tgtStr) return { ok: false, code: 'bad_request', error: 'missing target (@ref or CSS selector)' };
     const isRef = /^@[A-Za-z0-9_-]+$/.test(tgtStr);
     // B-21cc (the coordinator's r2491; report fb-03ae550a21): ONE TAB, NO GUESS. The fill acts on the conversation's CURRENT tab —
-    // the row its own session's `tab list` marks active, the tab its `get url` and `snapshot` read — as the keeper reads it
-    // (`currentTabOf`: the lease's own list, as its tab fence does). THAT one tab is judged and filled; there is no second
-    // resolution and no «most recently seen» pick: unreadable ⇒ refused by name (`current_tab_unreadable`). An in-process caller
-    // may name the tab (`targetId`). A conversation with no tab of its own in scope is refused before its session is asked (a
-    // never-used session's `tab list` would bind a tab of its own).
-    let fillTid = targetId;
-    if (!fillTid) {
-      if (!hasScopedTab(w, target)) return { ok: false, code: 'target_not_found', error: 'no active tab in scope to fill — open a page first' };
-      let cur = null;
-      try { cur = keeper && typeof keeper.currentTabOf === 'function' ? await keeper.currentTabOf({ profileId: pid, browserKey: (target && target.browserKey) || '', ephemeral: Boolean(target && target.ephemeral) }) : null; } catch { cur = null; }
-      if (!cur || !cur.ok || !cur.targetId) return { ok: false, code: 'current_tab_unreadable', error: (cur && cur.error) || 'VibeSpace could not read which tab this conversation is on — nothing was filled; try again' };
-      if (w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
-      fillTid = cur.targetId;
-    }
-    const e = pickScopedTabFor(w, target, { targetId: fillTid });
-    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ? 'no active tab in scope to fill — open a page first' : 'the tab this conversation is on is not one of its own pages here — nothing was filled' };
+    // the row its own session's `tab list` marks active, the tab its `get url` and `snapshot` read — through `currentTabFor` (the
+    // keeper's own read, the SAME one the snapshot's references are written through). THAT one tab is judged and filled; there is
+    // no second resolution and no «most recently seen» pick: unreadable ⇒ refused by name. The read comes BEFORE the judgment: a tab
+    // switch during it leaves the value for the tab that was current at the read — still the one judged, still in scope.
+    const ct = await currentTabFor(w, target, targetId);
+    if (!ct.ok) return ct;
+    const e = pickScopedTabFor(w, target, { targetId: ct.targetId });
+    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ? 'no active tab in scope to fill — open a page first' : 'the tab this conversation is on is not one of its own pages here (a page opened a moment ago may not be watched yet: try again in a moment) — nothing was filled' };
+    if (judged && typeof judged === 'object') judged.targetId = e.targetId; // round w41hvnm5h: the tab judged, for the refusal's frame sentence
 
     const trackedTabOrigin = BL().originOf(tabLoginUrlOf(e));
     const parsedEarlySpec = BL().parseVaultFillSpec(spec, { user, generate: !!generate, tabOrigin: trackedTabOrigin });
