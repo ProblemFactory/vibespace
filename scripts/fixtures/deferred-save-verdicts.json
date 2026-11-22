@@ -925,6 +925,11 @@
   "why": "its act's last step: the release's own synchronous save"
  },
  {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > setEnvironment · commitSync()",
+  "verdict": "sync-last",
+  "why": "its act's last step: the release's own synchronous save"
+ },
+ {
   "key": "browser-keeper · src/server/browser-keeper.js · create > moveProxyPassword · save()",
   "verdict": "sync",
   "why": "the answer waits for the landing (landNow); a FAILED write puts the row back (not_written), a held one says it finishes by itself",

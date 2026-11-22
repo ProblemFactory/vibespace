@@ -763,6 +763,19 @@ router.post('/api/browser/profiles/:id/egress', async (req, res) => {
   try { const r = await k.keepEgress(req.params.id, req.body && typeof req.body === 'object' ? req.body : {}); return res.status(r.ok ? 200 : EXIT_STATUS[r.code] || 422).json(r); }
   catch (e) { return res.status(500).json({ error: String((e && e.message) || e), code: 'error' }); }
 });
+// B-9584 U3 — A PROFILE's ENVIRONMENT (time zone, language, location and its sites): the PERSON's save in the profile's «Environment…»
+// dialog. No agent's token, no CLI verb, no automation verb (the cookie write's same-origin verdict runs before it, src/auth.js).
+const ENV_IS_USERS = 'setting a browser profile\'s environment is the user\'s act — an agent\'s token cannot set it';
+const ENV_STATUS = Object.freeze({ 'not-found': 404, browser_place_unsupported: 409, env_sites_engine: 409, env_sites_unoffered: 409 });
+router.post('/api/browser/profiles/:id/environment', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, ENV_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (typeof k.setEnvironment !== 'function') return res.status(503).json({ error: 'a profile\'s environment cannot be set on this server', code: 'unavailable' });
+  try { const r = await k.setEnvironment(req.params.id, req.body && typeof req.body === 'object' ? req.body : {}); return res.status(r.ok ? 200 : ENV_STATUS[r.code] || 400).json(r); }
+  catch (e) { return res.status(500).json({ error: String((e && e.message) || e), code: 'error' }); }
+});
 router.post('/api/browser/profiles/:id/browse', async (req, res) => {
   if (refuseHost(req, res)) return;
   if (refuseAgentBearer(req, res)) return;

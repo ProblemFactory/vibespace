@@ -7657,6 +7657,35 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       return { ok: true, profile: pview(p) };
     });
   }
+  /** B-9584 U3 — THE PROFILE's ENVIRONMENT IS SET HERE ALONE: the person's save in the profile's «Environment…» dialog (the route
+   *  refuses every bearer; no CLI verb, no agent verb). The setting judged WHOLE (ENV.environmentVerdict — each refusal by its own
+   *  name); r2172 (a) where it is set: a place or «blocked» on a conversation's own browser or a paired machine's is refused by name
+   *  (neither has the stored denial nor the hold: its sites would read that machine's real position); r2311: a list of sites on an
+   *  ENGINE's profile is refused by name (its kernel gives the place to every site). Kept canonical (all «this machine's» ⇒ nothing
+   *  kept); a running browser takes it at its NEXT start (decision 5a): the answer says `restartNeeded`, the dialog offers the restart. */
+  function setEnvironment(profileId, input = {}) {
+    return batched(() => {
+      ensureLoaded();
+      const p = profile(profileId);
+      if (!p) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };
+      if (!input || typeof input !== 'object' || !Object.prototype.hasOwnProperty.call(input, 'environment')) return { ok: false, code: 'env_invalid', error: 'the environment is missing' };
+      const v = ENV.environmentVerdict(input.environment);
+      if (!v.ok) return { ok: false, code: v.code, error: v.error };
+      const next = v.value || null;
+      const engine = !!(p.browser && p.browser.kind === 'plugin');
+      const g = next ? ENV.resolveEnvironment(next, ENV.keptExitOf(p)).geolocation : null;
+      if (g && !engine && (isEph(p) || p.host)) return { ok: false, code: 'browser_place_unsupported', error: `a place or a blocked location is held only on a named profile of this machine's browser — on ${isEph(p) ? 'a conversation\'s own browser' : 'a paired machine'} its sites would read that machine's real position` };
+      const sites = next && next.location && Array.isArray(next.location.sites) ? next.location.sites : [];
+      if (sites.length && engine) return { ok: false, code: 'env_sites_engine', error: 'an engine\'s profile gives its place to every site (its kernel holds it) — a list of sites is kept only on this machine\'s own browser' };
+      if (JSON.stringify(p.environment || null) === JSON.stringify(next)) return { ok: true, changed: false, restartNeeded: false, profile: pview(p) };
+      if (next) p.environment = next; else delete p.environment;
+      commitSync();
+      const rec = reg.browsers[p.id];
+      const restartNeeded = !!(rec && (rec.state === 'ready' || rec.state === 'starting'));
+      log.log?.(`[browser] ${p.id}: its environment set — ${JSON.stringify(ENV.environmentLogView(next || {}))}${restartNeeded ? ' (at its next start)' : ''}`);   // the log view: no place, no origin
+      return { ok: true, changed: true, restartNeeded, profile: pview(p) };
+    });
+  }
   // ── B-8b87 (lane cli-update-needs-nothing): A PROFILE'S PROXY REACHES ITS BROWSER — THE LAW: a field the form validates reaches the
   // process it names. ONE road for every profile proxy: this profile's forwarder above (src/server/egress-proxy.js), its upstream =
   // the profile's proxy, the browser handed only its loopback port (`rec.proxyRoad.arg` on the driver's derived config and the
@@ -9323,6 +9352,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields
     onLease, addDigest, updateProfile, moveProxyPassword, // + B-8b87: «Move the password to the vault»
     exitCheck, keepEgress, // + the exit check (a person's press; the person's confirm)
+    setEnvironment, // B-9584 U3: the profile's environment — the person's save in its «Environment…» dialog
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
     storeFile, STORE_FILE, uid, _reg: () => reg, _proxyCredHeld: (id) => proxyCreds.has(String(id || '')), /* a suite's seam: whether the forwarders' login entry holds this profile (a yes/no — no secret crosses) */ _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
