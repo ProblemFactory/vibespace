@@ -103,6 +103,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a phone, the Claude page of Settings no longer scrolls sideways: the Default effort level box now fits the screen.
 - Background Work results for a shut or offline paired machine now wait in order and go out when it is back; after an hour, For you shows one item for it.
 - What you type in a Task Group's Backlog (the add box, open edits) now stays when the list redraws for someone else's change.
+- Disconnecting a storage now says «Disconnecting…» while it waits, and says so when the storage did not disconnect.
 
 ## 2.369.415 — 2026-11-21
 
