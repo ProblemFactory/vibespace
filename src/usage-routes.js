@@ -181,7 +181,10 @@ function readUsageCache() {
 // itself lives in usage-cache/__global__.json — so it is written by the STORE WRITER (memory is authoritative; a burst is one
 // write, off the loop; the folder made on its own thread), the latest state at its write; no state ⇒ nothing written, as
 // before. Its other writer, the identity repair (src/reading-repair.js repairGlobalFile), flushes this file before it judges it.
-function writeUsageCache() {
+function writeUsageCache({ evenNone = false } = {}) {
+  // r2430: a repair's verdict of NONE for the machine login's reading — the copy says none too (`{ claude: null }`: readUsageCache
+  // reads it as none, repairGlobalFile as «absent»), so a restart never seeds back the reading the repair took away
+  if (evenNone) { try { require('./store-writer.js').storeWriter().dirty(USAGE_CACHE_FILE, { name: 'usage-cache.write', makeDir: true, produce: () => JSON.stringify({ claude: _rateLimitCache || null }, null, 2) }); } catch { } return; }
   if (!_rateLimitCache) return;
   try {
     require('./store-writer.js').storeWriter().dirty(USAGE_CACHE_FILE, { name: 'usage-cache.write', makeDir: true, produce: () => (_rateLimitCache ? JSON.stringify({ claude: _rateLimitCache }, null, 2) : null) });
@@ -361,7 +364,25 @@ let _codexLinkUndecided = false;   // B-360d (round wldn7whag): this pass could 
  *  memory is NEWER than the file (the store writer's produce reads memory when it writes): the reload keeps memory then, or the
  *  owed write would land the older file's reading (the active poll's reading lives in memory and this copy alone; the repair
  *  that judges this copy, reading-repair.js repairGlobalFile, flushes it first, so a repaired copy is read). */
-function reloadRateLimitCache() { let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }
+/** r2430 — A REPAIR'S VERDICT OUTRANKS MEMORY. When the identity repair (repairIdentityAnchors → src/reading-repair.js
+ *  repairSidecarsByApiPhase, its ② «THE CACHE SNAPSHOT») REPLACED, EMPTIED or STRIPPED the machine login's reading in the folder
+ *  (its report's row for __global__), memory takes the folder's OWN state for it — the repaired reading, or none (an emptied
+ *  file states no reading) — whatever the times say: the ingestion takes a folder reading only when it is NEWER, and a repaired
+ *  one is older or undated, so the reading the repair judged another account's stood in the machine login's row (and, through
+ *  the same-account merge, on the linked account's row) until a newer one came. The copy (the boot's seed) follows. Nothing else
+ *  in the ingestion moves. */
+const REPAIR_VERDICTS = new Set(['replaced', 'emptied', 'stripped']);
+const repairedGlobal = (rep) => { const row = rep && Array.isArray(rep.identities) ? rep.identities.find((r) => r && r.key === '__global__') : null; return !!(row && REPAIR_VERDICTS.has(row.cache)); };
+function reloadRateLimitCache(rep = null) {
+  if (repairedGlobal(rep)) {
+    let u = null; try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, '__global__.json'), { via: usageFolder.via }); } catch { u = null; }
+    _rateLimitCache = u && typeof u.fetchedAt === 'number' ? u : null;
+    writeUsageCache({ evenNone: true });
+    ingestPassiveUsage();
+    return;
+  }
+  let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage();
+}
 function ingestPassiveUsage() {
   const allAccts = accounts.list().accounts || [];
   const roster = allAccts.filter((a) => oauthUsageAccount(a));
@@ -1723,7 +1744,7 @@ app.post('/api/usage/repair-identity', async (req, res) => {
   let settled = null; try { settled = await accounts.signinFactsNow(null); } catch { }
   const rep = repairIdentityAnchors('manual', { since: settled && settled.since });
   if (rep && rep.error) return res.status(500).json({ error: 'identity repair failed: ' + rep.error, code: 'repair-failed' });
-  try { reloadRateLimitCache(); } catch { }
+  try { reloadRateLimitCache(rep); } catch { }   // r2430: the repair's verdict for the machine login's reading outranks memory
   try { for (const k of Object.keys(_onDemandUsageAt)) delete _onDemandUsageAt[k]; } catch { }
   // the folders this press could NOT compare (not read inside the person's bound, or unreadable) are NAMED in its reply (round
   // wge361035's small, 主开发 r2297): a row not read carries no email and is never grouped by one — the hourly run repairs it

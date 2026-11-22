@@ -13,6 +13,11 @@
 //     write of the copy is OWED (r2335): the owed write lands the newer reading, never the older file's. The folder no longer
 //     holding the reading stands in for the active poll's road (its reading lives in memory and this copy alone). RED: the
 //     release's reload reads the older file over memory and the owed write lands it.
+//  ⑥ A REPAIR'S VERDICT OUTRANKS MEMORY (r2430): when the identity repair REPLACED or EMPTIED the machine login's reading in the
+//     folder (its report's row for __global__), the reload takes the folder's own state for it — the repaired reading, or none —
+//     whatever the times say, and the copy (the boot's seed) follows ({ claude: null } for none); with no such verdict nothing
+//     moves. The repair's write is the product's own road (the file, then the write path's notice with replace). RED: the reload
+//     without the verdict keeps the reading the repair judged another account's.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -140,8 +145,8 @@ const judge = (mod, w) => mod.repairGlobalFile({ dataDir: w.dd, cacheDir: w.cach
 // ═══ ⑤ the reload keeps memory while a write of the copy is owed (r2335) ═══
 console.log('\n— ⑤ the reload keeps memory while a write of the copy is owed');
 const UCF = require(path.join(REPO, 'src/usage-cache-folder.js'));
-const RELOAD_CURE = "function reloadRateLimitCache() { let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }\n";
-const RELOAD_REL = "function reloadRateLimitCache() { _rateLimitCache = readUsageCache(); ingestPassiveUsage(); }\n";   // stale-pins: kept (the release reload)
+const RELOAD_CURE = "  let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage();\n";
+const RELOAD_REL = "  _rateLimitCache = readUsageCache(); ingestPassiveUsage();\n";   // stale-pins: kept (the release reload)
 // the folder's reader answers in microtasks (its fsp hook): its fresh read lands before the store writer's next turn, the write stays owed
 const nowFsp = { readdir: async (d) => fs.readdirSync(d), readFile: async (f, e) => fs.readFileSync(f, e) };
 const reloadWorld = async (routesMod) => {
@@ -167,5 +172,40 @@ const which = (at) => (at === T ? 'the newer reading' : at === T - 36e5 ? 'the O
   const Rel = M.load('src/usage-routes.js', anchored(ROUTES_SRC, RELOAD_CURE, RELOAD_REL, 'the release reload'), 'release-reload');
   const r = await reloadWorld(Rel);
   ok(r.owed === true && r.at === T - 36e5 && r.five === 0.05, `⑤ RED CONTROL the release's reload reads the older file over memory and the owed write lands it (owed: ${r.owed}; landed: ${which(r.at)})`, r);
+}
+// ═══ ⑥ a repair's verdict outranks memory (r2430) ═══
+console.log('\n— ⑥ a repair\'s verdict for the machine login\'s reading outranks memory');
+const UW = require(path.join(REPO, 'src/usage-cache-write.js'));
+const VERDICT = "  if (repairedGlobal(rep)) {\n    let u = null; try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, '__global__.json'), { via: usageFolder.via }); } catch { u = null; }\n    _rateLimitCache = u && typeof u.fetchedAt === 'number' ? u : null;\n    writeUsageCache({ evenNone: true });\n    ingestPassiveUsage();\n    return;\n  }\n";
+const S0 = Math.floor(T / 1000);
+const REPAIRED = { fetchedAt: T - 72e5, source: 'statusline', fiveHour: { utilization: 0.07, resetsAt: S0 + 1800 }, sevenDay: { utilization: 0.04, resetsAt: S0 + 5 * 86400 }, repairedBy: 'identity-repair:manual' };
+const EMPTIED = { orgUuid: 'org-own', emptiedReason: 'no anchor of the machine login agrees with its API-derived window', repairedBy: 'identity-repair:manual' };
+// memory holds the folder's reading (the one the repair judges another account's) and its copy is on disk; then the repair
+// writes the folder's file its own way and hands its report to the reload
+const verdictWorld = async (routesMod, repaired, cache) => {
+  const w = usageWorld();
+  const api = await setup(routesMod, w);
+  storeWriter().flushSync([w.file]);
+  const f = path.join(w.cacheDir, '__global__.json'), text = JSON.stringify(repaired);
+  fs.writeFileSync(f, text); UW.noteWritten(f, text, { replace: true });
+  await quiet(() => api.reloadRateLimitCache({ identities: [{ key: '__global__', cache }] }));
+  storeWriter().flushSync([w.file]);
+  let doc = null; try { doc = JSON.parse(fs.readFileSync(w.file, 'utf8')); } catch { doc = null; }
+  return { copy: doc ? doc.claude : undefined, at: doc && doc.claude ? doc.claude.fetchedAt : null };
+};
+const said = (r) => (r.copy === null ? 'none' : r.at === T ? 'the reading the repair judged (newer)' : r.at === T - 72e5 ? 'the repaired reading' : String(r.at));
+{
+  const ROUTES = require(path.join(REPO, 'src/usage-routes.js'));
+  const a = await verdictWorld(ROUTES, REPAIRED, 'replaced');
+  ok(!!(a.at === T - 72e5 && a.copy && a.copy.sevenDay && a.copy.sevenDay.utilization === 0.04), `⑥ REPLACED: memory takes the repaired reading although it is older, and its copy follows (memory, as its copy lands it: ${said(a)})`, a);
+  const b = await verdictWorld(ROUTES, EMPTIED, 'emptied');
+  ok(!!(b.copy === null), `⑥ EMPTIED: memory states no reading and its copy says none ({ claude: null }) — a restart seeds nothing back (${said(b)})`, b);
+  const c = await verdictWorld(ROUTES, REPAIRED, 'kept');
+  ok(!!(c.at === T), `⑥ NO VERDICT for the machine login (kept): nothing moves — memory keeps its newer reading over an older folder one (${said(c)})`, c);
+}
+{
+  const NoVerdict = M.load('src/usage-routes.js', anchored(ROUTES_SRC, VERDICT, '', 'the reload without the repair verdict'), 'no-verdict');
+  const r = await verdictWorld(NoVerdict, REPAIRED, 'replaced');
+  ok(!!(r.at === T), `⑥ RED CONTROL the reload without the verdict: the reading the repair judged another account's stays in memory and in its copy (${said(r)})`, r);
 }
 report();
