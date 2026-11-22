@@ -34,7 +34,9 @@
 //       one cleanup disposes createPopover's outside-press close (it was 3 → 33,
 //       each stale listener holding its detached chooser);
 //   (k)…(n) the verify-r1 LOWS (2026-09-25), each red on the r1-minor cut:
-//   (k) a tab title change REBUILDS the button under an open chooser: the new
+//   (k) a REBUILD under an open chooser (the strip's structure re-keyed — a tab
+//       added, closed or made active; since B-6cf9 a RENAME is painted in place:
+//       the same button, the chooser's row says the new title — leg k0): the new
 //       button says aria-expanded="true" and is the chooser's anchor, Esc hands
 //       the focus to it (was: body), a click on it keeps the SAME chooser (was:
 //       "a click elsewhere" ⇒ close + re-create);
@@ -53,7 +55,7 @@
 //   (n) a persisted A+B chain after a reload is ONE grouped button with no
 //       input at all (was: three single buttons until the first window event);
 //   (o) (2026-09-26, found by the one-core load construction of the (l) red:
-//       master's (a) went red too) a tab title change REBUILDS the button under
+//       master's (a) went red too) a REBUILD (the structure re-keyed) of the button under
 //       a RESTING pointer and Chrome re-targets it (a bare pointerenter): after
 //       a click, and after a hover chooser dismissed with Esc, nothing grows in
 //       two intent spans (was: a hover chooser 300 ms later, 5 of 5); a genuine
@@ -253,13 +255,21 @@ try {
   // ── the verify-r1 LOW legs (functions: CONTROL 2 re-runs them on the pre-fix bundle; defined after the
   //    ONBOARDED_SOURCE addScript — legRestore navigates, test-architecture §47) ──
   // a tab title change re-keys the taskbar structure ⇒ the grouped button is REBUILT under the open chooser
-  const REBUILD = `(() => { const { B } = window.__ids; const g0 = document.querySelector('.taskbar-group'); const w = app.wm.windows.get(B); if (window.__kTitle == null) window.__kTitle = w.title; w.title = 'B renamed ' + Math.random().toString(36).slice(2, 6) + ' \\u2014 /usr'; app.updateTaskbar(); const g1 = document.querySelector('.taskbar-group'); const p = document.querySelector('${CH}'); return { rebuilt: !!g0 && !!g1 && g0 !== g1, chooser: !!p, expanded: g1 && g1.getAttribute('aria-expanded'), anchored: !!(p && p._chooser && p._chooser.anchor === g1), focusRow: document.activeElement && document.activeElement.getAttribute('role') }; })()`;
+  // B-6cf9 (block lines 235/236; the block's hosted run 44980743210 read all five of this suite's rebuild legs red): a tab title
+  // change is painted IN PLACE now — the grouped button stays — so a rename no longer makes a rebuild. A rebuild comes from the
+  // strip's STRUCTURE (a tab added, closed or made active; a window opened or closed): REBUILD makes it through the product's own
+  // path, the strip's structure name re-keyed and app.updateTaskbar() — every leg below meets a REAL rebuild under its open chooser
+  // or resting pointer, as before. RENAME (leg k0) pins the new law: a tab renamed under the open chooser keeps the SAME button,
+  // the chooser stays, and its row says the new title
+  const REBUILD = `(() => { const g0 = document.querySelector('.taskbar-group'); const c = document.getElementById('taskbar-items'); if (c) c._structKey = '(re-keyed by the suite)'; app.updateTaskbar(); const g1 = document.querySelector('.taskbar-group'); const p = document.querySelector('${CH}'); return { rebuilt: !!g0 && !!g1 && g0 !== g1, chooser: !!p, expanded: g1 && g1.getAttribute('aria-expanded'), anchored: !!(p && p._chooser && p._chooser.anchor === g1), focusRow: document.activeElement && document.activeElement.getAttribute('role') }; })()`;
+  const RENAME = `(() => { const { B } = window.__ids; const g0 = document.querySelector('.taskbar-group'); const w = app.wm.windows.get(B); if (window.__kTitle == null) window.__kTitle = w.title; const t = 'B renamed ' + Math.random().toString(36).slice(2, 6) + ' \\u2014 /usr'; w.title = t; app.updateTaskbar(); const g1 = document.querySelector('.taskbar-group'); const p = document.querySelector('${CH}'); const row = p && p.querySelector('.overlap-switcher-item[data-win-id="' + B + '"] .taskbar-chooser-label'); return { same: !!g0 && g0 === g1, chooser: !!p, row: row ? row.textContent : null, want: t.split(' \\u2014 ')[0] }; })()`;
   const UNTITLE = `(() => { const w = app.wm.windows.get(window.__ids.B); if (w && window.__kTitle != null) w.title = window.__kTitle; window.__kTitle = null; app.updateTaskbar(); return true; })()`;
   // (k) keyboard: ArrowUp chooser → rebuild → Esc; mouse: in front, click chooser → rebuild → click the rebuilt button
   async function legReanchor() {
     await park(); await focusC();
     await evalJs(`document.querySelector('.taskbar-group').focus(); true`);
     await key('ArrowUp'); await sleep(120);
+    const k0 = await evalJs(RENAME);
     const k1 = await evalJs(REBUILD);
     await key('Escape');
     const k2 = await evalJs(`({ chooser: !!document.querySelector('${CH}'), back: !!document.activeElement && document.activeElement.classList.contains('taskbar-group') && document.activeElement.isConnected, expanded: document.querySelector('.taskbar-group')?.getAttribute('aria-expanded'), focus: document.activeElement ? (document.activeElement.className || document.activeElement.tagName) : null })`);
@@ -272,7 +282,7 @@ try {
     await key('Escape');
     await evalJs(`window.__kPop = null; true`);
     await evalJs(UNTITLE);
-    return { k1, k2, k3a, k3, k4 };
+    return { k0, k1, k2, k3a, k3, k4 };
   }
   // (l) a pen (a fine, hovering pointer) rests on the grouped button. The record is judged by WHO ARMED the open
   // (scripts/pen-hover-judge.mjs), never by the last pointerenter's type; a 'premise' trial (another pointer entered
@@ -601,7 +611,8 @@ try {
   // ══ the verify-r1 LOWS (2026-09-25): (k) re-anchor · (l) pen · (m) row menu · (n) restore ══
   console.log('(k) a taskbar rebuild under an open chooser re-anchors it to the live button');
   const k = await legReanchor();
-  check(`ArrowUp chooser, then a tab title change REBUILDS the button (${k.k1.rebuilt}): the chooser stays, the new button says aria-expanded="${k.k1.expanded}" and is the chooser's anchor (${k.k1.anchored})`, k.k1.rebuilt && k.k1.chooser && k.k1.expanded === 'true' && k.k1.anchored && k.k1.focusRow === 'menuitem', k.k1);
+  check(`ArrowUp chooser, then a tab RENAMED under it (B-6cf9): the SAME button (${k.k0.same}, painted in place), the chooser stays (${k.k0.chooser}), its row says the new title («${k.k0.row}»)`, k.k0.same && k.k0.chooser && typeof k.k0.row === 'string' && k.k0.row.includes(k.k0.want), k.k0);
+  check(`…then a REBUILD (the strip's structure re-keyed — a tab added, closed or made active does it) makes a NEW button (${k.k1.rebuilt}): the chooser stays, the new button says aria-expanded="${k.k1.expanded}" and is the chooser's anchor (${k.k1.anchored})`, k.k1.rebuilt && k.k1.chooser && k.k1.expanded === 'true' && k.k1.anchored && k.k1.focusRow === 'menuitem', k.k1);
   check(`Esc closes it and hands the focus to the LIVE button (focus ${k.k2.focus}), aria-expanded back to "false"`, !k.k2.chooser && k.k2.back && k.k2.expanded === 'false', k.k2);
   check('a click on the REBUILT button keeps the SAME chooser (its mousedown is the button\'s own, never "a click elsewhere": no close + re-create)', k.k3a.chooser && k.k3.anchored && k.k4.same && k.k4.opens === 0 && k.k4.closes === 0 && k.k4.expanded === 'true', k);
 
@@ -627,7 +638,7 @@ try {
 
   console.log('(o) a rebuild under a RESTING pointer is not an arrival');
   const o = await legRebuild();
-  check(`after a CLICK, a tab title change rebuilt the button under the resting pointer (${o.clicked.rebuilt}) and Chrome re-targeted it (${o.clicked.retarget}): no hover chooser grew in two intent spans (opens ${JSON.stringify(o.clicked.opens)})`, o.clicked.rebuilt && !!o.clicked.retarget && o.clicked.opens.length === 0 && !o.clicked.chooser, o.clicked);
+  check(`after a CLICK, a rebuild (the strip's structure re-keyed) under the resting pointer made a new button (${o.clicked.rebuilt}) and Chrome re-targeted it (${o.clicked.retarget}): no hover chooser grew in two intent spans (opens ${JSON.stringify(o.clicked.opens)})`, o.clicked.rebuilt && !!o.clicked.retarget && o.clicked.opens.length === 0 && !o.clicked.chooser, o.clicked);
   check(`a genuine arrival opens the hover chooser although the pointer left the button during the previous rebuild (the visit ended \'away\': ${o.escaped.pre.opened}); dismissed with Esc (${o.escaped.pre.gone}) it does not come back through a rebuild under the resting pointer (re-targeted ${o.escaped.retarget}, opens ${JSON.stringify(o.escaped.opens)})`, o.escaped.pre.opened && o.escaped.pre.gone && o.escaped.rebuilt && !!o.escaped.retarget && o.escaped.opens.length === 0 && !o.escaped.chooser, o.escaped);
   ids = await evalJs(SETUP); await evalJs(RECORDER);
 
