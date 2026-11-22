@@ -654,6 +654,20 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       await routes['/api/cli-config/apply']({ body: {}, query: {}, headers: {} }, res);
       ok(!!(body && body.ok === false && /removed: our hook entries are still in ~\/\.claude\/settings\.json/.test(body.error || '') && !/undefined/.test(body.error || '')), 'r1813: the Apply press says the queued removal\'s own reason', body);
     }
+    // r2345 (1): an opted-out start whose look at our rows was NOT read (the guard) — the Apply press says it, never «applied» over it
+    const applyUnread = async (HL) => {
+      const routes = {}, app = { post: (pp, fn) => { routes[pp] = fn; } };
+      HL.create({ activeSessions: new Map(), getSessionStatus: () => null, getUserTodos: () => null, sessionStatusKey: () => null, harnesses: { list: () => [] }, log: () => { }, warn: () => { } })
+        .registerApplyRoute(app, { ensureAgentHooks: async () => ({ optedOut: true, error: 'our hook entries on disk were not read (the home still has not answered an earlier read (1 still out)) — no removal asked; asked again at the next start' }), agentHooksStatus: () => ({}), integrationEnabled: () => true, harnessConfig: { syncCliConfig: async () => ({ receipts: [] }), cliConfigStatus: () => ({}) }, hookRegistrationSafe: () => true });
+      let body = null; const res = { status() { return res; }, json(x) { body = x; return res; } };
+      await routes['/api/cli-config/apply']({ body: {}, query: {}, headers: {} }, res);
+      return body;
+    };
+    const au = await applyUnread(require(path.join(REPO, 'src/server/hooks-late.js')));
+    ok(!!(au && au.ok === false && /our hook entries on disk were not read \(the home still has not answered/.test(au.error || '')), 'r2345 (1): the Apply press says an opted-out start\'s unread look by name — never «applied»', au);
+    const HLU = require(MC.write('src/server/hooks-late.js', anchored(src('src/server/hooks-late.js'), "        ...(hooks && hooks.optedOut && typeof hooks.error === 'string' ? [hooks.error] : []),", '', 'the unread look not gathered'), 'apply-unread'));
+    const aum = await applyUnread(HLU);
+    ok(!!(aum && aum.ok === true), 'RED (the unread look not gathered — line 412\'s form): the press answers «applied» over a look nobody read', aum);
     const SJ = src('server.js'), hc = SJ.slice(SJ.indexOf('function checkAgentHookHealth()'), SJ.indexOf('function checkAgentHookHealth()') + 1600);
     ok(/if \(info\.stale \|\| !info\.installed \|\| scriptMissing\) \{[\s\S]*?ensureAgentHooks\(\{ auto: true \}\)/.test(hc) && (hc.match(/ensureAgentHooks\(/g) || []).length === 1,
       'WIRING (d): the six-hourly check asks the helper only inside «stale, not installed, or the hook script missing»');

@@ -73,6 +73,7 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
         ...Object.entries(hooks && typeof hooks === 'object' ? hooks : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir').map(([k, v]) => `${k}: ${v.error || v.why || 'not applied'}`),   // r1813: a landing carries `why` (an opted-out start's removal)
         ...((cfg && cfg.receipts) || []).filter((x) => x.state === 'error' || x.state === 'refused').map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`),
         ...(cfg && cfg.error ? [cfg.error] : []),
+        ...(hooks && hooks.optedOut && typeof hooks.error === 'string' ? [hooks.error] : []),   // r2345 (1): an opted-out start whose look at our rows was not read (the guard) — the press says it, never «applied» over it
       ];
       res.json({ ok: !failed.length, ...(failed.length ? { error: failed.join('; ') } : {}), hooks, cliConfig: harnessConfig.cliConfigStatus(), status: await agentHooksStatus() });
     } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
