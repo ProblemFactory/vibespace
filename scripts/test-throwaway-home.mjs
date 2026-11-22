@@ -154,9 +154,9 @@ ok(fs.existsSync(jobHome) && fs.readFileSync(jobHome, 'utf8').trim() === own, "a
 const which = (() => { try { return fs.readFileSync(path.join(own, '.job-was-here', 'which'), 'utf8').trim(); } catch { return null; } })();
 ok(which === 'none', "…and a program only the stand-in's ~/.local/bin holds (on the PATH it was handed, in its login profile) is NOT on the hub's PATH: the PATH is built, nothing of the handed one carried", which);
 for (let i = 0; i < 30; i++) { try { await fetch(ORIGIN + '/api/search?q=probe'); } catch { } if (/\[search-index\] ready/.test(log())) break; await sleep(1000); }
-for (let i = 0; i < 60 && !/\[usage-index\] ready/.test(log()); i++) await sleep(1000);
+// (B-360d unit 1: the usage index is RETIRED — the Usage window answers from the ledger's own cells; only the search index opens a folder)
 const dirOf = (tag) => { const m = new RegExp(`\\[${tag}\\] ready: [^\\n]*\\((/[^)\\n]+)\\)`).exec(log()); return m ? m[1] : null; };
-ok(String(dirOf('usage-index')).startsWith(own + '/') && String(dirOf('search-index')).startsWith(own + '/'), `both indexes opened under the OWN home — the hotfix night's writer (usage: ${dirOf('usage-index')}; search: ${dirOf('search-index')})`, log().split('\n').filter((l) => /-index\]/.test(l)).slice(0, 6));
+ok(String(dirOf('search-index')).startsWith(own + '/') && !/\[usage-index\] ready/.test(log()), `the search index opened under the OWN home — the hotfix night's writer (search: ${dirOf('search-index')}); the retired usage index opens nothing`, log().split('\n').filter((l) => /-index\]/.test(l)).slice(0, 6));
 
 // ── the first screen's BANNER, read in a real browser (its picture) ──
 if (!CHROME) skip("the first screen's banner in a browser", 'no Chrome on this machine');

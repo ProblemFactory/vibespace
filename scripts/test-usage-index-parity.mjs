@@ -14,7 +14,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
@@ -38,6 +39,9 @@ function writeLedger(dir) {
   ev({ ts: T(2026, 2, 3, 9, 1), sid: 's-n', acct: 'sub-alice', atype: 'subscription', aname: 'Alice', cwd: '/w/n', i: 1, o: 2, cw5: 3, cr: 4 });   // a row with NO model
   ev({ ts: T(2026, 2, 4, 10, 2), sid: 's-p', model: 'claude-fable-5-1', acct: 'sub-alice', pool: 'pool-team', atype: 'subscription', aname: 'Alice', cwd: '/w/p', i: 7, o: 8, cw5: 9, cr: 10 });   // a pool row
   ev({ ts: T(2026, 2, 4, 10, 3), sid: 's-p', model: 'claude-fable-5-1', acct: 'sub-alice', pool: 'pool-team', atype: 'subscription', aname: 'Alice renamed', cwd: '/w/p', i: 7, o: 8, cr: 10 });   // a later aname (the label stays the earliest) + an absent cw5
+  // ONE CELL ON BOTH SIDES OF A NEW THRESHOLD (round wk8hot1jc's must): one conversation, one slot, whole prompts 3 000 and 20 000
+  ev({ ts: T(2026, 2, 6, 14, 1), sid: 's-t', model: 'claude-sonnet-5', acct: 'sub-alice', atype: 'subscription', aname: 'Alice', cwd: '/w/t', i: 100, o: 50, cw5: 0, cr: 2900 });
+  ev({ ts: T(2026, 2, 6, 14, 9), sid: 's-t', model: 'claude-sonnet-5', acct: 'sub-alice', atype: 'subscription', aname: 'Alice', cwd: '/w/t', i: 200, o: 60, cw5: 0, cr: 19800 });
   // B-d578 P1-b in the cells: two third-party providers' models with NO price row — counted apart, never $0, labelled «provider»
   // (LAW 3 below gives the second its provider's OWN row: the cells' rate memo keys it by the model id)
   for (let k = 0; k < 6; k++) {
@@ -100,11 +104,21 @@ await zoneLegs('Asia/Kathmandu');
     const a = await uh.aggregateCells({ pivots: PIVOTS });
     const shardReads = opened.filter((f) => /^events-/.test(f)).length;
     ok(shardReads === 0 && M.compareAggregates(uh.aggregate({ pivots: PIVOTS }), a).same, 'LAW 3: a changed rate (opus 5.5) — the next answer reads NO shard byte and equals a fresh fold under the new table', { shardReads, opened: opened.slice(0, 5) });
-    // a NEW threshold between one cell's smallest and largest prompt: sonnet 5 at long.above 9 500 — the s-g rows (prompt 9 005 … ) straddle
-    const tier = { input: 1, output: 2, cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1, long: { above: 9004, input: 2, output: 4, cacheWrite5m: 2.5, cacheRead: 0.2 } };
+    // a NEW threshold between one cell's smallest and largest whole prompt: sonnet 5 at long.above 10 000 — the s-t cell holds
+    // 3 000 and 20 000 (one slot): it STRADDLES, so its slot is folded from its rows (the s-g rows, 9 005, all stay below)
+    const tier = { input: 1, output: 2, cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1, long: { above: 10000, input: 2, output: 4, cacheWrite5m: 2.5, cacheRead: 0.2 } };
     uh.setPricing({ tiers: { 'claude-sonnet-5': tier } });
     const b = await uh.aggregateCells({ pivots: PIVOTS });
-    ok(M.compareAggregates(uh.aggregate({ pivots: PIVOTS }), b).same && b.fromCells.rowSlots >= 0, 'LAW 3: a new long-prompt threshold — the answer equals a fresh fold under the new table (a straddling cell priced from its rows, never the wrong side)', b.fromCells);
+    ok(M.compareAggregates(uh.aggregate({ pivots: PIVOTS }), b).same && b.fromCells.rowSlots > 0, 'LAW 3: a new long-prompt threshold — the answer equals a fresh fold under the new table (a straddling cell priced from its rows, never the wrong side)', b.fromCells);
+    { // RED CONTROL (round wk8hot1jc): the straddle return CUT — the straddling cell is priced as ONE class, and the cells differ
+      const UHSRC = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
+      const cut = anchored(UHSRC, "    if (pa !== per(last) || la !== cls(pmax)) return null;\n", '', 'the straddle return cut');
+      const { UsageHistory: U2 } = mutantCopies('uidx-straddle', REPO).load('src/usage-history.js', cut, 'no-straddle');
+      const u2 = new U2({ dataDir: dir, homeDir: dir, resolveAccount: (id) => (LIVE.has(id) ? { type: id.startsWith('api') ? 'api' : 'subscription', name: id === 'sub-alice' ? 'Alice' : 'Beta key' } : null) });
+      u2._loadEvents(); u2.setPricing({ tiers: { 'claude-sonnet-5': tier } });
+      const c2 = await u2.aggregateCells({ pivots: PIVOTS });
+      ok(!M.compareAggregates(u2.aggregate({ pivots: PIVOTS }), c2).same && c2.fromCells.rowSlots === 0, 'CONTROL: with the straddle return cut no slot goes to its rows and the straddling cell is priced as one class — the cells differ from the fresh fold (red)', c2.fromCells);
+    }
     // B-d578 P1-b in the cells: a provider's OWN row («Add a price» writes accounts[<pv id>].tiers[<key>]) prices that provider's
     // model; the other provider's model stays unknown — counted apart in both folds, named by its account
     const unk = (x) => (x.groups.model || []).find((r) => r.key === 'acme-coder-1'), own = (x) => (x.groups.model || []).find((r) => r.key === 'beta-chat-2');
@@ -116,6 +130,37 @@ await zoneLegs('Asia/Kathmandu');
     ok(M.compareAggregates(pvRows, pv).same && sameLabels(pvRows, pv).length === 0 && !own(pv).unpricedRequests && own(pv).cost > 0 && unk(pv).unpricedRequests === 6 && JSON.stringify(unk(pv).unpricedBy) === '["pv-fixture-acme"]',
       'P1-b in the cells: the provider\'s OWN row prices its model (the rate memo keys the row the model id matched), the other stays unknown — the cells equal the row fold', { diffs: M.compareAggregates(pvRows, pv).diffs.slice(0, 3), beta: own(pv) && own(pv).cost });
   } finally { fs.promises.open = o0; fs.openSync = s0; }
+  // THE CELLS ROAD KEEPS THE RELEASE's BOUNDS (round wk8hot1jc (3)): identical asks in flight are ONE fold, the same answer to each;
+  // a fold whose every asker went away stops at its next slice (ABORTED); one asker gone of two — the other is answered whole.
+  // RED CONTROLS: mutant copies with the flight's lookup cut (four folds) and with the askers' check cut (the gone fold answers).
+  {
+    console.log('the cells road keeps the release\'s bounds: one fold for identical asks; a fold nobody waits for stops');
+    const q = { pivots: PIVOTS };
+    const res = (id) => (LIVE.has(id) ? { type: id.startsWith('api') ? 'api' : 'subscription', name: id === 'sub-alice' ? 'Alice' : 'Beta key' } : null);
+    const bounds = async (u) => {
+      const n0 = u._cellFolds || 0;
+      const four = await Promise.all([1, 2, 3, 4].map(() => u.aggregateAsync(q)));
+      const n1 = u._cellFolds;
+      await Promise.all([u.aggregateAsync({ pivots: PIVOTS, backend: 'claude' }), u.aggregateAsync({ pivots: PIVOTS, backend: 'codex' })]);
+      const ac = new AbortController();
+      u.cellsHook = async () => { await null; ac.abort(); u.cellsHook = null; };
+      const gone = await u.aggregateAsync(q, { signal: ac.signal }).then(() => 'answered', (e) => (e && e.code) || String(e));
+      const a1 = new AbortController(), a2 = new AbortController();
+      u.cellsHook = async () => { await null; a1.abort(); u.cellsHook = null; };
+      const p1 = u.aggregateAsync(q, { signal: a1.signal }), p2 = u.aggregateAsync(q, { signal: a2.signal });
+      const [, r2] = await Promise.all([p1.catch((e) => e && e.code), p2.catch((e) => e && e.code)]);
+      return { one: n1 - n0, same: four.every((a) => a === four[0]), two: u._cellFolds - n1 - 2 >= 0 ? 2 : u._cellFolds - n1, gone, r2, first: four[0] };
+    };
+    const got = await bounds(uh);
+    ok(got.one === 1 && got.same && M.compareAggregates(uh.aggregate(q), got.first).same, `ONE FOLD: four identical asks in flight are ONE cells fold (${got.one}), the same answer to each, equal to a fresh fold`, { one: got.one, same: got.same });
+    ok(got.gone === 'ABORTED' && got.r2 && got.r2.totals && M.compareAggregates(uh.aggregate(q), got.r2).same, `THE ASKER GONE: a fold whose every asker went away stops at its next slice (${got.gone}); one of two gone — the other answered whole`, { gone: got.gone });
+    const UHSRC = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8'), MU = mutantCopies('uidx-bounds', REPO);
+    const noFlight = anchored(UHSRC, "    if (f && f.c === c) { f.job.waiters++; this._onAbort(signal, f.job); }\n    else {", "    {", 'the flight lookup cut');
+    const noCheck = anchored(UHSRC, "      if (job && job.waiters <= 0) throw Object.assign(new Error('every asker of this summary went away'), { code: 'ABORTED' });\n", '', 'the askers\' check cut');
+    const mk = (src, tag) => { const { UsageHistory: U } = MU.load('src/usage-history.js', src, tag); const u = new U({ dataDir: dir, homeDir: dir, resolveAccount: res }); u._loadEvents(); return u; };
+    const g1 = await bounds(mk(noFlight, 'no-flight')), g2 = await bounds(mk(noCheck, 'no-check'));
+    ok(g1.one === 4 && g2.gone === 'answered', `CONTROLS: with the flight's lookup cut the four asks are ${g1.one} folds; with the askers' check cut the gone fold ${g2.gone} — each leg above is red for its road`, { one: g1.one, gone: g2.gone });
+  }
 }
 // A PLACE GONE STALE UNDER AN EDGE SLOT (row B-360d unit 1): a shard edited in place inside the ledger's one-second check
 // throttle (same length: one row's output count 203 → 903) — the edge slot's cold read VERIFIES its line (the walk's own check:

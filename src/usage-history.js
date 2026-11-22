@@ -2180,7 +2180,7 @@ class UsageHistory {
     // B-360d unit 1 (law 4): THE CELLS ANSWER — every range, filter and pivot, folded in slices, reading only an edge's or a
     // straddling slot's rows. The row fold below is the road only while there are no cells (the boot's placeholder, a stood-down
     // cells add) or a rewritten shard is being rebuilt.
-    if (c && c.cells && !c.booting && !c.pending && !c.stale && !opts.rows) return this.aggregateCells(opts).catch((e) => { if (e && e.code === 'STALE') return this.aggregateAsync({ ...opts, rows: true }, { signal }); throw e; }); // a place gone stale ⇒ the ROW road, once: its walk rebuilds the cache and re-runs (never the cells road again on the same stale place)
+    if (c && c.cells && !c.booting && !c.pending && !c.stale && !opts.rows) return this._cellsAsk(opts, signal, c);
     const hotOnly = !c.cold.n || (opts.from && opts.from >= c.cutoff);
     const key = JSON.stringify([opts.from || null, opts.to || null, opts.backend || null, opts.accounts ? [...opts.accounts].sort() : null, opts.hostFilter || null, opts.pivots || null]);
     if (!this._aggFlights) { this._aggFlights = new Map(); this._queued = 0; }
@@ -2411,7 +2411,27 @@ class UsageHistory {
   // aggregate() reads them): a range EDGE off a 15-minute boundary, and a slot holding a cell whose rows straddle a price
   // boundary (a dated cut between its first and last instant, a long-prompt threshold between its smallest and largest whole
   // prompt) — never priced on the wrong side. → the answer, or null when this cache keeps no cells (the caller folds rows).
-  async aggregateCells(opts = {}, { sliceMs = 40 } = {}) {
+  /** THE CELLS ROAD KEEPS THE RELEASE's BOUNDS (round wk8hot1jc (3)): identical asks in flight are ONE fold (the row road's flight
+   *  key; every asker gets the same answer, as there), and a fold whose every asker went away (the route hands each its request's
+   *  signal) stops at its next slice — ABORTED. A place gone stale hands each asker to the ROW road once: its walk rebuilds the
+   *  cache and re-runs (never the cells road again on the same stale place). */
+  _cellsAsk(opts, signal, c) {
+    const key = JSON.stringify(['cells', opts.from || null, opts.to || null, opts.backend || null, opts.accounts ? [...opts.accounts].sort() : null, opts.hostFilter || null, opts.pivots || null]);
+    if (!this._cellFlights) this._cellFlights = new Map();
+    let f = this._cellFlights.get(key);
+    if (f && f.c === c) { f.job.waiters++; this._onAbort(signal, f.job); }
+    else {
+      f = { c, job: { waiters: 1, started: true, cancelled: false }, p: null };
+      this._onAbort(signal, f.job);   // the asker who starts it counts too (an already-gone one leaves 0: the fold stops at once)
+      f.p = this.aggregateCells(opts, { job: f.job });
+      this._cellFlights.set(key, f);
+      const fl = f, drop = () => { if (this._cellFlights.get(key) === fl) this._cellFlights.delete(key); };
+      f.p.then(drop, drop);
+    }
+    return f.p.catch((e) => { if (e && e.code === 'STALE') return this.aggregateAsync({ ...opts, rows: true }, { signal }); throw e; });
+  }
+  async aggregateCells(opts = {}, { sliceMs = 40, job = null } = {}) {
+    this._cellFolds = (this._cellFolds || 0) + 1;   // a diagnostic count of the folds run (the row road's twin is _coldWalks)
     const c = this._evCache;
     if (!c || !c.cells) return null;
     const U = c.cells, Q = CELL_SLOT_MS, NKEY = CELL_KEYS.length;
@@ -2423,7 +2443,10 @@ class UsageHistory {
     const spec = this._cellSpec();
     const rates = new Array(U.n);
     let t0 = Date.now();
-    const breathe = async () => { if (Date.now() - t0 >= sliceMs) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); if (this._evCache !== c) throw Object.assign(new Error('the usage ledger was rebuilt during the read'), { code: 'STALE' }); } };
+    const breathe = async () => {
+      if (this.cellsHook) await this.cellsHook();   // a test's door into the fold's slices (the row walk's is walkHook)
+      if (job && job.waiters <= 0) throw Object.assign(new Error('every asker of this summary went away'), { code: 'ABORTED' });
+      if (Date.now() - t0 >= sliceMs) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); if (this._evCache !== c) throw Object.assign(new Error('the usage ledger was rebuilt during the read'), { code: 'STALE' }); } };
     for (let i = 0; i < U.n; i++) {
       const slot = U.k[i * NKEY];
       if (slot < loS || slot > hiS || rowSlots.has(slot)) continue;
