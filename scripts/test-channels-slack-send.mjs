@@ -32,6 +32,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -362,7 +371,7 @@ console.log('⑥ removing the account deletes its local copy');
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
   const RET = "  retention: 'purge-on-remove',\n";
   ok(ssrc.includes(RET), 'the patch site of the retention control is in slack.js');
-  const keepMod = require(MC.write('src/channels/slack.js', ssrc.replace(RET, "  retention: 'keep',\n"), 'keep'));
+  const keepMod = require(MC.write('src/channels/slack.js', editAnchor(ssrc, RET, "  retention: 'keep',\n", "src/channels/slack.js"), 'keep'));
   const reg = CH.createChannelRegistry(); reg.register(keepMod.adapter);
   const K = await connected('keep', { registry: reg });
   const r2 = await K.eng.remove(K.id);

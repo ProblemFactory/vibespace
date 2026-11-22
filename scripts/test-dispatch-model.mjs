@@ -32,6 +32,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const M = require(path.join(REPO, 'src/dispatch-model.js'));
 
 // ── THE ORACLE: the brief's rules, written from the reader's side (never the module's code) ──
@@ -330,14 +339,14 @@ console.log('§5 controls');
   ];
   for (const [name, from, to] of mutants) {
     ok(src.includes(from), `CONTROL precondition: the model still holds the line the "${name}" control patches`);
-    const Mm = Mut.load('src/dispatch-model.js', src.replace(from, to), name.replace(/\W+/g, '-'));
+    const Mm = Mut.load('src/dispatch-model.js', editAnchor(src, from, to, "src/dispatch-model.js"), name.replace(/\W+/g, '-'));
     ok(tableMisses(Mm.dispatchVerdict).length > 0, `CONTROL: a model that ${name} is RED against the table`);
   }
   // verify r2 ①: a model whose fence reads only the last SEND (the draft ignored) lets a mid-draft worker be compacted
   {
     const from = 'const last = Math.max(Number.isFinite(a) && a > 0 ? a : 0, Number.isFinite(d) && d > 0 ? d : 0);';
     ok(src.includes(from), 'CONTROL precondition: the model still holds the draft-aware fence line');
-    const Md = Mut.load('src/dispatch-model.js', src.replace(from, 'const last = Number.isFinite(a) && a > 0 ? a : 0;'), 'ignores-the-draft');
+    const Md = Mut.load('src/dispatch-model.js', editAnchor(src, from, 'const last = Number.isFinite(a) && a > 0 ? a : 0;', "src/dispatch-model.js"), 'ignores-the-draft');
     const fd = Md.targetFacts({ live: true, mode: 'chat', hasPty: true, draftEditAt: 1000, now: 1000 + 60000 });
     ok(fd.targetState === 'idle' && M.targetFacts({ live: true, mode: 'chat', hasPty: true, draftEditAt: 1000, now: 1000 + 60000 }).targetState === 'user-active', 'CONTROL r2 ①: a model that ignores the draft reads a mid-draft worker as IDLE (compactable); the real one reads user-active');
   }

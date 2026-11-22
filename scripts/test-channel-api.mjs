@@ -329,7 +329,7 @@ console.log('③b B-4e97 cure: the engine\'s own scopes row — what the sign-in
   ok(JSON.stringify(r3.held) === JSON.stringify(['https://scopes.example.test/a', 'https://scopes.example.test/b']) && r3.empty === null && r3.none === null, 'the engine\'s credential row says the scopes the sign-in granted; an EMPTY list and a missing one are «not known» (null — every declared host kept), never «holds nothing»', JSON.stringify(r3));
   const ROWS3 = 'scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) && rec.auth.scopes.length ? rec.auth.scopes.map(String) : null),';
   ok(ESRC3.split(ROWS3).length === 2, 'control setup: the engine\'s scopes row is present once');
-  const r3c = await row3(MUT.load('src/server/channels-engine.js', ESRC3.replace(ROWS3, 'scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) ? rec.auth.scopes.map(String) : null),'), 'scopes-empty'), 'ctl');
+  const r3c = await row3(MUT.load('src/server/channels-engine.js', editAnchor(ESRC3, ROWS3, 'scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) ? rec.auth.scopes.map(String) : null),', "src/server/channels-engine.js"), 'scopes-empty'), 'ctl');
   ok(Array.isArray(r3c.empty) && r3c.empty.length === 0, 'RED CONTROL: a row that hands an empty list on — «holds nothing», every Google host dropped (the leg above is red on it)', JSON.stringify(r3c));
 }
 console.log('③ the engine: the `apiGrants` table (widen-only, the owner\'s, persisted, no reach)');
@@ -1003,7 +1003,7 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   const OSRC4 = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf-8');
   const SCRUB = "scopeRefusalOf(c, cur, String(res.headers.get('www-authenticate') || '').split(token).join(REDACTED))";
   ok(OSRC4.split(SCRUB).length === 2, 'control setup: the scrubbed challenge read is present once');
-  const xeOld = await ECHO(MUT.load('src/server/channel-api.js', OSRC4.replace(SCRUB, "scopeRefusalOf(c, cur, res.headers.get('www-authenticate'))"), 'b4e97-noscrub'));   // stale-pins: kept (the release's read, restored by the red control)
+  const xeOld = await ECHO(MUT.load('src/server/channel-api.js', editAnchor(OSRC4, SCRUB, "scopeRefusalOf(c, cur, res.headers.get('www-authenticate'))", "src/server/channel-api.js"), 'b4e97-noscrub'));   // stale-pins: kept (the release's read, restored by the red control)
   ok(JSON.stringify(xeOld).includes('ya29-TOKEN-SECRET'), 'RED CONTROL: the release\'s challenge read — the echoed bearer rides the scope line (the leg above is red on it)', JSON.stringify(xeOld).slice(0, 300));
   const DOCS_NEW = "hosts: r.reach, ...(r.needs.length ? { needsScope: r.needs,";
   const RUN_NEW = "ms: now() - t0, ...(scopeSays ? { scopeSays } : {}) };";

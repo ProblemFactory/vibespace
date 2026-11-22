@@ -519,7 +519,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     if (ok(TMS.split(A).length === 2, 'the anchor of the control «hub-real-for-every-row» is in src/task-membership.js once')) {
       const { mutantCopies } = await import('./mutant-copy.mjs');
       const MUT = mutantCopies('member-index-board', REPO);
-      const TMr = req(MUT.write('src/task-membership.js', TMS.replace(A, '  for (const c of [cwd, realCwd]) '), 'hub-real-for-every-row'));
+      const TMr = req(MUT.write('src/task-membership.js', editAnchor(TMS, A, '  for (const c of [cwd, realCwd]) ', "src/task-membership.js"), 'hub-real-for-every-row'));
       red = { board: boardBy(TMr.membershipCwds)(mergedFar), server: serverSays(mergedFar) };
     }
     ok(!!red && red.board === true && red.server === false, `RED CONTROL: the page's rule keeping the hub's real path for every row (the page before) — another machine's conversation: the board says member, the server not — ${JSON.stringify(red)}`);
@@ -568,7 +568,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     if (ok(SRC.split(A).length === 2, 'the anchor of the control «hub-real-on-remote-row» is in src/sessions-assemble.js once')) {
       const { mutantCopies } = await import('./mutant-copy.mjs');
       const MUT = mutantCopies('member-index-rows', REPO);
-      const copy = MUT.write('src/sessions-assemble.js', SRC.replace(A, 'const rc = realCwdOf(session.cwd);'), 'hub-real-on-remote-row');   // the checkpoint's line, on purpose — stale-pins: kept
+      const copy = MUT.write('src/sessions-assemble.js', editAnchor(SRC, A, 'const rc = realCwdOf(session.cwd);', "src/sessions-assemble.js"), 'hub-real-on-remote-row');   // the checkpoint's line, on purpose — stale-pins: kept
       red = rowsOf(req(copy).withSessionKey)[0].realCwd || null;
     }
     ok(red === realW, `RED CONTROL: the row builder without the guard (the checkpoint) stamps the hub's real path on another machine's row — ${JSON.stringify(red)}`);

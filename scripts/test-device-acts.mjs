@@ -32,6 +32,15 @@ const { censusActCalls } = await import('./device-acts-census.mjs');
 
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // planted secrets are BUILT at run time (split inside the vendor prefix) — a literal token shape in the tree reds the secret scan
@@ -335,8 +344,8 @@ console.log('— ⑦ the three URGENT For-you items');
     const src = read('src/server/device-alerts.js');
     const aCode = '  if (f.code) return false;\n', aFwd = 'if (y !== x) return y > x;';
     ok(src.split(aCode).length === 2 && src.split(aFwd).length === 2, 'ANCHORS: the signature check and the forward check');
-    const NoCode = MUT.load('src/server/device-alerts.js', src.replace(aCode, ''), 'no-code');
-    const NoFwd = MUT.load('src/server/device-alerts.js', src.replace(aFwd, 'if (y !== x) return true;'), 'no-forward');
+    const NoCode = MUT.load('src/server/device-alerts.js', editAnchor(src, aCode, '', "src/server/device-alerts.js"), 'no-code');
+    const NoFwd = MUT.load('src/server/device-alerts.js', editAnchor(src, aFwd, 'if (y !== x) return true;', "src/server/device-alerts.js"), 'no-forward');
     ok(NoCode.upgradeIsNotice({ from: '2.369.316', to: '2.369.317', code: 'bad-signature' }) === true && NoFwd.upgradeIsNotice({ from: '2.369.317', to: '2.369.316' }) === true,
       'MUTANTS RED: without the signature check a bad signature files as a notice; without the forward check a downgrade does — the table above fails on each');
   }

@@ -31,6 +31,15 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
@@ -221,7 +230,7 @@ console.log('⑥ CONTROL: the pre-fix _onOp (no hold) — the ops of the window 
   const src = read('src/lib/chat-view.js');
   const needle = '    if (this._resetPending) { this._holdResetOp(op); return; }\n';
   ok('⑥ the patch site exists', src.includes(needle));
-  const mut = M.write('src/lib/chat-view.js', src.replace(needle, ''), 'no-hold');
+  const mut = M.write('src/lib/chat-view.js', editAnchor(src, needle, '', "src/lib/chat-view.js"), 'no-hold');
   const { ChatView: Mut } = await import(pathToFileURL(mut).href);
   const r = legs(Mut.prototype, '⑥ mutant', false);
   ok('⑥ CONTROL: without the hold the window\'s ops are rendered into the OLD list, the watermark moves, and the rebuild WIPES them (the measured loss) — leg ① can go red', r.heldNotRendered === false && r.watermarkUntouched === false && r.slabThenOps === false, r);
@@ -229,7 +238,7 @@ console.log('⑥ CONTROL: the pre-fix _onOp (no hold) — the ops of the window 
   // ⑥b (r2): the rebuild's heal clearing an overflow (the pre-r2 shape) — the ④ (r2) leg can go red
   const needle2 = '    if (overflow) {\n      this._seqPoisoned = true;';
   ok('⑥b the overflow-heal patch site exists', src.includes(needle2));
-  const mut2 = M.write('src/lib/chat-view.js', src.replace(needle2, '    if (false) {\n      this._seqPoisoned = true;'), 'overflow-cleared');
+  const mut2 = M.write('src/lib/chat-view.js', editAnchor(src, needle2, '    if (false) {\n      this._seqPoisoned = true;', "src/lib/chat-view.js"), 'overflow-cleared');
   const { ChatView: Mut2 } = await import(pathToFileURL(mut2).href);
   const r2 = legs(Mut2.prototype, '⑥b mutant', false);
   ok('⑥b CONTROL: without the overflow re-poison the heal clears the flag and no heal attach is sent — the dropped op is lost with a clean watermark', r2.capStaysPoisoned === false && r2.capPoisons === true, { capStaysPoisoned: r2.capStaysPoisoned });

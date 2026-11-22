@@ -207,7 +207,7 @@ try {
   const tam = NR.reexecOnOwnRuntime({ ...base, execve: fake, probe: () => 'v22.41.0', log: (l) => tlog.push(l) });
   const MV = mutantCopies('noderuntime-verify', REPO);
   const NSRC2 = fs.readFileSync(path.join(REPO, 'src/node-runtime.js'), 'utf8');
-  const noVerify = NSRC2.replace(/  const chk = verifyRuntime\(cur\.dir, cur\.node, cur\.version\);\n  if \(!chk\.ok\) \{[^\n]*\n/, '');
+  const noVerify = editAnchor(NSRC2, /  const chk = verifyRuntime\(cur\.dir, cur\.node, cur\.version\);\n  if \(!chk\.ok\) \{[^\n]*\n/, '', "src/node-runtime.js");
   const redV = [];
   MV.load('src/node-runtime.js', noVerify, 'noverify').reexecOnOwnRuntime({ ...base, execve: (f) => redV.push(f), probe: () => 'v22.41.0' });
   fs.writeFileSync(curNode, origBin); fs.rmSync(recFile);
@@ -230,7 +230,7 @@ try {
   // RED: without the newer check it would switch to an OLDER node
   const M = mutantCopies('noderuntime', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/node-runtime.js'), 'utf8');
-  const mut = src.replace("  if (RF.compare(cur.version, version) !== 1) return { state: 'not-newer', version: cur.version };\n", '');
+  const mut = editAnchor(src, "  if (RF.compare(cur.version, version) !== 1) return { state: 'not-newer', version: cur.version };\n", '', "src/node-runtime.js");
   const red = [];
   M.load('src/node-runtime.js', mut, 'nonewer').reexecOnOwnRuntime({ ...base, version: 'v22.50.0', execve: (f) => red.push(f), probe: () => 'v22.41.0' });
   ok(mut !== src && red.length === 1 && NR.reexecOnOwnRuntime({ ...base, version: 'v22.50.0', execve: (f) => red.push(f), probe: () => 'v22.41.0' }).state === 'not-newer' && red.length === 1, 'RED: a copy without the newer check switches a v22.50.0 server DOWN to v22.41.0 (the real one: not-newer) — the rule above can go red');

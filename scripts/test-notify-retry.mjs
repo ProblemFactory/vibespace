@@ -1927,7 +1927,7 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
     // CONTROLS: the park without the re-base posts at every step; the jobs engine without it delivers every fire
     const M = mutantCopies('ntr', REPO);
     const cds = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
-    const m1 = cds.replace("      if (prevDrop && now - prevDrop < FLOOR_DROP_WINDOW_MS) {\n        lastPostAt.set(cid, now); n++;", "      if (false) {\n        lastPostAt.set(cid, now); n++;");
+    const m1 = editAnchor(cds, "      if (prevDrop && now - prevDrop < FLOOR_DROP_WINDOW_MS) {\n        lastPostAt.set(cid, now); n++;", "      if (false) {\n        lastPostAt.set(cid, now); n++;", "src/server/conversation-deliver.js");
     if (m1 === cds) ok(false, '(c) CONTROL anchor moved (park)');
     else {
       const CDm = M.load('src/server/conversation-deliver.js', m1, 'no-floor-rebase');
@@ -1940,7 +1940,7 @@ console.log('\n§7 verify r4: a hit during a flight; the copy that gives way; a 
       ok(Rm.posts.length === 4 && Rm.logs.filter((l) => /witness is dropped/.test(l)).length === 3, '(c) CONTROL: the park without the re-base posts at every backward step (4 posts in 0 ms, the floor gone)', JSON.stringify({ p: Rm.posts.length }));
     }
     const js = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf-8');
-    const m2 = js.replace("      if (drop && now() - drop.at < FLOOR_DROP_WINDOW_MS) {", "      if (false) {");
+    const m2 = editAnchor(js, "      if (drop && now() - drop.at < FLOOR_DROP_WINDOW_MS) {", "      if (false) {", "src/jobs.js");
     if (m2 === js) ok(false, '(c) CONTROL anchor moved (jobs)');
     else {
       const { JobManager: JMm } = M.load('src/jobs.js', m2, 'no-floor-rebase-jobs');

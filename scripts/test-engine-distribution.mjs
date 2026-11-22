@@ -124,6 +124,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e === undefined ? '' : ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700))); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 6000) => { const t0 = Date.now(); for (;;) { let v = null; try { v = await fn(); } catch { v = null; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(25); } };
 const { gitRepoFixture, URL_HTTPS } = await import('./fixtures/git-repo.mjs');
@@ -618,7 +627,7 @@ if (SLEEP) await leg('⑩b an ended program never holds the place (B-f8e5)', asy
   ok(now.gone === false && now.unknown === true && now.land === true && now.receipt === KSHA.k3,
     'an ENDED program never holds the place: this user\'s program whose name read answers ESRCH (it ended while its file was open) is not in use and K3 lands; an unknown error (EIO) still counts as in use', now);
   const src = fs.readFileSync(path.join(REPO, 'src/server/engine-distribution.js'), 'utf8'), NEEDLE = "const endedCode = (e) => !!e && (e.code === 'ENOENT' || e.code === 'ESRCH');";
-  const old = src.includes(NEEDLE) ? await run(mutantCopies('engine-dist-esrch', REPO).load('src/server/engine-distribution.js', src.replace(NEEDLE, "const endedCode = (e) => !!e && e.code === 'ENOENT';"), 'enoent-only')) : null;
+  const old = src.includes(NEEDLE) ? await run(mutantCopies('engine-dist-esrch', REPO).load('src/server/engine-distribution.js', editAnchor(src, NEEDLE, "const endedCode = (e) => !!e && e.code === 'ENOENT';", "src/server/engine-distribution.js"), 'enoent-only')) : null;
   ok(!!old && old.gone === true && old.land === false && old.receipt === KSHA.k2,
     'CONTROL: a copy that knows only ENOENT counts the ended program as in use and K3 does not land — the leg above is red without the change', old || 'the needle is gone');
 });

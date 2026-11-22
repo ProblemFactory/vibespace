@@ -20,6 +20,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const B = require(path.join(REPO, 'src/channel-budget.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -170,7 +179,7 @@ ok(ESRC.includes(REQ) && [HALVE, CREEP, WALL].every((a) => BSRC.split(a).length 
 {
   const c = await pair(engOver(BSRC.replace(HALVE, ''), 'nohalve'), { minutes: 20 });
   ok(c.refusals.length >= 10, `CONTROL no halve: the refused instance trips every pass (${c.refusals.length} refusals in 20 min) — RED`);
-  const Bc = M.load('src/channel-budget.js', BSRC.replace(CREEP, '      const next = s.ceiling;\n'), 'nocreep');
+  const Bc = M.load('src/channel-budget.js', editAnchor(BSRC, CREEP, '      const next = s.ceiling;\n', "src/channel-budget.js"), 'nocreep');
   let s = null; for (let i = 0; i < 5; i++) s = Bc.budgetStep(s, 'refused', F(T0 + i * 120e3)).state; for (let i = 1; i <= 180; i++) s = Bc.budgetStep(s, 'quiet-minute', F(T0 + 600e3 + i * 60e3)).state;
   ok(s.ceiling === 300, `CONTROL no creep: three quiet hours later the ceiling is still the floor (${s.ceiling}) — RED`);
   const nw = await pair(engOver(BSRC.replace(WALL, '      const walled = false;\n'), 'nowall'), { minutes: 60 });
@@ -179,7 +188,7 @@ ok(ESRC.includes(REQ) && [HALVE, CREEP, WALL].every((a) => BSRC.split(a).length 
   const np = await pair(mem('eng-mem-1'), { minutes: 30, restartAt: 15, EngAfter: mem('eng-mem-2') });
   ok(np.atRestart && np.atRestart.limit === 3000 && np.refusals.some((r) => r.at - T0 >= 15 * 60e3), `CONTROL ceiling not persisted: the restarted instance boots at 3 000 and trips again (${np.refusals.length} refusals) — RED`);
   const KEEP = '        const keep = !m && named(id);\n';
-  const g = await gmailPages(M.load('src/channels/gmail.js', GSRC.replace(KEEP, '        const keep = false;\n'), 'gmail-reread'));
+  const g = await gmailPages(M.load('src/channels/gmail.js', editAnchor(GSRC, KEEP, '        const keep = false;\n', "src/channels/gmail.js"), 'gmail-reread'));
   ok(GSRC.includes(KEEP) && g.again === 210, `CONTROL discovery re-reads a named thread: the re-listing meters ${g.again} units, not 10 — RED`);
 }
 const cc = copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: 'test-channel-budget' });

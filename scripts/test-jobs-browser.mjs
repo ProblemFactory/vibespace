@@ -26,6 +26,15 @@ function ok(cond, name, detail) {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 }
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const OWNER = 'bk-0000aaaa', OTHER = 'bk-0000bbbb';
 const job = (o = {}) => ({ id: 'jb-11112222', name: 'daily reconcile', state: 'up', owner: { conversation: { id: 'conv-userW-1' } }, ...o });
@@ -391,7 +400,7 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const WAIT_LINE = "    if (cw.wait) { log.log?.(`[browser] ${browserKey}: its attach on ${p.id} waits for its session's close in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`); await sessionCloses.get(cw.key); }\n";
   const MK = mutantCopies('jobs-browser-close', REPO);
   ok(KSRC.includes(WAIT_LINE), 'control "the attach does not wait for its close": its needle is in the shipped keeper');
-  const pre = await closeThenAttach(MK.load('src/server/browser-keeper.js', KSRC.replace(WAIT_LINE, ''), 'no-close-wait'), 'prefix');
+  const pre = await closeThenAttach(MK.load('src/server/browser-keeper.js', editAnchor(KSRC, WAIT_LINE, '', "src/server/browser-keeper.js"), 'no-close-wait'), 'prefix');
   ok(pre.attachFirst && pre.t2State === 'closed' && !pre.rooted && pre.rebinds > 0, 'control "the attach does not wait for its close" (the pre-fix keeper): the SAME hand interleave goes RED — the re-attach binds first, the late close shuts the NEW window\'s tab and marks it lost, the next verb rebinds a fresh root', pre);
   // B-0cee (an agent's report, fb-61e4794124; test-browser-windows c32 is its heavy cell): the holder's window closed between the
   // create and the bind (every tab of it gone, the binary knows no such tab) ⇒ the keeper asks ONCE more itself: a window of its
@@ -551,7 +560,7 @@ const CONTROLS = [
 ];
 for (const c of CONTROLS) {
   ok(src.includes(c.needle), `control "${c.what}": its needle is in the shipped source`);
-  const mod = M.load('src/browser-job-principal.js', src.replace(c.needle, c.repl), c.what.replace(/\W+/g, '-').slice(0, 24));
+  const mod = M.load('src/browser-job-principal.js', editAnchor(src, c.needle, c.repl, "src/browser-job-principal.js"), c.what.replace(/\W+/g, '-').slice(0, 24));
   const r = red(mod);
   ok(c.reds.every((n) => r.includes(n)), `control "${c.what}": the named rows go RED on the weakened copy (${r.length} red)`, r);
 }

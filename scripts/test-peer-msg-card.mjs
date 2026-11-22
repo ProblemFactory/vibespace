@@ -20,6 +20,15 @@ const { createMessageManager, feedPeerCard, rebuildHistory } = require('../src/n
 
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const BODY = 'peer channel test: please reply PONG with your desk name, and do nothing else.';
 const ORIGIN = { kind: 'peer', from: 'uds:/tmp/cc-socks/1791.sock', verifiedPeerPid: 1791, msg_id: 'b345f5db-9a36-4f00-a9f9-dfcdb93684e2', name: 'Coordinator', fromMode: 'bypass', body: BODY };
@@ -434,7 +443,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
     const MUT = mutantCopies('peer-card-sender', REPO);
     const anchor = 'const report = NOTICE_AT_START_RE.test(s) ? null : readReport(s);';
     check('CONTROL anchor present (the fallback\'s one read)', MMSRC.includes(anchor));
-    const f = MUT.write('src/message-manager.js', MMSRC.replace(anchor, 'const report = null;'), 'no-read');
+    const f = MUT.write('src/message-manager.js', editAnchor(MMSRC, anchor, 'const report = null;', "src/message-manager.js"), 'no-read');
     const M0 = require(f);
     const bad = legs(M0);
     check(`CONTROL the pre-fix normalizer (no framed-report read): the legs FAIL (${bad.length})`, bad.length >= 5, bad.length);
@@ -442,7 +451,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
     check('CONTROL …and the census is red by name: "Message from another session"', rows[0] === 'Message from another session', rows);
     const nAnchor = "if (m && typeof m[PEER_RECORDED] === 'string') return m[PEER_RECORDED]; ";
     check('CONTROL anchor present (the rebuild matches the recorded words)', NZSRC.includes(nAnchor));
-    const fz = MUT.write('src/normalizers.js', NZSRC.replace(nAnchor, ''), 'no-recorded');
+    const fz = MUT.write('src/normalizers.js', editAnchor(NZSRC, nAnchor, '', "src/normalizers.js"), 'no-recorded');
     const NZ0 = require(fz);
     const t = framed(MENTION, 1, [L('alpha', 'wake up please')]);
     const s = { claudeSessionId: 'c-sp3', backend: 'claude', mode: 'chat', _normalizer: NZ0.createMessageManager('claude', 'w-sp3') };

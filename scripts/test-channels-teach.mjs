@@ -235,7 +235,7 @@ console.log('④ CONTROLS: each leg can go red');
   const cut = editAnchor(src, "      sessionStart: ({ reach, expired }) => channelsByReach(CHANNELS_SECTION_LINES, reach) + expiredSentence(expired),\n", '      sessionStart: null,\n', "src/agent-cli-registry.js");   // lane channel-reauth-visible: + the dead sign-ins' sentence
   const regCopy = MUT.write('src/agent-cli-registry.js', cut, 'no-paragraph-reg');
   const tsrc = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
-  const tcut = tsrc.replace("require('./agent-cli-registry.js')", `require(${JSON.stringify(regCopy)})`);
+  const tcut = editAnchor(tsrc, "require('./agent-cli-registry.js')", `require(${JSON.stringify(regCopy)})`, "src/task-groups.js");
   const TGX = MUT.load('src/task-groups.js', tcut, 'no-paragraph');
   const m = await legsOf({ TGM: TGX }, 'no-paragraph');
   ok(cut !== src && tcut !== tsrc && !m.out.read.start.includes(TG.CHANNELS_SECTION_LINES.read), 'CONTROL: a tools section without the paragraph ⇒ the READ REACH SessionStart leg is RED (the incident: nothing names the tool)');
@@ -263,7 +263,7 @@ console.log('④ CONTROLS: each leg can go red');
   const cut = editAnchor(src, "      if (mod && mod.reach === 'msg-acl') continue;\n      recs.set(r.id, r);", "      recs.set(r.id, r);", "src/server/channels-access.js");
   const accessCopy = MUT.write('src/server/channels-access.js', cut, 'count-agents');
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-  const ecut = esrc.replace("const ChannelsAccess = require('./channels-access.js');", `const ChannelsAccess = require(${JSON.stringify(accessCopy)});`);
+  const ecut = editAnchor(esrc, "const ChannelsAccess = require('./channels-access.js');", `const ChannelsAccess = require(${JSON.stringify(accessCopy)});`, "src/server/channels-engine.js");
   const ENGX = MUT.load('src/server/channels-engine.js', ecut, 'count-agents-eng');
   const PEER = { kind: 'agent', id: 'agent-8', name: 'Peer', groups: [], msgLevelFor: () => 'visible' };
   const verdict = async (ENGM, tag) => {

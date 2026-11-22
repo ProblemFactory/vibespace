@@ -34,6 +34,15 @@ const CGM = require('../src/server/channels-grants.js');
 const ROOT = scratch('grants-store');
 let pass = 0, fail = 0;
 const ok = (c, m, d) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); if (d !== undefined) console.log(`    ${typeof d === 'string' ? d : JSON.stringify(d)}`.slice(0, 600)); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = JSON.stringify;
 const dirOf = (n) => { const d = path.join(ROOT, n); fs.mkdirSync(d, { recursive: true }); return d; };
 const G1 = { kind: 'group', id: 'g1' }, M1 = { kind: 'conversation', key: 'm1' };
@@ -273,7 +282,7 @@ console.log('⑦ RED control: THE admits swapped for a patched copy that ignores
     const src = fs.readFileSync(path.join(REPO, 'src/grant-model.js'), 'utf-8');
     const EX = "    if (x.kind === 'conversation' && F.keys.has(x.key)) return { state: 'excepted', row, entry: x };\n    if (x.kind === 'group') { if (F.groups.has(x.id)) return { state: 'excepted', row, entry: x }; if (F.unreadable) exceptUndecided = true; }\n";
     ok(src.split(EX).length === 2, 'CONTROL setup: the exception rung is found exactly once');
-    GM.admits = MZ.load('src/grant-model.js', src.replace(EX, ''), 'ignores-except').admits;
+    GM.admits = MZ.load('src/grant-model.js', editAnchor(src, EX, '', "src/grant-model.js"), 'ignores-except').admits;
     const p = await doorProbes();
     const inAll = [['exit', p.exit[0].ok], ['window', p.window[0].ok], ['browser', p.browser[0].ok], ['automation use', p.automationUse[0].ok], ['automation reach', p.automationReach[0].ok], ['channel reach', p.channelReach[0].ok], ['group visibility', p.groupVisibility[0].ok], ['web login', p.browserLogin[0].ok],
       ['round-robin', p.wake.roundRobin.calls.includes('m1')], ['fan-out', p.wake.fanOut.calls.includes('m1')], ['access left out', p.wake.accessLeftOut.m1Reads]];
@@ -1252,7 +1261,7 @@ console.log('⑩ lane lg-group-parents: «仅本组» (only:true) leaves by name
     const gsrc = fs.readFileSync(path.join(REPO, 'src/grant-model.js'), 'utf-8');
     const CARRY = "      out.push({ ...e, only: true }); moved = true;\n";
     ok(gsrc.split(CARRY).length === 2, 'CONTROL setup: the carry line is found exactly once');
-    const MG = MZ.load('src/grant-model.js', gsrc.replace(CARRY, '      out.push(e);\n'), 'no-carry');
+    const MG = MZ.load('src/grant-model.js', editAnchor(gsrc, CARRY, '      out.push(e);\n', "src/grant-model.js"), 'no-carry');
     const was = { to: [PO] };
     ok(MG.onlyCarried(was, [G1]).to[0].only === undefined && GM.onlyCarried(was, [G1]).to[0].only === true, 'CONTROL: a model without the carry hands the silent write on WIDER — ⑩ «KEEPS it» would be red');
   } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }

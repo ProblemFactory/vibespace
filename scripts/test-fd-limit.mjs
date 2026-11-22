@@ -31,6 +31,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const FB = require(path.join(REPO, 'src/fd-budget.js'));
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const ROOT = scratch('fd-limit');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -118,7 +127,7 @@ ok(FB.gaugeVerdict({ count: 799, soft: 1000, now: 0 }).level === 'ok' && FB.gaug
 ok(FB.gaugeVerdict({ count: 5, soft: null, now: 0 }).level === 'unknown' && FB.gaugeVerdict({ count: 5, soft: Infinity, now: 0 }).level === 'unknown', 'no limit known ⇒ unknown (never a guess)');
 {
   const src = fs.readFileSync(path.join(REPO, 'src/fd-budget.js'), 'utf8');
-  const latched = src.replace('if (ratio < GAUGE_RATIO) return { level: \'ok\', ratio, report: false };', 'if (ratio < GAUGE_RATIO && !(lastReportAt > 0)) return { level: \'ok\', ratio, report: false };');
+  const latched = editAnchor(src, 'if (ratio < GAUGE_RATIO) return { level: \'ok\', ratio, report: false };', 'if (ratio < GAUGE_RATIO && !(lastReportAt > 0)) return { level: \'ok\', ratio, report: false };', "src/fd-budget.js");
   ok(latched !== src, 'control setup: the latched copy took its patch');
   const L = M.load('src/fd-budget.js', latched, 'latched');
   ok(!gaugeOk(gaugeWalk(L.gaugeVerdict)), 'CONTROL: a gauge that stays high once it reported (a gauge that cannot fall) FAILS the walk');
@@ -277,7 +286,7 @@ const controlLeg = async () => {
   // hand-off to the store writer is put back to that shape); the same failure is a process death
   const out = [];
   const src = fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8');
-  const pre = src.replace(/require\('\.\/store-writer\.js'\)\.storeWriter\(\)\.dirty\(this\._file, \{[\s\S]*?\n {6}\} \}\);/, "if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; const tmp = this._file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2)); fs.renameSync(tmp, this._file); }, 500);");
+  const pre = editAnchor(src, /require\('\.\/store-writer\.js'\)\.storeWriter\(\)\.dirty\(this\._file, \{[\s\S]*?\n {6}\} \}\);/, "if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; const tmp = this._file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2)); fs.renameSync(tmp, this._file); }, 500);", "src/session-status.js");
   out.push([pre !== src, 'control setup: the pre-fix copy took its patch']);
   const copy = M.write('src/session-status.js', pre, 'prefix');
   const dir = path.join(ROOT, 'st-pre');

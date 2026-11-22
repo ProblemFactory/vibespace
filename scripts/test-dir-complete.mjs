@@ -45,6 +45,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
 let bad = 0, n = 0;
 const ok = (name, cond, got) => { n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + JSON.stringify(got).slice(0, 600)}`); };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dir-complete-'));
@@ -598,7 +607,7 @@ console.log('\n── ⑦ a paired machine that CANNOT be reached: refused by na
     ok('every stdin road on the dead machine answers with the named refusal (tools tar · usage scanner · opencode op · agent install · bootstrap)', ['installAgentTools', 'harvestUsage', 'opencodeOp', 'installAgentd'].every((k) => fixed[k] === 'host-unreachable') && fixed.bootstrapDone === 'host-unreachable', fixed);
     ok('…and NOTHING is uncaught — each feed went through feedStdin', uncaught.length === 0, uncaught);
     const src = read('src/hosts.js');
-    const mut = src.replace("  stdin.on('error', (e) => { if (!fed.error) fed.error = e; });\n", '');
+    const mut = editAnchor(src, "  stdin.on('error', (e) => { if (!fed.error) fed.error = e; });\n", '', "src/hosts.js");
     const M = mutantCopies('dir-complete-nolisten', REPO);
     const preFix = await roadsOf(M.load('src/hosts.js', mut, 'nolisten').HostManager, 'prefix');
     ok('RED CONTROL: the same roads through a copy whose feedStdin does not listen ⇒ an uncaught stream write error, EPIPE or ECONNRESET (the hub\'s death)', mut !== src && uncaught.filter((c) => /^(?:EPIPE|ECONNRESET|ERR_STREAM_DESTROYED)$/.test(c)).length >= 2, { uncaught, preFix });
@@ -635,7 +644,7 @@ console.log('\n── ⑦ B-5ce7 cure: a PARKED storage\'s folder is refused wit
   if (!fsr0.includes(from)) ok('CONTROL: the parked branch was found in src/routes/files.js', false, null);
   else {
     const MCx = mutantCopies('dir-complete-parked', REPO);
-    const noBranch = require(MCx.write('src/routes/files.js', fsr0.replace("    const pk = mounts.parkedAt?.(p);\n", '    const pk = null;\n'), 'noparked'));
+    const noBranch = require(MCx.write('src/routes/files.js', editAnchor(fsr0, "    const pk = mounts.parkedAt?.(p);\n", '    const pk = null;\n', "src/routes/files.js"), 'noparked'));
     const c = await askOn(noBranch, PARK + '/Docs');
     ok('CONTROL (the parked branch removed): the parked folder answers «try again in a moment» (red)', c.status === 503 && c.body.error === DOOR.SENTENCE, c);
   }

@@ -28,6 +28,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const near = (a, b) => Math.abs(a - b) < 1e-9;
 
@@ -436,7 +445,7 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const engSrc = read('src/server/usage-pool-engine.js');
   const needle = '  if (liveReadSource(backend)) {';
   ok('§9 control anchor: the live-read dispatch is spelled exactly once', engSrc.split(needle).length === 2);
-  const engP = M.load('src/server/usage-pool-engine.js', engSrc.replace(needle, "  if (backend === 'codex') {"), 'codex-branch').create(engOpts);
+  const engP = M.load('src/server/usage-pool-engine.js', editAnchor(engSrc, needle, "  if (backend === 'codex') {", "src/server/usage-pool-engine.js"), 'codex-branch').create(engOpts);
   const rp = await engP.probeQuotaForKey('fq-1');
   ok('§9 CONTROL: one codex branch restored in a patched engine ⇒ the fake harness is refused', rp.ok === false && reads.length === 1, rp);
   const adir = path.join(dir, 'acct-fq');
@@ -451,7 +460,7 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const accSrc = read('src/accounts.js');
   const an = "    if (this._credsOf(backend)?.spawnForm === 'isolated-home') return";
   ok('§9 control anchor: the spawn-form dispatch is spelled exactly once', accSrc.split(an).length === 2);
-  const am2 = new (M.load('src/accounts.js', accSrc.replace(an, "    if (backend === 'codex') return"), 'codex-branch').AccountManager)({ dataDir: adir, platform: 'linux' });
+  const am2 = new (M.load('src/accounts.js', editAnchor(accSrc, an, "    if (backend === 'codex') return", "src/accounts.js"), 'codex-branch').AccountManager)({ dataDir: adir, platform: 'linux' });
   am2._state.accounts.push({ ...fqRec });
   let e3 = null; try { am2.resolveForSpawn('fq-1', 'fakeq'); } catch (e) { e3 = e.message; }
   ok('§9 CONTROL: one codex branch restored in a patched accounts.js ⇒ the fake creds row is not served', /not a Claude account/.test(String(e3)), e3);

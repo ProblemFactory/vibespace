@@ -706,10 +706,10 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
     const MC = mutantCopies('desktop-switch-gap', REPO), cvSrc = read('src/lib/chat-view.js');
     const labelNeedle = "      this._startCollabTick();\n", recNeedle = '    this._turnSeqNote({ record: msg });\n';
     ok(cvSrc.split(labelNeedle).length === 2 && cvSrc.split(recNeedle).length === 2, 'the two RED patch sites exist');
-    const r2Shape = await import(pathToFileURL(MC.write('src/lib/chat-view.js', cvSrc.replace(labelNeedle, labelNeedle + '      this._turnStarted();\n'), 'label-is-a-start')).href);
+    const r2Shape = await import(pathToFileURL(MC.write('src/lib/chat-view.js', editAnchor(cvSrc, labelNeedle, labelNeedle + '      this._turnStarted();\n', "src/lib/chat-view.js"), 'label-is-a-start')).href);
     const gR = scene(r2Shape.ChatView.prototype);
     ok(!gR.gapHolds && gR.done.every(Boolean) && gR.reattach.every((x) => !x), 'RED (46dee2822\'s reading — the activity label is a start): the re-attach IN THE GAP erases the mark on both, and nothing brings it back ⇒ «THE GAP» red by name', gR);
-    const unfed = await import(pathToFileURL(MC.write('src/lib/chat-view.js', cvSrc.replace(recNeedle, ''), 'record-unfed')).href);
+    const unfed = await import(pathToFileURL(MC.write('src/lib/chat-view.js', editAnchor(cvSrc, recNeedle, '', "src/lib/chat-view.js"), 'record-unfed')).href);
     const gU = scene(unfed.ChatView.prototype);
     ok(gU.gapHolds && !gU.nextEnds, 'RED (the record never fed to the turn sequence): the next turn\'s record no longer ends the mark ⇒ «…and the NEXT turn» red by name', gU);
   }

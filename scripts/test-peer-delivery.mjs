@@ -338,7 +338,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
 `;
   ok('CONTROL scope: the anchor the patched copy re-adds the rung at is present once', cdSrc.split(RUNG1).length === 2);
   const M = mutantCopies('peer-delivery', REPO);
-  const mutant = await run(M.load('src/server/conversation-deliver.js', cdSrc.replace(RUNG1, RUNG0 + RUNG1), 'rung0'));
+  const mutant = await run(M.load('src/server/conversation-deliver.js', editAnchor(cdSrc, RUNG1, RUNG0 + RUNG1, "src/server/conversation-deliver.js"), 'rung0'));
   ok('NEGATIVE CONTROL: a patched copy with rung 0 put back delivers on the channel lane — the assertion above reads it as NOT the inbox (it can go red)', !firstRungIsInbox(mutant) && mutant.r.lane === 'channel' && mutant.calls.channel === 1 && mutant.calls.inbox.length === 0, JSON.stringify(mutant.r));
   // V1's shape at the spawn: a session option left over from the old build is ignored — no development-channels flag, no channel MCP server
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
@@ -347,7 +347,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const ccSrc = read('src/adapters/claude-code.js');
   const TUI = '    // TUI renderer for terminal-mode sessions';
   const OLD_PUSH = "    if (options.vibespaceChannel && options.vibespaceChannel.script) { args.push('--mcp-config', JSON.stringify({ mcpServers: { vibespace: { command: process.execPath, args: [options.vibespaceChannel.script], env: { VIBESPACE_CHANNEL_SOCK: options.vibespaceChannel.sock } } } })); args.push('--dangerously-load-development-channels', 'server:vibespace'); }\n";
-  const { ClaudeCodeAdapter: MutAdapter } = M.load('src/adapters/claude-code.js', ccSrc.replace(TUI, OLD_PUSH + TUI), 'channel-flags');
+  const { ClaudeCodeAdapter: MutAdapter } = M.load('src/adapters/claude-code.js', editAnchor(ccSrc, TUI, OLD_PUSH + TUI, "src/adapters/claude-code.js"), 'channel-flags');
   const mutArgv = new MutAdapter({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', vibespaceChannel: { script: '/x/vibespace-channel.js', sock: '/x/w.sock' } }).args;
   ok('NEGATIVE CONTROL: a patched adapter with the old flag push put back emits --dangerously-load-development-channels for the same options (the argv leg can go red)', ccSrc.split(TUI).length === 2 && mutArgv.includes('--dangerously-load-development-channels') && mutArgv.includes('--mcp-config'));
 }

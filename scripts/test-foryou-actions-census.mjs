@@ -29,6 +29,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FA = require(path.join(ROOT, 'src/foryou-actions.js'));
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const files = {};
 const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) { const rel = path.posix.join(d, e.name); if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) files[rel] = fs.readFileSync(path.join(ROOT, rel), 'utf8'); } };
@@ -281,7 +290,7 @@ console.log('⑤d THE ARRIVAL\'s words (B-99f7) — a run ask\'s toast and annou
   ok(Object.values(wired).every(Boolean), `the panel says it on every arrival surface: the arrival toast, its re-word from the current record, the announce card — through the model's ONE wordsOf (its arrival option), a cleared item's sentence first (${J(wired)})`, wired);
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const FSRC = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), from = '  const v = runCardOf(item, { t });\n  if (!v || !v.cmd || !v.headline) return null;\n';
-  const Fm = FSRC.split(from).length === 2 ? require(mutantCopies('b99f7', ROOT).write('src/foryou-actions.js', FSRC.replace(from, '  const v = null;\n  if (!v) return null;\n'), 'arrival')) : null;
+  const Fm = FSRC.split(from).length === 2 ? require(mutantCopies('b99f7', ROOT).write('src/foryou-actions.js', editAnchor(FSRC, from, '  const v = null;\n  if (!v) return null;\n', "src/foryou-actions.js"), 'arrival')) : null;
   const wm = Fm ? three.map((it) => said(Fm, it)) : null;
   ok(!!wm && new Set(wm).size === 1, `CONTROL (B-99f7): the mutant whose arrival says the record's words makes the three asks read alike (${J(wm && wm[0])}) — the leg goes red`, wm);
 }
@@ -312,7 +321,7 @@ console.log('⑤e WHO STARTED THE TURN (B-d868) — the «Allow for 1 hour» lin
   const FS = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), from = "    ...(w.turnBy && typeof w.turnBy === 'object' ? [turnByWords(w.turnBy, t)] : [])];";
   const k = FS.split(from).length - 1;
   ok(k === 1, `the anchor of the control B-d868 card-line is in the source (once)`, `found ${k} times`);
-  if (k === 1) { const { mutantCopies } = await import('./mutant-copy.mjs'); const FAx = require(mutantCopies('d868fa', ROOT).write('src/foryou-actions.js', FS.replace(from, '    ];'), 'no-turn-line'));
+  if (k === 1) { const { mutantCopies } = await import('./mutant-copy.mjs'); const FAx = require(mutantCopies('d868fa', ROOT).write('src/foryou-actions.js', editAnchor(FS, from, '    ];', "src/foryou-actions.js"), 'no-turn-line'));
     const v = FAx.runCardOf({ id: 'ut-d868', status: 'open', kind: 'action', origin: 'vault', sessionKey: 'claude:ops', text: 'x', createdAt: T0, expiresAt: T0 + 60e3, action: { type: 'vault-run-ask', askId: 'a'.repeat(32), always: false, window: true, tool: 'x' }, facts: { ...base, window: { offered: true, until: T0 + 3600e3, entries: ['Router'], switchOn: false, turnBy: { by: 'person' } } } });
     ok(!!v && !v.window.lines.some((x) => /The turn running when this asked was started/.test(x)), `CONTROL (B-d868): the copy without the line says nothing of who started the turn — the leg goes red`, v && v.window && v.window.lines); }
 }
