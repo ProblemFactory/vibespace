@@ -2,7 +2,10 @@
 // THE MOUNT DAEMON'S OWN START (B-323e, lane bl-machines-b, 主开发 r1299): «a mount daemon is started without the hub's main process
 // starting a program, and it lives exactly as today» — THE STARTER's one new kind of ask, a DETACHED child it never signals, holds or
 // counts. Fast, in-process: the real MountManager in temp data dirs and the real starter; the «daemon» a stand-in that LIVES and that
-// the adoption's own walk knows — a link named rclone to `tail -f /dev/null`, so its comm and argv say rclone, mount and its mount point
+// the adoption's own walk knows — a link named rclone to a SHELL that waits in a builtin read on this suite's own FIFO, so its comm
+// and argv say rclone, mount and its mount point, and it starts no child. WHY A SHELL (主开发 r1977): a tool that checks its own name
+// refuses to run as «rclone» (uutils' multicall tail ends at once there) — dash or bash read no name of their own. Each stand-in is
+// ended by the pid and start this suite holds for it, at EVERY exit (its end, a throw, a signal); the FIFO lives in its scratch folder
 // — no mount, no real mount table (the manager's seams), every program on this suite's own search path; each daemon ended by this suite
 //  ① its start makes NO program start from the hub's main process; its log: the hub's marker first, then the daemon's own lines
 //  ② LAW 1: it OUTLIVES its starter — the starter's pipe closed (it ends by itself) and a starter killed (a fault): the daemon lives —
@@ -43,15 +46,16 @@ CP.ChildProcess.prototype.spawn = function (o) { mainStarts.push(path.basename(S
 const SEC = ['s', 'ek', 'ret'].join('') + '-' + process.pid + '-daemon';
 const LOG = path.join(T, 'starts.log');
 const fbin = path.join(T, 'bin'), ddir = path.join(T, 'daemon'); fs.mkdirSync(fbin, { recursive: true }); fs.mkdirSync(ddir);
-const TAIL = ['/usr/bin/tail', '/bin/tail'].find((p) => fs.existsSync(p));
-fs.symlinkSync(TAIL, path.join(ddir, 'rclone'));   // THE DAEMON: its comm and argv[0] say rclone; it idles on /dev/null until ended here
+const SHELL = ['/usr/bin/dash', '/bin/dash', '/usr/bin/bash', '/bin/bash'].find((p) => fs.existsSync(p));   // never a multicall binary (r1977: uutils' tail ends at once under another name)
+fs.symlinkSync(SHELL, path.join(ddir, 'rclone'));   // THE DAEMON: its comm and argv[0] say rclone; it waits on HOLD until ended here
+const HOLD = path.join(T, 'hold.fifo'); CP.execFileSync('mkfifo', [HOLD], { stdio: 'ignore' });   // a FIFO no one writes: its open waits (an interruptible sleep), no child, no busy loop
 const SYS = 'PATH=/usr/bin:/bin';
 const standin = (name, body) => fs.writeFileSync(path.join(fbin, name), `#!/bin/sh\necho "$PPID ${name} $1 $2" >> '${LOG}'\n${body}\n`, { mode: 0o755 });
 standin('rclone', `case "$1" in
   help) echo '--use-accept-encoding-gzip --rc-addr --s3-use-accept-encoding-gzip' ;;
   version) echo 'rclone v1.70.0' ;;
   lsf) echo f.txt ;;
-  mount) [ "$2" = --help ] && { echo '--vfs-cache-mode --rc-addr'; exit 0; }; echo 'standin daemon up'; exec '${path.join(ddir, 'rclone')}' -f /dev/null -- "$@" ;;
+  mount) [ "$2" = --help ] && { echo '--vfs-cache-mode --rc-addr'; exit 0; }; echo 'standin daemon up'; exec '${path.join(ddir, 'rclone')}' -c 'read x < "$1"' standin '${HOLD}' "$@" ;;
 esac
 exit 0`);
 for (const [n, b] of [['fusermount3', 'exit 0'], ['fusermount', 'exit 0'], ['umount', 'exit 0'], ['sudo', 'exit 1'], ['find', 'exit 0'],
@@ -65,7 +69,12 @@ const PI = require(path.join(REPO, 'src/proc-identity.js'));
 const MOUNTS = require(path.join(REPO, 'src/mounts.js'));
 const MC = mutantCopies('mount-daemon-start', REPO);
 const alive = (pid) => { const st = pid ? PI.statOf(pid) : null; return !!st && st[0] !== 'Z'; };
-const daemons = new Set();   // every daemon this suite started: ended in finally
+const daemons = new Set(), daemonStarts = new Map();   // every daemon this suite started, with the start it had: ended at every exit
+const ownDaemon = (pid) => { if (!pid) return; const s0 = PI.starttimeOf(pid); if (s0 == null) return; daemons.add(pid); daemonStarts.set(pid, s0); };   // none read: gone already
+const sameStart = (pid) => daemonStarts.has(pid) && PI.starttimeOf(pid) === daemonStarts.get(pid);   // the pid this suite holds, still that process
+const endOwn = () => { for (const pid of daemons) { if (sameStart(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } } };
+process.on('exit', endOwn);   // its end, a throw that ends it
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { endOwn(); try { fs.rmSync(T, { recursive: true, force: true }); } catch { } process.kill(process.pid, sig); });   // a signal: its own stand-ins and folder, then the signal's own end
 const recEnv = () => ({ ...serviceEnv(process.env), RCLONE_CONFIG_VS_TYPE: 's3', RCLONE_CONFIG_VS_SECRET_ACCESS_KEY: SEC });
 const held = [], con = { log: console.log, warn: console.warn };   // this process's journal while the legs run
 console.warn = (...a) => { held.push(a.map(String).join(' ')); con.warn(...a); };
@@ -89,7 +98,7 @@ try {
   const s0 = mainStarts.length;
   await mm1.mount(R1.id);
   const d1 = (mm1._daemonIds && mm1._daemonIds.get(mp1) || {}).pid || (mm1._starting && (mm1._starting.get(R1.id) || {}).pid) || 0;
-  if (d1) daemons.add(d1);
+  if (d1) ownDaemon(d1);
   const fromMain = mainStarts.slice(s0);
   await until(() => fs.existsSync(path.join(T, 'data-a', 'mount-logs', 'mds-a.log')) && /standin daemon up/.test(fs.readFileSync(path.join(T, 'data-a', 'mount-logs', 'mds-a.log'), 'utf8')));
   const log1 = fs.readFileSync(path.join(T, 'data-a', 'mount-logs', 'mds-a.log'), 'utf8');
@@ -97,7 +106,7 @@ try {
     `① the daemon (pid ${d1}) started with NO program from the hub's main process (${fromMain.length}: ${fromMain.join(', ')}); its log holds the hub's marker, then the daemon's own lines`, { d1, fromMain, log: log1.slice(0, 200) });
 
   console.log('② law 1: it outlives its starter');
-  const startVia = async (st, tag) => { const mp = path.join(T, 'mp-' + tag); const logP = path.join(T, 'log-' + tag + '.log'); const r = await st.run('rclone', ['mount', 'VS:', mp, '--vfs-cache-mode', 'full'], { detach: { log: logP }, wholeEnv: true, env: recEnv(), timeoutMs: 10000 }); if (r && r.pid) daemons.add(r.pid); return r; };
+  const startVia = async (st, tag) => { const mp = path.join(T, 'mp-' + tag); const logP = path.join(T, 'log-' + tag + '.log'); const r = await st.run('rclone', ['mount', 'VS:', mp, '--vfs-cache-mode', 'full'], { detach: { log: logP }, wholeEnv: true, env: recEnv(), timeoutMs: 10000 }); if (r && r.pid) ownDaemon(r.pid); return r; };
   const outlive = async (script, tag, how) => {
     const st = CS.createChildStarter({ ...(script ? { script } : {}), log: { warn: () => { } } });
     const r = await startVia(st, tag); const sp = st._proc(); const spid = sp && sp.pid;
@@ -122,7 +131,7 @@ try {
   const lostReply = async (M, tag) => {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R), mp = mm.pathOf(R); let asks = 0, lost = true;
-    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) daemons.add(r.pid); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) daemons.add(r.pid); return r; }); } };
+    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return r; }); } };
     CS.setChildStarter(W);
     try { const first = await mm.mount(R.id); const second = await mm.mount(R.id); await sleep(150); return { first, second, asks, live: await walkCount(mm, mp) }; } finally { CS.setChildStarter(S); }
   };
@@ -139,7 +148,7 @@ try {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R); mm._procOpts = { procRoot: path.join(T, 'no-proc-' + tag) }; mm._cantTellMs = 50;   // a /proc root that is not there; «can't tell»'s own bound tiny
     let asks = 0, lost = true;
-    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) daemons.add(r.pid); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) daemons.add(r.pid); return r; }); } };
+    const W = { stats: () => S.stats(), run: (cmd, args, o) => { if (o && o.detach) asks++; const p = S.run(cmd, args, o); if (o && o.detach && lost) { lost = false; return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return { unknown: true, why: 'its reply lost' }; }); } return p.then((r) => { if (r && r.pid) ownDaemon(r.pid); return r; }); } };
     CS.setChildStarter(W);
     try { const first = await mm.mount(R.id); const second = await mm.mount(R.id); await sleep(150); const third = await mm.mount(R.id); await sleep(150); return { first, second, third, asks, waiting: !!(mm._cantTell && mm._cantTell.has(mm.pathOf(R))) }; } finally { CS.setChildStarter(S); }   // the third connect: past «can't tell»'s own bound (its clock starts at the second)
   };
@@ -193,13 +202,14 @@ try {
   ok(quiet(nb) && quiet(na) && nb.words === 'rclone exited before mounting' && na.words === UNANS && naR.words === 'rclone exited before mounting' && !quiet(nbR),
     `⑦ LAW 5: a start that could not be made (no such program) and one with NO ANSWER read «could not be started» in the journal, never «died», nothing watched; the person's words: no such program «${nb.words}» (the release's), no answer «${na.words}» (no verdict) — RED the no answer read as «exited» («${naR.words}»); RED the no-start branch cut: the release's road, a watch over no pid (${JSON.stringify({ r: nbR.r, watched: nbR.watched, died: nbR.died })})`, { nb, na, naR, nbR });
 } finally {
-  for (const pid of daemons) { if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } }   // this suite's own daemons, by the pids their starts answered
+  endOwn();   // this suite's own daemons, by the pid and start it holds
   // …and by their program: any process running THIS suite's own stand-in (its temp folder's rclone link) — a start no leg recorded
   // never outlives the suite (a red control's road may start one it never answers)
   const ownDaemons = () => { const out = []; for (const d of fs.readdirSync('/proc')) { if (!/^\d+$/.test(d)) continue; try { if (fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').startsWith(path.join(ddir, 'rclone') + '\0')) out.push(Number(d)); } catch { } } return out; };
-  for (const pid of ownDaemons()) { daemons.add(pid); try { process.kill(pid, 'SIGKILL'); } catch { } }
-  await until(() => [...daemons].every((pid) => !alive(pid)), 3000);
-  ok([...daemons].every((pid) => !alive(pid)), `the suite ends its own daemons (${daemons.size}; none left)`, [...daemons].filter(alive));
+  for (const pid of ownDaemons()) { ownDaemon(pid); if (sameStart(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } }   // found by its own program's path, its start read at that look
+  const ownLeft = () => [...daemons].filter((pid) => alive(pid) && sameStart(pid));
+  await until(() => ownLeft().length === 0, 3000);
+  ok(ownLeft().length === 0, `the suite ends its own daemons (${daemons.size}; none left)`, ownLeft());
   try { CS.setChildStarter(S); S.closePipe(); } catch { }
   console.warn = con.warn;
   fs.rmSync(T, { recursive: true, force: true });
