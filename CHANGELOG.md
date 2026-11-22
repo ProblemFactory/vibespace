@@ -80,6 +80,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A password written inside a web address (user:password@host) is now hidden in messages, job output and job names; the user and the host stay readable.
 - A backlog change made on the board no longer erases an agent's claim or a row it parked a moment before; a row removed meanwhile is named.
 - Archiving a conversation that is in a Task Group no longer holds VibeSpace still while the groups are saved.
+- When a conversation's login answered as another of your accounts, that account's usage was counted as this one's. Now its row says its own usage is unknown.
 
 ## 2.369.415 — 2026-11-21
 
