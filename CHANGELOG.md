@@ -114,6 +114,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A command an agent runs with a vault value no longer holds VibeSpace while its output is checked for that value.
 - A signed-out visitor could load the app's own page files (never your data) through an address written with «..»; such an address is now refused.
 - On a phone, the window list keeps a waiting conversation marked after it is matched with another device, and tapping a closed window now says so.
+- When a pool is your default, the usage meter's note now says it shows the pool's current member, not «Default account».
+- Notices held while a restarting VibeSpace was still handing over its record of turns nobody typed now say so, not that the spending ceiling held them.
+- When the data folder refuses the spending record's lock, the usage menu and For you now say so, and held turns resume by themselves once it writes again.
 
 ## 2.369.415 — 2026-11-21
 
