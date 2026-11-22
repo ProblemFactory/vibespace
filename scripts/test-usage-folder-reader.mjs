@@ -74,7 +74,8 @@ async function routesOf(routesMod, w) {
   // the REAL AccountManager (its decision rows and its sign-in facts' settle, as the routes ask them), the machine's own logins stubbed
   const over = { codexGlobalStatus: () => ({ loggedIn: false, email: null }), subscriptionStatus: () => ({ loggedIn: false, email: null }), subCredsPath: () => path.join(w.root, 'none', '.credentials.json'), usageToken: () => null };
   const accounts = new Proxy(w.am, { get: (t, k) => (k in over ? over[k] : (typeof t[k] === 'function' ? t[k].bind(t) : t[k])) });
-  const realSI = globalThis.setInterval; globalThis.setInterval = () => ({ unref() { }, ref() { } });   // no timer runs here: each refresh is asked by the leg
+  const timers = [];
+  const realSI = globalThis.setInterval; globalThis.setInterval = (fn, t) => { timers.push({ fn, t }); return { unref() { }, ref() { } }; };   // no timer runs here: each pass is asked by the leg
   try {
     await quiet(() => routesMod.setupUsage({
       app, accounts, hosts: { list: () => [] }, usageHistory: null, activeSessions: new Map(), serverSetting: () => false, ensureDir: (x) => fs.mkdirSync(x, { recursive: true }),
@@ -83,7 +84,7 @@ async function routesOf(routesMod, w) {
     }));
   } finally { globalThis.setInterval = realSI; }
   const get = (req = {}) => new Promise((resolve) => { const res = { status() { return res; }, set() { return res; }, setHeader() { }, json(b) { resolve(b); return res; } }; quiet(() => routes['GET /api/usage']({ query: {}, headers: {}, params: {}, ...req }, res)); });
-  return { routes, get };
+  return { routes, get, timers };
 }
 const F = require(path.join(REPO, 'src/usage-cache-folder.js'));
 const W = require(path.join(REPO, 'src/usage-cache-write.js'));
@@ -163,7 +164,7 @@ const tick = () => new Promise((z) => setImmediate(z));
   await p;
   const seen2 = groupAt(eng);
   ok(!!(seen1 === at1 && seen2 === at2), `③ the hub's own write is in the reply at once (${seen1 === at1}), and a write during a read in flight stands over what that read saw (${seen2 === at2})`, { seen1, seen2 });
-  const Wcut = M.load('src/usage-cache-write.js', anchored(W_SRC, "  fs.renameSync(file + '.tmp', file);\n  noteWritten(file, text);\n", "  fs.renameSync(file + '.tmp', file);\n", 'the write path without its notice'), 'no-notice');
+  const Wcut = M.load('src/usage-cache-write.js', anchored(W_SRC, "  fs.renameSync(file + '.tmp', file);\n  noteWritten(file, text, { replace });\n", "  fs.renameSync(file + '.tmp', file);\n", 'the write path without its notice'), 'no-notice');
   Wcut.onWritten(F.noteWrittenFile);   // the folder listens to the copy as it listens to the write path
   const w2 = world(); const e2 = await quiet(() => engineOf(ENG, w2));
   const C2 = w2.ids[2];
@@ -188,7 +189,7 @@ async function overlayLeg(mod) {
 {
   const got = await overlayLeg(F);
   ok(!!(got === 2), `③ a write after a read in flight took the old bytes stands in the reply it brings (fetchedAt ${got})`);
-  const NoOverlay = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      for (const [n, t] of mine) texts.set(n, laterOf(texts.get(n), t));   // the hub's own writes during the read stand over what it saw — unless the read saw a LATER reading (r1976 (g))\n", '', 'the reply without the writes during its read'), 'no-overlay');
+  const NoOverlay = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      for (const [n, o] of mine) texts.set(n, o.replace ? o.text : laterOf(texts.get(n), o.text));   // the hub's own writes during the read stand over what it saw — unless the read saw a LATER reading (r1976 (g))\n", '', 'the reply without the writes during its read'), 'no-overlay');
   const got2 = await overlayLeg(NoOverlay);
   ok(!!(got2 === 1), `CONTROL (the reply without the writes made during its read): the older bytes come back over the hub's write (fetchedAt ${got2}) — red`);
 }
@@ -268,7 +269,7 @@ async function unreadableLeg(mod) {
 {
   const u = await unreadableLeg(F);
   ok(!!(u.held === false && u.names.length === 1 && u.names[0] === 'a.json'), `⑤ one unreadable file is skipped (as the release skipped it): the others come, the folder is not held (${JSON.stringify(u)})`);
-  const Strict = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); } catch { }\n", "      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }\n", 'one unreadable file fails the refresh'), 'strict');
+  const Strict = M.load('src/usage-cache-folder.js', anchored(F_SRC, "      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); readOk(n); } catch (e) { if (!e || e.code !== 'ENOENT') skip(n, e); }\n", "      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }\n", 'one unreadable file fails the refresh'), 'strict');
   const s2 = await unreadableLeg(Strict);
   ok(!!(s2.held === true), 'CONTROL (one unreadable file fails the whole refresh): the folder is held for every identity — red');
 }
@@ -289,7 +290,88 @@ async function laterLeg(mod) {
 {
   const got = await laterLeg(F);
   ok(!!(got === 3), `⑤ the hub's write during a read keeps the LATER of the two readings: another process's newer reading stands (fetchedAt ${got})`);
-  const OwnWins = M.load('src/usage-cache-folder.js', anchored(F_SRC, 'texts.set(n, laterOf(texts.get(n), t));', 'texts.set(n, t);', 'the own write always wins'), 'own-wins');   // stale-pins: kept (the control's planted release form)
+  const OwnWins = M.load('src/usage-cache-folder.js', anchored(F_SRC, 'texts.set(n, o.replace ? o.text : laterOf(texts.get(n), o.text));', 'texts.set(n, o.text);', 'the own write always wins'), 'own-wins');   // stale-pins: kept (the control's planted release form)
   ok(!!((await laterLeg(OwnWins)) === 2), 'CONTROL (the own write always wins): the hub\'s older text hides the newer reading for a refresh — red');
+}
+// ⑥ (r2120) THE NAMED ERROR · THE INGEST WHILE HELD · A REPAIR'S REPLACE · THE BOOT'S FILL SKIPS ONE FILE · A SKIP SAID ONCE
+{
+  const named = async (routesMod) => {
+    const w = world(); await quiet(() => engineOf(ENG, w));
+    const R = await routesOf(routesMod, w);
+    const reader = F.forDir(w.cacheDir), realState = reader.state;
+    reader.state = () => { throw new Error('planted'); };   // a throw in the answer after the await
+    const out = { code: null, body: null };
+    const res = { status(c) { out.code = c; return res; }, set() { return res; }, setHeader() { }, json(b) { out.body = b; return res; } };
+    let rejected = null;
+    try { await quiet(() => R.routes['GET /api/usage']({ query: {}, headers: {}, params: {} }, res)); } catch (e) { rejected = e; } finally { reader.state = realState; }
+    return { ...out, rejected: rejected ? String(rejected.message || rejected) : null };
+  };
+  const cure = await named(ROUTES);
+  ok(!!(cure.code === 500 && cure.body && /the usage answer failed: planted/.test(cure.body.error) && !cure.rejected), `⑥ a throw in the answer after the await is answered BY NAME (${cure.code}: ${cure.body && cure.body.error})`, cure);
+  const Bare = M.load('src/usage-routes.js', anchored(R_SRC, "  try { usageAnswer(req, res); } catch (e) { try { res.status(500).json({ error: `the usage answer failed: ${(e && e.message) || e}` }); } catch { } }\n", '  usageAnswer(req, res);\n', 'the answer without its named error'), 'bare');
+  const rel = await named(Bare);
+  ok(!!(rel.body === null && rel.rejected === 'planted'), 'CONTROL (the answer without its named error): the handler\'s promise rejects and the request is never answered — red', rel);
+}
+{
+  const heldIngest = async (routesMod) => {
+    const w = world(); let hang = false;
+    const fsp = { readdir: (d) => (hang ? new Promise(() => { }) : fs.promises.readdir(d)), readFile: (f, e) => fs.promises.readFile(f, e) };
+    const reader = F.forDir(path.resolve(w.cacheDir), { fsp, everyMs: 20, log: () => { } });
+    await quiet(() => engineOf(ENG, w));
+    const R = await routesOf(routesMod, w);
+    const gone = w.ids[1];
+    w.am.remove(gone);   // an account removed while the folder is held
+    hang = true; reader.refresh();
+    await new Promise((z) => setTimeout(z, 40));
+    const pass = R.timers.find((x) => x.t === 30000);
+    await quiet(async () => pass.fn());
+    const ans = await R.get();
+    return { held: !!(ans.usageFolder && ans.usageFolder.held), still: !!(ans.accounts && ans.accounts[gone]), other: !!(ans.accounts && ans.accounts[w.ids[0]]) };
+  };
+  const c = await heldIngest(ROUTES);
+  ok(!!(c.held && !c.still && c.other), `⑥ while the folder is held the 30-s pass ingests over the kept reply: a removed account leaves the answer, the others stay (${JSON.stringify(c)})`);
+  const NoHeld = M.load('src/usage-routes.js', anchored(R_SRC, ' if (usageFolder.state().held) ingestPassiveUsage();', '', 'the pass without its held ingest'), 'no-held');
+  const r = await heldIngest(NoHeld);
+  ok(!!(r.held && r.still), 'CONTROL (the pass without its held ingest): the removed account stays in the answer for as long as the folder is held — red', r);
+}
+async function replaceLeg(mod) {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'replace-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 5, foreign: true }));   // a foreign reading on disk (newer)
+  const held = [];
+  const fsp = { readdir: (d) => fs.promises.readdir(d), readFile: (f) => new Promise((res) => held.push(() => res(fs.readFileSync(f, 'utf8')))) };
+  const r = mod.create(dir, { fsp, fillSync: false });
+  const pr = r.refresh();
+  for (let k = 0; k < 20 && !held.length; k++) await tick();
+  held.shift()();                                                                              // the read takes the foreign text …
+  r.noteWritten('a.json', JSON.stringify({ fetchedAt: 3, own: true }), { replace: true });   // … then a repair REPLACES it with the account's own older snapshot
+  await pr;
+  return JSON.parse(r.via.readText(path.join(dir, 'a.json')));
+}
+{
+  const got = await replaceLeg(F);
+  ok(!!(got.own === true && got.fetchedAt === 3), `⑥ a repair's replace during a read stands over the foreign reading the read took (fetchedAt ${got.fetchedAt})`);
+  const NoReplace = M.load('src/usage-cache-folder.js', anchored(F_SRC, 'texts.set(n, o.replace ? o.text : laterOf(texts.get(n), o.text));', 'texts.set(n, laterOf(texts.get(n), o.text));', 'a replace judged as a reading'), 'no-replace');
+  const r2 = await replaceLeg(NoReplace);
+  ok(!!(r2.foreign === true), 'CONTROL (a replace judged as a reading): the foreign reading the repair replaced stands for one more refresh — red', r2);
+}
+async function bootSkipLeg(mod) {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'bootskip-'));
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({ fetchedAt: 1 }));
+  fs.mkdirSync(path.join(dir, 'b.json'));
+  const said = [];
+  const r = mod.create(dir, { log: (m) => said.push(m) });   // the boot's synchronous fill
+  const st0 = r.state(), names0 = r.via.readdir(dir);
+  await r.refresh(); await r.refresh();
+  fs.rmSync(path.join(dir, 'b.json'), { recursive: true }); fs.writeFileSync(path.join(dir, 'b.json'), JSON.stringify({ fetchedAt: 2 }));
+  await r.refresh();
+  return { held: st0.held, names: names0, skipSaid: said.filter((m) => /cannot be read/.test(m)).length, againSaid: said.filter((m) => /: reads again$/.test(m)).length };
+}
+{
+  const b = await bootSkipLeg(F);
+  ok(!!(b.held === false && b.names.length === 1 && b.names[0] === 'a.json'), `⑥ the boot's fill skips one unreadable file too: the others come at once, nothing held (${JSON.stringify(b.names)})`);
+  ok(!!(b.skipSaid === 1 && b.againSaid === 1), `⑥ a skipped file is said ONCE an episode in the journal (${b.skipSaid} across three reads) and its reading again once (${b.againSaid})`, b);
+  const FillThrows = M.load('src/usage-cache-folder.js', anchored(F_SRC, "catch (e) { if (!e || e.code !== 'ENOENT') skip(n, e); } }   // r2120 (2)", "catch (e) { if (!e || e.code !== 'ENOENT') throw e; } }   // r2120 (2)", 'the fill throws on one file'), 'fill-throws');
+  const b2 = await bootSkipLeg(FillThrows);
+  ok(!!(b2.held === true), 'CONTROL (the boot\'s fill throws on one unreadable file): the folder is held from the boot — red', b2);
 }
 report();

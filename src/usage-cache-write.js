@@ -423,11 +423,13 @@ function noteDirectWrite(key, prev, next, { nowMs = Date.now(), cacheDir = null 
 // B-360d part 3 U3: a file the hub wrote replaces its entry in the folder's kept reply at once (src/usage-cache-folder.js)
 const _onWritten = new Set();
 function onWritten(fn) { if (typeof fn === 'function') _onWritten.add(fn); return () => _onWritten.delete(fn); }
-function noteWritten(file, text) { for (const fn of _onWritten) { try { fn(file, text); } catch { } } }
-function atomicWrite(file, text) {
+// `replace`: the write is a repair's REPLACE (writeCacheObject replace:true, the repair's fallback) — it stands over any reading a read in
+// flight took (r2120 (1)); a reading's write stands only when it is not older than what the read saw
+function noteWritten(file, text, { replace = false } = {}) { for (const fn of _onWritten) { try { fn(file, text, { replace }); } catch { } } }
+function atomicWrite(file, text, { replace = false } = {}) {
   fs.writeFileSync(file + '.tmp', text);
   fs.renameSync(file + '.tmp', file);
-  noteWritten(file, text);
+  noteWritten(file, text, { replace });
 }
 
 /**
@@ -610,7 +612,7 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   }
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
-    atomicWrite(file, JSON.stringify(out));
+    atomicWrite(file, JSON.stringify(out), { replace });
   } catch (e) {
     return { ok: false, why: 'write failed: ' + e.message };
   }

@@ -44,6 +44,9 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
   let failed = null, heldSince = null;  // the last refresh that failed; since when the folder has not given a reply
   let timer = null, said = false;
   const listeners = new Set();
+  const skipped = new Map();   // r2120 (3): a reading file that cannot be read now → said once an episode (cleared when it reads again)
+  const skip = (n, e) => { const code = (e && e.code) || 'error'; if (!skipped.has(n)) { skipped.set(n, code); log(`[usage-folder] ${DIR}/${n}: cannot be read (${code}) — skipped; its readings are not in the reply until it reads again`); } };
+  const readOk = (n) => { if (skipped.delete(n)) log(`[usage-folder] ${DIR}/${n}: reads again`); };
   const jsonOnly = (names) => names.filter((n) => typeof n === 'string' && n.endsWith('.json'));
 
   function land(texts, at) {
@@ -67,7 +70,7 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
     for (const n of names) {
       // a file that cannot be read now (removed after the list, unreadable, a folder named .json) is SKIPPED, as the release skipped it
       // (r1976 (b)): it never holds the other identities' readings; only the folder's own listing failing holds the reply
-      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); } catch { }
+      try { texts.set(n, await fsp.readFile(path.join(DIR, n), 'utf8')); readOk(n); } catch (e) { if (!e || e.code !== 'ENOENT') skip(n, e); }
     }
     return texts;
   }
@@ -76,7 +79,7 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
     const at = startedAt = now(); own = new Map();
     const p = readOnce().then((texts) => {
       const mine = own; inflight = null; own = null;
-      for (const [n, t] of mine) texts.set(n, laterOf(texts.get(n), t));   // the hub's own writes during the read stand over what it saw — unless the read saw a LATER reading (r1976 (g))
+      for (const [n, o] of mine) texts.set(n, o.replace ? o.text : laterOf(texts.get(n), o.text));   // the hub's own writes during the read stand over what it saw — unless the read saw a LATER reading (r1976 (g))
       return land(texts, at);
     }, (e) => {
       inflight = null; own = null;
@@ -104,10 +107,10 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
   }
   function start() { if (!timer) { timer = setInterval(tick, everyMs); if (timer && timer.unref) timer.unref(); } return api; }
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
-  function noteWritten(name, text) {
+  function noteWritten(name, text, { replace = false } = {}) {
     if (typeof name !== 'string' || !name.endsWith('.json') || typeof text !== 'string') return;
     if (reply) reply.texts.set(name, text);
-    if (own) own.set(name, text);
+    if (own) own.set(name, { text, replace: !!replace });   // r2120 (1): a repair's replace stands over a read in flight; a reading keeps the later one
   }
   function state() {
     const t = now();
@@ -128,7 +131,7 @@ function create(dir, { fsp = fs.promises, now = Date.now, everyMs = EVERY_MS, lo
     // THE BOOT'S ONE SYNCHRONOUS PASS (the boot read this folder synchronously before: the ingestion at setupUsage)
     try {
       const texts = new Map();
-      for (const n of jsonOnly(fs.readdirSync(DIR))) { try { texts.set(n, fs.readFileSync(path.join(DIR, n), 'utf8')); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; } }
+      for (const n of jsonOnly(fs.readdirSync(DIR))) { try { texts.set(n, fs.readFileSync(path.join(DIR, n), 'utf8')); } catch (e) { if (!e || e.code !== 'ENOENT') skip(n, e); } }   // r2120 (2): one unreadable file skipped at the boot too
       reply = { at: now(), texts };
     } catch (e) { if (e && e.code === 'ENOENT') reply = { at: now(), texts: new Map() }; else { failed = { at: now(), code: (e && e.code) || 'error' }; sayHeld(`the first read failed (${failed.code})`); } }
   }
@@ -142,9 +145,9 @@ function forDir(dir, opts) {
   return r;
 }
 /** the write path's notice (src/usage-cache-write.js): a file the hub wrote replaces its entry in its folder's reply */
-function noteWrittenFile(file, text) {
+function noteWrittenFile(file, text, opts) {
   const r = readers.get(path.dirname(path.resolve(String(file))));
-  if (r) r.noteWritten(path.basename(String(file)), text);
+  if (r) r.noteWritten(path.basename(String(file)), text, opts);
 }
 try { require('./usage-cache-write.js').onWritten(noteWrittenFile); } catch { }
 

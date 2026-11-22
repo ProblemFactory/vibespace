@@ -217,7 +217,7 @@ const windowWorld = () => {
 const windowScene = async (repairMod) => { const w = windowWorld(); const kept = await keptAfter(w.aDir, 'org_bbbb', () => repairMod.repairByWindow({ dataDir: w.dataDir, roster: w.roster, id: 'test-window' })); return { kept: kept && kept.fetchedAt, file: lastLine(w.file).fetchedAt }; };
 {
   const cure = await windowScene(require(path.join(REPO, 'src/reading-repair.js')));
-  ok(!!(cure.kept === cure.file && cure.file != null), `⑥ the window repair moved a reading onto another identity's file: its kept last line is the file's new last one (${cure.kept} = ${cure.file})`, cure);
+  ok(!!(cure.kept === cure.file && Number.isInteger(cure.file) && Boolean(cure.file)), `⑥ the window repair moved a reading onto another identity's file: its kept last line is the file's new last one (${cure.kept} = ${cure.file})`, cure);
   const Cut = M.load('src/reading-repair.js', anchored(R_SRC, WINDOW_NOTE, '', 'the window repair without its notice'), 'window-notice-cut');
   const cut = await windowScene(Cut);
   ok(!!(cut.kept !== cut.file && cut.kept != null), `⑥ RED CONTROL the window repair's notice cut: the kept last line is still the older one (${cut.kept}, the file's ${cut.file})`, cut);
@@ -273,5 +273,25 @@ const heldPrime = async (engMod) => {
   const p1 = w.eng.sweepUsageAnchors(), p2 = w.eng.sweepUsageAnchors();
   await quiet(() => p1);
   ok(!!(p1 && typeof p1.then === 'function' && p1 === p2), '⑧ two sweeps asked at once are ONE (the second joins the first): no reading lands between one sweep\'s check and its append');
+}
+// ═══ ⑨ (r2120) THE PRIME LEFT NOT READY on a listing error other than a missing folder ═══
+const primeScene = async (Mod, code) => {
+  const root = fs.mkdtempSync(path.join(ROOT, 'prime-')), dir = path.join(root, 'usage-anchors');
+  if (code) fs.mkdirSync(dir, { recursive: true });
+  const real = fs.promises.readdir;
+  fs.promises.readdir = async function (p0, ...a) { if (code && typeof p0 === 'string' && path.resolve(p0) === path.resolve(dir)) throw Object.assign(new Error(code), { code }); return real.call(this, p0, ...a); };
+  try {
+    const store = new Mod.UsageAnchors({ dataDir: root });
+    let threw = null; try { await store.prime(); } catch (e) { threw = (e && e.code) || 'error'; }
+    return { ready: store.ready(), threw };
+  } finally { fs.promises.readdir = real; }
+};
+{
+  const A = require(path.join(REPO, 'src/usage-anchors.js'));
+  const eio = await primeScene(A, 'EIO'), none = await primeScene(A, null);
+  ok(!!(eio.ready === false && eio.threw === 'EIO' && none.ready === true && none.threw === null), `⑨ a listing error at the prime (EIO) leaves the store NOT ready — the next sweep primes again; a missing folder is no anchors, ready (${JSON.stringify({ eio, none })})`);
+  const Empty = M.load('src/usage-anchors.js', anchored(A_SRC, "catch (e) { if (!e || e.code !== 'ENOENT') throw e; names = []; }", 'catch { names = []; }', 'a failed listing taken as an empty one'), 'prime-empty');
+  const r = await primeScene(Empty, 'EIO');
+  ok(!!(r.ready === true), 'CONTROL (a failed listing taken as an empty one): the store is marked ready with every kept line empty — red', r);
 }
 report();

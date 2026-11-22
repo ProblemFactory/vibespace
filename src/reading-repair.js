@@ -74,7 +74,7 @@ function _writeCacheAtomic(cacheDir, key, obj, ownTomb = null) {
   delete obj.limits; // the repaired object states the whole truth about this file
   _keepOwnAbsence(cacheDir, key, obj, ownTomb);
   const r = _usageWrite.writeCacheObject({ cacheDir, key, obj, replace: true, familyOf: _familyOf, source: obj.source || null });
-  if (!r.ok) { const f = _usageWrite.cacheFileFor(cacheDir, key), text = JSON.stringify(obj); _writeAtomic(f, text); _usageWrite.noteWritten(f, text); } // a repair that cannot write is worse than one that writes a legacy shape (B-360d U3: the folder's kept reply takes it at once)
+  if (!r.ok) { const f = _usageWrite.cacheFileFor(cacheDir, key), text = JSON.stringify(obj); _writeAtomic(f, text); _usageWrite.noteWritten(f, text, { replace: true }); } // a repair that cannot write is worse than one that writes a legacy shape (B-360d U3: the folder's kept reply takes it at once)
   return r.ok;
 }
 function _appendArchive(archiveDir, name, rows) {
