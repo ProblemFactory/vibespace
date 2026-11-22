@@ -59,14 +59,11 @@
     "test-split-restore-hidden.mjs": 1,
     "test-stream-op.mjs": 1,
     "test-takeover-keyboard.mjs": 1,
-    "test-task-scan-loop.mjs": 11,
     "test-title-chips-ui.mjs": 1,
     "test-turn-carry.mjs": 1,
     "test-vault-login-chrome.mjs": 7,
     "test-vault-use-grants.mjs": 7,
-    "test-vnc-view.mjs": 1,
-    "test-window-drag.mjs": 1,
-    "test-xpra-client.mjs": 1
+    "test-vnc-view.mjs": 1
    }
   },
   "B-7f0b": {
