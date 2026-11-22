@@ -909,6 +909,19 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE RUN'S FIGURE TIGHTENED (主开发 r1505, one commit after the follow): SCRUB_STEPS_A_CHAR 1 024 → 256 while the scan runs on the hub's loop — the run's figure must not widen what the loop may be held for. 2^28 + 256 × 2.03 M = 0.79 G for a 2 MiB run, 1.37× the costliest ordinary run at the largest set (575 M in 4 KiB reads), up to 42 s of the loop over its turns at 53 ns a step (2.35 G was up to 125 s). The four times of the rule waits for the scan off the loop (the next unit).
 - **The follow (r972, round wvjxft5u2: three take, no must).** THE TREE'S LAW FOR A COUNT THE PAGE KEEPS: every change of the held notices sends its frame, at ONE entry point — src/jobs.js \`_notifsChanged(cid, payload)\`, which every writer of pendingNotifs now calls (the stash, the put-back, the drain, the drop at the drain; the load is framed by its read again). Two roads sent none: a hand-over that came back undelivered (restoreNotifs) and a notice put aside inside the notify step after that step's frame went (the rate floor, the subscribers' held verdicts): a view opened afterwards seeded the OLD count from the keeper. A stash or a put-back is framed once a turn, after its step (one frame for a fan-out). Legs in test-jobs-held-seed ⑤, each with its red copy (the release's road: no frame), and a census of the writers with a planted control.
 
+### gmail-connect-wall — B-360d (A): every ceiling the memory census states is enforced where it is stated, or says «not enforced» (the transcript tails held 276 MB against a «128 MB» nothing enforced)
+- **The fault (measured on the test machine):**
+  - the tails' idle floor was trimmed only at a PUT: 30 windows idle eleven minutes still held 276 MB, and one new window took it to 110;
+  - the census row said OVER against the idle floor for a live set the code lawfully keeps up to 512 MB;
+  - the estimator's anchor lines had the same shape.
+- **The cure:**
+  - the census's 60-s tick runs both idle trims (src/server/memory-enforce.js, memory-sampler's `enforce` hook: a cache drop, nothing read);
+  - two rows each (idle / live), each against its own ceiling;
+  - every census row states what enforces its ceiling (cacheRow `enforced`), or «not enforced» and whose: the ledger's cold columns are lane lg-providers' unit 3;
+  - a HELD conversation keeps its tail: a window open on the live session, a turn running, or a history window of an open socket.
+- **Cost to a person:** ~0.27 s once, at the first page-up of a big conversation whose tail was trimmed after ten idle minutes (local disk).
+- **Gates:** test-cache-bounds §4b + §5b (the sweep), each with its RED; test-task-scan-loop sums the two rows.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
