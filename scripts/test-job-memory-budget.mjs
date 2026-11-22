@@ -16,6 +16,7 @@
 //      numbers; the no-limit control — and a RED copy of src/jobs.js without the verdict
 //   §3 the doors' words (src/lib/jobs-layout.js budgetWords / budgetRefusalPersonWords) in en, zh and ja, and their wiring
 //   (the CLI's `show` line is test-jobs-cli-body's — it starts the real CLI: heavy)
+import './scratch.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';

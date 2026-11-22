@@ -6,6 +6,7 @@
 // sync fail on cue), or with a recording file system — the ORDER (the file that takes the name checked, then synced, then
 // moved), a failed check or sync (the old file kept, the new one removed, refused BY NAME), and the RED of each: the release's
 // own lines. Run: node scripts/test-synced-installs.mjs
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

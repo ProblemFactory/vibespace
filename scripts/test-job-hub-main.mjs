@@ -24,6 +24,7 @@
 //      the next hub's boot over a killed wrapper's run reaps nothing and replays nothing. ONE RECOGNISER (hubChain, the shipped twin):
 //      the hub's own parent chain — a launcher main is latched, a launcher beside the main is kept by the drain; both callers over one
 //      table of process shapes answer the same. Each leg with its RED
+import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
