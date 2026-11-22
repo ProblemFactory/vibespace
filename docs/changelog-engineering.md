@@ -1599,6 +1599,12 @@ This file is the engineers' record of every release: the lanes, the verification
   - The pictures (r1505: through the test machine): test-browser-resume-ui ⑩ gains (3), the reply state (the bridge's ack planted as the fact is: the words under the line, the mark quiet beside it, at 1280 and 390), and prints its two asked pictures (en 1280, zh 390) as base64 «PICTURE <name> <i>/<n>» lines. The kit's one-row heavy part keeps a suite's whole output, so the pictures come back with no picture folder; elsewhere a green suite's output is not kept.
   - Legs: test-browser-display (the table; RED: a copy that says the line for ever); test-browser-passkey (the bridge world on the tree and on the release's line — the release's viewer is told nothing after its press, RED; the words' table and a silent copy, RED; the view's three pins; the zh/ja rows).
 
+### card-door-in-chat — B-ba47 shape H's follow (主开发 r1952, round wlatrwrv3): the boot's first act reads only what it needs; the one test answers one root
+- **The mount table only when a walk needs it.** src/server/throwaway-root.js rehomeAtBoot read /proc/self/mountinfo at every boot, production too, while only a re-homing hub walks a path; it is read now at the walk's first ask — a clone (no linked worktree) leaves the verdict at «not-worktree» before any walk. The temp roots are computed once and handed to the one test, the seam and the re-home's verdict; the root's real path is the facts' own read (once).
+- **One root.** throwaway(root) answers the declared hub's own root alone; another root (or none declared) is refused, never a synchronous judge of a folder that may sit on a mount. test-server-root's law leg asks the production stand-in through the boot's own verdict.
+- **Rule 3, said.** The person's changelog and the kb say what rule 3 lets through: a FULL copy under a temp folder run with the person's own home is a real install (its hooks, the update check); only a linked worktree is protected by itself.
+- **Gates.** test-throwaway-boot: a clone's boot reads no mount table and resolves its root once; CONTROL: a worktree that re-homes reads it; another root asked after the boot is refused and never read.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said

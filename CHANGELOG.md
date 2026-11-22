@@ -20,7 +20,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On an instance with a memory limit, a Background Work job that does not fit beside what the running jobs use is not started; you are told which jobs use it.
 - A page left open from before this update cannot approve a proposal that names people until you reload it.
 - A copy of VibeSpace started from a git worktree now uses a home of its own and says so when it starts; a clone keeps its home.
-- A clone of VibeSpace kept in a temporary folder and run with your own home now checks for updates and registers its hooks like any install.
+- A full copy of VibeSpace in a temporary folder, run with your own home, is a real install: it adds its hooks to your CLI settings and checks for updates.
 - A new conversation now waits up to 10 seconds for VibeSpace's hooks and CLI settings on this machine, and says so if it had to start before them.
 - Saving a setting that changes a CLI's own file now tells you when that file on this machine has not taken it yet.
 
