@@ -80,7 +80,8 @@ if (!placed.how) { ok(false, `NOT RUN — the node binary cannot be copied into 
 console.log(`  (the node the daemons run from: a PRIVATE COPY of ${process.execPath}, ${(placed.bytes / 1048576).toFixed(1)} MB, removed after their boot)`);
 // THE RULE (r2029): the real binary's inode is untouched by the placement (its link count and change time read before and after),
 // and NO suite under scripts/ hard-links the running program (a census by text: `linkSync(` or a `link(` handed process.execPath;
-// a symlink is not a link of the inode). CONTROL: a planted hard link is named, a planted symlink is not
+// a symlink is not a link of the inode). CONTROL: a planted hard link is named, a planted symlink is not. NOT SEEN (r2171): a link
+// handed a VARIABLE that holds the path (`const p = process.execPath` then a link of `p`) — a text census reads the call's own words
 {
   const st = fs.statSync(process.execPath), want = st.size;
   ok(placed.bytes === want && st.nlink === binBefore.nlink && st.ctimeMs === binBefore.ctimeMs,

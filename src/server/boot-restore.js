@@ -911,6 +911,10 @@ function restoreSessions() {
     // B-cd4b (the wrapper's hold): a wrapper that writes every said line before saying it answers a FENCE — its attach then reads what
     // it said between the catch-up and the connect (session-stdout setupSessionPty `fence`); an older wrapper is attached as before
     if (restoreBuf && wrapperObs && wrapperObs.caps && wrapperObs.caps.fence === SJ.FENCE_VERSION) restoreBuf.fence = true;
+    // r1418 (2): a CHAT record whose sidecar could not be read (or parsed) may be a journaled wrapper, whose file is APPENDED — a read
+    // can land in the middle of a line. Its catch-up takes the SAFE SHAPE, whole lines: a torn tail is never fed, so a line said after
+    // the connect never lands glued to its head. No fence follows (a wrapper we could not read is never asked one)
+    else if (restoreBuf && !wrapperObs && sessionMode === 'chat') restoreBuf.wholeLines = true;
 
     PinRecord.restorePin(path.dirname(META_DIR), meta, sockFile, pinAtBoot(sockFile));   // B-526c unit 2 (r1070): the record decides, written back into the meta
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
@@ -1403,12 +1407,13 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
     // r1266 (the law said right): WHOLE LINES ONLY WHERE THE FILE IS APPENDED AND A FENCE FOLLOWS — a journaled chat wrapper (its sidecar
     // adverts caps.fence). Every other survivor's file is fed AS READ, as the release fed it: a terminal's raw screen bytes, rewritten
     // whole by a rename (never torn) — a prompt with no line end («Overwrite existing file? [y/N] ») is the text a person must see, and
-    // nothing later delivers it (no fence; a plain shell repaints nothing); an older wrapper's file
-    if (!rb.fence) return body.length > pb.length ? { text: body.toString('utf-8'), drop: pfx ? rb.partial : '' } : null;
+    // nothing later delivers it (no fence; a plain shell repaints nothing); an older wrapper's file. r1418 (2): a chat record whose sidecar
+    // could not be read (`wholeLines`) takes whole lines too, with no fence after them
+    if (!rb.fence && !rb.wholeLines) return body.length > pb.length ? { text: body.toString('utf-8'), drop: pfx ? rb.partial : '' } : null;
     const nl = body.lastIndexOf(10);
     if (nl < 0) return null;
     const whole = body.subarray(0, nl + 1), text = whole.toString('utf-8'), ctx = Buffer.concat([rb.guard, whole]), tailB = body.subarray(nl + 1);
-    const rbEnd = { file: rb.file, len: size, lineAt: start + nl + 1, guard: Buffer.from(ctx.subarray(Math.max(0, ctx.length - RESTORE_GUARD))), partial: tailB.toString('utf-8'), partialBytes: Buffer.from(tailB), fence: true };
+    const rbEnd = { file: rb.file, len: size, lineAt: start + nl + 1, guard: Buffer.from(ctx.subarray(Math.max(0, ctx.length - RESTORE_GUARD))), partial: tailB.toString('utf-8'), partialBytes: Buffer.from(tailB), fence: !!rb.fence, ...(rb.wholeLines ? { wholeLines: true } : {}) };
     return whole.length > pb.length ? { text, drop: pfx ? rb.partial : '', rb: rbEnd } : null;
   } catch (e) { return { skipped: `its buffer could not be read (${(e && e.code) || (e && e.message) || e})` }; }
   finally {   // one owner, closed once, the number forgotten at its close; a failed close is SAID (its errno and the file), never swallowed — what was read is returned whatever the close answered (test-fd-close-census)

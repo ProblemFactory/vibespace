@@ -30,8 +30,11 @@
 // ITS SECOND FOLLOW (主开发 r1266):
 //  ⑭ WHOLE LINES ONLY WHERE A FENCE FOLLOWS: a TERMINAL survivor's screen file gaining a question with no line end is fed as read (the
 //     release's road); RED: whole lines for every survivor ⇒ the question is never drawn
-//  ⑮ A READ TORN INSIDE A MANY-BYTE CHARACTER: its partial compared as BYTES — the torn head leaves the buffer, the line once; RED: as text
-//  and in ⑦ a fence split across two chunks; in ⑧ the accepted window (a line drawn twice set aside, nothing said lost)
+//  ⑮ A READ TORN INSIDE A MANY-BYTE CHARACTER: its partial compared as BYTES — the torn head leaves the buffer, the line once; RED: as text.
+//     On the FENCED road too (r1418 (1): a journaled wrapper's Chinese conversation). r1418 (2): a CHAT record whose sidecar could not
+//     be read takes WHOLE LINES with no fence (a torn tail never fed); RED the release's as-read road feeds the torn head
+//  and in ⑦ a fence split across two chunks; in ⑧ the accepted window (a line drawn twice set aside, nothing said lost — and, r1418
+//  (3), a real gap line after it FED; RED: the window cut ⇒ that line is lost)
 // Run: node scripts/test-wrapper-said-journal.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -321,6 +324,12 @@ setInterval(() => {}, 1e3);
       'the gap = the file\'s lines before the fence less the live stream\'s END: a line the connect tore gives back its head; the preamble and the transport records are no live line; nothing live ⇒ all of it', { g1, g2, g3, g8 });
     ok(!!g4.skipped && !!g5.skipped && !!g6.skipped && g7.skipped === 'rewritten', 'a live line the file does not hold, no fence in the file, no file past the catch-up: fed nothing, the reason said', { g4, g5, g6, g7 });
     ok(g9.lost === '' && g9.twice === 1 && !!g9n.skipped, `THE ACCEPTED WINDOW (r1266): a line the catch-up fed that came live again is set aside as drawn twice (${g9.twice}) — the gap is the rest, nothing said lost; without the catch-up's text it reads as a mismatch`, { g9, g9n });
+    // r1418 (3): the window FEEDS lost text — a set-aside line followed by a REAL gap line (C: said after the catch-up, dropped by dtach)
+    const gw = (sj) => sj.fenceGap({ text: `${C}\n${B}\n${fl}\n` }, fl, `${X}\r\n${B}\r\n`, `${A}\n${X}\n`);
+    const SJnw = require(M.write('src/said-journal.js', anchored(read('src/said-journal.js'), '  if (m.miss !== undefined && fed) {', '  if (false) {', 'no-accepted-window'), 'no-accepted-window'));
+    const g10 = gw(SJ), r10 = gw(SJnw);
+    ok(g10.lost === `${C}\n` && g10.twice === 1, `the accepted window with a REAL gap line after the set-aside one: the drawn-twice line set aside (${g10.twice}), the gap line FED (${JSON.stringify(g10.lost)})`, g10);
+    ok(!!r10.skipped && !r10.lost, `RED: the window cut ⇒ a mismatch: fed nothing — the gap line is lost (${r10.skipped})`, r10);
   }
 
   console.log('— ⑨ THE CENSUS: every ring add and every stdout write of both wrappers, classified');
@@ -448,7 +457,7 @@ setInterval(() => {}, 1e3);
   console.log('— ⑭ A TERMINAL\'S CATCH-UP IS FED AS READ (主开发 r1266, the MUST) · ⑮ A READ TORN INSIDE A MANY-BYTE CHARACTER');
   {
     const BR = require(path.join(REPO, 'src/server/boot-restore.js')), brSrc = read('src/server/boot-restore.js');
-    const BRall = require(M.write('src/server/boot-restore.js', anchored(brSrc, 'if (!rb.fence) return body.length > pb.length', 'if (false) return body.length > pb.length', 'whole-lines-for-all'), 'whole-lines-for-all'));   // stale-pins: kept (the red plants the follow's first shape: whole lines for every survivor)
+    const BRall = require(M.write('src/server/boot-restore.js', anchored(brSrc, 'if (!rb.fence && !rb.wholeLines) return body.length > pb.length', 'if (false) return body.length > pb.length', 'whole-lines-for-all'), 'whole-lines-for-all'));   // stale-pins: kept (the red plants the follow's first shape: whole lines for every survivor)
     const BRtext = require(M.write('src/server/boot-restore.js', anchored(brSrc, 'pfx = body.subarray(0, pb.length).equals(pb);', "pfx = body.toString('utf-8').startsWith(rb.partial);", 'partial-as-text'), 'partial-as-text'));
     const { ptyListeners } = require(path.join(REPO, 'src/pty-duck.js'));
     const { createMessageManager } = require(path.join(REPO, 'src/normalizers'));
@@ -476,12 +485,13 @@ setInterval(() => {}, 1e3);
     ok(!tr.threw && !tr.fed && !tr.shown, 'RED: whole lines for every survivor (the follow\'s first shape) ⇒ the question is never drawn: the program waits on an answer nobody is asked', tr);
     // ⑮ a chat survivor's registration read torn INSIDE a many-byte character (a Chinese line): the read's partial ends in a
     // replacement mark — compared as BYTES, the head leaves the buffer and the whole line comes back once
-    const cjk = (BRm, tag) => {
+    const cjk = (BRm, tag, fenced = false) => {
       const dir = fs.mkdtempSync(path.join(HOME, 'cjk-')), file = path.join(dir, 'c.buf');
       const LINE = JSON.stringify({ type: 'system', subtype: 'informational', level: 'info', content: '这是一个会被撕开的中文句子，在一个多字节字符的中间' });
       const lb = Buffer.from(LINE + '\n', 'utf-8'), cut = lb.indexOf(Buffer.from('撕', 'utf-8')) + 1;   // inside the character's three bytes
       fs.writeFileSync(file, Buffer.concat([Buffer.from('{"type":"system","subtype":"informational","content":"head"}\n'), lb.subarray(0, cut)]));
       const raw = fs.readFileSync(file), rb = BRm.restoreBufOf(file, raw);
+      if (fenced) rb.fence = true;   // r1418 (1): a journaled wrapper (its sidecar adverts the fence): the whole-lines road
       fs.appendFileSync(file, lb.subarray(cut));
       const cu = BRm.restoreCatchUp(rb);
       const sid = 'w-cjk15', sess = { mode: 'chat', backend: 'claude', buffer: raw.toString('utf-8'), sockName: null, clients: new Set(), _normalizer: createMessageManager('claude', sid) };
@@ -491,6 +501,28 @@ setInterval(() => {}, 1e3);
     const cg = cjk(BR, 'cg'), cr = cjk(BRtext, 'cr');
     ok(!cg.threw && cg.torn && cg.dropped && cg.whole === 1 && !cg.mark, 'a registration read torn INSIDE a many-byte character (its partial ends in a replacement mark): compared as bytes, the torn head leaves the buffer and the whole line is in it ONCE, no mark left', cg);
     ok(!cr.threw && cr.torn && !cr.dropped && cr.mark, 'RED: the partial compared as decoded text ⇒ never equal: the torn head (its replacement mark) stays glued before the whole line — a page built from it holds a line that will not parse', cr);
+    const cgf = cjk(BR, 'cgf', true), crf = cjk(BRtext, 'crf', true);
+    ok(!cgf.threw && cgf.torn && cgf.dropped && cgf.whole === 1 && !cgf.mark, 'the same on the FENCED road (r1418 (1): a journaled wrapper, whole lines): compared as bytes, the torn head leaves the buffer and the whole line is in it ONCE, no mark left', cgf);
+    ok(!crf.threw && crf.torn && !crf.dropped && crf.mark, 'RED (fenced): the partial compared as text ⇒ the torn head stays glued before the whole line', crf);
+    // r1418 (2): a CHAT record whose sidecar could not be read — maybe a journaled wrapper, its file appended: a catch-up landing
+    // mid-append takes WHOLE LINES (the torn tail never fed: the line said after the connect lands clean), and asks no fence
+    const unread = (wholeLines) => {
+      const dir = fs.mkdtempSync(path.join(HOME, 'unread-')), file = path.join(dir, 'u.buf');
+      const H = '{"type":"a","n":0}\n', A1 = '{"type":"a","n":1}\n', B1 = '{"type":"assistant","text":"a line torn in the middle of its append"}\n';
+      fs.writeFileSync(file, H);
+      const rb = BR.restoreBufOf(file, fs.readFileSync(file));
+      if (wholeLines) rb.wholeLines = true;
+      fs.appendFileSync(file, A1 + B1.slice(0, 20));   // A whole, B torn mid-append
+      const cu = BR.restoreCatchUp(rb);
+      return { text: cu && cu.text, torn: !!(cu && cu.text && cu.text.includes(B1.slice(0, 20))), fence: !!(cu && cu.rb && cu.rb.fence) };
+    };
+    const uw = unread(true), ua = unread(false);
+    ok(uw.text === '{"type":"a","n":1}\n' && !uw.torn && !uw.fence, `a chat record whose sidecar could not be read: its catch-up feeds WHOLE LINES only (${JSON.stringify(uw.text)}), the torn tail never fed, no fence asked`, uw);
+    ok(ua.torn, 'RED: fed AS READ (the release for that record) ⇒ the torn head is fed — the same line said after the connect lands glued to it and will not parse', ua);
+    const WIRE = "else if (restoreBuf && !wrapperObs && sessionMode === 'chat') restoreBuf.wholeLines = true;";
+    const wired = (t) => { const i = t.indexOf(WIRE), j = t.indexOf("wrapperObs.caps.fence === SJ.FENCE_VERSION) restoreBuf.fence = true;"); return i > 0 && j > 0 && i > j && i - j < 600; };
+    ok(wired(brSrc), 'the restore marks it: a chat record (its mode) whose sidecar was not read gets `wholeLines`, right after the fence\'s own mark (by text)');
+    ok(!wired(brSrc.replace(WIRE, '')), 'CONTROL: a copy without the mark is named');
   }
 
   console.log('— ⑩ THE RESTORE\'S WIRING (src/server/boot-restore.js)');
