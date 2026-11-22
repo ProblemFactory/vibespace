@@ -1257,7 +1257,33 @@ console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra pe
     const xHas = D.environHas(r1.pids.x, `${K.SESSION_ENV}=${rec.id}`), appHas = D.environHas(r1.pids.app, `${K.SESSION_ENV}=${rec.id}`);
     let xArgv = null; try { xArgv = fs.readFileSync(`/proc/${r1.pids.x}/cmdline`, 'utf8').split('\0').filter(Boolean).slice(0, 3).join(' ').slice(0, 120); } catch (e) { xArgv = 'unread: ' + e.code; }
     const environBytes = (pid) => { try { return fs.readFileSync(`/proc/${pid}/environ`).length; } catch (e) { return 'unread: ' + e.code; } };
-    ok(!xHas && appHas, 'MEASURED FACT the belt rests on: xpra rewrites its own environ (the marker is invisible on the xpra pid) while the app we spawned still carries it', { xpraPid: r1.pids.x, xpraEnvironHasMarker: xHas, xpraEnvironBytes: environBytes(r1.pids.x), xpraArgv: xArgv, appPid: r1.pids.app, appEnvironHasMarker: appHas, appEnvironBytes: environBytes(r1.pids.app) });
+    // r2431 (主开发): the display server may or may not KEEP the marker, by the machine — the same xpra 6.5.4 drops it on the box and keeps
+    // it on the first test machine (59594edc9-…-box). The belt (src/desktop-serve.js needlesOf: the marker OR the per-app XAUTHORITY) reads
+    // it as EVIDENCE either way and never leaned on its absence. So the leg SAYS which it met and JUDGES THE BELT's OWN OUTCOME on both.
+    console.log(`  the display server's environ here: the marker ${xHas ? 'KEPT' : 'NOT kept'} on the xpra pid; the app carries it: ${appHas} — ${JSON.stringify({ xpraPid: r1.pids.x, xpraEnvironBytes: environBytes(r1.pids.x), xpraArgv: xArgv, appPid: r1.pids.app, appEnvironBytes: environBytes(r1.pids.app) })}`);
+    ok(appHas, 'the app the keeper spawned carries the session marker (the belt\'s first needle, on every machine)', { appPid: r1.pids.app, appEnvironHasMarker: appHas });
+    {
+      const DSsrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+      ok(DSsrc.includes("const needlesOf = (rec) => (!M.capsOf(rec, backends).ownsDisplay ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);"), 'the product\'s needles are the session marker and the per-app XAUTHORITY (the census below asks exactly these two)');
+      const needles = (id) => [`${K.SESSION_ENV}=${id}`, `XAUTHORITY=${path.join(k.logRoot, id, 'Xauthority')}`];
+      const censusOf = (pairs) => D.environCensus(new Map(pairs.flatMap(([id, as]) => needles(as).map((n) => [n, id]))));
+      // a SECOND application on its own xpra beside the first: its processes must never be in the first record's census, nor the reverse
+      const rec2 = await k.launch({ exec: appBin, args: appArgs, label: 'seamless-beside' });
+      const r2 = await until(() => { const r = k.get(rec2.id); return r && r.state !== 'launching' ? r : null; }, 30000);
+      const ownOf = (r, cen) => new Set([...(cen.get(r.id) || []), ...D.sessionCensus([r.pids.x, r.pids.app], { fresh: true })]);
+      const judge = (cen) => {
+        const own1 = ownOf(r1, cen), own2 = ownOf(r2, cen);
+        const xvfb1 = members.find((p) => p !== r1.pids.x) || null;
+        return { holds: own1.has(r1.pids.x) && !!xvfb1 && own1.has(xvfb1), apart: ![...(cen.get(r1.id) || [])].some((p) => own2.has(p)) && ![...(cen.get(r2.id) || [])].some((p) => own1.has(p)), n1: (cen.get(r1.id) || []).length, n2: (cen.get(r2.id) || []).length };
+      };
+      const real = r2 && r2.state === 'ready' ? judge(censusOf([[r1.id, r1.id], [r2.id, r2.id]])) : null;
+      ok(!!real && real.holds && real.apart, `THE BELT's OWN OUTCOME (marker ${xHas ? 'kept' : 'not kept'} on the display server): the record's evidence with its session holds its own xpra and X server, and NO process of the second application's record — nor the reverse (${real ? `${real.n1} / ${real.n2} carrying either needle` : 'the second app did not come up'})`, { real, r2: r2 && { state: r2.state, lastError: r2.lastError } });
+      const swapped = r2 && r2.state === 'ready' ? judge(censusOf([[r1.id, r2.id], [r2.id, r1.id]])) : null;
+      ok(!!swapped && !swapped.apart, 'CONTROL (RED): a census that takes ANOTHER record\'s processes (each record asked with the other\'s needles) fails the judgement', swapped);
+      try { await k.stop(rec2.id); } catch { /* the leg below says what is left */ }
+      const after = await until(() => { const c = censusOf([[rec2.id, rec2.id]]); return (c.get(rec2.id) || []).length === 0 ? true : null; }, 15000, 300);
+      ok(!!after, 'after the second application\'s stop NOTHING carrying either of its needles is left (its marker, its per-app XAUTHORITY)', (censusOf([[rec2.id, rec2.id]]).get(rec2.id) || []));
+    }
     ok(fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority')) && fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).size > 0 && fs.existsSync(path.join(k.logRoot, rec.id, 'xpra')), 'the per-app dir holds the Xauthority xpra wrote into (pinned, never ~/.Xauthority) and xpra\'s own socket/session dir');
     ok(k.streamTarget(rec.id) && k.streamTarget(rec.id).kind === 'xpra' && k.streamTarget(rec.id).port === r1.port, 'streamTarget: kind xpra on the recorded port');
     // (b) per-window facts: the app's window, no xpra wrapper rows
