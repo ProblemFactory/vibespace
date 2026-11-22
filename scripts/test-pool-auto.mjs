@@ -3091,6 +3091,7 @@ await (async () => {
       const cdir = path.join(pw.am._dataDir, 'usage-cache');
       const put = (k, o) => fs.writeFileSync(path.join(cdir, pw.id[k] + '.json'), JSON.stringify(o));
       put('uci', { fetchedAt: Date.now() - 5 * 86400e3, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nowS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nowS - 2 * 86400 } });
+      await pw.eng.usageFolder.refresh();   // B-360d U3: a write straight into the folder reaches the kept reply at its next refresh
       const ask = (o = {}) => { let r; const lines = quietly(() => { r = pw.eng.poolChooserForModel(pw.P, { model: 'claude-fable-5-1', ...o }); }); return { at: Object.keys(pw.id).find((k) => pw.id[k] === r) || r, lines }; };
       const s1 = ask();
       ck('engine: a spawn is placed on the member whose week reset unconfirmed (UCI, 95 % read 5 days ago) — and SAID in the journal', s1.at === 'uci' && s1.lines.some((l) => /^\[pool\] spawn on "全部": placed on UCI Max to confirm its 7-day window reset on .+; a reading follows its first turn$/.test(l)), JSON.stringify(s1));
@@ -3098,6 +3099,7 @@ await (async () => {
       ck('engine: …the proof is IN FLIGHT: the next two spawns are placed as today (the default, Martin) — never piled onto the guess', s2.at === 'martin' && s3.at === 'martin', JSON.stringify([s2.at, s3.at]));
       const hinted = ask({ hinted: true }), pinned = ask({ pin: pw.id.fish });
       put('uci', { fetchedAt: Date.now() - 5 * 86400e3 - 1, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nowS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nowS - 2 * 86400 } });
+      await pw.eng.usageFolder.refresh();   // B-360d U3: a write straight into the folder reaches the kept reply at its next refresh
       ck('engine: a RESUME (a hinted family) places nothing on a guess; a PINNED one starts on its pin', hinted.at === 'martin' && pinned.at === 'fish', JSON.stringify([hinted.at, pinned.at]));
       // the 10-minute end: the clock moves past PROVING_HOLD_MS ⇒ the guess is asked again
       const realNow = Date.now; let s4;
@@ -3150,20 +3152,21 @@ await (async () => {
       const heal = healWorld(engMod);
       for (const r of healLegs(heal)) ck(r.name, r.pass, r.detail);
       // MINOR 2: two pools that list the same members (an all-members pool + a narrower one), two spawns a minute apart
-      const twoPools = (engine) => {
+      const twoPools = async (engine) => {
         const w = world({ engine });
         if (!w) return null;
         const nS = Math.floor(Date.now() / 1000), cd = path.join(w.am._dataDir, 'usage-cache');
         const putW = (k, o) => fs.writeFileSync(path.join(cd, w.id[k] + '.json'), JSON.stringify(o));
         putW('uci', { fetchedAt: Date.now() - 5 * 86400e3, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nS - 2 * 86400 } });
         putW('fish', { fetchedAt: Date.now() - 3 * 86400e3, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nS - 3 * 86400 + 3600 }, sevenDay: { utilization: 0.9, resetsAt: nS - 86400 } });
+        await w.eng.usageFolder.refresh();   // B-360d U3: the two readings written straight into the folder, taken by a refresh
         const P2 = w.am.createPool({ name: 'Narrow', members: [w.id.martin, w.id.uci, w.id.fish] }).id;
         w.am.setPoolTarget(P2, w.id.martin);
         const realNow = Date.now, t0 = realNow();
         const at = (P, dt) => { let r; try { Date.now = () => t0 + dt; quietly(() => { r = w.eng.poolChooserForModel(P, { model: 'claude-fable-5-1' }); }); } finally { Date.now = realNow; } return nameOf(w, r); };
         return [at(w.P, 0), at(P2, 60e3), at(w.P, 120e3)];
       };
-      const tp = twoPools(engMod);
+      const tp = await twoPools(engMod);
       ck('r3 MINOR 2: TWO POOLS sharing members, two spawns 1 min apart ⇒ two DIFFERENT guesses (UCI, then Fish) — never the same guess twice; a third spawn holds on the default', !!tp && tp[0] === 'uci' && tp[1] === 'fish' && tp[2] === 'martin', JSON.stringify(tp));
       // MINOR 4a: the proving decision reads THE pool's reading (poolReadReading — the identity group's freshest, the own
       // 5h tombstone kept): a member whose own file is old but whose identity's machine login read it an hour ago is NOT a guess
@@ -3188,7 +3191,7 @@ await (async () => {
       ck('r3 MAJOR RED: proving admitted for the pool DEFAULT re-points the default onto the guess (U) — the default legs go red by name', !!eDef && hRed.some((n) => n.includes('re-pointed onto MEASURED headroom')), JSON.stringify(hRed));
       const ePer = ectl('perpool', [['const _proving = new Map();\n', 'const _provingPools = new Map(); let _proving = new Map(); /* PATCHED: a map per pool, as r2 had it */\n'],
         ['function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) {\n', 'function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) { _proving = _provingPools.get(poolId) || _provingPools.set(poolId, new Map()).get(poolId); /* PATCHED */\n']]);
-      const tpRed = ePer ? twoPools(ePer) : null;
+      const tpRed = ePer ? await twoPools(ePer) : null;
       ck('r3 MINOR 2 RED: with a hold map PER POOL the second pool sends its spawn onto the SAME guess (UCI, UCI)', !!tpRed && tpRed[0] === 'uci' && tpRed[1] === 'uci', JSON.stringify(tpRed));
       const eOwn = ectl('ownfile', [['readReading: poolReadReading(),', "readReading: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } }, /* PATCHED: the member's own file only */"]]);
       const gwRed = eOwn ? groupWorld(eOwn) : null;

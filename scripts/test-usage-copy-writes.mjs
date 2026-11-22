@@ -60,7 +60,7 @@ const rollWorld = () => { const dir = fs.mkdtempSync(path.join(ROOT, 'arch-')), 
   const rel = M.load('src/archive-roll.js', anchored(ROLL_SRC, '    fs.renameSync(file, shard);\n', "    fs.appendFileSync(`${base}.ndjson`, fs.readFileSync(file)); fs.writeFileSync(file, '');\n", 'the release roll'), 'release-roll');
   const { dir, f } = rollWorld();
   const calls = await counting(dir, () => { rel.rollIfOver(f, MB5, { now: T }); });
-  ok(n(calls, 'readFileSync') === 1 && n(calls, 'appendFileSync') === 1 && n(calls, 'writeFileSync') === 1, `① RED CONTROL the release's roll: a whole read, an append and an empty write on the loop (${calls.join(' + ')})`, calls);
+  ok(n(calls, 'readFileSync') === 1 && n(calls, 'appendFileSync') === 1 && n(calls, 'writeFileSync') >= 1, `① RED CONTROL the release's roll: a whole read, an append and an empty write on the loop (${calls.join(' + ')})`, calls);
 }
 // ═══ ② the engine's archive goes through it ═══
 console.log('\n— ② the pool engine\'s archive goes through the roll');

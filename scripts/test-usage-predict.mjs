@@ -216,6 +216,8 @@ console.log('— ⑧ THE POOL\'S READS OF THE ESTIMATOR (law B3): every one a ro
     basisRaw: 'bookkeeping — whether a pool runs on raw readings (no prediction in it)',
     basisGen: 'bookkeeping — the basis generation (a counter)',
     primeIfCold: 'bookkeeping — loads the lines a sweep needs',
+    viewFor: 'bookkeeping — reads off the loop what the sweep\'s fresh step will ask of one identity\'s anchors file (B-360d part 3 U1); no prediction read',
+    withView: 'bookkeeping — serves the sweep\'s step from that view (B-360d part 3 U1); no prediction read',
     noteLive: 'bookkeeping — hands the estimator a live usage record (its odometer ring); a write INTO it, no prediction read',
     estimateFor: 'auto-cli-loop only: the burn-aware CLI rung\'s drift (2.329.0, its own ruling) — when to read, never a placement',
   };

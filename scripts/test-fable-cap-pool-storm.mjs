@@ -3415,6 +3415,7 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
     w.writeCache(w.id.wmax, { ...own, orgUuid: 'org-n5h-est' });
     // the org-merged machine login: FRESHER, still holding a 90.5 % 5h window (its session never saw the lift)
     w.writeCache('__global__', { fetchedAt: Date.now() - 1000, source: 'passive', orgUuid: 'org-n5h-est', fiveHour: { utilization: 0.905, resetsAt: w.nowSec + 3 * 3600 }, sevenDay: { utilization: 0.6, resetsAt: w.resets.wmax }, scopedWeekly: [] });
+    if (w.eng.usageFolder) await w.eng.usageFolder.refresh();   // B-360d U3: files written straight into the folder reach the kept reply at its next refresh
     const before = w.eng.poolReadCache(w.P)(w.id.wmax);
     await w.eng.sweepUsageAnchors();
     const after = w.eng.poolReadCache(w.P)(w.id.wmax);

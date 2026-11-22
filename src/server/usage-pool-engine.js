@@ -325,6 +325,7 @@ function usageIdentityGroups() {
 // pool auto-switch an ESTIMATED bucket view and /api/usage an `estimates`
 // field. Zero API calls; ledger + anchor files only.
 const _identGroupsMemo = { at: 0, groups: null };
+usageFolder.onReply(() => { _identGroupsMemo.groups = null; });   // B-360d part 3 U3: the memo never outlives the folder reply it was built on
 function usageIdentityGroupsCached() {
   if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000) {
     _identGroupsMemo.groups = usageIdentityGroups(); _identGroupsMemo.at = Date.now();

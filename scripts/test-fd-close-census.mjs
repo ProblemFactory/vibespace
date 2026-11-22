@@ -293,7 +293,7 @@ const EMPTY_CATCH_DEBT = Object.freeze({
   "src/sysinfo.js": 1,
   "src/task-groups.js": 1,
   "src/turn-carry.js": 1,
-  "src/usage-estimator.js": 2,
+  "src/usage-estimator.js": 1,   // B-360d part 3 U1: −1 (a line reader's close moved into the view's read)
   "src/usage-history.js": 1,
   "src/usage-origin-backfill.js": 1,
   "src/usage-routes.js": 1,

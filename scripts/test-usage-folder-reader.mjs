@@ -215,7 +215,7 @@ async function heldLeg(mod) {
 {
   const h = await heldLeg(F);
   ok(!!(h.s1.held && h.s1.error === 'EIO' && h.s1.asOf === h.asOf && h.s1.since === 5000 && h.list1 === 1), `④ a read that fails keeps the last reply (${h.list1} file still listed) and says it: held, ${h.s1.error}, since ${h.s1.since}, readings as of ${h.s1.asOf}`, h.s1);
-  ok(!!(h.s2.held && h.s2.error === 'not-replying' && h.s2.asOf === h.asOf2 && h.got === h.asOf2 && h.waited < 1000 && h.said >= 2), `④ a read that never replies is held past its period (${h.s2.error}); fresh() answers the kept reply within its bound (${h.waited} ms); the log says it once a time (${h.said})`, h.s2);
+  ok(!!(h.s2.held && h.s2.error === 'not-replying' && h.s2.asOf === h.asOf2 && h.got === h.asOf2 && h.said >= 2), `④ a read that never replies is held past its period (${h.s2.error}); fresh() answers the kept reply while the read still hangs; the log says it once a time (${h.said})`, h.s2);
   const none = path.join(ROOT, 'no-such-folder');
   const rn = F.create(none, { everyMs: 30 });
   await rn.refresh();

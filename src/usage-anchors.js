@@ -55,7 +55,7 @@ async function lastRecordOf(fp) {
       if (nl === -1 && want < size) continue;
       try { return JSON.parse(text.slice(nl + 1)); } catch { return null; }
     }
-  } catch { return null; } finally { if (fh) { try { await fh.close(); } catch { } } }
+  } catch { return null; } finally { if (fh) { try { await fh.close(); } catch (e) { console.warn(`[usage-anchors] ${fp}: its close failed (${(e && e.code) || e})`); } } }
 }
 /** A repair or a migration of THIS process rewrote anchors files under `dir`: every store over it reads its kept last lines
  *  again (off the loop); until that read lands, lastAnchor answers as before it (a whole read). */
