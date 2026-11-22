@@ -20,7 +20,9 @@ export function relayRefusalWords(x) {
   const c = x && x.code;
   return c === 'relay_held_elsewhere' ? t('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone')
     : c === 'relay_takeover_moved' ? t('The relay client changed since this page read it — look again')
-    : c === 'relay_takeover_stuck' ? t('The other relay client did not end — nothing was started')
+    : c === 'relay_takeover_stuck' ? t('The other relay client was not seen to end — nothing was started')
+    : c === 'relay_takeover_not_relay' ? t('The process the relay’s pid file names is not this home’s relay client — nothing was ended')   // r2329 (2): its own words
+    : c === 'relay_revoked' ? t('This instance’s relay token was revoked — mint a new one in Plugins › Public URLs and send its registration line to the relay admin')
     : String((x && (heldWordsOf(x) || x.error)) || '');   // a held plugins.json: worded by its code (2.369.417)
 }
 /** The plugin guide (docs/plugins.md on the project's home) — the folder layout and the smallest complete example live there. */
@@ -283,13 +285,14 @@ export function installPluginsUI(App) {
             const canRun = p.installed && p.configured !== false && !p.vaultLocked;
             const take = document.createElement('button'); take.className = 'mounts-btn'; take.textContent = t('Take it over');
             take.onclick = (ev) => { ev.stopPropagation(); act(async () => {
-              const ok = await showConfirmDialog({ title: t('Take the relay over?'), message: t('This ends the relay client another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.'), confirmText: t('Take it over'), danger: true });
+              const ok = await showConfirmDialog({ title: t('Take the relay over?'), message: p.held.since ? t('This ends the relay client {pid} — running since {since} — that another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.', { pid: p.held.pid, since: when(p.held.since, { words: true }) }) : t('This ends the relay client {pid} that another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.', { pid: p.held.pid }), confirmText: t('Take it over'), danger: true });
               if (!ok) return;
               const r = await api('takeover', { body: JSON.stringify({ pid: p.held.pid, start: p.held.start }) });
               if (r && r.startError) showToast(t('The other relay client was ended, but this instance’s own did not start: {why}', { why: relayRefusalWords(r.startError) }), { type: 'error' });
               else showToast(t('This instance runs the relay now'));
             }); };
-            if (canRun) f.append(take);
+            if (canRun && p.held.start != null) f.append(take);   // its read: a take-over proves the process by its start — none read, none offered
+            else if (canRun) f.append(document.createTextNode(t('This process’s start time could not be read, so it cannot be told from a later process with the same number — end process {pid} yourself, or stop the VibeSpace that runs it, then start the relay here.', { pid: p.held.pid })));
             if (fact) { const both = document.createElement('div'); both.append(fact, f); fact = both; } else fact = f;
           }
           if (loginNeeded) onChip = () => this._tailscaleLogin(p, api, render);

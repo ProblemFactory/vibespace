@@ -24,6 +24,17 @@ const FRP_VERSION = process.env.VIBESPACE_FRP_VERSION || '0.70.0';
 const FRP_PORT_MIN = Number(process.env.VIBESPACE_FRP_PORT_MIN || 20000);
 const FRP_PORT_MAX = Number(process.env.VIBESPACE_FRP_PORT_MAX || 25000);
 
+/** B-1217 its round (主开发 r2329 (4)): did the process the take-over signalled END — from its stat now (`st`: null = no such process,
+ *  undefined = not read), its start now and the start it had. An unreadable entry is NOT ended: unknown is never «it ended». With
+ *  no /proc at all no take-over reaches a signal (its start is read from /proc: none read ⇒ refused before), so null is never a
+ *  missing /proc here. PURE */
+function takeoverEnded(st, startNow, start) {
+  if (st === null) return true;
+  if (st === undefined) return false;
+  if (st[0] === 'Z') return true;
+  return startNow != null && startNow !== start;
+}
+
 /** B-1217 (主开发 r1775, lane bl-machines-b): IS THE RELAY CLIENT THE PID FILE NAMES THIS MANAGER'S OWN RUN? The relay folder
  *  (~/.vibespace/plugins/frp) is the HOME's: two instances under one home — a second instance beside the one that runs, a worktree
  *  hub started by hand — share its pid file, its log and its config, and the release let the second one's login watch read the
@@ -173,19 +184,42 @@ module.exports = {
     // its round (主开发 r2175 (3)): «ITS OWN» NEVER HANGS ON A PATH STRING — the recorded folder and this one compared by what they
     // resolve to (a data folder moved behind a link is still its own); a recorded folder that no longer exists (the install moved
     // or renamed) is not another instance
-    // its read: «gone» only by its own answer (ENOENT / ENOTDIR) — an unreadable folder (EACCES, EIO) is never «gone»; the pair's answer
-    // kept a few seconds (every status, every watch tick and every publish asks it)
-    const realOf = (p) => { try { return fs.realpathSync(p); } catch (e) { return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ? null : undefined; } };   // null: gone · undefined: not read
-    const sameMemo = new Map();
+    // its read: «gone» only by its own answer (ENOENT / ENOTDIR) — an unreadable folder (EACCES, EIO) is never «gone». r2329 (3) and
+    // ITS READS: a folder's real path is asked OFF THE LOOP (the promise fs — a hung network mount never holds the hub's loop; it holds one
+    // thread of the file system's shared pool at most, a folder's one ask in flight), one ask in
+    // flight a folder, never one per ask of the verdict (every status, every watch tick and every publish asks it). A real path is
+    // KEPT for the process; any other answer is asked again on the first ask a minute later. «GONE» NEEDS TWO ANSWERS A MINUTE APART:
+    // the first «gone» is unknown, and the plugin itself asks again a minute later (a mount's gap shorter than that is never «gone»);
+    // until then — not answered, unreadable, gone once — the recorded run is NOT this instance's (another instance's client is never
+    // taken for its own on one answer). An answer that may change the verdict (a client in the folder) is said at once: the card is
+    // told, and after the boot a run that is now its own gets its login watch. A folder whose answer never comes stays «not this
+    // instance's» (the safe side)
+    const REAL_AGAIN_MS = 60e3;
+    const realKept = new Map();   // a folder → { v: its real path | null (gone) | undefined (not answered), at, p (the ask in flight), gone (1: gone once) }
+    let booted = false;
+    const realSettled = () => { try { if (!frpDaemonPid()) return; h.notify(); if (booted && !watch && ownRunPid()) watchLogin(true); } catch { } };
+    const realOf = (p, confirm = false) => {
+      let k = realKept.get(p);
+      if (!k) { if (realKept.size >= 64) realKept.clear(); k = { v: undefined, at: 0, p: null, gone: 0 }; realKept.set(p, k); }
+      if (confirm && k.p) { k.p.then(() => realOf(p, true)); return k.v; }   // the confirming ask follows the one in flight
+      if (typeof k.v !== 'string' && !k.p && (confirm || !k.at || Date.now() - k.at >= REAL_AGAIN_MS)) {
+        const was = k.v;
+        k.p = fs.promises.realpath(p).then((r) => { k.v = r; k.gone = 0; }, (e) => {
+          const gone = !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+          if (!gone) { k.gone = 0; k.v = undefined; }
+          else if (k.v === null || (confirm && k.gone === 1)) k.v = null;   // gone again, or the confirming ask a minute after the first: GONE
+          else if (k.gone !== 1) { k.gone = 1; k.v = undefined; const t = setTimeout(() => realOf(p, true), REAL_AGAIN_MS); if (t && t.unref) t.unref(); }   // gone ONCE: unknown — its own confirming ask
+        }).finally(() => { k.p = null; k.at = Date.now(); if (k.v !== was) realSettled(); });
+      }
+      return k.v;
+    };
     const sameBy = (recorded, mine) => {
       if (recorded === mine) return true;
-      const k = recorded + '\0' + mine, m = sameMemo.get(k), now = Date.now();
-      if (m && now - m.at < 5000) return m.v;
-      const a = realOf(recorded), b = a === null ? null : realOf(mine);
-      const v = a === null ? true : typeof a === 'string' && typeof b === 'string' && a === b;
-      if (sameMemo.size > 32) sameMemo.clear();
-      sameMemo.set(k, { v, at: now }); return v;
+      const a = realOf(recorded); if (a === null) return true;
+      const b = realOf(mine); return typeof a === 'string' && typeof b === 'string' && a === b;
     };
+    // its read: this instance's own folder AND the one its record names are asked at its start (off the loop)
+    try { const own = dataFolder(), r0 = h.peek().frpcRun; if (own) realOf(own); if (r0 && r0.by) realOf(r0.by); } catch { }
     // its read (S3): «a relay client» is the frpc THIS home's config starts — its program named frpc and that config's path in its
     // argv, read in the take-over's own tick (a reused pid — a tail of the log, an editor on the config, another frpc service — is never it)
     const isRelayClient = (pid) => { const a = pidArgv(pid); return path.basename(a[0] || '') === 'frpc' && a.includes(frpConf()); };
@@ -603,6 +637,7 @@ module.exports = {
       // whenever effective-enabled + configured (no prior desiredUp needed — a
       // fresh pod has no state yet). It auto-installs frpc if missing.
       bootReplay() {
+        booted = true;   // its reads: from now on a folder's answer that makes the run its own arms its watch (realSettled)
         if (restarting) return;   // a relay restart in flight starts it
         try { frpScrubConf(); } catch (e) { console.warn('[plugins] frp: the config scrub failed:', e.message); }
         try { if (relayAdopt()) return; } catch (e) { console.warn('[plugins] frp: the relay identity was not adopted:', e.message); }
@@ -677,10 +712,9 @@ module.exports = {
       },
 
       stop() {
-        watchLogin(false);
-        endDrop();   // the episode ends with its run (a restart WITH the token, a settings change, the relay stopped)
         const any = frpDaemonPid(), pid = ownRunPid();   // B-1217: the kill law — never another instance's run
-        if (any && !pid) throw heldRefusal();   // said by name: the relay this page shows is another instance's (the card offers the person's own take-over)
+        if (any && !pid) throw heldRefusal();   // said by name: the relay this page shows is another instance's (the card offers the person's own take-over); refused BEFORE the watch or the record is touched
+        watchLogin(false); endDrop();   // the episode ends with its run (a restart WITH the token, a settings change, the relay stopped)
         if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
         if (pid || !any) { try { fs.unlinkSync(frpPidFile()); } catch { } }   // another run's pid file is its own
         const rec = h.rec();
@@ -703,11 +737,11 @@ module.exports = {
         if (ownOf(pid)) return { running: true };   // it is this instance's own already: nothing to take over
         const start = startOf(pid);
         if (start == null || start !== Number(askedStart)) throw moved();
-        if (!isRelayClient(pid)) throw moved();
+        if (!isRelayClient(pid)) throw Object.assign(new Error('the process the relay\'s pid file names is not this home\'s relay client — nothing was ended'), { code: 'relay_takeover_not_relay' });   // r2329 (2): its own words
         try { process.kill(pid, 'SIGTERM'); } catch { }   // THAT process only: its number, start and kind read in this same tick
-        const gone = () => { const st = require('../proc-identity.js').statOf(pid); return !st || st[0] === 'Z' || startOf(pid) !== start; };   // a zombie has ended
+        const gone = () => takeoverEnded(require('../proc-identity.js').statOf(pid), startOf(pid), start);   // a zombie has ended; an unreadable entry has not (r2329 (4))
         for (let i = 0; i < 60 && !gone(); i++) await new Promise((r) => setTimeout(r, 50));
-        if (!gone()) throw Object.assign(new Error('The other relay client did not end — nothing was started'), { code: 'relay_takeover_stuck' });
+        if (!gone()) throw Object.assign(new Error('The other relay client was not seen to end — nothing was started'), { code: 'relay_takeover_stuck' });
         console.log(`[plugins] frp: the person took the relay over — the client pid ${pid} this instance did not start was ended; its own starts`);
         try { return { tookOver: true, ...verbs.start() }; }
         catch (e) { return { tookOver: true, startError: { error: String((e && e.message) || e), ...(e && e.code ? { code: e.code } : {}) } }; }   // ended, and its own did not start: both said

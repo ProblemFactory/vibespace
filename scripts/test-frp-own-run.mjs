@@ -22,7 +22,12 @@
 //     the person's take-over ends THAT process (a bystander lives) and starts its own; refused with nothing ended: a process that
 //     moved, a reused pid (another start, or none sent), a pid-file process not this home's relay client, a start that cannot run —
 //     RED the release's silent «running»; RED each guard cut
-//  ⑥ a data folder moved behind a link, and one that no longer exists (the install moved): still its own — RED the path string
+//  ⑥ a data folder moved behind a link, and one that no longer exists (the install moved): still its own — RED the path string;
+//     the folders asked OFF THE LOOP, at the start, never per ask — RED a resolve per ask; «gone» by two answers a minute apart,
+//     the second the plugin's own ask: another instance's folder missing once (a mount's gap) is not its own — RED one answer read
+//     as gone; RED no confirming ask; RED the confirm lost behind an ask in flight; a gone folder that answers again is a path again —
+//     RED gone kept; the login watch armed by
+//     the answer that makes the run its own — RED never armed
 //  ⑦ a take-over asked by anything but the person's press: refused, nothing touched — RED unattended
 //  (the reds plant the release's roads back together — stop()'s and start()'s guards each still cover the harm alone)
 // Run: node scripts/test-frp-own-run.mjs
@@ -69,6 +74,12 @@ try {
   if (i < 0 || j < i) throw new Error('ownRunOf moved');
   const ownRunOf = new Function(`${SRC.slice(i, j + 2)}\nreturn ownRunOf;`)();
   const st = (v) => () => v;
+  const k0 = SRC.indexOf('function takeoverEnded('), k1 = SRC.indexOf('\n}\n', k0);   // r2329 (4): an unreadable entry is NOT ended
+  if (k0 < 0 || k1 < k0) throw new Error('takeoverEnded moved');
+  const endedOf = (text) => new Function(`${text}\nreturn takeoverEnded;`)();
+  const TE = endedOf(SRC.slice(k0, k1 + 2)), TER = endedOf(anchored(SRC.slice(k0, k1 + 2), '  if (st === undefined) return false;\n', '  if (st === undefined) return true;\n', 'B-1217 an unreadable entry read as ended'));
+  ok(TE(null, null, 5) === true && TE(undefined, null, 5) === false && TE(undefined, 5, 5) === false && TE(['Z'], 5, 5) === true && TE(['S'], 6, 5) === true && TE(['S'], 5, 5) === false && TE(['S'], null, 5) === false && TER(undefined, null, 5) === true,
+    '① the take-over\'s end (r2329 (4)): no such process or a zombie or another start ⇒ ended; its stat or its start unreadable ⇒ NOT ended (unknown is never «it ended») — RED an unreadable entry read as ended');
   ok(ownRunOf({ pid: 10, start: 5 }, 10, st(5)) === true && ownRunOf({ pid: 10, start: 5 }, 11, st(5)) === false && ownRunOf({ pid: 10, start: 5 }, 10, st(6)) === false
     && ownRunOf({ pid: 10 }, 10, st(6)) === true && ownRunOf(null, 10, st(5)) === false && ownRunOf(null, 10, st(5), { legacy: true }) === true && ownRunOf({ pid: 10, start: 5 }, 10, st(null)) === true && ownRunOf({ pid: 10 }, 0, st(5)) === false
     && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/b/data' }) === false && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/a/data' }) === true
@@ -94,7 +105,8 @@ try {
 
   console.log('③ the watch over a home whose client is now another run\'s');
   let ticks = 0;
-  global.setInterval = (fn, ms, ...a) => (ms === 60e3 ? SI((...x) => { ticks++; fn(...x); }, 50, ...a) : SI(fn, ms, ...a));   // the plugin's 60-s login watch, quick, its ticks counted
+  const wHeld = [];   // its third read: each case's watch ended with its case (a refused Stop leaves the watch it never touched)
+  global.setInterval = (fn, ms, ...a) => { if (ms !== 60e3) return SI(fn, ms, ...a); const t = SI((...x) => { ticks++; fn(...x); }, 50, ...a); wHeld.push(t); return t; };   // the plugin's 60-s login watch, quick, its ticks counted
   const watchOver = async (FRPm, tag, { own }) => {
     const rec = { enabled: false, frpcIdentity: 'instance', frpcKnock: true, frpcLogFrom: 0 }, h = hostOf(tag, rec), v = FRPm.create(h);
     const mine = await client(); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(mine));
@@ -110,6 +122,7 @@ try {
     const t0 = ticks; await until(() => ticks >= t0 + 5 && (rec.knockTrialAt == null || !alive(pid)), 3000);   // its round: ten ticks of the watch counted, and a restart's end waited on (never a fixed sleep)
     const r = { alive: alive(pid), trial: rec.knockTrialAt != null, saidOther: said.filter(OTHER).length - s0 };
     try { v.stop(); } catch { }   // (over another run: refused by name — ②)
+    for (const t of wHeld.splice(0)) clearInterval(t);
     return r;
   };
   const wOther = await watchOver(FRP, 'watch-other', { own: false }), wOwn = await watchOver(FRP, 'watch-own', { own: true });
@@ -174,35 +187,64 @@ try {
     ['        if (start == null || start !== Number(askedStart)) throw moved();\n', '        if (start == null) throw moved();\n'],
   ].reduce((t, [x, y], k) => anchored(t, x, y, `B-1217 the take-over's process not read again ${k + 1}`), SRC), 'no-reread'), 'left-red-pid');
   const sxR = await caseStart(cut1('        if (start == null || start !== Number(askedStart)) throw moved();\n', '        if (start == null) throw moved();\n', 'B-1217 the take-over\'s start not read again', 'no-start'), 'left-red-start2');
-  const kdR = await caseKind(cut1('        if (!isRelayClient(pid)) throw moved();\n', '', 'B-1217 the take-over\'s kind not read again', 'no-kind'), 'left-red-kind');
+  const kdR = await caseKind(cut1('        if (!isRelayClient(pid)) throw Object.assign(new Error(\'the process the relay\\\'s pid file names is not this home\\\'s relay client — nothing was ended\'), { code: \'relay_takeover_not_relay\' });   // r2329 (2): its own words\n', '', 'B-1217 the take-over\'s kind not read again', 'no-kind'), 'left-red-kind');
   const cnR = await caseCannot(cut1("        const no = verbs.canStart(); if (no) throw no;   // its read (S2): what start() would refuse is said BEFORE anything is ended\n", '', 'B-1217 the take-over ends before asking its start', 'no-pre'), 'left-red-pre');
   ok(startCode === 'relay_held_elsewhere' && stA.heldElsewhere && stA.held && stA.held.pid === A.other && !!stA.held.since
     && mv.code === 'relay_takeover_moved' && mv.lives && sx.code === 'relay_takeover_moved' && sx.none === 'relay_takeover_moved' && sx.lives
-    && kd.code === 'relay_takeover_moved' && kd.lives && cn.code === 'relay_revoked' && cn.lives
+    && kd.code === 'relay_takeover_not_relay' && kd.lives && cn.code === 'relay_revoked' && cn.lives
     && aTook === 'took' && !alive(A.other) && alive(bystander) && A.started() === 1
     && startR === 'running' && !mvR.lives && !sxR.lives && !kdR.lives && !cnR.lives,
     `⑤ a client LEFT BEHIND by an instance gone for good: Start refused by name (${startCode}); the card's facts say what holds it (pid ${stA.held && stA.held.pid}); the person's take-over ends THAT process (${!alive(A.other)}) and no other (a bystander lives: ${alive(bystander)}), then starts its own (${A.started()}); refused, nothing ended: a process that moved (${mv.code}), the same pid with another start or none sent (${sx.code}, ${sx.none}), a pid-file process that is not this home's relay client (${kd.code}), a start that cannot run (${cn.code}) — RED each guard cut: the release's silent «running» (${startR}); the moved process (${!mvR.lives}), the reused pid (${!sxR.lives}), the stranger (${!kdR.lives}) and a client ended for a start that cannot run (${!cnR.lives})`,
     { startCode, mv, sx, kd, cn, aTook, startR, mvR, sxR, kdR, cnR });
 
   console.log('⑥ a data folder moved (behind a link; the install moved): still its own');
+  const REAL_AGAIN = 60e3, dn0 = Date.now;
   const movedFolder = async (FRPm, tag, how) => {
     const rec = { enabled: false }, h = hostOf(tag, rec);
     const pid = await client(); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(pid));
     const real0 = path.join(T, 'data-real-' + tag); fs.mkdirSync(real0);
+    const there = path.join(T, (how === 'gap' ? 'gap-' : 'gone-') + tag, 'data');
     if (how === 'link') {   // recorded at its old real place; the folder moved to a new one and the old path is now a link to it
       rec.frpcRun = { pid, at: Date.now(), start: PI.starttimeOf(pid), by: real0 };
       const real1 = path.join(T, 'data-nvme-' + tag); fs.renameSync(real0, real1); fs.symlinkSync(real1, real0); h.dataDir = real1;
-    } else {   // the install moved or was renamed: the recorded folder is gone
-      rec.frpcRun = { pid, at: Date.now(), start: PI.starttimeOf(pid), by: path.join(T, 'gone-' + tag, 'data') }; h.dataDir = real0;
+    } else {   // gone: the install moved or was renamed (later a folder appears at that path again); gap: ANOTHER instance's folder (a copy of data/ seeded from it) missing at the first answer — its mount's gap — and back a minute later
+      rec.frpcRun = { pid, at: Date.now(), start: PI.starttimeOf(pid), by: there }; h.dataDir = real0;
     }
-    const v = FRPm.create(h); const st = v.status();
-    return { own: !!st.running, held: !!st.heldElsewhere };
+    const rp0 = fs.promises.realpath, SI1 = global.setInterval, ST1 = global.setTimeout, held = [], minute = [];
+    let asks = 0, settled = 0, ahead = 0, armed = 0;
+    fs.promises.realpath = (...a) => { asks++; return rp0(...a).finally(() => { settled++; }); };   // its reads: every resolve counted — each off the loop
+    Date.now = () => dn0() + ahead;
+    global.setInterval = (fn, ms, ...a) => { if (ms === 60e3) armed++; const t = SI1(fn, ms === 60e3 ? 3600e3 : ms, ...a); if (ms === 60e3) held.push(t); return t; };   // the login watch counted, never ticking here
+    global.setTimeout = (fn, ms, ...a) => (ms === REAL_AGAIN ? (minute.push(fn), { unref() { } }) : ST1(fn, ms, ...a));   // the plugin's own confirming ask: run when the suite lets a minute pass
+    try {
+      const v = FRPm.create(h), atCreate = asks;
+      const aMinute = async (busy) => { ahead += REAL_AGAIN + 1000; if (busy) v.status(); for (const f of minute.splice(0)) f(); v.status(); await until(() => settled === asks, 2000); };   // a minute passes without waiting one (busy: a status asks first — the confirm follows the ask in flight)
+      v.bootReplay();   // before any answer: the record's folder needs one — the answer that makes the run its own arms its watch
+      await until(() => settled === asks, 2000);
+      const first = v.status(), a0 = asks;
+      for (let k = 0; k < 20; k++) v.status();
+      const perAsk = asks - a0;
+      if (how === 'gap') fs.mkdirSync(there, { recursive: true });
+      await aMinute(how === 'gone');
+      const later = v.status();
+      let again = null;
+      if (how === 'gone') { fs.mkdirSync(there, { recursive: true }); await aMinute(); again = v.status(); }   // a folder at that path again: a path, never kept as gone
+      return { firstOwn: !!first.running, firstHeld: !!first.heldElsewhere, own: !!later.running, held: !!later.heldElsewhere, again: again && !!again.running, atCreate, perAsk, armed };
+    } finally { fs.promises.realpath = rp0; Date.now = dn0; global.setInterval = SI1; global.setTimeout = ST1; for (const t of held) clearInterval(t); }
   };
-  const mvL = await movedFolder(FRP, 'mv-link', 'link'), mvG = await movedFolder(FRP, 'mv-gone', 'gone');
+  const mvL = await movedFolder(FRP, 'mv-link', 'link'), mvG = await movedFolder(FRP, 'mv-gone', 'gone'), mvP = await movedFolder(FRP, 'mv-gap', 'gap');
   const BYSTRING = MC.load('src/plugins/frp.js', anchored(SRC, '  if (run.by && by && !(sameBy ? sameBy(run.by, by) : run.by === by)) return false;\n', '  if (run.by && by && run.by !== by) return false;\n', 'B-1217 its own by the path string'), 'by-string');   // stale-pins: kept (a red control plants the old road back)
   const mvLR = await movedFolder(BYSTRING, 'mv-link-red', 'link'), mvGR = await movedFolder(BYSTRING, 'mv-gone-red', 'gone');
-  ok(mvL.own && !mvL.held && mvG.own && !mvG.held && !mvLR.own && mvLR.held && !mvGR.own,
-    `⑥ «its own» never hangs on a path string: a data folder moved behind a link (${mvL.own}) and a recorded folder that no longer exists — the install moved (${mvG.own}) — still own their client — RED the path string decides: held elsewhere over its own (${mvLR.held}, ${!mvGR.own})`, { mvL, mvG, mvLR, mvGR });
+  const ASKLINE = "      if (typeof k.v !== 'string' && !k.p && (confirm || !k.at || Date.now() - k.at >= REAL_AGAIN_MS)) {";
+  const mvPR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, ASKLINE, '      if (true) {', 'B-1217 a resolve per ask'), 'per-ask'), 'mv-link-perask', 'link');
+  const mvOR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, '          else if (k.v === null || (confirm && k.gone === 1)) k.v = null;', '          else if (true) k.v = null;', 'B-1217 one answer read as gone'), 'one-gone'), 'mv-gap-onegone', 'gap');
+  const mvCR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, ' const t = setTimeout(() => realOf(p, true), REAL_AGAIN_MS); if (t && t.unref) t.unref(); }', ' }', 'B-1217 no confirming ask'), 'no-confirm'), 'mv-gone-noconfirm', 'gone');
+  const mvNR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, ASKLINE, "      if (k.v === undefined && !k.p && (confirm || !k.at || Date.now() - k.at >= REAL_AGAIN_MS)) {", 'B-1217 gone kept'), 'gone-kept'), 'mv-gone-kept', 'gone');
+  const mvAR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, ' if (booted && !watch && ownRunPid()) watchLogin(true); } catch { } };', ' } catch { } };', 'B-1217 the answer arms nothing'), 'no-arm'), 'mv-link-noarm', 'link');
+  const mvBR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, '      if (confirm && k.p) { k.p.then(() => realOf(p, true)); return k.v; }', '      if (confirm && k.p) return k.v;', 'B-1217 the confirm lost behind an ask'), 'confirm-lost'), 'mv-gone-busy', 'gone');
+  ok(mvL.firstOwn && mvL.own && !mvL.held && !mvG.firstOwn && mvG.firstHeld && mvG.own && !mvG.held && mvG.again === false && !mvP.firstOwn && !mvP.own && mvP.held && !mvLR.own && mvLR.held && !mvGR.own
+    && mvL.atCreate === 2 && mvL.perAsk === 0 && mvG.perAsk === 0 && mvPR.perAsk >= 20 && mvOR.firstOwn && !mvCR.own && !mvBR.own && mvNR.again === true && mvL.armed === 1 && mvG.armed === 1 && mvP.armed === 0 && mvAR.armed === 0,
+    `⑥ «its own» never hangs on a path string: a data folder moved behind a link (${mvL.own}) and a recorded folder that no longer exists — the install moved — still own their client (${mvG.own}), the gone one by TWO answers a minute apart, the second the plugin's own ask (one answer: ${mvG.firstHeld ? 'held elsewhere' : 'its own'}); a folder at that path again is a path again (${mvG.again === false ? 'not its own' : 'its own'}); ANOTHER instance's folder missing at the first answer and back a minute later (a mount's gap) is never its own (${!mvP.firstOwn}, ${!mvP.own}) — RED the path string decides: held elsewhere over its own (${mvLR.held}, ${!mvGR.own}); the two folders asked off the loop at the start (${mvL.atCreate}) and none in twenty status reads (${mvL.perAsk}, ${mvG.perAsk}) — RED a resolve per ask: ${mvPR.perAsk}; RED one answer read as gone: another instance's client taken for its own (${mvOR.firstOwn}); RED no confirming ask: the moved install's client never its own (${!mvCR.own}); the confirm that comes while an ask is in flight follows it — RED it lost (${!mvBR.own}); RED gone kept: a folder back still read as gone (${mvNR.again}); the login watch armed by the answer that makes the run its own (${mvL.armed}, ${mvG.armed}; another's: ${mvP.armed}) — RED never armed (${mvAR.armed})`, { mvL, mvG, mvP, mvLR, mvGR, mvPR, mvOR, mvCR, mvBR, mvNR, mvAR });
 
   console.log('⑦ a take-over asked by anything but the person\'s press: refused');
   const notPressed = async (FRPm, tag) => {
@@ -218,7 +260,9 @@ try {
   const npR = await notPressed(NOPRESS, 'np-red');
   const WIRE = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'), WO = require(path.join(REPO, 'src/write-origin.js'));
   const PUI = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8'), RAIL = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-rail.js'), 'utf8'), SMX = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8'), SJS = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), IURL = fs.readFileSync(path.join(REPO, 'src/server/instance-url.js'), 'utf8');
-  const page = PUI.includes("await api('takeover', { body: JSON.stringify({ pid: p.held.pid, start: p.held.start }) });") && PUI.includes("message: t('This ends the relay client another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.')")
+  const page = PUI.includes("await api('takeover', { body: JSON.stringify({ pid: p.held.pid, start: p.held.start }) });") && PUI.includes("message: p.held.since ? t('This ends the relay client {pid} — running since {since} — that another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.', { pid: p.held.pid, since: when(p.held.since, { words: true }) })")
+    && PUI.includes("c === 'relay_takeover_not_relay' ? t(") && PUI.includes("c === 'relay_revoked' ? t(")
+    && PUI.includes('            if (canRun && p.held.start != null) f.append(take);') && PUI.includes("else if (canRun) f.append(document.createTextNode(t('This process’s start time could not be read, so it cannot be told from a later process with the same number — end process {pid} yourself")   // its read: no start read, no take-over offered (the press could never pass)
     && (RAIL.split('showToast(relayRefusalWords(r)').length - 1) === 2 && SMX.includes('throw new Error(relayRefusalWords(r2))')
     && (SJS.split('portForwards.publish(String(req.params.id)').length - 1) === 1 && SJS.includes("res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it)")
     && (IURL.split('...(e && e.code ? { code: e.code } : {})').length - 1) === 2;
