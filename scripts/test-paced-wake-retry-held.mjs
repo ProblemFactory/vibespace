@@ -417,7 +417,7 @@ await leg(149, async () => {
   // B-f276 1c FOLLOW (its round whfrsuwsp lens 3, 主开发 r1588 (1) — MONEY): a GROUP's wake parked while groups.json is held, the hold
   // lifted, is posted EXACTLY ONCE — never dropped, never twice (the real groups engine over its real store: the hold read off the file)
   const DSRC1 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
-  const liftRun = async (DL, tag) => {
+  const liftRun = async (DL, tag, { GE = GE0 } = {}) => {   // GE: the restarted hub's groups engine (its round wy3zr6ym5's control)
     const c = { now: T0, timers: [] };
     const R1 = rig(`held1c-glift-${tag}`, { shared: c, DELIVER: DL });
     const g = await R1.group('lift', A, [B]);
@@ -428,7 +428,7 @@ await leg(149, async () => {
     const gj = path.join(R1.dataDir, 'channels', 'groups.json');
     const good = fs.readFileSync(gj, 'utf8');
     fs.rmSync(gj); fs.mkdirSync(gj); fs.writeFileSync(path.join(gj, 'x'), 'x');   // the read of groups.json fails (EISDIR): held
-    const R2 = rig(`held1c-glift-${tag}-2`, { shared: c, dir: R1.dataDir, DELIVER: DL, heldRetry: { firstMs: 5, maxMs: 10 } });
+    const R2 = rig(`held1c-glift-${tag}-2`, { shared: c, dir: R1.dataDir, DELIVER: DL, GE, heldRetry: { firstMs: 5, maxMs: 10 } });
     await R2.advanceTo(T0 + 40 * 60e3);   // far past the pace: held, so never posted, never fallen
     const during = { posts: R2.posts.length, owed: R2.owed(B).length, paused: !!R2.eng.pausedState() };
     fs.rmSync(gj, { recursive: true, force: true }); fs.writeFileSync(gj, good);
@@ -450,6 +450,12 @@ await leg(149, async () => {
   // its round wp3niroz5 (4): THE BILLED WAKE, NEVER TWICE — a copy whose lift road sends the wake's post twice (the lift and a retry meeting)
   const glt = await liftRun(MHF.load('src/server/conversation-deliver.js', anchored(DSRC1, '    try { r = await peerMsg.postToPeer(peer, frame.text); } catch (err) {', '    try { await peerMsg.postToPeer(peer, frame.text); r = await peerMsg.postToPeer(peer, frame.text); } catch (err) {', 'the lift road posts twice'), 'door-posts-twice'), 'twice');
   ok(glt.after.posts > 1 || glt.later > 1, 'its round wp3niroz5 (4) CONTROL (the lift road posts the wake twice, in a copy): the BILLED wake is posted twice and the leg\'s «exactly once» goes red — red', JSON.stringify(glt));
+  // its round wy3zr6ym5 (主开发 r2285 (2)): THE MARK, CUT — the posted wake KEPT in the park after the lift. Alone it still posts once: the
+  // landing moved the member's report marker, so the next pass's render answers «carried» (no post). Two marks in series, so the copy
+  // cuts both: the wake kept, its marker not moved at the landing — the next pass posts the BILLED wake again
+  const GSRC1 = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
+  const gkx = await liftRun(MHF.load('src/server/conversation-deliver.js', anchored(DSRC1, 'e.charged = null; e.retries = e.attempts.length; removeRetry(e); }', 'e.charged = null; e.retries = e.attempts.length; }', 'the posted wake kept in the park'), 'kept-in-park'), 'kept-cut', { GE: MHF.load('src/server/groups-engine.js', anchored(GSRC1, '        await markReported(gid, cid, rep.upTo);\n', '', 'the landing moves no marker'), 'landing-no-marker') });
+  ok(gkx.after.posts > 1 || gkx.later > 1, 'its round wy3zr6ym5 (r2285 (2)) CONTROL (THE POSTED WAKE KEPT after the lift, its report\'s marker not moved at the landing, in a copy): the next pass posts the BILLED wake again — red', JSON.stringify(gkx));
 });
 
 

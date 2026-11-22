@@ -1042,7 +1042,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  walk's stop lands before its page) AWAITED, never a hold of the loop: the writer writes the index now and the promise
    *  says whether it landed (false: the write failed and stays owed — the caller keeps its cursor where it was). */
   function durableIndex() {
-    if (closed) { try { flush(); return Promise.resolve(true); } catch { return Promise.resolve(false); } }
+    // its round wy3zr6ym5 (主开发 r2285 (1)): ON A CLOSED STORE the flush RETURNS false for a write the writer refused «appeared» (it held
+    // the index by name): the HOLD after it answers — never «done» over an index not written (a throw: a write that failed, false too)
+    if (closed) { try { flush(); } catch { return Promise.resolve(false); } return Promise.resolve(!ixLoad.blocked); }
     if (ixLoad.blocked) {   // r1542's law: held — the train's road for a whole write (its produce refuses by name)
       // B-f276 1c moved (its read r1 M3, the meeting): a paced change rides the journal now, so a held index need not be dirty — an index held
       // «appeared» answers FALSE by its hold (what this life changed since is never written), never «done» because nothing is pending;
@@ -1317,7 +1319,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!durable) return run;
     return run.then(async (r) => {
       const viaIndex = whole || (none && !!wholeOwed);   // B-360d unit 1: a durable act that changed nothing is on disk once what is OWED is (a retry of a failed act)
-      const ok = closed ? true : none ? await durableIndex() : await W().durable(whole ? indexFile : actsFile);
+      const ok = closed ? !ixLoad.blocked : none ? await durableIndex() : await W().durable(whole ? indexFile : actsFile);   // r2285 (1): a straggler act after close — its own flush refused «appeared» holds the index: told by the hold, never «done»
       if (ok) return r;
       // A FAILED ACT REACHES THE PERSON (round 2, law F): it IS in memory and the writer keeps retrying — the caller's
       // answer says so, never {ok: true}
@@ -3302,7 +3304,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, journalStats: () => ({ journalBytes, owedBytes, lines: actLines.length, actSeq, appendedSeq, compactOwed, wholeOwed, indexOwed: dirty }), journalDurable: () => { if (closed) return Promise.resolve(true); if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); askActs(); return W().durable(actsFile); },   // r1542's law: held — refused by name
       // B-360d unit 1: `fold()` — the index written WHOLE now (the journal folded into it), as the bound asks it — its promise
       // resolves when that write landed (a suite's whole write; the bound's own road)
-      fold: () => { if (closed) { try { flush(); return Promise.resolve(true); } catch { return Promise.resolve(false); } } if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); markDirty(true); return W().durable(indexFile); }, isDirty: () => dirty, blocked: () => ixLoad.blocked || null, held: () => !!ixLoad.held,   // fold: r1542's law — held, refused by name
+      fold: () => { if (closed) { try { flush(); } catch { return Promise.resolve(false); } return Promise.resolve(!ixLoad.blocked); } if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); markDirty(true); return W().durable(indexFile); }, isDirty: () => dirty, blocked: () => ixLoad.blocked || null, held: () => !!ixLoad.held,   // fold: r1542's law — held, refused by name
       // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
       keysOf, rowsOf, keysReady, keysStats: () => ({ ...acctStats, kept: !!byAcct, warming: !!acctWarm, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the

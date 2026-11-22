@@ -767,6 +767,31 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     ok(sc.out === 'ok,ok,ok,ok,ok' && !sc.appeared, 'its round wp3niroz5 (7): append, the compaction, append THROUGH THE STORE — every write lands, nothing held', JSON.stringify(sc));
     const scx = await storeCompactRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, "allowEmpty: true, ...actsOwn() }); }   // B-f276 1c: the compaction under the index's law", "allowEmpty: true, ownOnly: false, onWritten: actsWritten }); }   // B-f276 1c: the compaction under the index's law", 'the compaction by name'), "...actsOwn() }); }   // B-f276 1c (the meeting with B-360d unit 1)", "ownOnly: false, onWritten: actsWritten }); }   // B-f276 1c (the meeting with B-360d unit 1)", 'the journal asked by name (askActs)'), 'f-scompact').createChannelStore, 'cut');   // stale-pins: kept (the control restores the train's line)
     ok(/store-appeared$/.test(scx.out) && scx.appeared, 'its round wp3niroz5 (7) CONTROL (the compaction by name at both its doors — the fold\'s ask and askActs — its numbers never recorded): the next line refuses the store\'s own journal — the family held for nothing — red', JSON.stringify(scx));
+    // its round wy3zr6ym5 (主开发 r2285 (1)): ON A CLOSED STORE the asks answer by the HOLD after the flush. Another index.json takes the
+    // name after the close; a straggler act's own flush is refused «appeared» (the index held by name) — the act, «is the index durable»
+    // and «fold» are none of them told «done» over an index not written
+    const closedHeldRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-closedheld-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s26 = mk({ dir: d, log: qlog });
+      const ask = async (fn) => { try { return String(await fn()); } catch (e) { return (e && e.code) || 'threw'; } };
+      const first = await ask(() => s26.index.update(() => { s26.index.entry('fake', 'k1').title = 'one'; }, { durable: true }).then(() => 'ok'));   // index.json made whole: the store's own
+      try { s26.close(); } catch { }
+      const ixf = path.join(d, 'index.json');
+      fs.writeFileSync(ixf + '.other', IX); fs.renameSync(ixf + '.other', ixf);   // another index.json takes the name after the close
+      const act = await ask(() => s26.index.update(() => { s26.index.entry('fake', 'k2').title = 'late'; }, { durable: true }).then(() => 'ok'));   // a straggler act
+      const durable = await ask(() => s26.index.durable());
+      const fold = await ask(() => s26.index.fold());
+      const q = (s26.quarantined || []).find((x) => x.file === 'index.json' && x.kind === 'appeared') || {};
+      return { first, act, durable, fold, kind: q.kind || null, kept: fs.readFileSync(ixf, 'utf8') === IX };
+    };
+    const ch = await closedHeldRun(createChannelStore, 'head');
+    ok(ch.first === 'ok' && ch.act === 'store-appeared' && ch.durable === 'false' && ch.fold === 'false' && ch.kind === 'appeared' && ch.kept, 'its round wy3zr6ym5 (r2285 (1)): ON A CLOSED STORE another index.json meets a straggler act — its flush refused «appeared»: the act refused by name, «is the index durable» and «fold» answer false, the file that came kept byte for byte', JSON.stringify(ch));
+    const cha = await closedHeldRun(MC.load('src/channel-store.js', anchored(SSRC, '      const ok = closed ? !ixLoad.blocked : none ? await durableIndex() : await W().durable(whole ? indexFile : actsFile);', '      const ok = closed ? true : none ? await durableIndex() : await W().durable(whole ? indexFile : actsFile);', 'the closed act told done'), 'f-closed-act').createChannelStore, 'cut-act');   // stale-pins: kept (the control restores the line before this follow)
+    ok(cha.act === 'ok', 'its round wy3zr6ym5 (r2285 (1)) CONTROL (the closed act told «done» on any return, as before): the straggler act is told saved over an index not written — red', JSON.stringify(cha));
+    const chd = await closedHeldRun(MC.load('src/channel-store.js', anchored(SSRC, '    if (closed) { try { flush(); } catch { return Promise.resolve(false); } return Promise.resolve(!ixLoad.blocked); }\n    if (ixLoad.blocked) {   // r1542\'s law', '    if (closed) { try { flush(); return Promise.resolve(true); } catch { return Promise.resolve(false); } }\n    if (ixLoad.blocked) {   // r1542\'s law', 'the closed durable ask on any return'), 'f-closed-dur').createChannelStore, 'cut-dur');   // stale-pins: kept (the control restores the line before this follow)
+    ok(chd.durable === 'true', 'its round wy3zr6ym5 (r2285 (1)) CONTROL (the closed «is the index durable» true on any return of the flush, as before): told on disk — red', JSON.stringify(chd));
+    const chf = await closedHeldRun(MC.load('src/channel-store.js', anchored(SSRC, '      fold: () => { if (closed) { try { flush(); } catch { return Promise.resolve(false); } return Promise.resolve(!ixLoad.blocked); } if (ixLoad.blocked)', '      fold: () => { if (closed) { try { flush(); return Promise.resolve(true); } catch { return Promise.resolve(false); } } if (ixLoad.blocked)', 'the closed fold on any return'), 'f-closed-fold').createChannelStore, 'cut-fold');   // stale-pins: kept (the control restores the line before this follow)
+    ok(chf.fold === 'true', 'its round wy3zr6ym5 (r2285 (1)) CONTROL (the closed fold true on any return of the flush, as before): told folded — red', JSON.stringify(chf));
     // (6b): a family STARTED EMPTY by the damaged door is own-only again — after its first write lands, a file that is not its own
     // takes the name: the next write is refused by name, the file kept
     const doorOwnRun = async (mk, tag) => {
