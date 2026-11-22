@@ -2950,6 +2950,9 @@ export default {
   "the machine went offline while its folder was being mounted": "フォルダーのマウント中にマシンがオフラインになりました",
   "unknown machine mount": "不明なマシンマウントです",
   "machine is offline — start its daemon first": "マシンはオフラインです — 先にデーモンを起動してください",
+  "Did not disconnect — {why}; try again in a moment": "切断できませんでした — {why}。しばらくしてからもう一度お試しください",   // B-323e follow (lane bl-machines-b)
+  "Disconnected, but could not confirm its process ended — {why}": "切断しましたが、そのプロセスが終了したかは確認できませんでした — {why}",   // B-323e follow (lane bl-machines-b)
+  "Connects once the disconnect has finished": "切断が終わってから接続します",   // B-323e follow (lane bl-machines-b)
   "could not release the folder {mountpoint} — its unmount did not answer in {s} s": "フォルダー {mountpoint} を解放できませんでした — アンマウントが {s} 秒以内に応答しませんでした",
   "device serve-folder failed: {detail}": "デバイスの serve-folder に失敗しました: {detail}",
   "rclone webdav mount exited: {detail}": "rclone webdav マウントが終了しました: {detail}",

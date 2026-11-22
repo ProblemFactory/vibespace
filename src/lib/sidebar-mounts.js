@@ -681,7 +681,7 @@ export function installSidebarMounts(Sidebar) {
       if (m.mounted) {
         actions.append(
           ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path, { attended: true }); }),   // B-23e5 (a): pressed
-          ibtn(MI.eject, m.disconnecting ? tr('Disconnecting…') : this._providerRow(m.type).unmountLabel ? tr(this._providerRow(m.type).unmountLabel) : 'Disconnect', async () => {
+          ibtn(MI.eject, m.disconnecting ? tr('Disconnecting…') : this._providerRow(m.type).unmountLabel ? tr(this._providerRow(m.type).unmountLabel) : tr('Disconnect'), async () => {   // its follow (r1890 (5)): its own word translated too
             // B-323e (主开发 r1501 (8)): a Disconnect in flight is SAID (the hub's own mark: every client's row, through every redraw), and
             // one that did not end the mount SAYS SO — the route answers success:false with a 200, which the page used to show as nothing
             if (m.disconnecting) { showToast(tr('Already disconnecting…')); return; }
@@ -693,10 +693,11 @@ export function installSidebarMounts(Sidebar) {
         // Power icon (⏻) in the same icon-button family — the old glyph read
         // as a "download" button and a text chip among icons read worse
         // (user feedback, twice). The ROW itself is also click-to-connect.
-        actions.append(ibtn(MI.plug, m.connecting ? tr('Connecting…') : tr('Connect'), async () => {
+        actions.append(ibtn(MI.plug, m.connecting ? tr('Connecting…') : m.disconnecting ? tr('Connects once the disconnect has finished') : tr('Connect'), async () => {
           // a connect is already in flight — a second POST is refused server-
           // side (success:false) and would report a bogus connect FAILURE
           if (m.connecting) { showToast(tr('Already connecting…')); return; }
+          if (m.disconnecting) showToast(tr('Connects once the disconnect has finished'));   // its follow (r1890 (4)): the press is held by the hub until the disconnect ends — said, never a silent wait
           const r = await mmApi(`/api/mounts/${m.id}/mount`, { method: 'POST' });
           if (!r.success) throw new Error(tr('Couldn’t connect — hover the status dot for details'));
         }, 'mounts-icon-accent'));
@@ -769,11 +770,12 @@ export function installSidebarMounts(Sidebar) {
       // inside keep their own handlers.
       if (!isCred && !m.starting) {
         row.classList.add('mounts-row-clickable');
-        row.setAttribute('data-tip', m.mounted ? tr('Open in file explorer') : tr('Click to connect'));
+        row.setAttribute('data-tip', m.mounted ? tr('Open in file explorer') : m.disconnecting ? tr('Connects once the disconnect has finished') : tr('Click to connect'));
         row.onclick = async (e) => {
           if (e.target.closest('button, a, input, details, .mounts-row-actions')) return;
           if (m.mounted) { this.app.openFileExplorer(m.path, { attended: true }); return; }   // B-23e5 (a): a mounted row pressed
           if (m.connecting) { showToast(tr('Already connecting…')); return; } // see the Connect button
+          if (m.disconnecting) showToast(tr('Connects once the disconnect has finished'));   // its read (S2): the row's own Connect says the wait too
           row.style.opacity = '0.6';
           try {
             const r = await mmApi(`/api/mounts/${m.id}/mount`, { method: 'POST' });

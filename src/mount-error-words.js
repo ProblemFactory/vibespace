@@ -56,6 +56,8 @@ const WORDS = Object.freeze({
   webdav_mount_exited: i18nKey('rclone webdav mount exited: {detail}'),
   webdav_mount_not_up: i18nKey('rclone webdav mount did not come up: {detail}'),
   // ── cloud storage rows (src/mounts.js) ──
+  unmount_threw: i18nKey('Did not disconnect — {why}; try again in a moment'),   // B-323e follow (lane bl-machines-b, 主开发 r1890 (1)): a person's Disconnect whose road threw before it detached
+  unmount_unconfirmed: i18nKey('Disconnected, but could not confirm its process ended — {why}'),   // …and one that threw after it detached
   mount_cant_tell: i18nKey('could not tell whether this storage’s previous connection still runs (a process did not answer) — it is tried again by itself'),
   s3_access_denied: i18nKey('the credential can’t access “{target}” (AccessDenied) — check the bucket name (S3 buckets are lowercase letters/digits/hyphens) and the token’s bucket scope'),
   s3_sts_proxy: i18nKey('endpoint proxy rewrites signed headers (Cloudflare?) — temporary-credential (STS) shares need rclone 1.63–1.69, a service-account share, or an un-proxied endpoint'),

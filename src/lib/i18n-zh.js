@@ -2951,6 +2951,9 @@ export default {
   "unknown machine mount": "未知的机器挂载",
   "machine is offline — start its daemon first": "机器离线——先启动它的守护进程",
   "could not release the folder {mountpoint} — its unmount did not answer in {s} s": "无法释放文件夹 {mountpoint}——它的卸载在 {s} 秒内没有回应",
+  "Did not disconnect — {why}; try again in a moment": "没有断开连接——{why}；请稍后再试",   // B-323e follow (lane bl-machines-b)
+  "Disconnected, but could not confirm its process ended — {why}": "已断开连接，但无法确认它的进程已经结束——{why}",   // B-323e follow (lane bl-machines-b)
+  "Connects once the disconnect has finished": "断开完成后就会连接",   // B-323e follow (lane bl-machines-b)
   "device serve-folder failed: {detail}": "设备的 serve-folder 失败：{detail}",
   "rclone webdav mount exited: {detail}": "rclone webdav 挂载已退出：{detail}",
   "rclone webdav mount did not come up: {detail}": "rclone webdav 挂载没有起来：{detail}",

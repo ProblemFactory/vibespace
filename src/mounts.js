@@ -1085,6 +1085,7 @@ class MountManager {
     if (m.parked) this._unpark(m, 'removed');   // B-5ce7: its For-you item resolves with it
     this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }
     try { this.onRemoved?.(m); } catch { }   // its stranded-files notice too (the cap counts live records)
+    this._unmountWhy?.delete(id);   // its follow: a press's reason leaves with the record
     this._mountGen?.delete(id); this._cantTell?.delete(mpRemoved);   // B-e783: its generation and any «can't tell» wait leave with the record (after the unmount, which moves it)
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
@@ -1269,7 +1270,7 @@ class MountManager {
   }
 
   async mount(id) {
-    { const dj = this._pressJoins?.get(id); if (dj) await dj.catch(() => { }); }   // B-323e (r1501 (8)): a Disconnect in flight ends first — its daemon wait would kill a new one
+    { const dj = this._pressJoins?.get(id); if (dj) await dj.catch(() => { }); }   // its follow (r1890 (1)): bounded by that road itself — the trio (10 s each), the daemon's wait (8 looks 0.5 s apart, each a bounded walk) and its end; a throw in it answers by what is known, so it always settles   // B-323e (r1501 (8)): a Disconnect in flight ends first — its daemon wait would kill a new one
     // B-5ce7: a connect ends a PARK — the automatic roads (restore, the sweep's reconnect) never call mount() for a parked
     // record, so a mount() here is the person's (the Reconnect door, Connect, an edit, a re-authorization)
     { const pm = this._state.mounts.find((x) => x.id === id); if (pm && pm.parked) this._unpark(pm, 'reconnect'); if (pm) { try { this._forgetHeldProbes(this.pathOf(pm)); } catch { } } }
@@ -2372,7 +2373,7 @@ class MountManager {
   /** A KERNEL mount's unmount (no fuse daemon to stop) — the cephfs row's `unmount` hook. */
   _kernelUnmount(m, mp, finish) {
     return new Promise((resolve) => {
-      execFile('sudo', ['-n', 'umount', '-l', mp], { timeout: 10000 }, () => resolve(finish(!this.isMounted(m))));   // B-323e: bounded as the trio is (a child that never ends no longer holds the press)
+      execFile('sudo', ['-n', 'umount', '-l', mp], { timeout: 10000 }, () => { let v = false; try { v = finish(!this.isMounted(m)); } catch (e) { console.warn(`[mounts] unmount of ${mp}: its finish threw (${(e && e.message) || e})`); } resolve(v); });   // B-323e: bounded as the trio is (a child that never ends no longer holds the press)
     });
   }
 
@@ -2741,11 +2742,16 @@ class MountManager {
     const joins = (this._pressJoins = this._pressJoins || new Map());
     if (joins.has(id)) return joins.get(id);
     (this._disconnecting = this._disconnecting || new Set()).add(id); this._notify();
+    this._unmountWhy?.delete(id);   // its follow: a new road's reason is its own
     let road; try { road = Promise.resolve(this._unmountRoad(id, opts)); } catch (e) { road = Promise.reject(e); }
     const done = road.finally(() => { joins.delete(id); this._disconnecting.delete(id); this._notify(); });
     joins.set(id, done);
     return done;
   }
+
+  /** its follow (主开发 r1890 (1)): when the person's last Disconnect of a record THREW — { code, why } (unmount_threw: not detached; unmount_unconfirmed:
+   *  detached, its process not confirmed ended), null otherwise — the route words it */
+  unmountWhyOf(id) { return (this._unmountWhy && this._unmountWhy.get(id)) || null; }
 
   _unmountRoad(id, opts = {}) {
     const m = this._get(id);
@@ -2781,14 +2787,29 @@ class MountManager {
       // clean exit, then kill by exact argv. This must complete BEFORE the
       // promise resolves — bounce callers mount() right after, and a kill
       // fired later would murder the fresh daemon instead.
+      // its follow (主开发 r1890 (1)): THE ROAD ALWAYS SETTLES — a throw in its own body (the wait for the daemon, its end, a child's
+      // answer read) answers by what is known, with its reason (unmountWhyOf: the route words it): not detached ⇒ «not disconnected»;
+      // detached (a rung ended it) ⇒ disconnected, its process not confirmed ended. Never a promise left open — the row's
+      // «Disconnecting…» and a Connect that waits on this press both hang on it — not even when finish itself (its notify) throws
+      let settled = false;
+      const settle = (v) => { if (settled) return; settled = true; let out = v; try { out = finish(v); } catch (e) { console.warn(`[mounts] unmount ${id}: its finish threw (${(e && e.message) || e}) — answered as it stood`); } resolve(out); };
+      const threw = (e, detached = false) => {
+        if (settled) return;
+        const why = String((e && e.message) || e || 'failed').slice(0, 200);
+        console.warn(`[mounts] unmount ${id}: its road threw (${why}) — ${detached ? 'detached, its process not confirmed ended' : 'not disconnected'}`);   // the record id, never its name
+        if (opts && opts.press) (this._unmountWhy || (this._unmountWhy = new Map())).set(id, { code: detached ? 'unmount_unconfirmed' : 'unmount_threw', why });   // a person's press only (an internal road's throw is not its answer)
+        settle(detached);
+      };
       const ensureDaemonGone = async (ok) => {
-        for (let i = 0; i < 8 && (await this._daemonAlive(mp, { witness: false })); i++) await new Promise((r) => setTimeout(r, 500));
-        if (await this._daemonAlive(mp, { witness: false })) {
-          console.warn(`[mounts] daemon survived lazy unmount of ${mp} — killing it`);
-          await this._killMountDaemon(mp);
-          await new Promise((r) => setTimeout(r, 300));
-        }
-        resolve(finish(ok));
+        try {
+          for (let i = 0; i < 8 && (await this._daemonAlive(mp, { witness: false })); i++) await new Promise((r) => setTimeout(r, 500));
+          if (await this._daemonAlive(mp, { witness: false })) {
+            console.warn(`[mounts] daemon survived lazy unmount of ${mp} — killing it`);
+            await this._killMountDaemon(mp);
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        } catch (e) { threw(e, ok); return; }
+        settle(ok);
       };
       // B-323e (its mount half, its reader's S4): the lazy-unmount trio by THE STARTER — the sweep's own road into a dead daemon's unmount
       // (every 60 s) and a person's Disconnect; in turn as before (the next only when one did not end 0), each bounded 10 s
@@ -2799,7 +2820,7 @@ class MountManager {
         if (ended0(await S.run('fusermount', ['-uz', mp], { timeoutMs: 10000, envAdd }).catch(() => null))) return ensureDaemonGone(true);
         await S.run('umount', ['-l', mp], { timeoutMs: 10000, envAdd }).catch(() => null);
         return ensureDaemonGone(!this.isMounted(m));
-      })();
+      })().catch(threw);
     });
   }
 
