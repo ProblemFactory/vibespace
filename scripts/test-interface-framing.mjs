@@ -237,7 +237,9 @@ console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
   const ONE_ROAD = "    res.once('close', pageSide); req.socket.once('close', pageSide);";
   const prOneRoad = await pipelinedReset(mutant('src/interface/relay.js', ONE_ROAD, "    res.once('close', pageSide);"), 500);   // the response's close alone: Node 24's road
   console.log(`    (this Node, ${process.version}: with the response's close ALONE, ${prOneRoad.channels} of the four channels stay behind — 0 on a major that closes a waiting response, 3 on Node 22)`);
-  ok(prRed.channels >= 4, `RED CONTROL — a response's close ends nothing: ${prRed.channels} channels of the four stay behind`, prRed);
+  // ON THE OLDER MAJOR the second road is the one that ends them (主开发 r2128): there the count is an assert, a red control of its own
+  if (Number(process.versions.node.split('.')[0]) < 24) ok(prOneRoad.channels >= 1, `RED CONTROL (Node ${process.versions.node}) — the page socket's road cut: ${prOneRoad.channels} of the four channels stay behind (this major never closes a waiting response)`, prOneRoad);
+  ok(prRed.channels >= 4, `RED CONTROL — the page side's end ends nothing: ${prRed.channels} channels of the four stay behind`, prRed);
   /** the late close of an OLD link's channel never empties the NEW link's entry of the same number (r1057 item 3) */
   const lateClose = (mod) => {
     const R = mod.create({ ownerOf: () => 'hub' });
