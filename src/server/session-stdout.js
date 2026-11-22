@@ -116,9 +116,11 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
   // (B-ae4b; test-pty-duck is the census).
   // B-1217 — A BRIDGE'S LIFE SIGNS ARE ITS OWN: its birth is strictly AFTER its predecessor's last byte (a byte in the birth's own
   // millisecond reads «spoke» by ptyQuietSince's tie), and only the CURRENT bridge stamps — a replaced bridge's late bytes (a killed
-  // dtach client's «[detached]» goodbye, landing after the new birth) count for nobody, so the successor that never spoke still reads so
+  // dtach client's «[detached]» goodbye, landing after the new birth) count for nobody, so the successor that never spoke still reads so;
+  // and a current bridge's byte is never dated before its own birth (r1676): a wall clock stepped back inside a heal's window cannot
+  // make a bridge that spoke read «never spoke» (its held lines would be replayed: a person's keystrokes twice)
   session._ptyOpenedAt = Math.max(Date.now(), (Number(session._lastPtyDataAt) || 0) + 1); // THIS bridge's birth (verify r1): `ptyQuietSince(session, _ptyOpenedAt)` = "this pty never spoke" — the broken-stdin detector re-sends only then
-  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Date.now(); });
+  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Math.max(Date.now(), Number(session._ptyOpenedAt) || 0); });
   if (session._bridgeHeldInputs && session._bridgeHeldInputs.pty === null) replayHeldInputs(session, ptyProcess, session._bridgeHeldInputs.lines);   // the onExit ladder's carry (B-c20d verify r1)
 
   // B-cd4b (round wzvgb5033): a RESTORE's attach hands what the survivor wrote between the restore's read and this attach

@@ -900,7 +900,7 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   // that byte and the heal replays; on a copy of the release's two lines nothing is held, every run
   const SS5 = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8');
   const release5 = anchored(anchored(SS5, '  session._ptyOpenedAt = Math.max(Date.now(), (Number(session._lastPtyDataAt) || 0) + 1);', '  session._ptyOpenedAt = Date.now();' /* stale-pins: kept — the release's line, this control's plant */, 'release: the birth at now'),
-    '  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Date.now(); });', '  ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });' /* stale-pins: kept — the release's line, this control's plant */, 'release: any pty stamps');
+    '  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Math.max(Date.now(), Number(session._ptyOpenedAt) || 0); });', '  ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });' /* stale-pins: kept — the release's line, this control's plant */, 'release: any pty stamps');
   const stalledHeal = async (modulePath, tag) => {
     const { eng: E, activeSessions: AS, frames: F } = makeEngine({ getDeviceMgr: () => null, modulePath });
     const sock2 = mkQuietFixture('healer-' + tag);

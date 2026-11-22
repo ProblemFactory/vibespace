@@ -260,8 +260,8 @@ console.log('— §5 a bridge\'s life signs are its own: a replaced bridge\'s go
 {
   const SS = read('src/server/session-stdout.js');
   const CURE = "  session._ptyOpenedAt = Math.max(Date.now(), (Number(session._lastPtyDataAt) || 0) + 1);";
-  const STAMP = "  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Date.now(); });";
-  ok(SS.includes(CURE) && SS.includes(STAMP), 'the two lines stand in setupSessionPty (the birth after the predecessor\'s last byte; the stamp only from the current bridge)');
+  const STAMP = "  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Math.max(Date.now(), Number(session._ptyOpenedAt) || 0); });";
+  ok(SS.includes(CURE) && SS.includes(STAMP), 'the two lines stand in setupSessionPty (the birth after the predecessor\'s last byte; the stamp only from the current bridge, never dated before its birth)');
   const releaseSS = anchored(anchored(SS, CURE, '  session._ptyOpenedAt = Date.now();' /* stale-pins: kept — the release's line, this control's plant */, 'release: the birth at now'),
     STAMP, '  ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });' /* stale-pins: kept — the release's line, this control's plant */, 'release: any pty stamps');
   const MUT5 = (await import(path.join(REPO, 'scripts/mutant-copy.mjs'))).mutantCopies('pty-duck-b1217', REPO);
@@ -278,6 +278,9 @@ console.log('— §5 a bridge\'s life signs are its own: a replaced bridge\'s go
     getNoConvoRef: () => null, getDeliver: () => null, getPages: () => null, getPermissionRules: () => null,
   });
   const E5 = engFrom(require(path.join(REPO, 'src/server/session-stdout.js'))), R5 = engFrom(MUT5.load('src/server/session-stdout.js', releaseSS, 'release'));
+  // r1676: f28ff4de8's stamp (no floor at the birth) — the RED of the clock stepped back
+  const noFloorSS = anchored(SS, STAMP, '  ptyProcess.onData(() => { if (session.pty === ptyProcess) session._lastPtyDataAt = Date.now(); });' /* stale-pins: kept — f28ff4de8's line, this control's plant */, 'no floor at the birth');
+  const NF5 = engFrom(MUT5.load('src/server/session-stdout.js', noFloorSS, 'no-floor'));
   // a local stand-in (node-pty's listener SET) or a paired machine's bridge (dial.daemonPtyShim over a handle) — each with a way to speak
   const local = () => { const L = duck.ptyListeners(); return { pty: { pid: 11, onData: (cb) => L.on(cb), onExit: () => ({ dispose() { } }), write() { }, resize() { }, kill() { } }, say: (t) => L.emit(t) }; };
   const paired = () => { const h = { pid: 12, write() { }, resize() { }, kill() { } }; const p = dial.daemonPtyShim(h); return { pty: p, say: (t) => h.onData(Buffer.from(t)) }; };
@@ -325,6 +328,29 @@ console.log('— §5 a bridge\'s life signs are its own: a replaced bridge\'s go
       'A PAIRED MACHINE\'S BRIDGE (dial.daemonPtyShim pair): the same law — its predecessor\'s goodbye never speaks for it (RED on the release\'s lines)', { pair, pairRel });
     ok(cured.lastReal > 0 && cured.lastOutput === cured.lastReal && rel.lastOutput > rel.lastReal,
       'the SESSION\'s last output across the heal is its program\'s last byte: kept (never reset at a birth), and a dying client\'s goodbye does not move it (RED: the release\'s goodbye moved it)', { cured: [cured.lastReal, cured.lastOutput], rel: [rel.lastReal, rel.lastOutput] });
+    // r1676: THE WALL CLOCK STEPPED BACK inside a heal's window. B is born (after A's last byte), then the clock steps back 10 s, then B
+    // speaks a real byte: B SPOKE — what a person types after it is forwarded by B, never held, so a later heal replays nothing (no
+    // keystroke twice). RED: f28ff4de8's stamp dated B's byte before B's birth, so B read «never spoke», held the line and the heal replayed it
+    const stepBack = (E) => {
+      const id = 'sess-b1217-step-' + (++n5); const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: SOCK, cwd: ROOT };
+      activeSessions.set(id, session);
+      const realNow = Date.now, T0 = realNow(); const r = {};
+      try {
+        Date.now = () => T0;
+        const A = local(); E.setupSessionPty(session, id, A.pty); A.say('prompt$ ');
+        const B = local(); E.setupSessionPty(session, id, B.pty);
+        Date.now = () => T0 - 10000;                     // the step back (an NTP step, a VM resume)
+        B.say('the bridge speaks');
+        r.spoke = !E.ptyQuietSince(session, Number(session._ptyOpenedAt) || 0);
+        E.writeSessionInput(session, 'echo ONCE');
+        E.reattachLocalPty(id, session, 'test: B-1217 heal after a step back');
+        r.replay = session._bridgeHeldInputs && session._bridgeHeldInputs.replaying ? session._bridgeHeldInputs.lines.slice() : [];
+      } finally { Date.now = realNow; activeSessions.delete(id); try { session.pty?.kill?.(); } catch { } }
+      return r;
+    };
+    const sb = stepBack(E5), sbRel = stepBack(NF5);
+    ok(sb.spoke === true && sb.replay.length === 0, 'r1676 THE CLOCK STEPPED BACK 10 s after a bridge\'s birth: its real byte still says «spoke» — what the person typed is forwarded once, the heal replays nothing', sb);
+    ok(sbRel.spoke === false && JSON.stringify(sbRel.replay) === '["echo ONCE"]', 'RED (f28ff4de8\'s stamp, a copy): the byte dated before the birth reads «never spoke» — the heal would type the line a second time', sbRel);
     // the current bridge's own byte still stamps (readers of the session's last output and the bridge's liveness both move)
     {
       const id = 'sess-b1217-own'; const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: null, cwd: ROOT };
