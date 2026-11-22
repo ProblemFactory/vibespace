@@ -218,7 +218,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   // 主开发 r902 (its round's race): the count the product keeps is what the stop step's signal HEARD — the line's total less its «(N could
   // not be signalled: gone, or not ours)» (the timeout program may end its sleep before the wrapper's own signal reads it again)
   const treeOutOf = (r) => { const m = ((r && r.log) || '').match(/stop: (\d+) process(?:es)? it started outside its group \([^)]*\) hears? it from the wrapper(?: \((\d+) could not be signalled)?/); return m ? Number(m[1]) - Number(m[2] || 0) : 0; };
-  const [sa, sx, sr, fa, fx, fj, la, lx, ox] = await Promise.all([
+  const [sa, sx, sr, fa, fx, fj, la, lx, ox, fjs, fjh] = await Promise.all([
     escScene(WRAP, 'esc-stop', { viewMod: viewCut }),
     escScene(relEsc, 'esc-stop-mut'),
     escScene(anyRun, 'esc-run-mut'),
@@ -227,7 +227,9 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     escScene(WRAP, 'esc-force-jobmark', { force: true, jobsMod: jobMark }),
     launchScene(WRAP, 'esc-launcher'),
     launchScene(anchored(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), '  const hub = Number(all.hub) || 0, above = hub > 1 && keep.has(hub) ? hubChain(hub, { stop: process.pid }).pids : new Set();\n', '  const hub = 0, above = new Set();   // MUTANT: no ancestors kept (r1263: nor the keep test\'s chain)\n', 'b7ca1-ancestors-cut-2'), 'esc-launcher-mut'),
-    escScene(oldCount, 'esc-count-mut')
+    escScene(oldCount, 'esc-count-mut'),
+    escScene(WRAP, 'esc-force-jobmark-stall', { force: true, jobsMod: jobMark, stall: true, settle: false }),   // 主开发 r1979: the stall placed, no settle
+    escScene(WRAP, 'esc-force-jobmark-held', { force: true, jobsMod: jobMark, stall: true })   // the same stall, the scene held still
   ]);   // B-d8f4's other scenes (no /proc, the fold, the deaf escapee, EPERM) and its engine legs run in scripts/test-stop-rung.mjs (this suite's fast bound)
   // B-d8f4 (7): the stop step names the tree's members outside its group it signalled (`timeout` and its `sleep`, in timeout's own group) —
   // K, read from the job's log; «outside» = the re-parented child + those K, whatever the drain still finds alive, and never above n
@@ -244,6 +246,12 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   ok(fa.after && !fa.after.alive && fa.after.stranger && /carrying its run's mark outside its group \(re-parented\)/.test(fa.said), 'B-7ca1: a FORCE stop (the wrapper SIGKILLed) — the engine kills the re-parented child carrying the run\'s mark, said in the log; the stranger (another run\'s) lives', { after: fa.after, said: fa.said.slice(0, 400) });
   ok(fx.after && fx.after.alive, 'CONTROL (the engine without its mark kill, in a copy): the force stop leaves the re-parented child RUNNING — RED', fx.after);
   ok(fj.after && fj.after.strangerOwn && !fj.after.stranger, 'CONTROL (the engine by the job\'s mark, in a copy): the force stop kills the STRANGER — another run\'s — RED', fj.after);
+  // 主开发 r1979 (the control above read green once in a whole tier, UTC): its scene raced itself — the stranger counted ready by its pid
+  // file, stopped before its exec landed. Each scene now holds still first; the stall below makes that window at will, with no load
+  const notSettled = [sa, sx, sr, fa, fx, fj, ox, fjh].filter((r) => !(r.after && r.after.settled && r.after.settled.escapee && r.after.settled.stranger)).map((r) => r.after && r.after.settled);
+  ok(!notSettled.length, 'r1979: every scene holds still before its stop — its escapee and its stranger SETTLED (their exec landed: `sleep`, state S, the mark read by the walk\'s own reader), never «ready» by a pid file alone', { notSettled });
+  ok(fjs.after && fjs.after.strangerOwn && fjs.after.stranger && fjs.after.settled === null, 'r1979 THE PLACED STALL (in a copy, no load): a stranger stopped inside its window — its pid written, its mark not yet what the walk reads — is SPARED by the job-mark copy: that control reads green, the miss made at will', fjs.after);
+  ok(fjh.after && fjh.after.strangerOwn && !fjh.after.stranger && fjh.after.settled && fjh.after.settled.stranger, 'r1979: the same stall with the scene held still — it waits until the window is released, and the job-mark copy kills the stranger (the control red as designed)', fjh.after);
   ok(la.after && la.after.launcher && la.after.hub, 'B-7ca1 (its read r2, S1): a task\'s stop never ends the hub\'s LAUNCHER (it carries this run\'s mark, re-parented, its own group — the hub\'s parent) nor the hub', { ...la.after, state: la.state, ms: la.ms });
   ok(lx.after && !lx.after.launcher, 'CONTROL (the hub\'s ancestors not kept, in a copy): the stop ends the hub\'s launcher — RED', lx.after);
   // a hub started INSIDE a job never hands that run's mark to what it starts (its env loses it at the engine's construction)

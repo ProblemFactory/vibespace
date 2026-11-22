@@ -33,7 +33,7 @@ const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAl
   await until(async () => { const st = jm._readStamp(job); if (!st || !jm._verifyAlive(st)) return false; stamp = st; tree = PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }); return ready ? ready(tree) : tree.some((m) => m.comm === 'flock') && tree.filter((m) => m.comm === 'sleep').length >= 2; }, 8000);
   mine.push(...tree);
   const held = spawnSync('flock', ['-n', marker, 'true']).status !== 0;
-  const pre = before ? before({ dd, stamp, tree, jm }) : null;
+  const pre = before ? await before({ dd, stamp, tree, jm }) : null;   // r1979: a scene's before may wait on its own state (escScene's settle)
   const heldOut = !!stamp && PI.keptOut([]).some((x) => x[0] === Number(stamp.pid));   // the engine keeps its wrappers out of other stops' walks
   if (signalAlone) process.kill(Number(stamp.pid), 'SIGTERM'); else jm.stop(job, { force });
   const logNow = () => { try { const run = job.runs[job.runs.length - 1]; return fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'current.log'), 'utf8'); } catch { return ''; } };
@@ -62,7 +62,7 @@ const escScene = timed(async (wrapperText, tag, opts = {}) => {
   const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(ESC)}; exec sleep 318' &); timeout 319 sleep 319 & wait`];
   return jobScene(wrapperText, tag, { ...opts, argv,
     ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(ESC) && fs.readFileSync(ESC, 'utf8').trim().length > 0,
-    before: ({ tree, jm }) => {
+    before: async ({ tree, jm }) => {
       const pid = Number(fs.readFileSync(ESC, 'utf8').trim()), id = PI.identityOf(pid); mine.push(id);
       const job = [...jm.jobs.values()][0], ownGroup = PI.pgidOf(pid) === pid, inTree = tree.some((m) => m.pid === pid);   // read BEFORE the stop (its read's NIT)
       // its read's MUST: a STRANGER carrying the job's mark but ANOTHER run's (an earlier run's leftover forks it during this run) —
@@ -70,10 +70,25 @@ const escScene = timed(async (wrapperText, tag, opts = {}) => {
       // its read r2 (MUST): the stranger is NOT the hub's child (this suite is the hub: the keep-out would spare it by its parent chain,
       // and the run's mark would go untested) — a subshell that exits re-parents it, as an earlier run's leftover's fork is
       const STR = path.join(D, tag, 'stranger.pid');
-      spawnSync('sh', ['-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(STR)}; exec sleep 320' &)`], { env: { ...process.env, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:1` }, stdio: 'ignore' });
+      // 主开发 r1979 (THE PLACED STALL, no load): opts.stall — the stranger writes its pid, then waits on a FIFO UNMARKED, then execs into
+      // its marked sleep: its window (pid written, its mark not yet what the walk reads) held open at will
+      const FIFO = path.join(D, tag, 'stranger.go'), MARKS = [`VIBESPACE_JOB_ID=${job.id}`, `VIBESPACE_JOB_RUN=${job.id}:1`];
+      const bare = { ...process.env }; delete bare.VIBESPACE_JOB_ID; delete bare.VIBESPACE_JOB_RUN;
+      if (opts.stall) spawnSync('mkfifo', [FIFO]);
+      const body = opts.stall ? `echo $$ > ${JSON.stringify(STR)}; read go < ${JSON.stringify(FIFO)}; exec env ${MARKS.join(' ')} sleep 320` : `echo $$ > ${JSON.stringify(STR)}; exec sleep 320`;
+      spawnSync('sh', ['-c', `(setsid sh -c '${body}' &)`], { env: opts.stall ? bare : { ...process.env, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:1` }, stdio: 'ignore' });
       let spid = 0; for (let k = 0; k < 100 && !(spid > 1); k++) { try { spid = Number(fs.readFileSync(STR, 'utf8').trim()); } catch { } if (!(spid > 1)) spawnSync('sleep', ['0.02']); }
       const sid = PI.identityOf(spid); mine.push(sid);
       const strangerOwn = PI.ppidOf(spid) !== process.pid && PI.pgidOf(spid) === spid;   // re-parented, its own group
+      // 主开发 r1979: THE SCENE HOLDS STILL before its stop — a pid file says a process began, not that it is what the stop's walk will
+      // read: between its `echo $$` and its `exec sleep`, exec pages the binary in (D state: membersOf never reads it, by law) and builds
+      // the new image (its environ reads EMPTY: not even counted unread). Settled = its exec landed (`sleep`), state S, and its mark
+      // read by the walk's OWN reader (membersOf over that one process). A wait on state: the guard only ends a wait that never comes
+      const settledNow = (p, mark) => { try { return PI.stateOf(p) === 'S' && fs.readFileSync(`/proc/${p}/comm`, 'utf8').trim() === 'sleep' && PI.membersOf({ mark, first: [p], maxRows: 0 }).some((m) => Number(m.pid) === p); } catch { return false; } };
+      let released = false;
+      const release = () => { if (released) return; released = true; spawnSync('timeout', ['3', 'sh', '-c', `echo go > ${JSON.stringify(FIFO)}`], { stdio: 'ignore' }); };
+      if (opts.stall && opts.settle !== false) setTimeout(release, 300);   // the window held open 300 ms by the leg, then released (the stall placed)
+      const settled = opts.settle === false ? null : { escapee: await until(() => settledNow(pid, MARKS[0]), 5000), stranger: await until(() => settledNow(spid, MARKS[0]), 5000) };
       return { after: async () => {
         await until(() => PI.aliveIdentity(id) === false, 200);   // the drain (or the engine's SIGKILL) ended it before the run's end — its reaping by the subreaper is what is left: milliseconds
         const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
@@ -81,7 +96,7 @@ const escScene = timed(async (wrapperText, tag, opts = {}) => {
         if (stranger) PI.signalIdentity(sid, 'SIGKILL');
         let view = null; try { view = ((jm.snapshot(job) || {}).run || {}).left || null; } catch (e) { view = { threw: String(e && e.message) }; }   // the API's view (the card's row reads it)
         let viewCut = null; if (opts.viewMod) { try { viewCut = ((opts.viewMod.JobManager.prototype.snapshot.call(jm, job) || {}).run || {}).left || null; } catch (e) { viewCut = { threw: String(e && e.message) }; } }   // the control's view, over THIS run (no scene of its own)
-        return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view, viewCut };
+        return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view, viewCut, settled };
       } };
     } });
 });
