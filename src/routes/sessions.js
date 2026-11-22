@@ -271,18 +271,70 @@ function setup(ctx) {
   // is a safe last resort when cwd/claudeSessionId don't pin it down.
   // B-360d part 2 (lane chrome-157, 2026-11-21): a running workflow has no snapshot yet, and its card / window poll it every
   // 2.5 s; the snapshot finder's last resort walked EVERY session entry under ~/.claude/projects at each poll (on a stand-in home
-  // of about 2 500 session entries: 17.6 ms of the hub's loop a poll). THE LAW (round wvinqg1j4): A POLL NEVER LOSES A RUN THE
-  // RELEASE FOUND. The walk is skipped only when the run IS FOUND: its run dir found, its snapshot (when written) is the one
-  // beside it (<session>/workflows/<runId>.json). A run found elsewhere — a FORK names its own conversation while the run's
-  // files are its parent's — pays the walk ONCE: where it was found is kept (runId → path, bounded), so the next poll asks
-  // that one path.
-  // The order is the release's: the asker's OWN folder first (the cwd's, then its id across project dirs), then the kept place,
-  // then the walk (round w5daqaxxs). A found run with no snapshot beside it walks for one filed elsewhere at most once a
-  // WF_SNAP_REWALK_MS (a run's snapshot is written at its end, by whichever conversation ran it), never once a poll.
-  const _wfWhere = new Map();
-  const WF_WHERE_MAX = 256, WF_SNAP_REWALK_MS = 60 * 1000;
+  // of about 2 500 session entries: 17.6 ms of the hub's loop a poll). THE LAWS (rounds wvinqg1j4 / w5hvsu2v5, 主开发 r1811 /
+  // r2339): A POLL NEVER LOSES A RUN THE RELEASE FOUND, and A POLL ASKS ONLY KNOWN PATHS — the cwd's own folder, the place kept for
+  // THIS asker and run, the snapshot beside a found run dir: a bounded handful of stats. Anything that LISTS the projects folder is
+  // THE HUB's LOOK (below): asynchronous, shared by every run waiting for it, started at most once a WF_LOOK_EVERY_MS for the hub;
+  // until it answers, the poll says what it knows (a run whose place is not known yet is «locating»; «nowhere» after the look).
+  const _wfWhere = new Map();   // `${kind}:${asker}:${runId}` → the place found, kept for that asker and run
+  const WF_WHERE_MAX = 256;
   const keepWhere = (key, p) => { _wfWhere.delete(key); _wfWhere.set(key, p); if (_wfWhere.size > WF_WHERE_MAX) _wfWhere.delete(_wfWhere.keys().next().value); return p; };
   const keptWhere = (key) => { if (!_wfWhere.has(key)) return null; const p = _wfWhere.get(key); _wfWhere.delete(key); _wfWhere.set(key, p); return p; };   // a USE keeps it: the least recent use leaves first
+  // THE HUB's LOOK: ONE asynchronous pass over the projects folder for every run a poll could not place (its run dir or its
+  // snapshot), the runs wanted together riding one look (debounced), never more than one start a WF_LOOK_EVERY_MS. It lists the
+  // root, each project folder, and each conversation's `subagents/workflows` and `workflows` — off the main loop, WF_LOOK_LANES at
+  // a time — and answers per run with every place it found; a poll takes the ASKER's own conversation first (a run id under two
+  // conversations is answered from the asker's own, as the release's order did), else the first.
+  const WF_LOOK_EVERY_MS = 60 * 1000, WF_LOOK_LANES = 8, WF_WANT_TTL_MS = 5 * 60 * 1000;
+  const _wfWant = new Map();    // runId → { polled, dirAt, snapAt } — what a poll could not place, and since when
+  const _wfFound = new Map();   // runId → { dirs: [{ sid, path }], snaps: [{ sid, path }], at } — the last look's answer
+  let _wfLook = null, _wfLookStart = 0, _wfLookTimer = null;
+  function runWorkflowLook() {
+    for (const [id, w] of _wfWant) if (Date.now() - w.polled > WF_WANT_TTL_MS) { _wfWant.delete(id); _wfFound.delete(id); }   // nobody polls it now
+    if (!_wfWant.size) return;
+    const startedAt = Date.now(); _wfLookStart = startedAt;
+    const want = new Map([..._wfWant].map(([id, w]) => [id, { dir: !!w.dirAt, snap: !!w.snapAt }]));
+    _wfLook = (async () => {
+      const fsp = fs.promises, root = path.join(os.homedir(), '.claude', 'projects'), found = new Map();
+      const note = (id, kind, sid, p) => { let f = found.get(id); if (!f) { f = { dirs: [], snaps: [] }; found.set(id, f); } f[kind].push({ sid, path: p }); };
+      const needDir = [...want.values()].some((w) => w.dir), needSnap = [...want.values()].some((w) => w.snap);
+      let projects = []; try { projects = await fsp.readdir(root); } catch { }
+      const convs = [];
+      for (const dir of projects) { let names = []; try { names = await fsp.readdir(path.join(root, dir)); } catch { } for (const sid of names) if (!sid.endsWith('.jsonl')) convs.push([dir, sid]); }
+      let next = 0;
+      const lane = async () => {
+        while (next < convs.length) {
+          const [dir, sid] = convs[next++], base = path.join(root, dir, sid);
+          if (needDir) { let names = []; try { names = await fsp.readdir(path.join(base, 'subagents', 'workflows')); } catch { } for (const n of names) if (want.get(n)?.dir) note(n, 'dirs', sid, path.join(base, 'subagents', 'workflows', n)); }
+          if (needSnap) { let names = []; try { names = await fsp.readdir(path.join(base, 'workflows')); } catch { } for (const n of names) { const id = n.endsWith('.json') ? n.slice(0, -5) : ''; if (want.get(id)?.snap) note(id, 'snaps', sid, path.join(base, 'workflows', n)); } }
+        }
+      };
+      await Promise.all(Array.from({ length: WF_LOOK_LANES }, lane));
+      for (const id of want.keys()) if (_wfWant.has(id)) _wfFound.set(id, { ...(found.get(id) || { dirs: [], snaps: [] }), at: startedAt });
+    })().catch(() => { }).finally(() => { _wfLook = null; if ([..._wfWant.values()].some((w) => (w.dirAt || 0) > startedAt || (w.snapAt || 0) > startedAt)) scheduleWorkflowLook(); });
+  }
+  function scheduleWorkflowLook() {
+    if (_wfLook || _wfLookTimer) return;
+    const wait = Math.max(50, _wfLookStart ? _wfLookStart + WF_LOOK_EVERY_MS - Date.now() : 50);   // the runs wanted together ride ONE look
+    _wfLookTimer = setTimeout(() => { _wfLookTimer = null; runWorkflowLook(); }, wait);
+    if (_wfLookTimer.unref) _wfLookTimer.unref();
+  }
+  function wantWorkflow(runId, kind) {
+    const now = Date.now();
+    let w = _wfWant.get(runId); if (!w) { w = { polled: now, dirAt: 0, snapAt: 0 }; _wfWant.set(runId, w); }
+    w.polled = now;
+    if (kind === 'dirs' && !w.dirAt) w.dirAt = now;
+    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;
+    scheduleWorkflowLook();
+  }
+  // what the hub's look answered for this run and asker (the asker's own conversation first); `answered` false while no look
+  // that began after the run was wanted has ended
+  function lookedPlace(runId, asker, kind) {
+    const f = _wfFound.get(runId), w = _wfWant.get(runId), since = w ? (kind === 'dirs' ? w.dirAt : w.snapAt) : 0;
+    if (!f || !since || f.at < since) return { answered: false, path: null };
+    const list = f[kind] || [], own = list.find((x) => x.sid === asker) || list[0] || null;
+    return { answered: true, path: own ? own.path : null };
+  }
   function findWorkflowSnapshot(runId, claudeSessionId, cwd, runDir = null) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const tryPath = (p) => { try { return fs.existsSync(p) ? p : null; } catch { return null; } };
@@ -291,32 +343,14 @@ function setup(ctx) {
       const hit = tryPath(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId, 'workflows', `${runId}.json`));
       if (hit) return hit;
     }
-    // 2) session id known, unknown/mismatched cwd: scan project dirs (the asker's own folder, wherever it is)
-    if (claudeSessionId) {
-      try {
-        for (const dir of fs.readdirSync(projectsDir)) {
-          const hit = tryPath(path.join(projectsDir, dir, claudeSessionId, 'workflows', `${runId}.json`));
-          if (hit) return hit;
-        }
-      } catch {}
-    }
-    // THE RUN IS FOUND (B-360d part 2): its snapshot, when written, is the one beside its run dir
+    // THE RUN IS FOUND: its snapshot, when written, is the one beside its run dir
     if (runDir) { const beside = tryPath(path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', `${runId}.json`)); if (beside) return beside; }
-    // a snapshot an earlier walk found: that one path
-    { const kept = keptWhere('snap:' + runId); if (kept) { if (tryPath(kept)) return kept; _wfWhere.delete('snap:' + runId); } }
-    // a found run whose snapshot is nowhere yet (it is running): the walk at most once a WF_SNAP_REWALK_MS, never once a poll
-    if (runDir) { const walked = keptWhere('nosnap:' + runId); if (walked && Date.now() - walked < WF_SNAP_REWALK_MS) return null; keepWhere('nosnap:' + runId, Date.now()); }
-    // 3) last resort: runId is unique — walk every session dir
-    try {
-      for (const dir of fs.readdirSync(projectsDir)) {
-        const base = path.join(projectsDir, dir);
-        let sids = []; try { sids = fs.readdirSync(base); } catch {}
-        for (const sid of sids) {
-          const hit = tryPath(path.join(base, sid, 'workflows', `${runId}.json`));
-          if (hit) { _wfWhere.delete('nosnap:' + runId); return keepWhere('snap:' + runId, hit); }   // kept: the next poll asks this one path
-        }
-      }
-    } catch {}
+    // the place kept for THIS asker and run, then the hub's look (the asker's own first) — never a listing on this road
+    const key = 'snap:' + (claudeSessionId || '') + ':' + runId;
+    { const kept = keptWhere(key); if (kept) { if (tryPath(kept)) return kept; _wfWhere.delete(key); } }
+    const look = lookedPlace(runId, claudeSessionId || '', 'snaps');
+    if (look.path && tryPath(look.path)) return keepWhere(key, look.path);
+    wantWorkflow(runId, 'snaps');   // not placed: the hub's look names it (asynchronous, shared, at most once a minute)
     return null;
   }
 
@@ -378,18 +412,12 @@ function setup(ctx) {
     const sub = (base) => path.join(base, 'subagents', 'workflows', runId);
     const tryDir = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory() ? p : null; } catch { return null; } };
     if (claudeSessionId && cwd) { const h = tryDir(sub(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId))); if (h) return h; }
-    if (claudeSessionId) {
-      try { for (const dir of fs.readdirSync(projectsDir)) { const h = tryDir(sub(path.join(projectsDir, dir, claudeSessionId))); if (h) return h; } } catch {}
-    }
-    // a run dir an earlier walk found (B-360d part 2: a fork's view of its parent's run): that one path, after the asker's own
-    { const kept = keptWhere('dir:' + runId); if (kept) { if (tryDir(kept)) return kept; _wfWhere.delete('dir:' + runId); } }
-    try {
-      for (const dir of fs.readdirSync(projectsDir)) {
-        const base = path.join(projectsDir, dir);
-        let sids = []; try { sids = fs.readdirSync(base); } catch {}
-        for (const sid of sids) { const h = tryDir(sub(path.join(base, sid))); if (h) return keepWhere('dir:' + runId, h); }   // kept: the next poll asks this one path
-      }
-    } catch {}
+    // the place kept for THIS asker and run (a fork's view of its parent's run), then the hub's look — never a listing here
+    const key = 'dir:' + (claudeSessionId || '') + ':' + runId;
+    { const kept = keptWhere(key); if (kept) { if (tryDir(kept)) return kept; _wfWhere.delete(key); } }
+    const look = lookedPlace(runId, claudeSessionId || '', 'dirs');
+    if (look.path && tryDir(look.path)) return keepWhere(key, look.path);
+    wantWorkflow(runId, 'dirs');
     return null;
   }
 
@@ -479,7 +507,7 @@ function setup(ctx) {
   // A line that never ends is kept up to JOURNAL_TAIL_MAX bytes; past it its bytes are dropped (only its first JOURNAL_HEAD_KEEP
   // kept), the poll's answer says the journal's tail cannot be read yet, and the line, once it ends, is folded from its head alone
   // (its type and agent: a result never parsed whole) — round w5daqaxxs
-  const JOURNAL_SLICE = 512 * 1024, JOURNAL_EDGE = 64, JOURNAL_TAIL_MAX = 8 * 1024 * 1024, JOURNAL_HEAD_KEEP = 4096;
+  const JOURNAL_SLICE = 512 * 1024, JOURNAL_EDGE = 64, JOURNAL_TAIL_MAX = 1024 * 1024, JOURNAL_HEAD_KEEP = 4096;   // the kept tails' worst sum: 64 runs × (1 MiB + one 512 KiB slice) ≈ 96 MiB (round w5hvsu2v5)
   const freshJournal = () => ({ ino: null, mtimeMs: 0, offset: 0, edge: Buffer.alloc(0), tail: [], tailLen: 0, skipHead: null, fold: journalFold(null, '') });
   function journalOf(runDir) {
     let e = _wfJournals.get(runDir);
@@ -521,6 +549,7 @@ function setup(ctx) {
             let text;
             if (e.skipHead) {   // the line past the bound ends here: folded from its head alone, the lines after it read whole
               const head = e.skipHead.toString('utf8'); e.skipHead = null;
+              // the head's FIRST matches name the line: the CLI writes `type`, `key` and `agentId` before the payload (a result's text)
               const ty = /"type"\s*:\s*"(\w+)"/.exec(head), ag = /"agentId"\s*:\s*"([0-9a-f]+)"/.exec(head), ky = /"key"\s*:\s*"([^"\\]{1,200})"/.exec(head);
               if (ty && ag) journalFold(e.fold, JSON.stringify({ type: ty[1], agentId: ag[1], ...(ky ? { key: ky[1] } : {}) }));
               text = piece.subarray(piece.indexOf(0x0a) + 1, nl + 1).toString('utf8');
@@ -616,6 +645,12 @@ function setup(ctx) {
     // No snapshot — the run dir's view: running while it writes (or this server
     // holds its live tree), `stalled` once nothing has been written for 10 min.
     if (runDir) return res.json(liveView(await readRunDirParts(runDir, runId), { runId }));
+    // NOT PLACED YET (B-360d part 2, r2339): the hub's look has not answered for this run — it is asynchronous and starts at most
+    // once a minute — so the poll says what it knows: «locating», a running view with no agents (the window keeps polling a
+    // running run); a look that answered «nowhere» for both is the release's 404
+    if (!lookedPlace(runId, claudeSessionId || '', 'dirs').answered || !lookedPlace(runId, claudeSessionId || '', 'snaps').answered) {
+      return res.json({ ...liveView({ attempts: journalAttemptsOf(journalFold(null, '')), metas: {}, agentFiles: [], scriptName: '', newestMtime: 0 }, { runId }), locating: true });
+    }
     return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
 

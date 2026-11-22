@@ -30,6 +30,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratchHome, fixtureSid } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -379,7 +380,10 @@ const srv = app.listen(0, '127.0.0.1', async () => {
   const out = { modes: {} };
   const legs = (process.env.LEGS || 'base,modes,remote').split(',');
   if (legs.includes('base')) {
-    for (const id of ['wf_e2e0stall', 'wf_e2e0fresh', 'wf_e2e0m11', 'wf_e2e0old', 'wf_e2e0snap', 'wf_e2e0resumed', 'wf_e2e0nope', 'wf_e2e0metafresh']) out[id] = await get(id);
+    // wf_e2e0nope FIRST: the hub's look (B-360d part 2) gathers the runs wanted within 50 ms — a nowhere run asked after the look began would wait for the next one, a minute on
+    for (const id of ['wf_e2e0nope', 'wf_e2e0stall', 'wf_e2e0fresh', 'wf_e2e0m11', 'wf_e2e0old', 'wf_e2e0snap', 'wf_e2e0resumed', 'wf_e2e0metafresh']) out[id] = await get(id);
+    // B-360d part 2 (r2339): a run placed nowhere is «locating» until the hub's look answers (asynchronous), then the release's 404
+    { const t = Date.now() + 4000; while (out.wf_e2e0nope.status === 200 && out.wf_e2e0nope.body && out.wf_e2e0nope.body.locating && Date.now() < t) { await new Promise((r) => setTimeout(r, 25)); out.wf_e2e0nope = await get('wf_e2e0nope'); } }
     out.rawProbe = await HostManager.prototype.fetchWorkflowState.call({ ...fakeHm }, 'h1', 'wf_e2e0stall', '${SID}', ${JSON.stringify(CWD)});
   }
   if (legs.includes('remote')) {
@@ -429,7 +433,7 @@ if (out) {
   ok('a TERMINAL SNAPSHOT present ⇒ the terminal view exactly as before (status/labels/tokens from the snapshot, not live, no stall)', sn.status === 'completed' && !sn.live && sn.totalTokens === 1234 && flat(sn)[0].label === 'snap:agent' && !('stall' in sn), sn);
   const rs = out.wf_e2e0resumed.body;
   ok('a snapshot + run-dir activity > 15 s after it (a resume) ⇒ the disk view, resumed:true, labels from the run dir', rs.live === true && rs.resumed === true && flat(rs)[0].label === 'disk:agent' && rs.status === 'running', rs);
-  ok('an unknown run ⇒ 404 as before', out.wf_e2e0nope.status === 404);
+  ok('an unknown run ⇒ 404 as before, once the hub\'s look has answered «nowhere» (B-360d part 2: «locating» until then)', out.wf_e2e0nope.status === 404);
   ok('LOCAL: a run whose only fresh file is a just-spawned agent\'s meta.json ⇒ running (the newest mtime covers every file)', out.wf_e2e0metafresh.body.status === 'running' && out.wf_e2e0metafresh.body.liveness === 'recent', out.wf_e2e0metafresh.body.liveness);
   const rm = out.remote.body;
   ok('REMOTE (?host=): the compound probe ships the metas + the host\'s clock; the same stalled view with the labels and phases', out.remote.status === 200 && rm.status === 'stalled' && flat(rm).map((g) => g.label).join('|') === OWNER.map((g) => g.label).join('|') && rm.phases.map((p) => p.title).join('|') === PHASES.join('|') && JSON.stringify(rm.stall.unfinished) === '["ship:it"]', { status: out.remote.status, rm: JSON.stringify(rm).slice(0, 300) });
@@ -588,11 +592,14 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   const M9 = mutantCopies('workflow-known', REPO);
   const route = read('src/routes/sessions.js');
   const cut9 = (s, from, to) => { if (s.split(from).length !== 2) throw new Error('mutation anchor missing or not unique: ' + from); return s.replace(from, to); };
-  const release = M9.write('src/routes/sessions.js', cut9(route, "    if (runDir) { const walked = keptWhere('nosnap:' + runId); if (walked && Date.now() - walked < WF_SNAP_REWALK_MS) return null; keepWhere('nosnap:' + runId, Date.now()); }\n", ''), 'release-walk');
-  // (c)'s own red copies (round w5daqaxxs): the run-dir finder with no walk (the unit's first form never reached it for a known
-  // conversation: «not found»), and the walk with no kept place (every poll walks again)
-  const noWalk = M9.write('src/routes/sessions.js', cut9(route, "        for (const sid of sids) { const h = tryDir(sub(path.join(base, sid))); if (h) return keepWhere('dir:' + runId, h); }   // kept: the next poll asks this one path\n", "        for (const sid of sids) void sid;\n"), 'no-walk');
-  const noKeep = M9.write('src/routes/sessions.js', cut9(route, "if (h) return keepWhere('dir:' + runId, h); }   // kept: the next poll asks this one path\n", "if (h) return h; }\n"), 'no-keep');
+  // the copies (rounds w5daqaxxs / w5hvsu2v5): FRESH = the route as it is, its own look clock (a look starts at most once a
+  // minute per instance); WALK = the release's road, a synchronous walk of the projects folder put back on the poll; NOLOOK = the
+  // look never scheduled; PERPOLL = a look started by every poll that could not place its run (no sharing, no minute's bound)
+  const wantSnapAnchor = "    wantWorkflow(runId, 'snaps');   // not placed: the hub's look names it (asynchronous, shared, at most once a minute)\n    return null;\n";
+  const release = M9.write('src/routes/sessions.js', cut9(route, wantSnapAnchor, "    try { for (const dir of fs.readdirSync(projectsDir)) for (const sid of fs.readdirSync(path.join(projectsDir, dir))) { const hit = tryPath(path.join(projectsDir, dir, sid, 'workflows', `${runId}.json`)); if (hit) return hit; } } catch { }\n    return null;\n"), 'release-walk');
+  const noLook = M9.write('src/routes/sessions.js', cut9(route, "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n    scheduleWorkflowLook();\n", "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n"), 'no-look');
+  const perPoll = M9.write('src/routes/sessions.js', cut9(route, "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n    scheduleWorkflowLook();\n", "    if (kind === 'snaps' && !w.snapAt) w.snapAt = now;\n    runWorkflowLook();\n"), 'per-poll-look');
+  let freshN = 0; const fresh = () => M9.write('src/routes/sessions.js', route, 'fresh-' + (++freshN), { same: true });   // a deliberate unpatched copy: its own look clock
   const express = require(path.join(REPO, 'node_modules/express'));
   const W9 = ['existsSync', 'statSync', 'lstatSync', 'readdirSync'];
   const orig9 = Object.fromEntries(W9.map((k) => [k, fs[k]]));
@@ -610,11 +617,15 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
     finally { for (const k of W9) fs[k] = orig9[k]; }
   };
   const mCure = await mount9(path.join(REPO, 'src/routes/sessions.js')), mWalk = await mount9(release);
-  const cure1 = await pathsOf(mCure, 'wf_e2e0fresh'), cure = await pathsOf(mCure, 'wf_e2e0fresh');
-  await pathsOf(mWalk, 'wf_e2e0fresh'); const walk = await pathsOf(mWalk, 'wf_e2e0fresh');
-  ok(`(a) a running workflow (its run found, no snapshot anywhere yet): its first poll walks ONCE for a snapshot filed elsewhere (${cure1.foreign} paths), the next touches no other session's entry (${cure.foreign}) and answers as the walk does (${cure.status}, ${cure.body && cure.body.status})`,
-    cure1.foreign >= 120 && cure.foreign === 0 && cure.status === 200 && walk.status === 200 && JSON.stringify(cure.body.phases) === JSON.stringify(walk.body.phases), { first: cure1.foreign, next: cure.foreign, status: [cure.status, walk.status] });
-  ok(`(a) CONTROL (the release's walk every poll — the minute's bound cut): its next poll touches ${walk.foreign} other sessions' paths — the leg sees the walk`, walk.foreign >= 120, walk.foreign);
+  // the SYNCHRONOUS listings a poll makes of the projects folder — its root and its project folders (round w5hvsu2v5); a found
+  // run's own folder is a known path (the finished view's agent files), never the projects folder
+  const listingsOf = async (m, rid, n = 1) => { let c = 0, last = null; const o = fs.readdirSync; fs.readdirSync = function (...a) { const p = String(a[0]); if (p === projects || path.dirname(p) === projects) c++; return o.apply(this, a); }; try { for (let i = 0; i < n; i++) last = await m.get(rid); } finally { fs.readdirSync = o; } return { ...last, listings: c }; };
+  const asyncRoots = async (fn) => { let c = 0; const o = fs.promises.readdir; fs.promises.readdir = function (...a) { if (String(a[0]) === projects) c++; return o.apply(this, a); }; try { const r = await fn(); return { r, roots: c }; } finally { fs.promises.readdir = o; } };
+  const placed = async (m, rid, ms = 4000) => { const t = Date.now() + ms; let r = null; while (Date.now() < t) { r = await m.get(rid); if (r.status === 404 || !(r.body && r.body.locating)) return r; await new Promise((res) => setTimeout(res, 25)); } return markTimedOut(r, ms, 'the run placed by the hub look'); };
+  const a20 = await listingsOf(mCure, 'wf_e2e0fresh', 20), w20 = await listingsOf(mWalk, 'wf_e2e0fresh', 20);
+  ok(`(a) A POLL ASKS ONLY KNOWN PATHS (round w5hvsu2v5): twenty polls of a running run with no snapshot make ${a20.listings} synchronous listings of the projects folder (its root counted) and answer as the walk does (${a20.status}, ${a20.body && a20.body.status})`,
+    a20.listings === 0 && a20.status === 200 && w20.status === 200 && JSON.stringify(a20.body.phases) === JSON.stringify(w20.body.phases), { cure: a20.listings, status: [a20.status, w20.status] });
+  ok(`(a) CONTROL (the release's walk put back on the poll): the same twenty polls make ${w20.listings} synchronous listings — the leg sees the scan`, w20.listings >= 20, w20.listings);
   // (b) THE JOURNAL, FOLDED AS IT GROWS: a poll parses only the lines appended since the last; an unchanged journal parses none;
   // a journal replaced by another file is read again from its start
   const RG = 'wf_b360dgrow', gdir = path.join(PROJ, 'subagents', 'workflows', RG); fs.mkdirSync(gdir, { recursive: true });
@@ -675,47 +686,67 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   fs.promises.open = function (f, ...a) { if (String(f).endsWith('journal.jsonl')) opens++; return po.call(this, f, ...a); };
   let pr = []; try { pr = await Promise.all([mCure.get(RS), mCure.get(RS), mCure.get(RS)]); } finally { fs.promises.open = po; }
   ok(`(b) three pollers of one run at once: ONE read of its journal (${opens} opens), the same 30 agents each`, opens === 1 && pr.every((r) => agentsOf(r.body).length === 30), opens);
-  // (b) A LINE THAT NEVER ENDS is kept to 8 MiB (round w5daqaxxs): past it the answer SAYS the tail cannot be read yet; once it
+  // (b) A LINE THAT NEVER ENDS is kept to 1 MiB (rounds w5daqaxxs / w5hvsu2v5): past it the answer SAYS the tail cannot be read yet; once it
   // ends it is folded from its head (its agent done) and the line after it is read whole
   const RL = 'wf_b360dlong', ldir = path.join(PROJ, 'subagents', 'workflows', RL); fs.mkdirSync(ldir, { recursive: true });
   const lj = path.join(ldir, 'journal.jsonl');
-  fs.writeFileSync(lj, [JSON.stringify({ type: 'launched' }), started(400)].join('\n') + '\n' + `{"type":"result","key":"g:400","agentId":"${gid(400)}","result":{"summary":"` + 'z'.repeat(9 * 1024 * 1024));
+  fs.writeFileSync(lj, [JSON.stringify({ type: 'launched' }), started(400)].join('\n') + '\n' + `{"type":"result","key":"g:400","agentId":"${gid(400)}","result":{"summary":"` + 'z'.repeat(Math.round(1.25 * 1024 * 1024)));
   const l1 = await mCure.get(RL);
   fs.appendFileSync(lj, '"}}\n' + started(401) + '\n');
   const l2 = await mCure.get(RL);
   const la = agentsOf(l2.body);
-  ok('(b) a line that never ends is kept to 8 MiB: past it the answer SAYS the tail cannot be read yet (journalTailUnread); once it ends it is folded from its head (its agent done) and the line after it read whole',
+  ok('(b) a line that never ends is kept to 1 MiB: past it the answer SAYS the tail cannot be read yet (journalTailUnread); once it ends it is folded from its head (its agent done) and the line after it read whole',
     l1.body.journalTailUnread === true && agentsOf(l1.body).length === 1 && agentsOf(l1.body)[0].state !== 'done' && !l2.body.journalTailUnread && la.length === 2 && la[0].state === 'done' && la[1].label === 'g:401', { l1: l1.body.journalTailUnread, l1s: agentsOf(l1.body).map((a) => a.state), l2: la.map((a) => a.label + '/' + a.state) });
-  // (c) A POLL NEVER LOSES A RUN THE RELEASE FOUND (round wvinqg1j4's must): a run under conversation A, polled by a KNOWN
-  // conversation B of the same project folder (a fork names its own id; the run's files are its parent's): found; its second
-  // poll walks nothing (the place the walk found is kept). Red at fc0c0bfab: B is known there, so the finders stopped: «not found».
+  // (c) A POLL NEVER LOSES A RUN THE RELEASE FOUND (round wvinqg1j4's must) AND ASKS ONLY KNOWN PATHS (round w5hvsu2v5's): a run
+  // under conversation A, polled by a KNOWN conversation B of the same project (a fork names its own id; the run's files are its
+  // parent's). The first poll says «locating» (a running view, the window keeps polling); the hub's look places it; then twenty
+  // polls make NO synchronous listing (the place kept for B and the run)
   const SID_A = fixtureSid('fa36'), RF = 'wf_b360dfork', fdir = path.join(path.dirname(PROJ), SID_A, 'subagents', 'workflows', RF);
   fs.mkdirSync(fdir, { recursive: true });
   fs.writeFileSync(path.join(fdir, 'journal.jsonl'), [JSON.stringify({ type: 'launched' }), ...[0, 1, 2].map((i) => JSON.stringify({ type: 'started', key: `f:${i}`, agentId: (0xb360f000 + i).toString(16).padStart(16, '0'), label: `f:${i}`, phase: 'Fork' }))].join('\n') + '\n');
-  // the reads counted: the listings of a PROJECT folder (the walk); the asker's own id across project dirs lists the projects root, as at the release
-  const dirReadsOf = async (rid, m = mCure) => { let n = 0; const o = fs.readdirSync; fs.readdirSync = function (...a) { if (path.dirname(String(a[0])) === projects) n++; return o.apply(this, a); }; try { const r = await m.get(rid); return { ...r, reads: n }; } finally { fs.readdirSync = o; } };
-  const judgeC = (a, b) => a.status === 200 && agentsOf(a.body).length === 3 && a.reads > 0 && b.status === 200 && agentsOf(b.body).length === 3 && b.reads === 0;
-  const f1 = await dirReadsOf(RF), f2 = await dirReadsOf(RF);
-  ok(`(c) a run under ANOTHER conversation of the project (a fork's view of its parent's run) is FOUND (${f1.status}, ${agentsOf(f1.body).length} agents); the first poll walks (${f1.reads} dir reads), the second asks the kept place only (${f2.reads})`,
-    judgeC(f1, f2), { status: [f1.status, f2.status], reads: [f1.reads, f2.reads] });
-  const mNoWalk = await mount9(noWalk), mNoKeep = await mount9(noKeep);
-  const w1 = await dirReadsOf(RF, mNoWalk), w2 = await dirReadsOf(RF, mNoWalk), k1 = await dirReadsOf(RF, mNoKeep), k2 = await dirReadsOf(RF, mNoKeep);
-  ok(`(c) CONTROLS, the leg's own red copies: with no walk the run is «not found» (${w1.status}); with no kept place the second poll walks again (${k2.reads} folder listings) — the judge reads both as red`,
-    !judgeC(w1, w2) && w1.status === 404 && !judgeC(k1, k2) && k2.reads > 0, { noWalk: [w1.status, w2.status], noKeep: [k1.reads, k2.reads] });
-  // (d) A SNAPSHOT FILED UNDER ANOTHER CONVERSATION (round w5daqaxxs): the run dir under A2, its snapshot under C. A found run with
-  // none beside it walks for one at most once a minute: found — the snapshot's view; the next poll lists no project folder
+  const mC = await mount9(fresh());
+  const c0 = await listingsOf(mC, RF);
+  const cPlaced = await placed(mC, RF);
+  const c20 = await listingsOf(mC, RF, 20);
+  const judgeC = (first, at, after) => first.status === 200 && first.body && first.body.locating === true && first.body.status === 'running' && first.listings === 0
+    && at && at.status === 200 && agentsOf(at.body).length === 3 && after.listings === 0 && agentsOf(after.body).length === 3;
+  ok(`(c) a fork's view of its parent's run: the first poll says «locating» (${c0.status}, ${c0.body && c0.body.status}, no listing), the hub's look places it (${agentsOf(cPlaced && cPlaced.body).length} agents), then twenty polls make ${c20.listings} synchronous listings`,
+    judgeC(c0, cPlaced, c20), { first: [c0.status, c0.body && c0.body.locating, c0.listings], placed: cPlaced && cPlaced.status, after: c20.listings });
+  const mNoLook = await mount9(noLook), mWalkC = await mount9(release);
+  const n0 = await listingsOf(mNoLook, RF), nPlaced = await placed(mNoLook, RF, 300), n20 = await listingsOf(mNoLook, RF, 2);
+  const w0 = await listingsOf(mWalkC, RF, 3);
+  ok(`(c) CONTROLS, the leg's own red copies: with no look the run is never placed (still «locating» after 0.3 s); the release's walk lists the folder on every poll (${w0.listings} listings in 3 polls) — the judge reads both as red`,
+    !judgeC(n0, nPlaced, n20) && !!(nPlaced && nPlaced.body && nPlaced.body.locating) && w0.listings >= 3, { noLook: nPlaced && nPlaced.body && nPlaced.body.locating, walk: w0.listings });
+  // (c) THE HUB's LOOK IS SHARED: two runs a poll cannot place, polled together, ride ONE asynchronous look (one root listing)
+  const RF2 = 'wf_b360dfork2', fdir2 = path.join(path.dirname(PROJ), SID_A, 'subagents', 'workflows', RF2);
+  fs.mkdirSync(fdir2, { recursive: true }); fs.writeFileSync(path.join(fdir2, 'journal.jsonl'), JSON.stringify({ type: 'launched' }) + '\n' + JSON.stringify({ type: 'started', key: 'f2:0', agentId: (0xb360f100).toString(16).padStart(16, '0'), label: 'f2:0', phase: 'Fork' }) + '\n');
+  const RF3 = 'wf_b360dfork3', fdir3 = path.join(path.dirname(PROJ), SID_A, 'subagents', 'workflows', RF3);
+  fs.mkdirSync(fdir3, { recursive: true }); fs.writeFileSync(path.join(fdir3, 'journal.jsonl'), JSON.stringify({ type: 'launched' }) + '\n');
+  const both = async (m) => asyncRoots(async () => { await Promise.all([m.get(RF2), m.get(RF3)]); const a = await placed(m, RF2, 1500), b = await placed(m, RF3, 1500); return [a, b]; });
+  const mS = await mount9(fresh()), mP = await mount9(perPoll);
+  await new Promise((r) => setTimeout(r, 300));   // the controls' own looks above (each instance has its own clock) end before this one is counted
+  const sh = await both(mS), pp = await both(mP);
+  ok(`(c) two runs a poll cannot place, polled together, ride ONE look of the hub: ${sh.roots} listing of the projects root (asynchronous), both placed`, sh.roots === 1 && sh.r.every((x) => x && x.status === 200 && !(x.body && x.body.locating)), { roots: sh.roots, st: sh.r.map((x) => x && x.status) });
+  ok(`(c) CONTROL — a look started by every poll that cannot place its run: ${pp.roots} root listings for the same two runs`, pp.roots >= 2, pp.roots);
+  // a run NOWHERE: «locating» until the look has answered, then the release's 404
+  const mN = await mount9(fresh());
+  const g0 = await mN.get('wf_b360dnowhere'), gEnd = await placed(mN, 'wf_b360dnowhere');
+  ok(`(c) a run nowhere: «locating» (${g0.status}) until the hub's look answers, then the release's 404 (${gEnd && gEnd.status})`, g0.status === 200 && g0.body && g0.body.locating === true && gEnd && gEnd.status === 404, { first: g0.status, end: gEnd && gEnd.status });
+  // (d) A SNAPSHOT FILED UNDER ANOTHER CONVERSATION (round w5daqaxxs): the run dir under A2, its snapshot under C — the hub's look
+  // finds both; the finished view; then the next polls make no synchronous listing
   const SID_A2 = fixtureSid('fa37'), SID_C = fixtureSid('fa38'), RX = 'wf_b360dfiled';
   const xdir = path.join(path.dirname(PROJ), SID_A2, 'subagents', 'workflows', RX); fs.mkdirSync(xdir, { recursive: true });
   fs.writeFileSync(path.join(xdir, 'journal.jsonl'), [JSON.stringify({ type: 'launched' }), started(300)].join('\n') + '\n');
   const xs = path.join(path.dirname(PROJ), SID_C, 'workflows'); fs.mkdirSync(xs, { recursive: true });
   fs.writeFileSync(path.join(xs, RX + '.json'), JSON.stringify({ ...SNAP, runId: RX }));
   { const old = new Date(Date.now() - 60e3); for (const f of fs.readdirSync(xdir)) fs.utimesSync(path.join(xdir, f), old, old); }   // the run older than its snapshot: the finished view
-  const d1 = await dirReadsOf(RX), d2 = await dirReadsOf(RX);
-  ok(`(d) a run's snapshot filed under ANOTHER conversation than its run dir is found (${d1.status}, ${d1.body && d1.body.status}); the next poll asks the kept place (${d2.reads} folder listings)`,
-    d1.status === 200 && d1.body.status === 'completed' && d2.status === 200 && d2.body.status === 'completed' && d2.reads === 0, { status: [d1.status, d2.status], view: [d1.body && d1.body.status, d2.body && d2.body.status], reads: [d1.reads, d2.reads] });
-  await mNoWalk.close(); await mNoKeep.close();
+  const mD = await mount9(fresh());
+  const d1 = await placed(mD, RX), d20 = await listingsOf(mD, RX, 10);
+  ok(`(d) a run's snapshot filed under ANOTHER conversation than its run dir is found by the hub's look (${d1 && d1.status}, ${d1 && d1.body && d1.body.status}); the next ten polls make ${d20.listings} synchronous listings`,
+    d1 && d1.status === 200 && d1.body.status === 'completed' && d20.status === 200 && d20.body.status === 'completed' && d20.listings === 0, { status: [d1 && d1.status, d20.status], view: [d1 && d1.body && d1.body.status, d20.body && d20.body.status], listings: d20.listings });
+  for (const m of [mC, mNoLook, mWalkC, mS, mP, mN, mD]) await m.close();
   await mCure.close(); await mWalk.close();
-  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 3, label: '§9 ' })) ok(r.name, r.pass, r.detail);
+  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 5, label: '§9 ' })) ok(r.name, r.pass, r.detail);
 }
 
 // ── the REAL home is untouched (this process was re-homed before any fixture was written) ──
