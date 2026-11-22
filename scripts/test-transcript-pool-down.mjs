@@ -209,9 +209,15 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   ok(warmed === true && Array.isArray(whole) && whole.length > 1000 && !whole.notLoaded, `the pool answering: the warm reads it, the note ends — ${whole.length} records, loaded`, { warmed, n: whole.length, notLoaded: whole.notLoaded });
   // the file REWRITTEN (not an append — the warm asks the pool for a full read), the pool then refusing: the kept copy is BEHIND
   const lines = fs.readFileSync(claudeFp, 'utf8').split('\n').filter(Boolean);
-  fs.writeFileSync(claudeFp, lines.slice(0, 2000).join('\n') + '\n');
+  // A REWRITE is a new file under the same name (its temp renamed over it): the warm's whole read of it lands. The same inode cut
+  // shorter in place reads as an OLDER copy to B-cd4b's r935 (a) (a cached entry of that inode at least as large stays — the put that
+  // keeps a newer append from being overwritten by a warm that waited), and every leg below asks for the rewrite's read
+  const rewrite = (n) => { const tmp = claudeFp + '.rw'; fs.writeFileSync(tmp, lines.slice(0, n).join('\n') + '\n'); fs.renameSync(tmp, claudeFp); };
+  rewrite(2000);
   const N = refusing({ status: 503, code: 'no-worker' }); C._setTranscriptPoolForTest(N);
-  const tails = (P) => P.calls.filter((o) => o === 'jsonlTail').length;
+  // A WARM'S ASK of the pool: its pager's first page (B-cd4b unit 2: the warm reads through the pager; page 0 refused is the warm's
+  // refusal — the one-shot `jsonlTail` after a refusal that is not the storage's is the same ask's fallback, never a second ask)
+  const tails = (P) => P.calls.filter((o) => o === 'boundedParsedPage').length;
   const Rk = await road('④c the Claude history, its kept copy behind the file', async () => {
     const w = await SS0.warmSessionJsonlAsync(sid, cwd), asked = tails(N);
     const m = new SS0.SessionMessages({ backend: 'claude', claudeSessionId: sid, cwd, buffer: '' }, sid, {});
@@ -229,7 +235,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // THE STORAGE'S REFUSAL: a hung path. From a FRESH note (a warm that READ ends the last one — at any tree: the rate limit of an
   // older note never answers for the guard), the file rewritten (never an append — that one is folded in inline)
   C._setTranscriptPoolForTest(up()); await SS0.warmSessionJsonlAsync(sid, cwd);
-  fs.writeFileSync(claudeFp, lines.slice(0, 1500).join('\n') + '\n');
+  rewrite(1500);
   const H = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(H);
   await SS0.warmSessionJsonlAsync(sid, cwd);
   const asked0 = tails(H);
@@ -254,20 +260,20 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const okEnd = await SS0.warmSessionJsonlAsync(sid, cwd), loaded = SS0.parseSessionJsonl(sid, cwd);
   ok(okEnd === true && !loaded.notLoaded && loaded.length === 1500, `the hung note ends when the pool answers its retry: the history loads (${loaded.length} records, no «not loaded»)`, { okEnd, n: loaded.length, notLoaded: loaded.notLoaded });
   // … or the op's own error (the note ends; the parse is the old road)
-  fs.writeFileSync(claudeFp, lines.slice(0, 1200).join('\n') + '\n');
+  rewrite(1200);
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); await SS0.warmSessionJsonlAsync(sid, cwd);
   C._setTranscriptPoolForTest(refusing({ code: 'EACCES' })); await SS0.warmSessionJsonlAsync(sid, cwd);
   const opEnd = SS0.parseSessionJsonl(sid, cwd);
   ok(!opEnd.notLoaded && opEnd.length === 1200, `the hung note ends on its retry's own op error (EACCES): the old road (${opEnd.length} records)`, { n: opEnd.length, notLoaded: opEnd.notLoaded });
   // TWO WARMS OF ONE SESSION AT ONCE ARE ONE (joined): the second ask while the first reads is the SAME read — never a second
   // history read of the file sent to the pool (unjoined re-warms queued reads whose deadlines ended workers)
-  fs.writeFileSync(claudeFp, lines.slice(0, 1000).join('\n') + '\n');
-  let release = null;
-  const D = { calls: [], call(op, payload) { this.calls.push(op); if (op === 'jsonlTail') return new Promise((res) => { release = () => res(Promise.resolve(TW.runOp(op, payload)).then((x) => x.result)); }); return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } };
+  rewrite(1000);
+  let release = null, held = false;   // the pager's FIRST page held (the warm's read in flight); its later pages answer at once
+  const D = { calls: [], call(op, payload) { this.calls.push(op); if (op === 'boundedParsedPage' && !held) { held = true; return new Promise((res) => { release = () => res(Promise.resolve(TW.runOp(op, payload)).then((x) => x.result)); }); } return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } };
   C._setTranscriptPoolForTest(D);
   const w1 = SS0.warmSessionJsonlAsync(sid, cwd), w2 = SS0.warmSessionJsonlAsync(sid, cwd);
   await new Promise((res) => setImmediate(res));
-  const askedTails = D.calls.filter((o) => o === 'jsonlTail').length;
+  const askedTails = tails(D);
   if (release) release();
   const [o1, o2] = await Promise.all([w1, w2]);
   ok(w1 === w2 && askedTails === 1 && o1 === true && o2 === true, `two warms of one session at once are ONE (the same read: ${askedTails} tail read asked of the pool)`, { same: w1 === w2, askedTails });
@@ -277,7 +283,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const Rl = await road('a parse after a late refusal of a file the cache holds whole', () => { const l = SS0.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   ok(Rl.out && !Rl.out.notLoaded && Rl.out.n === 1000 && content(Rl).length === 0, `${Rl.name}: LOADED (${Rl.out && Rl.out.n} records), nothing read on the loop (${content(Rl).length})`, { out: Rl.out, reads: Rl.reads.slice(0, 4) });
   // ONE TAGGED TWIN per kept entry (the merge memo keys on the array): two parses under one note answer the SAME list
-  fs.writeFileSync(claudeFp, lines.slice(0, 800).join('\n') + '\n');
+  rewrite(800);
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); await SS0.warmSessionJsonlAsync(sid, cwd);
   const t1 = SS0.parseSessionJsonl(sid, cwd), t2 = SS0.parseSessionJsonl(sid, cwd);
   ok(t1 === t2 && t1.notLoaded === 'transcript_reader_restarting' && t1.length === 1000, `the kept copy's tagged twin is ONE per cache entry (the same list twice: the merge memo hits; ${t1.length} records, tagged)`, { same: t1 === t2, n: t1.length, notLoaded: t1.notLoaded });
@@ -285,7 +291,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // asks no warm while the hold stands
   await SS0.warmSessionJsonlAsync(sid, cwd);   // SETTLED: a re-warm the last parse asked (under the stand-in before) ends first — warms of one session join
   const H1 = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(H1);
-  fs.writeFileSync(claudeFp, lines.slice(0, 700).join('\n') + '\n');
+  rewrite(700);
   await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's: the file's record holds it
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.readJsonlTailAsync(claudeFp, { dropSubagent: true }); } catch { }   // a HISTORY read refused as «no worker»
   C._setTranscriptPoolForTest(H1);
@@ -300,8 +306,8 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // (3) A TASK SCAN'S ANSWER NEVER FORGIVES THE TAIL'S REFUSAL (the whole-state read's MUST): the tail read refused («storage worker
   // restarted»: another file hung on its worker), the task scan answered on the other worker AFTER it — the parse still reads
   // nothing on the loop (RED: any answer forgave the file; the parse then read it whole)
-  fs.writeFileSync(claudeFp, lines.slice(0, 600).join('\n') + '\n');
-  const split = { calls: [], call(op, payload) { this.calls.push(op); if (op === 'jsonlTail') return Promise.reject(Object.assign(new Error('storage worker restarted'), { status: 503 })); return new Promise((res) => setTimeout(() => res(TW.runOp(op, payload).result), 5)); } };
+  rewrite(600);
+  const split = { calls: [], call(op, payload) { this.calls.push(op); if (op === 'boundedParsedPage' || op === 'jsonlTail') return Promise.reject(Object.assign(new Error('storage worker restarted'), { status: 503 })); return new Promise((res) => setTimeout(() => res(TW.runOp(op, payload).result), 5)); } };
   C._setTranscriptPoolForTest(split);
   await SS0.warmSessionJsonlAsync(sid, cwd);
   const Rt = await road('(3) a parse after the tail was refused and the task scan answered after it', () => { const l = SS0.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
@@ -309,7 +315,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // (4) THE HUNG RETRY THAT READS stamps its parse and warms the task scan beside it, as the normal road
   await SS0.warmSessionJsonlAsync(sid, cwd);   // SETTLED (the parse above asked a re-warm)
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's
-  fs.writeFileSync(claudeFp, lines.slice(0, 500).join('\n') + '\n');
+  rewrite(500);
   const U = up(), metrics = [], metricWas = global.__vsMetric;
   global.__vsMetric = (n) => metrics.push(n);
   C._setTranscriptPoolForTest(U);
@@ -319,7 +325,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // (7) THE PAGE IS TOLD (r1243 item 2): a session answered «not loaded» is announced ONCE to the store's listeners when a warm next
   // loads it (ws-handler pushes `history-ready` to its clients — the page asks again by itself, never a re-open)
   { const heard = []; const off = SS0.onHistoryReadable((id) => heard.push(id));
-    fs.writeFileSync(claudeFp, lines.slice(0, 300).join('\n') + '\n');
+    rewrite(300);
     C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); await SS0.warmSessionJsonlAsync(sid, cwd);
     const nl = SS0.parseSessionJsonl(sid, cwd);   // «not loaded» (the cache behind the file): the session awaits
     await SS0.warmSessionJsonlAsync(sid, cwd);   // settles the re-warm the parse asked
@@ -334,7 +340,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   { const fpG = path.join(projDir, 'gap-only.jsonl'); C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.jsonlGapInfoAsync(fpG); } catch { }
     ok(!C.fileRefused(fpG), 'a gap read\'s plain refusal notes nothing of the file (only a history read\'s refusal or the storage\'s does)'); }
   C._setSlicedForTest({ storageRetryMs: 60 });
-  fs.writeFileSync(claudeFp, lines.slice(0, 250).join('\n') + '\n');   // SHORTER than the copy (7) loaded (300): a rewrite, the warm asks the pool for the whole read (400 was an append the warm folds in)
+  rewrite(250);   // SHORTER than the copy (7) loaded (300): a rewrite, the warm asks the pool for the whole read (400 was an append the warm folds in)
   const Hg = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(Hg);
   await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's (the cache was behind: the pool asked, refused)
   const g0 = tails(Hg);
@@ -393,6 +399,10 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
   const two = async (P) => { const fa = path.join(projDir, 'aaaa.jsonl'), fb = path.join(projDir, 'bbbb.jsonl'); await Promise.all([fa, fb].map((fp) => P.call('__hold', { fp, sab: new SharedArrayBuffer(4), ms: 4000 }).catch(() => null))); };
   const third = { fp: path.join(projDir, 'cccc.jsonl') };
   const K1 = mkPool(['fp'], { poolSize: 2, climb: false }), K0 = mkPool(['fp'], { poolSize: 2 });
+  // the control's look: B-23e5's remainder names a folder only after a no-follow look at its dead children (lstatKinds, an op of the
+  // FILE pool's worker — the transcript worker has none, so a climbing transcript pool would never name it); answered here as that
+  // look answers two children that are no link
+  K0._lookIdle = () => Promise.resolve({ links: [false, false] });
   try {
     await two(K1); await two(K0);
     for (let i = 0; i < 50 && !K0._hungOf(third, 'jsonlTail', 200); i++) await sleepMs(20);

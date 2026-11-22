@@ -232,11 +232,12 @@ console.log('⑤b the read note\'s two ends');
   C._setTranscriptPoolForTest(fail); fail.calls.length = 0;
   // a WARM first (the attach, a page — the hot roads warm before they parse): the pool alone, no find, no stat
   const Rw1 = await road('⑤b(a) a warm after the memory called the file the storage\'s', () => SS.warmSessionJsonlAsync(sa, cwd));
-  ok(Rw1.reads.length === 0 && fail.calls.filter((o) => o === 'jsonlTail').length === 1 && Rw1.out === false, `${Rw1.name}: no call of any kind on the transcript (${Rw1.reads.length}) — the pool alone asked (${fail.calls.filter((o) => o === 'jsonlTail').length})`, { reads: Rw1.reads.slice(0, 4), calls: fail.calls });
+  const asks = () => fail.calls.filter((o) => o === 'boundedParsedPage').length;   // a warm's ask of the pool: its pager's first page (B-cd4b unit 2)
+  ok(Rw1.reads.length === 0 && asks() === 1 && !fail.calls.includes('jsonlTail') && Rw1.out === false, `${Rw1.name}: no call of any kind on the transcript (${Rw1.reads.length}) — the pool alone asked (${asks()}), no one-shot after the storage's refusal`, { reads: Rw1.reads.slice(0, 4), calls: fail.calls });
   fail.calls.length = 0;
   const Ra = await road('⑤b(a) a parse of the grown file then', () => { const l = SS.parseSessionJsonl(sa, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   await new Promise((res) => setImmediate(res));
-  ok(Ra.reads.length === 0 && fail.calls.filter((o) => o === 'jsonlTail').length === 0, `${Ra.name}: no call of any kind on the transcript (${Ra.reads.length}), no warm asked (${fail.calls.length} pool calls) — the copy last read answered (${Ra.out && Ra.out.n} records)`, { reads: Ra.reads.slice(0, 4), calls: fail.calls, out: Ra.out });
+  ok(Ra.reads.length === 0 && fail.calls.filter((o) => o === 'boundedParsedPage' || o === 'jsonlTail').length === 0, `${Ra.name}: no call of any kind on the transcript (${Ra.reads.length}), no warm asked (${fail.calls.length} pool calls) — the copy last read answered (${Ra.out && Ra.out.n} records)`, { reads: Ra.reads.slice(0, 4), calls: fail.calls, out: Ra.out });
   // (b) THE POOL ANSWERING AGAIN: a warm that reaches it, then the file grown — the parse answers the grown file WHOLE (its re-warm
   // folds the append in, one stat shows the copy is the file): never a stale «not loaded» on a healthy hub
   const sb = sids[5], fb = claudeFp(sb);
@@ -337,7 +338,9 @@ console.log('⑨ the read\'s own deadline (a FIFO whose open never answers)');
     try { await C.readJsonlTailAsync(claudeFp(sids[2]), { dropSubagent: true }); } catch { }   // another file whose refusal stands (⑦'s records pushed the old one out)
     const Rd = await road('⑨ the warm of a file that never answers', () => SS.warmSessionJsonlAsync(sid, cwd));
     const st = C.slicedState(), other = C.slicedRoadFor(claudeFp(sids[2]));
-    ok(Rd.out === false && Rd.longest < LAW_MS && st.parked === 1 && !C.slicedRoadFor(fifo).ok && /storage hung/.test(C.slicedRoadFor(fifo).why) && !other.ok && /parked/.test(other.why),
+    // the FIFO's road: its own read is parked in it (r1461's read — said first, never a second read into it) and the file is the
+    // storage's (its mark stands beneath it)
+    ok(Rd.out === false && Rd.longest < LAW_MS && st.parked === 1 && !C.slicedRoadFor(fifo).ok && /its own read on the main process is still parked/.test(C.slicedRoadFor(fifo).why) && C.fileStorageHung(fifo) && !other.ok && /parked/.test(other.why),
       `${Rd.name}: its read ran out its deadline — «not loaded», the file is the STORAGE's for good, the parked read holds the one place (another file: «${other.why}»)`, { out: Rd.out, st, why: C.slicedRoadFor(fifo).why });
     const w = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);   // the file answers at last: the parked open completes
     fs.closeSync(w);

@@ -112,12 +112,14 @@ try {
       const r = await Promise.all([[A, 'A'], [B, 'B'], [A, "A'"]].map(([sid, n]) => SM.warmSessionJsonlAsync(sid, CWD).then((x) => { done.push(n); return x; })));
       return { r, done: done.join(), reads: stats().reads - s0.reads };
     };
-    const noJoin = anchored(ssSrc, '    let w = _warmInFlight.get(fp);', '    let w = null;', 'warm-no-join');
+    // BOTH joins taken away: the file's (this suite's) and row B-422c's of the SESSION around it (one warm a session at a time — A
+    // and A' are one session's asks, so that join alone would resolve A' with A and hide the file's join from this control)
+    const noJoin = anchored(anchored(ssSrc, '    let w = _warmInFlight.get(fp);', '    let w = null;', 'warm-no-join'), '  if (was && (bulk || !was.bulk)) return was.p;', '  if (false) return was.p;', 'warm-no-session-join');
     const noFresh = anchored(noJoin, '  if (fresh && fresh()) return { fresh: true };', '  if (false) return { fresh: true };', 'warm-no-fresh');
     const SJ = require(M.write('src/session-store.js', noJoin, 'warm-no-join')), SF = require(M.write('src/session-store.js', noFresh, 'warm-no-fresh'));
     const g5 = await order5(S), r5 = await order5(SJ);
     ok(g5.r.every((x) => x === true) && g5.done === "A,A',B" && g5.reads === 2, `the second A joins the first (resolved: ${g5.done}; ${g5.reads} reads for two files)`, g5);
-    ok(r5.done === "A,B,A'", `RED: the join taken away ⇒ the second A waits its own turn after B (${r5.done})`, r5);
+    ok(r5.done === "A,B,A'", `RED: the joins taken away (the file's and the session's) ⇒ the second A waits its own turn after B (${r5.done})`, r5);
     const twice = async (SM) => { fs.copyFileSync(hist, path.join(PROJ, A + '.jsonl')); SM.jsonlCacheClear?.(); const s0 = stats(); const r = await Promise.all([SM.warmSessionJsonlAsync(A, CWD), SM.warmSessionJsonlAsync(A, CWD)]); return { r, reads: stats().reads - s0.reads }; };
     const f5 = await twice(SJ), f5r = await twice(SF);
     ok(f5.r.every((x) => x === true) && f5.reads === 1, `with the join taken away, the second warm's turn finds the cache filled for the same file: ${f5.reads} read`, f5);
