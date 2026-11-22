@@ -101,6 +101,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a restart, an agent whose approval for a stored secret ended with it now says so and asks again, instead of saying the secret is not switched on.
 - After VibeSpace reconnects a terminal or conversation that stopped responding, what you type is no longer lost while the new connection is still silent.
 - On a phone, the Claude page of Settings no longer scrolls sideways: the Default effort level box now fits the screen.
+- Background Work results for a shut or offline paired machine now wait in order and go out when it is back; after an hour, For you shows one item for it.
 
 ## 2.369.415 — 2026-11-21
 

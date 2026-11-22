@@ -1173,6 +1173,67 @@ This file is the engineers' record of every release: the lanes, the verification
 - COST: the top-level tables are compared only when an update reached one (its view, `table()`) or for a durable act (a 214 KB table on the test machine: 1.47 ms a compare, 0.05 ms without).
 - LEGS: scripts/test-index-journal.mjs (new, fast, 6.5 s): laws 1+2, 3 (with the before-touch road), 4, 5 (a kill while each step is written and after it), 6 (the writer laws' failed-append scenes with a PACED line; an open tail at load), 7 (the RELEASE'S OWN replay frozen as scripts/fixtures/release-index-replay.cjs, at ten kill points), 8 (no product read of channels/index* outside the store), 11 (also over a journal left holding folded lines); the sliced warm-up at open; a real engine (the fake vendor) under the mail driver and a true refusal storm — no update scope reached the whole map (the store's `onWholeTouch` tap names one), no whole write. Red controls on 1, 3, 4, 6, 8, 11 (twice) and the census. test-sliced-walk restated 7.5 → 11.0 s alone (the per-update compare and the open's sliced warm-up), its over: debt on B-fbd6; the fast cap 1600 → 1610 by arithmetic. Legs that asked `durable()` for a WHOLE write now ask `fold()` (test-sliced-walk b1/b2/b4, test-channel-store-writer-laws k1).
 
+### bl-msg B-2566's remainder — a paired machine that cannot be reached (the coordinator's r1147 / r1149)
+- THE GAP (kb-features' own last sentence of B-2566): a paired owner whose machine had SAID NOTHING stayed «live». The remote rung's bounded connect failed, ownerHostOf stayed optimistic, liveForWake answered true. A job failing all night on the hub reached only the stash, as `not-reachable` (owed no wake: its results waited for a prompt, never for the machine's return).
+- THE VERDICT (one, src/server/conversation-deliver.js): the rung's catch with NO handle (nothing posted) AND hosts.linkState(hid) === 'offline' marks the machine UNREACHABLE.
+  - It is silent since the dial facts' lastDisconnectAt (dial-facts' own 'silent' state), else the first miss.
+  - The mark holds while the list says offline, else for REMOTE_ENDED_MS (the bound an ended reply has). A pure ten minutes would have ended an owed wake «running» in the middle of the night: the ruling's own «kept, until it replies».
+  - A landed post or a link that returns clears it; 'unknown' (an ssh host with no facts) is never marked, and neither is a machine of a HELD list (its linkState answers 'offline' for the pool's dark-source defense: the hold's own rule makes a remote owner «unknown», never unreachable).
+  - liveForWake reads it (unreachableOf). The answer is typed `notRunning` + `unreachable` + `since`. attemptEnded HOLDS an owed wake while its machine is unreachable (never the resume line).
+- JOBS: held kind `machine-away` (checked before notRunning: never `not-running`, so no B-6721 item a conversation), in WAKE_OWED_KINDS (the hand-over posts it once the conversation takes frames).
+  - The per-job away-failed item is NOT filed for it (the call site, and a guard inside _awayFailure).
+  - ONE For-you item a MACHINE an outage (jobs-wiring noticeMachineAway, itemKey jobs-machine-away:<hid>, group 'jobs', no action). It is filed only after MACHINE_AWAY_GRACE_MS (60 min) of silence and a failed delivery after it.
+  - Its count grows in place; a PERSON's close stands for the outage (createdAt ≥ since); it goes by itself (resolveMachineAway) when the machine replies (a delivery lands there) or nothing waits for it (the drain). Open items of an earlier run are asked once a run.
+- THE NUMBER (before the build, r1149 bound 2): two paired machines, laptop B shut 22:00–08:00 plus three daytime closes (20/45/60 min), three of B's conversations owning jobs (an hourly failing schedule, a --notify-ok report, a build).
+  - As first ruled (one item a conversation), 3 a night plus ~1.6 a day. As built, 1 a night for B, 0 for A, 0 by day for closes under an hour.
+  - test-jobs-triage replays the night: 12 results, 3 conversations, ONE item.
+- GROUPS: a wake to an unreachable member tells its sender «the machine this conversation runs on cannot be reached — this is kept and goes out when it replies» (delivery-wake senderWords 'unreachable'), never «ended».
+- WORDS (en/zh/ja): the item and its detail; the hand-over card's reason (stash-summary HELD_WHY); the Background Work panel's line (jobs-layout).
+- CENSUSES moved with it: test-user-todos-layout (118 sites), test-conversation-needs-pins (the jobs-wiring row is `mixed`: the machine's item and an owner-less job's file under the Background Work group), test-todos-held-census (jobs-wiring 10 writes / 13 reads / 3 untried), test-hosts-held-census (two harmless lookups: the silence's start and the machine's name), test-architecture §93 (origin 'jobs' filers ×4, filerKey hand-ons ×4), FORYOU_HEADS + 'Background Work' (test-ui-language ⑥).
+- LEGS: test-peer-state ⑭ over the real ladder, and test-jobs-triage §12 (B-2566's remainder) over the real engine and wiring; every leg prints the facts it judges, every red control is a copy through anchored().
+  - test-peer-state ⑭: the typed answer and silence; the hold, past the bound while offline; the reply; RED: the hold removed; 'unknown' never marked; a landed post clears; the bound once unknown.
+  - test-jobs-triage §12: the number; words with no button; the count in place; a person's close for the outage; the next outage; the grace (RED: no grace); no item a job (RED: both guards removed); gone when the results go out, and at the reply.
+- THE ROUND (wxt3g5pth, r1277: three readers «take with a small cure», ONE MUST two of them found apart): the mark lived only in memory, so a HUB RESTART ended the held wake «running» while the laptop was shut. The same root showed in a FLAP of the link and in a REBOOTED laptop: the link's word alone ended the hold, without asking the machine, and no resume came.
+- THE CURE, one law: a held wake ends «running» only on the machine's own word about that conversation.
+  - The owed wake carries `away` ON ITSELF (the park file), so the hold stands from what is durable, read with the link's state (unreachableOf / machineAwayOf read it).
+  - The link back ⇒ the machine is ASKED (peer-state, one ask at a time): it runs ⇒ «running»; it ended ⇒ the resume line; no answer ⇒ held. An older agent's word is a delivery that lands (the rung's landed post clears `away`).
+  - A pairing removed ⇒ the wake is refused by name (code unpaired), and the jobs notices become `machine-unpaired` (their words: open the conversation to read them).
+- ALSO (r1277 (1)–(7)):
+  - (1) the hold moves only its next look: no park-file write once a minute;
+  - (2) «notices wait» leaves machine-away out (its machine's item counts it);
+  - (3) the item's outage start is the ladder's own, this outage's;
+  - (4) the open-items look is taken only once the tray could be READ;
+  - (5) the hand-over chain does not knock on a machine known away;
+  - (6) the removed pairing's words, as above;
+  - (7) RED controls for a person's close, the item going by itself, and the group sender's words (the member's code stays the closed list's 'ended'; only the words the sender reads change).
+- THE CURE'S LEGS:
+  - test-peer-state ⑭: the park carries `away`; held with no file write; SCENE 1 a restart (RED: the link's word); SCENE 2 a flap (RED); SCENE 3 a rebooted laptop (the resume line asked; RED: «running» without asking); a machine that runs ⇒ running; a pairing removed.
+  - test-jobs-triage: an earlier outage's leftovers; no double count (RED); a person's close (RED); the item by itself (RED); unpaired.
+  - test-delivery-wake-line ⑥b: the group sender's words (RED).
+- THE NARROW ROUND (w9b42vlv3, r1397: two «take»; the must closed in all three scenes) and three shoulds ruled musts, cured in ONE commit:
+  - (1) a machine that CANNOT give its word held the wake for ever: an older agent (no such op) and an ssh-only machine (no dial: its link reads unknown, never asked). THE LAW, completed: where a machine can say, only its word ends the hold; where it cannot, the release's road stands once the link's word has stood REMOTE_ENDED_MS. The row says why (agent_older / no_link); the machine's item says it in place and goes only when its results went out.
+  - (2) a list that cannot say (absent, or a read that threw) keeps the wake; only a list that READ the machine gone refuses «unpaired».
+  - (3) a refused resume after the machine's word: its notices become not-running (true words; «notices wait» counts them again), and the machine's item goes at that moment.
+  - Smalls: (4) an ask's answer landing during a stop hands nothing on (checked against the stop; its promise tracked); (5) «silent since» is the outage's start (the oldest held wake's, the mark keeps its first start across a flap); (6) machine-unpaired's words stay true once paired again (past tense); (7) the «not resumed» line's words for unpaired and no_link (wake-grant-rows).
+  - The person-close guard moved INTO the engine (_fileMachineAway), so its red is a copy of the engine: a copy of the wiring cannot file at all (For you hands origin 'jobs''s key to src/server/jobs-wiring.js by its frame).
+  - Legs: test-peer-state ⑭ (older agent / no link: released after the bound, RED: the earlier tip holds for ever; a list that cannot say, RED; the stop, RED; the outage's start across a flap); test-jobs-triage (a refused resume; the wordless item; the close RED through the engine).
+- THE NARROW ROUND (wkfz3d8tp, r1645): musts (1) and (3) and the smalls closed; one MUST standing, in must (2)'s own cure.
+  - The real store's get THROWS «host not found» for a removed machine, and the cure's pairing check read every throw as «paired». So a machine a person unpaired read as paired: the «unpaired» refusal could not happen, and its notices promised a reply from a machine that was gone.
+  - The legs could not see it: the rig's stand-in answered nothing where the real store throws, and the census row for that read was deleted.
+- THE SHAPE, changed (the third round whose must came from the cure before it): THE PAIRING READ is ONE function, pairingOf, with three replies:
+  - paired (its record);
+  - gone (only the store's own «host not found»);
+  - cannot say (no list, a held list, a read that failed any other way).
+  - It is written against the store's contract, and every reader of a machine in the deliver engine asks it (the owner's claim, a held wake's machine, the silence's start, the machine's name).
+  - test-peer-state ⑮: the coordinator's ONE TABLE over the REAL store on scratch folders (paired, read gone, removed by the store's own remove, held, no list, an EIO read), each reply named. RED: every throw «cannot say» ⇒ the removed rows; every throw «gone» ⇒ the EIO row.
+  - THE CENSUS: the store's get is called in ONE place (pairingOf), with a planted direct read named. test-hosts-held-census holds its one lookup row, and its ownerHostOf control runs the sliced pairing read.
+  - Every pairing leg of ⑭ reads a real store; only the machine's link and connect stay stand-ins.
+- The round's shoulds, cured:
+  - the «cannot say since» stamp clears where the hold clears (clearAway), bounded at 500;
+  - a park entry without `at` falls back to its own start;
+  - a later filing keeps the wordless words;
+  - a refile after a restart takes the ladder's own outage start.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
