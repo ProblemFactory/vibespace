@@ -31,6 +31,14 @@
 //   live store) ⇒ the server says the new member, the page re-judges ≥ 2 polls and the chip STAYS on the old one;
 //   the fixed writer then brings it over (the page was healthy all along). An attempt during which any unrelated
 //   frame reached the page is void (that frame would carry the fact) and runs again, ≤ 3 times.
+//   B-360d (d229032f4) gave a link move a SECOND road to the page: the kept sign-in facts re-read the folder, and when
+//   what a row shows differs they land ⇒ _notifyRowsSoon ⇒ onChange ⇒ an active-sessions frame (r2072's print: each
+//   void attempt's one frame changed only the moved link). So (主开发 r2168): TWO ROADS — the fixed writer's move, every
+//   frame of a 12 s window printed with its time and its change (the gap between the links frame and the rows frame);
+//   SECOND ROAD ALONE — the pre-fix writer with the rows road LEFT as it is: the page hears the move within 12 s by a
+//   frame whose one change is that link (an edit that silences the rows road is red there, by name); and the CONTROL
+//   cuts the rows road for its own window only (the store's own _notifyRowsSoon over the shared one, removed in a
+//   finally) and says so on its line.
 // Requires google-chrome + dtach (SKIP without). Run: node scripts/test-billing-badge-live.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -94,6 +102,8 @@ const PRE = M.write('src/accounts.js', preSrc, 'pre-fix');
   check('the control is the pre-fix writer: ensureSessionPoolLink without its notify, nothing else changed (a patched copy outside the tree)',
     NOTIFY_LINE.test(accSrc) && /_notifyLinks\(\)/.test(body(accSrc)) && !/_notifyLinks\(\)/.test(body(preSrc)) && preSrc.split('\n').length === accSrc.split('\n').length - 1 && !PRE.startsWith(repo), { pre: PRE });
 }
+check('the rows road the control cuts is the landing of the kept sign-in facts alone: onLanded → _notifyRowsSoon, its one caller (B-360d)',
+  /onLanded: \(\) => this\._notifyRowsSoon\(\)/.test(accSrc) && (accSrc.match(/\._notifyRowsSoon\(/g) || []).length === 1 && /\n  _notifyRowsSoon\(\) \{/.test(accSrc));
 
 // ── the in-process hook: capture the server's AccountManager; a command file drives the ENGINE's writer ──
 const CMD = path.join(ROOT, 'cmd.json'), RES = path.join(ROOT, 'res.json');
@@ -112,6 +122,14 @@ if (require('worker_threads').isMainThread) {
       if (c.op === 'link') { am.ensureSessionPoolLink(c.pool, c.sid, c.member, { why: 'per-session-switch' }); out = { ok: true }; }
       else if (c.op === 'link-pre') { require(${S(PRE)}).AccountManager.prototype.ensureSessionPoolLink.call(am, c.pool, c.sid, c.member, { why: 'per-session-switch' }); out = { ok: true }; }
       else if (c.op === 'unlink') { am.dropSessionPoolLink(c.pool, c.sid); out = { ok: true }; }
+      else if (c.op === 'rows') {
+        // r2168: the rows road (the kept sign-in facts landing). watch = an own member that notes the time and CALLS the
+        // shared one (the road runs as it does for a person); cut = notes and sends nothing; restore = removes it
+        const own = Object.prototype.hasOwnProperty.call(am, '_notifyRowsSoon');
+        if (c.mode === 'restore') { delete am._notifyRowsSoon; out = { ok: own && am._notifyRowsSoon === Orig.prototype._notifyRowsSoon, at: global.__vsBadgeRowsAt || [] }; global.__vsBadgeRowsAt = []; }
+        else if (own || typeof Orig.prototype._notifyRowsSoon !== 'function') out = { ok: false, error: own ? 'the rows road is held already' : 'no shared _notifyRowsSoon on the store (the rows road moved?)' };
+        else { global.__vsBadgeRowsAt = []; const pass = c.mode === 'watch'; am._notifyRowsSoon = function () { global.__vsBadgeRowsAt.push(Date.now()); if (pass) return Orig.prototype._notifyRowsSoon.call(this); }; out = { ok: true, mode: c.mode }; }
+      }
       else if (c.op === 'default') { am.setPoolTarget(c.pool, c.member, { why: 'pool-switch' }); out = { ok: true }; }
       else if (c.op === 'cur') out = { ok: true, cur: am.poolCurrentFor(c.pool, c.sid), def: am.poolCurrent(c.pool) };
     } catch (e) { out = { ok: false, error: e.message }; }
@@ -193,12 +211,13 @@ const INSTRUMENT = `(() => {
     if (m.type !== 'active-sessions') return;
     B.frames++;
     try {
-      const now = new Map((m.sessions || []).map((x) => [String(x.id || ''), x])), ch = [];
+      const now = new Map((m.sessions || []).map((x) => [String(x.id || ''), x])), ch = [], keys = [], auth = {};
+      const add = (id, what) => { ch.push(id.slice(0, 8) + what); keys.push(id + what); };
       if (B.last) {
-        for (const [id, x] of now) { const p = B.last.get(id); if (!p) { ch.push(id.slice(0, 8) + ':new'); continue; } for (const k of new Set([...Object.keys(x), ...Object.keys(p)])) if (JSON.stringify(x[k]) !== JSON.stringify(p[k])) ch.push(id.slice(0, 8) + '.' + k); }
-        for (const id of B.last.keys()) if (!now.has(id)) ch.push(id.slice(0, 8) + ':gone');
+        for (const [id, x] of now) { const p = B.last.get(id); if (!p) { add(id, ':new'); continue; } for (const k of new Set([...Object.keys(x), ...Object.keys(p)])) if (JSON.stringify(x[k]) !== JSON.stringify(p[k])) { add(id, '.' + k); if (k === 'auth') auth[id] = JSON.stringify(x[k]).slice(0, 300); } }
+        for (const id of B.last.keys()) if (!now.has(id)) add(id, ':gone');
       }
-      B.last = now; B.diffs.push({ at: Date.now(), n: now.size, changed: ch.slice(0, 16) }); if (B.diffs.length > 40) B.diffs.shift();
+      B.last = now; B.diffs.push({ at: Date.now(), n: now.size, changed: ch.slice(0, 16), keys: keys.slice(0, 16), auth }); if (B.diffs.length > 40) B.diffs.shift();
     } catch (e) { B.diffs.push({ at: Date.now(), error: String((e && e.message) || e) }); }
   });
   const o = app.syncSessionIdentity.bind(app);
@@ -355,30 +374,87 @@ try {
   await evalJs('(async () => { await app.stage.leave(); return true; })()');
   await sleep(800);
 
+  // r2168 (3): a link move now reaches the page by TWO frames, the links frame (_notifyLinks, at once) and the rows frame
+  // (the kept sign-in facts land ⇒ _notifyRowsSoon ⇒ onChange). Measured, never assumed: the server's rows road is WATCHED
+  // (it still runs; only its landing times are noted) and every frame of the window is printed with its time, its change
+  // and S1's auth when that changed — a second frame long after the first would be a late flicker on a person's page.
+  const framesSince = async (p0) => JSON.parse(await evalJs(`JSON.stringify(__bb.diffs.filter((d) => d.at >= ${p0}).map((d) => ({ ms: d.at - ${p0}, keys: d.keys || [], changed: d.changed || [], auth: (d.auth || {})[${S(S1)}] || null, error: d.error || null })))`));
+  const said = (d) => '+' + d.ms + ' ms [' + (d.error ? 'error: ' + d.error : (d.changed.join(' ') || 'nothing changed')) + ']' + (d.auth ? ' S1 auth ' + d.auth : '');
+  const LINK = S1 + '.auth';
+  console.log('TWO ROADS: the fixed writer moves S1 — the links frame and the rows frame, timed over 12 s');
+  {
+    const to = other(await cur(S1));
+    await evalJs(chipExpr(S1, 'two-roads'));
+    const p0 = await evalJs('Date.now()');
+    const w = await command({ op: 'rows', mode: 'watch' });
+    let r = null, back = null;
+    try { r = await command({ op: 'link', pool: POOL, sid: S1, member: to }); await sleep(12000); }
+    finally { back = await command({ op: 'rows', mode: 'restore' }); }
+    const seen = await framesSince(p0), c1 = await evalJs(chipExpr(S1));
+    const landed = ((back && back.at) || []).map((t) => t - p0);
+    const links = seen.find((d) => d.keys.includes(LINK));
+    const rows = landed.length ? seen.find((d) => d.ms >= landed[0]) : null;
+    console.log(`  · the move at +0 ms; the rows road landed at ${landed.length ? landed.map((t) => '+' + t + ' ms').join(', ') : 'no time in the window'} (the server); ${seen.length} frame(s): ${seen.map(said).join(' · ') || 'none'}`);
+    console.log(`  · THE GAP: the links frame ${links ? '+' + links.ms + ' ms' : 'none'}, the rows frame ${rows ? '+' + rows.ms + ' ms' : 'none in 12 s'}${links && rows ? ' ⇒ ' + (rows.ms - links.ms) + ' ms apart' : ''}`);
+    check(`two roads: the fixed writer's move reaches the page by a frame carrying S1's link (${links ? '+' + links.ms + ' ms' : 'none'}), and at the window's end the chip still names ${NAME[to]} on the same node (no late flip): "${c1.words}"`,
+      !!(r && r.ok && w.ok && back && back.ok) && !!links && c1.mark === 'two-roads' && c1.words.includes(NAME[to]) && c1.visible, { w, back, seen: seen.slice(0, 6), c1 });
+  }
+  // r2168 (2): the pre-fix writer (no links frame) with the rows road LEFT as it is: the page still hears the move within
+  // the window, by a frame whose one change is that link — an edit that silences the rows road is red HERE, by name.
+  console.log('SECOND ROAD ALONE: the pre-fix writer, the rows road left as it is');
+  {
+    const to = other(await cur(S1));
+    await evalJs(chipExpr(S1, 'rows-alone'));
+    const p0 = await evalJs('Date.now()');
+    const r = await command({ op: 'link-pre', pool: POOL, sid: S1, member: to });
+    const serverSays = await cur(S1);
+    let hit = null, c1 = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 12000) {
+      hit = (await framesSince(p0)).find((d) => d.keys.length === 1 && d.keys[0] === LINK);
+      c1 = await evalJs(chipExpr(S1));
+      if (hit && c1.words && c1.words.includes(NAME[to])) break;
+      await sleep(250);
+    }
+    const seen = await framesSince(p0);
+    console.log(`  · ${seen.length} frame(s) after the move: ${seen.map(said).join(' · ') || 'none'}`);
+    check(`the second road alone tells the page when what a row shows changed: no links frame (the pre-fix writer), and a frame whose one change is S1's link came ${hit ? 'at +' + hit.ms + ' ms' : 'at no time in 12 s'}; the chip names ${NAME[to]} on the same node: "${c1 && c1.words}"`,
+      !!(r && r.ok) && serverSays === to && !!hit && !!c1 && c1.mark === 'rows-alone' && !!c1.words && c1.words.includes(NAME[to]) && c1.visible, { r, serverSays, seen: seen.slice(0, 6), c1 });
+  }
+
   console.log('CONTROL: the pre-fix writer (no notify) on the same page');
   {
     // Judged only over a window in which NO frame reached the page: a frame the scratch server sends for another
     // reason would carry the moved fact (the bug's own escape hatch — the owner's page waited for exactly such a
-    // frame for 30+ min), so such an attempt is VOID and runs once more (never judged either way)
+    // frame for 30+ min), so such an attempt is VOID and runs once more (never judged either way). The rows road
+    // (B-360d: the kept sign-in facts land when what a row shows differs) is such a frame BY DESIGN for every link
+    // move, so the control CUTS it for its own window only (r2168) — the bug under test is the missing links frame.
     let judged = null;
     for (let attempt = 1; attempt <= 3 && !judged; attempt++) {
       const c0 = await evalJs(chipExpr(S1, 'control'));
       const from = Object.keys(NAME).find((k) => c0.words && c0.words.includes(NAME[k]));
       const to = other(from);
       const f0 = await evalJs('__bb.frames'), s0 = await evalJs('__bb.syncs');
-      const r = await command({ op: 'link-pre', pool: POOL, sid: S1, member: to });
-      const serverSays = await cur(S1);
-      await sleep(12000);
-      const c1 = await evalJs(chipExpr(S1));
-      const frames = (await evalJs('__bb.frames')) - f0, syncs = (await evalJs('__bb.syncs')) - s0;
+      const cut = await command({ op: 'rows', mode: 'cut' });
+      let r = null, serverSays = null, c1 = null, frames = 0, syncs = 0, back = null;
+      try {
+        r = await command({ op: 'link-pre', pool: POOL, sid: S1, member: to });
+        serverSays = await cur(S1);
+        await sleep(12000);
+        c1 = await evalJs(chipExpr(S1));
+        frames = (await evalJs('__bb.frames')) - f0; syncs = (await evalJs('__bb.syncs')) - s0;
+      } finally { back = await command({ op: 'rows', mode: 'restore' }); }
+      const held = (back && back.at) ? back.at.length : 0;
+      console.log(`  · control attempt ${attempt}: the rows road (the kept sign-in facts landing, B-360d) CUT for this window only — the bug under test is the missing links frame, and that road tells the page of every link move by design; ${held} landing(s) held`);
+      if (!cut.ok || !back || !back.ok) { console.log(`  · control attempt ${attempt} void: the cut or its removal failed — ${S({ cut, back })}`); continue; }
       if (frames > 0) { const what = await evalJs(`JSON.stringify(__bb.diffs.slice(-${frames}).map((d) => d.error ? 'error: ' + d.error : (d.changed.length ? d.changed.join(' ') : 'nothing changed') + ' (' + d.n + ' sessions)'))`); console.log(`  · control attempt ${attempt} void: ${frames} unrelated frame(s) reached the page — what changed in it: ${what}`); continue; }
-      judged = { from, to, r, serverSays, c0, c1, frames, syncs };
+      judged = { from, to, r, serverSays, c0, c1, frames, syncs, held };
     }
     check('the control ran over a window with no unrelated frame (≤ 3 attempts)', !!judged);
     if (judged) {
-      const { from, to, r, serverSays, c0, c1, syncs } = judged;
+      const { from, to, r, serverSays, c0, c1, syncs, held } = judged;
       check(`the pre-fix writer moves the link too (${NAME[from]} → ${NAME[serverSays]})`, r.ok && serverSays === to, r);
-      check(`…and the chip STAYS on ${NAME[from]} for 12 s (no frame; the page re-judged ${syncs} merge(s) of the stale one) — the owner's report, reproduced: "${c1.words}"`,
+      check(`…and the chip STAYS on ${NAME[from]} for 12 s (no frame; the rows road cut, ${held} landing(s) held; the page re-judged ${syncs} merge(s) of the stale one) — the owner's report, reproduced: "${c1.words}"`,
         c0.words.includes(NAME[from]) && c1.words.includes(NAME[from]) && !c1.words.includes(NAME[to]) && syncs >= 2, { c0, c1, syncs });
       await leg('CONTROL → the fixed writer re-points to the same member', S1, to, () => command({ op: 'link', pool: POOL, sid: S1, member: to }));
     }
