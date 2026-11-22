@@ -20,6 +20,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A page left open from before this update cannot approve a proposal that names people until you reload it.
 - A copy of VibeSpace started from a git worktree now uses a home of its own and says so when it starts; a clone keeps its home.
 - A clone of VibeSpace kept in a temporary folder and run with your own home now checks for updates and registers its hooks like any install.
+- A new conversation now waits up to 10 seconds for VibeSpace's hooks and CLI settings on this machine, and says so if it had to start before them.
+- Saving a setting that changes a CLI's own file now tells you when that file on this machine has not taken it yet.
 
 ### Fixed
 - When a Channels file cannot be read, the sidebar shows a warning and the panel says what is paused; nothing is fetched, sent or written over until it reads.
@@ -118,6 +120,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Notices held while a restarting VibeSpace was still handing over its record of turns nobody typed now say so, not that the spending ceiling held them.
 - When the data folder refuses the spending record's lock, the usage menu and For you now say so, and held turns resume by themselves once it writes again.
 - With lowering off, Session Properties no longer says a conversation on another machine runs at this server's own CPU priority.
+- VibeSpace no longer stops responding while it writes the CLIs' own settings on a machine whose home folder answers slowly.
 
 ## 2.369.415 — 2026-11-21
 
