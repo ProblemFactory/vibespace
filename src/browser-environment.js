@@ -163,9 +163,10 @@ function environmentVerdict(input) {
     const mode = c ? str(c.mode) : '';
     if (!MODE_LIST.includes(mode)) return refuse('env_mode_invalid', `${key}: the choice is one of ${row.choices.join(', ')}`);
     if (!row.choices.includes(mode)) return refuse('env_mode_unoffered', `${key} offers ${row.choices.join(', ')} — not ${mode}`);
+    const listed = key === 'location' && c && c.sites != null && !(Array.isArray(c.sites) && c.sites.length === 0);
+    if (listed && mode !== MODES.VALUE) return refuse(   /* r2311: beside «this machine's» refused by name too, never dropped in silence */
+      'env_sites_unoffered', 'location: sites are listed only beside a place');   // B-9584 (B): a «blocked» location gives no site anything
     if (mode === MODES.MACHINE) continue;   // this machine's: nothing kept
-    const listed = key === 'location' && c.sites != null && !(Array.isArray(c.sites) && c.sites.length === 0);
-    if (listed && mode !== MODES.VALUE) return refuse('env_sites_unoffered', 'location: sites are listed only beside a place');   // B-9584 (B): a «blocked» location gives no site anything
     if (mode !== MODES.VALUE) { out[key] = { mode }; continue; }
     const v = row.value(c.value);
     if (!v.ok) return { ...v, error: `${key}: ${v.error}` };
@@ -200,7 +201,7 @@ function resolveEnvironment(environment, exit = null) {
     else r = { from: 'machine', value: null };
     if (r.from === 'value' || r.from === 'exit') told[row.key] = row.key === 'location' ? { latitude: r.value.latitude, longitude: r.value.longitude } : r.value;
     if (r.from === 'block') told[row.key] = 'blocked';   // B-9584 U2a (主开发 r745): the kernel's hand-over now has a form for it — the word
-    if (row.key === 'location' && (r.from === 'value' || r.from === 'exit')) { const sv = sitesVerdict(c && c.sites); geolocation = { kind: 'place', latitude: r.value.latitude, longitude: r.value.longitude, accuracy: r.value.accuracy != null ? r.value.accuracy : PLACE_ACCURACY_M, sites: sv.ok ? sv.value : [] }; }   // B-9584 (B): the sites judged again at use — a list that no longer passes gives NO site the place (fail closed)
+    if (row.key === 'location' && (r.from === 'value' || r.from === 'exit')) { const sv = r.from === 'value' ? sitesVerdict(c && c.sites) : { ok: false }; geolocation = { kind: 'place', latitude: r.value.latitude, longitude: r.value.longitude, accuracy: r.value.accuracy != null ? r.value.accuracy : PLACE_ACCURACY_M, sites: sv.ok ? sv.value : [] }; }   /* r2311: the sites only beside a place the person SET, as at the door */   // B-9584 (B): the sites judged again at use — a list that no longer passes gives NO site the place (fail closed)
     if (row.key === 'location' && r.from === 'block') geolocation = { kind: 'blocked' };
     if (r.said) unfollowed.push({ key: row.key, mode, said: r.said });
     settings.push({ key: row.key, mode, from: r.from, value: r.value, said: r.said || null });
@@ -269,6 +270,9 @@ function geoStoredDenial(prefs, { stamp = null } = {}) {
 }
 /** Give the person's own values back (the location is «this machine's» again): the default and each row still there, as they were;
  *  a row added since stays as Chrome keeps it. PURE → { ok, changed, prefs }. */
+/** r2311: the stamps that are OURS — the last denial's and the one before it (`prev`: a later launch wrote its kept file, then a crash
+ *  kept its Preferences from being written: the rows still carry the earlier stamp, never the person's). PURE. */
+function oursStamp(kept, lm) { return lm != null && !!kept && (String(lm) === String(kept.stamp) || (kept.prev != null && String(lm) === String(kept.prev))); }
 function geoStoredRestore(prefs, kept) {
   if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return { ok: false, why: 'its Preferences are not an object' };
   if (!kept || typeof kept !== 'object') return { ok: false, why: 'nothing kept to give back' };
@@ -285,7 +289,7 @@ function geoStoredRestore(prefs, kept) {
     if (!row || typeof row !== 'object') continue;
     // r2172 (b)(d): only a row still as OUR denial left it — our stamp (or, from a kept file without one, still «block»); a row the
     // person changed since keeps the person's value, whatever it is
-    if (kept.stamp ? String(row.last_modified) !== String(kept.stamp) : row.setting !== GEO_BLOCK) continue;
+    if (kept.stamp ? !oursStamp(kept, row.last_modified) : row.setting !== GEO_BLOCK) continue;
     if (setting === null) { if ('setting' in row) { delete row.setting; changed = true; } }
     else if (row.setting !== setting) { row.setting = setting; changed = true; }
     if (kept.stamp) { const lm = kept.stamps && Object.prototype.hasOwnProperty.call(kept.stamps, key) ? kept.stamps[key] : null; if (lm === null) delete row.last_modified; else row.last_modified = lm; changed = true; }   // its own stamp back: never ours again
@@ -294,16 +298,34 @@ function geoStoredRestore(prefs, kept) {
 }
 /** B-9584 U2c follow (主开发 r1707 (3)): THE PERSON'S OWN SETTINGS ARE NEVER LOST — a site the person allowed in Chrome's own settings
  *  WHILE the profile was held is theirs too: at each later held launch a row the kept values lack, and whose setting is not «block»,
- *  joins them (`found` = geoStoredDenial's `kept` of that launch). A row kept before keeps its FIRST value, never a denial's over it;
- *  the default keeps its first. PURE → { ok, changed, kept }; kept values of another shape are refused, never merged into. */
+ *  joins them (`found` = geoStoredDenial's `kept` of that launch). A row kept before keeps its FIRST value while it is still OURS
+ *  (it carries one of our stamps — the last denial's or the one before it), never a denial's over it; a row the PERSON changed since
+ *  our last denial (any other stamp; without stamps, anything but «block») takes the person's value and stamp (r2311 must (1): a
+ *  block they set while held gives back a block). The default: the person's when it reads anything but our «block». The kept
+ *  file carries this launch's stamp and the one before (`prev`). PURE → { ok, changed, kept }; another shape refused. */
 function geoKeptMerge(kept, found) {
   if (!kept || typeof kept !== 'object' || Array.isArray(kept) || (kept.rows !== undefined && (!kept.rows || typeof kept.rows !== 'object' || Array.isArray(kept.rows)))) return { ok: false, why: 'the kept values are not of their shape' };
-  const out = { default: Object.prototype.hasOwnProperty.call(kept, 'default') ? kept.default : null, rows: { ...(kept.rows || {}) }, ...(found && found.stamp ? { stamp: found.stamp, stamps: { ...((found && found.stamps) || {}), ...(kept.stamps || {}) } } : kept.stamp ? { stamp: kept.stamp, stamps: { ...(kept.stamps || {}) } } : {}) };   // r2172: the stamp of THIS launch's denial (the rows carry it now)
+  const stamped = !!(found && found.stamp);
+  const out = { default: Object.prototype.hasOwnProperty.call(kept, 'default') ? kept.default : null, rows: { ...(kept.rows || {}) },
+    ...(stamped ? { stamp: found.stamp, ...(kept.stamp && String(kept.stamp) !== String(found.stamp) ? { prev: kept.stamp } : kept.prev != null ? { prev: kept.prev } : {}), stamps: { ...(kept.stamps || {}) } }
+      : kept.stamp ? { stamp: kept.stamp, ...(kept.prev != null ? { prev: kept.prev } : {}), stamps: { ...(kept.stamps || {}) } } : {}) };   // r2172: the stamp of THIS launch's denial (the rows carry it now)
+  const fstamps = (found && found.stamps) || {};
   let changed = false;
   for (const [key, setting] of Object.entries((found && found.rows) || {})) {
-    if (Object.prototype.hasOwnProperty.call(out.rows, key) || setting === GEO_BLOCK) continue;
-    out.rows[key] = setting; changed = true;
+    const lm = Object.prototype.hasOwnProperty.call(fstamps, key) ? fstamps[key] : null;
+    if (!Object.prototype.hasOwnProperty.call(out.rows, key)) {   // a row the kept values lack: the person's, unless it blocks (it stays as Chrome keeps it)
+      if (setting === GEO_BLOCK) continue;
+      out.rows[key] = setting; if (out.stamps && stamped) out.stamps[key] = lm; changed = true; continue;
+    }
+    // r2311 MUST (1): A ROW THE PERSON CHANGED SINCE OUR LAST DENIAL — its stamp at this launch is none of ours (or, from a kept
+    // file without stamps, it reads anything but our «block») — is the PERSON's now: its value and its own stamp are kept, so a
+    // block they set while held gives back a block (an «ask» an «ask»), never the first value; a row still ours keeps its first
+    const persons = kept.stamp && stamped ? !oursStamp(kept, lm) : setting !== GEO_BLOCK;
+    if (!persons || (out.rows[key] === setting && (!out.stamps || out.stamps[key] === lm))) continue;
+    out.rows[key] = setting; if (out.stamps && stamped) out.stamps[key] = lm; changed = true;
   }
+  // the default has no stamp of its own: anything but our «block» at this launch is the person's change since our last denial
+  if (found && Object.prototype.hasOwnProperty.call(found, 'default') && found.default !== GEO_BLOCK && found.default !== out.default) { out.default = found.default; changed = true; }
   if (found && found.stamp && found.stamp !== kept.stamp) changed = true;   // a new launch's stamp is written beside the values
   return { ok: true, changed, kept: out };
 }

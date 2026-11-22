@@ -11,10 +11,10 @@
 //   ④ THE ONE READER of the kept exit
 //   ⑤ WHAT EACH SETTING IS — told (the hand-over's own object, or null), geolocation, unfollowed, case by case
 //   ⑥ THE SEEDED LAW — 3 seeds × 400 environments × exits; the facts judged printed
-//   ⑦ REDS — fourteen mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
+//   ⑦ REDS — fifteen mutants of the module (through anchored()), each judged by the same legs (the ninth, round wyx4vuerd: a kept value
 //      used raw at a start — the hostile-values leg goes red; the tenth, B-9584 U2c: the stored denial writing the default only; the
 //      eleventh, r1707 (3): the kept values merged with a later launch's value over the first; the twelfth and thirteenth, B-9584 (B):
-//      a wildcard taken as a site, the log carrying the sites; the fourteenth, r2172 (b): a give-back over the person's later block)
+//      a wildcard taken as a site, the log carrying the sites; the fourteenth, r2172 (b): a give-back over the person's later block; the fifteenth, r2311 (1): the merge over two held launches as it was)
 // The runtime decides two facts here: a zone name (its date formatter) and a language tag (Intl.getCanonicalLocales, its ICU data);
 // where the runtime's own spelling is the expected value (a legacy alias, Etc/UTC, a three-letter code), the leg asks the runtime.
 import fs from 'node:fs';
@@ -189,8 +189,8 @@ function legs(M) {
   { const kept0 = { default: null, rows: { 'https://maps.example:443,*': 1 } };
     const found = { default: 2, rows: { 'https://maps.example:443,*': 3, 'https://shop.example:443,*': 1, 'https://block.example:443,*': 2 } };
     const m1 = M.geoKeptMerge(kept0, found), m0 = M.geoKeptMerge(kept0, { default: 2, rows: { 'https://maps.example:443,*': 2 } }), bad = M.geoKeptMerge([1], found), bad2 = M.geoKeptMerge({ rows: [1] }, found);
-    leg('U2c the kept values merged at a later held launch: a site allowed while held joins them (shop 1), the one kept before keeps its FIRST value (maps 1, never the 3 seen later), a «block» row is not kept, the default its first; nothing new ⇒ unchanged; another shape refused',
-      m1.ok && m1.changed && J(m1.kept) === J({ default: null, rows: { 'https://maps.example:443,*': 1, 'https://shop.example:443,*': 1 } }) && J(kept0.rows) === J({ 'https://maps.example:443,*': 1 })
+    leg('U2c the kept values merged at a later held launch: a site allowed while held joins them (shop 1); a kept row the PERSON changed since our denial is theirs now (maps «ask» 3 — without stamps, anything but our «block»; r2311 (1)); a kept row still our «block» keeps its FIRST value; a new «block» row is not kept; the default its first while it reads our «block»; nothing new ⇒ unchanged; another shape refused',
+      m1.ok && m1.changed && J(m1.kept) === J({ default: null, rows: { 'https://maps.example:443,*': 3, 'https://shop.example:443,*': 1 } }) && J(kept0.rows) === J({ 'https://maps.example:443,*': 1 })
       && m0.ok && !m0.changed && !bad.ok && !bad2.ok, { m1: m1.kept, m0 }); }
   // B-9584 (B, the owner's choice; 主开发 r1898 (5)(6)): THE SITES A PLACE IS GIVEN TO — each an EXACT origin, default none, judged at the
   // door and again at use, the log by their count only
@@ -199,18 +199,34 @@ function legs(M) {
     const refusedSites = ['*.example.com', 'https://*.example.com', 'example.com', 'ftp://example.com', 'https://u:p@example.com', ' ', 'https://a b.com'].every((x) => !sv(x).ok);
     const list = ss(['https://b.example', 'https://a.example/x', 'https://b.example/']);
     const tooMany = ss(Array.from({ length: M.SITES_MAX + 1 }, (_, i) => `https://s${i}.example`));
-    const place = { mode: 'value', value: { latitude: 35.6762, longitude: 139.6503 } };
+    const place = { mode: 'value', value: { latitude: 10, longitude: 20 } };   // a round made-up pair (r2311: never a real city's)
     const kept = M.environmentVerdict({ location: { ...place, sites: ['https://a.example/x'] } });
     const none = M.environmentVerdict({ location: { ...place, sites: [] } });
     const onBlock = M.environmentVerdict({ location: { mode: 'block', sites: ['https://a.example'] } });
+    const onMachine = M.environmentVerdict({ location: { mode: 'machine', sites: ['https://a.example'] } });   // r2311: refused by name, never dropped in silence
     const r = M.resolveEnvironment({ location: { ...place, sites: ['https://a.example'] } });
     const rBad = M.resolveEnvironment({ location: { ...place, sites: ['*.a.example'] } });
     const lg = J(M.environmentLogView({ location: { ...place, sites: ['https://a.example', 'https://b.example'] } }));
-    leg('(B) the sites: each an EXACT origin (a path, a query dropped; the host lower-cased, the default port dropped); a wildcard, a bare name, another scheme, a user name, a space refused by name; sorted, once each, at most SITES_MAX; kept only beside a place (none ⇒ no key; beside «blocked» refused); judged again at use (a stored list that fails gives NO site the place); the log carries the COUNT, never an origin',
+    leg('(B) the sites: each an EXACT origin (a path, a query dropped; the host lower-cased, the default port dropped); a wildcard, a bare name, another scheme, a user name, a space refused by name; sorted, once each, at most SITES_MAX; kept only beside a place (none ⇒ no key; beside «blocked» or «this machine\'s» refused by name); judged again at use (a stored list that fails gives NO site the place); the log carries the COUNT, never an origin',
       okOrigins && refusedSites && list.ok && J(list.value) === J(['https://a.example', 'https://b.example']) && !tooMany.ok
-      && kept.ok && J(kept.value.location.sites) === J(['https://a.example']) && none.ok && !('sites' in none.value.location) && !onBlock.ok && onBlock.code === 'env_sites_unoffered'
+      && kept.ok && J(kept.value.location.sites) === J(['https://a.example']) && none.ok && !('sites' in none.value.location) && !onBlock.ok && onBlock.code === 'env_sites_unoffered' && !onMachine.ok && onMachine.code === 'env_sites_unoffered'
       && J(r.geolocation.sites) === J(['https://a.example']) && J(rBad.geolocation.sites) === '[]' && /2 sites/.test(lg) && !/a\.example/.test(lg),
       { list: list.value, kept: kept.value, lg }); }
+  // r2311 MUST (1): LAW (b) OVER TWO HELD LAUNCHES — deny (stamp 999); while held the person BLOCKS b and sets c to «ask» (the browser
+  // stamps them); deny AGAIN (stamp 1999, the kept file merged); give back: b stays a block, c «ask», a (still ours) its allow; a crash
+  // between the later launch's two writes (its kept file written, its Preferences not) still gives back by the stamp before it
+  { const rows0 = { 'https://a.example:443,*': { setting: 1, last_modified: '100' }, 'https://b.example:443,*': { setting: 1, last_modified: '200' }, 'https://c.example:443,*': { setting: 1, last_modified: '300' } };
+    const d1 = M.geoStoredDenial({ profile: { content_settings: { exceptions: { geolocation: rows0 } } } }, { stamp: '999' });
+    const held = JSON.parse(JSON.stringify(d1.prefs)), hr = held.profile.content_settings.exceptions.geolocation;
+    hr['https://b.example:443,*'] = { setting: 2, last_modified: '1000' }; hr['https://c.example:443,*'] = { setting: 3, last_modified: '1001' };
+    const d2 = M.geoStoredDenial(held, { stamp: '1999' }), mg = M.geoKeptMerge(d1.kept, d2.kept);
+    const back = mg.ok ? M.geoStoredRestore(d2.prefs, mg.kept) : null, crash = mg.ok ? M.geoStoredRestore(held, mg.kept) : null;
+    const at = (x, k) => x.profile.content_settings.exceptions.geolocation[`https://${k}.example:443,*`];
+    const three = (x) => !!x && x.ok && at(x.prefs, 'a').setting === 1 && at(x.prefs, 'a').last_modified === '100' && at(x.prefs, 'b').setting === 2 && at(x.prefs, 'b').last_modified === '1000' && at(x.prefs, 'c').setting === 3 && at(x.prefs, 'c').last_modified === '1001';
+    leg('r2311 (1) law (b) over two held launches: a block the person set while held gives back a BLOCK (b), an «ask» an «ask» (c), a row still ours its allow (a); the kept file carries the person\'s value and stamp, this launch\'s stamp and the one before (1999, 999); a crash between the later launch\'s two writes gives back the same',
+      d1.ok && d2.ok && mg.ok && mg.changed && J(mg.kept.rows) === J({ 'https://a.example:443,*': 1, 'https://b.example:443,*': 2, 'https://c.example:443,*': 3 }) && mg.kept.stamp === '1999' && mg.kept.prev === '999'
+      && J(mg.kept.stamps) === J({ 'https://a.example:443,*': '100', 'https://b.example:443,*': '1000', 'https://c.example:443,*': '1001' }) && three(back) && three(crash),
+      { kept: mg.ok && mg.kept, back: back && back.ok && back.prefs.profile.content_settings.exceptions.geolocation, crash: crash && crash.ok && crash.prefs.profile.content_settings.exceptions.geolocation }); }
   // r2172 (b)(d): OURS KEPT APART FROM THE PERSON'S — the denial stamps the rows it writes; the give-back restores a row only while it
   // still carries our stamp (a person's later block stays a block; a give-back that half ran never runs again over the person's change);
   // the default only while it still reads our «block»
@@ -301,8 +317,9 @@ const REDS = [
   ['the stored denial writes the default only (a site allowed before keeps its «allow» and wins — measured)', ['    if (row.setting !== GEO_BLOCK) { row.setting = GEO_BLOCK; changed = true; }', '    void 0;'], 'U2c the stored denial', null],
   ['a site matched by a pattern (a wildcard taken as a site)', ["  if (/[*\\s]/.test(t)) return refuse(", "  if (/\\s/.test(t)) return refuse("], '(B) the sites', null],
   ['the log carrying the sites (an origin in a log line)', ["? ` · ${c.sites.length} site${c.sites.length === 1 ? '' : 's'}` : ''}`", "? ` · ${c.sites.join(',')}` : ''}`"], '(B) the sites', null],
-  ['a give-back over the person\'s later block (the stamp not read)', ["    if (kept.stamp ? String(row.last_modified) !== String(kept.stamp) : row.setting !== GEO_BLOCK) continue;", "    void 0;"], 'r2172 (b)(d) ours apart', null],
-  ['a later launch\'s value over the first one kept (the merge takes a row it had)', ['    if (Object.prototype.hasOwnProperty.call(out.rows, key) || setting === GEO_BLOCK) continue;', '    if (setting === GEO_BLOCK) continue;'], 'U2c the kept values merged', null],
+  ['a give-back over the person\'s later block (the stamp not read)', ["    if (kept.stamp ? !oursStamp(kept, row.last_modified) : row.setting !== GEO_BLOCK) continue;", "    void 0;"], 'r2172 (b)(d) ours apart', null],
+  ['the merge over two held launches as it was (a kept row keeps its first value, the person\'s later block lost)', ['    const persons = kept.stamp && stamped ? !oursStamp(kept, lm) : setting !== GEO_BLOCK;', '    const persons = false;'], 'r2311 (1) law (b) over two held launches', null],
+  ['a later launch\'s value over the first one kept (the merge takes a row still OURS — our own «block» over the person\'s first value)', ['    const persons = kept.stamp && stamped ? !oursStamp(kept, lm) : setting !== GEO_BLOCK;', '    const persons = true;'], 'U2c the kept values merged', null],
   ['a kept value used raw at a start (the judgment at use bypassed)', ['    if (mode === MODES.VALUE) { const v = row.value(c.value);', '    if (mode === MODES.VALUE) { const v = { ok: true, value: c.value };'], 'U2b hostile stored values at use', null],
   ['a hex or an exponent read as a number', ["typeof x === 'string' && DECIMAL.test(x.trim()) ? Number(x.trim()) : NaN", "typeof x === 'string' && x.trim() !== '' ? Number(x.trim()) : NaN"], '③ refused by name: a hex latitude', null],
 ];

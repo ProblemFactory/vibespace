@@ -421,6 +421,31 @@ function liveFillCdpVerdict(method, { allowVerb = null, params = null, holdReaso
  *   · law 'whole-profile-window' (Browser.setDownloadBehavior): a context of the lease's own ⇒ forwarded as it is; another's ⇒
  *     refused; 'deny' ⇒ refused (it blocks every download of the person's); otherwise THE WINDOW decides (windowStep, below).
  */
+/**
+ * B-9584 (B), 主开发 r2311 (3)(4): A PROFILE HELD TO A PLACE OR «BLOCKED» — an agent never sets or clears a tab's position and never
+ * gives the location permission, on either road. On a LISTED site's tab, a cleared position leaves the hold's grant with NO position
+ * (this machine's real one; automation libraries send that clear in ordinary use); a «granted» in a browser context of the agent's
+ * own is an allow beside the person's list (an unlisted site reads the place) and, while the hold is down, a site with no position at
+ * all. Refused BY NAME (`place_held`); every other permission as before. `place` = the keeper's live answer (the profile's location
+ * kind, or null), asked only for these calls — PURE but for that callback.
+ */
+const GEO_POSITION_METHODS = new Set(['Emulation.setGeolocationOverride', 'Emulation.clearGeolocationOverride', 'Page.setGeolocationOverride', 'Page.clearGeolocationOverride']);
+function asksGeolocation(method, params) {
+  if (GEO_POSITION_METHODS.has(method)) return true;
+  const p = params && typeof params === 'object' ? params : {};
+  if (method === 'Browser.setPermission') return !!p.permission && typeof p.permission === 'object' && String(p.permission.name) === 'geolocation';
+  if (method === 'Browser.grantPermissions') return Array.isArray(p.permissions) && p.permissions.map(String).includes('geolocation');
+  return false;
+}
+function placeVerdict(msg, place) {
+  const method = msg && typeof msg.method === 'string' ? msg.method : '';
+  if (!asksGeolocation(method, msg && msg.params)) return null;
+  let held = null; try { held = typeof place === 'function' ? place() : place; } catch { held = null; }
+  if (!held) return null;
+  const sid = msg.sessionId == null ? null : String(msg.sessionId);
+  const what = GEO_POSITION_METHODS.has(method) ? "would set or clear a tab's position" : 'would give a site the location';
+  return { kind: 'refuse', why: 'place_held', reply: refusal(msg.id, 'place_held', `${method} ${what} — this profile's location is set by the person (${held === 'blocked' ? '«blocked»' : 'a place, given only to the sites on its list'}, in its Environment); an agent never changes it here`, sid) };
+}
 const LAW_OF = new Map(CENSUS.rows().filter((r) => r.law).map((r) => [r.domain + '.' + r.method, r]));
 const LAW_HEAD = "on a profile a person shares with agents it would act on the WHOLE profile (lane chrome-157, the owner's law)";
 function wholeProfileVerdict(msg, scope, { road = MEDIATED_MODE } = {}) {
@@ -758,7 +783,7 @@ function refusalCodeOf(reply) {
  * `paused` is the live input side (true = the user drives). A refusal carries `why`
  * (the census class, or 'unclassified'). The retired `fenceScripts` option is ignored.
  */
-function judge(msg, scope, { paused = false, browser = null } = {}) {
+function judge(msg, scope, { paused = false, browser = null, place = null } = {}) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return { kind: 'drop', why: 'not an object' };
   const id = msg.id;
   const method = typeof msg.method === 'string' ? msg.method : '';
@@ -768,6 +793,7 @@ function judge(msg, scope, { paused = false, browser = null } = {}) {
   if (id == null) return { kind: 'drop', why: 'no id' };
   if (sid && !scope.sessions.has(sid)) return { kind: 'refuse', reply: refusal(id, 'session_out_of_scope', `CDP session ${sid} was not handed to this lease`, sid) };
   { const wp = wholeProfileVerdict(msg, scope, { road: MEDIATED_MODE }); if (wp) return wp; }   // (lane chrome-157: the one whole-profile verdict)
+  { const pv = placeVerdict(msg, place); if (pv) return pv; }   // B-9584 (B), r2311 (3)(4): a held place is the person's
   if (ALWAYS_REFUSED.has(method)) return { kind: 'refuse', why: 'refused', reply: refusal(id, 'method_refused', `${method} ${ALWAYS_REFUSED_WHY[method] || 'acts on the whole shared browser — not through a session url'}`, sid) };
   if (!CENSUS.hasRow(method)) {   // (lane chrome-157: both driving states; r2: one Set lookup a message, the name's SHAPE judged first)
     if (!methodShaped(method)) return { kind: 'refuse', why: 'malformed', reply: refusal(id, 'bad_message', malformedWords(method), sid) };
@@ -817,12 +843,13 @@ function judge(msg, scope, { paused = false, browser = null } = {}) {
 // an explicit attach by id (the keeper's bind, `tab <targetId>`) admits that target.
 const SCOPE_MODE = 'scope', MEDIATED_MODE = 'mediated';
 /** The scope road's judge (PURE): `{kind:'forward', pending}` for every CDP call, `drop` for what is not one. */
-function judgeScope(msg, scope = null) {
+function judgeScope(msg, scope = null, { place = null } = {}) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return { kind: 'drop', why: 'not an object' };
   const method = typeof msg.method === 'string' ? msg.method : '';
   if (msg.id == null) return { kind: 'drop', why: method ? 'no id' : 'no method' };
   if (!method) return { kind: 'refuse', reply: refusal(msg.id, 'bad_message', 'a CDP call names a method', msg.sessionId == null ? null : String(msg.sessionId)) };
   { const wp = wholeProfileVerdict(msg, scope, { road: SCOPE_MODE }); if (wp) return wp; }   // (lane chrome-157, 主开发 2026-11-13: the law reaches the scope road — the ONE verdict; nothing else of the census here)
+  { const pv = placeVerdict(msg, place); if (pv) return pv; }   // B-9584 (B), r2311 (3)(4): the same on the scope road
   return { kind: 'forward', pending: { method, params: msg.params && typeof msg.params === 'object' ? msg.params : {}, sessionId: msg.sessionId == null ? null : String(msg.sessionId) }, explicit: true };
 }
 /**
@@ -1074,7 +1101,7 @@ module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX, withhold, replayOnAdmit, // B-70af: the out-of-band admission's replay
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
-  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, windowToldText, NO_WINDOW_TOLD, OTHER_WINDOW_TOLD, PLACE_UNKNOWN_TOLD, OWN_CONTEXT_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, placeVerdict, GEO_POSITION_METHODS, windowStep, windowToldText, NO_WINDOW_TOLD, OTHER_WINDOW_TOLD, PLACE_UNKNOWN_TOLD, OWN_CONTEXT_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   LIVE_FILL_CODE, LIVE_FILL_REFUSED_DOMAINS, LIVE_FILL_CLOSED_METHODS, LIVE_FILL_EVENTS_ALLOWED, liveFillEventAllowed, LIVE_FILL_ALLOWED_CLASSES, LIVE_FILL_VERB_METHODS, isAllowedVerbScript, fencedReadResult, liveFillCdpVerdict, // lane vault-login-chrome r3+r4+r5+r28: census-class CDP fence + dropped page read events while a vault secret stands filled in the tab
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,

@@ -31,6 +31,9 @@ const BOUND_MS = 3000;
 const CLOSE_MS = 2000;
 /** The arm's own bound: the socket, the auto-attach, every tab already open. */
 const ARM_MS = 8000;
+/** r2311 (small): the grant phase's OWN bound — every context's every-origin denial and its listed grants, all calls together (a
+ *  browser that stops answering held the arm about a minute for twenty sites); a grant not sent by then is counted, never retried. */
+const GRANT_MS = 5000;
 /** The hold's tries again after its socket went, while its browser lives (then `down`). */
 const REARM_MS = Object.freeze([250, 1000, 4000]);
 
@@ -51,7 +54,7 @@ function planOf(geolocation) {
   return { kind: 'place', latitude: lat, longitude: lng, accuracy: acc, sites: sv.ok ? sv.value : [] };
 }
 
-function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = BOUND_MS, closeMs = CLOSE_MS, armMs = ARM_MS, rearmMs = REARM_MS, onEvent = null } = {}) {
+function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = BOUND_MS, closeMs = CLOSE_MS, armMs = ARM_MS, rearmMs = REARM_MS, grantMs = GRANT_MS, onEvent = null } = {}) {
   const holds = new Map();
   const say = (m) => { try { log.log?.(`[browser] ${m}`); } catch { /* a log that throws says nothing */ } };
   const emit = (ev) => { if (typeof onEvent === 'function') { try { onEvent(ev); } catch (e) { say(`the place hold's listener failed — ${e && e.message}`); } } };
@@ -88,7 +91,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
         const cl = await call(h, 'Target.closeTarget', { targetId: tid }, null, closeMs);
         if (h.state === 'gone' || h.ws !== ws0) return false;
         const shut = fine(cl) && !(cl.result && cl.result.success === false);
-        if (!shut) h.dirty.add(ctx);   // a tab that could not be closed keeps its context WITHOUT grants (its listed sites read «denied»)
+        if (!shut) await taintCtx(h, ctx);   // a tab that could not be closed: its context WITHOUT grants — taken back if it had them (r2311 (2))
         say(`${h.profileId}: a tab ${paused ? 'opened' : 'open'} without its place was ${shut ? 'CLOSED' : 'not closed (its browser context gets no grant)'} — a site on its list there would have read this machine's location`);
         emit({ kind: 'closed', profileId: h.profileId, targetId: tid, why, shut, at: now(), opened: !!paused });
         return false;
@@ -96,7 +99,8 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
       say(`${h.profileId}: a tab ${paused ? 'opened' : 'open'} without its place — the browser ${why === 'refused' ? 'refused' : 'did not answer in ' + Math.round(boundMs / 1000) + ' s for'} it; it is denied the location (the profile's own setting), never given this machine's`);
       emit({ kind: 'unplaced', profileId: h.profileId, why, at: now(), opened: !!paused });
     }
-    if (placed && h.state === 'held' && !h.granted.has(ctx)) await grantCtx(h, ctx);   // a new context: its grants after this tab's place, before its release
+    if (placed && h.state === 'held') await grantCtx(h, ctx);   // a new context: its grants after this tab's place, before its release — a grant still IN FLIGHT
+                                                               // for its context (a second tab born with the first) is awaited too (r2311)
     if (h.state === 'gone' || h.ws !== ws0) return placed;
     // r1898 (7), measured on a real browser: while an arm or a RE-ARM runs, a placed tab waits for its context's grants — a tab its dead
     // socket left paused, released at its place, read «denied» on its listed site before the grant came; the open handler releases it
@@ -108,17 +112,47 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
    *  «denied» from the stored setting, never this machine's position): every origin «denied» (over anything the browser stores, an
    *  allow given in its own bar included, while the hold lives), then each LISTED site «granted» (an exact origin; the tabs it can
    *  read from already hold the place). Never for a context that kept a tab the hold could neither place nor close. */
-  async function grantCtx(h, ctx) {
-    if (h.granted.has(ctx) || h.dirty.has(ctx)) return false;
-    h.granted.add(ctx);
+  function grantCtx(h, ctx, deadline = now() + grantMs) {
+    if (h.dirty.has(ctx)) return Promise.resolve(false);
+    if (h.granting.has(ctx)) return h.granting.get(ctx);   // r2311: ONE job a context — a second tab waits for the first one's grants
+    const job = grantJob(h, ctx, deadline);
+    h.granting.set(ctx, job);
+    return job;
+  }
+  async function grantJob(h, ctx, deadline) {
     const at = ctx ? { browserContextId: ctx } : {};
-    const d = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', ...at });
+    const ms = () => Math.max(1, Math.min(boundMs, deadline - now()));   // r2311 (small): the phase's own bound, never a call's bound per site
+    if (now() >= deadline) { h.ungranted += h.plan.sites.length; say(`${h.profileId}: no grant was sent in a browser context in time — its listed sites read «denied»`); return true; }
+    const d = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', ...at }, null, ms());
     if (!fine(d)) say(`${h.profileId}: the every-origin denial was not set on its browser (${d && d.timeout ? 'no answer' : 'refused'}) — the profile's own stored denial stands under it`);
     for (const origin of h.plan.sites) {
-      const g = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'granted', origin, ...at });
+      if (h.dirty.has(ctx)) return true;   // tainted meanwhile: no more grants here (taintCtx takes back what was given)
+      if (now() >= deadline) { h.ungranted++; say(`${h.profileId}: a listed site was not granted its place in time — it reads «denied»`); continue; }
+      const g = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'granted', origin, ...at }, null, ms());
       if (!fine(g)) { h.ungranted++; say(`${h.profileId}: a listed site was not granted its place (${g && g.timeout ? 'no answer' : 'refused'}) — it reads «denied»`); }
     }
     return true;
+  }
+
+  /** r2311 MUST (2): A CONTEXT HOLDING A TAB THE HOLD COULD NEITHER PLACE NOR CLOSE has no grant — and if it had them (a grant given
+   *  or in flight before that tab came), each listed origin is set back to «denied» there AT ONCE: a listed site in that tab would
+   *  otherwise run granted with no position set, i.e. read this machine's. */
+  async function taintCtx(h, ctx) {
+    h.dirty.add(ctx);
+    const job = h.granting.get(ctx);
+    if (!job) return;
+    await job;
+    const at = ctx ? { browserContextId: ctx } : {};
+    let back = 0;
+    for (const origin of h.plan.sites) { const r = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin, ...at }); if (fine(r)) back++; }
+    say(`${h.profileId}: a browser context holds a tab without its place — its listed sites set back to «denied» (${back} of ${h.plan.sites.length})`);
+  }
+  /** THE ARM's GRANTS (r1898 (7)): every context seen, until none is left without its grants — a context first seen while they
+   *  were being given is granted too (r2311), all within the phase's own bound. */
+  async function grantAll(h, deadline) {
+    for (let todo = [...h.ctxs].filter((c) => !h.granting.has(c) && !h.dirty.has(c)); todo.length; todo = [...h.ctxs].filter((c) => !h.granting.has(c) && !h.dirty.has(c))) {
+      for (const c of todo) await grantCtx(h, c, deadline);
+    }
   }
 
   function onMessage(h, d) {
@@ -147,7 +181,9 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
       if (!LOOPBACK.test(String(url || ''))) return done({ ok: false, code: 'place_not_held', error: 'the browser answered no loopback debugging address' });
       try { ws = new WebSocketImpl(url, { perMessageDeflate: false, handshakeTimeout: Math.min(armMs, 5000), maxPayload: 4 * 1024 * 1024 }); } catch (e) { return done({ ok: false, code: 'place_not_held', error: String(e && e.message) }); }
       h.ws = ws; h.id = 0; h.waiting = new Map(); h.tabs = new Map(); h.pending = new Set(); h.seen = new Set();
-      h.ctxs = new Set(['']); h.granted = new Set(); h.dirty = new Set(); h.release = new Set();   // B-9584 (B): grants live on THIS socket only — a new one starts with none
+      h.ctxs = new Set(); h.granting = new Map(); h.dirty = new Set(); h.release = new Set();   // B-9584 (B): grants live on THIS socket only — a new one starts with none;
+      // r2311 (2): NO '' seed — a grant with no context id IS the default context's, and the browser names that context by its id too, so
+      // a seeded '' was granted even when the default context's own id was tainted; '' is now only a target that names no context
       const tArm = timer(() => { try { ws.terminate ? ws.terminate() : ws.close(); } catch { /* gone */ } done({ ok: false, code: 'place_not_held', error: `the browser did not take this profile's place within ${Math.round(armMs / 1000)} s` }); }, armMs);   // its socket goes with it: never a second auto-attach beside the next try
       ws.on('message', (d) => { try { onMessage(h, d); } catch (e) { say(`${h.profileId}: a place hold event was not handled — ${e && e.message}`); } });
       ws.on('error', () => { /* the close follows */ });
@@ -169,7 +205,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
         if (h.state === 'gone') return done({ ok: false, code: 'place_not_held', error: 'disarmed' });
         if (h.ws !== ws || ws.readyState !== 1) return done({ ok: false, code: 'place_not_held', error: 'the browser closed the place hold' });   // r1707 (7): it went meanwhile — never a false «held» (its close re-arms)
         // B-9584 (B, 主开发 r1898 (7)): every open tab holds the place (or is closed) — ONLY NOW each context's grants, on this socket
-        for (const c of [...h.ctxs]) await grantCtx(h, c);
+        await grantAll(h, now() + grantMs);
         if (h.ws !== ws || ws.readyState !== 1) return done({ ok: false, code: 'place_not_held', error: 'the browser closed the place hold' });
         for (const s of h.release) call(h, 'Runtime.runIfWaitingForDebugger', {}, s, closeMs);   // the arm's placed tabs: only now, their grants set
         h.release.clear();
@@ -212,7 +248,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
     const u0 = typeof url === 'function' ? url() : url;
     if (typeof u0 !== 'string' || !LOOPBACK.test(u0)) return { ok: false, code: 'place_not_held', error: 'the browser answered no loopback debugging address' };
     disarm(pid, 'armed again');
-    const h = { profileId: pid, url, plan: pl, state: 'arming', after, unplaced: 0, ungranted: 0, heldAt: 0, lostAt: 0, rearming: false, ctxs: new Set(['']), granted: new Set(), dirty: new Set() };
+    const h = { profileId: pid, url, plan: pl, state: 'arming', after, unplaced: 0, ungranted: 0, heldAt: 0, lostAt: 0, rearming: false, ctxs: new Set(), granting: new Map(), dirty: new Set() };
     holds.set(pid, h);
     const r = await connect(h);
     if (!r.ok && holds.get(pid) === h) { h.state = 'gone'; holds.delete(pid); try { h.ws && h.ws.close(); } catch { /* */ } }
@@ -243,4 +279,4 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
   return { arm, disarm, heldOf, factOf, rearmNow, dispose, _holds: holds };
 }
 
-module.exports = { create, overrideOf, planOf, DOCUMENT_TYPES, BOUND_MS, CLOSE_MS, ARM_MS, REARM_MS };
+module.exports = { create, overrideOf, planOf, DOCUMENT_TYPES, BOUND_MS, CLOSE_MS, ARM_MS, REARM_MS, GRANT_MS };

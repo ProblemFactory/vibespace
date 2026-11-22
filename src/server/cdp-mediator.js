@@ -292,7 +292,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         credit = tc.credit;
       }
       // the owner's ruling (2026-09-27): no switch — every class but read / session / harmless is refused while the user drives
-      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg, g.scope) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: conn.browser });   // (lane chrome-157: the browser's version names itself in an unclassified refusal; r2: this connection's) // lane browser-shared-profile-freeze: the scope road passes every call
+      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg, g.scope, { place: g.place || null }) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: conn.browser, place: g.place || null });   // (lane chrome-157: the browser's version names itself in an unclassified refusal; r2: this connection's) // lane browser-shared-profile-freeze: the scope road passes every call
       if (v.kind === 'refuse') {
         g.refusals = (g.refusals || 0) + 1;
         // a method the census does not list was refused (lane chrome-157: whoever drives) — said in the hub's journal ONCE per method
@@ -602,7 +602,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
   /** ONE grant per (profile, conversation): minted on first ask, re-used
    *  after (the upstream and the paused reader refreshed; the scope KEPT — a
    *  lease that re-attaches keeps its tabs; `targetIds` are ADDED). */
-  async function grantFor({ profileId, browserKey, upstream = null, targetIds = [], paused = null, mode = M.MEDIATED_MODE } = {}) {
+  async function grantFor({ profileId, browserKey, upstream = null, targetIds = [], paused = null, place = null, mode = M.MEDIATED_MODE } = {}) {
     if (!profileId || !browserKey) throw Object.assign(new Error('a grant names a profile and a conversation'), { code: 'bad-request' });
     await listen();
     { const pend = adopting.get(String(profileId)); if (pend) await Promise.race([pend, new Promise((res) => { const t = setTimeout(res, ADOPT_WAIT_MS); if (t.unref) t.unref(); })]); }   // (lane chrome-157, W6: the adoption's put-back before the first grant)
@@ -616,6 +616,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     for (const t of targetIds || []) admitInto(g, t);
     g.mode = mode === M.SCOPE_MODE ? M.SCOPE_MODE : M.MEDIATED_MODE; // lane browser-shared-profile-freeze: the road the keeper judged (leaseRoadVerdict)
     if (typeof paused === 'function') g.paused = paused;
+    if (typeof place === 'function') g.place = place;   // B-9584 (B), r2311 (3)(4): the profile's location kind, read live at a geolocation call
     if (upstream !== undefined && upstream !== g.upstream) repointGrant(g, upstream);
     return { token: g.token, url: M.mediatedBrowserUrl({ port, token: g.token }), httpBase: M.mediatedHttpBase({ port, token: g.token }), view: view(g) };
   }

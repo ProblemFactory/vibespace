@@ -639,6 +639,28 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
     return { M: Mx, MED: MEDx };
   };
   const only = (pairs) => (r) => pairs.some(([st, act]) => r.state === st && r.act === act);
+  // B-9584 (B), 主开发 r2311 (3)(4): A PROFILE HELD TO A PLACE OR «BLOCKED» — an agent's position calls (set / clear, both domains) and
+  // the LOCATION permission (set, grant — in a context of its own) refused BY NAME on both roads; every other permission as before;
+  // nothing refused while the profile holds no place; the keeper's answer asked only at such a call
+  {
+    const GEO = [['Emulation.setGeolocationOverride', { latitude: 1, longitude: 2, accuracy: 10 }], ['Emulation.clearGeolocationOverride', {}], ['Page.setGeolocationOverride', { latitude: 1, longitude: 2, accuracy: 10 }], ['Page.clearGeolocationOverride', {}],
+      ['Browser.setPermission', { browserContextId: 'CTX-MINE', permission: { name: 'geolocation' }, setting: 'granted', origin: 'https://a.example' }], ['Browser.grantPermissions', { browserContextId: 'CTX-MINE', permissions: ['notifications', 'geolocation'] }]];
+    const placeLeg = (Mx) => {
+      const two = (m, params, place) => [Mx.judge({ id: 21, method: m, params }, sc, { place }), Mx.judgeScope({ id: 22, method: m, params }, sc, { place })];
+      const refused = (place) => GEO.every(([m, p]) => two(m, p, place).every((v) => v.kind === 'refuse' && Mx.refusalCodeOf(v.reply) === 'place_held' && v.reply.error.message.includes(m) && /set by the person/.test(v.reply.error.message)));
+      const others = two('Browser.setPermission', { browserContextId: 'CTX-MINE', permission: { name: 'notifications' }, setting: 'granted', origin: 'https://a.example' }, () => 'place').every((v) => v.kind === 'forward')
+        && two('Browser.grantPermissions', { browserContextId: 'CTX-MINE', permissions: ['notifications'] }, () => 'blocked').every((v) => v.kind === 'forward');
+      const free = GEO.every(([m, p]) => two(m, p, () => null).every((v) => v.kind === 'forward'));
+      let asked = 0; two('Page.navigate', { url: 'about:blank' }, () => { asked++; return 'place'; });
+      return refused(() => 'place') && refused(() => 'blocked') && others && free && asked === 0;
+    };
+    ok(placeLeg(M), 'r2311 (3)(4) a profile held to a place or «blocked»: an agent\'s set / clear of a tab\'s position (Emulation and Page) and the LOCATION permission (setPermission, grantPermissions — in a context of its own) refused by name (place_held) on BOTH roads; another permission forwarded; nothing refused while no place is held; the keeper asked only at such a call');
+    const placeA = "  { const pv = placeVerdict(msg, place); if (pv) return pv; }   // B-9584 (B), r2311 (3)(4): a held place is the person's\n";
+    const placeSA = "  { const pv = placeVerdict(msg, place); if (pv) return pv; }   // B-9584 (B), r2311 (3)(4): the same on the scope road\n";
+    ok(bmSrcW.split(placeA).length === 2 && bmSrcW.split(placeSA).length === 2, 'r2311 control setup: the place verdict\'s two calls are each spelled once');
+    const { M: Mnp } = withM(bmSrcW.replace(placeA, '').replace(placeSA, ''), 'no-place-verdict');
+    ok(!placeLeg(Mnp), 'r2311 CONTROL: the roads without the place verdict — an agent clears a listed tab\'s position or grants the location: the leg above goes RED');
+  }
   const c1 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW.replace(firstA, "      if (false && left.length) return { ...out, state: { ...st, began: left } };   /* MUTANT: the window closes at the FIRST completion */"), 'first-completion'), only: only([['flight2', 'endAdmitted']]) });
   ok(redOf(c1).length === 1, '⑥e CONTROL: the window closing at the FIRST completion turns «two downloads in one window» RED (behavioural — the cell flight2 × endAdmitted)', say(c1.results));
   const c2 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(editAnchor(bmSrcW, leaseA, "      if (st && st.phase === 'open') return close('the lease ended');   /* MUTANT: any lease's end closes the window */", "src/browser-mediation.js"), 'any-lease-end'), only: only([['armed', 'leaseEndM'], ['flight', 'leaseEndM']]) });

@@ -32,7 +32,7 @@ const ENVm = require('../src/browser-environment.js');
 const { ok, report } = checker();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
-const PLACE = Object.freeze({ kind: 'place', latitude: 35.6762, longitude: 139.6503, accuracy: 50 });   // a stand-in place (no person's)
+const PLACE = Object.freeze({ kind: 'place', latitude: 12.5, longitude: 45.25, accuracy: 50 });   // a stand-in place: a round made-up pair (no person's, no city's — r2311)
 const SPACING_MS = 3000, READ_MS = 1000;   // a tab a time, each in the foreground; a first read waits at most READ_MS for its answer
 const quiet = { log() { }, warn() { }, error() { } };
 
@@ -317,6 +317,26 @@ const refusedRead = (x) => !!x && x.err === 1 && x.lat === undefined;   // the r
   ok(denied(fr), `(B) (4) the listed site FRAMED inside an UNLISTED page: «denied» (the top page's own setting) (${J(fr)})`, F.B);
   ok(!!wk && wk.worker === false, `(B) (4) a WORKER of a listed page: no geolocation in it at all (${J(wk || null)})`, F.B);
   ok(denied(ot), `(B) (3) an UNLISTED site's tab: «denied», in silence (${J(ot || null)})`, F.B);
+  // r2311 (3): AN AGENT's OWN CLEAR OF A LISTED TAB's POSITION — the mediation every agent call goes through refuses it BY NAME (both
+  // roads), so the site still reads the place. FACT: the same clear sent raw by a second client on that tab (what the refusal stops);
+  // the tab closed after it
+  {
+    const MED = require('../src/browser-mediation.js');
+    const tg = await c.cdp.send('Target.createTarget', { url: `${LISTED}/geo?k=b-clr&i=0` });
+    const [c0] = await reportsOf((x) => x.k === 'b-clr' && x.i === '0', 1, SPACING_MS + 6000);
+    const v = MED.judge({ id: 1, method: 'Emulation.clearGeolocationOverride', params: {} }, MED.newScope({ targets: [tg.targetId] }), { place: () => 'place' });
+    const vs = MED.judgeScope({ id: 2, method: 'Emulation.clearGeolocationOverride', params: {} }, null, { place: () => 'place' });
+    const a2 = await c.cdp.send('Target.attachToTarget', { targetId: tg.targetId, flatten: true });   // a second client on the tab (the suite's own)
+    if (v.kind !== 'refuse') await c.cdp.send('Emulation.clearGeolocationOverride', {}, a2.sessionId);   // sent only were it admitted
+    await c.cdp.send('Runtime.evaluate', { expression: 'window.again(1)' }, a2.sessionId);
+    const [c1] = await reportsOf((x) => x.k === 'b-clr' && x.i === '1', 1, SPACING_MS + 6000);
+    await c.cdp.send('Emulation.clearGeolocationOverride', {}, a2.sessionId).catch(() => null);   // THE FACT: what an admitted clear does
+    await c.cdp.send('Runtime.evaluate', { expression: 'window.again(2)' }, a2.sessionId);
+    const [c2] = await reportsOf((x) => x.k === 'b-clr' && x.i === '2', 1, SPACING_MS + 8000);
+    await c.cdp.send('Target.closeTarget', { targetId: tg.targetId }).catch(() => null);
+    F.Bclear = { before: c0 || null, afterTheRefusedClear: c1 || null, refusedAs: v.kind === 'refuse' ? MED.refusalCodeOf(v.reply) : v.kind, scopeRoad: vs.kind === 'refuse' ? MED.refusalCodeOf(vs.reply) : vs.kind, factAnAdmittedClearReads: c2 || null };
+    ok(isPlace(c0) && v.kind === 'refuse' && MED.refusalCodeOf(v.reply) === 'place_held' && vs.kind === 'refuse' && MED.refusalCodeOf(vs.reply) === 'place_held' && isPlace(c1), `r2311 (3) an agent's own clear of a LISTED tab's position: REFUSED by name on both roads (place_held); the site still reads the place — FACT, the same clear admitted, the site then reads: ${J(c2 || null)}`, F.Bclear);
+  }
   h.dispose(); await stop(c);
 }
 {
@@ -339,7 +359,7 @@ const refusedRead = (x) => !!x && x.err === 1 && x.lat === undefined;   // the r
   w.close(); await sleep(400);
   const rW2 = await readAgain(4);
   F.Bwatch = { underAnotherClientsDenial: rW, afterThatClientLeft: rW2 };
-  ok(!!rW && !!rW2 && !(rW.lat !== undefined && !isPlace(rW)) && !(rW2.lat !== undefined && !isPlace(rW2)), `(B) (D) the dialog watch's kind of client: its every-origin denial, then its leaving — never this machine's position; what the listed site reads (a FACT): ${J(F.Bwatch)}`, F.Bwatch);
+  ok(!!rW && !!rW2 && (denied(rW) || isPlace(rW)) && (denied(rW2) || isPlace(rW2)), `(B) (D) the dialog watch's kind of client: its every-origin denial, then its leaving — never this machine's position; what the listed site reads (a FACT): ${J(F.Bwatch)}`, F.Bwatch);
   ctl.place = 'refuse';
   await openTabs(c, 'b-unplaced', 1);
   const closedEv = await untilV(() => evs.find((e) => e.kind === 'closed') || null, SPACING_MS + 6000);

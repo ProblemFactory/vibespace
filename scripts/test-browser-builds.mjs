@@ -2453,6 +2453,8 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
     ok(!!e && e.code === 'browser_place_unsupported' && /a paired machine/.test(String(e.message)) && !/35\.67|139\.65/.test(String(e.message)), '⑦g r2172 (a) a paired machine\'s profile asking a place is REFUSED BY NAME at its start (browser_place_unsupported) — never started with that machine\'s real position', e && { code: e.code, message: String(e.message) });
     const RB = require('../src/routes/browser.js'); const rs = { req: { path: '/x' }, locals: {}, status(c) { this.c = c; return this; }, json(o) { this.o = o; return this; } }; RB.fail(rs, Object.assign(new Error('x'), { code: 'browser_place_unsupported' }));
     ok(rs.c === 409, '⑦g (a) the route answers it 409', rs.c); }
+  // r2311 (lens 3): the EPHEMERAL half of r2172 (a), pinned in the keeper's source (its ephemeral start re-creates its profile: no fast seam)
+  ok(/function placeRefusalOf\(p\) \{\n    if \(!p \|\| !\(isEph\(p\) \|\| p\.host\)/.test(read('src/server/browser-keeper.js')), '⑦g r2172 (a) its ephemeral half pinned in the source: placeRefusalOf refuses an ephemeral profile (isEph) as it refuses a paired one', null);
   const ad = await adoptOf(K, 'real');
   ok(!ad.e && ad.arms.length === 1 && ad.arms[0].after === 'restart' && ad.state === 'ready' && ad.conf === false && ad.items.length === 1 && /could not be armed after VibeSpace restarted/.test(String(ad.items[0].detail)) && /may stay frozen/.test(String(ad.items[0].detail)) && !/35\.67|139\.65/.test(J(ad.items)),
     '⑦g r1707 (5) THE ADOPTION: a restart\'s arm refused does NOT stop the person\'s running browser (the stored denial holds) — ONE For-you line says the place cannot be given and that a tab may stay frozen', ad);

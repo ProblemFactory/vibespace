@@ -1622,6 +1622,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const geo = () => geoHoldOwn || (geoHoldOwn = (typeof geoHold === 'function' ? geoHold : GH.create)({ log, now, onEvent: onGeoEvent }));
   const geoSaid = new Map();   // profile id → the hold's notices filed for its browser's run (one of each)
   /** The plan a STOCK profile's browser is held to (a named profile on this machine, never an engine's — the kernel takes its own). */
+  /** B-9584 (B), r2311 (3)(4): the profile's location KIND as the person set it — 'place', 'blocked' or null — read live by the CDP
+   *  mediator at an agent's geolocation call (a tab's position, the location permission): refused while it is not null. */
+  function placeKindFor(pid) { try { const p = profile(String(pid || '')); if (!p) return null; const g = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p)).geolocation; return g ? g.kind : null; } catch { return null; } }
   function geoPlanFor(p, envR = null) {
     if (!p || isEph(p) || p.host || (p.browser && p.browser.kind === 'plugin')) return null;
     return geoPlanOf((envR || ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p))).geolocation);
@@ -1684,7 +1687,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         const v = ENV.geoStoredDenial(prefs, { stamp: String((now() + 11644473600000) * 1000) });   // r2172 (b)(d): OUR rows told apart by their stamp (the browser's microseconds since 1601)
         if (!v.ok) return fail(`Default/Preferences: ${v.why}`);
         // the person's own values FIRST (a crash between the two writes loses nothing); r1707 (3): at every LATER held launch a row the
-        // person allowed in Chrome's own settings meanwhile joins them (a row kept before keeps its FIRST value — never a denial's)
+        // person allowed in Chrome's own settings meanwhile joins them (a row still OURS keeps its FIRST value — never a denial's; r2311 (1):
+        // a row the person changed since our last denial takes the person's value, so a block they set while held gives back a block)
         if (!kept) await writeAtomic(keptFile, v.kept); else { const m = ENV.geoKeptMerge(kept, v.kept); if (!m.ok) return fail(`${GEO_KEPT_FILE}: ${m.why}`); if (m.changed) await writeAtomic(keptFile, m.kept); }
         writing = file;
         if (v.changed) await writeAtomic(file, v.prefs);
@@ -5096,9 +5100,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     ensureLoaded();
     const p = profile(profileId);
     if (!p) throw namedError('not-found', `no profile ${profileId}`);
+    { const pr = placeRefusalOf(p); if (pr) throw pr; }   // r2172 (a): never started «not applied» — it would read the machine's real position
     // the moved2 cure 3 (its read's should): an ADOPTED profile whose folder has not moved yet (its record's landing is owed) is never
     // started — a browser launched on the empty target would make the move fail under it
-    { const pr = placeRefusalOf(p); if (pr) throw pr; }   // r2172 (a): never started «not applied» — it would read the machine's real position
     if (adopting.has(String(profileId))) throw namedError('adopt_pending', `profile "${p.label}" is being adopted — its folder moves once its record is on disk; start it again in a moment`);
     const cur = reg.browsers[profileId];
     // takeover C3: an ephemeral daemon that idled out between two ticks is
@@ -5511,7 +5515,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // attach refuses `scope_unavailable` by name); it never hands the raw endpoint, where no fence and no window stands
     if (!B.findLease(reg.leases, p.id, String(browserKey))) return null;
     try {
-      const g = await mediator.grantFor({ profileId: p.id, browserKey: String(browserKey), upstream: raw, targetIds: holderTabs(p.id, browserKey), mode: M.SCOPE_MODE, paused: () => inputStateFor(String(browserKey), p.id).input === 'user' });   // (the window refuses a set while the person drives — W1 on the scope road)
+      const g = await mediator.grantFor({ profileId: p.id, browserKey: String(browserKey), upstream: raw, targetIds: holderTabs(p.id, browserKey), mode: M.SCOPE_MODE, paused: () => inputStateFor(String(browserKey), p.id).input === 'user', place: () => placeKindFor(p.id) });   // (the window refuses a set while the person drives — W1 on the scope road)
       return g && g.url ? g.url : null;
     } catch (e) { log.warn?.(`[browser] ${browserKey} on ${p.id}: no scoped url (${e && e.message}) — refused by name, never the raw endpoint`); return null; }
   }
@@ -6050,7 +6054,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (!mediationOn()) throw namedError('mediation_unavailable', `"${p.label}" is shared instance-wide and this instance has no mediating CDP proxy — it cannot be attached here`);
       if (!rec || !rec.cdpUrl) throw namedError('mediation_no_cdp', `"${p.label}" is shared instance-wide but its browser answered no CDP url — nothing to mediate; stop it and attach again`);
       sayRetiredSwitch();
-      const g = await mediator.grantFor({ profileId: p.id, browserKey, upstream: rec.cdpUrl, targetIds: d.lease.targetId ? [d.lease.targetId] : [], paused: () => inputStateFor(browserKey, p.id).input === 'user' });
+      const g = await mediator.grantFor({ profileId: p.id, browserKey, upstream: rec.cdpUrl, targetIds: d.lease.targetId ? [d.lease.targetId] : [], paused: () => inputStateFor(browserKey, p.id).input === 'user', place: () => placeKindFor(p.id) });
       // verify r1 (H3): a mediated conversation whose tab went with a stopped browser (Quit the whole browser, the row's
       // Stop) binds a NEW tab before its first command — under ITS session in ITS namespace over ITS scoped url (the same
       // env its CLI runs with, so its daemon is not restarted), so the tab is created through the grant and is its own
@@ -8996,7 +9000,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const rec = reg.browsers[p.id];
       if (!mediationOn() || !rec || !rec.cdpUrl) return { ok: false, port: null, code: 'stream_unavailable', error: `"${p.label}" is shared instance-wide and ${mediationOn() ? 'its browser answered no CDP url' : 'this instance has no mediating proxy'}` };
       sayRetiredSwitch();
-      const g = await mediator.grantFor({ profileId: p.id, browserKey: bk, upstream: rec.cdpUrl, paused: () => inputStateFor(bk, p.id).input === 'user' });
+      const g = await mediator.grantFor({ profileId: p.id, browserKey: bk, upstream: rec.cdpUrl, paused: () => inputStateFor(bk, p.id).input === 'user', place: () => placeKindFor(p.id) });
       const r = await rt.streamPort(M.mediatedNamespace(p.id, bk), { session: target.sessionName, extraEnv: { AGENT_BROWSER_CDP: g.url, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(idleMs()) } });
       return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: (r.code === 'browser_cli_gone' || r.code === 'browser_cli_unconfirmed') ? r.code : 'stream_unavailable', error: r.error };
     }
