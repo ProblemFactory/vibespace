@@ -205,8 +205,13 @@ try {
   const gone2 = await until(async () => { const c = await chipsOf(S.e2); return c && c.length === 0 ? 'gone' : null; }, 15000);
   ok(!!(!!down2 && gone2 === 'gone'), '⑤ confirmed ⇒ the job is STOPPED (no restart), its approval gone, and its chip leaves «Weather API»\'s row', { job: down2 && { state: down2.state, desiredUp: down2.desiredUp }, chips: await chipsOf(S.e2) });
 
-  // ⑥ 390 — A PHONE: the For-you card's Allow, then the job card's ✕
+  // ⑥ 390 — A PHONE: the For-you card's Allow, then the job card's ✕. A phone IS a touch screen (the block's hosted run, r2073): the
+  // touch emulation on — as test-phone-six-chrome does — so the product's touch floor applies (public/style.css: under (hover: none)
+  // and (pointer: coarse) every .iw-act is ≥ 36 px); a 390-wide page with a mouse sized the Allow from its 11 px font alone (23 px
+  // with the hosted runner's fonts, ≥ 24 with the test machines' — the leg's old bound read the fonts, never the product)
+  await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   await openPage(390, 844, true);
+  const coarse390 = await evalJs(`matchMedia('(hover: none) and (pointer: coarse)').matches`);   // the premise said: the page IS a touch screen
   await evalJs(`app.openInbox({ itemId: ${JSON.stringify(ready.c)} }); true`);
   const allow390 = await until(async () => { const v = await inView('[data-act="job-allow"]'); return v && v.w > 0 ? v : null; }, 15000);
   const txt390 = await evalJs(`document.body.innerText.includes('mail-bot')`);
@@ -214,7 +219,7 @@ try {
   const pw3 = press3 ? await reauthIfAsked() : 'no-ask';
   console.log(`      the Allow presses at 390: ${JSON.stringify(press3)}`);
   const up3 = await until(async () => { const j = await jobOf(S.j3); return j && j.state === 'up' ? j : null; }, 30000, 400);
-  ok(!!(!!allow390 && allow390.inside && allow390.topmost && allow390.h >= 24 && txt390 === true && pw3 === 'pw-typed' && !!up3), `⑥ 390: «mail-bot»\'s card opens with its Allow ON SCREEN (inside the viewport, ${allow390 ? allow390.w + '×' + allow390.h : '?'} px — the For-you window\'s own action row); Allow ⇒ 验证是你 (a fresh page asks again) ⇒ the job starts`, { allow390, txt390, press3, pw3, job: up3 && up3.state });
+  ok(!!(!!allow390 && allow390.inside && allow390.topmost && coarse390 === true && allow390.h >= 36 && txt390 === true && pw3 === 'pw-typed' && !!up3), `⑥ 390: «mail-bot»\'s card opens with its Allow ON SCREEN (inside the viewport, ${allow390 ? allow390.w + '×' + allow390.h : '?'} px on a touch screen (${coarse390 ? 'coarse pointer' : 'NOT a touch screen'}): the touch floor ≥ 36 px — the For-you window\'s own action row); Allow ⇒ 验证是你 (a fresh page asks again) ⇒ the job starts`, { coarse390, allow390, txt390, press3, pw3, job: up3 && up3.state });
   await evalJs('app.openJobs({ forceWindow: true }); true');
   const l3 = await until(async () => { const v = await vaultLineOf(S.j3); return v && v.line && v.x ? v : null; }, 15000);
   const x390 = await inView('.jobs-win .jobs-card[data-job="' + S.j3 + '"] .jobs-vault-x');
