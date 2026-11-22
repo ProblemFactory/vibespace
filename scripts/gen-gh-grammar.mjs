@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // THE gh GRAMMAR, GENERATED FROM gh's OWN --help (lane vault-agent-own — the registry law: a kind of fact is ONE table derived
 // from its source, with a census that fails a drift). gh's flags are PER VERB, so a hand-kept flag list drifts and leaks a host.
-// src/vault-run.js's gh row ships the table + the program-naming env list this script generates; test-vault-run-model ⑤c
+// src/vault-run.js's gh row ships the table + the program-naming env list this script generates; test-vault-run-model-gh (⑤c, the heavy twin since 主开发 r2048)
 // re-runs the SAME parse against the live gh and diffs the WHOLE tree — any drift (a listed verb's shape, a value flag, a
 // repository TYPE/description, a positional spec, a hostname short, a program-naming env var, OR an allowlisted verb's live
 // help-text HASH) is RED by name.
@@ -32,19 +32,30 @@
 // executable), never a hand list — gh reads the GH_ ones FIRST, so a minted value must not run gh with one set. GH_FORCE_TTY /
 // GH_EXTENSION / GH_CONFIG_DIR name no program the user supplies and are correctly excluded by the derivation.
 import { execFileSync, execFile } from 'node:child_process';
-import { readFileSync, writeFileSync, statSync, accessSync, constants } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, accessSync, constants, mkdtempSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 
 export const helpSha = (text) => createHash('sha256').update(String(text)).digest('hex').slice(0, 16);   // round 9: a 64-bit fingerprint of a verb's live --help — the census REDs when the reviewed help changes or the version pin moves
 
-export const ghHelp = (args) => { try { return execFileSync('gh', [...args, '--help'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
-export const ghHelpAsync = (args) => new Promise((res) => execFile('gh', [...args, '--help'], { encoding: 'utf8', timeout: 15000, maxBuffer: 8e6 }, (e, o) => res(e ? null : o)));   // the census fetches ~250 helps in parallel — the SAME parse (parseHelp), so no drift vs the serial generator
-export const ghHelpTopic = (name) => { try { return execFileSync('gh', ['help', name], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
-export const ghVersion = () => { try { const o = execFileSync('gh', ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }); const m = /gh version (\S+)/.exec(o); return m ? m[1] : null; } catch { return null; } };
+// THE ENV gh RUNS IN (主开发 r2048, lane bl-release): the generator's CLI keeps its caller's; the heavy census
+// (test-vault-run-model-gh) sets a minimal one first — a scratch HOME, no person's gh configuration — so the help, topic and
+// version it reads are the program's own
+let GH_ENV = null;
+export const setGhEnv = (env) => { GH_ENV = env ? { ...env } : null; };
+const ghOpts = (o) => (GH_ENV ? { ...o, env: GH_ENV } : o);
+/** THE ONE builder of gh's env (a scratch HOME, its config folders inside it and empty, the caller's PATH, nothing of a person):
+ *  the census (test-vault-run-model-gh) and this CLI's --repin / --allow-shas / --write read gh alike, so a pin is reproducible */
+export const scratchGhEnv = (home, PATH = process.env.PATH || '/usr/bin:/bin') => ({ PATH, HOME: home, XDG_CONFIG_HOME: `${home}/.config`, GH_CONFIG_DIR: `${home}/.config/gh`,
+  LANG: 'C.UTF-8', GH_NO_UPDATE_NOTIFIER: '1', GH_PROMPT_DISABLED: '1', NO_COLOR: '1' });
+export const ghHelp = (args) => { try { return execFileSync('gh', [...args, '--help'], ghOpts({ encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { return null; } };
+export const ghHelpAsync = (args) => new Promise((res) => execFile('gh', [...args, '--help'], ghOpts({ encoding: 'utf8', timeout: 15000, maxBuffer: 8e6 }), (e, o) => res(e ? null : o)));   // the census fetches ~250 helps in parallel — the SAME parse (parseHelp), so no drift vs the serial generator
+export const ghHelpTopic = (name) => { try { return execFileSync('gh', ['help', name], ghOpts({ encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { return null; } };
+export const ghVersion = () => { try { const o = execFileSync('gh', ['--version'], ghOpts({ encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] })); const m = /gh version (\S+)/.exec(o); return m ? m[1] : null; } catch { return null; } };
 // round 12 (BLOCKER-class): the TOOL is pinned BY DIGEST — the door refuses a replaceable (uid-owned) gh whose bytes are not the
 // pinned sha256 (tool_changed), so a planted shim of the same name never runs. The pin follows the binary: a version roll or the
 // owner's own install is a new binary, re-pinned by `--repin`. ghBinPath resolves gh on PATH exactly as the door's resolveTool.
-export const ghBinPath = () => { for (const d of String(process.env.PATH || '').split(':')) { if (!d) continue; const p = `${d}/gh`; try { const st = statSync(p); if (st.isFile()) { accessSync(p, constants.X_OK); return p; } } catch { } } return null; };
+export const ghBinPath = () => { for (const d of String((GH_ENV || process.env).PATH || '').split(':')) { if (!d) continue; const p = `${d}/gh`; try { const st = statSync(p); if (st.isFile()) { accessSync(p, constants.X_OK); return p; } } catch { } } return null; };
 export const toolSha256Of = (p) => { try { return createHash('sha256').update(readFileSync(p)).digest('hex'); } catch { return null; } };
 
 // The subcommands a help lists, ONLY inside a *COMMANDS section (never EXAMPLES / HELP TOPICS / LEARN MORE). ALIAS COMMANDS and
@@ -276,6 +287,7 @@ function argReason() {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
+  { const home = mkdtempSync(`${tmpdir()}/gh-grammar-home-`); mkdirSync(`${home}/.config/gh`, { recursive: true }); setGhEnv(scratchGhEnv(home)); }   // the census's env
   if (process.argv.includes('--repin')) {
     // round 10 (MINOR): THE ONE re-pin after a gh version rolls — rewrites the version pin (src/vault-run.js grammarVersion) AND
     // the 32 ALLOWLIST help hashes (here), prints each verb whose help text changed (the re-review list), and refuses when the

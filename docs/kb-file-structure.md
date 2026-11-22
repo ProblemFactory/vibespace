@@ -2071,6 +2071,7 @@ src/account-display-facts.js (NEW — B-360d, lane chrome-157) — THE ACCOUNTS 
 src/accounts.js — + B-360d: list() / rowOf() answer from the kept facts (NO file on the loop); THE DECISION ROAD signinFacts / signinFactsSettled / decisionList / decisionRowOf / decisionLoginStateOf (DECIDE_WITHIN_MS 10 s; «unknown» decides nothing) ⇒ kb-file-structure.md
 scripts/test-accounts-list-reads.mjs (NEW, fast — B-360d) — 12 accounts + a pool, a stand-in file door holding each ask 60 ms (placed); RED the release's per-row reads; the decision road; the census of the sign-in readers ⇒ kb-file-structure.md
 scripts/test-vendor-whitelist-live.mjs — heavy twin (主开发 r1875 / r2036): test-vendor-whitelist §6 (b) moved whole — every shipped local oracle re-measured under strace for INET connects, its two controls; strace required on a runner. The fast suite keeps (a), every census and §10's live witness.
+scripts/test-vault-run-model-gh.mjs — heavy twin (主开发 r2048): test-vault-run-model ⑤c moved whole — the gh grammar census against the INSTALLED gh (~250 help/topic/version calls) on a scratch HOME, a minimal env (setGhEnv/scratchGhEnv); hosted, ci.yml's heavy job pins gh. Fast suite keeps ⑤d.
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 

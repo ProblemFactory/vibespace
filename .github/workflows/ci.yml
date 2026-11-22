@@ -273,6 +273,31 @@ jobs:
       - name: Install CJK fonts (the runner measures zh / ja text as users see it)
         run: bash scripts/ci-fonts.sh --system
         timeout-minutes: 6
+      # THE gh GRAMMAR CENSUS IS REQUIRED HERE TOO (主开发 r2300): test-vault-run-model-gh (heavy, the census moved from the fast
+      # suite by r2048) re-parses the LIVE gh against the pin; the fast job's two steps below, copied unchanged (their why is there).
+      - name: Cache the pinned gh
+        uses: actions/cache@v4
+        timeout-minutes: 3
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
+        with:
+          path: ~/.cache/vs-gh-pinned
+          key: gh-pinned-2.102.0-linux-amd64-bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+      - name: Install the pinned gh 2.102.0 (the gh grammar census is reviewed at it)
+        timeout-minutes: 3
+        env:
+          GH_PIN_VERSION: 2.102.0
+          GH_PIN_SHA256: bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+        run: |
+          set -euo pipefail
+          had=$( (gh --version 2>/dev/null || true) | sed -n 's/^gh version \([^ ]*\).*/\1/p')
+          tgz="gh_${GH_PIN_VERSION}_linux_amd64.tar.gz"; c="$HOME/.cache/vs-gh-pinned"; mkdir -p "$c"
+          [ -s "$c/$tgz" ] || curl -fsSL --retry 5 --connect-timeout 20 --max-time 120 -o "$c/$tgz" "https://github.com/cli/cli/releases/download/v${GH_PIN_VERSION}/${tgz}"
+          echo "${GH_PIN_SHA256}  $c/$tgz" | sha256sum -c --strict - || { rm -f "$c/$tgz"; echo "::error::the gh ${GH_PIN_VERSION} tarball is not the pinned sha256"; exit 1; }
+          d="$RUNNER_TOOL_CACHE/vs-gh-pinned/$GH_PIN_VERSION"; rm -rf "$d"; mkdir -p "$d"; tar -xzf "$c/$tgz" -C "$d" --strip-components=1
+          [ "$("$d/bin/gh" --version | sed -n 's/^gh version \([^ ]*\).*/\1/p')" = "$GH_PIN_VERSION" ] || { echo "::error::the unpacked gh is not ${GH_PIN_VERSION}"; exit 1; }
+          echo "$d/bin" >> "$GITHUB_PATH"
+          echo "gh pinned ${GH_PIN_VERSION} (runner had ${had:-none})"
       - name: Install claude CLI, the tree's pinned build (B-28b1, scripts/ci-claude.mjs pin, as the fast job)
         run: pin="$(node scripts/ci-claude.mjs pin)" && bash scripts/ci-npm.sh install -g "@anthropic-ai/claude-code@$pin"
         timeout-minutes: 5
