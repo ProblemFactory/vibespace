@@ -1,8 +1,8 @@
 /**
- * shared-gets.js — THE PAGE ASKS EACH ROUTE ONCE (B-360d part 1, 主开发 r2197; PURE: no import, the fetch handed in).
+ * shared-gets.js — A GET IN FLIGHT IS SHARED (B-360d part 1, 主开发 r2197; PURE: no import, the fetch handed in).
  *
  * WHY: the page's own load asked SIXTEEN routes TWICE (the same caller run by two boot roads: 32 of its 54 requests on a
- * stand-in of the owner's order, one doubled answer a quarter megabyte), and the load was the one clear hold of the hub's loop
+ * stand-in, one doubled answer a quarter megabyte), and the load was the one clear hold of the hub's loop
  * over fifty milliseconds. `sharedGets(fetch)` answers a fetch that SHARES a read WHILE IT IS IN FLIGHT:
  *   (a) one read in flight a route: a second caller that asks the SAME read before the first has landed gets the SAME answer —
  *       its own copy of the response (`clone()`, made the moment it lands, before the first caller reads a byte), never a second
@@ -14,8 +14,11 @@
  *       never shared at all;
  *   (d) WRITES ARE NEVER SHARED: only GET is.
  * The first caller gets the response itself; a joiner gets a copy — so a read nobody joined costs nothing (no copy, no tee).
- * Installed once, at the page's boot (src/client.js), over `window.fetch`: every fetch, fetchJson and api() of the page goes
- * through it. Gated by scripts/test-shared-gets.mjs.
+ * Installed once, at the page's boot (src/client.js), over `window.fetch`: every fetch, fetchJson and api() from then on goes
+ * through it. The page's imports run BEFORE it: a fetch at a module's top level goes unshared. A relative URL is resolved
+ * against the page's address AS THE KEY IS MADE (a history move changes it), never the one at install.
+ * MEASURED (the stand-in's figures): the page's load sent 54 API requests before, 42–43 after; FOUR routes are still asked twice,
+ * because their two asks are not one read in flight (docs/kb-file-structure.md, its essay). Gated by scripts/test-shared-gets.mjs.
  */
 
 const SHAREABLE = new Set(['method', 'headers', 'credentials', 'cache']);
@@ -41,12 +44,14 @@ export function readKeyOf(input, init, base) {
   return JSON.stringify([url, heads, o.credentials || '', o.cache || '']);
 }
 
-/** → a fetch that shares a GET while it is in flight (laws a–d above). `base` resolves a relative URL (the page's location). */
-export function sharedGets(fetchImpl, { base = (typeof location !== 'undefined' ? location.href : 'http://localhost/') } = {}) {
+/** → a fetch that shares a GET while it is in flight (laws a–d above). `base` resolves a relative URL; none given = the page's
+ *  address read as each key is made (never the one at install) */
+export function sharedGets(fetchImpl, { base = null } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('sharedGets: the fetch handed in is not a function');   // never «name(» in a string: the bundle check reads it as a call
   const inflight = new Map();   // key → { joiners: [{ resolve, reject }] } — only while the read is in flight
+  const baseNow = () => base || (typeof location !== 'undefined' ? location.href : 'http://localhost/');
   const shared = function fetchShared(input, init) {
-    const key = readKeyOf(input, init, base);
+    const key = readKeyOf(input, init, baseNow());
     if (key === null) return fetchImpl(input, init);
     const had = inflight.get(key);
     if (had) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });

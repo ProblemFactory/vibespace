@@ -1,14 +1,18 @@
 #!/usr/bin/env node
-// THE PAGE ASKS EACH ROUTE ONCE (B-360d part 1, 主开发 r2197; lane bl-loop-a). src/lib/shared-gets.js over a counting stand-in fetch
+// A GET IN FLIGHT IS SHARED (B-360d part 1, 主开发 r2197; lane bl-loop-a). src/lib/shared-gets.js over a counting stand-in fetch
 // (node's own Response): its four laws, each with its RED (a copy of the module with that law cut):
 //  ① TWO CALLERS WHILE IN FLIGHT: ONE request; each gets the whole answer, readable (its own copy). RED: the join cut ⇒ two requests
 //  ② A LATER ASK, after it landed: a NEW request (nothing kept). RED: the entry kept past its landing ⇒ the later ask answered stale
 //  ③ A FAILED SHARED READ tells EVERY caller: a rejection rejects both; a refusal (503) reaches both, its body whole. RED: the
 //     joiners never told of a failure ⇒ the second caller never answers
-//  ④ OTHER WORDS are another read: a query, a header, a body, a signal, a Request object — each its own request
-//  ⑤ WRITES ARE NEVER SHARED: two POSTs (and a PUT, a DELETE) at once ⇒ each its own request
-//  ⑥ THE PAGE INSTALLS IT at its boot, over window.fetch, before anything fetches (src/client.js, by text). CONTROL: a copy without
-//     it is named
+//  ④ OTHER WORDS are another read: a query, a header, a body, a signal, a Request object — each its own request; a relative URL
+//     is resolved against the page's address AS THE KEY IS MADE. REDs: the headers left out of the key ⇒ the two scopes share; the
+//     address read at install ⇒ one request for two pages' reads
+//  ⑤ WRITES ARE NEVER SHARED: two POSTs (and a PUT, a DELETE) at once ⇒ each its own request. RED: the method check cut ⇒ the
+//     DELETE and the bodiless post share
+//  ⑥ THE PAGE INSTALLS IT at its boot, over window.fetch, before the exit hop and the App (src/client.js, by text; the imports run
+//     before it: a fetch at a module's top level goes unshared). CONTROL: a copy without it is named
+// A green leg waits GENEROUSLY (3 s) for its answers; a RED's «never answers» is read at 400 ms (a hung promise never answers)
 // Run: node scripts/test-shared-gets.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,13 +35,17 @@ function stand({ fail = null, status = 200 } = {}) {
     return new Promise((resolve, reject) => setTimeout(() => (fail ? reject(fail) : resolve(new Response(JSON.stringify({ url: String(input), n: calls.length }), { status, headers: { 'Content-Type': 'application/json' } }))), 15)); };
   return { fetch, calls };
 }
-const settle = (p, ms = 400) => Promise.race([p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e: String((e && e.message) || e) })), new Promise((r) => setTimeout(() => r({ hung: true }), ms))]);
+const GREEN_MS = 3000, HUNG_MS = 400;
+const settle = (p, ms = GREEN_MS) => Promise.race([p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e: String((e && e.message) || e) })), new Promise((r) => setTimeout(() => r({ hung: true }), ms))]);
 
 try {
   const M = await load(src, 'base');
   const cutJoin = await load(anchored(src, '    if (had) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });\n', '', 'shared-gets-join-cut'), 'join-cut');
   const keptEntry = await load(anchored(src, "      if (inflight.get(key) === entry) inflight.delete(key);   // (a) nothing kept after it lands\n", '', 'shared-gets-kept'), 'kept');
   const deafJoiners = await load(anchored(src, '      for (const j of entry.joiners) j.reject(err);   // (b) a failure reaches every caller that shared it\n', '', 'shared-gets-deaf'), 'deaf');
+  const noHeads = await load(anchored(src, "  return JSON.stringify([url, heads, o.credentials || '', o.cache || '']);\n", "  return JSON.stringify([url, [], o.credentials || '', o.cache || '']);\n", 'shared-gets-no-heads'), 'no-heads');
+  const anyMethod = await load(anchored(src, "  if (method !== 'GET') return null;\n", '', 'shared-gets-any-method'), 'any-method');
+  const baseAtInstall = await load(anchored(src, 'export function sharedGets(fetchImpl, { base = null } = {}) {', "export function sharedGets(fetchImpl, { base = (typeof location !== 'undefined' ? location.href : 'http://localhost/') } = {}) {", 'shared-gets-base-at-install'), 'base-at-install');
 
   console.log('① two callers while in flight: one request');
   const run1 = async (mod) => { const s = stand(); const f = mod.sharedGets(s.fetch, { base: BASE }); const [a, b] = await Promise.all([f('/api/tasks'), f('/api/tasks')]); const [ja, jb] = await Promise.all([a.json(), b.json()]); return { calls: s.calls.length, ja, jb, left: f.inflightCount() }; };
@@ -46,34 +54,44 @@ try {
   ok(r1.calls === 2, `RED: the join cut ⇒ ${r1.calls} requests`, r1);
 
   console.log('② a later ask, after it landed: a new request (nothing kept)');
-  const run2 = async (mod) => { const s = stand(); const f = mod.sharedGets(s.fetch, { base: BASE }); const a = await f('/api/user-todos'); await a.json(); const b = await settle(f('/api/user-todos')); const jb = b.ok ? await b.v.json() : null; return { calls: s.calls.length, second: jb && jb.n, b: b.hung ? 'hung' : 'answered' }; };
-  const g2 = await run2(M), r2 = await run2(keptEntry);
+  const run2 = async (mod, ms) => { const s = stand(); const f = mod.sharedGets(s.fetch, { base: BASE }); const a = await f('/api/user-todos'); await a.json(); const b = await settle(f('/api/user-todos'), ms); const jb = b.ok ? await b.v.json() : null; return { calls: s.calls.length, second: jb && jb.n, b: b.hung ? 'hung' : 'answered' }; };
+  const g2 = await run2(M), r2 = await run2(keptEntry, HUNG_MS);
   ok(g2.calls === 2 && g2.second === 2, `an ask after the first landed is a NEW request (${g2.calls} in all; its answer is the second read's)`, g2);
   ok(r2.calls === 1, `RED: the entry kept past its landing ⇒ the later ask never reaches the hub (${r2.calls} request: ${r2.b})`, r2);
 
   console.log('③ a failed shared read tells every caller');
-  const run3 = async (mod) => { const s = stand({ fail: new Error('the hub did not answer') }); const f = mod.sharedGets(s.fetch, { base: BASE }); const [a, b] = await Promise.all([settle(f('/api/hosts')), settle(f('/api/hosts'))]); return { calls: s.calls.length, a, b }; };
-  const g3 = await run3(M), r3 = await run3(deafJoiners);
+  const run3 = async (mod, ms) => { const s = stand({ fail: new Error('the hub did not answer') }); const f = mod.sharedGets(s.fetch, { base: BASE }); const [a, b] = await Promise.all([settle(f('/api/hosts'), ms), settle(f('/api/hosts'), ms)]); return { calls: s.calls.length, a, b }; };
+  const g3 = await run3(M), r3 = await run3(deafJoiners, HUNG_MS);
   ok(g3.calls === 1 && g3.a.ok === false && g3.b.ok === false && g3.a.e === 'the hub did not answer' && g3.b.e === 'the hub did not answer', 'a rejected read rejects BOTH callers with its own error (one request)', g3);
   ok(r3.b.hung === true, `RED: the joiners never told of a failure ⇒ the second caller never answers (${JSON.stringify(r3.b)})`, r3);
   { const s = stand({ status: 503 }); const f = M.sharedGets(s.fetch, { base: BASE }); const [a, b] = await Promise.all([f('/api/vault/state'), f('/api/vault/state')]); const [ja, jb] = await Promise.all([a.json(), b.json()]);
     ok(s.calls.length === 1 && a.status === 503 && b.status === 503 && ja.url === jb.url, `a refusal (503) reaches both callers as its own copy, the body whole (${s.calls.length} request)`, { a: a.status, b: b.status }); }
 
   console.log('④ other words are another read');
-  { const s = stand(); const f = M.sharedGets(s.fetch, { base: BASE }); const ac = new AbortController();
-    const rs = await Promise.all([f('/api/x?a=1'), f('/api/x?a=2'), f('/api/x?a=1', { headers: { 'X-Scope': 'one' } }), f('/api/x?a=1', { headers: { 'X-Scope': 'two' } }), f('/api/x?a=1', { signal: ac.signal }), f(new Request(BASE + 'api/x?a=1'))]);
-    await Promise.all(rs.map((r) => r.text()));
-    ok(s.calls.length === 6, `a query, a header (each its own), a signal and a Request object are each another read: ${s.calls.length} requests for 6 asks`, s.calls.map((c) => c.input)); }
+  { const run4 = async (mod) => { const s = stand(); const f = mod.sharedGets(s.fetch, { base: BASE }); const ac = new AbortController();
+      const rs = await Promise.all([f('/api/x?a=1'), f('/api/x?a=2'), f('/api/x?a=1', { headers: { 'X-Scope': 'one' } }), f('/api/x?a=1', { headers: { 'X-Scope': 'two' } }), f('/api/x?a=1', { signal: ac.signal }), f(new Request(BASE + 'api/x?a=1'))]);
+      await Promise.all(rs.map((r) => r.text())); return s.calls.map((c) => c.input); };
+    const g4 = await run4(M), r4 = await run4(noHeads);
+    ok(g4.length === 6, `a query, a header (each its own), a signal and a Request object are each another read: ${g4.length} requests for 6 asks`, g4);
+    ok(r4.length < 6, `RED: the headers left out of the key ⇒ the two scopes share one read (${r4.length} requests for 6 asks)`, r4); }
+  { const run4b = async (mod) => { const s = stand(); globalThis.location = { href: 'http://page.test/a/' };
+      try { const f = mod.sharedGets(s.fetch); const p1 = f('api/x'); globalThis.location.href = 'http://page.test/b/'; const p2 = f('api/x'); await Promise.all([p1, p2].map((p) => p.then((r) => r.text()))); return s.calls.length; }
+      finally { delete globalThis.location; } };
+    const g4b = await run4b(M), r4b = await run4b(baseAtInstall);
+    ok(g4b === 2, `a relative URL is resolved against the page's address AS THE KEY IS MADE: «api/x» under /a/ and then /b/ is two reads (${g4b} requests)`);
+    ok(r4b === 1, `RED: the address read at install ⇒ the read under /b/ joins the one under /a/ (${r4b} request)`); }
   { const s = stand(); const f = M.sharedGets(s.fetch, { base: BASE }); const rs = await Promise.all([f('/api/x', { headers: { 'X-A': '1', 'X-B': '2' } }), f('/api/x', { headers: { 'x-b': '2', 'x-a': '1' } })]); await Promise.all(rs.map((r) => r.text()));
     ok(s.calls.length === 1, `the same headers in another order and case are the same read (${s.calls.length} request)`, s.calls); }
 
   console.log('⑤ writes are never shared');
-  { const s = stand(); const f = M.sharedGets(s.fetch, { base: BASE });
-    const rs = await Promise.all([f('/api/x', { method: 'POST', body: '{}' }), f('/api/x', { method: 'POST', body: '{}' }), f('/api/x', { method: 'PUT', body: '{}' }), f('/api/x', { method: 'DELETE' }), f('/api/x', { method: 'post' })]);
-    await Promise.all(rs.map((r) => r.text()));
-    ok(s.calls.length === 5, `two POSTs, a PUT, a DELETE and a lower-case post at once: ${s.calls.length} requests (none shared)`, s.calls.map((c) => c.method)); }
+  { const run5 = async (mod) => { const s = stand(); const f = mod.sharedGets(s.fetch, { base: BASE });
+      const rs = await Promise.all([f('/api/x', { method: 'POST', body: '{}' }), f('/api/x', { method: 'POST', body: '{}' }), f('/api/x', { method: 'PUT', body: '{}' }), f('/api/x', { method: 'DELETE' }), f('/api/x', { method: 'post' })]);
+      await Promise.all(rs.map((r) => r.text())); return s.calls.map((c) => c.method); };
+    const g5 = await run5(M), r5 = await run5(anyMethod);
+    ok(g5.length === 5, `two POSTs, a PUT, a DELETE and a lower-case post at once: ${g5.length} requests (none shared)`, g5);
+    ok(r5.length === 4, `RED: the method check cut ⇒ the DELETE and the bodiless post share one request (${r5.length} for 5)`, r5); }
 
-  console.log('⑥ the page installs it at its boot, before anything fetches (by text)');
+  console.log('⑥ the page installs it at its boot, before the exit hop and the App (by text)');
   { const cl = fs.readFileSync(path.join(REPO, 'src/client.js'), 'utf8');
     const installed = (t) => { const i = t.indexOf('window.fetch = sharedGets(window.fetch.bind(window))'), j = t.indexOf('continueExit()'), k = t.indexOf('new App('); return i > 0 && /import \{ sharedGets \} from '\.\/lib\/shared-gets\.js';/.test(t) && (j < 0 || i < j) && (k < 0 || i < k); };
     ok(installed(cl), 'src/client.js wraps window.fetch with sharedGets before the exit hop and the App (the first fetches of the load)');
