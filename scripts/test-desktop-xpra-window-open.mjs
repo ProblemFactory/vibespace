@@ -73,7 +73,7 @@
 // The boot (the worktree server on the real xpra rung, headless chrome, §5's fake claude, the private runtime dir) and the
 // teardown are scripts/xpra-window-boot.mjs's, ONCE for this part; the measures the §§ share live there too.
 // Run: node scripts/test-desktop-xpra-window-open.mjs
-import { execSync, execFileSync, spawn } from 'node:child_process';
+import { execSync, execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -82,6 +82,28 @@ import { freePorts, scratch, scratchHome } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const require = createRequire(import.meta.url);
+// B-34bc's MEASURE (主开发 r2145, tests only: it prints, it judges nothing): where the page and the display part. For one app:
+// the display's root as X says it (xwininfo -root); the display packet this page last asked for, its size and its TYPE (picked
+// from the server's packet list exactly as src/lib/xpra-proto.js displayPacket picks it); the server hello's size keys; the
+// server's own size answers (the client drops xpra's desktop_size packet, so they are read from xpra's lines in the app's
+// app.log); the window's placement hints (xprop WM_NORMAL_HINTS); and, once, the display program's and the X server's versions
+const MEASURE_LINES = /client display size is|server virtual display now set to|best resolution matching|sent updated screen size|tried to set resolution|ended up with|failed to add resolution|failed to set new resolution|no matching resolution/;
+let measureVersions = null;
+async function displayFacts(pg, id, xenvX, xid = null) {
+  const out = {};
+  try { out.xRoot = (execFileSync('xwininfo', ['-root'], { env: xenvX, encoding: 'utf8', timeout: 5000 }).match(/-geometry\s+(\S+)/) || [])[1] || ''; } catch (e) { out.xRoot = `xwininfo failed: ${e.message}`; }
+  try {
+    out.page = await pg.evalJs(`(() => { const m = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)} && !w._desktopSatelliteWid); const c = m && m._desktopAppView && m._desktopAppView.client; if (!c) return null; const t = Array.isArray(c.packetTypes) ? c.packetTypes : []; const name = t.includes('display-configure') ? 'display-configure' : t.includes('configure-display') ? 'configure-display' : null; const h = c.serverCaps || {}; const keys = Object.keys(h).filter((k) => /desktop|root|screen|display/i.test(k)).slice(0, 12); return { asked: c.display, type: t.includes('desktop_size') || !name ? 'desktop_size' : name, hello: Object.fromEntries(keys.map((k) => [k, JSON.stringify(h[k]).slice(0, 120)])) }; })()`);
+  } catch (e) { out.page = `read failed: ${e.message}`; }
+  try { out.server = fs.readFileSync(path.join(wt, 'data', 'desktop-apps', id, 'app.log'), 'utf8').split('\n').filter((l) => MEASURE_LINES.test(l)).slice(-10).map((l) => l.trim().slice(0, 200)); } catch (e) { out.server = `app.log unread: ${e.code || e.message}`; }
+  if (xid) { try { out.hints = execFileSync('xprop', ['-id', String(xid), 'WM_NORMAL_HINTS'], { env: xenvX, encoding: 'utf8', timeout: 5000 }).split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 8); } catch (e) { out.hints = `xprop failed: ${e.message}`; } }
+  if (!measureVersions) {
+    const first = (bin, args) => { try { const r = spawnSync(bin, args, { encoding: 'utf8', timeout: 5000 }); return `${r.stdout || ''}${r.stderr || ''}`.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join(' / ') || `rc ${r.status}`; } catch (e) { return `failed: ${e.message}`; } };
+    measureVersions = { xpra: first('xpra', ['--version']), Xvfb: first('Xvfb', ['-version']) };
+    out.versions = measureVersions;
+  }
+  return out;
+}
 const { agentTokens, bin, bootedCopy, CDP_PORT, check, crashed, ctlServers, D, devHomes, devProcs, dropPage, ensureActive, FAKE_CLAUDE, fakeHome,
   finish, HOSTNAME, hostResolves, keyOf, launchOn, measurePane, mkPage, newPage, openPage, page, PORT, R2, readyOn, repo, RUNTIME, SEAT,
   SETTLE_DEADLINE_MS, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, TITLE_DEADLINE_MS, trustedClickAt, typedFile, until, VNC_ENV,
@@ -340,6 +362,10 @@ try {
     // bounded by the configure round-trip XAGREE_DEADLINE_MS (the §18 legs wait the same over the GTK fixture).
     const xSecond = own && await until(async () => { const s = await p1.evalJs(WIN(appId)); const cw = s && s.windows.find((x) => x.title === 'vs-second-top'); const xw = ((await p1.evalJs(`fetch('/api/desktop/apps/${appId}/windows').then((r) => r.json())`)).windows || []).find((x) => x.title === 'vs-second-top'); return cw && xw && Math.abs(xw.x - cw.x) <= 2 && Math.abs(xw.y - cw.y) <= 2 ? xw : null; }, XAGREE_DEADLINE_MS, 250);
     console.log(`  a second top-level at +2000+1500 ⇒ ${own ? `its own window "${own.sat.title}", ${own.w.w}×${own.w.h} at ${own.w.x},${own.w.y} (slot ${JSON.stringify(own.sat.slot)}, the main ${own.main.w}×${own.main.h})` : 'NO satellite'}; X says ${xSecond ? `+${xSecond.x}+${xSecond.y}` : 'elsewhere'}`);
+    { // B-34bc's measure: X's last read of the second window, and where the page and the display part (prints only)
+      const xw5 = (((await p1.evalJs(`fetch('/api/desktop/apps/${appId}/windows').then((r) => r.json())`).catch(() => null)) || {}).windows || []).find((x) => x.title === 'vs-second-top') || null;
+      console.log(`  MEASURE (B-34bc) the fifth leg: X's last read of the second ${JSON.stringify(xw5)}; ${JSON.stringify(await displayFacts(p1, appId, xenv, xw5 && xw5.id))}`);
+    }
     check('a second top-level the app opened at +2000+1500 (kind main, not transient) opens its OWN window (design 016 S2: titled "vs-xpra-title · vs-second-top") and lies in its slot of the root beside the main, and X agrees', !!own && own.sat.title === 'vs-xpra-title · vs-second-top' && own.w.x >= own.main.w && !!xSecond, { own, x: xSecond });
     const m4 = await mainNow();
     check('…the first window stays the main and the picture, titled "vs-xpra-title" — the second is in front in its own window, not named here (S1c is for a window with no satellite: §18)', fitsPane(m4) && m4.s.title === 'vs-xpra-title', m4 && { m: m4.m, title: m4.s.title });
@@ -1059,6 +1085,7 @@ try {
           let xs = null;
           await until(async () => { const xw18 = await G.p.evalJs(`fetch('/api/desktop/apps/${id18}/windows').then((r) => r.json())`).catch(() => null); xs = xw18 && Array.isArray(xw18.windows) ? xw18.windows.find((x) => x.title === T2) : null; return !!xs && Math.abs(xs.x - sec.x) <= 2 && Math.abs(xs.y - sec.y) <= 2; }, XAGREE_DEADLINE_MS, 200);
           if (xs && Number.isFinite(xs.x)) check(`§18 S2: …and the X server agrees (${xs.x},${xs.y})`, Math.abs(xs.x - sec.x) <= 2 && Math.abs(xs.y - sec.y) <= 2, { xs, sec });
+          console.log(`  MEASURE (B-34bc) §18: X's last read of the second ${JSON.stringify(xs)}; ${JSON.stringify(await displayFacts(G.p, id18, { ...process.env, DISPLAY: r18.display, XAUTHORITY: path.join(wt, 'data', 'desktop-apps', id18, 'Xauthority') }, xs && xs.id))}`);   // prints only
           check(`§18 S2: the satellite holds the X window 1:1 (pane ${sat.pane.w}×${sat.pane.h} CSS × ${s1.ratio} = ${sec.w}×${sec.h} ± 2 device px, never below the minimum ${MIN18[1]})`, Math.abs(sat.pane.w * s1.ratio - sec.w) <= 2 && Math.abs(sat.pane.h * s1.ratio - sec.h) <= 2 && sec.h >= MIN18[1], { pane: sat.pane, sec });
           check(`§18 S2: ONE connection — the app still has one viewer socket from this page (${s1.viewers})`, s1.viewers === 1, s1.viewers);
           // ── typing reaches ITS window ──
