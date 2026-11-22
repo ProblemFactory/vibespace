@@ -122,6 +122,8 @@ const ST = process.env.FAKE_STATE; const args = process.argv.slice(2);
 const udd = (args.find((a) => a.startsWith('--user-data-dir=')) || '').slice(16);
 let mode = 'ok'; try { mode = fs.readFileSync(path.join(ST, 'chrome-mode'), 'utf8').trim(); } catch {}
 try { mode = fs.readFileSync(path.join(ST, 'chrome-mode-' + udd.replace(/[^A-Za-z0-9]/g, '_')), 'utf8').trim(); } catch {} // one profile's own mode (the cdp_port_missing keeper leg)
+// B-7e49: its port is written 15 ms after it listens; a leg that reads the WAIT itself (② new: r.ms >= 100) sets chrome-delay (120 ms)
+let delay = 15; try { delay = Number(fs.readFileSync(path.join(ST, 'chrome-delay'), 'utf8').trim()) || delay; } catch {}
 fs.appendFileSync(path.join(ST, 'chrome.log'), JSON.stringify({ pid: process.pid, args, mode, DISPLAY: process.env.DISPLAY || null, XAUTHORITY: process.env.XAUTHORITY || null, TMPDIR: process.env.TMPDIR || null, TZ: process.env.TZ || null, ab: Object.keys(process.env).filter((k) => k.startsWith('AGENT_BROWSER_')) }) + '\\n');
 process.on('SIGTERM', () => process.exit(0));
 if (mode === 'exit') { console.error('ERROR: the profile appears to be in use by another Google Chrome process'); process.exit(21); }
@@ -134,7 +136,7 @@ srv.listen(0, '127.0.0.1', () => setTimeout(() => {
   // window was proves it shut. 'stale-torn' = the old order (write, then backdate) with a stall between: the control
   if (mode === 'stale') { const tmp = pfile + '.tmp'; fs.writeFileSync(tmp, '9\\n/devtools/browser/dead-0001\\n'); const t = new Date(Date.now() - 3600e3); fs.utimesSync(tmp, t, t); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); fs.renameSync(tmp, pfile); }
   if (mode === 'stale-torn') { fs.writeFileSync(pfile, '9\\n/devtools/browser/dead-0001\\n'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); const t = new Date(Date.now() - 3600e3); fs.utimesSync(pfile, t, t); }
-}, 120));
+}, delay));
 `, { mode: 0o755 });
 const chromeLog = () => { try { return fs.readFileSync(path.join(STATE, 'chrome.log'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const setMode = (m) => fs.writeFileSync(path.join(STATE, 'chrome-mode'), m);
@@ -144,8 +146,10 @@ ok(ATL.chromeExecutable(baseEnv) === path.join(FAKE_BIN, 'google-chrome') && ATL
 const PD = path.join(S, 'profile-io'); fs.mkdirSync(PD, { recursive: true });
 setMode('ok');
 fs.writeFileSync(path.join(PD, 'DevToolsActivePort'), '9\n/devtools/browser/dead-0000\n'); // a killed Chrome's file — deleted BEFORE the spawn
+fs.writeFileSync(path.join(STATE, 'chrome-delay'), '120');   // this leg reads the spawn's WAIT (r.ms >= 100): the port comes 120 ms after the listen
 let r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: ['--remote-debugging-port=0', `--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log') });
 ok(r.ok && r.port > 9 && r.wsPath === '/devtools/browser/fake-0001' && alive(r.pid) && r.ms >= 100, 'new: the spawn deletes the stale file, waits for the NEW one and answers its port (never the dead 9)', { ...r, child: undefined });
+fs.rmSync(path.join(STATE, 'chrome-delay'), { force: true });
 try { process.kill(r.pid, 'SIGTERM'); } catch { }
 setMode('stale');
 let t = Date.now();
@@ -156,7 +160,7 @@ ok(!r.ok && r.code === 'cdp_port_missing' && /stale one/.test(r.error) && Date.n
 // file written fresh and backdated only after a stall ⇒ the launcher takes the dead port 9 — the box-zone red's own values
 setMode('stale-torn');
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 900 });
-const tornPid = chromeLog().pop().pid; try { process.kill(tornPid, 'SIGTERM'); } catch { } await until(() => !alive(tornPid), 5000);
+const tornPid = chromeLog().pop().pid; try { process.kill(tornPid, 'SIGKILL'); } catch { } await until(() => !alive(tornPid), 5000);   // B-7e49: its 1500 ms stall holds a SIGTERM until it ends; the launcher's answer is already read
 ok(r.ok === true && r.port === 9 && r.wsPath === '/devtools/browser/dead-0001' && !alive(tornPid), 'CONTROL — the stale file written fresh and backdated after a stall (the fixture\'s old order): the launcher takes the dead port 9 — the leg above writes it whole and runs WITH a stall in that window', { ...r, child: undefined });
 setMode('never');
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 600 });
@@ -314,21 +318,21 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   ok(kh._reg().browsers[pH.id] && kh._reg().browsers[pH.id].launch === 'attach' && holders() === 1, 'a conversation holds an attach browser (a lease)', held && held.error);
   const pids = [kh._reg().browsers[pH.id].pid];
   for (let i = 1; i <= 3; i++) {
-    process.kill(pids[pids.length - 1], 'SIGKILL'); await sleep(250);
+    process.kill(pids[pids.length - 1], 'SIGKILL'); await until(() => !alive(pids[pids.length - 1]), 2000);   // B-7e49: the death landed (the tick reads it by its pid), not a fixed 250 ms
     await kh.tick();
     const back = await (async () => { for (let j = 0; j < 80; j++) { const r0 = kh._reg().browsers[pH.id]; if (r0 && r0.state === 'ready' && r0.pid !== pids[pids.length - 1] && alive(r0.pid)) return r0; await sleep(100); } return null; })();
     ok(back && back.launch === 'attach', `heal ${i}: its Chrome killed under the lease ⇒ the tick starts it again on the attach road (a new Chrome pid ${back && back.pid}, a new display session ${back && back.displaySession && back.displaySession.id})`);
     if (!back) break;
     pids.push(back.pid);
   }
-  process.kill(pids[pids.length - 1], 'SIGKILL'); await sleep(250);
-  await kh.tick(); await sleep(400);
+  process.kill(pids[pids.length - 1], 'SIGKILL'); await until(() => !alive(pids[pids.length - 1]), 2000);
+  await kh.tick(); await until(() => { const r0 = kh._reg().browsers[pH.id]; return r0 && r0.state === 'stopped' && /closed 3 times in 10 min/.test(r0.lastError || ''); }, 2000);   // B-7e49: the budget's own words, or the leg below is red
   const last = kh._reg().browsers[pH.id];
   ok(last.state === 'stopped' && /closed 3 times in 10 min, so it is not started again by itself; the next command starts it/.test(last.lastError || ''), 'the 4th closure inside the window: NOT started again (the budget), said on the record', last.lastError);
   const pU = kh.createProfile({ label: 'Unheld' }, { owner: { kind: 'instance', id: null } });
   await kh.start(pU.id, { why: 'test' });
   const pidU = kh._reg().browsers[pU.id].pid;
-  process.kill(pidU, 'SIGKILL'); await sleep(250); await kh.tick(); await sleep(400);
+  process.kill(pidU, 'SIGKILL'); await until(() => !alive(pidU), 2000); await kh.tick(); await sleep(400);   // (the 400 ms stays: «no heal» is a window nothing may start in)
   ok(kh._reg().browsers[pU.id].state === 'stopped' && !kh._reg().browsers[pU.id].displaySession === false && !dlive.has(kh._reg().browsers[pU.id].displaySession.id), 'nobody holds it ⇒ no heal (stopped, its display gone; the next command starts it)');
   await kh.stop(pH.id, { why: 'user' }).catch(() => { });
 }
@@ -700,7 +704,8 @@ console.log('— ⑥ lane browser-x-in-window: the picture source, the holder\'s
   const rowsNow = () => [...dialogs, ...[...wins.values()].reverse().map((w) => ({ id: w.xid, title: 'x - Google Chrome', instance: INSTX, cls: 'Google-chrome', x: w.bounds.left, y: w.bounds.top, w: w.bounds.width, h: w.bounds.height, depth: 2, frame: w.xid + 1 })), { id: 0x600001, title: 'chrome', instance: 'chrome', cls: 'Chrome', x: 10, y: 10, w: 10, h: 10, depth: 1 }];
   const winCalls = [];
   const DKP = { facts: async () => ({ bins: { xpra: '/usr/bin/xpra', xauth: '/usr/bin/xauth' } }), launchDisplay: async () => null, x11EnvFor: () => null, stop: async () => null, liveRecords: () => [], windows: async (id) => { winCalls.push(id); return { ok: true, windows: rowsNow() }; } };
-  const kP = mk({ dataDir: path.join(S, 'data-pic'), displaySessions: DKP });
+  let picSkew = 0;   // B-7e49: the keeper's own clock (its injected now) is carried past the rows' 750 ms memo — the memo is the keeper's, unchanged
+  const kP = mk({ dataDir: path.join(S, 'data-pic'), displaySessions: DKP, now: () => Date.now() + picSkew });
   const pP = kP.createProfile({ label: 'Pic' }, { owner: { kind: 'instance', id: null } });
   const prof = kP._reg().profiles.find((x) => x.id === pP.id); prof.dir = PDIR;
   const startedAt = Date.now();
@@ -717,14 +722,14 @@ console.log('— ⑥ lane browser-x-in-window: the picture source, the holder\'s
   // two windows with the very bounds ⇒ A's moved one pixel, asked again
   Object.assign(wins.get(13).bounds, { left: 20, top: 20, width: 1050, height: 980 });
   const set0 = cdpCalls.filter((m) => m.method === 'Browser.setWindowBounds').length;
-  await new Promise((r) => setTimeout(r, 800)); // past the rows' 750 ms memo
+  picSkew += 800; // past the rows' 750 ms memo (by the keeper's clock)
   const xa2 = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pa01' });
   const nudge = cdpCalls.filter((m) => m.method === 'Browser.setWindowBounds').slice(set0);
   ok(xa2.wid === 0x40000c && nudge.length >= 1 && nudge.some((m) => m.params.windowId === 12 && m.params.bounds.left === 21) && wins.get(12).bounds.left === 21, 'TWINS (two windows, one geometry) ⇒ its window is moved ONE pixel and told apart', { xa2, nudge });
   // Chrome's own dialog window over B's window: said to B, never to A
   dialogs = [{ ...CHOOSER_X, x: 300 + 100, y: 20 + 100 }];
   Object.assign(wins.get(13).bounds, { left: 300, top: 120, width: 900, height: 700 });
-  await new Promise((r) => setTimeout(r, 800));
+  picSkew += 800;
   const dB = await kP.nativeDialogsFor(pP.id, { browserKey: 'bk-0000pb02' });
   const dA = await kP.nativeDialogsFor(pP.id, { browserKey: 'bk-0000pa01' });
   ok(dB.length === 1 && dB[0].title === 'Open File' && dA.length === 0, `Chrome's own "Open File" over B's window is B's (${dB.map((x) => x.title)}) — never A's (${dA.length})`, { dA, dB });
