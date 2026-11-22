@@ -164,7 +164,8 @@ is that window's own image (its own origin; the CLI says «this image is ONE win
 `type`, `key` and `scroll` on it act on THAT window's pixels. Keys and text first give that window the X focus (xdotool
 `windowfocus`, no raise): the focus is LEFT there, as when a person clicks a window — the user's live view shows the
 popup focused, and nothing puts it back. A key or a text on the APP's own handle goes where the keyboard is; when that is a
-window of the app this image does not show, the reply says so and names its own handle. A window's own handle reaches only the
+window of the app this image does not show, the reply says so and names its own handle. It says nothing on a desktop the app
+does not own, nor after you aimed into that window (a click on it, its own handle, or a ref). A window's own handle reaches only the
 granted app's own windows on a desktop the app owns. Refused by name:
 - `window_gone` — that window closed, or it is not one of this app's (`screenshot <app handle>` names what it has now);
 - `window_list_unreadable` — the app's window list could not be read just now; nothing was done, try again;

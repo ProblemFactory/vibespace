@@ -489,6 +489,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
   const capsOf = (rec) => M.capsOf(rec); // the rung's capability cells (the view's, else the row's)
+  /** THE ONE COPY of «a desktop the app owns» (r989 (3); r2157 (c)): the subject door (a window's own handle), the screenshot's
+   *  handles and the keyboard's look all read it — a shared desktop shows the person's own windows, and none of them has a handle. */
+  const ownsItsDisplay = (rec) => !!rec && rec.origin !== 'desktop' && !!capsOf(rec).ownsDisplay;
   /** The pixel verbs' common door: an injection backend (unless only reading), the plan, the VISIBILITY gate. */
   async function pixelsFor(rec, who, verb, { inject = true, sub = null, plan: given = undefined } = {}) {
     const { backends, xenv, bins: b } = await backendsFor(rec);
@@ -570,7 +573,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const subH = UN.subHandle(rec.id, sub); // r989 (4): the subject in ONE form, refused or acted
     const refuse = (code, why, extra = {}) => { audit({ sessionId: facts && facts.sessionId, browserKey: facts && facts.browserKey, handle: rec.id, subject: subH, verb, by: 'subject', ok: false, code }); return namedError(code, why, { handle: subH, ...extra }); };
     // r989 (3): THE ONE COPY of the record-kind rule — a desktop the app does not own (the person's own, a shared rung) has no window handles
-    if (rec.origin === 'desktop' || !capsOf(rec).ownsDisplay) throw refuse('window_subject_shared', `${subH}: a window's own handle exists only on a desktop the app owns — this one is shared with the person's own windows; use the app's own handle ${rec.id}`);
+    if (!ownsItsDisplay(rec)) throw refuse('window_subject_shared', `${subH}: a window's own handle exists only on a desktop the app owns — this one is shared with the person's own windows; use the app's own handle ${rec.id}`);
     if (!subjectVerb) throw refuse('window_subject_verb', `${subH} is one window of the app — \`${verb}\` takes the app's own handle ${rec.id}; a window's own handle takes only screenshot, click --at, type, key and scroll`);
     if (tree) throw refuse('window_subject_pixels', `${subH} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${rec.id}`);
     if (rec.state !== 'ready') throw refuse('window_not_ready', `${subH}: the app is still starting — its windows are listed once it is ready; nothing was done`);
@@ -1435,6 +1438,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       if (!at) throw namedError('bad-request', '--at needs `x,y` (integers: a pixel of `vibespace-window screenshot`)');
       const px = await pixelsFor(rec, who, 'click', { sub, ...(door.plan ? { plan: door.plan } : {}) });
       const pt = await pointOf(rec, px, at, who, 'click');
+      // B-dbb4 M3 (r2157 (a)): the point aim is judged WHEN THE CLICK IS MADE — the windows it aimed into are the ones this click's
+      // own plan already held, partly in the image (clipped), under its point; a window that came later (one the click opened over that
+      // point) never counts, nor does an unmapped one
+      if (aimOut && aimOut.aim && aimOut.aim.kind === 'point') aimOut.aim.into = (px.plan && Array.isArray(px.plan.unshown) ? px.plan.unshown : []).filter((w) => w && w.why === 'clipped' && at.x >= w.x && at.x < w.x + w.w && at.y >= w.y && at.y < w.y + w.h).map((w) => w.id);
       held();
       const r = await injecting((signal) => wt.injectClick({ bins: px.bins, xenv: px.xenv, x: pt.x, y: pt.y, button: body.button, signal, python }));
       fromHelper(r, { verb: 'click', by: 'point', at, display: { x: pt.x, y: pt.y }, coords: pt.coords, backend: px.backends.injection.backend });
@@ -1537,7 +1544,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   async function keyboardNoteFor(rec, facts, px) {
     // round wd6ogrta0's MUST: a desktop the app does NOT own shows the person's own windows — no look, no note there (the same test
     // the screenshot's window handles take: a shared desktop has none)
-    if (!capsOf(rec).ownsDisplay) return null;
+    if (!ownsItsDisplay(rec)) return null;
     for (const k of [...aims.keys()]) if (!liveAny(k.slice(0, k.lastIndexOf('|')))) aims.delete(k); // (c) a record that went takes its aims
     const un = px && px.plan && Array.isArray(px.plan.unshown) ? px.plan.unshown : [];
     if (!un.length) return null;
@@ -1549,7 +1556,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (!w) return null;
     const a = aims.get(aimKey(rec, facts));
     if (a && (a.kind === 'tree' || (a.kind === 'window' && a.wid === w.id))) return null; // the agent aimed into it (law B)
-    if (a && a.kind === 'point' && a.at && a.at.x >= w.x && a.at.x < w.x + w.w && a.at.y >= w.y && a.at.y < w.y + w.h) return null; // (a) a click on the part of it the image shows (a clipped window) aimed into it
+    if (a && a.kind === 'point' && Array.isArray(a.into) && a.into.includes(w.id)) return null; // (a, r2157) the click's OWN plan held this window, clipped, under its point
     return { handle: UN.subHandle(rec.id, w.id), title: w.title, note: UN.keyboardText(w, rec.id) };
   }
   function mainFocus(px, lease) {
@@ -1599,7 +1606,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       heldOrUnlink(rec, facts, out); // lane E verify: a revoke during the grab ⇒ the image is deleted, never handed over
       const unshown = Array.isArray(plan.unshown) ? plan.unshown : [];
       audit({ ...who, verb: 'screenshot', by: 'pixels', ok: true, w: r.w, h: r.h, windows: plan.members.length, lit: r.lit, ...(unshown.length ? { unshown: unshown.length } : {}) });
-      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true, ...(plan.subject ? { subject: plan.subject } : {}), ...(unshown.length ? { unshown, note: UN.unshownText(unshown, rec.id, { handles: !!capsOf(rec).ownsDisplay }) } : {}) };
+      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true, ...(plan.subject ? { subject: plan.subject } : {}), ...(unshown.length ? { unshown, note: UN.unshownText(unshown, rec.id, { handles: ownsItsDisplay(rec) }) } : {}) };
     }
     // no window geometry from the keeper: the display grab, cropped to the last snapshot's frame
     let bounds = null;

@@ -590,6 +590,9 @@ console.log('CONTROLS (patched copies)');
         // part aimed into it (no note); a click elsewhere did not (the note names it)
         clipIn: await scene(E, { rows: [big, pinned], pin: '1600x900', answer: { ok: true, id: 6 }, before: (E2) => E2.act('da-pop', fP, { verb: 'click', at: '1450,750' }) }),
         clipOut: await scene(E, { rows: [big, pinned], pin: '1600x900', answer: { ok: true, id: 6 }, before: (E2) => E2.act('da-pop', fP, { verb: 'click', at: '100,100' }) }),
+        // (a, r2157) the point is judged WHEN THE CLICK IS MADE: a click on the main OPENS a popup over its own point (the click's plan
+        // held no such window); the keyboard moves into it ⇒ the next key with no aim IS told — the one case the note exists for
+        opensUnder: await scene(E, { rows: [big, pinned], pin: '1600x900', answer: { ok: true, id: 6 }, before: async (E2) => { rowsP = [pinned].map((w) => ({ ...w })); await E2.act('da-pop', fP, { verb: 'click', at: '1450,750' }); rowsP = [big, pinned].map((w) => ({ ...w })); } }),
         // (b) a REFUSED act does not move the last aim: an aim into the popup (its own handle), then a click the takeover refuses — the aim stands
         refused: await scene(E, { rows: [pop, helper, main], answer: { ok: true, id: 2 }, before: async (E2) => { await E2.act('da-pop.w2', fP, { verb: 'key', chord: 'Tab' }); try { await E2.act('da-pop', fP, { verb: 'click', at: '9999,9999' }); } catch { /* refused after the door: a point outside the image */ } } }),
       });
@@ -602,6 +605,7 @@ console.log('CONTROLS (patched copies)');
       const audS = fs.readFileSync(EP.auditFile, 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } });
       ok(audS.some((l) => l.verb === 'key' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2') && audS.some((l) => l.verb === 'type' && l.by === 'inject' && l.keyboardIn === 'da-pop.w2'), 'M3 shape (C): the audit names the handle where the keyboard was (keyboardIn)');
       ok(none(S.one) && S.one.calls === 0, 'M3 shape (1): an app with ONE window a person sees (Chrome\'s 15×15 helper aside) — no look made, no extra call', S.one);
+      ok(!!S.opensUnder.note && S.opensUnder.note.includes('`da-pop.w6`'), 'M3 shape (a, r2157): a click on the main that OPENS a popup over its own point — the popup was not in the click\'s plan, so it was no aim into it: the next key IS told where the keyboard was', S.opensUnder);
       ok(none(S.clipIn) && !!S.clipOut.note && S.clipOut.note.includes('`da-pop.w6`'), 'M3 shape (a, round wd6ogrta0): a click on the visible part of a CLIPPED popup aimed into it — nothing said; a click elsewhere did not — the note names it', { clipIn: S.clipIn, clipOut: S.clipOut });
       ok(none(S.refused), 'M3 shape (b, round wd6ogrta0): a REFUSED act (a click at a point outside the image, refused after the door) does not move the last aim — the aim into the popup stands, nothing said', S.refused);
       ok(none(S.unread) && none(S.late) && S.late.ms < 1500, `M3 shape (2): a look that failed, or one that did not answer within its bound — the key lands as at the release and NOTHING is said (never a guess, never a refusal; the late one waited ${S.late.ms} ms)`, { unread: S.unread, late: S.late });
@@ -612,8 +616,10 @@ console.log('CONTROLS (patched copies)');
       ok(forced.A.windows[0] === 1 && forced.B.windows[0] === 1, 'RED CONTROL (A)(B): the main forced whenever it is named (ab6d685ff\'s road) — window 1 under a drawn window and after an aim into the popup: the keys go under it / away from the aim', { A: forced.A.windows, B: forced.B.windows });
       const noAimCheck = await scenesOn(anchored(SS, "    if (a && (a.kind === 'tree' || (a.kind === 'window' && a.wid === w.id))) return null; // the agent aimed into it (law B)\n", '', 'M3 shape control: the aim check cut'), 'no-aim-check');
       ok(!!noAimCheck.B.note && !!noAimCheck.refused.note, 'RED CONTROL (B, round wd6ogrta0 (d)): the aim check cut — a note is said right after the agent aimed into the popup', { B: noAimCheck.B.note, refused: noAimCheck.refused.note });
-      const noPoint = await scenesOn(anchored(SS, '    if (a && a.kind === \'point\' && a.at && a.at.x >= w.x && a.at.x < w.x + w.w && a.at.y >= w.y && a.at.y < w.y + w.h) return null; // (a) a click on the part of it the image shows (a clipped window) aimed into it\n', '', 'M3 shape control: the point aim not read'), 'no-point');
+      const noPoint = await scenesOn(anchored(SS, '    if (a && a.kind === \'point\' && Array.isArray(a.into) && a.into.includes(w.id)) return null; // (a, r2157) the click\'s OWN plan held this window, clipped, under its point\n', '', 'M3 shape control: the point aim not read'), 'no-point');
       ok(!!noPoint.clipIn.note, 'RED CONTROL (a): the click\'s point not read — the note is said right after a click INTO the clipped popup', noPoint.clipIn);
+      const keyTime = await scenesOn(anchored(SS, '    if (a && a.kind === \'point\' && Array.isArray(a.into) && a.into.includes(w.id)) return null; // (a, r2157) the click\'s OWN plan held this window, clipped, under its point\n', '    if (a && a.kind === \'point\' && a.at && a.at.x >= w.x && a.at.x < w.x + w.w && a.at.y >= w.y && a.at.y < w.y + w.h) return null; // the control: f9b610bf1\'s key-time box\n', 'M3 shape control (r2157): the point judged when the key is sent'), 'key-time');
+      ok(!keyTime.opensUnder.note, 'RED CONTROL (a, r2157): f9b610bf1\'s road — the click\'s point compared with the popup\'s box as it stands when the KEY is sent: the popup the click opened over its point silences the note', keyTime.opensUnder);
       const headSrc = anchored(anchored(SS, '    if (aimOut.key && aimOut.aim) aims.set(aimOut.key, { ...aimOut.aim, t: now() });\n', '', 'M3 shape control (b): the answered-only keep cut'), ": null; // B-dbb4 M3 (r1879; wd6ogrta0 (a)(b)): this act's aim, kept when it answers — a point aim keeps its point\n", ": null; if (aimOut.aim) aims.set(aimOut.key, { ...aimOut.aim, t: now() }); // the control: kept at the head\n", 'M3 shape control (b): the aim kept at the act\'s head');
       const aimAtHead = await scenesOn(headSrc, 'aim-at-head');
       ok(!!aimAtHead.refused.note, 'RED CONTROL (b): the aim kept at the act\'s head (before it answers) — the refused click took the aim, and the note is said', aimAtHead.refused);
@@ -645,7 +651,7 @@ console.log('CONTROLS (patched copies)');
       const sk = await sharedKey(ENGINE, 'now');
       ok(!sk.code && !sk.note && sk.calls === 0, 'round wd6ogrta0 MUST: on a SHARED desktop a window outside the image holds the keyboard — a key on the app\'s own handle makes no look and says no note (no window handle exists there)', sk);
       const SSh = read(ENGINE_REL);
-      const skRed = await sharedKey(MUT.load(ENGINE_REL, anchored(SSh, '    if (!capsOf(rec).ownsDisplay) return null;\n', '', 'shared-desktop control: the own-display test cut'), 'shared-look'), 'red');
+      const skRed = await sharedKey(MUT.load(ENGINE_REL, anchored(SSh, '    if (!ownsItsDisplay(rec)) return null;\n', '', 'shared-desktop control: the own-display test cut'), 'shared-look'), 'red');
       ok(!!skRed.note && skRed.calls >= 1 && /da-sh\.w2/.test(skRed.note), 'RED CONTROL (the MUST): the line as it stood — on the shared desktop the look is made and the note names `da-sh.w2`, a handle the door refuses (window_subject_shared)', skRed);
       wtP.keyboardWindow = keepKw;
     }
