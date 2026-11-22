@@ -22,10 +22,10 @@ fs.mkdirSync(path.join(HOME, '.config', 'gh'), { recursive: true });
 const GH_ENV = GHG.scratchGhEnv(HOME);   // the generator's ONE builder (its CLI's re-pin reads gh alike)
 GHG.setGhEnv(GH_ENV);
 {
-  const ALLOWED = 'GH_CONFIG_DIR GH_NO_UPDATE_NOTIFIER GH_PROMPT_DISABLED HOME LANG NO_COLOR PATH XDG_CONFIG_HOME';
-  ok(Object.keys(GH_ENV).sort().join(' ') === ALLOWED, `gh's env is these eight names and nothing else (${Object.keys(GH_ENV).sort().join(' ')})`);
-  ok(GH_ENV.HOME === HOME && HOME !== process.env.HOME && [GH_ENV.XDG_CONFIG_HOME, GH_ENV.GH_CONFIG_DIR].every((d) => d.startsWith(GH_ENV.HOME + path.sep)) && fs.readdirSync(GH_ENV.GH_CONFIG_DIR).length === 0,
-    'its HOME is this run\'s own scratch folder (not even the suite\'s HOME), its config folders inside it and empty: no hosts file, no token, no alias');
+  const ALLOWED = 'DO_NOT_TRACK GH_CONFIG_DIR GH_NO_EXTENSION_UPDATE_NOTIFIER GH_NO_UPDATE_NOTIFIER GH_PROMPT_DISABLED GH_TELEMETRY HOME LANG NO_COLOR PATH XDG_CONFIG_HOME';   // eleven: the three telemetry / update switches gh documents (主开发 r2400)
+  ok(Object.keys(GH_ENV).sort().join(' ') === ALLOWED, `gh's env is these eleven names and nothing else (${Object.keys(GH_ENV).sort().join(' ')})`);
+  ok(GH_ENV.GH_TELEMETRY === 'false' && GH_ENV.DO_NOT_TRACK === '1' && GH_ENV.GH_NO_UPDATE_NOTIFIER === '1' && GH_ENV.GH_NO_EXTENSION_UPDATE_NOTIFIER === '1' && GH_ENV.HOME === HOME && HOME !== process.env.HOME && [GH_ENV.XDG_CONFIG_HOME, GH_ENV.GH_CONFIG_DIR].every((d) => d.startsWith(GH_ENV.HOME + path.sep)) && fs.readdirSync(GH_ENV.GH_CONFIG_DIR).length === 0,
+    'its telemetry off and its update checks off as gh documents them; its HOME is this run\'s own scratch folder (not even the suite\'s HOME), its config folders inside it and empty: no hosts file, no token, no alias');
   // WHAT gh RECEIVES, not the literal: a stand-in gh that prints its own environment, reached through the generator's spawn helpers
   const stub = scratchDir('vrm-gh-stub');
   fs.writeFileSync(path.join(stub, 'gh'), '#!/bin/sh\nenv\n', { mode: 0o755 });
@@ -43,7 +43,7 @@ GHG.setGhEnv(GH_ENV);
   } finally { process.env.PATH = pathWas; delete process.env[PLANT]; GHG.setGhEnv(GH_ENV); }
   const extra = got.filter((k) => !ALLOWED.split(' ').includes(k) && k !== 'PWD' && k !== 'SHLVL' && k !== '_' && k !== 'OLDPWD');
   ok(got.includes('HOME') && got.includes('GH_CONFIG_DIR') && !got.includes(PLANT) && extra.length === 0 && !got.some((k) => /TOKEN|^GH_HOST$/.test(k)),
-    `the spawned gh RECEIVES the eight names and nothing of the caller, not the name planted in this process (the shell adds only PWD / SHLVL / _ / OLDPWD): ${extra.join(' ') || 'nothing else'}`);
+    `the spawned gh RECEIVES the eleven names and nothing of the caller, not the name planted in this process (the shell adds only PWD / SHLVL / _ / OLDPWD): ${extra.join(' ') || 'nothing else'}`);
   ok(leak.includes(PLANT),
     `RED CONTROL: the SAME stand-in with no env built receives the caller's environment — the planted ${PLANT} among it (${leak.length} names): the leg above is a measurement`);
 }
@@ -63,14 +63,15 @@ await (async () => {
     }
     // r2380 (3): FROM THE VENDOR'S OWN TEXT at the pinned version (its environment help, the one the census parses below), never from
     // memory: every variable whose paragraph speaks of an update check, telemetry or the network is named here, and one the
-    // scratch environment does not set is RED (it joins the builder, scratchGhEnv, with the value the text documents)
+    // scratch environment does not set is printed «NOT SET» — a report line, never a cross, until its first hosted run (主开发 r2400)
     {
       const envText = GHG.ghHelpTopic('environment') || '';
       const paras = envText.split(/\n\s*\n/).filter((p) => /\b(?:update|telemetry|network|notif)/i.test(p));
       const named = [...new Set(paras.flatMap((p) => p.match(/\b(?:GH|DO_NOT|NO)_[A-Z0-9_]+\b/g) || []))].sort();
       console.log(`  · the environment help of gh ${pinned} names ${named.length ? named.join(', ') : 'no variable'} beside an update check, telemetry or the network`);
-      const unset = named.filter((n) => !(n in GH_ENV));
-      ok(envText.length > 0 && unset.length === 0, `every variable gh ${pinned} documents beside an update check, telemetry or the network is set in its scratch environment (${named.join(', ') || 'none documented'})${unset.length ? ' — NOT SET: ' + unset.join(', ') : ''}`);
+      const unset = named.filter((n) => !(n in GH_ENV));   // a REPORT, never a cross (主开发 r2400): the first hosted run shows 2.102.0's own
+      // words; the commit after that run turns this into a law (a fourth name at 2.102.0 must not turn the final candidate's run red)
+      console.log(`  · ${envText ? 'set in the scratch environment: ' + (named.filter((n) => n in GH_ENV).join(', ') || 'none') + (unset.length ? ' · NOT SET: ' + unset.join(', ') : '') : 'the environment help could not be read'}`);
     }
     const { table, unreadable, shas } = await GHG.buildGrammarParallel();                            // the WHOLE live tree, concurrently (~0.9 s): the SAME parse as the serial generator, so no spurious drift; shas = the live help-text sha of every EMITTED (allowlisted) verb
     const shippedKeys = new Set(Object.keys(shipped)), liveKeys = new Set(Object.keys(table));

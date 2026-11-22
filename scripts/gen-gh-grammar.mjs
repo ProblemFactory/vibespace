@@ -45,9 +45,19 @@ let GH_ENV = null;
 export const setGhEnv = (env) => { GH_ENV = env ? { ...env } : null; };
 const ghOpts = (o) => (GH_ENV ? { ...o, env: GH_ENV } : o);
 /** THE ONE builder of gh's env (a scratch HOME, its config folders inside it and empty, the caller's PATH, nothing of a person):
- *  the census (test-vault-run-model-gh) and this CLI's --repin / --allow-shas / --write read gh alike, so a pin is reproducible */
+ *  the census (test-vault-run-model-gh) and this CLI's --repin / --allow-shas / --write read gh alike, so a pin is reproducible.
+ *  gh SENDS TELEMETRY AND CHECKS FOR UPDATES unless told not to — the vendor's own words, read from gh 2.100.0's environment help
+ *  (`gh help environment`, on a scratch home with this env; the pin is 2.102.0 — the census names 2.102.0's own words at its run):
+ *    GH_NO_UPDATE_NOTIFIER: «set to any value to disable GitHub CLI update notifications. When any command is executed, gh checks
+ *      for new versions once every 24 hours.»
+ *    GH_NO_EXTENSION_UPDATE_NOTIFIER: «set to any value to disable GitHub CLI extension update notifications. When an extension is
+ *      executed, gh checks for new versions for the executed extension once every 24 hours.»
+ *    GH_TELEMETRY: «set to log to print telemetry data to standard error instead of sending it. Set to false or 0 to disable
+ *      telemetry. Takes precedence over DO_NOT_TRACK.»
+ *    DO_NOT_TRACK: «set to true or 1 to disable telemetry. Ignored when GH_TELEMETRY is set, which takes precedence.»
+ *  so all four are set as the text documents (主开发 r2400): ELEVEN names. */
 export const scratchGhEnv = (home, PATH = process.env.PATH || '/usr/bin:/bin') => ({ PATH, HOME: home, XDG_CONFIG_HOME: `${home}/.config`, GH_CONFIG_DIR: `${home}/.config/gh`,
-  LANG: 'C.UTF-8', GH_NO_UPDATE_NOTIFIER: '1', GH_PROMPT_DISABLED: '1', NO_COLOR: '1' });
+  LANG: 'C.UTF-8', GH_NO_UPDATE_NOTIFIER: '1', GH_NO_EXTENSION_UPDATE_NOTIFIER: '1', GH_TELEMETRY: 'false', DO_NOT_TRACK: '1', GH_PROMPT_DISABLED: '1', NO_COLOR: '1' });
 export const ghHelp = (args) => { try { return execFileSync('gh', [...args, '--help'], ghOpts({ encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { return null; } };
 export const ghHelpAsync = (args) => new Promise((res) => execFile('gh', [...args, '--help'], ghOpts({ encoding: 'utf8', timeout: 15000, maxBuffer: 8e6 }), (e, o) => res(e ? null : o)));   // the census fetches ~250 helps in parallel — the SAME parse (parseHelp), so no drift vs the serial generator
 export const ghHelpTopic = (name) => { try { return execFileSync('gh', ['help', name], ghOpts({ encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { return null; } };
