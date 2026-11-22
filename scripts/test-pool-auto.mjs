@@ -3703,6 +3703,30 @@ await (async () => {
       const p0 = am0.memberProviderOf(R.id);
       ck('engine: CONTROL — the release\'s accounts answer null for the provider\'s id, and the pool\'s reader agrees it with ITS OWN provider (a hot, unasked move): red', p0 === null && sameProvider(p0, own), J({ p0 }));
     }
+    // POOL UNIT (c) (row B-d578, ruling r1516): a conversation held by a PROVIDER member bills THAT provider — its usage is
+    // attributed to the provider's id (priced as the provider's: its own row, or «unknown»), never the credential link's member.
+    // ws-create stamps a pooled spawn that landed on a provider (its process HOLDS it: the key rides the env, no link); usage
+    // attribution asks accounts.poolMemberOfSession, which honours that stamp before the link on any harness.
+    // RED: the release's accounts read the link first on a hot-switch harness — the provider's rows go to Member A.
+    {
+      const R = { id: 'pv-fixture-router', kind: 'openai-chat', label: 'Router', models: [{ id: 'router-1' }], modelsSource: 'manual' };
+      const w = pworld(); const look = (acct) => (acct.id === R.id ? R : acct.id === w.B ? Q : null); w.am.setProviderLookup(look);
+      const s9 = w.mk('s9'); s9._heldPoolMember = R.id;   // linked to Member A as every spawn of this world; stamped as ws-create stamps a provider spawn
+      w.mk('s10');                                            // a conversation with no provider stamp
+      const recs = [];
+      const attr = (am, cid) => { recs.length = 0; require(path.resolve('src/server/usage-attribution.js')).create({ activeSessions: w.sessions, accounts: am, usageHistory: { recordAttribution: (r) => recs.push(r) } }).recordUsageAttribution({ claudeSessionId: cid, accountId: w.Pl }); return recs[0] || null; };
+      const held = w.am.poolMemberOfSession(w.Pl, s9, 's9'), r9 = attr(w.am, 'cid-s9'), r10 = attr(w.am, 'cid-s10');
+      ck('engine: POOL UNIT (c) — a conversation held by a provider member IS that member (origin «provider»), and its usage is attributed to the provider, the pool kept as its tag', held.id === R.id && held.origin === 'provider' && !!r9 && r9.acct === R.id && r9.pool === w.Pl, J({ held, r9 }));
+      ck('engine: …a conversation with no provider stamp is attributed as before (its link: Member A)', !!r10 && r10.acct === w.A && r10.pool === w.Pl, J(r10));
+      ck('engine: …the spawn stamps it: ws-create holds a pooled spawn that landed on a provider (its poolTarget), whatever the hot switch', /if \(pa && pa\.type === 'pooled' && spawnAccount\.kind === 'provider' && spawnAccount\.poolTarget\) heldPoolMember = spawnAccount\.poolTarget;/.test(fsx.readFileSync(path.resolve('src/ws-create.js'), 'utf8')));
+      const { mutantCopies: mcC } = await import('./mutant-copy.mjs');
+      const { anchored: anchoredC } = await import('./scratch.mjs');
+      const csrc = fsx.readFileSync(path.resolve('src/accounts.js'), 'utf8');
+      const { AccountManager: AMc } = mcC('pool-c-accounts', path.resolve('.')).load('src/accounts.js', anchoredC(csrc, "    if (stamp && this._providerMemberOf(stamp)) return { id: stamp, held: true, origin: 'provider' };\n", '', 'the release: the link first'), 'release-attribution');
+      const amc = new AMc({ dataDir: w.am.dataDir }); amc.setProviderLookup(look);
+      const rc = attr(amc, 'cid-s9');
+      ck('engine: CONTROL — the release\'s accounts read the LINK first on a hot-switch harness: the provider member\'s usage is attributed to Member A (red)', !!rc && rc.acct === w.A, J(rc));
+    }
     // Deny: nothing moves, not asked again
     const wd = pworld(); wd.client(); wd.mk('s2'); wd.pass();
     const c3 = wd.items.find((x) => x.action && x.action.type === 'pool-cross-provider');

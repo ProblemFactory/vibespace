@@ -2389,8 +2389,11 @@ class AccountManager {
     const link = () => this.poolCurrentFor(poolId, key) || null;
     const a = this.get(poolId);
     if (!a || a.type !== 'pooled' || !session || session._accountId !== poolId || session.host) return { id: a && a.type === 'pooled' ? link() : null, held: false, origin: 'link' };
-    if (capsOf(a.backend || session.backend || 'claude').hotSwitch === 'verified') return { id: link(), held: false, origin: 'link' };
     const stamp = typeof session._heldPoolMember === 'string' ? session._heldPoolMember : null;
+    // A PROVIDER MEMBER (row B-d578, the pool's fallback unit (c)): its process HOLDS it whatever the harness's hot switch — its
+    // key rides the spawn's env, no credential link can point at it — so it bills that provider, never the link's member
+    if (stamp && this._providerMemberOf(stamp)) return { id: stamp, held: true, origin: 'provider' };
+    if (capsOf(a.backend || session.backend || 'claude').hotSwitch === 'verified') return { id: link(), held: false, origin: 'link' };
     if (stamp && this.get(stamp)) return { id: stamp, held: true, origin: session._heldPoolOrigin === 'ledger' ? 'ledger' : 'stamp' };
     // a session restored from a meta that never recorded its start (boot-restore
     // fills `createdAt` with the boot instant): the ledger would answer the pool

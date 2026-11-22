@@ -1163,6 +1163,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           try {
             const pa = spawnAccount && !data.hostId && accounts ? accounts.get(spawnAccount.id) : null;
             if (pa && pa.type === 'pooled' && capsOf(backend).hotSwitch !== 'verified') heldPoolMember = spawnAccount.pinnedMember || accounts.poolCurrent(pa.id) || null; // a pinned codex spawn HOLDS its pin (2026-09-28)
+            if (pa && pa.type === 'pooled' && spawnAccount.kind === 'provider' && spawnAccount.poolTarget) heldPoolMember = spawnAccount.poolTarget; // B-d578 pool unit (c): a PROVIDER member is held by its process whatever the hot switch (its key rides the env: no link can point at it)
           } catch { heldPoolMember = null; }
           // WHICH LONG-LIVED TOKEN this process carries (lane oat-identity-fix, verify r1 F1): the ENV road holds the
           // generation it spawned with for life; a LOCAL creds dir is the FILE road (the engine reads the token file's
