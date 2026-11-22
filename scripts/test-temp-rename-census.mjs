@@ -221,7 +221,7 @@ const ROWS = [
   ["src/routes/persistence.js", "unsynced", "store", "the layouts' owed mark (data/layouts.owed.json, B-0248: an episode's mark, its own temp + rename, unsynced) — the layouts and settings themselves are the store writer's since B-0248 step 2", "setup > writeMark"],
   ["src/safe-fs-worker.js", "move", "move", "", "rename", "move"],
   ["src/safe-fs-worker.js", "unsynced", "person", "the person's file copied or moved across devices (its .part)", "copy", "move"],
-  ["src/secret-file.js", "synced", "secret", "the secret-bearing replace (synced since the hotfix 2.369.415)", "replaceShredding"],
+  ["src/secret-file.js", "synced", "secret", "the secret-bearing replace (synced since the hotfix 2.369.415): the sync one, and its async twin the interface's sign-in table writes through (the separation's B3b-1, line 306: the temp synced, then renamed, its folder synced)", "replaceShredding", "replaceShreddingAsync"],
   ["src/server/agent-listener.js", "unsynced", "store", "", "keepPort"],
   ["src/server/agent-tool-generators.js", "unsynced", "derived", "an agent tool copied from the checkout at every start", "create > createBrowserVerbsCopy", "create > createBrowserStuckCopy", "create > createBrowserPasskeyCopy", "create > createBrowserReadBackCopy", "create > createCliTextCopy", "create > createCliCallCopy", "create > createFdCloseCopy", "create > createLocalIndexCopy"],
   ["src/server/apps-engine.js", "unsynced", "store", "", "writeJsonAtomic"],

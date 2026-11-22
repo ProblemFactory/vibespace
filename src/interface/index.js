@@ -21,9 +21,11 @@
 // line names its file — main.js hands it in with useSignin before it listens) every head meets it FIRST: the held state and the
 // sign-in road are answered here, and every other head is relayed with the table's ONE fact on its stamp (`signin`: 'off', a
 // live login's digest, or null) and, on a page answer, the slide's cookie. After a party's hello-ack the table's state goes to
-// it (`{op:'signin-state', enabled, password, sso, held}`), and again at every change; a party's `{op:'signin-revoke-all', why}`
-// (a vault lock — B3b-2 sends it) revokes every login, answered `{op:'signin-revoke-all-ack', revoked}` (the hub closes its own
-// page sockets with the signed-out code, as today). Without a table (a suite's relay alone) nothing of this runs.
+// it (`{op:'signin-state', enabled, password, sso, held}`), and again at every change; a party's `{op:'signin-revoke-all', id, why}`
+// (a vault lock) revokes every login, answered `{op:'signin-revoke-all-ack', id, ok, revoked}` only once the table's save landed
+// (`ok:false` with its `why` when it failed: the hub keeps the order held); `{op:'signin-epoch', id}` after a join sets the epoch
+// every live login's stamp carries (the hub closes its own page sockets with the signed-out code, as today). Without a table (a
+// suite's relay alone) nothing of this runs.
 const { Mux } = require('../agentd/mux.js');
 const front = require('./front.js');
 const relay = require('./relay.js');

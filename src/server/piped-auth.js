@@ -39,7 +39,12 @@ class PipedAuth extends Auth {
     this.#floor = typeof opts.revokeFloor === 'function' ? opts.revokeFloor : revokeFloor;   // the newest order's id (law 1)
     (typeof opts.subscribe === 'function' ? opts.subscribe : onSigninState)((m) => {   // the interface's state line (a suite hands its own hook)
       if (m && m.op === 'signin-state') this.#told = m;
-      else if (m && m.op === 'signin-revoke-all-ack') { try { this.#say.log?.(`[auth] the interface signed ${Number(m.revoked) || 0} login(s) out (a vault lock's revoke, answered)`); } catch { } }
+      else if (m && m.op === 'signin-revoke-all-ack') {   // only answers to orders hub-port holds reach here (r2210 (1))
+        try {
+          if (m.ok === false) this.#say.warn?.(`[auth] a vault lock's sign-out is NOT on disk in the interface (${String(m.why || 'error').slice(0, 40)}): the order is still held, no login is honoured, and it is said again`);
+          else this.#say.log?.(`[auth] the interface signed ${Number(m.revoked) || 0} login(s) out — on disk (a vault lock's revoke, answered)`);
+        } catch { }
+      }
     });
   }
   /** THE INTERFACE HOLDS THE TABLE: nothing is opened, nothing is held here */

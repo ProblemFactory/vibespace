@@ -186,7 +186,8 @@ function wire(decision, { hub, server, join = null, end = endSelf, log = console
   /** after a join, FIRST: the epoch the interface's disk holds, then every held order, oldest first */
   const sayAll = () => { if (!party) return; if (answered > 0) { try { party.mux.control({ op: 'signin-epoch', id: answered }); } catch { } } for (const id of [...held.keys()].sort((a, b) => a - b)) say(id); };
   const heard = (m) => {
-    if (m && m.op === 'signin-revoke-all-ack' && Number.isSafeInteger(m.id) && held.has(m.id)) {
+    if (m && m.op === 'signin-revoke-all-ack' && !(Number.isSafeInteger(m.id) && held.has(m.id))) return;   // an answer to no order this hub holds: nothing to say (r2210 (1))
+    if (m && m.op === 'signin-revoke-all-ack') {
       if (m.ok === false) {   // law 2: not on disk — the order stays held, said again in a moment
         if (!resay) { resay = setTimeout(() => { resay = null; if (party) for (const id of [...held.keys()].sort((a, b) => a - b)) say(id); }, RESAY_MS); resay.unref?.(); }
       } else { held.delete(m.id); answered = Math.max(answered, m.id); }   // law 4: THIS order is done, no other

@@ -17,7 +17,8 @@
 // THE SIGN-IN FACT (piece B3b-1, 主开发 r1517 (A)): when the interface holds the sign-in table, the stamp carries its fact for
 // that head — 'off', { alive: <a login's sha256 digest>, epoch } or null — kept on the channel's socket (signinFactOf), read by the
 // piped hub's gate (src/server/piped-auth.js); a malformed fact is kept as null (no login). The table's state line
-// `{op:'signin-state', …}` and its answer to a revoke (`{op:'signin-revoke-all-ack', revoked}`) go to `onSignin`.
+// `{op:'signin-state', …}` and its answer to a revoke (`{op:'signin-revoke-all-ack', id, ok, revoked, why?}` — ok:false: not on
+// disk) go to `onSignin`.
 const net = require('net');
 const { Mux } = require('../agentd/mux.js');
 const { createChanSockets } = require('../agentd/chan-socket.js');

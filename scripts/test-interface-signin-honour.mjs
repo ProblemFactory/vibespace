@@ -103,7 +103,8 @@ async function fakeInterface(link, { holdAck = false, holdChallenge = false, ack
   };
   /** the open line now, its head's bytes later — the gap law 1 is about (the stamp travels ahead of the head) */
   const openNow = (cookie, fact) => { const c = ++chan; side.control({ op: 'open', chan: c, to: 'hub', trace: 't', stamp: { secure: false, addr: '127.0.0.1', port: 1, signin: fact } }); return async () => { side.data(c, Buffer.from(`GET /api/x HTTP/1.1\r\nHost: hub.example\r\nAccept: application/json\r\nCookie: vs_token=${cookie}\r\nConnection: close\r\n\r\n`, 'latin1')); await until(() => /HTTP\/1\.1 \d{3}/.test(got.get(c) || ''), 3000); return Number((/HTTP\/1\.1 (\d{3})/.exec(got.get(c) || '') || [])[1] || 0); }; };
-  return { head, openNow, orders, heard, ackAll: () => { while (held.length) held.shift().ack(); }, ack: (id) => { const i = held.findIndex((h) => h.id === id); if (i >= 0) held.splice(i, 1)[0].ack(); }, greet: () => { greetAsked = true; if (greetLater) { const g = greetLater; greetLater = null; g(); } }, linked: () => !!side, close: () => { try { side && side.destroy(); } catch { } srv.close(); } };
+  const rawAck = (m) => side.control({ op: 'signin-revoke-all-ack', ...m });   // an answer the leg makes up (to no order, say)
+  return { head, openNow, orders, heard, rawAck, ackAll: () => { while (held.length) held.shift().ack(); }, ack: (id) => { const i = held.findIndex((h) => h.id === id); if (i >= 0) held.splice(i, 1)[0].ack(); }, greet: () => { greetAsked = true; if (greetLater) { const g = greetLater; greetLater = null; g(); } }, linked: () => !!side, close: () => { try { side && side.destroy(); } catch { } srv.close(); } };
 }
 /** the hub joined to a fake interface by hand (no wiring): its gate over the given class, no order ever given */
 async function joinedHub(AuthClass, opts = {}) {
@@ -209,13 +210,23 @@ async function onDisk(idxSrc, { fail = false } = {}) {
   ok(failed.ack && failed.ack.ok === false && failed.ack.why === 'ENOSPC', `a save that FAILS is answered «not done» (${failed.ack && failed.ack.why}): ${failed.events.join(' → ')}`, failed);
   // the hub's side: an answer «not done» keeps the order held, and it is said again (a copy of hub-port with RESAY_MS 50)
   const HPS = 'src/server/hub-port.js';
-  const quick = compileAt(HPS, swapped(HPS, [['const RESAY_MS = 5000;', 'const RESAY_MS = 50;']]));
-  const W = await wiredHub(quick, { holdAck: false, ackOk: false }); await until(() => W.booted(), 3000);
-  W.H.auth.revokeAllTokens();
-  const again = await until(() => W.F.orders.length >= 2, 2000);
-  const stillHeld = quick.revokePending();
-  W.close();
-  ok(again && stillHeld && W.F.orders[0].id === W.F.orders[1].id, `and the hub HOLDS on an answer «not done»: the same order said again (${W.F.orders.length}× id ${W.F.orders[0] && W.F.orders[0].id}), still pending (${stillHeld})`, { orders: W.F.orders.length, stillHeld });
+  async function notDone(pa = PA) {
+    const quick = compileAt(HPS, swapped(HPS, [['const RESAY_MS = 5000;', 'const RESAY_MS = 50;']]));
+    const W = await wiredHub(quick, { holdAck: false, ackOk: false, pa }); await until(() => W.booted(), 3000);
+    W.H.auth.revokeAllTokens();
+    const again = await until(() => W.F.orders.length >= 2, 2000);
+    const stillHeld = quick.revokePending();
+    W.F.rawAck({ id: 99, ok: true, revoked: 7 });   // an answer to an order this hub never gave
+    await sleep(60);
+    W.close();
+    const journal = W.lines.filter((l) => l.startsWith('[auth]'));
+    return { again, stillHeld, orders: W.F.orders.map((o) => o.id), notOnDisk: journal.filter((l) => /NOT on disk/.test(l)).length, answered: journal.filter((l) => /answered/.test(l)).length };
+  }
+  const nd = await notDone();
+  ok(nd.again && nd.stillHeld && nd.orders[0] === nd.orders[1], `and the hub HOLDS on an answer «not done»: the same order said again (${nd.orders.length}× id ${nd.orders[0]}), still pending (${nd.stillHeld})`, nd);
+  ok(nd.notOnDisk >= 1 && nd.answered === 0, `its journal names it «NOT on disk, still held, said again» (${nd.notOnDisk}) and never «answered»; an answer to an order it never gave says nothing (${nd.answered})`, nd);
+  const oldWords = await notDone(mutant('src/server/piped-auth.js', "          if (m.ok === false) this.#say.warn?.(", "          if (false) this.#say.warn?.("));
+  ok(oldWords.answered >= 1, `RED CONTROL — the journal's one line for every answer: an answer «not done» is said «answered» (${oldWords.answered})`, oldWords);
   const IDXOLD = swapped('src/interface/index.js', [["          r.written.then((w) => {\n", "          Promise.resolve(true).then((w) => {   // (the red: answered at once)\n"]]);
   const early = await onDisk(IDXOLD, { fail: true });
   ok(!!early.ack && early.ack.ok === true && early.events.indexOf('ack done') >= 0 && early.events.indexOf('ack done') < early.events.indexOf('write-failed'), `RED CONTROL — B3b-2's answer (at once): a save that FAILS is answered «done» (${early.events.join(' → ')}) — an interface that dies there brings the revoked logins back`, early);
@@ -329,7 +340,7 @@ console.log('— ⑥ THE CENSUS: one sign-in reader in the hub\'s tree; no reade
   const files = ['server.js', ...(function walk(d) { return fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'lib' && d === 'src' ? [] : walk(`${d}/${e.name}`)) : e.name.endsWith('.js') ? [`${d}/${e.name}`] : [])); })('src')];
   /** the VENDOR CLI's own auth.json (~/.codex, its account copies), by file and count — never the sign-in table: a new quoted
    *  'auth.json' anywhere else, or one more in these files, is red by name */
-  const VENDOR = { 'src/harnesses/codex.js': 4, 'src/accounts.js': 1, 'src/machine-probes.js': 3, 'src/routes/persistence.js': 1, 'src/login-state.js': 1 };
+  const VENDOR = { 'src/harnesses/codex.js': 5 /* B-360d: + displayFiles, the accounts list's off-loop read of codex's own per-account auth.json */, 'src/accounts.js': 1, 'src/machine-probes.js': 3, 'src/routes/persistence.js': 1, 'src/login-state.js': 1 };
   function census(texts) {
     const out = [], quoted = new Map();
     for (const [rel, raw] of texts) {
