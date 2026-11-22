@@ -74,7 +74,8 @@ function endMine() {
   return hit;
 }
 let current = null;   // the DeviceManager the stand-in registry answers (null = the machine is offline)
-const endAll = () => { try { if (current) current.stop(); } catch { /* */ } try { endDaemonsAndWait(AGENTD_ROOT); } catch { /* */ } return endMine(); };
+let chromeProc = null;   // the suite's ONE Chrome, ended by its held handle (the root's sweep below is the net)
+const endAll = () => { try { if (current) current.stop(); } catch { /* */ } try { endDaemonsAndWait(AGENTD_ROOT); } catch { /* */ } try { if (chromeProc && chromeProc.pid > 1 && chromeProc.exitCode === null) chromeProc.kill('SIGKILL'); } catch { /* */ } return endMine(); };
 process.on('exit', () => { try { endAll(); } catch { /* best effort at exit */ } });
 for (const sg of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sg, () => process.exit(130));
 
@@ -93,7 +94,7 @@ const srv = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'te
 await new Promise((r) => srv.listen(PAGE_PORT, '127.0.0.1', r));
 const PAGE = (n) => `http://127.0.0.1:${PAGE_PORT}/p${n}`;
 const CDP_PORT = await freePort();
-spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'], { stdio: 'ignore', env: { ...BASE_ENV, HOME: path.join(ROOT, 'chrome-home') } });
+chromeProc = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'], { stdio: 'ignore', env: { ...BASE_ENV, HOME: path.join(ROOT, 'chrome-home') } });
 let BROWSER_WS = null;
 for (let i = 0; i < 100 && !BROWSER_WS; i++) { try { BROWSER_WS = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json()).webSocketDebuggerUrl || null; } catch { await sleep(150); } }
 if (!ok(!!BROWSER_WS, 'the suite\'s ONE Chrome answers its DevTools endpoint on the "machine" (headless, CHROME_QUIET + CHROME_STORE, its own profile dir)', String(BROWSER_WS))) report();
@@ -104,6 +105,8 @@ const bundle = path.join(ROOT, 'agentd.js');
 await agentdBundle({ version, outfile: bundle });
 const dataDir = path.join(ROOT, 'hubdata'); fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 const { DeviceManager } = require('../src/agentd/client.js');
+process.env.PATH = `${path.dirname(REAL_AB)}:${process.env.PATH || ''}`;   // the machine's agent runs the real driver (browser-serve's `start`)
+process.env.HOME = path.join(ROOT, 'device-home'); fs.mkdirSync(process.env.HOME, { recursive: true, mode: 0o700 });   // its ~/.agent-browser inside this root
 const dial = async () => { const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => { } }); dm.installLocal(); await dm.connect(); return dm; };
 current = await dial();
 const HOST_A = 'h-paired-a', HOST_B = 'h-paired-b';   // two names of the same stand-in machine: two forward listeners (the url change)
@@ -122,7 +125,7 @@ const newTab = async (n) => { const r = await hub.call('Target.createTarget', { 
 
 // ── the mediator in this process (the hub makes ONE a run): a scope grant per scoped session, its upstream THE FORWARD ──
 const med = MED.create({ log: { log() { }, warn() { } } });
-const PROFILE = 'bp-00paired', SA_KEY = 'bk-00pairsa', SB_KEY = 'bk-00pairsb', SC_KEY = 'bk-00pairsc';
+const PROFILE = 'bp-0000a1a1', SA_KEY = 'bk-0000a5a1', SB_KEY = 'bk-0000b5b1', SC_KEY = 'bk-0000c5c1';
 const gSA = await med.grantFor({ profileId: PROFILE, browserKey: SA_KEY, upstream: FWD_URL, mode: M.SCOPE_MODE, paused: () => false });
 const gSB = await med.grantFor({ profileId: PROFILE, browserKey: SB_KEY, upstream: FWD_URL, mode: M.SCOPE_MODE, paused: () => false });
 const road = M.leaseRoadVerdict({ proxy: true, paired: true, agent: true });
@@ -209,7 +212,7 @@ const back = await reach();
 ok(back.code === 0 && back.ms <= ANSWER_BOUND_MS, `② the machine RE-DIALS ⇒ SA reaches its tab again through the SAME grant url (${back.ms} ms)`, brief(back));
 // the forward's url CHANGES (a second listener of the same machine): the grant REPOINTED follows it; the first listener closes
 let fwd2 = null; try { fwd2 = await access.forwardCdp(HOST_B, CDP_PORT, { remoteUrl: BROWSER_WS }); } catch (e) { fwd2 = { error: String(e && e.message) }; }
-const gSC = await med.grantFor({ profileId: 'bp-00pairsc', browserKey: SC_KEY, upstream: FWD_URL, mode: M.SCOPE_MODE, paused: () => false });   // the CONTROL: a grant left on the first url
+const gSC = await med.grantFor({ profileId: 'bp-0000c1c1', browserKey: SC_KEY, upstream: FWD_URL, mode: M.SCOPE_MODE, paused: () => false });   // the CONTROL: a grant left on the first url
 const SC = world('SC', gSC.url);
 med.repoint(PROFILE, fwd2 && fwd2.url);
 try { hub.ws.close(); } catch { /* */ } try { fwd.close(); } catch { /* */ }
@@ -217,6 +220,33 @@ const repointed = await reach();
 const left1 = await drive(SC, ['open', PAGE('sc0'), '--json'], FAULT_MS);
 ok(!!(fwd2 && fwd2.url && fwd2.url !== FWD_URL) && repointed.code === 0 && repointed.ms <= ANSWER_BOUND_MS, `② the forward's url CHANGES and the grant is REPOINTED ⇒ SA reaches its tab through the new url (${repointed.ms} ms)`, { fwd2: fwd2 && (fwd2.url || fwd2.error), r: brief(repointed) });
 ok(left1.code !== 0 && left1.code !== 'timeout' && left1.ms <= ANSWER_BOUND_MS + 10000 && wordOf(left1).length > 0, `② CONTROL (RED by construction): a grant left on the CLOSED first url refuses by name, never a hang (${left1.ms} ms: «${wordOf(left1)}»)`, brief(left1));
+// ── ③ THROUGH THE KEEPER's ROAD (round wpdtugrv1 MUST 1): the REAL keeper starts a shared profile on the suite's paired agent (the
+// browser-serve `start` op runs THERE: the real driver launches that machine's Chrome under the agent's home, inside this root), two
+// conversations lease it — the scope road, each url a grant of the same mediator over the keeper's own forward. One conversation's
+// `tab <the other's target id>` through the keeper's own tab door is REFUSED BY NAME (not_your_tab), as on a local shared profile:
+// the fence follows the road, never the machine. CONTROL: the owner's own `tab <id>` through the same door is admitted.
+const K = require('../src/server/browser-keeper.js');
+const LIMITS = require('../src/keeper-limits.js');
+const KHOME = path.join(ROOT, 'khome'); fs.mkdirSync(KHOME, { recursive: true, mode: 0o700 });
+const k = K.create({ dataDir: path.join(ROOT, 'kdata'), homeDir: KHOME, env: () => ({ PATH: `${path.dirname(REAL_AB)}:${BASE_ENV.PATH || ''}`, HOME: KHOME }), broadcast: () => { }, serverSetting: () => undefined, serverNotice: () => { },
+  getTelemetry: () => null, liveKeys: () => new Set(), limits: { ...LIMITS, CONCURRENT_CAP: 4 }, log: { log() { }, warn() { }, error() { } }, tickMs: 3600e3, install: false, access, hostKnown: (h) => access.hostKnown(h), mediator: med });
+const KA = 'bk-0000a7a1', KB = 'bk-0000b7b1';
+const tabAct = async (browserKey, argv) => { try { return await k.agentTabAct({ browserKey, argv }); } catch (e) { return { ok: false, code: e && e.code, error: String(e && e.message) }; } };
+let kp = null, kErr = null;
+try {
+  kp = k.createProfile({ label: 'Paired shared', host: HOST_A }, { owner: { kind: 'instance', id: null } });
+  await k.attach({ profileId: kp.id, browserKey: KA, sessionId: 'sess-ka' });
+  await k.attach({ profileId: kp.id, browserKey: KB, sessionId: 'sess-kb' });
+} catch (e) { kErr = `${e && e.code ? e.code + ': ' : ''}${e && e.message}`; }
+const kRoad = kp ? k.agentRoadFor(kp.id) : null;
+const aNew = kErr ? null : await tabAct(KA, ['tab', 'new', PAGE('ka')]);
+const aTid = aNew && aNew.ok && aNew.opened ? aNew.opened.targetId : null;
+const bTake = aTid ? await tabAct(KB, ['tab', aTid]) : null;
+const aOwn = aTid ? await tabAct(KA, ['tab', aTid]) : null;
+ok(!kErr && kRoad && kRoad.mode === M.SCOPE_MODE && !!aTid, `③ the REAL keeper starts a shared profile on the paired agent and two conversations lease it on the SCOPE road (${kRoad ? kRoad.mode + '/' + kRoad.why : 'no road'}); A opens a tab of its own through the keeper's tab door (${aTid ? aTid.slice(0, 8) : 'none'})`, { kErr, kRoad, aNew: aNew && (aNew.ok ? { opened: aNew.opened, note: aNew.noteCode } : aNew) });
+ok(!!bTake && bTake.ok === false && bTake.code === 'not_your_tab' && !!aOwn && aOwn.ok === true, `③ THROUGH THE KEEPER's ROAD: B's \`tab <A's target id>\` is REFUSED BY NAME (${bTake ? bTake.code : 'not asked'}), never bound — the same fence as a local shared profile; CONTROL: A's own \`tab <id>\` is admitted (${aOwn ? (aOwn.ok ? 'switched' : aOwn.code) : 'not asked'})`, { bTake, aOwn });
+try { await k.shutdown(); } catch { /* */ }
+
 console.log(`B-19a9 PAIRED summary ${JSON.stringify({ seconds: Math.round((Date.now() - T0) / 1000), scoped: okWays(SCOPED).map((w) => [w.bind.ms, w.nav && w.nav.ms]), bare: okWays(BARE).map((w) => [w.bind.ms, w.bind.code, w.nav && w.nav.code]), prepareFailLines: fails, faults: { dropped: brief(dropped), back: brief(back), repointed: brief(repointed), leftOnOld: brief(left1) } })}`);
 
 try { srv.close(); } catch { /* */ }

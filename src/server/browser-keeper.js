@@ -4504,7 +4504,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!p || isEph(p)) throw namedError('not-found', 'that browser is not one of this conversation\'s');
     if (isMediated(p)) return { ok: true, passthrough: true, why: 'this browser keeps each conversation\'s tabs apart (its proxy lists and reaches only yours)' };
     const rec = reg.browsers[p.id];
-    if (p.host || !isLocalRec(rec)) return { ok: true, passthrough: true, why: 'a browser on another machine' };
+    // B-19a9 (round wpdtugrv1 MUST 1): the pass-through follows the ROAD's verdict, never the machine — a paired machine's shared profile
+    // is on the scope road, whose judge leaves an explicit attach by id to THIS fence: it goes through the same fence and another
+    // holder's tab is refused by the same name (not_your_tab). Only a RAW road (an outside endpoint, a remote conversation) passes as before
+    if (leaseRoadOf(p, bk).mode !== M.SCOPE_MODE && (p.host || !isLocalRec(rec))) return { ok: true, passthrough: true, why: 'a browser on another machine' };
     if (!B.findLease(reg.leases, p.id, bk)) throw namedError('no_lease', `this conversation holds no lease on "${p.label}" — \`vibespace-browser use ${p.id}\` first`);
     const o = await leaseCliOpts(p.id, bk);
     if (!o) throw namedError('browser_no_cdp', noCdpError(p));
@@ -5384,7 +5387,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // B-19a9 (the coordinator's r1840 / r1846 (b)): the facts the ONE road verdict takes, each by ITS OWN reason — an outside endpoint (a
   // `cdp` profile, a browser this hub did not start) stays raw; a PAIRED machine's browser (reached by this hub's own loopback forward,
   // its drivers run here) is a parameter of the scope road, never a lump with the outside one
-  const roadFactsOf = (p, rec) => { const external = !!((rec && rec.external) || (p && p.provider === 'cdp')); return { external, paired: !external && !!((p && p.host) || (rec && rec.hostId)) }; };
+  const roadFactsOf = (p, rec) => { const prow = p && !isEph(p) ? rowOf(p.provider) : null; const external = !!((rec && rec.external) || (p && p.provider === 'cdp') || (prow && !prow.starts)); return { external, paired: !external && !!((p && p.host) || (rec && rec.hostId)) }; };
   const agentRoadOf = (p) => { const rec = p ? reg.browsers[p.id] : null; return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), ...roadFactsOf(p, rec), agent: true }); };
   /** The road the «Who can use it» dialog words: the same verdict, except a mediated profile on a hub with no proxy — every agent lease
    *  there is refused `mediation_unavailable`, so the dialog says unavailable (the .401 read, L2b). → {mode, why} */
@@ -8455,7 +8458,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const eph = resolvedEphemeral || !p || isEph(p);
     const rec = p ? (reg.browsers[p.id] || null) : null;
     const prow = p && !eph ? rowOf(p.provider) : null;
-    const external = Boolean((!eph && prow && !prow.starts) || (p && p.provider === 'cdp') || (rec && rec.external));
+    const external = !eph && roadFactsOf(p, rec).external;   // B-19a9 (round wpdtugrv1): the ONE fact helper every road verdict reads
     const hasCdp = eph ? true : Boolean(!prow || prow.cdp !== false);
     const remote = Boolean((p && p.host) || (rec && rec.hostId));
     const remSess = Boolean(remoteSession || (bk && isRemoteKey(bk)));
@@ -8617,7 +8620,6 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         const probe = await probeCdp(fwd.url);
         if (!probe.ok) { try { fwd.close(); } catch { /* none */ } return ended(`no browser answers CDP at ${p.host ? p.host + ':' : '127.0.0.1:'}${p.cdpPort} (${probe.error})`); }
         rec.cdpUrl = fwd.url; rec.forward = p.host ? { remotePort: p.cdpPort, localPort: fwd.localPort } : null; rec.state = 'ready'; rec.adoptedAt = now();
-        if (mediator) mediator.repoint(rec.profileId, rec.cdpUrl); // B-19a9 (r1846 (c)): the adopted forward is the leases' upstream too
         log.log?.(`[browser] adopted ${rec.profileId} "${p.label}" (external browser over CDP)`);
         return;
       }
@@ -8626,6 +8628,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const cdp = await acc().call(rec.hostId, 'cdp-url', { profileId: rec.profileId });
       const fwd = await acc().forwardCdp(rec.hostId, cdp.port, { remoteUrl: cdp.url });
       rec.pid = st.pid; rec.starttime = st.starttime; rec.remoteCdpUrl = cdp.url; rec.cdpUrl = fwd.url; rec.forward = { remotePort: cdp.port, localPort: fwd.localPort };
+      if (mediator) mediator.repoint(rec.profileId, rec.cdpUrl); // B-19a9 (r1846 (c), round wpdtugrv1 MUST 2): the PAIRED adoption's new forward is its scope leases' upstream
       rec.state = 'ready'; rec.adoptedAt = now();
       log.log?.(`[browser] adopted ${rec.profileId} "${p.label}" on ${rec.hostId} (daemon pid ${rec.pid} there)`);
     } catch (e) { ended(`${rec.hostId || 'this machine'} could not be asked (${e.message})`); }

@@ -46,12 +46,25 @@ console.log('— B-19a9 (r1840 / r1846): THE ROAD VERDICT names each raw case by
   ok(parity(kp, lu && lu[0], calls), `the PARITY: the keeper's ${calls.length} verdict callers pass no lumped \`remote\` (two hand it roadFactsOf), and leaseUrlFor mints the scope url by the verdict alone — no machine branch, ONE scope grant site`);
   const second = lu ? anchored(lu[0], '    if (!raw || !p || leaseRoadOf(p, browserKey).mode !== M.SCOPE_MODE) return raw;\n', '    if (!raw || !p || leaseRoadOf(p, browserKey).mode !== M.SCOPE_MODE) return raw;\n    if (p.host) return raw;\n', 'b19a9-second-road') : '';
   ok(!parity(kp, second, calls), 'CONTROL (RED): a second road in a copy (a paired machine handed the raw url) fails the parity');
-  // r1846 (c): the grant follows the forward — the paired START and the paired ADOPTION repoint, as the local starts do (the heavy
-  // paired leg proves the effect: a restarted paired browser is reached by the SAME grant url)
+  // r1846 (c), round wpdtugrv1 MUST 2: the grant follows the forward — the paired START and the PAIRED adoption (the re-forward that sets
+  // the new url — never the outside-endpoint branch, which holds no scope grants) repoint, as the local starts do
   const rp = (src) => /rec\.remoteCdpUrl = r\.cdpUrl; rec\.cdpUrl = fwd\.url; rec\.forward = \{ remotePort: r\.cdpPort, localPort: fwd\.localPort \};\n\s+if \(mediator\) mediator\.repoint\(profileId, rec\.cdpUrl\);/.test(src)
-    && /rec\.state = 'ready'; rec\.adoptedAt = now\(\);\n\s+if \(mediator\) mediator\.repoint\(rec\.profileId, rec\.cdpUrl\);/.test(src);
-  const noRepoint = anchored(kp, '        if (mediator) mediator.repoint(profileId, rec.cdpUrl); // B-19a9 (r1846 (c))', '        // (no repoint)', 'b19a9-no-repoint');
-  ok(rp(kp) && !rp(noRepoint), 'the paired START and the paired ADOPTION repoint the leases\' grants at the new forward url (r1846 (c)); CONTROL (RED): the start without its repoint fails it');
+    && /rec\.remoteCdpUrl = cdp\.url; rec\.cdpUrl = fwd\.url; rec\.forward = \{ remotePort: cdp\.port, localPort: fwd\.localPort \};\n\s+if \(mediator\) mediator\.repoint\(rec\.profileId, rec\.cdpUrl\);/.test(src);
+  const noStartRepoint = anchored(kp, '        if (mediator) mediator.repoint(profileId, rec.cdpUrl); // B-19a9 (r1846 (c))', '        // (no repoint)', 'b19a9-no-start-repoint');
+  const noAdoptRepoint = anchored(kp, '      if (mediator) mediator.repoint(rec.profileId, rec.cdpUrl); // B-19a9 (r1846 (c), round wpdtugrv1 MUST 2)', '      // (no repoint)', 'b19a9-no-adopt-repoint');
+  ok(rp(kp) && !rp(noStartRepoint) && !rp(noAdoptRepoint), 'the paired START and the PAIRED ADOPTION (its re-forward line) repoint the leases\' grants at the new forward url (r1846 (c)); CONTROL (RED), each for one reason: the start without its repoint, the paired adoption without its repoint');
+  // round wpdtugrv1 MUST 1: THE TAB FENCE follows the ROAD's verdict, never the machine — a paired scope lease is fenced like a local one
+  const fence = (src) => src.includes("    if (leaseRoadOf(p, bk).mode !== M.SCOPE_MODE && (p.host || !isLocalRec(rec))) return { ok: true, passthrough: true, why: 'a browser on another machine' };")
+    && !src.includes("    if (p.host || !isLocalRec(rec)) return { ok: true, passthrough: true, why: 'a browser on another machine' };"); /* stale-pins: kept — the release's machine branch must be ABSENT */
+  const machineFence = anchored(kp, "    if (leaseRoadOf(p, bk).mode !== M.SCOPE_MODE && (p.host || !isLocalRec(rec))) return { ok: true, passthrough: true", "    if (p.host || !isLocalRec(rec)) return { ok: true, passthrough: true", 'b19a9-machine-fence'); /* stale-pins: kept — the RED copy restores the release's machine branch */
+  ok(fence(kp) && !fence(machineFence), 'THE TAB FENCE passes a browser through only on a RAW road (the verdict) — a paired machine\'s scope lease goes through the same fence (another holder\'s tab refused not_your_tab); CONTROL (RED): the release\'s machine branch in a copy (a paired scope lease waved through)');
+  // round wpdtugrv1: roadFactsOf's CONTENT, compiled from its own source (the ONE fact helper every road verdict reads)
+  const rf = /\n  const roadFactsOf = (\(p, rec\) => \{[^\n]*\});\n/.exec(kp);
+  const compileRF = (src) => new Function('isEph', 'rowOf', 'return ' + src)((p) => !!(p && p.ephemeral), (id) => (id === 'agent-browser' ? { starts: true, cdp: true } : id === 'cdp' ? { starts: false, cdp: true } : id === 'local-window' ? { starts: false, cdp: false } : null));
+  const factsLaw = (fn) => { const a = fn({ host: 'h1', provider: 'agent-browser' }, { hostId: 'h1' }), b = fn({ host: 'h1', provider: 'cdp' }, null), c = fn({ provider: 'agent-browser' }, { external: true }), d = fn({ provider: 'agent-browser' }, {}), e = fn({ provider: 'local-window' }, null);
+    return a.paired === true && a.external === false && b.external === true && b.paired === false && c.external === true && d.external === false && d.paired === false && e.external === true; };
+  const rfBad = rf ? anchored(rf[1], "return { external, paired: !external && !!((p && p.host) || (rec && rec.hostId)) };", "return { external: external || !!(p && p.host), paired: false };", 'b19a9-paired-as-external') : '';
+  ok(!!rf && factsLaw(compileRF(rf[1])) && !factsLaw(compileRF(rfBad)), 'roadFactsOf (compiled from the keeper): a paired machine\'s started profile ⇒ paired; an outside endpoint (a `cdp` profile, a record not started here, a provider that does not start) ⇒ external; a local one ⇒ neither; CONTROL (RED): a copy that calls a paired profile external');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
