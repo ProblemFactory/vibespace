@@ -38,6 +38,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { anchored } from './scratch.mjs'; // B-92aa r2217: the control's edit is anchored (the unanchored-controls census); scratch.mjs FIRST of the local imports (§113)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -592,6 +593,40 @@ console.log('§6 lane app-window-fit-topleft (B-1f0b) — a fixed window LARGER 
   let mut = src; for (const [from, to] of levers) mut = mut.replace(from, to);
   const C = await placeOn((await import(MUTW.write('src/lib/window.js', mut, 'topleft'))).WindowManager);
   ok(C.tall.left === 100 && C.tall.top === 0 && C.wide.top === 100 && C.wide.bar === '' && C.rsShort.left === 100 && C.rsMoved === 0, `CONTROL: pre-fix the taller window keeps the cascade's x (${C.tall.left},${C.tall.top}: "x kept, top slid to 0" — app-fit-fixed's report), the wider one its y (${C.wide.left},${C.wide.top}) with its bar — and the ✕ — 1602 px wide past a 1450 px workspace, and a workspace resize re-judges nothing (${JSON.stringify(C.rsShort)})`);
+}
+
+console.log('§7 B-92aa (the coordinator\'s r2217) — the window manager SAYS what a fit applies: a relaunch plans its first map on that answer');
+{
+  // fitSizeFor answers the size resizeWindowTo applies — the window's own minimum raised, capped at the workspace (1600×1000 here)
+  // — or null where it refuses (maximized, minimized, a tab chain, a fixed size, the phone layout); resizeWindowTo returns THAT
+  // answer. desktop-app-window.js relaunchPlanFor hands a relaunch's new connection only this size (refused ⇒ no plan; capped ⇒
+  // the capped pane). RED: the release's resizeWindowTo, which says only `true`, gives a caller no size to plan on
+  const fitOn = (WM) => {
+    const wm = mkWm(WM), out = {};
+    const el = mkEl(900, 620, 100, 100); el.classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
+    const a = { id: 'fa', element: el, onResize() {}, gridBounds: null, _tabChain: null, isMaximized: false }; wm.windows.set('fa', a);
+    const size = () => [el.style.width, el.style.height];
+    out.plain = [wm.fitSizeFor('fa', { w: 1225.5, h: 951.25 }), wm.resizeWindowTo('fa', { w: 1225.5, h: 951.25 }), size()];
+    out.capped = [wm.fitSizeFor('fa', { w: 1818, h: 1264 }), wm.resizeWindowTo('fa', { w: 1818, h: 1264 }), size()];
+    a.minWidth = 700; a.minHeight = 500;
+    out.raised = [wm.fitSizeFor('fa', { w: 400, h: 300 }), wm.resizeWindowTo('fa', { w: 400, h: 300 }), size()];
+    a.isMaximized = true; out.max = [wm.fitSizeFor('fa', { w: 900, h: 600 }), wm.resizeWindowTo('fa', { w: 900, h: 600 }), size()]; a.isMaximized = false;
+    wm._hideMq = { matches: true }; out.phone = [wm.fitSizeFor('fa', { w: 900, h: 600 }), wm.resizeWindowTo('fa', { w: 900, h: 600 }), size()]; wm._hideMq = { matches: false };
+    out.none = [wm.fitSizeFor('nope', { w: 900, h: 600 }), wm.fitSizeFor('fa', { w: 0, h: 600 })];
+    return out;
+  };
+  const { WindowManager } = await import('../src/lib/window.js');
+  const F = fitOn(WindowManager);
+  ok(same(F.plain[0], { w: 1225.5, h: 951.25 }) && same(F.plain[1], F.plain[0]) && same(F.plain[2], ['1225.5px', '951.25px'])
+    && same(F.capped[0], { w: 1600, h: 1000 }) && same(F.capped[1], F.capped[0]) && same(F.capped[2], ['1600px', '1000px'])
+    && same(F.raised[0], { w: 700, h: 500 }) && same(F.raised[1], F.raised[0]) && same(F.raised[2], ['700px', '500px']),
+    `B-92aa r2217: fitSizeFor answers what resizeWindowTo then APPLIES and returns — a size kept at 0.01 px (${JSON.stringify(F.plain[0])}), capped at the 1600×1000 workspace (${JSON.stringify(F.capped[0])}), raised to the window's own 700×500 minimum (${JSON.stringify(F.raised[0])})`, F);
+  ok(F.max[0] === null && F.max[1] === false && same(F.max[2], ['700px', '500px']) && F.phone[0] === null && F.phone[1] === false && same(F.phone[2], ['700px', '500px']) && F.none[0] === null && F.none[1] === null,
+    'B-92aa r2217: where resizeWindowTo REFUSES (a maximized window, the phone layout), fitSizeFor answers null and nothing moves — no window, no size asked: null', F);
+  const wsrc = read('src/lib/window.js');
+  const relSrc = anchored(wsrc, '    return { w: nw, h: nh };\n  }\n  /** B-92aa (the coordinator\'s r2217)', '    return true;\n  }\n  /** B-92aa (the coordinator\'s r2217)', 'B-92aa r2217 control: the release\'s answer');
+  const R = fitOn((await import(MUTW.write('src/lib/window.js', relSrc, 'b92aa-true'))).WindowManager);
+  ok(R.capped[1] === true && !(R.capped[1] && R.capped[1].w), `RED CONTROL (B-92aa r2217): the release's resizeWindowTo answers only ${JSON.stringify(R.capped[1])} for a fit it CAPPED — a caller cannot tell the capped size from the one it asked`, R.capped);
 }
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

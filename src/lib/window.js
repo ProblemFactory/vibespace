@@ -1192,15 +1192,11 @@ class WindowManager {
    * grid bounds re-captured, onResize, and the layout notified (the sync carries it to every other client).
    * A maximized / minimized window, a tab chain (its size is the chain's) and the ≤768 px phone layout (the window
    * is the screen) are left alone — returns false. Sub-pixel sizes are kept (0.01 px) so a 0.75× pane stays exact.
+   * B-92aa (r2217): it returns WHAT IT APPLIED — { w, h } (layout px; truthy) — computed by fitSizeFor below, the ONE answer.
    */
   resizeWindowTo(id, { w, h } = {}) {
-    const win = this.windows.get(id); if (!win) return false;
-    if (win.isMaximized || win.isMinimized || win._tabChain || win.fixedSize || this._mobileLayout()) return false;
-    if (!(Number(w) > 0) || !(Number(h) > 0)) return false;
-    const el = win.element, ws = this._workspaceBox(), min = this._ownMinOf(win);
-    const q = (v) => Math.round(v * 100) / 100;
-    let nw = Math.max(min.w, q(Number(w))), nh = Math.max(min.h, q(Number(h)));
-    if (ws) { nw = Math.min(nw, ws.w); nh = Math.min(nh, ws.h); }
+    const fit = this.fitSizeFor(id, { w, h }); if (!fit) return false;
+    const win = this.windows.get(id), el = win.element, ws = this._workspaceBox(), nw = fit.w, nh = fit.h;
     const k = keepInside({ left: el.offsetLeft, top: el.offsetTop, width: nw, height: nh }, ws);
     el.style.width = nw + 'px'; el.style.height = nh + 'px';
     if (k.moved) { el.style.left = k.left + 'px'; el.style.top = k.top + 'px'; }
@@ -1208,7 +1204,21 @@ class WindowManager {
     if (win.onResize) win.onResize();
     this._scheduleOverlapUpdate();
     this._notify();
-    return true;
+    return { w: nw, h: nh };
+  }
+  /** B-92aa (the coordinator's r2217): the size resizeWindowTo WOULD apply to this window NOW — { w, h } layout px (its own
+   *  minimum raised, 0.01 px, capped at the workspace) — or null when it refuses (maximized, minimized, a tab chain, a fixed
+   *  size, the phone layout, no such window, no size asked). Reads only; resizeWindowTo applies exactly this answer, so a caller
+   *  that plans on it (a relaunch's first map) plans on the size the window takes. */
+  fitSizeFor(id, { w, h } = {}) {
+    const win = this.windows.get(id); if (!win) return null;
+    if (win.isMaximized || win.isMinimized || win._tabChain || win.fixedSize || this._mobileLayout()) return null;
+    if (!(Number(w) > 0) || !(Number(h) > 0)) return null;
+    const ws = this._workspaceBox(), min = this._ownMinOf(win);
+    const q = (v) => Math.round(v * 100) / 100;
+    let nw = Math.max(min.w, q(Number(w))), nh = Math.max(min.h, q(Number(h)));
+    if (ws) { nw = Math.min(nw, ws.w); nh = Math.min(nh, ws.h); }
+    return { w: nw, h: nh };
   }
 
   /** The workspace box (layout px) a window's own minimum is capped at; null while the workspace is not laid out. */

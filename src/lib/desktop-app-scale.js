@@ -71,3 +71,28 @@ export function appDefaultModel(rec, map) {
   const make = typeof running === 'number' && running !== def ? running : null;
   return { key, def, running, make, isDefault: typeof def === 'number' && running === def, clear: typeof def === 'number' };
 }
+/**
+ * B-92aa (the coordinator's r2217) — THE PANE A RELAUNCH HANDS ITS NEW CONNECTION'S FIRST MAP: only a size the window TAKES.
+ * `fit` = the window manager's own answer to the relaunch fit's ask (WindowManager.fitSizeFor: the layout size resizeWindowTo
+ * applies — its minimum raised, capped at the workspace — or null when it refuses: maximized, minimized, a tab chain, a fixed
+ * size, the phone layout). The pane = that size × the UI scale − the chrome around the pane, ROUNDED the way the pane is then
+ * measured (clientWidth: a whole CSS px, at least 1 — a half pixel handed on maps a pixel narrow and is refit). → { width,
+ * height }, or null: no plan, the first map measures the pane (the release's road).
+ */
+export function relaunchHandOver({ fit = null, chrome = null, uiScale = 1 } = {}) {
+  if (!fit || !(Number(fit.w) > 0) || !(Number(fit.h) > 0)) return null;
+  const s = Number(uiScale) > 0 ? Number(uiScale) : 1, c = chrome || {};
+  const width = Math.round(Number(fit.w) * s - (Number(c.w) || 0)), height = Math.round(Number(fit.h) * s - (Number(c.h) || 0));
+  return width >= 1 && height >= 1 ? { width, height } : null;
+}
+/**
+ * …and whether a handed plan still holds when the first connect reads it (r2217): the window still takes a fit (`refused`
+ * false — not maximized, minimized, chained or on the phone layout NOW) and its own size is the one it had when the plan was
+ * made (`at`: the fit not landed yet) or the one the fit applies (`fit`). Any other size — the person resized it in the
+ * «Starting…» wait, a snap, a layout — drops the plan. Sizes as the window's own style strings ('' = never sized).
+ */
+export function relaunchPlanHolds({ at = null, fit = null, now = null, refused = false } = {}) {
+  if (refused || !at || !fit || !now) return false;
+  const same = (a, b) => String(a.w) === String(b.w) && String(a.h) === String(b.h);
+  return same(now, at) || same(now, fit);
+}

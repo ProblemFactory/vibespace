@@ -178,7 +178,7 @@ import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into �
 import { shortModeBadge } from './live-bar-layout.js';
 import { minPaneCss } from './xpra-proto.js';
 import { seamlessVerdict, windowSeamless, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
-import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel } from './desktop-app-scale.js';
+import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel, relaunchHandOver, relaunchPlanHolds } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, satellitePlacement, setSatelliteOffset } from './desktop-app-prefs.js';
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
 import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
@@ -504,11 +504,13 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   // the stream KIND the record declares; src/lib/stream-views.js answers with its view (keyed by the view module's own STREAM_KIND)
   const streamKindOf = (r) => (r && r.stream) || STATUS_KIND;
   // B-92aa (the coordinator's r1635): the relaunch fit's PLAN for the new connection's first map — { id, width, height } (CSS px),
-  // set from the fit's ONE computation just before the retarget, read once by THAT app's first connect (another app's view never
-  // takes it), null when no plan exists (the first map then measures the pane, as before)
+  // from the fit's ONE computation, read once by THAT app's first connect (another app's view never takes it), null when no plan
+  // exists (the first map then measures the pane, as before). r2217: ONLY A SIZE THE WINDOW TAKES — the window manager's own
+  // answer (refused ⇒ none; capped ⇒ the capped), dropped when the fit applied another size or the window was resized by
+  // anything else before the read (relaunchPlanHolds), and when the successor's record never answers a running app
   let relaunchPlanned = null;
   const viewOpts = () => ({
-    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; return p && p.id === id ? { width: p.width, height: p.height } : null; },
+    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; if (!p || p.id !== id) return null; const el = winInfo.element; return relaunchPlanHolds({ at: p.at, fit: p.fitCss, now: { w: el.style.width, h: el.style.height }, refused: !app.wm.fitSizeFor(winInfo.id, p.ask) }) ? { width: p.width, height: p.height } : null; },
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
@@ -1083,11 +1085,23 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   /** B-92aa (r1635): THE ONE COMPUTATION of the relaunch fit — the pane the window is about to have (PURE relaunchPaneCss), or null.
    *  The new connection's first map and the window's resize below take THIS value; there is no second estimate. */
   const relaunchFitPlan = (g, next) => (!g || !next || closed ? null : (relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next }) || null));
+  const fitAsk = (g, p) => { const s = uiScale(); return { w: (p.w + g.chrome.w) / s, h: (p.h + g.chrome.h) / s }; }; // the window size the plan asks (layout px)
+  /** B-92aa (r2217): THE PLAN THE NEW CONNECTION IS HANDED — only a size the window TAKES: the window manager's own answer to the
+   *  fit's ask (fitSizeFor, what resizeWindowTo applies): refused ⇒ null (the pane, today's road); capped or raised ⇒ the pane
+   *  of THAT size, rounded as the pane is measured (PURE relaunchHandOver). Stamped with the window's size now and the fit's, so
+   *  a resize by anything else before the first connect reads it drops it (PURE relaunchPlanHolds, in firstPane). */
+  const relaunchPlanFor = (g, next, p) => {
+    if (!g || !next || closed || !p) return null;
+    const ask = fitAsk(g, p), fit = app.wm.fitSizeFor(winInfo.id, ask);
+    const pane = relaunchHandOver({ fit, chrome: g.chrome, uiScale: uiScale() });
+    return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height } } : null;
+  };
   const fitAfterRelaunch = (g, next, p) => {
     if (!g || !next || closed || !p) return false;
-    const s = uiScale();
-    const done = app.wm.resizeWindowTo(winInfo.id, { w: (p.w + g.chrome.w) / s, h: (p.h + g.chrome.h) / s });
+    const done = app.wm.resizeWindowTo(winInfo.id, fitAsk(g, p));
     winInfo._desktopRelaunchFit = { pane: p, chrome: { ...g.chrome }, from: renderOf(g.from), to: renderOf(next), applied: !!done }; // the raw handle the heavy suite reads
+    // B-92aa (r2217): THE RESIZE'S OWN RESULT DECIDES — a plan not read yet stays only when the window applied exactly its size
+    if (relaunchPlanned && relaunchPlanned.id === next.id && !(done && done.w === relaunchPlanned.fit.w && done.h === relaunchPlanned.fit.h)) relaunchPlanned = null;
     return done;
   };
   async function relaunchAt(choice, scale) {
@@ -1107,11 +1121,13 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     relaunching = false;
     if (!r || r.error || !r.app || !r.app.id) { showToast(r?.error || t('Could not relaunch the app'), { type: 'error' }); return; }
     showToast(t('{app} relaunched at {scale}×', { app: name, scale: r.app.scale }), { duration: 3500 });
-    // B-92aa (r1635, int361's row 104: «the ORDER IS NAMED»): the fit planned BEFORE the retarget, so the NEW connection's first map
-    // takes the planned pane — final whenever the window's resize lands (a loaded box landed it after the map: a stale map, then a refit)
+    // B-92aa (r1635, int361's row 104: «the ORDER IS NAMED»): the fit planned ONCE, so the NEW connection's first map takes the
+    // planned pane — final whenever the window's resize lands (a loaded box landed it after the map: a stale map, then a refit).
+    // r2217: handed only as the size the window TAKES, asked of the window manager once the retarget cleared the old app's
+    // minimum (the same tick: the new connection reads it behind the record fetch and the ready gate)
     const plan = relaunchFitPlan(geo, r.app);
-    relaunchPlanned = plan ? { id: r.app.id, width: plan.w, height: plan.h } : null;
     retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)
+    relaunchPlanned = relaunchPlanFor(geo, r.app, plan);
     fitAfterRelaunch(geo, r.app, plan); // lane D (a) F2: the window keeps the app's size at the new scale — the SAME plan
   }
   /** A record that names its successor (`replacedBy`): this window follows it — same window, the picture reconnects. */
@@ -1139,6 +1155,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     refetchLease(); refetchViewers(); reachView = null; applyReach(null); // lane E: the share follows the successor on the server — re-read once its record answers
     fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
       if (closed || winInfo._desktopAppId !== nextId) return;
+      if (!r || r.error || r.code === 'not-found') relaunchPlanned = null; // B-92aa (r2217): no running successor ⇒ no plan left behind for a later connect
       if (r && r.code === 'not-found') { forgotten(); return; }
       if (!r || r.error) { ensureView(STATUS_KIND).setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
       applyRecord(r); refetchReach();

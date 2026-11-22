@@ -537,6 +537,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       applyConstraints(constraints);
       applyFixed(fixedDev);
     }
+    planned = null; // B-92aa (r2217): the pane moved under a live client — the pane rules from here, never an older plan at the first main
     const s = paneSize(); client.resize(s.width, s.height); fitStage();
   };
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(relayout, RESIZE_DEBOUNCE_MS); }) : null;
@@ -589,7 +590,8 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     try { client?.close(); } catch {}
     clearWindows();
     for (const sat of sats.values()) sat.unbind(); // S2: a new session — each satellite re-binds by wid once its slot is named
-    planned = (typeof firstPane === 'function' && firstPane()) || null; // B-92aa: the caller's plan for this first map, if any
+    const p0 = (typeof firstPane === 'function' && firstPane()) || null; // B-92aa: the caller's plan for this first map, if any — always read: it is one connect's
+    planned = mode === 'active' ? p0 : null; // r2217 (c): a watching or blocked pane's hello takes the pane, as at the release
     const s = planned || paneSize();
     drawRatio = ratio(); drawK = pictureK();
     constraints = null; minSize = null;
@@ -619,7 +621,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         window: onWindow, paint: onPaint, title: (text) => { try { onTitle?.(text); } catch {} },
         // F3 (lane D (a)): the window hears the main's metadata (a CSD app folds its bars) and the client gets the pane of
         // AFTER that, inside this call — a main being announced is fitted and mapped at the final pane (no re-fit, no snap-back)
-        main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} if (client && win && mode === 'active') { const s = planned || paneSize(); planned = null; client.resize(s.width, s.height); } }, // B-92aa: the first main maps at the PLANNED pane (a relaunch's fit not landed yet), then the pane rules
+        main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} if (win) { const s = planned || paneSize(); planned = null; if (client && mode === 'active') client.resize(s.width, s.height); } }, // B-92aa: the first main maps at the PLANNED pane (a relaunch's fit not landed yet); r2217 (b): the mark goes at the first main whatever the mode, then the pane rules
         state: (win, changed) => { if (client && win && win.wid === client.mainWid) { try { onState?.({ ...changed }); } catch {} } else { const sat = win && sats.get(win.wid); if (sat && sat.bound) { try { sat.cb.onState?.({ ...changed }); } catch {} } } },
         slot: onSlot,
         ready: () => { sessionListed = true; for (const sat of [...sats.values()]) sat.settle(); },

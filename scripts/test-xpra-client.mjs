@@ -2324,11 +2324,11 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   // the pane BEFORE the relaunch fit lands (the 11-18 red's own stale size), the plan the fit computed (its final size): the main's
   // first map-window is the PLAN; no plan (none given, or the caller's null) ⇒ the pane as it is, today's road (never an invented
   // size); the plan is ONE connect's — a reconnect maps the pane. RED CONTROL: today's view (the plan read nowhere) maps the stale pane
-  const firstMap = async (Vmod, firstPane, again = false) => {
+  const firstMap = async (Vmod, firstPane, again = false, paneAt = { w: 1634, h: 1232 }) => {
     const host = new El('div');
     const view = Vmod.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async (b) => ({ bitmap: str(b), close() {} }), secure: false, clipboardApi: false, ...(firstPane !== undefined ? { firstPane } : {}) });
     const pane = host.children[0].children[1].children[0];
-    pane.clientWidth = 1634; pane.clientHeight = 1232;
+    pane.clientWidth = paneAt.w; pane.clientHeight = paneAt.h; // the pane as it stands at the connect (1634×1232: the fit not landed yet)
     const once = async () => {
       const n0 = FakeWorker.instances.length;
       await view.connect();
@@ -2350,21 +2350,115 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   ok(same(a.first, [1818, 1232]) && same(a.second, [1634, 1232]) && asked === 2 && same(b.first, [1634, 1232]) && same(c.first, [1634, 1232]),
     'B-92aa: the main\'s FIRST map takes the planned pane (1818×1232 while the pane still stands at 1634×1232); the plan is one connect\'s (a reconnect maps the pane); no plan, or a null one ⇒ the pane as it is (today\'s road)', { a, b, c, asked });
   const vsrc = read('src/lib/xpra-view.js');
-  let today = anchored(vsrc, "    planned = (typeof firstPane === 'function' && firstPane()) || null; // B-92aa: the caller's plan for this first map, if any\n    const s = planned || paneSize();", '    const s = paneSize();', 'B-92aa control: today\'s connect');
-  today = anchored(today, 'const s = planned || paneSize(); planned = null; client.resize(s.width, s.height);', 'const s = paneSize(); client.resize(s.width, s.height);', 'B-92aa control: today\'s main announce');
+  const CONNECT_NOW = "    const p0 = (typeof firstPane === 'function' && firstPane()) || null; // B-92aa: the caller's plan for this first map, if any — always read: it is one connect's\n    planned = mode === 'active' ? p0 : null; // r2217 (c): a watching or blocked pane's hello takes the pane, as at the release\n    const s = planned || paneSize();";
+  const MAIN_NOW = "if (win) { const s = planned || paneSize(); planned = null; if (client && mode === 'active') client.resize(s.width, s.height); }";
+  let today = anchored(vsrc, CONNECT_NOW, '    const s = paneSize();', 'B-92aa control: today\'s connect');
+  today = anchored(today, MAIN_NOW, "if (client && win && mode === 'active') { const s = paneSize(); client.resize(s.width, s.height); }", 'B-92aa control: today\'s main announce');
   const red = await firstMap(await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', today, 'b92aa-no-plan')).href), oneShot());
   ok(same(red.first, [1634, 1232]), `RED CONTROL (B-92aa): today's view reads no plan — the main maps at the STALE pane (${red.first}) and the fit's resize refits it later (the jump a person sees)`, red);
-  // THE ONE COMPUTATION (r1635's first law): desktop-app-window.js plans the fit ONCE, hands that value to the new connection BEFORE
-  // the retarget and resizes the window with the SAME value; another app's view never takes it (keyed by the relaunched id)
+  // THE ONE COMPUTATION (r1635's first law): desktop-app-window.js plans the fit ONCE and resizes the window with the SAME value;
+  // r2217: the new connection is handed only the size the window TAKES — the window manager's own answer to the fit's ask
+  // (fitSizeFor, what resizeWindowTo applies), stamped, checked at the read, dropped when the fit applied another size or the
+  // successor never answered; another app's view never takes it (keyed by the relaunched id)
   const dsrc = read('src/lib/desktop-app-window.js');
   const PINS = [
     'const relaunchFitPlan = (g, next) => (!g || !next || closed ? null : (relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next }) || null));',
-    '    const plan = relaunchFitPlan(geo, r.app);\n    relaunchPlanned = plan ? { id: r.app.id, width: plan.w, height: plan.h } : null;\n    retarget(r.app.id);',
-    '    fitAfterRelaunch(geo, r.app, plan);',
-    "    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; return p && p.id === id ? { width: p.width, height: p.height } : null; },",
+    '    const plan = relaunchFitPlan(geo, r.app);\n    retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)\n    relaunchPlanned = relaunchPlanFor(geo, r.app, plan);\n    fitAfterRelaunch(geo, r.app, plan);',
+    '    const ask = fitAsk(g, p), fit = app.wm.fitSizeFor(winInfo.id, ask);\n    const pane = relaunchHandOver({ fit, chrome: g.chrome, uiScale: uiScale() });',
+    "return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height } } : null;",
+    '    const done = app.wm.resizeWindowTo(winInfo.id, fitAsk(g, p));',
+    '    if (relaunchPlanned && relaunchPlanned.id === next.id && !(done && done.w === relaunchPlanned.fit.w && done.h === relaunchPlanned.fit.h)) relaunchPlanned = null;',
+    "    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; if (!p || p.id !== id) return null; const el = winInfo.element; return relaunchPlanHolds({ at: p.at, fit: p.fitCss, now: { w: el.style.width, h: el.style.height }, refused: !app.wm.fitSizeFor(winInfo.id, p.ask) }) ? { width: p.width, height: p.height } : null; },",
+    "      if (!r || r.error || r.code === 'not-found') relaunchPlanned = null;",
   ];
   const pmiss = PINS.filter((x) => dsrc.split(x).length !== 2);
-  ok(pmiss.length === 0 && dsrc.split('relaunchPaneCss(').length === 2, 'B-92aa (r1635\'s law): the relaunch fit is computed ONCE (relaunchFitPlan, the one relaunchPaneCss call) and that value both sizes the new connection\'s first map (handed before the retarget, keyed by the relaunched id) and resizes the window', pmiss.map((x) => x.slice(0, 60)));
+  ok(pmiss.length === 0 && dsrc.split('relaunchPaneCss(').length === 2 && dsrc.split('relaunchPlanned = ').length === 6, 'B-92aa (r1635\'s law; r2217): the relaunch fit is computed ONCE (relaunchFitPlan, the one relaunchPaneCss call) and resizes the window; the new connection is handed only what the window manager says the window TAKES (fitSizeFor → relaunchHandOver), keyed by the relaunched id, checked at the read (relaunchPlanHolds), dropped when the fit applied another size or the successor never answered', pmiss.map((x) => x.slice(0, 60)));
+
+  // r2217 — THE CONNECTION IS HANDED ONLY A SIZE THE WINDOW TOOK. The window's hand-over composed exactly as desktop-app-window.js
+  // composes it (pinned above): the window manager's answer to the fit's ask (null = refused; capped or raised = what it applies)
+  // → PURE relaunchHandOver (the pane of THAT size, rounded as the pane is measured), stamped with the window's size; at the read,
+  // PURE relaunchPlanHolds (the window still takes a fit; its size is the stamp's or the fit's). The pane stands at 1634×1232 before
+  // the fit lands; the fit asks 1818×1264 for the window (a pane of 1818×1232: 32 px of chrome, UI scale 1)
+  const DF = await import('../src/lib/desktop-app-scale.js');
+  const CH = { w: 0, h: 32 };
+  const scene = async (DFm, { fit, landed = null, person = null, refusedNow = false, paneAt = { w: 1634, h: 1232 } }) => {
+    const el = { style: { width: '1634px', height: '1264px' } };
+    const p = DFm.relaunchHandOver({ fit, chrome: CH, uiScale: 1 });
+    let planned = p ? { ...p, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: el.style.width, h: el.style.height } } : null;
+    if (landed) { el.style.width = landed.w + 'px'; el.style.height = landed.h + 'px'; } // the fit applied (resizeWindowTo's answer)
+    if (person) { el.style.width = person.w + 'px'; el.style.height = person.h + 'px'; } // a resize by anything else in the «Starting…» wait
+    const read = () => { const q = planned; planned = null; if (!q) return null; return DFm.relaunchPlanHolds({ at: q.at, fit: q.fitCss, now: { w: el.style.width, h: el.style.height }, refused: refusedNow }) ? { width: q.width, height: q.height } : null; };
+    return (await firstMap(V, read, false, paneAt)).first;
+  };
+  const SC = {
+    applied: { fit: { w: 1818, h: 1264 } },                                                         // the fit takes the plan, not landed yet at the connect
+    refused: { fit: null },                                                                          // maximized (or the phone layout): the window manager refuses
+    capped: { fit: { w: 1700, h: 1264 }, paneAt: { w: 1700, h: 1232 } },                            // the workspace is 1700 wide: the fit lands capped
+    wait: { fit: { w: 1818, h: 1264 }, landed: { w: 1818, h: 1264 }, person: { w: 1750, h: 1264 }, paneAt: { w: 1750, h: 1232 } }, // the person resized it in the wait
+    refusedNow: { fit: { w: 1818, h: 1264 }, refusedNow: true },                                    // maximized in the wait: the window takes no fit now
+    fraction: { fit: { w: 1225.56, h: 951.26 }, paneAt: { w: 1226, h: 919 } },                       // a fractional fit (relaunchPaneCss keeps 0.01 px)
+  };
+  const got = {}; for (const [k, v] of Object.entries(SC)) got[k] = await scene(DF, v);
+  ok(same(got.applied, [1818, 1232]) && same(got.refused, [1634, 1232]) && same(got.refusedNow, [1634, 1232]) && same(got.capped, [1700, 1232]) && same(got.wait, [1750, 1232]),
+    'B-92aa r2217: the first map takes ONLY a size the window takes — the fit\'s plan when the window takes it (1818×1232, the fit not landed yet); a REFUSED fit (maximized, the phone layout) hands no plan: the pane (1634×1232); a fit CAPPED at the workspace hands the capped pane (1700×1232: what the pane then measures — no refit); a resize of the window in the wait drops the plan: the person\'s pane (1750×1232); a window maximized in the wait: the pane', got);
+  ok(same(got.fraction, [1226, 919]), `B-92aa r2217 (a): a FRACTIONAL fit (1225.56×951.26 for the window) maps WHOLE pixels, as the pane measures them (${got.fraction}: 1226×919 — never a pixel narrow and refit)`, got.fraction);
+  ok(same(DF.relaunchHandOver({ fit: null }), null) && same(DF.relaunchHandOver({ fit: { w: 1000, h: 800 }, chrome: { w: 0, h: 40 }, uiScale: 1.25 }), { width: 1250, height: 960 }) && DF.relaunchHandOver({ fit: { w: 20, h: 20 }, chrome: { w: 0, h: 40 } }) === null
+    && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' } }) === true && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '900px', h: '700px' } }) === true
+    && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '880px', h: '700px' } }) === false && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' }, refused: true }) === false,
+    'B-92aa r2217 (PURE): relaunchHandOver — refused ⇒ null; the pane = the size × the UI scale − the chrome, whole px (1000×800 at 1.25, 40 px of chrome ⇒ 1250×960); nothing left past the chrome ⇒ null; relaunchPlanHolds — the window unsized as at the plan, or at the fit\'s size ⇒ holds; any other size, or a fit refused now ⇒ dropped');
+  // RED CONTROLS: (1) 76cc2bb77's hand-over — the asked plan handed whatever the window manager says — maps 1818 where the window
+  // refused (the pane stays 1634), where it capped (1700), and where the person resized it in the wait (1750); (2) a desktop-app-scale copy
+  // whose hand-over keeps the fraction maps a pixel narrow (the client floors 1225.56); (3) a copy whose plan always holds maps the
+  // older plan over the person's resize
+  const rawOnce = () => { let left = 1; return () => (left-- > 0 ? { width: 1818, height: 1232 } : null); };
+  const rawRefused = (await firstMap(V, rawOnce())).first, rawCapped = (await firstMap(V, rawOnce(), false, SC.capped.paneAt)).first, rawWait = (await firstMap(V, rawOnce(), false, SC.wait.paneAt)).first;
+  ok(same(rawRefused, [1818, 1232]) && same(rawCapped, [1818, 1232]) && same(rawWait, [1818, 1232]), `RED CONTROL (B-92aa r2217, 76cc2bb77's hand-over: the asked plan, the window manager's answer not read): a refused fit maps ${rawRefused} in a 1634×1232 pane, a capped one ${rawCapped} in 1700×1232, a resize in the wait ${rawWait} in 1750×1232 — a size the pane never gets`, { rawRefused, rawCapped, rawWait });
+  const dfsrc = read('src/lib/desktop-app-scale.js');
+  const DFnoRound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  const width = Math.round(Number(fit.w) * s - (Number(c.w) || 0)), height = Math.round(Number(fit.h) * s - (Number(c.h) || 0));', '  const width = Number(fit.w) * s - (Number(c.w) || 0), height = Number(fit.h) * s - (Number(c.h) || 0);', 'B-92aa r2217 control: the fraction kept'), 'b92aa-fraction')).href);
+  const redFraction = await scene(DFnoRound, SC.fraction);
+  ok(redFraction && redFraction[0] === 1225, `RED CONTROL (B-92aa r2217 (a)): a hand-over that keeps the fraction maps ${redFraction} — a pixel narrower than the 1226 px pane, refit after`, redFraction);
+  const DFholds = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return same(now, at) || same(now, fit);', '  return true;', 'B-92aa r2217 control: the plan always holds'), 'b92aa-holds')).href);
+  const redWait = await scene(DFholds, SC.wait);
+  ok(same(redWait, [1818, 1232]), `RED CONTROL (B-92aa r2217): a plan that always holds maps the older plan (${redWait}) over the person's resize in the wait (the pane: 1750×1232)`, redWait);
+
+  // r2217 (b) THE MARK GOES AT THE FIRST MAIN WHATEVER THE MODE, and (c) A WATCHING PANE'S HELLO TAKES THE PANE (as at the release);
+  // the plan is READ either way (one connect's: never left for a later one)
+  const modes = async (Vmod) => {
+    let asked = 0; const plan = () => { asked++; return asked === 1 ? { width: 1818, height: 1232 } : null; };
+    const mk = () => { const host = new El('div'); const view = Vmod.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async (b) => ({ bitmap: str(b), close() {} }), secure: false, clipboardApi: false, firstPane: plan }); const pane = host.children[0].children[1].children[0]; pane.clientWidth = 1634; pane.clientHeight = 1232; return view; };
+    const out = {};
+    { // (c) the pane WATCHES at the connect: its hello is the pane
+      const view = mk(); view.setMode('watch');
+      const n0 = FakeWorker.instances.length; await view.connect();
+      const wk = await until(() => FakeWorker.instances.length > n0 && FakeWorker.instances[FakeWorker.instances.length - 1]);
+      const h = await until(() => wk.sent('hello')[0]);
+      out.watchHello = h && h[1] && h[1].display ? h[1].display.desktop_size : null; out.watchAsked = asked;
+      view.dispose();
+    }
+    asked = 0;
+    { // (b) connected ACTIVE with the plan, the pane turned to Watch before the first main; active again, the main replaced
+      const view = mk();
+      const n0 = FakeWorker.instances.length; await view.connect();
+      const wk = await until(() => FakeWorker.instances.length > n0 && FakeWorker.instances[FakeWorker.instances.length - 1]);
+      await until(() => wk.sent('hello').length);
+      wk.feed(['hello', { 'packet-types': [] }]);
+      view.setMode('watch');
+      wk.feed(['new-window', 1, 0, 0, 1634, 1232, { title: 'calc' }]);
+      view.setMode('active');
+      wk.feed(['lost-window', 1]);
+      wk.feed(['new-window', 2, 0, 0, 1634, 1232, { title: 'calc' }]);
+      const m = await until(() => wk.sent('map-window').find((x) => x[1] === 2));
+      out.second = m ? [m[4], m[5]] : null; out.mainAsked = asked;
+      view.dispose();
+    }
+    return out;
+  };
+  const mo = await modes(V);
+  ok(same(mo.watchHello, [1634, 1232]) && mo.watchAsked === 1 && same(mo.second, [1634, 1232]) && mo.mainAsked === 1, `B-92aa r2217 (b)(c): a WATCHING pane's hello takes the pane (${mo.watchHello}), the plan still read once; the plan's mark goes at the FIRST main whatever the mode — a later main of the same connection maps the pane (${mo.second}), never the old plan`, mo);
+  const old = anchored(anchored(vsrc, CONNECT_NOW, "    planned = (typeof firstPane === 'function' && firstPane()) || null; // 76cc2bb77\n    const s = planned || paneSize();", 'B-92aa r2217 control: 76cc2bb77\'s connect'), MAIN_NOW, "if (client && win && mode === 'active') { const s = planned || paneSize(); planned = null; client.resize(s.width, s.height); }", 'B-92aa r2217 control: 76cc2bb77\'s main announce'); // stale-pins: kept — the RED plants 76cc2bb77's own connect and main lines into a copy of today's view
+  const mOld = await modes(await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', old, 'b92aa-modes')).href));
+  ok(same(mOld.watchHello, [1818, 1232]) && same(mOld.second, [1818, 1232]), `RED CONTROL (B-92aa r2217, 76cc2bb77's view): the watching pane's hello takes the plan (${mOld.watchHello}) and the replaced main maps the OLD plan (${mOld.second})`, mOld);
+  ok(/    planned = null; \/\/ B-92aa \(r2217\): the pane moved under a live client/.test(vsrc) && vsrc.indexOf('    planned = null; // B-92aa (r2217)') > vsrc.indexOf('  const relayout = () => {') && vsrc.indexOf('    planned = null; // B-92aa (r2217)') < vsrc.indexOf('  const ro = typeof ResizeObserver'), 'B-92aa r2217: a pane change under a live client (relayout) drops the plan — the main announce never puts an older plan over it');
 }
 
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
