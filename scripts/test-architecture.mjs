@@ -7922,7 +7922,11 @@ await section(async () => {
   // remembered: the files changed between the release and the tip that are in this build's own input list (the metafile below), each
   // mapped to its list line — the bundle carries chat-pipeline files too (message-manager.js, record-shape.js, permission-outcome.js…).
   // Was 5112402, 2.369.414's signed bundle: the hotfix 2.369.415 changed no device input but the version text the bundle carries.
-  const RELEASE_BUNDLE_BYTES = 5112402, DEVICE_BUNDLE_MARGIN = 0.02;
+  // 主开发 r2602 (§107's own words: the coordinator's to rule): 4 % FOR THE BLOCK 2.369.416 ONLY. This block carries two device units ruled
+  // onto the machine, both measured as shipped by their lanes: the codex rollout index (lane mask-value-shape: 12,140 bytes) and the
+  // paired listing's collector with its three disk operations (lane bl-chat-c: 36,940 bytes), on top of the 94,995 of 102,248 bytes the
+  // block had already used at 5b5fb7a9d. At the cut the base is restated to the signed size and THE MARGIN RETURNS TO 0.02 (2 %).
+  const RELEASE_BUNDLE_BYTES = 5112402, DEVICE_BUNDLE_MARGIN = 0.04;
   ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
