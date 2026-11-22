@@ -683,6 +683,12 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(back && made2 && made2.job && lA.some((l) => /jobs\.json read again after \d+ tr(y|ies): 2 record\(s\) — writes resume/.test(l)), 'B-f276: the store is READ AGAIN off the loop: its records are loaded, writes resume, a job can be created', { back, made2: made2 && (made2.error || 'ok') });
   // cure r1, the ruling: a read that ANSWERED and LOADED lifts what the failure filed — its note marked done, its item resolved
   const lifted = await until(() => !fs.existsSync(noteA) && fs.readdirSync(dA).some((n) => /^jobs\.json\.unread-done-\d+$/.test(n)));
+  // r1679 (the load row — seen red at 717191cda-20261121224429-both, the box zone: both legs below, {"noteThere":true,"lifted":true,
+  // "resolved":[]}): the note's RENAME is the lift's FIRST step (_unreadLift awaits _noteDone, then resolves the For-you items, files
+  // the one true sentence and says its line) — on a loaded runner the legs read `told` and `resolved` between the rename and the rest.
+  // They wait for the lift's OWN LAST WORD, its line, bounded (until's 3 s), and say so by name when it never came
+  const liftEnded = await until(() => lA.some((l) => /jobs\.json was read again: its note jobs\.json\.corrupt-unread is marked done \(renamed\)/.test(l)));
+  if (!liftEnded) console.log('    (the lift never said its line in 3 s — the two legs below read what stood then)');
   const told = filed.find((n) => n && n.fact === 'records-read-again');
   ok(!!told && told.urgency === 'low' && /could not be read from \{when\} to \{until\} \(\{error\}\); VibeSpace read them again and nothing was lost/.test(told.words.key) && Number.isFinite(told.words.params.when.at) && Number.isFinite(told.words.params.until.at) && told.words.params.until.at >= told.words.params.when.at && !/written over: keep the note/.test(told.words.key), 'B-f276 cure r2 (the ruling): the person who was told hears ONE TRUE SENTENCE — could not be read from … to …, read again, nothing lost (never «may already have been written over»)', told && told.words);
   ok(noteThere && lifted && A._logsUnread.store === null && resolved.length >= 1 && lA.some((l) => /jobs\.json was read again: its note jobs\.json\.corrupt-unread is marked done \(renamed\), 1 For-you item\(s\) resolved, the job-logs clean-up resumes/.test(l)), 'B-f276 cure (the ruling): the read again that loaded marks its note done (renamed — no hold reads it), resolves its For-you item, and the clean-up resumes', { noteThere, lifted, resolved });
