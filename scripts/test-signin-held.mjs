@@ -141,7 +141,7 @@ for (const [name, make] of SHAPES) {
   console.log(`    ${name}: «${held && held.why}» · refused ${refused.map((r) => r.status).join(' ')} · the sign-in page ${sp.probe.status} / ${sp.ja.status} / HEAD ${sp.head.status} · roads ${JSON.stringify(roads)}`);
   ok(held && refused.every((r) => r.status === 503) && api.json && api.json.error === 'signin-held' && api.json.fix === LW.LOGIN_WORDS['signin-held-fix'].en && page.text.includes(LW.LOGIN_WORDS['signin-held'].en) && door.json && door.json.error === 'signin-held',
     `${name}: every API, page and door refused 503 by name — the API says why and the way out, a page says it`, { api: api.json, page: page.text.slice(0, 200) });
-  ok(/^ {2}Password auth: HELD — the sign-in file cannot be read/.test(I.auth.bootLine() || '') && I.auth.bootLine().includes('every page and API is refused'), `${name}: the boot's sign-in line says HELD by name, never «ENABLED» (r1195 4): «${I.auth.bootLine()}»`);
+  ok(/^ {2}Password auth: HELD — the sign-in file cannot be read/.test(I.auth.bootLine() || '') && I.auth.bootLine().includes('every page and API is refused'), `${name}: the boot's sign-in line says HELD by name, never «ENABLED» (r1195 4): «${I.auth.bootLine()}»`);   // stale-pins: kept (B-dc3f (1): the boot line is built from the hold's cause — the shipped cause reads exactly so)
   ok(sp.alive, `${name}: THE SIGN-IN PAGE ANSWERS AS A PAGE — 200 with the held words to a health check (any accept), a browser (ja when asked) and HEAD`, { probe: [sp.probe.status, sp.probe.text.slice(0, 160)], ja: sp.ja.status, head: sp.head.status });
   ok(I.auth.enabled === true && I.auth.passwordEnabled === true && I.auth.shut === true && I.auth.checkToken('a'.repeat(48)) === false && I.auth.requestAuthed({ method: 'GET', headers: { host: 'hub.example' }, socket: {} }) === false && I.auth.verifyPassword('anything') === false && I.auth.exportPasswordRecord() === null,
     `${name}: the held state reaches every reader from ONE place — sign-in reads «on», no login is valid, requestAuthed (every upgrade that asks) is false`);
@@ -304,7 +304,7 @@ console.log('— ⑤ THE WRITER CANNOT TEAR IT: the temp file is synced BEFORE t
 
 console.log('— RED CONTROL: the release\'s reading (an unreadable file taken as «no sign-in»)');
 {
-  const CUT = '    this._held = { why };\n';
+  const CUT = "    this._held = { why, kind, ...(kind !== 'file' ? { dir: this._dataDir, ...(files.length ? { witness: files.join(', '), witnesses: files } : {}), ...(verdict && verdict.unread ? { unread: true } : {}) } : {}) };\n";   // B-dc3f (1): the held mark carries its kind and paths (r2152: every witness file there)
   const src = read('src/auth.js'); if (src.split(CUT).length !== 2) throw new Error('CONTROL needle not found exactly once: the held mark');
   const Release = compileAt('src/auth.js', src.replace(CUT, '')).Auth;
   const I = await instance(SHAPES[0][1], Release);

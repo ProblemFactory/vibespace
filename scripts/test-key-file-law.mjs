@@ -840,6 +840,7 @@ try {
     'src/server/stash-handover.js', 'src/server/tls.js', 'src/server/vault-run-door.js',
     'src/server/vault-totp.js', 'src/server/voice-teach-engine.js', 'src/ssh-key.js',
     'src/user-todos.js', 'src/webdav.js',
+    'src/signin-witness.js', // B-dc3f (1): the sha256 of the ROOT's path names the sign-in witness file (the CLI index's own digest) — no secret is digested; the file holds a fact and a path
     'src/usage-hold-road.js', // lane lg-remote-hardening (B-5278 unit 2): the sha256 is the DIGEST of a machine's usage cursor map (transcript paths, byte offsets, request ids) — no secret is digested; it is kept to compare and in that map's own record
   ]);
   const WRITE_NAMES_KFL = new Set(['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'replaceShredding', 'replaceShreddingAsync' /* the separation's B3b-1: the interface's sign-in table writer */, 'writeJsonAtomic', '_save', 'saveRegistry']);

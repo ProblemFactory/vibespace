@@ -2,6 +2,7 @@
 // THE SIGN-IN PAGE (moved verbatim out of src/auth.js by the separation's B3b-1, 主开发 r1517): ONE page for both holders of the
 // sign-in table — the plain form's hub and the piped form's interface serve the same words. PURE but for the words module.
 const { LOGIN_WORDS, loginWords } = require('./login-words.js'); // lane ui-language: the sign-in page's words, whole in en / zh / ja
+const { heldWords } = require('./signin-table.js');   // B-dc3f (1): a folder / link / declared hold's words, its paths filled in
 
 /**
  * The login page. Password form when a password is set; Clerk SSO section
@@ -47,7 +48,7 @@ function loginHtml({ clerk = null, passwordEnabled = true, held = null, nonce = 
 <body><form class="card" id="f">
   <h1>VibeSpace</h1>
   <p data-w="${passwordEnabled ? 'subPassword' : 'subSso'}">${e(sub)}</p>
-  ${held ? `<p class="held" data-w="signin-held-sso">${e(W['signin-held-sso'])}</p><p class="held" data-w="signin-held-sso-fix">${e(W['signin-held-sso-fix'])}</p>` : ''}
+  ${held && held.kind && held.kind !== 'file' ? (() => { const hw = heldWords(lang, true, held); return `<p class="held">${e(hw.why)}</p><p class="held">${e(hw.fix)}</p>`; })() /* B-dc3f (1): its paths filled in on the server — no language key to swap */ : held ? `<p class="held" data-w="signin-held-sso">${e(W['signin-held-sso'])}</p><p class="held" data-w="signin-held-sso-fix">${e(W['signin-held-sso-fix'])}</p>` : ''}
   ${passwordEnabled ? `
   <input type="password" id="pw" placeholder="${e(W.password)}" data-w-ph="password" autofocus autocomplete="current-password">
   <button type="submit" data-w="signIn">${e(W.signIn)}</button>` : ''}

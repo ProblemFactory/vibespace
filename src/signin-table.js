@@ -7,6 +7,9 @@
 // SHARED: node's crypto and the login words; no store, no disk, no clock of its own (every `now` is the caller's).
 const crypto = require('crypto');
 const { loginWords } = require('./login-words.js'); // lane ui-language: the sign-in page's words, whole in en / zh / ja
+/** B-dc3f (1): the opt-in declaration's env name (VIBESPACE_SIGNIN=required, set nowhere by default) — its ONE reader is
+ *  src/signin-witness.js; the held words name it */
+const DECLARE_ENV = 'VIBESPACE_SIGNIN';
 
 const TOKEN_COOKIE = 'vs_token';
 const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // THE CAP: 180 days from the sign-in, however often the login is used
@@ -21,8 +24,23 @@ const LOCAL_ROAD = new Set(['/api/login', '/api/auth/set-password']);
 /** a path as express 4's router matches a route (its defaults: case-insensitive, one optional trailing slash) — so a held
  *  refusal by name meets every spelling the route itself would answer (主开发 r1195 3) */
 const routeKey = (p) => String(p || '').toLowerCase().replace(/(.)\/$/, '$1');
-/** the held words in the asked language: why and the way out; `sso` = single sign-on still guards (B-dc3f) */
-function heldWords(lang, sso) { const w = loginWords(lang); return { title: w.title, why: w[sso ? 'signin-held-sso' : 'signin-held'], fix: w[sso ? 'signin-held-sso-fix' : 'signin-held-fix'] }; }
+/** the held words in the asked language: why and the way out; `sso` = single sign-on still guards (B-dc3f); `held` = the held
+ *  state — its kind (B-dc3f (1): the folder / link / declared holds, said by both holders) picks its own words */
+function heldWords(lang, sso, held = null) {
+  const w = loginWords(lang);
+  const kind = held && held.kind && held.kind !== 'file' ? held.kind : null;
+  if (!kind) return { title: w.title, why: w[sso ? 'signin-held-sso' : 'signin-held'], fix: w[sso ? 'signin-held-sso-fix' : 'signin-held-fix'] };
+  // B-dc3f (1): the one act and its full paths named, filled in here (every language); a link hold with a witness names the
+  // witness too (主开发 r2152: else its act leaves one hold for the other); an unreadable witness has its own words (r2152 (a));
+  // two copies are named «A and B» in the reader's language (r2269 (2), the words' own `signin-held-and`)
+  const files = Array.isArray(held.witnesses) && held.witnesses.length ? held.witnesses : (held.witness ? [held.witness] : []);
+  const named = files.length < 2 ? files.join('') : `${files.slice(0, -1).join(', ')} ${w['signin-held-and']} ${files[files.length - 1]}`;
+  const root = held.dir ? String(held.dir).replace(/\/+[^/]+\/*$/, '') || '/' : '';   // the install the data folder sits in
+  const fill = (t) => String(t || '').replace(/\{dir\}/g, held.dir || '').replace(/\{root\}/g, root).replace(/\{witness\}/g, named).replace(/\{env\}/g, DECLARE_ENV);
+  const whyKey = kind === 'folder' && held.unread ? 'signin-held-unread' : `signin-held-${kind}`;
+  const fixKey = kind === 'link' && held.witness ? 'signin-held-link-witness-fix' : `${whyKey}-fix`;
+  return { title: w.title, why: fill(w[whyKey]) + (sso ? ' ' + w['signin-held-sso-still'] : ''), fix: fill(w[fixKey]) };
+}
 const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 /** auth.json keys a login by sha256(token) — never the token. A 48-hex key is a token an older build stored (hashed at load). */
 const tokenDigest = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
@@ -57,13 +75,21 @@ function judgeRead({ error = null, text = null, linkGone = false } = {}) {
   return { state: parsed };
 }
 
-/** the journal's held line (B-dc3f), said ONCE at the holder's start — `file` the table's path, `sso` = single sign-on still guards */
-function heldJournal(file, why, sso) {
+/** the journal's held line (B-dc3f), said ONCE at the holder's start — `file` the table's path, `sso` = single sign-on still guards;
+ *  `held` = the held state: a folder / link / declared hold (B-dc3f (1)) says its own line, whose act IS the page's en words
+ *  (主开发 r2152: the journal and the page can never name different acts) */
+function heldJournal(file, why, sso, held = null) {
+  if (held && held.kind && held.kind !== 'file') {
+    const act = heldWords('en', false, held).fix.replace(/\.$/, '');
+    return `SIGN-IN HELD: ${why} — ${sso ? 'single sign-on still guards this instance and the password sign-in is refused' : 'every page and API is refused (the sign-in page says so)'}; ${act}; no sign-in file is written`;
+  }
   const fix = 'if it looks whole, restart VibeSpace first (a read can fail for a moment); otherwise restore it from a backup and restart, or remove it and restart';
   return sso
     ? `THE SIGN-IN FILE IS HELD: ${file} is there but ${why} — single sign-on still guards this instance (its logins kept in memory only, until the next restart) and the password sign-in is refused; ${fix}; nothing is written over it`
     : `THE SIGN-IN FILE IS HELD: ${file} is there but ${why} — every page and API is refused (the sign-in page says so); ${fix} to start with no sign-in; nothing is written over it`;
 }
+/** the held state's cause for the boot line (B-dc3f (1)): the data folder not the one / a link to nowhere / the declaration */
+const heldCause = (held) => ({ folder: held && held.unread ? 'the sign-in witness outside the data folder cannot be read' : 'the data folder is not the one its sign-in was set in', link: 'the data folder is a link to a place that is not there', declared: `${DECLARE_ENV}=required is set and no password is set` }[held && held.kind] || 'the sign-in file cannot be read');
 /** a held instance's refusal of an upgrade (every one but a paired machine's dial-in): 503 by name, nothing proxied */
 const HELD_UPGRADE = 'HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3600\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"signin-held"}';
 /** THE PASSWORD'S HASH: scrypt, 32 bytes, over the stored salt (hex) — `hashSync` the plain form's hub, `hash` the interface's
@@ -99,7 +125,7 @@ function addLogin(tokens, digest, ua, now) {
 // ui-words: `data/auth.json` on the page is the file's own name (a path to restore or remove, never words); its words are login-words'
 const heldPage = (held, lang, w) => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escHtml(w.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1em;line-height:1.5"><h1 style="font-size:1.3em">${escHtml(w.why)}</h1><p>${escHtml(w.fix)}</p><p style="color:#666;font-size:.9em"><code>data/auth.json</code>: ${escHtml(held.why)}</p></body></html>`;
 /** the held state's answer to an API or a door (B-dc3f), as JSON */
-const heldJson = (held, lang, w) => ({ error: 'signin-held', why: w.why, fix: w.fix, lang, detail: held.why });
+const heldJson = (held, lang, w) => ({ error: 'signin-held', reason: held.kind || 'file', why: w.why, fix: w.fix, lang, detail: held.why });   // `reason` B-dc3f (1)
 /** THE LOGIN COOKIE: HttpOnly, the whole site, SameSite=Lax — Secure only behind an https INGRESS (`x-forwarded-proto`): the
  *  hub's own https shares ONE port and host with http, and a Secure cookie set over it would lock the http origin out */
 const loginCookie = (token, maxAgeS, headers = {}) => `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${maxAgeS}; SameSite=Lax;${headers['x-forwarded-proto'] === 'https' ? ' Secure;' : ''}`;
@@ -121,6 +147,6 @@ function rateFail(map, ip, now) {
 }
 
 module.exports = {
-  TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, MAX_TOKENS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, escHtml, tokenDigest, DIGEST_RE, loginAlive, cookieMaxAge, judgeRead,
+  TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, MAX_TOKENS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, DECLARE_ENV, heldWords, heldCause, escHtml, tokenDigest, DIGEST_RE, loginAlive, cookieMaxAge, judgeRead,
   heldJournal, HELD_UPGRADE, SCRYPT_KEYLEN, hashSync, hash, hashMatches, migrateTokens, addLogin, heldPage, heldJson, loginCookie, CLEAR_COOKIE, cookieTokenOf, RATE_FAILS, RATE_LOCK_MS, rateCheck, rateFail,
 };

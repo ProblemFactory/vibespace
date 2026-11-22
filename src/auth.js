@@ -43,15 +43,16 @@ const PASSES = Object.freeze(new Set(['door', 'open', 'login']));
 const PD = require('./path-dot-segment.js'); // PURE (r1317): a path with a dot segment is never a door
 const { replaceShredding } = require('./secret-file.js');
 // THE TABLE'S SHARED LAW (src/signin-table.js, the separation's B3b-1): the cookie, the ages, the digest, the held judgement and words
-const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, tokenDigest, loginAlive, cookieMaxAge, judgeRead,
+const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, heldWords, heldCause, tokenDigest, loginAlive, cookieMaxAge, judgeRead,
   heldJournal, HELD_UPGRADE, hashSync, hashMatches, migrateTokens, addLogin, heldPage, heldJson, loginCookie, CLEAR_COOKIE, cookieTokenOf, rateCheck, rateFail } = require('./signin-table.js');
 const { loginHtml } = require('./login-page.js');   // the sign-in page, one for both holders
+const SW = require('./signin-witness.js');   // B-dc3f (1): the data folder's own id inside it, the witness outside it (the plain form)
 
 /** the held state's answer (B-dc3f): a page navigation gets the words (in the asked language), an API or a door gets them as
  *  JSON — 503, the way out named. `page` = THE SIGN-IN PAGE itself: it answers AS A PAGE, 200 whatever the request accepts
  *  (a health check asks it — the tree's chart: start, ready and alive — and a refusal there restarted a held pod for ever) */
 function refuseHeld(held, req, res, { sso = false, page = false } = {}) {
-  const lang = landingLang(req.headers['accept-language']), w = heldWords(lang, sso);
+  const lang = landingLang(req.headers['accept-language']), w = heldWords(lang, sso, held);
   res.setHeader('Retry-After', '3600');
   if (page || (req.method === 'GET' && String(req.headers.accept || '').includes('text/html'))) {
     return res.status(page ? 200 : 503).type('html').send(heldPage(held, lang, w));
@@ -61,13 +62,59 @@ function refuseHeld(held, req, res, { sso = false, page = false } = {}) {
 const heldError = (held) => Object.assign(new Error(`the sign-in file is held (${held.why}) — nothing is written over it`), { code: 'signin-held' });
 
 class Auth {
-  constructor(dataDir, { clerk = null } = {}) {
+  constructor(dataDir, { clerk = null, witness = null } = {}) {
     this._file = path.join(dataDir, 'auth.json');
+    // B-dc3f (1): `witness` = the start's inputs for the witness ({env, throwaway, …}; server.js passes its env and THE ONE TEST's
+    // answer to the PLAIN form only; the home is read when the facts are) — null = no folder check (the piped form's hub, which
+    // opens no file; an Auth a suite builds for another purpose); the facts are read ONCE, beside this file's own read
+    this._dataDir = dataDir; this._witnessCfg = witness; this._facts = null; this._said = new Set();
     this._state = null; // { passwordHash, salt, tokens: { token: {createdAt, ua} } }
     this._attempts = new Map(); // ip -> { fails, lockUntil }
     this._clerk = clerk; // optional ClerkAuth (src/clerk-auth.js)
     this._load();
+    this._afterLoad();
   }
+
+  /** B-dc3f (1): the start's facts (the folder, its id, the witness) — read once, never while a suite gave no inputs */
+  _startFacts() {
+    if (!this._witnessCfg) return null;
+    if (this._facts) return this._facts;
+    try { this._facts = SW.startFactsSync({ dataDir: this._dataDir, ...this._witnessCfg }); } catch (e) { this._sayOnce('facts', `[auth] the data folder's sign-in facts could not be read (${(e && e.message) || e}) — a folder that is not the one reads as before`); this._facts = null; }
+    return this._facts;
+  }
+  _sayOnce(k, line) { if (this._said.has(k)) return; this._said.add(k); try { console.warn(line); } catch { } }
+  /** B-dc3f (1): after the load — the folder's id written ONCE (never while held), then the witness learned */
+  _afterLoad() {
+    if (this._held || !this._witnessCfg) return;
+    const f = this._startFacts();
+    if (!f) return;
+    try { f.instance = SW.ensureInstance(this._dataDir, f.instance); } catch (e) { this._sayOnce('instance', `[auth] the data folder's id (${path.join(this._dataDir, SW.INSTANCE_FILE)}) could not be written (${(e && e.message) || e}) — no witness is kept until it is`); return; }
+    this._syncWitness();
+  }
+  /** THE ONE WRITER of the witness (B-dc3f (1), law 3): after the sign-in file is on disk — a password set ⇒ written (this
+   *  folder's id), none ⇒ removed. A failure never fails the person's act: said once, learned again at the next start.
+   *  主开发 r2152 (c): written again at each start (and at a set or an import) — a hub that does not restart for longer than
+   *  the system cleaner's age can still lose a copy on /var/tmp (said in the kb). r2269 (1): EVERY copy found is kept and
+   *  refreshed where it can be written, never removed because another was written: a network home late at one start puts its
+   *  copy in the folder under the mount point, and the other copy is the one the next start finds. */
+  _syncWitness() {
+    if (this._held || !this._witnessCfg) return;
+    const f = this._startFacts();
+    if (!f || !f.instance) return;
+    const set = !!(this._state && this._state.passwordHash), found = f.found || [];
+    const each = (file, act, fn) => { try { fn(); } catch (e) { this._sayOnce('witness', `[auth] the sign-in witness ${file} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start`); } };
+    if (set) {
+      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.map((w) => w.file)])];   // the ladder's place + every copy found
+      for (const file of files) each(file, 'written', () => SW.writeWitness({ place: { dir: path.dirname(file) }, file, root: f.root, dataDir: f.dataDir, id: f.instance.id, uid: f.uid }));
+      f.witness = { id: f.instance.id }; f.found = files.map((file) => ({ file, doc: { id: f.instance.id } }));
+    } else {
+      for (const w of found) each(w.file, 'removed', () => SW.removeWitness({ file: w.file }));   // the sign-in turned off: every copy
+      f.found = []; f.witness = null;
+    }
+  }
+  /** B-dc3f (1): the opt-in declaration (VIBESPACE_SIGNIN=required, set nowhere by default) — read from the start's inputs */
+  _declaredNow() { return !!(this._witnessCfg && SW.declaredOf(this._witnessCfg.env || {})); }
+
 
   _load() {
     this._held = null;
@@ -77,7 +124,14 @@ class Auth {
     if (error && error.code === 'ENOENT') { try { fs.lstatSync(this._file); linkGone = true; } catch { /* nothing at the path */ } }
     const j = judgeRead({ error, text, linkGone });
     if (j.held) return this._hold(j.held);
-    if (j.missing) { this._state = null; return; }   // truly missing: nothing at the path — a new instance
+    if (j.missing) {
+      // truly missing: nothing at the path — a new instance, UNLESS the folder is not the one (B-dc3f (1)): a link to nowhere,
+      // or a witness whose id this folder does not hold; a folder that moved WITH its id file is the same folder
+      const f = this._startFacts();
+      const v = f ? SW.verdictOf({ auth: 'missing', dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: this._dataDir }) : { hold: null };
+      if (v.hold) return this._hold(v.hold.why, v.hold.kind, v.hold);
+      this._state = null; return;
+    }
     this._state = j.state;
     // THE MIGRATION (once, at the first start of this build): a plaintext token map becomes its digests — every login
     // stays valid ONCE (the cookie's token hashes to its key; an older build never stamped a use, so the migration counts as
@@ -90,11 +144,12 @@ class Auth {
   }
 
   /** HOLD the instance closed on a sign-in file that cannot be read (B-dc3f): said once, here, at the start */
-  _hold(why) {
+  _hold(why, kind = 'file', verdict = null) {
     const sso = !!this._clerk?.enabled;
     this._state = sso ? { tokens: {} } : null;   // single sign-on still guards: its logins in MEMORY only (_save writes nothing while held)
-    this._held = { why };
-    try { console.error(`[auth] ${heldJournal(this._file, why, sso)}`); } catch { }   // the table's shared words (src/signin-table.js)
+    const files = verdict && Array.isArray(verdict.files) ? verdict.files : [];   // B-dc3f (1): every witness file there (both places)
+    this._held = { why, kind, ...(kind !== 'file' ? { dir: this._dataDir, ...(files.length ? { witness: files.join(', '), witnesses: files } : {}), ...(verdict && verdict.unread ? { unread: true } : {}) } : {}) };
+    try { console.error(`[auth] ${heldJournal(this._file, why, sso, this._held)}`); } catch { }   // the table's shared words (src/signin-table.js): a folder / link / declared hold says its own act
   }
 
   /** the held state (B-dc3f), or null: { why } */
@@ -106,7 +161,10 @@ class Auth {
   /** THE BOOT'S SIGN-IN LINE (server.js prints it): true in every state — while held it says HELD by name, never «a password is
    *  set» (主开发 r1195 4: `passwordEnabled` answers «on» while held, for the gate) → the line, or null with no password */
   bootLine() {
-    if (this._held) return this._clerk?.enabled ? '  Password auth: HELD — the sign-in file cannot be read (said above): single sign-on still guards, the password sign-in is refused' : '  Password auth: HELD — the sign-in file cannot be read (said above): every page and API is refused but the sign-in page';
+    if (this._held) {
+      const cause = heldCause(this._held);   // B-dc3f (1): the hold's own cause (src/signin-table.js) — the file's, as before, for a file that cannot be read
+      return this._clerk?.enabled ? `  Password auth: HELD — ${cause} (said above): single sign-on still guards, the password sign-in is refused` : `  Password auth: HELD — ${cause} (said above): every page and API is refused but the sign-in page`;
+    }
     return this.passwordEnabled ? '  Password auth: ENABLED' : null;
   }
   /** the upgrade dispatcher's refusal while shut: 503 by name, nothing proxied */
@@ -156,13 +214,16 @@ class Auth {
     const passwordHash = this._hash(password, salt);
     this._state = { passwordHash, salt, userSet: userSet || this._state?.userSet || false, tokens: this._state?.tokens || {} };
     this._save();
+    this._syncWitness();   // B-dc3f (1): the witness, after the sign-in file is on disk
   }
 
   /** Disable auth entirely (user choice — env won't re-enable on next boot). */
   removePassword() {
     if (this._held) throw heldError(this._held);
+    if (this._declaredNow()) throw Object.assign(new Error(`${SW.DECLARE_ENV}=required is set for this VibeSpace: its sign-in cannot be turned off here — remove that setting and restart first`), { code: 'signin-required' });
     this._state = { userSet: true, tokens: {} };
     this._save();
+    this._syncWitness();   // B-dc3f (1): the sign-in turned off — the witness removed
   }
 
   /** Revoke every login token except (optionally) one — in-app password change kicks all other devices; a vault LOCK
@@ -189,6 +250,7 @@ class Auth {
     if (!rec?.passwordHash || !rec?.salt) throw new Error('invalid password record');
     this._state = { passwordHash: String(rec.passwordHash), salt: String(rec.salt), userSet: true, tokens: {} };
     this._save();
+    this._syncWitness();   // B-dc3f (1): an imported record is THIS folder's sign-in now (its own id — the export never carries one)
   }
 
   /**
@@ -201,10 +263,21 @@ class Auth {
    *   returned so the caller can print it prominently.
    * Returns { generated?: string } — the plaintext ONLY when freshly generated.
    */
-  ensurePassword({ generateIfMissing = false } = {}) {
+  ensurePassword(opts = {}) {
+    const r = this._ensurePassword(opts);
+    // B-dc3f (1): THE DECLARATION (opt-in, set nowhere by default) — required, and no password and no single sign-on ⇒ held
+    if (!this._held && this._declaredNow() && !(this._state && this._state.passwordHash) && !this._clerk?.enabled) this._hold(`${SW.DECLARE_ENV}=required is set and no password is set`, 'declared');
+    return r;
+  }
+  _ensurePassword({ generateIfMissing = false } = {}) {
     if (this._held) return {};   // held: neither the env nor a generated password is written over the file
-    if (this._state?.userSet) return {};
+    // B-dc3f (1), 主开发 r2152 (d): the sign-in turned OFF from the page earlier stays off — but NOT under the declaration
+    // (VIBESPACE_SIGNIN=required) with no password: there the env password (or a generated one) applies, so the held words'
+    // act («set VIBESPACE_PASSWORD and restart») leaves the hold; the page's «off» gives way, and the env password is the env's
+    const declaredNoPw = this._declaredNow() && !(this._state && this._state.passwordHash);
+    if (this._state?.userSet && !declaredNoPw) return {};
     const envPw = process.env.VIBESPACE_PASSWORD;
+    if (declaredNoPw && this._state && this._state.userSet && (envPw || generateIfMissing)) this._state.userSet = false;
     if (envPw) {
       if (!this.passwordEnabled || this._hash(envPw, this._state.salt) !== this._state.passwordHash) {
         this.setPassword(envPw);
@@ -427,6 +500,7 @@ class Auth {
       }
       if (remove) {
         if (!this.passwordEnabled) return res.json({ success: true, enabled: this.enabled });
+        if (this._declaredNow()) return res.status(409).json({ error: 'signin-required', why: `${SW.DECLARE_ENV}=required is set for this VibeSpace: its sign-in cannot be turned off here — remove that setting and restart first` });   // B-dc3f (1)
         this.removePassword();
         res.setHeader('Set-Cookie', CLEAR_COOKIE);
         return res.json({ success: true, enabled: this.enabled }); // Clerk may keep auth on
