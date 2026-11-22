@@ -142,6 +142,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Opening a file or folder from a chat link, a search result, an artifact or the sidebar is also tried once even if that folder just did not answer.
 - A terminal editor (Ctrl+G) whose file could not be read no longer opens empty, where Save & Close could wipe it; a file not there yet still opens to be made.
 - A save says what happened: «still saving…» while one is out, «may have been saved» if no reply came (a note stays till you reload), or the terminal not told.
+- When the reset-credit records cannot be read, VibeSpace now uses no reset credit until they read again, so an earlier request is never spent twice.
 
 ## 2.369.415 — 2026-11-21
 
