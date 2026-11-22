@@ -1442,9 +1442,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       // own plan already held, partly in the image (clipped), under its point; a window that came later (one the click opened over that
       // point) never counts, nor does an unmapped one
       if (aimOut && aimOut.aim && aimOut.aim.kind === 'point') aimOut.aim.into = (px.plan && Array.isArray(px.plan.unshown) ? px.plan.unshown : []).filter((w) => w && w.why === 'clipped' && at.x >= w.x && at.x < w.x + w.w && at.y >= w.y && at.y < w.y + w.h).map((w) => w.id);
+      const kbTo = clickWindow(rec, px, pt, sub); // B-dbb4 M3 (r2220): the window this click lands in takes the keyboard, in the same call
       held();
-      const r = await injecting((signal) => wt.injectClick({ bins: px.bins, xenv: px.xenv, x: pt.x, y: pt.y, button: body.button, signal, python }));
-      fromHelper(r, { verb: 'click', by: 'point', at, display: { x: pt.x, y: pt.y }, coords: pt.coords, backend: px.backends.injection.backend });
+      const r = await injecting((signal) => wt.injectClick({ bins: px.bins, xenv: px.xenv, x: pt.x, y: pt.y, button: body.button, window: kbTo, signal, python }));
+      fromHelper(r, { verb: 'click', by: 'point', at, display: { x: pt.x, y: pt.y }, coords: pt.coords, backend: px.backends.injection.backend, ...(kbTo ? { keyboardTo: UN.subHandle(rec.id, kbTo) } : {}) });
       return { ok: true, handle: rec.id, did: { ...r.did, at, coords: pt.coords } };
     }
     if (verb === 'click') throw namedError('bad-request', 'click needs a ref (@e7) or --at x,y');
@@ -1552,12 +1553,25 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     let r = null;
     try { r = await Promise.race([wt.keyboardWindow({ bins: px.bins, xenv: px.xenv, timeout: KB_LOOK_MS }), sleep(KB_LOOK_MS + 100).then(() => null)]); } catch { r = null; }
     if (!r || !r.ok || !Number.isInteger(r.id)) return null;
-    const w = un.find((x) => x && x.id === r.id);
+    const chain = Array.isArray(r.chain) && r.chain.length ? r.chain : [r.id]; // r2220: the plan window whose SUBTREE holds the focus
+    const w = un.find((x) => x && chain.includes(x.id));
     if (!w) return null;
     const a = aims.get(aimKey(rec, facts));
     if (a && (a.kind === 'tree' || (a.kind === 'window' && a.wid === w.id))) return null; // the agent aimed into it (law B)
     if (a && a.kind === 'point' && Array.isArray(a.into) && a.into.includes(w.id)) return null; // (a, r2157) the click's OWN plan held this window, clipped, under its point
     return { handle: UN.subHandle(rec.id, w.id), title: w.title, note: UN.keyboardText(w, rec.id) };
+  }
+  /** B-dbb4 M3 (the coordinator's r2220): A CLICK GIVES THE KEYBOARD TO THE WINDOW IT LANDS IN, as a person's click through a viewer
+   *  does — the app's TOP window under the point, from the same plan the click is clipped against (its members, bottom→top, display
+   *  px); a click on a window's own handle gives it to that window. A point in no window of the app (the plan clips it away) moves
+   *  nothing; nor does a desktop the app does not own (its own window manager decides there), nor any injection but the X display's
+   *  own (xtest). The engine moves the keyboard only with a click — never with a key or a text. */
+  function clickWindow(rec, px, pt, sub) {
+    if (!pt || !ownsItsDisplay(rec) || !px || !px.backends || !px.backends.injection || px.backends.injection.backend !== 'xtest') return null;
+    if (sub != null) return Number.isInteger(sub) && sub > 0 ? sub : null;
+    const ms = px.plan && Array.isArray(px.plan.members) ? px.plan.members : [];
+    for (let i = ms.length - 1; i >= 0; i--) { const w = ms[i]; if (w && Number.isInteger(w.id) && w.id > 0 && pt.x >= w.x && pt.x < w.x + w.w && pt.y >= w.y && pt.y < w.y + w.h) return w.id; }
+    return null;
   }
   function mainFocus(px, lease) {
     const dw = dialogWindow(px, lease);

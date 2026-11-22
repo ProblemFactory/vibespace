@@ -163,7 +163,8 @@ yet, one beyond a pinned size — is NAMED under the image line, with its title,
 is that window's own image (its own origin; the CLI says «this image is ONE window of the app»), and `click … --at x,y`,
 `type`, `key` and `scroll` on it act on THAT window's pixels. Keys and text first give that window the X focus (xdotool
 `windowfocus`, no raise): the focus is LEFT there, as when a person clicks a window — the user's live view shows the
-popup focused, and nothing puts it back. A key or a text on the APP's own handle goes where the keyboard is; when that is a
+popup focused, and nothing puts it back. A `click --at` gives the keyboard to the window of the app it lands in (as your click in
+a live view does); a key or a text never moves it. A key or a text on the APP's own handle goes where the keyboard is; when that is a
 window of the app this image does not show, the reply says so and names its own handle. It says nothing on a desktop the app
 does not own, nor after you aimed into that window (a click on it, its own handle, or a ref). A window's own handle reaches only the
 granted app's own windows on a desktop the app owns. Refused by name:

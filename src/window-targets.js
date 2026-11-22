@@ -166,14 +166,32 @@ async function probeA11y({ env = process.env, now = Date.now, ...rest } = {}) {
   return memoSet(key, { ok: true, apps: r.apps, why: null, sessionBus: r.sessionBus, ms: r.ms }, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
 }
 
-/** B-dbb4 M3 (the coordinator's r1879): THE DISPLAY's OWN WORD for where the keyboard is — X's input focus (`xdotool
- *  getwindowfocus`), bounded by `timeout`; { ok: true, id } or { ok: false, why } — never a guess. Read just before a key or a text
- *  with no aim on an app's own handle; its caller says nothing when it is not ok. */
+/** B-dbb4 M3 (the coordinator's r1879): THE DISPLAY's OWN WORD for where the keyboard is — X's input focus, bounded by `timeout`
+ *  in all; { ok: true, id, chain } or { ok: false, why } — never a guess. Read just before a key or a text with no aim on an app's
+ *  own handle; its caller says nothing when it is not ok. r2220: the RAW focus (`xdotool getwindowfocus -f`) and the chain of the
+ *  windows that hold it (itself, its parent, … up to the top-level: ONE `xwininfo -root -tree` within what is left of the bound),
+ *  so the caller names the window of ITS plan whose subtree holds the focus — a toolkit's own focus child is its top-level's. No
+ *  tree within the bound ⇒ the chain is the focus window alone. */
 async function keyboardWindow({ bins, xenv, timeout = 400 } = {}) {
   if (!bins || !bins.xdotool) return { ok: false, why: 'xdotool not on PATH' };
-  const r = await run(bins.xdotool, ['getwindowfocus'], { env: xenv, timeout });
+  const t0 = Date.now();
+  const r = await run(bins.xdotool, ['getwindowfocus', '-f'], { env: xenv, timeout });
   const id = !r.err && /^\s*(\d+)\s*$/.test(r.stdout) ? Number(r.stdout.trim()) : null;
-  return Number.isInteger(id) && id > 0 ? { ok: true, id } : { ok: false, why: r.err ? String(r.err.message || r.err).split('\n')[0].slice(0, 120) : 'no focus window read' };
+  if (!(Number.isInteger(id) && id > 0)) return { ok: false, why: r.err ? String(r.err.message || r.err).split('\n')[0].slice(0, 120) : 'no focus window read' };
+  const left = timeout - (Date.now() - t0), xw = bins.xwininfo || display.binOnPath('xwininfo', { env: xenv || process.env });
+  if (!xw || left < 20) return { ok: true, id, chain: [id] };
+  const t = await run(xw, ['-root', '-tree'], { env: xenv, timeout: left });
+  return { ok: true, id, chain: t.err ? [id] : focusChain(display.parseWininfoTree(t.stdout), id) };
+}
+/** …the chain of a window id over parsed `xwininfo -root -tree` rows (desktop-display parseWininfoTree: printed parent first, each
+ *  level one `depth` deeper): the id, then each ancestor up to its top-level (depth 1) — PURE. An id the tree does not hold ⇒ [id]. */
+function focusChain(rows, id) {
+  const list = Array.isArray(rows) ? rows : [];
+  const at = list.findIndex((w) => w && w.id === id);
+  if (at < 0) return [id];
+  const chain = [id]; let depth = list[at].depth;
+  for (let i = at - 1; i >= 0 && depth > 1; i--) if (list[i] && list[i].depth === depth - 1) { chain.push(list[i].id); depth = list[i].depth; }
+  return chain;
 }
 function run(bin, args, { env, timeout = 3000 } = {}) {
   return new Promise((resolve) => execFile(bin, args, { env, timeout, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => resolve({ err, stdout: String(stdout || '') })));
@@ -550,15 +568,17 @@ async function injectKey({ bins, xenv, chord, focus = null, window = null, timeo
 /** The buttons a point click may press — anything else is refused by name (lane E M8: a coerced
  *  wheel button became a LEFT click); the wheel is `injectScroll`. */
 const CLICK_BUTTONS = Object.freeze([1, 2, 3]);
-/** A coordinate click on OUR display (audited `by:'point'` by the caller). No `--sync` (M9). */
-async function injectClick({ bins, xenv, x, y, button = 1, timeout = 5000, signal = null, python = 'python3' } = {}) {
+/** A coordinate click on OUR display (audited `by:'point'` by the caller). No `--sync` (M9). B-dbb4 M3 (r2220): `window` = the X
+ *  window the click lands in, given the keyboard IN THE SAME xdotool call, after the pointer moved and before the button (as a
+ *  person's click through a viewer focuses its window); null ⇒ the click alone, as before. */
+async function injectClick({ bins, xenv, x, y, button = 1, window = null, timeout = 5000, signal = null, python = 'python3' } = {}) {
   if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return refuse('bad-request', '--at needs two non-negative integers x,y');
   const b = button == null || button === '' ? 1 : Number(button);
   if (!CLICK_BUTTONS.includes(b)) return refuse('bad-request', `--button is 1 (left), 2 (middle) or 3 (right) — not ${JSON.stringify(button)}; the wheel is \`vibespace-window scroll\``);
-  const r = await runInject(bins.xdotool, ['mousemove', String(Math.round(x)), String(Math.round(y)), 'click', String(b)], { env: xenv, timeout, signal });
+  const r = await runInject(bins.xdotool, ['mousemove', String(Math.round(x)), String(Math.round(y)), ...focusArgs(window), 'click', String(b)], { env: xenv, timeout, signal });
   if (r.killed) return afterKill(r, { what: `the click (button ${b})`, timeout, bins, xenv, buttons: [b], python });
-  return r.err ? refuse('inject_failed', `xdotool click failed: ${r.err.message.split('\n')[0]}`) : { ok: true, did: { verb: 'click', by: 'point', x: Math.round(x), y: Math.round(y), button: b, backend: 'xtest' } };
+  return r.err ? refuse('inject_failed', `xdotool click failed: ${r.err.message.split('\n')[0]}`) : { ok: true, did: { verb: 'click', by: 'point', x: Math.round(x), y: Math.round(y), button: b, backend: 'xtest', ...(focusArgs(window).length ? { focused: window } : {}) } };
 }
 /** Lane E (D7): the WHEEL — X buttons 4/5/6/7 = up/down/left/right, `by` notches (1..20; Chrome scrolls 120 px a
  *  notch, measured) at a display point (null = where the pointer is). */
@@ -735,7 +755,7 @@ module.exports = {
   TREE_UNREACHABLE, treeUnreachable,
   runHelper, probeA11y, probeInputBackends, keyboardWindow /* B-dbb4 M3, r1879 */, probeScreenCastPortal, resetProbeMemo, envKeyOf,
   verbVerdicts, parseChord, pickAction, ACTION_PREFERENCE, NEVER_BY_DEFAULT, NAMED_KEYS, refTableOf, resolveRef, targetRows, nodeView, textBoundOf,
-  snapshotTarget, actOnNode, focusedNode, screenshotDisplay, injectKey, injectClick,
+  snapshotTarget, actOnNode, focusedNode, screenshotDisplay, injectKey, injectClick, focusChain,
   // lane E (D7): the pixel road
   CLICK_BUTTONS, SCROLL_BUTTONS, SCROLL_MAX, TYPE_MAX, injectScroll, injectType, xdoStderr, XDO_STDERR_KNOWN, displayGeometry, windowShot, focusNode,
   // lane E verify r2 (L5): the cancellable injection + the release pass

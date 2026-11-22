@@ -319,11 +319,18 @@ try {
     //   (1) THE CONTROL: `key <app> c` — the key goes where the keyboard is (one page hears it), and the reply NAMES that popup's own
     //       handle exactly when the page that heard it is a popup this image does not show (never a claim about another window);
     //   (2) M3: a key on the popup's OWN handle arrives in THAT popup, the main window hears none;
+    //   r2220: an ENGINE click gives the keyboard to the window it lands in (the box's row 236: on xpra nothing else does);
     //   (3) after an aim INTO the main (a click on its page — the third click opens nothing), the keys stand there: the select's list
     //       opened by Tab + alt+Down (one more window drawn in the image, read), Down then Return PICK «two» (nothing forced, the
     //       list's grab kept); `key <app> x` lands in the main page (and closes both popups: the clean-up)
     if (popNamed) {
       const heardSince = (k0) => hits.slice(k0).filter((h) => /^\/key\?/.test(h.url)).map((h) => h.url);
+      // r2220's MEASURE (judged by nothing): X's own word right before the key, on THIS browser's display — the focus window as
+      // xdotool's top-level climb names it, the raw one (-f), and the named popups' X ids
+      const xenv2 = { ...baseEnv, DISPLAY: rec2.display, XAUTHORITY: path.join(wt, 'data', 'desktop-apps', H2, 'Xauthority') };
+      const x2 = (args) => new Promise((resolve) => execFile('xdotool', args, { env: xenv2, timeout: 5000 }, (e, out) => resolve(e ? `unread (${e.code ?? 'error'})` : String(out).trim())));
+      const focusSane = await x2(['getwindowfocus']), focusRaw = await x2(['getwindowfocus', '-f']);
+      console.log(`    MEASURE B-dbb4 r2220 (not a proof): right before \`key ${H2} c\` X's focus is ${focusSane} (getwindowfocus) / ${focusRaw} (getwindowfocus -f); the named windows ${JSON.stringify(((acc && acc.named) || []).map((h) => [h, parseInt(h.slice(h.lastIndexOf('.w') + 2), 16)]))}`);
       const c0 = hits.length;
       const kc = await cli('vibespace-window', ['key', H2, 'c']);
       await until(async () => (heardSince(c0).length ? true : null), 15000, 300);

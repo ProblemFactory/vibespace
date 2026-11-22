@@ -567,15 +567,17 @@ console.log('CONTROLS (patched copies)');
       let kbAnswer = null, kbCalls = 0;
       wtP.keyboardWindow = async () => { kbCalls++; return typeof kbAnswer === 'function' ? kbAnswer() : kbAnswer; };
       const rowsKeepS = rowsP;
+      let lookDone = false; // set when a LATE look finally answers — the order proof of (2), never a clock bound (the wall-clock census, §2e)
       const scene = async (E, { rows, answer, before = null, act = { verb: 'key', chord: 'Return' }, pin = null }) => {
-        rowsP = rows.map((w) => ({ ...w })); kbAnswer = answer; kbCalls = 0; recP.pin = pin || undefined;
+        rowsP = rows.map((w) => ({ ...w })); kbAnswer = answer; kbCalls = 0; recP.pin = pin || undefined; lookDone = false;
         if (before) await before(E);
         kbCalls = 0;
         const k0 = keysP.length, t0 = typedP.length, at0 = Date.now();
         let r = null, code = null; try { r = await E.act('da-pop', fP, act); } catch (e) { code = e && e.code; }
+        const lookDoneAtAnswer = lookDone; // had the look answered when the act answered?
         const sent = act.verb === 'key' ? keysP.slice(k0) : typedP.slice(t0);
         rowsP = rowsKeepS; kbAnswer = null; recP.pin = undefined;
-        return { code, note: r && r.note || null, keyboard: r && r.keyboard || null, windows: sent.map((x) => x.window), calls: kbCalls, ms: Date.now() - at0 };
+        return { code, note: r && r.note || null, keyboard: r && r.keyboard || null, windows: sent.map((x) => x.window), calls: kbCalls, ms: Date.now() - at0, lookDone: lookDoneAtAnswer };
       };
       const clickMain = (E) => E.act('da-pop', fP, { verb: 'click', at: '10,20' });
       const runScenes = async (E) => ({
@@ -585,7 +587,7 @@ console.log('CONTROLS (patched copies)');
         Ct: await scene(E, { rows: [pop, helper, main], answer: { ok: true, id: 2 }, before: clickMain, act: { verb: 'type', text: 'hi' } }),
         one: await scene(E, { rows: [helper, main], answer: { ok: true, id: 1 }, before: clickMain }),
         unread: await scene(E, { rows: [pop, helper, main], answer: { ok: false, why: 'no focus window read' }, before: clickMain }),
-        late: await scene(E, { rows: [pop, helper, main], answer: () => new Promise((res) => setTimeout(() => res({ ok: true, id: 2 }), 2500)), before: clickMain }),
+        late: await scene(E, { rows: [pop, helper, main], answer: () => new Promise((res) => setTimeout(() => { lookDone = true; res({ ok: true, id: 2 }); }, 2500)), before: clickMain }),
         // (a) round wd6ogrta0: a popup PARTLY in the image (over the pinned main, reaching past the pin: clipped) — a click on its visible
         // part aimed into it (no note); a click elsewhere did not (the note names it)
         clipIn: await scene(E, { rows: [big, pinned], pin: '1600x900', answer: { ok: true, id: 6 }, before: (E2) => E2.act('da-pop', fP, { verb: 'click', at: '1450,750' }) }),
@@ -608,7 +610,7 @@ console.log('CONTROLS (patched copies)');
       ok(!!S.opensUnder.note && S.opensUnder.note.includes('`da-pop.w6`'), 'M3 shape (a, r2157): a click on the main that OPENS a popup over its own point — the popup was not in the click\'s plan, so it was no aim into it: the next key IS told where the keyboard was', S.opensUnder);
       ok(none(S.clipIn) && !!S.clipOut.note && S.clipOut.note.includes('`da-pop.w6`'), 'M3 shape (a, round wd6ogrta0): a click on the visible part of a CLIPPED popup aimed into it — nothing said; a click elsewhere did not — the note names it', { clipIn: S.clipIn, clipOut: S.clipOut });
       ok(none(S.refused), 'M3 shape (b, round wd6ogrta0): a REFUSED act (a click at a point outside the image, refused after the door) does not move the last aim — the aim into the popup stands, nothing said', S.refused);
-      ok(none(S.unread) && none(S.late) && S.late.ms < 1500, `M3 shape (2): a look that failed, or one that did not answer within its bound — the key lands as at the release and NOTHING is said (never a guess, never a refusal; the late one waited ${S.late.ms} ms)`, { unread: S.unread, late: S.late });
+      ok(none(S.unread) && none(S.late) && S.late.lookDone === false, `M3 shape (2): a look that failed, or one that did not answer within its bound — the key lands as at the release and NOTHING is said (never a guess, never a refusal); the late one's act ANSWERED BEFORE the look did (by order, never a clock bound: ${S.late.ms} ms said)`, { unread: S.unread, late: S.late });
       // RED CONTROLS (anchored, each anchor found exactly once — or twice where said)
       const SS = read(ENGINE_REL);
       const scenesOn = async (src, tag) => { const EC = MUT.load(ENGINE_REL, src, tag); const E3 = EC.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-shape-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); E3.grantReach('da-pop', { kind: 'session', id: 's1' }); E3.setShareMode('da-pop', 'pixels'); E3.attach('da-pop', fP); return runScenes(E3); };
@@ -630,7 +632,7 @@ console.log('CONTROLS (patched copies)');
       const refusing = await scenesOn(anchored(SS, '    if (!r || !r.ok || !Number.isInteger(r.id)) return null;\n', "    if (!r || !r.ok || !Number.isInteger(r.id)) throw namedError('keyboard_unknown', 'where the keyboard is could not be read');\n", 'M3 shape control: an unread look refuses'), 'look-refuses');
       ok(refusing.unread.code === 'keyboard_unknown' && refusing.late.code === 'keyboard_unknown', 'RED CONTROL (2): a look that refuses when unread or late — the act is STOPPED by the look', { unread: refusing.unread.code, late: refusing.late.code });
       const unbound = await scenesOn(anchored(SS, '    try { r = await Promise.race([wt.keyboardWindow({ bins: px.bins, xenv: px.xenv, timeout: KB_LOOK_MS }), sleep(KB_LOOK_MS + 100).then(() => null)]); } catch { r = null; }\n', '    try { r = await wt.keyboardWindow({ bins: px.bins, xenv: px.xenv, timeout: KB_LOOK_MS }); } catch { r = null; }\n', 'M3 shape control: the look unbounded'), 'look-unbound');
-      ok(unbound.late.ms >= 2000, `RED CONTROL (2): the look with no bound of its own — the act waits on it (${unbound.late.ms} ms)`, unbound.late);
+      ok(unbound.late.lookDone === true, `RED CONTROL (2): the look with no bound of its own — the act answers only AFTER the late look did (${unbound.late.ms} ms said)`, unbound.late);
       delete wtP.keyboardWindow;
     }
     // RULED: on a SHARED desktop (a rung that does not own its display) no window has a handle of its own
@@ -654,6 +656,77 @@ console.log('CONTROLS (patched copies)');
       const skRed = await sharedKey(MUT.load(ENGINE_REL, anchored(SSh, '    if (!ownsItsDisplay(rec)) return null;\n', '', 'shared-desktop control: the own-display test cut'), 'shared-look'), 'red');
       ok(!!skRed.note && skRed.calls >= 1 && /da-sh\.w2/.test(skRed.note), 'RED CONTROL (the MUST): the line as it stood — on the shared desktop the look is made and the note names `da-sh.w2`, a handle the door refuses (window_subject_shared)', skRed);
       wtP.keyboardWindow = keepKw;
+    }
+    // B-dbb4 M3, the coordinator's r2220 (int361's box row 236: on the real xpra an ENGINE click moved no keyboard — the aim into the
+    // main page left it in the popup): A CLICK GIVES THE KEYBOARD TO THE WINDOW IT LANDS IN, as a person's click through a viewer does
+    // — the app's TOP window under the point, from the click's own plan, in the same xdotool call; a window's own handle: that window.
+    // A point the plan clips away (in no window of the app), a desktop the app does not own and a REFUSED click (the lease, the
+    // takeover) move nothing. Keys and text force nothing (laws A and B). The look names the plan window whose SUBTREE holds the focus.
+    {
+      const corner = { id: 8, title: 'Corner', cls: 'chromium', x: 1700, y: 1100, w: 300, h: 300, mapped: true }; // over the main's corner: the image's union keeps an empty quarter
+      const rowsKeepC = rowsP, injKeep = wtP.injectClick, kbKeep = wtP.keyboardWindow;
+      let focusNow = 2, kbFixed = null; // X's focus in this fake world (the popup holds it: the box's scene); a fixed look answer when set
+      wtP.injectClick = async (o) => { clicksP.push({ x: o.x, y: o.y, window: o.window == null ? null : o.window }); if (Number.isInteger(o.window) && o.window > 0) focusNow = o.window; return { ok: true, did: { verb: 'click' } }; };
+      wtP.keyboardWindow = async () => kbFixed || { ok: true, id: focusNow, chain: [focusNow] };
+      const mkE = (Emod, tag) => { const E = Emod.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-r2220-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 }); E.grantReach('da-pop', { kind: 'session', id: 's1' }); E.setShareMode('da-pop', 'pixels'); E.attach('da-pop', fP); return E; };
+      const click = async (E, { rows, at, handle = 'da-pop', pin = null, before = null }) => {
+        rowsP = rows.map((w) => ({ ...w })); recP.pin = pin || undefined; focusNow = 2;
+        if (before) await before(E);
+        const c0 = clicksP.length; let code = null; try { await E.act(handle, fP, { verb: 'click', at }); } catch (e) { code = e && e.code; }
+        const sent = clicksP.slice(c0); recP.pin = undefined;
+        return { code, sent: sent.length, window: sent.length ? sent[0].window : undefined };
+      };
+      // the box's scene: the popup holds the keyboard; a click into the main page; then `key <app> x` — where it goes, what is said
+      const aimThenKey = async (E) => { rowsP = [pop, helper, main].map((w) => ({ ...w })); focusNow = 2; await E.act('da-pop', fP, { verb: 'click', at: '10,20' }); const k0 = keysP.length; const r = await E.act('da-pop', fP, { verb: 'key', chord: 'x' }); const sent = keysP.slice(k0); return { heard: focusNow, window: sent.length ? sent[0].window : undefined, note: (r && r.note) || null }; };
+      // the look by SUBTREE: X's focus sits on a CHILD (99) of the unseen popup (2) — the chain names it
+      const childFocus = async (E) => { rowsP = [pop, helper, main].map((w) => ({ ...w })); kbFixed = { ok: true, id: 99, chain: [99, 2] }; try { await E.act('da-pop', fP, { verb: 'click', at: '10,20' }); const r = await E.act('da-pop', fP, { verb: 'key', chord: 'Tab' }); return { note: (r && r.note) || null }; } finally { kbFixed = null; } };
+      const runClicks = async (E) => ({
+        main: await click(E, { rows: [pop, helper, main], at: '10,20' }),                         // the main page
+        dialog: await click(E, { rows: [over, helper, main], at: '100,100' }),                    // a popup drawn OVER the main, on top under the point
+        under: await click(E, { rows: [over, helper, main], at: '10,20' }),                       // the main beside it
+        own: await click(E, { rows: [pop, helper, main], at: '10,20', handle: 'da-pop.w2' }),     // a window's own handle
+        clipped: await click(E, { rows: [big, pinned], at: '1450,750', pin: '1600x900' }),        // the visible part of a popup reaching past the pin: on top there
+        away: await click(E, { rows: [corner, helper, main], at: '1350,50' }),                    // in the image, in NO window of the app
+        aim: await aimThenKey(E), child: await childFocus(E),
+        lease: await click(E, { rows: [pop, helper, main], at: '10,20', before: (E2) => E2.revokeReach('da-pop', { kind: 'session', id: 's1' }) }), // LAST: the grant goes
+      });
+      try {
+        const C = await runClicks(mkE(ENGINE, 'now'));
+        const Et = mkE(ENGINE, 'takeover'); const tk = Et.takeover({ handle: 'da-pop', viewerId: 'v-r2220', holderAlive: true });
+        const takeover = await click(Et, { rows: [pop, helper, main], at: '10,20' });
+        ok(C.main.window === 1 && C.dialog.window === 5 && C.under.window === 1 && C.own.window === 2 && C.clipped.window === 6 && [C.main, C.dialog, C.under, C.own, C.clipped].every((x) => !x.code && x.sent === 1),
+          'M3 r2220: a click gives the keyboard to the window it LANDS IN, in the same call — the main page (1), a popup drawn over the main under the point (5), the main beside it (1), a window\'s own handle (2), the visible part of a popup reaching past the pin (6: on top there)', C);
+        ok(!C.away.code && C.away.sent === 1 && C.away.window === null, 'M3 r2220 (the coordinator\'s bound): a point the plan CLIPS AWAY (in the image, in no window of the app) — the click is sent as before and moves NOTHING', C.away);
+        ok(!!C.lease.code && C.lease.sent === 0 && !!tk && tk.ok === true && takeover.code === 'window_paused' && takeover.sent === 0, `M3 r2220 (the coordinator's bound): a REFUSED click moves nothing — the lease revoked (${C.lease.code}), the person's takeover (${takeover.code}): nothing sent, no focus`, { lease: C.lease, takeover, tk: tk && tk.ok });
+        ok(C.aim.heard === 1 && C.aim.window == null && !C.aim.note, 'M3 r2220: the box\'s scene — the popup held the keyboard, the agent clicked into the main page, `key <app> x` lands in the MAIN (the key forces no window, nothing is said)', C.aim);
+        ok(!!C.child.note && C.child.note.includes('`da-pop.w2`'), 'M3 r2220 (2): X\'s focus on a CHILD of the unseen popup (99 under 2) — the look names the popup, the plan window whose subtree holds it', C.child);
+        // on a desktop the app does NOT own the click moves nothing (its own window manager decides there)
+        const sharedClick = { code: null, window: undefined }; { const c0 = clicksP.length; try { await ES2.act('da-sh', fP, { verb: 'click', at: '10,20' }); } catch (e) { sharedClick.code = e && e.code; } const s = clicksP.slice(c0); sharedClick.window = s.length ? s[0].window : undefined; sharedClick.sent = s.length; }
+        ok(!sharedClick.code && sharedClick.sent === 1 && sharedClick.window === null, 'M3 r2220: on a SHARED desktop (the app does not own the display) a click is sent as before and moves no keyboard', sharedClick);
+        // THE ONE CALL: the real injector puts the focus between the pointer's move and the button, in ONE xdotool argv; none without a window
+        const fakeX = path.join(dir, 'fake-xdotool-r2220.sh'), argF = path.join(dir, 'xdotool-r2220.args');
+        fs.writeFileSync(fakeX, `#!/bin/sh\nprintf '%s ' "$@" >> ${JSON.stringify(argF)}\nprintf '\\n' >> ${JSON.stringify(argF)}\n`); fs.chmodSync(fakeX, 0o755);
+        const r1 = await WT.injectClick({ bins: { xdotool: fakeX }, xenv: {}, x: 5, y: 6, window: 7 }), r0 = await WT.injectClick({ bins: { xdotool: fakeX }, xenv: {}, x: 5, y: 6 });
+        const lines = fs.readFileSync(argF, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean);
+        ok(lines[0] === 'mousemove 5 6 windowfocus 7 click 1' && lines[1] === 'mousemove 5 6 click 1' && r1.ok && r1.did.focused === 7 && r0.ok && r0.did.focused === undefined, `M3 r2220: ONE xdotool call — «${lines[0]}» (the focus after the move, before the button); with no window «${lines[1]}», as before`, { lines, r1: r1.did, r0: r0.did });
+        // PURE focusChain over a captured `xwininfo -root -tree` (xpra's corral wraps each client; Chrome's popup holds a child)
+        const DDm = require(path.join(REPO, 'src/desktop-display.js'));
+        const TREE = ['xwininfo: Window id: 0x25d (the root window) (has no name)', '', '  Root window id: 0x25d (the root window) (has no name)', '  Parent window id: 0x0 (none)', '     2 children:',
+          '     0x200006 "Xpra-CorralWindow-0x400016": ()  520x654+0+0  +0+0', '        1 child:', '        0x400016 "Sign in – stand-in 1 - Google Chrome": ("google-chrome" "Google-chrome")  520x654+0+0  +0+0', '           1 child:', '           0x400099 (has no name): ()  520x654+0+0  +0+0',
+          '     0x200008 "Xpra-CorralWindow-0x400003": ()  1920x1080+10+10  +10+10', '        1 child:', '        0x400003 "E2A rung page - Google Chrome": ("google-chrome" "Google-chrome")  1920x1080+0+0  +10+10'].join('\n');
+        const rowsT = DDm.parseWininfoTree(TREE);
+        ok(same(WT.focusChain(rowsT, 0x400099), [0x400099, 0x400016, 0x200006]) && same(WT.focusChain(rowsT, 0x400003), [0x400003, 0x200008]) && same(WT.focusChain(rowsT, 0x7777), [0x7777]), 'M3 r2220 (PURE focusChain): a child of the popup climbs to the popup and its corral; the main to its corral; an id the tree does not hold stays alone', { a: WT.focusChain(rowsT, 0x400099), b: WT.focusChain(rowsT, 0x400003) });
+        // RED CONTROLS (anchored once each)
+        const SC = read(ENGINE_REL);
+        const noFocusClick = await runClicks(mkE(MUT.load(ENGINE_REL, anchored(SC, 'button: body.button, window: kbTo, signal, python', 'button: body.button, signal, python', 'r2220 control: 8853d0767\'s click'), 'r2220-no-focus'), 'red-nofocus')); // stale-pins: kept (a RED control plants the pre-cure text)
+        ok(noFocusClick.main.window === null && noFocusClick.aim.heard === 2 && /`da-pop\.w2`/.test(noFocusClick.aim.note || ''), 'RED CONTROL (r2220, 8853d0767\'s click: no window): the key after the aim into the main goes to the POPUP, and the note says so — the box\'s ✗', noFocusClick.aim);
+        const mainFallback = await runClicks(mkE(MUT.load(ENGINE_REL, anchored(SC, '    return null;\n  }\n  function mainFocus(px, lease) {', '    return px.plan && px.plan.main ? px.plan.main.id : null;\n  }\n  function mainFocus(px, lease) {', 'r2220 control: the main when no window holds the point'), 'r2220-main-fallback'), 'red-fallback'));
+        ok(mainFallback.away.window === 1, 'RED CONTROL (r2220 bound): a click in no window of the app gives the keyboard to the main anyway', mainFallback.away);
+        const bottomFirst = await runClicks(mkE(MUT.load(ENGINE_REL, anchored(SC, '    for (let i = ms.length - 1; i >= 0; i--) { const w = ms[i];', '    for (let i = 0; i < ms.length; i++) { const w = ms[i];', 'r2220 control: the bottom window first'), 'r2220-bottom'), 'red-bottom'));
+        ok(bottomFirst.dialog.window === 1, 'RED CONTROL (r2220): the BOTTOM window under the point (the main under the popup) — the popup the click landed in does not get the keyboard', bottomFirst.dialog);
+        const idOnly = await runClicks(mkE(MUT.load(ENGINE_REL, anchored(SC, '    const w = un.find((x) => x && chain.includes(x.id));', '    const w = un.find((x) => x && x.id === r.id);', 'r2220 control: the look by id only'), 'r2220-id-only'), 'red-idonly')); // stale-pins: kept (a RED control plants the pre-cure text)
+        ok(!idOnly.child.note, 'RED CONTROL (r2220 (2)): the look by the focus id alone — a focus on the popup\'s child names nothing', idOnly.child);
+      } finally { wtP.injectClick = injKeep; wtP.keyboardWindow = kbKeep; rowsP = rowsKeepC; recP.pin = undefined; if (kbKeep === undefined) delete wtP.keyboardWindow; }
     }
     // a window of ANOTHER app (an id this app's display does not list) is refused window_gone — the list is the app's own display's
     let fo = null; try { await EP.screenshot('da-pop.w7', fP); } catch (e) { fo = e; }
