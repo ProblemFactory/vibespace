@@ -121,6 +121,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When the data folder refuses the spending record's lock, the usage menu and For you now say so, and held turns resume by themselves once it writes again.
 - With lowering off, Session Properties no longer says a conversation on another machine runs at this server's own CPU priority.
 - VibeSpace no longer stops responding while it writes the CLIs' own settings on a machine whose home folder answers slowly.
+- VibeSpace no longer pauses for a moment each time a job changes while the Jobs list is open, or every few seconds while sessions are listed.
 
 ## 2.369.415 — 2026-11-21
 
