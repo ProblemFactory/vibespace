@@ -20,6 +20,15 @@ import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 // a fake DOM just wide enough for window.js's import graph (test-title-chips / test-window-minsize)
@@ -86,7 +95,7 @@ console.log('§2 CONTROL: the unguarded setTitleMeta');
   const GUARD = /\n[ \t]*if \(prevKeys\.length === nextKeys\.length && nextKeys\.every\(\(k\) => prevMeta\[k\] === nextMeta\[k\]\)\) return;/;
   ok(GUARD.test(src) && src.split('prevMeta[k] === nextMeta[k]').length === 2, 'the guard is spelled once — the control removes exactly it');
   const M = mutantCopies('badge-meta', REPO);
-  const { WindowManager: Pre } = await import(M.write('src/lib/window.js', src.replace(GUARD, ''), 'unguarded'));
+  const { WindowManager: Pre } = await import(M.write('src/lib/window.js', editAnchor(src, GUARD, '', "src/lib/window.js"), 'unguarded'));
   const { wm, n } = mkWm(Pre);
   for (let i = 0; i < 10; i++) wm.setTitleMeta('w-guest', { ...META });
   ok(n.render === 10 && n.notify === 10 && n.apply === 10, `the pre-fix manager re-draws the strip on EVERY identical call (${n.render} of 10) — every tab chip on the page, every poll`, n);

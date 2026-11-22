@@ -364,7 +364,7 @@ console.log('§10 RED CONTROLS — the pre-fix renders fail the judges above');
   ok(bad.length >= 4 && bad.some((x) => /no zone sentence/.test(x)) && bad.some((x) => /without its zone/.test(x)), `the base's UTC strings on a PT fixture fail the injection's judge (${bad.length} problems — the «23:16» an agent relayed)`, bad);
   SET['taskbar.position'] = 'top'; US = { ownerPage: { lang: 'zh' } };
   const reg = read('src/agent-cli-registry.js');
-  const preReg = reg.replace("ALSO file it in ${trayOf(tray)} (say that, never \"your inbox\")", 'ALSO file it in their For you tray (bottom right of their screen: say that, never "your inbox")');
+  const preReg = editAnchor(reg, "ALSO file it in ${trayOf(tray)} (say that, never \"your inbox\")", 'ALSO file it in their For you tray (bottom right of their screen: say that, never "your inbox")', "src/agent-cli-registry.js");
   ok(preReg !== reg, '(the patch applied: the registry\'s ask paragraph as the base wrote it)');
   const R0 = M.load('src/agent-cli-registry.js', preReg, 'pre-literal');
   const said = R0.renderSessionStartTools({ status: true, ask: true, task: true, jobs: true }, { tray: OF.tray().phrase }).join('\n');

@@ -36,6 +36,15 @@ const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(40); } return !!fn(); };
 
@@ -399,7 +408,7 @@ console.log('④b lane tailnet-names r2 (N3): THE FIRST LAUNCH AFTER A RESTART K
         && w.rowOn === w.port0 && w.url1 === w.url0 && w.heldOn === 200 && w.lists, w);
     const dsrc = fs.readFileSync(path.join(REPO, 'src/server/tailnet-door.js'), 'utf8'), WA = '  unfollow = plugins.watch(() => roadChanged());';
     ok('CONTROL the tip-wiring edit applies once', dsrc.split(WA).length === 2);
-    const DM = dsrc.includes(WA) ? MR.load('src/server/tailnet-door.js', dsrc.replace(WA, "  unfollow = plugins.watch((ev) => { if (ev && ev.type === 'plugins-updated') roadChanged(); }); // r3: the broadcast only"), 'tip-wiring') : null;
+    const DM = dsrc.includes(WA) ? MR.load('src/server/tailnet-door.js', editAnchor(dsrc, WA, "  unfollow = plugins.watch((ev) => { if (ev && ev.type === 'plugins-updated') roadChanged(); }); // r3: the broadcast only", "src/server/tailnet-door.js"), 'tip-wiring') : null;
     const WM = DM ? await wired(DM, 'tip') : null;
     ok('MUTANT the tip\'s wiring (r3: only the plugin broadcast reaches the door) ⇒ the row OFF leaves the door listening ⇒ RED', !!WM && WM.out.rowOff !== null && WM.out.heldOff === 200, WM && WM.out);
     if (WM && WM.d) await WM.d.close();

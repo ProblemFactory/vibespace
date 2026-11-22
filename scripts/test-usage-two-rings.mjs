@@ -37,6 +37,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 
 // ── the fake document the real `_renderUsage` paints into (test-roster-live-usage's shape) ───────────────────────────
@@ -566,7 +575,7 @@ console.log('— mutants (each reds its own leg by name)');
   if (U3) { red('us-none-back (r3\'s «none» on an empty ⟳ read — taskbar)', meterLegs(U3.um), 'A ⟳ READ THAT NAMED NO CAP PROVES NOTHING (taskbar)'); red('us-none-back (roster)', rosterLegs(U3.ma), 'A ⟳ READ THAT NAMED NO CAP PROVES NOTHING (roster)'); red('us-none-back (the drifted panel)', driftLegs(U3.um, U3.ma), 'THE DRIFTED PANEL'); } else ok('mutant us-none-back: the patched line exists', false);
   // u2: the hole back to the literal English «cap» (no t()) — a zh render says «cap»
   { let src = srcOf('src/lib/usage-source.js'); const a = ": t('cap'), name: known || null,";
-    const url = src.split(a).length === 2 ? pathToFileURL(M.write('src/lib/usage-source.js', src.replace(a, ": 'cap', name: known || null,"), 'us-hole-english')).href : null;
+    const url = src.split(a).length === 2 ? pathToFileURL(M.write('src/lib/usage-source.js', editAnchor(src, a, ": 'cap', name: known || null,", "src/lib/usage-source.js"), 'us-hole-english')).href : null;
     const Z = url && await zhTwins('us-hole-english', url);
     if (Z) red('us-hole-english (the not-read hole the literal English «cap», no t())', zhLegs(Z), 'THE HOLE SPEAKS THE DEVICE\'S LANGUAGE'); else ok('mutant us-hole-english: the patched line exists', false); }
   // …and the ONE constant really is one: flipped in a copy, BOTH twins flip (never a mutant — the owner may ask for it)

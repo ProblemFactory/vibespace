@@ -36,6 +36,15 @@ const VERSION = require('../package.json').version;
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const B = (t) => Buffer.byteLength(String(t || ''), 'utf-8');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-seenmarks-'));
 const quiet = console.log;   // the routes' own [inject] journal lines are not the suite's output
@@ -978,7 +987,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     const aW = "  const W = () => writer || require('./store-writer.js').storeWriter();\n";
     ok(tcSrc.split(aW).length === 2, 'ANCHOR: the table\'s one writer line');
     const { mutantCopies } = await import('./mutant-copy.mjs');
-    const Sync = mutantCopies('seen-marks-u2', REPO).load('src/turn-carry.js', tcSrc.replace(aW, "  const W = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });\n"), 'sync-save');
+    const Sync = mutantCopies('seen-marks-u2', REPO).load('src/turn-carry.js', editAnchor(tcSrc, aW, "  const W = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });\n", "src/turn-carry.js"), 'sync-save');
     const r = leg(Sync, 's');
     ok(r.atMark && r.rec.dirties.length === 0, 'CONTROL (U2): the old synchronous save ⇒ the file is on disk at the mark — the leg\'s first check would be red');
   }

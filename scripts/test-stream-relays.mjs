@@ -81,7 +81,7 @@ ok(DS.WS_MAX_MESSAGE_BYTES === 16 * 1024 * 1024 + 8, 'the ws cap = the largest d
 const dsSrc = read('src/server/desktop-stream.js');
 const gate = '    if (!Object.hasOwn(STREAM_RELAYS, target.kind)) {';
 ok(dsSrc.split(gate).length === 2, 'the bridge\'s kind gate is spelled once (the control patches exactly it)');
-const ctl = require(MUT.write('src/server/desktop-stream.js', dsSrc.replace(gate, "    if (target.kind !== 'rfb' && target.kind !== 'xpra') {"), 'handlist'));
+const ctl = require(MUT.write('src/server/desktop-stream.js', editAnchor(dsSrc, gate, "    if (target.kind !== 'rfb' && target.kind !== 'xpra') {", "src/server/desktop-stream.js"), 'handlist'));
 const r4 = await drive(ctl, 'fake');
 ok(r4.out.status === 501, `CONTROL: with the hand list restored the registered fake kind is refused 501 (${JSON.stringify(r4.out)}) — the registry is the gate`);
 

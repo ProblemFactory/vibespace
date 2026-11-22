@@ -27,6 +27,15 @@ const SP = require(path.join(REPO, 'src/sock-path.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 const rootOf = (bytes) => { const base = '/Users/owner/.vibespace/device@'; return base + 'x'.repeat(bytes - base.length); };
 
@@ -186,7 +195,7 @@ console.log('control (patched copy)');
 {
   const M = mutantCopies('sockpath', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/sock-path.js'), 'utf8');
-  const fixed = src.replace("const m = Object.prototype.hasOwnProperty.call(SUN_PATH_MAX, platform) ? SUN_PATH_MAX[platform] : SUN_PATH_MAX.default;", 'const m = 108;');
+  const fixed = editAnchor(src, "const m = Object.prototype.hasOwnProperty.call(SUN_PATH_MAX, platform) ? SUN_PATH_MAX[platform] : SUN_PATH_MAX.default;", 'const m = 108;', "src/sock-path.js");
   ok(fixed !== src, 'the patch applies');
   const X = M.load('src/sock-path.js', fixed, 'bound108');
   const cell = (m) => m.daemonSocketPath({ root: rootOf(86), platform: 'darwin', uid: 501 }).via;

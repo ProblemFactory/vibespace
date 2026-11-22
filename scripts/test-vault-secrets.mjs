@@ -873,7 +873,7 @@ console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2
     const esrc = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
     const anchor = "  function blocked(actor, verb) {\n    if (state() !== 'locked') return false;\n";
     ok(esrc.includes(anchor), 'the control’s anchor is the ONE helper’s first line');
-    const VEpre = MB.load('src/server/vault-engine.js', esrc.replace(anchor, "  function blocked(actor, verb) {\n    return false;   // PRE-FIX: a refusal is nobody's signal\n"), 'pre-fix');
+    const VEpre = MB.load('src/server/vault-engine.js', editAnchor(esrc, anchor, "  function blocked(actor, verb) {\n    return false;   // PRE-FIX: a refusal is nobody's signal\n", "src/server/vault-engine.js"), 'pre-fix');
     const run = async (engineMod, tag) => {
       const d = dirOf(tag);
       const v = engineMod.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false }); engines.push(v);

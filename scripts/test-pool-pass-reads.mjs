@@ -629,7 +629,7 @@ console.log('⑭ A LOOK-AGAIN READ ASKS THE MOUNT ITSELF — another process cha
   const ONE_TRY_TO = 'let dirs = []; try { dirs = namers.map((f) => f.apply(this, args)); } catch { } for (const d of dirs) { try { if (d) RR.forget(d); } catch { } }';
   ok(ACC_SRC.split(ONE_TRY_FROM).length === 2, 'the anchor of the RED CONTROL (the look-again\'s per-folder tries) is in the source (src/accounts.js)');
   if (ACC_SRC.split(ONE_TRY_FROM).length === 2) {
-    const oneTryAM = require(MU.write('src/accounts.js', ACC_SRC.replace(ONE_TRY_FROM, ONE_TRY_TO), 'one-try')).AccountManager;
+    const oneTryAM = require(MU.write('src/accounts.js', editAnchor(ACC_SRC, ONE_TRY_FROM, ONE_TRY_TO, "src/accounts.js"), 'one-try')).AccountManager;
     const r1 = await siteRun({ AccountManager: oneTryAM, engMod }, UNNAMED);
     const r1T = await siteRun({ AccountManager: oneTryAM, engMod }, UNNAMED_T);
     ok(r1T.got === 'written', `RED CONTROL: …and setPoolTarget under the hotfix's one try re-points the pool default to that member (${JSON.stringify(r1T.got)})`, r1T);

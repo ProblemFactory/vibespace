@@ -25,6 +25,15 @@ const { scratch, anchored } = await import(path.join(REPO, 'scripts/scratch.mjs'
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? `\n      ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
 
@@ -212,7 +221,7 @@ console.log('— §4 the healer on an R6-shaped session: it refuses the pipe duc
 {
   const SS = read('src/server/session-stdout.js');
   const BELT = /^\s*if \(session\.pty && session\.pty\._pipe\) \{[^\n]*return false; \}\n/m;
-  const noBelt = SS.replace(BELT, '');
+  const noBelt = editAnchor(SS, BELT, '', "src/server/session-stdout.js");
   ok(noBelt !== SS, 'control setup: the copy lost exactly the healer\'s pipe-duck refusal');
   const MUT = (await import(path.join(REPO, 'scripts/mutant-copy.mjs'))).mutantCopies('pty-duck', REPO);
   const engOf = (mod) => mod.create({

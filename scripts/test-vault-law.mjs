@@ -956,7 +956,7 @@ console.log('⑫ lane browser-login (r22 pivot): A WEB LOGIN IS A VAULT ENTRY, I
     // MUTANT: a watch copy that answers the value, a route copy that passes the answer on
     const dsrc = read('src/server/browser-dialogs.js'), rsrc = read('src/routes/browser.js');
     const leakD = editAnchor(editAnchor(dsrc, "        resolved.value = '';\n", '', "src/server/browser-dialogs.js"), '      receipt,\n    };', '      value: resolved.value,\n      receipt,\n    };', "src/server/browser-dialogs.js");
-    const leakR = rsrc.replace("    res.json({\n      ok: true,\n      entry: r.entry,", "    res.json({\n      ...r,\n      ok: true,\n      entry: r.entry,");
+    const leakR = editAnchor(rsrc, "    res.json({\n      ok: true,\n      entry: r.entry,", "    res.json({\n      ...r,\n      ok: true,\n      entry: r.entry,", "src/routes/browser.js");
     ok(leakD !== dsrc && leakR !== rsrc, 'the two mutation anchors are found (the watch\'s answer, the route\'s named fields)');
     const DL = MUT.load('src/server/browser-dialogs.js', leakD, 'leakwatch');
     const wl = mkWatch(DL); watches.push(wl);

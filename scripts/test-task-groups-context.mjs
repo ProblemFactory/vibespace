@@ -23,6 +23,15 @@ const ok = (name, cond, extra) => {
   failed++;
   console.error(`  ✗ ${name}${extra !== undefined ? `\n    ${typeof extra === 'string' ? extra : JSON.stringify(extra).slice(0, 1500)}` : ''}`);
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const B = (s) => Buffer.byteLength(String(s), 'utf-8');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tgc-'));
 const home = path.join(root, 'home');
@@ -257,7 +266,7 @@ console.log('— the 10 KiB law: tools / rules first, then the table, within the
   ok('ANCHOR: the none-fit words, spelled once', SRC9.split(NONE9).length === 2);
   if (SRC9.split(NONE9).length === 2) {
     const MT = mutantCopies('task-groups-log-head', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
-    const TG = MT.load('src/task-groups.js', SRC9.replace(NONE9, 'const noneFitWords = (n) => `last 0 of ${n}`;'), 'last-0');
+    const TG = MT.load('src/task-groups.js', editAnchor(SRC9, NONE9, 'const noneFitWords = (n) => `last 0 of ${n}`;', "src/task-groups.js"), 'last-0');
     const { m: m0 } = fresh({ Manager: TG.TaskGroupManager });
     const a0 = m0.create({ title: 'Law', objective: 'R'.repeat(1500) }), b0 = m0.create({ title: 'Law2', objective: 'R'.repeat(1500) });
     for (let i = 0; i < 30; i++) { m0.addProgress(a0.id, { note: 'entry ' + i + ' ' + 'x'.repeat(150), session: 'claude:abc' }); m0.addProgress(b0.id, { note: 'two ' + i + ' ' + 'y'.repeat(150), session: 'claude:abc' }); }

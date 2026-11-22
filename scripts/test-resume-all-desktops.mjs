@@ -8,6 +8,15 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 import { scanStoppedInDesktopStates } from '../src/lib/layout.js';
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const win = (over = {}) => ({ type: 'chat', backendSessionId: 'aaaa-1111', serverSessionId: 'sess-9-1', gridBounds: { left: 0.1, top: 0.1, width: 0.4, height: 0.5 }, title: 'T', ...over });
 const DATA = {
@@ -90,7 +99,7 @@ ok(/scanStoppedInDesktopStates\([\s\S]{0,200}_bootStoppedSessions\.push|_bootSto
   const lay = fs.readFileSync(path.join(repo, 'src/lib/layout.js'), 'utf8');
   ok(!/ws\.title \|\|/.test(lay) && (lay.match(/savedWindowName\(ws\) \|\| 'Session'/g) || []).length === 10, 'B-ddc0 CENSUS: no restore branch reads ws.title as a name (all 10 read savedWindowName)');
   const M = mutantCopies('resume-name', repo);
-  const pre = lay.replace("  let name = String(typeof spec === 'string' && spec.trim() ? spec : (ws?.title || ''));", "  let name = String(ws?.title || ''); return name;");
+  const pre = editAnchor(lay, "  let name = String(typeof spec === 'string' && spec.trim() ? spec : (ws?.title || ''));", "  let name = String(ws?.title || ''); return name;", "src/lib/layout.js");
   ok(pre !== lay, 'B-ddc0 (the pre-fix patch applied — the title IS the name)');
   const P = await import(pathToFileURL(M.write('src/lib/layout.js', pre, 'pre-ddc0')).href);
   const pn = reloads(P.scanStoppedInDesktopStates);

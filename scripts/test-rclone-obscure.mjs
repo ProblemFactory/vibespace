@@ -25,6 +25,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = scratch('rclone-obscure');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const { obscure, reveal } = require(path.join(REPO, 'src/rclone-obscure.js'));
@@ -113,7 +122,7 @@ const RCLONE_SAMPLES = [
   const NEW = '    return rcloneObscure(String(plain));';
   const OLD = "    return require('child_process').execFileSync(this.rcloneBin(), ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();";   // B-323e: src/mounts.js imports no execFileSync any more (it starts no synchronous child) — the plant brings its own
   ok(src.split(NEW).length === 2, '§4 the mutant anchor exists once (the in-process _obscure body)');
-  const MUT = MC.load('src/mounts.js', src.replace(NEW, OLD), 'argv-mutant').MountManager;
+  const MUT = MC.load('src/mounts.js', editAnchor(src, NEW, OLD, "src/mounts.js"), 'argv-mutant').MountManager;
   fs.writeFileSync(cap, '');
   runPass(MUT, 'mutant');
   const capMut = fs.readFileSync(cap, 'utf8');

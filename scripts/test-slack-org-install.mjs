@@ -30,6 +30,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -143,7 +152,7 @@ const scopeOf = (m) => slack.METHOD_SCOPE[m];
 // the seam-less copy: slack.js with `withTeam` not called (the request as before the lane; the refusal words kept)
 const SRC = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8');
 const SEAM = 'await callSlack(fetchFn, method, withTeam(method, params, held), { token: tok, signal: w ? AbortSignal.timeout(w) : null });';   // lane channel-upload-retry r3: the line carries a retry request's window
-const NOSEAM = SRC.includes(SEAM) ? require(MC.write('src/channels/slack.js', SRC.replace(SEAM, 'await callSlack(fetchFn, method, params, { token: tok, signal: w ? AbortSignal.timeout(w) : null });'), 'noseam')) : null;
+const NOSEAM = SRC.includes(SEAM) ? require(MC.write('src/channels/slack.js', editAnchor(SRC, SEAM, 'await callSlack(fetchFn, method, params, { token: tok, signal: w ? AbortSignal.timeout(w) : null });', "src/channels/slack.js"), 'noseam')) : null;
 ok(!!NOSEAM, 'the seam is the one callSlack line in api() (the copy without it loads)');
 
 // ── ⓐ the record learns the install kind ──
