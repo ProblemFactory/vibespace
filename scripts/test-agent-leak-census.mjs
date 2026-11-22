@@ -96,7 +96,17 @@ function walk(n, fn, parent = null) {
   for (const k of Object.keys(n)) { const v = n[k]; if (Array.isArray(v)) v.forEach((x) => walk(x, fn, n)); else if (v && typeof v.type === 'string') walk(v, fn, n); }
 }
 const squash = (s) => String(s).replace(/\s+/g, ' ').trim();
-const lineAt = (src, i) => src.slice(0, i).split('\n').length;
+// B-7e49: a text's newline offsets, found ONCE (keyed by the text itself) — a line number is a binary search over them. The old
+// form sliced and split the whole text before the place at every ask (every member call of a wiring file, every sort compare)
+const NL = new Map();
+const lineAt = (src, i) => {
+  if (typeof src !== 'string' || !Number.isInteger(i) || i < 0) return src.slice(0, i).split('\n').length;   // a shape no AST gives: the old form
+  let nl = NL.get(src);
+  if (!nl) { nl = []; for (let j = src.indexOf('\n'); j !== -1; j = src.indexOf('\n', j + 1)) nl.push(j); NL.set(src, nl); }
+  let lo = 0, hi = nl.length;   // the newlines BEFORE i (the old slice(0, i) held offsets 0 … i - 1)
+  while (lo < hi) { const m = (lo + hi) >>> 1; if (nl[m] < i) lo = m + 1; else hi = m; }
+  return lo + 1;
+};
 
 /** THE GATE'S DOORS. Since the separation's B3a they stand in TWO places: the door class (src/door.js doorClassOf — the
  *  middleware's door lines lifted verbatim: there `return next()` lets a request through its door, `return OPEN` the open
@@ -150,12 +160,14 @@ const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all', 'use']);
 const RECV = /^(app|router)$/;
 /** Every route registration in `files`: rows [{ file, line, verb, method, path }] (one per path), dynamic
  *  [{ key, file, line }] (`<file> <recv>.<verb>(<first arg>)` — the table's key, line-free), requires: file → Set(file). */
-const PER_FILE = new Map();   // (file, its text) → what it registers and requires — a control re-walks only its planted file
+const PER_FILE = new Map();   // file → (its text → what it registers and requires) — a control re-walks only its planted file. Two levels,
+//   the text ITSELF the inner key (B-7e49): a joined «file\0text» key was a fresh copy of the whole file to hash at every ask
 function fileFacts(f, src) {
-  const key = f + '\0' + src;
-  if (PER_FILE.has(key)) return PER_FILE.get(key);
+  let byText = PER_FILE.get(f);
+  if (!byText) PER_FILE.set(f, (byText = new Map()));
+  if (byText.has(src)) return byText.get(src);
   const ast = parse(src);
-  if (!ast) { PER_FILE.set(key, null); return null; }
+  if (!ast) { byText.set(src, null); return null; }
   const consts = new Map(), specs = [], rows = [], dynamic = [];
   walk(ast, (n) => {
     if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) {
@@ -190,7 +202,7 @@ function fileFacts(f, src) {
     for (const p of paths) regs.push({ file: f, line, verb, method: verb === 'use' ? 'USE' : verb.toUpperCase(), path: p });
   }
   const out = { specs, rows: regs, dynamic };
-  PER_FILE.set(key, out);
+  byText.set(src, out);
   return out;
 }
 /** Every route registration in `files`: rows [{ file, line, verb, method, path }] (one per path), dynamic
@@ -430,13 +442,29 @@ const MOUNTED_AT = new WeakMap();
   const use0 = proto.use;
   proto.use = function (first, ...rest) { if (typeof first === 'string' || Array.isArray(first)) for (const fn of rest.flat()) if (typeof fn === 'function') MOUNTED_AT.set(fn, [].concat(first)); return use0.call(this, first, ...rest); };
 }
-const AST = new Map();
-const astOf = (f, read = readRepo) => { const s = read(f); const k = f + '\0' + s; if (!AST.has(k)) AST.set(k, parse(s)); return AST.get(k); };
+const AST = new Map();   // file → (its text → its AST): two levels, as PER_FILE (B-7e49)
+const astOf = (f, read = readRepo) => { const s = read(f); let byText = AST.get(f); if (!byText) AST.set(f, (byText = new Map())); if (!byText.has(s)) byText.set(s, parse(s)); return byText.get(s); };
 function walkA(n, fn, anc = []) {
   if (!n || typeof n.type !== 'string') return;
   if (fn(n, anc) === false) return;
   const next = [...anc, n];
   for (const k of Object.keys(n)) { const v = n[k]; if (Array.isArray(v)) v.forEach((x) => walkA(x, fn, next)); else if (v && typeof v.type === 'string') walkA(v, fn, next); }
+}
+/** B-7e49: what the wiring model asks of an AST again and again (every bearer module's uses in every wiring file, every chain's
+ *  export, every route line, in every world) read off ONE walkA of it: its VariableDeclarators, its CallExpressions (each with
+ *  the ancestor list walkA hands it) and its AssignmentExpressions, in walkA's order — the same nodes, the same lists, a list
+ *  read instead of a new walk (no reader of these prunes: each of its walks visited every node) */
+const INDEXED = new WeakMap();
+const NO_AST = Object.freeze({ decls: [], calls: [], assigns: [] });
+function indexOf(ast) {
+  if (!ast || typeof ast !== 'object') return NO_AST;
+  let x = INDEXED.get(ast);
+  if (!x) {
+    x = { decls: [], calls: [], assigns: [] };
+    walkA(ast, (n, anc) => { if (n.type === 'VariableDeclarator') x.decls.push(n); else if (n.type === 'CallExpression') x.calls.push([n, anc]); else if (n.type === 'AssignmentExpression') x.assigns.push(n); });
+    INDEXED.set(ast, x);
+  }
+  return x;
 }
 const FNS = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
 const KNOWN = new Set(FILES);
@@ -447,7 +475,7 @@ const reqOf = (n, f) => (n && n.type === 'CallExpression' && n.callee.type === '
 function wiringModel(read) {
   const src = (f) => read(f);
   const text = (f, n) => src(f).slice(n.start, n.end);
-  const lineOfAt = (f, i) => src(f).slice(0, i).split('\n').length;
+  const lineOfAt = (f, i) => lineAt(src(f), i);
   /** the uses of module M's exports in WIRING files: [{ file, node, anc, fnAnc, what, via }] */
   const usesMemo = new Map();
   function usesOf(M) {
@@ -458,12 +486,12 @@ function wiringModel(read) {
       if (W === M || !src(W).includes(stem)) continue;
       const ast = astOf(W, read); if (!ast) continue;
       const alias = new Map();
-      walkA(ast, (n) => {
-        if (n.type !== 'VariableDeclarator' || !n.init) return;
+      for (const n of indexOf(ast).decls) {
+        if (!n.init) continue;
         if (n.id.type === 'Identifier' && reqOf(n.init, W) === M) alias.set(n.id.name, '*');
         else if (n.id.type === 'Identifier' && n.init.type === 'MemberExpression' && reqOf(n.init.object, W) === M) alias.set(n.id.name, n.init.property.name);
         else if (n.id.type === 'ObjectPattern' && reqOf(n.init, W) === M) for (const p of n.id.properties) if (p.type === 'Property' && p.value.type === 'Identifier') alias.set(p.value.name, p.key.name || p.key.value);
-      });
+      }
       const usesM = (e) => {
         if (!e) return null;
         if (e.type === 'MemberExpression' && !e.computed && reqOf(e.object, W) === M) return e.property.name;
@@ -471,19 +499,18 @@ function wiringModel(read) {
         if (e.type === 'Identifier' && alias.has(e.name) && alias.get(e.name) !== '*') return alias.get(e.name);
         return null;
       };
-      walkA(ast, (n, anc) => {
-        if (n.type !== 'CallExpression') return;
+      for (const [n, anc] of indexOf(ast).calls) {
         let what = usesM(n.callee), via = 'call';
         if (!what && n.callee.type === 'MemberExpression' && !n.callee.computed && n.callee.property.name === 'use' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'app') for (const a of n.arguments) { const w = usesM(a); if (w) { what = w; via = 'app.use'; } }
         if (what) out.push({ file: W, node: n, anc, fnAnc: [...anc].reverse().find((a) => FNS.has(a.type)) || null, what, via, of: M });
-      });
+      }
     }
     usesMemo.set(M, out);
     return out;
   }
   function exportedAs(W, fname) {
     let name = null;
-    walkA(astOf(W, read), (n) => { if (n.type === 'AssignmentExpression' && text(W, n.left) === 'module.exports' && n.right.type === 'ObjectExpression') for (const p of n.right.properties) if (p.type === 'Property' && p.value.type === 'Identifier' && p.value.name === fname) name = p.key.name || p.key.value; });
+    for (const n of indexOf(astOf(W, read)).assigns) if (text(W, n.left) === 'module.exports' && n.right.type === 'ObjectExpression') for (const p of n.right.properties) if (p.type === 'Property' && p.value.type === 'Identifier' && p.value.name === fname) name = p.key.name || p.key.value;
     return name;
   }
   /** a use's chain to server.js's top level: [use, its function's caller, …] — or { broken } */
@@ -640,13 +667,13 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
   }
   for (const W of bearerFiles.filter((m) => WIRING.has(m))) {
     const lines = new Set(routes.filter((r) => r.file === W).map((r) => r.line));
-    walkA(astOf(W, read), (n, anc) => {
-      if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || !lines.has(WM.lineOfAt(W, n.start)) || !RECV.test(WM.text(W, n.callee.object))) return;
+    for (const [n, anc] of indexOf(astOf(W, read)).calls) {
+      if (n.callee.type !== 'MemberExpression' || !lines.has(WM.lineOfAt(W, n.start)) || !RECV.test(WM.text(W, n.callee.object))) continue;
       const u = { file: W, node: n, anc, fnAnc: [...anc].reverse().find((a) => FNS.has(a.type)) || null, what: 'route', via: 'route' };
       const ch = WM.chainOf(u);
       const tag = `${W}:${WM.lineOfAt(W, n.start)} ${WM.text(W, n.callee)}(${squash(WM.text(W, n.arguments[0])).slice(0, 60)}, …)`;
       if (Array.isArray(ch)) sites.push({ u, ch, tag }); else broken.push({ tag, why: ch.broken, what: 'route', of: W });
-    });
+    }
   }
   // (iii) every top-level `app.use(…)` of server.js: the middleware in front of the routes (the cookie gate, the body
   // parser, the routers between), in the boot's order — express runs them in registration order
