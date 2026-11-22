@@ -1307,7 +1307,7 @@ await leg('㉙ the refusal\'s words', async () => {
 // ═══ RED CONTROLS — each a patched copy, each the leg it breaks ═══
 console.log('— RED controls');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
-const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control anchor missing (${what}): ${a.slice(0, 80)}`); return src.replace(a, b); };
+const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control anchor missing (${what}): ${a.slice(0, 80)}`); return editAnchor(src, a, b, "the text handed to swap()"); };
 const MC = mutantCopies('engine-distribution', REPO);
 const EDsrc = read('src/server/engine-distribution.js'), LDsrc = read('src/server/plugin-loader.js');
 // the sweep's names kept while the record names a waiting kernel — r8 (s2): the .prev only while healAside cannot tell (the tip) ·

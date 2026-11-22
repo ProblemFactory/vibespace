@@ -307,7 +307,7 @@ console.log("§8b the picture shows the tab the view says it shows — across wi
   ok(pr.shown && pr.order && pr.moved, 'PURE: the tab on show = the watched tab, else the agent\'s (xShownTarget); the keeper reads THAT tab\'s window first, then the lease\'s own window, then its other tabs — no tab named ⇒ the own window first, as before (xWindowLookups); a known, different window re-issues the ticket, the same or an untold one keeps it (xTicketMoved)', pr);
   // ── the RELEASE's rules as the mutants (each the same file with the release's lines) ──
   const Module = require('node:module');
-  const compileAt = (rel, from, to) => { const file = path.join(REPO, rel), src = fs.readFileSync(file, 'utf8'); if (src.split(from).length !== 2) throw new Error(`the mutant's anchor moved in ${rel} — update this suite`); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(from, to), file); return m.exports; };
+  const compileAt = (rel, from, to) => { const file = path.join(REPO, rel), src = fs.readFileSync(file, 'utf8'); if (src.split(from).length !== 2) throw new Error(`the mutant's anchor moved in ${rel} — update this suite`); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(editAnchor(src, from, to, rel), file); return m.exports; };
   const PICrel = compileAt('src/browser-picture.js', "  if (targetId) out.push({ targetId: String(targetId) });\n  if (own != null) out.push({ windowId: own });\n", "  if (own != null) out.push({ windowId: own });\n  if (targetId) out.push({ targetId: String(targetId) });\n");
   ok(!pureRows(PICrel).order, 'RED CONTROL — the release\'s order (the lease\'s own window first): the window of the tab on show is not read first');
   // ── THE REAL LIVE-VIEW BRIDGE over a fake keeper (each tab its own window) and a fake upstream that moves the agent's tab ──
@@ -376,7 +376,7 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
   const W1 = 4194311, W2 = 4194599, W5 = 4195175;
   const C = { [T1]: 1, [T2]: 2, [T3]: 3, [T4]: 1, [T5]: 5 }; // each tab's CDP window (T4 shares T1's window — the other road)
   const Module = require('node:module');
-  const compileAt = (rel, from, to) => { const file = path.join(REPO, rel), src = fs.readFileSync(file, 'utf8'); if (src.split(from).length !== 2) throw new Error(`the mutant's anchor moved in ${rel} — update this suite`); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(from, to), file); return m.exports; };
+  const compileAt = (rel, from, to) => { const file = path.join(REPO, rel), src = fs.readFileSync(file, 'utf8'); if (src.split(from).length !== 2) throw new Error(`the mutant's anchor moved in ${rel} — update this suite`); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(editAnchor(src, from, to, rel), file); return m.exports; };
   // PURE — the keeper's ONE look can lie: a stale row set answers the OLD window by «the only window», two windows of EQUAL bounds none
   const row = (id, x) => ({ id, title: 'p - Google Chrome', cls: 'Google-chrome', instance: 'google-chrome (/tmp/x)', x, y: 0, w: 800, h: 600, mapped: true });
   const stale = PIC.xWindowOf({ bounds: { left: 30, top: 0, width: 800, height: 600 }, rows: [row(W1, 0)], profileDir: '/tmp/x' });

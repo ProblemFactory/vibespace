@@ -46,7 +46,7 @@ function mutant(rel, from, to) {
   const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
   if (!src.includes(from)) throw new Error(`mutant anchor missing in ${rel}: ${from}`);
   const f = path.join(S, 'mut-' + Math.random().toString(36).slice(2) + '-' + path.basename(rel));
-  fs.writeFileSync(f, src.replace(from, to));
+  fs.writeFileSync(f, editAnchor(src, from, to, rel));
   return require(f);
 }
 

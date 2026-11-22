@@ -446,7 +446,7 @@ ok(!vU.collapsed.intent.includes('i:touched') && touchedShut(M, vU) === false &&
 // ── CONTROLS ──
 console.log('⑤ CONTROLS — patched copies of the model, each must be RED');
 const src = fs.readFileSync(MODEL, 'utf8');
-const copy = async (tag, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, src.replace(from, to)); return import(pathToFileURL(f).href); };
+const copy = async (tag, from, to) => { if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, editAnchor(src, from, to, "src/lib/artifacts-list-model.js")); return import(pathToFileURL(f).href); };
 const bare = await copy('bare', '    if (rs.length < 2) { out.set(rs[0].key, n); continue; }', '    { for (const r of rs) out.set(r.key, n); continue; }');
 ok(bare && bare.listPlan(OV, { collapsed: ['i:touched'] }).ctx.names.get(':' + CWD + '/referee3/README.md') === 'README.md', 'CONTROL the bare name on a collision ⇒ the README leg reads «README.md» three times — RED');
 const more = await copy('more', '    sections.push({ key: g.head.key, head: alone ? { ...g.head, alone: true } : g.head, rows: g.rows, open, folders });', '    sections.push({ key: g.head.key, head: g.head, rows: g.rows.slice(0, 8), more: Math.max(0, g.rows.length - 8), open, folders: null });');

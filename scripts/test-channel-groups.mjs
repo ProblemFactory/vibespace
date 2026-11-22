@@ -1090,8 +1090,8 @@ console.log('§1f deliveryOf — where a record stands with each recipient (lane
   // PATCHED-COPY CONTROLS — one per rule
   const MUT = mutantCopies('chan-groups-dlv', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/channel-groups.js'), 'utf-8');
-  const cut = (needle, repl, tag) => { if (!src.includes(needle)) throw new Error('mutation anchor missing: ' + tag); return MUT.load('src/channel-groups.js', src.replace(needle, repl), tag); };
-  const NoEq = cut('m.reportedUpTo >= at', 'm.reportedUpTo > at', 'strict');
+  const cut = (needle, repl, tag) => { if (!src.includes(needle)) throw new Error('mutation anchor missing: ' + tag); return MUT.load('src/channel-groups.js', editAnchor(src, needle, repl, "src/channel-groups.js"), tag); };
+  const NoEq = cut('m.reportedUpTo >= at;', 'm.reportedUpTo > at;', 'strict');   // B-0d3e slice 6: «>= at» is spelled twice (awaitVerdict too); deliveryOf's own, held once — the place the first-match replace always patched
   ok(states(NoEq.deliveryOf(gEq, m1, { log: [m1] })) === 'beta:waiting,gamma:waiting', 'CONTROL: a copy comparing the marker with `>` calls a record AT the marker waiting (the pin above can go red)');
   const NoOwner = cut("m.member !== OWNER && ", '', 'owner');
   const planted = { ...mk, members: [...mk.members, { member: G.OWNER, name: 'User', joinedAt: T0, invitedBy: null, notify: 'next-turn', reportedUpTo: null }] };

@@ -58,7 +58,7 @@ const pt = ST.pageText;
 const SRC = fs.readFileSync(path.join(REPO, 'src/browser-surfaces.js'), 'utf8');
 const DSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
 /** A copy of the PURE module with ONE line changed (a RED control) — the anchor must be found, or the control is void. */
-function sfMutant(from, to, tag) { if (!SRC.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return MUT.load('src/browser-surfaces.js', SRC.replace(from, to), tag); }
+function sfMutant(from, to, tag) { if (!SRC.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return MUT.load('src/browser-surfaces.js', editAnchor(SRC, from, to, "src/browser-surfaces.js"), tag); }
 
 // ═══ ① PURE ═══
 console.log('① PURE src/browser-surfaces.js');

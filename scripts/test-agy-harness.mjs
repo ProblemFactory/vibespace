@@ -436,7 +436,7 @@ const fixes2 = (async () => {
   const R = [];
   const ck = (n, c, e) => R.push([n, c, e]);
   const src = fs.readFileSync(WRAPPER, 'utf8');
-  const mutant = (name, cut, put) => { if (src.split(cut).length !== 2) throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(cut).length - 1} times): ${JSON.stringify(String(cut).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(MUTBIN, `agy-wrapper-${name}.js`); fs.writeFileSync(f, src.replace(cut, put)); return f; };
+  const mutant = (name, cut, put) => { if (src.split(cut).length !== 2) throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(cut).length - 1} times): ${JSON.stringify(String(cut).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(MUTBIN, `agy-wrapper-${name}.js`); fs.writeFileSync(f, editAnchor(src, cut, put, "data/bin/agy-wrapper.js")); return f; };
   const starts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
   const agyLines = (w) => w.stub().filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content);
   const ended = async (w) => { await w.stop(); await w.until(() => w.exited, 5000, 'the wrapper exit').catch(() => null); }; // its finalize persists the files 500 ms after SIGTERM

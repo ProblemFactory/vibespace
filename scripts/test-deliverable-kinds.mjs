@@ -30,6 +30,15 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + JSON.stringify(extra).slice(0, 500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf-8');
 const AF = require(path.join(repo, 'src/artifacts.js'));
 const M = await import(pathToFileURL(path.join(repo, 'src/lib/artifacts-list-model.js')).href);
@@ -113,7 +122,7 @@ console.log('— ⑨ CONTROLS');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-deliverable-kinds-'));
 process.on('exit', () => { try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { } });
 const afSrc = read('src/artifacts.js');
-const afCopy = (tag, from, to) => { if (!afSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const d = path.join(scratch, tag, 'src'); fs.mkdirSync(d, { recursive: true }); for (const f of fs.readdirSync(path.join(repo, 'src')).filter((x) => /\.js$/.test(x))) fs.copyFileSync(path.join(repo, 'src', f), path.join(d, f)); fs.writeFileSync(path.join(d, 'artifacts.js'), afSrc.replace(from, to)); return require(path.join(d, 'artifacts.js')); };
+const afCopy = (tag, from, to) => { if (!afSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const d = path.join(scratch, tag, 'src'); fs.mkdirSync(d, { recursive: true }); for (const f of fs.readdirSync(path.join(repo, 'src')).filter((x) => /\.js$/.test(x))) fs.copyFileSync(path.join(repo, 'src', f), path.join(d, f)); fs.writeFileSync(path.join(d, 'artifacts.js'), editAnchor(afSrc, from, to, "src/artifacts.js")); return require(path.join(d, 'artifacts.js')); };
 const byTitle = afCopy('title', "  const e = FILE_TYPES[extOf(r.path)];", "  if (/design|设计/i.test(String(r.name || ''))) return 'design';\n  const e = FILE_TYPES[extOf(r.path)];");
 ok(byTitle && byTitle.deliverableKind(row({ kind: 'doc', path: H + '/设计稿.md', name: '设计稿 design.md' })) === 'design', 'CONTROL a kind guessed from the title ⇒ the «设计稿 design.md» leg is RED');
 const anyPage = afCopy('anypage', "  if (r.presented || (r.kind === 'page' && (r.state === 'published'", "  if (r.presented || (r.kind === 'page' || (r.state === 'published'");
@@ -121,7 +130,7 @@ ok(anyPage && anyPage.deliverableKind(row({ kind: 'page', path: H + '/site/index
 const media = afCopy('media', "  if (cat === 'image') return 'image';", "  if (cat === 'image' || cat === 'audio' || cat === 'video') return 'image';");
 ok(media && media.deliverableKind(row({ kind: 'media', path: H + '/s.mp3' })) === 'image', 'CONTROL sound counted a picture ⇒ the mp3 leg is RED');
 const mSrc = read('src/lib/artifacts-list-model.js');
-const mCopy = async (tag, from, to) => { if (!mSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, mSrc.replace(from, to)); return import(pathToFileURL(f).href); };
+const mCopy = async (tag, from, to) => { if (!mSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, editAnchor(mSrc, from, to, "src/lib/artifacts-list-model.js")); return import(pathToFileURL(f).href); };
 const rawKind = await mCopy('raw', "export const kindKey = (r) => (r && KIND_ORDER.includes(r.dk) ? r.dk : (r && RAW_KIND[r.kind]) || 'file');", "export const kindKey = (r) => (r && RAW_KIND[r.kind]) || 'file';");
 ok(rawKind && rawKind.listPlan(V, { group: 'kind' }).sections.filter((s) => s.head.group === 'kind').map((s) => s.head.label + ' ' + s.head.count).join(' · ') !== heads.join(' · '), 'CONTROL the list grouping by the RAW kind (not dk) ⇒ the groups leg is RED');
 const noAlone = await mCopy('noalone', "  const all = alone ? railRows([...items, ...code], alone) : [...items, ...code];", "  const all = [...items, ...code];");

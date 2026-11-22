@@ -303,7 +303,7 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   // CONTROLS: a copy of slack.js without each part turns its own leg red
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
   // the cure (verdict 06:13Z): a control whose anchor is not in slack.js (once) FAILS BY NAME — never a silent null
-  const cut = (from, to, tag) => { if (ssrc.split(from).length !== 2) { ok(false, `CONTROL anchor missing: ${tag} — the line this control patches is not in slack.js once (rewritten?)`); return null; } const reg = CH.createChannelRegistry(); reg.register(require(MC.write('src/channels/slack.js', ssrc.replace(from, to), tag)).adapter); return reg; };
+  const cut = (from, to, tag) => { if (ssrc.split(from).length !== 2) { ok(false, `CONTROL anchor missing: ${tag} — the line this control patches is not in slack.js once (rewritten?)`); return null; } const reg = CH.createChannelRegistry(); reg.register(require(MC.write('src/channels/slack.js', editAnchor(ssrc, from, to, "src/channels/slack.js"), tag)).adapter); return reg; };
   const noTwo = cut('        for (const l of [...longer, one]) {', '        for (const l of [one]) {', 'a0ae-two');   // the cure: the follow-up rewrote the walk — the same meaning at the new site
   const noRaw = cut('        if (ids.includes(r.id) && !(p && p.deleted)) {', '        if (false) {', 'a0ae-raw');
   const noDir = cut("      if (ids.some((id) => !people.has(id))) { try { await listPeople({ until: now() + DIRECTORY_PROPOSE_MS }); } catch { /* best effort: the lookups' names stand */ } }", '', 'a0ae-dir');

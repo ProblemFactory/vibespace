@@ -300,7 +300,7 @@ console.log('⑥ controls (patched copies)');
 const XSRC = read('src/exit-call.js');
 const xcControl = (tag, from, to, why, want) => {
   if (!XSRC.includes(from)) { ok(false, `CONTROL ${tag}: the anchor is gone`, from); return; }
-  const X = require(MUT.write('src/exit-call.js', XSRC.replace(from, to), tag));
+  const X = require(MUT.write('src/exit-call.js', editAnchor(XSRC, from, to, "src/exit-call.js"), tag));
   const red = want(X);
   ok(red, `CONTROL ${tag}: ${why} — goes red`);
 };

@@ -33,6 +33,15 @@ const A = require(path.join(repo, 'src/app-manifest.js'));
 const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const MUT = mutantCopies('app-system', repo);
 const SRC = fs.readFileSync(path.join(repo, 'src/app-system.js'), 'utf8');
@@ -158,7 +167,7 @@ ok(S.HELPER_SHA256 === sha(HELPER) && S.SUDOERS_SHA256 === sha(SUDOERS) && S.SUD
 
 // ── §6 ──
 console.log('§6 controls — a patched copy per rule, caught by the table above');
-const patch = (from, to, tag) => { const m = SRC.replace(from, to); ok(m !== SRC, `CONTROL (${tag}): the patch applies`); return MUT.load('src/app-system.js', m, tag); };
+const patch = (from, to, tag) => { const m = editAnchor(SRC, from, to, "src/app-system.js"); ok(m !== SRC, `CONTROL (${tag}): the patch applies`); return MUT.load('src/app-system.js', m, tag); };
 const mArch = patch("if (identity.arch !== image.arch) return { state: 'blocked', why: 'arch' };", '', 'no-arch');
 ok(!t2.every(([i, im, st]) => mArch.rebaseVerdict(i, im).state === st), 'CONTROL: a verdict that ignores the architecture fails §2\'s table');
 const mContract = patch("if (j.helperContract !== HELPER_CONTRACT) return { ok: false, code: 'contract' };", '', 'no-contract');
@@ -247,7 +256,7 @@ ok(m0.ok && m0.manifest.entries[0].layer === 'sys' && m0.manifest.entries[0].row
 { // (a block: §8's names never meet §1–§7's)
 console.log('§8 HARDENING — the machine half in-process (a fixture userland of this user stands in for root\'s: rootUid)');
 const SSRC = fs.readFileSync(path.join(repo, 'src/app-system-serve.js'), 'utf8');
-const spatch = (from, to, tag) => { const m = SSRC.replace(from, to); ok(m !== SSRC, `CONTROL (${tag}): the patch applies`); return MUT.load('src/app-system-serve.js', m, tag); };
+const spatch = (from, to, tag) => { const m = editAnchor(SSRC, from, to, "src/app-system-serve.js"); ok(m !== SSRC, `CONTROL (${tag}): the patch applies`); return MUT.load('src/app-system-serve.js', m, tag); };
 const me = process.getuid();
 const H2 = path.join(dir, 'home2'), R2 = path.join(H2, '.vibespace/sysroot/rootfs'), OUT = path.join(dir, 'outside');
 const wf = (p, t, m = 0o644) => { fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o755 }); fs.writeFileSync(p, t, { mode: m }); fs.chmodSync(p, m); };

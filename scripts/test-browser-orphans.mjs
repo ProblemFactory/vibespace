@@ -38,6 +38,15 @@ const F = require('../src/browser-facts.js');
 const { DeviceManager } = require('../src/agentd/client.js');
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-orphans-'));
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* none */ } });
 const MIN = 60000, H = 60 * MIN, NOW = 1_800_000_000_000;
@@ -87,7 +96,7 @@ ok(O.rowNote(130 * MIN) === 'stopped — the daemon was ended after 2.2 h idle (
 function mutant(from, to, name) {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-orphans.js'), 'utf8');
   if (!src.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
-  const f = path.join(ROOT, `mut-${name}.js`); fs.writeFileSync(f, src.replace(from, to));
+  const f = path.join(ROOT, `mut-${name}.js`); fs.writeFileSync(f, editAnchor(src, from, to, "src/browser-orphans.js"));
   return table(require(f));
 }
 const m1 = mutant("  if (num(leases) > 0) return { act: 'keep', why: 'a lease holds it' };\n", '', 'lease');

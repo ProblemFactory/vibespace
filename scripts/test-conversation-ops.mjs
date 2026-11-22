@@ -29,6 +29,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const SPEC = require(path.join(ROOT, 'src/conversation-spec.js'));
 const OPS = require(path.join(ROOT, 'src/server/conversation-ops.js'));
 const TABLES = { backends: ['claude', 'shell'], chatBackends: ['claude'], byBackend: {
@@ -279,7 +288,7 @@ console.log('⑤ MUTANTS (patched copies outside the tree)');
     // the mutant's own leg below reds too, nothing crashes)
     const n = src.split(from).length - 1;
     if (n !== 1) { ok(false, `ANCHOR (${name}, src/server/conversation-ops.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`); return { dir, missing: true }; }
-    fs.writeFileSync(path.join(dir, 'src/server/conversation-ops.js'), src.replace(from, to));
+    fs.writeFileSync(path.join(dir, 'src/server/conversation-ops.js'), editAnchor(src, from, to, "src/server/conversation-ops.js"));
     return { dir, M: require(path.join(dir, 'src/server/conversation-ops.js')) };
   };
   const gateLine = "    const g = spendGuard.authorize({ reason: 'automation-open', identity, sessionName: v.spec.name || null });\n";

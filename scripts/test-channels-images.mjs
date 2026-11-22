@@ -436,7 +436,7 @@ async function chargeLeg(engineMod, name) {
 }
 {
   const ESRC = ENGINE_SRC;
-  const cut = (label, from, to = '') => { ok(ESRC.split(from).length === 2, `CONTROL ${label}: the anchor is spelled once in the engine`); return MUT.load('src/server/channels-engine.js', ESRC.replace(from, to), label); };
+  const cut = (label, from, to = '') => { ok(ESRC.split(from).length === 2, `CONTROL ${label}: the anchor is spelled once in the engine`); return MUT.load('src/server/channels-engine.js', editAnchor(ESRC, from, to, "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), label); };
   const noReach = cut('agent-no-reach', "if (agent && !(ctx && ctx.kind === 'agent' && stillSees(ctx, adapterId, convId))) return ACL.notFound();");
   // the answer is re-judged after the await (agentAttachmentAnswer), so a copy without the FIRST check still answers 404 —
   // what the first check alone stops is the VENDOR CALL (and its charge) for a conversation the agent may not read

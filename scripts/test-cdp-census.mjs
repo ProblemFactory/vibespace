@@ -436,7 +436,7 @@ console.log('— ⑫ the whole-profile law, fast: the marks, a recipe for every 
     const MUT45 = mutantCopies('cdp-census-0645', REPO);
     // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the leg's
     // own `m && …` reds too, nothing crashes)
-    const mut = (from, to, tag) => { const n = MS.split(from).length - 1; if (n !== 1) { ok(false, `ANCHOR (${tag}, src/browser-mediation.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the control builds nothing`); return null; } return MUT45.load('src/browser-mediation.js', MS.replace(from, to), tag); };
+    const mut = (from, to, tag) => { const n = MS.split(from).length - 1; if (n !== 1) { ok(false, `ANCHOR (${tag}, src/browser-mediation.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the control builds nothing`); return null; } return MUT45.load('src/browser-mediation.js', editAnchor(MS, from, to, "src/browser-mediation.js"), tag); };
     const OPEN = (owner = 'K-L') => M.windowStep(null, { kind: 'set', by: owner, behavior: 'allowAndName', now: 0, boundMs: 30000 }).state;
     // (1) a stale ORDERED answer after the hub's own put-back went out never ends the window under it
     const race = (WS) => {

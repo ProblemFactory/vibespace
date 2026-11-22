@@ -634,7 +634,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     // the controls: patched copies of the ask route's ONE answer — r6's reader (origin `agent`), the filter dropped, r6's key (no fork guard), no placeholder
     const stSrc = fsX.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
     const ISASK = 'store.idsWhere((i) => IO.isAsk(i) && keys.has(i.sessionKey))', FORKKEY = '  const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);', PLACE = 'const keys = new Set([askKey(s, id, sessionStatusKey), `webui:${id}`]);';
-    const stMut = (a, b, tag) => (stSrc.includes(a) ? M.load('src/agent-routes/status.js', stSrc.replace(a, b), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(a).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
+    const stMut = (a, b, tag) => (stSrc.includes(a) ? M.load('src/agent-routes/status.js', editAnchor(stSrc, a, b, "src/agent-routes/status.js"), tag) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(a).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
     const S6 = stMut(ISASK, "store.idsWhere((i) => i.origin === 'agent' && keys.has(i.sessionKey))", 'r6origin'), S0 = stMut(ISASK, 'store.idsWhere((i) => keys.has(i.sessionKey))', 'nofilter');
     const SK = stMut(FORKKEY, '  const key = sessionStatusKey(s, id);', 'r6key'), SP = stMut(PLACE, 'const keys = new Set([askKey(s, id, sessionStatusKey)]);', 'noplaceholder');
     ok(S6 && S0 && SK && SP, 'CONTROL needles present: asksOf\'s filter, askKey\'s fork guard, the placeholder key (r7) — a tree without them has nothing to patch');

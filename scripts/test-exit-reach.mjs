@@ -878,7 +878,7 @@ console.log('controls (patched copies)');
 {
   const M = mutantCopies('exitreach', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/exit-reach.js'), 'utf8');
-  const patch = (from, to, tag) => { const s = src.replace(from, to); ok(s !== src, `(${tag}) the patch applies`); return M.load('src/exit-reach.js', s, tag); };
+  const patch = (from, to, tag) => { const s = editAnchor(src, from, to, "src/exit-reach.js"); ok(s !== src, `(${tag}) the patch applies`); return M.load('src/exit-reach.js', s, tag); };
   const table = (mod) => { const bad = []; for (const grant of ['use', 'run']) for (const a of Object.keys(ACCESS)) Object.keys(CALLERS).forEach((c, i) => { if (cellOf(mod, grant, a, c) !== WANT[a][i]) bad.push(`${grant}×${a}×${c}`); }); return bad; };
   const A = patch("if (isUnknown(access)) return refuse('unknown_shape', { grant });", "if (isUnknown(access)) return { ok: true, via: 'everyone', row: null };", 'unknown-everyone');
   ok(table(A).some((x) => x.includes('unknown')), 'CONTROL (a): exitAccessOf/exitVerdict reading unknown as everyone turns the unknown row red');
@@ -1110,7 +1110,7 @@ console.log('lane exit-transfer (design 013 B): the PURE parts of pull / push �
   const MX = mutantCopies('exitxfer', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/exit-reach.js'), 'utf8');
   const ctl = (tag, from, to, judge, name) => {
-    const mut = src.replace(from, to);
+    const mut = editAnchor(src, from, to, "src/exit-reach.js");
     ok(mut !== src, `CONTROL (${tag}): the patch applies`);
     const X = MX.load('src/exit-reach.js', mut, tag);
     ok(judge(X), `CONTROL (${tag}): ${name}`);

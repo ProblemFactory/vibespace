@@ -176,12 +176,12 @@ const MC = mutantCopies('send-files', REPO);
 async function mutantEngine(from, to, judge, tag) {
   const s = engineSource(REPO);
   if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
-  return judge(require(MC.write('src/server/channels-engine.js', s.replace(from, to), tag)));
+  return judge(require(MC.write('src/server/channels-engine.js', editAnchor(s, from, to, "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), tag)));
 }
 async function mutant(file, from, to, judge, tag) {
   const s = fs.readFileSync(path.join(REPO, 'src', file), 'utf8');
   if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
-  return judge(require(MC.write(`src/${file}`, s.replace(from, to), tag)));
+  return judge(require(MC.write(`src/${file}`, editAnchor(s, from, to, `src/${file}`), tag)));
 }
 
 console.log('① the caps rows');

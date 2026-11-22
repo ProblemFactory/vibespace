@@ -164,7 +164,7 @@ const replaceOnce = (text, from, to) => { const i = text.indexOf(from); if (i < 
   // Patched copies of the module, each without ONE rule: the plant that
   // rule caught goes through — the rule, not something else, is the catch.
   const src = fs.readFileSync(path.join(REPO, 'src/changelog-style.js'), 'utf8');
-  const cut = (from, to) => { if (!src.includes(from)) throw new Error('module anchor missing: ' + from); return src.replace(from, to); };
+  const cut = (from, to) => { if (!src.includes(from)) throw new Error('module anchor missing: ' + from); return editAnchor(src, from, to, "src/changelog-style.js"); };
   const noBanned = M.load('src/changelog-style.js', cut('for (const [re, rule] of BANNED) if', 'for (const [re, rule] of []) if'), 'no-banned');
   const noCjk = M.load('src/changelog-style.js', cut("if (lang === 'en' && CJK.test(b))", 'if (false)'), 'no-cjk');
   const noLen = M.load('src/changelog-style.js', cut('if (len > max)', 'if (false)'), 'no-length');
