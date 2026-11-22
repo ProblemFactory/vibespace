@@ -11,7 +11,7 @@
 //   unsynced  a file written in its scope, then renamed with no sync between
 //   move      no file written before it in its scope: an existing file or folder moved
 // (the scope read = the enclosing functions out to the one the site's scope names, never another function's text; a write is a
-// writeFile / createWriteStream / an open for writing / a copy INTO the source; an open to append is a log's rotation, not a
+// writeFile / createWriteStream / an open for writing / a copy INTO the source; an open to append — its flag a literal, or a const of its function — is a log's rotation, not a
 // write). Each FAMILY goes through the store writer, or is named with its reason, or is A CURE OWED with its row (FAMILIES).
 // A NEW site without a row is red by name, a rowed site that is gone is red, a class its family does not admit is red, a family
 // with no row is red; OWED_MAX (the sites of the owed families) is an EQUALITY here — the unit that cures a site lowers it, and
@@ -94,6 +94,11 @@ export function renameSites(rel, src, AC) {
     if (!roots.length) roots.push(parents[1] || ast);
     const root = roots[roots.length - 1];
     let wrote = null, synced = [];
+    // an open's flags through a CONST of its function (line 349, B-f276 1c: writeJob's `fl` = 'ax' for an own-only store's first
+    // append, then O_WRONLY | O_APPEND, else 'a'): an append when EVERY leaf of its value is one — a string that starts with 'a',
+    // or an OR-chain of constants that holds O_APPEND (and no O_TRUNC); a flag bound by let / var, or bound twice, reads as a write
+    const appendOf = (x) => !!x && ((x.type === 'Literal' && typeof x.value === 'string' && /^a/.test(x.value)) || (x.type === 'ConditionalExpression' && appendOf(x.consequent) && appendOf(x.alternate)) || (x.type === 'BinaryExpression' && x.operator === '|' && /\bO_APPEND\b/.test(text(x)) && !/\bO_TRUNC\b/.test(text(x))));
+    const constAppend = (name) => { let init = null, seen = 0; walk(root, (d, ps) => { if (d.type === 'VariableDeclarator' && d.id.type === 'Identifier' && d.id.name === name) { seen++; const decl = ps[ps.length - 1]; init = decl && decl.kind === 'const' ? d.init : null; } }); return seen === 1 && appendOf(init); };
     walk(root, (c) => {
       if (c.type !== 'CallExpression' || c.start >= n.start || c.callee.type !== 'MemberExpression' || c.callee.computed) return;
       const q = c.callee.property && c.callee.property.name;
@@ -101,7 +106,7 @@ export function renameSites(rel, src, AC) {
       if (!WRITE.has(q)) return;
       const a = c.arguments[WRITE.get(q)];
       if (!a || text(a) !== from) return;
-      if (q === 'open' || q === 'openSync') { const fl = c.arguments[1]; if (!fl || (fl.type === 'Literal' && typeof fl.value === 'string' && /^[ra]/.test(fl.value))) return; }   // a read, or an append (a log's rotation)
+      if (q === 'open' || q === 'openSync') { const fl = c.arguments[1]; if (!fl || (fl.type === 'Literal' && typeof fl.value === 'string' && /^[ra]/.test(fl.value)) || (fl.type === 'Identifier' && constAppend(fl.name))) return; }   // a read, or an append (a log's rotation)
       if (!wrote || c.start > wrote) wrote = c.start;
     });
     const cls = wrote != null ? (synced.some((x) => x > wrote) ? 'synced' : 'unsynced') : (synced.length ? 'synced' : 'move');
@@ -304,7 +309,7 @@ const ROWS = [
   ["src/server/writes-lost.js", "move", "move", "", "create > load"],
   ["src/slot-transitions.js", "unsynced", "store", "", "SlotTransitions._maybeTrim"],
   ["src/store-hold.js", "unsynced", "b0248", "the hold's write (the desktops and their rollback points)", "create > write", "create > write"],
-  ["src/store-hold.js", "move", "move", "", "create > setAside"],
+  ["src/store-hold.js", "move", "move", "a DAMAGED copy set aside under its dated name, its bytes untouched: setAside, and its off-the-loop twin setAsideAsync (line 349, B-f276 1c — r1143 (3): the rename through fs.promises, a person's press)", "create > setAside", "create > setAsideAsync"],
   ["src/store-writer-worker.js", "move", "move", "a ring's rotation (the live log to .1; each append was synced)", "writeJob"],
   ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: every store the writer holds", "writeJob"],
   ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: the REWRITE of an append store from its own bytes (row B-360d — the OTel stash's trim), synced, then renamed over the file", "rewriteJob"],
@@ -447,6 +452,11 @@ console.log('③ the classifier on planted sources');
   ok(u.unknown.length === 1 && u.unknown[0].obj === 'thing' && u.skipped.length === 1 && u.sites.length === 0, 'an object nobody judged is red by name; a NOT_FS object is skipped by name', u);
   const bare = renameSites('src/zz-plant.js', `function z(a, b) { const { renameSync } = require('fs'); renameSync(a, b); }`, AC), judgedBare = renameSites('src/routes/files.js', `function n() { return rename('a.txt'); }`, AC);
   ok(bare.unknown.length === 1 && bare.unknown[0].obj === '(a bare renameSync)' && judgedBare.skipped.length === 1 && judgedBare.unknown.length === 0, 'a call through a BARE name (destructured, aliased) is red as unknown; a file judged in BARE_NOT_FS is skipped by name', { bare, judgedBare });
+  // an open's flags through a CONST of its function (line 349's `fl`): every leaf an append — the rotation after it reads «move»;
+  // CONTROLS: one leaf that writes ('w'), and a flag bound by let, read as a write before the rename («unsynced»)
+  const flagOf = (decl) => renameSites('src/zz-plant.js', `function z(f, g, c) { const fs = require('fs'); ${decl} const fd = fs.openSync(f, fl); fs.closeSync(fd); fs.renameSync(f, g); }`, AC).sites.map((s) => s.cls).join(',');
+  const flags = { append: flagOf("const fl = c ? 'ax' : fs.constants.O_WRONLY | fs.constants.O_APPEND;"), write: flagOf("const fl = c ? 'w' : 'a';"), notConst: flagOf("let fl = 'a'; if (c) fl = 'w';") };
+  ok(flags.append === 'move' && flags.write === 'unsynced' && flags.notConst === 'unsynced', `an open's flags read through a CONST of its function: every leaf an append — the rotation reads «move» (${flags.append}); CONTROLS: a leaf that writes (${flags.write}), a flag bound by let (${flags.notConst}) — read as a write`, flags);
 }
 
 // ── ④ THE WRITER'S LAW, and the census's own controls ───────────────────────────────────────────────────────────────────────
