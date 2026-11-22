@@ -1,6 +1,21 @@
 import { t } from './i18n.js';
 import { metric } from './telemetry-client.js';
 
+// THE CARD A PERSON IS READING STAYS WHERE IT IS WHEN HISTORY ARRIVES OR SETTLES ABOVE IT; every notch moves the view exactly
+// its own distance, once (主开发 r2251 / r2395; the block's hosted run, test-chat-paging gap-up-hold-1). Measured (three probes,
+// Chrome 154): the first hold up into unloaded history landed a screen and a half past the card being read, for two reasons.
+// (1') THE SCROLL RANGE's END: after a jump the window's content can be shorter than the viewport (blank below it); a slab
+// inserted above it leaves the range ending short of the reader's place (253–301 px), so no scrollTop puts the card back —
+// what the range could not give back is taken from the carried notch landing with it (_applyWheelCarry's `less`). (2) THE
+// SLAB's ROWS SETTLE ABOVE THE READER after the insert (+418, +258 px), and the browser's own scroll anchoring answered SOME
+// of them: ONE AUTHORITY for the slab's settle — the list opts out of the browser's anchoring (`overflow-anchor: none`, as the
+// channel list does for good, B-59ff) and a ResizeObserver over every row answers each size change of a row wholly above the
+// viewport's top by the same delta on scrollTop: a size answer only, so a person's own scroll or jump is never fought. Bounded:
+// the slab leaves the DOM, a jump or a teleport, a newer slab, the view's dispose, or this ceiling from the insert, read inside
+// the observer's own callback (no timer) — the batch that finds it past is still answered, then the browser's anchoring is back.
+const GAP_SETTLE_CEIL_MS = 8000;
+const GAP_SETTLE_RECENT_MS = 150;   // the lowest line the view showed this long ago is still the line that was read
+
 /**
  * ChatView gap-seek mixin — the huge-JSONL continuous-scroll machinery
  * (sentinel, bidirectional slab loading, teleport jumps, stable-height
@@ -178,6 +193,79 @@ export function installChatSeek(ChatView) {
     for (const d of [180, 400, 750]) setTimeout(hold, d);
   },
 
+    /** THE CARD A PERSON IS READING (主开发 r2251): the first visible message card at the viewport's top — never the seek
+     *  sentinel, a run's header or footer, a folded card — and its offset from the top edge. */
+    _gapReaderCard() {
+    const list = this._messageList, st = list.scrollTop;
+    for (const c of list.children || []) {
+      const cl = c.classList;
+      if (c._isSeekSentinel || !cl || !cl.contains('chat-msg') || cl.contains('chat-run-header') || cl.contains('chat-run-footer')) continue;
+      if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st) return { el: c, top: c.offsetTop - st };
+    }
+    return null;
+  },
+    /** (2) THE SLAB's ROWS SETTLE ABOVE THE READER (主开发 r2251 / r2395 — ONE AUTHORITY): for the slab's life the list
+     *  opts out of the browser's scroll anchoring and a ResizeObserver over EVERY row (a row added meanwhile is observed from
+     *  its first size: its arrival is its adder's to anchor) answers each size change of a row lying WHOLLY ABOVE the reading
+     *  line (the lowest line the view showed in the last GAP_SETTLE_RECENT_MS) by the same delta on scrollTop — a size
+     *  answer only. A batch is read in document order, each row's old top rebuilt
+     *  from the deltas before it. Bounded: the slab leaves (_dropGapSlab), a jump's reset, a teleport, the view's dispose, a
+     *  newer slab (its watch replaces this one), or GAP_SETTLE_CEIL_MS from the insert (read in the callback: no timer). */
+    _watchGapSettle() {
+    if (typeof ResizeObserver !== 'function') return;
+    this._stopGapSettle('newSlab');
+    const list = this._messageList, t0 = performance.now(), last = new WeakMap();
+    const hOf = (e) => (e.borderBoxSize && e.borderBoxSize[0] ? e.borderBoxSize[0].blockSize : e.target.getBoundingClientRect().height);
+    // THE LINE THE PERSON WAS READING: a row a notch scrolls INTO view takes its real height within a frame or two (probe 5:
+    // 33 ms after the notch, +209 and +258 px) — it lay above the line read before the notch, so its change is answered too.
+    // The line is the lowest content line (the largest scrollTop) the view showed during the last GAP_SETTLE_RECENT_MS —
+    // not «the one before the latest scroll event»: any other write in between (the runs pass putting its anchor back,
+    // −27 px, measured) would lose it. An upward notch keeps the card read before it exactly where the notch put it; a
+    // downward one, the card now at the top. Each answer moves the remembered lines with the content it moved.
+    const seen = [], fr = { at: list.scrollTop };   // seen: { st, until } — a scrollTop the view showed, and when it stopped
+    const onScroll = () => { const now = performance.now(); seen.push({ st: fr.at, until: now }); while (seen.length && now - seen[0].until > GAP_SETTLE_RECENT_MS) seen.shift(); fr.at = list.scrollTop; };
+    list.addEventListener('scroll', onScroll, { passive: true });
+    this._gapSettleOff = () => list.removeEventListener('scroll', onScroll);
+    const ro = new ResizeObserver((entries) => {
+      const late = this._disposed || performance.now() - t0 > GAP_SETTLE_CEIL_MS;
+      const now = performance.now(), st = list.scrollTop, changed = [];
+      let line = st;
+      for (const x of seen) if (now - x.until <= GAP_SETTLE_RECENT_MS && x.st > line) line = x.st;
+      for (const e of entries) {
+        const el = e.target;
+        if (!el.isConnected) { ro.unobserve(el); continue; }
+        const was = last.get(el), h = hOf(e);
+        last.set(el, h);
+        if (was === undefined || Math.abs(h - was) < 0.01) continue;
+        changed.push({ el, was, h });
+      }
+      if (changed.length && !this._disposed) {
+        changed.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        let before = 0, d = 0;
+        for (const c of changed) {
+          const oldTop = c.el.offsetTop - before;
+          if (oldTop + c.was <= line + 0.5) d += c.h - c.was;   // wholly above the reading line: it moved everything read below it
+          before += c.h - c.was;
+        }
+        if (Math.abs(d) >= 0.5) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; for (const x of seen) x.st += d; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st) }); }
+      }
+      if (late) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
+    });
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes) if (n.nodeType === 1) ro.observe(n); }) : null;
+    this._gapSettleRO = ro; this._gapSettleMO = mo;
+    list.style.overflowAnchor = 'none';   // ONE authority while the slab settles (B-59ff's property, for the slab's life only)
+    for (const el of list.children) { if (el._isSeekSentinel) continue; last.set(el, el.getBoundingClientRect().height); ro.observe(el); }
+    mo?.observe(list, { childList: true });
+  },
+    _stopGapSettle(why) {
+    const ro = this._gapSettleRO;
+    if (!ro) return;
+    this._gapSettleRO = null;
+    try { ro.disconnect(); this._gapSettleMO?.disconnect(); this._gapSettleOff?.(); } catch { }
+    this._gapSettleMO = null; this._gapSettleOff = null;
+    if (this._messageList) this._messageList.style.overflowAnchor = '';   // the browser's own anchoring is back
+    this._trace?.('gapUp:settleEnd', { why });
+  },
     _maybeSeekEarlier() {
     if (!this._gapMinimapActive) return;
     const s = this._seekSentinel;
@@ -191,6 +279,7 @@ export function installChatSeek(ChatView) {
   },
 
     _resetGapAfterJump() {
+    this._stopGapSettle?.('gapReset');   // (2) ends with the slab
     this._trace?.('gapReset', { wasTeleported: this._teleported ? 1 : 0 });
     this._clearWheelCarry?.('gapReset');   // a carried notch is stale after a full-window jump (verifier r1)
     this._teleported = false;   // a full-window jump exits teleport mode
@@ -293,6 +382,7 @@ export function installChatSeek(ChatView) {
       // content-visibility flaw as _extendTop — see _withViewportAnchor).
       let firstInserted = null;
       const inserted = [];
+      const reader = this._gapReaderCard();   // (1) the card a person is reading, and its offset from the top edge
       const anchoredOk = this._withViewportAnchor(() => {
         // A TAIL-MODE GAP SLAB RUNS WITH STABLE HEIGHTS (verifier r1, measured
         // in headless chrome on the §1c fixture): with content-visibility on,
@@ -351,10 +441,25 @@ export function installChatSeek(ChatView) {
       // THE LANDING (inc-mubvu3a4-x8sb): every slab names its size, where the
       // cursor moved to, whether the anchor held, and the geometry it left —
       // the seek path shipped no evidence at all before this.
+      // (1') THE READER's OWN CARD back where it was, as far as the scroll range allows; what its END could not give back
+      // (the window's content shorter than the viewport) is taken from the carried notch landing with it, so the card ends
+      // exactly one carried notch from where it was
+      let rest = 0;
+      if (reader && reader.el.isConnected) {
+        const list = this._messageList, d = (reader.el.offsetTop - list.scrollTop) - reader.top;
+        if (Math.abs(d) >= 1) {
+          this._traceExpect?.('gapUp:reader'); list.scrollTop += d;
+          rest = Math.max(0, (reader.el.offsetTop - list.scrollTop) - reader.top);
+          this._trace?.('gapUp:reader', { px: Math.round(d), rest: Math.round(rest) });
+        }
+      }
       // the carried wheel-up notch lands here too (the seek path used to eat it)
-      this._applyWheelCarry?.('up', 'gapUp:carry');
+      this._applyWheelCarry?.('up', 'gapUp:carry', { less: rest });
       this._trace?.('gapUp:done', { n: msgs.length, from: data.fromLine, anchored: anchoredOk, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight, dsh: this._messageList.scrollHeight - scrollHeightBefore, kids: this._messageList.childElementCount });
       this._scheduleAxSync?.('gapUp'); // the reader's band lands with the slab (chat-view.js _syncAxExposure)
+      // (2) the slab's rows settle above the reader: ONE authority answers each size change — a TAIL-MODE slab, the one that
+      // runs with stable heights (a teleported view keeps content-visibility and its own landing regime: not measured, not changed)
+      if (!this._teleported) this._watchGapSettle();
       if (this._teleported) this._trimGapDom('bottom');
       if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
     } catch (e) {
@@ -532,6 +637,7 @@ export function installChatSeek(ChatView) {
     const msgs = data?.messages || [];
     if (!msgs.length) { this._trace?.('teleport:fail', { line, why: 'empty' }); return null; }
     // Replace the entire rendered view with this slab; keep + reset the sentinel.
+    this._stopGapSettle?.('teleport');   // (2) ends: the whole view is replaced
     this._clearWheelCarry?.('teleport');   // the reader chose a destination — no carried notch rides into it
     this._teleported = true;
     this._gapCursorDown = Number.isFinite(data.toLine) ? data.toLine : null; // next NEWER slab starts here

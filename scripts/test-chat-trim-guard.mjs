@@ -1155,12 +1155,12 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     /this\._wheelPending = 'up'; this\._trace\('wheelTop', \{ st: Math\.round\(roomUp\), eaten: 1/.test(cv) && /this\._wheelPending = 'down'; this\._trace\('wheelBottom', \{[^}]*eaten: 1/.test(cv));
   ok('ONE carry accounting (_addWheelCarry / _applyWheelCarry / _clearWheelCarry / _dropWheelCarry): both extends AND both gap slabs consume it; nothing else assigns _wheelCarry',
     /_applyWheelCarry\('up', 'extendTop:carry'[,)]/.test(cv) && /_applyWheelCarry\('down', 'extendBottom:carry'[,)]/.test(cv)
-    && /_applyWheelCarry\?\.\('up', 'gapUp:carry'\)/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\)/.test(sk)
+    && /_applyWheelCarry\?\.\('up', 'gapUp:carry'[,)]/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\)/.test(sk)
     && (cv.match(/this\._wheelCarry = /g) || []).length === 4 && !/_wheelCarry = /.test(sk), `assignments in chat-view.js: ${(cv.match(/this\._wheelCarry = /g) || []).length} (want 4: add / apply / clear / drop)`);
   ok('r1b: both GROW LOOPS keep the rest a pass had no room for (keepRest) and drop what no pass applied in their finally; the single-landing gap slabs consume the carry either way',
     /this\._applyWheelCarry\('up', 'extendTop:carry', \{ keepRest: true \}\);/.test(cv) && /this\._applyWheelCarry\('down', 'extendBottom:carry', \{ keepRest: true \}\);/.test(cv)
     && /this\._extendingTop = false;\n\s*endLoad\(\);\n\s*this\._dropWheelCarry\('up', 'extendTop:end'\);/.test(cv) && /endLoad\(\);\n\s*this\._dropWheelCarry\('down', 'extendBottom:end'\);/.test(cv)
-    && /this\._wheelCarry = keepRest \? held - carry : 0;/.test(cv) && /_applyWheelCarry\?\.\('up', 'gapUp:carry'\);/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\);/.test(sk));
+    && /this\._wheelCarry = keepRest \? held - carry : 0;/.test(cv) && /_applyWheelCarry\?\.\('up', 'gapUp:carry'(, \{ less: rest \})?\);/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\);/.test(sk));
   ok('a chosen destination clears a carried notch: _noteUserNav (jumps, minimap, search reveal, run bar), _resetGapAfterJump (both jumps), _seekTeleport',
     /_noteUserNav\(via\) \{[\s\S]{0,400}this\._clearWheelCarry\?\.\(via\);/.test(cv) && /_resetGapAfterJump\(\) \{[\s\S]{0,300}this\._clearWheelCarry\?\.\('gapReset'\);/.test(sk) && /this\._clearWheelCarry\?\.\('teleport'\);[^\n]*\n\s*this\._teleported = true;/.test(sk));
   ok('_extendTop prepends before the first NON-GAP card, and the top trim drops the gap slab when the window leaves message 0 — inside the same anchored removal',

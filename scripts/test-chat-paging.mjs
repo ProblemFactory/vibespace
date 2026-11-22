@@ -532,6 +532,7 @@ const runGestures = async (plan, label) => {
   // its geometry. Suite-side, read-only: it never changes a decision.
   await evaljs(TRIM_WITNESS_SOURCE);
   for (const [name, dir, speed] of plan) {
+    if (dir === 'eval') { console.log(`    ${name.padEnd(14)} ${JSON.stringify(await evaljs(speed))}`); continue; }   // a SETUP step (§4h's blinded part)
     if (dir === 'jump') {
       // a SETUP step, not a judged gesture: the minimap's own jump (jumpToIndex) to a
       // message index — used to reach the start of the registered tail cheaply
@@ -556,9 +557,12 @@ const runGestures = async (plan, label) => {
     await evaljs(`(() => { window.__pgReader = ${JSON.stringify(before.topId)}; window.__trimWitness = []; return 1; })()`);
     // over a PLAIN point of the viewport (never a card's own scroll box — that box would take the notches)
     const pt = (await evaljs(WHEEL_POINT_SOURCE(dir, c.notches * c.deltaY))) || { x: cx, y: cy, moved: 0 };
+    const reads = globalThis.__notchReads && name === 'gap-up-hold-1' ? globalThis.__notchReads : null;   // §4h's law, per notch
+    if (reads) reads.push(await evaljs(NOTCH_READ));
     for (let i = 0; i < c.notches; i++) {
       await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pt.x, y: pt.y, deltaX: 0, deltaY: dir === 'up' ? -c.deltaY : c.deltaY });
       if (c.gap) await sleep(c.gap);
+      if (reads) reads.push(await evaljs(NOTCH_READ));
     }
     await sleep(c.settle);
     const after = await snap(before.topId, before.topOff); const ring = await ringSince(mark);
@@ -651,21 +655,9 @@ if (huge.opened?.ok) {
   check(`the legs are non-vacuous: at least 10 gestures paged the window (${paged})`, paged >= 10);
   check('the trace ring is non-empty after the first gesture (the seek/extend path leaves evidence)', R[0].ring.length > 0, JSON.stringify(R[0].ring.slice(0, 3)));
   const bad = (pred) => R.filter((r) => r.verdict.reasons.some(pred));
-  // A NAMED KNOWN BOUND (主开发 r2516, row B-3e8b): THE FIRST HOLD UP INTO UNLOADED HISTORY skips past the card being read —
-  // the release's own product (chat-view-seek.js's gap fill upward: the scroll range's end at the slab's insert, the slab's
-  // rows settling above the reading line), measured by three probes; its cure is the next block's. Its size is the runner's:
-  // 1088 px on the block's hosted run (Chrome 157, three tries alike), against the rule's slack of 1.5 viewports (1059 px);
-  // 540 px on the first test machine at the release a3f329c05 and 538 px at the train 61a1c21f5 (the same scene, the same
-  // machine: the train did not move it). ONLY that row's ① «further» reason is held to the measured skip — no wider: it goes
-  // red when the skip GROWS; every other gesture keeps the slack, every other rule its own bound. Gone with the cure.
-  const KNOWN_BOUND = { 'gap-up-hold-1': { px: 1088, row: 'B-3e8b' } };
-  const beyondOf = (r) => (r.after.topDev == null ? null : (r.dir === 'up' ? 1 : -1) * (r.after.topDev + r.wheelPx));
-  const knownBound = (r, x) => { const k = KNOWN_BOUND[r.name], b = beyondOf(r); return !!k && /further/.test(x) && b != null && b <= k.px; };
-  const jumps = R.filter((r) => r.verdict.reasons.some((x) => /further|gone from the DOM|pageUp band/.test(x) && !knownBound(r, x)));
-  for (const [name, k] of Object.entries(KNOWN_BOUND)) {
-    const r = R.find((x) => x.name === name), b = r ? beyondOf(r) : null;
-    check(`① KNOWN BOUND ${k.row} — ${name}, the first hold up into unloaded history: the reader's card ${b} px past the wheel, at most the release's measured ${k.px} px (the slack ${Math.round(JUMP_SLACK_VIEWPORTS * ch)} px stands for every other gesture; red if the jump grows)`, b != null && b <= k.px, r ? formatGesture(r, r.verdict) : 'no row');
-  }
+  // (B-3e8b's named bound, the .416 block's plan B, is gone with its cure: gap-up-hold-1 is held to the slack like
+  // every gesture again; §4h judges the first hold notch by notch)
+  const jumps = bad((x) => /further|gone from the DOM|pageUp band/.test(x));
   check(`① no jump back > ${JUMP_SLACK_VIEWPORTS} viewports on any gesture (the reader's card stays where the wheel put it; a notch never lands inside the ${PAGE_UP_BAND_PX} px pageUp band with history — window OR gap — above)`, jumps.length === 0, jumps.map((r) => r.name + ': ' + r.verdict.reasons.join('; ')).join('\n    '));
   const teleports = bad((x) => /pinned with the window|re-pinned mid-history|DOM's bottom|teleported to the tail/.test(x));
   check('② no pin and no bottom landing before the window reaches the live tail (the DOM edge is a paging boundary, not a pin)', teleports.length === 0, teleports.map((r) => r.name + ': ' + r.verdict.reasons.join('; ')).join('\n    '));
@@ -705,6 +697,80 @@ if (huge.opened?.ok) {
   const p = await pinProbe(PORT, 'fix');
   check(`② probe on the fix — precondition held: a partial window with the viewport parked ${PROBE_D} px above the DOM's bottom, unpinned, idle (${JSON.stringify(p.pre || p.opened)})`, !!p.pre?.ok, JSON.stringify(p.pre || p.opened));
   if (p.row) check('② probe on the fix: the notch that crosses into the pin band pages instead — no pin, no bottom landing, no walk to the tail, no repin with we < total', !p.row.verdict.reasons.some(TELEPORT) && p.midRepins === 0, p.row.verdict.reasons.join('; ') + ` (repins with we < total: ${p.midRepins})`);
+}
+
+// ── 4h. THE FIRST HOLD UP INTO UNLOADED HISTORY (主开发 r2251 / r2395; the block's hosted red: gap-up-hold-1 read 1088 px
+// against the 1059 px slack). THE LAW: THE CARD A PERSON IS READING STAYS WHERE IT IS WHEN HISTORY ARRIVES OR SETTLES ABOVE
+// IT; every notch moves the view exactly its own distance, once. On a FRESH page (no slab row measured yet) the minimap's
+// jump to message 0, then the 40-notch hold up into the seek gap, read PER NOTCH: before each notch the card at the viewport's
+// top (the reading line) and its offset, after it the same card — in the frame the person saw (after its observers and its
+// paint) — moved exactly the notch's distance (NOTCH_TOL_PX). Until the slab lands the notches are carried (the card does
+// not move); over those notches and the landing the card moved exactly their sum, once. Rows that grow BELOW the reading line
+// move nothing read there and are not counted (the original card's displacement at the hold's end, which counts them, is
+// printed and judged by ①'s slack only). Measured before the cure (Chrome 154, the first machine): the range's end at the
+// insert +253 px, the slab's rows settling above the reading line +209 / +258 px — some answered by the browser's own scroll
+// anchoring, the rest by no one. A CONTROL A PART, on the same build, blinded on the view's instance before the jump:
+// (1') no reader read at the insert (_gapReaderCard → null: the carry lands whole); (2) the pair — the settle watch blinded
+// (the browser's anchoring alone) and the settle answered beside the browser's anchoring (overflow-anchor left on: answered
+// twice): a browser that answers none reddens the first, one that answers all the second; Chrome 154 answers some — both red.
+const NOTCH_TOL_PX = 8;   // the law says 0; this is sub-pixel heights and the device pixel scrollTop lands on
+const NOTCH_READ = `(async () => {
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  const v = window.__v, list = window.__list, lt = list.getBoundingClientRect().top;
+  const prev = window.__notchTop, prevOff = prev && prev.isConnected ? prev.getBoundingClientRect().top - lt : null;
+  let top = null;
+  for (const c of list.children) {
+    const cl = c.classList;
+    if (c._isSeekSentinel || !cl || !cl.contains('chat-msg') || cl.contains('chat-run-header') || cl.contains('chat-run-footer')) continue;
+    const r = c.getBoundingClientRect();
+    if (r.height > 0 && r.bottom > lt + 0.5) { top = c; break; }
+  }
+  window.__notchTop = top;
+  return { prevOff, off: top ? top.getBoundingClientRect().top - lt : null, st: Math.round(list.scrollTop), sh: list.scrollHeight, landed: (v._traceRing || []).some((e) => e.tag === 'gapUp:done') ? 1 : 0 };
+})()`;
+const notchLaw = (reads, notchPx) => {
+  const iv = [];
+  for (let k = 1; k < reads.length; k++) { const a = reads[k - 1], b = reads[k]; iv.push({ moved: a.off == null || b.prevOff == null ? null : b.prevOff - a.off, landed: b.landed }); }
+  const L = iv.findIndex((x) => x.landed);
+  if (L < 0) return { ok: false, why: 'no slab landed during the hold', iv };
+  const lost = iv.filter((x) => x.moved == null).length;
+  const carried = iv.slice(0, L + 1).reduce((m, x) => m + (x.moved || 0), 0) - notchPx * (L + 1);
+  const extras = iv.slice(L + 1).map((x) => (x.moved == null ? null : x.moved - notchPx));
+  const worst = extras.reduce((m, x) => (x != null && Math.abs(x) > Math.abs(m) ? x : m), 0);
+  return { ok: !lost && Math.abs(carried) <= NOTCH_TOL_PX && Math.abs(worst) <= NOTCH_TOL_PX, L, carried: Math.round(carried), worst: Math.round(worst), lost, extras: extras.map((x) => (x == null ? 'gone' : Math.round(x))) };
+};
+const BLIND = {
+  "(1')": `(() => { const v = window.__v; v._gapReaderCard = () => null; return { blinded: "(1') no reader read at the insert" }; })()`,
+  '(2) off': `(() => { const v = window.__v; v._watchGapSettle = () => { }; return { blinded: '(2) the settle watch: the browser anchoring alone' }; })()`,
+  '(2) twice': `(() => { const v = window.__v, w = v._watchGapSettle; v._watchGapSettle = function (...a) { const r = w.apply(this, a); this._messageList.style.overflowAnchor = ''; return r; }; return { blinded: '(2) answered beside the browser anchoring' }; })()`,
+};
+const firstHold = async (label, blind) => {
+  if (!(await pageReady(PORT, 'first hold ' + label))) return { label, law: { ok: false, why: 'no page' } };
+  await sleep(1500);
+  globalThis.__notchReads = [];
+  const r = await runGestures([...(blind ? [['blind ' + blind, 'eval', BLIND[blind]]] : []), ['gap-jump', 'jump', 0], ['gap-up-hold-1', 'up', 'hold']], 'first hold ' + label);
+  const reads = globalThis.__notchReads; globalThis.__notchReads = null;
+  const row = (r.rows || []).find((x) => x.name === 'gap-up-hold-1');
+  const ring = row ? row.ring : [];
+  const n = (tag, by) => ring.filter((e) => e.tag === tag && (by === undefined || e.by === by)).length;
+  const law = row ? notchLaw(reads, CADENCE.hold.deltaY) : { ok: false, why: 'no row' };
+  const out = { label, row, law, dev: row && row.after.topDev != null ? Math.round(row.after.topDev + row.wheelPx) : null, slabs: n('gapUp:done'), carries: n('wheelCarry', 'gapUp:carry'),
+    reader: ring.filter((e) => e.tag === 'gapUp:reader').map((e) => [e.px, e.rest]), settle: ring.filter((e) => e.tag === 'gapUp:settle').map((e) => e.px), less: ring.filter((e) => e.tag === 'wheelCarry' && e.less).map((e) => [e.px, e.less]) };
+  console.log(`  [first hold ${label}] per notch: ${law.why || `carried + landing ${law.carried} px (${law.L + 1} notch(es)), then the worst notch ${law.worst} px, ${law.lost} read(s) lost`}; extras ${JSON.stringify(law.extras || [])}`);
+  console.log(`  [first hold ${label}] the original card ${out.dev} px past the wheel at the end (rows growing below the reading line count there); slabs ${out.slabs}, carried landings ${out.carries} ${JSON.stringify(out.less)}; (1') ${JSON.stringify(out.reader)}; (2) answered ${JSON.stringify(out.settle)}`);
+  return out;
+};
+{
+  console.log(`§4h the first hold up into unloaded history, per notch: the card at the reading line moves exactly each notch (± ${NOTCH_TOL_PX} px), the carried ones exactly once at the landing (a fresh page); a control a part`);
+  const fix = await firstHold('fix');
+  check(`§4h the fresh page's first hold reached the seek gap (a slab landed: gapUp:done) and its notches at scrollTop 0 were carried into it (≥ 1 carried landing, at most one a slab: ${fix.carries} over ${fix.slabs})`, fix.slabs >= 1 && fix.carries >= 1 && fix.carries <= fix.slabs, JSON.stringify({ slabs: fix.slabs, carries: fix.carries }));
+  check(`§4h THE CARD AT THE READING LINE STAYS WHERE IT IS WHEN HISTORY ARRIVES OR SETTLES ABOVE IT: every notch moved it exactly its ${CADENCE.hold.deltaY} px (worst ${fix.law.worst} px), the carried notches exactly once at the landing (${fix.law.carried} px over ${fix.law.L + 1})`, fix.law.ok, JSON.stringify(fix.law));
+  check(`§4h the hold's end inside ①'s slack (${JUMP_SLACK_VIEWPORTS} viewports): the original card ${fix.dev} px past the wheel`, !!fix.row && !fix.row.verdict.reasons.length, fix.row ? fix.row.verdict.reasons.join('; ') : 'no row');
+  const c1 = await firstHold("control (1')", "(1')");
+  check(`§4h CONTROL (1'): with no reader read at the insert (no gapUp:reader) the carried notches land whole and the card misses at the landing by more than ${NOTCH_TOL_PX} px (${c1.law.carried} px)`, c1.slabs >= 1 && c1.reader.length === 0 && Math.abs(c1.law.carried ?? 0) > NOTCH_TOL_PX, JSON.stringify(c1.law));
+  const c2 = await firstHold('control (2) off', '(2) off'), c3 = await firstHold('control (2) twice', '(2) twice');
+  const red = (c) => c.slabs >= 1 && !c.law.ok;
+  check(`§4h CONTROL (2), the pair: the settle watch blinded (no gapUp:settle: ${c2.settle.length === 0}, worst ${c2.law.worst} px) or answered beside the browser's anchoring (worst ${c3.law.worst} px) — at least one misses a notch by more than ${NOTCH_TOL_PX} px (here: ${[red(c2) && 'blinded', red(c3) && 'twice'].filter(Boolean).join(' + ') || 'none'})`, c2.settle.length === 0 && c3.settle.length > 0 && (red(c2) || red(c3)), JSON.stringify({ off: c2.law, twice: c3.law }));
 }
 
 // ── 4e. THE RELEASE FRAME (B-1192): a paging slab's fresh-height reservation

@@ -3385,13 +3385,15 @@ class ChatView {
    *  loop landed at the very bottom and the landing's own scroll re-pinned the
    *  view the wheel had just unpinned (`wheelTop{carry:120} extendTop:done
    *  {st:0,sh:565} … extendTop:grown repin`, no wheelCarry anywhere). */
-  _applyWheelCarry(dir, by, { keepRest = false } = {}) {
+  _applyWheelCarry(dir, by, { keepRest = false, less = 0 } = {}) {
     const list = this._messageList;
     const room = dir === 'up' ? list.scrollTop : Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight);
     const held = (this._wheelCarryDir === dir && !(dir === 'up' && this._pinned)) ? (this._wheelCarry || 0) : 0;
-    const carry = Math.min(held, room);
+    // `less` (a single landing only — the gap slab's, 主开发 r2395): px the landing already moved the reader's card in the
+    // carry's direction (the scroll range's end at the insert) — the notch is honoured once, measured on the card
+    const carry = Math.min(Math.max(0, held - less), room);
     this._wheelCarry = keepRest ? held - carry : 0;
-    if (carry > 0) { this._traceExpect(by); list.scrollTop += dir === 'up' ? -carry : carry; this._trace('wheelCarry', { dir, px: Math.round(carry), by }); }
+    if (carry > 0 || (less > 0 && held > 0)) { this._traceExpect(by); list.scrollTop += dir === 'up' ? -carry : carry; this._trace('wheelCarry', { dir, px: Math.round(carry), by, ...(less > 0 ? { less: Math.round(Math.min(less, held)) } : {}) }); }
     return carry;
   }
   /** A grow loop ended with carried px no pass had room for (history
@@ -3927,6 +3929,7 @@ class ChatView {
     const els = list.querySelectorAll(':scope > .chat-gap-msg');
     if (!els.length) return 0;
     if (zone) { const pos = this._cardPositions(els); if (pos[pos.length - 1].bottom > zone.top) { this._trace('gapDrop:skip', { why, n: els.length }); return 0; } }
+    this._stopGapSettle?.('gapDrop');   // 主开发 r2251: the slab's settle answers end with its rows
     for (const el of els) el.remove();
     const s = this._seekSentinel;
     if (s) { s._gapCursor = null; s._gapAnchor = null; s._gapRetryAt = 0; s._gapEpoch = (s._gapEpoch || 0) + 1; }
@@ -8580,6 +8583,7 @@ class ChatView {
     try { this.app?._reconnectQueue?.cancel(this); } catch { } // a disposed view never takes its reconnect slot (perf ⑤b)
     try { this._cvReleaseIO?.disconnect(); } catch { }
     try { this._cvSlabIO?.disconnect(); } catch { }
+    try { this._stopGapSettle?.('disposed'); } catch { }   // 主开发 r2251: no observer outlives the view
     // B-360d (A) r1374: a HISTORY window (its id `view-…`) tells the server it is gone, so its tail's hold ends with it
     try { const vid = this._viewHoldId || (String(this.sessionId || '').startsWith('view-') ? this.sessionId : null); if (vid) this.ws?.send?.({ type: 'view-close', sessionId: vid }); } catch { }
     LIVE_CHAT_VIEWS.delete(this);
