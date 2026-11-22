@@ -1422,6 +1422,19 @@ console.log('\n§2j a suite reads no history master does not have');
       }
       return memo.get(sha);
     };
+    // ONE ASK FOR ALL THE READS' COMMITS (B-54a9, 主开发 r2572 (1)): their shas peeled to commits by ONE cat-file batch (the same
+    // «<sha>^{commit}» each rev-parse --verify resolved) and judged against ONE walk of HEAD's history (a commit is an ancestor of HEAD,
+    // or HEAD itself, exactly when rev-list HEAD lists it, as merge-base --is-ancestor answers). Each verdict is the one the road above
+    // gave, and a sha that does not peel to a commit (missing, ambiguous, a blob or a tree) keeps that road, one by one.
+    {
+      const shas = [...new Set(reads.map((r) => r.sha))];
+      const peel = spawnSync('git', ['-C', REPO, 'cat-file', '--batch-check=%(objectname) %(objecttype)'], { input: shas.map((x) => x + '^{commit}').join('\n') + '\n', encoding: 'utf8', env: GIT_ENV });
+      const walked = spawnSync('git', ['-C', REPO, 'rev-list', 'HEAD'], { encoding: 'utf8', env: GIT_ENV, maxBuffer: 1 << 28 });
+      if (peel.status === 0 && walked.status === 0) {
+        const onHead = new Set(walked.stdout.split('\n').filter(Boolean)), out = peel.stdout.split('\n');
+        shas.forEach((x, i) => { const m = /^([0-9a-f]{40}) commit$/.exec(out[i] || ''); if (m) memo.set(x, onHead.has(m[1]) ? 'on' : 'off'); });
+      }
+    }
     ok(verdictOf(git(REPO, ['rev-parse', 'HEAD'])) === 'on' && verdictOf('0'.repeat(40)) === 'off', 'the oracle: HEAD is on master; an absent object is off master (a full clone holds every ancestor)');
     const blob = git(REPO, ['rev-parse', 'HEAD:package.json']), tree = git(REPO, ['rev-parse', 'HEAD:scripts/lib']);
     ok(verdictOf(blob) === 'on' && verdictOf(tree) === 'on', `B-1388: a blob (HEAD:package.json ${blob.slice(0, 9)}) and a tree (HEAD:scripts/lib ${tree.slice(0, 9)}) master's history holds are ON master — never the false «off-master» of a commit-only oracle`);
