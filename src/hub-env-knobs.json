@@ -1,6 +1,7 @@
 {
  "_": "B-ba47 shape H (主开发 r1222 (a)): the hub's OWN env knobs, DERIVED from what server.js and src/ read (scripts/hub-home-census.mjs hubEnvReads; the device agent's src/agentd/ aside). test-architecture §113 (h) holds this file EQUAL to that reading both ways. knobs: carried by a re-homed hub by shape; credentials and refused: never carried (named NOTs).",
  "knobs": [
+  "AGENT_BROWSER_CONFIG",
   "ANTIGRAVITY_CMD",
   "AT_SPI_BUS_ADDRESS",
   "BROWSER",
@@ -77,6 +78,7 @@
   "VIBESPACE_RUNTIME_SWITCH",
   "VIBESPACE_SAFEFS_POOL",
   "VIBESPACE_SAFEFS_TEST",
+  "VIBESPACE_START_FD",
   "VIBESPACE_STOP_GRACE_S",
   "VIBESPACE_STORE_TIMING",
   "VIBESPACE_SUPERVISED",

@@ -235,6 +235,7 @@ const HUB_NOT = Object.freeze([
   ...ENV_NOT.filter((x) => !HUB_OWN.some((o) => o.name === x.name)),
   ...[...CE.CONVERSATION_ENV, ...CE.CONVERSATION_TELEMETRY_ENV, ...CE.CONVERSATION_ACCOUNT_ENV, ...CE.CONVERSATION_HUB_ENV].filter((n) => !CONVERSATION_MARKS.includes(n) && !ENV_NOT.some((x) => x.name === n))
     .map(N("the CALLER's conversation (src/conversation-env.js): its route, its credential, its account's sign-in, its telemetry receiver or its hub's own family — a hub started from inside a conversation is not that conversation", 'a conversation name')),
+  N("the CALLER's computed mark (src/conversation-env.js HANDED_MARK): the names a conversation's own child was handed — a hub started from inside a conversation is not that child", 'a conversation mark')(CE.HANDED_MARK),
   ...CE.CONVERSATION_ENV_FAMILIES.map((prefix) => Object.freeze({ prefix, why: "a conversation family (src/conversation-env.js CONVERSATION_ENV_FAMILIES): the caller's harness names and its browser", tag: 'a conversation family' })),
   ...HUB_KNOBS.credentials.map((c) => Object.freeze({ name: c.name, why: c.why, tag: "a credential of the person's own hub" })),
   ...(HUB_KNOBS.refused || []).map((c) => Object.freeze({ name: c.name, why: c.why, tag: 'a root act over the person\'s home' })),

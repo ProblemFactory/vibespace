@@ -74,7 +74,7 @@ const TR = require(${JSON.stringify(path.join(REPO, 'src/server/throwaway-root.j
 const home = require('os').homedir();
 const pm = require(${JSON.stringify(path.join(REPO, 'src/peer-messaging.js'))}).REGISTRY_DIR;   // a home CAPTURED WHEN A MODULE LOADS, loaded after line 1 (§113 (i))
 const kid = require('child_process').spawnSync(process.execPath, ['-e', 'process.stdout.write(require("os").homedir())'], { encoding: 'utf8' }).stdout;
-setImmediate(() => console.log(JSON.stringify({ rec, home, pm, view: TR.view(), kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED', 'SSL_CERT_FILE'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
+setImmediate(() => console.log(JSON.stringify({ rec, home, pm, view: TR.view(), kid, env: Object.fromEntries(['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'SSH_AUTH_SOCK', 'PATH', 'LANG', 'PORT', 'NO_AUTO_UPDATE', 'VIBESPACE_SKIP_AGENT_HOOKS', 'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'CLAUDE_WEBUI_PORT', 'VIBESPACE_PASSWORD', 'VIBESPACE_APP_SYSTEM', 'HUBGUARD_PLANTED', 'SSL_CERT_FILE', 'VIBESPACE_START_FD'].map((k) => [k, process.env[k] ?? null])), lines, verdict: TR.boot(), throwaway: TR.throwaway(process.argv[2]) })));
 `);
 const NODE_BIN = path.dirname(process.execPath);
 const SYS = createRequire(import.meta.url)('../src/home-verdict.js').SYSTEM_PATHS[process.platform === 'darwin' ? 'darwin' : 'linux'].join(':');
@@ -89,7 +89,7 @@ const uline = (j) => (j.lines || []).find((l) => l.startsWith('[throwaway] hande
 // a conversation's names and family, an agent CLI's folder, the person's ssh agent, a credential of the person's own hub
 const STAND_IN = Object.freeze({ HOME: POISON, LANG: 'C.UTF-8', TZ: 'UTC', PORT: '39999', NO_AUTO_UPDATE: '1', VS_NO_REAL_CLI: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1',
   CLAUDE_CONFIG_DIR: `${POISON}/.claude-${SECRETISH}`, SSH_AUTH_SOCK: '/tmp/ssh-x/agent', VIBESPACE_API: 'http://127.0.0.1:1', VIBESPACE_SESSION_TOKEN: `tok-${SECRETISH}`,
-  CLAUDE_WEBUI_PORT: '1', VIBESPACE_PASSWORD: `pw-${SECRETISH}`, VIBESPACE_APP_SYSTEM: '1' });
+  CLAUDE_WEBUI_PORT: '1', VIBESPACE_PASSWORD: `pw-${SECRETISH}`, VIBESPACE_APP_SYSTEM: '1', VIBESPACE_START_FD: '9' });
 const NOT_CARRIED = ['CLAUDE_CONFIG_DIR', 'CLAUDE_WEBUI_PORT', 'SSH_AUTH_SOCK', 'VIBESPACE_API', 'VIBESPACE_APP_SYSTEM', 'VIBESPACE_PASSWORD', 'VIBESPACE_SESSION_TOKEN'];
 { // (a) a linked worktree, handed a home outside every temp root
   const root = mkWorktree('wt-a');
@@ -97,7 +97,7 @@ const NOT_CARRIED = ['CLAUDE_CONFIG_DIR', 'CLAUDE_WEBUI_PORT', 'SSH_AUTH_SOCK', 
   const own = path.join(root, '.home');
   ok(j.verdict && j.verdict.rehome === true && j.verdict.why === 'throwaway' && j.verdict.sign === 'worktree' && j.throwaway === true && j.home === own && j.env.HOME === own, '(a) a LINKED WORKTREE handed a home outside every temp root is re-homed to <root>/.home — and throwaway for every gate', j.verdict || j);
   ok(j.env && j.env.XDG_CONFIG_HOME === null && NOT_CARRIED.every((k) => j.env[k] === null) && j.env.PATH === `${own}/.vs-bin:${SYS}`
-    && j.env.LANG === 'C.UTF-8' && j.env.PORT === '39999' && j.env.NO_AUTO_UPDATE === '1' && j.env.VIBESPACE_SKIP_AGENT_HOOKS === '1',
+    && j.env.LANG === 'C.UTF-8' && j.env.PORT === '39999' && j.env.NO_AUTO_UPDATE === '1' && j.env.VIBESPACE_SKIP_AGENT_HOOKS === '1' && j.env.VIBESPACE_START_FD === '9',
     "(a) the env is BUILT from the hub's rows: its port, the locale and the kit's switches carried (the hub's own knobs, derived); the caller's conversation names and family, the agent CLI's folder, the person's ssh agent, the person's own hub password and the app system's switch (its acts run as root over the person's home) NOT carried; the XDG base dirs unset; PATH its own .vs-bin + the system's fixed directories, nothing of the handed PATH", j.env);
   ok(fs.existsSync(own) && (fs.statSync(own).mode & 0o777) === 0o700 && j.kid === own, '(a) the own home is made 0700, and a child the hub starts inherits it', j.kid);
   const vw = j.view || {}, vwText = JSON.stringify(vw);

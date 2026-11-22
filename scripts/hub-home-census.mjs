@@ -526,6 +526,9 @@ export function envCensus(repo, HV) {
 // neither a row nor a NOT, and scripts/test-throwaway-boot.mjs holds that line EMPTY on a stand-in start.
 const ENV_DOT_READ = /\benv\.([A-Z][A-Z0-9_]{2,})\b(?!\s*=[^=])/g;
 const ENV_CONST = /\b[A-Z][A-Z0-9_]*_ENV\s*[:=]\s*['"]([A-Z][A-Z0-9_]{2,})['"]/g;
+// a name read through a KEY constant: `const START_WORD = 'N'` and a READ `env[START_WORD]` in the same file (the separation's start
+// word, src/start-pipe.js / src/node-runtime.js — missed until the moved shape H's gate: test-hub-port ⑪ saw the re-home drop it)
+const KEY_CONST = /\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*['"]([A-Z][A-Z0-9_]{2,})['"]/g;
 export function hubEnvReads(repo) {
   const files = execFileSync('git', ['-C', repo, 'ls-files', '-z', '--', 'server.js', 'src'], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\0')
     .filter((f) => /\.(?:m?js|cjs)$/.test(f) && !f.startsWith('src/agentd/'));
@@ -542,6 +545,12 @@ export function hubReadsOfText(t) {
   const dr = dataRanges(t).filter((r) => r[2] !== 'regex'), inData = (i) => dr.some(([a, b]) => i >= a && i < b);
   for (const m of t.matchAll(ENV_DOT_READ)) if (!inData(m.index) && !/delete\s+$/.test(t.slice(Math.max(0, m.index - 8), m.index))) names.add(m[1]);
   for (const m of t.matchAll(ENV_CONST)) if (!inData(m.index)) names.add(m[1]);   // a name read through a constant: `const OVERRIDE_ENV = 'N'` / `OVERRIDE_ENV: 'N'`
+  for (const m of t.matchAll(KEY_CONST)) {
+    if (inData(m.index)) continue;
+    const use = new RegExp(`\\benv\\s*\\[\\s*${m[1]}\\s*\\]`, 'g');
+    for (const u of t.matchAll(use)) { const after = t.slice(u.index + u[0].length, u.index + u[0].length + 4), before = t.slice(Math.max(0, u.index - 8), u.index);
+      if (!inData(u.index) && !/^\s*=(?!=)/.test(after) && !/delete\s+$/.test(before)) { names.add(m[2]); break; } }   // a READ (never a write or a delete)
+  }
   return names;
 }
 /** PURE: the names of `reads` the hub's rows leave UNRULED (neither a HUB_ROWS row nor a HUB_NOT), and the knob-file names no

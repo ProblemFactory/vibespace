@@ -8606,9 +8606,10 @@ await section(async () => {
   const hubReads = hubEnvReads(REPO), hubC = hubKnobCensus(hubReads, HVh);
   const ctlRuled = hubKnobCensus(new Map([['HUBCTL_UNRULED_X', ['src/x.js']], ...hubReads]), HVh);
   const k0 = HVh.HUB_KNOBS.knobs[0], ctlUnread = hubKnobCensus(new Map([...hubReads].filter(([n]) => n !== k0)), HVh);
-  const formsCtl = [...hubReadsOfText("const a = process.env.HC_A1; const b = env.HC_B2; const C3_ENV = 'HC_C3'; env.HC_D4 = '1'; const s = 'process.env.HC_E5'; delete env.HC_F6;")].sort().join();
+  const formsCtl = [...hubReadsOfText("const a = process.env.HC_A1; const b = env.HC_B2; const C3_ENV = 'HC_C3'; env.HC_D4 = '1'; const s = 'process.env.HC_E5'; delete env.HC_F6;"
+    + " const G7_WORD = 'HC_G7'; if (env[G7_WORD] !== undefined) go(); const H8_KEY = 'HC_H8'; env[H8_KEY] = 'v'; delete env[H8_KEY]; const I9_LABEL = 'HC_I9'; log(I9_LABEL);")].sort().join();
   ok(hubC.unruled.length === 0 && hubC.unread.length === 0 && hubReads.size > 100 && HVh.HUB_KNOBS.knobs.length > 50 && ctlRuled.unruled.join() === 'HUBCTL_UNRULED_X' && ctlUnread.unread.join() === k0
-    && formsCtl === 'HC_A1,HC_B2,HC_C3',
+    && formsCtl === 'HC_A1,HC_B2,HC_C3,HC_G7',
     `§113 (h) THE HUB'S OWN KNOBS: ${hubReads.size} env names the hub's code reads — each a hub row (${HVh.HUB_KNOBS.knobs.length} derived knobs of src/hub-env-knobs.json) or a hub NOT (${HVh.HUB_KNOBS.credentials.length} credentials of the person's own hub; the conversation's names and families), and every knob read — CONTROLS: a planted unruled read is red by name, a knob no code reads is red, the reader takes process.env / env.N / a *_ENV constant and never an assignment, a string or a delete`,
     { unruled: hubC.unruled, unread: hubC.unread, formsCtl });
   // (i) THE LINE-1 CENSUS (B-ba47 shape H, the plan's PROOFS-9): server.js's FIRST line is the runtime boot (the re-home is its first
