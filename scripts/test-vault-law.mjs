@@ -655,14 +655,20 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     }
     for (const f of frames) { const h = hitsOf(f); if (h.length) leaks.push(`a broadcast frame ⇒ ${h.join(', ')}`); }
     const cliVerbs = verbs || useCensus(new Map([['data/bin/vibespace-vault', fs.readFileSync(cli, 'utf8')]])).verbs;
-    for (const v of [...cliVerbs, '']) {
-      if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
-      const r = await runCli(cli, v ? [v] : [], port, TOK.dial);
+    const heard = (v, r) => {
       seen.calls++;
       bodies.push([`vibespace-vault ${v || '(no verb)'}`, r.out]);
       const h = hitsOf(r.out);
       if (h.length) leaks.push(`vibespace-vault ${v || '(no verb)'} ⇒ ${h.join(', ')}`);
-    }
+    };
+    const oneByOne = async (vs) => { for (const v of vs) { if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {}); heard(v, await runCli(cli, v ? [v] : [], port, TOK.dial)); } };
+    // B-7e49 (the fast tier's time): the verbs' children start AT ONCE, each over an UNLOCKED vault as one by one — the verb that
+    // locks it (`lock`) runs after them, alone; a batch the vault was locked in anyway is thrown away and run again one by one
+    const all = [...cliVerbs, ''], together = all.filter((v) => v !== 'lock');
+    if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
+    const batch = await Promise.all(together.map((v) => runCli(cli, v ? [v] : [], port, TOK.dial)));
+    if (eng8.state() === 'unlocked') together.forEach((v, i) => heard(v, batch[i])); else await oneByOne(together);
+    await oneByOne(all.filter((v) => v === 'lock'));
     // a door that MADE a value during the sweep (a mint, when it lands) — its value is in no answer either
     if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
     const made = eng8.secretNames().filter((x) => /^agent:/.test(x.name)).map((x) => [x.name, eng8.secretGet(x.name).value]).filter(([, b]) => b && b.length >= 12);
@@ -806,7 +812,9 @@ console.log('⑩ THE AGY LOGIN FILE (lane agy-subagent-cards): the subagent read
   const CANARY = 'TOKEN-CANARY-' + crypto.randomBytes(6).toString('hex');
   // ONE object that parses as a subagent row, a message row AND a transcript step — whichever read follows a link shows it
   const bait = JSON.stringify({ conversationId: S, subagentDescriptor: { typeName: 'self', role: CANARY }, state: 'SUBAGENT_STATE_ALIVE', id: M1, recipient: S, sender: P, timestamp: '2026-10-21T14:32:32Z', content: CANARY, renderDetails: { messageTitle: CANARY }, sourceMetadata: { tool: { conversationId: P, stepIndex: 6, toolCall: { name: 'invoke_subagent', argumentsJson: '{}' } } }, step_index: 0, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-10-21T14:32:33Z' }) + '\n';
-  const run = async (tag, wrapper) => {
+  // B-7e49 (the fast tier's time): `enough(all)` — the claim's evidence is in, stop waiting (the RED run's tail never goes off: it
+  // waited out its 12 s cap); after the SIGTERM the wait ends at the child's close, bounded by the same 300 ms
+  const run = async (tag, wrapper, enough = null) => {
     const home = path.join(ROOT10, tag), store = path.join(home, '.gemini', 'antigravity-cli'), tok = path.join(store, AS.TOKEN_FILE);
     for (const d of [`brain/${P}/${SG}/subagents`, `brain/${S}/${SG}/messages`, `brain/${S}/${SG}/logs`]) fs.mkdirSync(path.join(store, d), { recursive: true });
     fs.writeFileSync(tok, bait, { mode: 0o600 });
@@ -818,17 +826,26 @@ console.log('⑩ THE AGY LOGIN FILE (lane agy-subagent-cards): the subagent read
     let out = '';
     child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
     const logOf = () => { try { return fs.readFileSync(path.join(dir, 'agy-wrapper.log'), 'utf8'); } catch { return ''; } };
+    const bufOf = () => { try { return fs.readFileSync(path.join(dir, 's.buf'), 'utf8'); } catch { return ''; } };
+    let closed = false; child.on('close', () => { closed = true; });
     const t0 = Date.now();
     while (!/"kind":"session"/.test(out) && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 30));
     child.stdin.write(JSON.stringify({ type: 'chat-input', text: 'please start a subagent', msgId: 'v1' }) + '\n');
-    while (!/subagent tail off/.test(logOf()) && Date.now() - t0 < 12000) await new Promise((r) => setTimeout(r, 50));
+    while (!/subagent tail off/.test(logOf()) && !(enough && enough(out + bufOf() + logOf())) && Date.now() - t0 < 12000) await new Promise((r) => setTimeout(r, 50));
     await new Promise((r) => setTimeout(r, 300));
     child.kill('SIGTERM');
-    await new Promise((r) => setTimeout(r, 300));
+    for (const t1 = Date.now(); !closed && Date.now() - t1 < 300;) await new Promise((r) => setTimeout(r, 10));
     let buf = ''; try { buf = fs.readFileSync(path.join(dir, 's.buf'), 'utf8'); } catch { }
     return { all: out + buf + logOf(), log: logOf(), turned: /"kind":"prompt_end"/.test(out) };
   };
-  const real = await run('real', path.join(REPO, 'data/bin/agy-wrapper.js'));
+  // RED: the ONE gate (src/agy-store-fs.js) as a copy that follows links — the wrapper (unchanged) and the hub both leak. B-7e49: the
+  // copy is written FIRST and the two runs go at once — the real wrapper reads the repo's own gate, the copy only this root's src
+  const gate = read('src/agy-store-fs.js');
+  const cut1 = "      if (fs.realpathSync(abs) !== want) { log(`store ${why} refused (a link in the store): ${rel}`); return null; }\n", cut2 = ' | (fs.constants.O_NOFOLLOW || 0)';
+  fs.writeFileSync(path.join(ROOT10, 'src', 'agy-store-fs.js'), editAnchor(editAnchor(gate, cut1, '', "src/agy-store-fs.js"), cut2, '', "src/agy-store-fs.js", 'first'));
+  const mutated = path.join(ROOT10, 'data', 'bin', 'agy-wrapper.js');
+  fs.copyFileSync(path.join(REPO, 'data/bin/agy-wrapper.js'), mutated);
+  const [real, red] = await Promise.all([run('real', path.join(REPO, 'data/bin/agy-wrapper.js')), run('red', mutated, (all) => all.includes(CANARY))]);
   ok(real.turned && !real.all.includes(CANARY) && /refused \(a link in the store\)/.test(real.log) && /subagent tail off/.test(real.log),
     'END TO END: every file the tail opens is a link to the login file — the real wrapper says it refused the link, journals and logs NO byte of the canary, and its look ends', real.log.split('\n').filter((l) => /store|subagent/.test(l)).slice(0, 6));
   // the hub's reader of a sub that ALREADY RAN (src/agy-backfill.js, the cards' addendum) over the SAME store: no canary
@@ -837,13 +854,7 @@ console.log('⑩ THE AGY LOGIN FILE (lane agy-subagent-cards): the subagent read
   const snapOf = (sr) => JSON.stringify(AS.snapshotOf(sr, { parentId: P, toolCallId: `${P}:6`, step: 6 }));
   const hub = snapOf(storeReader(path.join(ROOT10, 'real'), { log: (l) => hubLog.push(l) }));
   ok(!hub.includes(CANARY) && hubLog.some((l) => /refused \(a link in the store\)/.test(l)), 'THE HUB\'S READER (a sub that already ran) over the same store: the SAME gate refuses the links — no byte of the canary in what it would draw', hubLog.slice(0, 3));
-  // RED: the ONE gate (src/agy-store-fs.js) as a copy that follows links — the wrapper (unchanged) and the hub both leak
-  const gate = read('src/agy-store-fs.js');
-  const cut1 = "      if (fs.realpathSync(abs) !== want) { log(`store ${why} refused (a link in the store): ${rel}`); return null; }\n", cut2 = ' | (fs.constants.O_NOFOLLOW || 0)';
-  fs.writeFileSync(path.join(ROOT10, 'src', 'agy-store-fs.js'), editAnchor(editAnchor(gate, cut1, '', "src/agy-store-fs.js"), cut2, '', "src/agy-store-fs.js", 'first'));
-  const mutated = path.join(ROOT10, 'data', 'bin', 'agy-wrapper.js');
-  fs.copyFileSync(path.join(REPO, 'data/bin/agy-wrapper.js'), mutated);
-  const red = await run('red', mutated);
+  // the RED run's verdicts (its run went beside the real one, above)
   ok(gate.includes(cut1) && gate.includes(cut2) && red.all.includes(CANARY), 'RED CONTROL: with the gate as a copy that follows links (no realpath check, no O_NOFOLLOW) the wrapper journals the canary — the leg above can go red', red.all.includes(CANARY) ? 'canary seen' : red.log.slice(-400));
   const redHub = snapOf(require(path.join(ROOT10, 'src', 'agy-store-fs.js')).storeReader(path.join(ROOT10, 'red')));
   ok(redHub.includes(CANARY), 'RED CONTROL: …and the hub\'s reader through that copy draws the canary — its leg can go red too', redHub.slice(0, 200));
