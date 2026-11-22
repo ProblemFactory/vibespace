@@ -1178,7 +1178,9 @@ function jobCardOf(item, { t = fmt } = {}) {
       ...(script ? [[{ mono: str(script.path) }], ...(script.unread === true ? [[{ text: t('Its file facts could not be read in time — counted as a script an agent can change.') }]] : script.writable === true ? [[{ text: t('An agent can change this script.') }]] : [])] : []),
       ...(f.held === true ? [[{ text: t('A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.') }]] : [])] },   // r1042 item 3: an earlier read holds the door's one slot
     { key: 'folder', lines: [[{ mono: str(f.folder) }]] },
-    { key: 'hosts', lines: [[{ text: t('unknown — VibeSpace cannot read where a program connects') }]] },
+    // stage L3's F12 (design §4 T6 — open, the owner accepted it ON CONDITION that the card says it): what the program writes to its
+    // own files, config, databases and caches is not protected
+    { key: 'hosts', lines: [[{ text: t('unknown — VibeSpace cannot read where a program connects') }], [{ text: t('What the program writes to its own files, config, databases and caches is not protected — an agent can read them.') }]] },
     { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }], [{ text: t("Taking it back — ✕ on a secret's Vault row, or on the job card for all of them — stops it at once.") }]] },
   ].map((r) => ({ key: r.key, label: t(JOB_LABEL[r.key]), lines: r.lines, warn: false, ...(r.strip ? { strip: r.strip } : {}) }));
   return { headline: who ? t('Background job «{name}» asks to use {secrets} — set up by {who}', { name: title, secrets: names, who }) : t('Background job «{name}» asks to use {secrets}', { name: title, secrets: names }), cmd: str(f.command), cut: null, again: null, rows, changes: null, always: { offered: false, hint: null }, fold: [] };

@@ -13450,7 +13450,10 @@ export default {
   "New on this card since it was first drawn: {secrets}": "このカードに最初の表示から加わったもの：{secrets}",
   "Already allowed for this job (they stand): {secrets}": "このジョブにすでに許可済み（有効のまま）：{secrets}",
   "The program reads each once from the descriptor its variable names ({vars}) — never from its environment, its command line or a file.": "プログラムはそれぞれの変数が示す記述子（{vars}）から一度ずつ読みます——環境変数・コマンドライン・ファイルからは決して読みません。",
-  "Where it sends the secrets: unknown — VibeSpace cannot read where a program connects.": "シークレットの送り先：不明——VibeSpace にはプログラムの接続先は読めません。",
+  "Where it sends the secrets: unknown — VibeSpace cannot read where a program connects. What the program writes to its own files, config, databases and caches is not protected.": "シークレットの送り先：不明——VibeSpace にはプログラムの接続先は読めません。プログラムが自分のファイル・設定・データベース・キャッシュに書くものは保護されません。",
+  // stage L3's F12 / F2 (主开发 r2570): what stays open, said on the card; the rotation sentence on the Vault row
+  "What the program writes to its own files, config, databases and caches is not protected — an agent can read them.": "プログラムが自分のファイル・設定・データベース・キャッシュに書くものは保護されません——agent はそれを読めます。",
+  "A running job keeps the old value until its next start — after you change this key, restart the job to hand it the new one.": "動いているジョブは次の起動まで古い値を使い続けます——このキーを変えたら、ジョブを再起動して新しい値を渡してください。",
   "Locking the vault stops nothing that runs (a new start waits for the unlock); taking it back — ✕ on a secret's Vault row, or on the job card for all of them — stops it at once. A value the program has read cannot be taken back — rotate the key at its provider to end it.": "保管庫をロックしても動いているものは止まりません（新しい起動はロック解除を待ちます）。取り消すと——シークレットの保管庫の行の ✕、またはジョブのカードの ✕ ですべてを取り消し——すぐに止まります。プログラムが読んだ値は取り戻せません——無効にするにはプロバイダでキーを変更してください。",
   "Background job «{name}» asks to use {secrets} — set up by {who}": "バックグラウンドジョブ「{name}」が {secrets} の使用を求めています——設定したのは {who}",
   "Background job «{name}» asks to use {secrets}": "バックグラウンドジョブ「{name}」が {secrets} の使用を求めています",

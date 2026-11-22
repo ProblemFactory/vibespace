@@ -996,6 +996,33 @@ async function legRestartRevoke() {
   B.release(); B.end();
   return rows;
 }
+// stage L3's word findings (主开发 r2570): every refusal and waiting sentence of the road names the vault (F4); the card says what the
+// program writes to its own files is not protected (F12 — design §4 T6, «卡上写»); the manual promises no more than the design (F5)
+// and says who else starts a job with its values (F8)
+async function legWords() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const ROAD = ['wait_vault', 'wait_approval', 'vault_denied', 'ask_quiet', 'too_many_asks', 'too_many_asks_hub', 'ask_unfiled', 'ask_closed', 'ask_changed', 'no_owner_conversation'];
+  const silent = ROAD.filter((c) => !/vault/i.test(String(VJ.WORDS[c] || '')));
+  row(silent.length === 0 && /vault/i.test(VJ.fullRowWords('k1')), 'F4 — every refusal and waiting sentence of the road names the vault (the asks\' caps, the unfiled card, the changed card, the full row)', silent);
+  const W = await world('words');
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({ name: 'words' }).job.id);
+  await W.door.factsLanded();
+  const it = cards(W).find((i) => i.action.jobId === job.id) || {};
+  const FA = R('src/foryou-actions.js');   // PURE, CJS (the card model a client draws)
+  const card = FA.runCardOf(it, { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x) });
+  const hosts = ((card && card.rows) || []).find((r) => r.key === 'hosts');
+  const said = (hosts && hosts.lines.map((l) => l.map((x) => x.text || '').join('')).join(' ')) || '';
+  row(/What the program writes to its own files, config, databases and caches is not protected/.test(said) && /What the program writes to its own files, config, databases and caches is not protected\./.test(String(it.detail)),
+    'F12 — the approval card SAYS what stays open (design §4 T6, the owner\'s condition): what the program writes to its own files, config, databases and caches is not protected — on the drawn card and in its prose', said);
+  W.end();
+  const manual = fs.readFileSync(path.join(REPO, 'docs/agent/vault-manual.md'), 'utf8');
+  const never = manual.split('\n').find((l) => l.includes('**Where it never is:**')) || '';
+  const part = manual.slice(manual.indexOf('## A Background Work job that needs a secret'), manual.indexOf('\n## ', manual.indexOf('## A Background Work job that needs a secret') + 4));
+  row(never !== '' && !never.includes('data/') && /a sieve, not a wall/.test(never) && /\*\*Who else can start it:\*\* a conversation that holds CONTROL of the job/.test(part) && /hands the approved values to the program/.test(part),
+    'F5 + F8 — the manual promises no more than the design (the job\'s log lives in the data folder, its masker a sieve) and says who else starts a job with its values (a conversation that holds control)', { never: never.slice(0, 160) });
+  return rows;
+}
 async function legSmalls() {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   // (1) a ✕ over an UNREADABLE grants store (its fail-closed row): the job still STOPS, the answer says so — nothing written
@@ -1076,7 +1103,10 @@ async function legChips() {
     const VJR = await import(pathToFileURL(path.join(REPO, 'src/lib/vault-job-row.js')).href);
     const r = { id: 'secrets:secret:k1#secret', jobs: [{ id: 'jb-0000aaaa', name: 'tg-bot', kind: 'service', state: 'running', starts: 3 }, { id: 'jb-0000bbbb', name: 'nightly', kind: 'cron', state: 'waiting-vault', starts: 0 }, { id: 'not-a-job', name: 'x', state: 'running' }] };
     const box = VJR.jobExtras(r, { refresh: noop }).box;
-    const chips = box.children, words = chips.map((c) => c.children[0].textContent), xs = chips.map((c) => c.children[1]);
+    const chips = box.children.filter((c) => /\bvw-job-chip\b/.test(c.className)), words = chips.map((c) => c.children[0].textContent), xs = chips.map((c) => c.children[1]);
+    const note = box.children.find((c) => /\bvw-job-note\b/.test(c.className));
+    row(!!note && note.textContent === 'A running job keeps the old value until its next start — after you change this key, restart the job to hand it the new one.' && box.children.length === chips.length + 1 && VJR.jobExtras({ id: 'secrets:secret:k2#secret', jobs: [] }, { refresh: noop }).box.children.length === 0,
+      'stage L3\'s F2 (design D8): the row of an approved job SAYS a running job keeps the old value until its next start — once, under its chips; a row with no job says nothing', note && note.textContent);
     row(chips.length === 2 && words[0] === 'Background job: tg-bot · running · started 3×' && words[1] === 'Background job: nightly · waiting for the unlock' && /vw-job-running/.test(chips[0].className) && /vw-job-waiting-vault/.test(chips[1].className),
       'one chip per approved job — «Background job: <name> · <state in words> · started N×» from the codes (an id that is no job id is never drawn)', words);
     row(xs.every((x) => x && x.tagName === 'button' && x.textContent === '✕' && x.type === 'button' && /the job stops now/.test(x.title) && x.attrs['aria-label'] === x.title && typeof x.onclick === 'function'), 'every chip carries its ✕ (a real button, its title and label say the job stops now)', xs.map((x) => x && x.title));
@@ -1378,9 +1408,9 @@ const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'fun
 const MUT_NOSLOT = dmut('    if (lateHere || !(await take())) throw LATE;', '    if (lateHere) throw LATE;');
 const MUT_VALUEPROG = dmut('function pastWrapper(argv, i) {\n', "function pastWrapper(argv, i) {\n  if (argv[i + 1] === '-s') return i + 2;\n");
 const [oneSlot, oneSlotMut, heldSaid, wrapMut] = await Promise.all([legOneSlot(), MUT_NOSLOT ? legOneSlot(MUT_NOSLOT) : null, legHeldSaid(), MUT_VALUEPROG ? legWrapperSkip(MUT_VALUEPROG) : null]);
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
-  legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {}]);
+  legWords(), legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1402,6 +1432,7 @@ print('⑨ THE APPROVAL CARD (lane vault-job-approval — one card per job × en
 print('⑨d ONE CARD A JOB (stage L3\'s F1, 主开发 r2528) — its entries named, one Allow and one Deny cover them, all or nothing, what stands said, the same card drawn again, the job card\'s ✕ takes back all', [...oneCard, ...oneDeny, ...redraw, ...standing, ...fullRow, ...takeAll]);
 ok(!!MUT_HALF && !!fullHalfMut.half && fullHalfMut.half.tok === 1, 'CONTROL — the half-written press NOT taken back (the door\'s rollback cut): the first row stays written while the press is refused — RED on the copy', MUT_HALF ? fullHalfMut.half : 'the copy could not be built (its anchor is missing)');
 print('⑨e THE WAIT\'S AUDIT LINE (stage L3\'s F3)', waitLine);
+print('⑨f THE ROAD\'S WORDS (stage L3\'s F4, F12, F5, F8 — 主开发 r2570)', words);
 ok(!!MUT_NOWAIT && noWaitMut.first === 0, 'CONTROL — the door that writes no wait line: a start waiting for the locked vault leaves NO line — RED on the copy', MUT_NOWAIT ? { first: noWaitMut.first } : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_EVERYWAIT && everyWaitMut.first > 1, 'CONTROL — a wait line at every judge (the engine\'s «again» cut): the re-judges while it waits write one each — RED on the copy', MUT_EVERYWAIT ? { first: everyWaitMut.first } : 'the copy could not be built (its anchor is missing)');
 print('⑨c THE ADVERSARIAL READ\'S CURES — a cron\'s card, a Deny after a locked boot, the cap counts jobs, one card a job, an own value, a deleted entry', [...cronCard, ...denyWait, ...capJobs, ...ownGone]);

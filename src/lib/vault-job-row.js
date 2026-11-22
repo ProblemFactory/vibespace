@@ -39,5 +39,8 @@ export function jobExtras(row, { refresh } = {}) {
     chip.append(x);
     box.append(chip);
   }
+  // stage L3's F2 (design D8: the rotation debt said on the row): a running job holds the value it was handed — a changed key reaches
+  // it only at its next start
+  if (box.children.length) box.append(el('div', 'vw-job-note', t('A running job keeps the old value until its next start — after you change this key, restart the job to hand it the new one.')));
   return { box };
 }

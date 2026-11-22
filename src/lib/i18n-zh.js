@@ -13451,7 +13451,10 @@ export default {
   "New on this card since it was first drawn: {secrets}": "这张卡最初显示后新增的：{secrets}",
   "Already allowed for this job (they stand): {secrets}": "已为这个后台任务允许过（仍然有效）：{secrets}",
   "The program reads each once from the descriptor its variable names ({vars}) — never from its environment, its command line or a file.": "程序从各自变量指名的描述符（{vars}）里各读一次——绝不从环境变量、命令行或文件里读。",
-  "Where it sends the secrets: unknown — VibeSpace cannot read where a program connects.": "密钥发往哪里：未知——VibeSpace 读不出一个程序会连到哪里。",
+  "Where it sends the secrets: unknown — VibeSpace cannot read where a program connects. What the program writes to its own files, config, databases and caches is not protected.": "密钥发往哪里：未知——VibeSpace 读不出一个程序会连到哪里。程序写进它自己的文件、配置、数据库和缓存里的东西不受保护。",
+  // stage L3's F12 / F2 (主开发 r2570): what stays open, said on the card; the rotation sentence on the Vault row
+  "What the program writes to its own files, config, databases and caches is not protected — an agent can read them.": "程序写进它自己的文件、配置、数据库和缓存里的东西不受保护——agent 能读到它们。",
+  "A running job keeps the old value until its next start — after you change this key, restart the job to hand it the new one.": "正在运行的后台任务在下次启动前一直用旧的值——换了这个密钥之后，重启任务才会把新值交给它。",
   "Locking the vault stops nothing that runs (a new start waits for the unlock); taking it back — ✕ on a secret's Vault row, or on the job card for all of them — stops it at once. A value the program has read cannot be taken back — rotate the key at its provider to end it.": "锁上保险库不会停掉正在运行的东西（新的启动会等解锁）；收回授权——在某个密钥的保险库那一行点 ✕，或在后台任务卡片上点 ✕ 收回全部——会立刻停掉它。程序已经读到的值收不回——要彻底作废，请到服务商那里换 key。",
   "Background job «{name}» asks to use {secrets} — set up by {who}": "后台任务「{name}」请求使用 {secrets}——由 {who} 设置",
   "Background job «{name}» asks to use {secrets}": "后台任务「{name}」请求使用 {secrets}",

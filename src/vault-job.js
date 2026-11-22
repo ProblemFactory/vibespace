@@ -84,13 +84,13 @@ const WORDS = Object.freeze({
   wait_approval: 'waiting for the user\'s approval of this job\'s vault values (a key the user stored, or a value the hub minted) — at its start ONE card naming its entries asks the user in their For-you tray (a schedule: at its first fire); the job starts by itself once they allow it, and is refused if they deny it; a value this conversation PUT itself needs no approval (vibespace-vault put <name> --stdin, then --vault NAME=vault://agent:<this conversation>/<name>)',
   vault_denied: 'the user denied this job the use of its vault entries — it was not started; `vibespace-job start` asks again (not within 10 minutes of the denial)',
   ask_quiet: 'the user denied this conversation that vault entry less than 10 minutes ago — the job was not started; start it again later to ask again',
-  too_many_asks: `this conversation already has ${ASKS_PER_CONV} Background Work jobs waiting for the user's approval — the job was not started; wait for an answer (or rm a waiting job), then start it again`,
-  too_many_asks_hub: `${ASKS_MAX} Background Work jobs on this instance are waiting for the user's approval — the job was not started; start it again later`,
+  too_many_asks: `this conversation already has ${ASKS_PER_CONV} Background Work jobs waiting for the user's approval of their vault values — the job was not started; wait for an answer (or rm a waiting job), then start it again`,   // stage L3's F4: every refusal of the road names the vault
+  too_many_asks_hub: `${ASKS_MAX} Background Work jobs on this instance are waiting for the user's approval of their vault values — the job was not started; start it again later`,
   no_owner_conversation: 'a job with no owner conversation cannot be approved to use a vault value (an approval names its conversation) — the job was not started; create it from a conversation',
-  ask_unfiled: 'the approval card could not be filed in the user\'s For-you tray — the job was not started',
-  ask_closed: 'the approval card was closed without an answer — the job was not started; `vibespace-job start` asks again',
+  ask_unfiled: 'the approval card for the job\'s vault values could not be filed in the user\'s For-you tray — the job was not started',
+  ask_closed: 'the approval card for the job\'s vault values was closed without an answer — the job was not started; `vibespace-job start` asks again',
   // stage L3's F1 (主开发 r2528): the person's press — refused by name, never a greyed button; the recipe in the same sentence
-  ask_changed: 'the card changed since it was drawn (another of the job\'s secrets now waits too) — nothing was written; read the card again and answer it',
+  ask_changed: 'the approval card changed since it was drawn (another of the job\'s vault secrets now waits too) — nothing was written; read the card again and answer it',
 });
 /** stage L3's F1 (b): an Allow that a full row refuses — the entry named and what to do, in one sentence (the recipe, not only the
  *  refusal) */
@@ -300,7 +300,7 @@ function askCardOf({ who = '', job = {}, entries = [], standing = [], program = 
     ...(f.held ? [{ key: i18nKey('A file read for an earlier card did not reply; until it does or the hub restarts, every card says its file facts could not be read.') }] : []),   // 主开发 r1042 item 3: said to the person — it lasts until that read replies or the hub restarts
     { key: i18nKey('Folder: {folder}'), params: { folder: f.folder } },
     { key: i18nKey('Command: {command}'), params: { command: f.command } },
-    { key: i18nKey('Where it sends the secrets: unknown — VibeSpace cannot read where a program connects.') },
+    { key: i18nKey('Where it sends the secrets: unknown — VibeSpace cannot read where a program connects. What the program writes to its own files, config, databases and caches is not protected.') },   // stage L3's F12 (design §4 T6: open, accepted by the owner — «卡上写»)
     { key: i18nKey("Locking the vault stops nothing that runs (a new start waits for the unlock); taking it back — ✕ on a secret's Vault row, or on the job card for all of them — stops it at once. A value the program has read cannot be taken back — rotate the key at its provider to end it.") },
   ];
   // the job's own name first; an unknown asker has its own key (never an English «a conversation» param inside a translated sentence)
