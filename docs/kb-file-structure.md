@@ -12,6 +12,7 @@ scripts/fixtures/channel-store-heap-child.cjs (NEW — B-360d r2542) — test-ch
 src/server/subagent-transcript.js (NEW — 主开发 r2374) — a finished agent's transcript found (kept place, cwd's folder first, async walk) and read by the transcript pool's pages, whole, one read at a time; the sub-agent attach + GET /api/subagent-messages; a pool refusal said ⇒ kb-file-structure
 scripts/test-subagent-transcript.mjs (NEW, fast) — the sub-agent viewer's attach and route off the loop: zero sync listings / whole reads counted, the place kept, ten windows at once, the pool refusing, 37 MB whole; a red copy each
 scripts/test-channels-agent-cli-verbs.mjs (NEW, heavy — B-7e49) — test-channels-agent-cli's legs that run the shipped CLI as a child moved verbatim with the stub: the verbs, the attachment verb, ⑳–㉔; the table (CLI presence, refused-set census) stays fast + a pin
+scripts/test-app-system-chain-helper.mjs (NEW, heavy — B-7e49) — test-app-system-chain's legs that wait on real children moved verbatim: §2 the helper's refusals, §3 a patched helper per rule, §4 the real keeper (stay probes, killed sleepers); §1 (the chain's law) and §5 stay fast + a pin
 
 ```
 src/signin-witness.js (NEW — B-dc3f (1)) — a data folder that is not the one at the start is HELD: its own id inside it (data/instance.json), a witness outside it (the CLI index's persistent place); verdictOf (PURE), placeOf, startFactsSync, the one writer; the opt-in VIBESPACE_SIGNIN=required ⇒

@@ -11,6 +11,8 @@
 //   §1 THE ARGV TABLE (the spec): user mode / --root / --root --next — unshare's argv, every mount in order, chroot's argv
 //      with the env allowlist, the app's own environment; the session token, a loader knob and BASH_ENV never cross; ONE
 //      pid from the spawn to the app; the passwd / group upsert inside the userland
+//   §2–§4 MOVED to the heavy twin scripts/test-app-system-chain-helper.mjs (B-7e49): each waits on real children;
+//      their text kept here for the reader:
 //   §2 REFUSALS before any namespace op (exit 111, by name, nothing recorded) + stage 2 called directly (no private ns)
 //   §3 CONTROLS — a patched helper per rule (scratch copies), each caught by the table
 //   §4 THE KEEPER: a sys row's shim (S.shimText) launched by the REAL keeper (desktop-serve, setsid) over a fake sudo that
@@ -20,6 +22,7 @@
 //      the boot step's children run off the loop — with two 400 ms sudo children and a 300-entry app system the largest
 //      loop gap stays under half of a CONTROL's (the same boot waiting for its sudo child synchronously: the hold the law
 //      forbids; no literal wall-clock bound — scripts/wall-clock-census.mjs); "helper + sudoers installed" before "boot:"
+//   §T the twin holds §1–§4 (a pin)
 // Run: node scripts/test-app-system-chain.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -175,131 +178,6 @@ await leg('§1', async () => {
   ok(rn.code === 0 && same(cn.find((c) => c.name === 'unshare').argv.slice(4, 8), [HELPER, '--stage2', '--root', '--next']) && chn && chn.argv[0] === wn.R + '.next' && same(chn.argv.slice(-4), ['apt-get', 'install', '-y', 'hello']), '--root --next: the Rebase target rootfs.next, the same fixed environment', cn.map((c) => c.argv));
 });
 
-await leg('§2', async () => {
-  console.log('§2 REFUSALS — exit 111 by name, before any namespace op');
-  const cases = [
-    ['no SUDO_UID', {}, (e) => { delete e.SUDO_UID; return e; }, ['--', PROBE], /no SUDO_UID/],
-    ['SUDO_UID 0', {}, (e) => ({ ...e, SUDO_UID: '0' }), ['--', PROBE], /SUDO_UID is 0/],
-    ['a uid with no passwd entry', {}, (e) => ({ ...e, SUDO_UID: '4242' }), ['--', PROBE], /has no passwd entry/],
-    ['a relative --cwd', {}, (e) => e, ['--cwd', 'proj', '--', PROBE], /--cwd must be an absolute path/],
-    ['--next without --root', {}, (e) => e, ['--next', '--', PROBE], /--next is for --root only/],
-    ['--root running a shell', {}, (e) => e, ['--root', '--', 'sh', '-c', 'id'], /--root runs apt-get/],
-    ['--root with --cwd', {}, (e) => e, ['--root', '--cwd', '/tmp', '--', 'dpkg', '--audit'], /--cwd is for the user mode only/],
-    ['no command', {}, (e) => e, ['--'], /no command/],
-    ['an unknown option', {}, (e) => e, ['--privileged', '--', PROBE], /unknown option --privileged/],
-    ['another helper contract', { contract: S.HELPER_CONTRACT + 1 }, (e) => e, ['--', PROBE], /identity of another helper contract/],
-    ['another architecture', { arch: 'arm64' }, (e) => e, ['--', PROBE], /architecture mismatch/],
-  ];
-  const got = [];
-  for (const [what, wo, envEdit, args, re] of cases) {
-    const wd = world(wo);
-    if (what === 'another architecture') fs.writeFileSync(path.join(wd.w, 'arch'), 'amd64\n'); // the machine stays amd64; the identity says arm64
-    const r = await run(HELPER, wd, args, envEdit(callerEnv(wd)));
-    const cs = calls(wd);
-    got.push({ what, ok: r.code === 111 && re.test(r.stderr) && !cs.some((c) => c.name === 'unshare' || c.name === 'mount' || c.name === 'chroot'), code: r.code, stderr: r.stderr.trim().slice(0, 160), calls: cs.map((c) => c.name) });
-  }
-  ok(got.every((g) => g.ok), `${got.length} refusals by name, nothing unshared / mounted / chrooted first: ${got.map((g) => g.what).join(' · ')}`, got.filter((g) => !g.ok));
-  // the userland itself not what root expects
-  const shapes = [
-    ['etc is a symlink', (wd) => { fs.renameSync(path.join(wd.R, 'etc'), path.join(wd.R, 'etc-real')); fs.symlinkSync('etc-real', path.join(wd.R, 'etc')); }, /a symlink inside the app system/],
-    ['etc writable by the group', (wd) => fs.chmodSync(path.join(wd.R, 'etc'), 0o775), /not root's directory inside the app system/],
-    ['the rootfs world-writable', (wd) => fs.chmodSync(wd.R, 0o757), /world-writable/],
-    ['the rootfs reached through a link', (wd) => { fs.renameSync(wd.R, wd.R + '-real'); fs.symlinkSync(wd.R + '-real', wd.R); }, /not canonical/],
-    ['no identity file', (wd) => fs.rmSync(path.join(wd.R, 'etc', 'vibespace-sysroot.json')), /no root-owned identity file/],
-    ['the identity is a link', (wd) => { const f = path.join(wd.R, 'etc', 'vibespace-sysroot.json'); fs.renameSync(f, f + '.real'); fs.symlinkSync(f + '.real', f); }, /no root-owned identity file/],
-  ];
-  const got2 = [];
-  for (const [what, edit, re] of shapes) {
-    const wd = world(); edit(wd);
-    const r = await run(HELPER, wd, ['--', PROBE], callerEnv(wd));
-    got2.push({ what, ok: r.code === 111 && re.test(r.stderr) && !calls(wd).length, code: r.code, stderr: r.stderr.trim().slice(0, 160), calls: calls(wd).map((c) => c.name) });
-  }
-  ok(got2.every((g) => g.ok), `the userland's shape, refused before anything: ${got2.map((g) => g.what).join(' · ')}`, got2.filter((g) => !g.ok));
-  const wd = world();
-  const d = await run(HELPER, wd, ['--stage2', '--cwd', wd.home, '--', PROBE], callerEnv(wd));
-  ok(d.code === 111 && /stage 2 outside a private mount namespace/.test(d.stderr) && !calls(wd).some((c) => c.name === 'mount'), 'stage 2 called directly (no fresh namespace — its mounts would land in the pod\'s): refused, nothing mounted', { code: d.code, stderr: d.stderr, calls: calls(wd) });
-  const wl = world();
-  fs.symlinkSync('/etc', path.join(wl.R, 'proc'));
-  const l = await run(HELPER, wl, ['--', PROBE], callerEnv(wl));
-  const lm = calls(wl).filter((c) => c.name === 'mount');
-  ok(l.code === 111 && /a symlink inside the app system: .*\/proc/.test(l.stderr) && !lm.length, 'a bind target planted as a link (rootfs/proc → /etc) is refused by name before its mount — root never mounts through it', { code: l.code, stderr: l.stderr, mounts: lm });
-});
-
-await leg('§3', async () => {
-  console.log('§3 CONTROLS — a patched helper per rule; the table above catches each');
-  const ctl = async (name, edit, judge) => {
-    const h = helperCopy(name, (t) => { const u = edit(t); if (u === t) throw new Error(`control ${name}: the edit changed nothing`); return u; });
-    const wd = world();
-    const r = await run(h, wd, name === 'stage2-check' ? ['--stage2', '--cwd', wd.home, '--', PROBE] : ['--cwd', wd.home, '--', PROBE], callerEnv(wd));
-    return judge({ r, wd, cs: calls(wd), app: kv(path.join(wd.log, 'app-env')) || {} });
-  };
-  const rows = [
-    ['shared-propagation', (t) => t.replace('exec unshare --mount --propagation private --', 'exec unshare --mount --'), ({ cs }) => !same(cs.find((c) => c.name === 'unshare').argv.slice(0, 4), ['--mount', '--propagation', 'private', '--'])],
-    ['sys-writable', (t) => t.replace('bind_dir /sys /sys ro', 'bind_dir /sys /sys'), ({ cs, wd }) => !same(cs.filter((c) => c.name === 'mount').map((c) => c.argv), mountTable(wd.R, 'user'))],
-    ['token-kept', (t) => t.replace(/^KEEP="([^"]*)"$/m, 'KEEP="$1 VIBESPACE_SESSION_TOKEN"'), ({ app }) => app.VIBESPACE_SESSION_TOKEN === 'vsst_never_inside'],
-    ['no-userspec', (t) => t.replace('exec chroot --userspec="$U_UID:$U_GID" "$R"', 'exec chroot "$R"'), ({ cs }) => { const c = cs.find((x) => x.name === 'chroot'); return !!c && !c.argv[0].startsWith('--userspec='); }],
-    ['host-path', (t) => t.replace('ENVV=(PATH="$SYS_PATH"', 'ENVV=(PATH="$PATH:$SYS_PATH"'), ({ app }) => !!app.PATH && app.PATH !== SYS_PATH],
-    ['stage2-check', (t) => t.replace(/^\[ "\$\(readlink \/proc\/self\/ns\/mnt\)" != "\$\(readlink \/proc\/1\/ns\/mnt\)" \] \|\| die .*$/m, ': # (control: no namespace check)'), ({ cs }) => cs.some((c) => c.name === 'mount') && !cs.some((c) => c.name === 'unshare')],
-  ];
-  const caught = [];
-  for (const [name, edit, judge] of rows) caught.push({ name, caught: await ctl(name, edit, judge).catch((e) => `threw: ${e.message}`) });
-  ok(caught.every((c) => c.caught === true), `each patched helper shows the hole the table pins: ${caught.map((c) => c.name).join(' · ')}`, caught);
-});
-
-await leg('§4', async () => {
-  console.log('§4 THE KEEPER — a sys row\'s shim, started by the REAL keeper, IS the app (pid P through sudo → helper → unshare → chroot → sh)');
-  const D = require(path.join(repo, 'src/desktop-display.js'));
-  const DS = require(path.join(repo, 'src/desktop-serve.js'));
-  const Mx = require(path.join(repo, 'src/desktop-apps.js'));
-  const wd = world();
-  fs.writeFileSync(CUR, wd.w);
-  const shimDir = mk(path.join(wd.home, '.vibespace', 'sysroot', 'bin'));
-  const sudoDir = (name, body) => { const d = mk(path.join(root, name)); put(path.join(d, 'sudo'), `#!/bin/sh\nW=$(cat '${CUR}')\n${REC(name)}\n[ "$1" = -n ] && shift\n${body}\n`, 0o755); return d; };
-  const EXEC_SUDO = sudoDir('sudo-exec', `exec /usr/bin/env SUDO_UID=${ME} SUDO_GID=${MYGID} "$@"`); // the drop-in's !use_pty: sudo EXECs
-  const FORK_SUDO = sudoDir('sudo-fork', `/usr/bin/env SUDO_UID=${ME} SUDO_GID=${MYGID} "$@"\nexit $?`); // a monitor process stays the parent
-  const { rows, exports } = S.sysRows([{ id: 'app.probe', label: 'Probe', exec: PROBE, args: ['stay'], category: 'app' }], { shimDir, present: new Set([PROBE]) });
-  for (const e of exports) put(path.join(shimDir, e.name), S.shimText(e.target, { helper: HELPER }), 0o755);
-  const row = rows[0];
-  const FAKE_DISPLAY = ':4093';
-  const kids = [];
-  const fakeDisplay = {
-    ...D,
-    hostFacts: async () => ({ hostId: null, bins: { fakex: '/bin/true' }, xpra: null, browsers: {}, office: { exec: null, path: null, program: null, confinement: null, modules: null }, at: Date.now() }),
-    RECIPES: Object.freeze({ 'fake-x': async (ctx) => { const c = await D.spawnDetached('sleep', ['600'], { env: ctx.base, logFd: ctx.logFd, name: 'fake-x' }).spawned; kids.push(c.pid); ctx.onPart('x', c, { display: FAKE_DISPLAY, port: 1, alsoServer: true }); return { display: FAKE_DISPLAY, port: 1, shared: false, wm: false }; } }),
-    waitForListen: async () => ({ ok: true }), listenerHeldBy: () => true,
-    enumerateWindows: async () => ({ ok: true, why: null, windows: [] }), displaySize: async () => ({ ok: true, width: 1280, height: 800 }), applyWindowPlan: async () => ({ ok: true }),
-  };
-  const vnc = Mx.DISPLAY_BACKENDS.find((b) => b.id === 'vnc-display');
-  const BACKENDS = Object.freeze([Object.freeze({ ...vnc, needs: Object.freeze([Object.freeze(['fakex'])]), recipes: Object.freeze({ fakex: 'fake-x' }) })]);
-  const log = { log: () => {}, warn: () => {}, error: () => {} };
-  const procOf = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'), rest = st.slice(st.lastIndexOf(')') + 2).split(' '); return { exe: fs.readlinkSync(`/proc/${pid}/exe`), sid: Number(rest[3]), uids: (/^Uid:\s+(.*)$/m.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8')) || [, ''])[1].trim().split(/\s+/).map(Number), env: Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])) }; } catch (e) { return { error: e.message }; } };
-  const launch = async (sudo, name) => {
-    fs.rmSync(path.join(wd.log, 'app'), { force: true });
-    const env = () => ({ PATH: `${sudo}:/usr/bin:/bin`, HOME: wd.home, VIBESPACE_SESSION_TOKEN: 'vsst_never_inside', LD_LIBRARY_PATH: '/nonexistent-vs-loader' });
-    const apps = { catalogRows: () => [{ ...row, args: [...row.args] }], refreshCatalog: async () => {}, witnessRows: () => [] };
-    const ds = DS.install({ dataDir: path.join(root, `ds-${name}`), env, display: fakeDisplay, backends: BACKENDS, registryRows: [], log, now: Date.now, tickMs: 3600e3, apps });
-    const rec = await ds.launch({ appId: row.id }, {});
-    const app = await until(() => kv(path.join(wd.log, 'app')));
-    await sleep(150); // the probe's own `exec sleep` (same pid)
-    const r = ds.get(rec.id), P = r && r.pids && r.pids.app;
-    return { ds, rec, P, app, proc: P ? procOf(P) : null };
-  };
-  const a = await launch(EXEC_SUDO, 'exec');
-  const sleepBin = fs.realpathSync('/bin/sleep');
-  ok(a.P && a.app && Number(a.app.pid) === a.P, `the keeper's pid P (${a.P}) is the app's own pid — shim → sudo → helper → unshare → stage 2 → chroot → env → sh → app, all execs`, { P: a.P, app: a.app });
-  ok(a.proc && fs.realpathSync(a.proc.exe || '/') === sleepBin && a.proc.sid === a.P && a.proc.uids.every((u) => u === ME), 'P is the app binary itself (exe), the session leader (the keeper\'s setsid), all four uids the user\'s — the handle, starttime, group kill and PSS read hold the app', a.proc);
-  const pe = (a.proc && a.proc.env) || {};
-  ok(pe.DISPLAY === FAKE_DISPLAY && pe.VIBESPACE_DESKTOP_APP && pe.HOME === wd.home && pe.PATH === SYS_PATH && !('VIBESPACE_SESSION_TOKEN' in pe) && !('LD_LIBRARY_PATH' in pe), 'P\'s environ: the keeper\'s DISPLAY + VIBESPACE_DESKTOP_APP crossed, HOME from passwd, the system PATH; the keeper env\'s session token and loader knob did not', pe);
-  const sudoCall = calls(wd).find((c) => c.name === 'sudo-exec');
-  ok(sudoCall && same(sudoCall.argv, ['-n', HELPER, '--cwd', sudoCall.argv[3], '--', PROBE, 'stay']) && sudoCall.pid === a.P, 'the shim ran `sudo -n <helper> --cwd "$PWD" -- <target> <args…>` on P (S.shimText, byte for byte the shipped template)', sudoCall);
-  await a.ds.stop(a.rec.id, { why: 'user' });
-  ok(await until(() => { try { process.kill(a.P, 0); return false; } catch { return true; } }, 8000), 'Stop: the keeper\'s group kill ends the app (no sudo or helper left in between to outlive it)');
-  const b = await launch(FORK_SUDO, 'fork');
-  ok(b.P && b.app && Number(b.app.pid) !== b.P && b.proc && fs.realpathSync(b.proc.exe || '/') !== sleepBin, `CONTROL — a sudo that forks (no !use_pty): P (${b.P}) is sudo's process, the app (${b.app && b.app.pid}) a child of it — the drop-in is load-bearing`, { P: b.P, app: b.app, exe: b.proc && b.proc.exe });
-  await b.ds.stop(b.rec.id, { why: 'user' });
-  for (const p of [...kids, Number(b.app && b.app.pid)]) { try { process.kill(p, 'SIGKILL'); } catch { /* gone */ } }
-});
-
 await leg('§5', async () => {
   console.log('§5 THE BOOT ORDER — nothing before listen; after it, every step off the loop (judged against a control that holds it)');
   const AS = require(path.join(repo, 'src/app-serve.js')), E = require(path.join(repo, 'src/server/apps-engine.js'));
@@ -364,6 +242,22 @@ await leg('§5', async () => {
     if (prev === undefined) delete process.env.VIBESPACE_APP_SYSTEM; else process.env.VIBESPACE_APP_SYSTEM = prev;
     if (prevInv !== undefined) process.env.INVOCATION_ID = prevInv;
   }
+});
+
+// ── §T the twin holds §2–§4 (B-7e49: a leg cannot fall between the two files) ─────────────────────────────────────────────
+await leg('§T', async () => {
+  console.log('§T the heavy twin holds the sections that wait on real children');
+  const twinRel = 'scripts/test-app-system-chain-helper.mjs';
+  const twin = fs.existsSync(path.join(repo, twinRel)) ? fs.readFileSync(path.join(repo, twinRel), 'utf8') : '';
+  const here = fs.readFileSync(new URL(import.meta.url), 'utf8');
+  const MOVED = [
+    "console.log('§2 REFUSALS — exit 111 by name, before any namespace op');",
+    "console.log('§3 CONTROLS — a patched helper per rule; the table above catches each');",
+    "console.log('§4 THE KEEPER — a sys row\\'s shim, started by the REAL keeper, IS the app (pid P through sudo → helper → unshare → chroot → sh)');",
+  ];
+  const ci = fs.readFileSync(path.join(repo, 'scripts/ci.mjs'), 'utf8');
+  ok(MOVED.every((h) => twin.includes(h)) && !/^await leg\('§[234]'/m.test(here) && /^await leg\('§1'/m.test(here) && /^await leg\('§5'/m.test(here), 'the twin holds §2 (the refusals), §3 (the controls) and §4 (the keeper) by their headings, and this file runs none of them (§1, the chain\'s law, stays here)', MOVED.filter((h) => !twin.includes(h)));
+  ok(/\{ name: 'test-app-system-chain-helper', tier: 'heavy',/.test(ci), 'the twin is a HEAVY row of the tier');
 });
 } finally {
   fs.rmSync(CUR, { force: true });
