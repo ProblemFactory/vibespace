@@ -54,7 +54,8 @@ const path = require('path');
  *  identity + the access token IF currently valid (for the usage poll). */
 function parseClaudeAuth(dir, rd = RR) {   // rd: the reader — run-reads (the decision roads), or the accounts list's kept snapshot (src/account-display-facts.js)
   try {
-    const raw = JSON.parse(rd.facts(path.join(dir, '.credentials.json')).text);   // B-403e: the run's ONE ask of the file
+    const cp = path.join(dir, '.credentials.json');
+    const raw = typeof rd.json === 'function' ? rd.json(cp) : JSON.parse(rd.facts(cp).text);   // B-403e: the run's ONE ask of the file; a landing's snapshot parses it ONCE (rd.json)
     const o = raw?.claudeAiOauth;
     if (!o?.accessToken) return { loggedIn: false };
     const valid = !o.expiresAt || Date.now() < o.expiresAt - 60000;
@@ -63,7 +64,8 @@ function parseClaudeAuth(dir, rd = RR) {   // rd: the reader — run-reads (the 
     let email = o.email || o.emailAddress || null, org = null;
     if (!email) {
       try {
-        const cfg = JSON.parse(rd.readText(path.join(dir, '.claude.json')));
+        const sp = path.join(dir, '.claude.json');
+        const cfg = typeof rd.json === 'function' ? rd.json(sp) : JSON.parse(rd.readText(sp));
         email = cfg?.oauthAccount?.emailAddress || null;
         org = cfg?.oauthAccount?.organizationName || null;
       } catch { }
@@ -77,20 +79,35 @@ function parseClaudeAuth(dir, rd = RR) {   // rd: the reader — run-reads (the 
   } catch { return { loggedIn: false }; }
 }
 
-/** WHO THIS SIGN-IN FOLDER IS SIGNED IN AS (row B-87fd unit 2, src/account-identity.js): the address, and the SEAT as the
- *  CLI's own record names it (.claude.json oauthAccount) — the person's account IN its organisation (accountUuid with
- *  organizationUuid: one person holds a seat in each organisation; a record naming no organisation names no seat) — or null
- *  when no sign-in is there. Read over the SAME snapshot as parseClaudeAuth (the kept facts' landing, src/account-display-
- *  facts.js) and never part of parseAuth's answer: that answer reaches the person's page (finalize); the ids stay in memory */
-function claudeFolderIdentity(dir, rd = RR) {
+/** WHO THIS SIGN-IN FOLDER IS SIGNED IN AS (row B-87fd unit 2, src/account-identity.js): `{ email, seat, orgId }` or null.
+ *  The seat is the PERSON's accountUuid and orgId its organizationUuid, kept APART (the record pairs them: one person holds a
+ *  seat in each organisation), both as the CLI's own record names them (.claude.json oauthAccount). Round wvjd20mpa:
+ *  - NO DEFAULT READER: only the handed snapshot answers (the kept facts' landing, src/account-display-facts.js) — without it,
+ *    null; never a synchronous read of the folder (a mount) on the loop. The landing's ONE parse of each file is shared
+ *    with parseClaudeAuth (rd.json).
+ *  - THE CONFIG NAMES THE FOLDER'S LAST OAuth LOGIN, trusted only beside that login's own token (a refresh token: `claude
+ *    login` writes one). A long-lived token — ours (login-expiry oatFileOf) or one pasted — names no seat and no organisation
+ *    from it (else a token of one account beside an old login of another reads «same» as the old one: the false merge this
+ *    row ends); and a config whose address differs from the credentials' own names none either (a stale record).
+ *  - Malformed files or ids (not JSON, not strings) name nothing: null, never a throw.
+ *  Never part of parseAuth's answer (finalize sends that to the person's page); the ids stay in memory */
+function claudeFolderIdentity(dir, rd) {
+  if (!rd || typeof rd.facts !== 'function') return null;
   try {
-    const o = JSON.parse(rd.facts(path.join(dir, '.credentials.json')).text)?.claudeAiOauth;
-    if (!o?.accessToken) return null;
-    let acct = null;
-    try { acct = JSON.parse(rd.readText(path.join(dir, '.claude.json')))?.oauthAccount || null; } catch { }
     const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
-    const person = s(acct?.accountUuid), org = s(acct?.organizationUuid);
-    return { email: s(o.email) || s(o.emailAddress) || s(acct?.emailAddress), seat: person && org ? `${person}/${org}` : null, orgId: org };
+    const parse = (p, text) => (typeof rd.json === 'function' ? rd.json(p) : JSON.parse(text()));
+    const cp = path.join(dir, '.credentials.json');
+    const raw = parse(cp, () => rd.facts(cp).text);
+    const o = raw && typeof raw === 'object' ? raw.claudeAiOauth : null;
+    if (!o || typeof o !== 'object' || !s(o.accessToken)) return null;
+    const own = s(o.email) || s(o.emailAddress);
+    const named = (x) => (x.email || x.seat || x.orgId ? x : null);
+    if (!s(o.refreshToken)) return named({ email: own, seat: null, orgId: null });   // a long-lived token: nothing from the config
+    let acct = null;
+    try { const sp = path.join(dir, '.claude.json'); const c = parse(sp, () => rd.readText(sp)); acct = c && typeof c === 'object' && c.oauthAccount && typeof c.oauthAccount === 'object' ? c.oauthAccount : null; } catch { }
+    const cfgEmail = s(acct && acct.emailAddress);
+    if (own && cfgEmail && own.toLowerCase() !== cfgEmail.toLowerCase()) return named({ email: own, seat: null, orgId: null });   // another login's record
+    return named({ email: own || cfgEmail, seat: s(acct && acct.accountUuid), orgId: s(acct && acct.organizationUuid) });
   } catch { return null; }
 }
 

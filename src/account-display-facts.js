@@ -105,10 +105,11 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
    *  a ROW shows (the parse's answer, a pool's target, the kept texts and their files' times — a login's own file), never a
    *  rewrite of a file nothing keeps (a CLI rewrites its settings at every start: no broadcast). → whether the kept facts changed */
   function land(f, out, parse, target, from, keep, identity) {
+    const raw = readerOf(out, 'raw');   // ONE reader over the raw texts: the parse and the identity read share its parses
     let auth = null;
-    if (typeof parse === 'function') { try { auth = NO_TOKEN(parse(readerOf(out, 'raw'))); } catch { auth = { loggedIn: false }; } }
+    if (typeof parse === 'function') { try { auth = NO_TOKEN(parse(raw)); } catch { auth = { loggedIn: false }; } }
     let ident = null;   // who the folder is signed in as — read over the raw texts BEFORE only what is kept stays (identityOf)
-    if (typeof identity === 'function') { try { ident = identity(readerOf(out, 'raw')) || null; } catch { ident = null; } }
+    if (typeof identity === 'function') { try { ident = identity(raw) || null; } catch { ident = null; } }
     for (const [p, x] of out) if (x.ok && x.isFile && x.raw != null) { x.text = keptTextOf(p, x.raw, keep).text; delete x.raw; }
     const sig = JSON.stringify([auth, target, [...out].map(([p, x]) => [p, x.ok ? (x.text != null ? [x.text, x.mtimeMs] : 'ok') : '!' + x.code])]);
     const changed = f.state !== 'read' || sig !== f.sig;
@@ -184,11 +185,15 @@ function create({ safeFs = () => null, timeoutMs = 5000, maxSize = 16 << 20, onL
   /** run-reads' shape over a kept snapshot: an unseen path refuses («EUNREAD»), a missing file answers ENOENT, a file whose text
    *  is not kept answers its stat only */
   function readerOf(files, which = 'text') {
+    // ONE PARSE A LANDING (round wvjd20mpa (1)): a file's JSON parsed once per reader — the harness's parse and its identity
+    // read share it (a folder's settings text grows with its history: megabytes on an old one); the memo lives as long as the reader
+    const parsed = new Map();
     const of = (p) => { const x = files.get(p); if (!x) throw errOf('EUNREAD', `not kept: ${p}`); if (!x.ok) throw errOf(x.code || 'ENOENT'); return x; };
     const textOf = (x) => { const v = which === 'raw' ? x.raw : x.text; if (!x.isFile || v == null) throw errOf('EISDIR'); return v; };
     return {
       facts(p) { const x = of(p); return { text: textOf(x), mtimeMs: x.mtimeMs, size: x.size }; },
       readText(p) { return textOf(of(p)); },
+      json(p) { if (!parsed.has(p)) { try { parsed.set(p, { v: JSON.parse(textOf(of(p))) }); } catch (e) { parsed.set(p, { e }); } } const r = parsed.get(p); if (r.e) throw r.e; return r.v; },
       stat(p) { const x = of(p); return { mtimeMs: x.mtimeMs, size: x.size, isFile: () => !!x.isFile, isDirectory: () => !x.isFile }; },
     };
   }

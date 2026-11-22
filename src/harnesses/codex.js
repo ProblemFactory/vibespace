@@ -78,7 +78,7 @@ function jwtPayload(tok) {
  *  mirrors `plan` so every harness reports the same shape. */
 function parseCodexAuthFile(file, rd = null) {   // rd: the accounts list's kept snapshot (B-360d, src/account-display-facts.js); none = the file itself
   try {
-    const raw = JSON.parse(rd ? rd.readText(file) : fs.readFileSync(file, 'utf-8'));
+    const raw = rd && typeof rd.json === 'function' ? rd.json(file) : JSON.parse(rd ? rd.readText(file) : fs.readFileSync(file, 'utf-8'));   // a landing's snapshot parses it ONCE (rd.json)
     const mode = raw.auth_mode || (raw.tokens ? 'chatgpt' : (raw.OPENAI_API_KEY ? 'apikey' : null));
     const hasTok = !!(raw.tokens?.access_token || raw.tokens?.id_token || raw.OPENAI_API_KEY);
     if (!hasTok) return { loggedIn: false };
@@ -93,20 +93,25 @@ function parseCodexAuthFile(file, rd = null) {   // rd: the accounts list's kept
   } catch { return { loggedIn: false }; }
 }
 const parseCodexAuth = (dir, rd = null) => parseCodexAuthFile(path.join(dir, 'auth.json'), rd);
-/** WHO THIS SIGN-IN FOLDER IS SIGNED IN AS (row B-87fd unit 2, src/account-identity.js): the id_token's address, and the SEAT —
- *  the ChatGPT user IN its workspace (chatgpt_user_id, else user_id, with chatgpt_account_id: one person holds a seat in each
- *  workspace; a token naming no workspace names no seat) — or null (no id_token: an API key names no person). Read over the
- *  SAME snapshot as parseCodexAuthFile and never part of its answer (finalize sends that to the person's page): the ids stay
- *  in memory */
-function codexFolderIdentity(dir, rd = null) {
+/** WHO THIS SIGN-IN FOLDER IS SIGNED IN AS (row B-87fd unit 2, src/account-identity.js): `{ email, seat, orgId }` or null —
+ *  the id_token's address; the seat = the ChatGPT user (chatgpt_user_id, else user_id) and orgId = its workspace
+ *  (chatgpt_account_id), kept APART (the record pairs them: one person holds a seat in each workspace). No id_token (an API key
+ *  names no person), a malformed file or token, or ids that are not strings ⇒ null, never a throw. NO DEFAULT READER (round
+ *  wvjd20mpa): only the handed snapshot answers — never a synchronous read of the folder. Its one parse is shared with
+ *  parseCodexAuthFile (rd.json); never part of its answer (finalize sends that to the person's page): the ids stay in memory */
+function codexFolderIdentity(dir, rd) {
+  if (!rd || typeof rd.readText !== 'function') return null;
   try {
-    const file = path.join(dir, 'auth.json');
-    const raw = JSON.parse(rd ? rd.readText(file) : fs.readFileSync(file, 'utf-8'));
-    if (!raw?.tokens?.id_token) return null;
-    const c = jwtPayload(raw.tokens.id_token), auth = c['https://api.openai.com/auth'] || {};
     const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
-    const person = s(auth.chatgpt_user_id) || s(auth.user_id), ws = s(auth.chatgpt_account_id);
-    return { email: s(c.email), seat: person && ws ? `${person}/${ws}` : null, orgId: ws };
+    const file = path.join(dir, 'auth.json');
+    const raw = typeof rd.json === 'function' ? rd.json(file) : JSON.parse(rd.readText(file));
+    const tok = raw && typeof raw === 'object' && raw.tokens && typeof raw.tokens === 'object' ? s(raw.tokens.id_token) : null;
+    if (!tok) return null;
+    const c = jwtPayload(tok);
+    const claims = c && typeof c === 'object' ? c : {};
+    const auth = claims['https://api.openai.com/auth'] && typeof claims['https://api.openai.com/auth'] === 'object' ? claims['https://api.openai.com/auth'] : {};
+    const out = { email: s(claims.email), seat: s(auth.chatgpt_user_id) || s(auth.user_id), orgId: s(auth.chatgpt_account_id) };
+    return out.email || out.seat || out.orgId ? out : null;
   } catch { return null; }
 }
 

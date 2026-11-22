@@ -285,18 +285,22 @@ const DOOR_MARKS = {
 };
 { const jsFiles = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : jsFiles(path.join(d, e.name))) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const texts = jsFiles(path.join(REPO, 'src')).map((f) => [path.relative(REPO, f).split(path.sep).join('/'), fs.readFileSync(f, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')]);
-  const countIn = (mark) => { const out = {}; for (const [f, s] of texts) { const c = s.split(mark).length - 1; if (c) out[f] = c; } return out; };
-  const drift = [];
+  const countIn = (mark, txts) => { const out = {}; for (const [f, s] of txts) { const c = s.split(mark).length - 1; if (c) out[f] = c; } return out; };
+  // THE DRIFT COMPARISON (one function: the census and its red control run the same)
+  const driftOf = (txts) => { const drift = [];
   for (const [door, marks] of Object.entries(DOOR_MARKS)) for (const [mark, want] of Object.entries(marks)) {
-    const got = countIn(mark);
+    const got = countIn(mark, txts);
     for (const f of new Set([...Object.keys(want), ...Object.keys(got)])) if ((want[f] || 0) !== (got[f] || 0)) drift.push(`${door} · «${mark}» in ${f}: ${got[f] || 0} (row says ${want[f] || 0})${want[f] ? '' : ' — an UNLISTED caller: judge it, or name it in the row'}`);
   }
+  return drift; };
+  const drift = driftOf(texts);
   ok(texts.length > 100 && drift.length === 0, `THE DOORS FOUND IN THE TREE: every known door's fixed strings, file by file over ${texts.length} src files, as its row says — no unlisted caller`, drift.join(' ; '));
   const rowed = new Set(Object.keys(DOOR_MARKS)), named = [...Object.keys(DOORS), ...Object.keys(UNJUDGED)];
   ok(named.every((d) => rowed.has(d)) && [...rowed].filter((d) => !named.includes(d)).length === 1, 'every judged and unjudged door has its fixed-string row (and one reader row beside them)', { unrowed: named.filter((d) => !rowed.has(d)), extra: [...rowed].filter((d) => !named.includes(d)) });
-  // the census CAN fail: a planted caller in a file no row names is red by name
-  const planted = (() => { texts.push(['src/planted-door.js', 'const v = am.reloginResolve(id);']); try { return countIn('reloginResolve(')['src/planted-door.js'] === 1 && !DOOR_MARKS.reloginResolve['reloginResolve(']['src/planted-door.js']; } finally { texts.pop(); } })();
-  ok(planted, 'RED CONTROL: a planted «reloginResolve(» in a file no row names is counted (it would be red as an unlisted caller)'); }
+  // RED CONTROL (round wvjd20mpa (6)): the SAME drift comparison over the tree plus ONE planted caller in a file no row names —
+  // red by name, as an unlisted caller; the tree alone stays clean
+  const plantedDrift = driftOf([...texts, ['src/planted-door.js', 'const v = am.reloginResolve(id);']]);
+  ok(plantedDrift.length === 1 && plantedDrift[0].includes('src/planted-door.js') && plantedDrift[0].includes('UNLISTED'), 'RED CONTROL: the drift comparison itself, over the tree plus a planted «reloginResolve(» in a file no row names, says it by name (an UNLISTED caller)', plantedDrift); }
 ok(Object.keys(DOORS).length === 5 && Object.keys(UNJUDGED).length === 8, 'the census judges 5 doors through the product\'s own chain (sameAccount the 5th, with NO debt row) and names 8 not reached so (each with its reason): the unjudged list only falls', JSON.stringify({ judged: Object.keys(DOORS), unjudged: Object.keys(UNJUDGED) }));
 for (const [d, why] of Object.entries(UNJUDGED)) console.log(`  · UNJUDGED ${d} — ${why}`);
 // the generator's own premises (a census that cannot fail proves nothing)
