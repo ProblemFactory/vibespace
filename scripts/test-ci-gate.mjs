@@ -374,10 +374,67 @@ console.log('\n§2 tier hygiene');
 // constant or the evidence it ended for its reason. Lane wall-clock-ratchet-down (2.369.271): THE RATCHET IS AT 0 — the
 // 30 held bounds became evidence / stamps read between two marks / relative bounds, and the census also reads a span
 // the PRODUCT (or a child script) measured and returned, through a tuple, a helper's parameter, a Map / Set.
+// ── THE ONE PASS (主开发 r2572 (5), row B-54a9, lane bl-tests-a, 2026-11-22). Four sections parse every script with acorn: §2e (the
+// wall-clock census over the fast tier), §2k (old page-target loops), §2m (old app waits) and §2p (last-read waits). Measured alone,
+// they were 17.5 + 3.3 + 1.7 + 3.1 s of a 36 s run. Each script under scripts/ is now READ ONCE and PARSED AT MOST ONCE here; its
+// tree goes to all four and is dropped before the next file (a run's worth of trees is never held). The tree is the census's own
+// strict parse (wall-clock-census PARSE_OPTIONS, locations on). The three that also accept a top-level `return` get a lenient
+// parse only for a file the strict one refuses, so each gets the tree or the error its own parse gave. The census goes LAST on each
+// tree, since its walk writes a parent link into every node (the other three write nothing). Each section reads its own results
+// below, in its own order, and falls back to its own parse for a file the pass did not see.
+let ONE_PASS = null;
+const onePass = async () => {
+  const t0 = performance.now(), acorn = createRequire(import.meta.url)('acorn');
+  const WC = await import('./wall-clock-census.mjs');
+  const { oldPageLoops } = await import('./cdp-page-target.mjs'), { oldAppWaits } = await import('./cdp-page-load.mjs'), { lastReadWaits } = await import('./last-read-waits.mjs');
+  const LENIENT_KEYS = ['ecmaVersion', 'sourceType', 'allowHashBang', 'allowAwaitOutsideFunction', 'allowReturnOutsideFunction', 'locations'];
+  const lenientAsk = (o) => !!o && o.ecmaVersion === 'latest' && o.sourceType === 'module' && o.allowHashBang === true && o.allowAwaitOutsideFunction === true && o.allowReturnOutsideFunction === true && Object.keys(o).every((k) => LENIENT_KEYS.includes(k));
+  const treeOf = (text) => {   // one file's parse, made at the first ask, at most once each way
+    let strict = null, strictErr = null, lenient = null, lenientErr = null, s = false, l = false;
+    const getStrict = () => { if (!s) { s = true; try { strict = acorn.parse(text, WC.PARSE_OPTIONS); } catch (e) { strictErr = e; } } return !strictErr; };
+    return {
+      parses: () => (s ? 1 : 0) + (l ? 1 : 0),
+      strict: (src) => { if (src !== text) return acorn.parse(src, WC.PARSE_OPTIONS); if (!getStrict()) throw strictErr; return strict; },
+      acorn: { parse: (src, o) => {
+        if (src !== text || !lenientAsk(o)) return acorn.parse(src, o);   // a page's own code a suite ships, a planted text: its own parse
+        if (getStrict()) return strict;
+        if (!l) { l = true; try { lenient = acorn.parse(text, { ...WC.PARSE_OPTIONS, allowReturnOutsideFunction: true }); } catch (e) { lenientErr = e; } }
+        if (lenientErr) throw lenientErr;
+        return lenient;
+      } },
+    };
+  };
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
+  const files = walk(path.join(REPO, 'scripts'));
+  const fastAt = new Map(SUITES.filter((r) => r.tier === 'fast').map((r) => [path.join(REPO, 'scripts', r.name + '.mjs'), r]));
+  const suiteAt = new Set(SUITES.map((r) => path.join(REPO, 'scripts', r.name + '.mjs')));
+  const pageLoops = new Map(), appWaits = new Map(), lastReads = new Map(), census = new Map();
+  let parses = 0;
+  for (const f of files) {
+    const text = fs.readFileSync(f, 'utf8'), one = treeOf(text);
+    pageLoops.set(f, oldPageLoops(text, one.acorn));
+    appWaits.set(f, oldAppWaits(text, one.acorn));
+    if (suiteAt.has(f)) lastReads.set(f, lastReadWaits(text, one.acorn));
+    const row = fastAt.get(f);
+    if (row) census.set(row.name, WC.censusRow(row, text, one.strict));   // LAST: its walk writes a parent link into every node
+    parses += one.parses();
+  }
+  console.log(`  (THE ONE PASS, r2572 (5): ${files.length} scripts read once, ${parses} parse(s) for §2e · §2k · §2m · §2p, ${Math.round(performance.now() - t0)} ms; printed, never judged)`);
+  return { pageLoops, appWaits, lastReads, census };
+};
 console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
 {
   const WC = await import('./wall-clock-census.mjs');
-  const suites = WC.censusOver(SUITES);
+  ONE_PASS = await onePass();
+  // censusOver's own loop over the tier (fast rows, in order; an unreadable file skipped), each row from THE ONE PASS
+  const suites = [];
+  for (const r of SUITES) {
+    if (r.tier !== 'fast') continue;
+    const got = ONE_PASS.census.get(r.name);
+    if (got) { suites.push(got); continue; }
+    let src; try { src = fs.readFileSync(path.join(REPO, 'scripts', r.name + '.mjs'), 'utf8'); } catch { continue; }
+    suites.push(WC.censusRow(r, src));
+  }
   const baseline = JSON.parse(fs.readFileSync(WC.BASELINE, 'utf-8'));
   const v = WC.ratchetVerdict(suites, baseline);
   const by = {};
@@ -1393,7 +1450,7 @@ console.log('\n§2k one page-target waiter: no loop under scripts/ waits for a p
   const { waitPageTarget, waitPageList, oldPageLoops } = await import('./cdp-page-target.mjs');
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
   const files = walk(path.join(REPO, 'scripts')), found = [], unread = [];
-  for (const f of files) for (const h of oldPageLoops(fs.readFileSync(f, 'utf8'), acorn)) (h.error ? unread : found).push(`${path.relative(REPO, f)}:${h.line}${h.error ? ' ' + h.error.slice(0, 60) : ''}`);
+  for (const f of files) for (const h of (ONE_PASS.pageLoops.get(f) || oldPageLoops(fs.readFileSync(f, 'utf8'), acorn))) (h.error ? unread : found).push(`${path.relative(REPO, f)}:${h.line}${h.error ? ' ' + h.error.slice(0, 60) : ''}`);
   ok(files.length > 300 && found.length === 0, `no loop under scripts/ waits for a page target only on its error road — ${files.length} scripts walked (subfolders too), ${found.length} carry it${found.length ? ': ' + found.slice(0, 8).join(', ') : ''}`);
   ok(unread.length === 0, `…and every script that quotes 'page' parsed (an unparsable one would hide a loop): ${unread.length ? unread.slice(0, 4).join(', ') : 'all'}`);
   const U = '`http://127.0.0.1:${P}/json`';
@@ -1504,7 +1561,7 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
   const { loadPage, afterNavigation, oldAppWaits, APP_BOOTED, LOAD_MARK } = await import('./cdp-page-load.mjs');
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
   const files = walk(path.join(REPO, 'scripts')), found = new Map(), unread = [];
-  for (const f of files) for (const h of oldAppWaits(fs.readFileSync(f, 'utf8'), acorn)) { const k = path.relative(REPO, f); if (h.error) unread.push(`${k} ${h.error.slice(0, 60)}`); else found.set(k, [...(found.get(k) || []), h.line]); }
+  for (const f of files) for (const h of (ONE_PASS.appWaits.get(f) || oldAppWaits(fs.readFileSync(f, 'utf8'), acorn))) { const k = path.relative(REPO, f); if (h.error) unread.push(`${k} ${h.error.slice(0, 60)}`); else found.set(k, [...(found.get(k) || []), h.line]); }
   // THE NAMED DEBT: 0 since unit 2 (B-1217 (13), 2026-11-20). Each site was READ: a navigation the suite starts goes through
   // loadPage / afterNavigation; a page the suite has SEEN land, or one that may stay the same document (a cache restore, a HELD
   // reload), keeps its own wait CHECKED (test-mobile-back-chrome settle(): a timeout is a named red) — said in that suite, no row
@@ -1825,7 +1882,7 @@ console.log('\n§2p a wait that runs out says so: no suite returns its last read
   const heavy = SUITES, per = new Map(), unread = [];   // every tier (r1372); the name kept for the lines below
   for (const x of heavy) {
     const f = path.join(REPO, 'scripts', x.name + '.mjs'); if (!fs.existsSync(f)) continue;
-    const w = lastReadWaits(fs.readFileSync(f, 'utf8'), acorn);
+    const w = ONE_PASS.lastReads.get(f) || lastReadWaits(fs.readFileSync(f, 'utf8'), acorn);   // THE ONE PASS's result for this file
     for (const e of w.filter((y) => y.error)) unread.push(`${x.name}: ${e.error}`);
     const real = w.filter((y) => !y.error); if (real.length) per.set(x.name, real);
   }

@@ -109,7 +109,7 @@ const CLOCK_FN_TEXT = /\btime\.(?:monotonic|time|perf_counter)(?:_ns)?\(\)/;   /
 const GROWTH_TEXT = /\bgrowth\s*\(/;   // scripts/cost-ratio.mjs's growth(): a ratio on CPU time with no clock word in the suite
 const anyNode = (n, pred) => { let hit = false; visit(n, (m) => { if (!hit && pred(m)) hit = true; }); return hit; };
 
-const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true, allowAwaitOutsideFunction: true });
+const parse = (src) => acorn.parse(src, PARSE_OPTIONS);   // PARSE_OPTIONS (below): one truth for this parse and test-ci-gate's ONE PASS
 const fnOf = (n) => !!n && /Function/.test(n.type);
 
 /** the data flow of one source — a suite, or a product module it loads — to a fixed point: marks, spans, span fields,
@@ -597,14 +597,23 @@ export function censusOver(rows, readSource = (name) => fs.readFileSync(path.joi
     if (r.tier !== 'fast') continue;
     let src;
     try { src = readSource(r.name); } catch { continue; }
-    // one parse per suite, shared by the product read and the flow (a suite with no clock and no duration name skips both)
-    let ast = null;
-    if (CLOCK_TEXT.test(src) || CLOCK_FN_TEXT.test(src) || GROWTH_TEXT.test(src) || DURATION_CMP.test(src)) { try { ast = parse(src); } catch (e) { suites.push({ name: r.name, findings: [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }] }); continue; } }
-    const fields = ast ? productSpanFields(src, readFile, ast) : [];
-    suites.push({ name: r.name, findings: ast ? wallClockFindings(src, { fields, ast }) : [] });
+    suites.push(censusRow(r, src, parse, readFile));
   }
   return suites;
 }
+
+/** ONE fast suite's row of the census (censusOver's body for one row). `parseSuite` parses the suite's text as this module's
+ *  own parse does (test-ci-gate hands the tree of its ONE PASS, 主开发 r2572 (5)); it throws as acorn throws. */
+export function censusRow(r, src, parseSuite = parse, readFile = undefined) {
+  // one parse per suite, shared by the product read and the flow (a suite with no clock and no duration name skips both)
+  let ast = null;
+  if (CLOCK_TEXT.test(src) || CLOCK_FN_TEXT.test(src) || GROWTH_TEXT.test(src) || DURATION_CMP.test(src)) { try { ast = parseSuite(src); } catch (e) { return { name: r.name, findings: [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }] }; } }
+  const fields = ast ? productSpanFields(src, readFile, ast) : [];
+  return { name: r.name, findings: ast ? wallClockFindings(src, { fields, ast }) : [] };
+}
+
+/** the census's own parse options (test-ci-gate's ONE PASS parses each script once with these) */
+export const PARSE_OPTIONS = Object.freeze({ ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true, allowAwaitOutsideFunction: true });
 
 /** PURE: the verdict over a census + the baseline ({ suite: count of ≥ 1 s literal bounds }) */
 export function ratchetVerdict(suites, baseline) {
