@@ -1452,6 +1452,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - test-channels-agent-cli: as found. The shipped CLI run as a child, the agent's own road, 156 times, about 0.1 s each on a loaded machine: a child runs for 18.1 of its 21.4 s. The CLI's own two waits are 3.7 s (api --wait's 2 s timeout; compose polling the hub's 1 s window for a held send). The one road left under 10 s is a heavy twin of the CLI legs, which would leave the fast file its tables only: not taken.
 - test-engine-distribution: as found. Its pod legs run the real loader's git (78 calls) and the plugin's server (16 forks): 7.3 s with a child running in a 15.9 s timeline. The light scenes run in-process over snapshots of that same pod, and their bounds are their subject. The pod legs cannot move without the fast file losing its fixtures. The three pod controls (M1–M3, 2.5 s in the timeline) could move only with a copy of the pod harness: not taken.
 - ROWS: not restated here; bl-release's restating line holds them.
+- ROUND w23p1p1eh (r2022): the chain TAKEN as block line 314. The small follow, one commit:
+  - the wordless MARK is durable: the release writes its decision on the notices it is about (held.wordless, in the stash file), and the look reads it back for an open item while the ladder names no outage of it;
+  - so a restart AFTER the release no longer closes the «update the agent» item while its results wait, and a release under a held tray survives a second restart (the in-memory queue is gone);
+  - kb-features: «once a machine a run of the hub».
+  - Legs: test-jobs-triage, the restart after the release (RED: the read-back removed) and the second restart under a held tray (RED: the decision never written); the r1861 legs' reds re-pointed at the read-back.
 
 ## 2.369.415 — 2026-11-21
 
