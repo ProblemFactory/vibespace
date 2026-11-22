@@ -1454,8 +1454,11 @@ export function createPopover(anchor, className, opts = {}) {
     pop.style.left = (MENU_PAD / Z) + 'px'; pop.style.right = 'auto';   // measured where it has the screen's width (a right-anchored box too: held by its right it would read the fill, not its width)
     const across = vw - 2 * MENU_PAD, natural = pop.getBoundingClientRect().width;
     // only a box WIDER THAN THE SCREEN itself is held (r2082 — the hosted run's test-doc-window ⑬): one the screen holds whole was never
-    // past it — the phone's link bar, edge to edge by its own rule, was capped at the screen less its pads and stood 8 px short
-    if (natural > vw + 0.5) {
+    // past it — the phone's link bar, edge to edge by its own rule, was capped at the screen less its pads and stood 8 px short. A box
+    // its CALLER anchors by its right (r2157) is held at the screen less its pads, as before: past that bound its right edge stays
+    // where it was written, the clamps below write its left, and its row runs past the box with no scroll in it
+    const bound = atR && atR !== 'auto' ? across : vw + 0.5;
+    if (natural > bound) {
       pop._ownMaxW = pop.style.maxWidth; pop._ownOverflowX = pop.style.overflowX;   // what the caller wrote is put back when the box fits again
       pop.style.maxWidth = (across / Z) + 'px';
       pop.style.overflowX = 'auto';
