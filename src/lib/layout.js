@@ -850,15 +850,6 @@ class LayoutManager {
     try { window.__vsOp?.('layout-clock-jump', { gap, rearmed: n }); } catch { }
   }
 
-  /** THE UNSAVED ACT (verify r4 ①): is a local act stamped at `t` (a move's `_movedAt`, a drag's / resize's / snap's
-   *  `_boundsAt`) held over a record received at `receivedAt`? Yes when the record landed BEFORE the act — it cannot
-   *  know it (the held move / geometry of r2) — and yes while NO SAVE HAS CARRIED THE ACT (`_movesSentAt`, stamped by
-   *  every save that leaves on an open socket): a record received after the act but before its save left was
-   *  captured by a page that could not know it either. It used to revert a drop or a drag made up to 500 ms before
-   *  it landed (the autosave's debounce) and swallow the act's save, and under the apply's cooldown the deferred
-   *  save (r3 ③) then wrote the peer's box back as the user's; a peer saving every 400 ms undid every act here.
-   *  Bounded by ACT_HOLD_MS like every held witness (§6b guard 2: an idle page holds nothing over the server; the
-   *  act's real time is never fabricated). */
   /** THE ONE HELD-ACT PREDICATE for a window a record would take over (B-1d87's follow, r1377 (2) — the apply's re-key and the refusal
    *  road's, which had two copies; the refusal road missed the held tab act): a tab act no record of `state` agreed with yet
    *  (_heldChainIds), or a move, a resize or a chain act held over a record received at `receivedAt` (actHeld) */
@@ -868,6 +859,15 @@ class LayoutManager {
     return [win._movedAt, win._boundsAt, win._chainAt].some((t) => this.actHeld(t, receivedAt, win));
   }
 
+  /** THE UNSAVED ACT (verify r4 ①): is a local act stamped at `t` (a move's `_movedAt`, a drag's / resize's / snap's
+   *  `_boundsAt`) held over a record received at `receivedAt`? Yes when the record landed BEFORE the act — it cannot
+   *  know it (the held move / geometry of r2) — and yes while NO SAVE HAS CARRIED THE ACT (`_movesSentAt`, stamped by
+   *  every save that leaves on an open socket): a record received after the act but before its save left was
+   *  captured by a page that could not know it either. It used to revert a drop or a drag made up to 500 ms before
+   *  it landed (the autosave's debounce) and swallow the act's save, and under the apply's cooldown the deferred
+   *  save (r3 ③) then wrote the peer's box back as the user's; a peer saving every 400 ms undid every act here.
+   *  Bounded by ACT_HOLD_MS like every held witness (§6b guard 2: an idle page holds nothing over the server; the
+   *  act's real time is never fabricated). */
   actHeld(t, receivedAt, win = null) {
     if (!(t > 0) || Date.now() - t > ACT_HOLD_MS) return false;
     return t >= receivedAt || t > (win ? this._carriedAt(win._desktopId) : (this._movesSentAt || 0));

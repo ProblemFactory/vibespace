@@ -711,13 +711,15 @@ export class DesktopManager {
    *  it STANDS under its own id in the row's place instead (noteStands — the record read so, its next write carrying it; the other page
    *  takes that id). A row this page closed and no save has carried (`rowHeld`) is left as today. One window for one row.
    *  WHICH ID WINS when two pages each opened the conversation: the HUB's order — the first write the hub accepts; the other page's
-   *  write is refused and that page takes the kept record on the refusal road (this method too), whatever the two ids. TWO FIRST
-   *  WRITES NEVER BOTH STAND (the coordinator's r1802, read in the hub's route): a write naming a base is judged by the staleness gate
-   *  (§6b guard 11, desktop-record.js staleVerdict); one naming none (a desktop this page never saw a record of) passes that gate, but
-   *  it drops the first page's window, which ANOTHER client added lately — the shrink belt refuses such a drop with no evidence, «one
-   *  of them is enough» (desktop-record.js shrinkVerdict; ws-handler.js ARRIVAL_TTL_MS, 10 min), and a page applies a relayed record
-   *  in far less. So no page ever applies the other's record while its own window is on the wire: never a swap, one id on every
-   *  page.
+   *  write is refused and that page takes the kept record on the refusal road (this method too), whatever the two ids. WITHIN THE
+   *  BELT'S MEMORY TWO FIRST WRITES NEVER BOTH STAND (the coordinator's r1802, read in the hub's route): a write naming a base is
+   *  judged by the staleness gate (§6b guard 11, desktop-record.js staleVerdict); one naming none (a desktop this page never saw a
+   *  record of) passes that gate, but it drops the first page's window, which ANOTHER client added lately — the shrink belt refuses
+   *  such a drop with no evidence, «one of them is enough» (desktop-record.js shrinkVerdict), and a page applies a relayed record in
+   *  far less. THAT MEMORY'S BOUND (r2239): it lives in the hub's process and lasts ARRIVAL_TTL_MS (ws-handler.js layoutArrivals, 10
+   *  min) — after a hub restart or past ten minutes a second write with no base STANDS; then only ONE page ever sees the other's
+   *  record (the other never received the first: a record deferred before its re-read is dropped), and it re-keys once on the apply
+   *  road — one window, one row, one id. Never a swap.
    *  → { rekeyed: [[from, to]], stands: [[win, row]] } */
   takeRowsShown(desk, state, { held = () => false, rowHeld = () => false } = {}) {
     const out = { rekeyed: [], stands: [] }, wm = this.app.wm;

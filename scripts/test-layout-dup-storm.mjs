@@ -753,6 +753,23 @@ async function b1d87Legs({ DM = RealDM, LM = RealLM, install = null, legs = null
     leg(J(atRefusal) === J([b1]) && second.includes(b1) && !second.includes(a1),
       `§1D87 (c2) a HELD act on the refusal road (r1377 (4)): B's window (${b1}) stands under its own id — its second write carries it IN the kept row's place (${a1} left, evidence 'replaced')`, { a1, b1, atRefusal, second });
   })());
+  if (want('c2tab')) scenes.push((async () => {
+    const { A, B } = pair();
+    open(A); open(B); await tick(40);
+    const [a1] = sWins(A), [b1] = sWins(B);
+    // (c2) with a held TAB act (the round wbz2w39cd's gap, r2239): B's person merged its window into a tab group, and no record has
+    // agreed with that group yet (_heldChainActs, the window's own chain against the record's) — the one predicate heldActOf holds it
+    // on the refusal road as on the apply's: B's window stands under its own id in the kept row's place (move and resize untouched)
+    const wb = B.wins.get(b1); wb._tabChain = { tabs: [b1, 'x-tabmate'], active: 0, layout: 'tabs', order: [b1, 'x-tabmate'] };
+    (B.lm._heldChainActs ||= new Map()).set(b1, { at: Date.now(), desk: 'desk-x' });
+    save(A); save(B); B.lm._restoring = true; // B's write is refused as stale: a held TAB act on the refusal road
+    await tick(30);
+    const atRefusal = sWins(B);
+    save(B); B.lm._restoring = true; // the refused page's second write
+    const second = ids((B.syncs('desk-x').slice(-1)[0] || {}).state?.windows);
+    leg(J(atRefusal) === J([b1]) && second.includes(b1) && !second.includes(a1),
+      `§1D87 (c2tab) a held TAB act on the refusal road (r2239): B's window (${b1}), merged into a tab group no record agreed with yet, stands under its own id — its second write carries it IN the kept row's place (${a1} left)`, { a1, b1, atRefusal, second });
+  })());
   if (want('g')) scenes.push((async () => {
     const r = recs(); delete r['desk-x']; // a FRESH desktop: no stored record — a page that saw none writes with NO base (the staleness gate passes it)
     const { H, A, B } = pair(r);
@@ -808,17 +825,18 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
   const apply = 'const shownBy = this.app.desktopManager?.takeRowsShown?.(';
   const refusal = 'if (d === this._activeId) this.takeRowsShown(d, rec, {';
   const rekey = 'if (!held(w) && wm.rekeyWindow(was, id, { inChain: true })) {';
+  const chainTerm = '    if (state && this._heldChainIds(state).includes(String(win.id))) return true;\n';
   const stands = '      this.noteStands(desk, was, id);\n';
   const refusalStands = '    if (this._standsNow?.get(d)?.length) this._setRecord(d, this._standsInto(d, this._savedStates.get(d)));';
   const resend = '    if (standing.size && !keptShown) setTimeout(() => this.resendKeptShown(), 1000);';
-  const set = ok([LSRC.includes(apply), DSRC.includes(refusal), DSRC.includes(rekey), DSRC.includes(stands), !DSRC.includes('mineWins'), DSRC.includes(refusalStands), LSRC.includes(resend)].every(Boolean),
+  const set = ok([LSRC.includes(apply), DSRC.includes(refusal), DSRC.includes(rekey), DSRC.includes(stands), !DSRC.includes('mineWins'), LSRC.includes(chainTerm), DSRC.includes(refusalStands), LSRC.includes(resend)].every(Boolean),
     '§1D87 CONTROL setup: the apply\'s and the refusal road\'s calls, the re-key, the stand (and NO tie rule: r1802 (B)), the refusal road\'s stand and the stand\'s re-send exist (layout.js, desktop-manager.js)');
   const M = mutantCopies('ldup-1d87', REPO);
   const lm = async (src, name) => (await import(pathToFileURL(M.write('src/lib/layout.js', src, name, { esm: true })).href)).LayoutManager;
   const dm = async (src, name) => (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', src, name, { esm: true })).href)).DesktopManager;
   const none = { failed: [], said: [] };
   const run = (mk, src, name, legs, key) => (set ? mk(src, name).then((X) => b1d87Legs({ [key]: X, install: install1d87, legs })) : Promise.resolve(none));
-  const [real, rel, refused, keep, noStand, noTie, noResend, heldIgnored] = await Promise.all([
+  const [real, rel, refused, keep, noStand, noTie, noResend, heldIgnored, chainDropped] = await Promise.all([
     b1d87Legs({ install: install1d87 }),
     run(lm, LSRC.replace(apply, 'const shownBy = ((..._) => null)('), '1d87-release', ['a', 'b'], 'LM'),
     run(dm, DSRC.replace(refusal, 'if (false) this.takeRowsShown(d, rec, {'), '1d87-refusal-road', ['c'], 'DM'),
@@ -827,6 +845,7 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
     run(dm, DSRC.replace(rekey, 'const mineWins = this.wireListed(desk, was) && was < id; if (!held(w) && !mineWins && wm.rekeyWindow(was, id, { inChain: true })) {'), '1d87-tie-rule', ['g', 'crev'], 'DM'),
     run(lm, LSRC.replace(resend, ''), '1d87-stand-not-resent', ['f'], 'LM'),
     run(dm, DSRC.replace(rekey, 'if (wm.rekeyWindow(was, id, { inChain: true })) {'), '1d87-held-ignored', ['f'], 'DM'),
+    run(lm, LSRC.replace(chainTerm, ''), '1d87-chain-term-dropped', ['c2tab'], 'LM'),
   ]);
   for (const [c, n, e] of real.said) ok(c, n, e);
   if (!set) return;
@@ -838,6 +857,7 @@ await section('§1D87 B-1d87 — a conversation opened on two devices in the sam
   ok(red(noTie, 'crev'), `§1D87 RED CONTROL — the follow's tie rule put back (r1802 (B): the smaller id stands): on the refusal road (c with the ids reversed) the refused page keeps its own id and the first page re-keys onto it — the hub's order broken (${red(noTie, 'crev')} red; the crossing on a fresh desktop, (g), never reaches the rule: ${red(noTie, 'g') ? 'red' : 'green'} — the belt refuses the second write)`, noTie.failed);
   ok(red(noResend, 'f'), `§1D87 RED CONTROL — a standing window never re-sent: the other page keeps its own id (${red(noResend, 'f')} red)`, noResend.failed);
   ok(red(heldIgnored, 'f'), `§1D87 RED CONTROL — a held act ignored: the moved window is re-keyed under the person's hand (${red(heldIgnored, 'f')} red)`, heldIgnored.failed);
+  ok(red(chainDropped, 'c2tab'), `§1D87 RED CONTROL — the one held-act predicate without its TAB-act term (the refusal road's old copy): the merged window is re-keyed under the person's hand (${red(chainDropped, 'c2tab')} red)`, chainDropped.failed);
   // rekeyWindow (window.js, ITS OWN TEXT): the focus and a resume's fence mark follow the window to its new id — RED: the release's text
   const rekeyOf = (src) => { const i = src.indexOf('\n  rekeyWindow('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).rekeyWindow;`)(); };
   const follow = async (src) => {
