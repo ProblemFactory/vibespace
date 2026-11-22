@@ -177,10 +177,18 @@ async function setup(P) {
 }
 // a chat both pages show: A makes it the way a user does (createSession), B attaches; a layout sync between the two pages
 // may move windows, so each page re-attaches until both show it
-async function openChat(name, not = []) {
-  await A.evalJs(`app.createSession({ cwd: ${JSON.stringify(CWD)}, name: ${JSON.stringify(name)}, mode: 'chat', backend: 'antigravity' }); true`);
+// THE NEW CONVERSATION BY SNAPSHOT (r1759, box row 131: «the first one not in a list» picked ⑤'s conversation and an older one for the
+// red controls — their lists never named ⑤'s): the session ids on A BEFORE the create; the new one is the one not among them
+const sessionIdsOn = (P) => P.evalJs('[...app.sessions.values()].map((v) => v && v.sessionId).filter(Boolean)');
+async function newSessionAfter(before) {
   let sid = null;
-  for (let i = 0; i < 80 && !sid; i++) { sid = await A.evalJs(`([...app.sessions.values()].find((v) => v && v._messageList && !${JSON.stringify(not)}.includes(v.sessionId))?.sessionId) || null`); if (!sid) await sleep(250); }
+  for (let i = 0; i < 80 && !sid; i++) { sid = await A.evalJs(`([...app.sessions.values()].find((v) => v && v._messageList && v.sessionId && !${JSON.stringify(before)}.includes(v.sessionId))?.sessionId) || null`); if (!sid) await sleep(250); }
+  return sid;
+}
+async function openChat(name, not = []) {
+  const before = [...new Set([...(await sessionIdsOn(A)), ...not])];
+  await A.evalJs(`app.createSession({ cwd: ${JSON.stringify(CWD)}, name: ${JSON.stringify(name)}, mode: 'chat', backend: 'antigravity' }); true`);
+  const sid = await newSessionAfter(before);
   await until(() => sid && agyStarted(sid), 15000);
   for (let round = 0; round < 3; round++) {
     for (const P of [A, B]) if (!(await P.evalJs(`!!(${V(sid)})?._chatInput?._textarea`))) await P.evalJs(`app.attachSession(${JSON.stringify(sid)}, ${JSON.stringify(name)}, ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`);
@@ -322,9 +330,9 @@ try {
     // HELD BY THE LEG ALONE (r1534, box row 98: a plain `_restoring = true` was opened by the apply-before's 1 s cooldown timer — A's first
     // record then BUILT B's window before B opened the conversation, the control's premise never formed): the timer's write is kept, never read
     await B.evalJs(`(() => { const lm = app.layoutManager; let v = true; window.__df1d87Gate = true; Object.defineProperty(lm, '_restoring', { configurable: true, enumerable: true, get: () => window.__df1d87Gate === true || v, set: (x) => { v = x; } }); ${release ? 'app.desktopManager.takeRowsShown = () => ({ rekeyed: [], stands: [] });' : ''} return true; })()`);
+    const before = [...new Set([...(await sessionIdsOn(A)), ...not])];
     await A.evalJs(`app.createSession({ cwd: ${JSON.stringify(CWD)}, name: ${JSON.stringify(name)}, mode: 'chat', backend: 'antigravity' }); true`);
-    let s = null;
-    for (let i = 0; i < 80 && !s; i++) { s = await A.evalJs(`([...app.sessions.values()].find((v) => v && v._messageList && !${JSON.stringify(not)}.includes(v.sessionId))?.sessionId) || null`); if (!s) await sleep(250); }
+    const s = await newSessionAfter(before);
     await until(() => s && agyStarted(s), 15000);
     await B.evalJs(`app.attachSession(${JSON.stringify(s)}, ${JSON.stringify(name)}, ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`); // B's person opens it (its sidebar row)
     await viewReady(B, s);
