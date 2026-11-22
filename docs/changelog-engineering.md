@@ -1548,6 +1548,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - UNTOUCHED: the static census of every vendor construction (files, counts, gates); a new construction is red in the fast suite alone (§1+2's census and its controls).
 - THE CONTROLS' STRINGS (r2036 (3)): the B-ddb9 census's own controls are built from two strings, so no line of the fast suite reads as a start of a real program; the census row of the suite that ran the real oracles leaves with the leg (the twin's lookup is by the registry's name).
 - THE ROW, ALONE after the split and B-7e49 slice 2: 6 865 / 7 419 ms both zones (machine 2 at load 66 → 59) — 7.4 s, under ten seconds: no exception; the named false row of line 357 (15.9 s at d1505e694) ends here.
+- Its round's follow (wt5inp00k, r2047): the filing reports three outcomes (filed / owed / failed — a thrown add is asked again at the next 60 s ask); an earlier run's item also closes at a takeover after a held boot and when the lock was lost before the store answered; red controls for the first-beat close and the snapshot's cause; the zh hand-over words in their family («未交出——»); legs for the lock remade by another process meanwhile and for the Codex pool note. Nothing widens what the guard lets through: the held and refused legs (§3h n, o, q, r, s) stay red-on-widening.
 
 ## 2.369.415 — 2026-11-21
 
