@@ -219,9 +219,15 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); proc
 for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 
 // lane phone-first-screen: restart the throwaway server on another For-you store (the store reads data/user-todos.json at boot)
+// THE STOP IS A CLEAN ONE (主开发 r2062 / r2089): since B-225b's remainder (4d98d2611) a hub that was KILLED tells it at its next start
+// — «may not have saved», quietly, on #store-held-strip above the list until its first landed layouts write — and the first-screen
+// legs below measured that strip as part of the list (the hosted run: band 2's head 170 px down, not 51). A person's restart stops
+// cleanly (SIGTERM → the hub's shutdown writes its clean stop); a hard stop only past the bound, and then said by name.
 const restartWith = async (items) => {
-  const was = srv; was.kill('SIGKILL');
-  await new Promise((r) => { if (was.exitCode !== null || was.signalCode) r(); else { was.once('exit', r); setTimeout(r, 3000); } });
+  const was = srv; was.kill('SIGTERM');
+  const clean = await new Promise((r) => { if (was.exitCode !== null || was.signalCode) r(true); else { const t = setTimeout(() => r(false), 10000); was.once('exit', () => { clearTimeout(t); r(true); }); } });
+  if (!clean) { try { was.kill('SIGKILL'); } catch {} await new Promise((r) => { if (was.exitCode !== null || was.signalCode) r(); else { was.once('exit', r); setTimeout(r, 3000); } }); }
+  check('the throwaway hub stopped CLEANLY before its restart (SIGTERM answered inside 10 s — a hard stop would leave «may not have saved» on the next start: B-225b)', clean);
   fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ items }, null, 2));
   srv = startServer();
   for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
