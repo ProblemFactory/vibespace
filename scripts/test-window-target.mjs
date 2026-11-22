@@ -83,6 +83,17 @@ const PTR = (x, y) => Buffer.from([5, 0, (x >> 8) & 255, x & 255, (y >> 8) & 255
 const HS = [Buffer.from('RFB 003.008\n'), Buffer.from([1]), Buffer.from([1])];
 
 // ─────────────────────────────────────────────────────────────────────────────
+let a11yLauncher = null;   // r2305: the accessibility bus this child started (its group ended at the child's end)
+const SEC3_CHILD = process.argv.includes('--sec3-child');
+if (SEC3_CHILD) {
+  console.log('§3 REAL (child, a private session bus + the accessibility bus on it, HOME ' + process.env.HOME + ')');
+  await section3();
+  if (a11yLauncher) { try { process.kill(-a11yLauncher.pid, 'SIGTERM'); } catch { } }
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+  console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
+  cleanup();
+  process.exit(fail ? 1 : 0);
+}
 const LANE_E_CHILD = process.argv.includes('--lane-e-child');
 if (LANE_E_CHILD) {
   console.log('§4 LANE E (child, private session bus, HOME ' + process.env.HOME + ')');
@@ -323,163 +334,12 @@ console.log('§2 THE BRIDGE over a fake RFB server, policy = the engine');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring, the CLI as a child process');
-{
-  const base = { ...process.env };
-  const py = await run('python3', ['-c', "import gi; gi.require_version('Atspi','2.0'); gi.require_version('Gtk','3.0'); from gi.repository import Atspi, Gtk; print('ok')"], base, 20000);
-  const facts = await D.hostFacts({});
-  const a11y = py.err ? null : await WT.probeA11y({ env: base, wallMs: 10000 });
-  const python = D.binOnPath('python3', { env: base });
-  const fixture = path.join(REPO, 'scripts', 'fixtures', 'window-target-app.py');
-  if (py.err) skip(`python3 gi Atspi/Gtk not importable: ${(py.stderr || py.err.message).trim().split('\n').pop()}`);
-  else if (!facts.bins.Xvfb || !facts.bins.x11vnc) skip(`Xvfb (${!!facts.bins.Xvfb}) and x11vnc (${!!facts.bins.x11vnc}) are both needed for the keeper's vnc-display rung`);
-  else if (!base.DBUS_SESSION_BUS_ADDRESS && !base.XDG_RUNTIME_DIR) skip('no session bus in this environment — the a11y bus is unreachable');
-  else if (!a11y || !a11y.ok) skip(`the accessibility bus did not answer: ${a11y && a11y.why}`);
-  else {
-    console.log(`  a11y probe: ${a11y.apps} apps on the bus in ${a11y.ms} ms; backends: Xvfb ${facts.bins.Xvfb}, x11vnc ${facts.bins.x11vnc}`);
-    const dataDir = path.join(dir, 'real'); fs.mkdirSync(dataDir, { recursive: true });
-    const K = require('../src/server/desktop-app-keeper.js');
-    const bcasts = [];
-    // AN EXEC IS A HUMAN'S (design-desktop-apps §5, engine 2026-09-21): an agent opens a
-    // REGISTRY app by id, so the fixture is a registry ROW of this keeper — `open --exec`
-    // is the refusal test-window-targets pins, not the way in.
-    const registryRows = [{ id: 'vs-window-fixture', label: 'vs window fixture', exec: python, args: [fixture], category: 'test' }];
-    // P8-2: xpra wins the default ladder when installed; this leg drives the RFB bridge (Watch drops a KeyEvent), so it pins vnc-display through the instance preference
-    const keeper = K.create({ dataDir, env: () => ({ ...base }), broadcast: (m) => bcasts.push(m), serverSetting: (key) => (key === 'desktop.backendPrefs' ? 'vnc-display, xpra, desktop-singleton' : undefined), registryRows, log: { log() { }, warn() { }, error() { } } });
-    keepers.push(keeper);
-    await keeper.adoptAll(); keeper.start();
-    const sessions = new Map([['s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha', backendSessionId: 'conv-1' }], ['s2', { agentToken: 'vsst_bbbb', _browserKey: 'bk-22222222', name: 'beta', backendSessionId: 'conv-2' }]]);
-    const delivered = [];
-    const announcer = HB.create({ keeper: null, deliver: { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return { ok: true }; } }, serverSetting: () => undefined, activeSessions: sessions, log: { log() { }, warn() { } } });
-    const express = require('express');
-    const app = express();
-    app.use(express.json());
-    const wired = WIRING.install({ app, auth: { requestAuthed: () => true }, vnc: { port: 0 }, keeper, DESKTOP_SINGLETON_ID: 'desktop-singleton', dataDir, env: () => ({ ...base }), activeSessions: () => sessions, serverSetting: () => undefined, broadcast: (m) => bcasts.push(m), browserHandback: announcer, log: { log() { }, warn() { } } });
-    ok(wired.announced === true && wired.windowEngine && wired.desktopStream, 'the wiring composes the engine, the bridge and the announcer\'s window seam');
-    const srv = http.createServer(app);
-    srv.on('upgrade', (req, socket, head) => { const id = wired.desktopStream.upgradeId(req.url.split('?')[0]); if (!id) { socket.destroy(); return; } wired.desktopStream.handleUpgrade(req, socket, head, id); });
-    const port = await freePort();
-    await new Promise((r) => srv.listen(port, '127.0.0.1', r));
-    const API = `http://127.0.0.1:${port}`;
-    const cli = (token, ...args) => new Promise((res) => { const c = spawn(process.execPath, [path.join(REPO, 'data', 'bin', 'vibespace-window'), ...args], { env: { ...base, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (code) => res({ code, out, err })); });
-    const api = async (method, p, body) => { const r = await fetch(API + p, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), 'Sec-Fetch-Site': 'same-origin' }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };   // r2: the person's own page (the door mints the PRESS)
-    const engine = wired.windowEngine;
-    const f1 = engine.factsForToken('vsst_aaaa');
-    // the agent (session 1) opens the fixture through the CLI
-    const refused = await cli('vsst_aaaa', 'open', '--exec', python, '--args', fixture, '--json');
-    ok(refused.code !== 0 && /exec_is_human/.test(refused.err), `open --exec is refused by the CLI itself, exec_is_human (${refused.err.trim().split('\n').pop().slice(0, 80)})`);
-    const opened = await cli('vsst_aaaa', 'open', 'vs-window-fixture', '--title', 'vs window fixture', '--json');
-    let handle = null; try { handle = JSON.parse(opened.out).handle; } catch { }
-    ok(opened.code === 0 && handle && /^da-/.test(handle), `vibespace-window open (as a child process) starts the fixture through the keeper and answers a handle (${handle}) — ${opened.err.trim().split('\n').pop() || 'no stderr'}`);
-    if (!handle) { console.log(opened.out, opened.err); }
-    else {
-      const ready = await until(() => { const r = keeper.get(handle); return r && r.state === 'ready'; }, 30000, 200);
-      const rec = keeper.get(handle);
-      ok(ready && rec.backend === 'vnc-display', `the keeper brings it up on ${rec && rec.display} via ${rec && rec.via} (state ${rec && rec.state})`);
-      // wait for the app on the a11y bus, then snapshot through the CLI
-      let snap = null;
-      const onBus = await until(async () => { const r = await cli('vsst_aaaa', 'snapshot', handle, '--json'); if (r.code === 0) { try { const j = JSON.parse(r.out); if (j.nodes && j.nodes.length) { snap = j; return true; } } catch { } } return false; }, 30000, 500);
-      ok(onBus && snap && snap.census.nodes > 5, `snapshot through the CLI: ${snap && snap.census.nodes} nodes from the real tree (Action ${snap && snap.census.action}, EditableText ${snap && snap.census.editableText})`);
-      const listed = await cli('vsst_aaaa', 'list');
-      ok(listed.code === 0 && listed.out.includes(`* ${handle}`) && /held by me/.test(listed.out) && /only windows the user shared with you \(or you opened\)/.test(listed.out) && /because you opened it/.test(listed.out), 'list marks the window as held by me, says it reaches me because I opened it, and states the scope');
-      const countBtn = snap && snap.nodes.find((n) => n.role === 'push button' || n.role === 'button') && snap.nodes.find((n) => (n.role === 'push button' || n.role === 'button') && n.name === 'Count');
-      const countLabel = () => snap && snap.nodes.find((n) => n.role === 'label' && /^count \d+/.test(n.name || ''));
-      ok(!!countBtn && countBtn.actions && countBtn.actions.length > 0 && countLabel() && countLabel().name === 'count 0', 'the Count button (with Action) and the count label are in the snapshot');
-      if (countBtn) {
-        const clicked = await cli('vsst_aaaa', 'click', handle, countBtn.ref);
-        const again = await cli('vsst_aaaa', 'snapshot', handle, '--json');
-        try { snap = JSON.parse(again.out); } catch { }
-        ok(clicked.code === 0 && /click/.test(clicked.out) && countLabel() && countLabel().name === 'count 1', `click @ref through the CLI changed the app's state, read back from ITS OWN tree (${countLabel() && countLabel().name})`);
-      }
-      // lane E (D1): the window the agent OPENED is shared with IT only — the second session does not even see it
-      const hid2 = await cli('vsst_bbbb', 'attach', handle);
-      const hidList = await cli('vsst_bbbb', 'list');
-      ok(hid2.code === 1 && /not_exposed/.test(hid2.err) && hidList.code === 0 && !hidList.out.includes(handle) && /no window is shared with you/.test(hidList.out), 'lane E: a SECOND session cannot see the window the first one opened (not listed, attach ⇒ not_exposed) — the opener\'s self-open share reaches only itself');
-      ok((await api('POST', `/api/desktop/apps/${handle}/reach`, { principal: { kind: 'session', id: 's2' } })).status === 200, 'the user shares it with the second session (POST …/reach)');
-      // the second session is refused by the lease — attach and act alike, typed, exit 1
-      const at2 = await cli('vsst_bbbb', 'attach', handle);
-      ok(at2.code === 1 && /window_leased/.test(at2.err) && /alpha/.test(at2.err) && /one holder per window/.test(at2.err), 'a SECOND session\'s attach is refused window_leased naming the holder (exit 1)');
-      const act2 = await cli('vsst_bbbb', 'click', handle, countBtn ? countBtn.ref : '@e1');
-      ok(act2.code === 1 && /not_attached/.test(act2.err), 'and its click is refused not_attached — two agents never fight one pointer');
-      const snap2 = await cli('vsst_bbbb', 'snapshot', handle);
-      ok(snap2.code === 1 && /not_attached/.test(snap2.err), 'nor may it read the tree');
-      // the user's live view on the REAL bridge: a viewer in Watch sends 'a' — the key witness stays "key none"
-      const WebSocket = require('ws');
-      const keyLabel = async () => { const r = await cli('vsst_aaaa', 'snapshot', handle, '--json'); try { const j = JSON.parse(r.out); const n = j.nodes.find((x) => x.role === 'label' && /^key /.test(x.name || '')); return n ? n.name : null; } catch { return null; } };
-      const viewerId = 'wl-user1';
-      const rfb = await new Promise((resolve, reject) => {
-        const ws = new WebSocket(`ws://127.0.0.1:${port}/api/desktop/${handle}/stream?viewer=${viewerId}`);
-        let buf = Buffer.alloc(0), phase = 'version';
-        const st = { ws, ready: false };
-        ws.on('error', reject);
-        ws.on('message', (m) => {
-          buf = Buffer.concat([buf, Buffer.from(m)]);
-          for (;;) {
-            if (phase === 'version') { if (buf.length < 12) return; buf = buf.subarray(12); ws.send(Buffer.from('RFB 003.008\n')); phase = 'security'; }
-            else if (phase === 'security') { if (buf.length < 1) return; const n = buf[0]; if (n === 0) { reject(new Error('server refused: ' + buf.subarray(5).toString())); return; } if (buf.length < 1 + n) return; const types = [...buf.subarray(1, 1 + n)]; buf = buf.subarray(1 + n); if (!types.includes(1)) { reject(new Error('no None security type: ' + types)); return; } ws.send(Buffer.from([1])); phase = 'result'; }
-            else if (phase === 'result') { if (buf.length < 4) return; const r = buf.readUInt32BE(0); buf = buf.subarray(4); if (r !== 0) { reject(new Error('security result ' + r)); return; } ws.send(Buffer.from([1])); phase = 'serverinit'; }
-            else if (phase === 'serverinit') { if (buf.length < 24) return; const nl = buf.readUInt32BE(20); if (buf.length < 24 + nl) return; buf = buf.subarray(24 + nl); phase = 'done'; st.ready = true; resolve(st); }
-            else { buf = Buffer.alloc(0); return; }
-          }
-        });
-        setTimeout(() => reject(new Error('RFB handshake did not finish in 8 s')), 8000);
-      }).catch((e) => ({ error: e.message }));
-      ok(rfb && !rfb.error, `a viewer completes the RFB handshake with the keeper's x11vnc through the bridge${rfb && rfb.error ? ' — ' + rfb.error : ''}`);
-      if (rfb && !rfb.error) {
-        const pressA = () => { rfb.ws.send(Buffer.concat([PTR(60, 60), KEY_DOWN, KEY_UP])); };
-        ok((await keyLabel()) === 'key none', 'before anything: the fixture\'s key witness reads "key none"');
-        pressA(); await sleep(600);
-        ok((await keyLabel()) === 'key none', 'in Watch the viewer\'s pointer move + KeyEvent \'a\' are dropped by the bridge: the witness still reads "key none" (the agent is driving)');
-        // the user takes over through the desktop route (the live view's Take over)
-        const lease0 = await api('GET', `/api/desktop/apps/${handle}/lease`);
-        ok(lease0.status === 200 && lease0.j.lease && lease0.j.lease.sessionId === 's1' && lease0.j.lease.input === 'agent' && lease0.j.origin === 'vibespace', 'GET …/lease says the agent holds it (input agent, origin vibespace)');
-        const tk = await api('POST', `/api/desktop/apps/${handle}/takeover`, { viewerId });
-        ok(tk.status === 200 && tk.j.ok && tk.j.lease.input === 'user' && /^tk-[0-9a-f]{16}$/.test(tk.j.lease.takenBy.tag) && !JSON.stringify(tk.j.lease).includes(viewerId), 'POST …/takeover flips the lease to the user and answers the taker its OPAQUE tag — the viewer id is not in the lease');
-        ok(bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.input === 'user')), 'window-leases-updated was broadcast with input user');
-        ok(!bcasts.some((m) => m.type === 'window-leases-updated' && JSON.stringify(m).includes(viewerId)) && bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.takenBy && /^tk-/.test(l.takenBy.tag))), 'the broadcast names the takeover by its tag and carries the viewer id (the socket\'s secret) NOWHERE — another client cannot drive or hand back with it');
-        const pausedClick = await cli('vsst_aaaa', 'click', handle, countBtn ? countBtn.ref : '@e1');
-        ok(pausedClick.code === 1 && /window_paused/.test(pausedClick.err) && /do NOT retry/.test(pausedClick.err), 'the agent\'s click is refused window_paused (exit 1, "do NOT retry") — nothing was injected');
-        const pausedKey = await cli('vsst_aaaa', 'key', handle, 'ctrl+s');
-        ok(pausedKey.code === 1 && /window_paused/.test(pausedKey.err), 'a chord too: §6.6 — a takeover stops injection of every kind');
-        ok((await api('POST', `/api/desktop/apps/${handle}/takeover`, { viewerId: 'wl-other' })).j.code === 'held', 'another viewer is refused held (409) while this one drives');
-        pressA(); await sleep(800);
-        const afterKey = await (async () => { const r = await fetch(API + '/api/agent/window/snapshot', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_aaaa' }, body: JSON.stringify({ handle }) }); return r.status; })();
-        ok(afterKey === 409, 'the agent cannot even snapshot while the user drives (409 window_paused)');
-        const hb = await api('POST', `/api/desktop/apps/${handle}/handback`, { viewerId });
-        ok(hb.status === 200 && hb.j.ok && hb.j.cause === 'explicit' && hb.j.byHolder === true && hb.j.lease.input === 'agent', 'POST …/handback returns it to the agent (explicit, by the holder)');
-        ok((await keyLabel()) === 'key a', 'the \'a\' the user sent WHILE driving landed: the witness reads "key a" (their input relayed only while they held the window)');
-        await sleep(50);
-        ok(delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && /the "vs window fixture" window back to you/.test(delivered[0].text) && delivered[0].text.includes(`vibespace-window snapshot ${handle}`), 'the explicit handback was announced into the holder\'s conversation through the ONE ladder, with the window text');
-        const snapHb = await cli('vsst_aaaa', 'snapshot', handle, '--json');
-        let btn2 = null; try { snap = JSON.parse(snapHb.out); btn2 = snap.nodes.find((n) => (n.role === 'push button' || n.role === 'button') && n.name === 'Count'); } catch { }
-        const afterHb = btn2 ? await cli('vsst_aaaa', 'click', handle, btn2.ref) : { code: -1, err: 'no Count button after the handback snapshot' };
-        const snapHb2 = await cli('vsst_aaaa', 'snapshot', handle, '--json');
-        try { snap = JSON.parse(snapHb2.out); } catch { }
-        ok(snapHb.code === 0 && afterHb.code === 0 && countLabel() && countLabel().name === 'count 2', `after the handback the agent snapshots and clicks again (${countLabel() && countLabel().name}) — the window is theirs once more`);
-        const w = await cli('vsst_aaaa', 'watch', handle);
-        ok(w.code === 0 && /window-live/.test(w.out) && /origin vibespace/.test(w.out) && /Take over/.test(w.out), 'watch names the window-live form, the origin and the three moves');
-        rfb.ws.close();
-      }
-      // a RESTART: a new engine over the same data dir + keeper still holds the lease; the CLI snapshots without re-attaching
-      const engine2 = ENGINE.create({ keeper, dataDir, env: () => ({ ...base }), activeSessions: sessions, log: { log() { }, warn() { } } });
-      const boot = engine2.boot();
-      ok(boot.leases === 1 && engine2.leaseOf(handle).sessionId === 's1' && engine2.leaseOf(handle).input === 'agent', 'a new engine over the same data dir (a restart) boots with the lease kept and the input side fresh');
-      AROUTES.setup({ engine: engine2 });
-      const snapAfter = await cli('vsst_aaaa', 'snapshot', handle, '--json');
-      ok(snapAfter.code === 0 && JSON.parse(snapAfter.out).nodes.length > 5, 'after the restart the CLI snapshots without re-attaching (the persisted lease)');
-      const at2b = await cli('vsst_bbbb', 'attach', handle);
-      ok(at2b.code === 1 && /window_leased/.test(at2b.err), 'and the second session is still refused');
-      const audit = fs.readFileSync(engine2.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-      ok(audit.some((l) => l.verb === 'takeover' && l.by === 'user' && l.viewer === 'wl-user1' && l.origin === 'vibespace') && audit.some((l) => l.verb === 'handback' && l.cause === 'explicit' && l.origin === 'vibespace') && audit.some((l) => l.verb === 'click' && l.by === 'node' && l.node && l.node.action) && !audit.some((l) => 'text' in l), 'the audit carries the takeover (viewer) and handback (cause) lines with origin, the node click with its action, and never typed text');
-      engine2.shutdown();
-      const det = await cli('vsst_aaaa', 'detach', handle);
-      ok(det.code === 0 && /detached/.test(det.out), 'detach through the CLI');
-      await keeper.stop(handle);
-    }
-    await new Promise((r) => srv.close(r));
-    wired.shutdown(); announcer.shutdown(); keeper.shutdown();
-  }
-}
+console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring, the CLI as a child process — under a PRIVATE session bus and the accessibility bus on it');
+// r2305 — A SUITE THAT NEEDS A BUS BRINGS ITS OWN: §3 runs as a child under dbus-run-session (a private session bus) with the
+// accessibility bus started on it by the child itself (at-spi-bus-launcher), in its own runtime folder (0700, removed at its end) and
+// a scratch HOME — never the machine's session bus, never a bus name from the caller's environment. Where the bus programs are
+// absent the skip says which by name (a runner reads it as partial).
+await privateBusChild('--sec3-child', 'sec3', 300000);
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('§4 LANE E REAL: reach + the share mode + the pixel road on the xpra rung (a child under a PRIVATE session bus)');
@@ -747,4 +607,198 @@ async function laneE() {
     keeper.shutdown();
     await new Promise((r) => srv.close(r));
   }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+/** §3 itself — run ONLY in its child (`--sec3-child`), on the private session bus its parent started */
+async function section3() {
+  // the accessibility bus ON THE PRIVATE SESSION BUS, started by this child (the parent named the launcher it found)
+  if (process.env.VS_A11Y_LAUNCHER) { const l = spawn(process.env.VS_A11Y_LAUNCHER, ['--launch-immediately'], { env: process.env, stdio: 'ignore', detached: true }); children.add(l); a11yLauncher = l; }
+  {
+  const base = { ...process.env };
+  const py = await run('python3', ['-c', "import gi; gi.require_version('Atspi','2.0'); gi.require_version('Gtk','3.0'); from gi.repository import Atspi, Gtk; print('ok')"], base, 20000);
+  const facts = await D.hostFacts({});
+  const a11y = py.err ? null : await WT.probeA11y({ env: base, wallMs: 10000 });
+  const python = D.binOnPath('python3', { env: base });
+  const fixture = path.join(REPO, 'scripts', 'fixtures', 'window-target-app.py');
+  if (py.err) skip(`python3 gi Atspi/Gtk not importable: ${(py.stderr || py.err.message).trim().split('\n').pop()}`);
+  else if (!facts.bins.Xvfb || !facts.bins.x11vnc) skip(`Xvfb (${!!facts.bins.Xvfb}) and x11vnc (${!!facts.bins.x11vnc}) are both needed for the keeper's vnc-display rung`);
+  else if (!base.DBUS_SESSION_BUS_ADDRESS && !base.XDG_RUNTIME_DIR) skip('no session bus in this environment — the a11y bus is unreachable');
+  else if (!a11y || !a11y.ok) skip(`the accessibility bus did not answer: ${a11y && a11y.why}`);
+  else {
+    console.log(`  a11y probe: ${a11y.apps} apps on the bus in ${a11y.ms} ms; backends: Xvfb ${facts.bins.Xvfb}, x11vnc ${facts.bins.x11vnc}`);
+    const dataDir = path.join(dir, 'real'); fs.mkdirSync(dataDir, { recursive: true });
+    const K = require('../src/server/desktop-app-keeper.js');
+    const bcasts = [];
+    // AN EXEC IS A HUMAN'S (design-desktop-apps §5, engine 2026-09-21): an agent opens a
+    // REGISTRY app by id, so the fixture is a registry ROW of this keeper — `open --exec`
+    // is the refusal test-window-targets pins, not the way in.
+    const registryRows = [{ id: 'vs-window-fixture', label: 'vs window fixture', exec: python, args: [fixture], category: 'test' }];
+    // P8-2: xpra wins the default ladder when installed; this leg drives the RFB bridge (Watch drops a KeyEvent), so it pins vnc-display through the instance preference
+    const keeper = K.create({ dataDir, env: () => ({ ...base }), broadcast: (m) => bcasts.push(m), serverSetting: (key) => (key === 'desktop.backendPrefs' ? 'vnc-display, xpra, desktop-singleton' : undefined), registryRows, log: { log() { }, warn() { }, error() { } } });
+    keepers.push(keeper);
+    await keeper.adoptAll(); keeper.start();
+    const sessions = new Map([['s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha', backendSessionId: 'conv-1' }], ['s2', { agentToken: 'vsst_bbbb', _browserKey: 'bk-22222222', name: 'beta', backendSessionId: 'conv-2' }]]);
+    const delivered = [];
+    const announcer = HB.create({ keeper: null, deliver: { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return { ok: true }; } }, serverSetting: () => undefined, activeSessions: sessions, log: { log() { }, warn() { } } });
+    const express = require('express');
+    const app = express();
+    app.use(express.json());
+    const wired = WIRING.install({ app, auth: { requestAuthed: () => true }, vnc: { port: 0 }, keeper, DESKTOP_SINGLETON_ID: 'desktop-singleton', dataDir, env: () => ({ ...base }), activeSessions: () => sessions, serverSetting: () => undefined, broadcast: (m) => bcasts.push(m), browserHandback: announcer, log: { log() { }, warn() { } } });
+    ok(wired.announced === true && wired.windowEngine && wired.desktopStream, 'the wiring composes the engine, the bridge and the announcer\'s window seam');
+    const srv = http.createServer(app);
+    srv.on('upgrade', (req, socket, head) => { const id = wired.desktopStream.upgradeId(req.url.split('?')[0]); if (!id) { socket.destroy(); return; } wired.desktopStream.handleUpgrade(req, socket, head, id); });
+    const port = await freePort();
+    await new Promise((r) => srv.listen(port, '127.0.0.1', r));
+    const API = `http://127.0.0.1:${port}`;
+    const cli = (token, ...args) => new Promise((res) => { const c = spawn(process.execPath, [path.join(REPO, 'data', 'bin', 'vibespace-window'), ...args], { env: { ...base, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (code) => res({ code, out, err })); });
+    const api = async (method, p, body) => { const r = await fetch(API + p, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), 'Sec-Fetch-Site': 'same-origin' }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };   // r2: the person's own page (the door mints the PRESS)
+    const engine = wired.windowEngine;
+    const f1 = engine.factsForToken('vsst_aaaa');
+    // the agent (session 1) opens the fixture through the CLI
+    const refused = await cli('vsst_aaaa', 'open', '--exec', python, '--args', fixture, '--json');
+    ok(refused.code !== 0 && /exec_is_human/.test(refused.err), `open --exec is refused by the CLI itself, exec_is_human (${refused.err.trim().split('\n').pop().slice(0, 80)})`);
+    const opened = await cli('vsst_aaaa', 'open', 'vs-window-fixture', '--title', 'vs window fixture', '--json');
+    let handle = null; try { handle = JSON.parse(opened.out).handle; } catch { }
+    ok(opened.code === 0 && handle && /^da-/.test(handle), `vibespace-window open (as a child process) starts the fixture through the keeper and answers a handle (${handle}) — ${opened.err.trim().split('\n').pop() || 'no stderr'}`);
+    if (!handle) { console.log(opened.out, opened.err); }
+    else {
+      const ready = await until(() => { const r = keeper.get(handle); return r && r.state === 'ready'; }, 30000, 200);
+      const rec = keeper.get(handle);
+      ok(ready && rec.backend === 'vnc-display', `the keeper brings it up on ${rec && rec.display} via ${rec && rec.via} (state ${rec && rec.state})`);
+      // wait for the app on the a11y bus, then snapshot through the CLI
+      let snap = null;
+      const onBus = await until(async () => { const r = await cli('vsst_aaaa', 'snapshot', handle, '--json'); if (r.code === 0) { try { const j = JSON.parse(r.out); if (j.nodes && j.nodes.length) { snap = j; return true; } } catch { } } return false; }, 30000, 500);
+      ok(onBus && snap && snap.census.nodes > 5, `snapshot through the CLI: ${snap && snap.census.nodes} nodes from the real tree (Action ${snap && snap.census.action}, EditableText ${snap && snap.census.editableText})`);
+      // r2305 (line 392's own word on the REAL helper): a walk the traversal deadline cuts says «deadline» — the real helper on the
+      // real (private) bus over the real fixture, a 1 ms wall (the desktop's application list alone takes longer), its words naming it
+      if (onBus && snap && Array.isArray(snap.apps) && snap.apps.length) {
+        const dl = await WT.runHelper({ op: 'snapshot', pids: snap.apps.map((a) => a.pid), budget: 600, wallMs: 1 }, { env: base });
+        const dlSays = WT.truncationSays(dl);
+        ok(!!dl && dl.ok === true && dl.truncated === true && JSON.stringify(dl.truncatedBy) === JSON.stringify(['deadline']) && /traversal deadline/.test(dlSays || '') && !/budget/.test(dlSays || ''),
+          `line 392 on the REAL helper: a walk the traversal deadline cuts (a 1 ms wall) says «deadline», never the budget — ${dlSays}`, dl && dl.ok ? { by: dl.truncatedBy, nodes: (dl.nodes || []).length } : dl);
+      }
+      const listed = await cli('vsst_aaaa', 'list');
+      ok(listed.code === 0 && listed.out.includes(`* ${handle}`) && /held by me/.test(listed.out) && /only windows the user shared with you \(or you opened\)/.test(listed.out) && /because you opened it/.test(listed.out), 'list marks the window as held by me, says it reaches me because I opened it, and states the scope');
+      const countBtn = snap && snap.nodes.find((n) => n.role === 'push button' || n.role === 'button') && snap.nodes.find((n) => (n.role === 'push button' || n.role === 'button') && n.name === 'Count');
+      const countLabel = () => snap && snap.nodes.find((n) => n.role === 'label' && /^count \d+/.test(n.name || ''));
+      ok(!!countBtn && countBtn.actions && countBtn.actions.length > 0 && countLabel() && countLabel().name === 'count 0', 'the Count button (with Action) and the count label are in the snapshot');
+      if (countBtn) {
+        const clicked = await cli('vsst_aaaa', 'click', handle, countBtn.ref);
+        const again = await cli('vsst_aaaa', 'snapshot', handle, '--json');
+        try { snap = JSON.parse(again.out); } catch { }
+        ok(clicked.code === 0 && /click/.test(clicked.out) && countLabel() && countLabel().name === 'count 1', `click @ref through the CLI changed the app's state, read back from ITS OWN tree (${countLabel() && countLabel().name})`);
+      }
+      // lane E (D1): the window the agent OPENED is shared with IT only — the second session does not even see it
+      const hid2 = await cli('vsst_bbbb', 'attach', handle);
+      const hidList = await cli('vsst_bbbb', 'list');
+      ok(hid2.code === 1 && /not_exposed/.test(hid2.err) && hidList.code === 0 && !hidList.out.includes(handle) && /no window is shared with you/.test(hidList.out), 'lane E: a SECOND session cannot see the window the first one opened (not listed, attach ⇒ not_exposed) — the opener\'s self-open share reaches only itself');
+      ok((await api('POST', `/api/desktop/apps/${handle}/reach`, { principal: { kind: 'session', id: 's2' } })).status === 200, 'the user shares it with the second session (POST …/reach)');
+      // the second session is refused by the lease — attach and act alike, typed, exit 1
+      const at2 = await cli('vsst_bbbb', 'attach', handle);
+      ok(at2.code === 1 && /window_leased/.test(at2.err) && /alpha/.test(at2.err) && /one holder per window/.test(at2.err), 'a SECOND session\'s attach is refused window_leased naming the holder (exit 1)');
+      const act2 = await cli('vsst_bbbb', 'click', handle, countBtn ? countBtn.ref : '@e1');
+      ok(act2.code === 1 && /not_attached/.test(act2.err), 'and its click is refused not_attached — two agents never fight one pointer');
+      const snap2 = await cli('vsst_bbbb', 'snapshot', handle);
+      ok(snap2.code === 1 && /not_attached/.test(snap2.err), 'nor may it read the tree');
+      // the user's live view on the REAL bridge: a viewer in Watch sends 'a' — the key witness stays "key none"
+      const WebSocket = require('ws');
+      const keyLabel = async () => { const r = await cli('vsst_aaaa', 'snapshot', handle, '--json'); try { const j = JSON.parse(r.out); const n = j.nodes.find((x) => x.role === 'label' && /^key /.test(x.name || '')); return n ? n.name : null; } catch { return null; } };
+      const viewerId = 'wl-user1';
+      const rfb = await new Promise((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/api/desktop/${handle}/stream?viewer=${viewerId}`);
+        let buf = Buffer.alloc(0), phase = 'version';
+        const st = { ws, ready: false };
+        ws.on('error', reject);
+        ws.on('message', (m) => {
+          buf = Buffer.concat([buf, Buffer.from(m)]);
+          for (;;) {
+            if (phase === 'version') { if (buf.length < 12) return; buf = buf.subarray(12); ws.send(Buffer.from('RFB 003.008\n')); phase = 'security'; }
+            else if (phase === 'security') { if (buf.length < 1) return; const n = buf[0]; if (n === 0) { reject(new Error('server refused: ' + buf.subarray(5).toString())); return; } if (buf.length < 1 + n) return; const types = [...buf.subarray(1, 1 + n)]; buf = buf.subarray(1 + n); if (!types.includes(1)) { reject(new Error('no None security type: ' + types)); return; } ws.send(Buffer.from([1])); phase = 'result'; }
+            else if (phase === 'result') { if (buf.length < 4) return; const r = buf.readUInt32BE(0); buf = buf.subarray(4); if (r !== 0) { reject(new Error('security result ' + r)); return; } ws.send(Buffer.from([1])); phase = 'serverinit'; }
+            else if (phase === 'serverinit') { if (buf.length < 24) return; const nl = buf.readUInt32BE(20); if (buf.length < 24 + nl) return; buf = buf.subarray(24 + nl); phase = 'done'; st.ready = true; resolve(st); }
+            else { buf = Buffer.alloc(0); return; }
+          }
+        });
+        setTimeout(() => reject(new Error('RFB handshake did not finish in 8 s')), 8000);
+      }).catch((e) => ({ error: e.message }));
+      ok(rfb && !rfb.error, `a viewer completes the RFB handshake with the keeper's x11vnc through the bridge${rfb && rfb.error ? ' — ' + rfb.error : ''}`);
+      if (rfb && !rfb.error) {
+        const pressA = () => { rfb.ws.send(Buffer.concat([PTR(60, 60), KEY_DOWN, KEY_UP])); };
+        ok((await keyLabel()) === 'key none', 'before anything: the fixture\'s key witness reads "key none"');
+        pressA(); await sleep(600);
+        ok((await keyLabel()) === 'key none', 'in Watch the viewer\'s pointer move + KeyEvent \'a\' are dropped by the bridge: the witness still reads "key none" (the agent is driving)');
+        // the user takes over through the desktop route (the live view's Take over)
+        const lease0 = await api('GET', `/api/desktop/apps/${handle}/lease`);
+        ok(lease0.status === 200 && lease0.j.lease && lease0.j.lease.sessionId === 's1' && lease0.j.lease.input === 'agent' && lease0.j.origin === 'vibespace', 'GET …/lease says the agent holds it (input agent, origin vibespace)');
+        const tk = await api('POST', `/api/desktop/apps/${handle}/takeover`, { viewerId });
+        ok(tk.status === 200 && tk.j.ok && tk.j.lease.input === 'user' && /^tk-[0-9a-f]{16}$/.test(tk.j.lease.takenBy.tag) && !JSON.stringify(tk.j.lease).includes(viewerId), 'POST …/takeover flips the lease to the user and answers the taker its OPAQUE tag — the viewer id is not in the lease');
+        ok(bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.input === 'user')), 'window-leases-updated was broadcast with input user');
+        ok(!bcasts.some((m) => m.type === 'window-leases-updated' && JSON.stringify(m).includes(viewerId)) && bcasts.some((m) => m.type === 'window-leases-updated' && m.leases.some((l) => l.handle === handle && l.takenBy && /^tk-/.test(l.takenBy.tag))), 'the broadcast names the takeover by its tag and carries the viewer id (the socket\'s secret) NOWHERE — another client cannot drive or hand back with it');
+        const pausedClick = await cli('vsst_aaaa', 'click', handle, countBtn ? countBtn.ref : '@e1');
+        ok(pausedClick.code === 1 && /window_paused/.test(pausedClick.err) && /do NOT retry/.test(pausedClick.err), 'the agent\'s click is refused window_paused (exit 1, "do NOT retry") — nothing was injected');
+        const pausedKey = await cli('vsst_aaaa', 'key', handle, 'ctrl+s');
+        ok(pausedKey.code === 1 && /window_paused/.test(pausedKey.err), 'a chord too: §6.6 — a takeover stops injection of every kind');
+        ok((await api('POST', `/api/desktop/apps/${handle}/takeover`, { viewerId: 'wl-other' })).j.code === 'held', 'another viewer is refused held (409) while this one drives');
+        pressA(); await sleep(800);
+        const afterKey = await (async () => { const r = await fetch(API + '/api/agent/window/snapshot', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_aaaa' }, body: JSON.stringify({ handle }) }); return r.status; })();
+        ok(afterKey === 409, 'the agent cannot even snapshot while the user drives (409 window_paused)');
+        const hb = await api('POST', `/api/desktop/apps/${handle}/handback`, { viewerId });
+        ok(hb.status === 200 && hb.j.ok && hb.j.cause === 'explicit' && hb.j.byHolder === true && hb.j.lease.input === 'agent', 'POST …/handback returns it to the agent (explicit, by the holder)');
+        ok((await keyLabel()) === 'key a', 'the \'a\' the user sent WHILE driving landed: the witness reads "key a" (their input relayed only while they held the window)');
+        await sleep(50);
+        ok(delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && /the "vs window fixture" window back to you/.test(delivered[0].text) && delivered[0].text.includes(`vibespace-window snapshot ${handle}`), 'the explicit handback was announced into the holder\'s conversation through the ONE ladder, with the window text');
+        const snapHb = await cli('vsst_aaaa', 'snapshot', handle, '--json');
+        let btn2 = null; try { snap = JSON.parse(snapHb.out); btn2 = snap.nodes.find((n) => (n.role === 'push button' || n.role === 'button') && n.name === 'Count'); } catch { }
+        const afterHb = btn2 ? await cli('vsst_aaaa', 'click', handle, btn2.ref) : { code: -1, err: 'no Count button after the handback snapshot' };
+        const snapHb2 = await cli('vsst_aaaa', 'snapshot', handle, '--json');
+        try { snap = JSON.parse(snapHb2.out); } catch { }
+        ok(snapHb.code === 0 && afterHb.code === 0 && countLabel() && countLabel().name === 'count 2', `after the handback the agent snapshots and clicks again (${countLabel() && countLabel().name}) — the window is theirs once more`);
+        const w = await cli('vsst_aaaa', 'watch', handle);
+        ok(w.code === 0 && /window-live/.test(w.out) && /origin vibespace/.test(w.out) && /Take over/.test(w.out), 'watch names the window-live form, the origin and the three moves');
+        rfb.ws.close();
+      }
+      // a RESTART: a new engine over the same data dir + keeper still holds the lease; the CLI snapshots without re-attaching
+      const engine2 = ENGINE.create({ keeper, dataDir, env: () => ({ ...base }), activeSessions: sessions, log: { log() { }, warn() { } } });
+      const boot = engine2.boot();
+      ok(boot.leases === 1 && engine2.leaseOf(handle).sessionId === 's1' && engine2.leaseOf(handle).input === 'agent', 'a new engine over the same data dir (a restart) boots with the lease kept and the input side fresh');
+      AROUTES.setup({ engine: engine2 });
+      const snapAfter = await cli('vsst_aaaa', 'snapshot', handle, '--json');
+      ok(snapAfter.code === 0 && JSON.parse(snapAfter.out).nodes.length > 5, 'after the restart the CLI snapshots without re-attaching (the persisted lease)');
+      const at2b = await cli('vsst_bbbb', 'attach', handle);
+      ok(at2b.code === 1 && /window_leased/.test(at2b.err), 'and the second session is still refused');
+      const audit = fs.readFileSync(engine2.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+      ok(audit.some((l) => l.verb === 'takeover' && l.by === 'user' && l.viewer === 'wl-user1' && l.origin === 'vibespace') && audit.some((l) => l.verb === 'handback' && l.cause === 'explicit' && l.origin === 'vibespace') && audit.some((l) => l.verb === 'click' && l.by === 'node' && l.node && l.node.action) && !audit.some((l) => 'text' in l), 'the audit carries the takeover (viewer) and handback (cause) lines with origin, the node click with its action, and never typed text');
+      engine2.shutdown();
+      const det = await cli('vsst_aaaa', 'detach', handle);
+      ok(det.code === 0 && /detached/.test(det.out), 'detach through the CLI');
+      await keeper.stop(handle);
+    }
+    await new Promise((r) => srv.close(r));
+    wired.shutdown(); announcer.shutdown(); keeper.shutdown();
+  }
+  }
+}
+
+/** run this file's `flag` section as a child under a PRIVATE session bus (dbus-run-session): a scratch HOME, its own runtime folder
+ *  (0700, removed at its end), no display or bus name of the caller's; the accessibility bus is started on it by the child */
+async function privateBusChild(flag, tag, timeoutMs) {
+  const base = { ...process.env };
+  const launcher = ['/usr/libexec/at-spi-bus-launcher', '/usr/lib/at-spi2-core/at-spi-bus-launcher'].find((p) => fs.existsSync(p)) || null;
+  const missing = [...(D.binOnPath('dbus-run-session', { env: base }) ? [] : ['dbus-run-session']), ...(launcher ? [] : ['at-spi-bus-launcher'])];
+  if (missing.length) { skip(`${tag}: a private session bus and its accessibility bus need ${missing.join(' and ')} — not on this machine (the section is PARTIAL here)`); return; }
+  const home = path.join(dir, tag, 'home'), rt = path.join(dir, tag, 'run');
+  fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(rt, { recursive: true }); fs.chmodSync(rt, 0o700);
+  const env = { ...base, HOME: home, XDG_RUNTIME_DIR: rt, VS_A11Y_LAUNCHER: launcher };
+  for (const k of ['WAYLAND_DISPLAY', 'DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS']) delete env[k];
+  const child = spawn('dbus-run-session', ['--', process.execPath, new URL(import.meta.url).pathname, flag], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  children.add(child);
+  let buf = '', summary = null, errTail = '', ebuf = '';
+  child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); const m = /^(\d+) passed, (\d+) failed, (\d+) skipped$/.exec(line.trim()); if (m) summary = m.slice(1).map(Number); else console.log(line); } });
+  child.stderr.on('data', (d) => { errTail = (errTail + d).slice(-3000); ebuf += d; let i; while ((i = ebuf.indexOf('\n')) >= 0) { const line = ebuf.slice(0, i); ebuf = ebuf.slice(i + 1); if (/^\s+✗|^\s{4}\S/.test(line)) console.error(line); } });
+  const code = await new Promise((r) => { const t = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { } r('timeout'); }, timeoutMs); child.on('close', (c) => { clearTimeout(t); r(c); }); });
+  if (!summary) ok(false, `the ${tag} child answered no summary (exit ${code})`, errTail.split('\n').filter((l) => !/dbus-daemon|WARNING|Message:|SpiRegistry|discover_other/.test(l)).slice(-12).join('\n'));
+  else { pass += summary[0]; fail += summary[1]; skipped += summary[2]; ok(code === 0 || summary[1] > 0, `the ${tag} child ran to its end on its private bus (${summary[0]} passed, ${summary[1]} failed, ${summary[2]} skipped, exit ${code})`); }
+  try { fs.rmSync(path.join(dir, tag), { recursive: true, force: true }); } catch { }
 }
