@@ -235,7 +235,8 @@ router.get('/api/home-folders', async (req, res) => {
     // files): the instance's own checkout, its data dir and dot-folders are never offered (PURE isExcludedPath)
     // (B-5561 / r1748 (a): each home folder's checkout fact is its OWN call, behind — the exclusion is waited for inside a bound, and an
     // answer built while a fact was still out is never kept: the next ask asks again)
-    const sw = await dirSliceOf(req).selfWhole(1500).catch(() => null);
+    const hac = new AbortController(); res.on('close', () => { if (!res.writableEnded) hac.abort(); });   // (r2178 (4): the dialog closed: the wait ends)
+    const sw = await dirSliceOf(req).selfWhole(1500, hac.signal).catch(() => null);
     const self = sw && sw.v;
     const { isExcludedPath } = require('../path-candidates.js');
     const kept = (Array.isArray(folders) ? folders : []).filter((f) => !(f && f.path && isExcludedPath(f.path, self || { home, roots: [] })));

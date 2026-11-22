@@ -18,7 +18,8 @@ const { NO_IDLE, NO_WORKER } = require('../safe-fs.js');
 // M1: the pool has no worker free for the call — every worker busy (NO_IDLE), or every live one looking (NO_WORKER, bl-machines-a's
 // folder-rule look): asked again inside the bound, never «could not be read»
 const poolBusy = (err) => !!err && (err.code === NO_IDLE.code || err.code === NO_WORKER.code);
-const mono = () => performance.now();   // the re-ask's bound: the monotonic clock (a stepped wall clock never widens it)
+const mono = () => performance.now();
+const LASTING_ERR = /^(ELOOP|ENAMETOOLONG|EACCES|EPERM)$/;   // r2178 (1): the erred facts that cannot heal by themselves   // the re-ask's bound: the monotonic clock (a stepped wall clock never widens it)
 // B-d833's remainder: EVERY call of the field runs on an IDLE worker or not at all (SafeFs `idleOnly`) — a healthy folder's check
 // sent into a worker held by a hung, slower call waited there, ran out ITS OWN deadline and was marked dead for 30 s. A call the pool
 // refuses (every worker busy) is LATE: still looking, asked again by the field — never a mark, never «could not be read»
@@ -110,7 +111,10 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
      texts. Each asker brings its own bound and its own field's end; the call is asked again while ANY live asker's bound is open, and
      ends LATE only past the latest live bound or once EVERY joined asker's field has ended (an asker with no signal never ends) */
   const queuedAsk = new Map();   // counter + key → the ask group of a call still waiting for its slot
-  const joinAsk = (g, boundAt, signal) => { if (g) g.asks.push({ boundAt, signal }); };
+  // (r2178 (2): a join first drops the askers that are done — their field ended, their bound passed —; an asker with no bound and no
+  // field (a kid's facts, the exclusion's own re-read) never joins: it can widen nothing)
+  const asking = (a) => (a.boundAt > 0 || !!a.signal) && !(a.signal && a.signal.aborted) && !(a.boundAt > 0 && a.boundAt <= mono());
+  const joinAsk = (g, boundAt, signal) => { if (!g) return; g.asks = g.asks.filter(asking); const a = { boundAt, signal }; if (asking(a)) g.asks.push(a); };
   const askOpen = (g) => { const live = g.asks.filter((a) => !(a.signal && a.signal.aborted)); return live.length ? live.reduce((m, a) => Math.max(m, a.boundAt || 0), 0) : 0; };
   function once(key, cn, p, run, { entrance = false, born = now(), through = null, boundAt = 0, signal = null }) {
     const t = now(), s0 = sent.get(key);
@@ -118,7 +122,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     if (s0 && s0 !== through && s0.hungAt != null && t - s0.hungAt < PROBE_LATE_MS) return Promise.resolve({ skipped: markEnd(s0), at: p });   // its OWN deadline mark: never sent again inside the window
     const qk = cn + '\n' + key;
     if (queued.has(qk)) { joinAsk(queuedAsk.get(qk), boundAt, signal); return queued.get(qk); }
-    const ask = { asks: [{ boundAt, signal }] };
+    const ask = { asks: [{ boundAt, signal }].filter(asking) };
     queuedAsk.set(qk, ask);
     const qp = grant(C[cn]).then((free) => {
       queued.delete(qk); queuedAsk.delete(qk);
@@ -135,7 +139,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
       const attempt = () => Promise.resolve().then(run).then((r) => { if (reasked) busy.freed++; return r; }, (err) => {
         if (!poolBusy(err)) throw err;
         if (!reasked) busy.refused++;
-        if (!(mono() + REASK_MS <= askOpen(ask))) { busy.late++; throw err; }
+        if (!(mono() + REASK_MS <= askOpen(ask))) { busy.late++; if (sent.get(key) === e) sent.delete(key); throw err; }   // (r2178 (3): out of `sent` in the same step — no joiner meets a call already ending)
         reasked++; busy.reasked++;
         return new Promise((res) => setTimeout(res, REASK_MS)).then(attempt);
       });
@@ -184,19 +188,21 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     return null;
   }
   const raceOf = (p, untilSoft) => Promise.race([Promise.resolve(p).then((r) => r || LATE), untilSoft]);
-  const noteKnown = (p, st) => { known.set(p, { at: now(), stat: st }); if (known.size > 2000) for (const k of [...known.keys()].slice(0, 500)) known.delete(k); };
+  const noteKnown = (p, st) => { known.set(p, { at: now(), stat: st }); if (known.size > 2000) for (const k of [...known.keys()].slice(0, 500)) known.delete(k); if (st && st.exists) { const kf = kidFacts.get(p); if (kf && kf.f && kf.f.errored) kidFacts.delete(p); } };   // (r2178 (1): a good stat of the path clears its erred fact)
   /* (a LISTING states no kid at all since B-5561 — names and types only —, so it needs no skip list: a known dead folder, a mount, a path
      this ask states by its own call is NAMED by every listing, never crossed) */
   /* B-5561: A KID'S OWN FACTS — kept, and asked behind an answer (never waited for). → true when asked (it may still land) */
-  const factOf = (p, t = now()) => { const k = kidFacts.get(p); return k && t - k.at < PROBE_LATE_MS ? k.f : null; };
+  const factOf = (p, t = now()) => { const k = kidFacts.get(p); return k && t - k.at < (k.keep || PROBE_LATE_MS) ? k.f : null; };
   function askFacts(p) {
     const t = now();
     if (factOf(p, t) || mountPaths.includes(p) || entranceAbove(p, t)) return false;   // kept · a mount (named, never stated) · under a dead mark
     // r1748 (b): a facts call that ERRS at once (a stale mount, a link loop, the pool's own refusal by its memory) is kept AS SUCH for
     // the keep time — not asked again at every reply, its late flag settled, its slot never taken from the kids after it. A deadline
     // (its mark) and a busy pool (asked again, or late) are not answers and are not kept
-    const keepFact = (f) => { kidFacts.set(p, { at: now(), f }); if (kidFacts.size > 4000) for (const k of [...kidFacts.keys()].slice(0, 1000)) kidFacts.delete(k); };
-    const keepErr = (err) => keepFact({ errored: true, exists: false, err: String((err && (err.message || err.code)) || err || 'failed').slice(0, 200) });
+    const keepFact = (f, keep = 0) => { kidFacts.set(p, { at: now(), f, ...(keep ? { keep } : {}) }); if (kidFacts.size > 4000) for (const k of [...kidFacts.keys()].slice(0, 1000)) kidFacts.delete(k); };
+    // (r2178 (1): kept the full PROBE_LATE_MS only when it cannot heal by itself — a link loop, a name too long, a permission; a passing
+    // error (EIO, ESTALE while a mount comes up, the pool's memory of a hang) keeps a listing's own short time, LIST_FRESH_MS)
+    const keepErr = (err) => { const msg = String((err && (err.message || err.code)) || err || 'failed').slice(0, 200), code = (err && err.code) || msg.split(/[:\s]/)[0]; keepFact({ errored: true, exists: false, err: msg }, LASTING_ERR.test(code) ? 0 : LIST_FRESH_MS); };
     once('stat:' + p, 'facts', p, () => call('pathStat', { path: p, facts: true }, IDLE_ONLY).then((x) => {
       const st = x && x.stat;
       if (st && st.facts && !st.err) {
@@ -489,16 +495,16 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
 
   /** r1748 (a): the exclusion WHOLE — self() asked again while any home folder's fact is still out, inside `boundMs` (the monotonic
    *  clock). → { v, whole } — `whole: false` = a fact was still out at the bound (a caller that keeps an answer must not keep this one) */
-  async function selfWhole(boundMs = 1500) {
+  async function selfWhole(boundMs = 1500, signal = null) {
     const until = mono() + Math.max(0, boundMs);
     for (;;) {
       const v = await self();
       if (!selfCache.missing && selfCache.v === v) return { v, whole: true };
-      if (mono() >= until) return { v, whole: false };
+      if (mono() >= until || (signal && signal.aborted)) return { v, whole: false };   // (r2178 (4): the request's own end stops the wait)
       await new Promise((r) => setTimeout(r, 40));
     }
   }
-  return { slice, self, selfWhole, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts }, _counters: C };
+  return { slice, self, selfWhole, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts, sent }, _counters: C };
 }
 
 module.exports = { create, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS, FACT_SLOTS, KID_FACTS, LINK_FACTS };
