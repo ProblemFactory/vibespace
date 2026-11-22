@@ -1768,6 +1768,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - NOT MOVED, said: a memo's first read of a process (the file, once), the drops' unlink, and on ingest's road a NEW body's attachmentPut (its meta's atomic write, the LRU ledger's first read and save) — none is on the digest; the store writer's own makeDir comment (lg-store-writes' file) still names one door.
 - LEGS: scripts/test-channel-store-sync-holds.mjs (new, fast): the main thread's synchronous fs calls counted during each door — 0 for both memos (and the directory made by the writer), 0 for attachmentGetAsync with the same answer; a drop with a newer write owed leaves no file; a drop whose write's rename lands late reads null (the tombstone); the async hit refreshes the LRU entry; the engine's road pinned. Red controls: the release's memo door, a synchronous body behind the async name, a drop without its tombstone, an async hit that touches no LRU.
 
+### bl-mail B-360d r2542 — the channel store keeps no start-read text (主开发 r2542, lane gmail-connect-wall's heap find)
+- THE FIND: on a 200 000-row stand-in the channels' settled heap grew 660 → 1017 MB between a117cebb8 and 5b5fb7a9d; a second object the size of the index beside the parsed rows. THE HOLDER (by reading, then measured): src/store-hold.js keeps a family's start-read text «until the caller takes it once»; the channel store's `loadJsonFamily` took the value alone (B-f276 1b), so index.json's whole text stayed for the store's life.
+- THE MEASURE (a scratch probe on the test machine, 20 000 rows, 909 bytes a row on disk, a title outside Latin-1; the mean of two runs a copy): as it is 3149 bytes a row of heap + 908 of ArrayBuffers; with the text taken 1343 + 908 (the text: 1806 bytes a row, twice the file); the layout not warmed at open 3025 + 0.
+- THE CURE: `fam.H.takeText()` after the start read (every family) and at a read again (`liftFamily`). The hold's own file is untouched. The class, by a fixed-string search: the hold's other start-read callers (src/routes/persistence.js ×5) take their text; the migrations' `readNow` keeps none.
+- LEG: scripts/test-channel-store-heap.mjs (new, fast): 8 000 rows, the settled heap a row under twice the file's bytes a row; RED the text kept. KNOWN COST, said: the layout warmed at open (unit 1, to fill the prints) is 908 bytes a row of ArrayBuffers + 125 of heap against «built at the first whole write».
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
