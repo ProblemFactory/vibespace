@@ -1421,6 +1421,7 @@ export default {
   "not logged in": "未登录",
   "sign-in not read yet": "登录信息尚未读取",
   "Could not compare with {names} — their sign-in could not be read; if this login is one of them, two rows now name one account": "无法与 {names} 比较——无法读取其登录信息；若此次登录就是其中之一，现在会有两行指向同一账号",
+  "Could not compare with {names} — their sign-in could not be read; two rows may name one account": "无法与 {names} 比较——无法读取其登录信息；可能有两行指向同一账号",
   "sign-in could not be read": "无法读取登录信息",
   "sign-in could not be read ({why})": "无法读取登录信息（{why}）",
   "the share did not answer in time": "共享存储未及时响应",

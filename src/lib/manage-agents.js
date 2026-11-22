@@ -387,16 +387,19 @@ export function factsWordsHtml(a) {
   return `<span class="acct-linked-hint">${escHtml(t('sign-in not read yet'))}</span>`;
 }
 /** B-360d: a same-account fold that could not compare rows (their sign-in could not be read in time) is SAID, never silent — the
- *  finish's answer and a host's accounts answer, one set of words; '' when every row it compares was read */
-export function foldUnjudgedWords(list) {
+ *  finish's answer names the login just made; a host's accounts answer (its view, its login poll: nobody may have just signed in)
+ *  says only what may be (round wge361035's small, 主开发 r2297); '' when every row it compares was read */
+export function foldUnjudgedWords(list, { host = false } = {}) {
   if (!Array.isArray(list) || !list.length) return '';
-  return t('Could not compare with {names} — their sign-in could not be read; if this login is one of them, two rows now name one account', { names: list.map((x) => x.name || x.id).join(', ') });
+  const names = list.map((x) => x.name || x.id).join(', ');
+  return host ? t('Could not compare with {names} — their sign-in could not be read; two rows may name one account', { names })
+    : t('Could not compare with {names} — their sign-in could not be read; if this login is one of them, two rows now name one account', { names });
 }
 // a host's accounts answer is read at every render of its view and every login poll: its words are said once a change (B-360d
 // follow, 主开发 r1574) — host → the words last said; an answer with every row compared forgets them
 const _hostFoldSaid = new Map();
 export function sayHostFoldUnjudged(hostId, r) {
-  const said = foldUnjudgedWords(r && r.foldUnjudged);   // not `words`: test-plain-words reads a file's first `const words = …(` as a dialog's builder
+  const said = foldUnjudgedWords(r && r.foldUnjudged, { host: true });   // not `words`: test-plain-words reads a file's first `const words = …(` as a dialog's builder
   if (!said) { _hostFoldSaid.delete(hostId); return; }
   if (_hostFoldSaid.get(hostId) === said) return;
   _hostFoldSaid.set(hostId, said); showToast(said, { duration: 10000 });

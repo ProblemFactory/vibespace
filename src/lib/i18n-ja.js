@@ -1420,6 +1420,7 @@ export default {
   "not logged in": "未ログイン",
   "sign-in not read yet": "サインイン情報はまだ読み込まれていません",
   "Could not compare with {names} — their sign-in could not be read; if this login is one of them, two rows now name one account": "{names} と比較できませんでした（サインイン情報を読み込めませんでした）。このログインがその一つなら、同じアカウントの行が二つになります",
+  "Could not compare with {names} — their sign-in could not be read; two rows may name one account": "{names} と比較できませんでした（サインイン情報を読み込めませんでした）。同じアカウントの行が二つある可能性があります",
   "sign-in could not be read": "サインイン情報を読み込めませんでした",
   "sign-in could not be read ({why})": "サインイン情報を読み込めませんでした（{why}）",
   "the share did not answer in time": "共有ストレージが時間内に応答しませんでした",

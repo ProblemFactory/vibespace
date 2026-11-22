@@ -1725,7 +1725,11 @@ app.post('/api/usage/repair-identity', async (req, res) => {
   if (rep && rep.error) return res.status(500).json({ error: 'identity repair failed: ' + rep.error, code: 'repair-failed' });
   try { reloadRateLimitCache(); } catch { }
   try { for (const k of Object.keys(_onDemandUsageAt)) delete _onDemandUsageAt[k]; } catch { }
-  res.json({ success: true, counts: rep.counts, ms: rep.ms, identities: (rep.identities || []).map((r) => ({ key: r.key, name: r.name, apiPhase: r.apiPhase, n: r.n, of: r.of, sidecar: r.sidecar, sidecarWas: r.sidecarWas, cache: r.cache, readmitted: r.readmitted })) });
+  // the folders this press could NOT compare (not read inside the person's bound, or unreadable) are NAMED in its reply (round
+  // wge361035's small, 主开发 r2297): a row not read carries no email and is never grouped by one — the hourly run repairs it
+  const notCompared = [];
+  try { for (const [id, f] of (settled && settled.facts) || []) if (!f || f.state !== 'read') { const a = accounts.get(id); notCompared.push({ id, name: (a && a.name) || id, why: (f && f.why) || 'not-read-yet' }); } } catch { }
+  res.json({ success: true, counts: rep.counts, ms: rep.ms, notCompared, identities: (rep.identities || []).map((r) => ({ key: r.key, name: r.name, apiPhase: r.apiPhase, n: r.n, of: r.of, sidecar: r.sidecar, sidecarWas: r.sidecarWas, cache: r.cache, readmitted: r.readmitted })) });
 });
 
 // THE ON-DEMAND READINGS (lane antigravity-card-fixes): a named account whose harness declares `quota.onDemand`
