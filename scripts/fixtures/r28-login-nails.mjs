@@ -371,7 +371,7 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
         saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
         loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
         loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
-          BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+          BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remoteSession: Boolean(remoteSession), agent: true }),
           { proxy: Boolean(mediator), external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(wsEndpoint), usableProfiles: [prof.label], profileLabel: prof.label, action },
         ),
       };
@@ -470,7 +470,7 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
       saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
       loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
       loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
-        BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+        BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remoteSession: Boolean(remoteSession), agent: true }),
         { proxy: Boolean(mediator), external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(wsEndpoint), usableProfiles: [prof.label], profileLabel: prof.label, action },
       ),
     });
@@ -824,7 +824,7 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
       saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
       loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
       loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
-        BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+        BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remoteSession: Boolean(remoteSession), agent: true }),
         { proxy: Boolean(mediator), external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(relay.wsUrl), usableProfiles: [prof.label], profileLabel: prof.label, action },
       ),
     };

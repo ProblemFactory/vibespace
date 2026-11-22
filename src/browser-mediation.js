@@ -826,21 +826,27 @@ function judgeScope(msg, scope = null) {
   return { kind: 'forward', pending: { method, params: msg.params && typeof msg.params === 'object' ? msg.params : {}, sessionId: msg.sessionId == null ? null : String(msg.sessionId) }, explicit: true };
 }
 /**
- * WHICH ROAD a lease's CDP url takes (PURE) → `{mode: 'mediated'|'scope'|null, why}`:
+ * WHICH ROAD a lease's CDP url takes (PURE) → `{mode: 'mediated'|'scope'|null, why[, paired]}`, each raw case by ITS OWN reason
+ * (B-19a9, the coordinator's r1846 (b): never one flag that lumps them):
  *   · a mediated profile (`instance` sharing)                                  ⇒ 'mediated' (its own judge, unchanged)
  *   · no mediating proxy in this process                                       ⇒ null 'no-proxy' (the raw url, as before)
  *   · an ephemeral browser (the conversation's own — nobody else's tabs in it) ⇒ null 'ephemeral'
- *   · a browser on a paired machine / reached remotely                         ⇒ null 'remote' (the proxy serves THIS machine)
+ *   · an OUTSIDE endpoint (a `cdp` profile — a browser this hub did not start) ⇒ null 'external'
+ *   · a conversation on ANOTHER machine (a remote session's lease)             ⇒ null 'remote-session' (the hub's loopback is not its)
  *   · the user's own session (Browse yourself) or no agent key                 ⇒ null 'human' (a person sees every tab)
- *   · else (an agent's lease on a local named profile shared cooperatively)    ⇒ 'scope'
+ *   · else (an agent's lease on a named profile shared cooperatively)          ⇒ 'scope' — on THIS machine, or on a PAIRED one
+ *     (`paired: true`): a paired machine's browser is reached through this hub's OWN loopback forward (browser-access forwardCdp),
+ *     so its drivers run HERE and the same proxy stands in front of that forward — a machine is a PARAMETER, never a second road
+ *     (B-19a9: the 30 s bind under another holder's tabs, and the false «tab gone», are the hub's drivers' on either machine).
  */
-function leaseRoadVerdict({ mediated = false, proxy = false, ephemeral = false, remote = false, agent = false } = {}) {
+function leaseRoadVerdict({ mediated = false, proxy = false, ephemeral = false, external = false, remoteSession = false, paired = false, agent = false } = {}) {
   if (mediated) return { mode: MEDIATED_MODE, why: 'mediated' };
   if (!proxy) return { mode: null, why: 'no-proxy' };
   if (ephemeral) return { mode: null, why: 'ephemeral' };
-  if (remote) return { mode: null, why: 'remote' };
+  if (external) return { mode: null, why: 'external' };
+  if (remoteSession) return { mode: null, why: 'remote-session' };
   if (!agent) return { mode: null, why: 'human' };
-  return { mode: SCOPE_MODE, why: 'shared' };
+  return paired ? { mode: SCOPE_MODE, why: 'shared', paired: true } : { mode: SCOPE_MODE, why: 'shared' };
 }
 
 const LOGIN_CHANNEL_CODE = 'login_channel_unmediated';

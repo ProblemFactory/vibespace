@@ -53,7 +53,7 @@ const eq = (a, b, label) => ok(JSON.stringify(a) === JSON.stringify(b), label, {
 const quiet = { log() {}, warn() {}, error() {} };
 const stubLoginChannel = ({ mediated = false, proxy = true, ephemeral = false, remote = false, external = false, remoteSession = false, hasCdp = true, label = 'ShopProfile', action = 'fill' } = {}) =>
   BM.loginFillChannelVerdict(
-    BM.leaseRoadVerdict({ mediated, proxy, ephemeral: Boolean(ephemeral), remote: Boolean(remote || external || remoteSession), agent: true }),
+    BM.leaseRoadVerdict({ mediated, proxy, ephemeral: Boolean(ephemeral), external: Boolean(external), remoteSession: Boolean(remoteSession), paired: Boolean(remote) && !external, agent: true }),
     { proxy, external, remote, remoteSession: Boolean(remoteSession), hasCdp, usableProfiles: proxy ? [label] : [], profileLabel: label, action },
   );
 

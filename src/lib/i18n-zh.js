@@ -6071,6 +6071,7 @@ export default {
   "Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.": "你的任何会话都能使用这个浏览器和其中的登录 — 同一个浏览器，每个会话在自己的标签页里。",
   "Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.": "现在 agent 无法在这台电脑上使用这个浏览器 — 它以独立标签页的方式共享，而 VibeSpace 的浏览器代理没有在这里运行。",
   "Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.": "你的任何会话都能使用这个浏览器和其中的登录 — 它们共用这个浏览器：每个会话都能看到并操作其中的每个标签页。",
+  "Any of your conversations can use this browser and its logins — it is a browser VibeSpace did not start, reached at its own address: they all share it, each can see and drive every tab in it.": "你的任何会话都能使用这个浏览器和其中的登录 — 它不是 VibeSpace 启动的浏览器，而是按它自己的地址连接的：它们共用这个浏览器，每个会话都能看到并操作其中的每个标签页。",
   "Could not change who can use it": "无法更改谁能使用",
   "{n} other conversation(s) no longer use {label}": "另有 {n} 个会话不再使用 {label}",
   "Rename {label}": "重命名 {label}",

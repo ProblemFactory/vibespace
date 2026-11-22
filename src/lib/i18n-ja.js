@@ -6070,6 +6070,7 @@ export default {
   "Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.": "あなたのどの会話もこのブラウザとそのログインを使えます — ブラウザは 1 つ、各会話は自分のタブで動きます。",
   "Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.": "いまエージェントはこのコンピューターでこのブラウザを使えません — 個別タブで共有されていますが、VibeSpace のブラウザプロキシがここで動いていません。",
   "Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.": "あなたのどの会話もこのブラウザとそのログインを使えます — 全員で共有するため、各会話はその中のすべてのタブを見て操作できます。",
+  "Any of your conversations can use this browser and its logins — it is a browser VibeSpace did not start, reached at its own address: they all share it, each can see and drive every tab in it.": "あなたのどの会話もこのブラウザとそのログインを使えます — VibeSpace が起動したものではなく、それ自身のアドレスでつながるブラウザです：全員で共有するため、各会話はその中のすべてのタブを見て操作できます。",
   "Could not change who can use it": "使える会話を変更できませんでした",
   "{n} other conversation(s) no longer use {label}": "他の {n} 件の会話は {label} を使わなくなりました",
   "Rename {label}": "{label} の名前を変更",

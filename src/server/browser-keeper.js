@@ -5180,6 +5180,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         let fwd;
         try { fwd = await acc().forwardCdp(p.host, r.cdpPort, { remoteUrl: r.cdpUrl }); } catch (e) { throw failed(e.code || 'host_unavailable', `${p.host}: ${e.message}`); }
         rec.pid = r.pid; rec.starttime = r.starttime; rec.socketDir = r.socketDir; rec.dir = r.dir || null; rec.remoteCdpUrl = r.cdpUrl; rec.cdpUrl = fwd.url; rec.forward = { remotePort: r.cdpPort, localPort: fwd.localPort };
+        if (mediator) mediator.repoint(profileId, rec.cdpUrl); // B-19a9 (r1846 (c)): a paired machine's scope leases follow its forward, as the local starts do (P6)
         rec.display = r.display && typeof r.display === 'object' ? r.display : null; // lane headless-fallback: the fact THAT machine probed at its launch
         sayDisplay(rec.display, `${profileId} "${p.label}" on ${p.host}`);
         rec.browserChoice = remoteChoice ? BB.choiceView(remoteChoice) : { kind: 'default' };
@@ -5380,7 +5381,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** lane chrome-157 (the owner's law 2026-11-13): the road ANY agent's lease of this profile takes — the SAME verdict the leases use
    *  (never a second «is there a proxy» test). Read by the profile's view (the «Who can use it» dialog says what is true on it) and by
    *  the boot's adoption (THE WINDOW's fourth door). → {mode, why} */
-  const agentRoadOf = (p) => { const rec = p ? reg.browsers[p.id] : null; return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), remote: !!(p && p.host) || !(rec && isLocalRec(rec)), agent: true }); };
+  // B-19a9 (the coordinator's r1840 / r1846 (b)): the facts the ONE road verdict takes, each by ITS OWN reason — an outside endpoint (a
+  // `cdp` profile, a browser this hub did not start) stays raw; a PAIRED machine's browser (reached by this hub's own loopback forward,
+  // its drivers run here) is a parameter of the scope road, never a lump with the outside one
+  const roadFactsOf = (p, rec) => { const external = !!((rec && rec.external) || (p && p.provider === 'cdp')); return { external, paired: !external && !!((p && p.host) || (rec && rec.hostId)) }; };
+  const agentRoadOf = (p) => { const rec = p ? reg.browsers[p.id] : null; return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), ...roadFactsOf(p, rec), agent: true }); };
   /** The road the «Who can use it» dialog words: the same verdict, except a mediated profile on a hub with no proxy — every agent lease
    *  there is refused `mediation_unavailable`, so the dialog says unavailable (the .401 read, L2b). → {mode, why} */
   const dialogRoadOf = (p) => { const v = agentRoadOf(p); return p && isMediated(p) && !(mediator && mediationOn() && typeof mediator.grantFor === 'function') ? { mode: v.mode, why: 'unavailable' } : v; };
@@ -5440,7 +5445,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   });
   const leaseRoadOf = (p, browserKey) => {
     const bk = String(browserKey || ''), rec = p ? reg.browsers[p.id] : null;
-    return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), remote: !!(p && p.host) || !(rec && isLocalRec(rec)), agent: (B.isBrowserKey(bk) || B.isChildKey(bk)) && !HM.isHumanKey(bk) });
+    return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), ...roadFactsOf(p, rec), remoteSession: !!bk && isRemoteKey(bk), agent: (B.isBrowserKey(bk) || B.isChildKey(bk)) && !HM.isHumanKey(bk) });
   };
   /** The url ONE lease's driver is handed for `raw` (the browser's own endpoint): its scope grant's on the scope road (the
    *  lease's known tabs admitted first — holderTabs), else `raw` unchanged. A proxy that throws leaves `raw` (journalled). */
@@ -8459,7 +8464,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       mediated: Boolean(p && !eph && isMediated(p)),
       proxy,
       ephemeral: eph,
-      remote: remote || external || remSess,
+      external,
+      remoteSession: remSess,
+      paired: remote && !external,   // B-19a9 (r1846 (b)): each by its own reason; the login channel's own law below still refuses a paired machine
       agent,
     });
     return M.loginFillChannelVerdict(road, {
@@ -8610,6 +8617,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         const probe = await probeCdp(fwd.url);
         if (!probe.ok) { try { fwd.close(); } catch { /* none */ } return ended(`no browser answers CDP at ${p.host ? p.host + ':' : '127.0.0.1:'}${p.cdpPort} (${probe.error})`); }
         rec.cdpUrl = fwd.url; rec.forward = p.host ? { remotePort: p.cdpPort, localPort: fwd.localPort } : null; rec.state = 'ready'; rec.adoptedAt = now();
+        if (mediator) mediator.repoint(rec.profileId, rec.cdpUrl); // B-19a9 (r1846 (c)): the adopted forward is the leases' upstream too
         log.log?.(`[browser] adopted ${rec.profileId} "${p.label}" (external browser over CDP)`);
         return;
       }
@@ -9179,7 +9187,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     /** lane chrome-157: the road an agent's lease of profile `id` takes ({mode, why}) — or, with no id, the road a NEW profile on `host`
      *  would take — the same verdict the leases use; the sharing dialogs word «each conversation in its own tab» only where it holds */
     onDownloadFolder: (fn) => { if (typeof fn !== 'function') return () => { }; folderListeners.add(fn); return () => folderListeners.delete(fn); },   // (lane chrome-157: THE WINDOW's notice road)
-    agentRoadFor: (id, { host = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, remote: !!host, agent: true })),
+    agentRoadFor: (id, { host = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, paired: !!host, agent: true })),
     list, profile, profileByRef, browserOf, browserIdentityOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
     engineFactOf, engineRowsView, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy

@@ -27,14 +27,16 @@ import { capsOf } from '../backend-caps.js'; // PURE → PURE (lane dc-harness-t
 export const EVERYONE_KEY = 'everyone:*';
 /** lane chrome-157 (the owner's law 2026-11-13): the «All agents» sentence says what is TRUE on the road an agent's lease of this
  *  profile takes — the server's own road verdict (`road`: 'mediated' | 'shared' = the scope road ⇒ each conversation in its own
- *  tab; 'no-proxy' | 'remote' | anything else ⇒ the raw endpoint, every conversation sees and drives every tab). Never a second
+ *  tab, on this machine or a paired one — B-19a9; 'external' ⇒ an outside endpoint, said by name; 'no-proxy' | anything else ⇒ the raw
+ *  endpoint, every conversation sees and drives every tab). Never a second
  *  «is there a proxy» test here. */
 export function allAgentsSentence(road, t = (s) => s) {
   // lane chrome-157 (the .401 read, L2b): a mediated profile on a hub with no proxy — every agent lease there is refused by name
   if (road === 'unavailable') return t("Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.");
-  return road === 'mediated' || road === 'shared'
-    ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
-    : t('Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.');
+  if (road === 'mediated' || road === 'shared') return t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.');   // B-19a9: a paired machine's shared profile too (the same scope road, its forward behind the proxy)
+  // B-19a9 (the coordinator's r1846 (b)): an outside endpoint says WHICH raw road it is, by its own reason
+  if (road === 'external') return t('Any of your conversations can use this browser and its logins — it is a browser VibeSpace did not start, reached at its own address: they all share it, each can see and drive every tab in it.');
+  return t('Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.');
 }
 
 /** How many chips the panel row shows before "+N more" (the phone: 2). */

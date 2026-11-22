@@ -353,17 +353,17 @@ export async function runR29LoginNails({ repoDir, ok }) {
 
       const GRID = [
         // Admitted cells (ONLY local mediated channels: 'mediated' and 'scope')
-        { key: 'mediated|mediated|local-instance', roadIn: { mediated: true, proxy: true, ephemeral: false, remote: false, agent: true }, chIn: { proxy: true, external: false, remote: false, remoteSession: false, hasCdp: true }, wantOk: true, wantMode: 'mediated', wantWhy: 'mediated' },
-        { key: 'scope|shared|local-owner', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: false, agent: true }, chIn: { proxy: true, external: false, remote: false, remoteSession: false, hasCdp: true }, wantOk: true, wantMode: 'scope', wantWhy: 'shared' },
+        { key: 'mediated|mediated|local-instance', roadIn: { mediated: true, proxy: true, ephemeral: false, agent: true }, chIn: { proxy: true, external: false, remote: false, remoteSession: false, hasCdp: true }, wantOk: true, wantMode: 'mediated', wantWhy: 'mediated' },
+        { key: 'scope|shared|local-owner', roadIn: { mediated: false, proxy: true, ephemeral: false, agent: true }, chIn: { proxy: true, external: false, remote: false, remoteSession: false, hasCdp: true }, wantOk: true, wantMode: 'scope', wantWhy: 'shared' },
         // Refused cells covering every leaseRoadVerdict mode/why × profile/session kinds
-        { key: 'null|no-proxy|local-owner', roadIn: { mediated: false, proxy: false, ephemeral: false, remote: false, agent: true }, chIn: { proxy: false }, wantOk: false, wantWhy: 'no-proxy' },
-        { key: 'mediated|mediated|no-proxy-override', roadIn: { mediated: true, proxy: false, ephemeral: false, remote: false, agent: true }, chIn: { proxy: false }, wantOk: false, wantWhy: 'no-proxy' },
-        { key: 'null|ephemeral|managed-ephemeral', roadIn: { mediated: false, proxy: true, ephemeral: true, remote: false, agent: true }, chIn: { proxy: true }, wantOk: false, wantWhy: 'ephemeral' },
-        { key: 'null|ephemeral|child-handle', roadIn: { mediated: false, proxy: true, ephemeral: true, remote: false, agent: true }, chIn: { proxy: true }, wantOk: false, wantWhy: 'ephemeral' },
-        { key: 'null|remote|paired-machine', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: true, agent: true }, chIn: { proxy: true, remote: true, profileLabel: 'LabProfile' }, wantOk: false, wantWhy: 'remote' },
-        { key: 'null|remote|external-cdp', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: true, agent: true }, chIn: { proxy: true, external: true, profileLabel: 'ExtCdp' }, wantOk: false, wantWhy: 'external' },
-        { key: 'null|remote|remote-session', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: true, agent: true }, chIn: { proxy: true, remoteSession: true }, wantOk: false, wantWhy: 'remote-session' },
-        { key: 'scope|shared|no-cdp', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: false, agent: true }, chIn: { proxy: true, hasCdp: false, profileLabel: 'NoCdpProf' }, wantOk: false, wantWhy: 'no-cdp' },
+        { key: 'null|no-proxy|local-owner', roadIn: { mediated: false, proxy: false, ephemeral: false, agent: true }, chIn: { proxy: false }, wantOk: false, wantWhy: 'no-proxy' },
+        { key: 'mediated|mediated|no-proxy-override', roadIn: { mediated: true, proxy: false, ephemeral: false, agent: true }, chIn: { proxy: false }, wantOk: false, wantWhy: 'no-proxy' },
+        { key: 'null|ephemeral|managed-ephemeral', roadIn: { mediated: false, proxy: true, ephemeral: true, agent: true }, chIn: { proxy: true }, wantOk: false, wantWhy: 'ephemeral' },
+        { key: 'null|ephemeral|child-handle', roadIn: { mediated: false, proxy: true, ephemeral: true, agent: true }, chIn: { proxy: true }, wantOk: false, wantWhy: 'ephemeral' },
+        { key: 'null|remote|paired-machine', roadIn: { mediated: false, proxy: true, ephemeral: false, paired: true, agent: true }, chIn: { proxy: true, remote: true, profileLabel: 'LabProfile' }, wantOk: false, wantWhy: 'remote' },
+        { key: 'null|remote|external-cdp', roadIn: { mediated: false, proxy: true, ephemeral: false, external: true, agent: true }, chIn: { proxy: true, external: true, profileLabel: 'ExtCdp' }, wantOk: false, wantWhy: 'external' },
+        { key: 'null|remote|remote-session', roadIn: { mediated: false, proxy: true, ephemeral: false, remoteSession: true, agent: true }, chIn: { proxy: true, remoteSession: true }, wantOk: false, wantWhy: 'remote-session' },
+        { key: 'scope|shared|no-cdp', roadIn: { mediated: false, proxy: true, ephemeral: false, agent: true }, chIn: { proxy: true, hasCdp: false, profileLabel: 'NoCdpProf' }, wantOk: false, wantWhy: 'no-cdp' },
         { key: 'null|human|browse-yourself', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: false, agent: false }, chIn: { proxy: true }, wantOk: false, wantWhy: 'human' },
       ];
 

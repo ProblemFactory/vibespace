@@ -904,7 +904,7 @@ try {
       saveLoginFenceState: (id, st) => rk.saveLoginFenceState(id, st),
       loginFenceStateOf: (id) => rk.loginFenceStateOf(id),
       loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM5.loginFillChannelVerdict(
-        BM5.leaseRoadVerdict({ mediated: false, proxy: true, ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+        BM5.leaseRoadVerdict({ mediated: false, proxy: true, ephemeral: Boolean(ephemeral), remoteSession: Boolean(remoteSession), agent: true }),
         { proxy: true, external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(fk5.wsUrl), usableProfiles: [pf5.label], profileLabel: pf5.label, action },
       ),
     },
