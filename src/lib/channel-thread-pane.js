@@ -17,6 +17,8 @@ import { t, tc } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
 import { autosizeEditor } from './channel-editor-size.js';   // lane channel-edit-autosize: every message editor opens at its text's size
 import { routeErrorText } from './channel-words.js';
+import { accountEnableDoor } from './channel-account-dialogs.js';   // B-7aef: a disabled account's Enable door
+import { needDoorButton } from './need-line.js';
 import * as chanCaps from '../channel-caps.js';
 import { paneMode, firstLine } from '../channel-thread.js';
 import { composerMode } from './channel-groups-view.js';
@@ -187,7 +189,7 @@ export function createThreadPane(host, ctx) {
     const r = prepend
       ? await fetchJson(`${ctx.base}/thread/${encodeURIComponent(cur.root || cur.key)}/older`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ before: oldest ? oldest.at : null, beforeId: oldest ? oldest.vendorId : null, limit: PANE_PAGE }) })
       : await fetchJson(`${ctx.base}/thread/${encodeURIComponent(cur.root || cur.key)}?${q}`);
-    if (!r || r.error) { if (r && r.error && !prepend) list.appendChild(el('div', 'chanwin-empty', routeErrorText(r))); return 0; }
+    if (!r || r.error) { if (r && r.error && !prepend) { const note = el('div', 'chanwin-empty', routeErrorText(r)); const d = accountEnableDoor(r, { after: () => load() }); if (d) note.appendChild(needDoorButton(d)); list.appendChild(note); } return 0; }
     // verify r3: a REFUSED older page (the per-thread floor, the budget) is not the thread's start — it is asked again
     // on the next input; a walk that stopped at the channel's own bound says so at the top of the replies
     if (prepend && (r.exhausted || r.vendorHasNoOlder) && !(r.records || []).length && !r.refused) {
@@ -237,6 +239,8 @@ export function createThreadPane(host, ctx) {
     if (r && r.error && r.code !== 'thread-floor') {
       // the refusal's sentence, never a spinner forever (§6.5): the local replies stay drawn
       const note = el('div', 'chanthread-note', routeErrorText(r));
+      const d = accountEnableDoor(r);   // B-7aef: a disabled account's Enable door beside the words
+      if (d) note.appendChild(needDoorButton(d));
       list.appendChild(note);
     }
     if (r && r.ok && r.appended) await serial(renderNow);
@@ -295,7 +299,7 @@ export function createThreadPane(host, ctx) {
       const r = await fetchJson(`${ctx.base}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, replyTo, placement: 'thread', expectWakes: 0 }) });   // 2026-09-28: the PLACEMENT (the old `inThread` is its alias)
       send.disabled = false;
       // a refusal keeps the draft (the heldDraft rule — attack 19)
-      if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); if (r && r.code === 'topic-forbidden') drawFoot(); return; }
+      if (!r || r.error) { showToast(routeErrorText(r), { type: 'error', action: accountEnableDoor(r) }); if (r && r.code === 'topic-forbidden') drawFoot(); return; }
       const st = r.proposal && r.proposal.state;
       if (st === 'failed') { showToast(t('The channel refused the send: {error}', { error: (r.proposal && r.proposal.reason) || '' }), { type: 'error' }); return; }
       // the SENT text leaves every box of this thread — a broadcast that redrew the foot while the send was in flight

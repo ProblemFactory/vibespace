@@ -1228,7 +1228,7 @@ function proxyLaunchVerdict(p) {
   const label = p.label ? `"${p.label}"` : 'this profile';
   const pp = proxyParts(p.proxy);
   if (!pp) return { ok: false, code: 'proxy_unusable', error: `${label}'s proxy address cannot be read — edit the profile and give it again (http://host:port, https://host:port or socks5://host:port)` };
-  if (pp.inline) return { ok: false, code: 'proxy_password_in_profile', error: `${label}'s proxy address carries its password — it was never used, and it is not used now. Press «Move the password to the vault» on the profile's card (the vault unlocked), then start the browser again` };
+  if (pp.inline) return { ok: false, code: 'proxy_password_in_profile', profileId: p.id, error: `${label}'s proxy address carries its password — it was never used, and it is not used now. Press «Move the password to the vault» on the profile's card (the vault unlocked), then start the browser again` };
   if (!PROXY_SCHEMES.includes(pp.scheme)) return { ok: false, code: 'proxy_scheme_unsupported', error: `${label}'s proxy is ${pp.scheme}, which cannot carry a site's name — edit the profile and give an http, https or socks5 proxy` };
   if (p.host) return { ok: false, code: 'proxy_off_machine', error: `${label} runs on another machine — a browser profile's proxy works for browsers on this machine only, for now` };
   if (isCloudProfile(p)) return { ok: false, code: 'proxy_cloud_browser', error: `${label}: ${PROXY_CLOUD_WHY}` };

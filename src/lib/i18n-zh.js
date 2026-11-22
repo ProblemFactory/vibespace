@@ -7185,7 +7185,9 @@ export default {
   "As the channel policy allows": "按频道策略允许的方式",
   "An agent can propose an emoji reaction on a message; it shows in your name. \"As the channel policy allows\" sends it directly only where the channel sends replies directly and the agent may send.": "agent 可以提议对一条消息添加表情回应；它会以你的名义显示。“按频道策略允许的方式”只在该频道直接发送回复且 agent 有发送权限时才直接发出。",
   // naive-user pass of lane channel-threads (2026-09-28)
-  "This account is disabled — enable it in the account’s ⋯ menu to load or send here": "这个账号已停用 —— 在账号的 ⋯ 菜单中启用后，才能在这里加载或发送",
+  "This account is disabled — enable it to load or send here": "这个账号已停用 —— 启用后才能在这里加载或发送",
+  "Enable this account": "启用这个账号",
+  "The account is enabled — try again": "账号已启用 —— 请再试一次",
   "a reaction notice": "一条表情回应通知",
   "{n} reaction notices": "{n} 条表情回应通知",
   // lane lark-search-poll (B-5aab, 2026-09-28): the change feed, single chats, the ordered narrowing
@@ -14726,7 +14728,8 @@ export default {
   "A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor's own settings.": "云端浏览器运行在服务商那里，这台机器上的代理够不到它——请清空代理，或在服务商自己的设置里设代理。", // B-8b87 cure: a proxy's refusals in the page's words
   "Its proxy login is no longer in the vault — choose its login again in Proxy….": "它的代理登录已不在保险库中——请在「代理…」里重新选择登录。", // B-8b87 cure: a proxy's refusals in the page's words
   "Its proxy login could not be read from the vault ({code}).": "无法从保险库读取它的代理登录（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
-  "Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.": "它的代理地址里带着密码，这个密码从不使用——请先在 ⋯ 里按「把密码移入保险库」。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address carries its password, which is never used — move it to the vault first.": "它的代理地址里带着密码，这个密码从不使用——请先把它移入保险库。",
+  "The proxy password is in the vault now — the profile keeps the address alone": "代理密码已存入保险库——配置里只留地址",
   "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "它的代理是 socks4，无法传递网站的名称——请在「代理…」里填写 http、https 或 socks5 代理。", // B-8b87 cure: a proxy's refusals in the page's words
   "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "这个配置连接的是一个不由 VibeSpace 启动的浏览器——那个浏览器保留它自己的代理设置。", // B-8b87 cure: a proxy's refusals in the page's words
   "The browser's proxy could not be put in its config — the browser was not started without it.": "无法把代理写进浏览器的配置——浏览器没有在不走代理的情况下启动。", // B-8b87 cure: a proxy's refusals in the page's words

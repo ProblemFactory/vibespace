@@ -119,7 +119,7 @@ for (const c of C) {
     // each family's count only falls: B-d073 0 (主开发's ruling (a), 2026-11-18 23:33Z, was 4 — B-d073 built their doors); B-8703 29
     // (主开发 r533, 2026-11-20: unit 1 LISTS what the closed path net and the zh / ja value net newly catch — 22 menu paths, 7 values;
     // unit 2 makes doors of them where a helper that exists makes it one line)
-    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 5 });   // B-7aef: 7 → 5 — the two Settings descriptions naming the gear menu's report and Customize UI now carry their door (settings-ui.js SETTINGS_DOORS);   // B-8703 unit 2: 29 → 7 — the long-lived-token words and doors (12), the beside sentences said without their direction (8), the Agent browser door (2); the 7 left keep their row with the reason (主开发 r700)
+    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 3 });   // B-7aef (bl-phone-ui, r2680): 5 → 3 — the channel words' «enable it in the account's ⋯ menu» and the proxy refusal's «Move the password to the vault in ⋯» carry their doors now (routeErrorDoor / accountEnableDoor; proxyDoor 'move' / exitWords' door). Before: B-7aef: 7 → 5 — the two Settings descriptions naming the gear menu's report and Customize UI now carry their door (settings-ui.js SETTINGS_DOORS);   // B-8703 unit 2: 29 → 7 — the long-lived-token words and doors (12), the beside sentences said without their direction (8), the Agent browser door (2); the 7 left keep their row with the reason (主开发 r700)
     const owedBy = (f) => (c.T.DOORS_OWED || []).filter((r) => r.family === f).length;
     // a B-8703 row names its file(s), and each file it names says the sentence it claims (the list is honest about where)
     const named = (r) => { const fs8 = (/^((?:src\/[\w./-]+\.js)(?:, src\/[\w./-]+\.js)*): /.exec(r.why) || [])[1]; const got = c.owed.filter((x) => x.row === r); return !!fs8 && got.length > 0 && got.every((x) => fs8.split(', ').every((f) => (words.get(x.s) || new Set()).has(f))); };
@@ -1752,6 +1752,91 @@ if (CL) {
     const planted = STRAYS.splice(before);
     FETCH = noFetch;
     ok(planted.length > 0 && planted.every((x) => x.startsWith('the census control (the next leg): GET /api/')), `CONTROL (the census): a panel torn down inside its broadcast's coalesce leaves a redraw in flight — it lands under the NEXT leg's stand-in and is named there (${planted.length}: ${planted.slice(0, 2).join(' · ')})`, planted);
+  }
+  // B-7aef (bl-phone-ui, 主开发 r2680 / r2686): THE TWO DOORS WHOSE HELPERS ANSWERED TEXT ONLY — each helper answers its door as DATA, the
+  // caller draws it; each door PRESSED calls exactly its act; RED: the release's text-only helper (no door)
+  {
+    const answerOf = (answer) => ({ ok: !(answer && (answer.error || answer.ok === false)), status: answer && (answer.error || answer.ok === false) ? 409 : 200, json: async () => answer });
+    const bundleOf = async (entry, swaps, tag) => {   // a module bundled alone, a source swapped in (a RED control's copy, built by anchored())
+      const swap = { name: tag + '-src', setup(b) { for (const [re, src] of swaps) b.onLoad({ filter: re }, () => ({ contents: src, loader: 'js' })); } };
+      const out = await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(REPO, 'src/lib'), sourcefile: tag + '-entry.js', loader: 'js' }, bundle: true, format: 'esm', write: false, plugins: [stubBuildVersion, swap], logLevel: 'silent', loader: { '.css': 'empty' } });
+      const f = path.join(TMP, tag + '.mjs'); fs.writeFileSync(f, out.outputFiles[0].text);
+      return import(pathToFileURL(f).href);
+    };
+    const newToasts = (seen) => DOC.body.querySelectorAll('.global-toast-body').filter((x) => !seen.has(x));
+    const dropToasts = (seen) => { for (const b of newToasts(seen)) if (b.parentNode) Nd.prototype.remove.call(b.parentNode); };
+    // (1) A DISABLED CHANNEL ACCOUNT's refusal: «Enable this account» = the channels panel's own one-press enable
+    const enable = async (cad, refusal, answer = { ok: true }) => {
+      const calls = []; let after = 0;
+      const before0 = FETCH;
+      FETCH = async (url, o) => { if (!String(url).startsWith('/api/channels/adapters/')) return before0(url, o); calls.push([String(url), o && o.method, o && o.body ? JSON.parse(o.body) : null]); return answerOf(answer); };
+      const seen = new Set(DOC.body.querySelectorAll('.global-toast-body'));
+      const d = cad && typeof cad.accountEnableDoor === 'function' ? cad.accountEnableDoor(refusal, { after: () => { after++; } }) : null;
+      if (d && typeof d.run === 'function') await d.run();
+      await tick(10);
+      const said = newToasts(seen).map((x) => x.textContent);
+      dropToasts(seen);
+      FETCH = noFetch;
+      return { door: !!d, label: d ? d.label : null, calls, after, said };
+    };
+    const REFUSED = { error: 'Team chat is disabled', code: 'disabled', account: 'acct-7' };
+    const E = await enable(CL && CL.CAD, REFUSED);
+    ok(E.door && E.label === 'Enable this account' && E.calls.length === 1 && E.calls[0][0] === '/api/channels/adapters/acct-7' && E.calls[0][1] === 'PUT' && JSON.stringify(E.calls[0][2]) === '{"enabled":true}' && E.after === 1 && E.said.some((s) => s.includes('The account is enabled — try again')),
+      'B-7aef: a disabled account\'s refusal carries «Enable this account» — PRESSED it calls exactly the panel\'s own enable (PUT /api/channels/adapters/<its id> {enabled: true}), says so, and the caller loads again', E);
+    const NI = await enable(CL && CL.CAD, { error: 'x is disabled', code: 'disabled' }), OC = await enable(CL && CL.CAD, { error: 'slow down', code: 'rate-limited', account: 'acct-7' });
+    ok(!NI.door && !NI.calls.length && !OC.door && !OC.calls.length, 'B-7aef: a refusal with no account id draws no door (nothing to aim at), another code draws none', { NI, OC });
+    const RF = await enable(CL && CL.CAD, REFUSED, { error: 'gone', code: 'not-found' });
+    ok(RF.calls.length === 1 && RF.after === 0 && RF.said.length > 0 && !RF.said.some((s) => s.includes('The account is enabled')), 'B-7aef: a refused enable says why in the page\'s words and loads nothing again', RF);
+    const CWSRC = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf8');
+    let textOnly = null;
+    try { textOnly = (await bundleOf("export * as CAD from './channel-account-dialogs.js';", [[/channel-words\.js$/, anchored(CWSRC, "  if (!r || r.code !== 'disabled' || typeof r.account !== 'string' || !r.account) return null;\n", '  return null;\n', 'B-7aef: the channel words as released — text only')]], 'b7aef-cw')).CAD; } catch (e) { ok(false, 'RED control setup: the channel dialogs bundle alone', String(e && e.message).slice(0, 300)); }
+    const RT = await enable(textOnly, REFUSED);
+    ok(!RT.door && !RT.calls.length, 'RED control: the release\'s text-only words (no door as data) leave a disabled account\'s refusal with no press — the person sent to a menu', RT);
+    // (2) THE PROXY's PASSWORD IN ITS ADDRESS: «Move the password to the vault» = the profile's own move (主开发 r2686: the hub moves the
+    // word, it never crosses the page); the exit dialog's refused check draws it, PRESSED it posts the profile's id ONLY; a locked vault
+    // refuses by name (unlock, then move again) and the press stays live; a done move takes the refusal away
+    const EWSRC = fs.readFileSync(path.join(REPO, 'src/lib/browser-exit-words.js'), 'utf8');
+    const ENTRY_BX = "export * as BED from './browser-exit-dialog.js'; export * as BPM from './browser-proxy-model.js'; export * as BEW from './browser-exit-words.js';";
+    let BX = null, BXR = null;
+    try { BX = await bundleOf(ENTRY_BX, [], 'b7aef-bx'); BXR = await bundleOf(ENTRY_BX, [[/browser-exit-words\.js$/, anchored(EWSRC, "    case 'proxy_password_in_profile': return row(t('Its proxy address carries its password, which is never used — move it to the vault first.'), '', 'move');", "    case 'proxy_password_in_profile': return row(t('Its proxy address carries its password, which is never used — move it to the vault first.'));", 'B-7aef: the exit words as released — no door')]], 'b7aef-bxr'); } catch (e) { ok(false, 'the exit dialog bundles alone', String(e && e.message).slice(0, 300)); }   // stale-pins: kept — the release's text, the RED's own
+    const exitDrive = async (B, moveAnswers) => {
+      const calls = [];
+      const before0 = FETCH;
+      FETCH = async (url, o) => {
+        const u = String(url);
+        if (u === '/api/browser/profiles/p-1/exit-check') { calls.push(['check', o && o.method]); return answerOf({ ok: false, code: 'proxy_password_in_profile', profileId: 'p-1', error: 'its proxy address carries its password' }); }
+        if (u === '/api/vault/proxy-logins/move') { calls.push(['move', o && o.method, o && o.body ? JSON.parse(o.body) : null]); return answerOf(moveAnswers.shift() || { ok: true }); }
+        return before0(url, o);
+      };
+      const before = new Set(DOC.body.children), seen = new Set(DOC.body.querySelectorAll('.global-toast-body'));
+      const app = { settings: { get: (k) => (k === 'browser.exitCheckUrl' ? 'https://check.example/ip' : undefined) } };
+      if (B && B.BED && typeof B.BED.openExitDialog === 'function') B.BED.openExitDialog(app, { id: 'p-1', label: 'Work' });
+      const q = (sel) => DOC.body.querySelector(sel);
+      const look = () => { const r = q('.bnew-refusal'), d = q('.bexit-door'); return { words: r ? r.textContent : '', said: !!r && r.style.display !== 'none', door: !!d && d.style.display !== 'none', greyed: !!(d && d.disabled) }; };
+      const check = q('.bexit-check'); if (check) check.click();
+      for (let i = 0; i < 20 && !calls.length; i++) await tick(10);
+      await tick(10);
+      const refused = look(), steps = [];
+      for (let i = 0; i < 2 && look().door; i++) { q('.bexit-door').click(); for (let k = 0; k < 20 && calls.filter((c) => c[0] === 'move').length <= i; k++) await tick(10); await tick(10); steps.push(look()); }
+      const said = newToasts(seen).map((x) => x.textContent);
+      dropToasts(seen);
+      for (const n of DOC.body.children.filter((c) => !before.has(c))) Nd.prototype.remove.call(n);
+      FETCH = noFetch;
+      return { calls, refused, steps, said };
+    };
+    const X = await exitDrive(BX, [{ ok: false, code: 'vault_locked', error: 'the vault is locked' }, { ok: true, credential: 'proxy:host:8080#user' }]);
+    const moves = X.calls.filter((c) => c[0] === 'move');
+    ok(X.refused.said && X.refused.words.includes('move it to the vault first') && X.refused.door && !X.refused.greyed,
+      'B-7aef: the exit check refused for a password in the proxy address draws «Move the password to the vault» beside its words, live', X.refused);
+    ok(moves.length === 2 && moves.every((m) => m[1] === 'POST' && JSON.stringify(m[2]) === '{"profileId":"p-1"}'),
+      'B-7aef: PRESSED, the door posts the profile\'s own move with its id ONLY (the word itself in no argument: the hub moves it)', moves);
+    ok(X.steps[0] && X.steps[0].words.includes('The vault is locked') && X.steps[0].words.includes('move the password again') && X.steps[0].door && !X.steps[0].greyed,
+      'B-7aef: a locked vault refuses by name and says what to do in the same sentence (unlock, then move again) — the press stays, never greyed', X.steps[0]);
+    ok(X.steps[1] && !X.steps[1].said && !X.steps[1].door && X.said.some((s) => s.includes('The proxy password is in the vault now')),
+      'B-7aef: a done move takes the refusal and its door away and says the password is in the vault', { step: X.steps[1], said: X.said });
+    const XR = await exitDrive(BXR, []);
+    ok(XR.refused.said && !XR.refused.door && !XR.calls.some((c) => c[0] === 'move'), 'RED control: the release\'s exit words (no door as data) leave the refusal with no press — «in ⋯» was the way', XR.refused);
+    ok(BX && BX.BPM && BX.BPM.proxyDoor('proxy_password_in_profile') === 'move' && BX.BPM.proxyDoor('bad_proxy') === null, 'B-7aef: proxyDoor answers «move» for a password in the address (the proxy dialog and the live view draw it with the profile they hold)');
   }
   ok(STRAYS.length === 0, `A LEG LEAVES NOTHING IN FLIGHT: no stand-in of this section was asked an address that is not its leg's (a stray call is refused by name where it lands)${STRAYS.length ? ' — ' + STRAYS.slice(0, 8).join(' · ') : ''}`, STRAYS);
 }

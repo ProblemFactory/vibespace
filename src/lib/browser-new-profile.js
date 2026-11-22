@@ -154,7 +154,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const create = btn(adopt ? t('Create and use it here') : t('Create'), () => doCreate(), 'mounts-btn-primary bnew-create');
   footer.append(cancel, create);
   shell.dialog.append(notes, footer);
-  const say = (text, which = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; notes.style.display = text ? '' : 'none'; door.dataset.door = which || ''; door.textContent = which === 'setup' ? t('Set up the vault…') : t('Unlock…'); door.style.display = text && which ? '' : 'none'; };
+  const say = (text, which = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; notes.style.display = text ? '' : 'none'; door.dataset.door = which || ''; door.textContent = which === 'setup' ? t('Set up the vault…') : t('Unlock…'); door.style.display = text && which && which !== 'move' ? '' : 'none'; };   // B-7aef: «move» needs a saved profile — none here yet
   say('');
 
   // ── drawing the two lists (keyed by id: a re-draw after a broadcast patches the rows, the choice stays) ──

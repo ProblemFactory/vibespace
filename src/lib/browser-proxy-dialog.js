@@ -30,10 +30,10 @@ export function openProxyDialog(app, r, { onDone = null, onClose = null } = {}) 
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
   refusal.style.display = 'none';
   // B-8b87 cure: a locked (or never set up) vault's refusal carries ITS press — Unlock… / Set up the vault…
-  const door = btn('', () => { try { (door.dataset.door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } }, 'bproxy-door');
+  const door = btn('', () => { if (door.dataset.door === 'move') { doMove(); return; } try { (door.dataset.door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } }, 'bproxy-door');   // B-7aef: «move» = this profile's own move (主开发 r2686)
   door.style.display = 'none';
   const notes = el('div', 'bwho-notes'); notes.append(refusal, door);
-  const say = (text, which = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; door.dataset.door = which || ''; door.textContent = which === 'setup' ? t('Set up the vault…') : t('Unlock…'); door.style.display = text && which ? '' : 'none'; };
+  const say = (text, which = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; door.dataset.door = which || ''; door.textContent = which === 'setup' ? t('Set up the vault…') : which === 'move' ? t('Move the password to the vault') : t('Unlock…'); door.style.display = text && which ? '' : 'none'; };
   const footer = el('div', 'dialog-footer bwho-footer');
   const cancel = btn(t('Cancel'), () => shell.close(), 'bnew-cancel');
   const save = btn(t('Save'), () => doSave(), 'mounts-btn-primary bproxy-save');

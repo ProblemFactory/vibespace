@@ -85,7 +85,7 @@ import { renderFacts } from './channel-facts-view.js';   // lane message-facts (
 // verify round 3: THE UPWARD PAGE'S VERDICT — a scroll event is displacement; the person's input is intent (PURE)
 import { pageUpVerdict, isGutterPress, isUpKey, isTypingTarget, wheelTowardOlder, nestedScrollTop, holdUntilAfter, atTail, anchorDelta, PULL_PX } from './channel-paging.js';
 // §25: the read-only footer's Re-authorize is the account's own re-auth dialog
-import { showReauthAccountDialog } from './channel-account-dialogs.js';
+import { showReauthAccountDialog, accountEnableDoor } from './channel-account-dialogs.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern): the
 // server sends STRUCTURE and the sentence is composed HERE, because the
 // digest is broadcast to every client while the language is per DEVICE.
@@ -1295,7 +1295,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
    *  the whole thread once, server-side single-flight); every other row of the thread it filled is redrawn in place. */
   async function askFacts(rec) {
     const r = await fetchJson(`${base}/facts?msg=${encodeURIComponent(rec.vendorId || '')}`);
-    if (!r || r.error || !r.ok) { showToast(routeErrorText(r), { type: 'error' }); return null; }
+    if (!r || r.error || !r.ok) { showToast(routeErrorText(r), { type: 'error', action: accountEnableDoor(r) }); return null; }   // B-7aef: a disabled account's Enable door
     for (const [vid, facts] of Object.entries(r.all && typeof r.all === 'object' ? r.all : {})) {
       if (vid === rec.vendorId) continue;
       for (const row of rowsFor(vid)) {

@@ -61,6 +61,13 @@ export function ruleRefusalText(r, which, ruleLabel = (k) => k) {
 }
 
 /** The toast body for a failed channel/outbox/integration request. */
+/** B-7aef (the B-8703 doors): a route refusal's DOOR, as data — `disabled` with its account's id ⇒ «Enable this account» (the
+ *  channels panel's own one-press enable); anything else ⇒ null. The caller draws it (a toast's action / a door beside a note):
+ *  channel-account-dialogs.js accountEnableDoor. An id only — never an address or a secret. */
+export function routeErrorDoor(r) {
+  if (!r || r.code !== 'disabled' || typeof r.account !== 'string' || !r.account) return null;
+  return { door: 'enable-account', account: r.account, label: t('Enable this account') };
+}
 export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}) {
   if (!r) return t('Could not reach the server');
   const code = String(r.code || '');
@@ -146,7 +153,7 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'topic-forbidden': return t('This group does not allow replies in threads');
     // naive-user pass (2026-09-28): a thread pane / refresh on a DISABLED account showed the engine's English sentence
     // ("Lark / 飞书 is disabled") on a zh / ja page — the code had no words, the default fell through to the raw sentence
-    case 'disabled': return t('This account is disabled — enable it in the account’s ⋯ menu to load or send here');
+    case 'disabled': return t('This account is disabled — enable it to load or send here');   // B-7aef: its door is routeErrorDoor's «Enable this account»
     case 'thread-not-loaded': return chanCaps.threadWhyText('thread-not-loaded', { t });
     // quote-vs-topic (owner 2026-09-28): a quoted reply is a quote — it has no thread to open or load
     case 'not-a-thread': return t('That message is not in a thread — a quoted reply is shown in the conversation itself');

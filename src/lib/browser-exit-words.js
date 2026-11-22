@@ -22,7 +22,7 @@ export function exitKindWords(kind, t) {
 /** → { text, data, known } — `text` the page's sentence (in the page's language), `data` what the far side said (shown after it,
  *  as data), `known` false when the code has no row here (then named by its code — never the server's sentence). */
 export function exitWords(code, t, { kind = '', status = 0, detail = '' } = {}) {
-  const row = (text, data = '') => ({ text, data: String(data || ''), known: true });
+  const row = (text, data = '', door = null) => ({ text, data: String(data || ''), known: true, ...(door ? { door } : {}) });   // B-7aef: a refusal's door, as data
   switch (code) {
     case 'exit_no_proxy': return row(t('This profile has no proxy of its own — its browser may leave by another road, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.'));
     case 'exit_external_browser': return row(t('This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.'));
@@ -30,7 +30,7 @@ export function exitWords(code, t, { kind = '', status = 0, detail = '' } = {}) 
     case 'exit_url_invalid': return row(t('The exit check address must be a public https address with no user name or password in it.'));
     case 'exit_restart_first': return row(t('This browser runs on another road than its proxy now names (the address or its login changed since it started) — restart it, then check the exit.'));
     case 'proxy_credential_unreadable': return row(t('The proxy\'s login is in the vault, which is locked — a person unlocks it on this instance\'s page (Unlock…), then checks again.'));
-    case 'proxy_password_in_profile': return row(t('Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.'));
+    case 'proxy_password_in_profile': return row(t('Its proxy address carries its password, which is never used — move it to the vault first.'), '', 'move');   // its door: the profile's own move (主开发 r2686)
     case 'proxy_scheme_unsupported': return row(t('Its proxy is socks4, which cannot carry a site\'s name — give an http, https or socks5 proxy in Proxy….'));
     case 'proxy_off_machine': return row(t('A browser profile\'s proxy works for browsers on this machine only, for now.'));
     case 'proxy_cloud_browser': return row(t('A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor\'s own settings.'));

@@ -39,6 +39,7 @@ export function proxyDoor(code, word = '') {
   const w = String(word || '');
   if (code === 'vault_locked' || /vault_locked/.test(w)) return 'unlock';
   if (code === 'vault_not_set_up' || /vault_not_set_up/.test(w)) return 'setup';
+  if (code === 'proxy_password_in_profile') return 'move';   // B-7aef (主开发 r2686): the profile's own «Move the password to the vault» — the hub moves the word, it never crosses the page
   return null;
 }
 /** The words a refusal is said in, by its CODE and the act it refused (`act`: 'save' — this dialog's Save · 'move' — «Move the
@@ -55,7 +56,7 @@ export function proxyWords(code, t, error = '', { act = 'save', word = '' } = {}
     case 'proxy_off_machine': return t('A browser profile\'s proxy works for browsers on this machine only, for now.');
     case 'proxy_cloud_browser': return t('A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor\'s own settings.');
     case 'proxy_credential_unreadable': return /proxy_login_no_entry/.test(String(word || '')) ? t('Its proxy login is no longer in the vault — choose its login again in Proxy….') : t('Its proxy login could not be read from the vault ({code}).', { code: String(word || code) });
-    case 'proxy_password_in_profile': return t('Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.');
+    case 'proxy_password_in_profile': return t('Its proxy address carries its password, which is never used — move it to the vault first.');   // its door: proxyDoor 'move'
     case 'proxy_scheme_unsupported': return t('Its proxy is socks4, which cannot carry a site\'s name — give an http, https or socks5 proxy in Proxy….');
     case 'proxy_external_browser': return t('This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.');
     case 'egress_proxy_missing': return t('The browser\'s proxy could not be put in its config — the browser was not started without it.');

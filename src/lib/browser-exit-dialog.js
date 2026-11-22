@@ -5,13 +5,15 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
-import { exitSay, exitAgeText } from './browser-exit-words.js';
+import { exitSay, exitAgeText, exitWords } from './browser-exit-words.js';
+import { proxyWords } from './browser-proxy-model.js';   // B-7aef: the move's own refusal words (a locked vault: unlock, then move again)
 
 const KEY = 'browser.exitCheckUrl';
 const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 // 主开发 18:36Z: every sentence a person reads here is the PAGE's, chosen by code or kind (src/lib/browser-exit-words.js); what the far
 // side said rides after it as data, never as the sentence
 const WORDS = (code, extra = {}) => exitSay(code, t, extra);
+const DOOR = (code) => (code ? exitWords(code, t).door || null : null);   // B-7aef: a refusal's door, as exitWords answers it
 
 // B-acb9 (r226): the forms ONE of their own saves ended, keyed by the form's overlay. A second open of the same profile RAISES the
 // live form and hands its caller that same overlay, so the word every caller hears is the FORM's — never one call's local.
@@ -46,8 +48,20 @@ export function openExitDialog(app, r, { onDone = null, onClose = null } = {}) {
   body.appendChild(fields);
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
   refusal.style.display = 'none';
-  const notes = el('div', 'bwho-notes'); notes.appendChild(refusal);
-  const say = (text) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; };
+  // B-7aef (主开发 r2686): «Move the password to the vault» beside the refusal that names it — this profile's own move (the hub moves the
+  // word: it never crosses the page); a refused move says why and what to do; a done one takes the refusal away
+  const moveDoor = btn(t('Move the password to the vault'), () => doMove(), 'bexit-door');
+  moveDoor.style.display = 'none';
+  const notes = el('div', 'bwho-notes'); notes.append(refusal, moveDoor);
+  const say = (text, door = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; moveDoor.style.display = text && door === 'move' ? '' : 'none'; };
+  async function doMove() {
+    const res = await post('/api/vault/proxy-logins/move', { profileId: r.id });
+    // a locked (or never set up) vault refuses by name and says what to do (unlock, then move again) — the press stays, live (主开发 r2686 law 2)
+    const again = !!res && (res.code === 'vault_locked' || res.code === 'vault_not_set_up' || /vault_locked|vault_not_set_up/.test(String(res.word || '')));
+    if (!res || res.error || res.ok === false) { say(proxyWords(res && res.code, t, '', { act: 'move', word: res && res.word }), again ? 'move' : null); return; }
+    say('');
+    showToast(t('The proxy password is in the vault now — the profile keeps the address alone'), { duration: 6000 });
+  }
   const footer = el('div', 'dialog-footer bwho-footer');
   const cancel = btn(t('Cancel'), () => shell.close(), 'bnew-cancel');
   const byHand = btn(t('Type it by hand'), () => { source = 'typed'; read = null; fields.style.display = ''; keep.style.display = ''; say(''); try { countryInput.focus(); } catch { /* none */ } }, 'bexit-hand');
@@ -76,7 +90,7 @@ export function openExitDialog(app, r, { onDone = null, onClose = null } = {}) {
       if (!res || !res.ok) {
         if (res && res.code === 'exit_url_unset') urlRow.style.display = '';
         if (res && res.code === 'exit_answer_unreadable') { if (!urlIn.value) urlIn.value = current; urlRow.style.display = ''; }   // the door to change it: the field, here
-        say(WORDS(res && res.code, { kind: res && res.kind, status: res && res.status, detail: res && res.detail }));
+        say(WORDS(res && res.code, { kind: res && res.kind, status: res && res.status, detail: res && res.detail }), DOOR(res && res.code));
         return;
       }
       read = res.read; source = 'measured';

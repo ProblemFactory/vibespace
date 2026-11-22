@@ -92,7 +92,7 @@ import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
 import './channel-outbox.js';
 // r4 (design-integrations-per-account, chunk 3): the account dialogs — every
 // one the storage dialog component (src/lib/mounts-dialog.js, D1)
-import { showConnectAccountDialog, showReauthAccountDialog, showEditAccountDialog, showDuplicateAccountDialog, removeAccount, accountName, clientChipText, providerOf } from './channel-account-dialogs.js';
+import { accountEnableDoor, showConnectAccountDialog, showReauthAccountDialog, showEditAccountDialog, showDuplicateAccountDialog, removeAccount, accountName, clientChipText, providerOf } from './channel-account-dialogs.js';
 import { enterSubmits } from './chat-enter-keys.js';
 
 /** A short, honest freshness chip. The server sends `{kind, state, seconds}`
@@ -148,7 +148,7 @@ function fitRowPills(scope) {
 
 async function api(pathname, init) {
   const r = await fetchJson(pathname, init);
-  if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return null; }
+  if (!r || r.error) { showToast(routeErrorText(r), { type: 'error', action: accountEnableDoor(r) }); return null; }   // B-7aef: a disabled account's refusal carries its Enable door
   return r;
 }
 

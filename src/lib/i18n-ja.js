@@ -7184,7 +7184,9 @@ export default {
   "As the channel policy allows": "チャンネルのポリシーに従う",
   "An agent can propose an emoji reaction on a message; it shows in your name. \"As the channel policy allows\" sends it directly only where the channel sends replies directly and the agent may send.": "agent はメッセージへの絵文字リアクションを提案できます。リアクションはあなたの名前で表示されます。「チャンネルのポリシーに従う」は、そのチャンネルが返信を直接送信し、かつ agent に送信権限がある場合にのみ直接送信します。",
   // naive-user pass of lane channel-threads (2026-09-28)
-  "This account is disabled — enable it in the account’s ⋯ menu to load or send here": "このアカウントは無効です — アカウントの ⋯ メニューで有効にすると、ここで読み込み・送信できます",
+  "This account is disabled — enable it to load or send here": "このアカウントは無効です — 有効にすると、ここで読み込み・送信できます",
+  "Enable this account": "このアカウントを有効にする",
+  "The account is enabled — try again": "アカウントを有効にしました — もう一度お試しください",
   "a reaction notice": "リアクション通知 1 件",
   "{n} reaction notices": "リアクション通知 {n} 件",
   // lane lark-search-poll (B-5aab, 2026-09-28): the change feed, single chats, the ordered narrowing
@@ -14725,7 +14727,8 @@ export default {
   "A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor's own settings.": "クラウドブラウザはベンダー側で動いており、このマシンのプロキシは届きません——プロキシを空にするか、ベンダー自身の設定でプロキシを設定してください。", // B-8b87 cure: a proxy's refusals in the page's words
   "Its proxy login is no longer in the vault — choose its login again in Proxy….": "プロキシのログインはもう保管庫にありません——「プロキシ…」でログインを選び直してください。", // B-8b87 cure: a proxy's refusals in the page's words
   "Its proxy login could not be read from the vault ({code}).": "保管庫からプロキシのログインを読み取れませんでした（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
-  "Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.": "プロキシのアドレスにパスワードが含まれており、そのパスワードは使われません——先に ⋯ の「パスワードを保管庫へ移す」を押してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address carries its password, which is never used — move it to the vault first.": "プロキシのアドレスにパスワードが含まれており、そのパスワードは使われません——先に保管庫へ移してください。",
+  "The proxy password is in the vault now — the profile keeps the address alone": "プロキシのパスワードは保管庫に入りました——プロファイルにはアドレスだけが残ります",
   "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "プロキシが socks4 で、サイトの名前を渡せません——「プロキシ…」で http、https または socks5 のプロキシを指定してください。", // B-8b87 cure: a proxy's refusals in the page's words
   "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "このプロファイルは VibeSpace が起動しないブラウザに接続します——そのブラウザは自身のプロキシ設定を使います。", // B-8b87 cure: a proxy's refusals in the page's words
   "The browser's proxy could not be put in its config — the browser was not started without it.": "ブラウザの設定にプロキシを書き込めませんでした——プロキシなしでブラウザを起動することはしていません。", // B-8b87 cure: a proxy's refusals in the page's words

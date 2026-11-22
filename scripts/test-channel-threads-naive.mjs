@@ -90,7 +90,7 @@ const M = mutantCopies('chanthr-naive', REPO);
 
 // ═══ ① the `disabled` code in words ═══════════════════════════════════════════════════════════════
 console.log('① a disabled account\'s refusal is worded in the device\'s language (never the engine\'s English)');
-const DISABLED_KEY = 'This account is disabled — enable it in the account’s ⋯ menu to load or send here';
+const DISABLED_KEY = 'This account is disabled — enable it to load or send here';   // B-7aef: its door (routeErrorDoor) carries the act
 {
   // the browser's shape: a DISABLED Lark account whose topic room was ingested (the REAL Lark normalizer over an
   // invented `omt_` topic), the owner opening its thread — the walk is refused before any vendor call
@@ -122,7 +122,7 @@ const DISABLED_KEY = 'This account is disabled — enable it in the account’s 
   ok(paneSrc.includes("const note = el('div', 'chanthread-note', routeErrorText(r));"), 'WIRING: the pane\'s walk draws its refusal through routeErrorText (the sentence the user saw)');
   // CONTROL: the words module as it was (no case for the code) hands the user the engine's English
   const src = fs.readFileSync(WORDS_PATH, 'utf-8');
-  const line = "    case 'disabled': return t('This account is disabled — enable it in the account’s ⋯ menu to load or send here');\n";
+  const line = "    case 'disabled': return t('This account is disabled — enable it to load or send here');   // B-7aef: its door is routeErrorDoor's «Enable this account»\n";
   ok(src.includes(line), 'CONTROL setup: the case line is found verbatim');
   const C = await import(pathToFileURL(M.write(WORDS_PATH, src.replace(line, ''), 'no-disabled-case')).href);
   const c1 = C.routeErrorText(th);

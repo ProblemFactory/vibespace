@@ -5270,7 +5270,7 @@ function create(deps = {}) {
   async function refresh(adapterId, convId, { origin = 'refresh' } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec || !known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
-    if (rec.enabled === false) return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+    if (rec.enabled === false) return { ok: false, code: 'disabled', account: rec.id, error: `${rec.label || rec.id} is disabled` };   // B-7aef: the account's id — the page's «Enable this account» door
     olderChanged(adapterFor(rec), convId);   // rule 19: the owner's Refresh forgets the "nothing older" memory
     if (origin === 'refresh') revAsked.set(`${adapterId}/${convId}`, now());   // lane channel-record-revisions: the owner's press re-asks this conversation's stored messages sooner
     return requestRefresh(rec, adapterFor(rec), `${adapterId}/${convId}`, { origin });
@@ -5747,7 +5747,7 @@ function create(deps = {}) {
       default:
         if (v.code === 'not-found') return { ok: false, code: 'not-found', error: msg && !(typeof store.findRecord === 'function' && store.findRecord(adapterId, convId, String(msg))) ? NOT_IN_EITHER : 'no message in this conversation carries that attachment' };
         if (v.code === 'not-supported') return { ok: false, code: 'not-supported', error: `${rec.label || rec.id} can list attachments but not fetch them` };
-        if (v.code === 'disabled') return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+        if (v.code === 'disabled') return { ok: false, code: 'disabled', account: rec.id, error: `${rec.label || rec.id} is disabled` };   // B-7aef: the account's id — the page's «Enable this account» door
         if (v.code === 'backoff') {
           if (inBackoff(e)) return backoffRefusal(rec, e);
           const s = Math.max(1, Math.ceil(((Number(e.attBackoffUntil) || 0) - t) / 1000));
@@ -5832,7 +5832,7 @@ function create(deps = {}) {
     const fx0 = fxOf();
     if (Array.isArray(owner.facts) || fx0.length) return { ok: true, msg: vid, facts: Facts.foldFacts(owner.facts, fx0), cached: true };
     if (!METHOD_GATES.factsOf(c)) return { ok: false, code: 'not-supported', error: `${rec.label || rec.id} cannot read the facts of a message stored before them` };
-    if (rec.enabled === false) return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+    if (rec.enabled === false) return { ok: false, code: 'disabled', account: rec.id, error: `${rec.label || rec.id} is disabled` };   // B-7aef: the account's id — the page's «Enable this account» door
     const k = `${adapterId}/${convId}`;
     const e = adapterFor(rec);
     if (!factsFlights.has(k)) {
@@ -6655,7 +6655,7 @@ function create(deps = {}) {
     if (g.refusal) return g.refusal;
     const { rec, e, c } = g;
     if (threadsRow(c).listing !== 'separate') return { ok: false, code: 'not-supported', error: `${rec.label || rec.id} lists thread replies with the conversation — there is nothing to walk` };
-    if (rec.enabled === false) return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+    if (rec.enabled === false) return { ok: false, code: 'disabled', account: rec.id, error: `${rec.label || rec.id} is disabled` };   // B-7aef: the account's id — the page's «Enable this account» door
     const ix = threadIxOf(adapterId, convId);
     const id = String(msg || '');
     // THE KEY IS THIS CONVERSATION'S (verify r1, IDENTITY): a thread is walked only under a key the conversation's
@@ -7119,7 +7119,7 @@ function create(deps = {}) {
     const r0 = reactionsRow(c);
     if (r0.read === 'none') return { ok: false, code: 'not-supported', error: `${rec.label || rec.id} has no reactions` };
     if (r0.read !== 'list') return { ok: true, asked: [], refused: [], floorMs: Drain.REACTIONS_FLOOR_MS, via: r0.read };
-    if (rec.enabled === false) return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+    if (rec.enabled === false) return { ok: false, code: 'disabled', account: rec.id, error: `${rec.label || rec.id} is disabled` };   // B-7aef: the account's id — the page's «Enable this account» door
     const offer = await offerNow(rec, adapterId, convId, 'read-reactions');
     if (!offer.offered && offer.why === 'reactions-scope-not-granted') return { ok: false, code: 'reactions-scope-not-granted', error: 'reading reactions needs a re-authorization with the reactions read permission', why: offer.why, scopes: reactionsGrantView(rec) ? reactionsGrantView(rec).scopes : [] };
     if (!offer.offered) return { ok: false, code: 'react-not-available', error: `reactions cannot be read here (${offer.why})`, why: offer.why };
@@ -7361,7 +7361,7 @@ function create(deps = {}) {
       case 'join': return emojiFlights.get(fk);
       case 'fetch': break;
       default:
-        if (v.code === 'disabled') return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+        if (v.code === 'disabled') return { ok: false, code: 'disabled', account: rec.id, error: `${rec.label || rec.id} is disabled` };   // B-7aef: the account's id — the page's «Enable this account» door
         if (v.code === 'backoff') {
           if (inBackoff(e)) return backoffRefusal(rec, e);
           const s2 = Math.max(1, Math.ceil(((Number(e.attBackoffUntil) || 0) - t) / 1000));
@@ -7464,7 +7464,7 @@ function create(deps = {}) {
       default:
         if (stale) return stale;
         if (v.code === 'not-found') return { ok: false, code: 'not-found', error: 'no message of this account names this person' };
-        if (v.code === 'disabled') return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+        if (v.code === 'disabled') return { ok: false, code: 'disabled', account: rec.id, error: `${rec.label || rec.id} is disabled` };   // B-7aef: the account's id — the page's «Enable this account» door
         if (v.code === 'backoff') return inBackoff(e) ? backoffRefusal(rec, e) : { ok: false, code: 'backoff', error: 'the vendor rate-limited this account\'s last picture fetch', retryAfterSec: Math.max(1, Math.ceil(((Number(e.attBackoffUntil) || 0) - t) / 1000)) };
         return budgetRefusal(rec, e);
     }

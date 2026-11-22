@@ -50,7 +50,7 @@ import { pushClaimOptions } from './value-words.js'; // lane ui-language: the pu
 import { needLine } from './need-line.js'; // lane ui-needs-a-button (channels-accounts-4): a reference with its release door
 import { techFold } from './plain-words.js'; // lane ui-plain-words: the vendor's scope names fold
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
-import { routeErrorText, policyModeText } from './channel-words.js';
+import { routeErrorText, routeErrorDoor, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
 import { narrowRowVerdict, consentEndOf } from '../channel-caps.js';   // lane lark-consent-chain ADDENDUM 1: the narrowing row only where the vendor can refuse; lane lark-signin-dialog: a consent's end
 import { ownerPolicyModel, guardRowsEl, showAccountReachDialog } from './channel-reach-editor.js';   // lanes account-policy-door + guards-door: the policy row's model and guard rows
@@ -66,6 +66,19 @@ import * as CR from '../consent-road.js';   // lane oauth-relay-road (PURE): doe
  *  shape (§2.4): START → `{flowId, url, flow}`, STATUS `?flowId=` → `{token}`
  *  once signed in (the token IS the flow id — the handle Connect submits),
  *  CALLBACK = the paste-back. */
+/** B-7aef: a refusal's «Enable this account» door — the channels panel's own one-press enable (PUT the account { enabled: true });
+ *  `after` runs once the hub answers yes (the caller loads or sends again). null when the refusal carries no door. */
+export function accountEnableDoor(r, { after = null } = {}) {
+  const d = routeErrorDoor(r);
+  if (!d) return null;
+  return { label: d.label, door: d.door, run: async () => {
+    const res = await fetchJson(`/api/channels/adapters/${encodeURIComponent(d.account)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true }) });
+    if (!res || res.error) { showToast(routeErrorText(res), { type: 'error' }); return; }
+    showToast(tr('The account is enabled — try again'));
+    if (typeof after === 'function') after();
+  } };
+}
+
 export const CHANNEL_OAUTH_ENDPOINTS = Object.freeze({
   start: '/api/channels/oauth/start',
   status: '/api/channels/oauth/status',

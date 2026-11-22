@@ -779,10 +779,18 @@ async function act(url, init, what, wordsOf = null) {
 const restartWordsOf = (row) => (r) => restartRefusalWords(r, { label: String((row && (row.label || row.id)) || ''), human: humanRefusalText }, t);
 /** A refusal's toast — B-8b87 cure: a proxy's refusal (`act` = the act it refused) in the page's words, with the vault's press
  *  (Unlock… / Set up the vault…) when it needs one; any other refusal as before. */
+/** B-7aef (主开发 r2686): the profile's own «Move the password to the vault» as a refusal's door — the HUB moves the word (it never
+ *  crosses the page, an address or a log); a locked vault refuses by name with its press (sayRefusal 'move'). */
+async function moveProxyDoor(profileId) {
+  const res = await fetchJson('/api/vault/proxy-logins/move', jsonInit('POST', { profileId }));
+  if (!res || res.error || res.ok === false) { sayRefusal(res, t('Could not move the password'), 'move'); return; }
+  showToast(t('The proxy password is in the vault now — the profile keeps the address alone'), { duration: 6000 });
+}
 function sayRefusal(r, what, act) {
   const door = act ? proxyDoor(r && r.code, r && r.word) : null;
+  const moveId = door === 'move' && r && typeof r.profileId === 'string' && r.profileId ? r.profileId : '';   // the refusal names its profile (an id)
   const reason = act ? proxyWords(r && r.code, t, '', { act, word: r && r.word }) : (r && r.error) || t('server unreachable');
-  showToast(t('{what} — {reason}', { what, reason }), { type: 'error', duration: 9000, ...(door ? { action: { label: door === 'setup' ? t('Set up the vault…') : t('Unlock…'), run: () => { try { (door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } } } } : {}) });
+  showToast(t('{what} — {reason}', { what, reason }), { type: 'error', duration: 9000, ...(door === 'move' ? (moveId ? { action: { label: t('Move the password to the vault'), run: () => moveProxyDoor(moveId) } } : {}) : door ? { action: { label: door === 'setup' ? t('Set up the vault…') : t('Unlock…'), run: () => { try { (door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } } } } : {}) });
 }
 const jsonInit = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
