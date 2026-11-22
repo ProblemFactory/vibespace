@@ -592,7 +592,7 @@ class DeviceManager {
             const prevControl = mux.onControl;
             mux.onControl = (m, bytes) => {
               if (m.op === 'line-refused') { this._lineRefused(m); return; }   // lane lg-remote-hardening (D8): a push the agent refused by name
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'left-behind-result' /* B-69a7 */ || m.op === 'settings-merge-result' /* B-e7c0 */ || m.op === 'left-behind-end-result' /* B-69a7 (b) */ || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'peer-state-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'dir-collect-result' /* r1636 */ || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'left-behind-result' /* B-69a7 */ || m.op === 'settings-merge-result' /* B-e7c0 */ || m.op === 'left-behind-end-result' /* B-69a7 (b) */ || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'peer-state-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m, bytes); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -1453,6 +1453,17 @@ class DeviceManager {
     const r = await this._request({ op: 'design-fs', action, params, timeoutMs: 30000, by });
     if (r.error) throw new Error(r.error);
     return r.result;
+  }
+
+  /** r1636 (the paired machine's folder listing — the machine collects, the hub shapes): the folder field's FACTS for the hub's plan,
+   *  collected ON this machine (src/dir-collect.js collect). Capability-gated: an agent without `dir-collect` is never asked (an unknown
+   *  op hangs) — its caller keeps the sh road. → the facts (JSON-safe; a mark's end in THAT machine's clock, `at` its clock at the reply) */
+  async dirCollect(plan, { timeoutMs = 4000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('dir-collect')) throw Object.assign(new Error('daemon lacks dir-collect (capabilities gate)'), { code: 'no-capability' });
+    const r = await this._request({ op: 'dir-collect', plan, timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.facts;
   }
 
   async sysinfo() {

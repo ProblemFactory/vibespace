@@ -111,6 +111,9 @@ mk('vibespace/src', 60); fs.writeFileSync(path.join(HOME, 'vibespace/package.jso
 process.env.HOME = HOME;
 
 const PC = require('../src/path-candidates.js');
+// r1636 (the machine collects, the hub shapes): the collector's laws live in src/dir-collect.js — a patched collector rides the REAL
+// hub answer through src/server/dir-slice.js create's `DCm`; a patch goes to the file its anchor is in
+const withDC = (D, DCm) => ({ ...D, create: (o = {}) => D.create({ ...o, DCm }) });
 const { runOp } = require('../src/safe-fs-worker.js');
 const express = require('express');
 const app = express();
@@ -248,8 +251,12 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     } finally { fn.out--; }
   }; fn.rec = rec; fn.touched = 0; fn.touchedAt = {}; fn.touchLog = []; fn.blockedReached = 0; fn.out = 0; fn.maxOut = 0; return fn; };
   const mkDS = (D, call, now) => D.create({ home: HOME, repoDir: REPO, call, ...(now ? { now } : {}) });
-  const DSsrc = read('src/server/dir-slice.js'), M = mutantCopies('dir-complete-d833s4', REPO);
-  const mutant = (name, pairs) => M.load('src/server/dir-slice.js', pairs.reduce((src, [a, b, what]) => anchored(src, a, b, what), DSsrc), name);
+  const DSsrc = read('src/server/dir-slice.js'), DCsrc = read('src/dir-collect.js'), M = mutantCopies('dir-complete-d833s4', REPO);
+  const mutant = (name, pairs) => {
+    const inDC = pairs.filter(([a]) => DCsrc.includes(a)), inDS = pairs.filter(([a]) => !DCsrc.includes(a));
+    const D = inDS.length ? M.load('src/server/dir-slice.js', inDS.reduce((src, [a, b, what]) => anchored(src, a, b, what), DSsrc), name) : DS;
+    return inDC.length ? withDC(D, M.load('src/dir-collect.js', inDC.reduce((src, [a, b, what]) => anchored(src, a, b, what), DCsrc), name + '-dc')) : D;
+  };
   const into = (rec, dir) => rec.filter((x) => { const q = x.slice(x.indexOf(':') + 1); return q === dir || q.startsWith(dir + '/'); });
   const deadlineOf = () => Object.assign(new Error('Storage not responding (operation timed out).'), { status: 503, safeFsTimeout: true });
   const IR = path.join(HOME, 'work', 'investor-relations'), WORK = path.join(HOME, 'work');
@@ -426,7 +433,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     const run = async (D2) => { const g = hold(), d = mkDS(D2, standIn({ dead: [{ path: SH, g }] })); const r = { nw: await d.slice({ text: '~/work/q3-new', bases: ['~'], budgetMs: 150 }), pre: await d.slice({ text: '~/work/pay', bases: ['~'], budgetMs: 150 }), ex: await d.slice({ text: '~/work/payments', bases: ['~'], budgetMs: 150 }) }; g.open(); return r; };
     const a = await run(DS);
     ok('③c a new folder beside a DEAD KID (~/work/share): «absent», not partial — the create is offered; «~/work/pay» completes to ~/work/payments by the names (the one match stated under its own key — not literal); «~/work/payments» exists, literal', a.nw.verdict.kind === 'absent' && !a.nw.partial && a.pre.verdict.kind === 'exists' && a.pre.verdict.path === '~/work/payments' && a.pre.verdict.completed && !a.pre.verdict.literal && a.ex.verdict.kind === 'exists' && a.ex.verdict.literal === true, { nw: a.nw.verdict, pre: a.pre.verdict, ex: a.ex.verdict });
-    const LISTED = mutant('s4-listed', [['    const ans = PC.lineAnswerOf(st, { files: o.files });', "    if (!st.exists) { const lr = await raceOf(listOne(path.dirname(a), { files: o.files, ...o }), o.untilSoft); if (lr === LATE || !lr || !lr.ok) return { path: c, answer: 'late', at: a }; }\n    const ans = PC.lineAnswerOf(st, { files: o.files });", 'the line waits for its parent\'s listing']]);
+    const LISTED = mutant('s4-listed', [['    const ans = PT.lineAnswerOf(st, { files: o.files });', "    if (!st.exists) { const lr = await raceOf(listOne(path.dirname(a), { files: o.files, ...o }), o.untilSoft); if (lr === LATE || !lr || !lr.ok) return { path: c, answer: 'late', at: a }; }\n    const ans = PT.lineAnswerOf(st, { files: o.files });", 'the line waits for its parent\'s listing']]);
     // (B-5561: a listing reads names and types only, so the dead kid no longer holds it — the scene the control needs is a parent's
     // listing that HANGS by itself: the stand-in holds ~/work's listing alone; the line's stats there are not held)
     const runHung = async (D2) => { const g = hold(), gL = hold(), d = mkDS(D2, standIn({ dead: [{ path: SH, g }, { path: WORK, g: gL, op: 'dirSlice' }] })); const r = await d.slice({ text: '~/work/q3-new', bases: ['~'], budgetMs: 150 }); g.open(); gL.open(); return r; };
@@ -442,7 +449,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
   // dead folder as a skip; since B-5561 a listing states no kid, so there is no skip left to take out)
   await section('③c R-c', async () => {
     lap('  · dead folder as a skip; since B-5561 a listing states no');   // (r2178 (5): where the seconds go)
-    const OLDL = mutantCopies('dir-complete-s4-oldlist', REPO).load('src/safe-fs-worker.js', anchored(read('src/safe-fs-worker.js'), '        if (e.isDirectory()) { kids.push({ name: e.name }); continue; }', '        if (e.isDirectory()) { kids.push({ name: e.name, git: gitOf(path.join(d, e.name)) }); continue; }', 'the release listing: a .git stat per kid'), 'w-s4-oldlist');
+    const OLDL = mutantCopies('dir-complete-s4-oldlist', REPO).load('src/dir-ops.js', anchored(read('src/dir-ops.js'), '        if (e.isDirectory()) { kids.push({ name: e.name }); continue; }', '        if (e.isDirectory()) { kids.push({ name: e.name, git: gitOf(path.join(d, e.name)) }); continue; }', 'the release listing: a .git stat per kid'), 'w-s4-oldlist');
     const run = async (D2, wrun) => { const g = hold(), c = standIn({ dead: [{ path: STALE, g }], ...(wrun ? { run: wrun } : {}) }), d = mkDS(D2, c); for (const [t, pr] of [['', []], ['a/b/q3', [STALE]], ['a/b', [path.join(STALE, 'a')]], ['a', []], ['c/z', []]]) await d.slice({ text: t ? path.join(STALE, t) : STALE, bases: [], probe: pr, budgetMs: 50 }); const n = c.touched; g.open(); return n; };
     lap('    · real, nod, keys, noskip');
     const [real, nod, keys, noskip] = await Promise.all([run(DS), run(mutant('s4-nodescent', [["      const d = await descend(a, 'line', o, false);", '      const d = null;', 'no descent']])), run(mutant('s4-linekey', [["      const own = () => once('stat:' + a, 'line', a,", "      const own = () => once('line:' + a, 'line', a,", 'the line\'s own call under its own key']])), run(DS, OLDL.runOp)]);
@@ -457,7 +464,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
   await section('③c one match', async () => {
     lap('  · CONTROL (the in-worker stat of the one match, by name):');   // (r2178 (5): where the seconds go)
     const NP = path.join(TMP, 'np-parent'), NM = path.join(NP, 'nas-mount'); fs.mkdirSync(NM, { recursive: true }); fs.mkdirSync(path.join(NP, 'work-ok'), { recursive: true });
-    const Wsrc = read('src/safe-fs-worker.js'), WIN = mutantCopies('dir-complete-s4-inworker', REPO).load('src/safe-fs-worker.js', anchored(Wsrc, '      stat.names = hits.slice(0, 20);\n', '      stat.names = hits.slice(0, 20);\n      if (hits.length === 1) stat.one = bare(path.join(dir, hits[0]));\n', 'the in-worker stat of the one match'), 'w-inworker');
+    const Wsrc = read('src/dir-ops.js'), WIN = mutantCopies('dir-complete-s4-inworker', REPO).load('src/dir-ops.js', anchored(Wsrc, '      stat.names = hits.slice(0, 20);\n', '      stat.names = hits.slice(0, 20);\n      if (hits.length === 1) stat.one = bare(path.join(dir, hits[0]));\n', 'the in-worker stat of the one match'), 'w-inworker');
     const typing = async (run) => {
       const g = hold(), c = standIn({ dead: [{ path: NM, g }], run }), d = mkDS(DS, c);
       for (const t of ['n', 'na', 'nas']) await d.slice({ text: path.join(NP, t), bases: [], budgetMs: 50 });
@@ -613,7 +620,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     const MANY = Array.from({ length: 44 }, (_, i) => { const d = path.join(TMP, 'many', 'b' + i); fs.mkdirSync(d, { recursive: true }); return d; });
     const many = async (D2) => (await mkDS(D2, standIn()).slice({ text: 'work', bases: [...MANY, '~'], budgetMs: 2000 })).verdict;
     lap('    · mv, mvC');
-    const [mv, mvC] = await Promise.all([many(DS), many(mutant('s4-cut40', [['    const cands = PC.textCandidates(text, tAll).map(', '    const cands = PC.textCandidates(text, tAll.slice(0, 40)).map(', 'the candidates cut at 40']]))]);
+    const [mv, mvC] = await Promise.all([many(DS), many(mutant('s4-cut40', [['  const cands = PC.textCandidates(text, tAll).map(', '  const cands = PC.textCandidates(text, tAll.slice(0, 40)).map(', 'the candidates cut at 40']]))]);
     ok('③c 44 bases and the home last: «work» EXISTS (every base a candidate, asked one at a time) — CONTROL cut at 40: «absent» with the home never asked', mv && mv.kind === 'exists' && mv.path === '~/work' && mvC && mvC.kind === 'absent', { real: mv, control: mvC });
   });
   // ③c FAILED is the machine's own answer about the path (a loop of links: ELOOP), never «absent» — CONTROL: the worker reading every
@@ -622,7 +629,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     lap('  · failed stat as absent. A row source that did not answer');   // (r2178 (5): where the seconds go)
     const LOOP = path.join(TMP, 'loop-a'); try { fs.symlinkSync(LOOP, LOOP); } catch { }
     const r5 = await mkDS(DS, standIn()).slice({ text: LOOP, bases: [], budgetMs: 450 });
-    const W0 = mutantCopies('dir-complete-s4-worker', REPO).load('src/safe-fs-worker.js', anchored(read('src/safe-fs-worker.js'), "function goneOf(e) { return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ? {} : { err: String((e && (e.message || e.code)) || e).slice(0, 200) }; }", 'function goneOf() { return {}; }', 'every failed stat read as absent'), 'w0');
+    const W0 = mutantCopies('dir-complete-s4-worker', REPO).load('src/dir-ops.js', anchored(read('src/dir-ops.js'), "function goneOf(e) { return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ? {} : { err: String((e && (e.message || e.code)) || e).slice(0, 200) }; }", 'function goneOf() { return {}; }', 'every failed stat read as absent'), 'w0');
     const r5c = await mkDS(DS, async (op, p) => (await W0.runOp(op, p)).result).slice({ text: LOOP, bases: [], budgetMs: 450 });
     ok('③c a stat that FAILED (ELOOP): the verdict «failed» with the machine\'s words — CONTROL: read as absent (the field would offer to create it)', r5.verdict.kind === 'failed' && /ELOOP/.test(r5.verdict.err) && r5c.verdict.kind === 'absent', { r5: r5.verdict, r5c: r5c.verdict });
     // …and a PROBE's (the coordinator's find, 2026-11-20): only «no such file» is «not there» — the worker's listing and probe stats say any
@@ -652,15 +659,15 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     fs.writeFileSync(path.join(K5, 'vs', 'package.json'), JSON.stringify({ name: 'vibespace' }));
     fs.writeFileSync(path.join(K5, 'notes.txt'), 'n\n');
     try { fs.symlinkSync(path.join(K5, 'proj'), path.join(K5, 'ln-proj')); fs.symlinkSync(path.join(K5, 'notes.txt'), path.join(K5, 'ln-notes')); fs.symlinkSync(path.join(K5, 'gone'), path.join(K5, 'dangling')); } catch { }
-    const Wsrc5 = read('src/safe-fs-worker.js');
-    const OLDW = mutantCopies('dir-complete-5561-oldlist', REPO).load('src/safe-fs-worker.js', anchored(Wsrc5, '        if (e.isDirectory()) { kids.push({ name: e.name }); continue; }',
+    const Wsrc5 = read('src/dir-ops.js');
+    const OLDW = mutantCopies('dir-complete-5561-oldlist', REPO).load('src/dir-ops.js', anchored(Wsrc5, '        if (e.isDirectory()) { kids.push({ name: e.name }); continue; }',
       '        if (e.isDirectory()) { const q = path.join(d, e.name); kids.push({ name: e.name, git: gitOf(q), ...pkgOf(q) }); continue; }', 'the release listing: a .git stat and a package.json read per folder kid'), 'w-oldlist');
     const reach = reachOf(runOp, 'dirSlice', { dirs: [{ path: K5 }], files: true });
     const fileKids = new Set(['notes.txt'].map((n) => path.join(K5, n)));
     const under = reach.seen.filter((q) => q !== K5 && q !== path.join(K5, '.git') && !fileKids.has(q));
     const kids0 = ((reach.res && reach.res.result.dirs[0]) || {}).kids || [];
     ok(`③e the worker's listing reads names and types only — no fs call under a kid (${under.length}: ${under.slice(0, 4).join(' ')}); a link is named «link: ''»`, under.length === 0 && kids0.some((k) => k.name === 'nas' && k.link == null && k.git === undefined) && kids0.filter((k) => k.link === '').map((k) => k.name).sort().join(',') === 'dangling,ln-notes,ln-proj', { under, kids0 });
-    const LKW = mutantCopies('dir-complete-5561-linkstat', REPO).load('src/safe-fs-worker.js', anchored(Wsrc5, "        if (e.isSymbolicLink()) { kids.push({ name: e.name, link: '' }); continue; }", "        if (e.isSymbolicLink()) { try { fs.statSync(path.join(d, e.name)); } catch { } kids.push({ name: e.name, link: '' }); continue; }", 'a link kid stated by the listing'), 'w-linkstat');
+    const LKW = mutantCopies('dir-complete-5561-linkstat', REPO).load('src/dir-ops.js', anchored(Wsrc5, "        if (e.isSymbolicLink()) { kids.push({ name: e.name, link: '' }); continue; }", "        if (e.isSymbolicLink()) { try { fs.statSync(path.join(d, e.name)); } catch { } kids.push({ name: e.name, link: '' }); continue; }", 'a link kid stated by the listing'), 'w-linkstat');
     const reachL = reachOf(LKW.runOp, 'dirSlice', { dirs: [{ path: K5 }], files: true });
     const underL = reachL.seen.filter((q) => q !== K5 && q !== path.join(K5, '.git') && !fileKids.has(q));
     ok(`③e RED CONTROL (a listing that states its link kids): ${underL.length} fs call(s) under a kid — ${underL.slice(0, 3).join(' ')}`, underL.length > 0, underL.slice(0, 4));
@@ -693,8 +700,8 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     ok(`③e …and the dead kid's MARK stands: ${real.metAfter} call more, ~/nas still named, the rows whole, factsLate ${real.a4.factsLate} (nothing left that can land)`,
       real.metAfter === 0 && real.a3.kids.includes('nas') && !real.a3.late && !real.a3.unread && !real.a4.factsLate, { a3: real.a3, a4: real.a4, metAfter: real.metAfter });
     ok(`③e RED CONTROL (the release's listing — a .git stat and a package.json read per folder kid): the home's rows LATE (${rel.a1.late}) while ~/nas hangs, then COULD NOT BE READ (${rel.a3.unread}) for the listing's own mark`, rel.a1.late === true && rel.a1.kids.length === 0 && rel.a3.unread === true, { a1: rel.a1, a3: rel.a3 });
-    const DSsrc5 = read('src/server/dir-slice.js'), M5 = mutantCopies('dir-complete-5561-s2s3', REPO);
-    const one = await scene(runOp, M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const FACT_SLOTS = 2;', 'const FACT_SLOTS = 1;', 'one facts slot (84e43bb55)'), 'ds-one-slot'));
+    const DCsrc5 = read('src/dir-collect.js'), M5 = mutantCopies('dir-complete-5561-s2s3', REPO), M5dc = (src, name) => withDC(DS, M5.load('src/dir-collect.js', src, name));
+    const one = await scene(runOp, M5dc(anchored(DCsrc5, 'const FACT_SLOTS = 2;', 'const FACT_SLOTS = 1;', 'one facts slot (84e43bb55)'), 'ds-one-slot'));
     ok(`③e S3 RED CONTROL (one facts slot): the dead kid's call holds it — no badge on ~/proj before the pool's deadline (${one.whileHung.git})`, one.whileHung.git === false && one.whileHung.met === 1, one.whileHung);
     // S2 (r1507): a home of 30 folders — a reply asks at most 24 of their own facts (the rest the next ask), and they are KEPT while the
     // home's time has not moved: past SELF_TTL_MS (the exclusion read again) no home folder is asked again. A text whose rows are about
@@ -714,8 +721,8 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     };
     lap('    · k2, k2cap, k2keep');
     const [k2, k2cap, k2keep] = await Promise.all([s2(DS),
-      s2(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const SELF_FACTS = 24;', 'const SELF_FACTS = 1000;', 'no cap'), 'ds-no-cap')),
-      s2(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const SELF_KEEP_MS = 10 * 60e3;', 'const SELF_KEEP_MS = 0;', 'no keep'), 'ds-no-keep'))]);
+      s2(M5dc(anchored(DCsrc5, 'const SELF_FACTS = 24;', 'const SELF_FACTS = 1000;', 'no cap'), 'ds-no-cap')),
+      s2(M5dc(anchored(DCsrc5, 'const SELF_KEEP_MS = 10 * 60e3;', 'const SELF_KEEP_MS = 0;', 'no keep'), 'ds-no-keep'))]);
     ok(`③e S2: a home of 30 folders — ${k2.first} of their own facts asked by the first reply (the cap: 24), ${k2.all} after the next; past the exclusion's re-read ${k2.later} asked again (the home's time held); ~/f07 (vibespace) excluded`, k2.first === 24 && k2.all === 30 && k2.later === 0 && k2.excluded, k2);
     ok(`③e S2 RED CONTROLS: no cap — ${k2cap.first} asked at once; no keep — ${k2keep.later} asked again`, k2cap.first === 30 && k2keep.later > 0, { cap: k2cap, keep: k2keep });
     // (the facts go out behind each answer through two slots: a leg reads its counts once they have all gone — a condition, bounded 3 s)
@@ -732,7 +739,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       await q(); await settle(d); return { all, again: homeFacts() - all };
     };
     lap('    · kt, ktc');
-    const [kt, ktc] = [await s2t(DS), await s2t(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'if (sf && sf.homeAt === d.mtime && now() - sf.at < SELF_KEEP_MS)', 'if (sf && true && now() - sf.at < SELF_KEEP_MS)', 'the home-time compare taken out'), 'ds-no-hometime'))];
+    const [kt, ktc] = [await s2t(DS), await s2t(M5dc(anchored(DCsrc5, 'if (sf && sf.homeAt === d.mtime && now() - sf.at < SELF_KEEP_MS)', 'if (sf && true && now() - sf.at < SELF_KEEP_MS)', 'the home-time compare taken out'), 'ds-no-hometime'))];
     ok(`③e S2: the home's own time moved — its folders' facts asked again (${kt.again} after ${kt.all}) — RED CONTROL the home-time compare taken out: ${ktc.again}`, kt.all === 30 && kt.again > 0 && ktc.again === 0, { real: kt, control: ktc });
     // r1748 (a): THE EXCLUSION NEVER SHRINKS — a home checkout's fact past its keep STANDS while its re-ask is out (here held). RED: the
     // tip's self() (the stale verdict dropped): the checkout offered for that reply
@@ -751,7 +758,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       return { before: r1.self.roots.includes(F3), during: r2.self.roots.includes(F3) && r3.self.roots.includes(F3), out };
     };
     lap('    · ks, ksc');
-    const [ks, ksc] = await Promise.all([stands(DS), stands(M5.load('src/server/dir-slice.js', anchored(DSsrc5, '        if (sf && sf.pkg === PC.SELF_PACKAGE) roots.push(p);\n', '', 'the stale verdict dropped (the tip)'), 'ds-shrinks'))]);
+    const [ks, ksc] = await Promise.all([stands(DS), stands(M5dc(anchored(DCsrc5, '        if (sf && sf.pkg === PT.SELF_PACKAGE) roots.push(p);\n', '', 'the stale verdict dropped (the tip)'), 'ds-shrinks'))]);
     ok(`r1748 (a): a home checkout's fact past its keep STANDS while its re-ask is out (out: ${ks.out}) — excluded before (${ks.before}) and during (${ks.during}); RED CONTROL the tip's self(): during ${ksc.during}`, ks.before && ks.during && ks.out >= 1 && ksc.before && !ksc.during, { real: ks, control: ksc });
     // r1748 (b): A KID WHOSE FACTS CALL ERRS AT ONCE (twelve link loops, ELOOP) is kept AS SUCH: asked ONCE, the late flag settles, and
     // the 13th link gets its slot (a LINK). RED: the tip's askFacts (an error never kept)
@@ -764,7 +771,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       return { asked: c.rec.filter((x) => x === 'pathStat:' + path.join(K8, 'l00')).length, lz: (r.listing.links || {})['~/lz'] || null, factsLate: !!r.factsLate };
     };
     lap('    · lr, lc');
-    const [lr, lc] = await Promise.all([loops(DS), loops(M5.load('src/server/dir-slice.js', anchored(DSsrc5, '      } else if (st && st.err) keepErr(st.err);\n', '      }\n', 'an erred fact never kept (the tip)'), 'ds-err-unkept'))]);
+    const [lr, lc] = await Promise.all([loops(DS), loops(M5dc(anchored(DCsrc5, '      } else if (st && st.err) keepErr(st.err);\n', '      }\n', 'an erred fact never kept (the tip)'), 'ds-err-unkept'))]);
     ok(`r1748 (b): twelve links that err at once (ELOOP) — each asked ${lr.asked}×, the 13th a LINK (${lr.lz}), factsLate ${lr.factsLate} — RED CONTROL the tip's askFacts: asked ${lc.asked}×, the 13th ${lc.lz}, factsLate ${lc.factsLate}`, lr.asked === 1 && lr.lz === '~/target' && !lr.factsLate && lc.asked > 1 && lc.lz === null && lc.factsLate, { real: lr, control: lc });
     // the two caps of 12 (KID_FACTS, LINK_FACTS — PER ANSWER, over every listing it holds: the home's too): a folder of 30 folders and 30
     // links, its whole listing asked once, under a home of its own with no kid (nothing of it shares the caps) — 12 of each asked.
@@ -778,7 +785,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       return { kids: nOf(/^pathStat:.*\/caps-12\/d\d\d$/), links: nOf(/^pathStat:.*\/caps-12\/k\d\d$/) };
     };
     lap('    · cr, ccK, ccL');
-    const [cr, ccK, ccL] = await Promise.all([caps(DS), caps(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const KID_FACTS = 12;', 'const KID_FACTS = 1000;', 'no kid cap'), 'ds-no-kidcap')), caps(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const LINK_FACTS = 12;', 'const LINK_FACTS = 1000;', 'no link cap'), 'ds-no-linkcap'))]);
+    const [cr, ccK, ccL] = await Promise.all([caps(DS), caps(M5dc(anchored(DCsrc5, 'const KID_FACTS = 12;', 'const KID_FACTS = 1000;', 'no kid cap'), 'ds-no-kidcap')), caps(M5dc(anchored(DCsrc5, 'const LINK_FACTS = 12;', 'const LINK_FACTS = 1000;', 'no link cap'), 'ds-no-linkcap'))]);
     ok(`③e the two caps of 12: a folder of 30 folders and 30 links listed whole — ${cr.kids} folder facts and ${cr.links} link facts asked — RED CONTROLS: no kid cap ${ccK.kids}, no link cap ${ccL.links}`, cr.kids === 12 && cr.links === 12 && ccK.kids === 30 && ccL.links === 30, { real: cr, kidCap: ccK, linkCap: ccL });
     // a MOUNT kid is named, never stated (askFacts' mount guard). RED: the guard taken out
     const K11 = path.join(TMP, 'with-mount'); fs.mkdirSync(path.join(K11, 'mnt'), { recursive: true }); fs.mkdirSync(path.join(K11, 'plain'), { recursive: true });
@@ -788,7 +795,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       return { mount: c.rec.filter((x) => x === 'pathStat:' + MK).length, plain: c.rec.filter((x) => x === 'pathStat:' + path.join(K11, 'plain')).length };
     };
     lap('    · mr, mc');
-    const [mr, mc] = await Promise.all([mg(DS), mg(M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'if (factOf(p, t) || mountPaths.includes(p) || entranceAbove(p, t)) return false;', 'if (factOf(p, t) || entranceAbove(p, t)) return false;', 'the mount guard taken out'), 'ds-no-mountguard'))]);
+    const [mr, mc] = await Promise.all([mg(DS), mg(M5dc(anchored(DCsrc5, 'if (factOf(p, t) || mountPaths.includes(p) || entranceAbove(p, t)) return false;', 'if (factOf(p, t) || entranceAbove(p, t)) return false;', 'the mount guard taken out'), 'ds-no-mountguard'))]);
     ok(`③e a hub MOUNT among a listing's kids is named, never stated: its facts asked ${mr.mount}× (a plain kid's ${mr.plain}×) — RED CONTROL the mount guard taken out: ${mc.mount}×`, mr.mount === 0 && mr.plain === 1 && mc.mount >= 1, { real: mr, control: mc });
     // r2178 (1): AN ERRED LINK FACT HEALS — a PASSING error (EIO while a mount comes up) keeps a listing's short time, then the link is
     // asked again and is a LINK; a LASTING one (ELOOP) keeps the full time, and a good stat of its own path (the person types it: the
@@ -807,8 +814,8 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       return { before, after: linkOf(await q()) };
     };
     const EIO = 'EIO: i/o error, stat \'' + LNK + '\'', ELOOP = 'ELOOP: too many symbolic links encountered, stat \'' + LNK + '\'';
-    const ALLKEPT = M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'LASTING_ERR.test(code) ? 0 : LIST_FRESH_MS); };', '0); };', 'every erred fact kept the full time (the tip)'), 'ds-err-allkept');
-    const NOCLEAR = M5.load('src/server/dir-slice.js', anchored(DSsrc5, ' if (st && st.exists) { const kf = kidFacts.get(p); if (kf && kf.f && kf.f.errored) kidFacts.delete(p); } };', ' };', 'no clear by a good stat'), 'ds-err-noclear');
+    const ALLKEPT = M5dc(anchored(DCsrc5, 'LASTING_ERR.test(code) ? 0 : LIST_FRESH_MS); };', '0); };', 'every erred fact kept the full time (the tip)'), 'ds-err-allkept');
+    const NOCLEAR = M5dc(anchored(DCsrc5, ' if (st && st.exists) { const kf = kidFacts.get(p); if (kf && kf.f && kf.f.errored) kidFacts.delete(p); } };', ' };', 'no clear by a good stat'), 'ds-err-noclear');
     lap('    · hp, hl, hs, hpC, hlC');
     const [hp, hl, hs, hpC, hlC] = await Promise.all([heals(DS, EIO, { ahead: DS.LIST_FRESH_MS + 100 }), heals(DS, ELOOP, { press: true }), heals(DS, ELOOP, { ahead: DS.LIST_FRESH_MS + 100 }), heals(ALLKEPT, EIO, { ahead: DS.LIST_FRESH_MS + 100 }), heals(NOCLEAR, ELOOP, { press: true })]);
     ok(`r2178 (1): an erred link heals — a PASSING error (EIO) is out for a listing's short time (${hp.before}) then a LINK again (${hp.after}); a LASTING one (ELOOP) stays out past it (${hs.after}) and the person's own text of its path clears it (${hl.after}) — RED CONTROLS: every error kept the full time ${hpC.after}; no clear by a good stat ${hlC.after}`,
@@ -840,8 +847,8 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       await d.slice({ text: '~/work', bases: [], budgetMs: 120 }); await sleep(30);
       return { refusals: probes.length, ending: probes.filter((x) => x.late)[0] || null };
     };
-    const KEEPALL = M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'const joinAsk = (g, boundAt, signal) => { if (!g) return; g.asks = g.asks.filter(asking); const a = { boundAt, signal }; if (asking(a)) g.asks.push(a); };', 'const joinAsk = (g, boundAt, signal) => { if (g) g.asks.push({ boundAt, signal }); };', 'every asker kept (the tip)'), 'ds-ask-keepall');   // stale-pins: kept (a red control: its replacement is the tip's own text)
-    const LATEGAP = M5.load('src/server/dir-slice.js', anchored(DSsrc5, '{ busy.late++; if (sent.get(key) === e) sent.delete(key); throw err; }', '{ busy.late++; throw err; }', 'the entry left only at its own end (the tip)'), 'ds-late-gap');   // stale-pins: kept (a red control: its replacement is the tip's own text)
+    const KEEPALL = M5dc(anchored(DCsrc5, 'const joinAsk = (g, boundAt, signal) => { if (!g) return; g.asks = g.asks.filter(asking); const a = { boundAt, signal }; if (asking(a)) g.asks.push(a); };', 'const joinAsk = (g, boundAt, signal) => { if (g) g.asks.push({ boundAt, signal }); };', 'every asker kept (the tip)'), 'ds-ask-keepall');   // stale-pins: kept (a red control: its replacement is the tip's own text)
+    const LATEGAP = M5dc(anchored(DCsrc5, '{ busy.late++; if (sent.get(key) === e) sent.delete(key); throw err; }', '{ busy.late++; throw err; }', 'the entry left only at its own end (the tip)'), 'ds-late-gap');   // stale-pins: kept (a red control: its replacement is the tip's own text)
     lap('    · gr, grC, gp, gpC');
     const [gr, grC, gp, gpC] = await Promise.all([grp(DS), grp(KEEPALL), gap(DS), gap(LATEGAP)]);
     ok(`r2178 (2): twelve answers joined ~/work's call with no bound and no field — the group holds ${gr.size} asker (the typed ask) — RED CONTROL the tip's join: ${grC.size} (each join kept)`, gr.size === 1 && grC.size >= 13, { real: gr, control: grC });
@@ -854,7 +861,7 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
       const ac = new AbortController(); setTimeout(() => ac.abort(), 80);
       const t0 = Date.now(), r = await d.selfWhole(SW_BOUND_MS, ac.signal), ms = Date.now() - t0; g.open(); return { ms, whole: r.whole };
     };
-    const NOABORT = M5.load('src/server/dir-slice.js', anchored(DSsrc5, 'if (mono() >= until || (signal && signal.aborted)) return { v, whole: false };', 'if (mono() >= until) return { v, whole: false };', 'no abort read (the tip)'), 'ds-sw-noabort');   // stale-pins: kept (a red control: its replacement is the tip's own text)
+    const NOABORT = M5dc(anchored(DCsrc5, 'if (mono() >= until || (signal && signal.aborted)) return { v, whole: false };', 'if (mono() >= until) return { v, whole: false };', 'no abort read (the tip)'), 'ds-sw-noabort');   // stale-pins: kept (a red control: its replacement is the tip's own text)
     lap('    · sa, saC');
     const [sa, saC] = await Promise.all([swOf(DS), swOf(NOABORT)]);
     ok(`r2178 (4): the home route's wait ends with its request — answered in ${sa.ms} ms, not whole (${sa.whole}) — RED CONTROL the tip's: ${saC.ms} ms`, sa.whole === false && sa.ms < saC.ms / 2 && saC.ms >= SW_BOUND_MS * 0.95, { real: sa, control: saC });
@@ -953,7 +960,7 @@ await section('④', async () => {
 // `same`, the kid out of the rows until the folder changes again
 await section('④ B-1c27', async () => {
   const DS = require('../src/server/dir-slice.js'), work = path.join(HOME, 'work');
-  const EXACT = mutantCopies('dir-complete-1c27-exact', REPO).load('src/server/dir-slice.js', anchored(read('src/server/dir-slice.js'), 'known: base && !base.entry.racy ? base.entry.mtime : undefined', 'known: base ? base.entry.mtime : undefined', "the exact compare (the release's)"), 'ds-1c27-exact');   // stale-pins: kept (the red control writes the release's exact compare back)
+  const EXACT = withDC(DS, mutantCopies('dir-complete-1c27-exact', REPO).load('src/dir-collect.js', anchored(read('src/dir-collect.js'), 'known: base && !base.entry.racy ? base.entry.mtime : undefined', 'known: base ? base.entry.mtime : undefined', "the exact compare (the release's)"), 'ds-1c27-exact'));   // stale-pins: kept (the red control writes the release's exact compare back)
   const sameTick = async (D2, name) => {
     let ck = 1e12; const sent = [];
     const RT = path.join(work, name); fs.mkdirSync(RT);

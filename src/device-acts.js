@@ -59,6 +59,7 @@ const TABLE = Object.freeze({
   'stream-audio': 'read', // lane speaker-passthrough-v1: the strip's 「声音」 on the person's OWN stream session (its sound captured for that session only, like its picture — stream-offer's class)
   'window-track': 'read', 'window-untrack': 'read', 'proc-list': 'read', 'left-behind': 'read', 'dial-status': 'read',
   'probe-cli': 'read', 'probe-creds': 'read', 'ping-info': 'read', 'ok': 'read',
+  'dir-collect': 'read', // r1636: the folder field's facts (listings, bare stats, the index walk) — read where they live, nothing written
   'peer-state': 'read', // B-95fc U1: is a conversation running there and is its inbox open — the machine's OWN registry, read; nothing posted
   'transcript-op': 'read',  // a conversation's own transcript pages, read where it lives
   'quota-refresh': 'read',  // a quota READING the device takes with its own token (human-gated at the route)

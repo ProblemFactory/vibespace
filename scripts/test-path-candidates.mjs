@@ -281,7 +281,9 @@ console.log('\n── ⑦ the text\'s VERDICT, its fourth shape (B-d833) ──'
   // before an exact hit decide. Rows, the seeded law, RED CONTROLS (anchored edits of the shipped source)
   const nfs = require('node:fs'), npath = require('node:path');
   const SRC = nfs.readFileSync(npath.join(npath.dirname(new URL(import.meta.url).pathname), '..', 'src', 'path-candidates.js'), 'utf8');
-  const load = (src) => { const m = { exports: {} }; new Function('module', 'exports', 'require', src)(m, m.exports, require); return m.exports; };
+  // (r1636: path-candidates requires src/path-text.js — a copy's require resolves where the module lives)
+  const srcRequire = createRequire(npath.join(npath.dirname(new URL(import.meta.url).pathname), '..', 'src', 'path-candidates.js'));
+  const load = (src) => { const m = { exports: {} }; new Function('module', 'exports', 'require', src)(m, m.exports, srcRequire); return m.exports; };
   const edit = (src, pairs) => pairs.reduce((s2, [a, b]) => { if (s2.split(a).length !== 2) throw new Error('anchor gone: ' + a.slice(0, 60)); return s2.replace(a, b); }, src);
   const T = api.textCandidates, V = api.textVerdict, A = api.lineAnswerOf, B = [{ path: '~/a' }, { path: '~' }, { path: '~/a' }];
   ok('⑦ isPathText — the ONE predicate (shared with resolveRelative): any text with no whitespace — an absolute or ~ text, a relative one, a BARE WORD (the POC\'s «草稿» resolves in two bases); a spaced text is a search',

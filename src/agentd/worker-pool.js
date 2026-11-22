@@ -98,11 +98,14 @@ function createWorkerPool({ file, workerData = { role: 'agentd-worker' }, size =
   let nextJob = 1;
   for (let k = 0; k < size; k++) spawnWorker();
   return {
-    run(action, params, timeoutMs = 10000) {
+    run(action, params, timeoutMs = 10000, { idleOnly = false } = {}) {
       return new Promise((resolve, reject) => {
         const job = { id: nextJob++, msg: { id: 0, action, ...params }, timeoutMs, resolve, reject };
         job.msg.id = job.id;
         const w = idle[0];
+        // r1636 (the folder field's collector, src/dir-collect.js): an IDLE-ONLY call runs on an idle worker or not at all — never queued
+        // behind a person's op, never sent into a worker a hung call holds; refused at once by code (asked again inside its reply's bound)
+        if (idleOnly && !w) return reject(Object.assign(new Error(`no idle fs worker for ${action}: ${live ? 'every worker is busy' : 'no worker is running'} — the call was not sent`), { code: live ? 'no-idle-worker' : 'no-worker' }));
         if (!w && live === 0 && !wedged) return reject(new Error('no workers')); // runFs's inline fallback (a crash backoff)
         if (!w && live === 0 && !pending) return reject(new Error(`fs pool exhausted (${action}): ${wedged} workers wedged in the kernel (last on ${lastWedge}) — not run inline, it would wedge the daemon's loop`));
         queue.push(job);

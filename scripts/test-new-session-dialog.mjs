@@ -103,8 +103,8 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 try { execSync('command -v dtach', { stdio: 'ignore', shell: '/bin/bash' }); } catch { console.log('SKIP: dtach is not installed — a chat session cannot be created here'); process.exit(0); }
 const { claudeAllowRules } = require(path.join(repo, 'src/agent-tool-rules.js'));
-// the hub's listing reuse window (src/server/dir-slice.js — the design; A3's premise names it), read from the module's own line
-const LIST_FRESH_MS = Number((fs.readFileSync(path.join(repo, 'src/server/dir-slice.js'), 'utf8').match(/^const LIST_FRESH_MS = (\d+);/m) || [])[1]);
+// the hub's listing reuse window (src/dir-collect.js since r1636 — the design; A3's premise names it), read from the module's own line
+const LIST_FRESH_MS = Number((fs.readFileSync(path.join(repo, 'src/dir-collect.js'), 'utf8').match(/^const LIST_FRESH_MS = (\d+);/m) || [])[1]);
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const root = mintRoot('new-session-dialog-wt'), wt = path.join(root, 't');

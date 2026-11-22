@@ -124,12 +124,16 @@ const FS_ACTIONS = {
     return { ok: true, size };
   },
 };
+// r1636 (the paired machine's folder listing — the machine collects, the hub shapes): the folder field's three disk ops (src/dir-ops.js —
+// the SAME three the hub's SafeFs worker runs), run by this daemon's fs worker for its collector (dirCollectorOf below) in their OWN
+// table: a message marked `dirOp` reaches them, nothing else does — never the hub-callable fs-op door (FS_ACTIONS)
+const DIR_OPS = require('../dir-ops.js').OPS;
 {
   let wt = null; try { wt = require('worker_threads'); } catch { }
   if (wt && !wt.isMainThread && wt.workerData && wt.workerData.role === 'agentd-worker') {
     wt.parentPort.on('message', (m) => {
       try {
-        const fn = FS_ACTIONS[m.action];
+        const fn = m.dirOp ? DIR_OPS[m.action] : FS_ACTIONS[m.action];
         if (!fn) throw new Error('unknown worker action ' + m.action);
         const r = fn(m);
         if (r && Buffer.isBuffer(r.data)) {
@@ -585,6 +589,49 @@ async function runFs(action, params, timeoutMs) {
     }
   }
   return FS_ACTIONS[action]({ action, ...params }); // honest inline fallback
+}
+// ── THE FOLDER FIELD'S COLLECTOR (r1508 / r1636 / r1651 — the paired machine's folder listing: the hub PLANS and SHAPES, this machine
+// COLLECTS): src/dir-collect.js, the SAME collector the hub runs over its own pool, here over this daemon's fs worker pool — every call
+// IDLE-ONLY (no idle worker ⇒ refused at once and asked again inside the reply's bound: never queued ahead of a person's Files op),
+// under the hub pool's own deadline (DIR_CALL_MS: a deadline marks the folder PROBE_LATE_MS on both roads alike), NEVER inline on this
+// loop (a hung mount would hold every session pipe: no live worker ⇒ refused as busy). Its memory is this process's: a restart forgets
+// it (the first ask lists, states and walks again). The exclusion roots: none of this daemon's own — the home's checkouts named
+// vibespace are found by their own facts. One collector per daemon (its caches serve every hub link).
+const DIR_CALL_MS = 15000;
+let dirCollector = null;
+const dirMounts = { at: 0, rows: [] };
+function dirCollectorOf() {
+  if (dirCollector) return dirCollector;
+  const DCm = require('../dir-collect.js'), hung = DCm.hungMemory({ home: require('os').homedir() });   // B-23e5's law for this pool (the fresh read's MUST)
+  dirCollector = DCm.create({
+    home: require('os').homedir(),
+    roots: [],
+    poolBusy: (err) => !!err && (err.code === 'no-idle-worker' || err.code === 'no-worker'),
+    log: (m) => log(m),
+    // THIS machine's mounted folders (src/dir-ops.js mountRows — names only), read on the worker behind the answers at most every 5 s
+    mounts: () => {
+      const t = Date.now();
+      if (t - dirMounts.at >= 5000 && workerPool && workerPool.alive()) {
+        dirMounts.at = t;
+        workerPool.run('mountRows', { dirOp: true, home: require('os').homedir(), platform: process.platform }, 5000, { idleOnly: true }).then((r) => { if (r && r.result && Array.isArray(r.result.rows)) dirMounts.rows = r.result.rows; }, () => { });
+      }
+      return dirMounts.rows;
+    },
+    call: async (op, payload, opts) => {
+      if (!workerPool || !workerPool.alive()) throw Object.assign(new Error('no fs worker of this agent is running'), { code: 'no-worker' });
+      const refused = hung.refusal(op, payload); if (refused) throw refused;   // a dead path is never sent to a fresh worker
+      let r;
+      try { r = await workerPool.run(op, { ...payload, dirOp: true }, DIR_CALL_MS, { idleOnly: !!(opts && opts.idleOnly) }); } catch (e) {
+        if (e && /^fs deadline \(/.test(String(e.message))) { e.safeFsTimeout = true; hung.deadline(op, payload); }   // the pool's deadline ended it: its folder's mark, and the pool's memory of it
+        else if (e && !e.code && /^(worker died|no workers)$/.test(String(e.message))) e.code = 'no-worker';   // no answer, no mark: asked again
+        throw e;
+      }
+      hung.landed(op, payload);   // it answered: forgotten
+      if (r.error) throw Object.assign(new Error(r.error), { code: r.code });
+      return r.result;
+    },
+  });
+  return dirCollector;
 }
 // the daemon's own exits (the self-upgrade's re-exec, SIGTERM): one no fs worker blocked in the kernel can hold (verify r1)
 function exitDaemon(code) { if (workerPool) workerPool.exit(code); process.exit(code); }
@@ -2223,6 +2270,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           ...(nonceD ? { nonceD, hubPinned: !!hubPin } : {}), // D3 half b: THIS device's fresh nonce — the hub's ok must sign it
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
           openssl: process.versions.openssl, nodeOwn: nodeOwn(), // lane device-node-version: the runtime's TLS library + whether this node is the installer's own (<root>/node — re-running the installer replaces it; a system node it never touches)
+          home: require('os').homedir(), // r1636: THIS machine's home — the hub plans the folder field's ask in this machine's own paths (`~` is this home)
           nodePath: process.execPath, // B-b83c: THIS agent's own node (absolute) — the hub's node finder and the scanner's fallback run the agent's own programs on it first
           nicePath: niceProgram(), // B-460d's remainder: THIS machine's own nice program (fixed system dirs; null on Windows or none) — the hub starts a conversation here below this agent with it
           posixShells: (posixShellsSaid = shells), // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it) — kept as the list last said (B-77ed's remainder)
@@ -2231,7 +2279,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'producer-bounds' /* B-5278 unit 2: each producer bounded by construction — the hub lowers its caps for this agent (answer-caps BOUNDED_CAPS) */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'left-behind-end' /* B-69a7 (b): a person's press on that line, ended HERE (each row re-proven) */, 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'browser-stop-facts' /* B-e799: the stop answers its outcome in fields */, 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'sent-rows' /* B-9a2e: a transcript op's params may carry {id: rows} — what VibeSpace sent, held for that op's reads */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'producer-bounds' /* B-5278 unit 2: each producer bounded by construction — the hub lowers its caps for this agent (answer-caps BOUNDED_CAPS) */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'dir-collect' /* r1636: the folder field's facts collected HERE (src/dir-collect.js; the hub plans and shapes) — an agent without it is asked nothing (the hub keeps the sh road) */, 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'left-behind-end' /* B-69a7 (b): a person's press on that line, ended HERE (each row re-proven) */, 'settings-merge' /* B-e7c0: a subscription pick's merge of the person's own settings file, made HERE */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'browser-stop-facts' /* B-e799: the stop answers its outcome in fields */, 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'sent-rows' /* B-9a2e: a transcript op's params may carry {id: rows} — what VibeSpace sent, held for that op's reads */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2658,6 +2706,18 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             const dfs = require('./../design-fs.js');
             mux.control({ op: 'design-fs-result', id: msg.id, result: dfs.toWire(await dfs.run(msg.action, msg.params || {})) });
           } catch (e) { mux.control({ op: 'design-fs-result', id: msg.id, error: String(e.message || e) }); }
+        })();
+        return;
+      }
+      // r1636: THE FOLDER FIELD's facts, collected HERE over the hub's plan (src/dir-collect.js) and answered ONCE, within the op's byte
+      // cap (answer-caps 'dir-collect'): over it, the reply is cut by the collector's own rule (the index first, said as partial)
+      if (msg.op === 'dir-collect') {
+        (async () => {
+          try {
+            const DCm = require('../dir-collect.js');
+            const facts = DCm.cutToCap(await dirCollectorOf().collect(msg.plan || {}), DCm.COLLECT_CAP_BYTES);
+            mux.control({ op: 'dir-collect-result', id: msg.id, facts });
+          } catch (e) { mux.control({ op: 'dir-collect-result', id: msg.id, error: String((e && e.message) || e).slice(0, 200) }); }
         })();
         return;
       }

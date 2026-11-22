@@ -25,6 +25,7 @@ const CAPS = Object.freeze({
   'stream-windows': 12 * MiB,      // the helper's 4 MiB stdout, re-escaped
   'run-cmd': 8 * MiB,              // stdout cut to 1 Mi units of a 2 MiB maxBuffer, escaped ≈ 6.4 MiB; stderr 64 Ki units
   'proc-list': 4 * MiB,            // 2000 rows × a 400-unit cmd ≈ 2.7 MB
+  'dir-collect': 4 * MiB,          // r1636 / r1651: the folder field's facts — the collector CUTS its reply to COLLECT_CAP_BYTES (src/dir-collect.js cutToCap: the index, the one-match listings, the kids, the probes — each cut said) before it is sent
   'desktop-apps-list': 2 * MiB,    // 500 rows × (a 200-unit name + a 1000-unit launch line, 3 bytes a unit at worst) + fields ≈ 1.75 MiB
                                    // — the tightest margin: the suite computes it from installed-apps' and the run door's bounds
   // the producers with NO bound of their own: the line for now (row B-5278 bounds each producer)

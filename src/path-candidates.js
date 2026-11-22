@@ -20,12 +20,13 @@
 // Aliases are general (never a rename table): a link pointing at a folder, the OS display names on a Mac, the owning Task
 // Group's name. Words never live here: chips / whys / lines are `{ key, params }` and the field says them through t().
 // Paths are kept in their `~/…` form for the machine they live on (listing.home is that machine's home).
-// PURE: imports nothing (scripts/test-architecture.mjs PURE set) — the bundle and the hub share it.
+// PURE: imports only src/path-text.js (PURE → PURE: the few path facts the device's collector reads too — SELF_PACKAGE, toTilde /
+// fromTilde / stripSlash, lineAnswerOf, re-exported here unchanged) — the bundle and the hub share it.
+const { SELF_PACKAGE, toTilde, fromTilde, stripSlash, lineAnswerOf } = require('./path-text.js');
 
 const SEC = Object.freeze({ GROUP: 1, NAME: 2, RECENT: 3, DIR: 4, MOUNT: 5 });
 const TIER = Object.freeze({ SEGMENT: 3, SUBSEQ: 2, TOKEN: 1 });
 const HOST_ROW = /^([^:/\s]+)::(\/.*)$/;   // a Task Group folder declared for one machine (task-groups.js keeps `host::/path`)
-const SELF_PACKAGE = 'vibespace';   // a folder whose package.json names this is an instance's own checkout (isExcludedPath's `self.roots`)
 
 /* ── paths ── */
 const baseName = (p) => (p === '~' ? '~' : String(p).split('/').pop());
@@ -43,9 +44,6 @@ function joinPath(b, rel) {
   }
   return head ? (out.length ? '~/' + out.join('/') : '~') : '/' + out.join('/');
 }
-const toTilde = (home, p) => { const h = String(home || ''); const s = String(p || ''); return h && s === h ? '~' : h && s.startsWith(h + '/') ? '~' + s.slice(h.length) : s; };
-const fromTilde = (home, p) => { const s = String(p || ''); return s === '~' ? String(home || '') : s.startsWith('~/') ? String(home || '') + s.slice(1) : s; };
-const stripSlash = (p) => { const s = String(p || ''); return s.length > 1 ? s.replace(/\/+$/, '') || '/' : s; };
 
 /** Never offered unasked: a dot-folder (any segment below the home / root starts with "."), the instance's own checkout and
  *  its data dir (`self.roots`, absolute). `path` in `~/…` or absolute form; `self.home` expands `~`. → 'dot' | 'self' | ''. */
@@ -81,15 +79,6 @@ function textCandidates(text, bases) {
   const out = [];
   for (const b of bases || []) if (b && b.path) { const c = joinPath(b.path, q); if (!out.includes(c)) out.push(c); }
   return out;
-}
-function lineAnswerOf(stat, { files = false } = {}) {
-  const s = stat || {};
-  if (s.err) return { answer: 'failed', err: String(s.err) };
-  if (s.exists) return s.isDir !== false || files ? { answer: 'listed', ...(s.link ? { link: s.link } : {}), ...(s.isDir === false ? { file: true } : {}) } : { answer: 'absent', file: true };
-  if (s.namesErr) return { answer: 'failed', err: String(s.namesErr) };
-  const one = s.one;
-  if (one && one.exists && (one.isDir !== false || files) && !one.err) return { answer: 'listed', completed: one.path, ...(one.isDir === false ? { file: true } : {}) };
-  return { answer: 'absent' };
 }
 function textVerdict(cands = []) {
   let late = null, failed = null, comp = null;

@@ -585,7 +585,7 @@ console.log('①c the person\'s words: the files router says a remembered dead p
     const fe = readSrc('src/lib/file-explorer.js'), fr = readSrc('src/routes/files.js');
     ok(fe.includes("const { data, info } = await listingAndProbe(fetch, `/api/files?path=${encodeURIComponent(dirPath)}${this._hp()}`, `/api/file/info?path=${encodeURIComponent(dirPath)}${this._hp()}`, init);") && fe.includes("if (info && !info.isDirectory) { this.app.openFile(")
       && fe.includes("  refresh({ attended = false } = {}) { this.navigate(this.currentPath, { attended }); }") && fe.includes("this._startPressed = !!winInfo._explorerPressed;") && fr.includes("return attendedOf(req) ? { call: (op, payload, opts = {}) => pool.call(op, payload, { ...opts, attended: true }) } : pool;")
-      && fr.includes("call: (op, payload, opts) => sfsPlain(req).call(op, payload, opts),") && readSrc('src/server/dir-slice.js').includes("const IDLE_ONLY = Object.freeze({ idleOnly: true });"),
+      && fr.includes("call: (op, payload, opts) => sfsPlain(req).call(op, payload, opts),") && readSrc('src/dir-collect.js').includes("const IDLE_ONLY = Object.freeze({ idleOnly: true });"),
       'PIN (r316 / r336): the explorer lists and probes through explorer-listing; a refresh after a delete or a host change carries no mark; a restored window none (its press only from openFileExplorer\'s own word); the router hands the mark to the pool; the folder field\'s dir slice, built once, never reads the mark of the request it closed over (B-d833: its calls carry idleOnly only, never a mark)');
     // r336: ONE PRESS, ONE WORKER at the page's own level — the explorer's listing step over a STAND-IN fetch: a storage refusal of the
     // listing is followed by NO second call; a plain error («not a folder») still asks the probe, unmarked; its RED control
@@ -740,7 +740,7 @@ console.log('①h2 the folder rule reads its look: a link keeps the folder asked
 
 console.log('①i B-23e5\'s remainder (c), REVERTED (r1396): the folder field\'s calls name their folder by `path` — the memory has seen them since the release');
 {
-  const ds = fs.readFileSync(path.join(REPO, 'src/server/dir-slice.js'), 'utf8'), src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
+  const ds = fs.readFileSync(path.join(REPO, 'src/dir-collect.js'), 'utf8'), src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
   ok(ds.includes("call('dirSlice', { path: a, dirs: [{ path: a, known: base && !base.entry.racy ? base.entry.mtime : undefined }]") && ds.includes("call('dirSlice', { path: a, dirs: [], probes: [a] }, IDLE_ONLY)") && ds.includes("call('dirIndex', { path: root, roots: [root],")
       && src.includes("const pathsOf = (payload, keys = PATH_KEYS) => [...keys.map((k) => payload[k]), ...(Array.isArray(payload.paths) ? payload.paths : [])]") && !/LIST_KEYS/.test(src) && !SF.WIDE_OPS.has('dirSlice') && !SF.WIDE_OPS.has('dirIndex'),
     'PIN: the slice and the walk carry `path` (dir-slice.js) — asked and remembered by it as at the release; the first build\'s list keys (dirs / roots / probes) and its listing class are gone (they refused healthy calls)');
