@@ -117,6 +117,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When a pool is your default, the usage meter's note now says it shows the pool's current member, not «Default account».
 - Notices held while a restarting VibeSpace was still handing over its record of turns nobody typed now say so, not that the spending ceiling held them.
 - When the data folder refuses the spending record's lock, the usage menu and For you now say so, and held turns resume by themselves once it writes again.
+- With lowering off, Session Properties no longer says a conversation on another machine runs at this server's own CPU priority.
 
 ## 2.369.415 — 2026-11-21
 

@@ -1433,6 +1433,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - Its own fresh read's cures (in the unit): the release and the ✕'s end ride the writer's REAL landing (never a bound); a record changed in the window stays the store's and its copy is taken out again; persisted() waits on the archive only for a clear; «being removed» on a repeat ✕; the held-notice judge reads the handed archive.
 - Gate: scripts/test-jobs-triage.mjs §B-0248 step 3 — the release at the landing, a refusal keeps (and the write again lands), the ✕ at its landing, the owed write, a record changed in the window, «being removed», persisted only for a clear, the loop's measure on the real writer, each with its red; census rows: src/jobs.js «*» 16 → 15, DEBT_MAX 847 → 846, the jobs waits 2 → 3.
 
+### login-request-card — B-460d's smalls (主开发 r1911, the round wozut8d33 on block line 294)
+- The no-usable-reply journal line says «at this start» (it fires at the first start after each hub start); a terminal with no usable reply carries `join` on its unlowered fact too (it may have joined a lowered shell) with its own words; a remote conversation with the setting off reads «Its machine’s own — lowering it is off in Settings», never «the server’s own» (en, zh, ja); the restore's parity leg takes its shapes from the producers' own output, each held to a round trip. Legs + one RED (the unlowered start without `join`).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
