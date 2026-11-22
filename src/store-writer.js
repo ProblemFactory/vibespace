@@ -549,7 +549,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       if (r && r.own) s.own = r.own;   // B-f276 1c: the numbers of the file this own-only store made
       finish(s, null, now() - t0, p.size, since, true, p.append);
       return true;
-    } catch (e) { if (!p.append) { try { fs.unlinkSync(tmp); } catch { } } fail(s, since, e); return false; }
+    } catch (e) { if (e && e.own) s.own = e.own; if (!p.append) { try { fs.unlinkSync(tmp); } catch { } } fail(s, since, e); return false; }   // r2593 (2): a FIRST own-only append that made the file and then failed hands its numbers to the store's cell here too
   }
   /** the failed job's own error code, from the shared cells (round 6's amend: the exit road said «EWRITE» for an EIO) */
   function jobErrorCode(l) {

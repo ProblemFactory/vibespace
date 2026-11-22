@@ -453,7 +453,7 @@ parentPort.on('message', (m) => {
     const asThread = (src) => anchored(src, 'if (parentPort && require.main === module) {', 'if (parentPort) {', 'the copy is the thread\'s own script');
     const plantFail = (src) => anchored(src, '      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);', "      if (FS.existsSync(m.file + '.fail')) { FS.unlinkSync(m.file + '.fail'); throw Object.assign(new Error('a planted failure after the create'), { code: 'EIO' }); }\n      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);", 'an append that fails after its create');
     const ANSWER = M12.write('src/store-writer-worker.js', plantFail(asThread(srcK0)), 'answer');
-    const ANSWER_RED = M12.write('src/store-writer-worker.js', anchored(plantFail(asThread(srcK0)), '  const ownNow = (m, own) => own || (m.ownOnly && m.file ? OWN.get(m.file) || null : null);', '  const ownNow = (m, own) => own || null;', 'an answer that carries only a job\'s own result'), 'answer-red');
+    const ANSWER_RED = M12.write('src/store-writer-worker.js', anchored(plantFail(asThread(srcK0)), '  const ownNow = (m, own, was) => own || (m.ownOnly && m.file && OWN.get(m.file) !== was ? OWN.get(m.file) || null : null);', '  const ownNow = (m, own, was) => own || null;', 'an answer that carries only a job\'s own result'), 'answer-red');
     const ownAnswer = async (workerPath, tag) => {
       const dir = path.join(T12, `p-answer-${tag}`); fs.mkdirSync(dir); const f = path.join(dir, 'acts.ndjson'), said = [];
       const w = SW.create({ log: { warn: (l) => said.push(String(l)), log: () => { }, error: () => { } }, workerPath });
@@ -475,6 +475,54 @@ parentPort.on('message', (m) => {
     ok(p0.refused && p0.disk === 'line 1\n', `⑫ (p1) RED (a settle that reads no numbers from the cells): the compaction refused its store's own file (${JSON.stringify(p0.disk)})`, p0);
     ok(q1.first === false && q1.made && q1.disk === 'compacted\n' && !q1.refused, `⑫ (p2) an own-only store's FIRST append made the file and then failed: the answer carried the numbers — the compaction on the other thread landed (${JSON.stringify(q1.disk)})`, q1);
     ok(q0.refused && q0.disk === '', `⑫ (p2) RED (an answer that carries only a job's own result): the compaction refused the file its own failed append made (${JSON.stringify(q0.disk)})`, q0);
+    // (p3) r2593 (1): A STALE MAP ENTRY IS NEVER HANDED BACK — the append thread made X, a compaction on the whole-write thread
+    // renamed Y over it, an append on the append thread fails at its open (before its own numbers): the append retried THERE
+    // lands over Y. RED: the thread hands back its map entry whatever the job's end — the old pair X over the store's Y, the
+    // retried append refused as a file that appeared, for good
+    const plantOpen = (src) => anchored(src, '    try { fd = openA(); } catch (e) {', "    if (FS.existsSync(m.file + '.failopen')) { FS.unlinkSync(m.file + '.failopen'); throw Object.assign(new Error('a planted open failure'), { code: 'EMFILE' }); }\n    try { fd = openA(); } catch (e) {", 'an append that fails at its open');
+    const STALE = M12.write('src/store-writer-worker.js', plantOpen(asThread(srcK0)), 'stale');
+    const STALE_RED = M12.write('src/store-writer-worker.js', anchored(plantOpen(asThread(srcK0)), '  const ownNow = (m, own, was) => own || (m.ownOnly && m.file && OWN.get(m.file) !== was ? OWN.get(m.file) || null : null);', '  const ownNow = (m, own) => own || (m.ownOnly && m.file ? OWN.get(m.file) || null : null);', 'the map entry handed back whatever the job\'s end'), 'stale-red');
+    const staleScene = async (workerPath, tag) => {
+      const dir = path.join(T12, `p-stale-${tag}`); fs.mkdirSync(dir); const f = path.join(dir, 'acts.ndjson'), said = [];
+      const w = SW.create({ log: { warn: (l) => said.push(String(l)), log: () => { }, error: () => { } }, workerPath });
+      try {
+        let phase = 0;
+        const produce = () => (phase === 1 ? 'compacted\n' : { append: phase === 0 ? 'line 1\n' : 'line 2\n' });
+        const step = () => { w.dirty(f, { name: 'acts.write', produce, debounceMs: 0, ownOnly: true, urgent: true }); return w.durable(f, { timeoutMs: 8000 }); };
+        const made = await step();                     // the append thread makes X
+        phase = 1; const compacted = await step();     // the whole-write thread renames Y over it
+        phase = 2; fs.writeFileSync(f + '.failopen', '1');
+        const failed = await step();                   // the append thread fails at its open: false, its answer read
+        const b = w.flushSync([f]);                    // the append retried on the append thread, before the writer's backoff
+        return { made, compacted, failed, b: b.written.length, disk: fs.readFileSync(f, 'utf8'), refused: said.some((l) => /appeared since/.test(l)) };
+      } finally { try { w.stop(); } catch { } }
+    };
+    // (p4) r2593 (2): THE MAIN-THREAD ROAD ON A FAILURE — the append lane past its restarts (main-only): a FIRST own-only append
+    // that made the file there and then failed hands its numbers to the store's cell off its error, and the owed compaction on
+    // the whole-write thread lands. RED: writeHere's catch records no numbers — the compaction refused for good
+    const mainScene = async (SWx, tag) => {
+      const dir = scene(`p-main-${tag}`, { die: 'append' }), f = path.join(dir, 'acts.ndjson'), said = [], told = [];
+      fs.writeFileSync(path.join(dir, 'die'), '1');   // the append thread exits at its first append: past restartsMax 0, appends go to the main thread
+      fs.writeFileSync(f + '.mfail', '1');            // the main thread's write of it then fails after its create
+      const mfs = { ...fs, writeSync: (fd, ...a) => { if (fs.existsSync(f + '.mfail')) { fs.unlinkSync(f + '.mfail'); throw Object.assign(new Error('a planted failure after the create (the main thread)'), { code: 'EIO' }); } return fs.writeSync(fd, ...a); } };
+      const w = SWx.create({ log: { warn: (l) => said.push(String(l)), log: () => { }, error: () => { } }, workerPath: STAND, restartsMax: 0, fs: mfs });
+      try {
+        let whole = false;
+        const produce = () => (whole ? 'compacted\n' : { append: 'line 1\n' });
+        w.dirty(f, { name: 'acts.write', produce, debounceMs: 0, ownOnly: true, urgent: true, onWritten: (okW, e) => told.push(`${okW}${e && e.code ? ' ' + e.code : ''}`) });
+        await until(() => told.some((x) => /EIO/.test(x)), 'the main thread\'s append failed after its create');
+        const mode = w.modes().append, made = fs.existsSync(f);
+        whole = true;
+        const b = w.flushSync([f]);   // the owed compaction, on the whole-write lane's own thread
+        return { mode, made, told: told.join(','), b: b.written.length, disk: fs.readFileSync(f, 'utf8'), refused: said.some((l) => /appeared since/.test(l)) };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const NO_MAIN_OWN = M12.load('src/store-writer.js', anchored(srcW, '    } catch (e) { if (e && e.own) s.own = e.own; if (!p.append)', '    } catch (e) { if (!p.append)', 'writeHere\'s catch that records no numbers'), 'no-main-own');
+    const [staleOk, staleRed, mainOk, mainRed] = await Promise.all([staleScene(STALE, 'stale'), staleScene(STALE_RED, 'stale-red'), mainScene(SW, 'main'), mainScene(NO_MAIN_OWN, 'main-red')]);
+    ok(staleOk.made && staleOk.compacted && staleOk.failed === false && staleOk.disk === 'compacted\nline 2\n' && !staleOk.refused, `⑫ (p3) a compaction on the whole-write thread, an append failing at its open on the append thread: the append retried THERE lands (${JSON.stringify(staleOk.disk)}) — no stale pair handed back`, staleOk);
+    ok(staleRed.refused && staleRed.disk === 'compacted\n', `⑫ (p3) RED (the map entry handed back whatever the job's end): the retried append refused its store's own file for good (${JSON.stringify(staleRed.disk)})`, staleRed);
+    ok(mainOk.mode === 'main' && mainOk.made && /EIO/.test(mainOk.told) && mainOk.disk === 'compacted\n' && !mainOk.refused, `⑫ (p4) a FIRST own-only append on the main-only append lane made the file and failed: its numbers reached the store's cell — the compaction on the other lane's thread landed (${JSON.stringify(mainOk.disk)}, the append lane ${mainOk.mode})`, mainOk);
+    ok(mainRed.refused && mainRed.disk === '', `⑫ (p4) RED (writeHere's catch records no numbers): the compaction refused the file the failed main-thread append made (${JSON.stringify(mainRed.disk)})`, mainRed);
   } finally { fs.rmSync(T12, { recursive: true, force: true }); }
 })();
 

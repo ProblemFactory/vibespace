@@ -184,13 +184,13 @@ console.log('⑧ round 4 — true words 5: «not landed since» only while it ha
   fs.writeFileSync(STAND, `'use strict';
 const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'); const P = require('path');
 const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
-const S = new Int32Array(workerData.sab), OWNS = new Map();   // OWNS: this thread's record of the files its own-only stores made
+const S = new Int32Array(workerData.sab);
 parentPort.on('message', (m) => {
   if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
   Atomics.store(S, 0, m.id); let err = null, own = null; const was = m.ev === 'write' && fs.existsSync(m.file);
   if (m.ev === 'write' && /index\\.json$/.test(m.file) && fs.existsSync(P.join(P.dirname(m.file), 'blockix'))) err = { code: 'EIO', message: 'the index is unwritable in this scene' };
   else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else { try { own = (writeJob(m, fs) || {}).own || null; } catch (e) { err = { code: e.code || null, message: e.message }; } }
-  if (m.ev === 'write' && m.ownOnly) { if (own) OWNS.set(m.file, own); else if (!was) { try { const st = fs.statSync(m.file, { bigint: true }); OWNS.set(m.file, { dev: st.dev, ino: st.ino }); } catch { } } own = own || OWNS.get(m.file) || null; }   // the thread's own record whatever the job's end, as the real thread answers (a first append that made the file, then failed)
+  if (m.ev === 'write' && m.ownOnly && !own && !was) { try { const st = fs.statSync(m.file, { bigint: true }); own = { dev: st.dev, ino: st.ino }; } catch { } }   // as the real thread answers: a job's own result, else the numbers of a file THIS job made and then failed on (never an older job's: r2593 (1)); these stand-ins write no cell numbers, so the cells' road is proven only in test-store-writer-lanes ⑫ (p1)
   Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
   parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms: 0, err, file: m.file, own });   // own: as the real thread's answer (B-f276 1c: the store's other lane knows the file it made)
 });
