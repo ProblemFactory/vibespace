@@ -1000,6 +1000,10 @@ async function approvedService(W, name) {   // a service the owner approved, run
   const up = await W.untilMs(() => W.got().length >= 1 && job.state === 'up', 4000);
   return { job, a, ok: !!(y.ok && up.ok) };
 }
+// B-7e49 (the fast tier's time): a take-back's stop is waited for while its INTENT says one comes (desiredUp false), bounded as
+// before; a copy that never stops its job (the controls) ends the wait at once — it waited out the program's own exit (~3 s), a
+// time its verdict (desiredUp: the stop's intent, no clock) never read
+const stopLanded = (W, job) => W.untilMs(() => (job.state !== 'up' && job.state !== 'starting') || job.desiredUp !== false, 3000);
 async function legRevoke(doorSrc = null) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world('revk', { doorSrc });
@@ -1007,7 +1011,7 @@ async function legRevoke(doorSrc = null) {
   const { job, a, ok: up } = await approvedService(W, 'revk');
   const t0 = W.told.length;
   const rv = W.door.revoke(a.entry, job.id, { by: 'user' });
-  await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
+  await stopLanded(W, job);
   rows.desired = job.desiredUp;   // the control's signal: the stop's own intent (no clock — the program also exits by itself after ~3 s)
   const notes = W.told.slice(t0).filter((x) => /took back its vault entry/.test(x.text));
   row(up && rv.ok && rv.outcome === 'revoked' && rv.stopped === true && W.grants.rowsFor('vault-job', a.entry).length === 0 && job.desiredUp === false && !['up', 'starting'].includes(job.state),
@@ -1034,7 +1038,7 @@ async function legEntryGone(doorSrc = null) {
   const d = W.door.dropRow(a.entry, { by: 'user' });
   W.vault.secretDrop('agent:conv-a/tok');
   const n = W.door.entryGone(a.entry, { label: 'tok' });
-  await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
+  await stopLanded(W, job);
   rows.desired = job.desiredUp;
   await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
   row(up && c2 === 1 && d.ok && JSON.stringify(d.jobs) === JSON.stringify([job.id]) && W.grants.rowsFor('vault-job', a.entry).length === 0 && n === 2 && job.desiredUp === false && !['up', 'starting'].includes(job.state) && j2.state === 'failed' && cards(W).filter((i) => i.action.jobId === j2.id).length === 0,
@@ -1146,7 +1150,7 @@ async function legPasteDelete(pasteSrc = null) {
   W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
   const up = await W.untilMs(() => W.got().length >= 1 && job.state === 'up', 4000);
   const del = paste.dropEntry(String(add.entry || '').replace(/^secret:/, ''), { by: 'user' });
-  await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
+  await stopLanded(W, job);
   rows.desired = job.desiredUp; rows.acted = !!(add.ok && up.ok && del.ok);   // a control reads its intent only over a delete that HAPPENED on a running job
   row(add.ok && up.ok && (W.got()[0] || {}).v === S && del.ok && W.grants.rowsFor('vault-job', a.entry).length === 0 && job.desiredUp === false && !['up', 'starting'].includes(job.state) && W.told.some((x) => /deleted its vault entry «Bot token»/.test(x.text)),
     'THE REAL ROAD: a key the owner stored, a job approved on it and running — the Vault window\'s 删除 (vault-paste-door dropEntry) removes its approval row and STOPS the job, its owner told («Bot token» deleted)', { add: add.ok, up: up.ok, del, state: job.state });
@@ -1164,7 +1168,7 @@ async function legAgentDelete(pasteSrc = null) {
   const paste = pasteOf(pasteSrc).create({ vault: W.vault, userTodos: W.todos, vaultJob: W.door, log: () => { } });
   const t0 = W.told.length;
   const del = paste.dropAgentEntry('agent:conv-a/tok', { by: 'user', who: 'the test' });
-  const stopped = await W.untilMs(() => job.state !== 'up' && job.state !== 'starting', 3000);
+  const stopped = await stopLanded(W, job);
   rows.desired = job.desiredUp; rows.acted = !!(up && del.ok);   // a control reads its intent only over a delete that HAPPENED on a running job
   if (pasteSrc) { W.release(); W.end(); return rows; }
   row(up && del.ok && W.grants.rowsFor('vault-job', a.entry).length === 0 && stopped.ok && job.desiredUp === false && !['up', 'starting'].includes(job.state) && W.told.slice(t0).filter((x) => /deleted its vault entry «/.test(x.text)).length === 1,
