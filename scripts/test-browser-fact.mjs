@@ -800,5 +800,55 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
   await new Promise((r) => chrome9.close(() => r()));
 }
 
+// ═══ ⑩ B-9584 (B), 主开发 r2497 (1): THE PLACE LAW's WIRING — the mediator's OWN grant carries the keeper's place reader to its judge on
+//     BOTH roads (the mediated and the scoped): an agent's clear of a tab's position and the location permission in a context of its own,
+//     sent over the grant's socket, are refused BY NAME and never reach the browser. Its RED: the reader taken out of the judge call. A pin
+//     on the keeper's three grants that hand the reader.
+console.log('— ⑩ B-9584 (B) r2497: the place reader rides the mediator\'s grant to its judge, both roads; the keeper hands it at its three grants');
+{
+  const MEDp = require('../src/server/cdp-mediator.js');
+  const MUTP = mutantCopies('browser-fact-place', REPO);
+  const medSrc = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
+  const judgeA = "      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg, g.scope, { place: g.place || null }) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: conn.browser, place: g.place || null });";
+  const ROADS = [M.MEDIATED_MODE, M.SCOPE_MODE];
+  const wire = async (MEDmod) => {
+    const upPort = await freePort();
+    const up = new WebSocketServer({ port: upPort, host: '127.0.0.1' }); await new Promise((r) => up.on('listening', r));
+    const upSaw = [];
+    up.on('connection', (ws) => ws.on('message', (d) => { const m = JSON.parse(d); upSaw.push(m.method); ws.send(JSON.stringify({ id: m.id, result: m.method === 'Target.createBrowserContext' ? { browserContextId: 'CTX-P' } : {} })); }));
+    const med = MEDmod.create({ log: { log() { }, warn() { } } }); await med.listen();
+    const out = {};
+    try {
+      for (const mode of ROADS) {
+        const g = await med.grantFor({ profileId: WORK, browserKey: `${KEY}-${mode}`, upstream: `ws://127.0.0.1:${upPort}/devtools/browser/fake`, targetIds: ['T1'], paused: () => false, place: () => 'place', mode });
+        const cdp = new WebSocket(g.url); await new Promise((r, e) => { cdp.on('open', r); cdp.on('error', e); });
+        const rep = []; cdp.on('message', (d) => rep.push(JSON.parse(d)));
+        cdp.send(JSON.stringify({ id: 1, method: 'Target.createBrowserContext', params: {} }));   // a context of the agent's own (its lease made it)
+        await until(() => rep.some((r) => r.id === 1), 3000);
+        cdp.send(JSON.stringify({ id: 2, method: 'Emulation.clearGeolocationOverride', params: {} }));
+        cdp.send(JSON.stringify({ id: 3, method: 'Browser.setPermission', params: { browserContextId: 'CTX-P', permission: { name: 'geolocation' }, setting: 'granted', origin: 'https://a.example' } }));
+        cdp.send(JSON.stringify({ id: 4, method: 'Browser.grantPermissions', params: { browserContextId: 'CTX-P', permissions: ['geolocation'] } }));
+        await until(() => [2, 3, 4].every((i) => rep.some((r) => r.id === i)), 3000);
+        out[mode] = [2, 3, 4].map((i) => { const r = rep.find((x) => x.id === i); return r ? (M.refusalCodeOf(r) || 'answered') : 'none'; });
+        try { cdp.close(); } catch { }
+      }
+    } finally { try { med.shutdown(); } catch { } up.close(); }
+    out.upSawGeo = upSaw.filter((m) => /Geolocation|Permission/.test(m));
+    return out;
+  };
+  const okWire = (o) => ROADS.every((m) => JSON.stringify(o[m]) === JSON.stringify(['place_held', 'place_held', 'place_held'])) && o.upSawGeo.length === 0;
+  const w0 = await wire(MEDp);
+  ok(okWire(w0), `⑩ r2497 (1) the mediator's own grant with the keeper's place reader: an agent's clear of a tab's position, the location permission set and granted in a context of its own — REFUSED by name (place_held) on the mediated road AND the scoped one, none reaching the browser ${JSON.stringify(w0)}`, JSON.stringify(w0));
+  ok(medSrc.split(judgeA).length === 2, '⑩ control setup: the judge call that hands the reader is spelled once in src/server/cdp-mediator.js');
+  const mutM = MUTP.load('src/server/cdp-mediator.js', editAnchor(medSrc, judgeA, "      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg, g.scope) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: conn.browser });", 'src/server/cdp-mediator.js'), 'no-place-reader');
+  const w1 = await wire(mutM);
+  ok(!okWire(w1), `⑩ RED — the reader taken out of the judge call: the clear and the permission are ADMITTED on both roads (an agent clears a listed site's position) ${JSON.stringify(w1)}`, JSON.stringify(w1));
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const grants = ksrc.split('await mediator.grantFor({').length - 1, withPlace = ksrc.split(', place: () => placeKindFor(p.id) });').length - 1;
+  ok(grants === 3 && withPlace === 3 && /function placeKindFor\(pid\) \{ try \{ const p = profile\(String\(pid \|\| ''\)\); if \(!p\) return null; const g = ENV\.resolveEnvironment\(p\.environment, ENV\.keptExitOf\(p\)\)\.geolocation; return g \? g\.kind : null;/.test(ksrc),
+    `⑩ r2497 (1) PIN: the keeper's ${grants} grants each hand the place reader (${withPlace} of them), and the reader is the profile's own location kind`, { grants, withPlace });
+  for (const c of copiesCensus(MUTP.files, MUTP.dir, REPO, { label: '⑩ controls: ' })) ok(c.pass, c.name, c.detail);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

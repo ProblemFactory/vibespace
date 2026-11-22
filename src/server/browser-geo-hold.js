@@ -113,6 +113,8 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
    *  allow given in its own bar included, while the hold lives), then each LISTED site «granted» (an exact origin; the tabs it can
    *  read from already hold the place). Never for a context that kept a tab the hold could neither place nor close. */
   function grantCtx(h, ctx, deadline = now() + grantMs) {
+    if (!ctx) return Promise.resolve(false);   // r2497 (3): a target that names NO browser context is never granted — a grant with no id is the
+                                               // DEFAULT context's, whatever else it holds (the browser names that context by its id; its listed sites read «denied»)
     if (h.dirty.has(ctx)) return Promise.resolve(false);
     if (h.granting.has(ctx)) return h.granting.get(ctx);   // r2311: ONE job a context — a second tab waits for the first one's grants
     const job = grantJob(h, ctx, deadline);
@@ -143,14 +145,16 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
     if (!job) return;
     await job;
     const at = ctx ? { browserContextId: ctx } : {};
-    let back = 0;
-    for (const origin of h.plan.sites) { const r = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin, ...at }); if (fine(r)) back++; }
+    const by = now() + grantMs;   // r2497 (4): every take-back SENT at once, all under the grant phase's one deadline — never one bound each, none skipped
+    const takeBack = (origin) => call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin, ...at }, null, Math.max(1, Math.min(boundMs, by - now())));
+    const back = (await Promise.all(h.plan.sites.map(takeBack))).filter(fine).length;
     say(`${h.profileId}: a browser context holds a tab without its place — its listed sites set back to «denied» (${back} of ${h.plan.sites.length})`);
   }
   /** THE ARM's GRANTS (r1898 (7)): every context seen, until none is left without its grants — a context first seen while they
    *  were being given is granted too (r2311), all within the phase's own bound. */
   async function grantAll(h, deadline) {
-    for (let todo = [...h.ctxs].filter((c) => !h.granting.has(c) && !h.dirty.has(c)); todo.length; todo = [...h.ctxs].filter((c) => !h.granting.has(c) && !h.dirty.has(c))) {
+    const left = () => [...h.ctxs].filter((c) => c && !h.granting.has(c) && !h.dirty.has(c));   // (r2497 (3): never the empty name)
+    for (let todo = left(); todo.length; todo = left()) {
       for (const c of todo) await grantCtx(h, c, deadline);
     }
   }
