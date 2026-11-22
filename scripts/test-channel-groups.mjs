@@ -558,8 +558,8 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
       return { code, done };
     };
     const m3 = await m3Run(createChannelStore, 'head');
-    ok(m3.code === 'store-appeared' && m3.done === false, 'r1 M3: the index held (a journal not its own) — a durable ask of the dirty index answers FALSE by name, never «done» for a change nothing will write', JSON.stringify(m3));
-    const m3x = await m3Run(MC.load('src/channel-store.js', anchored(SSRC, "      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST' });\n", '', 'the held index answers null'), 'r1c-m3').createChannelStore, 'cut');
+    ok(m3.code === 'store-appeared' && m3.done === false, 'r1 M3: the index held (a journal not its own) — a durable ask of the index answers FALSE by its hold (a paced change rides the journal now: the index need not be dirty), never «done» for a change nothing will write', JSON.stringify(m3));
+    const m3x = await m3Run(MC.load('src/channel-store.js', anchored(anchored(SSRC, "      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index.json held: ' + ixLoad.blocked), { code: 'EEXIST' });\n", '', 'the held index answers null'), "      if (ixLoad.q && ixLoad.q.kind === 'appeared') return Promise.resolve(false);\n", '', 'the held durable ask answers as if nothing were owed'), 'r1c-m3').createChannelStore, 'cut');
     ok(m3x.done === true, 'r1 M3 CONTROL (a held index answers «nothing to write», the 1c tip before its read): the durable ask is told DONE — red', JSON.stringify(m3x));
     // ── 主开发 r1143 (2), AS IF A MUST: a COMPANION read that FAILS (not «not there») holds its family — never «no text»
     const companionRun = async (mk, tag) => {
@@ -637,6 +637,45 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     ok(sf.failed === 1 && sf.json && sf.kept, 'B-f276 1c follow (r1588 (6)): THE STAMPS FOLD\'S GUARD — a journal that appeared before the side file landed is never truncated by the fold (this life never read nor opened it)', JSON.stringify(sf));
     const sfx = await stampsLateRun(MC.load('src/channel-store.js', anchored(SSRC, "    if (journalFd === null && psLoad.readMissing && !journalWas) return;", "    if (false) return;", 'no fold guard'), 'f-foldguard').createChannelStore, 'foldcut', true);
     ok(sfx.json && !sfx.kept, 'B-f276 1c follow (r1588 (6)) CONTROL (no fold guard): the fold truncates by name the journal that came — red', JSON.stringify(sfx));
+    // B-f276 1c MOVED (the meeting with B-360d unit 1, 主开发 r1568 (1a / 2a) / r1864): EVERY index change rides the journal now — a journal
+    // that is not this store's own (a late mount, after the first act made its own) meets the next DURABLE act: refused BY NAME
+    // (store-appeared), never appended to — the journal kept byte for byte, the index held «appeared»
+    const FOREIGN = '{"seq":9001,"rows":{"fake/m":{"key":"fake/m","id":"m","adapterId":"fake"}}}\n';
+    const journalAppearRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-jappear-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s19 = mk({ dir: d, log: qlog });
+      let first = 'ok', second = 'ok';
+      try { await s19.index.update(() => { s19.index.entry('fake', 'j1').title = 'one'; }, { durable: true }); } catch (e) { first = (e && e.code) || 'threw'; }
+      const jf = path.join(d, 'index-acts.ndjson'), made = fs.existsSync(jf);
+      fs.writeFileSync(jf + '.other', FOREIGN); fs.renameSync(jf + '.other', jf);   // a journal of another's takes the name
+      try { await s19.index.update(() => { s19.index.entry('fake', 'j2').title = 'two'; }, { durable: true }); } catch (e) { second = (e && e.code) || 'threw'; }
+      const q = (s19.quarantined || []).find((x) => x.file === 'index.json' && x.kind === 'appeared') || {};
+      try { s19.close(); } catch { }
+      return { first, made, second, kind: q.kind || null, kept: fs.readFileSync(jf, 'utf8') === FOREIGN };
+    };
+    const ja = await journalAppearRun(createChannelStore, 'head');
+    ok(ja.first === 'ok' && ja.second === 'store-appeared' && ja.kind === 'appeared' && ja.kept, 'B-f276 1c moved (the meeting, r1568 (1a / 2a)): after the first act (index.json made whole), a journal not its own that takes the name meets the next durable act — a journal LINE now — refused BY NAME (store-appeared), the index held «appeared», the journal kept byte for byte', JSON.stringify(ja));
+    const jax = await journalAppearRun(MC.load('src/channel-store.js', anchored(SSRC, 'mode: 0o600, rank: durable ? 0 : 1, allowEmpty: true, ...actsOwn() });', 'mode: 0o600, rank: durable ? 0 : 1, allowEmpty: true, onWritten: actsWritten });', 'the act\'s journal line by name only'), 'f-jappear').createChannelStore, 'cut');   // stale-pins: kept (the control restores the train\'s line)
+    ok(!jax.kept && jax.second !== 'store-appeared', 'B-f276 1c moved (r1568 (1a)) CONTROL (the act\'s line appended by name, the train before this move): the second act is appended to the journal that came — red', JSON.stringify(jax));
+    // r1568 (5b): a JOURNAL-ONLY family at open (a life that journaled and was killed before any fold: no index.json) is a store WITH
+    // data: its lines replayed, its journal read at the start (its appends the store's own, never refused), the fold the exclusive
+    // create of index.json
+    const journalOnlyRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-jonly-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
+      const s20 = mk({ dir: d, log: qlog });
+      const had = s20.index.has('fake/old');
+      let act = 'ok'; try { await s20.index.update(() => { s20.index.entry('fake', 'n1').title = 'new'; }, { durable: true }); await s20.index.update(() => { s20.index.entry('fake', 'n1').title = 'newer'; }, { durable: true }); } catch (e) { act = (e && e.code) || 'threw'; }   // the first act makes index.json whole, the second is a journal LINE appended to the journal read at the start
+      let fold = 'ok'; try { fold = (await s20.index.fold()) ? 'ok' : 'false'; } catch (e) { fold = (e && e.code) || 'threw'; }
+      const appeared = (s20.quarantined || []).some((x) => x.kind === 'appeared');
+      try { s20.close(); } catch { }
+      const ixf = path.join(d, 'index.json'), ixText = fs.existsSync(ixf) ? fs.readFileSync(ixf, 'utf8') : '';
+      return { had, act, fold, appeared, index: /fake\/old/.test(ixText) && /fake\/n1/.test(ixText) };
+    };
+    const jo = await journalOnlyRun(createChannelStore, 'head');
+    ok(jo.had && jo.act === 'ok' && jo.fold === 'ok' && !jo.appeared && jo.index, 'B-f276 1c moved (the meeting, r1568 (5b)): a JOURNAL-ONLY family at open — its lines replayed, an act appended to the journal it read, the fold creates index.json holding both rows; nothing held', JSON.stringify(jo));
+    const jox = await journalOnlyRun(MC.load('src/channel-store.js', anchored(SSRC, 'const actsOwn = () => ({ ownOnly: !!ixLoad.readMissing && !actsAtStart, onWritten: actsWritten });', 'const actsOwn = () => ({ ownOnly: !!ixLoad.readMissing, onWritten: actsWritten });', 'the journal read at the start taken for another\'s'), 'f-jonly').createChannelStore, 'cut');
+    ok(jox.act !== 'ok' && jox.appeared, 'B-f276 1c moved (r1568 (5b)) CONTROL (the journal read at the start held to the own-only law): the act is refused as «appeared» over the store\'s own data — red', JSON.stringify(jox));
     // (6b): a family STARTED EMPTY by the damaged door is own-only again — after its first write lands, a file that is not its own
     // takes the name: the next write is refused by name, the file kept
     const doorOwnRun = async (mk, tag) => {
@@ -657,7 +696,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     };
     const dn = await doorOwnRun(createChannelStore, 'head');
     ok(dn.door === 'pass' && dn.first && dn.kind === 'appeared' && dn.kept, 'B-f276 1c follow (r1588 (6)): a family STARTED EMPTY by the damaged door is own-only again — its first write lands, a file not its own that takes the name is never written over (held «appeared», kept)', JSON.stringify(dn));
-    const dnx = await doorOwnRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, 'fam.missing = true; fam.readMissing = true; fam.appearing = null;', 'fam.missing = true; fam.appearing = null;', 'the door keeps readMissing as read (1)'), '      fam.readMissing = true; if (fam === psLoad) journalWas = false;', '      if (fam === psLoad) journalWas = false;', 'the door keeps readMissing as read (2)'), 'f-doorown').createChannelStore, 'cut');
+    const dnx = await doorOwnRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, 'fam.missing = true; fam.readMissing = true; fam.appearing = null;', 'fam.missing = true; fam.appearing = null;', 'the door keeps readMissing as read (1)'), '      fam.readMissing = true; if (fam === psLoad) journalWas = false;', '      if (fam === psLoad) journalWas = false;', 'the door keeps readMissing as read (2)'), 'f-doorown').createChannelStore, 'cut');   // stale-pins: kept (the control restores the door's text before 1c)
     ok(dnx.first && !dnx.kept, 'B-f276 1c follow (r1588 (6)) CONTROL (the door leaves the family «read»): the second write renames over the index that came — red', JSON.stringify(dnx));
     // S2 + S3: the writer's thread — a temp left as a second name is never opened again; our own link answered EEXIST is our link landed
     const WSRC = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf-8');
@@ -712,7 +751,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
       try { fs.unlinkSync(t); } catch { }
       return { code, whole: fs.readFileSync(f, 'utf8') === '{"v":1,"a":"whole"}' };
     };
-    const fresh = (tag) => MC.load('src/store-writer-worker.js', anchored(WSRC, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere };   // a fresh life of the thread (${tag})`, `fresh life ${tag}`), `life-${tag}`);   // a module of its own: its first sweep of the file
+    const fresh = (tag) => MC.load('src/store-writer-worker.js', anchored(WSRC, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };   // a fresh life of the thread (${tag})`, `fresh life ${tag}`), `life-${tag}`);   // a module of its own: its first sweep of the file
     const sw = sweepRun(fresh('head'), 'head');
     ok(sw.code === 'EIO' && sw.whole, 'lens 3: a temp of THIS road left by an earlier life of the thread (a second name of the store) is removed at the first sweep — a write that then fails part-way leaves the store whole', JSON.stringify(sw));
     const swx = sweepRun(MC.load('src/store-writer-worker.js', anchored(WSRC, ' || path.join(dir, n) === ownTmp)) {', ')) {', 'no own-temp sweep'), 'lens3-sweep'), 'cut');
@@ -735,7 +774,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     ok(!ufx.whole, 'B-f276 1c follow (lens 3) CONTROL (the failed unlink marks nothing): the open truncates the store through its second name — red', JSON.stringify(ufx));
     // (3) THE OWN NUMBERS (主开发 r1588 (3)): the store's own cell (m.own) first, the thread's map second — two lives of the thread
     // (one started again between two writes of the other) rewrite the store's own file 24 times: never refused
-    const lifeOf = (src, tag) => MC.load('src/store-writer-worker.js', anchored(src, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere };   // a life of the thread (${tag})`, `life ${tag}`), `life-${tag}`);
+    const lifeOf = (src, tag) => MC.load('src/store-writer-worker.js', anchored(src, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };   // a life of the thread (${tag})`, `life ${tag}`), `life-${tag}`);
     const ownRun = (LA, LB, tag) => {
       const d = path.join(ROOT, `store-ownorder-${tag}`); fs.mkdirSync(d, { recursive: true });
       const f = path.join(d, 'z.json'), t = `${f}.tmp-${process.pid}-w`;
@@ -768,6 +807,22 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     };
     const gn = goneRun(fresh('gone'), 'head');
     ok(gn.own && gn.code === 'EEXIST' && !gn.made, 'B-f276 1c follow (judged): a journal gone since an own-only store made it — the next append refused as not its own, NOTHING made in its place', JSON.stringify(gn));
+    // B-f276 1c MOVED (the meeting with B-360d unit 1, 主开发 r1568 (4b)): append, the COMPACTION (a whole write over its own journal),
+    // append — the next line is checked against the compaction's own numbers, never refused as «not its own»
+    const compactLegRun = (WK, tag) => {
+      const d = path.join(ROOT, `store-owncompact-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'acts.ndjson'), t = `${f}.tmp-${process.pid}-w`;
+      let own = null; const out = [];
+      const step = (m) => { try { const r = WK.writeJob(m); if (r && r.own) own = r.own; out.push('ok'); } catch (e) { out.push((e && e.code) || 'threw'); } };
+      step({ file: f, append: true, parts: ['{"seq":1}\n'], ownOnly: true });
+      step({ file: f, tmp: t, parts: ['{"seq":1}\n{"seq":2}\n'], ownOnly: true, own });
+      step({ file: f, append: true, parts: ['{"seq":3}\n'], ownOnly: true, own });
+      return { out: out.join(), text: fs.readFileSync(f, 'utf8') };
+    };
+    const cmp = compactLegRun(fresh('compact'), 'head');
+    ok(cmp.out === 'ok,ok,ok' && cmp.text === '{"seq":1}\n{"seq":2}\n{"seq":3}\n', 'B-f276 1c moved (the meeting, r1568 (4b)): append, the compaction over its own journal, append — the last line checked against the compaction\'s own numbers lands', JSON.stringify(cmp));
+    const cmpx = compactLegRun(MC.load('src/store-writer-worker.js', anchored(WSRC, '  if (made) { res = { own: made }; OWN.set(m.file, made); }\n', '', 'the rename keeps the old numbers'), 'f-compact'), 'cut');   // stale-pins: kept (the control cuts its own unit\'s line)
+    ok(/,EEXIST$/.test(cmpx.out), 'B-f276 1c moved (r1568 (4b)) CONTROL (an own-only rename keeps the old numbers): the next line refuses the store\'s own journal — the family held for nothing — red', JSON.stringify(cmpx));
     const gnx = goneRun(MC.load('src/store-writer-worker.js', anchored(WSRC, "'ax' : FS.constants.O_WRONLY | FS.constants.O_APPEND) : 'a';", "'ax' : 'a') : 'a';", 'the later open creates'), 'f-gone'), 'cut');
     ok(gnx.made, 'B-f276 1c follow (judged) CONTROL (the later open creates, the 1c tip): an empty journal is made where none was — red', JSON.stringify(gnx));
     // lens 3: a PACED change (no durable door, a stamp or a row's bookkeeping) that meets an index that appeared — never written over it;

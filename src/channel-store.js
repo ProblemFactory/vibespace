@@ -916,7 +916,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function touchKey(key) {
     dirtyKeys.add(key);
     if (curTouch) { if (curTouch.before && !curTouch.before.has(key)) curTouch.before.set(key, hasOwn(ix.conversations, key) ? JSON.stringify(ix.conversations[key], INDEX_KEYS) : null); curTouch.add(key); }
-    else { fire(key); outsideTouched.add(key); if (!outsideArmed) { outsideArmed = true; Promise.resolve().then(() => { outsideArmed = false; const o = outsideTouched; outsideTouched = new Set(); if (closed || !o.size || ixLoad.blocked) return; try { const k = actOf(o, false); if (k === 'whole') oweWhole(); } catch (e) { warn('[channels] index-acts.ndjson: a touch outside an update was not journaled:', (e && e.message) || e); oweWhole(); } }); } }   // B-360d unit 1: a row touched outside an update rides the journal too
+    else { fire(key); outsideTouched.add(key); if (!outsideArmed) { outsideArmed = true; Promise.resolve().then(() => { outsideArmed = false; const o = outsideTouched; outsideTouched = new Set(); if (closed || !o.size) return; try { const k = actOf(o, false); if (k === 'whole') oweWhole(); } catch (e) { warn('[channels] index-acts.ndjson: a touch outside an update was not journaled:', (e && e.message) || e); oweWhole(); } }); } }   // B-360d unit 1: a row touched outside an update rides the journal too
   }
   // B-360d unit 1: a census's tap — fn(why) AT the whole touch, in the scope that made it (its stack names it; the hooks
   // above hear it after the update ended, its scope gone). Nothing is kept: no tap, no cost.
@@ -1021,7 +1021,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  says whether it landed (false: the write failed and stays owed — the caller keeps its cursor where it was). */
   function durableIndex() {
     if (closed) { try { flush(); return Promise.resolve(true); } catch { return Promise.resolve(false); } }
-    if (ixLoad.blocked) { if (dirty) markDirty(true); return W().durable(indexFile); }   // r1542's law: held — the train's road for a whole write (its produce refuses by name)
+    if (ixLoad.blocked) {   // r1542's law: held — the train's road for a whole write (its produce refuses by name)
+      // B-f276 1c moved (its read r1 M3, the meeting): a paced change rides the journal now, so a held index need not be dirty — an index held
+      // «appeared» answers FALSE by its hold (what this life changed since is never written), never «done» because nothing is pending
+      if (ixLoad.q && ixLoad.q.kind === 'appeared') return Promise.resolve(false);
+      if (dirty) markDirty(true); return W().durable(indexFile);
+    }
     // B-360d unit 1 (law 2): the index's state is on disk once ITS JOURNAL'S LINES are — a whole write only when the index
     // itself is owed (a whole-map change, a burst, the journal's bound)
     if (wholeOwed) { if (dirty) markDirty(true); return W().durable(indexFile); }   // S5: a whole / burst update's rows are in no journal line — its write (one in flight: that one — never a second)
@@ -1295,7 +1300,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       const fileN = viaIndex ? 'index.json' : 'index-acts.ndjson';
       // round 4 (true words 4): WHY, by the writer's own record — a write still QUEUED at durable()'s bound is waiting, never «failed»
       const wn = (() => { try { return W().whyNotDurable(viaIndex ? indexFile : actsFile); } catch { return null; } })();
-      if (wn && wn.code === 'EEXIST') throw Object.assign(appearedError(ixLoad), { applied: true });   // B-f276 1b (its read r1 S5): the index APPEARED — held for the life, never «written when the storage can»
+      if ((wn && wn.code === 'EEXIST') || (ixLoad.q && ixLoad.q.kind === 'appeared')) throw Object.assign(appearedError(ixLoad), { applied: true });   // B-f276 1c moved (the meeting, r1568 (2a)): the act's words by the HOLD, never «retried»   // B-f276 1b (its read r1 S5): the index APPEARED — held for the life, never «written when the storage can»
       const why = wn && wn.why === 'queued' ? `its write is still queued${wn.ahead > 0 ? ` behind at least ${wn.ahead} other write${wn.ahead === 1 ? '' : 's'}` : ''} — the storage is slow${wn.lastMs ? ` (its last write took ${(wn.lastMs / 1000).toFixed(1)} s)` : ''}; kept, written in its turn` : 'its write failed — kept, retried';
       if (!notDurableSaid[fileN]) { notDurableSaid[fileN] = 1; warn(`[channels] ${fileN}: an act is in memory but not on disk yet (${why}; the next acts not on disk the same way are counted, said when a write lands)`); }
       else notDurableSaid[fileN]++;
@@ -1365,11 +1370,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const notDurableSaid = {};   // file → acts that failed since the first was said (round 3, smaller 7)
   const sayLanded = (fileN) => { const n = notDurableSaid[fileN]; if (n > 1) warn(`[channels] ${fileN}: written again — ${n - 1} more act${n - 1 === 1 ? '' : 's'} had failed the same way meanwhile (each kept in memory, now on disk)`); delete notDurableSaid[fileN]; };
   function produceActs() {
-    if (ixLoad.blocked) {   // r1542's law: the journal stands behind the index's hold — and B-f276 1c (its read r1 M3, the meeting): an index held because a
-      // file of its came that is NOT its own answers BY NAME (EEXIST) — never null: a durable act waits on THIS file now, and null would tell it «done»
-      if (ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST' });
-      warn('[channels] index-acts.ndjson not written: ' + ixLoad.blocked); return null;
-    }
+    // B-f276 1c (its read r1 M3, the meeting): an index held because a file of its came that is NOT its own answers BY NAME (EEXIST) — never
+    // null: a durable act waits on THIS file now, and null would tell it «done»
+    if (ixLoad.blocked && ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST' });
+    if (ixLoad.blocked) { warn('[channels] index-acts.ndjson not written: ' + ixLoad.blocked); return null; }   // r1542's law: the journal stands behind the index's hold
     // law 10: NO JOURNAL JOB CARRIES MORE THAN THE BOUND — past it (the storage did not take the lines in time) the index's
     // whole write FOLDS them (its landing drops the lines it holds) and this file waits (LATER: its waiters wait — a job
     // must never be cut short, the writer answers every waiter of the version it wrote)
