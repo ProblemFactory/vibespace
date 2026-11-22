@@ -821,9 +821,9 @@ class CodexSessionMessages {
     // least), and that read is never final: it is read again once the index has MOVED (a walk ended since — rolloutIndexEpoch),
     // so it corrects itself with no press, and a caller asking in a loop meanwhile does no work and asks no walk
     if (this._all && (!this._partial || this._partialEpoch === rolloutIndexEpoch())) return;
-    const partial = { unknown: false };
-    const fpOf = (id) => { const got = codexRolloutLookup(id); if (!got.known) partial.unknown = true; return got.fp; };
-    const threadId = getCodexHistorySessionId(this._session);
+    const threadId0 = getCodexHistorySessionId(this._session), partial = { unknown: false, absent: false };
+    const fpOf = (id) => { const got = codexRolloutLookup(id); if (!got.known) partial.unknown = true; else if (id === threadId && !got.fp) partial.absent = true; return got.fp; };
+    const threadId = threadId0;
     // Fork ancestry first (oldest → newest; the wrapper chain whole, codex's
     // own 0.153 fork parents cut at their boundary ordinal), then the current
     // thread. NOTE: parseCodexSessionJsonl is tail-bounded (32MB) — a
@@ -843,11 +843,21 @@ class CodexSessionMessages {
     if (currentHistory.length) history = mergeCodexRecords(history, currentHistory);
     const live = parseBufferRecords(this._session?.buffer || '');
     this._all = mergeCodexRecords(history, live);
-    this._partial = partial.unknown; this._partialEpoch = rolloutIndexEpoch();
+    this._markRead(partial, threadId);
   }
 
-  /** B-a60e remainder: true while a rollout of this conversation was «not known yet» at its last read (nothing of it kept) */
-  get findUnknown() { return !!this._partial; }
+  /** B-a60e remainder, FOLDED INTO LINE 411's DOOR (主开发 r2439): a rollout «not known yet» at this read is one more CAUSE of
+   *  «not loaded» — line 411's `notLoaded`, with its own mark `notLoadedNotKnown` (the page's own words) and the waiting mark, so a
+   *  later read that loads it tells the page (`noteReadable` → `history-ready`, once). It is never a walk: the page's re-ask reads
+   *  the index's own answer (the walk out, or its result). `notFound`: the index answered «none» for this thread (a whole walk begun
+   *  after its miss): the page's FINAL word, and the re-ask stops. A read that knows every rollout again clears the cause it set. */
+  _markRead(partial, threadId) {
+    this._partial = !!partial.unknown; this._partialEpoch = rolloutIndexEpoch();
+    this.notFound = !partial.unknown && !!partial.absent;
+    if (partial.unknown) { if (!this.notLoaded) { this.notLoaded = NOT_LOADED; this._notLoadedByIndex = true; } this.notLoadedNotKnown = true; }
+    else if (this.notLoadedNotKnown) { this.notLoadedNotKnown = false; if (this._notLoadedByIndex) { this.notLoaded = null; this._notLoadedByIndex = false; } }
+    noteHistoryMark(this.notLoaded ? 'noteAwaiting' : 'noteReadable', threadId);   // any cause (line 411's own or this one) waits; none ⇒ readable
+  }
 
   /** The attach's records off the loop — kb-file-structure «src/codex-session-store.js» (lane resume-all-paced L2). */
   rawAsync({ bulk = false, wanted = null } = {}) {
@@ -867,9 +877,9 @@ class CodexSessionMessages {
       const threadId = getCodexHistorySessionId(this._session);
       // B-a60e remainder: every rollout of the read AWAITED in the rollout index first (one walk shared by every asker, off this
       // thread) — the files below are then the index's answers, and status, the view and the attach are exact from the first call
-      const partial = { unknown: false };
+      const partial = { unknown: false, absent: false };
       const ancestry = await resolveCodexForkAncestryAsync(threadId, this._session?.forkedFrom || [], { partial });
-      if (threadId) { const got = await codexRolloutLookupAsync(threadId); if (!got.known) partial.unknown = true; }
+      if (threadId) { const got = await codexRolloutLookupAsync(threadId); if (!got.known) partial.unknown = true; else if (!got.fp) partial.absent = true; }
       if (this._all && this._partial && partial.unknown && this._partialEpoch === rolloutIndexEpoch()) return this._all;   // nothing moved since the last «not known yet» read: the same answer, no second read
       // B-f3f9: THE WHOLE READ IN THE WORKER — every file of the ancestry and the thread's own read, parsed, cut, tagged and merged,
       // then the live buffer merged, in the transcript worker's history lane; only the FINAL records cross (in pages), each re-tagged
@@ -881,8 +891,7 @@ class CodexSessionMessages {
         if (got && Array.isArray(got.records)) {
           if (this._all && !this._partial) return this._all;   // the sync road filled it meanwhile
           for (let i = 0; i < got.records.length; i++) if (got.threads[i]) tagOne(got.records[i], got.threads[i]);
-          this._all = got.records; this._partial = partial.unknown; this._partialEpoch = rolloutIndexEpoch();
-          noteHistoryMark('noteReadable', threadId);   // r1461 (2): loaded — a window waiting on it is told
+          this._all = got.records; this._markRead(partial, threadId);   // r1461 (2): loaded — a window waiting on it is told (B-a60e, r2439: unless a rollout is «not known yet»: then it waits)
           return this._all;
         }
         // a file the worker failed on may have moved (compressed to .zst): looked up again (its kept path) — never one the memory calls
@@ -900,12 +909,12 @@ class CodexSessionMessages {
       const currentRead = threadId ? await parseCodexSessionJsonlAsync(threadId, { fp: fps.get(threadId) }) : [];
       said(currentRead);
       if (notLoaded) { this.notLoaded = notLoaded; this.notLoadedStorage = notLoadedStorage; this.notLoadedRetryAt = notLoadedRetryAt; this.notLoadedReaderGone = notLoadedReaderGone; this.notLoadedReaderCause = notLoadedReaderCause; }
-      noteHistoryMark(notLoaded ? 'noteAwaiting' : 'noteReadable', threadId);   // r1461 (2): the waiting mark by THIS conversation's id (the one its windows wait under) — a later read that loads it tells them   // row B-422c: the page says the history waits on the reader (the live buffer still shown) — which door, when again
+      if (notLoaded || partial.unknown) noteHistoryMark('noteAwaiting', threadId); else noteHistoryMark('noteReadable', threadId);   // r1461 (2): the waiting mark by THIS conversation's id (the one its windows wait under) — a later read that loads it tells them   // row B-422c: the page says the history waits on the reader (the live buffer still shown) — which door, when again
       const currentHistory = threadId ? tagRecordThread(currentRead, threadId) : [];
       if (currentHistory.length) history = await mergeCodexRecordsAsync(history, currentHistory);
       const live = parseBufferRecords(this._session?.buffer || '');
       const all = await mergeCodexRecordsAsync(history, live);
-      if (!this._all || this._partial) { this._all = all; this._partial = partial.unknown; this._partialEpoch = rolloutIndexEpoch(); }
+      if (!this._all || this._partial) { this._all = all; this._markRead(partial, threadId); }
       return this._all;
     }, { bulk });
     // A READ THAT MAY BE DROPPED IS NEVER THE READER'S SHARED MEMO (主开发 03:16Z, the follow-up's third item): a job carrying `wanted` can

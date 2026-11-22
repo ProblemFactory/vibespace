@@ -324,7 +324,7 @@ try {
     const tip = anchored(anchored(anchored(anchored(tsSrc10,
       'const reply = (out) => { if (!(r.gone && r.gone()) && !said(out)) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
       '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n', '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n    BULK.replied(session);\n', 'tip-view'),
-      '    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.findUnknown ? { findUnknown: true } : {}) };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.findUnknown ? { findUnknown: true } : {}) };', 'tip-status'),   // the status reply as B-a60e's cure has it (its «not known yet» flag)
+      '    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.notLoadedNotKnown ? { notLoaded: sm.notLoaded, notKnownYet: true } : {}) };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.notLoadedNotKnown ? { notLoaded: sm.notLoaded, notKnownYet: true } : {}) };', 'tip-status'),   // the status reply as B-a60e has it (its «not known yet», line 411's cause since r2439)
       '    const st = sm.taskState() || {};\n', '    const st = sm.taskState() || {};\n    BULK.replied(live);\n', 'tip-todos');
     const red = await table(require(M.write('src/transcript-service.js', tip, 'ts-tip-shape')));
     const redDev = red.out.filter((x) => x.source === 'device'), redLocal = red.out.filter((x) => x.source === 'local' && x.line);
@@ -430,7 +430,7 @@ try {
     const SENDS = [
       ['attachedFrameText(livePayload', 1, /ws\.send\(attachedFrameText\(livePayload, resume, \(\) => \(\{[\s\S]{0,600}?\}\)\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !livePayload\.historyNotLoaded\) BULK\.replied\(session\);/],   // a chat attach
       ["buffer: session.buffer || ''", 1, /buffer: session\.buffer \|\| '' \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN\) BULK\.replied\(session\);/],   // a terminal's attach
-      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true(?:, \.\.\.\(sm\.findUnknown \? \{ findUnknown: true \} : \{\}\))?(?:, historyNotLoaded: [^\n]*?)? \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !sm\.notLoaded\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId && \(s\.host \|\| null\) === \(data\.host \|\| null\)\) BULK\.replied\(s\);/],   // View History (row B-422c: its not-loaded info rides the same send; its own address, on its machine)
+      ["name: data.name || '', cwd: data.cwd || '', mode: 'chat'", 1, /viewOnly: true(?:, \.\.\.\(sm\.notFound \? \{ historyNotFound: true \} : \{\}\))?(?:, historyNotLoaded: [^\n]*?)? \}\)\);\s*\n\s*if \(ws\.readyState === WS_OPEN && !sm\.notLoaded\) for \(const \[, s\] of activeSessions\) if \(addressableId\(s\) === backendSessionId && \(s\.host \|\| null\) === \(data\.host \|\| null\)\) BULK\.replied\(s\);/],   // View History (row B-422c: its not-loaded info rides the same send; its own address, on its machine)
       ['sessionId: subId', 3, null],   // NOT A DOOR: a subagent's own transcript — a virtual session no create marks
     ];
     const sendsCensus = (t) => {

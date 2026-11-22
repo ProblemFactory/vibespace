@@ -22,7 +22,7 @@ const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
  *  rebuilt by innerHTML when its message re-renders) — so no node is kept and a redrawn row is the same row */
 const pressKeyOf = (row) => (!row ? null : row.dataset?.key ? 'k:' + row.dataset.key : 'm:' + (row.closest?.('[data-msg-id]')?.dataset?.msgId || '') + '|' + (row.textContent || ''));
 import { stampAt as when, num, span, stampSpan, clockOf, dateOf } from './page-time.js';
-import { reaskNext, retryAtOf } from './history-reask.js';
+import { reaskNext, retryAtOf, endsNotFound } from './history-reask.js';
 import { readerKindOf, readerAskWords, readerLineWords } from './reader-words.js'; // row B-422c (r3077): the reader's refusal in the words of the cause it has // row B-422c (r1461): the page's re-ask of a history «not loaded» — PURE // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
@@ -1430,7 +1430,7 @@ class ChatView {
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
         if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: a re-attach whose history waits on the reader
-        else this._historyLoadedNow();
+        else this._historyLoadedNow(msg);   // B-a60e (r2439 (2)): a rollout found absent ends in its final word
       } else if (msg.type === 'history-ready' && msg.sessionId === sessionId) {
         this._onHistoryReady();   // r1243 item 2: the server loaded it — ask again now (once: a re-ask on its way is that ask)
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
@@ -2990,12 +2990,11 @@ class ChatView {
     // row B-422c: a history the transcript reader refused (its kept copy, or nothing) is a FAILED fetch — the view that stands is never
     // replaced by a short one; the person is told «try again» (a toast, at most one each few seconds; the 2 s poll stays quiet)
     if (data && data.notLoaded) {
-      const info = { storageHung: !!data.storageHung, readerGone: !!data.readerGone, readerCause: data.readerCause || null, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null };
+      const info = { storageHung: !!data.storageHung, readerGone: !!data.readerGone, readerCause: data.readerCause || null, notKnownYet: !!data.notKnownYet, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null };
       if (!quietRefusal) this._sayReaderRestarting(info);
       throw Object.assign(new Error(this._readerAskWords(info)), { code: data.notLoaded });
     }
     if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
-    if (data && data.findUnknown) this._showHistoryStatus(t('Its saved history is not known yet — it is read again the next time this conversation opens.'), { kind: 'info' });   // B-a60e remainder (r1638): a read whose rollout is «not known yet» — said, never «the conversation begins here»
     return data;
   }
 
@@ -3752,6 +3751,7 @@ class ChatView {
    *  reader's listing promises no time: none said) */
   _readerAskWords(info, now = Date.now()) {
     const at = retryAtOf(info, now);
+    if (info && info.notKnownYet) return t('Its saved history is not known yet — it fills in here by itself.');   // B-a60e (r2439 (3)): its own cause, its own words (before the reader's table, r3077)
     return readerAskWords(info, readerKindOf(info) === 'gone' && !at ? null : this._clockOf(at));
   }
   /** the page's own clock (src/lib/page-time.js — the page's language and zone) */
@@ -3765,15 +3765,21 @@ class ChatView {
     if (!code) return;
     if (this._readOnly) this._listenHistoryReady();   // a view: the hub tells it too (its view waits on that history — r1461 (2))
     const at = this._reaskEvent({ type: 'not-loaded', code, info }).due;   // the time the page REALLY asks again (the back-off, an earlier ask kept)
-    const words = readerLineWords(info, this._clockOf(at));   // r3077: in the words of the cause it has; the page asks again by itself
+    let words;
+    if (info && info.notKnownYet) { words = t('Its saved history is not known yet — it fills in here by itself.'); this._notKnownYetSaid = true; }   // B-a60e (主开发 r2439 (3)): the rollout index has not found it YET — one more cause at this door, its own words
+    else words = readerLineWords(info, this._clockOf(at));   // r3077: in the words of the cause it has; the page asks again by itself
     const el = this._historyNotLoadedEl, inner = el && el.isConnected ? el.querySelector('.chat-system') : null;
     if (inner) { inner.textContent = words; return; }   // the line stands: only its words change (no row added, none moved)
     this._historyNotLoadedEl = this._renderers.appendSystem(words);
   }
   /** the history loaded (an answer carried it): no more asks, the line gone */
-  _historyLoadedNow() {
+  _historyLoadedNow(msg = null) {
     this._reaskEvent({ type: 'loaded' });
     try { this._historyReadyOff?.(); } catch { } this._historyReadyOff = null;
+    // B-a60e (主开发 r2439 (2)): IT ENDS — a rollout this page said «not known yet» that a whole walk then found ABSENT: the line's words
+    // become the final word, once (the re-ask stopped above); found, the history came in and the line goes (below)
+    const ended = endsNotFound(msg, this._notKnownYetSaid); this._notKnownYetSaid = false;
+    if (ended) { const el = this._historyNotLoadedEl, inner = el && el.isConnected ? el.querySelector('.chat-system') : null; if (inner) inner.textContent = t('Its saved history was not found.'); else this._renderers.appendSystem(t('Its saved history was not found.')); this._historyNotLoadedEl = null; return; }
     try { this._historyNotLoadedEl?.remove(); } catch { } this._historyNotLoadedEl = null;
   }
   /** the server says the history is readable (`history-ready`: the push, or the cheap ask's reply) */
@@ -3834,7 +3840,7 @@ class ChatView {
       if (msg.type !== 'attached') return false;
       if (msg.messages?.length) this._reloadViewSlab(msg);
       if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });
-      else this._historyLoadedNow();
+      else this._historyLoadedNow(msg);   // B-a60e (r2439 (2))
       return true;
     }, { isAlive: () => !this._disposed, timeoutMs: 20000, onTimeout: () => this._reaskEvent({ type: 'not-loaded', code: code(), info: null }), resend: true });
   }
@@ -7458,7 +7464,6 @@ class ChatView {
       // only when the rebuild itself ran through (a throw above keeps it poisoned)
       this._seqPoisoned = false;
       if (msg && msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });   // row B-422c: the reset removed the line — said again over the new slab, after the heal (test-hidden-view-suspend: nothing between the rebuild and it)
-      if (msg.findUnknown) this._renderers.appendSystem(t('Its saved history is not known yet — it is read again the next time this conversation opens.'));   // B-a60e remainder: its rollout is «not known yet» (a find that failed or came late) — SAID, never «no messages»
     } catch (e) { this._seqPoisoned = true; throw e; }
     this._drainResetQueue(held, msg);
     if (this._connNoticeOwed) { this._connNoticeOwed = false; this._connNotice?.answered(true); }
@@ -7739,9 +7744,8 @@ class ChatView {
       // _getSessionIds/openSpec — nothing addresses the dead server id anymore.
       this.sessionId = viewId;
       if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
-      else if (!msg.historyNotLoaded && !msg.findUnknown) this._renderers.appendSystem(t("No messages in this session's transcript yet."));
+      else if (!msg.historyNotLoaded) this._renderers.appendSystem(t("No messages in this session's transcript yet."));
       if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: never «no messages» for a history the reader refused
-      if (msg.findUnknown) this._renderers.appendSystem(t('Its saved history is not known yet — it is read again the next time this conversation opens.'));   // B-a60e remainder: its rollout is «not known yet» (a find that failed or came late) — SAID, never «no messages»
       this._renderers.appendSystem(t('The session is no longer running — showing saved history.')); this._rescueNoteSaid = true;   // row B-422c: said again when a re-ask replaces the slab
       this._setReadOnly();
     };

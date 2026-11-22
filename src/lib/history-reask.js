@@ -25,6 +25,11 @@ export function reaskAt({ now, at = 0, tries = 0, prompt = false, pendingDue = 0
   return pendingDue && pendingDue <= due ? pendingDue : due;
 }
 
+/** B-a60e (主开发 r2439 (2)), PURE: IT ENDS — an answer that LOADED the history (the re-attach, a view's reload) and says its rollout
+ *  was found ABSENT (`historyNotFound`: a whole walk begun after the miss found none), on a page that said «not known yet»: the line's
+ *  words become the FINAL word and the re-ask has stopped ('loaded'). Any other loaded answer: the history came in, the line goes. */
+export function endsNotFound(msg, saidNotKnownYet) { return !!(msg && msg.historyNotFound && saidNotKnownYet); }
+
 export const REASK_IDLE = Object.freeze({ code: null, tries: 0, due: 0, owed: false, reloadAt: 0 });
 
 /** ONE event → { state, act } — `act`: 'arm' (a timer at state.due) · 'cancel' · 'ask' (the cheap ask) · 'reload' · null.

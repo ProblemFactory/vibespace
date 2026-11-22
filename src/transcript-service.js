@@ -253,33 +253,31 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     // row B-422c: a history the transcript reader refused (its kept copy, or the live buffer alone) is SAID in every answer built on
     // it — `notLoaded`, the page's «not loaded yet» — never a short history passed off as the whole one
     const notLoaded = sm.notLoaded || null;
-    const notLoadedInfo = notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null } : null;   // r1243: which door, when again
-    const findUnknown = !!sm.findUnknown;   // B-a60e remainder (r1638): a rollout «not known yet» — the reply SAYS it, never an empty history without a word
-    if (r.memo) r.memo.view = { mm, session, notLoaded, notLoadedInfo, findUnknown };
-    return { mm, session, notLoaded, notLoadedInfo, findUnknown };
+    const notLoadedInfo = notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null, notKnownYet: !!sm.notLoadedNotKnown } : null;   // r1243: which door, when again; B-a60e (r2439): «not known yet» one more cause
+    if (r.memo) r.memo.view = { mm, session, notLoaded, notLoadedInfo };
+    return { mm, session, notLoaded, notLoadedInfo };
   }
-  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, readerGone: !!v.notLoadedInfo.readerGone, readerCause: v.notLoadedInfo.readerCause || null, retryAt: v.notLoadedInfo.retryAt, retryIn: Number(v.notLoadedInfo.retryAt) ? Math.max(0, v.notLoadedInfo.retryAt - Date.now()) : null } : {}) } : {});   // retryIn: the delay from the hub's now (a page's clock is not the hub's)
+  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, readerGone: !!v.notLoadedInfo.readerGone, readerCause: v.notLoadedInfo.readerCause || null, ...(v.notLoadedInfo.notKnownYet ? { notKnownYet: true } : {}), retryAt: v.notLoadedInfo.retryAt, retryIn: Number(v.notLoadedInfo.retryAt) ? Math.max(0, v.notLoadedInfo.retryAt - Date.now()) : null } : {}) } : {});   // retryIn: the delay from the hub's now (a page's clock is not the hub's)
 
   async function page(ref, { offset, limit, untilUuid } = {}) {
     const r0 = norm(ref);
     const viaDev = await tryDevice(r0, 'page', { offset, limit, untilUuid });
     if (viaDev) return viaDev;
-    const v = await view(ref), { mm, findUnknown } = v;
-    const said = findUnknown ? { findUnknown: true } : {};   // B-a60e remainder (r1638): the flag on every page of such a read
+    const v = await view(ref), { mm } = v;
     if (untilUuid) {
       const idx = mm.messages.findIndex((m) => m.uuid === untilUuid);
       const upto = idx >= 0 ? idx + 1 : mm.total;
       const start = Math.max(0, upto - 50);
-      return { messages: mm.messages.slice(start, upto), total: upto, ...saidOf(v), ...said };
+      return { messages: mm.messages.slice(start, upto), total: upto, ...saidOf(v) };
     }
     if (offset !== undefined || limit !== undefined) {
-      return { messages: mm.slice(parseInt(offset) || 0, parseInt(limit) || 50), total: mm.total, ...saidOf(v), ...said };
+      return { messages: mm.slice(parseInt(offset) || 0, parseInt(limit) || 50), total: mm.total, ...saidOf(v) };
     }
     // THE DEFAULT PAGE = the attach slab's rule (src/text-window.js) — the HTTP
     // withStatus read AND the daemon's `transcript-op page` (agentd bundles this
     // service), byte-identical by test-transcript-parity. An OLD daemon answers
     // tail(50); the client renders any N (nothing assumes 50).
-    return { messages: mm.tailWindow(), total: mm.total, ...saidOf(v), ...said };
+    return { messages: mm.tailWindow(), total: mm.total, ...saidOf(v) };
   }
 
   async function turnmap(ref) {
@@ -317,7 +315,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {
       chatStatus.permissionMode = session._permissionMode;
     }
-    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.findUnknown ? { findUnknown: true } : {}) };   // B-a60e remainder (r1638): «not known yet» travels
+    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.notLoadedNotKnown ? { notLoaded: sm.notLoaded, notKnownYet: true } : {}) };   // B-a60e (r1638, folded r2439): «not known yet» travels as line 411's cause
   }
 
   async function taskState(ref) {

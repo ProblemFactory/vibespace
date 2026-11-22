@@ -254,7 +254,7 @@ async function world(A, spec = {}) {
     if (AD && typeof AD.codexRolloutLookup === 'function') {
       const ids = [...new Set(JSON.stringify([CORPUS_CIDS, spec, SESSIONS, METAS, TASKS, USER_STATE, corpusGroups()]).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g) || [])];
       for (let r = 0; r < 2; r++) { ids.forEach((x) => AD.codexRolloutLookup(x)); await AD.refreshCodexRolloutIndex(); }
-      if (!world.saidPrimed) { world.saidPrimed = true; const got = ids.map((x) => AD.codexRolloutLookup(x)); say(`  · this tree's codex rollout index, primed over ${ids.length} ids: ${got.filter((g) => g.fp).length} found, ${got.filter((g) => !g.fp && g.known).length} «none», ${got.filter((g) => !g.known).length} «not known yet» — ${JSON.stringify(AD.rolloutIndexStats())}`); }
+      if (!world.saidPrimed) { world.saidPrimed = true; const got = ids.map((x) => AD.codexRolloutLookup(x)); say(`  · this tree's codex rollout index, primed over ${ids.length} ids: ${got.filter((g) => g.fp).length} found, ${got.filter((g) => !g.fp && g.known).length} «none», ${got.filter((g) => !g.known).length} «not known yet» — ${JSON.stringify(AD.rolloutIndexStats())}`); }   // stale-pins: kept (a printed word, no pin)
     }
   }
   const R = A.rosterOf(sessions, tasks);
