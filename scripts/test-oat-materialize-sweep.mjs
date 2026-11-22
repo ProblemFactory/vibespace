@@ -52,7 +52,7 @@ const put = (am, id, o) => fs.writeFileSync(credsOf(am, id), JSON.stringify(o), 
 console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-materialize §7, B-e601 r2)');
 {
   let k7 = 0;
-  const mk = (M = { AccountManager }) => new M.AccountManager({ dataDir: path.join(tmp, 'sw-' + (++k7), 'data') });
+  const mk = (M = { AccountManager }, o = {}) => new M.AccountManager({ dataDir: path.join(tmp, 'sw-' + (++k7), 'data'), ...o });
   // ── F13: the sweep never blocks the loop — fs.promises, one row per loop turn, no sync fs on a member path ──
   // (lane oat-loop-gap-bound, .270: the old `maxGap < 50` read 59.4 ms on ubuntu-latest — an absolute wall-clock bound
   // judges the runner, never the sweep.) ONE ROW PER LOOP TURN is a WORK count: the rows the sweep STARTS between two
@@ -72,8 +72,8 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
     // stop() closes the open turn: a sweep that never yields reads its whole length
     return { turn: () => turns, stop: () => { on = false; mark(); return { maxGap, turns }; } };
   };
-  const f13 = async (M, N = 200) => {
-    const am13 = mk(M); await nv(am13, '2.1.296');
+  const f13 = async (M, N = 200, o = {}) => {
+    const am13 = mk(M, o); await nv(am13, '2.1.296');
     const ids = [];
     for (let i = 0; i < N; i++) { const m = am13.createSubscription({ name: 'C' + i }).id; put(am13, m, login(NOW, { dead: true })); ids.push(m); }
     for (const m of ids) { const a = am13.get(m); a.oatEnc = am13._enc(OAT); a.oatMintedAt = Date.now(); a.oatShape = SHAPE; }
@@ -119,8 +119,18 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
   // the r1 shape (pool-oat-verify F13): every act ON the loop — account-material's fs.promises answered by the sync
   // calls, no turn between rows — both sweeps run in ONE turn: the stall passes 3 × the control, the count reads 2 × N
   const R1_FSP = "const fsp = (() => { const h = (fd) => ({ fd, chmod: async (m) => fs.fchmodSync(fd, m), close: async () => fs.closeSync(fd), readFile: async (o) => fs.readFileSync(fd, o), stat: async () => fs.fstatSync(fd), sync: async () => fs.fsyncSync(fd), writeFile: async (b) => fs.writeFileSync(fd, b) }); return { open: async (...a) => h(fs.openSync(...a)), chmod: async (...a) => fs.chmodSync(...a), link: async (...a) => fs.linkSync(...a), lstat: async (...a) => fs.lstatSync(...a), mkdir: async (...a) => fs.mkdirSync(...a), rename: async (...a) => fs.renameSync(...a), unlink: async (...a) => fs.unlinkSync(...a) }; })();\n";
+  // …and THE DOOR OF THE r1 SHAPE (主开发 r2068 / r2097): since B-360d (d229032f4, the accounts list reads no file on the loop) the
+  // store reads its sign-in facts OFF the loop through its own SafeFs worker, whose answers land on LATER turns (the hosted run read
+  // «20 rows in one turn» under this mutant); the r1 shape — every act on the loop — reads them in the SAME turn, as the release did:
+  // a door whose stat / realpath / read are synchronous, each answered as a resolved promise. Only this mutant takes it.
+  const SYNC_DOOR = { call: async (op, a) => {
+    if (op === 'stat') { const st = fs.statSync(a.path); return { isFile: st.isFile(), mtimeMs: st.mtimeMs, size: st.size }; }
+    if (op === 'realpath') return fs.realpathSync(a.path);
+    if (op === 'readText') return fs.readFileSync(a.path, 'utf8');
+    throw Object.assign(new Error(`the r1 door has no ${op}`), { code: 'ENOSYS' });
+  } };
   const mF13c = mutantStore({ mat: [['const fsp = fs.promises;\n', R1_FSP]], acc: [['        await new Promise((res) => setImmediate(res));\n      }\n      if (moved) this._notify();\n', '      }\n      if (moved) this._notify();\n']] });
-  const r13c = mF13c ? await f13(mF13c) : null;
+  const r13c = mF13c ? await f13(mF13c, undefined, { safeFs: SYNC_DOOR }) : null;
   ok(!!r13c && r13c.counts.materialize === 200 && r13c.maxGap > 3 * r13c.ctlGap && r13c.rowsPerTurn === 400, `RED control (F13): the r1 sweep (every act on the loop) stalls it ${r13c && r13c.maxGap} ms — past 3 × its control's ${r13c && r13c.ctlGap} ms; ${r13c && r13c.rowsPerTurn} rows in one turn`, r13c);
 }
 
