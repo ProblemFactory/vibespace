@@ -108,6 +108,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - At a start, VibeSpace reads its record of how each request was billed a piece at a time, instead of all of it into memory at once.
 - Once the one-time repair of older usage records has run, that record is trimmed at every start to what VibeSpace still reads, even while sessions work.
 - The one-time repair of older usage records no longer counts as done when it could not read that record; it runs again at the next start.
+- A large workflow that is still running no longer slows VibeSpace each time its card or window refreshes.
 
 ## 2.369.415 — 2026-11-21
 
