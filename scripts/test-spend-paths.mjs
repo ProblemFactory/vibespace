@@ -4190,7 +4190,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
       const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
       const tmpU = tmpdir('vs-spend-5g-usage-'), cacheU = path.join(tmpU, 'usage-cache'); fs.mkdirSync(cacheU, { recursive: true });
       const routesU = {};
-      setupUsage({ app: { get: (pt, h) => { routesU[pt] = h; }, post() { }, locals: {} }, accounts: { list: () => ({ accounts: [] }), subscriptionStatus: () => ({ loggedIn: false }), codexGlobalStatus: () => ({ loggedIn: false }) },
+      setupUsage({ app: { get: (pt, h) => { routesU[pt] = h; }, post() { }, locals: {} }, accounts: { list: () => ({ accounts: [] }), decisionList: () => ({ accounts: [] }), signinFactsSettled: async () => ({ since: 0, facts: new Map() }), displayReaderOf: () => null, subscriptionStatus: () => ({ loggedIn: false }), codexGlobalStatus: () => ({ loggedIn: false }) },   // B-360d (line 228): the stand-in carries the DECISION road in the real store's shapes (test-usage-link's, d229032f4)
         activeSessions: new Map(), serverSetting: () => null, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(tmpU, 'usage.json'), USAGE_CACHE_DIR: cacheU,
         CODEX_SESSIONS_DIR: path.join(tmpU, 'cx'), META_DIR: path.join(tmpU, 'meta'), AVAILABLE_MODELS: { claude: [] }, BUFFERS_DIR: path.join(tmpU, 'buf'), spendGuard: { ledgerNotice: () => ({ state: 'refused', error: 'EACCES', since: 1 }) } });
       const payU = await new Promise((resolve) => routesU['/api/usage']({}, { json: resolve }));
