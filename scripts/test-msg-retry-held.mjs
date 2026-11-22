@@ -14,6 +14,9 @@
 //   ⑥ while a set-aside's rename is out, no read starts. RED: a read starts.
 //   ⑦ desktop-apps-hosts.json: a failed read HELD — a save refused, the file kept; read again at the keeper's tick, its machines join.
 //     RED: written over.  ⑧ its torn bytes set aside, never written over. RED: written over.
+//   line 494's follow (主开发 r2695), each with its red: ⑨ THE MONEY — the same paced wake and the same ended conversation in the file
+//   and in memory: ONE frame, ONE resume (the file's ended wake folds into the resume made while held; the file's older entry first);
+//   ⑩ a stop while held says what memory alone held; ⑪ the adopted entries' bound counts from the lift.
 // In-process: the real deliverer and keeper over scratch data/, a manual clock; nothing is posted anywhere.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,11 +43,11 @@ const tick = () => new Promise((z) => setImmediate(z));
 
 let wn = 0;
 /** one deliverer over a scratch data/: `failBoot` = the start's read fails by that code, `asideFails` = the start's set-aside refused */
-function world(DL = DELIVER0, { text = null, failBoot = null, asideFails = false } = {}) {
-  const dataDir = path.join(ROOT, `w${++wn}`); fs.mkdirSync(dataDir, { recursive: true });
+function world(DL = DELIVER0, { text = null, failBoot = null, asideFails = false, dir = null, posts = null, c: c0 = null, dead = [] } = {}) {
+  const dataDir = dir || path.join(ROOT, `w${++wn}`); fs.mkdirSync(dataDir, { recursive: true });
   const file = path.resolve(path.join(dataDir, 'msg-retry.json'));
   if (text != null) fs.writeFileSync(file, text);
-  const c = { now: T0, timers: [] }, logs = [];
+  const c = c0 || { now: T0, timers: [] }, logs = [];
   const realRead = fs.readFileSync, realRename = fs.renameSync;
   let boots = 0;
   if (failBoot) fs.readFileSync = function (p, ...a) { if (!boots && path.resolve(String(p)) === file) { boots++; throw stand(failBoot); } return realRead.call(this, p, ...a); };
@@ -52,14 +55,17 @@ function world(DL = DELIVER0, { text = null, failBoot = null, asideFails = false
   let d;
   try {
     d = DL.create({ dataDir, activeSessions: new Map(), serverSetting: () => undefined, log: (...a) => logs.push(a.join(' ')),
-      peerMsg: { findPeer: (cid) => ({ name: cid, socketPath: '/dev/null' }), postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
+      peerMsg: { findPeer: (cid) => (dead.includes(cid) ? null : { name: cid, socketPath: '/dev/null' }),   // `dead`: ENDED conversations (no inbox — a wake owed to one goes to the resume line)
+                 postToPeer: async (peer, text) => { if (!posts) return { ok: false }; posts.push({ cid: peer.name, text }); return { ok: true, phase: 'written' }; }, postChannelEvent: async () => ({ ok: false }) },
       retryClock: { now: () => c.now, setTimeout: (fn, ms) => { const t = { at: c.now + ms, fn }; c.timers.push(t); return t; }, clearTimeout: (t) => { const i = c.timers.indexOf(t); if (i >= 0) c.timers.splice(i, 1); } } });
   } finally { fs.readFileSync = realRead; fs.renameSync = realRename; }
   const park = (cid, key) => d.parkOwedWake(cid, { producer: 'test-held', key, retryInMs: 60_000, text: 'a wake held for the pace', meta: { k: key } });
   const settle = async () => { for (let i = 0; i < 4; i++) { const p = d._retryReading(); if (p) await p; await tick(); } };
   const onDisk = () => (fs.existsSync(file) ? realRead(file, 'utf8') : null);
   const asides = () => fs.readdirSync(dataDir).filter((f) => f.startsWith('msg-retry.json.corrupt-')).length;
-  return { d, c, file, logs, park, settle, onDisk, asides };
+  /** the manual clock moved to `to`, every timer fired in its order, each attempt settled */
+  const advanceTo = async (to) => { for (;;) { c.timers.sort((x, y) => x.at - y.at); const t = c.timers[0]; if (!t || t.at > to) break; c.timers.shift(); c.now = Math.max(c.now, t.at); t.fn(); await d.settleRetries(2000); await tick(); } c.now = to; await d.settleRetries(2000); await tick(); };
+  return { d, c, file, dataDir, logs, park, settle, onDisk, asides, advanceTo };
 }
 /** the last run's file: ONE paced wake owed to A (the money case: it was promised a wake) */
 const OLD = JSON.stringify({ [A]: [{ id: 'rt-old-1', cid: A, text: 'a wake of the last run', kind: 'peer', spendReason: 'peer-message', producer: 'test-held', key: 'k-old', meta: { k: 'k-old' }, senders: [], held: { why: 'paced', reason: 'paced' }, attempts: [], firstAt: T0 - 600e3, nextAt: T0 + 60e3 }] });
@@ -173,6 +179,66 @@ const r6 = await asidingRun(DELIVER0);
 ok(r6.renaming && r6.first === 1 && r6.during === 1 && !r6.held && r6.asides === 1, 'while a set-aside\'s rename is out no read starts (its own outcome settles the hold): set aside, lifted', r6);
 const r6x = await asidingRun(cut(DSRC, "    if (retryAsiding) return retryReading;   // a set-aside's rename is out: its own outcome settles the hold — no read starts meanwhile (r2550 (1)(2), carried)\n", '', 'a read during the rename', 'mr-aside-read'));
 ok(r6x.during > r6x.first, 'RED CONTROL (a read starts while the rename is out): a second read meets the file mid-move — red', r6x);
+
+console.log('⑨ line 494\'s follow (r2695 (1)) THE MONEY: the same owed wake and the same ended conversation in both sets — ONE frame, ONE resume');
+const C = 'aaaaaaaa-0000-4000-8000-000000000003';
+const twinsRun = async (DL) => {
+  const w1 = world(DL, { dead: [C] });   // the last run: one paced wake owed to A, one wake owed to the ended conversation C — on disk
+  const fileOwed = w1.d.parkOwedWake(A, { producer: 'test-held', key: 'k-twin', retryInMs: 60_000, sender: 'S1', text: 'a wake held for the pace', meta: { k: 'k-twin' } });
+  w1.d.parkEndedWake(C, { producer: 'test-ended', spendReason: 'peer-message', kind: 'peer', fromName: 'Stand-in', sender: 'S1', reason: 'a job ended' });
+  w1.d.closeRetries();
+  const fileC = w1.d.retryPeek(C).length;
+  const posts = [], resumes = [];
+  const w = world(DL, { dir: w1.dataDir, failBoot: 'EIO', posts, dead: [C] });   // this start's read FAILS: held
+  w.d.registerWakePacer(() => { const m = () => true; m.force = () => ({ ok: true }); m.refund = () => { }; return m; });
+  w.d.registerOwedWake('test-held', { render: () => ({ text: 'the words of the wake', kind: 'peer', fromName: 'Stand-in' }), fell: () => true, cancelled: () => { } });
+  w.d.registerEndedWake((cid, e) => { resumes.push({ cid, id: e.id }); return Promise.resolve({ outcome: 'delivered' }); });
+  w.d.parkOwedWake(A, { producer: 'test-held', key: 'k-twin', retryInMs: 60_000, sender: 'S1', text: 'a wake held for the pace', meta: { k: 'k-twin' } });   // its twin, in memory
+  w.d.parkEndedWake(C, { producer: 'test-ended', spendReason: 'peer-message', kind: 'peer', fromName: 'Stand-in', sender: 'S1', reason: 'a peer message' });   // C's wake, in memory
+  await w.advanceTo(T0 + 5_000);   // memory's ended wake RESUMES C while the file is held (delivered)
+  const during = { fileC, held: !!w.d.retryHeldState(), resumes: resumes.length };
+  w.c.now = T0 + 31_000;
+  w.d.parkOwedWake(B, { producer: 'test-held', key: 'k-trig', retryInMs: 60_000, sender: 'S2', text: 'a wake held for the pace', meta: { k: 'k-trig' } });   // the park's road reads the file again
+  await w.settle();
+  const firstA = (w.d.retryPeek(A)[0] || {}).id || null;
+  await w.advanceTo(T0 + 600_000);
+  return { during, held: !!w.d.retryHeldState(), fileOwed: fileOwed && fileOwed.id, firstA, resumes: resumes.length, postsA: posts.filter((p) => p.cid === A).length };
+};
+const tw = await twinsRun(DELIVER0);
+console.log(`    facts: ${JSON.stringify(tw)}`);
+ok(tw.during.fileC === 1 && tw.during.held && tw.during.resumes === 1 && !tw.held && tw.resumes === 1, 'the file\'s wake owed to the ended conversation C folds into the resume made while the file was held — ONE resume, never a second billed turn for the same words', tw);
+ok(tw.firstA === tw.fileOwed && tw.postsA === 1, 'the same paced wake in the file and in memory: the file\'s (older) entry first in the queue, ONE frame posted', tw);
+const twx = await twinsRun(cut(DSRC, '          if (isEnded(e) && (live || settled === \'delivered\' || settled === \'running\')) {\n', '          if (false) {\n', 'the file\'s ended wake handed to the line again', 'mr-fold-cut'));
+ok(twx.resumes === 2, 'RED CONTROL (the lift appends the file\'s ended wake unfolded, as before): C is resumed a SECOND time — red', twx);
+const two = await twinsRun(cut(DSRC, '        retry[cid] = [...keep, ...mem];', '        retry[cid] = [...mem, ...keep];', 'memory\'s first', 'mr-order-mem'));
+ok(two.firstA !== two.fileOwed, 'RED CONTROL (memory\'s entries first, as before): the newer twin leads — the older wake\'s first miss is lost — red', two);
+
+console.log('⑩ line 494\'s follow (r2695 (2)): a stop while held says what memory alone held');
+const stopRun = (DL) => { const w = world(DL, { text: OLD, failBoot: 'EIO' }); w.park(B, 'k-s'); w.d.closeRetries(); return { said: w.logs.some((l) => /stops HELD .*1 delivery parked during the hold lived in memory only/.test(l)), kept: w.onDisk() === OLD }; };
+const st = stopRun(DELIVER0);
+ok(st.said && st.kept, 'a stop while held: one journal line with the count of what memory alone held; the file kept as it is', st);
+const stx = stopRun(cut(DSRC, '    if (retryHeld) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); if (n) log(`[deliver] the retry park stops HELD (data/msg-retry.json could not be read): ${n} deliver${n === 1 ? \'y\' : \'ies\'} parked during the hold lived in memory only and ${n === 1 ? \'is\' : \'are\'} not written — the file is kept as it is`); }\n', '', 'the stop says nothing', 'mr-stop-quiet'));
+ok(!stx.said, 'RED CONTROL (the stop says nothing, as before): the memory-only wakes go with no word — red', stx);
+
+console.log('⑪ line 494\'s follow (r2695 (3)): the adopted entries\' bound counts from the lift');
+const boundRun = async (DL) => {
+  const w1 = world(DL);
+  w1.d.parkOwedWake(A, { producer: 'test-held', key: 'k-b', retryInMs: 60_000, sender: 'S1', text: 'a wake held for the pace', meta: { k: 'k-b' } });
+  w1.d.closeRetries();
+  const w = world(DL, { dir: w1.dataDir, failBoot: 'EIO' });
+  let forced = 0, asked = 0;
+  w.d.registerWakePacer(() => { const m = () => { asked++; return { reason: 'the floor', retryInMs: 60_000 }; }; m.force = () => { forced++; return { ok: true }; }; m.refund = () => { }; return m; });
+  w.d.registerOwedWake('test-held', { render: () => ({ text: 'the words', kind: 'peer', fromName: 'Stand-in' }), fell: () => true, cancelled: () => { } });
+  w.c.now = T0 + 2 * 3600e3;   // a LONG hold: the file reads only now
+  w.d.parkOwedWake(B, { producer: 'test-held', key: 'k-trig', retryInMs: 60_000, sender: 'S2', text: 'a wake held for the pace', meta: { k: 'k-trig' } });
+  await w.settle();
+  await w.advanceTo(T0 + 2 * 3600e3 + 30_000);
+  return { held: !!w.d.retryHeldState(), forced, asked };
+};
+const bd = await boundRun(DELIVER0);
+ok(!bd.held && bd.forced === 0 && bd.asked >= 1, 'after a two-hour hold the adopted paced wake is paced from the lift (asked, never forced past a bound it has not had) — «paced out from now» is true', bd);
+const bdx = await boundRun(cut(DSRC, '        for (const e of q) if (e && typeof e === \'object\') e.boundFrom = liftAt;\n', '', 'the bound from the boot', 'mr-bound-boot'));
+ok(bdx.forced >= 1, 'RED CONTROL (the bound counted from the boot, as before): the adopted wake is overdue at its first attempt and forced past the pace — red', bdx);
 
 console.log('⑦ desktop-apps-hosts.json — a failed read held, read again at the keeper\'s tick');
 const quiet = { log() { }, warn() { }, error() { } };

@@ -1045,7 +1045,7 @@ await leg(29, async () => {
     ok(o.owed === 2 && o.two === 2 && o.three === 2, '(xv) CONTROL: unfolded, a missed post leaves two entries and the next frame carries the report twice', o);
   }
   { // the hour rebased only when it had ended
-    ok(cdSrc.includes('const owedEnd = (e) => Math.max(Number(e.firstAt || 0), parkBootAt) + RETRY_MAX_MS;'), '(xvi) the boot\'s rebase is whole: no cliff by construction');
+    ok(cdSrc.includes('const boundStart = (e) => Math.max(Number(e.firstAt || 0), parkBootAt, Number(e.boundFrom || 0));') && cdSrc.includes('const owedEnd = (e) => boundStart(e) + RETRY_MAX_MS;'), '(xvi) the boot\'s rebase is whole (and a held park file\'s lift rebases what it adopts — line 494\'s follow): no cliff by construction');
   }
   { // the fall is silent
     const GEm = Ms.load(gePath, swap(geSrc, '      notice: {\n', '      silent: {\n'), 'silent-fall');

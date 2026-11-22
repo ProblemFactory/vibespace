@@ -721,6 +721,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // holds a thread every file read of the hub shares), never sooner than SR.retryDelay after the last one (30 s doubling to 5 min),
   // at the park's own roads (a new park, a turn end) — NO timer of its own
   let retryReading = null, retryReads = 0, retryReadAt = 0, retryAsiding = false;
+  const endedSettledHeld = new Map();   // line 494's follow (r2695 (1)): cid → the outcome of its ended wake that SETTLED while the park was held — until the lift
   const RETRY_REREAD_BOUND_MS = 30_000, RETRY_REREADS_MAX = 2;
   function rereadRetry() {
     const H = retryHeld;
@@ -740,6 +741,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** a read again's answer: data → the file's entries join the park; not there → lifted (nothing of the last run); a failed read →
    *  still held; torn bytes → set aside OFF the loop (one at a time), then lifted — or HELD when the set-aside fails */
   function applyRetryRead(read) {
+    if (retryAsiding) return null;   // line 494's follow (its round's smalls): a set-aside's rename is out — its own end settles the hold (never «not there» from a read that met the moved file)
     const a = retryAnswer(read);
     if (a.state === 'unreadable') { holdRetry(a); return null; }
     if (a.state === 'corrupt') {
@@ -766,16 +768,35 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     let n = 0;
     if (doc) {
       const { notes, waitedOut } = adoptRetryDoc(doc);
+      const liftAt = clock.now();
       for (const [cid, q] of Object.entries(doc)) {
         if (!q.length) continue;
         if (readoptDone) for (const e of q) if (e && e.waitsReadopt) { delete e.waitsReadopt; e.nextAt = clock.now(); }   // the settle ran while the file was held: it runs now
-        retry[cid] = [...(retry[cid] || []), ...q];
-        n += q.length;
+        // r2695 (3): THE BOUND COUNTS FROM THE LIFT for what waited through the hold, as the boot's does from the boot (owedEnd)
+        for (const e of q) if (e && typeof e === 'object') e.boundFrom = liftAt;
+        // r2695 (1) THE MONEY: one wake per conversation across the lift — the file's ended wake folds into memory's in the resume
+        // line, or into the one that settled while held (delivered / running: that resume carried every word waiting)
+        const mem = retry[cid] || [];
+        const live = mem.find((x) => isEnded(x) && x.inflight);
+        const settled = endedSettledHeld.get(cid);
+        const keep = [];
+        for (const e of q) {
+          if (isEnded(e) && (live || settled === 'delivered' || settled === 'running')) {
+            if (live) { for (const x of e.senders || []) if (!live.senders.includes(x)) live.senders.push(x); live.producers = mergeProducers(live, e); live.metas = [...metasOf(e), ...metasOf(live)].slice(-ENDED_METAS); live.deliveries = (Number(live.deliveries) || 1) + (Number(e.deliveries) || 1); }
+            log(`[deliver] ${cid}: the held file's wake owed to the ended conversation (${e.id}) folds into ${live ? `${live.id}, in the resume line now` : `the resume made while the file was held (${settled})`} — one wake per conversation, never a second resume for the same words`);
+            continue;
+          }
+          keep.push(e);
+        }
+        if (!keep.length) continue;
+        retry[cid] = [...keep, ...mem];   // the file's (older) entries FIRST: a twin fold keeps the older entry's first miss
+        n += keep.length;
         stashChanged(cid);
       }
       for (const x of notes) log(`[deliver] ${x}`);
       if (waitedOut) log(`[deliver] ${waitedOut} paced wake${waitedOut === 1 ? '' : 's'} of the held file waited through the hold — paced out from now, never dumped at once`);
     }
+    endedSettledHeld.clear();
     log(`[deliver] data/msg-retry.json ${how} — the retry park's hold is lifted (held ${Math.round((clock.now() - H.at) / 1000)} s)${n ? `; ${n} parked deliver${n === 1 ? 'y' : 'ies'} of the last run join the park` : ''}`);
     writeRetryNow();
     scheduleRetry();
@@ -1258,6 +1279,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function stashCids() { return Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].length > 0); }
   function endEnded(e, r = {}) {
     if (!retry[e.cid] || !retry[e.cid].includes(e)) return;
+    if (retryHeld) endedSettledHeld.set(e.cid, r.outcome || 'ended');   // line 494's follow (r2695 (1)): the file's older wake for this conversation folds into this settle at the lift
     if (r.outcome === 'refused' || r.outcome === 'failed') endedAnswers.set(e.cid, { outcome: r.outcome, code: r.code || null, why: r.why || null, until: r.until || null, at: clock.now() });
     else endedAnswers.delete(e.cid);
     removeRetry(e);
@@ -1271,7 +1293,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function owedEntries(cid, producer) { return (retry[cid] || []).filter((e) => isOwed(e) && e.producer === producer && !e.inflight); }
   /** THE HARD BOUND (the owner's rule): this entry's wake is due NOW, whatever the pace says */
   // …AND A BACKLOG THAT WAITED THROUGH DOWNTIME IS PACED OUT FROM THE BOOT (acceptance r2, P2, measured: a two-hour downtime made 11 owed wakes overdue at once, all forced in 5 ms, 11 stamps in a minute against the sender's 8; r3, P11, measured: rebasing only an hour that had ENDED left a cliff, a 59.5-min downtime still forced 3 within the minute): the hour counts from this boot, so after a restart the bound is never nearer than the pace needs
-  const owedEnd = (e) => Math.max(Number(e.firstAt || 0), parkBootAt) + RETRY_MAX_MS;
+  const boundStart = (e) => Math.max(Number(e.firstAt || 0), parkBootAt, Number(e.boundFrom || 0));   // line 494's follow (r2695 (3)): an entry adopted at a held file's lift counts from the lift
+  const owedEnd = (e) => boundStart(e) + RETRY_MAX_MS;
   const owedOverdue = (e) => clock.now() >= owedEnd(e) || (Number(e.paceRefusals) || 0) >= RETRY_MAX_ATTEMPTS;
   /** The pace, asked once per frame: the first sender it grants pays the frame's slot. Past the bound (`force`) it is not asked:
    *  the slot is stamped, so the ledger still counts the wake. → {ok, refund?} | {ok:false, retryInMs, reason} */
@@ -1464,7 +1487,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     judgeRetries(cid);   // lane jobs-addressed-push r4: the turn end's and the timer's attempt ask each entry's producer first
     attemptEnded(cid);   // piece 7: a wake owed to an ENDED conversation goes to the resume line (or leaves: it runs again)
     // a producer that never came up in a whole hour of this process: nothing here can send it — said, like every owed entry's end (D4)
-    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !aside(x) && unready(x) && clock.now() - Math.max(Number(x.firstAt || 0), parkBootAt) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `nothing on this server can send it (its producer «${e.producer}» never came up)`, { expired: true });
+    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !aside(x) && unready(x) && clock.now() - boundStart(x) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `nothing on this server can send it (its producer «${e.producer}» never came up)`, { expired: true });
     for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !aside(x) && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });
     // THE BOUND HOLDS AT EVERY ATTEMPT (verify r1 N5, reproduced: an entry two hours old at boot — a downtime — was posted and
     // billed): a parked entry past RETRY_MAX_MS from its first miss is not posted, at a boot, a late timer or a turn end
@@ -1697,7 +1720,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     retryInFlight.add(p);
     try { await p; } finally { retryInFlight.delete(p); if (attempting.get(cid) === p) attempting.delete(cid); }
   }
-  function closeRetries() { retryClosed = true; flushRetryWrite(); if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; } }
+  function closeRetries() {
+    retryClosed = true;
+    // line 494's follow (r2695 (2)): A STOP WHILE HELD — what was parked in memory is not written (the file is kept as it is): said, with its count
+    if (retryHeld) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); if (n) log(`[deliver] the retry park stops HELD (data/msg-retry.json could not be read): ${n} deliver${n === 1 ? 'y' : 'ies'} parked during the hold lived in memory only and ${n === 1 ? 'is' : 'are'} not written — the file is kept as it is`); }
+    flushRetryWrite();
+    if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; }
+  }
   function retryInFlightCount() { return retryInFlight.size; }
   /** resolves the number settled (negative: the deadline passed with that many still in flight — stamped on disk, the boot hands them to the stash) */
   function settleRetries(maxMs = 5000) {
