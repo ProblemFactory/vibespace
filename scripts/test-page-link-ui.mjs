@@ -539,7 +539,8 @@ try {
   await waitFor(`(() => { const w = ${TWIN}; return /✕/.test((w.content || w.element).querySelector('.save-indicator')?.textContent || ''); })()`, 5000);
   const e2 = await evalJs(`(() => { const w = ${TWIN}; return (w.content || w.element).querySelector('.save-indicator')?.textContent || null; })()`);
   await unstub();
-  check('a REAL press on Save the guard refused: the write route\'s own words, never the preview\'s sentence', pressed11 && e2 === '✕ refused: a synchronous fs call on a storage mount from the main thread', { pressed11, miss: RC.lastMiss, e2 });
+  // B-23e5's save law (主开发 r1378 (3), line 262): the words name WHERE it is not saved — the file first — and keep the route's own words as the why
+  check('a REAL press on Save the guard refused: the file named, then the write route\'s own words — never the preview\'s sentence', pressed11 && e2 === '✕ notes.txt is not saved — refused: a synchronous fs call on a storage mount from the main thread', { pressed11, miss: RC.lastMiss, e2 });
   await closeTxt();
   check('no page errors', pageErrors.length === 0, pageErrors);
 } catch (e) {
