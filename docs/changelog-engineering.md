@@ -1363,6 +1363,14 @@ This file is the engineers' record of every release: the lanes, the verification
 - SMALLS: the adoption's else binds to its own ready block again; a socket that dies mid-pause files no false notice; an arm's timer ends its socket; the agent's view of a tab: none vanishes now (an unplaced tab is released, not closed).
 - LEGS: test-browser-environment (the stored denial and its give-back, RED: the default alone), test-browser-geo-hold (new, fast: the order, the bound releasing unplaced, a mid-job socket quiet, the hold lost and armed again, a relaunch's new address, the arm's timer; REDs: released early, no bound, a re-arm judged by state, a mid-job death said, the address it was armed with), test-browser-geo-hold-chrome (new, heavy: the place first; «blocked», an unplaced tab, a tab opened while the hold is down and a running tab under the hold's dead socket each read «denied»; RED: no stored denial), test-browser-geo-hold-measure (new, heavy: the three facts above), test-browser-builds ⑦g (the stored denial written, untouched writes nothing, «blocked» with no hold, the give-back, the arm while the record is still starting; REDs: no arm, the hold for every start, no stored denial), test-browser-prompts (the watch on a held profile, the takeover's hand-over; REDs).
 
+### lg-rewind B-437e files tier — the kept copy's second follow (主开发 r1859; round w02e4ftoy TAKEN the cure as line 284)
+- A put-back on a paired machine is as strict as the keep (r1854): only an explicit «not a link» is overwritten; a link, an agent that does not say it, a link it could not read: refused by name.
+- One put-back of a press at a time: the fence is asked again right before the files mark is set (no await between) — two clients pressing one press at once: the second is refused `pending`, never two side by side.
+- The one bound holds inside one conversation's walk of presses too.
+- Legs: the REAL agent's stat action (src/agentd/agentd.js run as its own fs worker) on a scratch link and a plain file, through the paired keep; two put-backs of one press, both past the first fence; the bound inside one walk. Two red controls more (14).
+- kb: the seven days count only when a keep runs on that machine; a hard link's other name keeps the rewound bytes; the paired manifest's temp is not synced; a dangling link on a paired machine reads as absent.
+- THE ROW: test-rewind-kept restated 0.4 → 0.8 s (its gate run read 823 / 709 ms); the stated sum stays under the cap.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
