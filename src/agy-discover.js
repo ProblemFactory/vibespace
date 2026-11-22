@@ -21,6 +21,18 @@ const cache = new Map();  // home → { accountId, home, sig, rows, checkedAt }
 let inflight = null;
 /** The child, bounded (killed past `ms`): {code, out}. Its env is built, never the hub's (test-architecture §94): it reads
  *  the roots it is handed — no login, no token, nothing of the hub's. */
+// B-323e's remainder (lane bl-chat-b, the coordinator's r2681): the HUB hands its starter (src/routes/sessions.js, at its load:
+// useStarter) and the index child is asked of it with this same whole env, bound and buffer — never started from the hub's own
+// process; a no-reply is no answer (the last rows stand). This file is in the device agent's bundle, so it names no starter: the
+// device keeps runIndexChild below.
+let starterRun = null;
+function useStarter(starter) { starterRun = starter && typeof starter.run === 'function' ? starter : null; }
+function runViaStarter(bin, args, ms) {
+  // its WHOLE env, built here: PATH and LANG alone — exactly runIndexChild's (the spawn census's WHOLE_ROWS row)
+  const req = { timeoutMs: ms, capture: true, maxBuffer: 4 * 1024 * 1024, wholeEnv: true, env: { PATH: process.env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' } };
+  return Promise.resolve().then(() => starterRun.run(bin, args, req))
+    .then((r) => ({ code: r && r.started !== false && !r.unknown && !r.timedOut && !r.overflow && r.code === 0 ? 0 : ((r && (r.code || r.signal)) || 1), out: String((r && r.stdout) || '') }), () => ({ code: 1, out: '' }));
+}
 const runIndexChild = (bin, args, ms) => new Promise((resolve) => {
   execFile(bin, args, { env: { PATH: process.env.PATH || '/usr/bin:/bin', LANG: 'C.UTF-8' }, timeout: ms, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024 }, (e, out) => resolve({ code: e ? (e.code || e.signal || 1) : 0, out: String(out || '') }));
 });
@@ -58,8 +70,8 @@ async function refresh(dataDir, now, runChild) {
 }
 /** The descriptor's discover: one row per top-level conversation of every root — status 'live' while a session of this
  *  harness runs it (its webui id / name / mode, as codex's rows), else 'stopped'. `harnessId` = the descriptor's own id. */
-async function discover({ activeSessions, harnessId, dataDir = DATA_DIR, now = Date.now(), runChild = runIndexChild } = {}) {
-  if (!inflight) inflight = refresh(dataDir, now, runChild).finally(() => { inflight = null; });
+async function discover({ activeSessions, harnessId, dataDir = DATA_DIR, now = Date.now(), runChild = null } = {}) {
+  if (!inflight) inflight = refresh(dataDir, now, runChild || (starterRun ? runViaStarter : runIndexChild)).finally(() => { inflight = null; });
   try { await inflight; } catch { /* the last rows */ }
   const live = new Map();
   for (const [id, s] of activeSessions || []) if (s && s.backend === harnessId && !s.host && s.backendSessionId) live.set(s.backendSessionId, { id, s });
@@ -74,4 +86,4 @@ async function discover({ activeSessions, harnessId, dataDir = DATA_DIR, now = D
   return out.sort((x, y) => y.startedAt - x.startedAt);
 }
 
-module.exports = { discover, rootsOf, runIndexChild, CHECK_MS, _cache: cache };
+module.exports = { discover, rootsOf, runIndexChild, useStarter, CHECK_MS, _cache: cache };

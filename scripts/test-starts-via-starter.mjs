@@ -556,6 +556,86 @@ WD.section('⑧');
     ok(kbLine.includes('`?fresh=1`') && kbLine.includes('`unread`') && kbLine.includes('`keptAt`') && !/graceKill|GRACE_MS/.test(TS) && !/graceKill|GRACE_MS/.test(WKS), 'kb-api names the fresh read, `unread` and `keptAt`; the proxy plugin\'s dead import (graceKill, GRACE_MS) and the lookup\'s unused kill are gone');
   } finally { Date.now = nowWas; process.env.PATH = pathWas; }
 }
+say('⑨ B-323e\'S REMAINDER (lane bl-chat-b, 主开发 r2681) — the copy\'s du, the CLI which, the agy poll and the tailnet lookup ride the starter; each no-reply says what it said before');
+WD.section('⑨');
+{
+  const prev9 = answer;
+  // (a) THE COPY'S du (src/routes/files.js localDuBytes: two a tick, every 1.2 s, while a person's local folder copy runs) — read out of
+  //     the file with DU_SH, run over the suite's starter (its free names handed: fs, require, process, and execFile for the RED)
+  const FILES = read('src/routes/files.js');
+  const duOf = (src) => { const d = src.indexOf('const DU_SH = '), de = src.indexOf('\n', d), a = src.indexOf('function localDuBytes(p) {'), e = src.indexOf('\n}\n', a);
+    return new Function('fs', 'require', 'process', 'execFile', `${src.slice(d, de)}\n${src.slice(a, e + 2)}\nreturn localDuBytes;`)(fs, (m) => (m === '../server/child-starter' ? CS : require(m)), process, cp.execFile); };
+  const DIR9 = path.join(TMP, 'du-dest'); fs.mkdirSync(DIR9, { recursive: true }); fs.writeFileSync(path.join(TMP, 'du-file'), 'x'.repeat(7));
+  answer = (cmd, args) => (cmd === 'sh' ? { started: true, code: 0, stdout: '8192\n' } : prev9(cmd, args));
+  const du = duOf(FILES), D0 = directOf('sh'), A0 = asked.length;
+  const got = await du(DIR9), q = asked.slice(A0).find((x) => x.cmd === 'sh');
+  const file = await du(path.join(TMP, 'du-file')), nFile = asked.length;
+  answer = (cmd, args) => (cmd === 'sh' ? { unknown: true } : prev9(cmd, args));
+  const none = await du(DIR9);
+  ok(got === 8192 && file === 7 && none === 0 && !!q && q.args[0] === '-c' && q.args[1].startsWith(`du -sb '${DIR9}'`) && q.o.timeoutMs === 30000 && q.o.capture === true && typeof q.o.envAdd.PATH === 'string' && nFile - A0 === 1 && directOf('sh') === D0,
+    `(a) the copy's du asks the starter (sh -c du …, 30 s): ${got} bytes for a folder, a file's size with no start, and a NO-REPLY reads 0 as a failed du did (the bar keeps its last value) — none from the hub's process`, { got, file, none, q: q && { args: q.args, o: q.o } });
+  const OLDDU = anchored(FILES, "    : Promise.resolve().then(() => require('../server/child-starter').childStarter().run('sh', ['-c', DU_SH(p)], { timeoutMs: 30000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } }))\n      .then((r) => parseInt(String((r && r.stdout) || ''), 10) || 0, () => 0)), () => 0);\n",
+    "    : new Promise((resolve) => execFile('sh', ['-c', DU_SH(p)], { timeout: 30000 }, (e, out) => resolve(parseInt(out, 10) || 0)))), () => 0);\n", 'the release\'s du');   // stale-pins: kept (the release's text — the leg's RED)
+  const D1 = directOf('sh'); await duOf(OLDDU)(DIR9);
+  ok(directOf('sh') - D1 === 1, '(a) RED: the release\'s du starts `sh` from the hub\'s process (the spy counts it)', { direct: directOf('sh') - D1 });
+
+  // (b) THE CLI which (src/server/cli-cmd.js resolveCmdAsync: a MISSING CLI looked up again every RECHECK_MS while its status is polled)
+  const CLI = require(path.join(ROOT, 'src/server/cli-cmd.js'));
+  answer = (cmd, args) => (cmd === 'which' ? (args[0] === 'vs-cli-found' ? { started: true, code: 0, stdout: '/opt/vs/bin/vs-cli-found\n' } : { unknown: true }) : prev9(cmd, args));
+  const W0 = directOf('which'), A1 = asked.length;
+  const found = await CLI.resolveCmdAsync('vs-cli-found'), wq = asked.slice(A1).find((x) => x.cmd === 'which');
+  const unanswered = await CLI.resolveCmdAsync('vs-cli-none');   // no reply: the hub's own dir walk, then the bare name
+  ok(found === '/opt/vs/bin/vs-cli-found' && unanswered === 'vs-cli-none' && !!wq && JSON.stringify(wq.args) === '["vs-cli-found"]' && wq.o.timeoutMs === 2000 && typeof wq.o.envAdd.PATH === 'string' && directOf('which') === W0,
+    `(b) the CLI which asks the starter (2 s): ${found}; a NO-REPLY is no answer — the hub's own dir walk, then the bare name (${unanswered}) — none from the hub's process`, { found, unanswered, wq: wq && { args: wq.args, o: wq.o } });
+  const CC = read('src/server/cli-cmd.js');
+  const OLDCLI = anchored(anchored(CC, "const { execFileSync, spawn } = require('child_process');", "const { execFileSync, execFile, spawn } = require('child_process');", 'the release\'s import'),
+    "    Promise.resolve().then(() => require('./child-starter').childStarter().run('/usr/bin/which', [name], { timeoutMs: 2000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } }))\n      .then((x) => ({ err: !(x && x.started !== false && !x.unknown && !x.timedOut && !x.overflow && x.code === 0), out: String((x && x.stdout) || '') }), () => ({ err: true, out: '' }))\n      .then(async ({ err, out }) => {\n",
+    "    execFile('/usr/bin/which', [name], { encoding: 'utf-8', timeout: 2000 }, async (err, out) => {\n", 'the release\'s which');   // stale-pins: kept (the release's text — the leg's RED)
+  const OLDC = require(M.write('src/server/cli-cmd.js', OLDCLI, 'release-which'));
+  const W1 = directOf('which'); await OLDC.resolveCmdAsync('vs-cli-found');
+  ok(directOf('which') - W1 === 1, '(b) RED: the release\'s which starts from the hub\'s process (the spy counts it)', { direct: directOf('which') - W1 });
+
+  // (c) THE AGY POLL (src/agy-discover.js: the index child, ≤ 1 per 15 s per account root, only when its index changed) — the hub
+  //     hands its starter (src/routes/sessions.js, at its load); the file is in the device agent's bundle, so it names no starter
+  const AGY = require(path.join(ROOT, 'src/agy-discover.js')), AS = require(path.join(ROOT, 'src/agy-store.js'));
+  const nodeName = path.basename(process.execPath); WATCH.add(nodeName);   // for this section: an index child started DIRECTLY is counted, never run
+  try {
+    const dataDir = path.join(TMP, 'agy-data'), home = path.join(dataDir, 'agy-subs', 'agy-0a1b2c3d'), idx = path.join(home, '.gemini', 'antigravity-cli');
+    fs.mkdirSync(idx, { recursive: true }); fs.writeFileSync(path.join(idx, AS.SUMMARIES), 'one');
+    const ID = '1b4e28ba-2fa1-41d2-883f-0016d3cca427';
+    answer = (cmd, args) => (cmd === nodeName ? { started: true, code: 0, stdout: JSON.stringify({ [home]: [{ id: ID, title: 'Atlas', cwd: '/w', at: 5 }] }) } : prev9(cmd, args));
+    AGY.useStarter(fake); AGY._cache.clear();
+    const N0 = directOf(nodeName), A2 = asked.length;
+    const rows1 = await AGY.discover({ activeSessions: new Map(), harnessId: 'antigravity', dataDir, now: 1e9 });
+    const iq = asked.slice(A2).find((x) => x.cmd === nodeName);
+    fs.writeFileSync(path.join(idx, AS.SUMMARIES), 'two, changed');   // the index changed: asked again past CHECK_MS
+    answer = (cmd, args) => (cmd === nodeName ? { unknown: true } : prev9(cmd, args));
+    const A3 = asked.length;
+    const rows2 = await AGY.discover({ activeSessions: new Map(), harnessId: 'antigravity', dataDir, now: 1e9 + AGY.CHECK_MS + 1 });
+    const again = asked.slice(A3).filter((x) => x.cmd === nodeName).length;
+    ok(rows1.length === 1 && rows1[0].backendSessionId === ID && rows2.length === 1 && rows2[0].backendSessionId === ID && again === 1 && !!iq && iq.args.includes(home) && iq.o.wholeEnv === true
+      && JSON.stringify(Object.keys(iq.o.env || {}).sort()) === '["LANG","PATH"]' && iq.o.timeoutMs === 10000 && iq.o.maxBuffer === 4 * 1024 * 1024 && directOf(nodeName) === N0,
+      `(c) the agy poll's index child asks the handed starter with its WHOLE env {PATH, LANG}, 10 s, 4 MB; a NO-REPLY keeps the last rows (${rows2.length}) and is asked again next time — none from the hub's process`, { rows1: rows1.length, rows2: rows2.length, again, iq: iq && { args: iq.args.length, o: iq.o } });
+    const AGYS = read('src/agy-discover.js'), SESS = read('src/routes/sessions.js');
+    ok(SESS.includes("require('../agy-discover').useStarter(require('../server/child-starter').childStarter());") && !AGYS.includes('child-starter') && AGYS.includes('const runIndexChild = (bin, args, ms) => new Promise((resolve) => {'),
+      '(c) the hub hands it at the sessions route\'s load; the device bundle\'s copy names no starter and keeps its own child (runIndexChild, the census\'s not-hub row)');
+    const OLDAGY = anchored(AGYS, "runChild = null } = {}) {\n  if (!inflight) inflight = refresh(dataDir, now, runChild || (starterRun ? runViaStarter : runIndexChild))", "runChild = runIndexChild } = {}) {\n  if (!inflight) inflight = refresh(dataDir, now, runChild)", 'the release\'s discover');   // stale-pins: kept (the release's text — the leg's RED)
+    const REL = require(M.write('src/agy-discover.js', OLDAGY, 'release-discover'));
+    REL.useStarter(fake);
+    const N1 = directOf(nodeName); await REL.discover({ activeSessions: new Map(), harnessId: 'antigravity', dataDir, now: 2e9 });
+    ok(directOf(nodeName) - N1 === 1, '(c) RED: the release\'s discover starts the index child from the hub\'s process, a starter handed or not (the spy counts it)', { direct: directOf(nodeName) - N1 });
+  } finally { WATCH.delete(nodeName); AGY.useStarter(null); }
+
+  // (d) THE TAILNET LOOKUP (src/plugins/tailscale.js refreshNames: ≤ 1 per 60 s while our daemon runs, fired by a dial by name, a
+  //     browser's PAC / launch, reachFresh) — its body read: the starter, the same bound and buffer, a no-reply a failed read
+  const TSs = read('src/plugins/tailscale.js');
+  const look = (src) => { const i = src.indexOf('    const refreshNames = () => {'), j = src.indexOf('    const namesStale = ', i), b = i < 0 || j < 0 ? '' : src.slice(i, j);
+    return b.includes("require('../server/child-starter').childStarter().run(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeoutMs: 5000, capture: true, maxBuffer: 16 << 20,") && !b.includes('execFile(') && b.includes('if (!took) names.failAt = Date.now();'); };
+  const TSOLD = anchored(TSs, "names.pending = Promise.resolve().then(() => require('../server/child-starter').childStarter().run(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeoutMs: 5000, capture: true, maxBuffer: 16 << 20,",
+    "names.pending = new Promise((resolve) => execFile(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeout: 5000, maxBuffer: 16 << 20,", 'the release\'s lookup');   // stale-pins: kept (the release's text — the leg's RED)
+  ok(look(TSs) && !look(TSOLD), '(d) the tailnet lookup asks the starter (5 s, 16 MB); a no-reply is a failed read (failAt: the last table serves, its time said) — RED: the release\'s text, `status --json` from the hub\'s process');
+  answer = prev9;
+}
 for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 16, label: 'B-323e starts ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
 say(`\n${passed} passed, ${failed} failed`);

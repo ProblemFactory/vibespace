@@ -35,7 +35,7 @@ const LINK = 'only while a machine\'s device link is down: an ssh road on the sh
 const MOUNT = 'a connect or teardown the mount sweep\'s auto-reconnect can still reach (60 s, backed off 1/2/5/10 min) — lane bl-machines-b\'s line 141 moved its probes and its sixteen';
 /** [file, cmd (the first argument as the scan writes it), kind, count, what fires it] — the hub's ASYNC direct starts */
 export const ROWS = Object.freeze([
-  ['src/agy-discover.js', 'bin', 'timer', 1, 'the sessions list\'s poll: ≤1 per 15 s per agy root, when its database changed'],
+  ['src/agy-discover.js', 'bin', 'not-hub', 1, 'runIndexChild, the device agent\'s road — the hub hands its starter at its load (src/routes/sessions.js, B-323e\'s remainder, lane bl-chat-b): the sessions list\'s agy poll never starts from the hub'],
   ['src/app-secrets.js', 'bin', 'press', 1, 'a launch of an app window with a portal'],
   ['src/app-serve.js', 'cmd', 'press', 1, 'the launcher opened, an app planned / installed / removed'],
   ['src/claude-oat-probe.js', "'setpriv'", 'not-hub', 1, 'the self-measure\'s forked child'],
@@ -82,7 +82,6 @@ export const ROWS = Object.freeze([
   ['src/opslog.js', "'sudo'", 'start', 2, 'the ops log\'s CephFS mount at boot (opt-in)'],
   ['src/plugins/frp.js', "'tar'", 'start', 1, 'frpc\'s install (boot replay, a press)'], ['src/plugins/frp.js', 'bin', 'long', 1, 'frpc'],
   ['src/plugins/tailscale.js', 'run[0]', 'press', 1, 'the DNS setting at a start'],
-  ['src/plugins/tailscale.js', 'cli', 'timer', 1, 'the tailnet lookup, ≤1 per 60 s, asked by ssh dials and the tailnet door'],
   ['src/plugins/tailscale.js', 'cmd', 'long', 1, 'tailscaled'], ['src/plugins/tailscale.js', "useSudo ? 'sudo' : cli", 'long', 1, '`tailscale up` (the sign-in)'],
   ['src/remote-fs.js', "'ssh'", 'press', 3, 'Files on an ssh machine (list, read, save, download)'],
   ['src/remoteapp-facts.js', 'how.argv[0]', 'not-hub', 1, 'the device agent'],
@@ -92,7 +91,6 @@ export const ROWS = Object.freeze([
   ['src/routes/files.js', "'unzip'", 'press', 1, 'an archive listed'],
   ['src/routes/files.js', "'tar'", 'press', 4, 'an archive listed, a folder copied or moved'],
   ['src/routes/files.js', "type === 'zip' ? 'unzip' : 'tar'", 'press', 2, 'an archive extracted with progress'],
-  ['src/routes/files.js', "'sh'", 'timer', 1, '`du` ×2 every 1.2 s while a person\'s local folder copy runs (a timer the press starts)'],
   ['src/routes/files.js', "'ssh'", 'press', 3, 'a copy / move to or from a machine'],
   ['src/routes/files.js', "'zip'", 'press', 1, 'a folder downloaded as zip'], ['src/routes/files.js', "'du'", 'press', 1, 'a folder\'s Properties'],
   ['src/server/account-usage-routes.js', "'ssh'", 'press', 2, 'an account deleted, its long-lived token removed / rebound'],
@@ -107,7 +105,6 @@ export const ROWS = Object.freeze([
   ['src/server/child-starter.js', 'cmd', 'timer', 1, 'the OLD ROAD after two faults (≤ an hour a re-arm): every starter request'],
   ['src/server/child-starter.js', 'cmd', 'long', 1, 'the OLD ROAD\'s detached start after two faults: the rclone mount daemon (the start src/mounts.js\'s long row named before lane bl-machines-b\'s 3b9625657)'],
   ['src/server/claude-signin.js', 'file', 'press', 1, 'an account\'s sign-in (a PTY)'],
-  ['src/server/cli-cmd.js', "'/usr/bin/which'", 'timer', 1, 'a MISSING CLI\'s login-shell ask, ≤1 per 30 s while backend-status is polled'],
   ['src/server/cli-cmd.js', 'shell', 'timer', 1, 'the same (the login shell)'],
   ['src/server/cli-env.js', 'CODEX_CMD', 'start', 1, 'the boot\'s codex sandbox probe'],
   ['src/server/cli-registration.js', 'process.execPath', 'press', 1, 'a CLI registration draft'],
@@ -160,7 +157,7 @@ export const SYNC_ROWS = Object.freeze([
     'macOS only, with active usage polling on (opt-in): ≤1 per 5 min (the 90 s timer under the global login floor) + a ⟳ press, ≤3 s, ON THE MAIN LOOP'],
 ]);
 /** THE DEBT: the sum of every timer row's count — it only shrinks (lower it when a row is lowered) */
-export const TIMER_DEBT_SUM = 25;   // 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
+export const TIMER_DEBT_SUM = 21;   // B-323e's remainder (lane bl-chat-b, the coordinator's r2681): the tailnet lookup, the copy's du, the agy poll and the CLI which ride the starter — 25 → 21. 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
 /** a guard is a PLATFORM FACT — the OS, or /proc — never a setting, a flag, an env word */
 export const PLATFORM_GUARD = /^(?:[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)(?:\|[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)*$/;
 const NOT_PLATFORM = /setting|serverSetting|process\.env|\bflag\b|VS_[A-Z_]+|VIBESPACE_[A-Z_]+/i;

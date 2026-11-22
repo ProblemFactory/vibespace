@@ -1288,10 +1288,13 @@ router.delete('/api/file/transfer-status', (req, res) => {
 // -sk × 1024 (macOS hosts have no -b).
 const DU_SH = (p) => { const q = `'${String(p).replace(/'/g, `'\\''`)}'`; return `du -sb ${q} 2>/dev/null | cut -f1 | grep . || du -sk ${q} 2>/dev/null | awk '{print $1*1024}'`; };
 // lane hub-fuse-sync-guard: the destination is wherever the person copies to — a storage mount too — and this runs every
-// 1.2 s for the whole copy: an async stat (never the loop), the walk in a child
+// 1.2 s for the whole copy: an async stat (never the loop), the walk in a child — B-323e's remainder (lane bl-chat-b, r2681):
+// that child asked of the hub's starter, never started from the hub's own process (two a tick: the destination and its partial
+// twin); the same 30 s bound; a no-reply reads 0, as a failed du did — the bar keeps its last value, the copy goes on
 function localDuBytes(p) {
   return fs.promises.stat(p).then((st) => (!st.isDirectory() ? st.size
-    : new Promise((resolve) => execFile('sh', ['-c', DU_SH(p)], { timeout: 30000 }, (e, out) => resolve(parseInt(out, 10) || 0)))), () => 0);
+    : Promise.resolve().then(() => require('../server/child-starter').childStarter().run('sh', ['-c', DU_SH(p)], { timeoutMs: 30000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } }))
+      .then((r) => parseInt(String((r && r.stdout) || ''), 10) || 0, () => 0)), () => 0);
 }
 function remoteDuBytes(inst, host, p) {
   return inst._run(host, DU_SH(p)).then((r) => parseInt(r.stdout ?? r, 10) || 0).catch(() => 0);

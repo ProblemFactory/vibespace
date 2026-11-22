@@ -33,6 +33,7 @@ function tmuxReaderVia(starter = () => require('../server/child-starter').childS
   };
 }
 require('../session-store').useTmuxReader(tmuxReaderVia());
+require('../agy-discover').useStarter(require('../server/child-starter').childStarter());   // B-323e's remainder (r2681): the agy index child from the starter
 
 const {
   cwdToProjectDir, execFileP, isSubagentMessage,

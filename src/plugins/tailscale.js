@@ -167,13 +167,18 @@ module.exports = {
       const cli = tsOurDaemonPid() ? tsBin('tailscale') : null; // a read: never through sudo (status() reads it plain too)
       if (!cli) { names.list = []; return null; }
       names.busy = true; names.pendingAt = Date.now();
-      names.pending = new Promise((resolve) => execFile(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeout: 5000, maxBuffer: 16 << 20 }, (err, out) => {
-        names.busy = false;
-        let took = false;
-        if (!err) { try { takeStatus(JSON.parse(out)); took = true; } catch { } }
-        if (!took) names.failAt = Date.now();
-        resolve(took);
-      }));
+      // B-323e's remainder (lane bl-chat-b, the coordinator's r2681): asked of the hub's starter, never started from the hub's own
+      // process (a start forks the whole hub); the same bound and buffer; a no-reply (the starter's «no answer», a timeout, a cut
+      // output) is a failed read, as a failed `status` was: the last table serves, its time said, and `failAt` holds the next read
+      names.pending = Promise.resolve().then(() => require('../server/child-starter').childStarter().run(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeoutMs: 5000, capture: true, maxBuffer: 16 << 20, envAdd: { PATH: process.env.PATH || '' } }))
+        .then((r) => (r && r.started !== false && !r.unknown && !r.timedOut && !r.overflow && r.code === 0 ? String(r.stdout || '') : null), () => null)
+        .then((out) => {
+          names.busy = false;
+          let took = false;
+          if (out != null) { try { takeStatus(JSON.parse(out)); took = true; } catch { } }
+          if (!took) names.failAt = Date.now();
+          return took;
+        });
       return names.pending;
     };
     /** stale = not read in this hub's life yet (a persisted table at most), or read over a minute ago */

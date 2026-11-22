@@ -54,7 +54,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync, execFile, spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const { serviceEnv } = require('../agent-env');
 const LS = require('../login-shell');
 
@@ -82,7 +82,12 @@ function resolveCmd(name) {
  *  blocks the event loop). */
 function resolveCmdAsync(name) {
   return new Promise((resolve) => {
-    execFile('/usr/bin/which', [name], { encoding: 'utf-8', timeout: 2000 }, async (err, out) => {
+    // B-323e's remainder (lane bl-chat-b, the coordinator's r2681): the `which` asked of the hub's starter, never started from the
+    // hub's own process (a missing CLI is looked up again every RECHECK_MS while its status is polled); the same 2 s bound; a
+    // no-reply is no answer — the hub's own dir walk answers, as after a failed `which`
+    Promise.resolve().then(() => require('./child-starter').childStarter().run('/usr/bin/which', [name], { timeoutMs: 2000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } }))
+      .then((x) => ({ err: !(x && x.started !== false && !x.unknown && !x.timedOut && !x.overflow && x.code === 0), out: String((x && x.stdout) || '') }), () => ({ err: true, out: '' }))
+      .then(async ({ err, out }) => {
       const r = !err && String(out || '').trim();
       if (r && r.startsWith('/')) return resolve(r);
       for (const dir of candidateDirs()) {
