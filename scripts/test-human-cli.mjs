@@ -412,17 +412,24 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     kids.push(w);
     await until(() => fs.existsSync(meta), 10000);
     await sleep(2500);   // whatever the boot wrote is persisted (its 2 s cadence)
-    const size = () => { try { return fs.statSync(buf).size; } catch { return 0; } };
-    const s0 = size(), t0 = Date.now();
+    // THE CADENCE IS THE WHOLE REWRITE'S (主开发 r2066, the hosted run's red): since the wrapper's hold (B-cd4b) every line the wrapper
+    // SAYS is APPENDED to its buffer at once — the said journal, on disk before it is said — so the file's size no longer tells the
+    // cadence. The whole rewrite is tmp + rename (chat-wrapper.js persistBuffer): a NEW INODE; an append keeps the inode
+    const st = () => { try { const x = fs.statSync(buf); return { ino: x.ino, size: x.size }; } catch { return { ino: null, size: 0 }; } };
+    const b0 = st(), t0 = Date.now();
     w.stdin.write('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"torn HCPW\n');   // torn — and no person's CLI follows
-    await until(() => size() > s0, 6000, 20);
+    await until(() => st().size > b0.size, 6000, 20);
+    const appended = st(), appendMs = Date.now() - t0;
+    await until(() => st().ino !== b0.ino, 6000, 20);
     const tornMs = Date.now() - t0;
-    ok('THE 250 ms WINDOW OPENS ONLY ON A RECEIPT ASKED FOR (round 4): a torn line with no CLI following is persisted at the wrapper\'s 2 s cadence (round 3: 250 ms for 2 min — a sync whole-buffer rewrite 8× as often, for nobody)', tornMs >= 1500, `${tornMs} ms`);
-    const t1 = Date.now();
+    ok('…a torn line\'s notice is in the file AT ONCE, by the said journal: an APPEND on the same inode (the wrapper\'s hold), never a rewrite',
+      appended.size > b0.size && appended.ino === b0.ino && appendMs < 1500, `${appendMs} ms, the inode ${b0.ino} → ${appended.ino}`);
+    ok('THE 250 ms WINDOW OPENS ONLY ON A RECEIPT ASKED FOR (round 4): a torn line with no CLI following is REWRITTEN WHOLE at the wrapper\'s 2 s cadence — a new inode (round 3: 250 ms for 2 min — a sync whole-buffer rewrite 8× as often, for nobody)', tornMs >= 1500, `${tornMs} ms`);
+    const i1 = st().ino, t1 = Date.now();
     w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'followed HCPW' }] }, webui_msg_id: 'vs-cli-pw', webui_receipt: true }) + '\n');
-    await until(() => readOr(buf).includes('reply: followed HCPW'), 6000, 20);
+    await until(() => readOr(buf).includes('reply: followed HCPW') && st().ino !== i1, 6000, 20);   // its reply REWRITTEN WHOLE (a new inode), not only appended
     const followedMs = Date.now() - t1;
-    ok('…a frame that ASKS for a receipt (a person\'s CLI follows) opens it: its reply is in the buffer well inside the 2 s cadence', followedMs < 1500, `${followedMs} ms`);
+    ok('…a frame that ASKS for a receipt (a person\'s CLI follows) opens it: the buffer is REWRITTEN WHOLE with its reply (a new inode) well inside the 2 s cadence', followedMs < 1500, `${followedMs} ms`);
     w.kill('SIGTERM');
     await until(() => w.exitCode != null || w.signalCode != null, 5000);
   }
