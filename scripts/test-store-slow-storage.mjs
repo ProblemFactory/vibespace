@@ -514,7 +514,7 @@ if (!OTHER && leg('i')) {
     const first = m[3] ? +m[3] : 0, debtMs = m[4] ? +m[4] : null, names = (m[2] || '').split(', ');
     const markCode = await Promise.race([pm, sleep(100).then(() => 'no answer (the process ended)')]);
     table.runs[tag] = { crashMs, line, onDisk, first, debtMs, warm, markCode, prime }; save();
-    info(`(i) ${prime ? '' : 'RED scene, '}crashed ${crashMs != null ? `→ gone in ${(crashMs / 1000).toFixed(1)} s` : '(never ended in 60 s)'}; ${line || '(no exit line)'}; the act ${onDisk ? 'ON disk' : 'NOT on disk'}`);
+    info(`(i) ${patch ? 'RED scene (no rank-0 pass), ' : prime ? '' : 'CONTROL scene, '}crashed ${crashMs != null ? `→ gone in ${(crashMs / 1000).toFixed(1)} s` : '(never ended in 60 s)'}; ${line || '(no exit line)'}; the act ${onDisk ? 'ON disk' : 'NOT on disk'}`);
     return { crashMs, line, onDisk, first, debtMs, names, log, law: crashMs != null && first >= 1 && /channels-acts\.write/.test(names.slice(0, first).join(',')) && onDisk && !/NOT written|bound|signal|shutdown's/.test(line) && !/exit after the crash: [\d.]+ s after the crash/.test(log) };
   }
   };
@@ -522,9 +522,10 @@ if (!OTHER && leg('i')) {
   if (r) ok(r.law, `(i) LAW 2 on the crash path: the act (rank 0) written FIRST — before the crash road's own unmoved stores (${r.debtMs} ms of census debt) — on disk; nothing left, and the process ended BY ITSELF ${r.crashMs} ms after the crash (no keeper: inside the grace)`, { line: r.line, onDisk: r.onDisk, crashMs: r.crashMs });
   // ITS CONTROL (the scene, r2248): no first act (the one-lane scene). On the two lanes the probed act's append is IN FLIGHT at the crash
   // (an append fsyncs, at 500 ms a call), so the exit's in-flight pass settles it — a pass the exit line does not count as first — and
-  // nothing is owed for rank 0: the same check fails here, so the leg above measures an act that IS owed
+  // the ACT is owed for no rank-0 pass: the same check fails here, so the leg above measures an act that IS owed. Another rank-0 store
+  // may still go first (box row 349 at d5128b563: the status write, owed at the crash) — the control judges the act, not the count
   const r0 = await crashScene('crash500-unprimed', false);
-  if (r0) ok(!r0.law && r0.onDisk && r0.first === 0, `(i) CONTROL (the scene without its first act): the act's append was in flight at the crash and settled by the exit's in-flight pass, uncounted as first (on disk: ${r0.onDisk}; first ${r0.first}) — the check above fails here, as it must`, { line: r0.line, onDisk: r0.onDisk, first: r0.first });
+  if (r0) ok(!r0.law && r0.onDisk && !r0.names.slice(0, r0.first).includes('channels-acts.write'), `(i) CONTROL (the scene without its first act): the act's append was in flight at the crash and settled by the exit's in-flight pass — the act NOT among the exit's first writes (on disk: ${r0.onDisk}; first ${r0.first}${r0.first ? ': ' + r0.names.slice(0, r0.first).join(', ') : ''}) — the check above fails here, as it must`, { line: r0.line, onDisk: r0.onDisk, first: r0.first });
   // ITS RED (the LAW, r2248): the booted copy's crash road with its rank-0 pass REMOVED, so the owed act is written only by the last pass,
   // after the road's own unmoved stores (the census debt) — the check above must fail on the order itself
   const NO_RANK0 = (wt) => { const f = path.join(wt, 'server.js'), s = fs.readFileSync(f, 'utf8'), a = "w0.beginExit({ crash: true }); w0.exitFlush({ only: 'rank0' }); }"; if (s.split(a).length !== 2) throw new Error('the anchor of the red «no rank-0 pass on the crash road» is not in the booted server.js'); fs.writeFileSync(f, s.replace(a, 'w0.beginExit({ crash: true }); }')); };
