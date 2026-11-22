@@ -70,6 +70,24 @@ try { again = fs.readFileSync(fd, 'utf8'); } catch (e) { again = 'ERR:' + e.code
 let fd3 = ''; try { fd3 = fs.readlinkSync('/proc/self/fd/3'); } catch { fd3 = ''; } // node keeps its own fds (eventpoll …) — a SOCKET at 3 is the hub's channel
 const gotF = path.join(out, 'got-' + process.pid + '.json');   // int374 (B-b1f5): written whole, then renamed in — the suite polls this dir
 fs.writeFileSync(gotF + '.tmp', JSON.stringify({ v, again, fd3, pid: process.pid })); fs.renameSync(gotF + '.tmp', gotF);
+if (process.env.CHILDHALF) {   // F11 (stage L3, 主开发 r2552): the main writes a long lead and the value's first half and ENDS 100 ms later; a child of its group writes the second half when the end's drain signals it
+  const half = Math.floor(v.length / 2), h2 = path.join(out, 'half2'), ready = path.join(out, 'child-ready');
+  fs.writeFileSync(h2, v.slice(half));
+  const src = 'const fs = require("fs"); const h = fs.readFileSync(process.argv[1], "utf8"); const say = () => { fs.writeSync(1, h + " rest" + String.fromCharCode(10) + "y".repeat(4000) + String.fromCharCode(10)); process.exit(0); }; process.on("SIGTERM", say); fs.writeFileSync(process.argv[2], "1"); setTimeout(say, 4000);';
+  require('child_process').spawn(process.execPath, ['-e', src, h2, ready], { stdio: ['ignore', 'inherit', 'inherit'] });
+  for (let i = 0; i < 500 && !fs.existsSync(ready); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  process.stdout.write('lead ' + 'x'.repeat(4000) + ' ' + v.slice(0, half));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  process.exit(0);
+}
+if (process.env.PIECES) {   // F10 (stage L3, 主开发 r2524): a long lead, then the value in TWO pieces — the leg holds the quiet between them
+  const half = Math.floor(v.length / 2), waitFor = (f) => { for (let i = 0; i < 600 && !fs.existsSync(path.join(out, f)); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15); };
+  process.stdout.write('lead ' + 'x'.repeat(4000) + ' ' + v.slice(0, half));
+  waitFor('piece2');
+  process.stdout.write(v.slice(half) + ' rest\\n' + 'y'.repeat(4000) + '\\nbegins ' + v.slice(0, half));   // a window's worth after it (the masker reads a window at a time); at the pipe's end, a text that only BEGINS like it
+  waitFor('release');
+  process.exit(0);
+}
 console.log('plain ' + v); console.log('b64 ' + Buffer.from(v).toString('base64')); console.log('hex ' + Buffer.from(v).toString('hex'));
 console.log('url ' + encodeURIComponent(v)); console.error('err ' + v);
 for (let i = 0; i < 200 && !fs.existsSync(path.join(out, 'release')); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
@@ -172,6 +190,55 @@ async function legHanded() {
   const u = W.uses(job.id);
   row(W.built.length === 2 && W.built.every((b) => b.length > 0 && b.every((x) => x === 0)), 'every frame the door built (the gate\'s check, the one handed to the wrapper) is zeroed once used', W.built.map((b) => b.length));
   row(u.length === 1 && u[0].by === 'job' && u[0].outcome === 'ok' && /^vr-[0-9a-f]+$/.test(u[0].receipt) && u[0].conv === 'conv-a' && formsAbsent(W.audit(), S), 'ONE vault-use line per start (door service, by job, the owner conversation, a receipt) — the audit holds no value', u);
+  W.end();
+  return rows;
+}
+// F10 (stage L3, lane bl-proposals; 主开发 r2524): A VALUE IN TWO PIECES WITH A QUIET BETWEEN THEM never lands — the wrapper keeps
+// each pipe's tail (the window a value could still begin in) until the next piece or the pipe's end; a quiet releases text, never
+// that tail. The scene: a 4 000-character lead and the value's first half, a quiet the leg holds (past the release's 400 ms flush
+// and a margin), then the second half; at the pipe's end a text that only BEGINS like the value. RED: the release's quiet flush
+async function legPieces(wrap = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(wrap ? 'piecem' : 'piece', wrap ? { wrap } : {}), S = SENT('piece'), half = Math.floor(S.length / 2);
+  W.put(S);
+  const job = W.jm.jobs.get(W.create({ env: { PIECES: '1' } }).job.id);
+  await W.until(() => W.got().length === 1);
+  const logOf = () => { try { return fs.readFileSync(job.runs[job.runs.length - 1].log, 'utf8'); } catch { return ''; } };
+  const written1 = 'lead ' + 'x'.repeat(4000) + ' ' + S.slice(0, half);
+  const released = await W.untilMs(() => logOf().includes('lead x'), 4000);   // what is decided is released at once (the lead's head)
+  await nap(900);   // THE QUIET (its claim): past the release's 400 ms flush, with a margin for that flush to have landed
+  const atQuiet = logOf(), mine = atQuiet.slice(Math.max(0, atQuiet.indexOf('lead ')));
+  rows.quietHalf = atQuiet.includes(S.slice(0, half));
+  const lag = written1.length - mine.length;
+  row(released.ok && written1.startsWith(mine) && !rows.quietHalf && lag >= half + 1 && lag <= 4000,
+    'F10 — AT A QUIET the log lags by the tail a value could still begin in: the lead\'s head is released, the value\'s first piece is NOT (the log is a prefix of what was written, short of it)', { released, lag, half, logged: mine.length, written: written1.length });
+  fs.writeFileSync(path.join(W.root, 'out', 'piece2'), '1');
+  const second = await W.untilMs(() => logOf().includes(' rest'), 4000);
+  const afterTwo = logOf();
+  rows.whole = afterTwo.includes(S);
+  row(second.ok && !rows.whole && formsAbsent(afterTwo, S) && afterTwo.includes(' [vault:TOK] rest'), 'F10 — THE SECOND PIECE: the value is masked WHOLE across the quiet ([vault:TOK]) — no spelling of it in the log', afterTwo.slice(Math.max(0, afterTwo.indexOf(' rest') - 60), afterTwo.indexOf(' rest') + 8));
+  W.release();
+  await W.until(() => job.state === 'done');
+  const atEnd = logOf();
+  rows.wholeAtEnd = atEnd.includes(S);
+  row(!rows.wholeAtEnd && formsAbsent(atEnd, S) && atEnd.includes('begins ' + S.slice(0, half)), 'F10 — AT THE PIPE\'S END the masker ends: a trailing text that only BEGINS like the value is the job\'s own words (written as it came), and the log holds no spelling of the value', atEnd.slice(Math.max(0, atEnd.indexOf('begins ')), atEnd.indexOf('begins ') + 7 + half));
+  W.end();
+  return rows;
+}
+// F11 (stage L3, lane bl-proposals; 主开发 r2552): ONE MASKER FOR THE PIPES' WHOLE LIFE — the release ended it at the MAIN's exit
+// event and a fresh one took what the job's group wrote during the drain. The scene: the main writes a 4 000-character lead and the
+// value's first half, ends 100 ms later (under the 400 ms quiet); its child writes the second half when the end's drain signals it.
+// RED: the release's flush at the exit event put back
+async function legChildHalf(wrap = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(wrap ? 'chalfm' : 'chalf', wrap ? { wrap } : {}), S = SENT('chalf');
+  W.put(S);
+  const job = W.jm.jobs.get(W.create({ env: { CHILDHALF: '1' } }).job.id);
+  const ended = await W.untilMs(() => ['done', 'failed', 'interrupted'].includes(job.state), 12000);
+  let log = ''; try { log = fs.readFileSync(job.runs[job.runs.length - 1].log, 'utf8'); } catch { }
+  let wrote = false; try { wrote = fs.existsSync(path.join(W.root, 'out', 'half2')); } catch { }
+  rows.whole = log.includes(S);
+  row(ended.ok && wrote && !rows.whole && formsAbsent(log, S) && log.includes(' [vault:TOK] rest'), 'F11 — a value whose second half the job\'s CHILD writes AFTER THE MAIN ENDED (at the end\'s drain, under the old 400 ms quiet) is masked WHOLE: one masker for the pipes\' whole life, ended at their end', { ended, state: job.state, rest: log.includes(' rest'), placeholder: log.includes('[vault:TOK]') });
   W.end();
   return rows;
 }
@@ -1408,6 +1475,10 @@ async function mutant(name, { jobs = null, wrap = WRAP_SRC }, red) {
 }
 const ENV_AT = '...(vj ? VJ.envOf(vj.plan) : {})', SPEC_AT = '...(vj ? { vault: VJ.specOf(vj.plan) } : {}),', ARGV_AT = "[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]";
 const leak = "vj.door.payload(vj).frame.toString('latin1').replace(/[^\\x20-\\x7e]/g, '')";   // printable: an env value / argv may hold no NUL
+// F11's control: THE RELEASE'S FLUSH AT THE MAIN'S EXIT EVENT — the masker ended there, a fresh one takes what the drain brings
+const EXIT_FLUSH = (() => { try { return swap(WRAP_SRC, '  // protocol 3: the value masker does NOT end at the exit event', '  if (VAL) { const f = flushMask(); if (f.length) writeLog(f); }\n  // protocol 3: the value masker does NOT end at the exit event'); } catch { return null; } })();
+// F10's control: THE RELEASE'S QUIET FLUSH — every 400 ms quiet ends the masker (its tail passed out) and a fresh one takes the rest
+const QUIET_FLUSH = (() => { try { return swap(WRAP_SRC, '  if (vmask && vmask.over) { vquiet = setTimeout(() => { vquiet = null; if (vmask && vmask.over) {', '  if (true) { vquiet = setTimeout(() => { vquiet = null; if (true) {'); } catch { return null; } })();
 const MUTANTS = [
   ['the value in spec.env', { jobs: swap(JOBS_SRC, ENV_AT, `...(vj ? { ...VJ.envOf(vj.plan), TOK_COPY: ${leak} } : {})`) }, (f) => f.procs.includes(f.S)],
   ['the value in the spec file', { jobs: swap(JOBS_SRC, SPEC_AT, `...(vj ? { vault: VJ.specOf(vj.plan), copy: ${leak} } : {}),`) }, (f) => f.written],
@@ -1474,9 +1545,10 @@ const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'fun
 const MUT_NOSLOT = dmut('    if (lateHere || !(await take())) throw LATE;', '    if (lateHere) throw LATE;');
 const MUT_VALUEPROG = dmut('function pastWrapper(argv, i) {\n', "function pastWrapper(argv, i) {\n  if (argv[i + 1] === '-s') return i + 2;\n");
 const [oneSlot, oneSlotMut, heldSaid, wrapMut] = await Promise.all([legOneSlot(), MUT_NOSLOT ? legOneSlot(MUT_NOSLOT) : null, legHeldSaid(), MUT_VALUEPROG ? legWrapperSkip(MUT_VALUEPROG) : null]);
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
-  legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {}]);
+  legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {},
+  legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1484,6 +1556,10 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const print = (title, rows) => { console.log(title); for (const [c, n, e, judged] of rows) { ok(c, n, e); if (Array.isArray(judged)) { console.log(`      judged (${judged.length} line(s)):`); for (const l of judged.slice(0, 12)) console.log('        ' + String(l).slice(0, 240)); } } };   // a leg that judges journal / audit lines prints them
 print('① HANDED, NEVER LEFT LYING', handed);
+print('①b A VALUE IN TWO PIECES WITH A QUIET BETWEEN THEM (F10 of stage L3, 主开发 r2524)', pieces);
+ok(!!QUIET_FLUSH && piecesMut.quietHalf === true && piecesMut.whole === true, 'CONTROL — the release\'s quiet flush (every 400 ms quiet ends the masker): the first piece is written at the quiet and the value lands WHOLE in the log — RED on the copy', QUIET_FLUSH ? { quietHalf: piecesMut.quietHalf, whole: piecesMut.whole } : 'the copy could not be built (its anchor is missing)');
+print('①c A VALUE WHOSE SECOND HALF THE JOB\'S CHILD WRITES AFTER THE MAIN ENDED (F11 of stage L3, 主开发 r2552)', childHalf);
+ok(!!EXIT_FLUSH && childHalfMut.whole === true, 'CONTROL — the release\'s flush at the MAIN\'s exit event (the masker ended there, a fresh one for the drain): the value lands WHOLE in the log — RED on the copy', EXIT_FLUSH ? { whole: childHalfMut.whole } : 'the copy could not be built (its anchor is missing)');
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);
 console.log('④ A LOCKED BOOT WAITS (the frp class)');

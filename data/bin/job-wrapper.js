@@ -222,9 +222,9 @@ function writeLog(buf) {
 // given vault values (protocol 3, lane vault-job-road — design-vault-service-secret D5; q-043 ① reworded: a job holds a
 // stored value only once the owner approved it for that job — or it is its own conversation's PUT value — and the value
 // passes nothing that prints by accident) is masked by VALUE first — THIS run's values, every spelling of
-// src/vault-run.js's FORMS over one window for both pipes — then by shape; a job with none by shape alone. Residuals (said in the design §8.6 ③): a value
-// split across two reads, or between stdout and stderr, and a non-UTF-8 (binary) chunk pass — a credential is text, and
-// mangling binary output would break a legitimate job. Best-effort: if the module cannot be required the write is never
+// src/vault-run.js's FORMS over one window for both pipes — then by shape; a job with none by shape alone. Residuals of the
+// SHAPE road (a job given no values; the design §8.6 ③): a shape split across two reads, or between stdout and stderr, and a
+// non-UTF-8 (binary) chunk pass — a credential is text, and mangling binary output would break a legitimate job. Best-effort: if the module cannot be required the write is never
 // lost (the masker is a hardening layer, not the log's existence).
 let SHAPE = null, SHAPE_MAX = 64 * 1024;
 try { const m = require(path.join(__dirname, '..', '..', 'src', 'secret-shapes.js')); SHAPE = m.redactSecrets; SHAPE_MAX = m.INPUT_MAX || SHAPE_MAX; } catch { SHAPE = null; }
@@ -237,11 +237,24 @@ function maskChunk(buf) {
   return out === text ? buf : Buffer.from(out, 'utf8');
 }
 // THE VALUE MASKER (protocol 3): this run's values in every spelling, both pipes in arrival order (createRunMasker — the run
-// door's own), then the shapes; what it keeps back (the tail a value could still begin in) is flushed MASKED after a short
-// quiet and at the end; a fresh masker takes what comes after (the residual: a value the job writes in two pieces with a
-// quiet between them is two pieces to the masker — the run door's own floor, design §8.6 ③). Text only: a
-// job given values has its log decoded as UTF-8 (a value is text).
-let VAL = null, vmask = null, vdec = null, vquiet = null;
+// door's own), then the shapes. What it keeps back — the tail a value could still begin in (its last window: the longest
+// spelling's length less one, and until a window's worth has come) — waits for the NEXT PIECE or the PIPES' END, never for a
+// clock: a quiet releases nothing of it (stage L3's F10, 主开发 r2524: a value the job wrote in two pieces with a 400 ms quiet
+// between them was flushed at the quiet — its first piece unmasked — and a fresh masker took the rest: the value landed WHOLE
+// in the log; the design keeps the window for exactly that split, the run door's masker ends only at its run's end). The log
+// lags by that tail at a quiet; a value never lands. ONE MASKER FOR THE PIPES' WHOLE LIFE (主开发 r2552, stage L3's F11 — the
+// release also ended it at the MAIN's exit event and a fresh masker took what the job's group wrote during the drain: a value
+// whose second half a child wrote after the main ended landed whole): it ends ONCE, at the PIPES' END — the child's `close`, every
+// writer of them gone (bounded by PIPES_END_MS after the drain: a writer that escaped holds them open) — a natural end there: a
+// trailing text that merely BEGINS like a value is the job's own words; nothing the pipes bring after that end is written. The
+// one quiet it keeps: a masker past its scan's work bound (`over` — it handed on its words once, keeps nothing and hands on
+// nothing: what it withheld is gone, so no part of a value carries over) is retired at the next quiet and a fresh one takes what
+// comes after, so a service's log goes on. Text only: a job given values has its log decoded as UTF-8 (a value is text).
+let VAL = null, vmask = null, vdec = null, vquiet = null, vEnded = false;
+const PIPES_END_MS = 2000;   // F11: after the drain, how long the masker's ONE end waits for the pipes' end (every writer gone)
+let pipesClosed = false;
+const pipeWaiters = [];
+const pipesEnd = (ms) => (pipesClosed ? Promise.resolve(true) : new Promise((res) => { const t = setTimeout(() => res(false), ms); pipeWaiters.push(() => { clearTimeout(t); res(true); }); }));
 const { StringDecoder } = require('string_decoder');
 function vaultMasker() {
   if (!vmask) {
@@ -263,11 +276,13 @@ function flushMask() {
 }
 function maskOut(k, b) {
   if (!VAL) return maskChunk(b);
+  if (vEnded) return Buffer.alloc(0);   // F11: after the masker's ONE end nothing more is written (a fresh window would hand on a value's rest)
   let o;
   try { const m = vaultMasker(); const text = vdec[k].write(b); o = text ? m.push(k, text) : {}; }
   catch { return Buffer.from('[job-wrapper] output withheld: the value masker failed on it\n'); }
-  if (vquiet) clearTimeout(vquiet);
-  vquiet = setTimeout(() => { vquiet = null; const f = flushMask(); if (f.length) writeLog(f); }, 400); vquiet.unref?.();
+  if (vquiet) { clearTimeout(vquiet); vquiet = null; }
+  // ONLY a masker past its work bound is retired at a quiet: it keeps nothing (its end gives nothing) — a healthy one keeps its tail
+  if (vmask && vmask.over) { vquiet = setTimeout(() => { vquiet = null; if (vmask && vmask.over) { const f = flushMask(); if (f.length) writeLog(f); } }, 400); vquiet.unref?.(); }
   return shaped((o.out || '') + (o.err || ''));
 }
 process.on('exit', () => { if (VAL) for (const v of VAL) v.fill(0); });
@@ -427,6 +442,8 @@ function launch() {
   child.stderr.on('data', keepTail);
   child.on('exit', (code, signal) => { if (c === child && (proven || !gated)) ended(code, signal); });
   child.on('close', (code, signal) => { if (c === child && gated && !proven) fellThrough(r, code, signal); });
+  pipesClosed = false;
+  child.on('close', () => { if (c === child) { pipesClosed = true; for (const f of pipeWaiters.splice(0)) f(); } });   // F11: THE PIPES' END — every writer of them gone
   if (!gated) { boundRec = { mb: memMb, askedMb, by: 'none', why: r.why, ...(hubCap ? { cap: hubCap } : {}) }; writeBound(); startSampler(); return; }
   child.stdio[3].on('error', () => { });
   if (r.by === 'cgroup' && !r.policy) { // the keeper's PID, said before the job runs (round 6)
@@ -1127,7 +1144,8 @@ async function drainGroup() {
 async function ended(code, signal) {
   if (exited) return;
   exited = true;
-  if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // protocol 3: what the value masker held back, masked
+  // protocol 3: the value masker does NOT end at the exit event — the job's group may still write the rest of a value during the
+  // drain (F10, F11); it ends ONCE below, at the pipes' end
   if (!stopping) markStopping('drain'); // round 10: what the job left hears its SIGTERM from us — the engine's stop then signals us alone
   // round 7: the stop in flight, whatever ran first. Round 8: the intent is a stop the engine MEANT — its group signal reaches us
   // too: waited a little; heard ⇒ the engine's (our handler said so); not heard ⇒ nobody delivered it — we do, the grace from now
@@ -1144,7 +1162,7 @@ async function ended(code, signal) {
   const named = memory.cause === 'oom-bound' ? ` — stopped: used more than ${memory.mb >= 1024 ? Math.round(memory.mb / 102.4) / 10 + ' GB' : memory.mb + ' MB'} (${memory.how})`
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
   const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '');
-  if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // …and what came on the pipes after the exit event, masked
+  if (VAL) { await pipesEnd(PIPES_END_MS); const f = flushMask(); vEnded = true; if (f.length) writeLog(f); } // protocol 3: THE ONE END of the value masker, at the pipes' end — what it held back, masked
   try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
   writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(mainWasHub ? { hubMain: true } : {}), ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: drained.scopeUnread } : {}) } : {}) });
   process.exit(code === null ? 143 : code);
