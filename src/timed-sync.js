@@ -60,6 +60,8 @@ const STORES = Object.freeze({
   'channels-wake-pace.write': row('write', 'channels/wake-pace', 'src/channel-store.js', ['paceSet']),   // lane lg-store-writes (B-0248 U3): the groups' wake-pace ledger — paced
   'channels-dispatch.write': row('write', 'channels/dispatch-ledger', 'src/channel-store.js', ['dispatchSet']),   // lane lg-store-writes (B-0248 U3): the dispatch ledger — an act
   'channels-people.write': row('write', 'channels/<account>/people', 'src/channel-store.js', ['peopleWrite']),
+  'channels-search-memo.write': row('write', 'channels/<account>/search-memo', 'src/channel-store.js', ['searchMemoWrite']),   // B-360d r1360: the vendor-search memo, through the store writer (its thread makes the account's directory)
+  'channels-feed-miss.write': row('write', 'channels/<account>/feed-misses', 'src/channel-store.js', ['feedMissWrite']),   // B-360d r1360: the change feed's miss memo, the same road
   'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),
   'decision-memo.write': row('write', 'decision-memo', 'src/server/decision-engine.js', ['saveMemo']),   // through the store writer (lane lg-store-writes, B-0248 U1: the judge's memo — paced, the hub's own cache)
   'decision-usage.write': row('write', 'decision-usage', 'src/server/decision-engine.js', ['saveUsage']),   // through the store writer (lane lg-store-writes, B-0248 U1: the day's counter — money, an act)

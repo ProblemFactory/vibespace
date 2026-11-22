@@ -2379,7 +2379,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   // channel-store-off-loop (commit 1): PACED — the names an adapter learned (re-learned after a loss); the writer's thread
   // makes the account's directory (0700) when it is new — the field's 75 s were that mkdir on the main thread. Cure r1: ONLY
-  // this door asks for it (`makeDir`) — every other store whose directory is gone fails its write ENOENT, said, as before
+  // the doors that ask for it (`makeDir`: this one, and since B-360d r1360 the vendor-search and feed-miss memos) — every other
+  // store whose directory is gone fails its write ENOENT, said, as before
   const peopleFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'people.json');
   function peopleWrite(adapterId, memo) {
     const out = { self: memo && typeof memo.self === 'string' ? memo.self : null, people: memo && memo.people && typeof memo.people === 'object' ? memo.people : {} };
@@ -2393,18 +2394,34 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  does not forget it. Written whole (0600, atomic) by the engine on each remembered answer; read once at its first
    *  use; DROPPED with the account (a disconnect, a removal — the engine's dropLive). */
   const searchMemoFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'search-memo.json');
+  // B-360d r1360 (the owner's hub's loop-hold digest, 2026-11-21: 3 holds were this door's mkdir at a vendor search, on
+  // the data folder's network share): THE TWO MEMOS ARE OWED TO THE STORE WRITER (its thread makes the account's directory
+  // — `makeDir`, the people door's road), their truth in memory meanwhile (a read answers the owed memo); a drop forgets
+  // an owed write (one in flight lands, then the file is unlinked again on the writer's thread — a dropped memo never
+  // comes back), then unlinks, as before. The first read of an account's memo is still the file's (once a process).
+  // its read (M6): a DROP leaves a TOMBSTONE (null) — a write in flight may land its rename after the unlink and before the
+  // writer's own unlink: a read meanwhile answers null (never the dropped memo), and a new memo replaces the tombstone
+  const memoHeld = new Map();   // file → the memo object the writer owes (or wrote) · null = dropped
+  const memoBytes = (file) => () => { const v = memoHeld.get(file); return v ? JSON.stringify(v, RUNTIME_KEYS, 1) : null; };
+  function memoRead(file) {
+    if (memoHeld.has(file)) return memoHeld.get(file);
+    try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return null; }
+  }
+  const memoForget = (file) => { memoHeld.set(file, null); try { W().forget(file); } catch { } };   // before the unlink
   function searchMemoRead(adapterId) {
     if (!safeSeg(adapterId)) return null;
-    try { return JSON.parse(fs.readFileSync(searchMemoFile(adapterId), 'utf-8')); } catch { return null; }
+    return memoRead(searchMemoFile(adapterId));
   }
   function searchMemoWrite(adapterId, obj) {
     if (!safeSeg(adapterId)) return false;
-    fs.mkdirSync(path.join(dir, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
-    writeJsonAtomic(searchMemoFile(adapterId), obj, { mode: 0o600 });
+    const file = searchMemoFile(adapterId);
+    memoHeld.set(file, obj);
+    owe(file, { name: 'channels-search-memo.write', produce: memoBytes(file), mode: 0o600, makeDir: true });
     return true;
   }
   function searchMemoDrop(adapterId) {
     if (!safeSeg(adapterId)) return false;
+    memoForget(searchMemoFile(adapterId));
     try { fs.unlinkSync(searchMemoFile(adapterId)); return true; } catch { return false; }
   }
   /** lane lark-search-miss: THE CHANGE FEED'S MISS MEMO (`<account>/feed-misses.json`, beside search-memo.json) — the
@@ -2413,16 +2430,18 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const feedMissFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'feed-misses.json');
   function feedMissRead(adapterId) {
     if (!safeSeg(adapterId)) return null;
-    try { return JSON.parse(fs.readFileSync(feedMissFile(adapterId), 'utf-8')); } catch { return null; }
+    return memoRead(feedMissFile(adapterId));
   }
-  function feedMissWrite(adapterId, obj) {
+  function feedMissWrite(adapterId, obj) {   // B-360d r1360, ALSO CURED: the search memo's twin (the same mkdir + atomic write)
     if (!safeSeg(adapterId)) return false;
-    fs.mkdirSync(path.join(dir, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
-    writeJsonAtomic(feedMissFile(adapterId), obj, { mode: 0o600 });
+    const file = feedMissFile(adapterId);
+    memoHeld.set(file, obj);
+    owe(file, { name: 'channels-feed-miss.write', produce: memoBytes(file), mode: 0o600, makeDir: true });
     return true;
   }
   function feedMissDrop(adapterId) {
     if (!safeSeg(adapterId)) return false;
+    memoForget(feedMissFile(adapterId));
     try { fs.unlinkSync(feedMissFile(adapterId)); return true; } catch { return false; }
   }
   /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
@@ -2440,6 +2459,29 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (l.items[k]) { l.items[k].usedAt = now(); lruTouch(adapterId); }
     return { file, meta };
   }
+  /** B-360d r1360 (the loop-hold digest: 2 holds were ingest's held bodies asking attachmentGet — a synchronous open of a
+   *  meta on the network share, per attachment): THE SAME ANSWER OFF THE LOOP — the meta and the bytes' stat on the thread
+   *  pool, the account's LRU ledger read the same way at its first use. For ingest's road (persistHeldBodies). */
+  async function lruOfAsync(adapterId) {
+    if (lruCache.has(adapterId)) return lruCache.get(adapterId);
+    let l = null;
+    try { l = JSON.parse(await fs.promises.readFile(lruFile(adapterId), 'utf-8')); } catch { l = null; }
+    if (lruCache.has(adapterId)) return lruCache.get(adapterId);   // a synchronous first read won meanwhile
+    if (!l || typeof l !== 'object' || !l.items || typeof l.items !== 'object') l = { v: 1, items: {} };
+    lruCache.set(adapterId, l);
+    return l;
+  }
+  async function attachmentGetAsync(adapterId, convId, attId, msg = null) {
+    const file = path.join(attDir(adapterId, convId), attSlot(attId, msg));
+    let meta;
+    try { meta = JSON.parse(await fs.promises.readFile(file + '.json', 'utf-8')); } catch { return null; }
+    try { await fs.promises.stat(file); } catch { return null; }
+    const l = await lruOfAsync(adapterId);
+    const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];
+    if (hit) { hit.usedAt = now(); lruTouch(adapterId); }   // attachmentGet's touch on the async road, in words of its own (test-channels-images anchors the synchronous one)
+    return { file, meta };
+  }
+
   /** Store ONE attachment (0600, beside its meta) and evict the account's
    *  least-recently-used files down to `budgetBytes` — never the one just
    *  written. Returns (a Promise of) `{file, meta, evicted:[keys], totalBytes}`.
@@ -2536,7 +2578,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // waited for again, never a rejection); a PACED door (a bookkeeping stamp) resolves after the change in memory. After
   // close() — and for a synchronous caller — the bytes go through the writer at once and are waited for (`writeNow`).
   // NOT MOVED here, rows that only fall (scripts/test-store-write-census.mjs): lru, the
-  // attachment metas, search-memo, feed-miss, the message-log and audit appends, the outbox files' removal; and the
+  // attachment metas (search-memo and feed-miss moved by B-360d r1360), the message-log and audit appends, the outbox files' removal; and the
   // poll-stamps JOURNAL's append and fold (a named exception: a kill must keep every stamp — see the journal's note).
   const moved = new Set();   // the files this store handed to the writer (close() flushes them through it)
   function owe(file, { name, produce, mode, act = false, onWritten, makeDir = false } = {}) {
@@ -2943,7 +2985,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     startDamagedEmpty,   // B-f276 1b: the damaged family's one door (a person's choice — the engine's route asks it)
     appendRecords, readTail, readTailAsync, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
-    prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
+    prependRecords, oldestRecord, search, attachmentGet, attachmentGetAsync, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
     searchMemoRead, searchMemoWrite, searchMemoDrop,
     feedMissRead, feedMissWrite, feedMissDrop,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush

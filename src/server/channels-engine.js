@@ -5663,7 +5663,7 @@ function create(deps = {}) {
         const h = take(r.vendorId, a.id);
         if (!h || !h.data) continue;
         try {
-          if (store.attachmentGet(rec.id, convId, a.id, r.vendorId)) continue;
+          if (await store.attachmentGetAsync(rec.id, convId, a.id, r.vendorId)) continue;   // B-360d r1360: off the loop (a meta's open on the share held it)
           await store.attachmentPut(rec.id, convId, a.id, { msg: r.vendorId, data: h.data, name: peerName(a.name, 256) || null, mime: h.mime || a.mime || 'text/html' }, { budgetBytes: attachmentBudgetBytes() });
         } catch (err) { log.warn(`[channels] ${rec.id}: keeping the formatted body of ${r.vendorId} failed (${(err && err.message) || err}) — the window fetches it on demand`); }
       }

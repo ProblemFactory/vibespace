@@ -5298,6 +5298,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     const v = N.eng.adapterView(N.eng.adapterRecords().adapters[0]).feed;
     const by = Object.fromEntries((v.misses || []).map((x) => [x.id, x]));
     const file = path.join(dN, 'channels', 'feedy', 'feed-misses.json');
+    await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(file);   // B-360d r1360: the memo is the store writer's write now (its pace), never on disk the instant the pass ends
     const disk = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : null;
     ok(by['n-sys-0'] && by['n-sys-0'].cls === 'excluded-type' && by['n-lost'] && by['n-lost'].cls === 'lag' && by['n-ops-lost'] && by['n-ops-lost'].cls === 'lag' && v.missUncounted['excluded-type'] === 3 && v.measured.missed === 2 && v.misses.length === 5,
       `(I2) every miss is NAMED with its class — 3 system records (not counted: the search does not return them) + 2 lag misses counted (${v.measured.missed} of ${v.measured.total})`, JSON.stringify({ misses: v.misses, un: v.missUncounted, m: v.measured }));
