@@ -751,7 +751,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
       try { fs.unlinkSync(t); } catch { }
       return { code, whole: fs.readFileSync(f, 'utf8') === '{"v":1,"a":"whole"}' };
     };
-    const fresh = (tag) => MC.load('src/store-writer-worker.js', anchored(WSRC, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };   // a fresh life of the thread (${tag})`, `fresh life ${tag}`), `life-${tag}`);   // a module of its own: its first sweep of the file
+    const fresh = (tag) => MC.load('src/store-writer-worker.js', anchored(WSRC, 'module.exports = { writeJob, pieceJob, writeAll, sweepTemps, linkedHere, rewriteJob };', `module.exports = { writeJob, pieceJob, writeAll, sweepTemps, linkedHere, rewriteJob };   // a fresh life of the thread (${tag})`, `fresh life ${tag}`), `life-${tag}`);   // a module of its own: its first sweep of the file
     const sw = sweepRun(fresh('head'), 'head');
     ok(sw.code === 'EIO' && sw.whole, 'lens 3: a temp of THIS road left by an earlier life of the thread (a second name of the store) is removed at the first sweep — a write that then fails part-way leaves the store whole', JSON.stringify(sw));
     const swx = sweepRun(MC.load('src/store-writer-worker.js', anchored(WSRC, ' || path.join(dir, n) === ownTmp)) {', ')) {', 'no own-temp sweep'), 'lens3-sweep'), 'cut');
@@ -774,7 +774,7 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
     ok(!ufx.whole, 'B-f276 1c follow (lens 3) CONTROL (the failed unlink marks nothing): the open truncates the store through its second name — red', JSON.stringify(ufx));
     // (3) THE OWN NUMBERS (主开发 r1588 (3)): the store's own cell (m.own) first, the thread's map second — two lives of the thread
     // (one started again between two writes of the other) rewrite the store's own file 24 times: never refused
-    const lifeOf = (src, tag) => MC.load('src/store-writer-worker.js', anchored(src, 'module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };', `module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };   // a life of the thread (${tag})`, `life ${tag}`), `life-${tag}`);
+    const lifeOf = (src, tag) => MC.load('src/store-writer-worker.js', anchored(src, 'module.exports = { writeJob, pieceJob, writeAll, sweepTemps, linkedHere, rewriteJob };', `module.exports = { writeJob, pieceJob, writeAll, sweepTemps, linkedHere, rewriteJob };   // a life of the thread (${tag})`, `life ${tag}`), `life-${tag}`);
     const ownRun = (LA, LB, tag) => {
       const d = path.join(ROOT, `store-ownorder-${tag}`); fs.mkdirSync(d, { recursive: true });
       const f = path.join(d, 'z.json'), t = `${f}.tmp-${process.pid}-w`;
