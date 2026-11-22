@@ -82,6 +82,12 @@ const hookIn = (file) => {
   try { return JSON.stringify(JSON.parse(fs.readFileSync(file, 'utf-8'))).includes('vibespace-hook.mjs'); }
   catch { return false; }
 };
+// r2363: THE HOOKS LAND THROUGH THE SHIPPED HELPER, AFTER the call that asks them (B-ddf3 unit 2 line 1): the boot's registration
+// lands about 0.1 s after the hub first answers (measured on the test machine: listen +2089 ms, the hook file written +2180 ms),
+// and a switch's removal or registration a few hundred ms after its PATCH. A check of the file is therefore a BOUNDED WAIT for
+// the landing — the spawn gate's own bound, 10 s (src/server/cli-config-runner.js BOUND_MS: a conversation started meanwhile
+// waits that long for it), polled every 50 ms. A registration that never lands is still red, at the bound.
+const landed = async (fn, ms = 10000) => { const end = Date.now() + ms; for (;;) { if (fn()) return true; if (Date.now() >= end) return false; await sleep(50); } };
 const claudeCfg = path.join(home, '.claude', 'settings.json');
 const codexCfg = path.join(home, '.codex', 'hooks.json');
 
@@ -126,8 +132,8 @@ const dtachArgv = (sessionId) => {
 // ═══ Phase 1: boot ON (default) ═════════════════════════════════════════════
 console.log('Phase 1: boot with integration ON (default)');
 await bootServer();
-check('claude settings.json has the hook registered', hookIn(claudeCfg));
-check('codex hooks.json created + hook registered', hookIn(codexCfg));
+check('claude settings.json has the hook registered', await landed(() => hookIn(claudeCfg)));
+check('codex hooks.json created + hook registered', await landed(() => hookIn(codexCfg)));
 const hs1 = await (await api('/api/agent-hooks')).json();
 check('/api/agent-hooks integrationOff=false', hs1.integrationOff === false);
 
@@ -155,9 +161,8 @@ check('prompt-context delivers content while ON (the delivery this token gets)',
 // ═══ Phase 2: toggle OFF live ═══════════════════════════════════════════════
 console.log('Phase 2: PATCH agents.vibespaceIntegration=false');
 await api('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'agents.vibespaceIntegration': false }) });
-await sleep(300);
-check('claude hook entries stripped live', !hookIn(claudeCfg));
-check('codex hook entries stripped live', !hookIn(codexCfg));
+check('claude hook entries stripped live', await landed(() => !hookIn(claudeCfg)));
+check('codex hook entries stripped live', await landed(() => !hookIn(codexCfg)));
 const hs2 = await (await api('/api/agent-hooks')).json();
 check('/api/agent-hooks integrationOff=true', hs2.integrationOff === true);
 const inst = await api('/api/agent-hooks/install', { method: 'POST' });
@@ -181,9 +186,8 @@ check('OFF-spawn env KEEPS the session token (Ctrl+G auth)', !!argv2 && argv2.in
 // ═══ Phase 3: toggle back ON ════════════════════════════════════════════════
 console.log('Phase 3: PATCH back true');
 await api('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'agents.vibespaceIntegration': null }) }); // null deletes → default ON
-await sleep(300);
-check('claude hook re-registered on re-enable', hookIn(claudeCfg));
-check('codex hook re-registered on re-enable', hookIn(codexCfg));
+check('claude hook re-registered on re-enable', await landed(() => hookIn(claudeCfg)));
+check('codex hook re-registered on re-enable', await landed(() => hookIn(codexCfg)));
 
 // ═══ Phase 4: boot convergence (flipped OFF while server down) ══════════════
 console.log('Phase 4: boot with the switch already OFF');
@@ -196,8 +200,8 @@ cur['agents.vibespaceIntegration'] = false;
 fs.writeFileSync(settingsFile, JSON.stringify(cur));
 check('precondition: hook present before boot', hookIn(claudeCfg));
 await bootServer();
-check('boot strips hook entries when switch is OFF', !hookIn(claudeCfg));
-check('boot strips codex entries too', !hookIn(codexCfg));
+check('boot strips hook entries when switch is OFF', await landed(() => !hookIn(claudeCfg)));
+check('boot strips codex entries too', await landed(() => !hookIn(codexCfg)));
 
 srv.kill('SIGKILL');
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
