@@ -131,6 +131,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - VibeSpace no longer pauses while it sets aside a full archive of refused usage readings, or saves the machine login's usage copy.
 - Usage estimates no longer pause VibeSpace every minute to reread each account's whole usage history file.
 - VibeSpace no longer pauses to reread the usage folder at each panel refresh; if the folder stops answering, the panel keeps its last readings and their age.
+- A browser that runs out of sight now shows a quiet «Hidden window» mark on the live view's bar; its full sentence is said once each run.
+- When VibeSpace cannot see a browser's sign-in prompts, the live view says what to do, offers «Watch again now» or «Connect again now», and answers every press.
 
 ## 2.369.415 — 2026-11-21
 
