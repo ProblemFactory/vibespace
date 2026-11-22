@@ -161,7 +161,7 @@ console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail 
       const wa = await M.warmSessionJsonlAsync(A.id, CWD), wb = await M.warmSessionJsonlAsync(B.id, CWD);
       const rd = await opensDuring(async () => new M.SessionMessages({ backend: 'claude', claudeSessionId: B.id, backendSessionId: B.id, cwd: CWD, buffer: '' }, 'w-handoff', {}).raw().length, B.fp);
       const h1 = M.warmHandoffStats();
-      return { warmed: [wa, wb], rows: rd.v, opens: rd.n, held: h1.held - h0.held, taken: h1.taken - h0.taken };
+      return { warmed: [wa, wb], rows: rd.v, opens: rd.n, held: h1.held - h0.held, taken: h1.served - h0.served };
     } finally { M._warmHandoffTestSeam({ liveMaxBytes: null }); M.jsonlCacheClear(); }
   };
   const SS = require(path.join(REPO, SS_REL));
@@ -188,7 +188,7 @@ console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail 
   });
   const tr = await twoReaders(SS);
   ok(tr.rows[0] > 0 && tr.rows[1] === tr.rows[0] && tr.opens === 0, `TWO READERS joined on one warm the cache did not admit: both read ${tr.rows.join(' + ')} records with ${tr.opens} open(s) of the transcript on this thread`, tr);
-  const once = ssCopy('handoff-once', '    if (held) _handoffStats.taken++;', '    if (held) { _warmHandoff.delete(claudeSessionId); _handoffStats.taken++; }', 'the handed tail taken once');   // stale-pins: kept — the RED plants the cut before this cure back into a copy
+  const once = ssCopy('handoff-once', '    if (held) _handoffStats.served++;', '    if (held) { _warmHandoff.delete(claudeSessionId); _handoffStats.served++; }', 'the handed tail taken once');   // stale-pins: kept — the RED plants the cut before this cure back into a copy
   const trx = once.M ? await twoReaders(once.M) : null;
   ok(!!trx && trx.opens >= 1, `RED CONTROL (the handed tail taken ONCE — the cut before this cure): the second reader opened the transcript ${trx ? trx.opens : '?'} time(s) on this thread — the parse on the loop`, trx || once.why);
   // F3: the first caller LEAVES while the warm runs (its «wanted» turns false): it takes no parse; the second still reads its records
@@ -220,13 +220,30 @@ console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail 
     const A = small(17), B = small(18);
     await M.warmSessionJsonlAsync(A.id, CWD); await M.warmSessionJsonlAsync(B.id, CWD);   // B's tail handed, nobody reads it
     const h0 = M.warmHandoffStats(), t = M.jsonlCacheTrim(Date.now() + 121000), h1 = M.warmHandoffStats();
-    return { holdingBefore: h0.holding, holdingAfter: h1.holding, expired: h1.expired - h0.expired, said: t && t.handoffsExpired };
+    return { holdingBefore: h0.holding, holdingAfter: h1.holding, expired: h1.expiredAtSweep - h0.expiredAtSweep, said: t && t.handoffsExpired };
   });
   const sw = await sweep(SS);
   ok(sw.holdingBefore === 1 && sw.holdingAfter === 0 && sw.expired === 1 && sw.said === 1, `a handed tail nobody came for goes at the census tick past its time (${sw.holdingBefore} → ${sw.holdingAfter} held, ${sw.expired} counted expired)`, sw);
   const noSweep = ssCopy('no-sweep', '  for (const [hid, h] of [..._warmHandoff]) if (now - h.at > WARM_HANDOFF_MS) {', '  for (const [hid, h] of []) if (now - h.at > WARM_HANDOFF_MS) {', 'no sweep of the handed tails');
   const swx = noSweep.M ? await sweep(noSweep.M) : null;
   ok(!!swx && swx.holdingAfter === 1, `RED CONTROL (no sweep): the handed tail is still held after its time (${swx ? swx.holdingAfter : '?'})`, swx || noSweep.why);
+  // F5b (r2257 (3)): A RE-PUT OF THE SAME ENTRY KEEPS ITS FIRST TIME — a conversation warmed again and again is not held past its time:
+  // its first put 60 s back (the clock read through Date.now), a second warm now re-puts it; the sweep 61 s later drops it. RED: the
+  // re-put resets the time (the tail held on)
+  const reput = (M) => notAdmitted(M, async () => {
+    const A = small(21), B = small(22), real = Date.now;
+    await M.warmSessionJsonlAsync(A.id, CWD);
+    Date.now = () => real() - 60000;
+    try { await M.warmSessionJsonlAsync(B.id, CWD); } finally { Date.now = real; }   // B's tail handed 60 s back
+    await M.warmSessionJsonlAsync(B.id, CWD);   // warmed again now: the SAME entry re-put
+    const h0 = M.warmHandoffStats(), t = M.jsonlCacheTrim(real() + 61000), h1 = M.warmHandoffStats();
+    return { holdingBefore: h0.holding, holdingAfter: h1.holding, expired: h1.expiredAtSweep - h0.expiredAtSweep, said: t && t.handoffsExpired };
+  });
+  const rp = await reput(SS);
+  ok(rp.holdingBefore === 1 && rp.holdingAfter === 0 && rp.expired === 1, `a handed tail warmed again keeps its FIRST time: the sweep past it drops it (${rp.holdingBefore} → ${rp.holdingAfter} held)`, rp);
+  const resetTime = ssCopy('reput-resets', '{ entry, at: same ? prev.at : Date.now() }', '{ entry, at: Date.now() }', 'a re-put that resets the time');   // stale-pins: kept — the RED plants a re-put that resets the time
+  const rpx = resetTime.M ? await reput(resetTime.M) : null;
+  ok(!!rpx && rpx.holdingAfter === 1, `RED CONTROL (a re-put resets the time): the tail warmed again is still held past its first time (${rpx ? rpx.holdingAfter : '?'})`, rpx || resetTime.why);
   // F6 (r2195 (e)): a reader fed from a handed tail read from the file's FIRST BYTE says so (fromStart). RED: the cache alone asked
   const whole = (M) => notAdmitted(M, async () => {
     const A = small(19), B = small(20);

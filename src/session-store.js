@@ -646,26 +646,32 @@ function _jsonlHeldNow() { let h = null; try { h = _jsonlHeldFn(); } catch { h =
 const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
 // B-80cb cure (主开发 r1524): THE WARM'S READ IS NEVER THROWN AWAY. A tail the cache does not ADMIT (its live set past
 // JSONL_LIVE_MAX_BYTES — a restart's storm of long conversations: forty 32 MB tails pass it at the seventeenth; measured at the release:
-// those readers parsed their tails on the loop, its longest step 2.9 s on first attaches and 9.8 s on re-attaches) is handed to that
-// conversation's next parse ONCE (parseSessionJsonl takes it as its previous entry: an unchanged file is a hit), and the warm's own
-// fresh check sees it. ≤ WARM_HANDOFF_MAX held, each ≤ WARM_HANDOFF_MS (an unclaimed one goes, counted: its next parse reads the file,
-// as every parse past the cache's bound always did); counted in the transcript-tails census row.
-const WARM_HANDOFF_MAX = 4, WARM_HANDOFF_MS = 120000;   // a handoff lives from a warm to its reader's parse: two warms at once ⇒ ≤ 2–3 held
-const _warmHandoff = new Map();   // claude session id → { entry, at }
-const _handoffStats = { held: 0, taken: 0, dropped: 0, expired: 0 };   // dropped = pushed out past WARM_HANDOFF_MAX or past its time; expired = past its time (the census tick's sweep, r2195 (b))
+// those readers parsed their tails on the loop, its longest step 2.9 s on first attaches and 9.8 s on re-attaches) is handed to EVERY
+// READER of its warm (r2195: parseSessionJsonl takes it as its previous entry — an unchanged file is a hit, a grown one is read as an
+// append) until its time, a newer read, or the cache's admission; the warm's own fresh check sees it. THE BOUND (r2257): at most
+// WARM_HANDOFF_MAX (4) handed tails — each a parsed tail of tens of megabytes — each for up to WARM_HANDOFF_MS (2 min) from its FIRST
+// put (a re-put of the same entry keeps that time) plus one census minute (the memory census tick's sweep); counted in the live
+// transcript-tails census row. A tail that goes before a reader came: that reader's parse reads the file, as every parse past the
+// cache's bound always did.
+const WARM_HANDOFF_MAX = 4, WARM_HANDOFF_MS = 120000;   // a handoff lives from a warm to its readers' parses: two warms at once ⇒ ≤ 2–3 held
+const _warmHandoff = new Map();   // claude session id → { entry, at (its first put) }
+// r2257 (3): the counts as they are — held: handoffs made (a new entry); served: reads served from one (every reader of its warm);
+// pushedOut: gone past WARM_HANDOFF_MAX; expiredAtAsk / expiredAtSweep: gone past their time, found at an ask or by the census tick
+const _handoffStats = { held: 0, served: 0, pushedOut: 0, expiredAtAsk: 0, expiredAtSweep: 0 };
 let _liveMaxBytes = JSONL_LIVE_MAX_BYTES;   // the cache's live bound (a test seam sets it low: the not-admitted road at any size)
 function _handoffGet(id) {
   const h = _warmHandoff.get(id);
   if (!h) return null;
-  if (Date.now() - h.at > WARM_HANDOFF_MS) { _warmHandoff.delete(id); _handoffStats.dropped++; return null; }
+  if (Date.now() - h.at > WARM_HANDOFF_MS) { _warmHandoff.delete(id); _handoffStats.expiredAtAsk++; return null; }
   return h.entry;
 }
 /** the warm's put: the cache, and — when the cache did not admit the entry — the handoff to the next parse */
 function _warmPut(id, entry) {
   _jsonlCachePut(id, entry);
   if (_jsonlCache.get(id) === entry) { _warmHandoff.delete(id); return; }
-  _warmHandoff.delete(id); _warmHandoff.set(id, { entry, at: Date.now() }); _handoffStats.held++;
-  while (_warmHandoff.size > WARM_HANDOFF_MAX) { _warmHandoff.delete(_warmHandoff.keys().next().value); _handoffStats.dropped++; }
+  const prev = _warmHandoff.get(id), same = !!prev && prev.entry === entry;   // r2257 (3): a re-put of the SAME entry keeps its first time — warmed again and again, it is not held past its time
+  _warmHandoff.delete(id); _warmHandoff.set(id, { entry, at: same ? prev.at : Date.now() }); if (!same) _handoffStats.held++;
+  while (_warmHandoff.size > WARM_HANDOFF_MAX) { _warmHandoff.delete(_warmHandoff.keys().next().value); _handoffStats.pushedOut++; }
 }
 const warmHandoffStats = () => ({ ..._handoffStats, holding: _warmHandoff.size });
 function _warmHandoffTestSeam({ liveMaxBytes } = {}) { if (liveMaxBytes !== undefined) _liveMaxBytes = liveMaxBytes == null ? JSONL_LIVE_MAX_BYTES : liveMaxBytes; return { liveMaxBytes: _liveMaxBytes }; }
@@ -686,7 +692,7 @@ function jsonlCacheTrim(now = Date.now()) {
   const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: Infinity, now, sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e), held: (k) => held.has(k) });
   _jsonlResident = r.bytes; _jsonlLive = r.live;
   let handoffsExpired = 0;   // r2195 (b): a handed tail nobody came for (a window closed between its warm and its parse) goes at its time — never held until four newer ones push it out
-  for (const [hid, h] of [..._warmHandoff]) if (now - h.at > WARM_HANDOFF_MS) { _warmHandoff.delete(hid); _handoffStats.dropped++; _handoffStats.expired++; handoffsExpired++; }
+  for (const [hid, h] of [..._warmHandoff]) if (now - h.at > WARM_HANDOFF_MS) { _warmHandoff.delete(hid); _handoffStats.expiredAtSweep++; handoffsExpired++; }
   return { evicted: r.evicted, freedBytes: Math.max(0, before - r.bytes), ms: performance.now() - t0, entries: _jsonlCache.size, handoffsExpired };
 }
 /** (a suite's) a parsed tail of `bytes` put as if last read at `usedAt` — the trim's and the rows' legs over this very map */
@@ -767,6 +773,8 @@ const taggedKeptOf = (list, info = {}) => { let c = _taggedKept.get(list); if (!
 // B-80cb cure (主开发 r1524): TWO WARMS AT ONCE, each in its own lane (src/safe-fs.js LANES `warm` / `warm2`: one worker, one 'warm'
 // slot each: 'warm' / 'warm2') — one at a time made a restart's storm of forty wait one by one where the release read two cold tails at once. The line's
 // rules stand: a person's warm before every bulk one not started, the lift, one warm a file joined, the fresh check, let go in a finally.
+// LAW TWO, AS IT IS (r2195 (d) / r2257): no lane is kept for people — a person's window waits behind AT MOST ONE tail read already in
+// flight (the first of the two lanes to free), then goes before every bulk warm not yet started.
 const WARM_LANES = ['warm', 'warm2'];
 const _warmQ = { person: [], bulk: [], free: [...WARM_LANES] };
 const _warmLine = { turns: 0, atOnce: 0, bulkTurns: 0 };   // bulkTurns: the turns a bulk warm took (r2195 (a): the door's bulk word, seen)
@@ -953,7 +961,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     const stat = fs.statSync(fp);
     const held = _jsonlCache.get(claudeSessionId) ? null : _handoffGet(claudeSessionId);   // B-80cb cure: the warm's read the cache did not admit
     const cached = held || _jsonlCache.get(claudeSessionId);
-    if (held) _handoffStats.taken++;   // r2195 (round wll8bb3rr's MUST): TAKEN BY EVERY READER of its warm (a view and its live attach, two devices' re-attaches) — never deleted at a take: it goes at its time (the census tick's sweep), at a newer read, or when the cache admits it
+    if (held) _handoffStats.served++;   // r2195 (round wll8bb3rr's MUST): SERVED TO EVERY READER of its warm (a view and its live attach, two devices' re-attaches) — never deleted at a take: it goes at its time (the census tick's sweep), at a newer read, or when the cache admits it
     // Bounded read: a full readFileSync('utf-8') THROWS past Node's ~512MB
     // string limit (and blocks the event loop for hundreds of MB below it).
     // Tail-only: the client seek-loads the earlier history as a continuous
