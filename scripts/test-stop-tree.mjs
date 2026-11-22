@@ -18,6 +18,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error('ok(condition, name): the name is no string — a swapped call'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(20); } return !!(await fn()); };
 const mine = [];   // every identity this suite made or found under its own children — ended at exit, by identity
@@ -410,7 +419,7 @@ const svcScene = async (Mod, tag) => {
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), PEND = '    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {';
   ok(JSRC.split(PEND).length === 2, 'B-cac2 control setup: the remembered start is one line in jobs.js (the plant the control cuts) — the anchor of the control is in the source');
   const MJ9 = mutantCopies('stop-tree-cac2', ROOT);
-  const R = await svcScene(MJ9.load('src/jobs.js', JSRC.replace(PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {'), 'release'), 'job-start-during-stop-mut');
+  const R = await svcScene(MJ9.load('src/jobs.js', editAnchor(JSRC, PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {', "src/jobs.js"), 'release'), 'job-start-during-stop-mut');
   const rx = await R.press('start', { settle: true });
   await R.end();
   // the release (measured on the test machine, 2.369.412 base): its start sets desiredUp BEFORE the «already running» refusal, so at
@@ -421,7 +430,7 @@ const svcScene = async (Mod, tag) => {
   // its control: the line that clears it cut (a copy) — the remembered start survives the second stop (read off the record, no wait)
   const CLR = '    delete job._startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more\n';
   ok(JSRC.split(CLR).length === 2, 'B-cac2 control setup: the anchor of the control «a later stop clears the remembered start» is in the source');
-  const C = await svcScene(MJ9.load('src/jobs.js', JSRC.replace(CLR, '    /* MUTANT: a later stop leaves the remembered start */\n'), 'no-clear'), 'job-start-stop-mut');
+  const C = await svcScene(MJ9.load('src/jobs.js', editAnchor(JSRC, CLR, '    /* MUTANT: a later stop leaves the remembered start */\n', "src/jobs.js"), 'no-clear'), 'job-start-stop-mut');
   const cx = await C.press('start-stop');
   await C.end();
   ok(C.up && cx.answer && cx.answer.pending === true && cx.flagAfter === true, 'B-cac2 CONTROL (the clear cut, in a copy): the remembered start SURVIVES the second stop — it would start when the run ends', cx);
@@ -453,7 +462,7 @@ const svcScene = async (Mod, tag) => {
     P.J.shutdown();
     const PARKA = '      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked, PARKED_NO_START); return; }';
     ok(JSRC.split(PARKA).length === 2, 'B-cac2 control setup: the anchor of the control «the park road» is in jobs.js');
-    const Px = guardScene(MJ9.load('src/jobs.js', JSRC.replace(PARKA, '      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked); return; }   /* MUTANT: the park undone */'), 'park-undone'), 'cac2-park-mut');
+    const Px = guardScene(MJ9.load('src/jobs.js', editAnchor(JSRC, PARKA, '      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked); return; }   /* MUTANT: the park undone */', "src/jobs.js"), 'park-undone'), 'cac2-park-mut');
     Px.job._startAfterStop = true;
     try { Px.J._finalizeRun(Px.job, Px.job.runs[0], { code: 137, endedAt: Date.now() }, 'sweep'); } catch { }
     await flush();
@@ -470,7 +479,7 @@ const svcScene = async (Mod, tag) => {
     Ps.J.shutdown();
     const PARKS = '    this._startAskedAtStop(job, startAsked, memPark && memPark.park ? PARKED_NO_START : null);';
     ok(JSRC.split(PARKS).length === 2, 'B-cac2 control setup: the anchor of the control «the service park road» is in jobs.js');
-    const Psx = guardScene(MJ9.load('src/jobs.js', JSRC.replace(PARKS, '    this._startAskedAtStop(job, startAsked, null);   /* MUTANT: the service park undone */'), 'park-undone-svc'), 'cac2-park-svc-mut', 'service');
+    const Psx = guardScene(MJ9.load('src/jobs.js', editAnchor(JSRC, PARKS, '    this._startAskedAtStop(job, startAsked, null);   /* MUTANT: the service park undone */', "src/jobs.js"), 'park-undone-svc'), 'cac2-park-svc-mut', 'service');
     Psx.job._startAfterStop = true; Psx.job.desiredUp = false;
     try { Psx.J._finalizeRun(Psx.job, Psx.job.runs[0], { code: 137, endedAt: Date.now() }, 'sweep'); } catch { }
     await flush();
@@ -487,7 +496,7 @@ const svcScene = async (Mod, tag) => {
     G.J.shutdown();
     const GUARD = '      if (this._unreadStopped || this.jobs.get(job.id) !== job) return;   // the engine ended, or the job was removed meanwhile\n';
     ok(JSRC.split(GUARD).length === 2, 'B-cac2 control setup: the anchor of the control «the two guards» is in jobs.js');
-    const Gx = guardScene(MJ9.load('src/jobs.js', JSRC.replace(GUARD, '      /* MUTANT: no guard */\n'), 'no-guard'), 'cac2-guards-mut');
+    const Gx = guardScene(MJ9.load('src/jobs.js', editAnchor(JSRC, GUARD, '      /* MUTANT: no guard */\n', "src/jobs.js"), 'no-guard'), 'cac2-guards-mut');
     Gx.J._startAskedAtStop(Gx.job, true); Gx.J.jobs.delete(Gx.job.id); await flush();
     const xRemoved = Gx.out.starts;
     Gx.J.jobs.set(Gx.job.id, Gx.job); Gx.J._startAskedAtStop(Gx.job, true); Gx.J._unreadStopped = true; await flush();

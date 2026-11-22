@@ -24,6 +24,15 @@ const { PortForwardManager } = require(path.join(REPO, 'src/port-forward.js'));
 const M = mutantCopies('artifacts-services', REPO);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const H = 3600_000;
 const job = (id, cid, extra = {}) => ({ id, name: 'site-' + id, kind: 'service', state: 'up', owner: { conversation: { backend: 'claude', id: cid } }, listen: { port: 8100, firstAt: 1000, at: 1000 }, runs: [{ startedAt: 900 }], ...extra });
 
@@ -134,7 +143,7 @@ ok(edits() === e1 + 1, 'an unchanged broadcast patches nothing (the normalizer c
 // CONTROL (patched copy): the registry without the ports door's re-feed ⇒ a publish leaves the card on the proxy
 const rsrc = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf-8');
 const door = "  if (!msg || msg.type !== 'port-forwards-updated') return 0;\n";
-const MR = rsrc.includes(door) ? M.load('src/server/artifact-registry.js', rsrc.replace(door, '  return 0;\n'), 'norepatch') : null;
+const MR = rsrc.includes(door) ? M.load('src/server/artifact-registry.js', editAnchor(rsrc, door, '  return 0;\n', "src/server/artifact-registry.js"), 'norepatch') : null;
 if (MR) { MR.configure({ activeSessions: () => sessions, jobs: () => jm, ports: () => pf, instanceUrl: { url: () => 'https://inst.example.test' }, log: { log() { }, warn() { } } }); toRegistry = (m) => MR.noteForwards(m); }
 const e2 = edits();
 if (MR) await pf.publish(fwd.id);
@@ -219,16 +228,16 @@ ok(directionOf(['chat-artifact-path', 'chat-status-dim'], cssSrc) === 'rtl', 'a 
 console.log('④ patched-copy controls');
 const asrc = fs.readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf-8');
 const lineage = '    if (jobOwnerCid(j) !== cid) continue;\n';
-const ML = asrc.includes(lineage) ? M.load('src/artifacts.js', asrc.replace(lineage, ''), 'nolineage') : null;
+const ML = asrc.includes(lineage) ? M.load('src/artifacts.js', editAnchor(asrc, lineage, '', "src/artifacts.js"), 'nolineage') : null;
 ok(ML && Object.keys(ML.serviceRows([job('x', 'c-B')], { cid: 'c-A', now: 2000 })).length === 1, 'CONTROL: without the lineage check a FOREIGN job\'s row appears (the ① lineage assert sees it)');
 const syncExec = "    const PL = require('./proc-listen.js');\n";
 ok(jobsSrc.includes(syncExec) && census(listenPath(jobsSrc.replace(syncExec, syncExec + "    require('child_process').execSync('ss -ltnp');\n"), procSrc)) === 'red', 'CONTROL: a sync exec restored on the listen path ⇒ the never-block census is red');
 const expiry = '  if (!running && now - stoppedAt > SERVICE_KEEP_MS) return null;\n';
-const ME = asrc.includes(expiry) ? M.load('src/artifacts.js', asrc.replace(expiry, ''), 'noexpiry') : null;
+const ME = asrc.includes(expiry) ? M.load('src/artifacts.js', editAnchor(asrc, expiry, '', "src/artifacts.js"), 'noexpiry') : null;
 ok(ME && ME.serviceRow(stopped, { now: 5000 + AF.SERVICE_KEEP_MS + 1 }) !== null, 'CONTROL: without the expiry a day-old stopped row stays (the ① 24 h assert sees it)');
 // CONTROL 1: the old link restored (the instance URL's HOST with the job's RAW port) ⇒ the ①b table is red
 const proxyRet = 'return { url: `${base}/proxy/${target}`, via: \'proxy\', target, localUrl, forwardId };';
-const MH = asrc.includes(proxyRet) ? M.load('src/artifacts.js', asrc.replace(proxyRet, "let h = '127.0.0.1'; try { if (instanceUrl) h = new URL(String(instanceUrl)).hostname || h; } catch { }\n  return { url: `http://${h}:${p}/`, via: 'proxy', target, localUrl, forwardId };"), 'rawhostport') : null;
+const MH = asrc.includes(proxyRet) ? M.load('src/artifacts.js', editAnchor(asrc, proxyRet, "let h = '127.0.0.1'; try { if (instanceUrl) h = new URL(String(instanceUrl)).hostname || h; } catch { }\n  return { url: `http://${h}:${p}/`, via: 'proxy', target, localUrl, forwardId };", "src/artifacts.js"), 'rawhostport') : null;
 const mh = MH ? linkMisses(MH) : [];
 ok(MH && mh.some((x) => x.k === 'raw host:port') && mh.length > 0, 'CONTROL: the raw instance-host:port link restored ⇒ the link table is red (its never-raw-host:port invariant)', mh.slice(0, 2));
 // CONTROL 2: the rtl path box restored for the url (the .223 card) ⇒ the eye reads "/https…" first ⇒ the printing assert is red

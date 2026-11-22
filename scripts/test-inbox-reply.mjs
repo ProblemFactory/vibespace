@@ -57,6 +57,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const cleanup = [];
 process.on('exit', () => { for (const f of cleanup) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { } } });
@@ -1032,7 +1041,7 @@ const endedPhoto = async (routeFile) => {
   const needle = "      const rec = s || conversationOfKey(item.sessionKey) || null;";   // (cure 2: the one rule reads the record — the live one, else the key's)
   ok(rsrc.split(needle).length === 2, '§10 reopen-key control needle exists');
   const MUT = mutantCopies('inbox-reply-reopen-key', REPO);
-  const mut = MUT.write(rel, rsrc.split(needle).join('      const rec = s || null;'), 'live-only');
+  const mut = MUT.write(rel, editAnchor(rsrc, needle, '      const rec = s || null;', "src/routes/user-todos-reply.js", 'join'), 'live-only');
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 reopen key ' })) ok(row.pass, row.name, row.detail);
   const red = await endedPhoto(mut);
   ok(red.r.json.code !== 'bad_image' && red.reopened === 1, 'RED CONTROL: without the key\'s harness the ended conversation is reopened with a photo claude refuses — the leg above can go red', { json: red.r.json, reopened: red.reopened });
@@ -1064,7 +1073,7 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   const rsrc = read('src/routes/user-todos-reply.js'), needle = "      while (!ready(sessionId) && Date.now() < until) await new Promise((ok) => setTimeout(ok, CAPS_POLL_MS));";
   ok(rsrc.includes(needle), '§10 reopen-wait control needle exists');
   const MUT = mutantCopies('inbox-reply-capswait', REPO);
-  const mut = MUT.write('src/routes/user-todos-reply.js', rsrc.split(needle).join(''), 'no-caps-wait');
+  const mut = MUT.write('src/routes/user-todos-reply.js', editAnchor(rsrc, needle, '', "src/routes/user-todos-reply.js", 'join'), 'no-caps-wait');
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 wait ' })) ok(row.pass, row.name, row.detail);
   const red = await reopenBig(mut, 150);
   ok(red.r.status === 400 && red.r.json.code === 'too_large' && red.w.length === 0 && red.open, 'RED CONTROL: without the wait the reopened reply with a real screenshot is refused too_large — the leg above can go red', red.r.json);
@@ -1080,7 +1089,7 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   const needle = '    const v = judgeImageBase64(p && p.base64, { total, limits });';
   ok(rsrc.includes(needle), '§10 control needle exists');
   const MUT = mutantCopies('inbox-reply-pictures', REPO);
-  const mut = MUT.write(rel, rsrc.split(needle).join("    const v = { ok: true, mediaType: (p && p.mediaType) || 'image/png' };"), 'no-picture-rule');
+  const mut = MUT.write(rel, editAnchor(rsrc, needle, "    const v = { ok: true, mediaType: (p && p.mediaType) || 'image/png' };", "src/routes/user-todos-reply.js", 'join'), 'no-picture-rule');
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 ' })) ok(row.pass, row.name, row.detail);
   const H = harness(mut);
   const { wrote } = H.addSession('pic-red');
@@ -1096,7 +1105,7 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   const needle = '      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf(backend) });';
   ok(rsrc.includes(needle), '§10 per-harness control needle exists');
   const MUT = mutantCopies('inbox-reply-harness', REPO);
-  const mut = MUT.write(rel, rsrc.split(needle).join("      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf('claude') });"), 'claude-for-all');
+  const mut = MUT.write(rel, editAnchor(rsrc, needle, "      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf('claude') });", "src/routes/user-todos-reply.js", 'join'), 'claude-for-all');
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 harness ' })) ok(row.pass, row.name, row.detail);
   const H = harness(mut);
   const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
@@ -1127,7 +1136,7 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   const NOW_L = '      const rec = s || conversationOfKey(item.sessionKey) || null;\n      const backend = rec ? harnessOfRecord(rec) : null;';
   ok(rsrc.split(NOW_L).length === 2, '§10 cure 2: the route reads the harness in ONE place (the control edits it)');
   const MUT = mutantCopies('inbox-reply-noharness', REPO);
-  const mut = MUT.write(rel, rsrc.replace(NOW_L, '      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;   // stale-pins: kept — the cure 1 line the RED control re-plants'), 'no-harness-null');
+  const mut = MUT.write(rel, editAnchor(rsrc, NOW_L, '      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;   // stale-pins: kept — the cure 1 line the RED control re-plants', "src/routes/user-todos-reply.js"), 'no-harness-null');
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 cure 2 ' })) ok(row.pass, row.name, row.detail);
   const red = drive(mut);
   // (the stand-in sender has no adapter for a session that names no harness, so the photo the old route let through fails at the SEND —

@@ -30,6 +30,15 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const V = await import('../src/lib/settings-view.js');
 const S = await import('../src/lib/settings-schema.js');
@@ -195,7 +204,7 @@ console.log('§6 patched copies — each rule\'s judge goes red without it');
   let i = 0;
   for (const [name, from, to, judges] of PATCHES) {
     ok(src.includes(from), `the patch site of "${name}" is in the module (a moved line would make this control vacuous)`);
-    const f = M.write('src/lib/settings-view.js', src.replace(from, to), `m${i++}`, { esm: true });
+    const f = M.write('src/lib/settings-view.js', editAnchor(src, from, to, "src/lib/settings-view.js"), `m${i++}`, { esm: true });
     const Mut = await import(pathToFileURL(f).href);
     const red = judges.filter((j) => { try { return !J[j](Mut); } catch { return true; } });
     ok(red.length === judges.length && judges.every((j) => J[j](V)), `NEGATIVE CONTROL — ${name}: ${judges.join(', ')} RED on the copy, green on the real module`);
@@ -242,7 +251,7 @@ console.log('§7 the per-vendor channel rows (B-df40 part 3), derived from src/c
   const FROM = "    tier: 'advanced', when: { channel: tbl.vendor },\n";
   ok(ssrc.includes(FROM) && !/'channels\.(budgetLarkPerMin|budgetGmailPerMin|gmailUnitsPerSec|larkRequestsPerSec)': \{/.test(ssrc), 'the patch site of the derivation control is in settings-schema.js, and none of the four rows is hand-written there any more');
   const M = mutantCopies('settings-view-channel', REPO);
-  const Smut = await import(pathToFileURL(M.write('src/lib/settings-schema.js', ssrc.replace(FROM, ''), 'nowhen', { esm: true })).href);
+  const Smut = await import(pathToFileURL(M.write('src/lib/settings-schema.js', editAnchor(ssrc, FROM, '', "src/lib/settings-schema.js"), 'nowhen', { esm: true })).href);
   ok(!J7.derived(Smut) && Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin'] && !Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin'].when, 'NEGATIVE CONTROL — a schema copy whose derived vendor rows lose `tier` + `when` is RED on the derivation judge (green on the real module)');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
@@ -266,7 +275,7 @@ console.log('§8 the store\'s notifier walks a snapshot of its listeners');
   const ssrc = read('src/lib/settings.js');
   ok(ssrc.split(SNAP).length === 2, 'the notifier walks a snapshot, spelled once where the control reverts it');
   const M = mutantCopies('settings-notify', REPO);
-  const mut = M.write('src/lib/settings.js', ssrc.replace(SNAP, 'for (const cb of listeners) {'), 'liveset', { esm: true });
+  const mut = M.write('src/lib/settings.js', editAnchor(ssrc, SNAP, 'for (const cb of listeners) {', "src/lib/settings.js"), 'liveset', { esm: true });
   const red = verdict(drive(pathToFileURL(mut).href));
   ok(!red.green && red.signal === 'SIGTERM', `CONTROL: a copy walking the LIVE Set never returns — killed at the 4 s deadline (${red.signal}) ⇒ RED`, JSON.stringify(red));
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
@@ -405,7 +414,7 @@ console.log('§12 browser.idlePaintFreeze: the row\'s default is src/browser-idl
     'the door: turning it off STORES false (the server\'s read sees it); turning it back on drops the override (sparse storage — the default is on)');
   const ssrc12 = read('src/lib/settings-schema.js'), LIT = "    type: 'boolean', default: IDLE_PAINT_DEFAULT,\n    label: t('Stop drawing in a browser nobody watches'),";
   const M12 = mutantCopies('settings-view-idle', REPO);
-  const Slit = await import(pathToFileURL(M12.write('src/lib/settings-schema.js', ssrc12.replace(LIT, LIT.replace('default: IDLE_PAINT_DEFAULT,', 'default: false,')), 'literal-default', { esm: true })).href);
+  const Slit = await import(pathToFileURL(M12.write('src/lib/settings-schema.js', editAnchor(ssrc12, LIT, LIT.replace('default: IDLE_PAINT_DEFAULT,', 'default: false,'), "src/lib/settings-schema.js"), 'literal-default', { esm: true })).href);
   ok(ssrc12.includes(LIT) && !rowDefault(Slit), 'CONTROL: a row that keeps a literal default of its own (the .331 `false`) is RED on the default row');
   for (const r of copiesCensus(M12.files, M12.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
@@ -565,7 +574,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
       const other = blank('spend.budgetNoticePct');
       ok(capRows.every((r, i) => r.stored.length === 1 && r.stored[0][0] === V.SPEND_CAP_PATHS[i] && r.stored[0][1] === null && r.shown === '') && other.stored[0][1] === S.SETTINGS_SCHEMA['spend.budgetNoticePct'].default,
         'B-0a33 (3) the three Spending caps left BLANK are stored EMPTY (null) — never the default; the notice threshold (not a cap) still reverts to its default', JSON.stringify({ capRows, other }));
-      const Mb = await import(pathToFileURL(M7.write('src/lib/settings-view.js', orig.replace("    if (!Number.isFinite(num) && SPEND_CAP_PATHS.includes(path)) { settings.set(path, null); input.value = ''; onCommit(); return; }\n", ''), 'blank', { esm: true })).href);
+      const Mb = await import(pathToFileURL(M7.write('src/lib/settings-view.js', editAnchor(orig, "    if (!Number.isFinite(num) && SPEND_CAP_PATHS.includes(path)) { settings.set(path, null); input.value = ''; onCommit(); return; }\n", '', "src/lib/settings-view.js"), 'blank', { esm: true })).href);
       const mb = (() => { const stored = []; const inp = { value: '', oninput: null, onchange: null }; Mb.bindNumberField(inp, { schema: S.SETTINGS_SCHEMA[PATH], path: PATH, settings: { get: () => 30, set: (k, v) => stored.push(v) }, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[PATH], n) }); inp.onchange(); return stored; })();
       ok(orig.includes("SPEND_CAP_PATHS.includes(path)) { settings.set(path, null);") && mb.length === 1 && mb[0] === S.SETTINGS_SCHEMA[PATH].default, 'B-0a33 (3) CONTROL: the blank rule removed from a copy — a blank cap is stored as the DEFAULT (the release: read as the default) — RED', JSON.stringify(mb));
     }

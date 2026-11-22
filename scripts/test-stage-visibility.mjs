@@ -794,7 +794,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
     const found = VVSRC.includes(m.find);
     ok(found, `control ${m.tag}: the patched line exists in view-visibility.js`);
     if (!found) continue;
-    const f = pureLegs(M.load('src/lib/view-visibility.js', VVSRC.replace(m.find, m.repl), m.tag), { quiet: true });
+    const f = pureLegs(M.load('src/lib/view-visibility.js', editAnchor(VVSRC, m.find, m.repl, "src/lib/view-visibility.js"), m.tag), { quiet: true });
     ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched rule turns its §1 leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // (5) verify r1: the split rule that hands nothing back ⇒ §2 X1 / X3 RED (the promoted session stays a free window)
@@ -837,7 +837,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const ungroupFind = '    this.syncFrameHiders?.(lastWin);\n';
   ok(TGSRC.includes(ungroupFind), 'control stale-tab-reason: the patched line exists in tab-group.js');
   if (TGSRC.includes(ungroupFind)) {
-    const f = M.write('src/lib/tab-group.js', TGSRC.replace(ungroupFind, ''), 'stale-tab-reason');
+    const f = M.write('src/lib/tab-group.js', editAnchor(TGSRC, ungroupFind, '', "src/lib/tab-group.js"), 'stale-tab-reason');
     const { installTabGroupMixin: mixin } = await import(f);
     const { WindowManager: WM2 } = await import(path.join(REPO, 'src/lib/window.js'));
     class WMx extends WM2 { } // the scene's WindowManager with the patched mixin installed over the real one's methods
@@ -877,7 +877,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const axisFind = "  const axis = (pos, size) => { const max = Math.max(0, 1 - size); if (pos + d <= max + 1e-9) return Math.min(pos + d, max); if (pos - d >= -1e-9) return Math.max(0, pos - d); return Math.max(0, Math.min(pos, max)); };\n";
   ok(RSRC0.includes(axisFind), 'control corner-stacks: the patched line exists in stage-rules.js');
   if (RSRC0.includes(axisFind)) {
-    const f = geometryLegs(M.load('src/lib/stage-rules.js', RSRC0.replace(axisFind, "  const axis = (pos, size) => Math.max(0, Math.min(pos + d, 1 - size));\n"), 'corner-stacks'), { quiet: true });
+    const f = geometryLegs(M.load('src/lib/stage-rules.js', editAnchor(RSRC0, axisFind, "  const axis = (pos, size) => Math.max(0, Math.min(pos + d, 1 - size));\n", "src/lib/stage-rules.js"), 'corner-stacks'), { quiet: true });
     ok(f.some((n) => /THE CORNER/.test(n)) && f.some((n) => /steps BACKWARD/.test(n)), `control corner-stacks: the edge clamp of f5635f9d turns the §2b corner + edge legs RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // (15) verify r3: every half beside the same home taking the same step (f5635f9d) ⇒ §2 X18 RED
@@ -911,7 +911,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const spanFind = "      if (hostWin._desktopId && guestWin._desktopId !== hostWin._desktopId) guestWin._desktopId = hostWin._desktopId;\n";
   ok(TGSRC.includes(spanFind), 'control chain-spans-desktops: the patched line exists in tab-group.js');
   if (TGSRC.includes(spanFind)) {
-    const f = M.write('src/lib/tab-group.js', TGSRC.replace(spanFind, ''), 'chain-spans-desktops');
+    const f = M.write('src/lib/tab-group.js', editAnchor(TGSRC, spanFind, '', "src/lib/tab-group.js"), 'chain-spans-desktops');
     const { installTabGroupMixin: mixin } = await import(f);
     const { WindowManager: WM2 } = await import(path.join(REPO, 'src/lib/window.js'));
     class WMy extends WM2 { } mixin(WMy.prototype);
@@ -950,7 +950,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   const geoFind = '  const borrowed = !!onStage;\n';
   ok(RSRC.includes(geoFind), 'control slot-as-home: the patched line exists in stage-rules.js');
   if (RSRC.includes(geoFind)) {
-    const f = geometryLegs(M.load('src/lib/stage-rules.js', RSRC.replace(geoFind, '  const borrowed = false;\n'), 'slot-as-home'), { quiet: true });
+    const f = geometryLegs(M.load('src/lib/stage-rules.js', editAnchor(RSRC, geoFind, '  const borrowed = false;\n', "src/lib/stage-rules.js"), 'slot-as-home'), { quiet: true });
     ok(f.some((n) => /a BORROWED hero carries its HOME box/.test(n)), `control slot-as-home: the element's box as the carried box (c4f17e39) turns the §2b hero leg RED (${f.length}: ${f.slice(0, 1).join(' | ').slice(0, 160)})`);
   }
   // (21) lane stage-hero-key-race: the pre-fix follow — ANY shared record wins at enter() (f57d1cbe9) ⇒ §2 X21 THE RUNNER'S RED

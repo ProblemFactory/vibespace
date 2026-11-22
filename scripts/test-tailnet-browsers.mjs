@@ -62,6 +62,15 @@ const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : ''}`); } return !!cond; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 let fake = null;
 const done = () => { try { fake && fake.reap(); } catch { } console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }; // reaped BEFORE exit: the scratch dir (its launch log) goes first at exit
 let DOOR = null, TR = null;
@@ -671,7 +680,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   ok('MUTANT r4 N3: r3\'s order (the door cut BEFORE the PAC is answered) ⇒ ①\'s road-off PAC leg RED (the request reset)', !!m13 && m13.status !== 404, m13 && { status: m13.status, body: String(m13.body).slice(0, 60) });
   const esrc = read('src/server/egress-proxy.js'), eA = '      if (sock.destroyed) return;\n';
   ok('the dial-gone mutant\'s anchor is in egress-proxy.js', esrc.split(eA).length === 2);
-  const EM = esrc.includes(eA) ? MC.load('src/server/egress-proxy.js', esrc.replace(eA, ''), 'dial-gone-proxy') : null;
+  const EM = esrc.includes(eA) ? MC.load('src/server/egress-proxy.js', editAnchor(esrc, eA, '', "src/server/egress-proxy.js"), 'dial-gone-proxy') : null;
   const D14 = EM ? dm([["const EgressProxy = require('./egress-proxy.js');", `const EgressProxy = require(${JSON.stringify(MC.files[MC.files.length - 1])});`]], 'dial-gone') : null;
   const m14 = D14 ? await driveGone(D14) : null;
   ok('MUTANT r4 N2: the CONNECT dialled after its client is gone (r3) ⇒ ①\'s client-gone leg RED (a dial after the verdict, a live upstream left)', !!m14 && m14['connect-reset'].dials > 0 && m14['connect-reset'].live > 0, m14);
@@ -698,7 +707,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const m20 = G20 ? await driveSibling(G20.D) : null;
   ok('MUTANT B-05e8 ①: the cut takes every socket (the .382 door) ⇒ ①\'s sibling leg RED (the sibling still looked up reads nothing)', !!m20 && m20.b.cutBefore === true && m20.b.status === '(nothing)', m20 && m20.b);
   // MUTANT r5 m2 (both guards gone): r4's order in the door AND the .382 cut-all proxy ⇒ ①'s mid-lookup leg RED (the client reads nothing)
-  const G21 = esrc.includes(eA4) ? (() => { const em = MC.load('src/server/egress-proxy.js', esrc.replace(eA4, '      for (const c of socks) { try { c.destroy(); } catch { /* gone */ } }'), 'order-cut-all-proxy'); const dd = dm([['    return { ...refusal(TR.wordsFor(', '    sync(); return { ...refusal(TR.wordsFor('], ["const EgressProxy = require('./egress-proxy.js');", `const EgressProxy = require(${JSON.stringify(MC.files[MC.files.length - 1])});`]], 'order-cut-all'); return dd ? { D: dd, EP: em } : null; })() : null;
+  const G21 = esrc.includes(eA4) ? (() => { const em = MC.load('src/server/egress-proxy.js', editAnchor(esrc, eA4, '      for (const c of socks) { try { c.destroy(); } catch { /* gone */ } }', "src/server/egress-proxy.js"), 'order-cut-all-proxy'); const dd = dm([['    return { ...refusal(TR.wordsFor(', '    sync(); return { ...refusal(TR.wordsFor('], ["const EgressProxy = require('./egress-proxy.js');", `const EgressProxy = require(${JSON.stringify(MC.files[MC.files.length - 1])});`]], 'order-cut-all'); return dd ? { D: dd, EP: em } : null; })() : null;
   const m21 = G21 ? await driveMidLookup(G21.D) : null;
   ok('MUTANT r5 m2 (both guards gone: r4\'s order in the door + the .382 cut-all proxy) ⇒ ①\'s mid-lookup leg RED (the client reads nothing)', !!m21 && m21.get.status === '(nothing)' && m21.connect.status === '(nothing)', m21 && { get: m21.get.status, connect: m21.connect.status });
   const D15 = dm([["  const said = NODE_HINTS.reduce((t, re) => t.replace(re, ''), String(err.message || '')).replace(/[;\\s]+$/, '').trim();", "  const said = String(err.message || '').split(/;\\s*/).filter((c) => c.trim() && !/\\bnode(\\.js)?\\b|--[a-z]/i.test(c)).join('; ').trim();"]], 'hint-filter');
@@ -707,7 +716,7 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const ksrc = read('src/server/browser-keeper.js');
   const kA3 = "tailnet: require('../tailnet-reach.js').stampView(rec.tailnet), ";
   ok('the token-view mutant\'s anchor is in browser-keeper.js', ksrc.split(kA3).length === 2);
-  const KT = ksrc.includes(kA3) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA3, ''), 'token-view') : null;
+  const KT = ksrc.includes(kA3) ? MC.load('src/server/browser-keeper.js', editAnchor(ksrc, kA3, '', "src/server/browser-keeper.js"), 'token-view') : null;
   const D6k = path.join(ROOT, 'data-ktok'); fs.mkdirSync(D6k, { recursive: true });
   reachNow = { ...R };
   const kt = KT ? mkKeeper(KT, D6k) : null;
@@ -718,11 +727,11 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   ok('the keeper mutants\' anchors are in browser-keeper.js', ksrc.includes(kA1) && ksrc.includes(kA2));
   reachNow = { ...R };
   const D3 = path.join(ROOT, 'data-km'); fs.mkdirSync(D3, { recursive: true });
-  const KM = ksrc.includes(kA1) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA1, 'const eff2 = eff1;'), 'no-stamp-calls') : null;
+  const KM = ksrc.includes(kA1) ? MC.load('src/server/browser-keeper.js', editAnchor(ksrc, kA1, 'const eff2 = eff1;', "src/server/browser-keeper.js"), 'no-stamp-calls') : null;
   const mw = KM ? await driveProfile(mkKeeper(KM, D3), { label: 'Mutant' }) : null;
   ok('MUTANT the keeper\'s calls without the stamp\'s file ⇒ ②\'s every-call leg RED (a call names a file without the switch — Chrome would be relaunched)', !!mw && !(mw.files.length === 1 && mw.fileArgs[0] && mw.fileArgs[0].some((a) => /proxy-pac-url/.test(a))), mw && { files: mw.files, la: mw.la && mw.la.config });
   const D5k = path.join(ROOT, 'data-kenv'); fs.mkdirSync(D5k, { recursive: true });
-  const KE = ksrc.includes(kA2) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA2, 'envProxy: false, tailnet: true'), 'env-ignored') : null;
+  const KE = ksrc.includes(kA2) ? MC.load('src/server/browser-keeper.js', editAnchor(ksrc, kA2, 'envProxy: false, tailnet: true', "src/server/browser-keeper.js"), 'env-ignored') : null;
   const me = KE ? await driveProfile(mkKeeper(KE, D5k, { HTTPS_PROXY: 'http://127.0.0.1:9' }), { label: 'Env mutant' }, { stop: false }) : null;
   ok('MUTANT the env proxy ignored ⇒ ②\'s N6 j leg RED (the PAC rides beside the person\'s proxy)', !!me && hasPac(me), me && me.stamp);
   ok('the copies live outside the tree', MC.files.length === 29 && MC.files.every((f) => !f.startsWith(path.join(REPO, 'src'))), MC.files);

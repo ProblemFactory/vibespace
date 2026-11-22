@@ -34,6 +34,15 @@ const B = require('../src/browser-profiles.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const FLAG = '--disable-blink-features=AutomationControlled';
 const argList = (a) => (Array.isArray(a) ? a : String(a || '').split(/[,\n]/)).map((x) => String(x).trim()).filter(Boolean);
 
@@ -138,7 +147,7 @@ function mkEnv(settings, userCfg) {
   const TANCH = '  const a = quiet ? VERBS.withQuietLogging(args) : args;';
   if (!bsrc.includes(TANCH)) ok(false, 'the anchor of the control «B-1789 the launch tail» is not in the source (src/browser-profiles.js)');
   else {
-    const Bc = MQ.load('src/browser-profiles.js', bsrc.replace(TANCH, '  const a = args;'), 'b1789-tail-no-quiet');
+    const Bc = MQ.load('src/browser-profiles.js', editAnchor(bsrc, TANCH, '  const a = args;', "src/browser-profiles.js"), 'b1789-tail-no-quiet');
     const cg = Bc.generatedConfigParts({ userConfig: { args: '--no-sandbox' }, mark: 'bk-00000e06', holdDialogs: true, automationFlag: true }).config;
     ok(quietOf(cg.args) === 0 && quietOf(B.generatedConfigParts({ userConfig: { args: '--no-sandbox' }, mark: 'bk-00000e06', holdDialogs: true, automationFlag: true }).config.args) === 2,
       'CONTROL (B-1789 cure, a launch tail without the switches): the composer browser-env\'s spawn file is made by (the call above, as envFor makes it) carries none — the spawn-file legs above are RED on it', cg.args);
@@ -147,7 +156,7 @@ function mkEnv(settings, userCfg) {
   const CANCH = '    out.args = B.launchTail(out.args, childKey);';
   if (!esrc.includes(CANCH)) ok(false, 'the anchor of the control «B-1789 the helper\'s copy» is not in the source (src/server/browser-env.js)');
   else {
-    const BEc = MQ.load('src/server/browser-env.js', esrc.replace(CANCH, '    out.args = B.withKeeperMark(out.args, childKey);'), 'b1789-child-mark-only'); // stale-pins: kept — the release's helper line
+    const BEc = MQ.load('src/server/browser-env.js', editAnchor(esrc, CANCH, '    out.args = B.withKeeperMark(out.args, childKey);', "src/server/browser-env.js"), 'b1789-child-mark-only'); // stale-pins: kept — the release's helper line
     const bc = BEc.create({ dataDir: path.join(dP, 'data'), homeDir: path.join(dP, 'home'), serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, env: {}, socketDirBase: path.join(dP, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } }); // the SAME data dir: it reads the old parent file above
     const cc0 = childOf(bc);
     ok(cc0 && quietOf(cc0.args) === 0, 'CONTROL (B-1789 cure, the release\'s helper line): the old parent\'s helper launches with Chrome\'s logging on — the leg above is RED on it', cc0 && cc0.args);
@@ -257,7 +266,7 @@ const M = mutantCopies('bprop-env', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
   const cut = "  if (list.some((x) => /AutomationControlled/.test(x))) return { add: false, why: 'theirs' };\n";
   ok(src.includes(cut), 'the theirs rule is where the control cuts it');
-  const Bm = M.load('src/browser-profiles.js', src.replace(cut, ''), 'no-theirs');
+  const Bm = M.load('src/browser-profiles.js', editAnchor(src, cut, '', "src/browser-profiles.js"), 'no-theirs');
   const r = Bm.generatedConfigParts({ userConfig: { args: '--enable-blink-features=AutomationControlled' }, automationFlag: true });
   ok(argList(r.config.args).includes(FLAG), 'CONTROL: a verdict that ignores the user\'s own value adds a second, contradicting flag — the theirs row above would be red', r.config.args);
 }
@@ -265,7 +274,7 @@ const M = mutantCopies('bprop-env', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
   const cut = ', automationFlag: automationFlagOn() });';
   ok(src.includes(cut), 'browser-env passes the setting where the control cuts it');
-  const BEm = M.load('src/server/browser-env.js', src.replace(cut, ' });'), 'no-setting');
+  const BEm = M.load('src/server/browser-env.js', editAnchor(src, cut, ' });', "src/server/browser-env.js"), 'no-setting');
   const d = fs.mkdtempSync(path.join(ROOT, 'env-mut-'));
   const be = BEm.create({ dataDir: path.join(d, 'data'), homeDir: HOME, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, env: {}, socketDirBase: path.join(d, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } });
   const r = be.envFor({ browserKey: 'bk-00000e09' });

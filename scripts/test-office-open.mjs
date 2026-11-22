@@ -284,7 +284,7 @@ console.log('§11 CONTROLS — a patched copy per rule; each the table catches')
   const wline = src.split('\n').filter((l) => l.startsWith('  if (decodeUrl(last) !== decodeUrl(want)) return { remove: false,'));
   ok(wline.length === 1, 'CONTROL setup: the lock witness is spelled once');
   if (wline.length === 1) {
-    const Ml = MUT.load('src/office-open.js', src.replace(wline[0] + '\n', ''), 'any-lock');
+    const Ml = MUT.load('src/office-open.js', editAnchor(src, wline[0] + '\n', '', "src/office-open.js"), 'any-lock');
     ok(Ml.staleLockVerdict(',u,h,d,file:///home/u/.config/libreoffice/4;', '/srv/p').remove === true, 'CONTROL: without the witness the user\'s own LibreOffice lock would be removed (what §4b catches)');
   }
   for (const [name, line, code] of rules) {
@@ -298,14 +298,14 @@ console.log('§11 CONTROLS — a patched copy per rule; each the table catches')
   // the argv order: the path FIRST ⇒ the shape pin fails
   const argvLine = "  return { ok: true, code: null, error: null, argv: [...own, '--nologo', prof, ...(f ? [f] : [])] };";
   ok(src.includes(argvLine), 'CONTROL setup: the argv line is spelled once');
-  const Mv = MUT.load('src/office-open.js', src.replace(argvLine, "  return { ok: true, code: null, error: null, argv: [...(f ? [f] : []), ...own, '--nologo', prof] };"), 'path-first');
+  const Mv = MUT.load('src/office-open.js', editAnchor(src, argvLine, "  return { ok: true, code: null, error: null, argv: [...(f ? [f] : []), ...own, '--nologo', prof] };", "src/office-open.js"), 'path-first');
   const bad = Mv.officeArgv(O.OFFICE_ROWS[0], { file: F, profileDir: '/p' }).argv;
   ok(bad[bad.length - 1] !== F, 'CONTROL: a copy that puts the path first fails the "path LAST" pin', bad);
   // the launch request: without the file-on-a-non-office-row check, xterm takes a document silently
   const dsrc = read('src/desktop-apps.js');
   const dline = "    if (hasFile && !O.isOfficeModule(row.office)) return { ok: false, error: `${row.label} does not open documents — LibreOffice does`, code: 'not-office-app' };\n";
   ok(dsrc.includes(dline), 'CONTROL setup: the launch request\'s file-on-a-non-office-row check is spelled once');
-  const Md = MUT.load('src/desktop-apps.js', dsrc.replace(dline, ''), 'file-anywhere');
+  const Md = MUT.load('src/desktop-apps.js', editAnchor(dsrc, dline, '', "src/desktop-apps.js"), 'file-anywhere');
   const r = Md.validateLaunchRequest({ appId: 'xterm', file: '/x/r.docx' }, Md.DEFAULT_REGISTRY);
   ok(r.ok, 'CONTROL: without it a document rides an xterm launch unrefused (what §7 catches)', r);
 }
@@ -386,7 +386,7 @@ console.log('§13 verify-r6 I1 — the install runs the plan the dialog showed, 
   ok(o.ok2 && o.ok2.ok === true && o.runs === 1, 'I1: pressed again on the plan now shown ⇒ it runs (once)', o.ok2 && o.ok2.code);
   // CONTROL (i1): the access layer without the check runs the recomputed plan the dialog never showed
   const src = read(accRel);
-  const mut = src.replace("        if (expectDigest != null && planDigest(plan) !== String(expectDigest)) {", '        if (false) {');
+  const mut = editAnchor(src, "        if (expectDigest != null && planDigest(plan) !== String(expectDigest)) {", '        if (false) {', "src/server/desktop-access.js");
   ok(mut !== src, 'CONTROL (i1): the patch applies');
   const c = await i1(MUT.load(accRel, mut, 'i1-noshown'));
   ok(!c.changed && c.runsAfterChanged === 1, 'CONTROL (i1): without the check the press on the shown apt plan RUNS the xpra.org plan — the I1 cell goes red', { runs: c.runsAfterChanged });
@@ -435,7 +435,7 @@ console.log('§installs a NEW installable is ONE registration line of src/instal
   const ANCHOR = '  ...O.INSTALL_ROWS, // §7.9 the LibreOffice set (src/office-open.js)\n';
   const LINE = "  Object.freeze({ id: 'acme', from: 'facts', spec: Object.freeze({ what: 'acme', label: 'Acme', packages: ['acme-tool'], verify: 'command -v acme' }), done: 'catalog' }),\n";
   ok(ISRC.includes(ANCHOR), '§installs the registration anchor is the INSTALLS list');
-  const I2 = MUT.load('src/installs.js', ISRC.replace(ANCHOR, ANCHOR + LINE), 'fake-install');
+  const I2 = MUT.load('src/installs.js', editAnchor(ISRC, ANCHOR, ANCHOR + LINE, "src/installs.js"), 'fake-install');
   const fx = { platform: 'linux', apt: true, sudo: true };
   const p2 = I2.installPlanFor('acme', fx);
   ok(I2.INSTALL_WHATS.includes('acme') && I2.installRow('acme').done === 'catalog' && p2.ok && JSON.stringify(p2.packages) === '["acme-tool"]' && p2.script.includes('apt-get -o DPkg::Lock::Timeout=300 install -y acme-tool') && p2.canRun, '§installs the fake installable is planned by the ONE slot (packageInstallPlan over its spec, apt\'s lock wait) and listed — nothing else edited', p2);

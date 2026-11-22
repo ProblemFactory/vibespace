@@ -22,6 +22,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { create, CONTINUE_PROMPT, continuePromptFor, GRACE_MS, MAX_WAIT_MS, WF_REREAD_MS, WF_INFLIGHT_MAX } = require(path.join(REPO, 'src/server/auto-resume.js'));
 // lane resume-words: the continue is CONTINUE_PROMPT's head + facts + the CLI's own sentence (continuePromptFor)
@@ -1581,7 +1590,7 @@ await (async () => {
     const ENG = path.join(REPO, 'src/server/usage-pool-engine.js'), engSrc = read('src/server/usage-pool-engine.js');
     const wallNoReset = (eng) => { const s6 = { backend: 'claude', mode: 'chat', _webuiId: 'w-nr', sockName: 'sock-nr', claudeSessionId: 'c-nr' }; eng.noteWallSignal(s6, { bucket: 'fiveHour', key: '__global__' }); eng.noteTurnEnd(s6, { type: 'result', result: "You've hit your limit" }); return s6._stoppedBy; };
     noReset = wallNoReset(engOf(require(ENG), { 'sock-nr': { name: 'x' } }));
-    const mE = MUTX.load('src/server/usage-pool-engine.js', engSrc.replace('    const resetsAt = stated || 0;', '    const resetsAt = stated || 4102444800000;'));
+    const mE = MUTX.load('src/server/usage-pool-engine.js', editAnchor(engSrc, '    const resetsAt = stated || 0;', '    const resetsAt = stated || 4102444800000;', "src/server/usage-pool-engine.js"));
     noResetMut = engSrc.includes('    const resetsAt = stated || 0;') ? wallNoReset(engOf(mE, { 'sock-nr': { name: 'x' } })) : 'needle-missing';
     // B end to end: a stopped codex conversation, the hub restarted (the fact restored), its bridge re-attached and the backlog
     // replayed (a task_started an hour old) — the mark stays; a LIVE task_started clears it
@@ -1600,7 +1609,7 @@ await (async () => {
     const cxReal = codexRun(require(path.join(REPO, 'src/server/stdout/codex-events.js')));
     keptLate = cxReal.late; clearedLive = cxReal.live;
     const cxSrc = read('src/server/stdout/codex-events.js'), needle = 'try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop';   // stale-pins: kept — the CODEX consumer's line (codex-events still says it); the ACP one moved
-    keptMut = cxSrc.includes(needle) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', cxSrc.replace(needle, 'try { noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop'))).late : 'needle-missing';   // stale-pins: kept — the RED puts the old unguarded line BACK (the consumer without the test)
+    keptMut = cxSrc.includes(needle) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', editAnchor(cxSrc, needle, 'try { noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop', "src/server/stdout/codex-events.js"))).late : 'needle-missing';   // stale-pins: kept — the RED puts the old unguarded line BACK (the consumer without the test)
     // MUST 1 of the restack's verdict: the ACP / agy wrappers stamp a record `ts`, the lateness rule reads `timestamp` — the
     // consumer judges its record by its OWN stamp. The REAL acp-events consumer and the REAL engine, a restored mark.
     const acpRun = (acMod) => {
@@ -1619,10 +1628,10 @@ await (async () => {
     acpLate = acReal.late; acpLive = acReal.live;
     const acSrc = read('src/server/stdout/acp-events.js'), acNeedle = 'if (!recordIsLate?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts })) noteTurnRunning?.(session);';
     const acEnd = 'try { noteTurnEnd?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts }); } catch {}';
-    acpEndMut = acSrc.includes(acEnd) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', acSrc.replace(acEnd, 'try { noteTurnEnd?.(session); } catch {}'))).late : 'needle-missing';   // stale-pins: kept — the RED is the bare turn end
+    acpEndMut = acSrc.includes(acEnd) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', editAnchor(acSrc, acEnd, 'try { noteTurnEnd?.(session); } catch {}', "src/server/stdout/acp-events.js"))).late : 'needle-missing';   // stale-pins: kept — the RED is the bare turn end
     const cxEnd = 'try { noteTurnEnd?.(session, msg); } catch {}';
     cxEndMut = read('src/server/stdout/codex-events.js').includes(cxEnd) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', read('src/server/stdout/codex-events.js').replace(cxEnd, 'try { noteTurnEnd?.(session); } catch {}'))).late : 'needle-missing';   // stale-pins: kept — the RED is the bare turn end
-    acpMut = acSrc.includes(acNeedle) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', acSrc.replace(acNeedle, 'if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session);'))).late : 'needle-missing';   // stale-pins: kept — the RED is the restack's line (the record judged without its own stamp)
+    acpMut = acSrc.includes(acNeedle) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', editAnchor(acSrc, acNeedle, 'if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session);', "src/server/stdout/acp-events.js"))).late : 'needle-missing';   // stale-pins: kept — the RED is the restack's line (the record judged without its own stamp)
   } finally { console.log = ol; console.warn = ow; }
   ok('16c. a wall with NO stated reset shows none — the engine writes resetsAt null (never a verdict\'s guess)', !!noReset && noReset.kind === 'quota' && noReset.resetsAt === null, noReset);
   ok('16c. no-reset RED: an engine that fills the reset from elsewhere shows one (the leg above reads the fact, not a spelling)', !!noResetMut && typeof noResetMut === 'object' && noResetMut.resetsAt !== null, noResetMut);

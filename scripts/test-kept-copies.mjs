@@ -275,7 +275,7 @@ console.log('THE SIX MUTANTS (scratch copies, never src/), each red BY NAME');
 const M = mutantCopies('kept-copies', REPO);
 const mmSrc = read('src/message-manager.js');
 const PREFIX = 'function copyPrefixLen(copy, rec, off) {';
-const mmMut = M.write('src/message-manager.js', mmSrc.replace(PREFIX, PREFIX + ' return 0;'), 'prefix0');
+const mmMut = M.write('src/message-manager.js', editAnchor(mmSrc, PREFIX, PREFIX + ' return 0;', "src/message-manager.js"), 'prefix0');
 const MMx = require(mmMut);
 const mx = new MMx.MessageManager(ID);
 mx.convertHistory([...new SS.SessionMessages({ buffer: bcBuf, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, bcBuf) }, ID, { buffersDir: dir }).raw(), cliBC]);
@@ -283,20 +283,20 @@ const mxv = view(mx.messages.filter((m) => m.role === 'user'));
 ok(mmSrc.includes(PREFIX) && mxv.filter((v) => /IMG-B/.test(v.text)).length === 2, 'MUTANT copyPrefixLen → 0: RED — B drawn TWICE (its own bubble + inside C\'s)', mxv);
 // r7's road: every other copy pooled, matched by its words — the still-held H1 taken by H2's leading words, then drawn again
 const POOLED = '(named && c.cliUuid ? named.includes(c.cliUuid) : c.ran > 0)';
-const MMw = require(M.write('src/message-manager.js', mmSrc.replace(POOLED, 'true'), 'words-pool'));
+const MMw = require(M.write('src/message-manager.js', editAnchor(mmSrc, POOLED, 'true', "src/message-manager.js"), 'words-pool'));
 const mw = new MMw.MessageManager(ID);
 mw.convertHistory([...new SS.SessionMessages({ buffer: pBuf, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, pBuf) }, ID, { buffersDir: dir }).raw(), recP2, { type: 'system', subtype: 'init', session_id: 'cli-sess-kept', user_message_uuids: ['u-p1'] }, recP1]);
 const mwv = view(mw.messages.filter((m) => m.role === 'user'));
 ok(mmSrc.includes(POOLED) && mwv.length === 3 && mwv.filter((v) => v.text === 'continue' && !v.pics).length === 2, 'MUTANT every copy pooled by its words (r7\'s road): RED — the still-held «continue» drawn TWICE (three bubbles for two messages)', mwv);
 const ssSrc = read('src/session-store.js');
 const RESOLVE = "into.push(rec && rec.webui_copy ? resolve(rec) : rec);";   // B-299b A5: the buffer's records are parsed in bufferRecordsOf (its resolve = KC.resolveRecord over the kept copies)
-const ssMut = M.write('src/session-store.js', ssSrc.replace(RESOLVE, 'into.push(rec && false ? resolve(rec) : rec);'), 'no-resolve');
+const ssMut = M.write('src/session-store.js', editAnchor(ssSrc, RESOLVE, 'into.push(rec && false ? resolve(rec) : rec);', "src/session-store.js"), 'no-resolve');
 const SSx = require(ssMut);
 const nr = await restart(line1, { SSx });
 ok(ssSrc.includes(RESOLVE) && view(nr)[0].pics === 0 && view(nr)[0].gone === 1, 'MUTANT the store\'s merge without resolveRecord: RED — every kept picture a placeholder', view(nr));
 const kcSrc = read('src/kept-copies.js');
 const DROP = 'function dropFiles(dir, names) {';
-const KCx = require(M.write('src/kept-copies.js', kcSrc.replace(DROP, DROP + ' return;'), 'no-drop'));
+const KCx = require(M.write('src/kept-copies.js', editAnchor(kcSrc, DROP, DROP + ' return;', "src/kept-copies.js"), 'no-drop'));
 const leakLine = copyLine('m-l', 'u-l', [{ type: 'text', text: 'leak' }, img('L')], 1);
 KCx.dropFiles(kd, KCx.namesToDrop(leakLine, []));
 ok(kcSrc.includes(DROP) && fs.existsSync(path.join(kd, KC.namesIn(leakLine)[0])), 'MUTANT dropFiles a no-op: RED — a settled copy\'s .img file LEAKS', KC.namesIn(leakLine));
@@ -312,7 +312,7 @@ const heldInit = await realMerge(b312.jsonl, [...b312.head, ...b312.rest], { SSx
 ok(ssSrc.includes(HOLD_A) && ssSrc.includes(HOLD_C) && holdSrc !== ssSrc && heldInit.initAt > heldInit.recAt, `MUTANT the merge holds the init for the next matched record: RED — the init lands AFTER its batch's record (init ${heldInit.initAt} > record ${heldInit.recAt})`, heldInit.raw.map((r) => r.type + (r.uuid ? ':' + r.uuid.slice(-3) : '')));
 // (r9) the init as the ONE road (r8): a batch whose init the hub never read has no witness — the earlier frame drawn twice
 const ONE_ROAD = ': Array.isArray(merged) && merged.length ? merged.map(String) : null;';
-const MMo = require(M.write('src/message-manager.js', mmSrc.replace(ONE_ROAD, ': [];'), 'one-road'));
+const MMo = require(M.write('src/message-manager.js', editAnchor(mmSrc, ONE_ROAD, ': [];', "src/message-manager.js"), 'one-road'));
 const sOne = async (b) => { const csid = `5e551000-0000-4000-8000-${String(++csidN).padStart(12, '0')}`; fs.writeFileSync(path.join(projDir, csid + '.jsonl'), b.jsonl.map((r) => JSON.stringify(r)).join('\n') + '\n'); const buffer = b.head.join('\n') + '\n'; const mo = new MMo.MessageManager(ID); mo.convertHistory(new SS.SessionMessages({ buffer, cwd: work, claudeSessionId: csid, backend: 'claude', _keptFiles: await KC.preload(dir, ID, buffer) }, ID, { buffersDir: dir }).raw()); return view(mo.messages.filter((m) => m.role === 'user')); };
 const one312 = await sOne(b312), one296 = await sOne(b296);
 ok(mmSrc.includes(ONE_ROAD) && one312.filter((x) => /MARK-C/.test(x.text)).length === 2 && one296.filter((x) => /MARK-C/.test(x.text)).length === 2, 'MUTANT the init as the one road: RED — a restart inside the persist window draws C TWICE (2.1.312 and 2.1.296)', { one312, one296 });

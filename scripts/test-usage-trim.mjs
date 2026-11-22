@@ -157,12 +157,12 @@ try {
     const M = mutantCopies('usage-trim-trim', REPO), src = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
     const VIEW = 'c.sorted = head.concat(V.slice(lo)); c.sortedSz = headSz.concat(VZ.slice(lo));', OWED = '_trimOwed(c) { if (this.firstLoadInWorker) this._trimLater(c); else this._trimHot(); }';
     ok(src.split(VIEW).length === 2 && src.split(OWED).length === 2, 'the controls\' premise: the view filter and the hub\'s road are each one site of the module');
-    const rd = await hubRun(10000, M.load('src/usage-history.js', src.replace(VIEW, 'c.sorted = null; c.sortedSz = null;'), 'dropped').UsageHistory);
+    const rd = await hubRun(10000, M.load('src/usage-history.js', editAnchor(src, VIEW, 'c.sorted = null; c.sortedSz = null;', "src/usage-history.js"), 'dropped').UsageHistory);
     ok(rd.full === 1, `control (the release's view dropped at every trim): ${rd.full} full sort of every hot row ⇒ RED`);
-    const ri = await hubRun(10000, M.load('src/usage-history.js', src.replace(OWED, '_trimOwed(c) { this._trimHot(); }'), 'inline').UsageHistory);
+    const ri = await hubRun(10000, M.load('src/usage-history.js', editAnchor(src, OWED, '_trimOwed(c) { this._trimHot(); }', "src/usage-history.js"), 'inline').UsageHistory);
     ok(ri.asked.trimmed && ri.asked.cold > 0, `control (the trim inline on the hub's road): the asking tick moved ${ri.asked.cold} rows ⇒ RED`);
     const STEP = 'if (!r.done) return setImmediate(step);';
-    const r1 = await hubRun(100000, M.load('src/usage-history.js', src.replace(STEP, 'if (!r.done) return step();'), 'one-callback').UsageHistory);
+    const r1 = await hubRun(100000, M.load('src/usage-history.js', editAnchor(src, STEP, 'if (!r.done) return step();', "src/usage-history.js"), 'one-callback').UsageHistory);
     ok(src.split(STEP).length === 2 && r1.t.steps >= 7 && r1.turns < 3, `control (a driver that runs every step in one callback): ${r1.t.steps + 1} steps in ${r1.turns} loop turn(s) ⇒ RED by the turn count`);
     const s0 = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
     ok((s0.match(/this\._trimOwed\(c\)/g) || []).length === 3, 'both sync-road trims (the hourly slide, the byte ceiling) and a walk\'s end ask _trimOwed (each driven for real below: §2b, §4)');
@@ -215,7 +215,7 @@ try {
     const cold1 = c.cold.n; uh._trimHot();
     ok(!c.events.includes(late[1]) && c.cold.n === cold1 + 1 && sameView(c) && sig(uh) === sig(twin), `the next trim moves the late row below the cut (${c.lastTrim.moved} moved; the twin's totals still)`);
     const srcC = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8'), CARRY = "      for (let i = n; i < m; i++) { ne.push(evs[i]); ns.push(c.sizes[i]); nl.push(c.locs[i]); nh.push(c.hrh[i]); hb += c.sizes[i]; stat.commitVisits++; if ((evs[i].ts || 0) < cut) below++; }\n";
-    const Swap = mutantCopies('usage-trim-carry', REPO).load('src/usage-history.js', srcC.replace(CARRY, '      // (the release\'s form: the arrays swapped over the rows that came meanwhile)\n'), 'swap-over').UsageHistory;
+    const Swap = mutantCopies('usage-trim-carry', REPO).load('src/usage-history.js', editAnchor(srcC, CARRY, '      // (the release\'s form: the arrays swapped over the rows that came meanwhile)\n', "src/usage-history.js"), 'swap-over').UsageHistory;
     const x = mk(10000, { hub: false, U: Swap }); x.uh._sortedEvents();
     const gx = x.uh._trimSteps(500); let rx = gx.next(); while (!rx.done && !x.c.cold.sn) rx = gx.next();
     const lx = [mkRow(T - 20 * DAY)]; take(x.uh, x.c, lx, x.st); while (!rx.done) rx = gx.next();
@@ -265,7 +265,7 @@ try {
   console.log('§3d the headroom and a reader\'s window');
   {
     const srcR = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8'), HEAD = 'maxBytes: max - Math.floor(max / HOT_HEADROOM)';
-    const NoHead = mutantCopies('usage-trim-headroom', REPO).load('src/usage-history.js', srcR.replace(HEAD, 'maxBytes: max'), 'release-ceiling').UsageHistory;
+    const NoHead = mutantCopies('usage-trim-headroom', REPO).load('src/usage-history.js', editAnchor(srcR, HEAD, 'maxBytes: max', "src/usage-history.js"), 'release-ceiling').UsageHistory;
     const rowsH = Array.from({ length: 20000 }, (_, k) => mkRow(T - Math.floor((k / 20000) * 40 * DAY)));
     const run = (U) => {
       const { uh, c } = mk(0, { hub: false, U, rows: rowsH.map((e) => ({ ...e })) });

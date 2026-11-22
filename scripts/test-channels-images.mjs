@@ -596,11 +596,11 @@ console.log('④ negative controls (patched copies in this run\'s scratch dir)')
   // (d) a thumbnail verdict with no retry limit
   const LIMIT = 'if (TRANSIENT.includes(code) && attempt < AUTO_RETRIES) {';
   ok(ATT_SRC.includes(LIMIT), 'CONTROL setup: the retry limit is spelled once');
-  const AttNoLimit = MUT.load('src/channel-attachments.js', ATT_SRC.replace(LIMIT, 'if (TRANSIENT.includes(code)) {'), 'no-limit');
+  const AttNoLimit = MUT.load('src/channel-attachments.js', editAnchor(ATT_SRC, LIMIT, 'if (TRANSIENT.includes(code)) {', "src/channel-attachments.js"), 'no-limit');
   const bad = thumbRows(AttNoLimit).filter(([, p]) => !p).map(([nm]) => nm);
   ok(bad.length >= 1 && bad.some((x) => /TWO retries/.test(x)), `CONTROL: a thumbnail verdict with no limit retries for ever — its row reddens (${bad.join(' | ')})`);
   // (e) a verdict that fetches before asking the cache
-  const AttNoCache = MUT.load('src/channel-attachments.js', ATT_SRC.replace("  if (f.cached) return { act: 'serve', from: 'cache' };\n", ''), 'no-cache');
+  const AttNoCache = MUT.load('src/channel-attachments.js', editAnchor(ATT_SRC, "  if (f.cached) return { act: 'serve', from: 'cache' };\n", '', "src/channel-attachments.js"), 'no-cache');
   ok(verdictRows(AttNoCache).some(([, p]) => !p), 'CONTROL: a verdict that does not serve the cache first reddens the verdict table');
   // (f) an owner lookup that only reads the newest 5000 records (the pre-R3 engine)
   const FIND = '    if (msg) {\n      const byMsg = typeof store.findRecord === \'function\' ? store.findRecord(adapterId, convId, String(msg)) : null;';
@@ -645,7 +645,7 @@ console.log('\nB-fbac: a recalled message\'s attachment is said by name and the 
   const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
   const LINE = "        if (err && err.detail && err.detail.recalled === true) {";
   ok(ESRC.split(LINE).length === 2 && ESRC.includes("answers: [owner.replyTo, owner.root].filter((x) => typeof x === 'string' && x) })"), 'control setup: the recall branch is present once; the engine hands the adapter what the message answers (its replyTo / root)');
-  const Pre = MUT.load('src/server/channels-engine.js', ESRC.replace(LINE, '        if (false) {'), 'b-fbac-pre');
+  const Pre = MUT.load('src/server/channels-engine.js', editAnchor(ESRC, LINE, '        if (false) {', "src/server/channels-engine.js"), 'b-fbac-pre');
   const P = await rig('recalled-pre', { engineMod: Pre });
   P.W.script['pic-5'] = 'recalled';
   const pr = await P.eng.attachment('pics', 'room', 'pic-5', { msg: 'm5' });

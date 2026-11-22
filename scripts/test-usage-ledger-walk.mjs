@@ -28,6 +28,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // a world's dir removed: the store writer forgets its rates.json first (a pending write would say ENOENT and retry — hub-loop-stalls commit 2)
 const rmWorld = (w) => { try { require('../src/store-writer.js').storeWriter().forget(path.join(w.adir || path.join(w.data, 'usage-anchors'), 'rates.json')); } catch { } fs.rmSync(w.data, { recursive: true, force: true }); };
@@ -368,7 +377,7 @@ const getCount = (TREE) => {
     return { rebuilt: n, was: k0 && k0.ik, now: k1 && k1.ik };
   };
   const esrc = fs.readFileSync(path.join(REPO, 'src/usage-estimator.js'), 'utf8'), HIT = '(m.ik || null) === ikNow && ';
-  const ERel = mutantCopies('usage-memo-switch', REPO).load('src/usage-estimator.js', esrc.replace(HIT, ''), 'no-switch');
+  const ERel = mutantCopies('usage-memo-switch', REPO).load('src/usage-estimator.js', editAnchor(esrc, HIT, '', "src/usage-estimator.js"), 'no-switch');
   const s1 = sw(null), s0 = sw(ERel);
   ok(esrc.split(HIT).length === 2 && s1.was && s1.was !== 'email:switched@x' && s1.rebuilt === 1 && s1.now === 'email:switched@x' && s0.rebuilt === 0 && s0.now === s1.was,
     `an account switch refuses its memo at once: sub-b's entry (${s1.was}) is rebuilt for the identity it resolves to now (${s1.rebuilt} estimate, ${s1.now}); RED (acad2351a's hit): the old identity's entry served (${s0.rebuilt} built, ${s0.now})`, { s1, s0 });
@@ -457,7 +466,7 @@ let storeBlind = null, twoLoads = null, countBlind = null, boundFatal = null; //
   // the whole ring scanned per ask
   { const est = read('src/usage-estimator.js'), from = '    if (last && !(entry.ts >= last.ts)) this._liveOutOfOrder = true;';
     ok(est.includes(from), 'the ring patch site exists');
-    const EM = require(M.write('src/usage-estimator.js', est.replace(from, '    this._liveOutOfOrder = true;'), 'ring-scan'));
+    const EM = require(M.write('src/usage-estimator.js', editAnchor(est, from, '    this._liveOutOfOrder = true;', "src/usage-estimator.js"), 'ring-scan'));
     const e = new EM.UsageEstimator({ anchorsDir: os.tmpdir(), usageHistory: { ledgerKnowsId: () => false }, resolveIdentity: () => null });
     for (let k = 0; k < 3000; k++) e.noteLive({ rid: 'm' + k, accountId: 'sub-a', model: 'claude-opus-5-5', usd: 0.01, ts: NOW - 3 * 3600e3 + k * 3000 });
     let reads = 0; const ring = e._liveRing; e._liveRing = new Proxy(ring, { get(t, k) { if (typeof k === 'string' && /^\d+$/.test(k)) reads++; return t[k]; } });
@@ -623,7 +632,7 @@ console.log('§8 B3 + the rest — the hour sums, the stepped plan, the relearn 
     // RED: master's road (a read + a JSON build + a write + a rename of the whole file on the loop, per identity)
     const M = mutantCopies('usage-ledger-walk-b3w', REPO), src = read('src/usage-estimator.js');
     const from = "      require('./store-writer.js').storeWriter().dirty(fp, { name: 'usage-rates.write', produce: () => JSON.stringify(this._ratesAll, null, 1) });";
-    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, "      this._ratesAll = null; let all = {}; try { all = JSON.parse(fs.readFileSync(fp, 'utf-8')) || {}; } catch { } all[identityKey] = { computedAt: Date.now(), nAnchors, buckets: rates }; fs.writeFileSync(fp + '.tmp', JSON.stringify(all, null, 1)); fs.renameSync(fp + '.tmp', fp);"), 'b3-on-loop')) : null;
+    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, "      this._ratesAll = null; let all = {}; try { all = JSON.parse(fs.readFileSync(fp, 'utf-8')) || {}; } catch { } all[identityKey] = { computedAt: Date.now(), nAnchors, buckets: rates }; fs.writeFileSync(fp + '.tmp', JSON.stringify(all, null, 1)); fs.renameSync(fp + '.tmp', fp);", "src/usage-estimator.js"), 'b3-on-loop')) : null;
     if (EM) EM.UsageEstimator.prototype.relearnStepLines = Infinity; // usage-relearn-stepped: B's laws judged on whole relearns (the mutant class too)
     const R = EM ? b3(EM) : null;
     ok(!!R && R.writes >= 2 * R.ids && R.builds >= R.ids, `RED: rates.json written on the loop per identity (master's road) ⇒ ${R && R.reads} reads, ${R && R.writes} writes, ${R && R.builds} JSON builds in the handler`, R);
@@ -860,7 +869,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
     // RED: a reload that keeps the copy read before the migration — the dropped rates come back at the next persist
     const M = mutantCopies('usage-ledger-walk-r2w', REPO), src = read('src/usage-estimator.js');
     const from = '  reloadRates() { this._seeded = false; this._ratesAll = null;';
-    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '  reloadRates() { this._seeded = false;'), 'reload-keeps')) : null;
+    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', editAnchor(src, from, '  reloadRates() { this._seeded = false;', "src/usage-estimator.js"), 'reload-keeps')) : null;
     const R = EM ? r1(EM) : null;
     ok(!!R && R.back, `RED: a reload that keeps the copy ⇒ the dropped identity is written back (${R && R.back})`, R);
   }
