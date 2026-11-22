@@ -339,14 +339,14 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
     const keptCmd = `${JSON.stringify(link)} ${GEN.HOOK_CMD}`, k = JSON.parse(fs.readFileSync(sf, 'utf8'));
     for (const ev of ['SessionStart', 'UserPromptSubmit', 'Stop']) k.hooks[ev][0].hooks[0].command = keptCmd;
     fs.writeFileSync(sf, JSON.stringify(k, null, 2) + '\n');
-    const stK = GEN.agentHooksStatus().claude;
+    const stK = (await GEN.agentHooksStatus()).claude;
     said.length = 0;
     const rk = await hooks();
     const kAfter = JSON.parse(fs.readFileSync(sf, 'utf8'));
     ok(stK.installed === true && stK.stale === false && rk.claude && rk.claude.ok === true && ['SessionStart', 'UserPromptSubmit', 'Stop'].every((ev) => cmdOf(kAfter, ev) === keptCmd) && !said.some((l) => l.startsWith('Hook command rewritten')),
       '(d) a kept spelling reads installed (the check starts nothing for it), and a registration over it keeps it, rewrites nothing and reads ok', { stK, rk, said });
     const GENM = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), '  const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);', '  const sameRunner = (c) => c === hookCmd;', 'a plain string compare'), 'plain-compare')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });
-    const stKm = GENM.agentHooksStatus().claude;
+    const stKm = (await GENM.agentHooksStatus()).claude;
     ok(stKm.installed === false && stKm.stale === true, 'RED (a plain string compare): the kept spelling reads stale — the six-hourly check would start a run for it every time', stKm);
     // THE REMOVAL (the Integration switch off, «Remove hooks»): the helper's --uninstall strips ONLY our entries, never a managed key
     const HC2 = require(path.join(REPO, 'src/harness-config.js'));
@@ -450,8 +450,46 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const GENU = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), "typeof homeRead === 'function' ? homeRead(ourRowsOnDisk) : ", '', 'the read outside the guard'), 'opt-out-unguarded'));
       const hom = await heldOptLegs(GENU);
       ok(hom.reads > 0, 'RED (the read outside the guard — the second follow\'s form): the opted-out start reads the hook files into the held home', hom);
-      ok(src('server.js').includes('homeRead: (fn) => harnessConfig.homeRead(fn)') && src(SYNC_REL).includes('function homeRead(fn) { return cliRunner ? cliRunner.homeRead(fn)'),
-        'WIRING (r2224 (1)): the hub hands the generators the runner\'s guarded read (server.js → harness-config-sync → the runner)');
+      ok(src('server.js').includes('homeRead: (fn, ms) => harnessConfig.homeRead(fn, ms)') && src(SYNC_REL).includes('function homeRead(fn, ms) { return cliRunner ? cliRunner.homeRead(fn, ms)'),
+        'WIRING (r2224 (1)): the hub hands the generators the runner\'s guarded read (server.js → harness-config-sync → the runner), with the reader\'s own bound (r2345)');
+      // r2345 (THE ROW's OWN HARM): the hook STATUS (the six-hourly check, the hooks routes, the Apply answer) is read OFF THE LOOP,
+      // through the runner's guard and within its own bound — a home that stops answering is said «not read», never waited on
+      const statusLegs = async (GM) => {
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });   // our rows in the file: a status that reads them says installed
+        const asked = [];
+        const RS = R.createCliConfigRunner({ starter: handStarter(), helperPath: '/x/helper.mjs', timeoutMs: 80, stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+        const G = GM.create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn, ms) => { asked.push(ms); return RS.homeRead(fn, 80); } });   // the stand-in bound: 80 ms
+        const live = await G.agentHooksStatus();
+        const rf0 = fs.promises.readFile, rs0 = fs.readFileSync, ex0 = fs.existsSync; let reads = 0, syncReads = 0;
+        fs.promises.readFile = (f, ...a) => (String(f).startsWith(home) ? (reads++, new Promise(() => {})) : rf0.call(fs.promises, f, ...a));   // the home stops answering
+        fs.readFileSync = (f, ...a) => { if (String(f).startsWith(home)) syncReads++; return rs0.call(fs, f, ...a); };
+        fs.existsSync = (f) => { if (String(f).startsWith(home)) syncReads++; return ex0.call(fs, f); };
+        let hung = null, next = null, readsAfterFirst = 0; const t0 = Date.now();
+        try {
+          hung = await Promise.race([G.agentHooksStatus(), new Promise((res) => setTimeout(() => res(null), 1500))]);
+          readsAfterFirst = reads;
+          next = hung && await Promise.race([G.agentHooksStatus(), new Promise((res) => setTimeout(() => res(null), 1500))]);   // asked again while that read is out
+        } finally { fs.promises.readFile = rf0; fs.readFileSync = rs0; fs.existsSync = ex0; }
+        return { live: live.claude && { installed: live.claude.installed, fileExists: live.claude.fileExists }, hung: hung && hung.claude, ms: Date.now() - t0, next: next && next.claude, reads, readsAfterFirst, syncReads, asked: [...new Set(asked)] };
+      };
+      const sl = await statusLegs(require(path.join(REPO, 'src/server/agent-tool-generators.js')));
+      ok(!!(sl.live && sl.live.installed === true && sl.hung && /the home did not answer within 80 ms/.test(sl.hung.unread || '') && sl.hung.fileExists === null && sl.hung.installed === null
+          && sl.next && /the home still has not answered an earlier read \(1 still out\)/.test(sl.next.unread || '') && sl.reads === sl.readsAfterFirst && sl.syncReads === 0 && sl.asked.join() === '10000'),
+        'r2345: the hook status reads the home OFF the loop through the guard, within its own bound (10 s, asked by name): a home that stops answering is «not read» at the bound — no fact claimed (fileExists / installed null) — and the next ask is refused at once with no new read', sl);
+      const GNG = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), "typeof homeRead === 'function' ? await homeRead(hookFileFacts, STATUS_READ_MS) : ", '', 'the status read outside the guard'), 'status-unguarded'));
+      const slg = await statusLegs(GNG);
+      ok(!slg.hung, 'RED (the status read outside the guard): a home that stops answering holds the page — no answer within 1.5 s', slg);
+      const GSY = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), "try { text = await fs.promises.readFile(file, 'utf-8'); }", "try { text = fs.readFileSync(file, 'utf-8'); }", 'the release\'s synchronous read'), 'status-sync'));
+      const sls = await statusLegs(GSY);
+      ok(sls.syncReads > 0, 'RED (the release\'s synchronous read of the hook file): the status reads the home ON the hub\'s loop', sls);
+      const SJ2 = src('server.js'), HL2 = src('src/server/hooks-late.js'), hc2 = SJ2.slice(SJ2.indexOf('async function checkAgentHookHealth()'), SJ2.indexOf('async function checkAgentHookHealth()') + 2400);
+      const calls2 = (t) => [(t.match(/agentHooksStatus\(\)/g) || []).length, (t.match(/await agentHooksStatus\(\)/g) || []).length];
+      ok(SJ2.includes('async function checkAgentHookHealth()') && hc2.indexOf('const st = await agentHooksStatus();') > 0 && hc2.indexOf('if (!info.fileExists || info.parseError) continue;') > hc2.indexOf('const st = await agentHooksStatus();')
+          && hc2.indexOf('if (!info.fileExists || info.parseError) continue;') < hc2.indexOf('ensureAgentHooks({ auto: true })') && calls2(SJ2)[0] === calls2(SJ2)[1] && calls2(HL2)[0] === calls2(HL2)[1] && calls2(SJ2)[0] >= 4,
+        'WIRING (r2345): the six-hourly check awaits the status and skips an entry whose file is not known to exist (an unread one) before any repair; every status call of server.js and the Apply route is awaited', { server: calls2(SJ2), applyRoute: calls2(HL2) });
+      const ma2 = src('src/lib/manage-agents.js');
+      ok(ma2.indexOf('if (st.unread) return') > 0 && ma2.indexOf('if (st.unread) return') < ma2.indexOf('if (st.stale) return') && src('src/lib/i18n-zh.js').includes('"{label}: not read — {why}"') && src('src/lib/i18n-ja.js').includes('"{label}: not read — {why}"'),
+        'WIRING (r2345): Manage agents says an unread hook file by name, with its reason (zh, ja), before any other verdict of that file');
       // r1813 (2): an Install pressed WHILE the start reads the mark and the rows (outside the queue): the start's removal reads the
       // mark again INSIDE its job — the Install, answered «ok», is never stripped after it
       const pressLegs = async (G) => {

@@ -74,7 +74,7 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
         ...((cfg && cfg.receipts) || []).filter((x) => x.state === 'error' || x.state === 'refused').map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`),
         ...(cfg && cfg.error ? [cfg.error] : []),
       ];
-      res.json({ ok: !failed.length, ...(failed.length ? { error: failed.join('; ') } : {}), hooks, cliConfig: harnessConfig.cliConfigStatus(), status: agentHooksStatus() });
+      res.json({ ok: !failed.length, ...(failed.length ? { error: failed.join('; ') } : {}), hooks, cliConfig: harnessConfig.cliConfigStatus(), status: await agentHooksStatus() });
     } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
   }
 

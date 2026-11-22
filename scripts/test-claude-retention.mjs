@@ -292,12 +292,12 @@ const syncFor = (root, home, extra = {}) => require(path.join(repo, 'src/server/
   ok('hookRegistrationSafe unchanged: under VIBESPACE_SKIP_AGENT_HOOKS=1 the registration is skipped, nothing created', !!skipped.skipped && !fs.existsSync(path.join(process.env.HOME, '.claude')));
   process.env.VIBESPACE_FORCE_AGENT_HOOKS = '1';
   try {
-    const st0 = GEN.agentHooksStatus();
+    const st0 = await GEN.agentHooksStatus();
     const r0 = await run(() => GEN.ensureAgentHooks({ auto: true }));
     ok('~/.claude ABSENT ⇒ skipped and said (missing: no-dir), the directory never created, no callback', r0.claude && r0.claude.ok === false && r0.claude.missing === 'no-dir' && !fs.existsSync(path.join(process.env.HOME, '.claude')) && created.length === 0 && st0.claude.dirExists === false && st0.claude.creatable === false, { r0, st0: st0.claude });
     ok('…the journal says why (the CLI has not run on this machine)', logs.some((l) => /Hook registration \(claude\) skipped: .*\.claude not found — the CLI has not run on this machine; nothing is created/.test(l)), logs);
     fs.mkdirSync(path.join(process.env.HOME, '.claude', 'projects'), { recursive: true }); // the incident's shape: the CLI ran, wrote projects/, never settings.json
-    const st1 = GEN.agentHooksStatus();
+    const st1 = await GEN.agentHooksStatus();
     ok('~/.claude present, settings.json missing ⇒ the status says creatable (the chip offers Apply)', st1.claude.fileExists === false && st1.claude.dirExists === true && st1.claude.creatable === true, st1.claude);
     logs.length = 0;
     const r1 = await run(() => GEN.ensureAgentHooks({ auto: true }));
@@ -307,7 +307,7 @@ const syncFor = (root, home, extra = {}) => require(path.join(repo, 'src/server/
     ok('…ensureAgentHooks CREATES it (created: true), mode 0600, SessionStart/UserPromptSubmit/Stop registered with our absolute command', r1.claude.ok && r1.claude.created === true && modeOf(sf) === 0o600 && ['SessionStart', 'UserPromptSubmit', 'Stop'].every((ev) => /vibespace-hook\.mjs$/.test(cmd(ev) || '')), { r1, j });
     ok('…the journal line: "created ~/.claude/settings.json (the CLI had never written one) and registered VibeSpace hooks"', logs.includes('created ~/.claude/settings.json (the CLI had never written one) and registered VibeSpace hooks'), logs);
     ok('…onHookFileCreated fired ONCE with {harness: claude, rel: .claude/settings.json, file, at}', created.length === 1 && created[0].harness === 'claude' && created[0].rel === '.claude/settings.json' && created[0].file === sf && created[0].at > 0, created);
-    const st2 = GEN.agentHooksStatus();
+    const st2 = await GEN.agentHooksStatus();
     ok('…the status now reads installed, not creatable', st2.claude.installed === true && st2.claude.creatable === false);
     const r2 = await run(() => GEN.ensureAgentHooks({ auto: true }));
     ok('a second registration over the created file: ok, never "created" again, no second callback', r2.claude.ok && !r2.claude.created && created.length === 1, r2);
@@ -399,7 +399,7 @@ console.log('§9 wiring pins (a fix without its call site is dead)');
 {
   const srv = read('server.js'), ar = read('src/agent-routes.js'), gen = read('src/server/agent-tool-generators.js'), ss = read('src/session-status.js');
   ok("claude's settings.json is declared 'dir-exists'; codex's two files the same rule by name", /cliConfigFile\(HARNESS_SETTINGS\.claude\.files\.settings, \{ createIfMissing: 'dir-exists' \}\)/.test(read('src/harnesses/claude.js')) && (read('src/harnesses/codex.js').match(/createIfMissing: 'dir-exists'/g) || []).length === 2);
-  ok('server.js constructs hooksLate BEFORE the generators and hands ensureAgentHooks its callback', srv.indexOf("require('./src/server/hooks-late.js').create(") > 0 && srv.indexOf("require('./src/server/hooks-late.js').create(") < srv.indexOf("require('./src/server/agent-tool-generators.js').create(") && /agent-tool-generators\.js'\)\.create\(\{ rootDir: __dirname, port: PORT, onHookFileCreated: \(ev\) => hooksLate\.noteCreated\(ev\), applyThisMachine: \(o\) => harnessConfig\.applyThisMachine\(o\), homeRead: \(fn\) => harnessConfig\.homeRead\(fn\) \}\);/.test(srv));
+  ok('server.js constructs hooksLate BEFORE the generators and hands ensureAgentHooks its callback', srv.indexOf("require('./src/server/hooks-late.js').create(") > 0 && srv.indexOf("require('./src/server/hooks-late.js').create(") < srv.indexOf("require('./src/server/agent-tool-generators.js').create(") && /agent-tool-generators\.js'\)\.create\(\{ rootDir: __dirname, port: PORT, onHookFileCreated: \(ev\) => hooksLate\.noteCreated\(ev\), applyThisMachine: \(o\) => harnessConfig\.applyThisMachine\(o\), homeRead: \(fn, ms\) => harnessConfig\.homeRead\(fn, ms\) \}\);/.test(srv));
   ok('…calls hooksLate.ready() right after restoreSessions() — as CODE, before the line comment (§48)', /^\s*restoreSessions\(\);[^\n/]*hooksLate\.ready\(\); \/\//m.test(srv));
   ok('…and registers the Apply route with the belt, the master switch and the plan', /hooksLate\.registerApplyRoute\(app, \{ ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow \}\);/.test(srv));
   ok('the generator calls onHookFileCreated only for a file the helper\'s run CREATED and logs the journal line', /if \(\(landing\.created \|\| \[\]\)\.some\(\(c\) => c\.rel === rel\)\) \{/.test(gen) && /onHookFileCreated\(\{ harness: key, file, rel, at: Date\.now\(\) \}\)/.test(gen));

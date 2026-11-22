@@ -432,7 +432,7 @@ const {
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
   ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery, rootFactsNow, onRootLanded, // B-1425: the root facts a caller that can wait awaits
   agentHooksStatus, HOOK_OPTOUT_FILE,
-} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev), applyThisMachine: (o) => harnessConfig.applyThisMachine(o), homeRead: (fn) => harnessConfig.homeRead(fn) }); // B-ddf3 u2 line 1: this machine's hooks through the shipped helper
+} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev), applyThisMachine: (o) => harnessConfig.applyThisMachine(o), homeRead: (fn, ms) => harnessConfig.homeRead(fn, ms) }); // B-ddf3 u2 line 1: this machine's hooks through the shipped helper
 // ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
 // THE typed accessors over the descriptor-declared tables (harnessSetting /
 // harnessDeclares / harnessSpawnSettings — threaded to ws-create and the pool
@@ -470,12 +470,12 @@ function serverNotice(key, text, { level = 1, i18n = null } = {}) { // i18n = {k
 // dropping every Stop/SessionStart/UserPromptSubmit delivery. Boot(+60s) +
 // every 6h. NOTE the heal only fixes the FILE — running CLI sessions snapshot
 // hook config and pick it up after restart/compaction; the notice says so.
-function checkAgentHookHealth() {
+async function checkAgentHookHealth() {
   try {
     if (!hookRootWatch.probeMayRun() || !integrationEnabled() || fs.existsSync(HOOK_OPTOUT_FILE)) return; // verify r2 ①: an unjudgeable root arms the backoff re-judge, never a silent return
     const scriptMissing = !fs.existsSync(HOOK_CMD);
     if (scriptMissing) { try { createHookHelper(); } catch {} }
-    const st = agentHooksStatus();
+    const st = await agentHooksStatus();   // r2345: read off the loop, through the runner's guard — an unread file is no verdict (skipped below)
     for (const [key, info] of Object.entries(st)) {
       if (!info || typeof info !== 'object' || !('installed' in info)) continue; // hookPath/optedOut fields
       if (!info.fileExists || info.parseError) continue; // that CLI isn't set up here / unreadable
@@ -950,7 +950,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
 });
 require('./src/server/wait-watch.js').install({ activeSessions, getDeliver: () => deliver, getGroups: () => { try { return channelsWiring.groups; } catch { return null; } }, getUserTodos: () => userTodos, sessionKeyOf: (s, id) => sessionStatusKey(s, id), log: console }); const recordClear = require('./src/server/record-clear.js').create({ tasks, userTodos, sessionStatus, getJobs: jobsWiring.getJobs, getGroups: () => channelsWiring.groups, getChannels: () => channelsWiring.channels }); require('./src/routes/records-clear.js').registerRecordClearRoutes(app, { recordClear }); // "Clear content…" (2026-09-28): ONE entry point (PURE verdict, each store's door, the journal line); the owner's POST /api/records/clear[-many] here, an agent's own verbs through setupAgentRoutes
 setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), readUserStatePending: () => persistenceRouter.readUserStatePending(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear, getSendUserInput: () => sendUserInput, getSessionMetaStore: () => ({ readSessionMeta, writeSessionMeta }), carryDir: path.join(__dirname, 'data') }); // lane report-mark-on-ack r3: carryDir = the outstanding deliveries by conversation (a restart is said from it). B-86d3: the seen marks ride the session meta; lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3); getSendUserInput = THE typing path for a dispatch's `/compact` (lane worker-dispatch — sendUserInput is declared further down)
-app.get('/api/agent-hooks', async (req, res) => { try { await rootFactsNow(); res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() }); } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); } }); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
+app.get('/api/agent-hooks', async (req, res) => { try { await rootFactsNow(); res.json({ ...(await agentHooksStatus()), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() }); } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); } }); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
 app.post('/api/agent-hooks/install', async (req, res) => { try {   // B-1425: an async route answers a throw (500), never hangs
   // The master switch outranks the button: boot/toggle would strip the entries
   // right back — refuse with guidance instead of silently contradicting.
@@ -958,13 +958,13 @@ app.post('/api/agent-hooks/install', async (req, res) => { try {   // B-1425: an
   await rootFactsNow(); createHookHelper(); // B-1425: the verdict on the root's true facts; regenerate the script too (repair path)
   const results = await ensureAgentHooks({ auto: false }); // explicit → clears any opt-out (B-ddf3 u2 line 1: through the shipped helper, answered at its landing)
   // A worktree / temp server refuses BY NAME (src/server-root.js) — never "installed"
-  if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: agentHooksStatus() }); if (results.skipped && results.settingsHeld) return res.status(503).json({ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: { file: 'settings.json', kind: results.settingsHeld.kind, code: results.settingsHeld.code || null, since: null, rung: 'said' } });
-  const bad = Object.entries(results || {}).filter(([, v]) => v && v.ok === false); res.json({ success: !bad.length, results, ...(bad.length ? { error: bad.map(([k, v]) => `${k}: ${v.error}`).join('; ') } : {}), status: agentHooksStatus() });
+  if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: await agentHooksStatus() }); if (results.skipped && results.settingsHeld) return res.status(503).json({ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: { file: 'settings.json', kind: results.settingsHeld.kind, code: results.settingsHeld.code || null, since: null, rung: 'said' } });
+  const bad = Object.entries(results || {}).filter(([, v]) => v && v.ok === false); res.json({ success: !bad.length, results, ...(bad.length ? { error: bad.map(([k, v]) => `${k}: ${v.error}`).join('; ') } : {}), status: await agentHooksStatus() });
 } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
 hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)
 app.post('/api/agent-hooks/uninstall', async (req, res) => { try {
   await rootFactsNow(); const landing = await removeAgentHooks(); // B-ddf3 u2: the removal through the shipped helper, answered at its landing, a failure by name
-  res.json({ success: !(landing && landing.ok === false), ...(landing && landing.ok === false ? { error: `the removal did not land: ${landing.why}` } : {}), status: agentHooksStatus() });
+  res.json({ success: !(landing && landing.ok === false), ...(landing && landing.ok === false ? { error: `the removal did not land: ${landing.why}` } : {}), status: await agentHooksStatus() });
 } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); } });
 
 // ── Hosts (the MACHINE registry — ssh hosts AND dial-out devices, B-f3e8) ──

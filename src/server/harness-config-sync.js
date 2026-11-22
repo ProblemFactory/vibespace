@@ -143,8 +143,9 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? true : hooks })), reason, { uninstall: strip, kind, before, after, when });
   }
   /** r2224 (1): a read under this machine's home made OUTSIDE a job (the opted-out start's look at our hook rows) — through the
-   *  runner's guard (bounded, counted, refused while an earlier read is out); no runner: the read as it is → { value } | { error } */
-  function homeRead(fn) { return cliRunner ? cliRunner.homeRead(fn) : Promise.resolve().then(fn).then((value) => ({ value }), (error) => ({ error })); }
+   *  runner's guard (bounded, counted, refused while an earlier read is out; `ms`: the reader's own bound, r2345); no runner (a
+   *  test's server only — the hub always builds one): the raw read → { value } | { error } */
+  function homeRead(fn, ms) { return cliRunner ? cliRunner.homeRead(fn, ms) : Promise.resolve().then(fn).then((value) => ({ value }), (error) => ({ error })); }
   /** THE SPAWN GATE (r1407 (a)): null when this machine's config has landed (or nothing was asked: a refused or skipped
    *  server), else { late | failed, why } once the bound passes — the start goes on either way and says it once. A failed
    *  last landing is asked again here. */

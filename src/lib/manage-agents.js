@@ -2696,6 +2696,9 @@ export function installManageAgents(App, ctx = {}) {
           const stateOf = (k, label) => {
             const st = hs[k] || {};
             if (st.installed) return `<span class="ob-ok">✓ ${label}</span>`;
+            // r2345: the hook file was not read (the home did not answer in time, or an earlier read is still out) — no fact is
+            // claimed either way, the reason is said
+            if (st.unread) return `<span class="ob-warn">${escHtml(t('{label}: not read — {why}', { label, why: st.unread }))}</span>`;
             if (st.stale) return `<span class="ob-warn">${t('{label}: needs update', { label })}</span>`;
             if (st.parseError) return `<span class="ob-bad">${t('{label}: config unreadable', { label })}</span>`;
             // a missing hook file (lane hooks-create): its directory exists ⇒ the next start (or Apply, below) creates it;

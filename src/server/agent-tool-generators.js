@@ -474,25 +474,47 @@ const _findOurHookIn = findOurHookIn;
 // TRANSCRIPT RETENTION (2.369.118) is no longer a special case here: it is the
 // claude table's cli-config row `transcriptRetentionDays` (src/harness-settings.js),
 // written by src/server/harness-config-sync.js through the same CAS writer.
-function agentHooksStatus() {
+// r2345 (B-ddf3, THE ROW's OWN HARM): the hook files' facts are read OFF THE LOOP (fs.promises) and THROUGH THE RUNNER's GUARD —
+// bounded, counted while out, refused at once while an earlier read of the home is out. They were read synchronously on the
+// hub's loop by the six-hourly hook health check (a road that repeats by itself) and the hooks routes: a hung home froze the hub
+const STATUS_READ_MS = 10000;   // a person's page and the six-hourly check wait this long at most
+async function hookFileFacts() {
+  const out = {};
+  for (const [key, def] of Object.entries(HOOK_FILES)) {
+    const file = def.file();
+    let text = null, code = null;
+    try { text = await fs.promises.readFile(file, 'utf-8'); } catch (e) { code = (e && e.code) || 'EIO'; }
+    let dirExists = true; try { await fs.promises.stat(path.dirname(file)); } catch { dirExists = false; }
+    out[key] = { file, text, fileExists: text !== null || (code !== 'ENOENT' && code !== 'ENOTDIR'), dirExists };
+  }
+  return out;
+}
+let _statusUnreadSaid = null;   // the last «not read» said (once per cause, not once per page)
+async function agentHooksStatus() {
   // the spelling the SHIPPED HELPER writes on this machine (B-ddf3 unit 2 line 1, r1407 (e)): the stable node path (B-b83c)
   const hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE), refused: ownerWriteRefusal(), registeredAfterError: _registeredAfterError }; // verify r2 ①: the chip says "registered at HH:MM after an earlier read error"
+  const r = typeof homeRead === 'function' ? await homeRead(hookFileFacts, STATUS_READ_MS) : await hookFileFacts().then((value) => ({ value }), (error) => ({ error }));
+  if (!r.value) {
+    const why = `the hook files were not read (${r.why || (r.error && r.error.message) || r.error || 'no answer'})`;
+    if (_statusUnreadSaid !== why.replace(/\d+ still out/, '')) { _statusUnreadSaid = why.replace(/\d+ still out/, ''); console.warn(`[hooks] ${why} — the status says «not read»; nothing is judged broken or repaired on it`); }
+  } else _statusUnreadSaid = null;
   for (const [key, def] of Object.entries(HOOK_FILES)) {
-    const file = def.file();
+    const f = r.value && r.value[key];
+    // NOT READ: no fact is claimed — fileExists / dirExists / installed null (the six-hourly check skips an entry whose file is not
+    // known to exist: nothing is judged broken, nothing repaired, on not knowing); the page says why
+    if (!f) { out[key] = { file: def.file(), unread: String(r.why || (r.error && r.error.message) || r.error || 'no answer'), fileExists: null, dirExists: null, creatable: false, parseError: false, installed: null, stale: false }; continue; }
     let root = null, parseError = false;
-    try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); }
-    catch { parseError = fs.existsSync(file); }
+    if (f.text !== null) { try { root = JSON.parse(f.text); } catch { parseError = true; } } else parseError = f.fileExists;   // there but unreadable, or not JSON
     let found = [];
     const evs = HOOK_EVENTS_FOR(key);
     try { found = evs.map(ev => root ? _findOurHookIn(root.hooks?.[ev]) : null); } catch { found = evs.map(() => null); }
-    const fileExists = fs.existsSync(file), dirExists = fs.existsSync(path.dirname(file));
     out[key] = {
-      file,
-      fileExists,
-      dirExists,                                                               // the CLI has run here (its config directory exists)
-      creatable: !fileExists && dirExists && def.createIfMissing === 'dir-exists', // missing, and the next registration creates it (lane hooks-create)
+      file: f.file,
+      fileExists: f.fileExists,
+      dirExists: f.dirExists,                                                    // the CLI has run here (its config directory exists)
+      creatable: !f.fileExists && f.dirExists && def.createIfMissing === 'dir-exists', // missing, and the next registration creates it (lane hooks-create)
       parseError,
       installed: found.every(h => h && sameRunner(h.command)),   // r1407 (d): a spelling the applier KEEPS reads installed — the six-hourly check starts no run for it
       stale: found.some(h => h && !sameRunner(h.command)) || (found.some(Boolean) && !found.every(Boolean)),

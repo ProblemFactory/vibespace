@@ -157,11 +157,11 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       .finally(() => { inFlight = null; if (!queue.length) settle(last); pump(); });
   }
   /** r2224 (1): a read under the home made OUTSIDE a job (the opted-out start's look at our hook rows) goes through the SAME guard —
-   *  bounded by the run's bound, counted while it is out, refused at once while an earlier read is out → { value } | { error } |
-   *  { timedOut, why } | { held, why } */
-  function homeRead(fn) {
+   *  bounded by the run's bound (or `ms`: a reader a person or a start waits on — r2345), counted while it is out, refused at once
+   *  while an earlier read is out → { value } | { error } | { timedOut, why } | { held, why } */
+  function homeRead(fn, ms = timeoutMs) {
     if (homeStuck > 0) return Promise.resolve({ held: true, why: `the home still has not answered an earlier read (${homeStuck} still out)` });
-    return bounded(fn).then((r) => (r.timedOut ? { timedOut: true, why: `the home did not answer within ${timeoutMs} ms` } : r));
+    return bounded(fn, ms).then((r) => (r.timedOut ? { timedOut: true, why: `the home did not answer within ${ms} ms` } : r));
   }
   /** --status: the managed keys read off disk BY THE HELPER (nothing written). Never queued behind an apply's waiter list:
    *  a read beside a write is a read. */

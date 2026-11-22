@@ -1571,6 +1571,7 @@ export default {
   "{label}: config unreadable": "{label}: 設定を読み取れません",
   "{label}: needs update": "{label}: 更新が必要",
   "{label}: not installed": "{label}: 未インストール",
+  "{label}: not read — {why}": "{label}: 読み取れていません — {why}",
   "will be created at the next start — or press Apply": "次回の起動時に作成されます — または「適用」を押してください",
   "will be created at the next tool install or session start on that machine": "そのマシンで次にツールをインストールするかセッションを開始したときに作成されます",
   "{dir} not found — the CLI has not run on this machine, so nothing is written": "{dir} が見つかりません — このマシンではまだ CLI が実行されていないため、何も書き込みません",
