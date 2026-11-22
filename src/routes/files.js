@@ -68,8 +68,9 @@ const { contentDisposition, fileNameOf } = require('../file-disposition');
 // reload / save, the document window's and the pane editor's saves — test-safe-fs-path-memory's door census); such a call is asked
 // ONCE despite the pool's memory of a dead path. Every other request — a poll, a watcher, an auto reload, an agent's loop — carries
 // none. THE MARK IS A PERSON'S PRESS AND NOTHING ELSE (r1368 / r1396): the header, AND no bearer (an agent's, a job's or an automation
-// key's token never sets it), AND not a FOREIGN page (write-origin.js `foreignPageWhy`: a stated site must be same-origin, a stated origin
-// ours; neither stated — a plain-http LAN address — the custom header itself is the proof: no other site can send it without a preflight
+// key's token never sets it), AND not a FOREIGN page (write-origin.js `foreignPageWhy`: a stated same-origin site decides alone — the
+// browser's own word, whatever origin a proxy shows; any other stated site is foreign; with no site stated, a stated origin must be ours;
+// neither stated — a plain-http LAN address — the custom header itself is the proof: no other site can send it without a preflight
 // the hub never grants). It buys ONE try despite the memory and nothing else: no deadline, size or count, never an access door.
 const { pressBearer, foreignPageWhy, ownOriginOf } = require('../write-origin');
 const ATTENDED_HEADER = 'x-vibespace-attended';

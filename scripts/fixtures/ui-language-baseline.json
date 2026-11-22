@@ -396,9 +396,7 @@
    "Wrap: On",
    "Wrap: Off",
    "Dark",
-   "Light",
-   "Failed to load",
-   "Close editor"
+   "Light"
   ],
   "src/local-oracles.js": [
    "Login status",

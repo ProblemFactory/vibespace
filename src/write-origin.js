@@ -147,8 +147,8 @@ const isPress = (x) => !!x && typeof x === 'object' && MINTED.has(x) && PRESS_SC
 const pageOfUpgrade = (req) => Object.freeze({ headers: Object.freeze({ ...((req && req.headers) || {}) }), socket: Object.freeze({ encrypted: !!(req && req.socket && req.socket.encrypted) }), url: String((req && req.url) || '').split('?')[0], method: 'WS' });
 
 /** B-23e5's remainder (主开发 r1396): IS THIS REQUEST FROM A FOREIGN PAGE? Where the browser states the request's site it must say
- *  same-origin; where an origin is stated it must be ours; where neither is stated (a plain-http LAN address, a same-origin read) nothing
- *  says foreign. → null (not foreign) | why: the stated site ('cross-site' / 'same-site' / 'none') or 'origin'. PURE. The files router's
+ *  same-origin — and that word decides alone, the origin unread (r1733 (3)); only where no site is stated must a stated origin be ours;
+ *  where neither is stated (a plain-http LAN address, a same-origin read) nothing says foreign. → null (not foreign) | why: the stated site ('cross-site' / 'same-site' / 'none') or 'origin'. PURE. The files router's
  *  mark of a person's press asks it with the mark's own header — a custom header no other site's page can send without a preflight the
  *  hub never grants — and with no bearer: the strict `pageVerdict` would take every press away from a plain-http address. */
 function foreignPageWhy(headers = {}, own = '') {

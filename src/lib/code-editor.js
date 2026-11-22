@@ -445,7 +445,7 @@ class CodeEditor {
     else { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => {
       if (typeof prevAsk === 'function' && prevAsk(o) === false) return false;
       if (!this.modified || (o && o.discardAsked)) return true;
-      showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: String(this.filePath).split('/').pop() || this.filePath }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps (the safe default)
+      showConfirmDialog({ title: t('Close without saving?'), message: this._saveOut ? t('{name} has unsaved changes and a save of it is still out — close it and discard what is not saved?', { name: String(this.filePath).split('/').pop() || this.filePath }) : t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: String(this.filePath).split('/').pop() || this.filePath }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps (the safe default)
         .then((ok) => { const wm = this.app && this.app.wm; if (ok && wm) wm.requestClose(this.winInfo.id, { discardAsked: true }); });
       return false;
     }; }
@@ -617,37 +617,47 @@ class CodeEditor {
   }
 
   async save() {
+    const name = String(this.filePath).split('/').pop() || this.filePath;
+    // r2198 law 1: ONE save of this editor is out at a time — a press while one is out SENDS NOTHING and says so; nothing waits, nothing is
+    // queued, nothing is sent later by itself. It answers by the mark (law 6: save-and-close asks by it, its words saying a save is still out)
+    if (this._saveOut) { this.saveIndicator.textContent = '… ' + t('{name}: still saving…', { name }); this.saveIndicator.style.color = ''; this._wordsOf = 0; this._lastSaveError = t('a save of this file is still out'); return !this.modified; }
     const content = this.editorView.state.doc.toString();
-    const seq = this._saveSeq = (this._saveSeq || 0) + 1;   // an earlier save's late timer never wipes this one's words
-    this.saveIndicator.textContent = t('Saving…'); this.saveIndicator.style.color = '';   // B-3b03 follow-up: a save that is out says so
+    const seq = this._saveSeq = (this._saveSeq || 0) + 1;
+    this._saveOut = true;
+    this.saveIndicator.textContent = t('Saving…'); this.saveIndicator.style.color = ''; this._wordsOf = seq;   // B-3b03 follow-up: a save that is out says so
+    // r2198 law 3: a request with no reply inside 45 s is ENDED by the page — «not saved: no reply», and presses work again (the only bound)
+    const ctl = new AbortController(), end = setTimeout(() => ctl.abort(), 45000);
     try {
       // fetch only rejects on network errors — server-side write failures
       // (permission denied, read-only fs) return 400 with {error} and used to
       // show "✓ Saved" while silently dropping the edits
       // B-23e5: a save is a person's press (the button, Mod-s, save-and-close) — marked: tried once despite the pool's memory
-      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
+      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}), signal: ctl.signal });
       const data = await res.json().catch(() => ({}));
-      // r1733 (6): a save refused «still trying» — the save before it may still land: one true sentence, never «not saved»
-      if (data && data.code === 'storage_path_trying') { this.saveIndicator.textContent = '… ' + t('{name}: the save before this one is still being tried — wait for its answer', { name: String(this.filePath).split('/').pop() || this.filePath }); this.saveIndicator.style.color = 'var(--yellow)'; this._lastSaveError = fsErrorText(data); return false; }   // the save-and-close door's question says the true reason
+      // r2198 law 3: «still trying» — another press on this file or its folder holds it (this editor's own saves never overlap): NOT saved
+      if (data && data.code === 'storage_path_trying') throw new Error(t('another press on this file or its folder is still being tried'));
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
-      // B-3b03 follow-up (its read's S1): text typed while the save was out is NOT saved — its unsaved mark stays
       this.saveIndicator.title = '';   // B-23e5: a refusal's hover goes with the good save
+      // r2198 law 2: THE MARK IS CLEARED BY ONE THING ONLY — this «saved» reply, when its text is what the box holds AT THIS MOMENT; text typed
+      // while the save was out is not saved, and its mark stays (law 4: the person kept typing)
       if (this.editorView.state.doc.toString() === content) { this.modified = false; this.saveIndicator.textContent = '✓ ' + t('Saved'); this.saveIndicator.style.color = 'var(--green)'; }
-      else { this.saveIndicator.textContent = '● ' + t('Unsaved'); this.saveIndicator.style.color = 'var(--yellow)'; }   // its read's S2: the mark stays true
+      else { this.saveIndicator.textContent = '● ' + t('{name} is saved as it was when you pressed save — what you typed after is not saved yet: save again', { name }); this.saveIndicator.style.color = 'var(--yellow)'; }
+      this._wordsOf = seq;   // these words are this save's: its timer clears them unless a later press has spoken since
       this._diskChip.style.display = 'none';
       this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
-      setTimeout(() => { if (!this.modified && this._saveSeq === seq) this.saveIndicator.textContent = ''; }, 2000);
-      return true;
+      setTimeout(() => { if (!this.modified && this._wordsOf === seq) this.saveIndicator.textContent = ''; }, 2000);
+      return !this.modified;   // the save-and-close door reads the mark (never «done» over text the disk does not hold)
     } catch (err) {
+      const why = ctl.signal.aborted ? t('no reply') : (err.message || t('Error'));
       // B-23e5 (the save law): the text stays in the editor, the editor stays open, and the words say WHERE it is not saved
-      this.saveIndicator.textContent = '✕ ' + t('{name} is not saved — {why}', { name: String(this.filePath).split('/').pop() || this.filePath, why: err.message || t('Error') }); this.saveIndicator.style.color = 'var(--red)';
-      this.saveIndicator.title = t('{path} is not saved — {why}', { path: this.filePath, why: err.message || t('Error') });
-      // r1378 (3): where the text IS and what the person can do — said once as a toast; the dirty mark stays (a close asks, below)
-      showToast(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(this.filePath).split('/').pop() || this.filePath, why: err.message || t('Error') }), { type: 'error', duration: 8000 });
-      this._lastSaveError = err.message || t('Error');
-      return false;   // B-3b03 follow-up: the save-and-close door reads it (never «done» over a refused save)
-    }
+      this.saveIndicator.textContent = '✕ ' + t('{name} is not saved — {why}', { name, why }); this.saveIndicator.style.color = 'var(--red)';
+      this.saveIndicator.title = t('{path} is not saved — {why}', { path: this.filePath, why });
+      // r1378 (3): where the text IS and what the person can do — said once as a toast while there IS unsaved text (law 2: the mark is the mark)
+      if (this.modified) showToast(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name, why }), { type: 'error', duration: 8000 });
+      this._lastSaveError = why; this._wordsOf = seq;
+      return !this.modified;   // B-3b03 follow-up: the save-and-close door reads it (never «done» over a refused save with unsaved text)
+    } finally { clearTimeout(end); this._saveOut = false; }
   }
 
   // lane artifacts-model: a save in an editor opened FROM a chat counts on that conversation's deliverable row (by: user)
