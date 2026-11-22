@@ -90,6 +90,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A Background Work job running VibeSpace itself now says on its card why it was not restarted and that its memory bound ends VibeSpace with its conversations.
 - On slow storage, a save in a channel's Grant access… or Notify… dialog now applies at once instead of «Saving…» for seconds; a restart right after keeps it.
 - Pinning a conversation to a pool member, or back to automatic, is now saved before VibeSpace confirms it; a restart of VibeSpace right after keeps it.
+- When the rollback points of your desktops cannot be saved, every page now says so; before, nothing did.
+- After a stop that lost your latest desktop changes, the next start says so on every page until you press «Understood».
+- After a stop that was not clean, the next start says quietly that the last desktop changes may not have been saved.
+- A rollback point that cannot be read is no longer offered for restoring.
 
 ## 2.369.415 — 2026-11-21
 
