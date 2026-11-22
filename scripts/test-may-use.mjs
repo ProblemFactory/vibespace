@@ -104,7 +104,7 @@ function omitted(model) {
   ok(miss.length === 0, '② every admitted answer of the eleven-row battery (all ten shown doors) is in the view', miss);
   const MC = mutantCopies('may-use', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/may-use-model.js'), 'utf8');
-  const patched = src.replace("if (!a || typeof a !== 'object' || !DOOR_KIND[a.door]) return null;", "if (!a || typeof a !== 'object' || !DOOR_KIND[a.door] || a.door === 'exit') return null;");
+  const patched = editAnchor(src, "if (!a || typeof a !== 'object' || !DOOR_KIND[a.door]) return null;", "if (!a || typeof a !== 'object' || !DOOR_KIND[a.door] || a.door === 'exit') return null;", "src/may-use-model.js");
   ok(patched !== src, '② (the drop patch applied)');
   const copy = require(MC.write('src/may-use-model.js', patched, 'drop-exit'));
   const red = omitted(copy);
@@ -297,7 +297,7 @@ const FACTS9 = { cid: 'c1', conversationKeys: ['c1'], groupIds: ['gL'], groupsUn
   const src = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8');
   const cut = "const accessNamed = (res) => (cid ? CG.accessOf(res).filter((r) => F.rowNames(r, ctx)) : []);";
   ok(src.split(cut).length === 2, '⑨ (the door\'s per-entry check is there once)');
-  const whole = src.replace(cut, "const accessNamed = (res) => { const r = CG.rowOf(CG.DOORS.reach, res); const v = require('../grant-model.js').admits([{ door: 'channel-reach', resource: res, to: r.to, except: r.except }], RF); return v.ok ? CG.accessOf(res) : []; };");
+  const whole = editAnchor(src, cut, "const accessNamed = (res) => { const r = CG.rowOf(CG.DOORS.reach, res); const v = require('../grant-model.js').admits([{ door: 'channel-reach', resource: res, to: r.to, except: r.except }], RF); return v.ok ? CG.accessOf(res) : []; };", "src/server/channels-access.js");
   const mod = require(MC.write('src/server/channels-access.js', whole, 'whole-row'));
   const red = sceneRig(mod).access.mayUseFor(FACTS9).accounts.find((a) => a.id === 'a1');
   ok(red && red.state === 'excepted', '⑨ RED CONTROL: the whole-row rule (the row\'s 「除了」 applied to the conversation\'s own entry — r0\'s) says «left out», against the door', red);
@@ -310,7 +310,7 @@ const FACTS9 = { cid: 'c1', conversationKeys: ['c1'], groupIds: ['gL'], groupsUn
   ok(v9 && v9.state === 'request', '⑩ the view keeps it apart: state «request» (the page words it «may ask for it»), never «ok»', v9);
   const cutL = "const sees = hits.filter((x) => ACL.canSee(x.level)), asks = hits.filter((x) => ACL.canRequest(x.level));";
   ok(src.split(cutL).length === 2, '⑩ (the level split is there once)');
-  const nolevel = require(MC.write('src/server/channels-access.js', src.replace(cutL, 'const sees = hits, asks = [];'), 'no-level'));
+  const nolevel = require(MC.write('src/server/channels-access.js', editAnchor(src, cutL, 'const sees = hits, asks = [];', "src/server/channels-access.js"), 'no-level'));
   const red9 = sceneRig(nolevel).access.mayUseFor(FACTS9).answers.find((x) => x.resource === 'conversation:a1/r9');
   ok(red9 && red9.ok && !red9.request, '⑩ RED CONTROL: a lister that drops the level lists it as one it may SEE (r0\'s false answer)', red9);
   for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: '⑨⑩ ' })) ok(c.pass, c.name, c.detail);
@@ -383,7 +383,7 @@ console.log('— ⑭ THE KEY DOOR, LIVE (restack onto 2.369.410): a once-grant f
   const ENGS = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf8');
   const LIVE = "      for (const g of liveGrants()) {\n        if (g.keyId !== k.id || g.subject === 'external' || (g.mode === 'once' && g.spentAt)) continue;";
   const STORE = LIVE.replace('for (const g of liveGrants()) {', 'for (const g of db.grants) {');   // stale-pins: kept — the RED control plants the walk the release's key door left
-  const planted = ENGS.split(LIVE).length === 2 ? ENGS.replace(LIVE, STORE) : null;
+  const planted = ENGS.split(LIVE).length === 2 ? editAnchor(ENGS, LIVE, STORE, "src/server/automation-engine.js") : null;
   ok(!!planted && planted.split(STORE).length === 2 && planted.split(LIVE).length === 1, '⑭ CONTROL plant: the lister\'s walk over liveGrants() stands once in automation-engine.js, and the copy walks the raw store there instead');
   const MC14 = mutantCopies('may-use-keys', REPO);
   const red = planted ? listed(boot(MC14.load('src/server/automation-engine.js', planted, 'keys-store'))) : null;
@@ -401,7 +401,7 @@ console.log('— ⑮ B-df5f: the Task Groups are asked with the conversation\'s 
     '⑮ a conversation of another machine is judged with ITS machine (hostId m-2, its folder resolved there, never by the hub\'s realpath); a local one with none', { remote: a.remote.map((q) => q.hostId), local: a.local.map((q) => q.hostId) });
   const SRC15 = fs.readFileSync(path.join(REPO, 'src/server/may-use.js'), 'utf8');
   const PLANT15 = "hostId: str(s.host || s.hostId) || null, ";
-  const planted15 = SRC15.split(PLANT15).length === 2 ? SRC15.replace(PLANT15, '') : null;
+  const planted15 = SRC15.split(PLANT15).length === 2 ? editAnchor(SRC15, PLANT15, '', "src/server/may-use.js") : null;
   ok(!!planted15 && !planted15.includes('hostId: str(s.host'), '⑮ CONTROL plant: the machine fact stands once in may-use.js, and the copy asks without it');
   const MC15 = mutantCopies('may-use-host', REPO);
   const red15 = planted15 ? await asked(MC15.load('src/server/may-use.js', planted15, 'no-host')) : null;
@@ -426,7 +426,7 @@ console.log('— ⑯ B-48a4: the exit lister answers as the door does — the sa
     '⑯ the machine whose run list names Task Group g7: the door (its context asked again, B-48a4) and the unit\'s lister both admit run through g7, and neither admits use (g8)', { door: { use: door.use.ok, run: [door.run.ok, door.run.via] }, lister: Object.keys(L) });
   const SRC16 = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
   const PLANT16 = 'groupIds: (facts.groupIds || []).map(String),';   // stale-pins: kept — ⑯'s plant, proven to stand once in exit-proxy.js before the copy drops it
-  const planted16 = SRC16.split(PLANT16).length === 2 ? SRC16.replace(PLANT16, 'groupIds: [],') : null;
+  const planted16 = SRC16.split(PLANT16).length === 2 ? editAnchor(SRC16, PLANT16, 'groupIds: [],', "src/exit-proxy.js") : null;
   ok(!!planted16 && planted16.split(PLANT16).length === 1, '⑯ CONTROL plant: the lister\'s groups stand once in exit-proxy.js, and the copy drops them');
   const MC16 = mutantCopies('may-use-exit', REPO);
   const red16 = planted16 ? lister(MC16.load('src/exit-proxy.js', planted16, 'drop-groups').ExitProxyManager) : null;
@@ -479,7 +479,7 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
   const cut = '  const n = Number.isFinite(br.profilesNotUsable) ? br.profilesNotUsable : br.profiles.filter(notUsable).length;';
   ok(src.includes(cut), 'control setup (B-e630): the grant count is where the control cuts');
   const MCe = mutantCopies('may-use-e630', REPO);
-  const Ml = require(MCe.write('src/may-use-model.js', src.replace(cut, "  const n = br.profiles.filter((r) => /lark|飞书/i.test(String(r.name || ''))).length;"), 'by-label'));
+  const Ml = require(MCe.write('src/may-use-model.js', editAnchor(src, cut, "  const n = br.profiles.filter((r) => /lark|飞书/i.test(String(r.name || ''))).length;", "src/may-use-model.js"), 'by-label'));
   const lab = { closedNoLabel: Ml.browserSignInFold(true, Ml.viewOf({ facts: { live: true }, answers: [row('Work', false, 'not_open')], accounts: [] })), usableWithLabel: Ml.browserSignInFold(true, Ml.viewOf({ facts: { live: true }, answers: [row('Lark (company login)', true)], accounts: [] })) };
   ok(lab.closedNoLabel === null && lab.usableWithLabel && lab.usableWithLabel.n === 1, 'CONTROL (B-e630): a fold drawn from a profile\'s label misses the closed profile named «Work» and offers a door for a usable one named Lark (RED for the leg above)', lab);
   // the wiring: the keeper lists not_open, the contract validates the entry, the three web adapters declare it, the dialog draws the fold
@@ -520,11 +520,11 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
     'B-e630 cure: the section says the closed ones past the cut by their own words (zh / ja entries), with the browser list\'s own door');
   // RED ×2: a fold that counts only the drawn rows misses the closed past the cut; a bounded() with closed back in the «left out» bucket counts it unknown
   const MCc = mutantCopies('may-use-e630-cure', REPO);
-  const Md = require(MCc.write('src/may-use-model.js', src.replace(cut, '  const n = br.profiles.filter(notUsable).length;'), 'drawn-only'));
+  const Md = require(MCc.write('src/may-use-model.js', editAnchor(src, cut, '  const n = br.profiles.filter(notUsable).length;', "src/may-use-model.js"), 'drawn-only'));
   const drawn = Md.browserSignInFold(true, Md.viewOf({ facts: { live: true }, answers: [...unk, ...fiveClosed], accounts: [] }));
   const oldB = "const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), closed = s.filter((r) => r.state === 'closed');\n  const out = s.filter((r) => r.state !== 'ok' && r.state !== 'request' && r.state !== 'closed');";
   ok(src.includes(oldB), 'control setup (B-e630 cure): the bucket split is where the control cuts');
-  const Mo = require(MCc.write('src/may-use-model.js', src.replace(oldB, "const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), closed = [];\n  const out = s.filter((r) => r.state !== 'ok' && r.state !== 'request');"), 'one-out-bucket'));
+  const Mo = require(MCc.write('src/may-use-model.js', editAnchor(src, oldB, "const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), closed = [];\n  const out = s.filter((r) => r.state !== 'ok' && r.state !== 'request');", "src/may-use-model.js"), 'one-out-bucket'));
   const oneB = Mo.viewOf({ facts: { live: true }, answers: [...unk, row('Work', false, 'not_open')], accounts: [] }).kinds.find((k) => k.kind === 'browser');
   ok(drawn && drawn.n === 3 && oneB.profilesMoreOut === 1 && !oneB.profiles.some((r) => r.state === 'closed'),
     'CONTROL (B-e630 cure): the drawn-rows fold says 3 of 5; one «left out» bucket hides the closed profile behind three unreadable rows and counts it «left out or unknown» (RED for the two legs above)', { drawn, moreOut: oneB.profilesMoreOut });
@@ -548,7 +548,7 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
   // RED ×2: a model that forwards no closed count for logins; a section call that drops it
   const fwd = 'loginsMoreOut: logins.moreOut, loginsMoreClosed: logins.moreClosed });';
   ok(src.includes(fwd), 'control setup (B-e630 cure 2): the logins\' forward is where the control cuts');
-  const Mf = require(MCc.write('src/may-use-model.js', src.replace(fwd, 'loginsMoreOut: logins.moreOut });'), 'logins-unforwarded'));   // stale-pins: kept — the base's line, written back by this RED control
+  const Mf = require(MCc.write('src/may-use-model.js', editAnchor(src, fwd, 'loginsMoreOut: logins.moreOut });', "src/may-use-model.js"), 'logins-unforwarded'));   // stale-pins: kept — the base's line, written back by this RED control
   const secCut = 'moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut, moreClosed: br.loginsMoreClosed }, ';
   ok(sec.includes(secCut) && allShut(Mf).logins === undefined && unforwarded(sec.replace(secCut, 'moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut }, ')).length === 1,   // stale-pins: kept — the base's line, written back by this RED control
     'CONTROL (B-e630 cure 2): a model without the logins\' forward counts their closed rows nowhere, and a section call without it is named by the census (RED for the two legs above)');

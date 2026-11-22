@@ -92,6 +92,15 @@ const ok = (cond, name, detail) => {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600) : ''}`); }
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf-8');
 const MUT = mutantCopies('back-guard', repo);
 const BG = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', read('src/lib/back-guard.js'), 'as-is', { same: true })).href); // an .mjs copy: the tree's package.json has no "type"
@@ -1183,13 +1192,13 @@ console.log('\n§3 negative controls (patched copies)');
 const bgSrc = read('src/lib/back-guard.js');
 {
   const from = 'now - lastBackAt < BACK_WINDOW_MS';
-  const M = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from, 'now - lastBackAt <= BACK_WINDOW_MS'), 'edge')).href);
+  const M = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from, 'now - lastBackAt <= BACK_WINDOW_MS', "src/lib/back-guard.js"), 'edge')).href);
   const bad = judgeTable(M);
   ok(bgSrc.includes(from) && bad.length === 1 && /exactly 2000/.test(bad[0].name), 'CONTROL: the window edge `<=` fails exactly the 2000-ms row', bad);
 }
 {
   const from = 'if (target && !(deepLinkFirst && target === \'window\')) return';
-  const M = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from, 'if (target) return'), 'no-deeplink')).href);
+  const M = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from, 'if (target) return', "src/lib/back-guard.js"), 'no-deeplink')).href);
   const bad = judgeTable(M);
   ok(bgSrc.includes(from) && bad.length === 1 && /closes no window/.test(bad[0].name), 'CONTROL: deepLinkFirst ignored fails exactly the deep-link window row', bad);
 }
@@ -1219,37 +1228,37 @@ const bgSrc = read('src/lib/back-guard.js');
 
 { // lane phone-back-reload: the PURE rows' own controls
   const from = "if (isSentinel(state)) return enabled !== false && (wasDiscarded || navType === 'back_forward' || belowSame === false) ? 'rebuild' : 'keep';";
-  const M = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from, "if (isSentinel(state)) return 'keep';"), 'no-rebuild')).href);
+  const M = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from, "if (isSentinel(state)) return 'keep';", "src/lib/back-guard.js"), 'no-rebuild')).href);
   const bad = judgeRebuild(M);
   ok(bgSrc.includes(from) && bad.length === 4 && bad.every((b) => /rebuild/.test(b.n)), 'CONTROL: bootStep without the rebuild (the pre-fix rule) fails exactly the four rebuild rows', bad);
   const from2 = '  return length > 0 && length === block ? { skip: current, load: true } : { skip: current + 1, load: false };';
-  const M2 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from2, '  return { skip: current + 1, load: false };'), 'no-whole')).href);
+  const M2 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from2, '  return { skip: current + 1, load: false };', "src/lib/back-guard.js"), 'no-whole')).href);
   const bad2 = judgeExit(M2);
   ok(bgSrc.includes(from2) && bad2.length === 1 && /WHOLE tab/.test(bad2[0].n), 'CONTROL: an exit plan that never names the whole-tab load fails exactly that row', bad2);
   const from3 = "  return !prev.some((r) => r && (r.k === 'leave' || r.k === 'hop'));\n";
-  const M3 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from3, '  return true;\n'), 'cost-leave')).href);
+  const M3 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from3, '  return true;\n', "src/lib/back-guard.js"), 'cost-leave')).href);
   const bad3 = judgeCost(M3);
   ok(bgSrc.includes(from3) && bad3.length === 3 && bad3.filter((n) => /named load/.test(n)).length === 2 && bad3.some((n) => /hop row/.test(n)), 'CONTROL: a detector blind to the exit\'s own traversals fails exactly the named-load rows (with and without activation) and the hop row', bad3);
   const from4a = "  if (navType !== 'back_forward' || !prev.length || came === 'forward' || came === 'other') return false;";
-  const M4 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from4a, "  if (navType !== 'back_forward' || !prev.length) return false;"), 'cost-blind')).href);
+  const M4 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from4a, "  if (navType !== 'back_forward' || !prev.length) return false;", "src/lib/back-guard.js", 'first'), 'cost-blind')).href);
   const bad4 = judgeCost(M4);
   ok(bgSrc.includes(from4a) && bad4.length === 2 && bad4.every((n) => /FORWARD|another site/.test(n)), 'CONTROL (RED from round 1): a detector blind to the way in fails exactly the forward and other-site rows', bad4);
-  const M4b = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from3, "  if (prev.some((r) => r && (r.k === 'leave' || r.k === 'hop'))) return false;\n  if (came === 'back') return true;\n  const pop = [...prev].reverse().find((r) => r && r.k === 'pop');\n  return !!pop && !(pop.v === 'arm' && !pop.ex);\n"), 'cost-round-2')).href);
+  const M4b = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from3, "  if (prev.some((r) => r && (r.k === 'leave' || r.k === 'hop'))) return false;\n  if (came === 'back') return true;\n  const pop = [...prev].reverse().find((r) => r && r.k === 'pop');\n  return !!pop && !(pop.v === 'arm' && !pop.ex);\n", "src/lib/back-guard.js"), 'cost-round-2')).href);
   const bad4b = judgeCost(M4b);
   ok(bad4b.length === 2 && bad4b.some((n) => /DISCARD road/.test(n)) && bad4b.some((n) => /stay arm/.test(n)), 'CONTROL (RED from round 2): the «a pop row, never the stay arm» rule without activation fails exactly the discard road and the stay arm\'s loading back', bad4b);
   const from5 = "  if (!(typeof fromKey === 'string' && fromKey !== '' && fromKey === intent.key)) return 'clear';\n";
-  const M5 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from5, ''), 'hop-any-from')).href);
+  const M5 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from5, '', "src/lib/back-guard.js"), 'hop-any-from')).href);
   const bad5 = judgeHop(M5);
   ok(bgSrc.includes(from5) && bad5.length === 4 && bad5.every((n) => /another site|ANOTHER entry|no key|empty key/.test(n)), 'CONTROL: an exitHop that never asks where the load came from fails exactly the from-another-site, other-entry, no-key and empty-key rows', bad5);
-  const M5b = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from5, "  if (fromKey !== undefined && fromKey !== intent.key) return 'clear';\n"), 'hop-clock-alone')).href);
+  const M5b = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from5, "  if (fromKey !== undefined && fromKey !== intent.key) return 'clear';\n", "src/lib/back-guard.js"), 'hop-clock-alone')).href);
   const bad5b = judgeHop(M5b);
   ok(bad5b.length === 2 && bad5b.every((n) => /no key|empty key/.test(n)), 'CONTROL (RED from round 2): the clock-alone exitHop fails exactly the no-key and empty-key rows', bad5b);
   const from6s = "  return prev.some((r) => r && (r.k === 'leave' || r.k === 'hop') && r.slow > 0);\n";
-  const M6 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from6s, "  return prev.some((r) => r && (r.k === 'leave' || r.k === 'hop'));\n"), 'slow-any-leave')).href);
+  const M6 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from6s, "  return prev.some((r) => r && (r.k === 'leave' || r.k === 'hop'));\n", "src/lib/back-guard.js"), 'slow-any-leave')).href);
   const bad6 = judgeSlow(M6);
   ok(bgSrc.includes(from6s) && bad6.length === 2 && bad6.every((n) => /in time|never committed/.test(n)), 'CONTROL: a slowExit that never asks for the slow row fails exactly the in-time exit and the never-committed stay', bad6);
   const from6m = "  if (mine.some((r) => r && r.k === 'hop' && !r.drop)) return false;\n";
-  const M6m = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from6m, ''), 'slow-went-on')).href);
+  const M6m = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', editAnchor(bgSrc, from6m, '', "src/lib/back-guard.js"), 'slow-went-on')).href);
   const bad6m = judgeSlow(M6m);
   ok(bgSrc.includes(from6m) && bad6m.length === 2 && bad6m.every((n) => /WENT ON|its cap/.test(n)), 'CONTROL (RED from round 4): a slowExit blind to this document\'s own rows fails exactly the document that went on and the one at its cap', bad6m);
 }

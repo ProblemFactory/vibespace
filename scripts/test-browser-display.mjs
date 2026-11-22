@@ -246,9 +246,9 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
       'lane browser-swiftshader-cpu: only the hidden window and headless are frozen — a window on a real desktop never (a person may be looking at it)');
     const MI = mutantCopies('browser-idle', REPO); const isrc = fs.readFileSync(path.join(REPO, 'src/browser-idle.js'), 'utf8');
     const vline = "  else if ((Number(viewers) || 0) > 0) why = 'watched';";
-    ok(isrc.includes(vline) && !idleRow(MI.load('src/browser-idle.js', isrc.replace(vline, ''), 'no-viewer-rule').idlePaintVerdict), 'CONTROL: a verdict that ignores the live view freezes a watched page (RED on the idle row)');
+    ok(isrc.includes(vline) && !idleRow(MI.load('src/browser-idle.js', editAnchor(isrc, vline, '', "src/browser-idle.js"), 'no-viewer-rule').idlePaintVerdict), 'CONTROL: a verdict that ignores the live view freezes a watched page (RED on the idle row)');
     const offLine = "  if (enabled !== true) why = 'off';\n  else if (driving) why = 'driving';";
-    ok(isrc.includes(offLine) && !offRow(MI.load('src/browser-idle.js', isrc.replace(offLine, "  if (driving) why = 'driving';"), 'switch-blind').idlePaintVerdict), 'CONTROL: a verdict that ignores the switch freezes while it is off (RED on the off row)');
+    ok(isrc.includes(offLine) && !offRow(MI.load('src/browser-idle.js', editAnchor(isrc, offLine, "  if (driving) why = 'driving';", "src/browser-idle.js"), 'switch-blind').idlePaintVerdict), 'CONTROL: a verdict that ignores the switch freezes while it is off (RED on the off row)');
     // lane idle-paint-default-on (the owner 2026-10-20 「可以」 on IDLE_PAINT_PROOF.fleet): ON BY DEFAULT — the REAL keeper's
     // sweep over a stand-in paint watch on ONE idle hidden-window browser, the setting unset / '' / false / true. A default
     // never rewrites a stored value: explicitly false stays off.
@@ -288,29 +288,29 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   const liveLine = "const live = (p) => { const e = p ? byPath.get(p) : null; return !!e && e.type === 'socket' && e.alive !== false; };";
   const keepLine = "    const cut = withoutDisplayOzone(args);";
   ok(src.includes(liveLine) && src.includes(keepLine), 'CONTROL setup: the liveness line and the drop line are found');
-  const DS = MP.load('src/browser-display.js', src.replace(liveLine, "const live = (p) => { const e = p ? byPath.get(p) : null; return !!e && e.type === 'socket'; };"), 'stale-counts');
+  const DS = MP.load('src/browser-display.js', editAnchor(src, liveLine, "const live = (p) => { const e = p ? byPath.get(p) : null; return !!e && e.type === 'socket'; };", "src/browser-display.js"), 'stale-counts');
   ok(DS.displayVerdict({ env: { XDG_RUNTIME_DIR: '/r' }, entries: [sock('/r/wayland-0', false)] }).kind === 'wayland', 'CONTROL: a verdict that ignores the connect test counts the STALE socket (the table row above would be red)');
   { const hwLine = "const HIDDEN_WINDOW_ARGS = Object.freeze([...SOFTWARE_GL_ARGS, '--disable-gpu-compositing']);";
     ok(src.includes(hwLine), 'CONTROL setup: the hidden-window args line is found');
-    const DH = MP.load('src/browser-display.js', src.replace(hwLine, 'const HIDDEN_WINDOW_ARGS = SOFTWARE_GL_ARGS;'), 'pre-fix-args');
+    const DH = MP.load('src/browser-display.js', editAnchor(src, hwLine, 'const HIDDEN_WINDOW_ARGS = SOFTWARE_GL_ARGS;', "src/browser-display.js"), 'pre-fix-args');
     ok(!hiddenArgsRow(DH), 'CONTROL: the pre-fix rung (the SwiftShader pair alone — every frame composited on SwiftShader) is RED on the args row'); }
-  const DK = MP.load('src/browser-display.js', src.replace(keepLine, '    const cut = { args, dropped: [] };'), 'keeps-pin');
+  const DK = MP.load('src/browser-display.js', editAnchor(src, keepLine, '    const cut = { args, dropped: [] };', "src/browser-display.js"), 'keeps-pin');
   ok(DK.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: none }).args === OWNER_ARGS, 'CONTROL: a plan that keeps the Wayland pin is caught by the owner\'s-case row');
   const modeLine = "    if (noDisplayModeOf(mode) === 'auto' && d.xvfb === true) {";
   const clearLine = "env: d.envNamesDisplay ? { DISPLAY: '', WAYLAND_DISPLAY: '' } : {} };";
   ok(src.includes(modeLine) && src.includes(clearLine), 'CONTROL setup: the rung\'s mode gate and its display clearing are found');
-  const DM = MP.load('src/browser-display.js', src.replace(modeLine, '    if (d.xvfb === true) {'), 'ignores-mode');
+  const DM = MP.load('src/browser-display.js', editAnchor(src, modeLine, '    if (d.xvfb === true) {', "src/browser-display.js"), 'ignores-mode');
   const glLine = "      const gl = withSoftwareGl(withOzone(cut.args, 'x11'));";
   ok(src.includes(glLine), 'B-cc68 CONTROL setup: the rung\'s software-WebGL line is found');
-  const DG = MP.load('src/browser-display.js', src.replace(glLine, "      const gl = { args: withOzone(cut.args, 'x11'), added: [] };"), 'no-software-gl');
+  const DG = MP.load('src/browser-display.js', editAnchor(src, glLine, "      const gl = { args: withOzone(cut.args, 'x11'), added: [] };", "src/browser-display.js"), 'no-software-gl');
   ok(!/swiftshader/.test(String(DG.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX }).args)), 'B-cc68 CONTROL: a plan without the pair (the base) launches the hidden window with no WebGL — caught by the B-cc68 row');
   ok(DM.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX, mode: 'headless' }).fallback.rung === 'hidden-window', 'CONTROL: a plan that ignores browser.noDisplayMode is caught by the "headless" row');
-  const DC = MP.load('src/browser-display.js', src.replace(clearLine, 'env: {} };'), 'keeps-stale-display');
+  const DC = MP.load('src/browser-display.js', editAnchor(src, clearLine, 'env: {} };', "src/browser-display.js"), 'keeps-stale-display');
   ok(eq(DC.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX }).env, {}), 'CONTROL: a plan that keeps a stale DISPLAY is caught by the stale-display row (the fake below fails that launch)');
   // H5 CONTROL: the OLD meaning (unset ⇒ inherit everywhere) — a patched copy without the no-desktop branch — fails the table
   const h5Line = "  if (noDesktopWindow === true && noDisplayModeOf(mode) === 'auto' && isObj(display) && noDesktop(display) && display.xvfb === true) return { headed: true, why: 'no-desktop' };";
   ok(src.includes(h5Line), 'CONTROL setup: resolveHeaded\'s no-desktop branch is found');
-  const DI = MP.load('src/browser-display.js', src.replace(h5Line, ''), 'keeps-inherit');
+  const DI = MP.load('src/browser-display.js', editAnchor(src, h5Line, '', "src/browser-display.js"), 'keeps-inherit');
   const badOld = ROWS.filter(([, d, pref, mode, why]) => DI.resolveHeaded({ setting: pref, display: d, mode, ...H5 }).why !== why);
   const noDesk = ROWS.filter((r) => r[4] === 'no-desktop').length;
   ok(noDesk === 3 && badOld.length === noDesk && badOld.every((r) => r[4] === 'no-desktop'), 'CONTROL: a copy that keeps the old inherit reads every no-desktop + Xvfb row as inherit — the table goes red on exactly those 3 rows', badOld.map((r) => r[0]));
@@ -696,7 +696,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   ok(c.status !== 0 && /launch_failed/.test(c.stderr) && p1 && kPre.browserOf(p1.id).state === 'failed' && Lc.length === 1 && Lc[0].headed === true && /--ozone-platform=wayland/.test(Lc[0].args), 'CONTROL (the pre-fix launch): the headed + Wayland-pinned launch is attempted and the verb answers launch_failed — the incident, reproduced', { stderr: c.stderr, Lc });
   // (ii) /resolve naming the BASE file: the launch is headless, the agent's own verb then differs from it ⇒ a restart
   // into the same failure (why the planned file must reach every call)
-  const pre2 = MK.load('src/server/browser-keeper.js', src.replace(plannedLine, '    const planned = (file) => file;'), 'base-to-agent');
+  const pre2 = MK.load('src/server/browser-keeper.js', editAnchor(src, plannedLine, '    const planned = (file) => file;', "src/server/browser-keeper.js"), 'base-to-agent');
   const kPre2 = mkKeeper(pre2);
   Rt.setup({ keeper: kPre2, activeSessions: sessions, browserEnv: () => null, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
   const s2 = mkSession('sess-c2', KEY_C2, 'e', pairsN(KEY_C2), 'N');
@@ -742,7 +742,7 @@ console.log('— ④ the words every surface says it with, and where they are dr
     const VL = "  const vnc = vx && !vx.tcp && !(x11 && x11.name === vx.name) && (live(vx.path) || live(vx.abstract)) ? { name: vx.name, socket: live(vx.path) ? vx.path : vx.abstract } : null;";
     ok(dsrc.includes(VL), 'B-d635 control setup: the VNC-desktop line is found');
     const MV = mutantCopies('browser-display-vnc', REPO);
-    const cv = vncCase(MV.load('src/browser-display.js', dsrc.replace(VL, '  const vnc = null;'), 'no-vnc'));
+    const cv = vncCase(MV.load('src/browser-display.js', editAnchor(dsrc, VL, '  const vnc = null;', "src/browser-display.js"), 'no-vnc'));
     ok(cv.words.slice(0, 3).every((w) => /no desktop session/i.test(w)) && /no desktop session/.test(cv.words[3]), 'B-d635 CONTROL: a probe that cannot see the VNC desktop (the base) says "This machine has no desktop session" on every surface — the row above can go red', cv.words);
     for (const r of copiesCensus(MV.files, MV.dir, REPO, { label: 'B-d635 control: ' })) ok(r.pass, r.name, r.detail);
     // hermetic: only the SERVER names its VNC display (the wiring) — a probe / a keeper built without it never reads the

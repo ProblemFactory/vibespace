@@ -35,6 +35,15 @@ const TB = require('../src/browser-tabs.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1400) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(15); } return !!(await f()); };
 const J = (x) => JSON.stringify(x);
@@ -488,7 +497,7 @@ let work, NS, HUK, hisTab, aTab, bTab, aNew;
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = "    const av = TBS.agentTabVerdict({ act: w.act, ref: w.ref, targetId, own: s0.own, current: s0.active });\n";
   ok(src.includes(needle), 'the agent verdict needle (the control removes it)');
-  const Kc = M.load('src/server/browser-keeper.js', src.replace(needle, "    const av = { ok: true, targetId: targetId || s0.active, closesCurrent: false };\n"), 'no-agent-verdict');
+  const Kc = M.load('src/server/browser-keeper.js', editAnchor(src, needle, "    const av = { ok: true, targetId: targetId || s0.active, closesCurrent: false };\n", "src/server/browser-keeper.js"), 'no-agent-verdict');
   const kc = mkKeeper(Kc, { dataDir: path.join(ROOT, 'data-c') });
   await kc._facts.probeVersion();
   const pc = kc.createProfile({ label: 'Ctl' });
@@ -564,10 +573,10 @@ async function userActRaceLeg(Kmod, tag) {
   const reask = "      if (!stillDriving()) refuse(TBS.userTabVerdict({ act, owner: 'agent', human: false, driving: false, mediated: false, counts }), `the takeover ended while the tabs were read — ${step} not run`);\n";
   const order = "      const rec = noteUserTabAct(bk, profileId, told);\n      const r = await rt.exec(ns, argv, { ...opts, timeout: 30000 });\n";
   ok(src.includes(reask) && src.includes(order), 'control setup: the re-ask and the record-at-the-check are where the controls cut');
-  const Kn = M.load('src/server/browser-keeper.js', src.replace(reask, '\n'), 'no-reask');
+  const Kn = M.load('src/server/browser-keeper.js', editAnchor(src, reask, '\n', "src/server/browser-keeper.js"), 'no-reask');
   const Xn = await userActRaceLeg(Kn, 'no-reask');
   ok(Xn.read.code !== 'take_over_first' && !Xn.read.a3Stays && Xn.read.hbActs === 0, 'CONTROL: a keeper that trusts `driving` read before the awaits closes the agent\'s tab AFTER the handback, told to nobody — the (1) leg catches it (the verifier\'s repro)', Xn.read);
-  const Ko = M.load('src/server/browser-keeper.js', src.replace(order, "      const r = await rt.exec(ns, argv, { ...opts, timeout: 30000 });\n      const rec = noteUserTabAct(bk, profileId, told);\n"), 'note-after');
+  const Ko = M.load('src/server/browser-keeper.js', editAnchor(src, order, "      const r = await rt.exec(ns, argv, { ...opts, timeout: 30000 });\n      const rec = noteUserTabAct(bk, profileId, told);\n", "src/server/browser-keeper.js"), 'note-after');
   const Xo = await userActRaceLeg(Ko, 'note-after');
   ok(Xo.exec.a2Gone && Xo.exec.hbActs.length === 0, 'CONTROL: a keeper that records the act only AFTER its exec loses it to a handback landing mid-exec — the (2) leg catches it', Xo.exec);
 }
@@ -671,7 +680,7 @@ console.log('— ③b B-1626: the viewer\'s thaw is asked again with the tab the
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   const ANCH = '      if (relay.activeTarget && relay.activeTarget !== relay.thawAskedFor && relay.viewers.size) { relay.thawAskedFor = relay.activeTarget; noteViewers(relay); }';
   if (!bsrc.includes(ANCH)) ok(false, 'the anchor of the control «B-1626 re-ask» is not in the source (src/server/browser-stream.js)');
-  const Bc = bsrc.includes(ANCH) ? M.load('src/server/browser-stream.js', bsrc.replace(ANCH, '      // (no re-ask)'), 'b1626-no-reask') : null;
+  const Bc = bsrc.includes(ANCH) ? M.load('src/server/browser-stream.js', editAnchor(bsrc, ANCH, '      // (no re-ask)', "src/server/browser-stream.js"), 'b1626-no-reask') : null;
   const [r, c] = await Promise.all([viewersLeg(Bmod, 'now'), Bc ? viewersLeg(Bc, 'control') : Promise.resolve(null)]); // the leg beside its control
   const first = r.seen.find((x) => x.n >= 1);
   ok(first && first.tabs.length === 0 && r.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `B-1626: the viewer's join is reported before its relay knows its tab (the thaw's scope then: ${JSON.stringify(first && first.tabs)}); once the stream's tabs record names the tab on show, the viewers are reported AGAIN with that tab in scope — the thaw shows the view's own front`, r.seen);
@@ -694,7 +703,7 @@ console.log('— ③c B-26bb: no stale chip after a reconnect from a stop');
   const ANCH = '  const list = (Array.isArray(tabs) && !stale ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))';
   if (!tsrc.includes(ANCH)) ok(false, 'the anchor of the control «B-26bb stale» is not in the source (src/browser-tabs.js)');
   else {
-    const BTc = M.load('src/browser-tabs.js', tsrc.replace(ANCH, '  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))'), 'b26bb-no-stale'); // stale-pins: kept — the release's line, planted back as this control's mutant
+    const BTc = M.load('src/browser-tabs.js', editAnchor(tsrc, ANCH, '  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))', "src/browser-tabs.js"), 'b26bb-no-stale'); // stale-pins: kept — the release's line, planted back as this control's mutant
     ok(judge(BTc).stale === 3, 'CONTROL (B-26bb, the release\'s row): the stopped run\'s chips drawn after the reconnect (3 stale chips a person can press) — RED', judge(BTc));
   }
   // its verdict (NOT TAKEN, 10:27Z — the Resume press's own road cleared the stop before it connected): THE LAW — stale from the
@@ -791,11 +800,11 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   const WANCH = '    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && (fw.get(tid) == null || fw.get(tid) === ownWin));';
   const CANCH = '          const mine = probe.length > 0 && (await Promise.all(probe.map((t) => windowOfTarget(w, t)))).includes(ownWin);';
   if (!dsrc.includes(CANCH)) ok(false, 'the anchor of the control «B-1626 cure 3 the window confirmed» is not in the source (src/server/browser-dialogs.js)');
-  const DDs = dsrc.includes(CANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(CANCH, '          const mine = true; // the stamp trusted alone'), 'k23-stamp-alone') : null;
+  const DDs = dsrc.includes(CANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, CANCH, '          const mine = true; // the stamp trusted alone', "src/server/browser-dialogs.js"), 'k23-stamp-alone') : null;
   // cure 4's control: cure 3's rule — a window the freeze could not read is «not yours» (never read again)
-  const DDu = dsrc.includes(WANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(WANCH, '    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && fw.get(tid) === ownWin); // cure 3: unknown = not yours'), 'k23-unknown-not-yours') : null;
+  const DDu = dsrc.includes(WANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, WANCH, '    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && fw.get(tid) === ownWin); // cure 3: unknown = not yours', "src/server/browser-dialogs.js"), 'k23-unknown-not-yours') : null;
   if (!dsrc.includes(WANCH)) ok(false, 'the anchor of the control «B-1626 K23 the window rule» is not in the source (src/server/browser-dialogs.js)');
-  const DDc = dsrc.includes(WANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(WANCH, '    const byWindow = []; // the release: no window rule'), 'k23-no-window') : null;
+  const DDc = dsrc.includes(WANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, WANCH, '    const byWindow = []; // the release: no window rule', "src/server/browser-dialogs.js"), 'k23-no-window') : null;
   const strip = (h) => { const { windowId, ...rest } = h || {}; return rest; }; // the release's keeper line: the holder carries no window
   const H = { a: hA || { browserKey: KA, windowId: 1 }, b: hB || { browserKey: KB, windowId: 2 } };
   // B-1626 cure 3 (its readers): a mediated lease keeps a previous run's windowId — A's viewer arriving with a STALE id that names

@@ -287,7 +287,7 @@ console.log('⑦ frames are lazy: nearest first, capped, only inside the keep zo
   {
     const Mv = mutantCopies('mail-frame-lazy', REPO);
     const srcL = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
-    const oldLazy = srcL.replace("  const visible = near.filter((x) => x.d === 0);\n  const warm = near.filter((x) => x.d > 0).slice(0, Math.max(0, Math.max(0, cap) - visible.length));\n  return [...visible, ...warm].map((x) => x.id);", "  return near.slice(0, Math.max(0, cap)).map((x) => x.id);");
+    const oldLazy = editAnchor(srcL, "  const visible = near.filter((x) => x.d === 0);\n  const warm = near.filter((x) => x.d > 0).slice(0, Math.max(0, Math.max(0, cap) - visible.length));\n  return [...visible, ...warm].map((x) => x.id);", "  return near.slice(0, Math.max(0, cap)).map((x) => x.id);", "src/mail-frame.js");
     const ml = Mv.load('src/mail-frame.js', oldLazy, 'cap-cuts-visible');
     const oldLive = ml.liveFrames(rows, { top: 1000, bottom: 1600 });
     ok(oldLazy !== srcL && oldLive.length === MF.LIVE_FRAME_CAP && !oldLive.includes('m16'), `CONTROL: the round-1 verdict keeps ${oldLive.length} of the 7 visible rows — a visible mail left a blank box (${oldLive.join(',')})`, oldLive.join(','));
@@ -333,7 +333,7 @@ console.log('⑨ controls: patched copies (outside the tree)');
 {
   const M = mutantCopies('mail-frame', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
-  const keepAll = src.replace('      if (!ALLOWED_ATTR.includes(an)) continue;', '      if (false) continue;');
+  const keepAll = editAnchor(src, '      if (!ALLOWED_ATTR.includes(an)) continue;', '      if (false) continue;', "src/mail-frame.js");
   const m1 = M.load('src/mail-frame.js', keepAll, 'keep-every-attr');
   const b1 = runCorpus(m1);
   ok(keepAll !== src && b1.some((b) => /on\* attribute/.test(b)), `CONTROL: a sanitizer that keeps every attribute is RED on the corpus (${b1.length} mails)`, b1.slice(0, 2).join(' | '));
@@ -341,7 +341,7 @@ console.log('⑨ controls: patched copies (outside the tree)');
   const m2 = M.load('src/mail-frame.js', scriptOk, 'script-through');
   const b2 = runCorpus(m2);
   ok(scriptOk !== src && b2.some((b) => /a <script/.test(b)), `CONTROL: a sanitizer that lets <script> through is RED on the corpus (${b2.length} mails)`, b2.slice(0, 2).join(' | '));
-  const noCssFix = src.replace("  s = s.replace(/\\\\/g, '');\n", '');
+  const noCssFix = editAnchor(src, "  s = s.replace(/\\\\/g, '');\n", '', "src/mail-frame.js");
   const m3 = M.load('src/mail-frame.js', noCssFix, 'css-escapes');
   const b3 = runCorpus(m3);
   ok(noCssFix !== src && b3.some((b) => /^style attr url quoted \+ escapes/.test(b)), `CONTROL: CSS without the backslash rule lets u\\rl( reach the attacker (${b3.length})`, b3.slice(0, 2).join(' | '));
@@ -377,7 +377,7 @@ console.log('⑩ quoted history folded once (the outermost), a wide mail fitted'
   // CONTROL: a reader that never marks a quote — ⑩'s first pin goes red on it
   const M = mutantCopies('mail-frame-quote', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
-  const noMark = src.replace("    if (quote) { keep.push(['data-vs-quote', '1']); quoteAt = open.length; quotes++; }", "    if (false) { keep.push(['data-vs-quote', '1']); quoteAt = open.length; quotes++; }");
+  const noMark = editAnchor(src, "    if (quote) { keep.push(['data-vs-quote', '1']); quoteAt = open.length; quotes++; }", "    if (false) { keep.push(['data-vs-quote', '1']); quoteAt = open.length; quotes++; }", "src/mail-frame.js");
   const m1 = M.load('src/mail-frame.js', noMark, 'no-quote-mark');
   const c1 = m1.sanitizeMailHtml(gm);
   ok(noMark !== src && c1.quotes === 0 && !/data-vs-quote/.test(c1.html), 'CONTROL: a sanitizer that never marks a quote is RED on the Gmail reply (no mark, no fold)');
@@ -439,7 +439,7 @@ console.log('⑪ bounded work: every quadratic shape at MAX_HTML_BYTES costs wha
   ];
   const runs = [];
   for (const [what, shape, from, to] of OLD) {
-    const patched = src.replace(from, to);
+    const patched = editAnchor(src, from, to, "src/mail-frame.js");
     if (patched === src) { ok(false, `CONTROL setup: ${what} — the fixed line is present`, from); continue; }
     const file = M.write('src/mail-frame.js', patched, `linear-${shape}`);
     runs.push(inChild(file, SHAPES[shape][1]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the bound on "${SHAPES[shape][0]}" (${r.killed ? `still running after the ${CONTROL_WAIT_MS} ms wait — cut` : `${r.x.toFixed(1)} × a benign mail`})`, JSON.stringify(r))));
@@ -498,7 +498,7 @@ console.log('⑫ the mail body is read to the bound and no further (a header is 
   ok(!/^\s*import\s/m.test(br) && /export async function readBounded/.test(br), 'src/lib/bounded-read.js imports nothing (PURE over the Fetch primitives; the suite and the bundle take the same rule)');
   // CONTROL: a copy with the running bound removed reads the 3 MB body WHOLE
   const M = mutantCopies('mail-frame-bounded', REPO);
-  const noBound = br.replace('    if (n > limit) {', '    if (false) {');
+  const noBound = editAnchor(br, '    if (n > limit) {', '    if (false) {', "src/lib/bounded-read.js");
   const f = M.write('src/lib/bounded-read.js', noBound, 'no-running-bound');
   const m = await import(pathToFileURL(f));
   const sc = { sent: 0, cancelled: false };
@@ -577,16 +577,16 @@ console.log('⑬ a mail does not animate its row: keyframes stripped, the parent
   // CONTROLS
   const M = mutantCopies('mail-frame-anim', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
-  const keepAnim = src.replace("  s = cssKeyframes(s);\n  s = s.replace(/(?:-webkit-|-moz-|-o-)?(?:animation|transition)(?:-[a-z-]+)?\\s*:[^;}]*/gi, '');", '');
+  const keepAnim = editAnchor(src, "  s = cssKeyframes(s);\n  s = s.replace(/(?:-webkit-|-moz-|-o-)?(?:animation|transition)(?:-[a-z-]+)?\\s*:[^;}]*/gi, '');", '', "src/mail-frame.js");
   const m1 = M.load('src/mail-frame.js', keepAnim, 'keep-animation');
   const c1 = m1.sanitizeCss('@keyframes g{from{height:100px}to{height:19000px}} body{animation:g .2s infinite alternate}');
   ok(keepAnim !== src && /@keyframes/.test(c1) && /animation:g/.test(c1), 'CONTROL: a sanitizer that keeps CSS animations lets the pulse through (the round-2 shape)', c1);
-  const noFreeze = src.replace('    if (b.flips.length >= HEIGHT_FLIP_CAP) { b.frozen = true; b.pending = null; return { act: \'frozen\', h: b.lastH }; }', '');
+  const noFreeze = editAnchor(src, '    if (b.flips.length >= HEIGHT_FLIP_CAP) { b.frozen = true; b.pending = null; return { act: \'frozen\', h: b.lastH }; }', '', "src/mail-frame.js");
   const m2 = M.load('src/mail-frame.js', noFreeze, 'never-freeze');
   const b2 = m2.heightBudget(0); const a2 = pulse.map(([h, t2]) => m2.heightVerdict(b2, h, t2).act);
   ok(noFreeze !== src && a2.every((a) => a === 'apply'), 'CONTROL: a budget without the flip cap applies a pulse forever (the jumping conversation)', a2.join(','));
   // the round-2 budget as it shipped: a hold kept nothing and named no retry — the burst's last height is lost
-  const noTrail = src.replace("  if (!settling && t - b.lastAt < HEIGHT_MIN_GAP_MS) { b.pending = h; return { act: 'hold', h, retryAt: b.lastAt + HEIGHT_MIN_GAP_MS }; }", "  if (!settling && t - b.lastAt < HEIGHT_MIN_GAP_MS) return { act: 'hold', h };");
+  const noTrail = editAnchor(src, "  if (!settling && t - b.lastAt < HEIGHT_MIN_GAP_MS) { b.pending = h; return { act: 'hold', h, retryAt: b.lastAt + HEIGHT_MIN_GAP_MS }; }", "  if (!settling && t - b.lastAt < HEIGHT_MIN_GAP_MS) return { act: 'hold', h };", "src/mail-frame.js");
   const m3 = M.load('src/mail-frame.js', noTrail, 'no-trailing-edge');
   ok(noTrail !== src && burst(m3, drag) === 677 && burst(m3, pics) === 420, `CONTROL: the round-2 budget (a hold keeps nothing) ends the drag at 677 for a 696 mail and the pictures at 420 for 610 — the last line cut, the measured chrome shape`, J([burst(m3, drag), burst(m3, pics)]));
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(c.pass, c.name, c.detail);

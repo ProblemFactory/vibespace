@@ -390,7 +390,7 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     const srcS = read('src/server/stream-relay-rfb.js'); // F-B4: the rfb relay's own file
     const from = "if ((input || type === 251) && !allowInput) dropped++;";
     ok(srcS.split(from).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
-    const file = MUTD.write('src/server/stream-relay-rfb.js', srcS.replace(from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;"), 'rfbsize');
+    const file = MUTD.write('src/server/stream-relay-rfb.js', editAnchor(srcS, from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;", "src/server/stream-relay-rfb.js"), 'rfbsize');
     try {
       const rc = require(file).rfbInputSieve().strip(Buffer.concat([...hs, sd, key]), false);
       ok(rc.relay && rc.relay.equals(Buffer.concat([...hs, sd])) && rc.dropped === 1, 'CONTROL: the x4 strip relays a refused viewer\'s SetDesktopSize (Xvnc would resize the holder\'s display)');
@@ -401,7 +401,7 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     const srcS = read('src/server/stream-relay-rfb.js'); // F-B4: the rfb relay's own file
     const from = 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 150: 10, 250: 4 });';
     ok(srcS.split(from).length === 2, 'the fixed table is spelled once in the bridge (the control patches exactly it)');
-    const file = MUTD.write('src/server/stream-relay-rfb.js', srcS.replace(from, 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 5: 6, 150: 4 }); // pre-fix'), 'stream');
+    const file = MUTD.write('src/server/stream-relay-rfb.js', editAnchor(srcS, from, 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 5: 6, 150: 4 }); // pre-fix', "src/server/stream-relay-rfb.js"), 'stream');
     try {
       const P = require(file);
       const spf = Buffer.alloc(20); const se = Buffer.from([2, 0, 0, 1, 0, 0, 0, 0]);
@@ -502,7 +502,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     const from = "      if (life || pin || (!allowInput && !sizing && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);"; // lane e2b r2: `pin` = the pin fence; lane browser-x-in-window: `sizing` = a SIZE seat's geometry / display packets (input still cut)
     ok(srcS.split(from).length === 2, 'the allowlist decision is spelled once in the bridge (the control patches exactly it)');
-    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input'), 'xstream');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', editAnchor(srcS, from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input', "src/server/stream-relay-xpra.js"), 'xstream');
     try {
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(refusedBytes, false);
@@ -543,7 +543,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
     ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the control patches exactly it)');
-    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "), 'xkeymap');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', editAnchor(srcS, from, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', ", "src/server/stream-relay-xpra.js"), 'xkeymap');
     try {
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')]), false);
@@ -578,7 +578,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
     const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
     ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the display control patches exactly it)');
-    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from, from + "'display-configure', 'configure-display', 'desktop_size', "), 'xdisplay');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', editAnchor(srcS, from, from + "'display-configure', 'configure-display', 'desktop_size', ", "src/server/stream-relay-xpra.js"), 'xdisplay');
     try {
       const Pm = require(file);
       const bytes = Buffer.concat([rpkt('display-configure'), rpkt('configure-display'), rpkt('desktop_size')]);
@@ -588,7 +588,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     // CONTROL: the fence without the replay — a takeover carries nothing it held
     const fromN = '    if (allowInput && !st.oversize) {';
     ok(srcS.split(fromN).length === 2, 'the replay is spelled once in the bridge (the no-replay control patches exactly it)');
-    const nfile = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xnoreplay');
+    const nfile = MUTD.write('src/server/stream-relay-xpra.js', editAnchor(srcS, fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */', "src/server/stream-relay-xpra.js"), 'xnoreplay');
     try {
       const sn = require(nfile).xpraInputSieve();
       sn.strip(rpkt('display-configure'), false);
@@ -649,8 +649,8 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/stream-relay-xpra.js'), srcR = read('src/server/stream-relay-rfb.js'); // F-B4: each relay declares its protocol's cap
     const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;';
     ok(srcS.split(from1).length === 2 && srcR.split(from2).length === 2, 'each cap is spelled once, in its relay (the control patches exactly them)');
-    const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix'), 'xcap');
-    const rfile = MUTD.write('src/server/stream-relay-rfb.js', srcR.replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'rcap');
+    const file = MUTD.write('src/server/stream-relay-xpra.js', editAnchor(srcS, from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix', "src/server/stream-relay-xpra.js"), 'xcap');
+    const rfile = MUTD.write('src/server/stream-relay-rfb.js', editAnchor(srcR, from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix', "src/server/stream-relay-rfb.js"), 'rcap');
     try {
       const Pm = { ...require(file), ...require(rfile) };
       const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h.writeUInt32BE(2 ** 31, 4);
@@ -1001,7 +1001,7 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
     const srcV = read('src/desktop-fit.js');
     const FR = "  if (frontWid > 0 && frontWid !== mainWid) return { act: 'ask-front', why: 'front-window' };\n";
     ok(srcV.split(FR).length === 2, 'CONTROL: the front-window rule is spelled once in desktop-fit.js');
-    const Mc = require(MUTD.write('src/desktop-fit.js', srcV.replace(FR, ''), 'front'));
+    const Mc = require(MUTD.write('src/desktop-fit.js', editAnchor(srcV, FR, '', "src/desktop-fit.js"), 'front'));
     ok(Mc.outerCloseVerdict({ ...base, frontWid: 9 }).act === 'ask-app', 'CONTROL: pre-fix the ✕ with Moments in front asks WeChat ITSELF to close (close-window to its main) — the whole app, not the window in front');
   }
   { // lane browser-display-holders CONTROL: the pre-lane verdict (no holders rule) — the owner's ✕ on a browser display two
@@ -1009,7 +1009,7 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
     const srcV = read('src/desktop-fit.js');
     const HR = "  if (Number(holders) > 0) return { act: 'close', why: 'holders' };\n";
     ok(srcV.split(HR).length === 2, 'CONTROL: the holders rule is spelled once in desktop-fit.js');
-    const Mh = require(MUTD.write('src/desktop-fit.js', srcV.replace(HR, ''), 'holders'));
+    const Mh = require(MUTD.write('src/desktop-fit.js', editAnchor(srcV, HR, '', "src/desktop-fit.js"), 'holders'));
     const first = Mh.outerCloseVerdict({ ...base, holders: 2 }), second = Mh.outerCloseVerdict({ ...base, holders: 2, askedAt: 100000 - 1500 });
     ok(first.act === 'ask-app' && second.act === 'stop', `CONTROL: pre-lane the ✕ of a display two conversations hold asks the app (${first.act}) and the second ✕ 1.5 s later stops it (${second.act}) — the owner's report`);
     // the Desktop list's «you stopped it» rows (PURE userStoppedHeld over the keeper's view)
@@ -1194,7 +1194,7 @@ console.log('§D014 the machine picker: linux / darwin / win32 × online / offli
   ok(linuxSame(A.machinePickRow), `every Linux / unknown-platform row is byte-identical to today's (${BASE.length} rows; a probe answer on a Linux row is ignored)`, BASE.filter(([i, w]) => JSON.stringify(A.machinePickRow(i)) !== JSON.stringify(w)));
   const appsSrc = fs.readFileSync(path.join(repo, 'src/desktop-apps.js'), 'utf8');
   const anchor = "return caps.includes('desktop-serve') ? { selectable: true, code: 'ready' } : { selectable: false, code: 'host_needs_daemon' };";
-  const moved = MUTD.load('src/desktop-apps.js', appsSrc.replace(anchor, anchor.replace("code: 'ready' }", "code: 'ready', desktop: null }")), 'd014-linux');
+  const moved = MUTD.load('src/desktop-apps.js', editAnchor(appsSrc, anchor, anchor.replace("code: 'ready' }", "code: 'ready', desktop: null }"), "src/desktop-apps.js"), 'd014-linux');
   ok(appsSrc.includes(anchor) && !linuxSame(moved.machinePickRow), 'CONTROL: a copy that adds ONE key to a Linux row fails the byte-identical check');
   const R = (o) => A.machinePickRow({ hostId: 'mac-1', transport: 'dial', link: 'online', ...o });
   const ARD = { ok: true, auth: 'ard', type: 30 }, VNC = { ok: true, auth: 'password', type: 2 }, NONE = { ok: false, code: 'no_listener' };

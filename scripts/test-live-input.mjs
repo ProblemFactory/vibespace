@@ -122,10 +122,10 @@ console.log('§1 the chunker: ≤ 3 UTF-16 units a chunk, the measured control-c
   const PRE = "    if (cur.length + cp.length > cap || (cp === '\\n' && /[^\\n]/.test(cur))) flush();";
   const TAB = "    if (cp === '\\t') flush(); // a tab ENDS its chunk (one that starts with it drops the rest)";
   ok(src.split(PRE).length === 2 && src.split(TAB).length === 2, 'control setup: the chunk cut and the tab rule are each found once');
-  const Spre = M.load('src/browser-stream.js', src.replace(PRE, "    if (Array.from(cur).length >= 200) flush();"), 'pre-fix-200');
+  const Spre = M.load('src/browser-stream.js', editAnchor(src, PRE, "    if (Array.from(cur).length >= 200) flush();", "src/browser-stream.js"), 'pre-fix-200');
   const pre = Spre.textRecords('hello world'); const preTyped = typeAll(pre.records);
   ok(pre.ok && pre.records.length === 1 && preTyped.refused === 1 && preTyped.value === '', `NEGATIVE CONTROL: the pre-fix chunk (${pre.records[0] && pre.records[0].text.length} units in ONE record) is refused by the measured browser — "hello world" lands as ${JSON.stringify(preTyped.value)} (the owner's report)`);
-  const Stab = M.load('src/browser-stream.js', src.replace(TAB, ''), 'no-tab-rule');
+  const Stab = M.load('src/browser-stream.js', editAnchor(src, TAB, '', "src/browser-stream.js"), 'no-tab-rule');
   const tb = typeAll(Stab.textRecords('abc\tdef\tghi').records);
   ok(tb.value !== 'abc\tdef\tghi' && typeAll(S.textRecords('abc\tdef\tghi').records).value === 'abc\tdef\tghi', `NEGATIVE CONTROL: without the tab rule "abc\\tdef\\tghi" types as ${JSON.stringify(tb.value)} (a chunk that starts with a tab drops the rest)`);
 }
@@ -143,7 +143,7 @@ console.log('§2 the viewer\'s verdicts: input_text is the holder\'s; a key text
   const src = read('src/browser-stream.js');
   const G = "    if (t === 'input_keyboard' && typeof msg.text === 'string' && msg.text.length > CHAR_TEXT_MAX_UNITS) return";
   ok(src.split(G).length === 2, 'control setup: the key-text guard is found once');
-  const Sg = M.load('src/browser-stream.js', src.replace(G, '    if (false) return'), 'no-key-text-guard');
+  const Sg = M.load('src/browser-stream.js', editAnchor(src, G, '    if (false) return', "src/browser-stream.js"), 'no-key-text-guard');
   ok(Sg.viewerMessageVerdict({ type: 'input_keyboard', eventType: 'char', text: 'abcd' }, { holder: 1, viewerId: 1, mode: 'takeover' }).forward === true, 'NEGATIVE CONTROL: without the guard a 4-unit key text is FORWARDED — Chrome refuses it and a direct lease\'s receipt says "sent"');
   // the receipt book: a text act waits as long as its chunks need
   ok(S.textReceiptMs(0) === S.INPUT_RECEIPT_MS && S.textReceiptMs(1000) === S.INPUT_RECEIPT_MS + 10000 && S.textReceiptMs(1e9) === 120000, 'a text act\'s receipt wait = 1.5 s + 10 ms a chunk, at most 2 min (the stream dispatches one record after the other)');
@@ -202,7 +202,7 @@ console.log('§3 a Mac viewer\'s ⌘ chords on a non-Mac browser; the copy chord
   const src = read('src/browser-takeover.js');
   const C = "  if (map.meta !== 'control') return f;"; // lane xpra-mac-modifiers: the gate is the shared primary-modifier table's answer (src/lib/modifier-map.js)
   ok(src.split(C).length === 2, 'control setup: the Mac gate is found once');
-  const Tid = M.load('src/browser-takeover.js', src.replace(C, '  return f;'), 'no-mac-map');
+  const Tid = M.load('src/browser-takeover.js', editAnchor(src, C, '  return f;', "src/browser-takeover.js"), 'no-mac-map');
   const m0 = Tid.macChord({ key: 'a', code: 'KeyA', keyCode: 65, metaKey: true }, { viewerMac: true, remoteMac: false });
   const r0 = S.keyRecord({ kind: 'down', key: m0.key, code: m0.code, modifiers: S.modifiersOf(m0), keyCode: m0.keyCode });
   ok(r0.modifiers === 4 && r0.text === 'a', 'NEGATIVE CONTROL: without the table ⌘A reaches the page as Meta+A carrying the text "a" — MEASURED on Chromium 151 to TYPE the letter');
@@ -245,7 +245,7 @@ console.log('§3b the live view\'s key record carries the typed character: Shift
   const ssrc = read('src/browser-stream.js');
   const TXT = "(printable ? k : undefined)) : undefined;";
   ok(ssrc.split(TXT).length === 2, 'CONTROL anchor: keyRecord\'s text rule is one expression in browser-stream.js');
-  const S0 = M.load('src/browser-stream.js', ssrc.replace(TXT, "(printable ? (/^Key[A-Z]$/.test(String(code)) ? String(code).slice(3).toLowerCase() : k) : undefined)) : undefined;"), 'text-from-code');
+  const S0 = M.load('src/browser-stream.js', editAnchor(ssrc, TXT, "(printable ? (/^Key[A-Z]$/.test(String(code)) ? String(code).slice(3).toLowerCase() : k) : undefined)) : undefined;", "src/browser-stream.js"), 'text-from-code');
   const bad = [viewerRec(ROWS[0][1], true, S0), viewerRec(ROWS[2][1], false, S0)];
   ok(bad[0].text === 'a' && bad[1].text === 'a', `RED CONTROL: a text rebuilt from the key's code types ${JSON.stringify(bad[0].text)} for a Mac's Shift+a and ${JSON.stringify(bad[1].text)} under Caps Lock — the shipped record carries the character ("A")`, JSON.stringify(bad));
 }
@@ -312,7 +312,7 @@ console.log('§4 the fit chip: a claim rules the page; the words say where the s
   const src = read('src/browser-fit.js');
   const C = "  if (claim !== null && claim !== undefined) { // lane live-input: the pane a viewer asked for by its own click (\"Fit here\")";
   ok(src.split(C).length === 2, 'control setup: the claim rule is found once');
-  const Fno = M.load('src/browser-fit.js', src.replace(C, '  if (false) {'), 'no-claim');
+  const Fno = M.load('src/browser-fit.js', editAnchor(src, C, '  if (false) {', "src/browser-fit.js"), 'no-claim');
   ok(Fno.fitTarget({ fits, claim: 2 }).viewerId === 1, 'NEGATIVE CONTROL: without the claim rule "Fit here" changes nothing — the largest window keeps the page');
 }
 
@@ -420,10 +420,10 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   const C1 = '    const r = S.textRecords(text);';
   const C2 = '      if (relay.inflight >= inputWindow) return; // a settling credit pumps again';
   ok(src.split(C1).length === 2 && src.split(C2).length === 2, 'control setup: the chunking call and the window are each found once');
-  const pre = await pasteLeg(M.load('src/server/browser-stream.js', src.replace(C1, '    const r = S.textRecords(text, { units: 400 });'), 'pre-fix-chunks'), { text: 'hello world' });
+  const pre = await pasteLeg(M.load('src/server/browser-stream.js', editAnchor(src, C1, '    const r = S.textRecords(text, { units: 400 });', "src/server/browser-stream.js"), 'pre-fix-chunks'), { text: 'hello world' });
   const preR = pre.receipts.find((r) => r.rid === 2);
   ok(pre.value === 'xy' && pre.refused === 1 && preR && preR.ok && preR.via === 'stream', `NEGATIVE CONTROL: the pre-fix record (the whole text in one \`char\`) is refused by the browser — the page holds ${JSON.stringify(pre.value)} while the receipt says ok via stream (the owner's silent loss)`);
-  const nowin = await pasteLeg(M.load('src/server/browser-stream.js', src.replace(C2, ''), 'no-window'), { mediated: true, text: big });
+  const nowin = await pasteLeg(M.load('src/server/browser-stream.js', editAnchor(src, C2, '', "src/server/browser-stream.js"), 'no-window'), { mediated: true, text: big });
   ok(nowin.maxOut > BS.INPUT_WINDOW, `NEGATIVE CONTROL: without the window ${nowin.maxOut} credits wait at once (the mediator's 256 / 1.2 s would evict the paste's first chunks)`);
 }
 {
@@ -502,13 +502,13 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   const src = read('src/server/browser-stream.js');
   const C3 = '  function armCopyWatch(relay) {';
   ok(src.split(C3).length === 2, 'control setup: the watch arming is found once');
-  const nw = await world(M.load('src/server/browser-stream.js', src.replace(C3, C3 + ' return;'), 'no-copy-watch'));
+  const nw = await world(M.load('src/server/browser-stream.js', editAnchor(src, C3, C3 + ' return;', "src/server/browser-stream.js"), 'no-copy-watch'));
   await takeover(nw.A); await sleep(80);
   ok(nw.K.watches.length === 0, 'NEGATIVE CONTROL: without the arming a copy in the page never leaves it (no watch — the pre-lane view had no path out at all)');
   await nw.close();
   const C4 = '    const g = T.copyDeliverVerdict(relay.copyArm, t);';
   ok(src.split(C4).length === 2, 'control setup: the copy-out door is found once');
-  const ng = await world(M.load('src/server/browser-stream.js', src.replace(C4, "    const g = { deliver: true, gesture: 'chord', arm: null };"), 'no-copy-gate'));
+  const ng = await world(M.load('src/server/browser-stream.js', editAnchor(src, C4, "    const g = { deliver: true, gesture: 'chord', arm: null };", "src/server/browser-stream.js"), 'no-copy-gate'));
   await takeover(ng.A); await until(() => ng.K.watches.length === 1, 2000);
   ng.K.watches[0].onCopy({ kind: 'copy', text: 'HIJACK-3', length: 8 });
   await until(() => ng.A.msgs.some((m) => m.type === 'clipboard'), 2000);
@@ -623,9 +623,9 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   ok(src.split(CB1).length === 2 && src.split(CB2).length === 2, 'control setup: the hold and the at-once takeover fit are each found once');
   const [a1, a1pre, a2, a2pre, b, bpre] = await Promise.all([
     lateLeg(BS),
-    lateLeg(M.load('src/server/browser-stream.js', src.replace(CA1, "      fs.pending = null;\n      // …and a SHARED browser held"), 'late-mirror-agent')),
+    lateLeg(M.load('src/server/browser-stream.js', editAnchor(src, CA1, "      fs.pending = null;\n      // …and a SHARED browser held", "src/server/browser-stream.js"), 'late-mirror-agent')),
     heldLeg(BS),
-    heldLeg(M.load('src/server/browser-stream.js', src.replace(CA2, '      fs.failed = { width: v.width, height: v.height, at: now() };'), 'held-remembered')),
+    heldLeg(M.load('src/server/browser-stream.js', editAnchor(src, CA2, '      fs.failed = { width: v.width, height: v.height, at: now() };', "src/server/browser-stream.js"), 'held-remembered')),
     pressLeg(BS),
     pressLeg(M.load('src/server/browser-stream.js', editAnchor(editAnchor(src, CB1, '    if (false) {', "src/server/browser-stream.js"), CB2, "    if (relay.fits.size) scheduleFit(relay, 'mode');", "src/server/browser-stream.js"), 'no-button-hold')),
   ]);

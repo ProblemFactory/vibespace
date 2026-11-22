@@ -311,7 +311,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   const rand = seeded(20261107), pick = (a) => a[Math.floor(rand() * a.length)], runOf = (alpha, n) => Array.from({ length: n }, () => pick(alpha)).join('');
   const LOW = 'abcdefghijklmnopqrstuvwxyz', B62 = LOW + LOW.toUpperCase() + '0123456789', HEX = '0123456789abcdef';
   const sig64 = runOf(HEX, 64), tok = runOf(B62, 32), keyId = ['AK', 'IAIOSFODNN7EXAMPLE'].join('');
-  const beltOver = (shapes) => { const b = fs.readFileSync(path.join(REPO, 'src/agent-output-belt.js'), 'utf8'); return M.load('src/agent-output-belt.js', b.replace("require('./secret-shapes.js')", `require(${J(shapes)})`), 'belt'); };
+  const beltOver = (shapes) => { const b = fs.readFileSync(path.join(REPO, 'src/agent-output-belt.js'), 'utf8'); return M.load('src/agent-output-belt.js', editAnchor(b, "require('./secret-shapes.js')", `require(${J(shapes)})`, "src/agent-output-belt.js"), 'belt'); };
   const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
 
   // LAW 1 — THE NAME GRAMMAR, the table
@@ -772,16 +772,16 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
     ok(!o.includes(X) && o.includes('@beta') && said.includes('session:') && said.includes('password:'), 'a mask made by the gap filter is named in the answer (the region\'s head «session:»), beside the inner head\'s own', J({ o, said }));
     const GAP = 'if (say && filterHead) say(filterHead); }';
     ok(SRC.split(GAP).length === 2, 'the control «the gap names nothing» finds its line');
-    const s2 = []; M.load('src/secret-shapes.js', SRC.replace(GAP, '}'), 'gap-unnamed').redactSecrets(L, { message: true, mentions: ['beta'], said: s2 });
+    const s2 = []; M.load('src/secret-shapes.js', editAnchor(SRC, GAP, '}', "src/secret-shapes.js"), 'gap-unnamed').redactSecrets(L, { message: true, mentions: ['beta'], said: s2 });
     ok(!s2.includes('session:'), 'RED CONTROL (the gap names nothing): «session:» is missing from the answer — the leg above goes red', J(s2)); }
   // RED CONTROLS: this round's musts compiled back in — each must find a leak OF ITS OWN SCENE (the opener of the line that leaked)
   const W1 = 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) return null;', W1B = '      if (ce < 0) return null;', W2 = 'else if (sepColon && isMention(chunk, mentions)) keep = true;';
   ok(SRC.split(W1).length === 2 && SRC.split(W1B).length === 2 && SRC.split(W2).length === 2, 'the three controls find their lines');
-  const r1 = judge(M.load('src/secret-shapes.js', SRC.replace(W1, 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) { out += text.slice(i, e); return { out, end: e }; }'), 'must1'), { stopAtFirst: true, rev: true });
+  const r1 = judge(M.load('src/secret-shapes.js', editAnchor(SRC, W1, 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) { out += text.slice(i, e); return { out, end: e }; }', "src/secret-shapes.js"), 'must1'), { stopAtFirst: true, rev: true });
   ok(r1.leaks.length > 0 && '，、。：；！？'.includes(r1.leaks[0].op), `RED CONTROL (must 1 — a value that opens on a CJK stop stays in clear): the corpus finds it on a stop opener, e.g. ${J(r1.leaks[0] ? r1.leaks[0].L : '')}`);
-  const r1b = judge(M.load('src/secret-shapes.js', SRC.replace(W1B, '      if (ce < 0) { out += text.slice(i, e); return { out, end: e }; }'), 'must1b'), { stopAtFirst: true, rev: true });
+  const r1b = judge(M.load('src/secret-shapes.js', editAnchor(SRC, W1B, '      if (ce < 0) { out += text.slice(i, e); return { out, end: e }; }', "src/secret-shapes.js"), 'must1b'), { stopAtFirst: true, rev: true });
   ok(r1b.leaks.length > 0 && PAIRS[r1b.leaks[0].op.trim()], `RED CONTROL (must 1, its bracket half — an open pair stays in clear): the corpus finds it on a pair opener, e.g. ${J(r1b.leaks[0] ? r1b.leaks[0].L : '')}`);
-  const r2 = judge(M.load('src/secret-shapes.js', SRC.replace(W2, 'else if (chunk.charCodeAt(0) === 64) keep = true;'), 'must2'), { stopAtFirst: true });
+  const r2 = judge(M.load('src/secret-shapes.js', editAnchor(SRC, W2, 'else if (chunk.charCodeAt(0) === 64) keep = true;', "src/secret-shapes.js"), 'must2'), { stopAtFirst: true });
   ok(r2.leaks.length > 0 && /(?:^|[:=] ?)@/.test(r2.leaks[0].L), `RED CONTROL (must 2 — any @ value is a mention): the corpus finds it on an @ value, e.g. ${J(r2.leaks[0] ? r2.leaks[0].L : '')}`);
   // cure 2's RED CONTROLS: each of its rules compiled back out — the corpus finds a leak OF ITS OWN SCENE (a control whose line is gone
   // fails by name, RULES 06:25Z)
@@ -850,13 +850,13 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
       ['every head weak (the prose exception after a password too)', 'const weakHead = (name) => { const ws = nameWords(name); return ', 'const weakHead = (name) => { const ws = nameWords(name); return true || ', 'c7'],
     ]) {
       ok(SRC.split(from).length === 2, `the control «${name}» finds its line`);
-      const SSc = M.load('src/secret-shapes.js', SRC.replace(from, to), 'b34c8-' + key), [, L, pass] = CASES[key], o = MSG(SSc, L);
+      const SSc = M.load('src/secret-shapes.js', editAnchor(SRC, from, to, "src/secret-shapes.js"), 'b34c8-' + key), [, L, pass] = CASES[key], o = MSG(SSc, L);
       ok(!pass(o, L), `RED CONTROL (${name}): its measured row goes red — ${J(o)}`);
     }
   }
   // the main loop's guard: a COUNT of steps, never a clock — every message-mode loop is marked, each character read a bounded number of times
   ok(SRC.split('/*msg-step*/').length - 1 >= 9, 'the step marks are in every message-mode loop');
-  const ST = M.load('src/secret-shapes.js', SRC.split('/*msg-step*/').join('globalThis.__msgSteps = (globalThis.__msgSteps || 0) + 1;'), 'steps');
+  const ST = M.load('src/secret-shapes.js', editAnchor(SRC, '/*msg-step*/', 'globalThis.__msgSteps = (globalThis.__msgSteps || 0) + 1;', "src/secret-shapes.js", 'join'), 'steps');
   const HOSTILE = ['password: ' + 'a'.repeat(100000), 'token: x ' + '"\''.repeat(50000), 'token: x ' + 'token: ('.repeat(8000), 'key: ' + 'x9 '.repeat(20000), 'secret: x' + '「'.repeat(60000), 'token: a9 ' + '.'.repeat(60000) + 'x', 'token: x @' + '!'.repeat(60000) + 'x', 'token: (' + 'a'.repeat(60000), 'token: x ' + '{"a":'.repeat(12000)];
   const steps = HOSTILE.map((t) => { globalThis.__msgSteps = 0; ST.redactSecrets(t, { message: true, mentions: ['beta'] }); return { len: Math.min(t.length, INPUT_MAX), n: globalThis.__msgSteps }; });
   ok(steps.every((x) => x.n <= 6 * x.len) && steps.every((x) => x.n > 1000), `LINEAR BY COUNT: ${steps.map((x) => `${x.n} steps / ${x.len} chars`).join(' · ')} — each ≤ 6 × its length, each loop seen`);
@@ -883,16 +883,16 @@ console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the
   // a vault mark (the live-value masker's placeholder) is never re-opened: the give-back is the blanks only, never the head's `:`
   const MARK = 'see «<[vault:apikey:k]>» and [vault:agent:ops/deploy] here';
   ok(SS.redactSecrets(MARK).text === MARK && SS.redactSecrets(MARK, { message: true }).text === MARK, 'a vault mark stays whole in both modes (its `vault:` head gives back no colon)');
-  const COLON = SRC.replace("(m[5].endsWith('=') ? 1 : 0));   // r2", "(/[:=]$/.test(m[5]) ? 1 : 0));   // r2");
+  const COLON = editAnchor(SRC, "(m[5].endsWith('=') ? 1 : 0));   // r2", "(/[:=]$/.test(m[5]) ? 1 : 0));   // r2", "src/secret-shapes.js");
   ok(COLON !== SRC && mutantCopies('blmbe2', REPO).load('src/secret-shapes.js', COLON, 'colon-back').redactSecrets(MARK).text !== MARK, 'RED CONTROL (the colon given back too — the first cut): the vault mark is re-masked — the leg above goes red');
   ok(SS.redactSecrets(SS.redactSecrets(PROSE[0]).text).text === SS.redactSecrets(PROSE[0]).text, 'idempotent');
   ok(SS.redactSecrets('set `DB_PASSWORD=' + N + '` then', { message: true }).text === 'set `DB_PASSWORD=' + REDACTED + '` then' && SS.redactSecrets(`**API_KEY=${V}** x`, { message: true }).text === `**API_KEY=${REDACTED}** x`, 'MESSAGE MODE: the wrapper\'s closing twin stays the prose\'s (a backtick, the bold marks)');
-  const noOpen = mutantCopies('blmbe3', REPO).load('src/secret-shapes.js', SRC.replace("/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})", "/(^|[\\s,;{(\\[:/])(-{0,2})"), 'no-new-openers');
+  const noOpen = mutantCopies('blmbe3', REPO).load('src/secret-shapes.js', editAnchor(SRC, "/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})", "/(^|[\\s,;{(\\[:/])(-{0,2})", "src/secret-shapes.js"), 'no-new-openers');
   ok(SRC.includes("/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})") && leaks(judge(noOpen, {})).length >= 5, `RED CONTROL (the base's openers): the wrapped forms and the flag's assignment leak again (${leaks(judge(noOpen, {})).length}/${PROSE.length})`);
   // RED CONTROL: the give-back removed — the row's two sentences leak again in both modes
   const GIVE = "    KV_HEAD.lastIndex = headEnd - (bl || (m[5].endsWith('=') ? 1 : 0));   // r2: a bare `=` is given back (an opener now) — never a `:`\n";
   ok(SRC.split(GIVE).length === 2, 'the control finds its line (the give-back)');
-  const noBack = mutantCopies('blmbe', REPO).load('src/secret-shapes.js', SRC.replace(GIVE, ''), 'no-give-back');
+  const noBack = mutantCopies('blmbe', REPO).load('src/secret-shapes.js', editAnchor(SRC, GIVE, '', "src/secret-shapes.js"), 'no-give-back');
   ok(leaks(judge(noBack, {})).length >= 3 && leaks(judge(noBack, { message: true })).length >= 3, `RED CONTROL (the head keeps its trailing blank): the prose lines leak again (${leaks(judge(noBack, {})).length}/${PROSE.length}) — the legs above go red`);
 }
 

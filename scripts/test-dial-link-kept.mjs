@@ -103,7 +103,7 @@ console.log('— CONTROL: a client.js copy without the keep destroys the stream 
 {
   const M = mutantCopies('dialkept', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
-  const patched = src.replace("if (this._transport.kind === 'stream') { keepStream = true; mux.onControl = () => { }; }", '');
+  const patched = editAnchor(src, "if (this._transport.kind === 'stream') { keepStream = true; mux.onControl = () => { }; }", '', "src/agentd/client.js");
   ok(patched !== src, '(the patch applies)');
   const { DeviceManager: DM2 } = M.load('src/agentd/client.js', patched, 'nokeep');
   const stream = await dialIn();
@@ -187,7 +187,7 @@ console.log('— verify-r2 B9-r2a: admitDial — a header-less newcomer is refus
     ok(dfMut !== dfSrc, '(the verdict patch applies)');
     const dfPath = M.write('src/dial-facts.js', dfMut, 'r1rule', { name: 'dial-facts-r1' });
     const dpSrc = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
-    const dpMut = dpSrc.replace("const DF = require('../dial-facts.js');", `const DF = require(${JSON.stringify(dfPath)});`);
+    const dpMut = editAnchor(dpSrc, "const DF = require('../dial-facts.js');", `const DF = require(${JSON.stringify(dfPath)});`, "src/server/dial-pairing.js");
     ok(dpMut !== dpSrc, '(the gate is bound to the patched verdict)');
     const DPm = M.load('src/server/dial-pairing.js', dpMut, 'r1gate');
     const w = mk(DPm);
@@ -268,12 +268,12 @@ console.log('— verify-r2 the dial endpoint: one answer, the answer first, a LO
   {
     const M = mutantCopies('dialgate', REPO);
     const dpSrc = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
-    const i = dpSrc.replace("const code = why === 'no-pairing' ? 'token-mismatch' : why;", 'const code = why;');
+    const i = editAnchor(dpSrc, "const code = why === 'no-pairing' ? 'token-mismatch' : why;", 'const code = why;', "src/server/dial-pairing.js");
     ok(i !== dpSrc, '(i) the patch applies');
     const gi = mkGate(M.load('src/server/dial-pairing.js', i, 'twoanswers'));
     const si = sock(); await captureLogs(() => gi.DP.gateDialUpgrade(req('nosuch-device', wrong()), si));
     ok(heard(si).code === 'no-pairing', 'CONTROL (i): the pre-fix gate answers an unknown name `no-pairing` — the one-answer leg goes red');
-    const j = dpSrc.replace('if (b.log) { console.log(line); return; }', 'console.log(line); return;');
+    const j = editAnchor(dpSrc, 'if (b.log) { console.log(line); return; }', 'console.log(line); return;', "src/server/dial-pairing.js");
     ok(j !== dpSrc, '(j) the patch applies');
     const gj = mkGate(M.load('src/server/dial-pairing.js', j, 'nobudget'));
     const lj = await captureLogs(() => { for (let n = 0; n < 2000; n++) gj.DP.gateDialUpgrade(req(n % 2 ? 'macbook' : 'guess-' + n, wrong()), sock()); });
@@ -336,7 +336,7 @@ const rstLeg = async (DPmod) => {
   ok(r.outs.join(',') === 'answered,answered,answered,parked' && r.uncaught.length === 0, 'verify-r3 B-rst: four RSTs — after a refusal, an unknown name\'s refusal, a probe\'s 200, and inside admitDial\'s probe window — raise NOTHING uncaught (server.js would exit the whole hub on one)', r);
   const M = mutantCopies('dialrst', REPO);
   const dpSrc = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
-  const noGuard = dpSrc.replace("  socket.on('error', () => { try { socket.destroy(); } catch { } });\n  const q = new URL(req.url, 'http://x').searchParams;", "  const q = new URL(req.url, 'http://x').searchParams;");
+  const noGuard = editAnchor(dpSrc, "  socket.on('error', () => { try { socket.destroy(); } catch { } });\n  const q = new URL(req.url, 'http://x').searchParams;", "  const q = new URL(req.url, 'http://x').searchParams;", "src/server/dial-pairing.js");
   ok(noGuard !== dpSrc, '(m) the patch applies');
   const c = await rstLeg(M.load('src/server/dial-pairing.js', noGuard, 'noguard'));
   ok(c.uncaught.length >= 3 && c.uncaught.every((x) => x === 'ECONNRESET'), `CONTROL (m): the gate without its error listener lets ${c.uncaught.length} ECONNRESET(s) through uncaught — the leg above goes red`, c);
@@ -633,9 +633,9 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     ok([PROB, FENCED, HELD, ROOM, PUSH, RULED, RESEAT, MEMO].every((a) => DSRC2.split(a).length === 2), 'control: the probation, the cap, the rules over a refused seat, the seat\'s own boot and the refused boots (the anchors, each once)');
     const MD = mutantCopies('dial-dup-refused', REPO);
     const twoRefused = async (DPx, id) => { H.setDialToken(id, 'fe'.repeat(32)); const A2 = wsPair(); await seatIn(DPx, id, A2); const B2 = wsPair(); await dialIn(DPx, id, B2); return { A2, B2 }; };
-    const closing = await twoRefused(MD.load('src/server/dial-pairing.js', DSRC2.replace(PROB, '  if (false) {\n'), 'replace-closes').create(dpOpts), 'devE');
+    const closing = await twoRefused(MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, PROB, '  if (false) {\n', "src/server/dial-pairing.js"), 'replace-closes').create(dpOpts), 'devE');
     ok(closing.A2.closed() === 1, 'RED CONTROL: a copy that closes the refused copy it replaces (no probation) closes the first copy at the second\'s arrival — its daemon dials again: the loop\'s first turn', closing.A2.closed());
-    const DPL = MD.load('src/server/dial-pairing.js', DSRC2.replace(FENCED, '    else if (fenced()) { alive = true; }\n'), 'refused-holds').create(dpOpts);
+    const DPL = MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, FENCED, '    else if (fenced()) { alive = true; }\n', "src/server/dial-pairing.js"), 'refused-holds').create(dpOpts);
     const lk = await twoRefused(DPL, 'devF');
     const G2 = wsPair(goodAck2), dG2 = await dialIn(DPL, 'devF', G2);
     ok(dG2.r === null && DPL.agentdDials.get('devF') === lk.A2.stream, 'RED CONTROL: a copy where a refused copy keeps its seat against every newcomer turns the HEALTHY device away — locked out behind the refused one', dG2);
@@ -649,10 +649,10 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     const round4 = MD.load('src/server/dial-pairing.js', editAnchor(editAnchor(DSRC2, RULED, '  let v = judge(null);\n', "src/server/dial-pairing.js"), RESEAT, '', "src/server/dial-pairing.js"), 'same-boot-skips').create(dpOpts);
     const s4 = await storm(round4, 'devV');
     ok(s4.closes >= 50, `RED CONTROL: round 4's form (a copy closed at the cap dials again with its own boot, is taken for «the same daemon» and skips the rules) loops — ${s4.closes} closes in ten simulated minutes`, s4);
-    const noMemo = MD.load('src/server/dial-pairing.js', DSRC2.replace(MEMO, '    if (false) {'), 'no-boot-memory').create(dpOpts);
+    const noMemo = MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, MEMO, '    if (false) {', "src/server/dial-pairing.js"), 'no-boot-memory').create(dpOpts);
     const sm = await storm(noMemo, 'devW', { minutes: 30 });
     ok(sm.closes >= 15, `RED CONTROL: without the known copies, the copies beyond the cap are greeted and closed once per interval for ever — ${sm.closes} closes in thirty simulated minutes (the leg above: ${st.closes})`, sm);
-    const noIv = MD.load('src/server/dial-pairing.js', DSRC2.replace(HELD, '  const held = () => pending();\n'), 'no-interval').create(dpOpts);
+    const noIv = MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, HELD, '  const held = () => pending();\n', "src/server/dial-pairing.js"), 'no-interval').create(dpOpts);
     const sn = await storm(noIv, 'devX', { copies: ['b', 'c', 'x'], rotate: ['x'] });
     ok(sn.closes >= 50, `RED CONTROL: without the once-per-interval rule a copy stating a new boot at every dial is greeted and closed at every dial — ${sn.closes} closes in ten simulated minutes`, sn);
     const RESERVE = '  const pending = () => probation.has(deviceId) || admitted.has(deviceId);\n';
@@ -660,7 +660,7 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     const UNASKED = '    if (!refused) { try { pb.stream.destroy(); } catch { } }';
     ok([RESERVE, STALE, UNASKED].every((a) => DSRC2.split(a).length === 2), 'control: the reservation, the probation\'s 30 s end and the closing of a copy never greeted to the end (the anchors, each once)');
     {
-      const DPN = MD.load('src/server/dial-pairing.js', DSRC2.replace(RESERVE, '  const pending = () => probation.has(deviceId);\n'), 'no-reservation').create(dpOpts);
+      const DPN = MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, RESERVE, '  const pending = () => probation.has(deviceId);\n', "src/server/dial-pairing.js"), 'no-reservation').create(dpOpts);
       H.setDialToken('devN', '6b'.repeat(32));
       const N1 = wsPair(); DPN.adoptDialStream('devN', N1.stream); DPN.noteDialEvent('devN', 'accepted', { boot: hex16(), at: Date.now() - 1 });
       const pendN = DPN.deviceForDial('devN').catch(() => { });
@@ -681,7 +681,7 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     };
     const ud = await upgradeDies(DP, 'devU2');
     ok(ud.r1 === true && ud.r2 === true, 'an upgrade that never calls back frees its reservation at its socket\'s close: the next copy is greeted at once', ud);
-    const udM = await upgradeDies(MD.load('src/server/dial-pairing.js', DSRC2.replace(RELEASE, ''), 'no-release').create(dpOpts), 'devU3');
+    const udM = await upgradeDies(MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, RELEASE, '', "src/server/dial-pairing.js"), 'no-release').create(dpOpts), 'devU3');
     ok(udM.r1 === true && udM.r2 === null, 'RED CONTROL: without the release a dead upgrade holds the reservation, and every copy is told to wait (for 10 s each time, renewed by a holder that knocks with broken upgrades)', udM);
     // A TOKEN THAT CANNOT BE READ for another reason than a locked vault (a damaged entry, a failed mint) is a wait too
     const UNREADABLE = '  const tokenUnreadable = () => { try { agentdHostToken(\'dial-\' + deviceId); return false; } catch { return true; } };';
@@ -693,7 +693,7 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     const eioOpts = { ...dpOpts, agentdHostToken: () => { if (bad) throw Object.assign(new Error('the link token entry is damaged'), { code: 'EIO' }); return 'vsht_ok'; } };
     const rE = await eio(DPM.create(eioOpts), 'devE2');
     ok(rE === null && said.some((t) => /asked again within a minute/.test(t)), 'a token that cannot be read for ANOTHER reason than a locked vault: the newcomer is told to wait too (no probation that could never decide)', rE);
-    const rEM = await eio(MD.load('src/server/dial-pairing.js', DSRC2.replace(UNREADABLE, "  const tokenUnreadable = () => { try { agentdHostToken('dial-' + deviceId); return false; } catch (e) { return !!(e && e.code === 'vault_locked'); } };"), 'locked-only').create(eioOpts), 'devE3');
+    const rEM = await eio(MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, UNREADABLE, "  const tokenUnreadable = () => { try { agentdHostToken('dial-' + deviceId); return false; } catch (e) { return !!(e && e.code === 'vault_locked'); } };", "src/server/dial-pairing.js"), 'locked-only').create(eioOpts), 'devE3');
     ok(rEM === true, 'RED CONTROL: a copy that waits only for a locked vault starts a probation that could never decide', rEM);
     // A COPY WITH NO BOOT (an agent before the boot header): closed at the cap, it is known by address + version for ONE interval
     // and told to wait; after the interval it is greeted again (a healthy machine behind the same relay is never held longer)
@@ -716,7 +716,7 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     };
     const nb = await noBoot(DP, 'devZ');
     ok(nb.r0 === true && nb.closed === 1 && nb.r1 === null && nb.waited && nb.r2 === true, 'a copy stating NO boot, refused and closed at the cap: inside the interval it is told to WAIT (never named a copy: a healthy machine behind the same relay may share its address and version); after the interval it is greeted again', nb);
-    const nbM = await noBoot(MD.load('src/server/dial-pairing.js', DSRC2.replace(NOBOOT, 'REFUSED_BOOT_MS'), 'noboot-long').create(dpOpts), 'devZ2');
+    const nbM = await noBoot(MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, NOBOOT, 'REFUSED_BOOT_MS', "src/server/dial-pairing.js"), 'noboot-long').create(dpOpts), 'devZ2');
     ok(nbM.r2 === null, 'RED CONTROL: a copy that keeps a key with no boot as long as a boot (24 h) still turns that address and version away after the interval — a healthy bootless machine behind the same relay would be held for a day', nbM);
     // ── unit 4's cure 2, its verdict's shoulds ──
     const SAME = '  if (backOpen && newOpen && refused && nb && nb === hb) { try { pb.heldBack.destroy(); } catch { } reseat(deviceId, pb.stream, own); return; }\n';
@@ -765,26 +765,26 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     };
     const uj = await unjudgedLeg((o) => DPM.create(o), 'devUJ');
     ok(uj.r1 === true && uj.r2 === null && uj.waited && uj.dup !== 'restart-2', 'a probe that cannot judge replaces once per interval; the second dial-in inside it is told to WAIT, and the row does not call the machine its own copy', uj);
-    const ujM = await unjudgedLeg((o) => MD.load('src/server/dial-pairing.js', DSRC2.replace(UNJ, ' }'), 'unjudged-copy').create(o), 'devUJ2');
+    const ujM = await unjudgedLeg((o) => MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, UNJ, ' }', "src/server/dial-pairing.js"), 'unjudged-copy').create(o), 'devUJ2');
     ok(ujM.r2 === null && !ujM.waited && ujM.dup === 'restart-2', 'RED CONTROL: a copy whose rate rule answers «duplicate» tells the restarting machine it is another device holding a copy, on its own row', ujM);
     // A PROBATION WITH NO DIAL FACTS (adopted without admission — a seat refused between admission and the upgrade): refused, it
     // writes no duplicate note (the row would read «from »)
     const noFacts = async (DPx, id) => { H.setDialToken(id, '7d'.repeat(32)); const F1 = wsPair(); await seatIn(DPx, id, F1); const F2 = wsPair(); DPx.adoptDialStream(id, F2.stream); DPx.noteDialEvent(id, 'accepted', { boot: hex16(), at: Date.now() - 1 }); try { await DPx.deviceForDial(id); } catch { } const rs = rowOf(id); return { dup: rs.dup ? rs.dup.from : null, seat: DPx.agentdDials.get(id) === F1.stream }; };
     const nf = await noFacts(DP, 'devNF');
     ok(nf.dup === null && nf.seat, 'a probation with no dial facts, refused: the seat goes back and the row gets no «from »-less duplicate note', nf);
-    const nfM = await noFacts(MD.load('src/server/dial-pairing.js', DSRC2.replace(NOFACTS, "if (refused && !twin) noteDialEvent(deviceId, 'duplicate', { ...pb.facts, at: Date.now() });"), 'nofacts-note').create(dpOpts), 'devNF2');
+    const nfM = await noFacts(MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, NOFACTS, "if (refused && !twin) noteDialEvent(deviceId, 'duplicate', { ...pb.facts, at: Date.now() });", "src/server/dial-pairing.js"), 'nofacts-note').create(dpOpts), 'devNF2');
     ok(nfM.dup === '', 'RED CONTROL: without the guard the row reads «Another device … (from )»', nfM);
     // THE KNOWN COPIES HAVE A COUNT: a holder stating a new boot at every dial adds one per interval; the oldest goes past 16
     const kc = await storm(DP, 'devKC', { minutes: 30, copies: ['b', 'c', 'x'], rotate: ['x'] });
     const kcN = DP.knownCount('devKC');
     ok(kc.closes > 16 && kcN === 16, `the known copies are capped: ${kc.closes} rotating boots closed at the cap in thirty simulated minutes, ${kcN} kept (the oldest dropped first)`, { closes: kc.closes, known: kcN });
-    const DPKC = MD.load('src/server/dial-pairing.js', DSRC2.replace(KEYCAP, ''), 'keys-uncapped').create(dpOpts);
+    const DPKC = MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, KEYCAP, '', "src/server/dial-pairing.js"), 'keys-uncapped').create(dpOpts);
     const kcM = await storm(DPKC, 'devKC2', { minutes: 30, copies: ['b', 'c', 'x'], rotate: ['x'] });
     ok(DPKC.knownCount('devKC2') === kcM.closes && kcM.closes > 16, `RED CONTROL: without the count the map keeps every one (${DPKC.knownCount('devKC2')})`, { known: DPKC.knownCount('devKC2'), closes: kcM.closes });
     const stall = async (DPx, id) => { H.setDialToken(id, '2e'.repeat(32)); const X1 = wsPair(); await seatIn(DPx, id, X1); await DPx.admitDial(id, { boot: hex16() }, sock()); const X2 = wsPair(); DPx.adoptDialStream(id, X2.stream); const rn = Date.now; let r; Date.now = () => rn() + 31 * 1000; try { r = await DPx.admitDial(id, { boot: hex16() }, sock()); } finally { Date.now = rn; } await tick(); return { r, X2 }; };
-    const noEnd = await stall(MD.load('src/server/dial-pairing.js', DSRC2.replace(STALE, ''), 'no-probation-end').create(dpOpts), 'devO');
+    const noEnd = await stall(MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, STALE, '', "src/server/dial-pairing.js"), 'no-probation-end').create(dpOpts), 'devO');
     ok(noEnd.r === null, 'RED CONTROL: without the 30 s end a probation that never decides turns every later copy away — the healthy one too, for ever', noEnd.r);
-    const kept = await stall(MD.load('src/server/dial-pairing.js', DSRC2.replace(UNASKED, '    if (false) { }'), 'unasked-kept').create(dpOpts), 'devK');
+    const kept = await stall(MD.load('src/server/dial-pairing.js', editAnchor(DSRC2, UNASKED, '    if (false) { }', "src/server/dial-pairing.js"), 'unasked-kept').create(dpOpts), 'devK');
     ok(kept.r === true && kept.X2.closed() === 0, 'RED CONTROL: a copy that keeps a never-greeted probationer as a spare leaves it open and unasked — nothing ever greets a spare, so a healthy machine stalled by a locked vault would wait beside a refused seat for as long as that link lives', kept.X2.closed());
     for (const x of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 16, label: 'mutant-copy (duplicate): ' })) ok(x.pass, x.name, x.detail);
   }
@@ -798,12 +798,12 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
   const M = mutantCopies('dial-greeting-kept', REPO);
   const dmOver = (Cl, st) => new Cl.DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_ok', getStream: () => st } });
   {
-    const Det = M.load('src/agentd/client.js', CSRC.replace(KEEP, "              if (this._transport.kind === 'stream') { keepStream = true; mux.detach(); }"), 'detach-at-once'); // stale-pins: kept — the RED copy re-creates the cure's first form on purpose
+    const Det = M.load('src/agentd/client.js', editAnchor(CSRC, KEEP, "              if (this._transport.kind === 'stream') { keepStream = true; mux.detach(); }", "src/agentd/client.js", 'first'), 'detach-at-once'); // stale-pins: kept — the RED copy re-creates the cure's first form on purpose
     const Q = wsPair(); try { await dmOver(Det, Q.stream).connect(); } catch { }
     ok(!(await Q.devMux.ping(300)), 'RED CONTROL: a copy that lets go of the Mux at once (the first form) answers no PING — the device\'s heartbeat would end its link ~40 s later');
   }
   {
-    const NoSwap = M.load('src/agentd/client.js', CSRC.replace(SWAP, ''), 'no-swap');
+    const NoSwap = M.load('src/agentd/client.js', editAnchor(CSRC, SWAP, '', "src/agentd/client.js"), 'no-swap');
     const Q = wsPair(), R = wsPair();
     for (let i = 0; i < N; i++) { try { await dmOver(NoSwap, Q.stream).connect(); } catch { } try { await dmOver(require('../src/agentd/client.js'), R.stream).connect(); } catch { } }
     ok(counts(Q.stream) === `${N}/${N}/${N}` && counts(R.stream) === '1/1/1', `RED CONTROL: ${N} handshakes on one stream pile ${counts(Q.stream)} listeners without the swap; the real client keeps ${counts(R.stream)}`);
@@ -812,7 +812,7 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     const DSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
     const FENCE = "  if (rf && rf.stream === curStream && Date.now() - rf.at < AUTH_FAIL_REHELLO_MS) throw Object.assign(new Error(rf.message), { code: rf.code, stage: 'connect' });\n";
     ok(DSRC.includes(FENCE), 'control: deviceForDial\'s refused-stream fence (the anchor)');
-    const DPN = M.load('src/server/dial-pairing.js', DSRC.replace(FENCE, ''), 'no-fence').create(dpOpts);
+    const DPN = M.load('src/server/dial-pairing.js', editAnchor(DSRC, FENCE, '', "src/server/dial-pairing.js"), 'no-fence').create(dpOpts);
     const Q = wsPair(); DPN.agentdDials.set('devG', Q.stream);
     const h0 = gHellos;
     for (let i = 0; i < N; i++) { try { await DPN.deviceForDial('devG'); } catch { } }
@@ -820,7 +820,7 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
     await DPN.unpairDialDevice('devG');
   }
   {
-    const NoDead = M.load('src/agentd/client.js', CSRC.replace(DEAD, ''), 'no-dead-swap');
+    const NoDead = M.load('src/agentd/client.js', editAnchor(CSRC, DEAD, '', "src/agentd/client.js"), 'no-dead-swap');
     const R = wsPair(() => ({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '1.0.0', platform: 'linux', capabilities: [] }));
     const dm = new NoDead.DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_ok', getStream: () => R.stream } });
     await dm.connect(); dm._conn.mux._die('heartbeat: 3 missed pongs'); await dm.connect();

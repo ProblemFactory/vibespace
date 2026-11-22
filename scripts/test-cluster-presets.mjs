@@ -59,6 +59,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return Date.now() - t0; await sleep(15); } return -1; };
 
@@ -136,10 +145,10 @@ console.log('§1 PURE preset-layers');
 
   // CONTROLS: the per-key merge is the property — a whole-file override and a wrong layer order are both red
   const src = fs.readFileSync(path.join(REPO, 'src/preset-layers.js'), 'utf-8');
-  const wholeFile = M.load('src/preset-layers.js', src.replace("  const present = LAYERS.filter((l) => Array.isArray(layers[l]));", "  if (Array.isArray(layers.release)) layers = { release: layers.release };\n  const present = LAYERS.filter((l) => Array.isArray(layers[l]));"), 'wholefile');
+  const wholeFile = M.load('src/preset-layers.js', editAnchor(src, "  const present = LAYERS.filter((l) => Array.isArray(layers[l]));", "  if (Array.isArray(layers.release)) layers = { release: layers.release };\n  const present = LAYERS.filter((l) => Array.isArray(layers[l]));", "src/preset-layers.js"), 'wholefile');
   const wf = wholeFile.mergeLayers('gdrive', { cluster: cl, release: rel });
   ok(wf.entries.map((e) => e.key).join() !== 'org1,org2,channels,extra' && !wf.entries.some((e) => e.key === 'org1'), 'CONTROL: a whole-file override (the release file replaces the cluster file) HIDES the company\'s org1 + channels — the per-key assert above is red on it');
-  const wrongOrder = M.load('src/preset-layers.js', src.replace("const LAYERS = Object.freeze(['cluster', 'release']);", "const LAYERS = Object.freeze(['release', 'cluster']);"), 'order');
+  const wrongOrder = M.load('src/preset-layers.js', editAnchor(src, "const LAYERS = Object.freeze(['cluster', 'release']);", "const LAYERS = Object.freeze(['release', 'cluster']);", "src/preset-layers.js"), 'order');
   ok(wrongOrder.mergeLayers('gdrive', { cluster: cl, release: rel }).entries.find((e) => e.key === 'org2').clientSecret === SECRET_A, 'CONTROL: the layers read in the wrong order let the CLUSTER win org2 — the override assert above is red on it');
 }
 
@@ -253,7 +262,7 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
   const anchor = "      slot.error = { layer: slot.layer, file: FILES[slot.kind], code: out.error.code, kept: !!slot.list };";
   ok(srcR.includes(anchor), 'the control\'s anchor exists in the reader');
-  const dropper = M.load('src/server/cluster-presets.js', srcR.replace(anchor, anchor + '\n      slot.list = null;'), 'drop');
+  const dropper = M.load('src/server/cluster-presets.js', editAnchor(srcR, anchor, anchor + '\n      slot.list = null;', "src/server/cluster-presets.js"), 'drop');
   const dir3 = path.join(ROOT, 'ctl');
   project(dir3, { 'gdrive-clients.json': [g('org1', SECRET_A)] });
   const d3 = dropper.create({ dir: dir3, log: capture().log, debounceMs: 20, pollMs: 100 });
@@ -470,13 +479,13 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   // a value in a line: the pre-describeJsonError shape (V8 quotes the bytes around a JSON error)
   const a1 = "try { parsed = JSON.parse(text); } catch (e) { return { error: { code: 'unparseable', detail: describeJsonError(e) } }; }";
   ok(srcR.includes(a1), 'control anchor: the JSON error is described by position');
-  const leaky = M.load('src/server/cluster-presets.js', srcR.replace(a1, "try { parsed = JSON.parse(text); } catch (e) { return { error: { code: 'unparseable', detail: e.message } }; }"), 'leaky');
+  const leaky = M.load('src/server/cluster-presets.js', editAnchor(srcR, a1, "try { parsed = JSON.parse(text); } catch (e) { return { error: { code: 'unparseable', detail: e.message } }; }", "src/server/cluster-presets.js"), 'leaky');
   const lcap = capture(); leaky.create({ dir: cellDir({ cluster: 'malformed', release: 'absent' }), log: lcap.log });   // the table's `},]` bytes: V8 quotes the 10 bytes before the token
   ok(leaks(lcap.lines).length > 0, 'CONTROL: a copy that logs e.message prints the secret\'s bytes — the never-a-value assert is red on it');
   // a torn read published: no post-read re-check
   const a2 = "      if (after === sig) { outs = read; break; }";
   ok(srcR.includes(a2), 'control anchor: the post-read signature re-check');
-  const torn = M.load('src/server/cluster-presets.js', srcR.replace(a2, "      outs = read; break;"), 'torn');
+  const torn = M.load('src/server/cluster-presets.js', editAnchor(srcR, a2, "      outs = read; break;", "src/server/cluster-presets.js"), 'torn');
   const tdir = cellDir({ cluster: 'present', release: 'absent' });
   const tr = torn.create({ dir: tdir, log: capture().log, debounceMs: 20, pollMs: 100000 });
   const pub = []; tr.onChange(() => pub.push([tr.entries('gdrive')[0].clientSecret, tr.entries('integrations')[0].values.appSecret]));
@@ -488,14 +497,14 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   // a stray file unsaid
   const a3 = "    if (key && key !== saidStrays) log.warn(";
   ok(srcR.includes(a3), 'control anchor: the stray-file line');
-  const mute = M.load('src/server/cluster-presets.js', srcR.replace(a3, "    if (false) log.warn("), 'mute');
+  const mute = M.load('src/server/cluster-presets.js', editAnchor(srcR, a3, "    if (false) log.warn(", "src/server/cluster-presets.js"), 'mute');
   const mcap = capture(); mute.create({ dir: cellDir({ cluster: 'present', release: 'absent' }, { 'browser-keys.json': '[]' }), log: mcap.log });
   ok(!mcap.lines.some((l) => /ignored/.test(l)), 'CONTROL: a copy that never says a stray file ignores browser-keys.json in silence — the future-key assert is red on it');
   // the consumer substituting a preset for the user's own client
   const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf-8');
   const a4 = "    if (m.clientId) return null; // custom client on the record itself\n";
   ok(msrc.includes(a4), 'control anchor: _driveClient yields to the record\'s own client');
-  const subst = M.load('src/mounts.js', msrc.replace(a4, ''), 'subst');
+  const subst = M.load('src/mounts.js', editAnchor(msrc, a4, '', "src/mounts.js"), 'subst');
   const prevShared = CP.setSharedPresets(CP.create({ dir: cellDir({ cluster: 'present', release: 'absent' }), log: capture().log }));
   const got = subst.MountManager._driveClient({ clientId: 'mine.apps.googleusercontent.com', clientPreset: 'k' });
   CP.setSharedPresets(prevShared);
@@ -503,7 +512,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   // the watch's failure freezing the presets: no poll after a refused watch
   const a5 = "    } catch (e) { log.warn(`[presets] cannot watch ${dir} (${e && e.code}) — polling every ${Math.round(pollMs / 1000)} s`); }\n    poll = setInterval(() => { reload(); }, pollMs);";
   ok(srcR.includes(a5), 'control anchor: the poll starts whatever the watch did');
-  const frozen = M.load('src/server/cluster-presets.js', srcR.replace(a5, "    } catch (e) { log.warn(`[presets] cannot watch ${dir} (${e && e.code})`); return; }\n    poll = setInterval(() => { reload(); }, pollMs);"), 'frozen');
+  const frozen = M.load('src/server/cluster-presets.js', editAnchor(srcR, a5, "    } catch (e) { log.warn(`[presets] cannot watch ${dir} (${e && e.code})`); return; }\n    poll = setInterval(() => { reload(); }, pollMs);", "src/server/cluster-presets.js"), 'frozen');
   const fdir = cellDir({ cluster: 'present', release: 'absent' });
   const realWatch = fs.watch; fs.watch = () => { const e = new Error('EMFILE'); e.code = 'EMFILE'; throw e; };
   const fr = frozen.create({ dir: fdir, log: capture().log, debounceMs: 20, pollMs: 100 });
@@ -563,7 +572,7 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
   const a6 = '    const sources = [...P.KINDS, FLEET].filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));';
   ok(srcR.includes(a6), 'control anchor: the attribution comparison');
-  const valuesOnly = M.load('src/server/cluster-presets.js', srcR.replace(a6, '    const sources = [];'), 'valuesonly');
+  const valuesOnly = M.load('src/server/cluster-presets.js', editAnchor(srcR, a6, '    const sources = [];', "src/server/cluster-presets.js"), 'valuesonly');
   const c = await migrate(valuesOnly, 'ctl');
   ok(c.after === 'release:gdrive=3+lark=1' && c.pushed === null, `CONTROL: a copy that compares the values only keeps the summary on "release" after the override is gone and pushes nothing (${c.after}) — the asserts above are red on it`);
 }
@@ -613,7 +622,7 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   // RED CONTROL: the store without its legacy read answers nothing for the old prefix
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/integration-store.js'), 'utf8');
   const LINE = "const legacyIdsOf = (row) => (row.clusterEnv && row.clusterEnv.legacy && Array.isArray(row.clusterEnv.legacy.jsonKeys) ? row.clusterEnv.legacy.jsonKeys : []);";
-  const bare = SRC.includes(LINE) ? M.load('src/server/integration-store.js', SRC.replace(LINE, 'const legacyIdsOf = () => [];'), 'no-legacy') : null;
+  const bare = SRC.includes(LINE) ? M.load('src/server/integration-store.js', editAnchor(SRC, LINE, 'const legacyIdsOf = () => [];', "src/server/integration-store.js"), 'no-legacy') : null;
   const h = bare ? mk(OLD, { store: bare }) : null;
   ok(!!h && h.st.resolveIntegration('llm').source === 'none' && h.eng.status().configured === false, 'RED CONTROL: a store copy WITHOUT the legacy read leaves an old-prefix cluster unconfigured (the leg above proves the read)');
   const none = mk({});
@@ -691,7 +700,7 @@ console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
   const srcP = fs.readFileSync(path.join(REPO, 'src/preset-layers.js'), 'utf-8');
   const a5 = "    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k])) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }"; // lane engine-plugin: the write per field, + the engine fact
   ok(srcP.includes(a5), 'control anchor: the per-field write');
-  const rev = M.load('src/preset-layers.js', srcP.replace(a5, "    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k]) && !(k in facts)) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }"), 'fleet-first-wins');
+  const rev = M.load('src/preset-layers.js', editAnchor(srcP, a5, "    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k]) && !(k in facts)) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }", "src/preset-layers.js"), 'fleet-first-wins');
   ok(rev.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: { relayUrl: MINE } }).facts.relayUrl === RELAY1, 'CONTROL: a merge where the first layer read keeps its field lets the CLUSTER win — the override assert above is red on it');
 }
 

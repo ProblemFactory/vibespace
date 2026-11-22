@@ -40,6 +40,15 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
 const ROOT = scratch('browser-fact');
@@ -292,7 +301,7 @@ console.log('— ④ the REAL keeper: factFor, the pinned delete, the unpin, the
   { const MU5 = mutantCopies('browser-fact-words', REPO); const fsrc = fs.readFileSync(path.join(REPO, 'src/browser-fact.js'), 'utf8');
     const L5 = "    case 'pin_cleared': why = fact.pinCleared && fact.pinCleared.label ? t('{p} was deleted — its pin was cleared', { p: fact.pinCleared.label }) : t('the pinned profile was deleted — its pin was cleared'); break;";
     ok(fsrc.includes(L5), 'B-160d ⑤ control setup: the pin_cleared words are found');
-    const BF0 = MU5.load('src/browser-fact.js', fsrc.replace(L5, "    case 'pin_cleared': why = t('{p} was deleted — its pin was cleared', { p: fact.pinCleared && fact.pinCleared.label ? fact.pinCleared.label : t('a deleted profile') }); break;"), 'twice');
+    const BF0 = MU5.load('src/browser-fact.js', editAnchor(fsrc, L5, "    case 'pin_cleared': why = t('{p} was deleted — its pin was cleared', { p: fact.pinCleared && fact.pinCleared.label ? fact.pinCleared.label : t('a deleted profile') }); break;", "src/browser-fact.js"), 'twice');
     const l0 = BF0.browserFactWords(after).line;
     ok(/a deleted profile was deleted/.test(l0) && W(after).line !== l0, 'B-160d ⑤ CONTROL: the base\'s words say "' + l0 + '"');
     // B-160d ③ / ④ — ALREADY FIXED ON THE BASE (OWNER RULING A, 2026-09-26), pinned here: a create never starts a browser (the
@@ -514,7 +523,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     const src = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
     const needle = "if (M.isInputMethod(msg.method) && g.credits && g.credits.length) {";
     ok(src.includes(needle), '⑤ control setup: the credit admission is found in src/server/cdp-mediator.js');
-    const mutMed = MUT.load('src/server/cdp-mediator.js', src.replace(needle, 'if (false) {'), 'nocredit');
+    const mutMed = MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle, 'if (false) {', "src/server/cdp-mediator.js"), 'nocredit');
     const w = await mkWorld(mutMed);
     chromeSaw.length = 0;
     w.v.send(JSON.stringify({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', rid: 1 }));
@@ -526,7 +535,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     {
       const needle2 = "const tc = M.takeCredit(g.credits, now(), { msg, sessionTarget: (sid) => g.scope.sessions.get(sid) });";
       ok(src.includes(needle2), '⑤ control setup: the bound takeCredit is found in src/server/cdp-mediator.js');
-      const mutHead = MUT.load('src/server/cdp-mediator.js', src.replace(needle2, 'const tc = { credit: g.credits.shift(), expired: [] };'), 'headcredit');
+      const mutHead = MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle2, 'const tc = { credit: g.credits.shift(), expired: [] };', "src/server/cdp-mediator.js"), 'headcredit');
       const w = await mkWorld(mutHead);
       chromeSaw.length = 0; w.cdpReplies.length = 0;
       w.hold(true);
@@ -546,7 +555,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
     {
       const needle3 = "sessionTarget: (sid) => g.scope.sessions.get(sid)";
       ok(src.includes(needle3), '⑤ control setup: the session→tab read is found in src/server/cdp-mediator.js');
-      const mutR1 = MUT.load('src/server/cdp-mediator.js', src.replace(needle3, "sessionTarget: (sid) => (g.scope.sessions.has(sid) ? ((g.credits[0] && g.credits[0].expect.targetId) || 'T1') : undefined)"), 'r1credit');
+      const mutR1 = MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle3, "sessionTarget: (sid) => (g.scope.sessions.has(sid) ? ((g.credits[0] && g.credits[0].expect.targetId) || 'T1') : undefined)", "src/server/cdp-mediator.js"), 'r1credit');
       const w = await mkWorld(mutR1);
       const other = new WebSocket(w.grantUrl); const otherReplies = []; other.on('message', (d) => otherReplies.push(JSON.parse(d))); await new Promise((r, e) => { other.on('open', r); other.on('error', e); });
       other.send(JSON.stringify({ id: 1, method: 'Target.attachToTarget', params: { targetId: 'T2', flatten: true } }));
@@ -567,7 +576,7 @@ console.log('— ⑤ the mediated takeover: every input has a receipt; the user\
       const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
       const needleB = "      if (v.forward && relay.anchor && relay.anchor.switched) { receipt(S.tabSwitchedReceipt(relay.anchor)); return; }";
       ok(bsrc.includes(needleB), '⑤ control setup: the anchor refusal is found in src/server/browser-stream.js');
-      const mutBS = MUT.load('src/server/browser-stream.js', bsrc.replace(needleB, ''), 'noanchor');
+      const mutBS = MUT.load('src/server/browser-stream.js', editAnchor(bsrc, needleB, '', "src/server/browser-stream.js"), 'noanchor');
       const w = await mkWorld(MED, { BSmod: mutBS });
       await sleep(S.TAKEOVER_ANCHOR_GRACE_MS + 100);
       chromeSaw.length = 0; w.emitTabs('T2'); w.dispatchOn('S-T2'); await sleep(150);
@@ -621,7 +630,7 @@ function censusOf(file, text) {
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   const anchor = "    const fact = row.browserFact || null;";
   ok(cv.includes(anchor), '⑥ control setup: the chip\'s fact read is found in chat-view.js');
-  const mutPath = MUT.write('src/lib/chat-view.js', cv.replace(anchor, anchor + "\n    const pinnedOwn = row.browserProfileId || ''; const activeOwn = row.browserProfileActive;"), 'derives');
+  const mutPath = MUT.write('src/lib/chat-view.js', editAnchor(cv, anchor, anchor + "\n    const pinnedOwn = row.browserProfileId || ''; const activeOwn = row.browserProfileActive;", "src/lib/chat-view.js"), 'derives');
   const caught = censusOf('chat-view (patched copy)', fs.readFileSync(mutPath, 'utf8'));
   ok(caught.length === 2, `⑥ CONTROL: a chat-view copy that reads browserProfileId / browserProfileActive again is caught (${caught.length} finding(s))`, caught.join('\n'));
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑥ controls: ' })) ok(c.pass, c.name, c.detail);
@@ -764,7 +773,7 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     const src = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
     const needle = 'if (!g || !targetId) return false; admitInto(g, targetId); return true; }';
     ok(src.includes(needle), '⑨ control setup: the out-of-band admission is found in src/server/cdp-mediator.js');
-    const w9 = await world9(MUT.load('src/server/cdp-mediator.js', src.replace(needle, 'if (!g || !targetId) return false; M.admitTarget(g.scope, targetId); return true; }'), 'noreplay'));
+    const w9 = await world9(MUT.load('src/server/cdp-mediator.js', editAnchor(src, needle, 'if (!g || !targetId) return false; M.admitTarget(g.scope, targetId); return true; }', "src/server/cdp-mediator.js"), 'noreplay'));
     announce('Target.targetCreated', 'T9'); await w9.settle(); w9.med.admitTarget(WORK, KEY, 'T9'); await w9.settle();
     ok(w9.created('T9') === 0, '⑨ CONTROL (an admission without the replay — the release): the driver never hears its tab (the bind\'s «No tab with target id»)');
     await w9.close();
@@ -772,11 +781,11 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     const srcR = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
     const needleR = "return wasInScope ? null : { method: 'Target.targetCreated', params: { targetInfo: seen } };";
     ok(srcR.includes(needleR), '⑨ control setup: the in-scope rule is found in src/browser-mediation.js');
-    const mrPath = MUT.write('src/browser-mediation.js', srcR.replace(needleR, "return { method: 'Target.targetCreated', params: { targetInfo: seen } };"), 'replay-always');
+    const mrPath = MUT.write('src/browser-mediation.js', editAnchor(srcR, needleR, "return { method: 'Target.targetCreated', params: { targetInfo: seen } };", "src/browser-mediation.js"), 'replay-always');
     const medSrc = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
     const medNeedle = "const M = require('../browser-mediation.js');";
     ok(medSrc.split(medNeedle).length === 2, '⑨ control setup: the mediator requires the mediation module once');
-    const w9r = await world9(MUT.load('src/server/cdp-mediator.js', medSrc.replace(medNeedle, `const M = require(${JSON.stringify(mrPath)});`), 'replay-always-med'));
+    const w9r = await world9(MUT.load('src/server/cdp-mediator.js', editAnchor(medSrc, medNeedle, `const M = require(${JSON.stringify(mrPath)});`, "src/server/cdp-mediator.js"), 'replay-always-med'));
     const tcR = 'TC' + (tcN + 1);
     w9r.cdp.send(JSON.stringify({ id: 92, method: 'Target.createTarget', params: { url: 'about:blank' } })); await until(() => w9r.created(tcR) >= 1, 2000);
     await w9r.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: [tcR], mode: M.SCOPE_MODE }); await w9r.settle();

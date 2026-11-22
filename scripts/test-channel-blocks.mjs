@@ -72,6 +72,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const t0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = (x) => JSON.stringify(x);
 /** Structural equality, key order ignored (a tree is compared by content). */
 const canon = (x) => (Array.isArray(x) ? x.map(canon) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, canon(x[k])])) : x);
@@ -666,7 +675,7 @@ const LINEAR_BOUND_X = 150;
       }`;
     ok(src.includes(from), 'CONTROL setup (k): the read-time judgement is spelled once');
     const M2 = mutantCopies('chan-blocks-eng', REPO);
-    const E2 = M2.load('src/server/channels-engine.js', src.replace(from, '      if (r.blocks !== undefined) return r;'), 'trusts-stored');
+    const E2 = M2.load('src/server/channels-engine.js', editAnchor(src, from, '      if (r.blocks !== undefined) return r;', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'trusts-stored');
     const eng2 = mk(E2);
     try {
       const s2 = eng2.messages('lark', 'oc_s');
@@ -1170,7 +1179,7 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
   const OLD_FENCE = "    const fence = /^\\s*```\\s*([A-Za-z0-9_+-]{0,30})\\s*$/.exec(l);";
   const runs = [];
   for (const [what, from, to, shape] of [['the lazy tag regex', NEW_TAG, OLD_TAG, 0], ['the lazy tag regex (through the rung)', NEW_TAG, OLD_TAG, 1], ['a fence walk per opener', NEW_FENCE, OLD_FENCE, 2], ['a fence walk per opener (a card)', NEW_FENCE, OLD_FENCE, 3]]) {
-    const patched = src.replace(from, to);
+    const patched = editAnchor(src, from, to, "src/channels/lark/blocks.js");
     if (patched === src) { ok(false, `CONTROL setup: ${what} — the fixed line is present once`, from); continue; }
     const file = M.write('src/channels/lark/blocks.js', patched, `linear-${shape}`);
     runs.push(inChild(file, SHAPES[shape][1], SHAPES[shape][2]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the bound on "${SHAPES[shape][0]}" (${r.killed ? `still running after the ${CONTROL_WAIT_MS} ms wait — cut` : `${Math.round(r.x)} × its benign walk`})`, JSON.stringify(r))));
@@ -1179,8 +1188,8 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
   await Promise.all(runs);
   const NEW_Q = "      if (open) { flush(); if (baseDepth + stack.length + 1 > MAX_DEPTH) overQuote++; else stack.push({ blocks: [] }); continue; }";
   const NEW_MD = "      if (depth + 1 > MAX_DEPTH) {";
-  const noQ = src.replace(NEW_Q, "      if (open) { flush(); stack.push({ blocks: [] }); continue; }");
-  const noMd = src.replace(NEW_MD, "      if (false) {");
+  const noQ = editAnchor(src, NEW_Q, "      if (open) { flush(); stack.push({ blocks: [] }); continue; }", "src/channels/lark/blocks.js");
+  const noMd = editAnchor(src, NEW_MD, "      if (false) {", "src/channels/lark/blocks.js");
   const mq = M.load('src/channels/lark/blocks.js', noQ, 'unbounded-quote');
   const mm = M.load('src/channels/lark/blocks.js', noMd, 'unbounded-md');
   let eq = null, em = null;
@@ -1225,7 +1234,7 @@ console.log('⑰ an unclosed drop tag is a word, never a drop to the end of the 
   // CONTROL: a reader without the rule loses the tail of every unclosed sentence
   const M = mutantCopies('channel-blocks-lone-drop', REPO);
   const src = read('src/channels/lark/blocks.js');
-  const noRule = src.replace("    if (k.t === 'open' && MK_DROP.has(k.name) && !closed.has(k.name)) {", "    if (false) {");
+  const noRule = editAnchor(src, "    if (k.t === 'open' && MK_DROP.has(k.name) && !closed.has(k.name)) {", "    if (false) {", "src/channels/lark/blocks.js");
   const m = M.load('src/channels/lark/blocks.js', noRule, 'drop-to-end');
   const lost = m.larkPlainText('please set the <title> of the page to Foo');
   ok(noRule !== src && lost === 'please set the', `CONTROL: a reader without the rule reads "please set the <title> of the page to Foo" as ${J(lost)} — the round-1 shape`);
@@ -1260,7 +1269,7 @@ console.log('⑱ the inline reader is linear on <li> / <br> / <td> (the tail cha
   const src = read('src/channels/lark/blocks.js');
   ok(/const t = bounded\(String\(el\.text \|\| ''\)\);/.test(src) && /if \(mode === 'inline'\) \{ if \(runs\.length && tail !== '\\n'\) pushRun/.test(src) && !/\/\\n\$\/\.test\(last\.text\)/.test(src.replace(/^\s*\/\/.*$/gm, '')), 'WIRING: the post text element is bounded(); brk() reads the tracked tail, never the run (the comment naming the old test aside)');
   const M = mutantCopies('channel-blocks-inline-tail', REPO);
-  const reread = src.replace("    if (mode === 'inline') { if (runs.length && tail !== '\\n') pushRun({ k: 't', text: '\\n' }); return; }", "    if (mode === 'inline') { const last = runs[runs.length - 1]; if (runs.length && !(last && last.k === 't' && /\\n$/.test(last.text))) pushRun({ k: 't', text: '\\n' }); return; }");
+  const reread = editAnchor(src, "    if (mode === 'inline') { if (runs.length && tail !== '\\n') pushRun({ k: 't', text: '\\n' }); return; }", "    if (mode === 'inline') { const last = runs[runs.length - 1]; if (runs.length && !(last && last.k === 't' && /\\n$/.test(last.text))) pushRun({ k: 't', text: '\\n' }); return; }", "src/channels/lark/blocks.js");
   const c = judge(M.write('src/channels/lark/blocks.js', reread, 'reread-run'), '<li>', SHAPES[0][1]);
   ok(reread !== src && !c.ok && !c.err && c.ratio > 3, `CONTROL: a reader that re-reads the run on every <li> is NOT linear in WORK (×${c.ratio})`, J(c));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, x.name, x.detail);
@@ -1340,9 +1349,9 @@ console.log('⑳ a tag the reader does not know is content, as written; known ma
   ok(J(rec('text', { text: 'see **<emphasis>x</emphasis>** now' }).blocks) === J([{ k: 'p', runs: [{ k: 't', text: 'see ' }, { k: 'b', text: '<emphasis>x</emphasis>' }, { k: 't', text: ' now' }] }]), 'a kept tag stays INSIDE the run where it stood (the text pieces are joined again: bold around it still reads)');
   const src = read('src/channels/lark/blocks.js');
   const M = mutantCopies('channel-blocks-unknown-tags', REPO);
-  const oldReader = src.replace("    if (!knownTag(k.name)) { k.t = 'text'; k.v = k.raw; }", '');
-  const oldWall = src.replace("R.foldFrames(String(s == null ? '' : s), ", "String(s == null ? '' : s).replace(/<\\/?[A-Za-z][^<>]*>/g, ");   // lane belt-nested-opener: the fence is the belt's fixed point now
-  const noFence = src.replace("R.foldFrames(String(s == null ? '' : s), ", "((x) => x)(String(s == null ? '' : s), ");
+  const oldReader = editAnchor(src, "    if (!knownTag(k.name)) { k.t = 'text'; k.v = k.raw; }", '', "src/channels/lark/blocks.js");
+  const oldWall = editAnchor(src, "R.foldFrames(String(s == null ? '' : s), ", "String(s == null ? '' : s).replace(/<\\/?[A-Za-z][^<>]*>/g, ", "src/channels/lark/blocks.js");   // lane belt-nested-opener: the fence is the belt's fixed point now
+  const noFence = editAnchor(src, "R.foldFrames(String(s == null ? '' : s), ", "((x) => x)(String(s == null ? '' : s), ", "src/channels/lark/blocks.js");
   const a1 = M.load('src/channels/lark/blocks.js', oldReader, 'old-reader').larkPlainText('<emphasis>Hello</emphasis> world');
   ok(oldReader !== src && a1 === 'Hello world', `CONTROL: the old reader (an unknown tag stripped) reads it as ${J(a1)} — the owner's report`);
   const a2 = M.load('src/channels/lark/blocks.js', oldWall, 'old-wall').larkPlainText('wait <break time="500ms"/> <emphasis>Hello</emphasis>');
@@ -1375,8 +1384,8 @@ console.log('⑳ a tag the reader does not know is content, as written; known ma
   // CONTROLS: the clamp and the min each spelled once — taken out, the table goes red
   const src = read('src/lib/channel-editor-size.js');
   const M = mutantCopies('channel-editor-size', REPO);
-  const noMax = src.replace('const px = Math.min(maxPx, Math.max(minPx, want));', 'const px = Math.max(minPx, want);');
-  const noMin = src.replace('const px = Math.min(maxPx, Math.max(minPx, want));', 'const px = Math.min(maxPx, want);');
+  const noMax = editAnchor(src, 'const px = Math.min(maxPx, Math.max(minPx, want));', 'const px = Math.max(minPx, want);', "src/lib/channel-editor-size.js");
+  const noMin = editAnchor(src, 'const px = Math.min(maxPx, Math.max(minPx, want));', 'const px = Math.min(maxPx, want);', "src/lib/channel-editor-size.js");
   ok(noMax !== src && noMin !== src, 'CONTROL setup: the clamp is spelled once');
   const E1 = await import(pathToFileURL(M.write('src/lib/channel-editor-size.js', noMax, 'nomax')).href);
   const E2 = await import(pathToFileURL(M.write('src/lib/channel-editor-size.js', noMin, 'nomin')).href);

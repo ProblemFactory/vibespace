@@ -627,7 +627,7 @@ console.log('§13 B-c17d: a monthly cron keeps its child (its run ring) between 
     const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
     const guard = '      if (this._cronParentActive(job)) return false;\n';   // B-360d: the pass asks it in its `collectable` predicate
     ok(jsrc.split(guard).length === 2, 'B-c17d control setup: the gc asks the parent on one line');
-    const JMod = MJ.load('src/jobs.js', jsrc.replace(guard, '      // MUTANT: the release — the gc never asks the parent\n'));
+    const JMod = MJ.load('src/jobs.js', editAnchor(jsrc, guard, '      // MUTANT: the release — the gc never asks the parent\n', "src/jobs.js"));
     const d13c = mkDir('jobs-triage-cron-gc-mut'); seed(d13c);
     const X = new JMod.JobManager({ dataDir: d13c, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy });
     X.init(); await X._gc({ now: T0 });
@@ -635,7 +635,7 @@ console.log('§13 B-c17d: a monthly cron keeps its child (its run ring) between 
     X.shutdown();
     const atLine = "    return !!p && p.desiredUp !== false && p.state !== 'missed' && p.state !== 'done';\n";
     ok(jsrc.split(atLine).length === 2, 'B-c17d control setup: a fired --at cron is not active, on one line');
-    const JAt = MJ.load('src/jobs.js', jsrc.replace(atLine, "    return !!p && p.desiredUp !== false && p.state !== 'missed'; // MUTANT: a fired --at counts as active\n"), 'at');
+    const JAt = MJ.load('src/jobs.js', editAnchor(jsrc, atLine, "    return !!p && p.desiredUp !== false && p.state !== 'missed'; // MUTANT: a fired --at counts as active\n", "src/jobs.js"), 'at');
     const d13a = mkDir('jobs-triage-cron-gc-at-mut'); seed(d13a);
     const XA = new JAt.JobManager({ dataDir: d13a, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy });
     XA.init(); await XA._gc({ now: T0 });
@@ -844,7 +844,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(zNow !== torn, 'B-f276 CONTROL (the release\'s unguarded save, in a copy): the skeletons are written over the torn bytes\' only copy');
   const guardW = "    if (this._unread.archive) return { ok: false, error: `${path.basename(this.archiveFile)} could not be read (${this._unread.archive.code}) — it is not written over until a read answers` };\n";
   ok(jsrc.split(guardW).length === 2, 'B-f276 control setup: the archive\'s write guard is one line');
-  const JG = MJ.load('src/jobs.js', jsrc.replace(guardW, '    // MUTANT: no write guard\n'), 'guard');
+  const JG = MJ.load('src/jobs.js', editAnchor(jsrc, guardW, '    // MUTANT: no write guard\n', "src/jobs.js"), 'guard');
   const gx = guardScene(JG, 'jobs-triage-unread-archive-guard-mut');
   ok(!gx.kept && !gx.inStore, 'B-f276 CONTROL (no write guard, in a copy): the boot sweep WRITES OVER the unread archive — its record is gone from the file', { kept: gx.kept });
   if (gx.J._logsNoteP) await gx.J._logsNoteP;
@@ -922,7 +922,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(lf.wrote && !lf.noteLeft && !lf.held && lfx.wrote && lfx.noteLeft && lfx.held, 'B-f276 cure (the ruling) + CONTROL (no lift, in a copy): a folder fault writes the note; the read again that loads lifts it — without the lift it holds the clean-up for good', { lf, lfx });
   const preL = "      return { a, pre: await this._unreadPrefetch(which, a, file) };   // cure r2: what the late load reads, off the loop\n";   // cure 2: inside the one in-flight slot
   ok(jsrc.split(preL).length === 2, 'B-f276 cure r2 control setup: the late load\'s prefetch is one line');
-  const JP = MJ.load('src/jobs.js', jsrc.replace(preL, '      return { a, pre: null };   // MUTANT: the late load reads on the loop\n'), 'prefetch');
+  const JP = MJ.load('src/jobs.js', editAnchor(jsrc, preL, '      return { a, pre: null };   // MUTANT: the late load reads on the loop\n', "src/jobs.js"), 'prefetch');
   const lsx = await loopScene(JP, 'jobs-triage-reread-loop-mut');
   ok(lsx.dataCalls.length > 0 && lsx.tornCalls.length > 0, 'B-f276 cure r2 CONTROL (no prefetch, in a copy): the late load makes synchronous file calls on the data folder', { data: lsx.dataCalls.length, torn: lsx.tornCalls.length });
   const hgx = await hangScene(JC, 'jobs-triage-reread-hang-mut', { waitBack: false });
@@ -946,7 +946,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   };
   const LIFT_ANY = "      if (a.state === 'data') this._unreadLift(which, was)";
   ok(jsrc.split(LIFT_ANY).length === 2, 'B-f276 cure 2 control setup: the lift asks the answer\'s state on one line');
-  const JL = MJ.load('src/jobs.js', jsrc.replace(LIFT_ANY, "      if (true) this._unreadLift(which, was)"), 'lift-any');   // MUTANT: r2 — the lift on ANY answer that clears the hold
+  const JL = MJ.load('src/jobs.js', editAnchor(jsrc, LIFT_ANY, "      if (true) this._unreadLift(which, was)", "src/jobs.js"), 'lift-any');   // MUTANT: r2 — the lift on ANY answer that clears the hold
   const gn = await notWhole({ JobManager }, 'jobs-triage-reread-gone', 'gone'), gnx = await notWhole(JL, 'jobs-triage-reread-gone-mut', 'gone');
   ok(gn.wrote && gn.ended && gn.noteLeft && !gn.done && gn.held && !gn.readAgain && gn.resolved >= 1 && gn.gone && gn.gone.urgency === 'high' && /the file was gone — the jobs it listed are not in VibeSpace now/.test(gn.gone.words.key) && gn.gone.words.params.note === 'jobs.json.corrupt-unread' && Number.isFinite(gn.gone.words.params.when.at) && Number.isFinite(gn.gone.words.params.until.at) && /the file is GONE/.test(gn.said), 'cure 2: a read again that finds the file GONE ends the hold with ITS OWN sentence (what is gone, the note that keeps the logs) — the note STANDS, the clean-up stays held, never «nothing was lost»', gn);
   ok(gnx.readAgain && !gnx.noteLeft && !gnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of a GONE file, its note is marked done and the clean-up resumes over jobs whose records are not there', gnx);
@@ -971,7 +971,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   };
   const SLOT_A = "      const a = SR.storeAnswer(read, { valid: which === 'store' ? STORE_SHAPE : Array.isArray });\n";
   ok(jsrc.split(SLOT_A).length === 2, 'B-f276 cure 2 control setup: the read again\'s answer is one line inside its slot');
-  const JS2 = MJ.load('src/jobs.js', jsrc.replace(SLOT_A, SLOT_A + "      if (this._unreadP[which]) this._unreadP[which] = null;   // MUTANT: r2 — the slot covers the read only\n"), 'slot-read-only');
+  const JS2 = MJ.load('src/jobs.js', editAnchor(jsrc, SLOT_A, SLOT_A + "      if (this._unreadP[which]) this._unreadP[which] = null;   // MUTANT: r2 — the slot covers the read only\n", "src/jobs.js"), 'slot-read-only');
   const pf = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch'), pfx = await prefScene(JS2, 'jobs-triage-reread-prefetch-mut');
   ok(pf.during && pf.during.tries >= 5 && pf.during.storeReads === 1 && pf.during.ctlReads === 1 && pf.during.held && pf.back && pf.said === 1 && pf.loads === 1, 'cure 2: a SLOW prefetch holds the one slot — the tries go on, ONE read of the store, ONE control file in flight at a time, said once, ONE load once it answers', pf);
   ok(pfx.during && (pfx.during.storeReads > 1 || pfx.during.ctlReads > 1), 'cure 2 CONTROL (r2: the slot covers the read only, in a copy): a second try reads the store and starts its prefetch over the slow one', pfx);
@@ -993,7 +993,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   };
   const ONCE_A = "    if (a.state === 'missing' && !this._unreadMissingAt[which]) {";
   ok(jsrc.split(ONCE_A).length === 2, 'B-f276 cure 3 control setup: «missing» read once more is one line');
-  const JO = MJ.load('src/jobs.js', jsrc.replace(ONCE_A, '    if (false /* MUTANT: cure 2 — «missing» believed at once */) {'), 'missing-once');
+  const JO = MJ.load('src/jobs.js', editAnchor(jsrc, ONCE_A, '    if (false /* MUTANT: cure 2 — «missing» believed at once */) {', "src/jobs.js"), 'missing-once');
   const on = await onceScene({ JobManager }, 'jobs-triage-reread-once'), onx = await onceScene(JO, 'jobs-triage-reread-once-mut');
   ok(on.heldAfterOne && !on.wroteOver && on.back && on.said, 'cure 3: a store that answers «missing» right after an unreadable answer is READ ONCE MORE — the hold stands, the next save writes nothing at its path, and the file that was there all along is read back whole', on);
   ok(!onx.heldAfterOne && onx.wroteOver && !onx.back, 'cure 3 CONTROL (cure 2: «missing» believed at once, in a copy): the hold ends and the next save WRITES OVER the path — the records that were there are lost', onx);
@@ -1111,7 +1111,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   };
   const AR_A = "      if (which === 'store' && this.archive == null) {";
   ok(jsrc.split(AR_A).length === 2, 'B-f276 cure 3 control setup: the archive prefetch is one line');
-  const JR = MJ.load('src/jobs.js', jsrc.replace(AR_A, '      if (false /* MUTANT: cure 2 — the load reads the archive on the loop */) {'), 'ro-archive');
+  const JR = MJ.load('src/jobs.js', editAnchor(jsrc, AR_A, '      if (false /* MUTANT: cure 2 — the load reads the archive on the loop */) {', "src/jobs.js"), 'ro-archive');
   const ro = await roScene({ JobManager }, 'jobs-triage-reread-ro'), rox = await roScene(JR, 'jobs-triage-reread-ro-mut');
   ok(ro.ro && ro.sync === 0 && ro.skel && !ro.archivedSkel, 'cure 3: a READ-ONLY engine\'s torn read again makes no synchronous read on the loop — the archive\'s ids come with the prefetch (its skeletons skip the archived job)', ro);
   ok(rox.ro && rox.sync > 0, 'cure 3 CONTROL (cure 2, in a copy): the load reads jobs-archive.json synchronously on the loop', rox);
@@ -1180,7 +1180,7 @@ console.log('§16 B-c330: the job-logs clean-up\'s steady passes fold into ONE j
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), FOLD = '    else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }';
   ok(JSRC.split(FOLD).length === 2, 'B-c330 control setup: the fold is one line in jobs.js (the plant the control swaps)');
   const MJ30 = mutantCopies('jobs-logs-fold-c330', ROOT);
-  const rx = await scene(MJ30.load('src/jobs.js', JSRC.replace(FOLD, '    else if (ans.removed) this.d.log(LS.words.pass(ans));   /* MUTANT: the release — a line every pass */'), 'release'), 'jobs-triage-logs-fold-mut');
+  const rx = await scene(MJ30.load('src/jobs.js', editAnchor(JSRC, FOLD, '    else if (ans.removed) this.d.log(LS.words.pass(ans));   /* MUTANT: the release — a line every pass */', "src/jobs.js"), 'release'), 'jobs-triage-logs-fold-mut');
   ok(rx.day1.length === 4, 'B-c330 CONTROL (the release, in a copy): every steady pass says its own line (four in a morning)', rx.day1.length);
   for (const rr of copiesCensus(MJ30.files, MJ30.dir, ROOT, { minCopies: 1, label: 'B-c330 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
 }
