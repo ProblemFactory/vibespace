@@ -4,7 +4,8 @@
 //   ① THE TWO ASKS on the field's own road — exit-routes' real GET /api/hosts/:id/dir-complete handler (its create, a recording app) over
 //     the real HostManager, its ssh rung stubbed to run the SAME sh script here under a temp HOME with PLACED stalls (a process that
 //     ignores TERM and sleeps, its pid recorded, ended by this suite): the healthy typed folder listed while a base and a probe hang —
-//     judged by the ORDER (it lands while the hung run is still out, and the next ask serves it; 主开发 r2574: never a wall-clock bound); a
+//     judged by the ORDER (it lands while the hung run is still out, and the next ask serves it; 主开发 r2574: never a wall-clock bound;
+//     r2691: the same for ②, ③, the base-relative ask and the link-reached file ask — each waits on its landing, ends its own stall); a
 //     mount point child by name only; links never followed (unchecked); / as /x; one typed ask a folder; the cap; slow is not hung; ten
 //     asks one run; a hung typed folder marked 30 s; the rest's hold doubling; (r949) a child's marker file never read through a link;
 //     THE MOUNT TEST COMPARES REAL PATHS (a typed folder reached through a link whose real child is a mount point lands; the home's walk
@@ -69,7 +70,8 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
   // the others (their stalls never end: a short bound keeps the suite short)
   // h-99o (主开发 r2574): ① judges the ORDER — the healthy typed folder LANDS while the hung run is still OUT — so its runs carry a NET
   // of 20 s that judges nothing (a real sh and ls under twelve lanes read past the hub's own 200 ms wait once); the leg ends its own stall
-  const runtOf = (id) => (id === 'h-99o' ? 20e3 : id === 'h-99b' ? 800 : 250);   // h-99o's net twice the leg's 10 s landing wait: the hung rest is surely out then
+  const NET20 = new Set(['h-99o', 'h-99a', 'h-99e', 'h-99g']);   // r2691: every host whose leg judges a healthy typed run by its LANDING (①, ②, ③, the base-relative ask, the link-reached file ask)
+  const runtOf = (id) => (NET20.has(id) ? 20e3 : id === 'h-99b' ? 800 : 250);   // their net twice the legs' 10 s landing wait: a hung run of theirs is surely still out then
   const shOf = (script, timeout) => new Promise((resolve, reject) => execFile('sh', ['-c', script], { env: { HOME: MH, PATH: `${FB}:/usr/bin:/bin`, VS_PL: PL }, timeout, maxBuffer: 8 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
   const mkHm = (id) => {
     const hm = new HostManager({ dataDir: path.join(TMP, 'hub-data-' + id) });
@@ -113,15 +115,32 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     const ended1 = await until(() => { for (const pid of planted()) { if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } } return runs.filter((r) => r.id === 'h-99o').every((r) => r.settled); }, 10e3);
     ok('B-99b9 ① ends its own stall: every run of its host ended before the next leg (no sleep of it left to plant another)', ended1, runs.filter((r) => r.id === 'h-99o' && !r.settled).length);
     if (ended1) fs.rmSync(NOSTALL, { force: true });   // a run still out keeps the mark: it plants nothing more
+    // r2691: THE SAME SHAPE for every leg that judges a healthy typed run (主开发: wait on the landing, read the order, ask again, each
+    // ending its own stall): the first reply is the hub's own 200 ms wait, so the leg waits on the LANDING of the typed folder whose raw
+    // rows end with `dirEnds` (a fact in the hub's cache; load decides only how long, inside the host's 20 s net), reads THE ORDER where its
+    // host has a hung run (`hungOf(script)`: landed while that run is still out), asks again and judges THAT reply (the landing kept, or a fresh
+    // run's — ④ is the leg that proves keeping), and ends any stall of its own
+    const seenDead = new Set();
+    const landedAsk = async (id, ask, dirEnds, hungOf = null) => {
+      const C = () => hmOf(id)._sliceCache.get(id);
+      const first = await ask();
+      const landed = await until(() => !!C() && [...C().r1.values()].some((e) => e.raw && e.raw.dirs.some((d) => d.path.endsWith(dirEnds))), 10e3);
+      const hungOut = hungOf ? landed && runs.some((r) => r.id === id && hungOf(r.sc) && !r.settled) : true;   // read in the landing's own turn
+      const again = await ask();
+      fs.writeFileSync(NOSTALL, '1');   // its own stall ended: no new one, the sleeps by the pids they wrote, every run of its host ended — asserted by the leg
+      const ended = await until(() => { for (const pid of planted()) { if (seenDead.has(pid)) continue; if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } else seenDead.add(pid); } return runs.filter((r) => r.id === id).every((r) => r.settled); }, 10e3);   // its read: a pid seen dead is never signalled again (a reused number)
+      if (ended) fs.rmSync(NOSTALL, { force: true });   // a run still out keeps the mark: it plants nothing more
+      return { first, again, landed, hungOut, ended, firstPartial: first && first.partial };
+    };
     const PC2 = require('../src/path-candidates.js'), ask1 = PC2.sliceAsk('~/work/healthy/', [{ path: '~/net/a' }]);
     const oneScript = plant(DSS.sliceScript({ list: ask1.list, probes: ['~/lost'] }));
     const rel = await shOf(oneScript, 600).then((o) => ({ out: o }), (e) => ({ killed: !!(e && e.killed), out: String((e && e.stdout) || '') }));
     ok('RED CONTROL: TODAY\'S ONE SCRIPT (the typed folder, the bases and the probes in one run) under the same stall never ends (killed at 600 ms, no VS-SLICE-END): the release\'s reply could not list the healthy folder',
       rel.killed === true && !String(rel.out).includes('VS-SLICE-END'), { killed: rel.killed });
     // 2. THE MOUNT CHILD BY NAME: the typed home lists ~/net (a planted mount point of that machine) by name only — never tested
-    const a2 = await field('h-99a', '~/');
+    const L2 = await landedAsk('h-99a', () => field('h-99a', '~/'), path.join('fake99', 'home', 'me')), a2 = L2.again;   // r2691: the landing, then the kept answer
     ok('B-99b9 a mount point child of the typed home is listed BY NAME ONLY: the home listing lands (net and work in it), not partial — the mount\'s own package.json is never read',
-      listed(a2, '~', 'net') && listed(a2, '~', 'work') && a2.partial === false, { partial: a2.partial, kids: ((a2.listing || {}).dirs || {})['~'] });
+      listed(a2, '~', 'net') && listed(a2, '~', 'work') && a2.partial === false && L2.landed && L2.ended, { landed: L2.landed, ended: L2.ended, firstPartial: L2.firstPartial, partial: a2.partial, kids: ((a2.listing || {}).dirs || {})['~'] });
     const tested = await shOf(plant(DSS.sliceScript({ list: ['~'], files: false }), { mount: false }), 600).then(() => ({ killed: false }), (e) => ({ killed: !!(e && e.killed) }));
     ok('RED CONTROL: the same home listing with ~/net NOT in the machine\'s mount table (so tested, as the release tested every child) stalls on that test', tested.killed, tested);
     // 2b. (r949) A CHILD'S OWN MARKER FILES ARE NEVER READ THROUGH A LINK named like them: ~/pkgl/package.json is a link (the fake grep
@@ -134,11 +153,11 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     ok('B-99b9 (r949) a child\'s marker file is never read THROUGH A LINK named like it (~/pkgl/package.json): the home listing ends — RED CONTROL: the link followed (the release\'s road) stalls on it, killed at 600 ms',
       pk0.done === true && pk.killed === true, { pk0, pk });
     // 3. A LINK NEVER FOLLOWED: ~/work/two → ../hop1 → net/inner (into the stalled mount): the parent listing lands, the link by its target as written
-    const a3 = await field('h-99a', '~/work/');
+    const L3 = await landedAsk('h-99a', () => field('h-99a', '~/work/'), path.join('home', 'me', 'work')), a3 = L3.again;   // r2691
     const UC = (a3.listing || {}).unchecked || {}, LK = (a3.listing || {}).links || {}, D3 = (a3.listing || {}).dirs || {};
     ok('B-99b9 (主开发 r880) a link to a FILE, a DANGLING link and a two-hop link INTO THE STALL: none tested, none followed, none hangs ~/work (it lands, not partial); each is UNCHECKED with its target as written — never a folder, never a stub of its target',
-      listed(a3, '~/work', 'healthy') && a3.partial === false && UC['~/work/two'] === '~/hop1' && UC['~/work/deploy'] === '~/tools/deploy.sh' && UC['~/work/gone'] === '~/nowhere/x'
-        && !LK['~/work/two'] && !LK['~/work/deploy'] && !D3['~/tools/deploy.sh'] && !D3['~/nowhere/x'] && !D3['~/hop1'], { partial: a3.partial, unchecked: UC, links: LK });
+      L3.landed && L3.ended && listed(a3, '~/work', 'healthy') && a3.partial === false && UC['~/work/two'] === '~/hop1' && UC['~/work/deploy'] === '~/tools/deploy.sh' && UC['~/work/gone'] === '~/nowhere/x'
+        && !LK['~/work/two'] && !LK['~/work/deploy'] && !D3['~/tools/deploy.sh'] && !D3['~/nowhere/x'] && !D3['~/hop1'], { landed: L3.landed, ended: L3.ended, firstPartial: L3.firstPartial, partial: a3.partial, unchecked: UC, links: LK });
     const PCr = require('../src/path-candidates.js');
     const rows3 = PCr.rankCandidates('~/work/de', { listing: a3.listing, bases: [], machine: 'h-99a' }).sections.flatMap((x) => x.rows);
     const dep = rows3.find((r) => r.path === '~/work/deploy');
@@ -153,9 +172,9 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     const rootRow = DSS.parseSlice(rootOut).dirs.find((d) => d.path === '/') || { kids: [] };
     ok('B-99b9 listing / on that machine: /proc (a mount point in its own table) is a child said by NAME ONLY (flagged `mount`), never tested — the children are /x, never //x', rootRow.kids.some((k) => k.name === 'proc' && k.mount === true), rootRow.kids.filter((k) => k.mount).map((k) => k.name));
     // (M3) ONE TYPED ASK A TYPED FOLDER: a relative text against a healthy base and a dead one — the healthy one lands, NOT partial, the dead one said late
-    const a3c = await new Promise((resolve) => DC({ params: { id: 'h-99e' }, query: { path: 'sub/', bases: JSON.stringify(['~/work', '~/net']), probe: '[]', q: '', kind: 'folder' }, headers: {} }, { json: resolve, status() { return this; } }));
+    const L3c = await landedAsk('h-99e', () => new Promise((resolve) => DC({ params: { id: 'h-99e' }, query: { path: 'sub/', bases: JSON.stringify(['~/work', '~/net']), probe: '[]', q: '', kind: 'folder' }, headers: {} }, { json: resolve, status() { return this; } })), path.join('home', 'me', 'work', 'sub'), (sc) => sc.includes('/net/sub')), a3c = L3c.again;   // r2691: the ORDER — ~/work/sub landed while ~/net/sub's run is still out
     ok('B-99b9 (主开发 r880) ONE TYPED ASK A FOLDER: «sub/» against ~/work (healthy) and ~/net (dead) — ~/work/sub LISTED, NOT partial, ~/net/sub said late (sourcesLate), no skipped verdict',
-      listed(a3c, '~/work/sub', 'kid2') && a3c.partial === false && (a3c.sourcesLate || []).includes('~/net/sub') && !a3c.verdict, { partial: a3c.partial, late: a3c.sourcesLate, verdict: a3c.verdict });
+      listed(a3c, '~/work/sub', 'kid2') && a3c.partial === false && (a3c.sourcesLate || []).includes('~/net/sub') && !a3c.verdict && L3c.landed && L3c.hungOut && L3c.ended, { landed: L3c.landed, hungOut: L3c.hungOut, ended: L3c.ended, firstPartial: L3c.firstPartial, partial: a3c.partial, late: a3c.sourcesLate, verdict: a3c.verdict });
     // THE CAP: a text naming more typed folders than the cap asks the first SLICE_TYPED_CAP (the bases' order) and NAMES the rest unread
     const a3d = await new Promise((resolve) => DC({ params: { id: 'h-99f' }, query: { path: 'x/', bases: JSON.stringify(['~/b1', '~/b2', '~/b3', '~/b4', '~/b5', '~/b6']), probe: '[]', q: '', kind: 'folder' }, headers: {} }, { json: resolve, status() { return this; } }));
     const asked = runs.filter((r) => r.id === 'h-99f' && /ls1 "\$H"'\/b[0-9]\/x'/.test(r.sc)).length;
@@ -198,9 +217,9 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     // 8. (主开发 r949, RULED) THE MOUNT TEST COMPARES REAL PATHS — the machine's table holds real paths: ~/viaw is a LINK to ~/real,
     // whose child «stallm» the table names a mount point by its REAL path; a test of it (its stat, as a file field asks) is the placed
     // stall. The typed folder reached through the link LANDS, the child said by name only
-    const a8 = await field('h-99g', '~/viaw/', [], [], 'file');
+    const L8 = await landedAsk('h-99g', () => field('h-99g', '~/viaw/', [], [], 'file'), '/viaw'), a8 = L8.again;   // r2691
     ok('B-99b9 (主开发 r949) a typed folder REACHED THROUGH A LINK (~/viaw → ~/real) whose real child is a mount point of that machine LANDS in a file field: the child listed by NAME ONLY (never tested — its stat is the placed stall), not partial',
-      listed(a8, '~/viaw', 'stallm') && a8.partial === false && !a8.verdict, { partial: a8.partial, verdict: a8.verdict, kids: (((a8.listing || {}).dirs || {})['~/viaw'] || {}).kids });
+      listed(a8, '~/viaw', 'stallm') && a8.partial === false && !a8.verdict && L8.landed && L8.ended, { landed: L8.landed, ended: L8.ended, firstPartial: L8.firstPartial, partial: a8.partial, verdict: a8.verdict, kids: (((a8.listing || {}).dirs || {})['~/viaw'] || {}).kids });
     const via = DSS.sliceScript({ list: ['~/viaw'], files: true });
     const viaRow = (out) => (DSS.parseSlice(out).dirs.find((d) => d.path === path.join(MH, 'viaw')) || { kids: [] }).kids.find((k) => k.name === 'stallm');
     const [r8, r8t] = await Promise.all([
