@@ -30,13 +30,22 @@ GHG.setGhEnv(GH_ENV);
   const stub = scratchDir('vrm-gh-stub');
   fs.writeFileSync(path.join(stub, 'gh'), '#!/bin/sh\nenv\n', { mode: 0o755 });
   const seen = (env) => { GHG.setGhEnv(env); const out = GHG.ghHelp([]) || ''; return out.split('\n').map((l) => l.split('=')[0]).filter(Boolean).sort(); };
-  const got = seen({ ...GH_ENV, PATH: `${stub}:${GH_ENV.PATH}` });
+  // BOTH legs run the SAME stand-in and differ by ONE thing, the builder (主开发 r2380, round ww3vssz2o's must): a name is PLANTED in
+  // this process for the two calls, and the stand-in's folder goes first on the caller's PATH around the control, put back after —
+  // so the control never reaches a real gh (a machine without one is no red; a machine with one is no false green)
+  const PLANT = 'VS_GH_ENV_PROBE_PLANTED', pathWas = process.env.PATH;
+  process.env[PLANT] = '1';
+  let got, leak;
+  try {
+    got = seen({ ...GH_ENV, PATH: `${stub}:${GH_ENV.PATH}` });   // the built env
+    process.env.PATH = `${stub}:${pathWas}`;
+    leak = seen(null);                                           // RED CONTROL: no env built — the caller's, the stand-in first on its PATH
+  } finally { process.env.PATH = pathWas; delete process.env[PLANT]; GHG.setGhEnv(GH_ENV); }
   const extra = got.filter((k) => !ALLOWED.split(' ').includes(k) && k !== 'PWD' && k !== 'SHLVL' && k !== '_' && k !== 'OLDPWD');
-  ok(got.includes('HOME') && got.includes('GH_CONFIG_DIR') && extra.length === 0 && !got.some((k) => /TOKEN|^GH_HOST$/.test(k)),
-    `the spawned gh RECEIVES the eight names and nothing of the caller (the shell adds only PWD / SHLVL / _): ${extra.join(' ') || 'nothing else'}`);
-  const leak = seen(null);   // RED CONTROL: the generator with no env set hands gh the caller's whole environment
-  ok(leak.filter((k) => !ALLOWED.split(' ').includes(k)).length > 3, `RED CONTROL: with no env set the same stand-in receives the caller's names (${leak.length} names) — the leg above is a measurement`);
-  GHG.setGhEnv(GH_ENV);
+  ok(got.includes('HOME') && got.includes('GH_CONFIG_DIR') && !got.includes(PLANT) && extra.length === 0 && !got.some((k) => /TOKEN|^GH_HOST$/.test(k)),
+    `the spawned gh RECEIVES the eight names and nothing of the caller, not the name planted in this process (the shell adds only PWD / SHLVL / _ / OLDPWD): ${extra.join(' ') || 'nothing else'}`);
+  ok(leak.includes(PLANT),
+    `RED CONTROL: the SAME stand-in with no env built receives the caller's environment — the planted ${PLANT} among it (${leak.length} names): the leg above is a measurement`);
 }
 
 console.log('⑤c THE gh GRAMMAR CENSUS (round 5/6/7/8) — the shipped gh grammar (host-reaching + {default:1} POSITIVE-PROOF default-host-only entries) + its pinned version + envHijack must EQUAL the live gh, re-parsed over the WHOLE live tree IN PARALLEL (a census fails a drift). ROUND 7: the version pin is a HARD GATE — a live gh ≠ the pinned version is a named skip off-gate (a machine whose gh is not the pinned one) and RED on CI; EXTENSION COMMANDS are excluded from the walk (never exec a third-party binary in a test). ROUND 8: the census ALSO diffs envHijack live-vs-shipped. ROUND 9 (MAJOR 2): the shipped grammar IS the REVIEWED ALLOWLIST (every other verb ABSENT \u21d2 BLIND), and every allowlisted verb\'s live help-text HASH must equal its pinned review sha \u2014 a reworded help is RED by name (re-review it, then node scripts/gen-gh-grammar.mjs --repin --reason "<why>"). ROUND 10: each verb grammar entry ALSO carries its GENERATED launch set (--web/--editor flags), diffed with the rest of the table');
@@ -51,6 +60,17 @@ await (async () => {
     if (live !== pinned) {   // round 7 (BLOCKER 1): a version mismatch is a named skip off-gate (a machine whose gh is not the pinned one), RED on the gate — a diff against a DIFFERENT gh is meaningless (a flag whose meaning moved IS the risk), so the whole census yields to ONE skip, not a hard assert
       if (process.env.CI || process.env.GITHUB_ACTIONS) { ok(false, `gh grammar census REQUIRED on the gate at the pinned gh ${pinned}, but the live gh is ${live} — the runner must ship the pinned gh, or re-pin for the runner's gh with \`node scripts/gen-gh-grammar.mjs --repin --reason "<why>"\` (version + the 32 help hashes), then --write if a reviewed shape changed`, { pinned, live }); return; }
       console.log(`  · SKIP gh grammar census: live gh ${live} ≠ pinned ${pinned} — install gh ${pinned} to re-parse the grammar`); return;
+    }
+    // r2380 (3): FROM THE VENDOR'S OWN TEXT at the pinned version (its environment help, the one the census parses below), never from
+    // memory: every variable whose paragraph speaks of an update check, telemetry or the network is named here, and one the
+    // scratch environment does not set is RED (it joins the builder, scratchGhEnv, with the value the text documents)
+    {
+      const envText = GHG.ghHelpTopic('environment') || '';
+      const paras = envText.split(/\n\s*\n/).filter((p) => /\b(?:update|telemetry|network|notif)/i.test(p));
+      const named = [...new Set(paras.flatMap((p) => p.match(/\b(?:GH|DO_NOT|NO)_[A-Z0-9_]+\b/g) || []))].sort();
+      console.log(`  · the environment help of gh ${pinned} names ${named.length ? named.join(', ') : 'no variable'} beside an update check, telemetry or the network`);
+      const unset = named.filter((n) => !(n in GH_ENV));
+      ok(envText.length > 0 && unset.length === 0, `every variable gh ${pinned} documents beside an update check, telemetry or the network is set in its scratch environment (${named.join(', ') || 'none documented'})${unset.length ? ' — NOT SET: ' + unset.join(', ') : ''}`);
     }
     const { table, unreadable, shas } = await GHG.buildGrammarParallel();                            // the WHOLE live tree, concurrently (~0.9 s): the SAME parse as the serial generator, so no spurious drift; shas = the live help-text sha of every EMITTED (allowlisted) verb
     const shippedKeys = new Set(Object.keys(shipped)), liveKeys = new Set(Object.keys(table));

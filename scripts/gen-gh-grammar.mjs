@@ -32,15 +32,15 @@
 // executable), never a hand list — gh reads the GH_ ones FIRST, so a minted value must not run gh with one set. GH_FORCE_TTY /
 // GH_EXTENSION / GH_CONFIG_DIR name no program the user supplies and are correctly excluded by the derivation.
 import { execFileSync, execFile } from 'node:child_process';
-import { readFileSync, writeFileSync, statSync, accessSync, constants, mkdtempSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, accessSync, constants, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 
 export const helpSha = (text) => createHash('sha256').update(String(text)).digest('hex').slice(0, 16);   // round 9: a 64-bit fingerprint of a verb's live --help — the census REDs when the reviewed help changes or the version pin moves
 
-// THE ENV gh RUNS IN (主开发 r2048, lane bl-release): the generator's CLI keeps its caller's; the heavy census
-// (test-vault-run-model-gh) sets a minimal one first — a scratch HOME, no person's gh configuration — so the help, topic and
-// version it reads are the program's own
+// THE ENV gh RUNS IN (主开发 r2048 / r2380, lane bl-release): the heavy census (test-vault-run-model-gh) AND this script's own
+// command (--repin / --allow-shas / --write) set the env scratchGhEnv builds before they ask gh anything — a scratch HOME, no
+// person's gh configuration — so the help, topic and version both read are the program's own, and a pin is reproducible
 let GH_ENV = null;
 export const setGhEnv = (env) => { GH_ENV = env ? { ...env } : null; };
 const ghOpts = (o) => (GH_ENV ? { ...o, env: GH_ENV } : o);
@@ -287,7 +287,8 @@ function argReason() {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
-  { const home = mkdtempSync(`${tmpdir()}/gh-grammar-home-`); mkdirSync(`${home}/.config/gh`, { recursive: true }); setGhEnv(scratchGhEnv(home)); }   // the census's env
+  { const home = mkdtempSync(`${tmpdir()}/gh-grammar-home-`); mkdirSync(`${home}/.config/gh`, { recursive: true }); setGhEnv(scratchGhEnv(home));   // the census's env
+    process.on('exit', () => { try { rmSync(home, { recursive: true, force: true }); } catch { } }); }   // its temp home leaves with the run (r2380)
   if (process.argv.includes('--repin')) {
     // round 10 (MINOR): THE ONE re-pin after a gh version rolls — rewrites the version pin (src/vault-run.js grammarVersion) AND
     // the 32 ALLOWLIST help hashes (here), prints each verb whose help text changed (the re-review list), and refuses when the
