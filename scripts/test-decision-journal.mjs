@@ -13,6 +13,9 @@
 //      trim on the loop); the index follows the file through a second trim (every line whole, each once)
 //   ⑦ law 6: the first journal line after a start reads nothing of the file (RED: a whole-file count)
 //   ⑧ law 1 on the text-model client's road (RED: the ask first); the road counts a call once when the storage writes
+//   ⑨ r2581 (2): a trim whose rewrite keeps failing never locks the journal — the file whole, the next write an append (RED: armed again)
+//   ⑩ a day the belt keeps whole (past 6 000 lines): one rewrite, then appends (RED: a trim due at every write)
+//   ⑪ the drafter's second look after its landing (RED: none); a judgment's answer waits for its own lines (RED: no wait)
 import { scratchDir, anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -49,7 +52,7 @@ const spend = (dir) => DM.daySpendByUse(rows(dir), DAY0, () => 0).byUse;
  *  stays owed); `take(file)` hands a write to «the thread» and holds it (an append's fd is opened NOW, as the worker's would be — it
  *  lands in the inode it opened); the worker's rewriteJob emulated byte for byte (src/store-writer-worker.js) */
 const standIn = () => {
-  const st = { stores: new Map(), auto: true, fail: false, taken: null, asks: 0 };
+  const st = { stores: new Map(), auto: true, fail: false, failRewrite: false, rewrites: 0, taken: null, asks: 0 };
   const S = (f) => { let s = st.stores.get(f); if (!s) st.stores.set(f, s = { o: null, version: 0, written: 0, waiters: [], nd: null }); return s; };
   const settleW = (s, ok) => { s.waiters = s.waiters.filter((w) => { if (!ok || w.v <= s.written) { clearTimeout(w.t); w.res(ok); return false; } return true; }); };
   const rewriteJob = (f, b) => {
@@ -75,6 +78,7 @@ const standIn = () => {
     const v = s.version; let b;
     if (st.fail) { b = s.o.produce(o); return failWith(s); }   // its bytes were made, the storage failed them
     b = s.o.produce(o);
+    if (b && typeof b === 'object' && b.rewrite) { st.rewrites++; if (st.failRewrite) { const e = Object.assign(new Error('a rewrite job on the main thread (a stand-in)'), { code: 'EREWRITEMAIN' }); s.nd = { why: 'failed', code: 'EREWRITEMAIN' }; if (s.o.onWritten) s.o.onWritten(false, e); return settleW(s, false); } }
     try { apply(f, b, null); } catch (e) { s.nd = { why: 'failed', code: e.code }; if (s.o.onWritten) s.o.onWritten(false, e); return settleW(s, false); }
     s.written = v; s.nd = null; if (s.o.onWritten) s.o.onWritten(true, null); settleW(s, true);
   };
@@ -104,10 +108,11 @@ const mk = (Mod, { dir, writer, fetchImpl, cents = 100, landMs = 400 }) => {
   let c = cents; e.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ dailyBudgetCents: c }) }); e.setCents = (x) => { c = x; };
   return e;
 };
+const TEST_WORDS_RE = /spending line could not be written to the data folder — nothing was charged/;   // the Test's sentence for reservation-unwritten (r2581 (3))
 const LAND = "    { const landed = await reservationLanded(id, use, t); if (!landed.ok) return { ok: false, why: landed.why, detail: landed.detail }; }\n";
 const AGAIN = SRC.slice(SRC.indexOf("    { const again = verdictOf(use, {"), SRC.indexOf("    const sent = M.scrubQuestions(qs);"));
 const SLOT = "    open.set(id, { use, usd: estUsd });\n";
-const COUNT = "    if (jKnown && (!jWhole || jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > JOURNAL_MAX * 1.2)) jTrimDue = true;   // law 6: the count from the index (+ the lines on their way)\n";
+const COUNT = "    if (jKnown && (!jWhole || jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > Math.max(JOURNAL_MAX, jKeptFloor) * 1.2)) jTrimDue = true;   // law 6: the count from the index (+ the lines on their way)\n";
 const engineCopy = (pairs, tag) => MUT.load('src/server/decision-engine.js', pairs.reduce((src, [a, b, o]) => anchored(src, a, b, tag, o), SRC), tag);
 
 console.log('① laws 1+2: no reservation on disk, no judgment');
@@ -123,7 +128,7 @@ const failingStorage = async (Mod) => {
   return { error: r1.error, asked1, inFlight, spent1, reserved: res.length, released: rel.length, paired: res.length === 1 && rel.length === 1 && res[0].call === rel[0].call, sp1: Object.keys(sp1).length, ok2: r2.ok, asked2: asks.length, calls2: (spend(dir).test || {}).calls || 0 };
 };
 { const r = await failingStorage(DE);
-  ok(r.error === 'reservation-unwritten' && r.asked1 === 0 && r.inFlight === 0 && r.spent1 === 0, 'a reservation whose write FAILED refuses the judgment by name (reservation-unwritten): nothing asked of the vendor, its slot given back in memory', r);
+  ok(TEST_WORDS_RE.test(r.error) && r.asked1 === 0 && r.inFlight === 0 && r.spent1 === 0, 'a reservation whose write FAILED refuses the judgment by name (reservation-unwritten): nothing asked of the vendor, its slot given back in memory', r);
   ok(r.paired && r.sp1 === 0, '…its reservation and a «released» line are paired in the journal once the storage writes: the day counts NOTHING for it', r);
   ok(r.ok2 && r.asked2 === 1 && r.calls2 === 1, '…asked again, the judgment goes through and the day counts it ONCE (never twice)', r); }
 { const r = await failingStorage(engineCopy([[LAND, '']], 'ask-first'));
@@ -133,7 +138,7 @@ console.log('② law 2: a reservation past its bound');
 { const dir = fresh('bound'), W = standIn(), asks = []; W.st.auto = false;
   const e = mk(DE, { dir, writer: W, fetchImpl: vendor(asks), landMs: 150 });
   const t0 = Date.now(), r = await e.testRunner(), ms = Date.now() - t0;
-  ok(r.error === 'reservation-unwritten' && asks.length === 0 && ms >= 140 && e.status().today.inFlight === 0, 'a reservation still queued past its bound (150 ms here) refuses the judgment by name, nothing asked, its slot given back', { r, ms, asks: asks.length }); }
+  ok(TEST_WORDS_RE.test(r.error) && asks.length === 0 && ms >= 140 && e.status().today.inFlight === 0, 'a reservation still queued past its bound (150 ms here) refuses the judgment by name, nothing asked, its slot given back', { r, ms, asks: asks.length }); }
 
 console.log('③ law 3: the ceiling counts what is in flight');
 const estOne = async () => { const dir = fresh('est'), W = standIn(); const e = mk(DE, { dir, writer: W, fetchImpl: vendor([]) }); await e.testRunner(); W.land(); return rows(dir).find((x) => x.outcome === 'reserved').reserved; };
@@ -215,7 +220,7 @@ const trimUnderAppend = async (Mod) => {
   const j = rows(r.dir), more = new Map();
   for (const x of j) if (typeof x.why === 'string' && x.why.startsWith('more-')) more.set(x.why, (more.get(x.why) || 0) + 1);
   ok(j.every((x) => !x.torn) && more.size === 1200 && [...more.values()].every((v) => v === 1) && j.filter((x) => Number.isInteger(x.today)).length === 50 && j.filter((x) => x.call === 'gone.1').length === 1, '…and through a SECOND trim the index still matches the file: every line whole, each of the 1 200 new lines once, the day\'s and the open reservation kept', { n: j.length, more: more.size, torn: j.filter((x) => x.torn).length }); }
-{ const TRIM_OLD = "    if (jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > JOURNAL_MAX * 1.2) { const keep = fs.readFileSync(F.journal, 'utf8').split('\\n').filter(Boolean).slice(-JOURNAL_MAX); fs.writeFileSync(F.journal + '.t', keep.join('\\n') + '\\n'); fs.renameSync(F.journal + '.t', F.journal); jIdx = keep.map(() => ({})); jWriting = null; }   // the release's trim, on the loop\n";
+{ const TRIM_OLD = "    if (jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > JOURNAL_MAX * 1.2) { const keep = fs.readFileSync(F.journal, 'utf8').split('\\n').filter(Boolean).slice(-JOURNAL_MAX); fs.writeFileSync(F.journal + '.t', keep.join('\\n') + '\\n'); fs.renameSync(F.journal + '.t', F.journal); jIdx = keep.map(() => ({})); jWriting = null; }   // the release's trim, on the loop\n";   // the control writes the old trigger back on purpose — stale-pins: kept
   const r = await trimUnderAppend(engineCopy([[COUNT, TRIM_OLD]], 'trim-on-the-loop'));
   ok(r.A === 0, 'CONTROL (a copy with the release\'s trim — read, rewrite, rename on the loop): the append already on its way lands in the replaced file — a line LOST — red', { A: r.A, B: r.B, n: r.n }); }
 
@@ -230,7 +235,7 @@ const firstLine = async (Mod) => {
   return { reads };
 };
 { const r = await firstLine(DE); ok(r.reads === 0, 'the first journal line after a start reads NOTHING of the file (the count is the start\'s tail index)', r); }
-{ const r = await firstLine(engineCopy([[COUNT, "    if (fs.readFileSync(F.journal, 'utf8').split('\\n').filter(Boolean).length + jOwed.length > JOURNAL_MAX * 1.2) jTrimDue = true;   // the release's whole-file count\n"]], 'whole-count'));
+{ const r = await firstLine(engineCopy([[COUNT, "    if (fs.readFileSync(F.journal, 'utf8').split('\\n').filter(Boolean).length + jOwed.length > JOURNAL_MAX * 1.2) jTrimDue = true;   // the release's whole-file count\n"]], 'whole-count'));   // the control writes the old trigger back on purpose — stale-pins: kept
   ok(r.reads >= 1, 'CONTROL (a copy that counts the file again): a whole read on the loop at the first line — red', r); }
 
 console.log('⑧ law 1 on the text-model client\'s road');
@@ -253,5 +258,69 @@ const textRoad = async (TMmod, { fail }) => {
   const r = await textRoad(MUT.load('src/server/text-model-client.js', anchored(TSRC, NOWAIT, '', 'text-ask-first'), 'text-ask-first'), { fail: true });
   ok(r.asks === 1, 'CONTROL (a copy of the client that asks whatever its reservation answered): the vendor is asked with nothing on disk — red', r); }
 
-for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7, label: 'CONTROL: ' })) ok(!!row.pass, row.name, row.detail);
+console.log('⑨ r2581 (2): a trim that keeps failing never locks the journal; a failed trim leaves the file whole');
+const failingTrim = async (Mod) => {
+  const dir = fresh('failtrim'); seed(dir, 5999);
+  const W = standIn(); W.st.auto = false; W.st.failRewrite = true;   // the writer gone main-only: every rewrite job refused
+  const asks = [], e = mk(Mod, { dir, writer: W, fetchImpl: vendor(asks) });
+  e.ledger.journal({ use: 'learn', outcome: 'refused', why: 'line-A' }); e.ledger.journal({ use: 'learn', outcome: 'refused', why: 'line-B' });   // 6 001: a trim is owed
+  W.land(); const afterFail = rows(dir).length; W.land(); W.land();
+  W.st.auto = true; const r = await e.testRunner(); W.land();   // and a judgment after it: its reservation lands
+  const j = rows(dir);
+  return { afterFail, n: j.length, A: j.filter((x) => x.why === 'line-A').length, B: j.filter((x) => x.why === 'line-B').length, ok: r.ok, asks: asks.length, rewrites: W.st.rewrites, seeded: j.filter((x) => Number.isInteger(x.seq)).length };
+};
+{ const r = await failingTrim(DE);
+  ok(r.afterFail === 5999 && r.seeded === 5648, 'a trim whose rewrite job FAILED leaves the file whole as it was (5 999 lines, every seeded row)', r);
+  ok(r.A === 1 && r.B === 1 && r.ok && r.asks === 1 && r.rewrites === 1, '…the next write is a plain APPEND (no trim until the next start): its lines land, and the next judgment\'s reservation lands and is asked', r); }
+{ const r = await failingTrim(engineCopy([["      jKnown = false; jTrimDue = false;\n", "      if (w.trim) jTrimDue = true; else jKnown = false;   // the shape before r2581: a failed trim armed again\n"]], 'trim-armed-again'));
+  ok(r.A === 0 && !r.ok && r.asks === 0, 'CONTROL (a copy that arms the failed trim again): every write is the same refused rewrite — no line lands, the judgment refused — red', r); }
+
+console.log('⑩ the should: a day the belt keeps whole (past 6 000 lines) never makes every write a rewrite');
+const bigDay = async (Mod) => {
+  const dir = fresh('bigday');
+  const lines = []; for (let i = 0; i < 7000; i++) lines.push(JSON.stringify({ at: T0 - (7000 - i) * 5000, use: 'attention', outcome: 'ok', usd: 0.00001, inputTokens: 100, today: i }));
+  fs.writeFileSync(path.join(dir, JF), lines.join('\n') + '\n');
+  const W = standIn(), e = mk(Mod, { dir, writer: W, fetchImpl: vendor([]) });
+  for (let i = 0; i < 10; i++) { e.ledger.journal({ use: 'learn', outcome: 'refused', why: `day-${i}` }); W.land(); }
+  return { rewrites: W.st.rewrites, n: rows(dir).length };
+};
+{ const r = await bigDay(DE);
+  ok(r.rewrites === 1 && r.n === 7010, 'a day of 7 000 lines (all kept by the belt): ONE rewrite, then appends — the next trim is due past 1.2 × what the last one kept', r); }
+{ const r = await bigDay(engineCopy([[COUNT, COUNT.replace('Math.max(JOURNAL_MAX, jKeptFloor) * 1.2', 'JOURNAL_MAX * 1.2')]], 'trim-every-write'));   // the control writes the old trigger back on purpose — stale-pins: kept
+  ok(r.rewrites === 10, 'CONTROL (a copy whose trim is due past 6 000 always): every write rewrites the whole file — red', r); }
+
+console.log('⑪ the shoulds: the drafter\'s second look after the landing; a judgment\'s answer waits for its lines');
+const textLowered = async (TMmod) => {
+  const dir = fresh('textlow'), W = standIn(), asks = []; W.st.auto = false;
+  const fetchImpl = async (url) => { asks.push(url); return { status: 200, ok: true, headers: { get: () => null }, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 40, completion_tokens: 5, cost: 0.002 } }) }; };
+  const e = DE.create({ dataDir: dir, writer: W, fetchImpl, now: () => T0, tzOffset: () => 0, log: quiet, integrations: integOR, reserveLandMs: 400 });
+  let cents = 100; e.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: cents, learnModel: 'flash' }) });
+  const tm = TMmod.create({ integrations: integOR, ledger: e.ledger, fetchImpl, now: () => T0, log: quiet });
+  const p = tm.complete({ use: 'learn', messages: [{ role: 'user', content: 'x' }], schema: {}, est: 500 }); await tick();
+  cents = 0; W.st.auto = true; W.land();   // the owner lowers the budget to nothing while the drafter's reservation is written
+  const r = await p; W.land();
+  return { ok: r.ok, why: r.why, asks: asks.length, inFlight: e.status().today.inFlight, released: rows(dir).filter((x) => x.outcome === 'released').length };
+};
+{ const r = await textLowered(TM);
+  ok(!r.ok && r.why === 'daily-budget' && r.asks === 0 && r.inFlight === 0 && r.released === 1, 'the drafter: a budget lowered to nothing while its reservation was written — judged again at the landing, refused (daily-budget), nothing asked, released', r); }
+{ const SECOND = TSRC.slice(TSRC.indexOf("      const s2 = settings(), a2 = RL.availability("), TSRC.indexOf("    const body = Object.freeze({"));
+  const r = await textLowered(MUT.load('src/server/text-model-client.js', anchored(TSRC, SECOND, "    }\n", 'text-no-second-look'), 'text-no-second-look'));
+  ok(r.asks === 1, 'CONTROL (a copy of the client without its second look): the vendor is asked past the owner\'s new budget — red', r); }
+const answerWaits = async (Mod) => {
+  const dir = fresh('waits'), W = standIn(), asks = []; W.st.auto = false;
+  const e = mk(Mod, { dir, writer: W, fetchImpl: vendor(asks) });
+  let done = false; const p = e.testRunner().then((x) => { done = true; return x; });
+  await tick(); W.land(); await until(() => asks.length === 1);   // the reservation lands, the vendor answers
+  await until(() => W.pending(path.join(dir, 'decision-usage.json')) && W.pending(path.join(dir, JF)));
+  W.land([path.join(dir, 'decision-usage.json')]); for (let k = 0; k < 20; k++) await tick();   // the counter lands, the result line not yet
+  const before = done; W.land([path.join(dir, JF)]); const r = await p;
+  return { before, ok: r.ok, asks: asks.length };
+};
+{ const r = await answerWaits(DE);
+  ok(r.before === false && r.ok && r.asks === 1, 'a judgment\'s answer waits (bounded) for its own journal lines: with the counter landed and the result line still owed it has not answered; it answers once the line lands', r); }
+{ const WAIT = SRC.slice(SRC.indexOf("    if (jSeq !== j0 && !(r && r.why === 'reservation-unwritten'))"), SRC.indexOf("    return r;\n  }\n  async function judgeCall("));
+  const r = await answerWaits(engineCopy([[WAIT, '']], 'answer-no-wait'));
+  ok(r.before === true, 'CONTROL (a copy whose answer does not wait for its lines): it answers before its result line is on disk — red', r); }
+
+for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 11, label: 'CONTROL: ' })) ok(!!row.pass, row.name, row.detail);
 report();

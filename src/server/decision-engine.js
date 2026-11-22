@@ -76,6 +76,8 @@ const JOURNAL_MAX = 5000;
 const JOURNAL_DAYS = 30;
 // B-0248 (r2417 law 2): a call's RESERVATION line is on disk within this bound, or the judgment is refused by name (nothing is asked)
 const RESERVE_LAND_MS = 20000;
+// r2581 (3): the Test's words for that refusal — the storage, not the provider (the Integrations window shows them in the person's language)
+const TEST_RESERVATION_WORDS = 'the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes';
 const QUIET_MS = 5 * 60 * 1000;
 const TEST_SENTENCE = 'The invoice for the March order is due tomorrow — please confirm you will pay it.';
 const TEST_QUESTION = Object.freeze({ type: 'predicate', name: 'deadline_or_money', instructions: 'Does the text mention a deadline or money the reader owes?' });
@@ -120,7 +122,8 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   let jOwed = [];         // lines not handed to a write yet (each ends with its newline)
   let jWriting = null;    // {lines, lead, trim} the write in flight
   let jTrimDue = false, jFailSaid = false, jSeq = 0;
-  const CALL_TAG = crypto.randomBytes(3).toString('hex');   // this engine's calls: «<tag>.<seq>» on the reservation and its result
+  let jKeptFloor = 0;     // what the last trim kept: the next trim is due past 1.2 × the larger of it and JOURNAL_MAX (a day the belt keeps whole never rewrites at every write)
+  const CALL_TAG = crypto.randomBytes(6).toString('hex');   // this engine's calls: «<tag>.<seq>» on the reservation and its result
   const callOf = (id) => `${CALL_TAG}.${id}`;
   /** the journal's rows from a BOUNDED tail (≤ 2 MB: the journal itself is cut at 5 000 lines / 30 days) — the month's readout and
    *  the boot's rebuild of the day's counter (B-a85f) */
@@ -276,7 +279,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   function journal(o) {
     const row = M.journalRow({ at: now(), rubric: M.RUBRIC.version, ...o });
     jOwed.push(JSON.stringify(row) + '\n'); jSeq++;
-    if (jKnown && (!jWhole || jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > JOURNAL_MAX * 1.2)) jTrimDue = true;   // law 6: the count from the index (+ the lines on their way)
+    if (jKnown && (!jWhole || jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > Math.max(JOURNAL_MAX, jKeptFloor) * 1.2)) jTrimDue = true;   // law 6: the count from the index (+ the lines on their way)
     try { W().dirty(F.journal, { name: 'decision-journal.write', rank: 0, urgent: true, mode: 0o600, produce: produceJournal, onWritten: journalWritten }); }
     catch (e) { log.warn?.(`[decision] journal: ${e.message}`); }
     return jSeq;
@@ -314,8 +317,11 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const renamed = !ok && w.trim && err && err.code === 'ERENAMEDNOSYNC';   // the trim landed, its directory's fsync did not: the file is the trimmed one
     if (!ok && !renamed) {
       jOwed = w.lines.concat(jOwed);   // nothing of this write is on disk as written: owed again, first
-      if (w.trim) jTrimDue = true;     // a failed TRIM leaves the file whole as it was (the job copies, then renames)
-      else { jTorn = true; jKnown = false; }   // a failed APPEND is truncated back by the writer, at best: the index is not trusted until the next start
+      // NO TRIM UNTIL THE NEXT START (the coordinator's r2581 (2)): after a failed TRIM the next write is a plain APPEND — a trim that
+      // keeps failing (the writer gone main-only refuses a rewrite job, EREWRITEMAIN; a file shorter than its index, ESHRUNK / ENOENT)
+      // never locks the journal (every reservation refused for hours); a failed APPEND is truncated back at best — the offsets untrusted
+      jKnown = false; jTrimDue = false;
+      if (!w.trim) jTorn = true;       // a failed TRIM leaves the file whole as it was (the job copies, then renames): no torn tail
       if (!jFailSaid) { jFailSaid = true; log.warn?.(`[decision] the journal was not written (${(err && (err.code || err.message)) || 'an error'}) — its lines are kept in memory and the store writer retries`); }
       return;
     }
@@ -323,7 +329,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     if (w.trim) {
       let off = 0; const kept = [];
       for (const x of w.trim.keep) { kept.push({ ...x, off }); off += x.len + 1; }
-      jIdx = kept; jSize = off; jWhole = true; jTorn = false;
+      jIdx = kept; jSize = off; jWhole = true; jTorn = false; jKeptFloor = kept.length;
       log.log?.(`[decision] the journal trimmed by its writer: ${w.trim.size} → ${off} B (${w.trim.dropped} line(s) dropped; kept the day's, every reservation with no result, the newest inside ${JOURNAL_DAYS} days)${renamed ? ' — but its folder\'s fsync failed' : ''}`);
     }
     if (jKnown) {
@@ -495,7 +501,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   /** The registry row's Test (human-triggered, one fixed sentence, one predicate) — it counts like any call. */
   async function testRunner({ resolved } = {}) {
     const r = await judge('test', { body: TEST_SENTENCE }, { questions: [TEST_QUESTION], resolved });
-    if (!r.ok) return { ok: false, error: r.why === 'no-key' ? 'no provider + key saved (or the provider is not openai / openrouter)' : r.status ? `the provider answered HTTP ${r.status}` : r.why };
+    if (!r.ok) return { ok: false, error: r.why === 'no-key' ? 'no provider + key saved (or the provider is not openai / openrouter)' : r.why === 'reservation-unwritten' ? TEST_RESERVATION_WORDS : r.status ? `the provider answered HTTP ${r.status}` : r.why };
     const [first] = r.answers;
     const refused = !!first.refused;
     return { ok: !refused, error: refused ? 'the judge refused the question' : null, detail: { p: refused ? null : first.probability, inputTokens: r.usage.inputTokens, usd: r.usd } };

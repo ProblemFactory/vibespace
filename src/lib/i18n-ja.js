@@ -10257,6 +10257,7 @@ export default {
   "OpenRouter says the plan does not allow this model": "OpenRouter によると、このプランではこのモデルを使えません",
   "the model gave no usable proposal — try again": "モデルから使える提案が返りませんでした — もう一度どうぞ",
   "OpenRouter did not answer — try again in a minute": "OpenRouter から応答がありません — 少し待ってもう一度どうぞ",
+  "the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes": "呼び出しは送信されていません：支出の記録をデータフォルダーに書き込めませんでした — 課金はありません。ストレージが書き込めるようになってからもう一度テストしてください", // B-0248's next part (r2581 (3)): the decision Test's refusal by the storage
   "the draft was not sent: its spending line could not be written to the data folder — nothing was charged; try again once the storage writes": "下書きは送信されていません：支出の記録をデータフォルダーに書き込めませんでした — 課金はありません。ストレージが書き込めるようになってからもう一度どうぞ", // B-0248's next part (r2417 law 2): the drafter's reservation did not land
   "{model} read {n} of your decisions and proposes {m} lines": "{model} があなたの判断 {n} 件を読み、{m} 行を提案しました",
   "digests went through OpenRouter to a zero-data-retention endpoint": "要約は OpenRouter 経由でデータを保持しないエンドポイントに送られました",

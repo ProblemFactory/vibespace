@@ -348,6 +348,8 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
   const testBtn = el('button', 'mounts-btn integ-test', (TEST_LABEL[v.testKind] || TEST_LABEL['shape-only'])());
   testBtn.title = v.testDescribe ? t(v.testDescribe) : '';
   const result = el('div', 'integ-test-result');
+  // B-0248's next part (r2581 (3)): the decision Test's own sentence for a reservation that did not land (src/server/decision-engine.js TEST_RESERVATION_WORDS)
+  const TEST_WORDS = () => ({ 'the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes': t('the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes') });
   const drawVerdict = (ok, testedAt, error) => {
     result.textContent = '';
     if (ok === null || ok === undefined) { result.appendChild(el('span', 'plugin-detail', t('Not tested yet'))); }
@@ -355,7 +357,7 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
       const line = el('div', 'integ-verdict-line');
       line.appendChild(el('span', 'integ-verdict ' + (ok ? 'integ-ok' : 'integ-bad'), ok ? t('Passed') : t('Failed')));
       if (testedAt) line.appendChild(el('span', 'plugin-detail', '· ' + ago(Date.now() - testedAt)));
-      if (!ok && error) line.appendChild(el('span', 'plugin-detail plugin-cfg-warn integ-test-error', '— ' + error));
+      if (!ok && error) line.appendChild(el('span', 'plugin-detail plugin-cfg-warn integ-test-error', '— ' + (TEST_WORDS()[error] || error)));   // OUR sentences in the person's language; a vendor's words verbatim
       result.appendChild(line);
     }
     if (v.testCaveat) result.appendChild(el('div', 'plugin-detail integ-caveat', t(v.testCaveat)));

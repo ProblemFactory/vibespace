@@ -358,6 +358,7 @@ console.log('K the text-model client (lane rule-learning) — the request litera
   const c1 = await press(), c2 = await press(), c3 = await press();
   const day = eK.status().today;
   ok(c1.ok && c2.ok && !c3.ok && c3.why === 'use-budget' && chatReqs().length === n + 2 && day.byUse.learn.usd === 0.1 && day.total.usd < 1, 'the use learn stops at ITS cap: two $0.05 drafts, the third refused use-budget with 0 requests — the day\'s $1 budget still has room', { c3, learn: day.byUse.learn, total: day.total });
+  await require(path.join(repo, 'src/store-writer.js')).storeWriter().durable(eK.files.journal);   // B-0248's next part (r2581 (1)): the refusal's line rides the writer — the leg waits for its landing, the refusal never does
   ok(kJournal().filter((j) => j.why === 'use-budget').length === 1, 'the refusal is journalled (use-budget)');
   // 3 presses in flight with room for ONE (the hold sits in the verdict's synchronous step)
   T += 86400e3;

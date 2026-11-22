@@ -404,6 +404,8 @@ const ROAD_WORDS = Object.freeze({
   plan: Object.freeze(['the LLM provider refused the judging model (its plan)', 'when the user changes the judging model or the key (Settings › Plugins › LLM plugin)']),
   shape: Object.freeze(['the judging model refused the request', 'when the user changes the judging model (Settings › Plugins › LLM plugin)']),
   'account-never': Object.freeze(['the user set this account to never be judged by the LLM plugin', 'when the user lifts “never judge” on the account']),
+  // B-0248's next part (r2581 (3)): the judgment's reservation line did not reach the hub's storage — the storage, never the provider
+  'reservation-unwritten': Object.freeze(['the judgment was not sent: its spending line could not be written to the hub\'s data folder (nothing was charged)', 'when the hub\'s storage writes again (the next message is judged then)']),
 });
 /** A paid call's refusal (budgetVerdict / the judge's `why`) → the road's word for it (`ROAD_WORDS` keys). */
 function roadWhyOf(why) {

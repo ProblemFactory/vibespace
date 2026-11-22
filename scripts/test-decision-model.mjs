@@ -792,7 +792,11 @@ console.log('㉞ B-0248 (r2417 laws 4 + 5): the journal\'s calls — a reservati
   const noOpen = MUTJ.load('src/decision-model.js', anchored(MSRC, "    const open = r.outcome === 'reserved' && typeof r.call === 'string' && !!r.call && !answered.has(r.call);", "    const open = false;", 'trim-drops-open'), 'trim-drops-open');
   const k2 = noOpen.journalKeep(keepRows, { day, offsetMinOf: () => 0, now: D0, max: 5, days: 30 });
   ok(!k2.includes(0), 'CONTROL (a copy whose trim forgets the reservations with no result): the stopped call\'s line is trimmed away — the belt loses it — red', k2);
-  for (const row of copiesCensus(MUTJ.files, MUTJ.dir, repoJ, { minCopies: 2, label: 'CONTROL: ' })) ok(row.pass, row.name, row.detail);
+  const rw = M.roadWhyOf('reservation-unwritten');
+  ok(rw === 'reservation-unwritten' && /data folder/.test(M.ROAD_WORDS[rw][0]) && !/provider/.test(M.ROAD_WORDS[rw][0]), 'roadWhyOf: a judgment refused because its reservation did not land names the STORAGE, never the provider (r2581 (3))', { rw, words: M.ROAD_WORDS[rw] });
+  const noRow = MUTJ.load('src/decision-model.js', anchored(MSRC, "  'reservation-unwritten': Object.freeze([", "  'reservation-unwritten-gone': Object.freeze([", 'road-row-gone'), 'road-row-gone');
+  ok(noRow.roadWhyOf('reservation-unwritten') === 'backoff', 'CONTROL (a copy without that row): the agent is told the provider answered an error — red', noRow.roadWhyOf('reservation-unwritten'));
+  for (const row of copiesCensus(MUTJ.files, MUTJ.dir, repoJ, { minCopies: 3, label: 'CONTROL: ' })) ok(row.pass, row.name, row.detail);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
