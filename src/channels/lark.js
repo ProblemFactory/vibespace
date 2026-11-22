@@ -1597,9 +1597,9 @@ function create(record = {}, deps = {}) {
     // holds (a transport pause on this chat, or the vendor's moment on people reads): null = no read now, said BY ITS CAUSE
     // (memberListFor: «rate limited» for the vendor's rate pause, «no answer» for a transport one)
     if (fresh && c && !c.refused && now() - c.at < MEMBERS_OWN_COPY_MS) return c.names;
-    // B-82c2 round wqdnv452s (the MUST): the member read waits for the VENDOR's moment only (`vendorPausedUntil`: a rate refusal or a
+    // B-82c2 round wqdnv452s (the MUST): the member read waits for the VENDOR's moments only (`vendorRateUntil` / `vendorBlipUntil`: a rate refusal or a
     // transport blip, by its cause) — never for a profile-privilege refusal, which is another privilege and paused it for 6 h
-    if (fresh && ((c && c.until && now() < c.until) || vendorPausedUntil > now())) return null;
+    if (fresh && ((c && c.until && now() < c.until) || vendorRateUntil > now() || vendorBlipUntil > now())) return null;
     if (!fresh && c && (c.until ? now() < c.until : now() - c.at < (c.dissolved ? DISSOLVED_TTL_MS : MEMBERS_TTL_MS))) return c.names;
     const names = new Map();
     let refused = false, dissolved = false, until = 0, partial = false;
@@ -1645,7 +1645,7 @@ function create(record = {}, deps = {}) {
     catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : e instanceof ChannelError && e.code === 'rate-limited' ? 'members-rate-limited' : 'members-no-answer' }; }   // rate-ok: prepare-members
     // the follow (r1402 (1)): the back-off that holds is said BY ITS CAUSE — the vendor's rate pause on people reads is «rate
     // limited», a transport pause on this chat «no answer» (the words were «no answer» for both)
-    if (names === null) return { list: [], whole: false, why: vendorPausedUntil > now() && vendorPausedWhy === 'rate' ? 'members-rate-limited' : 'members-no-answer' };   // the back-off that holds, BY ITS CAUSE: the vendor's rate pause, else a transport pause (this chat's or the vendor's)
+    if (names === null) return { list: [], whole: false, why: vendorRateUntil > now() ? 'members-rate-limited' : 'members-no-answer' };   // the back-off that holds, BY ITS CAUSE: a rate pause that holds is said, even inside a longer transport one
     const m = members.get(convId) || {};
     if (m.refused) return { list: [], whole: false, why: m.dissolved ? 'chat-dissolved' : m.until ? 'members-no-answer' : 'members-unreadable' };   // a transport failure is «no answer», never «may not read»
     const list = [...names].map(([id, name]) => ({ id, name }));
@@ -1688,16 +1688,19 @@ function create(record = {}, deps = {}) {
   /** …and a department's name (`contact/v3/departments/:id` under a user token asks contact:contact.base:readonly). */
   const canReadDepts = () => (((readToken().token || {}).scopes) || []).some((x) => x === PEOPLE_SCOPE || x === 'contact:contact:readonly');
   let peopleRefusedUntil = 0;   // every PEOPLE read (a profile, a department, the pages that name authors) waits while it holds
-  // B-82c2 round wqdnv452s (the MUST): THE VENDOR's MOMENT, kept apart and BY ITS CAUSE ('rate' | 'transport') — what a proposal's
-  // member read waits for and what its words name; a profile-privilege refusal pauses the people reads only (`pausePeople`)
-  let vendorPausedUntil = 0, vendorPausedWhy = null;
+  // B-82c2 round wqdnv452s (the MUST): THE VENDOR's MOMENTS, each kept apart BY ITS CAUSE — what a proposal's member read waits
+  // for and what its words name; a profile-privilege refusal pauses the people reads only (`pausePeople`). Round wpi95ogqk (the
+  // small): the rate moment and the transport moment are TWO deadlines, so a rate refusal standing inside a longer transport pause
+  // is said «rate limited» (it was named by the longer of the two)
+  let vendorRateUntil = 0, vendorBlipUntil = 0;
   /** THE ONE WRITER of the people pauses: `cause` = 'rate' | 'transport' | 'privilege'. A pause only LENGTHENS (a later blip never
-   *  cuts a vendor's longer word short); the vendor's moment also sets the member read's own pause with its cause, which the
-   *  longer of two moments names. */
+   *  cuts a vendor's longer word short); each of the vendor's moments also sets its own deadline for the member read. */
   function pausePeople(until, cause) {
     if (until > peopleRefusedUntil) peopleRefusedUntil = until;
-    if ((cause === 'rate' || cause === 'transport') && until > vendorPausedUntil) { vendorPausedUntil = until; vendorPausedWhy = cause; }
+    if (cause === 'rate' && until > vendorRateUntil) vendorRateUntil = until;
+    if (cause === 'transport' && until > vendorBlipUntil) vendorBlipUntil = until;
   }
+
   /** verify r1 F3: how long the account's people lookups pause after a vendor rate refusal / a transport blip — the
    *  vendor's Retry-After when it gave one, else a minute; a transport blip never more than five. B-82c2 the second follow
    *  (主开发 r1403 (1)): a RATE refusal is never asked again SOONER than the vendor's own word — its hint is kept whole (a

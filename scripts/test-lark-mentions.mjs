@@ -295,7 +295,7 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
   const rl = await rateLeg(lark);
   ok(!rl.first.threw && J(rl.first.open) === J(['decorator']) && rl.first.openWhy === 'members-rate-limited' && !rl.next.threw && rl.after === 0 && rl.next.openWhy === 'members-rate-limited', `A READ THAT FAILS NEVER REFUSES: the vendor's rate refusal — the proposal is decided with the word open and said BY ITS CAUSE («${rl.first.openWhy}»); the next reads NOTHING while the back-off holds, said the same (${rl.after}, «${rl.next.openWhy}»)`, J(rl));
   // the follow (r1402 (1)): RED — the words as they were («no answer» for the vendor's rate refusal and its back-off)
-  const RATE_WHY = "    if (names === null) return { list: [], whole: false, why: vendorPausedUntil > now() && vendorPausedWhy === 'rate' ? 'members-rate-limited' : 'members-no-answer' };   // the back-off that holds, BY ITS CAUSE: the vendor's rate pause, else a transport pause (this chat's or the vendor's)\n";
+  const RATE_WHY = "    if (names === null) return { list: [], whole: false, why: vendorRateUntil > now() ? 'members-rate-limited' : 'members-no-answer' };   // the back-off that holds, BY ITS CAUSE: a rate pause that holds is said, even inside a longer transport one\n";
   const CATCH = "    try { names = await namesFor(convId, { fresh: true }); }\n    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : e instanceof ChannelError && e.code === 'rate-limited' ? 'members-rate-limited' : 'members-no-answer' }; }   // rate-ok: prepare-members\n";
   const rlW = await rateLeg(MUT.load('src/channels/lark.js', anchored(anchored(larkSrc, CATCH, "    try { names = await namesFor(convId, { fresh: true }); }\n    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : 'members-no-answer' }; }   // rate-ok: prepare-members\n", 'rate-said-no-answer'), RATE_WHY, "    if (names === null) return { list: [], whole: false, why: 'members-no-answer' };\n", 'backoff-said-no-answer'), 'lark-rate-no-answer'));   // stale-pins: kept (the RED: the words as they were)
   ok(rlW.first.openWhy === 'members-no-answer' && rlW.next.openWhy === 'members-no-answer', `RED CONTROL: the words as they were — the vendor's rate refusal and its back-off are said «${rlW.first.openWhy}» (no answer)`, J(rlW));
@@ -339,13 +339,41 @@ const REFUSED = { code: 99991672, msg: 'Access denied. One of the following scop
   };
   const PRIV = () => jsonRes(400, { code: 99991679, msg: 'permission denied: contact range' });
   const BLIP = () => jsonRes(503, { code: 0, msg: 'service unavailable' });
-  const FRESH_GATE = "    if (fresh && ((c && c.until && now() < c.until) || vendorPausedUntil > now())) return null;\n";
+  const FRESH_GATE = "    if (fresh && ((c && c.until && now() < c.until) || vendorRateUntil > now() || vendorBlipUntil > now())) return null;\n";
   const SHARED = MUT.load('src/channels/lark.js', anchored(anchored(larkSrc, FRESH_GATE, "    if (fresh && ((c && c.until && now() < c.until) || peopleRefusedUntil > now())) return null;\n", 'one-shared-pause-gate'), RATE_WHY, "    if (names === null) return { list: [], whole: false, why: peopleRefusedUntil > now() ? 'members-rate-limited' : 'members-no-answer' };\n", 'one-shared-pause-words'), 'lark-one-shared-pause');   // stale-pins: kept (the RED: the tip's one shared pause)
   const cp = await causeLeg(lark, 'ou_peerpriv0001', PRIV), cb = await causeLeg(lark, 'ou_peerblip0001', BLIP);
   const cpR = await causeLeg(SHARED, 'ou_peerpriv0002', PRIV), cbR = await causeLeg(SHARED, 'ou_peerblip0002', BLIP);
   ok(cp.profileReads === 1 && cp.memberReads === 1 && J(cp.ids) === J([ZHANG.id]) && cb.profileReads === 1 && cb.memberReads === 0 && cb.openWhy === 'members-no-answer',
     `THE WORDS NAME THE CAUSE: a profile refused for want of a privilege pauses the people reads only — the proposal's member read runs (${cp.memberReads}) and 张三 is decided; a profile read's transport blip holds the member read for the vendor's moment, said «${cb.openWhy}»`, J({ cp, cb }));
   ok(cpR.memberReads === 0 && cpR.openWhy === 'members-rate-limited' && cbR.openWhy === 'members-rate-limited', `RED CONTROL: the tip's one shared pause — a missing privilege blocks the member read and is said «${cpR.openWhy}» (for 6 h), and a transport blip is said «${cbR.openWhy}»`, J({ cpR, cbR }));
+  // round wpi95ogqk (the small): A RATE REFUSAL INSIDE A LONGER TRANSPORT PAUSE IS SAID «rate limited». A profile read's blip asks
+  // 300 s; ten seconds on, another chat's member page is refused by rate for 60 s; a proposal at +30 s is held, said «rate limited»
+  // (both hold); at +100 s only the blip holds, said «no answer». RED: one deadline named by the longer of the two (aa49210c9)
+  const insideLeg = async (LARK) => {
+    let t = T0;
+    const s0 = stub((c) => {
+      if (c.url.includes('/contact/v3/users/')) return { ...jsonRes(503, { code: 0, msg: 'service unavailable' }), headers: new Headers({ 'retry-after': '300' }) };
+      if (isMembers(c) && c.url.includes('oc_dm2')) return { ...jsonRes(429, { code: 99991400, msg: 'request trigger frequency limit' }), headers: new Headers({ 'retry-after': '60' }) };
+      if (isMembers(c)) return jsonRes(200, MEMBERS(c.url.includes('oc_dm') ? [] : [ZHANG]));
+      if (/\/im\/v1\/chats\/oc_dm2?(\?|$)/.test(c.url)) return jsonRes(200, { code: 0, msg: 'success', data: { chat_mode: 'p2p' } });
+      return jsonRes(200, SENT());
+    });
+    const a = LARK.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: s0.fetchFn, now: () => t, tokens: tokens(TOKEN_P) });
+    await a.describe('oc_dm', { peerIds: ['ou_peerblip0003'] }).catch(() => null);   // the blip: 300 s
+    t = T0 + 10e3; await a.describe('oc_dm2', { peerIds: [] }).catch(() => null);   // the rate refusal: 60 s, inside it
+    t = T0 + 30e3; const p30 = await a.prepareSend('oc_x', { text: '@张三 请看', known: [] });
+    t = T0 + 100e3; const p100 = await a.prepareSend('oc_x', { text: '@张三 再看', known: [] });
+    return { at30: p30.openWhy || null, at100: p100.openWhy || null, memberReadsX: s0.calls.filter((c) => isMembers(c) && c.url.includes('oc_x')).length };
+  };
+  const ONE_DEADLINE = MUT.load('src/channels/lark.js', anchored(anchored(anchored(anchored(larkSrc, FRESH_GATE, "    if (fresh && ((c && c.until && now() < c.until) || vendorPausedUntil > now())) return null;\n", 'one-vendor-deadline-gate'),   // stale-pins: kept (the RED: aa49210c9's one deadline put back)
+    "  let vendorRateUntil = 0, vendorBlipUntil = 0;\n", "  let vendorPausedUntil = 0, vendorPausedWhy = null;\n", 'one-vendor-deadline-vars'),   // stale-pins: kept (the RED: aa49210c9's one deadline put back)
+    "    if (cause === 'rate' && until > vendorRateUntil) vendorRateUntil = until;\n    if (cause === 'transport' && until > vendorBlipUntil) vendorBlipUntil = until;\n",
+    "    if ((cause === 'rate' || cause === 'transport') && until > vendorPausedUntil) { vendorPausedUntil = until; vendorPausedWhy = cause; }\n", 'one-vendor-deadline-writer'),   // stale-pins: kept (the RED: aa49210c9's one deadline put back)
+    RATE_WHY, "    if (names === null) return { list: [], whole: false, why: vendorPausedUntil > now() && vendorPausedWhy === 'rate' ? 'members-rate-limited' : 'members-no-answer' };\n", 'one-vendor-deadline-words'), 'lark-one-vendor-deadline');   // stale-pins: kept (the RED: aa49210c9's one deadline put back)
+  const il = await insideLeg(lark);
+  ok(il.at30 === 'members-rate-limited' && il.at100 === 'members-no-answer' && il.memberReadsX === 0, `A RATE REFUSAL INSIDE A LONGER TRANSPORT PAUSE: at +30 s (both hold) said «${il.at30}»; at +100 s (the blip alone) «${il.at100}»; no member read while either holds`, J(il));
+  const ilR = await insideLeg(ONE_DEADLINE);
+  ok(ilR.at30 === 'members-no-answer', `RED CONTROL: one vendor deadline named by the longer of the two (aa49210c9) — the rate refusal standing inside the blip's pause is said «${ilR.at30}»`, J(ilR));
   // round wqdnv452s (shoulds): the rate pause's ONE-DAY ceiling (a broken header never holds the read for ever) and the transport
   // blip's FIVE-MINUTE bound (kept when the rate branch split off), each by the clock
   const TOKEN_DAY = { ...TOKEN, expiresAt: T0 + 30 * 86400e3 };   // a sign-in that outlives the day the leg waits (the fixture's lives an hour)
