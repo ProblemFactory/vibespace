@@ -837,9 +837,11 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     if (!a || a.type !== 'pooled') return null;
     // THE COLD MOVE LANDS (row B-d578, the pool's fallback unit (a), ruling r1516): a conversation applyCrossMove moved is RESUMED
     // under a NEW server id — its resume (`resumeOf`: the backend id it resumes) starts on the member it was moved to while the
-    // carry lives (crossCarryFor), never where the automatic rules under 'never' would put it back (before the pin: a pin's own
-    // move is the same act). The POOL's default (`forDefault`) is never placed by one conversation's carry.
-    if (resumeOf && !forDefault) { const to = crossCarryFor(poolId, resumeOf); if (to) return to; }
+    // carry lives (crossCarryFor) AND the member can still serve (memberCanServe — the pin's own judgement: signed in, not at its
+    // wall, not parked); else the carry is dropped, said once, and the rules below place it. A pin the person set AFTER the move
+    // ended the carry already (setConversationPin); a pin's own cross move IS the carry. The POOL's default (`forDefault`) is
+    // never placed by one conversation's carry.
+    if (resumeOf && !forDefault) { const to = crossCarryFor(poolId, resumeOf); if (to) { if (memberCanServe(poolId, to)) return to; dropCrossCarry(poolId, resumeOf, to); } }
     const fam = familyOfModel(model);
     const cur = accounts.poolCurrent(poolId);
     const base = poolReadCache(poolId);
@@ -7279,6 +7281,7 @@ function applyCrossMove(poolId, sid, s2, fromId, d, now = Date.now(), { why = 'c
   const NOTE = i18nKey('Pool "{pool}": conversation "{title}" — switched from {from} ({fromProvider}) to {to} ({toProvider}), model {model} → {toModel}.');
   const text = fill(LINE);
   if (bsid) _crossLinesOwed.set(String(bsid), { text, i18n: { key: LINE, params }, at: now, fromSid: sid });
+  for (const [k, v] of _crossPlacementOwed) if (now - v.at > CROSS_CARRY_MS) _crossPlacementOwed.delete(k); // a resume that never came carries nothing (swept at each move)
   if (bsid) _crossPlacementOwed.set(String(bsid), { poolId, to: d.to, at: now, fromSid: sid }); // the RESUME starts on d.to (poolChooserForModel)
   serverNotice(`pool-cross-${poolId}-${sid}-${now}`, fill(NOTE) + ' Restarting the conversation to apply it.', { level: 1, i18n: { key: NOTE, params, then: { key: PIN_RESTART_KEY } } });
   console.log(`[pool] cross-provider switch ${poolId}/${sid}: ${fromId || '?'} (${x.fromId}) → ${d.to} (${x.toId}), model ${x.model || '?'} → ${x.toModel} (${why})`);
@@ -7294,7 +7297,9 @@ function feedOwedCrossLine(sid, s2) {
   if ((!_crossLinesOwed.size && !_crossPlacementOwed.size) || !s2) return;
   const bsid = s2.claudeSessionId || s2.backendSessionId;
   const carry = bsid ? _crossPlacementOwed.get(String(bsid)) : null;
-  if (carry && (sid !== carry.fromSid || Date.now() - carry.at > CROSS_CARRY_MS)) _crossPlacementOwed.delete(String(bsid)); // the resume is placed (or never came)
+  // the carry ends on a resumed process that STARTED — another server id whose CLI has printed since the move — or by age: a
+  // resume that registered and died before its first output leaves it, so its retry lands on the moved-to member too
+  if (carry && ((sid !== carry.fromSid && (s2._lastPtyDataAt || 0) > carry.at) || Date.now() - carry.at > CROSS_CARRY_MS)) _crossPlacementOwed.delete(String(bsid));
   const owed = bsid ? _crossLinesOwed.get(String(bsid)) : null;
   if (!owed) return;
   if (Date.now() - owed.at > CROSS_CARRY_MS) { _crossLinesOwed.delete(String(bsid)); return; } // a restart that never came owes nothing
@@ -7304,7 +7309,10 @@ function feedOwedCrossLine(sid, s2) {
 }
 /** The member a moved conversation's RESUME starts on: the carry applyCrossMove left under its backend id — for THIS pool, while
  *  it lives (CROSS_CARRY_MS) and while the pool still lists the member; else null (the automatic rules place it). Read, not
- *  taken: a resume that failed and is tried again lands on it too; the carry ends where the resumed conversation is seen. */
+ *  taken: a resume that failed before its process printed and is tried again lands on it too; the carry ends when a resumed
+ *  process has STARTED (feedOwedCrossLine), when the person pins another member (setConversationPin), when the member can no
+ *  longer serve at the resume (dropCrossCarry) or by age. It lives in memory only: a hub restart between the move and the
+ *  resume forgets it (the resume is then placed by the rules). */
 function crossCarryFor(poolId, bsid) {
   const k = String(bsid || ''), c = k ? _crossPlacementOwed.get(k) : null;
   if (!c || c.poolId !== poolId) return null;
@@ -7312,6 +7320,14 @@ function crossCarryFor(poolId, bsid) {
   const listed = poolMembershipOf(poolId);
   if (Array.isArray(listed) && listed.length > 0 && !listed.includes(c.to)) { _crossPlacementOwed.delete(k); return null; }
   return c.to;
+}
+/** The carry is not honoured: the member it names cannot serve at the resume. Dropped with the line it owed (that line would say
+ *  a move that did not happen), said once in the journal; the pool's rules place the resume. */
+function dropCrossCarry(poolId, bsid, to) {
+  const k = String(bsid || '');
+  _crossPlacementOwed.delete(k);
+  const owed = _crossLinesOwed.get(k); if (owed && owed.i18n && owed.i18n.params && owed.i18n.params.to === nameOf(to)) _crossLinesOwed.delete(k);
+  console.log(`[pool] cross-provider ${poolId}: the resume of ${k.slice(0, 12)} does not land on ${to} — it cannot serve now (signed out, at its wall or parked); the pool's rules place it`);
 }
 // THE OWNER'S CARD (decision ①, 2026-10-20 — 「切到 X 需要你同意」). Under the pool's crossProvider 'never' a conversation
 // whose member cannot serve any more and that only ANOTHER provider could take is never moved by itself: ONE For-you item
@@ -7570,6 +7586,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   }
   s._poolPin = pin;
   persistPoolPin(s, pin ? null : rec);
+  { const bsid = s.claudeSessionId || s.backendSessionId, c = bsid ? _crossPlacementOwed.get(String(bsid)) : null; if (c && memberId && memberId !== c.to) _crossPlacementOwed.delete(String(bsid)); } // the person's LATER pin wins over a cross move's carry (B-d578 (a) follow)
   const caps = capsOf(a.backend);
   const own = hasOwnPoolLink(poolId, sid);
   let current = null; try { current = own ? accounts.poolCurrentFor(poolId, sid) : (heldPoolMemberFor(s, poolId) || accounts.poolCurrent(poolId)); } catch { }
@@ -8543,7 +8560,7 @@ function maybeStopOnFallback(session, id, from, to) {
     armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
     requestSlotFor, // law 1's ONE answer to «which account» (lane readings-attribution-2): {key, slotOk, reqAt, movedAt?} or null = unknown
-    providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, _crossPlacementOwed, crossCarryFor, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
+    providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, _crossPlacementOwed, crossCarryFor, dropCrossCarry, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)

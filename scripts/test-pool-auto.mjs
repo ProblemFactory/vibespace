@@ -3574,7 +3574,7 @@ await (async () => {
     const on = (sid) => (am.poolCurrentFor(Pl, sid) === A ? 'A' : am.poolCurrentFor(Pl, sid) === B ? 'B' : String(am.poolCurrentFor(Pl, sid)));
     const pass = () => { const o = console.log, w2 = console.warn, lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); try { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(Pl, { force: true }); } finally { console.log = o; console.warn = w2; } return lines; };
     const client = () => clients.add({ readyState: 1, send: (p) => sent.push(JSON.parse(p)) });
-    return { am, eng, A, B, Pl, sessions, notices, sent, items, mk, on, pass, client, quiet: (f) => { const o = console.log; console.log = () => { }; try { return f(); } finally { console.log = o; } } };
+    return { am, eng, A, B, Pl, cacheDir, sessions, notices, sent, items, mk, on, pass, client, quiet: (f) => { const o = console.log; console.log = () => { }; try { return f(); } finally { console.log = o; } } };
   };
   const wn = pworld();
   if (!wn) ck('PROVIDER engine SKIP — pools unsupported on this platform', true);
@@ -3606,18 +3606,59 @@ await (async () => {
     // THE COLD MOVE LANDS (row B-d578, the pool's fallback unit (a), ruling r1516 — was faked here by a link set by hand): the
     // RESUMED process is placed by the REAL chooser through the store's own spawn road — resolveForSpawn's per-session link with
     // ws-create's chooseMember (the restart's model, `resumeOf` = the backend id it resumes)
-    const chooseFor = (resumeOf) => (pid, how = {}) => wn.eng.poolChooserForModel(pid, { model: 'deepseek-chat', hinted: false, forDefault: !!how.forDefault, ...(resumeOf ? { resumeOf } : {}) });
+    // ws-create's OWN chooser line, evaluated verbatim (the r3 legs' road, B-d578 (a) follow (1)): the leg goes red if the
+    // resume clause leaves that line — no copy of the call here
+    const arrowA = (/chooseMember: (\([^)]*\) => poolChooser\?\.\(.*\)),$/m.exec(fsx.readFileSync(path.resolve('src/ws-create.js'), 'utf8')) || [])[1] || null;
+    let seenOpts = [];
+    const chooseVia = (data) => new Function('poolChooser', 'data', 'accounts', 'return ' + arrowA)((pid, o) => { seenOpts.push(o); return wn.eng.poolChooserForModel(pid, o); }, data, wn.am);
+    const spawnVia = (key, data) => { seenOpts = []; return wn.quiet(() => wn.am.resolveForSpawn(wn.Pl, 'claude', { sessionKey: key, chooseMember: chooseVia(data) })); };
+    ck('engine: …ws-create\'s OWN chooser line is read and names the resume (the leg drives that line, not a copy of it)', !!arrowA && /resumeOf: String\(data\.resumeId\)/.test(arrowA), arrowA);
     ck('engine: …the carry names B for this pool under the backend id (cid-s1), from the server id it left (s1)', (() => { const c = wn.eng._crossPlacementOwed.get('cid-s1'); return !!c && c.poolId === wn.Pl && c.to === wn.B && c.fromSid === 's1'; })(), J([...wn.eng._crossPlacementOwed]));
     wn.sessions.delete('s1'); const rs = wn.mk('s1b', 'cid-s1');
-    const ctl = wn.quiet(() => wn.am.resolveForSpawn(wn.Pl, 'claude', { sessionKey: 's1c', chooseMember: chooseFor(null) }));
-    ck('engine: CONTROL — a resume that does not name its backend id (the release\'s road) is placed back on Member A by the rules under never: the move would not land', ctl && ctl.poolTarget === wn.A, J(ctl && ctl.poolTarget));
-    const sp = wn.quiet(() => wn.am.resolveForSpawn(wn.Pl, 'claude', { sessionKey: 's1b', chooseMember: chooseFor('cid-s1') }));
-    ck('engine: …the RESUME (a new server id, s1b, same backend id) starts on Member B — the spawn\'s own link, by the real chooser', sp && sp.poolTarget === wn.B && sp.sessionLink === true && wn.on('s1b') === 'B', J({ target: sp && sp.poolTarget, on: wn.on('s1b') }));
-    ck('engine: …a FORK of it (no resumeOf) and the POOL\'s default (forDefault) are never placed by the carry', wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', forDefault: true, resumeOf: 'cid-s1' }) !== wn.B && wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat' }) !== wn.B);
+    const ctl = spawnVia('s1c', { model: 'deepseek-chat' });
+    ck('engine: CONTROL — a create naming no resume (the release\'s road) is placed back on Member A by the rules under never: the move would not land', ctl && ctl.poolTarget === wn.A && seenOpts.every((o) => !('resumeOf' in o)), J(ctl && ctl.poolTarget));
+    const fk = spawnVia('s1f', { model: 'deepseek-chat', resumeId: 'cid-s1', fork: true });
+    ck('engine: …a FORK of it (ws-create\'s line with data.fork) hands the chooser no resumeOf and starts by the rules (Member A)', fk && fk.poolTarget === wn.A && seenOpts.length > 0 && seenOpts.every((o) => !('resumeOf' in o)), J({ target: fk && fk.poolTarget, opts: seenOpts }));
+    const sp = spawnVia('s1b', { model: 'deepseek-chat', resumeId: 'cid-s1' });
+    ck('engine: …the RESUME (a new server id, s1b, same backend id) starts on Member B — ws-create\'s line names it, the real chooser places it, the spawn\'s own link', sp && sp.poolTarget === wn.B && sp.sessionLink === true && wn.on('s1b') === 'B' && seenOpts.some((o) => o.resumeOf === 'cid-s1'), J({ target: sp && sp.poolTarget, on: wn.on('s1b') }));
+    ck('engine: …the POOL\'s default (forDefault) is never placed by the carry', wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', forDefault: true, resumeOf: 'cid-s1' }) !== wn.B);
     ck('engine: …another pool never reads this pool\'s carry', wn.eng.crossCarryFor('pool-other', 'cid-s1') === null && wn.eng.crossCarryFor(wn.Pl, 'cid-s1') === wn.B);
     wn.pass();
     ck('engine: …and it is fed once into the resumed conversation (same backend id, a new server id)', !wn.eng._crossLinesOwed.has('cid-s1') && !!rs, J([...wn.eng._crossLinesOwed]));
-    ck('engine: …the carry ends where the resumed conversation is seen (a later resume is placed by the rules again); the pass keeps it on B', !wn.eng._crossPlacementOwed.has('cid-s1') && wn.on('s1b') === 'B', J({ carry: [...wn.eng._crossPlacementOwed], on: wn.on('s1b') }));
+    // (4) the carry ends on a process that STARTED: s1b registered but has printed nothing since the move (its last output is the
+    // world's 20 minutes ago) — the carry stays, so a retry after it died lands on B too
+    ck('engine: …a resumed process that has not printed since the move LEAVES the carry — its retry lands on B, not back on A', wn.eng._crossPlacementOwed.has('cid-s1') && (spawnVia('s1d', { model: 'deepseek-chat', resumeId: 'cid-s1' }) || {}).poolTarget === wn.B, J([...wn.eng._crossPlacementOwed]));
+    rs._lastPtyDataAt = Date.now(); wn.pass();
+    ck('engine: …once it has printed (its CLI started) the carry ends; the pass keeps it on B', !wn.eng._crossPlacementOwed.has('cid-s1') && wn.on('s1b') === 'B', J({ carry: [...wn.eng._crossPlacementOwed], on: wn.on('s1b') }));
+    // (5) the half hour, the member no longer listed — each ends the carry: the resume is placed by the rules (A)
+    {
+      const at = Date.now();
+      wn.eng._crossPlacementOwed.set('cid-old', { poolId: wn.Pl, to: wn.B, at: at - 31 * 60e3, fromSid: 'x' });
+      ck('engine: …a carry past its half hour is dropped at its read (the rules place the resume)', wn.eng.crossCarryFor(wn.Pl, 'cid-old') === null && !wn.eng._crossPlacementOwed.has('cid-old') && wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', resumeOf: 'cid-old' }) === wn.A);
+      wn.eng._crossPlacementOwed.set('cid-gone', { poolId: wn.Pl, to: 'acct-not-listed', at, fromSid: 'x' });
+      ck('engine: …a carry whose member the pool no longer lists is dropped at its read', wn.eng.crossCarryFor(wn.Pl, 'cid-gone') === null && !wn.eng._crossPlacementOwed.has('cid-gone'));
+      wn.eng._crossPlacementOwed.set('cid-pool', { poolId: 'pool-other', to: wn.B, at, fromSid: 'x' });
+      ck('engine: …a carry of ANOTHER pool is not this pool\'s resume (the rules place it), and it is left for its own pool', wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', resumeOf: 'cid-pool' }) === wn.A && wn.eng._crossPlacementOwed.has('cid-pool'));
+      wn.eng._crossPlacementOwed.delete('cid-pool');
+    }
+    // (2) THE PERSON's LATER PIN WINS, and (3) THE MEMBER MUST STILL SERVE — each in a world of its own, after Allow once
+    const movedWorld = (sid) => { const w = pworld(); w.client(); w.mk(sid); w.pass(); const cd = w.items.find((x) => x.action && x.action.type === 'pool-cross-provider' && x.status === 'open'); const r = cd ? w.quiet(() => w.eng.answerCrossProviderAsk(cd.action.askId, { answer: 'once' })) : null; return { w, moved: !!(r && r.moved) }; };
+    {
+      const { w, moved } = movedWorld('s5');
+      const cleared = w.quiet(() => w.eng.setConversationPin('s5', null));
+      const keptOnClear = w.eng._crossPlacementOwed.has('cid-s5');
+      const pinned = w.quiet(() => w.eng.setConversationPin('s5', w.A));
+      ck('engine: THE LATER PIN WINS — after the move, pinning the conversation to another member ends the carry (clearing a pin does not)', moved && cleared.ok && keptOnClear && pinned.ok && !w.eng._crossPlacementOwed.has('cid-s5') && w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s5' }) !== w.B, J({ moved, keptOnClear, carry: [...w.eng._crossPlacementOwed] }));
+    }
+    {
+      const { w, moved } = movedWorld('s6');
+      const nowS = Math.floor(Date.now() / 1000);
+      const cacheB = path.join(w.cacheDir, w.B + '.json');
+      fsx.writeFileSync(cacheB, JSON.stringify({ fetchedAt: Date.now() - 1000, source: 'on-demand', fiveHour: { utilization: 1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 1, resetsAt: nowS + 3 * 86400 } }));
+      const lines = []; const o = console.log; console.log = (...a) => lines.push(a.join(' '));
+      let r6; try { r6 = w.eng.poolChooserForModel(w.Pl, { model: 'deepseek-chat', resumeOf: 'cid-s6' }); } finally { console.log = o; }
+      ck('engine: THE MEMBER MUST STILL SERVE — B at its wall when the resume comes: the carry is dropped (and the line it owed), said once, the rules place the resume', moved && r6 !== w.B && !w.eng._crossPlacementOwed.has('cid-s6') && !w.eng._crossLinesOwed.has('cid-s6') && lines.some((l) => /does not land on .* — it cannot serve now/.test(l)), J({ moved, r6, lines: lines.filter((l) => /\[pool\]/.test(l)).slice(0, 3) }));
+    }
     // Deny: nothing moves, not asked again
     const wd = pworld(); wd.client(); wd.mk('s2'); wd.pass();
     const c3 = wd.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
