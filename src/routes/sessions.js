@@ -246,13 +246,17 @@ function setup(ctx) {
   // reachable through the existing subagent viewer (candidate lists extended
   // below + in ws-handler). runId is globally unique, so a cross-session scan
   // is a safe last resort when cwd/claudeSessionId don't pin it down.
-  // B-360d part 2 (lane chrome-157, 2026-11-21): a running workflow has no snapshot yet, and the card / window polls it every
-  // 2.5 s. The last resort below walked EVERY session entry under ~/.claude/projects on each poll (about 2.5 µs an entry on the
-  // hub's loop: 250 ms at 100 000 entries, measured on the real route) though the call names its session. A session KNOWN in a
-  // project dir (its own dir, or its transcript) holds the run's files under that dir, so both finders stop there; the walk is
-  // only for a call that names no session, or a session found in no project dir.
-  const sessionIn = (projectDir, sid) => { try { return fs.existsSync(path.join(projectDir, sid)) || fs.existsSync(path.join(projectDir, `${sid}.jsonl`)); } catch { return false; } };
-  function findWorkflowSnapshot(runId, claudeSessionId, cwd) {
+  // B-360d part 2 (lane chrome-157, 2026-11-21): a running workflow has no snapshot yet, and its card / window poll it every
+  // 2.5 s; the snapshot finder's last resort walked EVERY session entry under ~/.claude/projects at each poll (on a stand-in home
+  // of about 2 500 session entries: 17.6 ms of the hub's loop a poll). THE LAW (round wvinqg1j4): A POLL NEVER LOSES A RUN THE
+  // RELEASE FOUND. The walk is skipped only when the run IS FOUND: its run dir found, its snapshot (when written) is the one
+  // beside it (<session>/workflows/<runId>.json). A run found elsewhere — a FORK names its own conversation while the run's
+  // files are its parent's — pays the walk ONCE: where it was found is kept (runId → path, bounded), so the next poll asks
+  // that one path.
+  const _wfWhere = new Map();
+  const WF_WHERE_MAX = 256;
+  const keepWhere = (key, p) => { _wfWhere.delete(key); _wfWhere.set(key, p); if (_wfWhere.size > WF_WHERE_MAX) _wfWhere.delete(_wfWhere.keys().next().value); return p; };
+  function findWorkflowSnapshot(runId, claudeSessionId, cwd, runDir = null) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const tryPath = (p) => { try { return fs.existsSync(p) ? p : null; } catch { return null; } };
     // 1) targeted: exact project dir for the cwd
@@ -260,19 +264,18 @@ function setup(ctx) {
       const hit = tryPath(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId, 'workflows', `${runId}.json`));
       if (hit) return hit;
     }
+    // THE RUN IS FOUND (B-360d part 2): its snapshot, when written, is the one beside its run dir — nothing to walk for
+    if (runDir) return tryPath(path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', `${runId}.json`));
+    // a snapshot an earlier walk found: that one path
+    { const kept = _wfWhere.get('snap:' + runId); if (kept) { if (tryPath(kept)) return kept; _wfWhere.delete('snap:' + runId); } }
     // 2) session id known, unknown/mismatched cwd: scan project dirs
     if (claudeSessionId) {
-      let known = false;
       try {
         for (const dir of fs.readdirSync(projectsDir)) {
           const hit = tryPath(path.join(projectsDir, dir, claudeSessionId, 'workflows', `${runId}.json`));
           if (hit) return hit;
-          if (!known) known = sessionIn(path.join(projectsDir, dir), claudeSessionId);
         }
       } catch {}
-      // THE SESSION IS KNOWN (B-360d part 2): its snapshot is written under its own dir or not yet at all, so a running
-      // workflow's poll stops here; the walk of every session below is only for a session found in no project dir
-      if (known) return null;
     }
     // 3) last resort: runId is unique — walk every session dir
     try {
@@ -281,7 +284,7 @@ function setup(ctx) {
         let sids = []; try { sids = fs.readdirSync(base); } catch {}
         for (const sid of sids) {
           const hit = tryPath(path.join(base, sid, 'workflows', `${runId}.json`));
-          if (hit) return hit;
+          if (hit) return keepWhere('snap:' + runId, hit);   // kept: the next poll asks this one path
         }
       }
     } catch {}
@@ -346,29 +349,23 @@ function setup(ctx) {
     const sub = (base) => path.join(base, 'subagents', 'workflows', runId);
     const tryDir = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory() ? p : null; } catch { return null; } };
     if (claudeSessionId && cwd) { const h = tryDir(sub(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId))); if (h) return h; }
+    // a run dir an earlier walk found (B-360d part 2: a fork's view of its parent's run): that one path
+    { const kept = _wfWhere.get('dir:' + runId); if (kept) { if (tryDir(kept)) return kept; _wfWhere.delete('dir:' + runId); } }
     if (claudeSessionId) {
-      let known = false;
-      try { for (const dir of fs.readdirSync(projectsDir)) { const h = tryDir(sub(path.join(projectsDir, dir, claudeSessionId))); if (h) return h; if (!known) known = sessionIn(path.join(projectsDir, dir), claudeSessionId); } } catch {}
-      if (known) return null;   // THE SESSION IS KNOWN (B-360d part 2): its run dir is under its own dir or nowhere
+      try { for (const dir of fs.readdirSync(projectsDir)) { const h = tryDir(sub(path.join(projectsDir, dir, claudeSessionId))); if (h) return h; } } catch {}
     }
     try {
       for (const dir of fs.readdirSync(projectsDir)) {
         const base = path.join(projectsDir, dir);
         let sids = []; try { sids = fs.readdirSync(base); } catch {}
-        for (const sid of sids) { const h = tryDir(sub(path.join(base, sid))); if (h) return h; }
+        for (const sid of sids) { const h = tryDir(sub(path.join(base, sid))); if (h) return keepWhere('dir:' + runId, h); }   // kept: the next poll asks this one path
       }
     } catch {}
     return null;
   }
 
-  // Journal retry chains (2.181.1): the text parser lives in src/workflow-disk.js
-  // (ONE implementation — the disk view and the snapshot's superseded tagging
-  // below read the same arithmetic).
-  function journalAttempts(runDir) {
-    let text = '';
-    try { text = fs.readFileSync(path.join(runDir, 'journal.jsonl'), 'utf-8'); } catch {}
-    return journalAttemptsFromText(text);
-  }
+  // Journal retry chains (2.181.1): the arithmetic lives in src/workflow-disk.js (ONE implementation); a local run's journal is
+  // read through journalOf below — the disk view and the snapshot's superseded tagging read the same kept fold (B-360d part 2)
 
   // ONE live view for the card AND the window (2.369.119, owner: "怎么这个内外实现还不一样？"):
   // the normalizer of the session that launched the run holds the harness's own
@@ -441,13 +438,15 @@ function setup(ctx) {
   }
   // THE JOURNAL, FOLDED AS IT GROWS (B-360d part 2, lane chrome-157): a live run's journal is append-only and its result lines
   // carry each agent's whole result. Every poll read and parsed it WHOLE — at 300 agents × 32 KB results (a 9.4 MB journal,
-  // the test machine) the loop held 133 ms a poll, three pollers every 2.5 s. Kept per run dir: the bytes read so far and their
-  // fold; a poll reads only the bytes appended since and folds their complete lines, a slice at a time (≤ JOURNAL_SLICE, the loop
-  // given back between); a journal that shrank or was replaced (another inode) is read again from its start; the pollers of one
-  // run share one read. A last line with no newline yet is folded when it is whole JSON (the old whole-text parse read it too).
+  // the test machine) the loop held 75 ms a poll, three pollers every 2.5 s. Kept per run dir: the bytes read so far, the last
+  // JOURNAL_EDGE of them and their fold; a poll reads only the bytes appended since and folds their complete lines, a slice at a
+  // time (≤ JOURNAL_SLICE, the loop given back between); a line longer than a slice waits as pieces (joined once, at its end).
+  // A journal that shrank, was replaced (another inode) or was REWRITTEN IN PLACE (the bytes just before where the fold goes on
+  // are not the ones it read there — checked whenever the file moved) is read again from its start; the pollers of one run
+  // share one read. A last line with no newline yet is folded once it is whole JSON (the old whole-text parse read it too).
   const _wfJournals = new Map();
-  const JOURNAL_SLICE = 512 * 1024;
-  const freshJournal = () => ({ ino: null, offset: 0, tail: Buffer.alloc(0), fold: journalFold(null, '') });
+  const JOURNAL_SLICE = 512 * 1024, JOURNAL_EDGE = 64;
+  const freshJournal = () => ({ ino: null, mtimeMs: 0, offset: 0, edge: Buffer.alloc(0), tail: [], fold: journalFold(null, '') });
   function journalOf(runDir) {
     let e = _wfJournals.get(runDir);
     if (e && e.inflight) return e.inflight;
@@ -459,26 +458,36 @@ function setup(ctx) {
       let st = null; try { st = await fs.promises.stat(fp); } catch { st = null; }
       if (!st) { Object.assign(e, freshJournal()); return journalAttemptsOf(e.fold); }
       if (st.ino !== e.ino || st.size < e.offset) Object.assign(e, freshJournal(), { ino: st.ino });
-      if (st.size > e.offset) {
+      const moved = st.size > e.offset || st.mtimeMs !== e.mtimeMs;
+      if (moved) {
         let fh = null;
         try {
           fh = await fs.promises.open(fp, 'r');
+          if (e.offset > 0) {   // REWRITTEN IN PLACE? the bytes before the fold's offset must be the ones it read there
+            const b = Buffer.alloc(e.edge.length);
+            const { bytesRead } = await fh.read(b, 0, b.length, e.offset - e.edge.length);
+            if (bytesRead !== b.length || !b.equals(e.edge)) Object.assign(e, freshJournal(), { ino: st.ino });
+          }
           while (e.offset < st.size) {
             const want = Math.min(JOURNAL_SLICE, st.size - e.offset);
             const buf = Buffer.alloc(want);
             const { bytesRead } = await fh.read(buf, 0, want, e.offset);
             if (!bytesRead) break;
+            const piece = buf.subarray(0, bytesRead);
             e.offset += bytesRead;
-            const chunk = e.tail.length ? Buffer.concat([e.tail, buf.subarray(0, bytesRead)]) : buf.subarray(0, bytesRead);
-            const nl = chunk.lastIndexOf(0x0a);   // a newline byte never sits inside a UTF-8 sequence: the cut is a line's end
-            if (nl < 0) { e.tail = Buffer.from(chunk); continue; }
-            journalFold(e.fold, chunk.toString('utf8', 0, nl + 1));
-            e.tail = Buffer.from(chunk.subarray(nl + 1));
+            e.edge = Buffer.from(piece.length >= JOURNAL_EDGE ? piece.subarray(piece.length - JOURNAL_EDGE) : Buffer.concat([e.edge, piece]).subarray(-JOURNAL_EDGE));
+            const nl = piece.lastIndexOf(0x0a);   // the pieces waiting hold no newline: a line's end is in this piece or not read yet
+            if (nl < 0) { e.tail.push(piece); continue; }
+            // a newline byte never sits inside a UTF-8 sequence: the cut is a line's end, the text decodes whole
+            const text = Buffer.concat([...e.tail, piece.subarray(0, nl + 1)]).toString('utf8');
+            e.tail = nl + 1 < piece.length ? [piece.subarray(nl + 1)] : [];
+            journalFold(e.fold, text);
             if (e.offset < st.size) await new Promise((r) => setImmediate(r));   // the loop given back between slices
           }
         } catch { /* a read that failed keeps what it folded; the next poll goes on from there */ } finally { if (fh) await fh.close().catch((err) => console.warn('[workflow] the journal\'s close failed:', err && err.message)); }
+        e.mtimeMs = st.mtimeMs;
       }
-      if (e.tail.length) { const t = e.tail.toString('utf8').trim(); let whole = false; try { JSON.parse(t); whole = true; } catch { } if (whole) { journalFold(e.fold, t); e.tail = Buffer.alloc(0); } }
+      if (moved && e.tail.length) { const t = Buffer.concat(e.tail).toString('utf8').trim(); let whole = false; if (t.endsWith('}')) { try { JSON.parse(t); whole = true; } catch { } } if (whole) { journalFold(e.fold, t); e.tail = []; } }
       return journalAttemptsOf(e.fold);
     })().finally(() => { e.inflight = null; });
     return e.inflight;
@@ -527,8 +536,8 @@ function setup(ctx) {
     // run is going again ⇒ serve the live skeleton until the new terminal
     // snapshot overwrites it. Margin: completed runs write the snapshot ≤0.1s
     // after the last journal line; a resume trails it by minutes.
-    const fp = findWorkflowSnapshot(runId, claudeSessionId || '', cwd || '');
     const runDir = findWorkflowRunDir(runId, claudeSessionId || '', cwd || '');
+    const fp = findWorkflowSnapshot(runId, claudeSessionId || '', cwd || '', runDir);   // B-360d part 2: a run found is not walked for
     if (fp) {
       try {
         if (runDir) {
@@ -549,7 +558,7 @@ function setup(ctx) {
         // lingers next to the snapshot; harmless if it's already gone)
         try {
           if (runDir) {
-            const { superseded } = journalAttempts(runDir);
+            const { superseded } = await journalOf(runDir);   // B-360d part 2: the kept fold, never the whole journal read on the loop
             for (const ph of out.phases || []) for (const ag of ph.agents || []) {
               if (superseded.has(ag.agentId) && ag.state !== 'done') ag.state = 'superseded';
             }

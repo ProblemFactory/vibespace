@@ -67,17 +67,18 @@ function journalFold(state, text) {
     if (o.type === 'started') {
       started.add(o.agentId);
       if (o.key) { keyOf.set(o.agentId, o.key); lastAttempt.set(o.key, o.agentId); }
-      if (!info.has(o.agentId)) info.set(o.agentId, { label: typeof o.label === 'string' ? o.label : null, phase: typeof o.phase === 'string' ? o.phase : null });
+      if (!info.has(o.agentId)) info.set(o.agentId, Object.freeze({ label: typeof o.label === 'string' ? o.label : null, phase: typeof o.phase === 'string' ? o.phase : null }));
     } else if (o.type === 'result') done.add(o.agentId);
     else if (o.type === 'failed') failed.add(o.agentId);
   }
   return s;
 }
+// the answer is a COPY (round wvinqg1j4): a caller that changes it never changes the kept fold (its info entries are frozen)
 function journalAttemptsOf(state) {
   const { started, done, keyOf, lastAttempt, failed, info } = state || journalFold(null, '');
   const superseded = new Set();
   for (const [id, k] of keyOf) { if (!done.has(id) && lastAttempt.get(k) !== id) superseded.add(id); }
-  return { started, done, superseded, failed, info };
+  return { started: new Set(started), done: new Set(done), superseded, failed: new Set(failed), info: new Map(info) };
 }
 function journalAttemptsFromText(text) { return journalAttemptsOf(journalFold(null, text)); }
 

@@ -175,8 +175,6 @@ const ROWS = [
   ["src/routes/sessions.js", "setup > findWorkflowSnapshot", 1, "local-only", "base = ~/.claude/projects/<dir> (the CLI's transcript tree)"],
   ["src/routes/sessions.js", "setup > findWorkflowRunDir > tryDir", 2, "local-only", "p = ~/.claude/projects/<dir>/<sid>/subagents/workflows/<runId> (cwd only via cwdToProjectDir)"],
   ["src/routes/sessions.js", "setup > findWorkflowRunDir", 1, "local-only", "base = ~/.claude/projects/<dir> (the CLI's transcript tree)"],
-  ["src/routes/sessions.js", "setup > sessionIn", 2, "local-only", "~/.claude/projects/<dir>/<sid> and <sid>.jsonl (os.homedir(); the session the poll names) — B-360d part 2: is that session known in this project dir"],
-  ["src/routes/sessions.js", "setup > journalAttempts", 1, "local-only", "runDir from findWorkflowRunDir — under ~/.claude/projects"],
   ["src/routes/sessions.js", "setup > route:GET /api/workflow", 5, "local-only", "fp / runDir from findWorkflowSnapshot / findWorkflowRunDir — under ~/.claude/projects (runId regex-checked)"],
   ["src/routes/sessions.js", "setup > _sweepOnce", 1, "local-only", "BUFFERS_DIR = <checkout>/data/session-buffers (server.js ctx) — the sweep's -cure: the sweep is _sweepOnce, _runSessionsSweep only counts its failures"],
   ["src/routes/window-targets.js", "*", 1, "local-only", "r.file = the engine's screenshot under data/window-shots/ (window-targets-engine screenshot())"],
