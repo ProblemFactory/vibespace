@@ -241,7 +241,7 @@ function backlogWithRow(list, { backlogRow, backlogAdd } = {}) {
     if (!backlogAdd || typeof backlogAdd !== 'object' || Array.isArray(backlogAdd)) throw bad('backlogAdd is one row');
     if (typeof backlogAdd.text !== 'string' || !backlogAdd.text.trim()) throw bad('backlogAdd.text is the row\'s line (words)');
     const { id: _id, claimedBy: _claims, ...row } = backlogAdd;   // a new row's id is the store's; nobody's claim rides a page's add
-    const sameAdd = (b) => Number(row.addedAt) > 0 && Number(b.addedAt) === Number(row.addedAt) && String(b.addedBy || '') === String(row.addedBy || '') && String(b.text || '') === row.text.trim().slice(0, CAPS.backlogItem);
+    const sameAdd = (b) => Number(row.addedAt) > 0 && Number(b.addedAt) === Number(row.addedAt) && String(b.addedBy || '') === String(row.addedBy || '') && String(b.text || '').trim() === row.text.slice(0, CAPS.backlogItem).trim();   // both sides trimmed (r1699 (6): a row stored by another road keeps its spaces)
     if (!next.some(sameAdd)) next.push(row);   // a try whose answer was lost, sent again: taken once
   }
   return next;
@@ -2866,6 +2866,7 @@ class TaskGroupManager {
       contentUpdatedAt: now,
     };
     this._state.tasks[id] = t;
+    this._archRebound(t.sessions);   // B-0248 step 3 follow (r1699 (1)): a member named at the group's creation is a person's act — an owed archive unbind of it is not retried
     // lane lg-group-parents (the U2 read, MAJOR 1): an id given out fresh never inherits an edge left on disk by a group of the
     // same id that is gone (a hand edit, an older build's remove) — no child is adopted without the owner choosing it
     const purged = [];   // the chain's cure (E): each child rewritten is named in the change notice
@@ -3150,8 +3151,9 @@ class TaskGroupManager {
     // BASELINE LAW STANDS (the census cure, 主开发 2026-11-19 08:56Z — the hunt's finding 3): from the hand-off until the store says it
     // holds the unbind (persisted() true), its keys stay OUT of the baseline — a pass meanwhile sees them as new and hands the landing
     // again; a landing that fails keeps them out; a landed one puts them back into the CURRENT baseline (a conversation bound again
-    // after it stays). The crash window: the user-state file (this pass's list) is written before this hook, so a kill before the
-    // writer's next write leaves the conversation a member — the same window as the synchronous landing had, now the writer's own.
+    // after it stays). THE CRASH WINDOW is the writer's: the user-state file (this pass's list) is written before this hook, so a kill
+    // before the writer's next write leaves the archived conversation a member for good (the next start's baseline already holds its
+    // key) — a window the release had only on a failed landing; now it is every unbind's, milliseconds unless the storage stalls.
     if (changed.length) { const gen = ++this._archGen; for (const k of due) this._archOwed.set(k, gen); }   // each key owed BY ITS UNBIND (a later one is a later generation)
     if (this._archOwed.size) this._landArchived();
     for (const k of this._archOwed.keys()) this._archSeen.delete(k);

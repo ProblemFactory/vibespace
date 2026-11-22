@@ -582,6 +582,23 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const ARheldOff = M5.load('src/agent-routes.js', anchored(arSrcH, "  if (code === 'unreachable' && heldReach(res)) return;\n", '', 'the held reach line'), 'held-off');
     const heldX = await targetLeg(ARheldOff, LC, 'r5-target-held-red', { parentLive: false, held: true });
     ok(heldX.toFork === '404:unreachable', `CONTROL (a copy without the held line): the held store's miss reads «outside your reach» (404 unreachable — red) (${heldX.toFork})`);
+    // r1699 (2): THE LEGACY DIRECT LANE (an instance with no groups engine) says the same held line — RED (anchored): the cut line
+    const legacyLeg = async (ARmod, held) => {
+      const ss = new Map([['w-S', { claudeSessionId: T, backend: 'claude', name: 'sender', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_S', _initialGroupId: 'tg1' }]]);
+      const tasks = { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => null,
+        ...(held ? { unreadRefusal: (act) => `Task Groups: ${act} was refused — task-groups.json in VibeSpace's data folder could not be read (EIO) (a stand-in)` } : {}) };
+      const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+      ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks,
+        sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x, id) => (x.claudeSessionId ? 'claude:' + x.claudeSessionId : 'webui:' + id), serverSetting: () => undefined,
+        integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: { deliverToConversation: async () => ({ ok: false, reason: 'a stand-in' }) }, getGroups: () => null });
+      const r = await new Promise((resolve) => { let status = 200; Promise.resolve(rts['POST /api/agent/msg/send']({ headers: { authorization: 'Bearer vsst_S' }, body: { to: 'nobody here', text: 'hello' }, query: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } })).catch((e) => resolve({ status: 500, body: { error: e.message } })); });
+      return `${r.status}:${r.body.code || (r.body.error ? 'error' : 'ok')}`;
+    };
+    const lg = await legacyLeg(AR, true), lgOpen = await legacyLeg(AR, false);
+    ok(lg === '503:TASK_GROUPS_UNREAD' && lgOpen === '404:error', `the legacy direct lane (no groups engine): a miss while the store is held says the held line (503 TASK_GROUPS_UNREAD); not held it is the release's 404 (${lg} / ${lgOpen})`);
+    const ARlegacyOff = M5.load('src/agent-routes.js', anchored(arSrcH, "  if (!reachable.length) { if (heldReach(res)) return; return res.status(404)", "  if (!reachable.length) { return res.status(404)", 'the legacy lane\'s held line'), 'legacy-held-off');
+    const lgX = await legacyLeg(ARlegacyOff, true);
+    ok(lgX === '404:error', `CONTROL (a copy without the legacy lane's held line): the held store's miss reads «not visible to you» (404 — red) (${lgX})`);
     const live = await targetLeg(AR, LC, 'r5-target-live', { parentLive: true });
     ok(!live.forkListed && live.toFork === '404:unreachable' && live.toParent === '200:ok' && live.askedOnParent === 1,
       `the parent live: the fork is not a peer and the PARENT is reachable by id (it was \`ambiguous\` beside its pending fork) — its own wake is its own (${JSON.stringify(live)})`);

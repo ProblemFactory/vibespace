@@ -122,12 +122,18 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     if (!b || !b.querySelector('.task-log-addwrap')) return;   // not the Backlog tab's body: what state holds stays
     const add = b.querySelector('.task-log-add'), addD = b.querySelector('.task-log-addwrap .task-log-edit-detail');
     state.blAdd = { text: add ? add.value : '', detail: addD ? addD.value : '', open: !!(addD && !addD.classList.contains('hidden')) };
-    const form = b.querySelector('.task-log-edit[data-bl-id]');
-    const ti = form && form.querySelector('input'), ta = form && form.querySelector('textarea'), ps = form && form.querySelector('select');
-    if (form && state.blEdit && state.blEdit.id === form.dataset.blId) state.blEdit = { ...state.blEdit, ti: ti.value, ta: ta.value, ps: ps.value };
-    const act = document.activeElement, hit = [['add', add], ['addDetail', addD], ['ti', ti], ['ta', ta]].find(([, el]) => el && el === act);
-    state.blFocus = hit ? { where: hit[0], sel: typeof act.selectionStart === 'number' ? [act.selectionStart, act.selectionEnd] : null } : null;
+    // EVERY open editor, by its row's id (r1699 (4): two editors open keep both)
+    const forms = [...b.querySelectorAll('.task-log-edit[data-bl-id]')], act = document.activeElement;
+    let hit = [['add', add], ['addDetail', addD]].find(([, el]) => el && el === act), fid = null;
+    for (const form of forms) {
+      const d = blEdits().get(form.dataset.blId);
+      const ti = form.querySelector('input'), ta = form.querySelector('textarea'), ps = form.querySelector('select');
+      if (d) blEdits().set(d.id, { ...d, ti: ti.value, ta: ta.value, ps: ps.value });
+      if (!hit && (act === ti || act === ta)) { hit = [act === ti ? 'ti' : 'ta', act]; fid = form.dataset.blId; }
+    }
+    state.blFocus = hit ? { where: hit[0], id: fid, sel: typeof act.selectionStart === 'number' ? [act.selectionStart, act.selectionEnd] : null } : null;
   };
+  const blEdits = () => state.blEdits || (state.blEdits = new Map());   // row id → its open editor's draft (opened values + what is typed)
   const clip80 = (v) => { const x = String(v || ''); return x.length > 80 ? x.slice(0, 79) + '…' : x; };
   const render = () => {
     captureBacklogDraft();
@@ -567,8 +573,8 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     // → true (taken) · false (refused / not taken: what was typed stays) · null (nothing to send). `base` = what the fields were when the
     // press began (the editor's own opening values: a box's own normalization is never sent as an edit); a close / reopen carries the
     // status the press SAW (an agent's close meanwhile is refused, never written over)
-    const patchItem = async (idx, fn, base = null) => {
-      const was = (task.backlog || [])[idx];
+    const patchItem = async (row0, fn, base = null) => {
+      const was = (task.backlog || []).find((b) => b && row0 && b.id === row0.id);   // r1699 (5): the row by its OWN id, never by where it was drawn
       if (!was || !was.id) return false;
       const now = fn({ ...was });
       const ref = base || was;
@@ -588,7 +594,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     const PRIO_LABEL = () => ({ high: t('High'), normal: t('Normal'), low: t('Low') });
     const setPriority = (it, p) => {
       if (normalizePriority(it.priority) === p) return;
-      patchItem(it._i, (b) => ({ ...b, priority: p }));
+      patchItem(it, (b) => ({ ...b, priority: p }));
     };
     const prioChip = (p) => {
       const n = normalizePriority(p);
@@ -606,7 +612,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       // parker == claimant is the common case (parking auto-claims) — collapse it
       // into ONE part instead of repeating the same session as two loud chips
       const selfClaim = !!it.addedBy && claims.includes(it.addedBy);
-      const claimX = (k) => `<button class="task-log-claim-x" data-unclaim="${escHtml(k)}" data-bidx="${it._i}" title="${escHtml(t('Remove this claim'))}">×</button>`;
+      const claimX = (k) => `<button class="task-log-claim-x" data-unclaim="${escHtml(k)}" data-bid="${escHtml(it.id || '')}" title="${escHtml(t('Remove this claim'))}">×</button>`;
       if (it.addedBy || it.addedAt) {
         html += `<span class="task-log-attr-part" title="${escHtml(t('Parked by') + (it.addedAt ? ' · ' + whenOn(app, it.addedAt) : ''))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}${selfClaim ? `<span class="task-log-selfclaim" title="${escHtml(t('Claimed by {n} session(s)', { n: claims.length }))}">⚑</span>${claimX(it.addedBy)}` : ''}</span>`;
       }
@@ -650,7 +656,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       }
       prioWrap.append(prioLbl, ps);
       const opened = draft && draft.opened ? draft.opened : { text: ti.value, detail: ta.value, priority: ps.value };   // read back: the boxes' own form of the row
-      state.blEdit = { id: it.id, text: it.text, opened, ti: ti.value, ta: ta.value, ps: ps.value };
+      blEdits().set(it.id, { id: it.id, text: it.text, opened, ti: ti.value, ta: ta.value, ps: ps.value });
       const btns = document.createElement('div');
       btns.className = 'task-log-edit-btns';
       const save = document.createElement('button');
@@ -660,12 +666,12 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
         if (!text) return;
         const base = { ...it, text: opened.text.trim(), priority: opened.priority };
         if (opened.detail.trim()) base.detail = opened.detail.trim(); else delete base.detail;
-        const took = await patchItem(it._i, (b) => { b.text = text; b.priority = ps.value; if (ta.value.trim()) b.detail = ta.value.trim(); else delete b.detail; return b; }, base);
-        if (took !== false) { state.blEdit = null; render(); }   // taken (or nothing changed): closed; refused: it stays with what was typed
+        const took = await patchItem(it, (b) => { b.text = text; b.priority = ps.value; if (ta.value.trim()) b.detail = ta.value.trim(); else delete b.detail; return b; }, base);
+        if (took !== false) { blEdits().delete(it.id); render(); }   // taken (or nothing changed): closed; refused: it stays with what was typed
       };
       const cancel = document.createElement('button');
       cancel.className = 'task-detail-btn'; cancel.textContent = t('Cancel');
-      cancel.onclick = () => { state.blEdit = null; render(); };
+      cancel.onclick = () => { blEdits().delete(it.id); render(); };
       btns.append(save, cancel);
       form.append(ti, prioWrap, ta, btns);
       replaceEl.replaceWith(form);
@@ -729,12 +735,12 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       };
       btn('✎', t('Edit text and detail'), () => editForm(it, row));
       if (it.status === 'open') {
-        btn('✓', t('Mark decided/finished'), () => patchItem(it._i, (b) => ({ ...b, status: 'done', resolvedBy: 'user', resolvedAt: Date.now() })));
-        btn('⊘', t('Drop as obsolete'), () => patchItem(it._i, (b) => ({ ...b, status: 'dropped', resolvedBy: 'user', resolvedAt: Date.now() })));
+        btn('✓', t('Mark decided/finished'), () => patchItem(it, (b) => ({ ...b, status: 'done', resolvedBy: 'user', resolvedAt: Date.now() })));
+        btn('⊘', t('Drop as obsolete'), () => patchItem(it, (b) => ({ ...b, status: 'dropped', resolvedBy: 'user', resolvedAt: Date.now() })));
       } else {
-        btn('↺', t('Reopen'), () => patchItem(it._i, (b) => { const nb = { ...b, status: 'open' }; delete nb.resolvedBy; delete nb.resolvedAt; return nb; }));
+        btn('↺', t('Reopen'), () => patchItem(it, (b) => { const nb = { ...b, status: 'open' }; delete nb.resolvedBy; delete nb.resolvedAt; return nb; }));
       }
-      btn('×', t('Delete item'), () => patchItem(it._i, () => null));
+      btn('×', t('Delete item'), () => patchItem(it, () => null));
       const metaRow = document.createElement('div');
       metaRow.className = 'task-log-blmeta';
       metaRow.innerHTML = attrHtml(it);
@@ -824,27 +830,35 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     body.appendChild(addWrap);
     // B-0248 step 3: what was typed comes back (captureBacklogDraft)
     if (state.blAdd) { if (state.blAdd.text || state.blAdd.detail) { add.value = state.blAdd.text; addDetail.value = state.blAdd.detail; } if (state.blAdd.open) addDetail.classList.remove('hidden'); }
-    const ed = state.blEdit;
-    if (ed) {
+    // every open editor comes back on its row (r1699 (4): NO TYPED WORD IS LOST WITHOUT A WORD)
+    const hidden = state.blHidden || (state.blHidden = new Set());
+    for (const ed of [...blEdits().values()]) {
       const it = items.find((x) => x.id === ed.id), rowEl = it ? [...body.querySelectorAll('.task-log-bl')].find((el) => el.dataset.blId === ed.id) : null;
-      if (rowEl) editForm(it, rowEl, ed);
-      else if (!it) {
-        // the row was REMOVED meanwhile: SAID by its text (r1443 (iii)); what was typed into its editor goes to the add box when that is empty
-        state.blEdit = null;
+      if (rowEl) { editForm(it, rowEl, ed); hidden.delete(ed.id); continue; }
+      if (!it) {
+        // the row was REMOVED meanwhile: SAID by its text (r1443 (iii)); what was typed goes to the add box when that is empty, else it is
+        // said in the notice itself, with a Copy
+        blEdits().delete(ed.id); hidden.delete(ed.id);
         const typedT = String(ed.ti || '').trim(), typedD = String(ed.ta || '');
         const typed = !!ed.opened && (typedT !== ed.opened.text.trim() || typedD.trim() !== ed.opened.detail.trim());
         const into = typed && !add.value.trim() && !addDetail.value.trim();
         if (into) { add.value = typedT; addDetail.value = typedD; if (typedD.trim()) addDetail.classList.remove('hidden'); state.blAdd = { text: typedT, detail: typedD, open: !!typedD.trim() }; }
-        showToast(into ? t('"{text}" was removed from this group\'s backlog meanwhile — what you typed is in the add box', { text: clip80(ed.text) }) : t('"{text}" was removed from this group\'s backlog meanwhile', { text: clip80(ed.text) }), { type: 'error' });
-      } else if (state.blHiddenSaid !== ed.id) {
-        // still there, but this view's filter hides it now (closed or reopened meanwhile): the edit is KEPT until it shows again
-        state.blHiddenSaid = ed.id;
-        showToast(t('"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again', { text: clip80(ed.text) }));
+        const words = typedT + (typedD.trim() ? ' — ' + typedD.trim() : '');
+        if (into) showToast(t('"{text}" was removed from this group\'s backlog meanwhile — what you typed is in the add box', { text: clip80(ed.text) }), { type: 'error' });
+        else if (typed) showToast(t('"{text}" was removed from this group\'s backlog meanwhile — what you typed: {words}', { text: clip80(ed.text), words: words.length > 400 ? words.slice(0, 399) + '…' : words }), { type: 'error', pinned: true, action: { label: t('Copy'), run: () => { import('./utils.js').then(({ copyText }) => copyText(words)); } } });
+        else showToast(t('"{text}" was removed from this group\'s backlog meanwhile', { text: clip80(ed.text) }), { type: 'error' });
+        continue;
+      }
+      // still there, but this view's filter hides it now (closed or reopened meanwhile): the edit is KEPT — said each time it is hidden,
+      // with the one press that drops it
+      if (!hidden.has(ed.id)) {
+        hidden.add(ed.id);
+        showToast(t('"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again', { text: clip80(ed.text) }), { action: { label: t('Drop this edit'), run: () => { blEdits().delete(ed.id); hidden.delete(ed.id); } } });
       }
     }
     const f = state.blFocus; state.blFocus = null;
     if (f) {
-      const form = body.querySelector('.task-log-edit');
+      const form = f.id ? [...body.querySelectorAll('.task-log-edit')].find((x) => x.dataset.blId === f.id) : null;
       const el = f.where === 'add' ? add : f.where === 'addDetail' ? addDetail : form ? form.querySelector(f.where === 'ti' ? 'input' : 'textarea') : null;
       if (el) { el.focus(); if (f.sel && typeof el.setSelectionRange === 'function') { try { el.setSelectionRange(f.sel[0], f.sel[1]); } catch { } } }
     }
@@ -864,9 +878,8 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     body.querySelectorAll('.task-log-claim-x').forEach((el) => {
       el.onclick = (e) => {
         e.stopPropagation(); e.preventDefault();
-        const idx = Number(el.dataset.bidx);
         const key = el.dataset.unclaim;
-        const was = (task.backlog || [])[idx];
+        const was = (task.backlog || []).find((b) => b && b.id === el.dataset.bid);   // r1699 (5): the row by its own id
         if (was && was.id) sidebar._taskUpdate(taskId, { backlogRow: { id: was.id, unclaim: [key] } }, { onRefused: rowGone(was) }).then(tookRow);   // B-0248 step 3: this one claim leaves the LIVE row
       };
     });

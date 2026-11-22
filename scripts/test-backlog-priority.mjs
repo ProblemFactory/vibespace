@@ -475,7 +475,7 @@ console.log('(7) Backlog tab');
   const rows = sel.sortBacklog(stored.map((b, i) => ({ ...b, _i: i })));
   check('tab order: high, then normal/low newest-first by priority, resolved last', rows.map((r) => r.text).join('|') === 'mid high|old normal|new low|done one', rows.map((r) => r.text).join('|'));
   check('every sorted row still names ITS store index (_i) — a write patches the right item', rows.every((r) => stored[r._i].id === r.id));
-  // the Priority submenu's write: patchItem(it._i, b => ({ ...b, priority })) — ONE ROW by its id since B-0248 step 3 (the fields fn changed)
+  // the Priority submenu's write: patchItem(it, b => ({ ...b, priority })) — ONE ROW by its id since B-0248 step 3 (the fields fn changed)
   const target = rows.find((r) => r.text === 'old normal');
   const after = tasks.update(g7.id, { backlogRow: { id: target.id, set: { priority: 'high' } } }).backlog;
   const moved = after.find((b) => b.id === target.id);
@@ -495,7 +495,7 @@ console.log('(7) Backlog tab');
     'the Backlog tab lists sortBacklog(items), filtered after': (src) => /const visible = sortBacklog\(items\)\.filter\(\(it\) =>/.test(src),
     'a chip per non-normal row: class bl-prio bl-prio-<p>, normal ⇒ no chip': (src) => /if \(n === 'normal'\) return null;/.test(src) && /c\.className = 'bl-prio bl-prio-' \+ n;/.test(src) && /const chip = prioChip\(it\.priority\);\n\s*if \(chip\) top\.appendChild\(chip\);/.test(src),
     'chip words: t(High) / t(Low) with t(High priority) / t(Low priority) titles': (src) => /high: t\('High'\), normal: t\('Normal'\), low: t\('Low'\)/.test(src) && /t\('High priority'\) : t\('Low priority'\)/.test(src),
-    'setPriority = ONE whole-backlog write through patchItem (no local mutation)': (src) => /patchItem\(it\._i, \(b\) => \(\{ \.\.\.b, priority: p \}\)\);/.test(src) && !/it\.priority\s*=[^=]/.test(src) && /for \(const k of BACKLOG_ROW_FIELDS\) if \(now\[k\] !== ref\[k\]\) set\[k\] = now\[k\] === undefined \? null : now\[k\];/.test(src) && /return tookRow\(await sidebar\._taskUpdate\(taskId, \{ backlogRow: row \}, \{ onRefused: rowGone\(was\) \}\)\);/.test(src),   // B-0248 step 3: the write is ONE ROW now (the fields fn changed, by the row's id)
+    'setPriority = ONE whole-backlog write through patchItem (no local mutation)': (src) => /patchItem\(it, \(b\) => \(\{ \.\.\.b, priority: p \}\)\);/.test(src) && !/it\.priority\s*=[^=]/.test(src) && /for \(const k of BACKLOG_ROW_FIELDS\) if \(now\[k\] !== ref\[k\]\) set\[k\] = now\[k\] === undefined \? null : now\[k\];/.test(src) && /return tookRow\(await sidebar\._taskUpdate\(taskId, \{ backlogRow: row \}, \{ onRefused: rowGone\(was\) \}\)\);/.test(src),   // B-0248 step 3: the write is ONE ROW now (the fields fn changed, by the row's id)
     "the row's context menu carries a Priority submenu over PRIORITIES": (src) => /line\.addEventListener\('contextmenu'/.test(src) && /\{ label: t\('Priority'\), children: PRIORITIES\.map\(\(p\) => \(\{[^\n]*action: \(\) => setPriority\(it, p\) \}\)\) \}/.test(src),
     'Copy as Markdown exports the view order with the markers': (src) => /md = sortBacklog\(task\.backlog \|\| \[\]\)\n\s*\.filter\(/.test(src) && /\$\{priorityMarker\(it\.priority\) \? priorityMarker\(it\.priority\) \+ ' ' : ''\}\$\{it\.text\}/.test(src),
     'the ✎ editor has a Priority select and Save writes it': (src) => /prioLbl\.textContent = t\('Priority'\);/.test(src) && /b\.priority = ps\.value;/.test(src) && /form\.append\(ti, prioWrap, ta, btns\);/.test(src),
@@ -505,7 +505,7 @@ console.log('(7) Backlog tab');
   const cuts = [
     ['the Backlog tab lists sortBacklog(items), filtered after', ['const visible = sortBacklog(items).filter(', 'const visible = items.filter(']],
     ['a chip per non-normal row: class bl-prio bl-prio-<p>, normal ⇒ no chip', ['if (chip) top.appendChild(chip);', '']],
-    ['setPriority = ONE whole-backlog write through patchItem (no local mutation)', ['patchItem(it._i, (b) => ({ ...b, priority: p }));', 'it.priority = p; render();']],
+    ['setPriority = ONE whole-backlog write through patchItem (no local mutation)', ['patchItem(it, (b) => ({ ...b, priority: p }));', 'it.priority = p; render();']],
     ["the row's context menu carries a Priority submenu over PRIORITIES", ["{ label: t('Priority'), children:", "{ label: t('Priority'), kids:"]],
     ['the ✎ editor has a Priority select and Save writes it', ['b.priority = ps.value; ', '']],
     ['Copy as Markdown exports the view order with the markers', ['md = sortBacklog(task.backlog || [])', 'md = (task.backlog || [])']],
@@ -575,6 +575,16 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
   const a = await patch8(A.id, { backlog: [...A.pageCopy, { text: 'typed on an old page', status: 'open', addedBy: 'user', addedAt: 40 }] });
   const l2 = A.live(), typed = l2.find((b) => b.text === 'typed on an old page');
   check('…an old page\'s ADD (its copy + one row without an id) is taken as THAT row: the typed words kept (a fresh id, no claim), the agent\'s claims and row untouched', a.status === 200 && !!typed && /^B-[0-9a-f]{4,8}$/.test(typed.id) && typed.claimedBy.length === 0 && l2.length === 4 && l2.find((b) => b.id === A.R1).claimedBy.includes('claude:agentA') && l2.some((b) => b.text === 'agent parked'), JSON.stringify({ a: a.status, l2 }));
+  // r1699 (3): an old page's whole list is taken as an add ONLY with exactly one row without an id — two such rows, or a list whose only
+  // change is a removed row, are refused by name (nothing written)
+  const snap3 = JSON.stringify(A.live());
+  const two = await patch8(A.id, { backlog: [...A.pageCopy, { text: 'typed one', status: 'open' }, { text: 'typed two', status: 'open' }] });
+  check('an old page\'s whole list with TWO rows without an id is refused (409 backlog_whole), nothing written', two.status === 409 && two.body.code === 'backlog_whole' && JSON.stringify(A.live()) === snap3, JSON.stringify(two));
+  const rm = await patch8(A.id, { backlog: A.pageCopy.slice(1) });
+  check('an old page\'s whole list whose only change is a REMOVED row is refused (409 backlog_whole) — the row stays', rm.status === 409 && rm.body.code === 'backlog_whole' && JSON.stringify(A.live()) === snap3, JSON.stringify(rm));
+  // r1699 (6): a resend is recognised with BOTH sides trimmed (an API caller's add with spaces, sent twice with its stamp)
+  const sp1 = await patch8(A.id, { backlogAdd: { text: '  spaced words  ', status: 'open', addedBy: 'user', addedAt: 95 } }), sp2 = await patch8(A.id, { backlogAdd: { text: '  spaced words  ', status: 'open', addedBy: 'user', addedAt: 95 } });
+  check('an add with surrounding spaces, sent again with its stamp, is taken ONCE (both sides trimmed)', sp1.status === 200 && sp2.status === 200 && A.live().filter((b) => String(b.text).trim() === 'spaced words').length === 1, JSON.stringify(A.live().filter((b) => /spaced/.test(b.text))));
   // a row gone meanwhile (another window deleted it): refused by name, nothing written
   const del = await patch8(A.id, { backlogRow: { id: A.R2, remove: true } });
   const afterDel = JSON.stringify(A.live());
@@ -633,7 +643,7 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
   const SELF = 'scripts/' + path.basename(fileURLToPath(import.meta.url));
   const tree = [...read('src/lib', (f) => f.endsWith('.js')), ...read('scripts', (f) => f.endsWith('.mjs')).filter(([rel]) => rel !== SELF), ...read('data/bin', (f) => fs.statSync(path.join(REPO, 'data/bin', f)).isFile())];
   const hits = wholeSenders(tree);
-  check(`THE CENSUS: no caller in the tree sends the page route a whole backlog (${tree.length} files: src/lib, scripts, data/bin)`, hits.length === 0 && tree.length > 100, hits.join(' | '));
+  check(`THE CENSUS — its reach: src/lib, scripts, data/bin; LITERAL call bodies only (a body built in a variable before the call is not read; the route's 409 backlog_whole is the runtime belt): no caller in the tree sends the page route a whole backlog (${tree.length} files)`, hits.length === 0 && tree.length > 100, hits.join(' | '));
   const planted = wholeSenders([['src/lib/zz.js', "sidebar._taskUpdate(taskId, {\n  backlog: next.filter(Boolean) });"], ['src/lib/zw.js', "const patch = (p) => sidebar._taskUpdate(taskId, p);\npatch({ backlog });"], ['scripts/zz.mjs', "const patchT = (body) => fetch(`/api/tasks/${tid}`, { method: 'PATCH', body: J(body) });\nawait patchT({\n  backlog: [] });"]]);
   check('CONTROL: the census catches a planted page call (over two lines), a wrapper\'s shorthand, and a suite PATCH through a wrapper with its body on another line', planted.length === 3, planted.join(' | '));
   const plantedOk = wholeSenders([['scripts/zy.mjs', "const fixture = { 'T-1': { id: 'T-1', backlog: [], sessions: [] } };\nawait api('PATCH', `/api/tasks/${id}`, { color: '#61afef' });\nawait api('PATCH', `/api/tasks/${id}`, {\n  backlogAdd: { text: 'one row' } });"]]);
@@ -644,8 +654,10 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
     'a gone or moved row is SAID by its text, the call answered (no generic toast), at both row writes': (src) => /if \(!d \|\| \(d\.code !== 'backlog_row_gone' && d\.code !== 'backlog_row_moved'\)\) return false;/.test(src) && /t\('"\{text\}" is no longer in this group\\'s backlog — it was removed meanwhile; nothing was written', \{ text: clip80\(was\.text\) \}\)/.test(src) && (src.match(/\{ onRefused: rowGone\(was\) \}/g) || []).length === 2,
     'the add box keeps what was typed until the hub took the row (the CURRENT boxes cleared)': (src) => /try \{ took = tookRow\(await sidebar\._taskUpdate\(taskId, \{ backlogAdd: item \}\)\); \} finally \{ state\.blAdding = false; \}\s*if \(!took\) return;/.test(src) && /if \(cur && cur\.value === typed\) cur\.value = '';/.test(src),
     'an add sent again after a lost answer keeps its stamp': (src) => /const again = state\.blAddTry && state\.blAddTry\.typed === typed && state\.blAddTry\.detail === typedDetail;/.test(src) && /addedAt: state\.blAddTry\.addedAt \}/.test(src),
-    'what was typed survives a re-render: captured before every rebuild, put back after, a removed box is no press': (src) => /const render = \(\) => \{\n\s*captureBacklogDraft\(\);/.test(src) && /captureBacklogDraft\(\);\n\s*state\.rerendering = true; queueMicrotask\(\(\) => \{ state\.rerendering = false; \}\);\n\s*body\.innerHTML = '';\n\s*renderBacklog\(body\);/.test(src) && /if \(rowEl\) editForm\(it, rowEl, ed\);/.test(src) && /add\.addEventListener\('blur', \(e\) => \{ if \(!state\.rerendering &&/.test(src),
-    'the editor diffs against its OWN opening values; Save closes it only once the hub took it': (src) => /const opened = draft && draft\.opened \? draft\.opened : \{ text: ti\.value, detail: ta\.value, priority: ps\.value \};/.test(src) && /if \(took !== false\) \{ state\.blEdit = null; render\(\); \}/.test(src),
+    'what was typed survives a re-render: captured before every rebuild, put back after, a removed box is no press': (src) => /const render = \(\) => \{\n\s*captureBacklogDraft\(\);/.test(src) && /captureBacklogDraft\(\);\n\s*state\.rerendering = true; queueMicrotask\(\(\) => \{ state\.rerendering = false; \}\);\n\s*body\.innerHTML = '';\n\s*renderBacklog\(body\);/.test(src) && /if \(rowEl\) \{ editForm\(it, rowEl, ed\); hidden\.delete\(ed\.id\); continue; \}/.test(src) && /for \(const ed of \[\.\.\.blEdits\(\)\.values\(\)\]\) \{/.test(src) && /add\.addEventListener\('blur', \(e\) => \{ if \(!state\.rerendering &&/.test(src),
+    'the editor diffs against its OWN opening values; Save closes it only once the hub took it': (src) => /const opened = draft && draft\.opened \? draft\.opened : \{ text: ti\.value, detail: ta\.value, priority: ps\.value \};/.test(src) && /if \(took !== false\) \{ blEdits\(\)\.delete\(it\.id\); render\(\); \}/.test(src),
+    'every open editor is carried by its row id; a hidden one is said each time with its drop; a removed one\'s words are never lost without a word': (src) => /const forms = \[\.\.\.b\.querySelectorAll\('\.task-log-edit\[data-bl-id\]'\)\]/.test(src) && /\{ action: \{ label: t\('Drop this edit'\), run: \(\) => \{ blEdits\(\)\.delete\(ed\.id\); hidden\.delete\(ed\.id\); \} \} \}/.test(src) && /action: \{ label: t\('Copy'\)/.test(src),
+    'a press finds its row by the row\'s own id (never the drawn index)': (src) => /const was = \(task\.backlog \|\| \[\]\)\.find\(\(b\) => b && row0 && b\.id === row0\.id\);/.test(src) && /const was = \(task\.backlog \|\| \[\]\)\.find\(\(b\) => b && b\.id === el\.dataset\.bid\);/.test(src) && !/patchItem\(it\._i/.test(src),
     'a close / reopen carries the status the press saw; a hub that did not take a row is said': (src) => /if \(set\.status !== undefined\) row\.expect = \{ status: was\.status \|\| 'open' \};/.test(src) && /if \(data\.backlogRows\) return true;/.test(src),
   };
   for (const [name, fn] of Object.entries(pins8)) check(`pin: ${name}`, fn(TL8));
@@ -653,14 +665,17 @@ console.log('(8) the page\'s backlog by row (B-0248 step 3, r1436 / r1443)');
     ['a gone or moved row is SAID by its text, the call answered (no generic toast), at both row writes', ["{ onRefused: rowGone(was) }).then(tookRow);", '{}).then(tookRow);']],
     ['the add box keeps what was typed until the hub took the row (the CURRENT boxes cleared)', ['if (!took) return;', '']],
     ['an add sent again after a lost answer keeps its stamp', ['addedAt: state.blAddTry.addedAt }', 'addedAt: Date.now() }']],   // the cut writes the release's stamp back on purpose — stale-pins: kept
-    ['what was typed survives a re-render: captured before every rebuild, put back after, a removed box is no press', ['if (rowEl) editForm(it, rowEl, ed);', 'if (rowEl) {}']],
-    ['the editor diffs against its OWN opening values; Save closes it only once the hub took it', ['if (took !== false) { state.blEdit = null; render(); }', 'state.blEdit = null; render();']],
+    ['what was typed survives a re-render: captured before every rebuild, put back after, a removed box is no press', ['if (rowEl) { editForm(it, rowEl, ed); hidden.delete(ed.id); continue; }', 'if (rowEl) { continue; }']],
+    ['the editor diffs against its OWN opening values; Save closes it only once the hub took it', ['if (took !== false) { blEdits().delete(it.id); render(); }', 'blEdits().delete(it.id); render();']],
+    ['every open editor is carried by its row id; a hidden one is said each time with its drop; a removed one\'s words are never lost without a word', ["{ action: { label: t('Drop this edit'), run: () => { blEdits().delete(ed.id); hidden.delete(ed.id); } } }", '{}']],
+    ['a press finds its row by the row\'s own id (never the drawn index)', ['const was = (task.backlog || []).find((b) => b && row0 && b.id === row0.id);', 'const was = (task.backlog || [])[row0 && row0._i];']],
     ['a close / reopen carries the status the press saw; a hub that did not take a row is said', ["if (set.status !== undefined) row.expect = { status: was.status || 'open' };", '']],
   ];
   for (const [name, [x, y]] of cuts8) { const bad = TL8.replace(x, y); check(`negative control: cutting "${x.slice(0, 40)}" fails the pin "${name.slice(0, 40)}…"`, bad !== TL8 && !pins8[name](bad)); }
   const zh8 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja8 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const K8s = ['"{text}" is no longer in this group\'s backlog — it was removed meanwhile; nothing was written', '"{text}" was closed or reopened meanwhile by someone else — nothing was written; the list shows it now', 'This page is newer than VibeSpace — reload it once VibeSpace has restarted (nothing changed)', '"{text}" was removed from this group\'s backlog meanwhile — what you typed is in the add box', '"{text}" was removed from this group\'s backlog meanwhile', '"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again'].map((k) => '  ' + JSON.stringify(k) + ': ');
-  check('zh + ja carry the Backlog tab\'s six new sentences', K8s.every((k) => zh8.includes(k) && ja8.includes(k)), K8s.filter((k) => !zh8.includes(k) || !ja8.includes(k)).join(' | '));
+  K8s.push(...['"{text}" was removed from this group\'s backlog meanwhile — what you typed: {words}', 'Drop this edit'].map((k) => '  ' + JSON.stringify(k) + ': '));
+  check('zh + ja carry the Backlog tab\'s eight new sentences', K8s.every((k) => zh8.includes(k) && ja8.includes(k)), K8s.filter((k) => !zh8.includes(k) || !ja8.includes(k)).join(' | '));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

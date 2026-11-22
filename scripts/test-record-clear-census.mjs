@@ -1158,7 +1158,7 @@ const BELT = [
   ['src/lib/task-log.js', "if (p.id) items.push({ label: t('Clear content…'), action: () => clearRecords([{ kind: 'activity', groupId: taskId, id: p.id, at: p.at, words: p.note }]) });", 'the menu of an entry NOT cleared (menuItemsFor returns before it for a cleared one); the dialog is spent at the answer'],
   ['src/lib/task-log.js', '&& (matches(it.text) || matches(it.detail)));', 'a BACKLOG item (not a cleared kind)'],
   ['src/lib/task-log.js', "ti.className = 'task-detail-input'; ti.value = it.text;", 'a BACKLOG item (not a cleared kind)'],
-  ['src/lib/task-log.js', "state.blEdit = { id: it.id, text: it.text, opened, ti: ti.value, ta: ta.value, ps: ps.value };", 'a BACKLOG item (not a cleared kind): the open editor\'s draft, kept across a re-render (B-0248 step 3)'],
+  ['src/lib/task-log.js', "blEdits().set(it.id, { id: it.id, text: it.text, opened, ti: ti.value, ta: ta.value, ps: ps.value });", 'a BACKLOG item (not a cleared kind): the open editor\'s draft, kept across a re-render (B-0248 step 3)'],
   ['src/lib/task-log.js', 'txt.textContent = it.text;', 'a BACKLOG item (not a cleared kind)'],
   ['src/lib/task-log.js', '.filter((p) => (!state.session || p.session === state.session) && (matches(p.note) || matches(p.detail)));', 'the Copy-as-markdown FILTER (the Find text); the line it writes words a cleared entry (isCleared on the next line)'],
   ['src/lib/task-log.js', "&& (matches(it.text) || matches(it.detail)))", 'a BACKLOG item (not a cleared kind)'],

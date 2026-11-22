@@ -288,6 +288,27 @@ try {
   const blSaved = await until(async () => ((await groupOf(ir.id)).backlog || []).some((b) => b.text === '下周补投资人名单'), 10000);
   const blToast = await until(() => D.ev("window.__toastTexts().find((x) => /离开输入框就保存了/.test(x)) || null"), 5000);
   check('its box saves when LEFT (no Enter), and says so', !!blSaved && !!blToast, { blSaved, blToast });
+  // B-0248 step 3 follow (r1699 (8)): WHAT WAS TYPED SURVIVES A REBUILD. Every tasks-updated of the group (here: a note another writer
+  // files) rebuilds the Backlog tab whole; an open editor and the add box keep their words and the caret, and a box the rebuild
+  // removed saves NOTHING on its blur (the release wiped both, and a blur on a removed box could park a half-typed row)
+  const EMB = `(${W(ir.id)}).element.querySelector('.task-log-embedded')`;
+  const edPressed = await D.ev(`(() => { const r = [...${EMB}.querySelectorAll('.task-log-bl')].find((x) => /季度会前对齐数字口径/.test(x.textContent)); const b = r && [...r.querySelectorAll('.task-log-blbtn')].find((x) => x.textContent === '✎'); if (b) b.click(); return !!b; })()`);
+  await until(() => D.ev(`!!${EMB}.querySelector('.task-log-edit[data-bl-id] input')`), 5000);
+  await typeInto(D, `JS:${EMB}.querySelector('.task-log-edit[data-bl-id] input')`, '季度会前对齐数字口径（重建时打的字）');
+  await D.ev(`(() => { ${EMB}.querySelector('.task-log-edit[data-bl-id]').__vsMark = 1; return true; })()`);   // the rebuild draws a NEW form
+  await api('POST', `/api/tasks/${ir.id}/progress`, { note: '另一处写入的记录（重建）' });
+  const edKept = await until(() => D.ev(`(() => { const f = ${EMB}.querySelector('.task-log-edit[data-bl-id]'); if (!f || f.__vsMark) return null; return { text: f.querySelector('input').value, focus: document.activeElement === f.querySelector('input') }; })()`), 10000);
+  check('an OPEN EDITOR keeps what was typed across a rebuild a group update causes (a new form, the same words, the caret back)', edPressed === true && !!edKept && edKept.text === '季度会前对齐数字口径（重建时打的字）' && edKept.focus, { edPressed, edKept });
+  await D.ev(`(() => { const f = ${EMB}.querySelector('.task-log-edit[data-bl-id]'); const c = f && [...f.querySelectorAll('button')].find((b) => b.classList.contains('task-detail-btn')); if (c) c.click(); return !!c; })()`);   // Cancel: the editor closes, nothing written
+  await until(() => D.ev(`!${EMB}.querySelector('.task-log-edit')`), 5000);   // a DOM query in the page, not a pin on the source — stale-pins: kept
+  await typeInto(D, `JS:${EMB}.querySelector('.task-log-add')`, '重建时打在添加框的字');
+  await D.ev(`(() => { ${EMB}.querySelector('.task-log-add').__vsMark = 1; return true; })()`);
+  await api('POST', `/api/tasks/${ir.id}/progress`, { note: '另一处写入的记录（重建 2）' });
+  const addKept = await until(() => D.ev(`(() => { const a = ${EMB}.querySelector('.task-log-add'); if (!a || a.__vsMark) return null; return { text: a.value, focus: document.activeElement === a }; })()`), 10000);
+  await sleep(1500);   // a save on the removed box's blur would have landed by now
+  const addRows = ((await groupOf(ir.id)).backlog || []).filter((b) => /重建时打在添加框的字/.test(b.text)).length;
+  check('the ADD BOX keeps what was typed across a rebuild (the caret back), and the box the rebuild removed saved NOTHING on its blur', !!addKept && addKept.text === '重建时打在添加框的字' && addKept.focus && addRows === 0, { addKept, addRows });
+  await D.ev(`(() => { const a = ${EMB}.querySelector('.task-log-add'); a.value = ''; return true; })()`);   // left empty: the next steps leave the tab (a blur parks a box that holds words)
   await shot(D.S, 'desk-backlog.png');
   // 活动记录 — the viewer, its note box (Enter)
   await press(D, IN(ir.id, '.task-detail-tabs .sidebar-subtab[data-tab="activity"]'));

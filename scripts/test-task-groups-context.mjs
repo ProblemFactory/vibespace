@@ -666,6 +666,55 @@ console.log('— the bundle and the export —');
   const ArchNoRebound = SyncLand.load('src/task-groups.js', anchored(tgSrc, REBOUND, "t.sessions = sanitizeStrArray(patch.sessions, 2000);", 'a whole members write re-adds'), 'arch-norebound');
   const gsR = await gateScene(ArchNoRebound.TaskGroupManager, 'red-norebound');
   ok('CONTROL (a copy whose whole members write does not count as a re-add): the next pass unbinds the person\'s re-add again (red)', !gsR.afterReadd.member, gsR);
+  // r1699 (1)(2): THE OTHER ROADS THAT RE-ADD A MEMBER — a group CREATED with it, a config IMPORT naming it — win over an owed unbind
+  // as bind() does; and a landing whose promise the writer REFUSES leaves the unbind owed and the next pass asks again (nothing stuck)
+  const readdScene = async (Mgr, tag, road) => {
+    const d = path.join(root, 'fu-readd-' + tag); fs.mkdirSync(d, { recursive: true });
+    const W = gateWriter(), st = { archivedSessions: [] };
+    const m = new Mgr({ dataDir: d, homeDir: home, writer: W, readUserState: () => st, isLiveKey: () => false });
+    const t = m.create({ title: 'fu readd' }); m.bind(t.id, 'claude:r1'); W.flushSync();
+    m.noteArchived(['claude:r1']);   // archived: its unbind owed (the landing asked, not answered)
+    let gid = t.id;
+    if (road === 'create') gid = m.create({ title: 'fu new', sessions: ['claude:r1'] }).id;
+    else m.importBundle({ version: 1, tasks: [{ ...m.get(t.id), sessions: ['claude:r1'] }] }, { log: () => {} });
+    m.noteArchived(['claude:r1']);   // the next user-state write, the old unbind still on its way
+    W.flushSync(); while (W.answer(true)) { await tickA(); await tickA(); }
+    return { member: m.get(gid).sessions.includes('claude:r1'), owed: m._archOwed.has('claude:r1') };
+  };
+  const rc = await readdScene(TaskGroupManager, 'create', 'create');
+  ok('a group CREATED with a member whose archive unbind is owed keeps it at the next pass (the creation is a re-add)', rc.member && !rc.owed, rc);
+  const CREATE_RB = "    this._archRebound(t.sessions);   // B-0248 step 3 follow (r1699 (1))";
+  const NoCreate = SyncLand.load('src/task-groups.js', anchored(tgSrc, CREATE_RB, '    void 0;   // (cut)', 'the creation re-adds'), 'fu-nocreate');
+  const rcX = await readdScene(NoCreate.TaskGroupManager, 'create-red', 'create');
+  ok('CONTROL (a copy whose creation is no re-add): the next pass unbinds the member named at the creation (red)', !rcX.member, rcX);
+  const ri = await readdScene(TaskGroupManager, 'import', 'import');
+  ok('a config IMPORT naming a member whose archive unbind is owed keeps it at the next pass (the import is a re-add)', ri.member && !ri.owed, ri);
+  const IMPORT_RB = "      for (const id of late) if (this._state.tasks[id]) this._archRebound(this._state.tasks[id].sessions);";
+  const NoImport = SyncLand.load('src/task-groups.js', anchored(tgSrc, IMPORT_RB, '      void 0;   // (cut)', 'the import re-adds'), 'fu-noimport');
+  const riX = await readdScene(NoImport.TaskGroupManager, 'import-red', 'import');
+  ok('CONTROL (a copy whose import is no re-add): the next pass unbinds the imported member (red)', !riX.member, riX);
+  const rejectScene = async (Mgr, tag) => {
+    const d = path.join(root, 'fu-reject-' + tag); fs.mkdirSync(d, { recursive: true });
+    const W = gateWriter(), st = { archivedSessions: [] };
+    const m = new Mgr({ dataDir: d, homeDir: home, writer: W, readUserState: () => st, isLiveKey: () => false });
+    const t = m.create({ title: 'fu reject' }); m.bind(t.id, 'claude:j1'); W.flushSync(); void t;
+    let asks = 0; m.persisted = () => { asks++; return asks === 1 ? Promise.reject(new Error('the writer refused (a stand-in)')) : Promise.resolve(true); };
+    const swallow = () => {}; process.on('unhandledRejection', swallow);   // a copy without the refusal arm leaves one unhandled: the red's own, not a crash
+    try {
+      m.noteArchived(['claude:j1']);   // its landing asked: the promise REFUSES
+      await tickA(); await tickA();
+      const after1 = { landing: m._archLanding, owed: m._archOwed.has('claude:j1'), asks };
+      m.noteArchived(['claude:j1']);   // the next pass asks again
+      await tickA(); await tickA();
+      return { after1, asks, owedAfter: m._archOwed.has('claude:j1'), inBase: !!(m._archSeen && m._archSeen.has('claude:j1')) };
+    } finally { await tickA(); process.off('unhandledRejection', swallow); }
+  };
+  const rj = await rejectScene(TaskGroupManager, 'real');
+  ok('a landing whose promise the writer REFUSES: nothing stuck (no landing in flight), the unbind still owed; the next pass asks again, lands, and the key enters the baseline', rj.after1.landing === false && rj.after1.owed && rj.asks === 2 && !rj.owedAfter && rj.inBase, rj);
+  const REJECT_ARM = "    this.persisted().then(settle, () => settle(false));";
+  const NoArm = SyncLand.load('src/task-groups.js', anchored(tgSrc, REJECT_ARM, '    this.persisted().then(settle);', 'the refusal arm'), 'fu-noarm');
+  const rjX = await rejectScene(NoArm.TaskGroupManager, 'red');
+  ok('CONTROL (a copy without the refusal arm): the refused landing stays «in flight» for good and the next pass never asks again (red)', rjX.after1.landing === true && rjX.asks === 1, rjX);
 }
 
 { const rEnd = require('../src/store-writer.js').storeWriter().flushSync(); if (rEnd.left && rEnd.left.length) ok('the store writer\'s owed writes land before the scratch root goes', false, rEnd.left); }   // lane lg-store-writes U5 (loud: the U4/U5 cure, should 6)
