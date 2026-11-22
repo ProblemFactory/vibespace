@@ -1678,6 +1678,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - ITS READ (one adversarial read): a stand-in gh proves what gh RECEIVES (the env's names, nothing of the caller; its red control the same stand-in with the caller's env and a planted name); the generator's CLI (--repin / --allow-shas / --write) builds gh's env with the same scratchGhEnv, so pins and census read gh alike; the moved header's uppercase skip sentence reworded (the fast suite's skip-sentence row leaves with it).
 - TELEMETRY (row B-9dd0, a test reaching a vendor's host unseen): until this move the census ran the real gh with its caller's environment inside a FAST suite, so a machine with a gh could send that program's telemetry at a test run; the scratch environment now turns it off. The vendor-text leg names, at the pinned version, every variable its environment help puts beside an update check, telemetry or the network and prints «NOT SET» for one the env lacks — a report line until its first hosted run.
 
+### lg-group-parents — B-360d part 3 U3's suite: the legs wait for the read's hold itself (主开发 r2405)
+- THE RED: int361's census gate at 59594edc9, the box zone — test-usage-folder-reader crashed in ⑥'s control: «held.shift(...) is not a function». Three legs (③ the write over a read in flight, ⑤ the later reading, ⑥ a repair's replace) held the read at its file and waited TWENTY loop turns for the hold; the listing before it is a real fs.promises.readdir, which a loaded machine answers after more. The product's order is unchanged (the folder reader and the suite were byte for byte the moved form's at that tip).
+- THE CURE (tests only): one wait for the hold itself — the hold, the read's end without one, or a bound, each said, never a crash — and the legs run on a listing slowed by sixty turns every run. RED CONTROL: the release's twenty-turn wait over that listing finds no hold.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
