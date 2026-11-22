@@ -710,6 +710,9 @@ const I_RECV = {
   // ALSO CURED (the train's own red at 7c30f13eb, met by this unit's heavy read — B-225b's page half): the held store's row in its
   // «Start {what} empty?» dialog — `what` = storeWhatOf(file), the store's OWN fixed name (src/lib/store-held.js), never a record's words
   'src/lib/store-held.js|row': ['held store', 'a held store\'s row: `what` is the store\'s own fixed name (storeWhatOf), its file the store\'s file name — never a record\'s words'],
+  // 主开发 r2090 (B-23e5 line 262, the hosted run on 61a1c21f5): the terminal window's guard over its Ctrl+G panes asks «{name} has unsaved
+  // changes…» — `d` = unsavedPane(): the unsaved panes' file names (each pane's own basename, joined), a person's own files, never a record's words
+  'src/lib/external-editor.js|d': ['file', 'the unsaved Ctrl+G panes\' own file names (unsavedPane(), joined) in the close question — a person\'s files, never a record\'s words'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {
