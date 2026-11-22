@@ -4229,6 +4229,32 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     l.tabRoots = next;
     save();
   }
+  const CURRENT_TAB_READ_MS = 5000; // B-21cc: the current-tab read's bound (bootstrapTabRoot's own)
+  /** B-21cc (the coordinator's r2491; report fb-03ae550a21): THE CONVERSATION's CURRENT TAB on a browser it holds a lease on — the
+   *  row its OWN session's `tab list --json` marks active (the tab its `get url` and `snapshot` read), through the lease's own url,
+   *  exactly as the agent's `tab` fence reads it (agentTabAct). ONE row marked, or refused BY NAME (`current_tab_unreadable`):
+   *  never a guess. Its caller (the vault fill) asks only when the conversation already has a tab of its own in scope: a
+   *  never-used session's `tab list` would bind a new tab (measured). An EPHEMERAL browser never reaches here on the vault fill's
+   *  road (the login-channel law refuses it first: browser-mediation leaseRoadVerdict, ephemeral ⇒ no mode); asked anyway, it is
+   *  refused by name (its own list would be read through its pairs, as userTabAct reads it). → { ok, targetId } | { ok: false, code, error } */
+  async function currentTabOf({ profileId = '', browserKey = '', ephemeral = false } = {}) {
+    ensureLoaded();
+    const bk = String(browserKey || '');
+    const no = (why) => ({ ok: false, code: 'current_tab_unreadable', error: `VibeSpace could not read which tab this conversation is on (${why}) — nothing was filled; try again` });
+    const p = profile(String(profileId || ''));
+    if (!p) return no('no such browser');
+    if (ephemeral || isEph(p)) return no('a browser of its own is not read on this road');
+    const rec = reg.browsers[p.id];
+    if (p.host || !B.isLiveBrowser(rec) || !isLocalRec(rec)) return no('the browser is not running on this machine');
+    if (!B.findLease(reg.leases, p.id, bk)) return no('this conversation holds no lease on it');
+    const o = await leaseCliOpts(p.id, bk);
+    if (!o) return no('the browser answered no CDP url');
+    const rows = await tabListUnder(nsOf(p.id), { ...o, timeout: CURRENT_TAB_READ_MS });
+    if (!rows) return no('its tab list did not answer');
+    const act = rows.filter((x) => x && x.active);
+    if (act.length !== 1) return no(act.length ? 'more than one tab is marked current' : 'no tab is marked current');
+    return { ok: true, targetId: String(act[0].targetId).toUpperCase() };
+  }
   /** A lease's FIRST root, learned after its first command (the audit route asks): the tab its session is on — a session's
    *  first command binds a NEW tab of its own (measured), so that tab is its; judged like every active (the weakest claim:
    *  never a tab another holder roots, never what his tab opened). Only while the lease has no root (once per lease); a
@@ -9224,7 +9250,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     streamPortFor, // P2: the live view's port (attachment or ephemeral; MULTIVIEW: a helper's — a view never STARTS any of them: released / stopped / not-started are said)
     noteStreamClosed, // VERIFY r1 H2: the bridge's upstream closed on an ephemeral relay — judge the process now
     leaseCliOpts, // naive study 2: the ONE way a CLI call under a lease's session reaches the keeper's browser (CDP, never the directory)
-    agentTabAct, tabOwnersFor, userTabAct, bootstrapTabRoot, // lane browser-resume C (§3.9, ruling 3): the agent's own tab verbs, whose tab it is (the bridge's row), the user's ✕ / switch
+    agentTabAct, tabOwnersFor, userTabAct, bootstrapTabRoot, currentTabOf, // lane browser-resume C (§3.9, ruling 3): the agent's own tab verbs, whose tab it is (the bridge's row), the user's ✕ / switch
     ephemeralPairsFor: (browserKey) => { ensureLoaded(); const p = reg.profiles.find((x) => isEph(x) && x.owner.id === String(browserKey || '')); return p ? (pairsOf(p.id) || null) : null; }, // naive study 2 (finding 4): a sub-agent browser's OWN pairs — the recorder's tap on it
     viewportFor, // lane J: the page's own viewport (the live view's input space)
     tabVisibilityFor, captureTabFor, watchTabFor, // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames

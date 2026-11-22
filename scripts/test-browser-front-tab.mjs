@@ -406,6 +406,41 @@ async function keeperCreateLeg(X, KTid, tbId) {
   ok(!!(tkN && tkN.ok && sN && sN.person === false && oN.owners[NT] === 'agent' && oN.made[NT] && oN.made[NT].mine === true && !Object.values(oN.owners).includes('you')), 'the person with NO Browse-yourself window: a birth in their takeover of A is A\'s (rooted, named) — no tab on that browser ever reads «yours»', { sN, owner: oN.owners[NT], made: oN.made[NT] });
   N.k.shutdown();
 }
+// B-21cc (the coordinator's r2491; report fb-03ae550a21): THE CONVERSATION's CURRENT TAB, read by the keeper from the lease's OWN
+// session's `tab list` (the row marked active — the tab its `get url` and `snapshot` read), as the agent's `tab` fence reads it; the
+// vault fill acts on that ONE tab. The stand-in's sessions keep their own bound tab, as the driver does (a `tab new` / `tab <id>`
+// moves it). Unreadable ⇒ refused BY NAME, never a guess.
+{
+  const C = await world(K, 'b21cc');
+  await C.run(KA, ['tab', 'new', 'https://b21cc.example/other']); // A's session: its second tab, now its current one
+  const boundA = () => String(((C.nsState(C.NS) || { sessions: {} }).sessions['vs-' + KA]) || '').toUpperCase();
+  const second = boundA();
+  const c1 = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
+  await C.run(KA, ['tab', C.aTab]); // back to its first tab
+  const c2 = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
+  const cB = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KB });
+  const none = await C.k.currentTabOf({ profileId: C.p.id, browserKey: 'bk-0000fc03' });
+  const eph = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA, ephemeral: true });
+  C.edit(C.NS, (s) => { s.pid = 2147483646; }); // the stand-in's browser gone: the lease's url answers nothing
+  const dead = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
+  ok(!!(c1.ok && c1.targetId === second && second && second !== C.aTab && c2.ok && c2.targetId === C.aTab && cB.ok && cB.targetId === C.bTab),
+    'B-21cc: the conversation\'s CURRENT tab is the row its OWN session\'s `tab list` marks active — after `tab new` the new tab, after `tab <id>` that tab; each lease reads its own (B: its tab)', { c1, c2, cB, second, aTab: C.aTab, bTab: C.bTab });
+  ok(!none.ok && none.code === 'current_tab_unreadable' && /holds no lease/.test(none.error) && !eph.ok && eph.code === 'current_tab_unreadable' && !dead.ok && dead.code === 'current_tab_unreadable' && /did not answer|no CDP url/.test(dead.error) && /nothing was filled/.test(dead.error),
+    'B-21cc: a current tab that cannot be read is REFUSED BY NAME (current_tab_unreadable) — no lease, an ephemeral browser (never on the vault fill\'s road: the login-channel law refuses it first), a tab list that does not answer — never a guess', { none, eph, dead });
+  C.k.shutdown();
+}
+// RED CONTROL (B-21cc): a keeper copy that takes the list's FIRST row instead of the one marked active names a tab the session is not on
+{
+  let ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  ks = anchored(ks, '    const act = rows.filter((x) => x && x.active);\n', '    const act = rows.slice(0, 1);\n', 'B-21cc control: the first row, not the active one');
+  const kf9 = path.join(ROOT, 'keeper-b21cc-first-row.js'); fs.writeFileSync(kf9, absReq(ks, path.join(REPO, 'src/server')));
+  const R9 = await world(require(kf9), 'b21cc-red');
+  await R9.run(KA, ['tab', 'new', 'https://b21cc.example/other']);
+  const bound9 = String(((R9.nsState(R9.NS) || { sessions: {} }).sessions['vs-' + KA]) || '').toUpperCase();
+  const r9 = await R9.k.currentTabOf({ profileId: R9.p.id, browserKey: KA });
+  ok(!!(r9 && r9.ok && r9.targetId !== bound9), 'RED CONTROL (B-21cc): the list\'s FIRST row taken for the current tab names a tab A\'s session is NOT on — the read leg above can go red', { r9, bound9 });
+  R9.k.shutdown();
+}
 // RED CONTROL OF THE MUST: the unit's first order (the person's stamped roots FIRST, before every lease) — B's rooted tab reads «yours»
 {
   let ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');

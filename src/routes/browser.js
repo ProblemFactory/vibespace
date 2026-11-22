@@ -2424,7 +2424,7 @@ router.post('/api/agent/browser/fill-vault', async (req, res) => {
       spec,
       generate: body.generate === true,
       user: word(body.user, 200),
-      targetId: word(body.targetId, 64),
+      // B-21cc (r2491): no tab of the caller's — the fill reads the conversation's CURRENT tab itself (browser-dialogs fillVaultField)
       prechecked: typeof D.precheckVaultFill === 'function',
       facts,
       conv,

@@ -37,6 +37,22 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// B-21cc (the coordinator's r2491): a vault fill acts on the session's CURRENT tab, which the keeper reads from the session's own
+// `tab list` (the row marked active). These worlds have no driver session, so each watch made here gets a keeper whose
+// `currentTabOf` answers the tab that watch's scene made current (`noteActiveTab`, on the watch or through the route), and refuses
+// by name when none was made current — never a guess. Every other keeper member is the world's own.
+function withCurrentTab(DmMod) {
+  return { ...DmMod, create(opts = {}) {
+    const cur = new Map();
+    const k0 = opts.keeper || null;
+    const keeper = k0 ? Object.assign({}, k0, { currentTabOf: async ({ profileId = '', browserKey = '' } = {}) => { const id = cur.get(String(profileId || '') + '|' + String(browserKey || '')); return id ? { ok: true, targetId: id } : { ok: false, code: 'current_tab_unreadable', error: 'VibeSpace could not read which tab this conversation is on (this world made none current) — nothing was filled; try again' }; } }) : k0;
+    const d = DmMod.create({ ...opts, keeper });
+    const n0 = d.noteActiveTab;
+    if (typeof n0 === 'function') d.noteActiveTab = (t, id) => { if (t && id) cur.set(String(t.profileId || '') + '|' + String(t.browserKey || ''), String(id)); return n0(t, id); };
+    return d;
+  } };
+}
+
 const SELF_PATH = fileURLToPath(import.meta.url);
 // lane lg-store-writes U5b (B-0248): browser-profiles.json is the STORE WRITER's — a direct read or plant of the FILE (or a walk of
 // the data folder) lands what the writer owes first; each runner points this at ITS tree's writer (a mutant tree has its own)
@@ -1140,7 +1156,7 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
   const GS = req('./src/server/grants-store.js');
   const BK = req('./src/server/browser-keeper.js');
   const Lm = req('./src/server/browser-logins.js');
-  const Dm = req('./src/server/browser-dialogs.js');
+  const Dm = withCurrentTab(req('./src/server/browser-dialogs.js')); // B-21cc: each watch's keeper answers its current tab
   const CM = req('./src/server/cdp-mediator.js');
   const Rm = req('./src/routes/browser.js');
   const { startFakeKernel } = await import(pathToFileURL(path.join(repoDir, 'scripts/fixtures/fake-kernel.mjs')).href);
@@ -2475,7 +2491,7 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
     if (src4) {
       const Dm4 = MUT.load('src/server/browser-dialogs.js', src4, 'r32-law4-could-not-look-reads-as-looked');
       const slice4 = tableSpec.cells.filter((c) => c.conn === 'connected' && c.check === 'throw' && c.guards >= 1 && c.expected.flavor === 'check_failed');
-      const res4 = await executeCellSet(slice4, { ...baseMods, Dm: Dm4 });
+      const res4 = await executeCellSet(slice4, { ...baseMods, Dm: withCurrentTab(Dm4) });
       const red4 = res4.filter((r) => !r.pass).map((r) => r.cell.id);
       ok(slice4.length > 0 && red4.length === slice4.length, `MUTANT LAW 4 (a check that could not look answers as if it looked, clean) RED on the table (${red4.length}/${slice4.length} cells RED)`, res4.filter((r) => r.pass).map((r) => r.cell.id));
     } else {
@@ -2497,7 +2513,7 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
       const DmDoc = MUT.load('src/server/browser-dialogs.js', docSrc, 'r32-doc-move-retires-guard');
       const sliceDoc = tableSpec.cells.filter((c) => c.conn === 'connected' && c.url === 'moved' && c.page === 'putback' && c.check === 'mem'
         && (c.fence === 'none' || c.fence === 'postLiftHeld') && c.guards >= 1 && !c.nothingToCheck);
-      const resDoc = await executeCellSet(sliceDoc, { ...baseMods, Dm: DmDoc });
+      const resDoc = await executeCellSet(sliceDoc, { ...baseMods, Dm: withCurrentTab(DmDoc) });
       const redDoc = resDoc.filter((r) => !r.pass).map((r) => r.cell.id);
       ok(redDoc.length === sliceDoc.length && redDoc.length > 0, `MUTANT DOC (an address move inside the document retires a guard) RED on the R32 table (${redDoc.length}/${sliceDoc.length} moved put-back cells RED)`, resDoc);
     } else {
@@ -2518,11 +2534,11 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
       const q7Cells = tableSpec.cells.filter((c) => c.conn === 'connected' && c.fence === 'none' && c.guards === 1 && c.url === 'same' && c.check === 'mem')
         .map((c) => ({ ...c, id: `${c.id}|q7`, expected: UNTIL_NAV, nothingToCheck: true }));
       const DmQ7 = MUT.load('src/server/browser-dialogs.js', scen, 'r32-q7-scenario-guard-nothing-to-check');
-      const resQ7 = await executeCellSet(q7Cells, { ...baseMods, Dm: DmQ7 });
+      const resQ7 = await executeCellSet(q7Cells, { ...baseMods, Dm: withCurrentTab(DmQ7) });
       ok(q7Cells.length > 0 && resQ7.length === q7Cells.length && resQ7.every((r) => r.pass), `Q7 CELL: a guard with nothing in memory to check with is HELD until the tab navigates (until_nav on both doors) — ${resQ7.filter((r) => r.pass).length}/${q7Cells.length}`, resQ7.filter((r) => !r.pass));
       const mutQ7 = scen.replace(qB, "          if (!g.prebuiltTargets || !Array.isArray(g.prebuiltTargets.targets) || !g.prebuiltTargets.targets.length) return { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' };   /* MUTANT Q7 */");
       const DmQ7m = MUT.load('src/server/browser-dialogs.js', mutQ7, 'r32-q7-mutant-try-again');
-      const resQ7m = await executeCellSet(q7Cells, { ...baseMods, Dm: DmQ7m });
+      const resQ7m = await executeCellSet(q7Cells, { ...baseMods, Dm: withCurrentTab(DmQ7m) });
       const redQ7 = resQ7m.filter((r) => !r.pass).map((r) => r.cell.id);
       ok(redQ7.length === q7Cells.length && redQ7.length > 0, `MUTANT Q7 RED: «try again» put back for a guard with nothing to check — ${redQ7.length}/${q7Cells.length} cells RED`, resQ7m.filter((r) => r.pass).map((r) => r.cell.id));
     } else {

@@ -35,6 +35,22 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// B-21cc (the coordinator's r2491): a vault fill acts on the session's CURRENT tab, which the keeper reads from the session's own
+// `tab list` (the row marked active). These worlds have no driver session, so each watch made here gets a keeper whose
+// `currentTabOf` answers the tab that watch's scene made current (`noteActiveTab`, on the watch or through the route), and refuses
+// by name when none was made current — never a guess. Every other keeper member is the world's own.
+function withCurrentTab(DmMod) {
+  return { ...DmMod, create(opts = {}) {
+    const cur = new Map();
+    const k0 = opts.keeper || null;
+    const keeper = k0 ? Object.assign({}, k0, { currentTabOf: async ({ profileId = '', browserKey = '' } = {}) => { const id = cur.get(String(profileId || '') + '|' + String(browserKey || '')); return id ? { ok: true, targetId: id } : { ok: false, code: 'current_tab_unreadable', error: 'VibeSpace could not read which tab this conversation is on (this world made none current) — nothing was filled; try again' }; } }) : k0;
+    const d = DmMod.create({ ...opts, keeper });
+    const n0 = d.noteActiveTab;
+    if (typeof n0 === 'function') d.noteActiveTab = (t, id) => { if (t && id) cur.set(String(t.profileId || '') + '|' + String(t.browserKey || ''), String(id)); return n0(t, id); };
+    return d;
+  } };
+}
+
 const SELF_PATH = fileURLToPath(import.meta.url);
 const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -271,7 +287,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
   const GS = req('./src/server/grants-store.js');
   const BK = req('./src/server/browser-keeper.js');
   const Lm = req('./src/server/browser-logins.js');
-  const Dm = req('./src/server/browser-dialogs.js');
+  const Dm = withCurrentTab(req('./src/server/browser-dialogs.js')); // B-21cc: each watch's keeper answers its current tab
   const CM = req('./src/server/cdp-mediator.js');
   const Rm = req('./src/routes/browser.js');
   const VRm = req('./src/routes/vault.js');

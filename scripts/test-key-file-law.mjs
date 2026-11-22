@@ -926,11 +926,11 @@ try {
   await w5.noteSnapshot({ profileId: pf5.id, browserKey: 'bk-kfl5' }, '- textbox "Current password" [ref=e1]\n- textbox "New password" [ref=e2]');
   const fillCur5 = await w5.fillVaultField(
     { profileId: pf5.id, browserKey: 'bk-kfl5', ephemeral: false },
-    { target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
+    { targetId: tid5, target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
   );
   const fillNew5 = await w5.fillVaultField(
     { profileId: pf5.id, browserKey: 'bk-kfl5', ephemeral: false },
-    { target: '@e2', spec: 'vault.example.test#owner/password', generate: true, facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
+    { targetId: tid5, target: '@e2', spec: 'vault.example.test#owner/password', generate: true, facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
   );
   const rec5 = BL.recordOf(eng5.secretGet(entry5).value.toString('utf8'));
   const p15 = rec5 && rec5.pending ? rec5.pending.password : null;
@@ -1004,7 +1004,7 @@ try {
     await w5M4.noteSnapshot({ profileId: pf5M4.id, browserKey: 'bk-kfl5' }, '- textbox "Current password" [ref=e1]');
     await w5M4.fillVaultField(
       { profileId: pf5M4.id, browserKey: 'bk-kfl5', ephemeral: false },
-      { target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
+      { targetId: tid5, target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
     );
     fs.writeFileSync(path.join(d5M4Sub, 'nested-sha512.json'), JSON.stringify({ h: crypto.createHash('sha512').update(p05, 'utf8').digest('hex') }), { mode: 0o600 });
     fs.mkdirSync(path.join(d5M4, 'profiles', 'bp-00000001'), { recursive: true });
