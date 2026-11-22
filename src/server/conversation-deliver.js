@@ -17,6 +17,7 @@
 // connectors later feed the same ladder with their own source tags.
 const fs = require('fs');
 const path = require('path');
+const SR = require('../store-read.js');   // B-f276's remainder (lane bl-windows): the park's file under THE STORE READ
 const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { wrapperCaps } = require('./wrapper-files.js');
 const { vibespaceNoticeText, withoutNoticeHead } = require('../notification-senders.js'); // lane S3: every kind:'notification' delivery opens with the ONE head naming VibeSpace as the speaker
@@ -564,19 +565,43 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // A TORN FILE IS SET ASIDE, NEVER SILENTLY EMPTY (verify r1 N5, reproduced: a torn msg-retry.json read as {} without a
   // word and the next park overwrote its bytes). The bytes move to `msg-retry.json.corrupt-<ts>` (never unlinked — the
   // channel store's rule) with ONE named log line; the park starts empty and the next write makes a fresh file.
+  // B-f276's remainder (lane bl-windows, 主开发 r1702 / r2407 — «a parked wake dropped silently»): THE STORE READ (src/store-read.js).
+  // The release read a FAILED read (EIO, EACCES, ETIMEDOUT…) as a fresh park: the next park wrote over the file, and every wake
+  // the last run had parked — a billed send, a paced wake, a wake owed to an ended conversation — was gone, unsaid. Now a read
+  // that failed is NO ANSWER: the park is HELD. Nothing is written over the file; the park works in memory (a miss is still
+  // parked and attempted — said: not on disk until the file reads); the file is read again OFF the loop at the park's own roads
+  // (a new park, a turn end), never sooner than the store read's own gap after the last read, never by a timer of its own; once it
+  // reads, its entries are adopted exactly as the boot adopts them and join the live park. Torn bytes are set aside as before
+  // (the read again's off the loop) — and a set-aside that fails leaves them HELD (their only copy), never written over.
+  let retryHeld = null;   // { code, why, at, tries, readAt, saidWrite, lasting, asideFailed } while msg-retry.json could not be read
+  const RETRY_VALID = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const retryWhy = (a) => (a.code === 'did not parse' ? String((a.error && a.error.message) || 'did not parse') : 'not an object');   // the release's words for torn bytes
+  const retryAsideName = () => `${retryFile}.corrupt-${new Date(clock.now()).toISOString().replace(/[:.]/g, '-')}`;   // ONE name for torn bytes (the boot's set-aside and the read again's)
+  const RETRY_LASTING = new Set(['EACCES', 'EPERM', 'EISDIR', 'ENOTDIR', 'ELOOP', 'not set aside']);
+  /** one read → the store read's answer (an EMPTY file is a fresh park, as before) */
+  function retryAnswer(read) {
+    if (read && read.error == null && read.text != null && String(read.text).trim() === '') return { state: 'missing', writable: true };
+    return SR.storeAnswer(read, { valid: RETRY_VALID });
+  }
+  function holdRetry(a) {
+    const was = retryHeld, code = String(a.code || 'unreadable');
+    retryHeld = { code, why: String(a.why || 'the read failed'), at: was ? was.at : clock.now(), tries: (was ? was.tries : 0) + 1, readAt: was ? was.readAt : clock.now(), saidWrite: !!(was && was.saidWrite), lasting: RETRY_LASTING.has(code), asideFailed: !!a.asideFailed || !!(was && was.asideFailed) };
+    if (!was) log(`[deliver] data/msg-retry.json could not be read (${code}) — the retry park is HELD: the file is kept as it is and nothing is written over it; the park works in memory (a wake parked now is not on disk until the file reads) and the file is read again at the next park and the next turn end, never on a timer${retryHeld.lasting ? ' — a cause that does not pass by itself: check the file and its access' : ''}`);
+  }
   {
-    let rawText = null;
-    try { rawText = fs.readFileSync(retryFile, 'utf-8'); } catch { rawText = null; }   // absent = a fresh park
-    if (rawText != null) {
-      let parsed = null, bad = null;
-      try { parsed = JSON.parse(rawText); } catch (e) { bad = e && e.message; }
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) retry = parsed;
-      else if (rawText.trim() !== '') {
-        const aside = `${retryFile}.corrupt-${new Date(clock.now()).toISOString().replace(/[:.]/g, '-')}`;
-        try { fs.renameSync(retryFile, aside); log(`[deliver] data/msg-retry.json could not be read (${bad || 'not an object'}) — set aside as ${path.basename(aside)} (${rawText.length} bytes kept); the retry park starts empty`); }
-        catch (e) { log(`[deliver] data/msg-retry.json could not be read (${bad || 'not an object'}) and could not be set aside (${e && e.message}) — the park starts empty and will overwrite it`); }
-      }
+    let read;
+    try { read = { text: fs.readFileSync(retryFile, 'utf-8') }; } catch (e) { read = { error: e }; }   // the boot's own read (before the first loop turn)
+    let a = retryAnswer(read);
+    if (a.state === 'corrupt') {
+      const aside = retryAsideName();
+      let moved = false;
+      try { fs.renameSync(retryFile, aside); moved = true; log(`[deliver] data/msg-retry.json could not be read (${retryWhy(a)}) — set aside as ${path.basename(aside)} (${String(read.text).length} bytes kept); the retry park starts empty`); }
+      catch (e) { log(`[deliver] data/msg-retry.json could not be read (${retryWhy(a)}) and could not be set aside (${e && e.message}) — its bytes are its only copy: HELD, never written over`); }
+      a = SR.afterSetAside(a, moved ? path.basename(aside) : null);
+      if (a.state === 'unreadable') a = { ...a, asideFailed: true };
     }
+    if (a.state === 'data') retry = a.value;
+    else if (a.state === 'unreadable') holdRetry(a);
   }
   let retrySeq = 0;
   // B-54b7 (主开发 r734 (3)): A PARK ID IS UNIQUE BY CONSTRUCTION — this park's own token beside the clock and its count (a process that
@@ -631,6 +656,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // the producer's landing — a kill first finds the park's copy, never neither (the step that cannot be undone rides the landing)
   const handing = new Set();
   const writeRetryNow = () => {
+    if (retryHeld) {   // B-f276's remainder: the file could not be read — NOTHING is written over it (said once a hold)
+      if (!retryHeld.saidWrite) { retryHeld.saidWrite = true; log('[deliver] the retry park is not written: data/msg-retry.json is HELD (it could not be read) — nothing is written over it until it reads; what is parked now lives in memory'); }
+      return false;
+    }
     for (const [cid, q] of Object.entries(retry)) if (!Array.isArray(q) || !q.length) delete retry[cid];
     let out = retry;
     if (handing.size) { out = { ...retry }; for (const e of handing) out[e.cid] = [...(out[e.cid] || []), e]; }
@@ -651,11 +680,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // sender). It falls to the producer's stash at the first sweep, typed not-reachable with `maybeDelivered`, so the
   // next prompt carries it for free. A graceful stop never leaves one: server.js waits for the posts in flight
   // (closeRetries / settleRetries, the hand-over's shape).
-  {
+  /** THE BOOT's ADOPTION of a parked file's entries (the stamps of a process that stopped) — at the start, and at a HELD file's
+   *  read again (B-f276's remainder): the same judgments either way. → {notes, waitedOut} */
+  function adoptRetryDoc(doc) {
     const notes = [];
     let waitedOut = 0;
-    for (const [cid, q] of Object.entries(retry)) {
-      if (!Array.isArray(q)) { delete retry[cid]; continue; }
+    for (const [cid, q] of Object.entries(doc)) {
+      if (!Array.isArray(q)) { delete doc[cid]; continue; }
       for (const e of q.slice()) {   // a copy: a posting wake leaves `q` inside the loop
         if (!e || typeof e !== 'object') continue;
         if (e.charged) e.charged.hold = null;
@@ -675,11 +706,79 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if (e.ho) { notes.push(`${cid}: ${e.id} was claimed by ${e.ho === 'carry' ? 'an unconfirmed answer (carry) when the previous server stopped — the answer that told it may have reached the conversation' : `hand-over ${e.ho} when the previous server stopped — its frame may have landed`}, so it is handed to the stash at the first sweep (its siblings wait there) and never posted again`); delete e.ho; e.maybeDelivered = true; e.nextAt = 0; }
       }
     }
+    return { notes, waitedOut };
+  }
+  {
+    const { notes, waitedOut } = adoptRetryDoc(retry);
     if (Object.keys(retry).length) writeRetryNow();
     for (const n of notes) log(`[deliver] ${n}`);
     if (waitedOut) log(`[deliver] ${waitedOut} paced wake${waitedOut === 1 ? '' : 's'} waited through the downtime — paced out from this boot, never dumped at once`);
     const n = Object.values(retry).reduce((a, q) => a + q.length, 0);
     if (n) log(`[deliver] ${n} parked deliver${n === 1 ? 'y waits' : 'ies wait'} for retry from the previous server`);
+  }
+  // B-f276's remainder: THE HELD PARK READ AGAIN — off the loop, one read at a time (past RETRY_REREAD_BOUND_MS a new read may start:
+  // a read that never settles on a dead mount keeps none from reading for ever — never more than RETRY_REREADS_MAX at once, each
+  // holds a thread every file read of the hub shares), never sooner than SR.retryDelay after the last one (30 s doubling to 5 min),
+  // at the park's own roads (a new park, a turn end) — NO timer of its own
+  let retryReading = null, retryReads = 0, retryReadAt = 0, retryAsiding = false;
+  const RETRY_REREAD_BOUND_MS = 30_000, RETRY_REREADS_MAX = 2;
+  function rereadRetry() {
+    const H = retryHeld;
+    if (!H || retryClosed) return null;
+    if (retryAsiding) return retryReading;   // a set-aside's rename is out: its own outcome settles the hold — no read starts meanwhile (r2550 (1)(2), carried)
+    const now = clock.now();
+    if (retryReading) { if (now - retryReadAt < RETRY_REREAD_BOUND_MS || retryReads >= RETRY_REREADS_MAX) return retryReading; }
+    else if (now - Number(H.readAt || 0) < SR.retryDelay(H.tries)) return null;
+    H.readAt = now; retryReadAt = now; retryReads++;
+    const p = fs.promises.readFile(retryFile, 'utf-8').then((text) => ({ text }), (error) => ({ error }))
+      .then((read) => { retryReads--; return retryHeld ? applyRetryRead(read) : null; })   // the first answer while held wins
+      .catch((e) => log('[deliver] the held retry park\'s read again failed:', e && e.message))
+      .finally(() => { if (retryReading === p) retryReading = null; });
+    retryReading = p;
+    return p;
+  }
+  /** a read again's answer: data → the file's entries join the park; not there → lifted (nothing of the last run); a failed read →
+   *  still held; torn bytes → set aside OFF the loop (one at a time), then lifted — or HELD when the set-aside fails */
+  function applyRetryRead(read) {
+    const a = retryAnswer(read);
+    if (a.state === 'unreadable') { holdRetry(a); return null; }
+    if (a.state === 'corrupt') {
+      if (retryAsiding) return null;
+      retryAsiding = true;
+      const aside = retryAsideName();
+      return fs.promises.rename(retryFile, aside).then(() => true, (e) => { log(`[deliver] data/msg-retry.json could not be read (${retryWhy(a)}) and could not be set aside (${e && e.message}) — still HELD, never written over`); return false; })
+        .then((moved) => {
+          retryAsiding = false;
+          if (!retryHeld) return null;
+          const b = SR.afterSetAside(a, moved ? path.basename(aside) : null);
+          if (b.state === 'unreadable') { holdRetry({ ...b, asideFailed: true }); return null; }
+          liftRetry(`did not parse — set aside as ${path.basename(aside)} (its bytes kept)`, null);
+          return null;
+        });
+    }
+    liftRetry(a.state === 'data' ? 'reads again' : 'is not there (nothing of the last run is parked)', a.state === 'data' ? a.value : null);
+    return null;
+  }
+  function liftRetry(how, doc) {
+    const H = retryHeld;
+    if (!H) return;
+    retryHeld = null;
+    let n = 0;
+    if (doc) {
+      const { notes, waitedOut } = adoptRetryDoc(doc);
+      for (const [cid, q] of Object.entries(doc)) {
+        if (!q.length) continue;
+        if (readoptDone) for (const e of q) if (e && e.waitsReadopt) { delete e.waitsReadopt; e.nextAt = clock.now(); }   // the settle ran while the file was held: it runs now
+        retry[cid] = [...(retry[cid] || []), ...q];
+        n += q.length;
+        stashChanged(cid);
+      }
+      for (const x of notes) log(`[deliver] ${x}`);
+      if (waitedOut) log(`[deliver] ${waitedOut} paced wake${waitedOut === 1 ? '' : 's'} of the held file waited through the hold — paced out from now, never dumped at once`);
+    }
+    log(`[deliver] data/msg-retry.json ${how} — the retry park's hold is lifted (held ${Math.round((clock.now() - H.at) / 1000)} s)${n ? `; ${n} parked deliver${n === 1 ? 'y' : 'ies'} of the last run join the park` : ''}`);
+    writeRetryNow();
+    scheduleRetry();
   }
   function onRetry(fn) { if (typeof fn !== 'function') return () => { }; retryListeners.add(fn); return () => retryListeners.delete(fn); }
   /** `fn(ev, cid, entry, extra)` — parked | attempt | delivered | fell; for `fell` a listener answering `true` TOOK
@@ -885,6 +984,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** `opts` = the ladder call's own (the relay of its caller's fromName / cardText / group / retry) */
   function parkRetry(cid, text, opts, { kind, spendReason, charged, attempt }) {
     const now = clock.now();
+    rereadRetry();   // B-f276's remainder: a HELD park's file read again at the park's own road (no-op when it reads)
     const e = { id: `rt-${now.toString(36)}-${retryRun}-${++retrySeq}`, cid, text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.group ? { group: opts.group } : {}), spendReason, producer: (opts.retry && opts.retry.producer) || null, meta: (opts.retry && opts.retry.meta) || null,
       charged: charged ? { reason: charged.reason, identity: charged.identity ? { key: charged.identity.key, name: charged.identity.name || charged.identity.key } : null, hold: charged.hold || null, holdAt: now } : null,
       firstAt: now, attempts: [attempt], nextAt: now + RETRY_STEPS_MS[0], retries: 0 };
@@ -911,6 +1011,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  ONE entry per (producer, key): a second paced wake moves the same entry — two paced wakes = ONE frame, one wake. */
   function parkOwedWake(cid, { producer, key, retryInMs, spendReason = 'peer-message', kind = 'peer', fromName = null, sender = null, reason = 'paced', text = 'A wake VibeSpace held for the pace', meta = null, merge = null } = {}) {
     if (!cid || !producer) return null;   // shutting down parks too: the file holds the debt, the next boot fires it (scheduleRetry arms nothing while closed)
+    rereadRetry();   // B-f276's remainder: a HELD park's file read again at the park's own road (no-op when it reads)
     // THE ONE GATE, in the door every park goes through (acceptance r6, P22, measured: the receipt road parked with no gate, so a live agy drafter was promised «sends it in N s» and was then called «not running»): a wake that could not fire is never parked, and the answer says why
     const blocked = wakeBlock(cid);
     if (blocked) { log(`[deliver] ${cid}: a paced wake is not parked, it could not fire (${blocked.cause}): ${blocked.why}`); return { parked: false, blocked }; }
@@ -1050,6 +1151,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  stash; `cardText` = the message that woke it, for that card). → {parked, id, merged?, live?} */
   function parkEndedWake(cid, { producer, spendReason, kind = 'notification', fromName = null, cardText = null, sender = null, reason = '', meta = null } = {}) {
     if (!cid || !producer || !spendReason) return { parked: false, why: 'no conversation, producer or reason' };
+    rereadRetry();   // B-f276's remainder: a HELD park's file read again at the park's own road (no-op when it reads)
     if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) return { parked: false, live: true, held: true };   // B-95fc U1: a held list makes only a REMOTE owner «unknown» — nothing parked for it (round w00h341sv: a conversation the index calls LOCAL is parked as before)
     if (liveForWake(cid)) return { parked: false, live: true };   // B-95fc U1: a remote conversation its machine said ended is not «live»
     const same = (retry[cid] || []).find(isEnded);
@@ -1607,6 +1709,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  that conversation is attempted now, then the registered turn-end listeners (the stash hand-over's auto arm). */
   async function noteTurnEnd(session) {
     let cid = null;
+    rereadRetry();   // B-f276's remainder: a HELD park's file read again at the park's own road (no-op when it reads)
     try { cid = session ? addressableId(session) : null; } catch { cid = null; }
     if (!cid) return;
     // the listeners FIRST (R3: an armed hand-over carries the parked entries too — ONE frame, ONE authorization; it
@@ -2392,6 +2495,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
 
   return {
+    retryHeldState: () => (retryHeld ? { ...retryHeld } : null), _retryReading: () => retryReading,   // B-f276's remainder: the park held unread (a copy), its read again in flight
     deliverToConversation, peerReachable, liveForWake, unreachableOf, machineAwayOf, machineNameOf: (hid) => { const h = pairingOf(hid).host; return String((h && (h.name || h.id)) || hid || '').slice(0, 80); }, pairingOf: (hid) => pairingOf(hid).reply, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
     stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation

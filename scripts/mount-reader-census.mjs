@@ -169,14 +169,14 @@ export const ROWS = [
   ['src/server/cli-cmd.js', 'own-tree', 4, null, CLI], // + `present` (lane cli-shell-truth: a target that does not run — missing, or there but not executable)
   ['src/server/cli-env.js', 'own-tree', 3, null, PROC], // lane lg-store-writes U6.4 −1: the folder's models list through the cache module
   ['src/server/cluster-presets.js', 'own-tree', 7, null, DATA],
-  ['src/server/conversation-deliver.js', 'own-tree', 2, null, DATA],
+  ['src/server/conversation-deliver.js', 'own-tree', 3, null, DATA],   // B-f276's remainder unit 2 (bl-windows) +1: a HELD msg-retry.json read again OFF the loop (fs.promises.readFile) at the park's own roads
   ['src/server/decision-engine.js', 'own-tree', 3, null, DATA],   // B-0248's next part (lane lg-vault-env, r2417) −2: the first line's whole-file count and the trim's read are gone (the count comes from the start's tail; the trim is a writer job); lane lg-store-writes (主开发 2026-11-20 03:10Z) +1: the month's journal tail read OFF the loop (fs.promises.open);  lane decision-core: data/decision-{memo,usage}.json + the journal; lane decision-spend-readout: the journal's bounded tail (the month so far)
   ['src/server/delivery-wake.js', 'own-tree', 2, null, `${CLI}; place-8 (piece 7): the resumed session's attach socket (statSync isSocket — VibeSpace's own wrapper socket) and ONE shared read a tick of the CLI registry ~/.claude/sessions, as src/peer-messaging.js reads it`],
   ['src/server/channels-attention.js', 'own-tree', 1, null, DATA],   // lane decision-attention: data/decision-examples.json (its ONE writer)
   ['src/server/doc-engine.js', 'own-tree', 1, null, DATA], // lane doc-comments-stopped-owner: data/doc-owners.json (the owner memo)
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],
   ['src/server/desktop-access.js', 'own-tree', 1, null, 'lane desktop-picker-instant: data/desktop-machines.json (the machine rows\' last known state), read once at boot — the server\'s own store'],
-  ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
+  ['src/server/desktop-app-keeper.js', 'own-tree', 2, null, DATA],   // B-f276's remainder unit 2 (bl-windows) +1: a HELD desktop-apps-hosts.json read again OFF the loop at the keeper's tick
   ['src/server/desktop-webrtc.js', 'own-tree', 6, null, 'lane stream-p3m-build: the prebuilt Mac screen helper the hub pushes to a Mac with no compiler — data/bin/helpers/vibespace-screen (+ .version) in the checkout: its version, its size, its bytes; lane apple-signing +3: its .identity.json, the release record beside the bundle (data/bin/vibespace-agentd.manifest.json) and the prebuilt\'s digest over a stream — all in the checkout'],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/device-alerts.js', 'own-tree', 2, null, DATA], // lane lg-store-writes (主开发 2026-11-20 03:10Z) +1: the held ledger's read again (fs.promises, off the loop) // lane device-act-audit: the three urgent items' dedup ledger (data/device-alerts.json)

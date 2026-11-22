@@ -279,6 +279,7 @@ const TIME_ALLOWED = [
   ['src/server/queued-wakes.js', "const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');", 'an unreadable msg-queued.json\'s set-aside NAME (msg-queued.json.unreadable-<instant>, B-e3fe follow-up) — never shown'],
   ['src/server/plugin-install.js', 'trashDir, `${id}-${', 'a trashed plugin\'s directory NAME'],
   ['src/server/conversation-deliver.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],
+  ['src/server/desktop-app-keeper.js', '.corrupt-${', 'the paired machines\' file\'s aside NAME (bytes that did not parse, set aside beside it — bl-windows B-f276\'s remainder unit 2) — never shown as a time'],
   ['src/server/vault-run-door.js', "const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');", 'the run store\'s torn-copy NAME (主开发 r3040 (a): a dated copy beside the store, the family\'s way) — a file name, never shown as a time'],
   ['src/server/job-secrets-door.js', '.corrupt-${', 'the job-secrets leftover record\'s aside NAME (bytes that did not parse, set aside beside it — bl-vault B-ef1b, 主开发 r333) — never shown as a time'],
   ['src/server/usage-pool-engine.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],

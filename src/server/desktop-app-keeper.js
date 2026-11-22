@@ -56,6 +56,7 @@ const DV = require('../desktop-viewers');
 const DS = require('../desktop-serve'); // THE MACHINE HALF (SHARED — the daemon bundles it)
 const fs = require('fs');
 const path = require('path');
+const SR = require('../store-read.js');   // B-f276's remainder (lane bl-windows): the paired machines' file under THE STORE READ
 const namedError = (code, msg) => { const e = new Error(msg); e.code = code; return e; };
 
 /** P8-2 x5 defaults (2.369.156, the verifier's two INFO items made the
@@ -610,6 +611,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   /** ONE pass: the machine's tick (liveness, the idle verdict, the belt, the sample + this report), then a row the
    *  report changed and the machine did not carry. */
   async function tick() {
+    rereadRemote();   // B-f276's remainder: a HELD paired-machines file read again at the keeper's own pass, first (no-op when it reads)
     await machine.tick();
     if (dirty) commit();
     await syncRemoteAll();
@@ -637,14 +639,80 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   const judged = new Map();    // id → the sample instant last judged (a device sample is judged once)
   const following = new Set(); // ids a launch/relaunch is following until they settle
   const remoteFile = path.join(dataDir, REMOTE_FILE);
+  // B-f276's remainder (lane bl-windows, 主开发 r1702): THE STORE READ (src/store-read.js). The release read a FAILED read (EIO, EACCES…)
+  // as an empty file and its next save wrote over it: a machine that was not answering lost its apps' records (they are shown, and
+  // re-asked, only because this file keeps them), and torn bytes were written over unkept. Now a failed read HOLDS the file:
+  // nothing is written over it (said once), the keeper works in memory (a machine that answers is still adopted), and the file is
+  // read again OFF the loop at the keeper's own tick, never sooner than the store read's gap — once it reads, the machines it names
+  // that memory does not hold join. Bytes that were READ and do not parse are set aside (`.corrupt-<ts>`), never written over; a
+  // set-aside that fails leaves them HELD (their only copy).
+  let remoteHeld = null;   // { code, at, tries, readAt, said } while the file could not be read
+  let remoteReading = null, remoteAsiding = false, remoteAsidingP = null;
+  const remoteAsideName = () => `${remoteFile}.corrupt-${new Date(now()).toISOString().replace(/[:.]/g, '-')}`;   // ONE name for torn bytes (the start's and the read again's)
+  const REMOTE_VALID = (j) => !!j && typeof j === 'object' && !!j.hosts && typeof j.hosts === 'object' && !Array.isArray(j.hosts);
+  const remoteDocOf = (j) => ({ hosts: j.hosts, ...(j.installed && typeof j.installed === 'object' ? { installed: j.installed } : {}) });
+  const notAskedYet = (hosts) => { for (const h of Object.values(hosts)) { if (!h || typeof h !== 'object') continue; h.apps = h.apps || {}; h.hub = h.hub || {}; h.online = null; } };
+  function holdRemote(a) {
+    const was = remoteHeld;
+    remoteHeld = { code: String(a.code || 'unreadable'), at: was ? was.at : now(), tries: (was ? was.tries : 0) + 1, readAt: was ? was.readAt : now(), said: !!(was && was.said) };
+    if (!was) log.warn?.(`[desktop] ${REMOTE_FILE} could not be read (${remoteHeld.code}) — HELD: kept as it is, nothing is written over it; the paired machines that answer are adopted in memory, and it is read again at the keeper's tick`);
+  }
+  function remoteAside(a, moved, aside) {
+    const b = SR.afterSetAside(a, moved ? path.basename(aside) : null);
+    if (b.state === 'unreadable') { holdRemote(b); return false; }   // their only copy: HELD
+    log.warn?.(`[desktop] ${REMOTE_FILE} did not parse (${a.why}) — set aside as ${path.basename(aside)} (its bytes kept); the paired machines are re-asked`);
+    return true;
+  }
+  /** torn bytes set aside OFF the loop (the start's and the read again's — one at a time); a save waits for it (never over the
+   *  bytes while they move); moved ⇒ the keeper goes on (a held file lifts), not moved ⇒ HELD */
+  function asideRemote(a) {
+    if (remoteAsidingP) return remoteAsidingP;
+    const aside = remoteAsideName();
+    remoteAsiding = true;
+    remoteAsidingP = fs.promises.rename(remoteFile, aside).then(() => true, (e) => { log.warn?.(`[desktop] ${REMOTE_FILE} did not parse and could not be set aside (${e.message}) — HELD, never written over`); return false; })
+      .then((moved) => { remoteAsiding = false; remoteAsidingP = null; const was = !!remoteHeld; if (remoteAside(a, moved, aside)) { if (was) liftRemote(null); else if (remoteDirty) saveRemote(); } });
+    return remoteAsidingP;
+  }
   function loadRemote() {
-    try {
-      const j = JSON.parse(fs.readFileSync(remoteFile, 'utf8'));
-      if (j && typeof j === 'object' && j.hosts && typeof j.hosts === 'object') remote = { hosts: j.hosts, ...(j.installed && typeof j.installed === 'object' ? { installed: j.installed } : {}) };
-    } catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[desktop] ${REMOTE_FILE} unreadable (${e.message}) — the paired machines are re-asked at boot`); }
-    for (const h of Object.values(remote.hosts)) { h.apps = h.apps || {}; h.hub = h.hub || {}; h.online = null; } // not asked yet this boot
+    let read;
+    try { read = { text: fs.readFileSync(remoteFile, 'utf8') }; } catch (e) { read = { error: e }; }   // the keeper's own start
+    const a = SR.storeAnswer(read, { valid: REMOTE_VALID });
+    if (a.state === 'data') remote = remoteDocOf(a.value);
+    else if (a.state === 'unreadable') holdRemote(a);
+    else if (a.state === 'corrupt') asideRemote(a);
+    notAskedYet(remote.hosts); // not asked yet this boot
+  }
+  /** the HELD file read again at the keeper's tick (one read at a time, never sooner than SR.retryDelay after the last) */
+  function rereadRemote() {
+    const H = remoteHeld;
+    if (!H || remoteReading || remoteAsiding || now() - Number(H.readAt || 0) < SR.retryDelay(H.tries)) return remoteReading;
+    H.readAt = now();
+    const p = fs.promises.readFile(remoteFile, 'utf8').then((text) => ({ text }), (error) => ({ error })).then((read) => {
+      if (!remoteHeld) return;
+      const a = SR.storeAnswer(read, { valid: REMOTE_VALID });
+      if (a.state === 'unreadable') { holdRemote(a); return; }
+      if (a.state === 'corrupt') return asideRemote(a);
+      liftRemote(a.state === 'data' ? remoteDocOf(a.value) : null);
+    }).catch((e) => log.warn?.(`[desktop] the held ${REMOTE_FILE}'s read again failed: ${e && e.message}`)).finally(() => { if (remoteReading === p) remoteReading = null; });
+    remoteReading = p;
+    return p;
+  }
+  /** the hold lifts: what the file names and memory does not hold joins (memory's own rows win — they are newer) */
+  function liftRemote(doc) {
+    const H = remoteHeld;
+    if (!H) return;
+    remoteHeld = null;
+    let n = 0;
+    if (doc) {
+      notAskedYet(doc.hosts);
+      for (const [hid, h] of Object.entries(doc.hosts)) if (h && typeof h === 'object' && !remote.hosts[hid]) { remote.hosts[hid] = h; n++; }
+      if (doc.installed) { remote.installed = remote.installed || {}; for (const [hid, e] of Object.entries(doc.installed)) if (!remote.installed[hid]) remote.installed[hid] = e; }
+    }
+    log.log?.(`[desktop] ${REMOTE_FILE} reads again — its hold is lifted (held ${Math.round((now() - H.at) / 1000)} s)${n ? `; ${n} paired machine(s) it named join` : ''}`);
+    saveRemote(); notify();
   }
   function saveRemote() {
+    if (remoteHeld || remoteAsiding) { remoteDirty = true; if (remoteHeld && !remoteHeld.said) { remoteHeld.said = true; log.warn?.(`[desktop] ${REMOTE_FILE} not written: it is HELD (it could not be read) — nothing is written over it until it reads`); } return; }
     try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(remoteFile, remote); remoteDirty = false; }
     catch (e) { log.warn?.(`[desktop] could not write ${REMOTE_FILE}: ${e.message}`); }
   }
@@ -824,6 +892,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     held: machine.held, heldWords: machine.heldWords, // r3189: desktop-apps.json's own hold (src/desktop-serve.js) — keeper.local carries it to the window engine's reconcile
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,
     remoteFile, REMOTE_FILE, _remote: () => remote, // lane C2
+    _remoteHeld: () => (remoteHeld ? { ...remoteHeld } : null), _remoteReading: () => remoteReading, _remoteAsiding: () => remoteAsidingP, // B-f276's remainder: the file held unread, its read again
     installedOf, noteInstalled, // the installed-apps list, owner 2026-10-11
     setBrowserHolders, browserHoldersMoved, onBrowserDisplayStop }; // lane browser-display-holders: a browser's display carries its holders; a person's stop is told
   // lane app-display-secrets: the logins an app's Secret Service keeps (device #0's apps) — the ⋯ menu's count + its door
