@@ -1997,24 +1997,38 @@ console.log('⑥ wiring pins');
   ok(/stash: stashFactOf\(s\),/.test(sv) && /onStashChange: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv) && /onStash: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv) && /stashView\.register\(app\);/.test(sv),
     'server.js: the payload carries `stash`, both stores\' hooks re-publish, the route is registered');
   const cd = read('src/server/conversation-deliver.js'), jb = read('src/jobs.js');
-  // the jobs stash BY SITE (the stores chain's hosted red, 主开发 05:26Z — never loosened): each of the four says once in its own method —
-  // the write (_stashNotif), the drain (drainNotifs), the restore (restoreNotifs), the merge at the lift (_notifsRetry: each
-  // waiting conversation's strip follows a read again of job-notifications.json), the records' read again (_unreadRetry: the notices
+  // the jobs stash BY SITE (the stores chain's hosted red, 主开发 05:26Z — never loosened): every site that changes a conversation's held
+  // notices says ONCE — the write (_stashNotif), the drain (drainNotifs), the restore (restoreNotifs), the merge at the lift (_notifsRetry:
+  // each waiting conversation's strip follows a read again of job-notifications.json), the records' read again (_unreadRetry: the notices
   // that waited for jobs.json / the archive show — 主开发 05:36Z) and the boot's announce (announceOwedWakes — B-6721, met at line 148's
   // side pick: the boot's FIRST read of job-notifications.json says nothing to any strip; a conversation it left OWED A WAKE is said
   // once there, so a live restored session's strip shows the notices the boot read, and the stash view arms that conversation's wake
-  // chain) — and the file says nowhere else
-  const SAY = /this\.d\.onStash\?\.\(cid\)/g;
-  const SAYS = { write: '  _stashNotif(cid, job, ev, reason, {', drain: '  drainNotifs(cid, only = null) {', restore: '  restoreNotifs(cid, items) {', merge: '  async _notifsRetry() {', records: '  async _unreadRetry(which) {', announce: '  announceOwedWakes() {' };
+  // chain). r972 (B-360d unit 3 follow, cd0f4494c; this pin re-read for 主开发 r2071, the block's hosted red): _notifsChanged is THE ONE
+  // ENTRY POINT of a change of held notices and says for every writer that calls it — the write, the drain, the restore, and the drop at
+  // the drain (_judgeHeldView: r972 gave it its say — its frame went before, its strip did not); the merge, the records' read again and
+  // the announce say directly. Each site ONCE, directly or through the entry point; the say is written only in the entry point and the
+  // direct sites; the entry point is called only by the sites this table names — seven in all
+  const SAY = /this\.d\.onStash\?\.\(cid\)/g, VIA = /this\._notifsChanged\(cid\b/g, ENTRY = '  _notifsChanged(cid, payload = null) {';
+  const SAYS = { write: '  _stashNotif(cid, job, ev, reason, {', drain: '  drainNotifs(cid, only = null) {', restore: '  restoreNotifs(cid, items) {', drop: '  _judgeHeldView(cid) {', merge: '  async _notifsRetry() {', records: '  async _unreadRetry(which) {', announce: '  announceOwedWakes() {' };
   const ONE_LINE = new Set(['announce']);   // a method written on its own line: its site is that line
-  const sayIn = Object.fromEntries(Object.entries(SAYS).map(([k, head]) => { const i = jb.indexOf(head), j = i < 0 ? -1 : jb.indexOf(ONE_LINE.has(k) ? '\n' : '\n  }\n', i); return [k, i < 0 || j < 0 ? -1 : (jb.slice(i, j).match(SAY) || []).length]; }));
-  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && Object.values(sayIn).every((n) => n === 1) && (jb.match(SAY) || []).length === 6 && /peekNotifs\(cid\)/.test(jb),
-    'the ladder\'s stash and the jobs stash each say every write, every drain and every restore — the jobs stash by site: the write, the drain, the restore, the merge at the lift, the records\' read again and the boot\'s announce of the conversations owed a wake (their strips show what the boot read), once each, six in all', { sayIn, all: (jb.match(SAY) || []).length });
+  const bodyOf = (src, k, head) => { const i = src.indexOf(head), j = i < 0 ? -1 : src.indexOf(ONE_LINE.has(k) ? '\n' : '\n  }\n', i); return i < 0 || j < 0 ? null : src.slice(i, j); };
+  const sitesOf = (src) => {
+    const n = (s, re) => (s.match(re) || []).length;
+    const per = Object.fromEntries(Object.entries(SAYS).map(([k, head]) => { const b = bodyOf(src, k, head); return [k, b === null ? null : { say: n(b, SAY), via: n(b, VIA) }]; }));
+    const entry = bodyOf(src, 'entry', ENTRY), rows = Object.values(per), direct = rows.filter((x) => x && x.say).length, through = rows.filter((x) => x && x.via).length;
+    const says = n(src, SAY), vias = n(src, VIA), entrySays = entry === null ? -1 : n(entry, SAY);
+    return { per, entrySays, says, vias, ok: rows.every((x) => x && x.say + x.via === 1) && entrySays === 1 && says === 1 + direct && vias === through };
+  };
+  const live = sitesOf(jb);
+  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && live.ok && Object.keys(SAYS).length === 7 && /peekNotifs\(cid\)/.test(jb),
+    'the ladder\'s stash and the jobs stash each say every write, every drain and every restore — the jobs stash by site: the write, the drain, the restore and the drop at the drain through its ONE entry point (r972), the merge at the lift, the records\' read again and the boot\'s announce of the conversations owed a wake (their strips show what the boot read) directly — once each, seven in all', live);
   {
-    // CONTROL (line 148's side cure): the by-site count refuses a say the table does not name — a seventh one in any method is red
-    const sitesOk = (src) => Object.entries(SAYS).every(([k, head]) => { const i = src.indexOf(head), j = i < 0 ? -1 : src.indexOf(ONE_LINE.has(k) ? '\n' : '\n  }\n', i); return i >= 0 && j >= 0 && (src.slice(i, j).match(SAY) || []).length === 1; }) && (src.match(SAY) || []).length === 6;
-    const seventh = anchored(jb, '  noteHandedOver(cid, text) { ', '  noteHandedOver(cid, text) { try { this.d.onStash?.(cid); } catch { } ', 'line 148: a seventh say');
-    ok(sitesOk(jb) && !sitesOk(seventh), 'CONTROL: a seventh jobs-stash say the table does not name (here in noteHandedOver) is red — the pin names every site');
+    // CONTROLS (line 148's side cure; r2071): the by-site count refuses a say the table does not name — directly or through the entry
+    // point, in any method — and an entry point that no longer says
+    const direct = anchored(jb, '  noteHandedOver(cid, text) { ', '  noteHandedOver(cid, text) { try { this.d.onStash?.(cid); } catch { } ', 'line 148: an unnamed say');
+    const via = anchored(jb, '  noteHandedOver(cid, text) { ', '  noteHandedOver(cid, text) { this._notifsChanged(cid); ', 'r2071: an unnamed entry call');
+    const mute = anchored(jb, ENTRY + '\n    try { this.d.onStash?.(cid); } catch { }\n', ENTRY + '\n', 'r2071: the entry point mute');
+    ok(live.ok && !sitesOf(direct).ok && !sitesOf(via).ok && !sitesOf(mute).ok, 'CONTROLS: a say the table does not name (here in noteHandedOver) — directly, or through the entry point — is red, and so is an entry point that no longer says: the pin names every site', { direct: sitesOf(direct).says, via: sitesOf(via).vias, mute: sitesOf(mute).entrySays });
   }
   const sh = read('src/server/stash-handover.js');
   ok(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush,/.test(cd) && /claimNotifs\(cid, entries, id = null\) \{/.test(jb) && /releases\.push\(d\.claimStash\(cid, shownStashed, id\)\)/.test(sh) && /releases\.push\(d\.claimRetry\(cid, shownParked, id\)\)/.test(sh) && /releases\.push\(jm\.claimNotifs\(cid, jobs, id\)\)/.test(sh),
