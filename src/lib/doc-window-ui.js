@@ -908,6 +908,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const patched = saveDoc(S.source, S.loaded, current()); // BLOCK PATCHING: only the blocks you changed are rewritten
     if (!patched.ok) { say(patched.code === 'lossy' ? t('This block would change on save (line {n}) — edit it in Raw', { n: patched.line }) : fidelityWords({ code: patched.code })); return; }
     const text = patched.text;
+    const sentJson = JSON.stringify(S.ed.getJSON());   // r1733 (1): what the box held when the save went out
     S.busy = true;
     try {
       // B-23e5's remainder (r1442 (C)): the save's OWN check is the press's one try (marked); refused by the storage ⇒ the save ends here
@@ -925,7 +926,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       const before = S.source;
       S.source = text; S.loaded = loadDoc(text); S.base = await info(); S.kept = 0; S.confirmed = 0; conflict.hidden = true;
-      S.at = hhmm(); S.note = t('Saved {time}', { time: S.at }); S.dirty = false; renderStatus();
+      S.at = hhmm(); S.note = t('Saved {time}', { time: S.at }); S.dirty = JSON.stringify(S.ed.getJSON()) !== sentJson; renderStatus();   // typed while it was out: still unsaved (a close asks)
       noteEdit(before, text);
     } catch (e) { say(t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(path).split('/').pop() || path, why: e.message })); } finally { S.busy = false; }   // B-23e5 (the save law): the text stays, the window stays, the words say where
   }

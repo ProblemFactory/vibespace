@@ -47,7 +47,7 @@ export function openDoc(app, { host = '', path = '', from = '', syncId, intoChai
   winInfo.onCloseRequest = (o) => {
     const dirty = typeof winInfo._editorDirty === 'function' && winInfo._editorDirty();
     if (!dirty || (o && o.discardAsked)) return true;
-    showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name }), confirmText: t('Discard'), danger: true })
+    showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps
       .then((ok) => { if (ok) app.wm.requestClose(winInfo.id, { discardAsked: true }); });
     return false;
   };

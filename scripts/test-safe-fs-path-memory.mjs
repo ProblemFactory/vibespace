@@ -70,6 +70,11 @@ async function scene(Mod, tag, k = K) {
 
 console.log('① asked K times, a dead path ends ONE worker; the rest are refused by name without a worker');
 {
+  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
+  const NOTE = '    if (running) this._noteHung(running.payload, running.op, running !== call ? Math.max(call.timeoutMs || 0, monoNow() - (running.sentAt || monoNow())) : Math.min(running.timeoutMs || Infinity, monoNow() - (running.sentAt || monoNow())), { early: running !== call });   // the time since it was sent without an answer; ended EARLY by a queued call ⇒ only that long\n';
+  const Rel = src.split(NOTE).length === 2 ? mutantCopies('safe-fs-path-memory', REPO).load('src/safe-fs.js', anchored(src, NOTE, '', 'release-no-memory'), 'release-no-memory') : null;
+  const RK = 3;   // the release's road needs no more asks to show itself
+  const redP = Rel ? scene(Rel, 'release', RK).catch((e) => ({ ends: -1, answers: [String(e && e.message)] })) : null;   // the release's road runs beside the leg (its own pool); a throw is a red, never an unhandled rejection
   let shift = 0; const clock = () => performance.now() + shift;   // r275 should 3: the memory's own clock, advanced by the leg (never a real 3 s wait)
   const pool = new SF.SafeFs({ poolSize: 2, name: 'path-memory', timeouts: { default: 15000, __sleep: 300 }, hungMs: 3000, mountsText, clock });
   const answers = [];
@@ -98,11 +103,7 @@ console.log('① asked K times, a dead path ends ONE worker; the rest are refuse
     ok(same.stats().timeouts === 1 && got.slice(1).every((a) => a === 'path-hung'), `ONE DEAD THING, ONE CALL: the same dead path asked ${K} times ended ${same.stats().timeouts} worker (${got.join(', ')})`, got);
   } finally { same.close(); }
   // RED CONTROL: the release's pool (a deadline end remembers nothing) — every ask of the dead path ends a fresh worker
-  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
-  const NOTE = '    if (running) this._noteHung(running.payload, running.op, running !== call ? Math.max(call.timeoutMs || 0, monoNow() - (running.sentAt || monoNow())) : Math.min(running.timeoutMs || Infinity, monoNow() - (running.sentAt || monoNow())), { early: running !== call });   // the time since it was sent without an answer; ended EARLY by a queued call ⇒ only that long\n';
-  const Rel = src.split(NOTE).length === 2 ? mutantCopies('safe-fs-path-memory', REPO).load('src/safe-fs.js', anchored(src, NOTE, '', 'release-no-memory'), 'release-no-memory') : null;
-  const RK = 3;   // the release's road needs no more asks to show itself
-  const red = Rel ? await scene(Rel, 'release', RK) : null;
+  const red = await redP;
   console.log(`  [measure] the release: ${red && red.ends} worker ends for ${RK} asks (${red && red.answers.join(', ')})`);
   ok(!!red && red.ends === RK && red.answers.every((a) => a === 'deadline'), `RED CONTROL (the release's pool): every ask of the dead path ends a fresh worker (${red && red.ends} of ${RK})`, red);
 }
@@ -227,12 +228,12 @@ console.log('①d the call the worker was RUNNING is the dead one — never a ca
       return { dead: !!pool._hungOf({ path: '/scratch-b23e5/q/dead' }, '__sleep', 200), healthy: !!pool._hungOf({ path: '/scratch-b23e5/q/healthy/f' }, '__sleep', 200), bound, probe, patientRefused: !!pool._hungOf({ path: '/scratch-b23e5/q/dead' }, '__sleep', probe) };
     } finally { pool.close(); }
   };
-  const now = await run(SF);
-  ok(now.dead && !now.healthy && !now.patientRefused, `the queued call's deadline ended the worker; the RUNNING call's path is remembered (${now.dead}), the queued one's is not (${now.healthy}); ended early after ${now.bound && Math.round(now.bound)} ms, a ${now.probe} ms caller is asked again (${!now.patientRefused})`, now);
+  const nowP = run(SF);
   const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
   const RUN = '    if (running) this._noteHung(running.payload, running.op, running !== call ? Math.max(call.timeoutMs || 0, monoNow() - (running.sentAt || monoNow())) : Math.min(running.timeoutMs || Infinity, monoNow() - (running.sentAt || monoNow())), { early: running !== call });   // the time since it was sent without an answer; ended EARLY by a queued call ⇒ only that long\n';
   const Q = src.split(RUN).length === 2 ? mutantCopies('safe-fs-path-memory-q', REPO).load('src/safe-fs.js', anchored(src, RUN, '    this._noteHung(call.payload, call.op, call.timeoutMs);\n', 'blame-the-queued'), 'blame-the-queued') : null;
-  const red = Q ? await run(Q) : null;
+  const [now, red] = await Promise.all([nowP, Q ? run(Q) : null]);
+  ok(now.dead && !now.healthy && !now.patientRefused, `the queued call's deadline ended the worker; the RUNNING call's path is remembered (${now.dead}), the queued one's is not (${now.healthy}); ended early after ${now.bound && Math.round(now.bound)} ms, a ${now.probe} ms caller is asked again (${!now.patientRefused})`, now);
   ok(!!red && red.healthy && !red.dead, `RED CONTROL (the timed-out call blamed): the healthy queued path is remembered and the dead one is not (${JSON.stringify(red)})`, red);
   const EARLY = ', { early: running !== call });';
   const E = src.split(EARLY).length === 2 ? mutantCopies('safe-fs-path-memory-e', REPO).load('src/safe-fs.js', anchored(src, EARLY, ', { early: false });', 'early-as-full'), 'early-as-full') : null;
@@ -283,14 +284,7 @@ console.log('①g 主开发\'s r275: a person\'s own press is tried; a path that
     } finally { pool.close(); }
     return out;
   };
-  const now = await run(SF);
-  console.log(`  [measure] ${JSON.stringify(now)}`);
-  ok(now.unmarked0 === 'path-hung' && now.press === 'answered' && now.after === 'answered', `the press after a recovery: an unmarked call is refused (${now.unmarked0}); the person's press is asked at once (${now.press}); answered, the path is forgiven — the next unmarked call is asked too (${now.after})`, now);
-  ok(now.deadPress === 'path-hung, tried' && now.deadEnds === 1 && now.renewed && now.unmarked === 'path-hung' && now.unmarkedEnds === 1, `the press on a still-dead path is tried once — ONE worker ends (${now.deadEnds}), the memory renewed (${now.renewed}), its words the memory's own (${now.deadPress}); an unmarked caller after it is refused, no worker (${now.unmarked})`, now);
-  ok(now.otherOp === 'answered' && now.under === 'answered' && now.listingKept && now.listingPress !== 'path-hung' && now.listingForgiven,
-    `r316 MUST 1: a listing's entry survives the folder's own other op (${now.otherOp}) and a reply under it (${now.under}) — still refused (${now.listingKept}); a listing that replies at that path forgives it (${now.listingPress} ⇒ ${now.listingForgiven})`, now);
-  ok(now.joined.sent === 1 && now.joined.pa === 'answered' && now.joined.pb === 'answered', `two presses of the same thing at once are ONE call in flight (${now.joined.sent} sent; both ${now.joined.pa})`, now.joined);
-  ok(JSON.stringify(now.spans) === JSON.stringify([30000, 60000, 120000, 240000, 480000, 480000]), `a path that ends a worker again is kept twice as long each time, at most 16 × (${now.spans.map((x) => x / 1000 + ' s').join(', ')})`, now.spans);
+  const nowP = run(SF);   // the scene and its RED copies run side by side (each its own pool)
   // RED CONTROLS, each over the copy without its rule
   const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
   const ATT = '    if (hp && !opts.attended) return Promise.reject(pathHungRefusal(hp.path, hp.ms));\n', FGV = '    this._forgive(call.payload, call.op);   // r275 / r316: the path answered — what its entry\'s kind lets this reply clear leaves\n';
@@ -298,7 +292,14 @@ console.log('①g 主开发\'s r275: a person\'s own press is tried; a path that
   const noFgv = src.split(FGV).length === 2 ? mutantCopies('safe-fs-path-memory-fgv', REPO).load('src/safe-fs.js', anchored(src, FGV, '', 'never-forgiven'), 'never-forgiven') : null;
   const WIDE_FGV = "        if (p === h && m.self) for (const sk of Object.keys(m.self)) if (sk === key || (wide && WIDE_OPS.has(sk))) { delete m.self[sk]; changed = true; }\n";
   const tooWide = src.split(WIDE_FGV).length === 2 ? mutantCopies('safe-fs-path-memory-wide', REPO).load('src/safe-fs.js', anchored(src, WIDE_FGV, "        if (p === h || p.startsWith(h.endsWith('/') ? h : h + '/')) { this._hung.delete(h); continue; }\n", 'forgiven-too-wide'), 'forgiven-too-wide') : null;   // stale-pins: kept (r275's wide rule, the RED's copy)
-  const r1 = noAtt ? await run(noAtt) : null, r2 = noFgv ? await run(noFgv) : null, r3 = tooWide ? await run(tooWide) : null;
+  const [now, r1, r2, r3] = await Promise.all([nowP, noAtt ? run(noAtt) : null, noFgv ? run(noFgv) : null, tooWide ? run(tooWide) : null]);
+  console.log(`  [measure] ${JSON.stringify(now)}`);
+  ok(now.unmarked0 === 'path-hung' && now.press === 'answered' && now.after === 'answered', `the press after a recovery: an unmarked call is refused (${now.unmarked0}); the person's press is asked at once (${now.press}); answered, the path is forgiven — the next unmarked call is asked too (${now.after})`, now);
+  ok(now.deadPress === 'path-hung, tried' && now.deadEnds === 1 && now.renewed && now.unmarked === 'path-hung' && now.unmarkedEnds === 1, `the press on a still-dead path is tried once — ONE worker ends (${now.deadEnds}), the memory renewed (${now.renewed}), its words the memory's own (${now.deadPress}); an unmarked caller after it is refused, no worker (${now.unmarked})`, now);
+  ok(now.otherOp === 'answered' && now.under === 'answered' && now.listingKept && now.listingPress !== 'path-hung' && now.listingForgiven,
+    `r316 MUST 1: a listing's entry survives the folder's own other op (${now.otherOp}) and a reply under it (${now.under}) — still refused (${now.listingKept}); a listing that replies at that path forgives it (${now.listingPress} ⇒ ${now.listingForgiven})`, now);
+  ok(now.joined.sent === 1 && now.joined.pa === 'answered' && now.joined.pb === 'answered', `two presses of the same thing at once are ONE call in flight (${now.joined.sent} sent; both ${now.joined.pa})`, now.joined);
+  ok(JSON.stringify(now.spans) === JSON.stringify([30000, 60000, 120000, 240000, 480000, 480000]), `a path that ends a worker again is kept twice as long each time, at most 16 × (${now.spans.map((x) => x / 1000 + ' s').join(', ')})`, now.spans);
   ok(!!r3 && !r3.listingKept, `RED CONTROL (r275's rule — any reply at or under clears every kind): the folder's own other op clears its listing's entry (${r3 && r3.listingKept})`, r3);
   ok(!!r1 && r1.press === 'path-hung', `RED CONTROL (no attended rule): the person's press after a recovery is refused (${r1 && r1.press})`, r1);
   ok(!!r2 && r2.press === 'answered' && r2.after === 'path-hung', `RED CONTROL (never forgiven): the press answers, yet the next unmarked call is still refused (${r2 && r2.after})`, r2);
@@ -570,10 +571,10 @@ console.log('①h B-23e5\'s remainder (b): two SYMLINKS into dead mounts never n
         return { named: !!pool._hungOf({ path: path.join(Y, 'c.txt') }, 'stat', 15000), held: await held, ends: pool.stats().timeouts - ends0 };
       } finally { pool.close(); }
     };
-    const b = await busy(SF, 'now');
+    const bP = busy(SF, 'now');   // the scene and its RED copy side by side
     const LI = "    const once = () => this.call('lstatKinds', payload, { timeoutMs: CLIMB_LOOK_MS, look: true, idleOnly: true })";
     const queued = src.split(LI).length === 2 ? mutantCopies('safe-fs-path-memory-busy', REPO).load('src/safe-fs.js', anchored(src, LI, "    const once = () => this.call('lstatKinds', payload, { timeoutMs: CLIMB_LOOK_MS, look: true })", 'look-queued'), 'look-queued') : null;
-    const bq = queued ? await busy(queued, 'queued') : null;
+    const [b, bq] = await Promise.all([bP, queued ? busy(queued, 'queued') : null]);
     console.log('    the busy worker: ' + JSON.stringify({ now: b, queued: bq }));
     ok(!b.named && b.held === 'answered' && b.ends === 0, `the look takes an IDLE worker only: the one worker held by a live call, the folder is not named now (${b.named}) and the held call answers (${b.held}; ${b.ends} worker ended)`, b);
     ok(!!bq && bq.held !== 'answered' && bq.ends >= 1, `RED CONTROL (the look queued behind the live call, in a copy): its short deadline ends the worker under the held call (${bq && bq.held}; ${bq && bq.ends} ended)`, bq);
@@ -679,8 +680,8 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
   // stays (it answers false to save-and-close), and the words say WHERE it is not saved; RED: the release's words name nothing
   const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
   const saveBody = (ce.match(/\n  async save\(\) \{\n([\s\S]*?)\n  \}\n\n  \/\/ lane artifacts-model/) || [])[1];
-  const runSave = async (body) => {
-    const inits = [], fetchStub = async (url, init) => { inits.push(init); return { ok: false, status: 503, json: async () => ({ error: 'this folder or file did not answer in time — try again in 30 s', code: 'storage_path_hung', params: { s: 30 } }) }; };
+  const runSave = async (body, answer = { error: 'this folder or file did not answer in time — try again in 30 s', code: 'storage_path_hung', params: { s: 30 } }) => {
+    const inits = [], fetchStub = async (url, init) => { inits.push(init); return { ok: false, status: 503, json: async () => answer }; };
     const ed = { editorView: { state: { doc: { toString: () => 'the person\'s text' } } }, saveIndicator: { textContent: '', style: {}, title: '' }, filePath: '/scratch-b23e5/dead/notes.md', _host: '', _diskChip: { style: {} }, _noteArtifactSave() {}, _baselineMtime() {}, modified: true };
     const toasts = [];
     const save = new Function('t', 'fsErrorText', 'ATTENDED_HEADERS', 'fetch', 'setTimeout', 'showToast', `return async function save() {\n${body}\n};`)(tt, (d) => d.error, { 'X-VibeSpace-Attended': '1' }, fetchStub, () => 0, (m) => toasts.push(m));
@@ -695,6 +696,13 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
       && /^notes\.md is not saved — .*\. Your text is still here, unsaved: save again, or copy it to keep it elsewhere\.$/.test(sv.toast),
     'THE SAVE LAW (the code editor, r1378 (3)): a save that meets a dead path is a marked press; the person\'s text stays (still unsaved — the dirty mark), the editor stays open (save-and-close hears false), the words name WHERE it is not saved (the file, the whole path on hover) and say where the text IS and what to do (a toast)', sv);
   ok(!!svR && !/is not saved/.test(svR.text), 'RED CONTROL (the release\'s words, in a lifted copy): the refusal names nothing — where the text was not saved is not said', svR);
+  // r1733 (6): Mod-s twice on a remembered path — the second is refused «still trying» while the first may still land: ONE true sentence
+  const TRYING = { error: 'this folder or file is still being tried — wait for the answer to the first press', code: 'storage_path_trying' };
+  const svT = saveBody ? await runSave(saveBody, TRYING) : null;
+  const TRY_LINE = (saveBody || '').split('\n').find((l) => l.includes("data.code === 'storage_path_trying'")) || '';
+  const svTR = saveBody && TRY_LINE ? await runSave(saveBody.replace(TRY_LINE, ''), TRYING) : null;   // stale-pins: kept (the line cut)
+  ok(!!svT && svT.out === false && svT.modified === true && /^… notes\.md: the save before this one is still being tried — wait for its answer$/.test(svT.text) && !svT.toast && !!svTR && /is not saved/.test(svTR.toast),
+    `THE WORDS (r1733 (6)): a second save refused «still trying» says one true sentence («${svT && svT.text}») — no «not saved» toast while the first may still land; the text stays unsaved; RED (the line cut, lifted): «not saved» beside a save that may land`, { svT, svTR });
   // the document window's and the pane editor's saves: the same law, read from their source — the FULL words (where the text IS and what
   // to do); the pane keeps them (no reset) and never signals the CLI over a refused save
   const FULL = "t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(";
@@ -705,16 +713,23 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
   // r1442 (C) THE DOCUMENT WINDOW's SAVE, LIFTED from its source and driven over a stand-in fetch: its OWN CHECK is the press's one try
   // (marked); refused by the storage (503) the save ends there with the words — never a write after it — and the text stays unsaved
   const dws = (dw.match(/\n  async function save\(\) \{\n([\s\S]*?)\n  \}\n/) || [])[1];
-  const runDocSave = async (body) => {
+  const runDocSave = async (body, { infoOk = false, typeDuringWrite = false } = {}) => {
     const calls = [], said = [];
-    const fetchStub = async (url, init) => { calls.push({ url, marked: !!(init && init.headers && init.headers['X-VibeSpace-Attended']) }); return url.startsWith('/api/file/info') ? { ok: false, status: 503, json: async () => ({ error: 'this folder or file did not answer in time — try again in 30 s', code: 'storage_path_hung', params: { s: 30 } }) } : { ok: true, status: 200, json: async () => ({ success: true }) }; };
-    const S = { mode: 'rich', ed: {}, busy: false, source: 'old text', loaded: {}, base: 0, confirmed: 0, dirty: true };
+    let edJson = { doc: 'the person\'s text' };
+    const fetchStub = async (url, init) => { calls.push({ url, marked: !!(init && init.headers && init.headers['X-VibeSpace-Attended']) }); if (url.startsWith('/api/file/info')) return infoOk ? { ok: true, status: 200, json: async () => ({ modified: 0 }) } : { ok: false, status: 503, json: async () => ({ error: 'this folder or file did not answer in time — try again in 30 s', code: 'storage_path_hung', params: { s: 30 } }) }; if (typeDuringWrite) edJson = { doc: 'the person\'s text, and more typed while the save was out' }; return { ok: true, status: 200, json: async () => ({ success: true }) }; };
+    const S = { mode: 'rich', ed: { getJSON: () => edJson }, busy: false, source: 'old text', loaded: {}, base: 0, confirmed: 0, dirty: true };
     const fn = new Function('S', 'M', 'saveDoc', 'current', 'say', 'fidelityWords', 'fetch', 'fsErrorText', 'ATTENDED_HEADERS', 't', 'showConfirmDialog', 'q', 'host', 'path', 'loadDoc', 'info', 'hhmm', 'renderStatus', 'noteEdit', 'conflict', `return async function save() {\n${body}\n};`)(
       S, { saveVerdict: () => 'write' }, () => ({ ok: true, text: 'the person\'s text' }), () => ({}), (m) => said.push(m), () => '', fetchStub, (d) => d.error, { 'X-VibeSpace-Attended': '1' }, tt, async () => true, () => 'path=x', '', '/scratch-b23e5/dead/notes.md', () => ({}), async () => 0, () => '00:00', () => {}, () => {}, {});
     await fn();
     return { calls: calls.map((c) => `${c.url.split('?')[0]}${c.marked ? ' (marked)' : ''}`), said: said[0] || '', dirty: S.dirty, busy: S.busy };
   };
   const ds = dws ? await runDocSave(dws) : null;
+  // r1733 (1): a save that LANDS clears the unsaved mark only if the box still holds what it sent (text typed meanwhile stays unsaved)
+  const dsTyped = dws ? await runDocSave(dws, { infoOk: true, typeDuringWrite: true }) : null, dsClean = dws ? await runDocSave(dws, { infoOk: true }) : null;
+  const DIRTY = "S.dirty = JSON.stringify(S.ed.getJSON()) !== sentJson;";
+  const dsTypedR = dws && dws.includes(DIRTY) ? await runDocSave(dws.replace(DIRTY, 'S.dirty = false;'), { infoOk: true, typeDuringWrite: true }) : null;   // stale-pins: kept (the release cleared the mark)
+  ok(!!dsTyped && dsTyped.dirty === true && !!dsClean && dsClean.dirty === false && !!dsTypedR && dsTypedR.dirty === false,
+    `THE DOCUMENT WINDOW's SAVE (r1733 (1)): text typed while the save was out stays UNSAVED when the save lands (${dsTyped && dsTyped.dirty}) — so a close asks; a save of what the box holds clears it (${dsClean && dsClean.dirty}); RED (the release's clear, lifted): the late text marked saved (${dsTypedR && dsTypedR.dirty})`, { dsTyped, dsClean, dsTypedR });
   const CHK = "      if (chk && chk.status === 503) throw new Error(chk.body && chk.body.error ? fsErrorText(chk.body) : t('the server did not answer'));\n";
   const dsR = dws && dws.includes(CHK) ? await runDocSave(dws.replace(CHK, '')) : null;   // stale-pins: kept (the rebuild's road: the check's refusal not read)
   console.log('    the document window\'s save: ' + JSON.stringify({ now: ds, rebuild: dsR }));
@@ -734,19 +749,19 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
     const rows = [['clean, its ✕', false, {}], ['unsaved, its ✕ — Discard', true, {}, true], ['unsaved, its ✕ — Cancel', true, {}, false], ['unsaved, a group\'s close-all', true, { asked: true }, false], ['unsaved, after its own Discard', true, { discardAsked: true }]];
     const out = [];
     for (const [what, dirty, o, answer] of rows) {
-      const asked = [], closes = [];
-      const ask = (q) => { asked.push(q.message); return Promise.resolve(answer); };
+      const asked = [], closes = [], safe = [];
+      const ask = (q) => { asked.push(q.message); safe.push(q.cancelDefault === true); return Promise.resolve(answer); };
       const wm = { requestClose: (id, op) => closes.push([id, op && op.discardAsked]) };
       let fn;
       if (kind === 'code') fn = new Function('t', 'showConfirmDialog', 'prevAsk', `return function (o) {\n${body}\n};`)(tt, ask, undefined).bind({ modified: dirty, filePath: '/scratch-b23e5/dead/notes.txt', winInfo: { id: 'w1' }, app: { wm } });
       else if (kind === 'pane') fn = new Function('t', 'showConfirmDialog', 'prevAsk', 'unsavedPane', 'app', 'targetWinInfo', `return function (o) {\n${body}\n};`)(tt, ask, undefined, () => (dirty ? { name: 'notes.txt' } : null), { wm }, { id: 'w1' });
       else fn = new Function('t', 'showConfirmDialog', 'winInfo', 'name', 'app', `return function (o) {\n${body}\n};`)(tt, ask, { id: 'w1', _editorDirty: () => dirty }, 'notes.md', { wm });
       const go = fn(o); await sleep(0);
-      out.push({ what, go, asked: asked.length ? asked[0] : '', closed: closes.length ? closes[0][1] : null });
+      out.push({ what, go, asked: asked.length ? asked[0] : '', closed: closes.length ? closes[0][1] : null, safe: safe.every(Boolean) });
     }
     return out;
   };
-  const want = (r) => (r.what.startsWith('clean') || r.what.includes('after its own') ? r.go === true && !r.asked : r.go === false && /has unsaved changes — they are only in this window/.test(r.asked) && (r.what.endsWith('Discard') ? r.closed === true : r.closed === null));
+  const want = (r) => (r.what.startsWith('clean') || r.what.includes('after its own') ? r.go === true && !r.asked : r.go === false && /has unsaved changes — they are only in this window/.test(r.asked) && r.safe && (r.what.endsWith('Discard') ? r.closed === true : r.closed === null));   // r1733 (2): every ask keeps on Enter (cancelDefault)
   const cg = guardOf('code', ce), dg = guardOf('doc', rd('src/lib/doc-window.js')), pg = guardOf('pane', ee);
   const cOut = cg ? await drive('code', cg) : null, dOut = dg ? await drive('doc', dg) : null, pOut = pg ? await drive('pane', pg) : null;
   const roadsSaid = (o) => o && o.map((r) => `${r.what}: ${r.go ? 'closes' : 'asks'}${r.closed ? ' → closed' : ''}`);
@@ -782,17 +797,22 @@ console.log('①j B-23e5\'s remainder (a): the doors pressed, driven over stand-
   const cee = (ee.match(/\nexport function closeExternalEditor\(app, signalPath\) \{\n([\s\S]*?)\n\}\n/) || [])[1];
   const cliClose = (body) => {
     const removed = [], pane = (sig) => ({ dataset: { signal: sig }, remove() { removed.push(sig); } });
-    const win = { _editorState: { signalPath: 'sig-B' }, content: { style: {}, querySelectorAll: (q) => (q === '.editor-container' ? [pane('sig-A'), pane('sig-B')] : []), querySelector: (q) => (q === '.editor-container' ? pane('sig-A') : null) } };
+    const win = { _editorState: null, content: { style: {}, querySelectorAll: (q) => (q === '.editor-container' ? [pane('sig-A'), pane('sig-B')] : []), querySelector: (q) => (q === '.editor-container' ? pane('sig-A') : null) } };   // A's save cleared the state; B still shows
     new Function('app', 'signalPath', body)({ wm: { windows: new Map([['w1', win]]) }, sessions: new Map() }, 'sig-B');
     return removed;
   };
   const cc = cee ? cliClose(cee) : null;
-  const OLDQ = "      const editorPane = [...win.content.querySelectorAll('.editor-container')].find((el) => el.dataset.signal === signalPath);";
-  const ccR = cee && cee.includes(OLDQ) ? cliClose(cee.replace(OLDQ, "      const editorPane = win.content.querySelector('.editor-container');")) : null;   // stale-pins: kept (the release's first-pane pick)
-  ok(!!cc && cc.join() === 'sig-B' && !!ccR && ccR.join() === 'sig-A', `the CLI's close removes ITS pane (${cc && cc.join()}); RED (the release's first .editor-container, lifted): the left-behind pane goes instead (${ccR && ccR.join()})`, { cc, ccR });
+  const OLDQ = "    if (!editorPane) continue;";
+  const ccR = cee && cee.includes(OLDQ) ? cliClose(cee.replace(OLDQ, "    if (!editorPane || win._editorState?.signalPath !== signalPath) continue;")) : null;   // stale-pins: kept (the release matched the window by its state)
+  const PICK = ".find((el) => el.dataset.signal === signalPath);";
+  const ccR2 = cee && cee.includes(PICK) ? cliClose(cee.replace(PICK, "[0];")) : null;   // stale-pins: kept (the first pane in the window)
+  ok(!!cc && cc.join() === 'sig-B' && !!ccR && ccR.join() === '' && !!ccR2 && ccR2.join() === 'sig-A',
+    `B-23e5's LEFT (1): the CLI's close removes ITS pane even after an older pane's save cleared the window's state (${cc && cc.join()}); REDs (lifted): the window matched by its state finds none (${ccR && (ccR.join() || 'none')}), the first pane picked removes the left-behind one (${ccR2 && ccR2.join()})`, { cc, ccR, ccR2 });
   ok(!!tpR && tpR.r2 === false, 'RED CONTROL (a removed pane still counted, in a lifted copy): the window asks forever about text that is gone', tpR);
   const redG = cg ? await drive('code', cg.replace('(o && o.discardAsked)', '(o && (o.discardAsked || o.asked))')) : null;
-  ok(!!redG && redG.find((r) => r.what.includes('group')).go === true, 'RED CONTROL (the group\'s «asked» taken as the person\'s Discard, in a lifted copy): an unsaved editor closes at a group\'s close-all unasked — a silent loss', redG);
+  const redGd = dg ? await drive('doc', dg.replace('(o && o.discardAsked)', '(o && (o.discardAsked || o.asked))')) : null, redGp = pg ? await drive('pane', pg.replace('!(o && o.discardAsked)', '!(o && (o.discardAsked || o.asked))')) : null;   // stale-pins: kept (the planted REDs)
+  ok(!!redG && redG.find((r) => r.what.includes('group')).go === true && !!redGd && redGd.find((r) => r.what.includes('group')).go === true && !!redGp && redGp.find((r) => r.what.includes('group')).go === true,
+    'RED CONTROLS (the group\'s «asked» taken as the person\'s Discard, in lifted copies of each of the three guards): an unsaved window closes at a group\'s close-all unasked — a silent loss', { redG, redGd, redGp });
   ok(/requestClose\(tid, \{ asked: true \}\)/.test(rd('src/lib/tab-group.js')) && /go = win\.onCloseRequest\(opts\) !== false;/.test(rd('src/lib/window.js')),
     'PIN: a group\'s close-all closes each member through requestClose (asked), and requestClose hears the window\'s answer');
 }
@@ -833,7 +853,17 @@ console.log('①k r1378 (2) / r1442 (A): ONE TRY A REMEMBERED PATH — ten press
       return { sent, ends, words, trying, pressUnder, readUnder, writesSent, held, named2, twoSent: pool._seq - s2, two };
     } finally { pool.close(); }
   };
-  const now = await run(SF, 'now');
+  const nowP = run(SF, 'now');   // the scene and its RED copies run side by side (each its own pool)
+  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
+  const TRY = '    if (busy) return Promise.reject(pathTryingRefusal(busy.path));\n';
+  const cut = src.split(TRY).length === 2 ? mutantCopies('safe-fs-path-memory-ten', REPO).load('src/safe-fs.js', anchored(src, TRY, '', 'second-press-sent'), 'second-press-sent') : null;
+  // the rebuild's own rule planted back (its read's H1): EVERY press held, every press at or under it refused
+  const HELD = "    const held = hp ? [...new Map(this._hungAll(payload, op, timeoutMs).map((x) => [x.path, x])).values()] : [];   // each remembered path refusing this press, once\n";
+  const BUSY = "    const busy = this._trying ? held.find((x) => this._trying.has(x.path)) : null;\n";
+  const every = src.split(HELD).length === 2 && src.split(BUSY).length === 2 ? mutantCopies('safe-fs-path-memory-every', REPO).load('src/safe-fs.js', anchored(anchored(src, HELD, "    const held = opts.attended ? [{ path: (hp && hp.path) || pathsOf(payload)[0] }] : [];\n", 'every-press-held-a'), BUSY, "    const busy = opts.attended && this._trying ? [...this._trying.keys()].map((tp) => ({ path: tp })).find((x) => pathsOf(payload).some((q) => q === x.path || q.startsWith(x.path + '/'))) : null;\n", 'every-press-held'), 'every-press-held') : null;
+  // one remembered path a press (the first build of rule A — its read's #1): the file and its named folder each hold a different press
+  const one = src.split(HELD).length === 2 ? mutantCopies('safe-fs-path-memory-onepath', REPO).load('src/safe-fs.js', anchored(src, HELD, '    const held = hp ? [hp] : [];\n', 'one-path-held'), 'one-path-held') : null;
+  const [now, red, redO, redE] = await Promise.all([nowP, cut ? run(cut, 'cut') : null, one ? run(one, 'one') : null, every ? run(every, 'every') : null]);
   console.log('    the facts judged: ' + JSON.stringify(now));
   ok(now.sent === 1 && now.ends === 1 && now.words.slice(0, 5).every((w) => w === 'path-hung, tried') && now.words.slice(5).every((w) => w === 'still trying') && now.trying === 0,
     `ONE TRY A REMEMBERED PATH: ten presses on a remembered dead folder sent ${now.sent} call and ended ${now.ends} worker — the five on the folder joined it (${now.words[0]}), the five on files in it were told «still trying» (${now.words[5]}); nothing held after the answer (${now.trying})`, now);
@@ -841,18 +871,6 @@ console.log('①k r1378 (2) / r1442 (A): ONE TRY A REMEMBERED PATH — ten press
     `two remembered paths refuse one press (a dead file and its named folder): presses on a.txt, b.txt, c.txt sent ${now.twoSent} call — the first tried (${now.two[0]}), the others told «still trying» (${now.two.slice(1).join(', ')})`, now);
   ok(now.pressUnder === 'answered' && now.readUnder === 'answered' && now.held === 'answered' && now.writesSent === 2,
     `a press the memory does not refuse is never held: a press and a read under a folder whose healthy listing press is out are asked (${now.pressUnder}, ${now.readUnder}); two writes of the same text at once are two calls (${now.writesSent} — a write never joins)`, now);
-  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
-  const TRY = '    if (busy) return Promise.reject(pathTryingRefusal(busy.path));\n';
-  const cut = src.split(TRY).length === 2 ? mutantCopies('safe-fs-path-memory-ten', REPO).load('src/safe-fs.js', anchored(src, TRY, '', 'second-press-sent'), 'second-press-sent') : null;
-  const red = cut ? await run(cut, 'cut') : null;
-  // the rebuild's own rule planted back (its read's H1): EVERY press held, every press at or under it refused
-  const HELD = "    const held = hp ? [...new Map(this._hungAll(payload, op, timeoutMs).map((x) => [x.path, x])).values()] : [];   // each remembered path refusing this press, once\n";
-  const BUSY = "    const busy = this._trying ? held.find((x) => this._trying.has(x.path)) : null;\n";
-  const every = src.split(HELD).length === 2 && src.split(BUSY).length === 2 ? mutantCopies('safe-fs-path-memory-every', REPO).load('src/safe-fs.js', anchored(anchored(src, HELD, "    const held = opts.attended ? [{ path: (hp && hp.path) || pathsOf(payload)[0] }] : [];\n", 'every-press-held-a'), BUSY, "    const busy = opts.attended && this._trying ? [...this._trying.keys()].map((tp) => ({ path: tp })).find((x) => pathsOf(payload).some((q) => q === x.path || q.startsWith(x.path + '/'))) : null;\n", 'every-press-held'), 'every-press-held') : null;
-  // one remembered path a press (the first build of rule A — its read's #1): the file and its named folder each hold a different press
-  const one = src.split(HELD).length === 2 ? mutantCopies('safe-fs-path-memory-onepath', REPO).load('src/safe-fs.js', anchored(src, HELD, '    const held = hp ? [hp] : [];\n', 'one-path-held'), 'one-path-held') : null;
-  const redO = one ? await run(one, 'one') : null;
-  const redE = every ? await run(every, 'every') : null;
   console.log('    the controls: ' + JSON.stringify({ noTry: red && { sent: red.sent, words: red.words.slice(5, 6) }, every: redE && { pressUnder: redE.pressUnder }, onePath: redO && { twoSent: redO.twoSent, two: redO.two } }));
   ok(!!red && red.sent === 6 && red.words.slice(5).every((w) => w !== 'still trying'), `RED CONTROL (no «still trying», in a copy): the five file presses each take a worker into the dead folder — ${red && red.sent} calls sent`, red);
   ok(!!redE && redE.pressUnder === 'still trying', `RED CONTROL (the rebuild's every-press rule planted back, in a copy — its read's H1): a press under a healthy folder whose listing press is out is refused (${redE && redE.pressUnder})`, redE);
@@ -918,20 +936,19 @@ console.log('①l r1378 (1): the mark is NOT an access door — a marked call is
       return out;
     } finally { pool.close(); }
   };
-  const now = await run(SF, 'now');
+  const nowP = run(SF, 'now');   // the scene and its RED copies run side by side (each its own pool)
+  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
+  const DOORL = '    const mp = this._blocked(payload);\n    if (mp) return Promise.reject(DOOR.refusal(mp));\n';
+  const open = src.split(DOORL).length === 2 ? mutantCopies('safe-fs-path-memory-door', REPO).load('src/safe-fs.js', anchored(src, DOORL, '    const mp = opts.attended ? false : this._blocked(payload);\n    if (mp) return Promise.reject(DOOR.refusal(mp));\n', 'mark-opens-door'), 'mark-opens-door') : null;
+  const CALL0 = '  call(op, payload = {}, opts = {}) {\n';
+  const wide = src.split(CALL0).length === 2 ? mutantCopies('safe-fs-path-memory-size', REPO).load('src/safe-fs.js', anchored(src, CALL0, CALL0 + '    if (opts.attended && payload && payload.maxSize) payload = { ...payload, maxSize: payload.maxSize * 2 };\n', 'mark-widens-size'), 'mark-widens-size') : null;
+  const [now, red, redW] = await Promise.all([nowP, open ? run(open, 'open') : null, wide ? run(wide, 'wide') : null]);
   console.log('    the facts judged: ' + JSON.stringify(now));
   const pairs = Object.entries(now).filter(([, v]) => Array.isArray(v)), apart = pairs.filter(([, [u, m]]) => u !== m);
   const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;   // as root the unreadable file reads: that row compares two answers, it cannot refuse
   ok(!apart.length && /storage-blocked/.test(now['a parked mount'][1]) && /deadline/.test(now.deadline) && !/^answered/.test(now.deadline) && now.workers === 2,
     `NOT AN ACCESS DOOR: ${pairs.length} refusals the same marked and unmarked (${pairs.map(([k, [u]]) => `${k}: ${u.slice(0, 40)}`).join(' · ')})${asRoot ? ' — as root, the unreadable file\'s row compares two answers' : ''}; a marked 4 s stall ends at its own 300 ms deadline, never answered (${now.deadline.slice(0, 40)}); the pool keeps its ${now.workers} workers`, { apart, now });
-  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
-  const DOORL = '    const mp = this._blocked(payload);\n    if (mp) return Promise.reject(DOOR.refusal(mp));\n';
-  const open = src.split(DOORL).length === 2 ? mutantCopies('safe-fs-path-memory-door', REPO).load('src/safe-fs.js', anchored(src, DOORL, '    const mp = opts.attended ? false : this._blocked(payload);\n    if (mp) return Promise.reject(DOOR.refusal(mp));\n', 'mark-opens-door'), 'mark-opens-door') : null;
-  const red = open ? await run(open, 'open') : null;
   ok(!!red && red['a parked mount'][0] !== red['a parked mount'][1], `RED CONTROL (the mark lets a call past the mount door, in a copy): the parked mount answers the two apart (${red && red['a parked mount'].join(' | ')})`, red);
-  const CALL0 = '  call(op, payload = {}, opts = {}) {\n';
-  const wide = src.split(CALL0).length === 2 ? mutantCopies('safe-fs-path-memory-size', REPO).load('src/safe-fs.js', anchored(src, CALL0, CALL0 + '    if (opts.attended && payload && payload.maxSize) payload = { ...payload, maxSize: payload.maxSize * 2 };\n', 'mark-widens-size'), 'mark-widens-size') : null;
-  const redW = wide ? await run(wide, 'wide') : null;
   ok(!!redW && redW['a file over the bound'][0] !== redW['a file over the bound'][1], `RED CONTROL (the mark widens the size bound, in a copy): the file over the bound answers the two apart (${redW && redW['a file over the bound'].map((x) => x.slice(0, 30)).join(' | ')})`, redW);
   // the same over the real router: a marked read is refused as an unmarked one; a marked chunk is cut to the route's 1 MB too
   const pool = new SF.SafeFs({ poolSize: 1, name: 'path-memory-door-route', hungMs: 60000 });
@@ -976,6 +993,85 @@ console.log('①m r1396: no other site\'s page can send the mark — a preflight
   const hits = censusOf(read), strays = hits.filter(([f, , t]) => !ROWS.some(([rf, text]) => rf === f && t.includes(text))), dead = ROWS.filter(([rf, text]) => !hits.some(([f, , t]) => f === rf && t.includes(text)));
   const plantedHits = censusOf((f) => (f === 'server.js' ? read(f) + "\napp.use((req, res, next) => { res.set('Access-Control-Allow-Headers', '*'); next(); });\n" : read(f))).filter(([f]) => f === 'server.js');   // stale-pins: kept (the planted RED)
   ok(!strays.length && !dead.length && plantedHits.length === 1, `THE CORS CENSUS (${hub.length} files): ${hits.length} line answers another origin, a row with its reason («${ROWS[0][2].slice(0, 60)}…»); no stray (${strays.length}), no dead row (${dead.length}); RED (a planted Allow-Headers in server.js): named (${plantedHits.length})`, { strays, dead });
+}
+
+console.log('①o r1733 (4)(5)(6): the rules its round found with no leg — each driven, each with its RED');
+{
+  const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const fv = rd('src/lib/file-viewer.js'), ce = rd('src/lib/code-editor.js'), dwu = rd('src/lib/doc-window-ui.js'), src = rd('src/safe-fs.js');
+  const H = { 'X-VibeSpace-Attended': '1' };   // stale-pins: kept (the constant's value, handed to lifted bodies)
+  // (4a) THE OPEN's SPENT PRESS: its first call refused (503) ⇒ the rest of the open goes unmarked — lifted from FileViewer.open
+  const FIRST = (fv.match(/\n(    let fileInfo = \{ size: 0, isBinary: false \};\n    try \{\n[\s\S]*?\n    \} catch \{\}\n)/) || [])[1];
+  const spent = async (block, status) => new Function('fetch', 'ATTENDED_HEADERS', 'filePath', 'hq', 'opts', `return (async () => {\n${block}\nreturn opts; })();`)(async () => ({ status, json: async () => (status === 503 ? { error: 'did not answer', code: 'storage_path_hung' } : { size: 3 }) }), H, '/scratch-b23e5/dead/a.html', '', { attended: true });
+  const SPENT = '      if (res.status === 503 && opts.attended) opts = { ...opts, attended: false };';
+  const sp503 = FIRST ? await spent(FIRST, 503) : null, sp200 = FIRST ? await spent(FIRST, 200) : null;
+  const spR = FIRST && FIRST.includes(SPENT) ? await spent(FIRST.replace(SPENT, ''), 503) : null;   // stale-pins: kept (the line cut)
+  ok(!!sp503 && sp503.attended === false && !!sp200 && sp200.attended === true && !!spR && spR.attended === true,
+    `THE OPEN's SPENT PRESS (lifted from FileViewer.open): refused by the storage, the rest of the open goes unmarked (${sp503 && sp503.attended}); answered, the press rides on (${sp200 && sp200.attended}); RED (the line cut): the editor's first load would be a second try (${spR && spR.attended})`, { sp503, sp200, spR });
+  // (4b) «THE FIRST READ IS MARKED ONCE» — the code editor's load and the document window's
+  const CE2 = (ce.match(/\n(        const pressed = this\._openPressed; this\._openPressed = false;\n        const res = await fetch\([^\n]*\n)/) || [])[1];
+  const twice = async (block) => { const marks = []; const self = { _openPressed: true, filePath: '/scratch-b23e5/proj/a.js', _host: '' }; const fn = new Function('fetch', 'ATTENDED_HEADERS', `return async function () {\n${block}\nreturn res; };`)(async (u, init) => { marks.push(!!(init && init.headers && init.headers['X-VibeSpace-Attended'])); return {}; }, H); await fn.call(self); await fn.call(self); return marks.join(); };
+  const ceNow = CE2 ? await twice(CE2) : null, ceRed = CE2 ? await twice(CE2.replace(' this._openPressed = false;', '')) : null;   // stale-pins: kept (the reset cut)
+  const DW2 = "      const pressed = (first && pressedFirst) || byPress; pressedFirst = false;   // a press: the window opened by one, its Reload, the way back from Raw";
+  const dwOnce = (line) => { let pressedFirst = true; const seen = []; const f1 = new Function('getPF', 'setPF', 'first', 'byPress', `let pressedFirst = getPF();\n${line}\nsetPF(pressedFirst); return pressed;`); for (let i = 0; i < 2; i++) seen.push(f1(() => pressedFirst, (v) => { pressedFirst = v; }, true, false)); return seen.join(); };
+  const dwNow = dwu.includes(DW2) ? dwOnce(DW2) : null, dwRed = dwu.includes(DW2) ? dwOnce(DW2.replace(' pressedFirst = false;', '')) : null;   // stale-pins: kept (the reset cut)
+  ok(ceNow === 'true,false' && ceRed === 'true,true' && dwNow === 'true,false' && dwRed === 'true,true',
+    `«THE FIRST READ IS MARKED ONCE»: the code editor's two loads ${ceNow}, the document window's two first loads ${dwNow}; REDs (each reset cut, lifted): every load marked (${ceRed} · ${dwRed})`, { ceNow, ceRed, dwNow, dwRed });
+  // (4c) THE HOLD RELEASED when the worker DIES or the send FAILS (not only an answer or a deadline)
+  const hold = async (Mod, tag) => {
+    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-hold-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText });
+    try {
+      await untilLive(pool, 1);
+      await pool._noteHung({ path: '/scratch-b23e5/held' }, 'stat', 15000);
+      const p = pool.call('__sleep', { path: '/scratch-b23e5/held', ms: 4000 }, { attended: true, timeoutMs: 15000 }).catch((e) => String(e && e.message));
+      await sleep(50); const during = pool._trying ? pool._trying.size : 0;
+      pool._workers[0].worker.terminate();   // the worker DIES under the held press
+      const died = await p; await sleep(20); const afterDeath = pool._trying ? pool._trying.size : 0;
+      await untilLive(pool, 1);
+      const w = pool._workers[0].worker, post = w.postMessage; w.postMessage = () => { throw new Error('the send failed (planted)'); };   // stale-pins: kept (a planted dispatch fault)
+      const p2 = await pool.call('__sleep', { path: '/scratch-b23e5/held', ms: 1 }, { attended: true }).then(() => 'answered', (e) => String(e && e.message));
+      w.postMessage = post; const afterSend = pool._trying ? pool._trying.size : 0;
+      return { during, died: died && died.slice(0, 40), afterDeath, p2: p2.slice(0, 40), afterSend };
+    } finally { pool.close(); }
+  };
+  const hNowP = hold(SF, 'now');   // the scene and its RED copy side by side
+  const OFF = "    if (held.length) { const off = () => { for (const x of held) if (this._trying && this._trying.get(x.path) === sent) this._trying.delete(x.path); }; for (const x of held) (this._trying = this._trying || new Map()).set(x.path, sent); sent.then(off, off); }\n";
+  const leak = src.split(OFF).length === 2 ? mutantCopies('safe-fs-path-memory-hold', REPO).load('src/safe-fs.js', anchored(src, OFF, OFF.replace('sent.then(off, off);', 'sent.then(off, () => {});'), 'hold-kept-on-a-fault'), 'hold-kept-on-a-fault') : null;
+  const [hNow, hRed] = await Promise.all([hNowP, leak ? hold(leak, 'red') : null]);
+  console.log('    the hold: ' + JSON.stringify({ now: hNow, red: hRed }));
+  ok(hNow.during === 1 && hNow.afterDeath === 0 && /send failed/.test(hNow.p2) && hNow.afterSend === 0 && !!hRed && hRed.afterDeath === 1,
+    `THE HOLD IS RELEASED on a worker's death (${hNow.afterDeath} held after it) and on a failed send (${hNow.afterSend}), not only on an answer or a deadline; RED (released on an answer only, in a copy): the dead worker's press holds the path for good (${hRed && hRed.afterDeath})`, { hNow, hRed });
+  // (5) A SERIAL LANE NEVER CLIMBS (its look would queue behind the one op it runs — the law: an idle worker only)
+  const laneClimb = async (Mod, tag) => {
+    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-lane-${tag}`, hungMs: 60000, mountsText });
+    try {
+      const lane = pool.lane('history'); let looks = 0; lane._lookIdle = async () => { looks++; return { links: [false, false] }; };
+      await lane._noteHung({ path: '/scratch-b23e5/hist/a' }, 'stat', 15000); await lane._noteHung({ path: '/scratch-b23e5/hist/b' }, 'stat', 15000);
+      return { looks, named: !!lane._hungOf({ path: '/scratch-b23e5/hist/c' }, 'stat', 15000), serial: !!lane._serial };
+    } finally { pool.close(); }
+  };
+  const lNow = await laneClimb(SF, 'now');
+  const SER = '    if (this._serial) return Promise.resolve();\n';
+  const lc = src.split(SER).length === 2 ? mutantCopies('safe-fs-path-memory-lane', REPO).load('src/safe-fs.js', anchored(src, SER, '', 'lane-climbs'), 'lane-climbs') : null;
+  const lRed = lc ? await laneClimb(lc, 'red') : null;
+  ok(lNow.serial && lNow.looks === 0 && !lNow.named && !!lRed && lRed.looks === 1, `A SERIAL LANE NEVER CLIMBS: two dead children on the history lane, ${lNow.looks} look, nothing named (each names itself); RED (the skip cut, in a copy): the lane looks (${lRed && lRed.looks})`, { lNow, lRed });
+  // (6) THE WORDS: looks holding every worker answer «busy» — never «the file readers are restarting»
+  const busyWord = async (Mod, tag) => {
+    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-busy-word-${tag}`, timeouts: { default: 15000 }, hungMs: 60000 });
+    try {
+      await untilLive(pool, 1);
+      const look = pool.call('__sleep', { ms: 300 }, { look: true, timeoutMs: 5000 });
+      const code = await pool.call('__sleep', { ms: 1 }).then(() => 'answered', (e) => String(e && e.code));
+      await look; return code;
+    } finally { pool.close(); }
+  };
+  const bNowP = busyWord(SF, 'now');
+  const BUSY = "      if ((this._workers || []).some((r) => r.alive && r.worker && r.looking)) return Promise.reject(noIdleRefusal(this._words));";
+  const bc = src.split(BUSY).length === 2 ? mutantCopies('safe-fs-path-memory-busyword', REPO).load('src/safe-fs.js', anchored(src, BUSY, '', 'busy-as-restarting'), 'busy-as-restarting') : null;
+  const [bNow, bRed] = await Promise.all([bNowP, bc ? busyWord(bc, 'red') : null]);
+  const fr = rd('src/routes/files.js'), ops = rd('src/lib/file-explorer-ops.js');
+  ok(bNow === 'no-idle-worker' && bRed === 'no-worker' && fr.includes("body.error.startsWith(NO_IDLE_HEAD)) body = { ...body, error: STORAGE_BUSY, code: 'storage_busy' };") && ops.includes("if (d && d.code === 'storage_busy') return t('the file readers are all busy — try again in a moment');"),
+    `THE WORDS: a call while every worker is out on a look is refused «busy» (${bNow} ⇒ storage_busy, «the file readers are all busy — try again in a moment»); RED (the line cut, in a copy): «the file readers are restarting» (${bRed})`, { bNow, bRed });
 }
 
 console.log('② the cost of one parked thread, measured (printed, never asserted)');

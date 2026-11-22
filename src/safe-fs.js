@@ -413,6 +413,8 @@ class SafeFs {
   /** B-23e5: name the folder of two dead siblings only on ONE storage — the mount table read off the loop, by path text; an automounter's
    *  folder never; unreadable ⇒ no climb. What is under a named folder is refused with it, other mounts too: they are reached through it. */
   _climb(dir, p, qs, m) {
+    // r1733 (5): a SERIAL lane never climbs — it runs one op at a time, so its look would queue behind the op it runs (the law: an idle worker only)
+    if (this._serial) return Promise.resolve();
     return Promise.resolve().then(() => this._mountsText()).then((text) => {
       const a = mountFactsOf(dir, text), b = mountTargetOf(p, text), same = qs.filter((q) => { const c = mountTargetOf(q, text); return !!c && c === b; });
       if (!a || !b || a.target !== b || !same.length) return;   // a mount point of its own (or two storages): the folder stays asked
@@ -505,6 +507,7 @@ class SafeFs {
       // (every one between a deadline kill and its respawn backoff, or none could start) the call is REFUSED BY NAME — 503,
       // `no-worker` — and its caller says so. The release ran it inline «as a last resort»: a hung path then held the whole hub
       // (scripts/test-safe-fs-no-inline.mjs measured it: the loop lost 1.5 s to a 1.5 s stall). B-55dc's `noInline` is now the rule.
+      if ((this._workers || []).some((r) => r.alive && r.worker && r.looking)) return Promise.reject(noIdleRefusal(this._words));   // r1733 (6): every live worker is out on a folder rule's look — busy, never «restarting»
       return Promise.reject(noWorkerRefusal(this._words));   // the hub's file pool is the unnamed one: «the file pool»
     }
     // `idleOnly` (B-d833 H9): the least busy live worker has a call in flight ⇒ no worker is idle ⇒ refused at once, never queued

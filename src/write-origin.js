@@ -154,7 +154,8 @@ const pageOfUpgrade = (req) => Object.freeze({ headers: Object.freeze({ ...((req
 function foreignPageWhy(headers = {}, own = '') {
   const h = headers || {};
   const site = String(h['sec-fetch-site'] || '').toLowerCase();
-  if (site && site !== 'same-origin') return site;
+  if (site === 'same-origin') return null;   // the browser's own word decides (as the owner's verdict): a proxy that hides the scheme never makes our page foreign (r1733 (3))
+  if (site) return site;
   if (h.origin != null) { const offered = normOrigin(String(h.origin)), ours = normOrigin(own); if (!ours || !offered || offered !== ours) return 'origin'; }
   return null;
 }

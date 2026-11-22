@@ -218,7 +218,7 @@ console.log('② the same-origin verdict table (PURE crossSiteVerdict — every 
   // B-23e5's remainder (r1396): IS IT A FOREIGN PAGE? (PURE foreignPageWhy — the files router's mark of a person's press asks it with the
   // mark's own custom header and no bearer): a stated site must be same-origin, a stated origin ours; NEITHER stated (a plain-http LAN
   // address, a same-origin read) is not foreign — every Sec-Fetch-Site × Origin against its oracle, then the named roads
-  const fOracle = (s, o) => (s !== undefined && s !== 'same-origin' ? s : o !== undefined && o !== OWN && o !== 'HTTPS://BOX.TAIL0.TS.NET:443' ? 'origin' : null);
+  const fOracle = (s, o) => (s === 'same-origin' ? null : s !== undefined ? s : o !== undefined && o !== OWN && o !== 'HTTPS://BOX.TAIL0.TS.NET:443' ? 'origin' : null);   // r1733 (3): the browser's own same-origin decides
   const fBad = []; let fRows = 0;
   for (const s of SITES) for (const [on, o] of Object.entries(ORIGINS)) {
     const headers = {};
@@ -227,7 +227,7 @@ console.log('② the same-origin verdict table (PURE crossSiteVerdict — every 
     const got = WO.foreignPageWhy(headers, OWN), want = fOracle(s, o); fRows++;
     if (got !== want) fBad.push({ s, on, got, want });
   }
-  ok(fRows === SITES.length * Object.keys(ORIGINS).length && !fBad.length, `foreignPageWhy: ${fRows} combinations (${SITES.length} Sec-Fetch-Site × ${Object.keys(ORIGINS).length} Origin) match the oracle — a stated site other than same-origin is named, then a stated Origin not ours`, fBad.slice(0, 4));
+  ok(fRows === SITES.length * Object.keys(ORIGINS).length && !fBad.length, `foreignPageWhy: ${fRows} combinations (${SITES.length} Sec-Fetch-Site × ${Object.keys(ORIGINS).length} Origin) match the oracle — a stated same-origin decides alone, any other stated site is named, then a stated Origin not ours`, fBad.slice(0, 4));
   const fNamed = [
     ['our page over https (the browser states same-origin)', { 'sec-fetch-site': 'same-origin', origin: OWN }, OWN, null],
     ['our page on a plain-http LAN address (a GET: nothing stated)', {}, 'http://192.0.2.20:3456', null],
@@ -239,6 +239,7 @@ console.log('② the same-origin verdict table (PURE crossSiteVerdict — every 
     ['a sandboxed frame (Origin null)', { origin: 'null' }, OWN, 'origin'],
     ['any Origin when ours is unknown (a host that is no host)', { origin: 'http://192.0.2.20:3456' }, '', 'origin'],
     ['our Origin with a foreign site stated (the site decides)', { 'sec-fetch-site': 'cross-site', origin: OWN }, OWN, 'cross-site'],
+    ['the site says same-origin behind a proxy that hides the scheme (Origin https, ours read as http) — the site decides', { 'sec-fetch-site': 'same-origin', origin: 'https://hub.example' }, 'http://hub.example', null],
   ];
   for (const [what, headers, own, want] of fNamed) { const got = WO.foreignPageWhy(headers, own); ok(got === want, `foreignPageWhy: ${what} ⇒ ${want || 'not foreign'}`, { got }); }
   ok(WO.foreignPageWhy(null, OWN) === null && WO.foreignPageWhy(undefined, OWN) === null, 'foreignPageWhy: no headers at all ⇒ not foreign (nothing stated)');

@@ -224,7 +224,8 @@ console.log('\n§2 tier hygiene');
   // and at line 241's pick (lane artifacts-by-intent's leak-census row, 6.6 → 11.9 s RAW with its named debt B-b664, 主开发 r1627): 16 → 17
   // and lane bl-mail (B-360d unit 1, moved onto the train, 主开发 r1542 / r1765): 17 → 18 — test-sliced-walk restated 9.2 → 13.1 s by the
   // unit (the journal's per-update compare and the open's sliced warm-up under its legs) with its named debt (B-fbd6 item 7)
-  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 18,
+  // and B-23e5 line 262's follow (主开发 r1733 (7)): 17 → 18 — test-safe-fs-path-memory restated 9.0 → 13.0 s (its remainder's legs) with its named debt B-4b9a
+  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 19,
     `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
   // MEASURED AGAINST STATED (B-eedd): the rule above judges the STATED time, so a whole green tier records its readings

@@ -110,7 +110,7 @@ class FileViewer {
       // B-23e5's remainder (r1442): a PRESS — its first call is the file's info, marked: an answer forgives a remembered path (the re-render's
       // own reads are asked); a storage refusal says its words and leaves the view as it was (one press, one try)
       const chk = await fetch(`/api/file/info?path=${encodeURIComponent(filePath)}${host ? '&host=' + encodeURIComponent(host) : ''}`, { headers: ATTENDED_HEADERS }).then((r) => (r.status === 503 ? r.json().catch(() => ({})) : null), () => null);
-      if (chk) { showToast(t('{name} — {why}', { name: fileName, why: chk.error ? fsErrorText(chk) : t('Error') }), { type: 'error' }); return; }   // a failed act: typed error (test-desktop-small LAW 2)
+      if (chk) { showToast(t('{name} was not reloaded — {why}; the view shows it as before', { name: fileName, why: chk.error ? fsErrorText(chk) : t('Error') }), { type: 'error' }); return; }   // a failed act: typed error (test-desktop-small LAW 2); r1733 (6): the view stayed
       container._bustTs = Date.now();
       container.innerHTML = '';
       await FileViewer.renderInto(container, filePath, fileName, app, host);

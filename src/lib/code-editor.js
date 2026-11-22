@@ -445,7 +445,7 @@ class CodeEditor {
     else { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => {
       if (typeof prevAsk === 'function' && prevAsk(o) === false) return false;
       if (!this.modified || (o && o.discardAsked)) return true;
-      showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: String(this.filePath).split('/').pop() || this.filePath }), confirmText: t('Discard'), danger: true })
+      showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: String(this.filePath).split('/').pop() || this.filePath }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps (the safe default)
         .then((ok) => { const wm = this.app && this.app.wm; if (ok && wm) wm.requestClose(this.winInfo.id, { discardAsked: true }); });
       return false;
     }; }
@@ -627,6 +627,8 @@ class CodeEditor {
       // B-23e5: a save is a person's press (the button, Mod-s, save-and-close) — marked: tried once despite the pool's memory
       const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
       const data = await res.json().catch(() => ({}));
+      // r1733 (6): a save refused «still trying» — the save before it may still land: one true sentence, never «not saved»
+      if (data && data.code === 'storage_path_trying') { this.saveIndicator.textContent = '… ' + t('{name}: the save before this one is still being tried — wait for its answer', { name: String(this.filePath).split('/').pop() || this.filePath }); this.saveIndicator.style.color = 'var(--yellow)'; this._lastSaveError = fsErrorText(data); return false; }   // the save-and-close door's question says the true reason
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       // B-3b03 follow-up (its read's S1): text typed while the save was out is NOT saved — its unsaved mark stays
       this.saveIndicator.title = '';   // B-23e5: a refusal's hover goes with the good save

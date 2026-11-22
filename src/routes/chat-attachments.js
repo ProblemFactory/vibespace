@@ -80,7 +80,7 @@ function registerChatAttachmentRoutes(app, { store, transcripts, hostKnown = () 
       clearTimeout(timer);
       if (e && e.code === 'left') return;
       // B-3b03 (its read, S2): the picture pool had no live worker — it restarts; the page asks again (never a final «unreadable»)
-      if (e && e.code === 'no-worker') { stats.finding++; return res.status(503).set('Retry-After', '2').json({ error: 'still finding this picture in the conversation', code: 'finding', retryMs: RETRY_MS }); }
+      if (e && (e.code === 'no-worker' || e.code === 'no-idle-worker')) { stats.finding++; return res.status(503).set('Retry-After', '2').json({ error: 'still finding this picture in the conversation', code: 'finding', retryMs: RETRY_MS }); }
       return res.status(500).json({ error: 'the picture could not be read', code: 'unreadable' });
     }
     clearTimeout(timer);

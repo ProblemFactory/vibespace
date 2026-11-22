@@ -128,6 +128,8 @@ const STORAGE_PATH_HUNG = 'this folder or file did not answer in time — try ag
 // B-23e5's remainder (r1378 (2)): a call at or under a path a person's press is still trying — one worker on it, never two
 const PATH_TRYING_HEAD = require('../safe-fs').PATH_TRYING.message.split(': {path}')[0];
 const STORAGE_PATH_TRYING = 'this folder or file is still being tried — wait for the answer to the first press';
+const NO_IDLE_HEAD = require('../safe-fs').NO_IDLE.message.split(' {pool}')[0];   // r1733 (6): «every worker of» — the looks hold every worker
+const STORAGE_BUSY = 'the file readers are all busy — try again in a moment';
 const STORAGE_NO_WORKER = 'the file readers are restarting — try again in a moment';   // a deadline kill, a crash, a worker that could not start — each is retried (no pool at all: server.js's boot line)
 router.use((req, res, next) => {
   const json = res.json;
@@ -137,6 +139,7 @@ router.use((req, res, next) => {
       const s = Number((/not asked again for (\d+) s/.exec(body.error) || [])[1]) || 30;
       body = { ...body, error: STORAGE_PATH_HUNG.replace('{s}', String(s)), code: 'storage_path_hung', params: { s } };
     } else if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(PATH_TRYING_HEAD)) body = { ...body, error: STORAGE_PATH_TRYING, code: 'storage_path_trying' };
+    else if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(NO_IDLE_HEAD)) body = { ...body, error: STORAGE_BUSY, code: 'storage_busy' };
     return json.call(this, body);
   };
   next();
@@ -441,7 +444,7 @@ router.get('/api/file/raw', async (req, res) => {
   // can't be pooled without a rewrite); a missing file (non-503) falls through
   // to sendFile's own 404 so behaviour is unchanged for the normal cases.
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' || e.code === 'path-trying' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' || e.code === 'path-trying' || e.code === 'no-idle-worker' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
   const named = contentDisposition(fileNameOf(filePath), 'inline');
   // dotfiles 'allow' (r2): without it send's LEGACY rule answered 404 for any basename starting
   // with '.', so `.env.png` could not be previewed — this route serves the paths the user opens
@@ -468,7 +471,7 @@ router.get('/api/download', async (req, res) => {
   if (R) return remoteStream(res, () => R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true }));
   const filePath = safePath(req.query.path);
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' || e.code === 'path-trying' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'no-worker' || e.code === 'path-hung' || e.code === 'path-trying' || e.code === 'no-idle-worker' ? e.message : e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's); B-3b03 follow-up: the pool's refusal goes to the router's words (storage_no_worker)
   try {
     res.download(filePath, { dotfiles: 'allow' }); // r2: a `.env` Download was send's legacy-dotfile 404
   } catch (err) { res.status(400).json({ error: err.message }); }

@@ -36,7 +36,8 @@ export function fsErrorText(d) {
   if (d && d.code === 'parse_busy') return t('another document is being parsed — try again in a moment'); // the parse lane's turn never came (src/safe-fs.js LANES)
   // B-3b03: the file pool had no live worker (its readers restart after a storage that did not answer) — refused, never run on the hub's loop
   if (d && d.code === 'storage_no_worker') return t('the file readers are restarting — try again in a moment');
-  if (d && d.code === 'storage_path_trying') return t('this folder or file is still being tried — wait for the answer to the first press');   // B-23e5's remainder: one press, one worker
+  if (d && d.code === 'storage_path_trying') return t('this folder or file is still being tried — wait for the answer to the first press');   // B-23e5's remainder
+  if (d && d.code === 'storage_busy') return t('the file readers are all busy — try again in a moment');   // r1733 (6): the looks hold every worker: one press, one worker
   if (d && d.code === 'storage_path_hung') return t('this folder or file did not answer in time — try again in {s} s', { s: (d.params && d.params.s) || 30 });   // B-23e5
   // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
   if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });

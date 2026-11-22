@@ -205,6 +205,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         parent: editorBody,
       });
       if (targetWinInfo._editorState) targetWinInfo._editorState.editorView = editorView; // for closeExternalEditor teardown
+      editorPane._editorView = editorView;   // B-23e5's LEFT (1): the CLI's close of THIS pane finds its own editor (the window's state may name another)
       // B-23e5's remainder (r1442 (D)): the pane's text lives only here until a save lands — the TERMINAL WINDOW asks before a close drops it
       // (its ✕, a tab's, a group's close-all: requestClose), with the tree's own dialog; the reload guard and the stage hear it (_editorDirty)
       // ONE guard a window, over EVERY pane it holds (a pane left behind by an interrupted CLI counts too): a pane whose text is not on
@@ -219,7 +220,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         targetWinInfo.onCloseRequest = (o) => {
           const d = unsavedPane();
           if (d && !(o && o.discardAsked)) {
-            showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: d.name }), confirmText: t('Discard'), danger: true })
+            showConfirmDialog({ title: t('Close without saving?'), message: t('{name} has unsaved changes — they are only in this window. Close it and discard them?', { name: d.name }), confirmText: t('Discard'), danger: true, cancelDefault: true })   // r1733 (2): Enter keeps
               .then((ok) => { if (ok) app.wm.requestClose(targetWinInfo.id, { ...(o || {}), discardAsked: true }); });
             return false;
           }
@@ -260,6 +261,8 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         try {
           const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json', ...ATTENDED_HEADERS}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }) });   // B-23e5: a person's save, marked
           const data = await res.json().catch(() => ({}));
+          // r1733 (6): a save refused «still trying» — the save before it may still land: one true sentence, never «not saved»
+          if (data && data.code === 'storage_path_trying') { saveBtn.textContent = t('{name}: the save before this one is still being tried — wait for its answer', { name: String(filePath).split('/').pop() || filePath }); return; }
           if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);   // B-3b03 follow-up: a refusal in the reader's language
           await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) });
         } catch (err) {
@@ -270,13 +273,17 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
           pathSpan.textContent = t('{name} is not saved — {why}. Your text is still here, unsaved: save again, or copy it to keep it elsewhere.', { name: String(filePath).split('/').pop() || filePath, why: err.message || t('Error') }); pathSpan.style.color = 'var(--red)';
           return;
         }
-        // Remove editor pane + resizer, restore terminal to full height
-        targetWinInfo._editorState = null;
-        targetWinInfo._editorDoSave = null;
-        targetWinInfo._editorTermVeil?.remove(); targetWinInfo._editorTermVeil = null;
+        // Remove editor pane + resizer, restore terminal to full height — B-23e5's LEFT (1): the window's state is cleared only when it is
+        // THIS pane's, and the split stays while another pane (one left behind by an interrupted CLI) is still shown
+        if (targetWinInfo._editorState && targetWinInfo._editorState.signalPath === signalPath) {
+          targetWinInfo._editorState = null;
+          targetWinInfo._editorDoSave = null;
+          targetWinInfo._editorTermVeil?.remove(); targetWinInfo._editorTermVeil = null;
+        }
         editorView.destroy();
-        splitResizer.destroy();
         editorPane.remove();
+        if (contentEl.querySelectorAll('.editor-container').length) return;   // another pane still shows: its split stays
+        (targetWinInfo._splitResizer || splitResizer).destroy(); targetWinInfo._splitResizer = null;   // the LIVE resizer (a later open replaced this pane's)
         contentEl.style.display = '';
         contentEl.style.flexDirection = '';
         termContainer.style.flex = '';
@@ -304,10 +311,10 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
       saveBtn.onclick = async () => {
         const at = openClock();   // B-c87d: the close began NOW; its signal answers later
         try { await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) }); } catch {}
-        targetWinInfo._editorState = null;
-        targetWinInfo._editorDoSave = null;
-        splitResizer.destroy();
+        if (targetWinInfo._editorState && targetWinInfo._editorState.signalPath === signalPath) { targetWinInfo._editorState = null; targetWinInfo._editorDoSave = null; }   // B-23e5: only its own pane's state
         editorPane.remove();
+        if (contentEl.querySelectorAll('.editor-container').length) return;   // another pane still shows: its split stays
+        (targetWinInfo._splitResizer || splitResizer).destroy(); targetWinInfo._splitResizer = null;
         contentEl.style.display = '';
         contentEl.style.flexDirection = '';
         termContainer.style.flex = '';
@@ -326,15 +333,18 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
  */
 export function closeExternalEditor(app, signalPath) {
   for (const [, win] of app.wm.windows) {
-    if (win._editorState?.signalPath === signalPath) {
-      const editorPane = [...win.content.querySelectorAll('.editor-container')].find((el) => el.dataset.signal === signalPath);   // B-23e5: this pane, never an older one left behind
+    // B-23e5's LEFT (1): the window is found by the pane of ITS OWN signal — never by the window's state (an older pane's save may have
+    // cleared it while this pane still shows), and only that pane goes
+    const editorPane = [...((win.content && win.content.querySelectorAll) ? win.content.querySelectorAll('.editor-container') : [])].find((el) => el.dataset.signal === signalPath);
+    if (!editorPane) continue;
+    {
       const termContainer = win.content.querySelector('.terminal-container');
-      if (editorPane) {
-        win._editorState?.editorView?.destroy?.(); // release the CodeMirror instance (leaked per remote close)
+      const mine = win._editorState?.signalPath === signalPath;
+      {
+        (editorPane._editorView || (mine ? win._editorState.editorView : null))?.destroy?.(); // release the CodeMirror instance (leaked per remote close)
         editorPane.remove();
-        win._editorState = null;
-        win._editorDoSave = null;
-        win._editorTermVeil?.remove(); win._editorTermVeil = null;
+        if (mine) { win._editorState = null; win._editorDoSave = null; win._editorTermVeil?.remove(); win._editorTermVeil = null; }
+        if (win.content.querySelectorAll('.editor-container').length) break;   // another pane still shows: its split stays
         if (win._splitResizer) { win._splitResizer.destroy(); win._splitResizer = null; }
         if (termContainer) {
           win.content.style.display = '';

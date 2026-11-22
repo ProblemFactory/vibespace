@@ -250,7 +250,7 @@ console.log('⑤ the index\'s cost — measured');
     const now = await ask(ROUTES);
     ok(now.status === 503 && now.j.code === 'finding' && now.j.retryMs === ROUTES.RETRY_MS && now.retry === '2', 'the picture pool REFUSED (no live worker) ⇒ 503 `finding` + its retry — never a final «unreadable» (B-3b03)', now);
     const CAR = fs.readFileSync(path.join(REPO, 'src/routes/chat-attachments.js'), 'utf8');
-    const NW_LINE = CAR.split('\n').find((l) => l.includes("if (e && e.code === 'no-worker') { stats.finding++;")) || '';
+    const NW_LINE = CAR.split('\n').find((l) => l.includes("if (e && (e.code === 'no-worker' || e.code === 'no-idle-worker')) { stats.finding++;")) || '';   // B-23e5: «busy» rides the same retry
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const Rel = NW_LINE ? mutantCopies('chat-attach-noworker', REPO).load('src/routes/chat-attachments.js', anchored(CAR, NW_LINE + '\n', '', 'the release: no refusal branch'), 'release-unreadable') : null;
     const was = Rel ? await ask(Rel) : null;
