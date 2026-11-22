@@ -112,11 +112,12 @@ WD.section('②');
 const FORGETS = require(M.write('src/chat-ring.js', anchored(CR_SRC, "  if (s.length <= max + Math.max(0, owedChars)) return", "  if (s.length <= max) return", 'forgets'), 'forgets'));   // MUTANT: the trigger forgets what it carried
 {
   const ringP = ringAt(MP, sendRec(MP, PIC));
-  const mine = streamThrough(ringP, 2000000, (s) => CR.trimRing(s, {}, 'chat-ring-suite'));
+  const sessP = {}, sessR = {};   // ONE session a stream, as every writer hands its own (the trim remembers what it carried BY session)
+  const mine = streamThrough(ringP, 2000000, (s) => CR.trimRing(s, sessP, 'chat-ring-suite'));
   const gaps = mine.at.slice(1).map((x, i) => x - mine.at[i]);
   ok(mine.trims >= 2 && mine.trims <= Math.ceil(2000000 / (CR.RING_MAX - CR.RING_KEEP)) + 1 && gaps.every((g) => g >= CR.RING_MAX - CR.RING_KEEP - 65536) && drawOf(mine.ring, MP).picture,
     `${mine.trims} trims over 2 000 000 chars of stream (chunks of 64 KB), every one ${Math.min(...gaps)}+ chars of stream after the last (≥ 100 000 by law; the ceiling less the kept tail, less one chunk) — the held picture still drawn`, { trims: mine.trims, gaps });
-  const red = streamThrough(ringP, 2000000, (s) => FORGETS.trimRing(s, {}, 'chat-ring-suite'));
+  const red = streamThrough(ringP, 2000000, (s) => FORGETS.trimRing(s, sessR, 'chat-ring-suite'));
   ok(red.trims >= 20, `RED: a copy whose trigger forgets what it carried — ${red.trims} trims (nearly every chunk: each one flattens, scans and parses ~750 KB again)`, { trims: red.trims });
 }
 
@@ -196,7 +197,7 @@ const WRITES = [
   ['src/server/stdout/codex-events.js', 'session.buffer = session.buffer.slice(-800000);', 1, 'other', 'codex\'s ring (1.2 MB → 800 KB)'],
 ];
 const WRITE_RE = /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\.buffer\s*(?:\+=|=(?!=))/g;
-const codeFiles = (() => { const out = ['server.js']; const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (e.name !== 'node_modules' && e.name !== 'lib' && e.name !== 'agentd') walk(rel); } else if (/\.c?js$/.test(e.name)) out.push(rel); } }; walk('src'); return out; })();
+const codeFiles = (() => { const out = []; out.push('server.js');   /* a list, never a spawn argv: test-fixture-isolation reads the file name closed by a list bracket as one */ const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (e.name !== 'node_modules' && e.name !== 'lib' && e.name !== 'agentd') walk(rel); } else if (/\.c?js$/.test(e.name)) out.push(rel); } }; walk('src'); return out; })();
 function census(read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8'), rows = WRITES) {
   const red = [], seen = new Map();
   for (const f of codeFiles) {
