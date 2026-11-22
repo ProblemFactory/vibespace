@@ -1415,9 +1415,19 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const pu = ku.createProfile({ label: 'Owner program', browser: { kind: 'plugin', id: UID } }, { engine: await ku.engineFactOf(UID) });
   await ku.start(pu.id, { why: 'test' });
   const laU = fake.launches().at(-1), wrU = wrapperOf(laU.exe) || { program: null, args: [] }, nodeV = process.versions.node;
+  // r1926 (the load row — seen red at e44bb4a98-20261122021849-both, the box zone only; UTC green on the same tree: the row's
+  // measuredVersion null while the profile's choice carried 24.22.1): the row reads the measure BY THE PROGRAM'S STAMP at the read
+  // (src/server/browser-engines.js userFactOf: size:mtime:ctime:ino:path) — and PROG is a symlink to the SHARED node binary, whose
+  // inode another suite on the same machine changes (test-agentd-stay-window hard-links process.execPath: its ctime moves). Between
+  // the start's measure and this read the stamp moved, and the row rightly said no version for a file it never measured. So the
+  // leg reads the stamp at the read: when it moved, the product's own measure for THAT stamp runs first (what the next launch
+  // does), said by name — the row is then judged on the file as it is
+  const measuredRec = () => { try { return ((JSON.parse(fs.readFileSync(path.join(UROOT, 'data', 'browser-engines.json'), 'utf8')).engines || {})[UID] || {}).measured || {}; } catch { return {}; } };
+  const prRow = await ENGRU.probe(UID), stampRow = prRow.ok ? prRow.fact.binaryStamp : null, forStart = measuredRec().for || null;
+  if (stampRow && forStart && forStart !== `user:stat:${stampRow}`) { console.log(`    (the program's stat MOVED between the start's measure and the row's read — ${forStart} → user:stat:${stampRow}: another process changed the shared node binary's inode; the product's own measure for the new stamp runs first, as the next launch's would)`); await EDU.measure(UID, { path: PROG, stamp: stampRow }); }
   const rcU = ku._reg().browsers[pu.id].browserChoice, rowU = (await ku.engineRowsView()).find((e) => e.id === UID) || {};
   ok(wrU.program === PROG && wrU.args.some((a) => a.startsWith('--proxy-server=')) && rcU.version === nodeV && rowU.source === 'user' && rowU.measuredVersion === nodeV && !rowU.binary && EDU.kernelFact(UID).state === 'absent' && !JSON.stringify(rowU).includes(UD),
-    `the OWNER's program runs: the keeper's wrapper execs THAT path (inside its egress proxy); its version MEASURED by VibeSpace (\`--version\` → ${nodeV}); the row says source user, never the path — and NOTHING was downloaded`, { wrU, rcU, rowU: { source: rowU.source, measuredVersion: rowU.measuredVersion, binary: rowU.binary }, kf: EDU.kernelFact(UID).state });
+    `the OWNER's program runs: the keeper's wrapper execs THAT path (inside its egress proxy); its version MEASURED by VibeSpace (\`--version\` → ${nodeV}); the row says source user, never the path — and NOTHING was downloaded`, { wrU, rcU, stamps: { measuredFor: forStart, atRow: stampRow }, rowU: { source: rowU.source, measuredVersion: rowU.measuredVersion, binary: rowU.binary }, kf: EDU.kernelFact(UID).state });
   await ku.stop(pu.id, { why: 'user' });
   // V5: the file REPLACED (another program at the same path — its size / mtime change): the core's fact carries the NEW stamp, and the
   // measure the keeper asks at every launch (the launch above proved it) runs the new program — never a stale version
