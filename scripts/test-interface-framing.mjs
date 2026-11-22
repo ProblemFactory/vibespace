@@ -400,7 +400,11 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   });
   /** an answer stream, read as a client reads it, answer after answer: each one's informational heads, its final head, its
    *  body (de-chunked, by its own framing), its trailers — `methods` names each request's method (a HEAD's answer has no body) */
-  const viewAll = (text, methods) => {
+  /** A DATE LINE IS COMPARED BY ITS PRESENCE, NEVER ITS SECOND: an answer Node writes itself (a refused head's 400, the hub's
+   *  own) carries the clock of the form that wrote it, and the two forms answer a moment apart — run
+   *  c8a6362e6-20261122160322-both (UTC) read «Date: … 16:22:25» against «… 16:22:26» and called the relay unfaithful */
+  const clockless = (l) => (/^date:/i.test(l) ? 'Date: (the clock)' : l);
+  const viewAll = (text, methods, { clock = false } = {}) => {
     const out = []; let rest = text;
     for (let k = 0; k < methods.length && rest.length; k++) {
       const infos = []; let head, code;
@@ -424,7 +428,7 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
         }
         body = o; rest = rest.slice(i);
       } else { const cl = lower.find((l) => l.startsWith('content-length:')); if (cl) { const n = Number(cl.split(':')[1]); body = rest.slice(0, n); rest = rest.slice(n); } else { body = rest; rest = ''; } }
-      out.push({ infos, status: head[0], lines, body: digest(Buffer.from(body, 'latin1')), trailers });
+      out.push({ infos, status: head[0], lines: clock ? lines : lines.map(clockless), body: digest(Buffer.from(body, 'latin1')), trailers });
     }
     return out;
   };
@@ -487,6 +491,12 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   for (const d of diffs) console.log(`    DIFFERS #${d.i} ${d.bytes.split('\r\n')[0]} [${partsOf(d)}] ${d.bytes.includes('Expect') ? 'expect ' : ''}${/Upgrade: /.test(d.bytes) ? 'upgrade ' : ''}${d.bytes.includes('Trailer') ? 'trailer ' : ''}${d.secure ? 'tls ' : ''}${d.keep ? 'kept ' : ''}`);
   for (const d of diffs.slice(0, 2)) console.log(`    THE FIRST, WHOLE: ${JSON.stringify(d).slice(0, 1400)}`);
   ok(diffs.length === 0, `${N} generated requests (targets absolute, «*», «//», dot segments, %2e, a byte above 0x7f; duplicated and reordered Cookie / Authorization / Origin / Sec-Fetch-Site / Host / X-Forwarded-*; no body, a length, chunked with extensions and trailers, a length AND chunked, Expect, a head inside a body; Connection tokens; upgrades with and without a body; HTTP/1.0; heads at the size limit; answers by length, chunked, streamed, with trailers, close-delimited, 204, 304, 102 + 103, to HEAD; encrypted pages; kept-alive connections answered twice; the stamp's address, port and encrypted flag as the handler sees them): what the hub's handler saw and what the page got are the plain form's but for the declared list (${Object.keys(RELAY.DECLARED).join(', ')}), the door class equal at both ends — ${diffs.length} differ`, diffs.slice(0, 2));
+  { // the view's own law: two answers a second apart are the same answer; a Date line on one side alone is not
+    const at = (sec, date = true) => `HTTP/1.1 400 Bad Request\r\nConnection: close\r\n${date ? `Date: Sun, 22 Nov 2026 16:22:${sec} GMT\r\n` : ''}Content-Length: 0\r\n\r\n`;
+    const v = (t, o) => JSON.stringify(viewAll(t, ['GET'], o));
+    ok(v(at(25)) === v(at(26)) && v(at(25)) !== v(at(25, false)), 'a Date line is compared by its presence, never its second: «…16:22:25» and «…16:22:26» read the same answer; an answer without one does not');
+    ok(v(at(25), { clock: true }) !== v(at(26), { clock: true }), 'RED CONTROL — the clock kept in the view: the same answer a second apart reads as a difference (the flake the differential had)');
+  }
   ok(Object.keys(RELAY.DECLARED).every((k) => declaredSeen[k] > 0), `every entry of the declared list was MET by a case and read by its name (${Object.keys(RELAY.DECLARED).map((k) => `${k} ×${declaredSeen[k] || 0}`).join(' · ')}) — none is declared unseen`, declaredSeen);
   ok(arms.tls > 0 && arms.kept > 0, `the arms were met: ${arms.tls} encrypted pages, ${arms.kept} kept-alive connections answered twice on one connection`, arms);
   ok(inner > 0 && innerOpened === inner, `a head inside a body (${inner} cases) opens no channel of its own (${innerOpened} with one open line or none, as the plain hub served one head)`);
