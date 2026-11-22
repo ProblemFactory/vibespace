@@ -2415,20 +2415,32 @@ class UsageHistory {
    *  key; every asker gets the same answer, as there), and a fold whose every asker went away (the route hands each its request's
    *  signal) stops at its next slice — ABORTED. A place gone stale hands each asker to the ROW road once: its walk rebuilds the
    *  cache and re-runs (never the cells road again on the same stale place). */
-  _cellsAsk(opts, signal, c) {
+  _cellsAsk(opts, signal, c, { retried = false } = {}) {
     const key = JSON.stringify(['cells', opts.from || null, opts.to || null, opts.backend || null, opts.accounts ? [...opts.accounts].sort() : null, opts.hostFilter || null, opts.pivots || null]);
     if (!this._cellFlights) this._cellFlights = new Map();
     let f = this._cellFlights.get(key);
-    if (f && f.c === c) { f.job.waiters++; this._onAbort(signal, f.job); }
+    if (f && f.c === c && f.pricing === this._pricing) { f.job.waiters++; this._onAbort(signal, f.job); }   // the same cache AND the same price table (an ask after a price change never takes the old table's fold)
     else {
-      f = { c, job: { waiters: 1, started: true, cancelled: false }, p: null };
+      f = { c, pricing: this._pricing, job: { waiters: 1, started: true, cancelled: false }, p: null };
       this._onAbort(signal, f.job);   // the asker who starts it counts too (an already-gone one leaves 0: the fold stops at once)
       f.p = this.aggregateCells(opts, { job: f.job });
       this._cellFlights.set(key, f);
       const fl = f, drop = () => { if (this._cellFlights.get(key) === fl) this._cellFlights.delete(key); };
       f.p.then(drop, drop);
     }
-    return f.p.catch((e) => { if (e && e.code === 'STALE') return this.aggregateAsync({ ...opts, rows: true }, { signal }); throw e; });
+    // A STALE FOLD (the cache swapped mid-fold, or a place gone stale): a GONE asker starts nothing; each LIVE asker retries ONCE
+    // on the NEW cells with its own signal, and goes to the row road (which rebuilds and re-runs) only when there are none or the
+    // retry meets STALE again (round whit8sjai: a gone first asker's row ask must never cancel a live asker's)
+    return f.p.catch((e) => {
+      if (!(e && e.code === 'STALE')) throw e;   // any other error reaches every asker as it is
+      if (signal && signal.aborted) throw Object.assign(new Error('the request went away'), { code: 'ABORTED' });
+      if (!retried) {
+        this._loadEvents();
+        const c2 = this._evCache;
+        if (c2 && c2 !== c && c2.cells && !c2.booting && !c2.pending && !c2.stale) return this._cellsAsk(opts, signal, c2, { retried: true });
+      }
+      return this.aggregateAsync({ ...opts, rows: true }, { signal });
+    });
   }
   async aggregateCells(opts = {}, { sliceMs = 40, job = null } = {}) {
     this._cellFolds = (this._cellFolds || 0) + 1;   // a diagnostic count of the folds run (the row road's twin is _coldWalks)
@@ -2473,7 +2485,7 @@ class UsageHistory {
     // a model's provider accounts with an unknown part, in the order the row fold meets them (each account's earliest row)
     if (st.unpricedAt) for (const [m, by] of st.unpricedAt) if (st.dimMeta.model && st.dimMeta.model[m]) st.dimMeta.model[m].unpricedBy = [...by].sort((x, y) => x[1] - y[1]).map(([a]) => a);
     const ans = this._aggEnd(st);
-    Object.defineProperty(ans, 'fromCells', { value: { cells: n, rowSlots: rowSlots.size }, enumerable: false });   // a diagnostic: never in the route's JSON
+    Object.defineProperty(ans, 'fromCells', { value: { cells: n, rowSlots: rowSlots.size, slots: [...rowSlots] }, enumerable: false });   // a diagnostic: never in the route's JSON
     return ans;
   }
   /** the rows of [a, b] (one slot): the hot rows from memory, the cold rows read one line each at their place */

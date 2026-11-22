@@ -109,7 +109,8 @@ await zoneLegs('Asia/Kathmandu');
     const tier = { input: 1, output: 2, cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1, long: { above: 10000, input: 2, output: 4, cacheWrite5m: 2.5, cacheRead: 0.2 } };
     uh.setPricing({ tiers: { 'claude-sonnet-5': tier } });
     const b = await uh.aggregateCells({ pivots: PIVOTS });
-    ok(M.compareAggregates(uh.aggregate({ pivots: PIVOTS }), b).same && b.fromCells.rowSlots > 0, 'LAW 3: a new long-prompt threshold — the answer equals a fresh fold under the new table (a straddling cell priced from its rows, never the wrong side)', b.fromCells);
+    ok(M.compareAggregates(uh.aggregate({ pivots: PIVOTS }), b).same && b.fromCells.slots.includes(Math.floor(T(2026, 2, 6, 14, 1) / Q)),   // THE s-t SLOT itself went to its rows (round whit8sjai: pinned to its own slot)
+ 'LAW 3: a new long-prompt threshold — the answer equals a fresh fold under the new table (a straddling cell priced from its rows, never the wrong side)', b.fromCells);
     { // RED CONTROL (round wk8hot1jc): the straddle return CUT — the straddling cell is priced as ONE class, and the cells differ
       const UHSRC = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
       const cut = anchored(UHSRC, "    if (pa !== per(last) || la !== cls(pmax)) return null;\n", '', 'the straddle return cut');
@@ -117,7 +118,7 @@ await zoneLegs('Asia/Kathmandu');
       const u2 = new U2({ dataDir: dir, homeDir: dir, resolveAccount: (id) => (LIVE.has(id) ? { type: id.startsWith('api') ? 'api' : 'subscription', name: id === 'sub-alice' ? 'Alice' : 'Beta key' } : null) });
       u2._loadEvents(); u2.setPricing({ tiers: { 'claude-sonnet-5': tier } });
       const c2 = await u2.aggregateCells({ pivots: PIVOTS });
-      ok(!M.compareAggregates(u2.aggregate({ pivots: PIVOTS }), c2).same && c2.fromCells.rowSlots === 0, 'CONTROL: with the straddle return cut no slot goes to its rows and the straddling cell is priced as one class — the cells differ from the fresh fold (red)', c2.fromCells);
+      ok(!M.compareAggregates(u2.aggregate({ pivots: PIVOTS }), c2).same && !c2.fromCells.slots.includes(Math.floor(T(2026, 2, 6, 14, 1) / Q)), 'CONTROL: with the straddle return cut no slot goes to its rows and the straddling cell is priced as one class — the cells differ from the fresh fold (red)', c2.fromCells);
     }
     // B-d578 P1-b in the cells: a provider's OWN row («Add a price» writes accounts[<pv id>].tiers[<key>]) prices that provider's
     // model; the other provider's model stays unknown — counted apart in both folds, named by its account
@@ -138,28 +139,66 @@ await zoneLegs('Asia/Kathmandu');
     const q = { pivots: PIVOTS };
     const res = (id) => (LIVE.has(id) ? { type: id.startsWith('api') ? 'api' : 'subscription', name: id === 'sub-alice' ? 'Alice' : 'Beta key' } : null);
     const bounds = async (u) => {
+      const out = { fresh: u.aggregate(q) };   // the fresh fold under the table these scenes start on (the price scene changes it last)
+      const code = (e) => (e && e.code) || String(e);   // no scene throws: a control's copy may refuse an ask the product answers
       const n0 = u._cellFolds || 0;
-      const four = await Promise.all([1, 2, 3, 4].map(() => u.aggregateAsync(q)));
+      const four = await Promise.all([1, 2, 3, 4].map(() => u.aggregateAsync(q).catch(code)));
       const n1 = u._cellFolds;
-      await Promise.all([u.aggregateAsync({ pivots: PIVOTS, backend: 'claude' }), u.aggregateAsync({ pivots: PIVOTS, backend: 'codex' })]);
-      const ac = new AbortController();
-      u.cellsHook = async () => { await null; ac.abort(); u.cellsHook = null; };
-      const gone = await u.aggregateAsync(q, { signal: ac.signal }).then(() => 'answered', (e) => (e && e.code) || String(e));
-      const a1 = new AbortController(), a2 = new AbortController();
-      u.cellsHook = async () => { await null; a1.abort(); u.cellsHook = null; };
-      const p1 = u.aggregateAsync(q, { signal: a1.signal }), p2 = u.aggregateAsync(q, { signal: a2.signal });
-      const [, r2] = await Promise.all([p1.catch((e) => e && e.code), p2.catch((e) => e && e.code)]);
-      return { one: n1 - n0, same: four.every((a) => a === four[0]), two: u._cellFolds - n1 - 2 >= 0 ? 2 : u._cellFolds - n1, gone, r2, first: four[0] };
+      await Promise.all([u.aggregateAsync({ pivots: PIVOTS, backend: 'claude' }).catch(code), u.aggregateAsync({ pivots: PIVOTS, backend: 'codex' }).catch(code)]);
+      Object.assign(out, { one: n1 - n0, two: u._cellFolds - n1, same: four.every((a) => a === four[0]), first: four[0] });
+      // every asker gone ⇒ the fold stops at its NEXT slice: the asker leaves at the fold's SECOND slice (its rates done)
+      { const ac = new AbortController(); let k = 0;
+        u.cellsHook = async () => { if (++k === 2) { u.cellsHook = null; await null; ac.abort(); } };
+        out.gone = await u.aggregateAsync(q, { signal: ac.signal }).then(() => 'answered', (e) => (e && e.code) || String(e)); out.goneAt = k; u.cellsHook = null; }
+      // one asker gone of two ⇒ the other is answered whole
+      { const a1 = new AbortController(), a2 = new AbortController();
+        u.cellsHook = async () => { u.cellsHook = null; await null; a1.abort(); };
+        const p1 = u.aggregateAsync(q, { signal: a1.signal }), p2 = u.aggregateAsync(q, { signal: a2.signal });
+        [, out.r2] = await Promise.all([p1.catch((e) => e && e.code), p2.catch((e) => e && e.code)]); }
+      // THE CACHE SWAPPED MID-FOLD WITH THE FIRST ASKER GONE (round whit8sjai, first in the follow): the gone asker starts nothing,
+      // the LIVE one retries ONCE on the new cells with its own signal — no row road, no «went away» told to it
+      { const sA = new AbortController(), sB = new AbortController(), w0 = u._cellFolds;
+        u.cellsHook = async () => { u.cellsHook = null; await null; sA.abort(); u._evCache = null; u._loadEvents(); throw Object.assign(new Error('the usage ledger was rebuilt during the read'), { code: 'STALE' }); };
+        const pA = u.aggregateAsync(q, { signal: sA.signal }), pB = u.aggregateAsync(q, { signal: sB.signal });
+        const [a, b] = await Promise.all([pA.then(() => 'answered', (e) => e && e.code), pB.then((x) => x, (e) => e && e.code)]);
+        out.stale = { a, b, folds: u._cellFolds - w0, rowJobs: u._aggFlights ? u._aggFlights.size + (u._queued || 0) : 0 }; }
+      // THE PRICE TABLE IN THE FLIGHT's NAME: an identical ask made after a price change while the old table's fold is in flight
+      // is a fold of its own, priced at the new table
+      { let release, reachedRes, k = 0; const gate = new Promise((r) => { release = r; }), reached = new Promise((r) => { reachedRes = r; }); const w1 = u._cellFolds;
+        u.cellsHook = async () => { if (++k === 2) { u.cellsHook = null; reachedRes(); await gate; } };   // held at its SECOND slice: its rates are the old table's
+        const pOld = u.aggregateAsync(q).catch(code);
+        await Promise.race([reached, pOld]);   // (a control's copy may end the old fold before its second slice: never wait for ever)
+        const cur = (u._pricing && u._pricing.tiers && u._pricing.tiers['claude-opus-5-5']) || {}, up = (Number(cur.input) || 7) + 1;   // a table that DIFFERS from the one in force (a control's copy loads the table this scene saved before)
+        u.setPricing({ tiers: { 'claude-opus-5-5': { input: up, output: up * 4, cacheWrite5m: up + 2, cacheWrite1h: up * 2, cacheRead: up / 10 } } });
+        const pNew = u.aggregateAsync(q).catch(code); release();
+        const [, aNew] = await Promise.all([pOld, pNew]);
+        out.price = { folds: u._cellFolds - w1, fresh: !!(aNew && aNew.totals) && M.compareAggregates(u.aggregate(q), aNew).same }; }
+      // AN ERROR REACHES EVERY WAITER (as it is: not STALE)
+      { u.cellsHook = async () => { u.cellsHook = null; await null; throw Object.assign(new Error('a planted failure'), { code: 'BOOM' }); };
+        out.boom = await Promise.all([1, 2].map(() => u.aggregateAsync(q).then(() => 'answered', (e) => e && e.code))); }
+      u.cellsHook = null;
+      return out;
     };
     const got = await bounds(uh);
-    ok(got.one === 1 && got.same && M.compareAggregates(uh.aggregate(q), got.first).same, `ONE FOLD: four identical asks in flight are ONE cells fold (${got.one}), the same answer to each, equal to a fresh fold`, { one: got.one, same: got.same });
-    ok(got.gone === 'ABORTED' && got.r2 && got.r2.totals && M.compareAggregates(uh.aggregate(q), got.r2).same, `THE ASKER GONE: a fold whose every asker went away stops at its next slice (${got.gone}); one of two gone — the other answered whole`, { gone: got.gone });
+    ok(got.one === 1 && got.two === 2 && got.same && M.compareAggregates(got.fresh, got.first).same, `ONE FOLD: four identical asks in flight are ONE cells fold (${got.one}), the same answer to each, equal to a fresh fold; two different backends are two (${got.two})`, { one: got.one, two: got.two, same: got.same });
+    ok(got.gone === 'ABORTED' && got.goneAt === 2 && got.r2 && got.r2.totals && M.compareAggregates(got.fresh, got.r2).same, `THE ASKER GONE: a fold whose every asker went away stops at its NEXT slice (${got.gone} at slice ${got.goneAt}, its rates done); one of two gone — the other answered whole`, { gone: got.gone, at: got.goneAt });
+    ok(got.stale.a === 'ABORTED' && got.stale.b && got.stale.b.totals && M.compareAggregates(got.fresh, got.stale.b).same && got.stale.folds === 2 && got.stale.rowJobs === 0, 'THE CACHE SWAPPED MID-FOLD, the first asker gone: the gone asker starts nothing (no row job), the live one retries ONCE on the new cells and is answered whole', got.stale.b && got.stale.b.totals ? { ...got.stale, b: 'answered' } : got.stale);
+    ok(got.price.folds === 2 && got.price.fresh, `THE PRICE TABLE IN THE FLIGHT's NAME: an ask after a price change does not take the old table's fold in flight (${got.price.folds} folds) and is priced at the new table`, got.price);
+    ok(got.boom.every((x) => x === 'BOOM'), `AN ERROR REACHES EVERY WAITER: ${got.boom.join(', ')}`, got.boom);
     const UHSRC = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8'), MU = mutantCopies('uidx-bounds', REPO);
-    const noFlight = anchored(UHSRC, "    if (f && f.c === c) { f.job.waiters++; this._onAbort(signal, f.job); }\n    else {", "    {", 'the flight lookup cut');
-    const noCheck = anchored(UHSRC, "      if (job && job.waiters <= 0) throw Object.assign(new Error('every asker of this summary went away'), { code: 'ABORTED' });\n", '', 'the askers\' check cut');
+    const LOOKUP = 'if (f && f.c === c && f.pricing === this._pricing) {';
+    const cuts = {
+      noFlight: anchored(UHSRC, LOOKUP, 'if (false) {', 'the flight lookup cut'),
+      noCheck: anchored(UHSRC, "      if (job && job.waiters <= 0) throw Object.assign(new Error('every asker of this summary went away'), { code: 'ABORTED' });\n", '', 'the askers\' check cut'),
+      anyOne: anchored(UHSRC, 'if (job && job.waiters <= 0) throw', 'if (job && job.waiters < 2) throw', 'a fold that stops when ANY one asker leaves'),
+      oldCatch: anchored(UHSRC, "      if (signal && signal.aborted) throw Object.assign(new Error('the request went away'), { code: 'ABORTED' });\n      if (!retried) {", '      if (false) {', 'the release\'s STALE catch: every asker to the row road'),
+      noPrice: anchored(UHSRC, LOOKUP, 'if (f && f.c === c) {', 'the flight without the price table'),   // stale-pins: kept (the copy WRITES the lookup without the price table)
+    };
     const mk = (src, tag) => { const { UsageHistory: U } = MU.load('src/usage-history.js', src, tag); const u = new U({ dataDir: dir, homeDir: dir, resolveAccount: res }); u._loadEvents(); return u; };
-    const g1 = await bounds(mk(noFlight, 'no-flight')), g2 = await bounds(mk(noCheck, 'no-check'));
-    ok(g1.one === 4 && g2.gone === 'answered', `CONTROLS: with the flight's lookup cut the four asks are ${g1.one} folds; with the askers' check cut the gone fold ${g2.gone} — each leg above is red for its road`, { one: g1.one, gone: g2.gone });
+    const g = {}; for (const [tag, src] of Object.entries(cuts)) g[tag] = await bounds(mk(src, tag));
+    ok(g.noFlight.one === 4 && g.noCheck.gone === 'answered' && g.anyOne.r2 === 'ABORTED' && g.oldCatch.stale.b === 'ABORTED' && g.noPrice.price.folds === 1 && !g.noPrice.price.fresh,
+      `CONTROLS, each leg above red for its road: the flight's lookup cut ⇒ ${g.noFlight.one} folds; the askers' check cut ⇒ the gone fold ${g.noCheck.gone}; a fold stopping when ANY asker leaves ⇒ the live one told ${g.anyOne.r2}; the release's STALE catch ⇒ the live asker told ${g.oldCatch.stale.b}; no price table in the flight ⇒ ${g.noPrice.price.folds} fold, the old prices`,
+      { noFlight: g.noFlight.one, noCheck: g.noCheck.gone, anyOne: g.anyOne.r2, oldCatch: g.oldCatch.stale.b, noPrice: g.noPrice.price });
   }
 }
 // A PLACE GONE STALE UNDER AN EDGE SLOT (row B-360d unit 1): a shard edited in place inside the ledger's one-second check
