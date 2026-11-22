@@ -130,7 +130,9 @@ try {
   ok([45, 40, 39, 25, 24].map((g) => R.loadRule(g, { batch: true })).join() === '8,8,4,4,2' && R.loadRule(45) === 4, '⑦ the batch LOAD RULE: ≥ 40 GB ⇒ 8 · ≥ 25 ⇒ 4 · else 2 (the tier\'s stays 4 / 2 / 1)');
   const srcOf = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf-8'); } catch { return ''; } };
   const self = CI.hostPlan(heavy, { sourceOf: srcOf }).self.map((s) => s.name).sort();
-  const bt = R.selectSlice(CI, { tree: REPO, batch: 'desktop' });
+  // B-7e49: ONE batch selection with no box times serves the two legs that read it — it was asked twice by the same call (the
+  // default timingDirs IS []), each a fresh host derivation over the tree's 468 sources; bta below keeps the default-argument road
+  const bt = R.selectSlice(CI, { tree: REPO, batch: 'desktop', timingDirs: [] });
   ok(self.length > 20 && bt.names.slice().sort().join() === self.join() && /--batch desktop: the \d+ self-hosted/.test(bt.summary),
     `⑦ the batch IS the tree's self-hosted set (${bt.names.length} of ${heavy.length}: ci.mjs hostPlan .self)`);
   const bta = R.selectSlice(CI, { tree: REPO, batch: 'desktop', changed: ['package.json'], range: 'x..y' });
@@ -139,7 +141,7 @@ try {
   // a suite the box never ran takes the tree's checked-in desktop time (lane xpra-window-split: the giant's new parts)
   const dt = CI.batchTimings(REPO) || {};
   const tabled = bt.names.filter((n) => typeof dt[n] === 'number').sort((a, b) => dt[b] - dt[a] || (a < b ? -1 : 1));
-  const btt = R.selectSlice(CI, { tree: REPO, batch: 'desktop', timingDirs: [] });
+  const btt = bt;   // the same call (above): its answer read again
   const btn = R.selectSlice({ ...CI, batchTimings: () => null }, { tree: REPO, batch: 'desktop', timingDirs: [] });
   ok(tabled.length >= 4 && btt.names.slice(0, tabled.length).join() === tabled.join() && btt.measured === tabled.length,
     `⑦ a batch with no box times starts the suites the tree times (${tabled.length}: ci-shard-timings.json \`desktop\`) longest first`);
