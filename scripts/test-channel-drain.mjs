@@ -188,7 +188,10 @@ function createSim(D, o = {}) {
   };
   /** THE ORACLE — the rules written again from the spec, never from the model. */
   const oracle = (s, pv) => {
-    const dueKeys = new Set(D.dueRows(s.pass).map((d) => d.key));
+    // B-7e49 (lane lg-recovery): the due rows read ONCE a call (they were read three times; dueRows + its iterator were ~3 s of the
+    // suite's CPU on the test machine, most of it here). The oracle only reads them: the same rows, the same rules
+    const dueNow = D.dueRows(s.pass);
+    const dueKeys = new Set(dueNow.map((d) => d.key));
     const takenKeys = new Set(s.requests.filter((r) => r.taken).map((r) => r.key));
     const groups = new Map();   // fresh groups: untaken requests on a key with no pending item, filing order of the key's first request
     for (const r of s.requests) {
@@ -211,12 +214,12 @@ function createSim(D, o = {}) {
     }
     // the queue, every request accepted: items by key
     const items = new Map();
-    for (const d of D.dueRows(s.pass)) items.set(d.key, { key: d.key, due: true, dueAt: d.dueAt, reqs: [] });
+    for (const d of dueNow) items.set(d.key, { key: d.key, due: true, dueAt: d.dueAt, reqs: [] });
     for (const r of s.requests) { if (!items.has(r.key)) items.set(r.key, { key: r.key, due: false, reqs: [] }); items.get(r.key).reqs.push(r); }
     const all = [...items.values()];
     for (const it of all) { it.human = it.reqs.some((r) => isHuman(r.origin)); it.minSeq = it.reqs.length ? Math.min(...it.reqs.map((r) => r.seq)) : Infinity; }
     const waitingItems = all.filter((it) => it.reqs.length).sort((a, b) => (Number(b.human) - Number(a.human)) || (a.minSeq - b.minSeq));
-    const plain = D.dueRows(s.pass).filter((d) => !items.get(d.key).reqs.length).map((d) => items.get(d.key));
+    const plain = dueNow.filter((d) => !items.get(d.key).reqs.length).map((d) => items.get(d.key));
     const queue = waitingItems.concat(plain);
     const head = queue[0] || null;
     let pick = head, redirect = false;
