@@ -2247,7 +2247,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     // (r1834's reads) a member whose END MOVED by a road that told no card (here: the store written directly — as a change made while
     // For you was held unread): the START, at For you's read, catches up what the row says — «replaced». RED: the start that tells
     // only the memory road (the read's third form) ⇒ the card keeps «always allowed» over a grant the row no longer says
-    const alwaysMoved = async (mod) => {
+    const alwaysMoved = async (mod, { shift = -3600e3 } = {}) => {
       const VUGm = R('src/server/vault-use-grants.js'), GSm = R('src/server/grants-store.js'), FAm = R('src/foryou-actions.js');
       const wm = await world(), gsm = GSm.create({ memory: true });
       const ugm = VUGm.create({ grants: () => gsm, vault: wm.vault, dataDir: wm.dataDir, log: (m) => wm.logs.push(String(m)) });
@@ -2257,7 +2257,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const a8 = await runAnswered(wm, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '8h' });
       const cardId = a8.card ? a8.card.id : null;
       const recOf = () => ((cardId ? wm.userTodos.get(cardId) : null) || {});
-      const f0 = recOf().resolvedFact || {}, pk = f0.principal, later = Number(f0.until) + 30 * 86400e3;
+      const f0 = recOf().resolvedFact || {}, pk = f0.principal, later = Number(f0.until) + shift;   // r2175 (1): EARLIER by default (a later move is held)
       const moved = ugm.addMember(ID, { kind: 'conversation', key: wm.caller.conversationId, name: 'Lane X' }, { hosts: ['api.example.com'], until: later, source: 'owner' });
       const scopesNow = ((ugm.publicFor(ID).to || []).find((x) => x.principal === pk) || {}).scopes || [];
       const before = (recOf().resolvedFact || {}).endedBy || null;   // nothing told it: the store was written directly
@@ -2265,8 +2265,9 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
       return { pressed: !!(a8.a && a8.a.ok), moved: !!(moved && moved.ok) && scopesNow.some((x) => Number(x.until) === later) && !scopesNow.some((x) => Number(x.until) === Number(f0.until)), before, end: (recOf().resolvedFact || {}).endedBy || null, state: FAm.decisionCard(recOf()).state };
     };
-    const amv = await alwaysMoved(DOOR);
-    ok(amv.pressed && amv.moved && !amv.before && amv.end === 'replaced' && amv.state === 'ended', `(r1834's reads) a member whose end moved with no card told: the start catches up what the row says — «replaced» — ${JSON.stringify(amv)}`, amv);
+    const amv = await alwaysMoved(DOOR), amvL = await alwaysMoved(DOOR, { shift: 30 * 86400e3 });
+    ok(amvL.pressed && amvL.moved && !amvL.end && amvL.state !== 'ended', `r2175 (1): a member whose end moved LATER with no card told: the start leaves the card «always allowed» — ${JSON.stringify(amvL)}`, amvL);
+    ok(amv.pressed && amv.moved && !amv.before && amv.end === 'replaced' && amv.state === 'ended', `(r1834's reads) a member whose end moved EARLIER with no card told: the start catches up what the row says — «replaced» — ${JSON.stringify(amv)}`, amv);
     const mamv = M.load('src/server/vault-run-door.js', anchored(SRCa, " : says === 'replaced' ? 'replaced' : says === 'gone' ? 'revoked' : null;", ' : null;', 'test-vault-run r1834 read 4: the start that tells only the memory road'), 'a14b-always-moved');
     const amvR = await alwaysMoved(mamv);
     ok(amvR.moved && !amvR.end, `RED control: the start that tells only the memory road ⇒ the card keeps «always allowed» over a grant the row no longer says — ${JSON.stringify(amvR)}`, amvR);
@@ -2320,7 +2321,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     // (its command no longer runs as pressed). And the PRESS road: a second card over both entries pressed «Always» (30 days)
     // moves the first card's end ⇒ the first says «replaced»; a second card on the other entry alone leaves it. REDs: one listed
     // scope read as enough; the press that tells no card
-    const twoEntries = async (mod, { second = null } = {}) => {
+    const twoEntries = async (mod, { second = null, firstTtl = '8h', secondTtl = '30d' } = {}) => {
       const VUGt = R('src/server/vault-use-grants.js'), GSt = R('src/server/grants-store.js'), FAt = R('src/foryou-actions.js');
       const wt = await world(), gst = GSt.create({ memory: true });
       const ugt = VUGt.create({ grants: () => gst, vault: wt.vault, dataDir: wt.dataDir, log: (m) => wt.logs.push(String(m)) });
@@ -2328,11 +2329,11 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const BOTH = ['--env', 'T=vault://mounts/m1/secretKey', '--env', 'U=vault://app-secrets/app1/item.0.1', '--', 'curl', '-s', 'https://api.example.com/v1/a'];
       const ONE = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'];
       const APP = ['--env', 'U=vault://app-secrets/app1/item.0.1', '--', 'curl', '-s', 'https://api.example.com/v1/b'];
-      const c1 = await runAnswered(wt, second ? ONE : BOTH, { answer: 'always', reauthed: true, ttl: '8h' });
+      const c1 = await runAnswered(wt, second ? ONE : BOTH, { answer: 'always', reauthed: true, ttl: firstTtl });
       const id1 = c1.card ? c1.card.id : null, recOf = () => ((id1 ? wt.userTodos.get(id1) : null) || {}), f1 = recOf().resolvedFact || {};
       let act = null;
       if (!second) act = wt.door.takeBack({ id: 'app-secrets:app1#item.0.1', principal: f1.principal, by: 'user' });   // the ✕ on ONE of its two entries
-      else { const c2 = await runAnswered(wt, second === 'both' ? BOTH : APP, { answer: 'always', reauthed: true, ttl: '30d' }); act = c2.a; }
+      else { const c2 = await runAnswered(wt, second === 'both' ? BOTH : APP, { answer: 'always', reauthed: true, ttl: secondTtl }); act = c2.a; }
       return { pressed: !!(c1.a && c1.a.ok), entries: Array.isArray(f1.entries) ? f1.entries.length : 0, act: !!(act && act.ok), end: (recOf().resolvedFact || {}).endedBy || null, state: FAt.decisionCard(recOf()).state };
     };
     const tw1 = await twoEntries(DOOR);
@@ -2340,10 +2341,11 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const mtw = M.load('src/server/vault-run-door.js', anchored(SRCa, "    return missing ? 'gone' : moved ? 'replaced' : 'held';", "    return (missing < want.length * f.entries.slice(0, 64).length) ? 'held' : 'gone';", 'test-vault-run r1834 read 4: one listed scope read as enough'), 'a14b-two-entries');
     const tw1R = await twoEntries(mtw);
     ok(tw1R.act && !tw1R.end, `RED control: one listed scope read as enough ⇒ the card keeps «always allowed» after the ✕ on one of its entries — ${JSON.stringify(tw1R)}`, tw1R);
-    const tw2 = await twoEntries(DOOR, { second: 'both' }), tw3 = await twoEntries(DOOR, { second: 'app' });
+    const tw2 = await twoEntries(DOOR, { second: 'both', firstTtl: '30d', secondTtl: '8h' }), tw3 = await twoEntries(DOOR, { second: 'app' }), tw2L = await twoEntries(DOOR, { second: 'both' });
+    ok(tw2L.pressed && tw2L.act && !tw2L.end && tw2L.state !== 'ended', `r2175 (1): a second press over both entries moving the first card's end LATER (8 hours ⇒ 30 days) ⇒ the first keeps «always allowed» — ${JSON.stringify(tw2L)}`, tw2L);
     ok(tw2.pressed && tw2.act && tw2.end === 'replaced' && tw2.state === 'ended' && tw3.pressed && tw3.act && !tw3.end, `(the fourth read) the PRESS road: a second card over both entries moves the first card's end ⇒ «replaced»; a second card on the other entry alone leaves it — ${JSON.stringify({ tw2, tw3 })}`, { tw2, tw3 });
     const mtp = M.load('src/server/vault-run-door.js', anchored(SRCa, "      try { for (const e of held.entries) alwaysTakenBack(String(e), 'revoked', held.principal); } catch { }", '', 'test-vault-run r1834 read 4: the press that tells no card'), 'a14b-press-tells');
-    const tw2R = await twoEntries(mtp, { second: 'both' });
+    const tw2R = await twoEntries(mtp, { second: 'both', firstTtl: '30d', secondTtl: '8h' });
     ok(tw2R.act && !tw2R.end, `RED control: the press that tells no card ⇒ the first card keeps «always allowed (8 hours)» while its end is now the second press's — ${JSON.stringify(tw2R)}`, tw2R);
     // …and BOTH roads that take a member back from the row (the ✕ — takeBack; the Save — saveRow) tell the «Always» cards: a census
     // of the door's text (the Save's leg needs the page's row stamp). RED: the Save without it ⇒ the census names it
@@ -2356,7 +2358,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     // one that MOVES the card's end ⇒ «replaced» (the card's own sentence no longer the row's); one that keeps the conversation
     // but leaves the card's host out ⇒ «revoked» (it no longer says more than the row). And a 1-hour window card whose entry is
     // DELETED ⇒ «deleted». REDs: the Save that tells no card (each); the delete that tells no window card
-    const alwaysSaved = async (mod, { keepHost = true } = {}) => {
+    const alwaysSaved = async (mod, { keepHost = true, shift = 3600e3 } = {}) => {
       const VUGs = R('src/server/vault-use-grants.js'), GSs = R('src/server/grants-store.js'), FAs = R('src/foryou-actions.js');
       const ws = await world(), gss = GSs.create({ memory: true });
       const ugs = VUGs.create({ grants: () => gss, vault: ws.vault, dataDir: ws.dataDir, log: (m) => ws.logs.push(String(m)) });
@@ -2364,18 +2366,41 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const ID = 'mounts:m1#secretKey';
       const a8 = await runAnswered(ws, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '8h' });
       const cardId = a8.card ? a8.card.id : null, f0 = ((cardId ? ws.userTodos.get(cardId) : null) || {}).resolvedFact || {};
-      const later = Number(f0.until) + 3600e3;
+      const later = Number(f0.until) + shift;
       const to = [{ kind: 'conversation', key: ws.caller.conversationId, hosts: keepHost ? ['api.example.com'] : ['other.example.org'], ...(keepHost ? { until: later } : {}) }];
       const sv = ws.door.saveRow(ID, { to }, { by: 'user', reauthed: true });
       const it = cardId ? ws.userTodos.get(cardId) : null;
       return { pressed: !!(a8.a && a8.a.ok), scopes: Array.isArray(f0.scopeHosts) && f0.scopeHosts.includes('api.example.com'), saved: !!(sv && sv.ok), code: sv && sv.code, end: ((it && it.resolvedFact) || {}).endedBy || null, state: it ? FAs.decisionCard(it).state : null };
     };
-    const asv = await alwaysSaved(DOOR), asd = await alwaysSaved(DOOR, { keepHost: false });
-    ok(asv.pressed && asv.scopes && asv.saved && asv.end === 'replaced' && asv.state === 'ended', `(r1834's third read) the owner's Save that MOVES the card's end ⇒ the card says «replaced» — ${JSON.stringify(asv)}`, asv);
+    const asv = await alwaysSaved(DOOR), asvE = await alwaysSaved(DOOR, { shift: -3600e3 }), asd = await alwaysSaved(DOOR, { keepHost: false });
+    ok(asv.pressed && asv.scopes && asv.saved && !asv.end && asv.state !== 'ended', `r2175 (1): the owner's Save that moves the card's end LATER ⇒ the card keeps «always allowed» (the runs it said are still admitted) — ${JSON.stringify(asv)}`, asv);
+    const mlat = M.load('src/server/vault-run-door.js', anchored(SRCa, 'if (e < c) moved++;', 'if (e !== c) moved++;', 'test-vault-run r2175 (1): any moved end read as replaced'), 'a14b-end-later');
+    const asvL = await alwaysSaved(mlat);
+    ok(asvL.saved && asvL.end === 'replaced', `RED control: any moved end read as «replaced» ⇒ the later end says «ended» while its runs are admitted — ${JSON.stringify(asvL)}`, asvL);
+    ok(asvE.pressed && asvE.scopes && asvE.saved && asvE.end === 'replaced' && asvE.state === 'ended', `(r1834's third read) the owner's Save that moves the card's end EARLIER ⇒ the card says «replaced» — ${JSON.stringify(asvE)}`, asvE);
     ok(asd.pressed && asd.saved && asd.end === 'revoked' && asd.state === 'revoked', `(r1834's third read) the owner's Save that keeps the conversation but leaves the card's host out ⇒ «revoked» — ${JSON.stringify(asd)}`, asd);
     const masv = M.load('src/server/vault-run-door.js', anchored(SRCa, "    if (r && r.ok) { try { told += alwaysTakenBack(String(id)); } catch { } }", '', 'test-vault-run r1834 read 3: the Save that tells no card'), 'a14b-always-saved');
-    const asvR = await alwaysSaved(masv), asdR = await alwaysSaved(masv, { keepHost: false });
+    const asvR = await alwaysSaved(masv, { shift: -3600e3 }), asdR = await alwaysSaved(masv, { keepHost: false });
     ok(asvR.saved && !asvR.end && asdR.saved && !asdR.end, `RED control: the Save that tells no card ⇒ both cards still read «always allowed» — ${JSON.stringify({ moved: asvR.end, left: asdR.end })}`, { asvR, asdR });
+    // r2175 (4): THE STANDING ALLOW's tell, by behaviour — a standing approval over the card's host writes a scope with NO end (later
+    // than any card's): the card keeps «always allowed», as the runs it said are still admitted. RED: any moved end read as
+    // «replaced» ⇒ «ended» over a member that still admits
+    const standingOver = async (mod) => {
+      const VUGs2 = R('src/server/vault-use-grants.js'), GSs2 = R('src/server/grants-store.js'), FAs2 = R('src/foryou-actions.js');
+      const wst = await world(), gss2 = GSs2.create({ memory: true });
+      const ugs2 = VUGs2.create({ grants: () => gss2, vault: wst.vault, dataDir: wst.dataDir, log: (m) => wst.logs.push(String(m)) });
+      wst.door = wst.mk(mod, { useGrants: ugs2, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) }); openRow(wst);
+      const c30 = await runAnswered(wst, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/a'], { answer: 'always', reauthed: true, ttl: '30d' });
+      const cardId = c30.card ? c30.card.id : null, recOf = () => ((cardId ? wst.userTodos.get(cardId) : null) || {});
+      const sq = await wst.door.request({ caller: wst.caller, entry: M1, purpose: 'a standing approval over the card host', standing: true, hosts: ['api.example.com', 'other.example.org'], cwd: wst.work });   // one host past the card's (the card's member already holds its own: a request for it alone is held already, nothing to ask)
+      const sa = sq && sq.askId ? wst.door.answerRequest(sq.askId, { answer: 'standing', reauthed: true, person: true }) : null;
+      const m = (ugs2.publicFor('mounts:m1#secretKey').to || []).find((x) => x.principal === (recOf().resolvedFact || {}).principal);
+      return { pressed: !!(c30.a && c30.a.ok), asked: sq ? (sq.askId ? 'card' : sq.code || sq.already || 'none') : null, allowed: !!(sa && sa.ok), noEnd: !!(m && (m.scopes || []).some((x) => x.kind === 'host' && x.until == null)), end: (recOf().resolvedFact || {}).endedBy || null, state: FAs2.decisionCard(recOf()).state };
+    };
+    const sto = await standingOver(DOOR);
+    ok(sto.pressed && sto.allowed && sto.noEnd && !sto.end && sto.state !== 'ended', `r2175 (4): a standing Allow over the card's host (no end — later than the card's) ⇒ the card keeps «always allowed» — ${JSON.stringify(sto)}`, sto);
+    const stoR = await standingOver(mlat);
+    ok(stoR.allowed && stoR.end === 'replaced', `RED control: any moved end read as «replaced» ⇒ the standing Allow ends the card over a member that still admits — ${JSON.stringify(stoR)}`, stoR);
     const windowDeleted = async (mod) => {
       const VUGw = R('src/server/vault-use-grants.js'), GSw = R('src/server/grants-store.js'), FAw = R('src/foryou-actions.js');
       const ww = await world(), gsw = GSw.create({ memory: true });

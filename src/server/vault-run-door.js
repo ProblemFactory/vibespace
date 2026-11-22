@@ -1244,7 +1244,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!so.ok && so.judged) { settle(q, 'denied', so.why); return so.judged; }
       if (!so.ok) { settle(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       const madeGrants = so.grants;
-      held = { until, principal: GM.principalKey(GM.bareOf({ kind: 'conversation', key: q.conv })), entries: (Array.isArray(so.changes) && so.changes.length ? so.changes.map((c) => c && c.id).filter((x) => typeof x === 'string') : q.entries.slice()), ...(byCommand ? { scopeCmd: (() => { try { const c = GM.commandListOf([q.command]); return c && c[0] ? GM.commandKeyOf(c[0]) : null; } catch { return null; } })() } : { scopeHosts: (GM.hostListOf(q.hosts) || q.hosts).slice() }) };   // (r1834) the row's own until — ONE value, never a second now() — its member, the entries it WROTE and its own scopes (the store's own spelling)
+      held = { until, principal: GM.principalKey(GM.bareOf({ kind: 'conversation', key: q.conv })), entries: q.entries.slice(), ...(byCommand ? { scopeCmd: (() => { try { const c = GM.commandListOf([q.command]); return c && c[0] ? GM.commandKeyOf(c[0]) : null; } catch { return null; } })() } : { scopeHosts: (GM.hostListOf(q.hosts) || q.hosts).slice() }) };   // (r1834) the row's own until — ONE value, never a second now() — its member, the entries it WROTE and its own scopes (the store's own spelling)
       try { for (const e of held.entries) alwaysTakenBack(String(e), 'revoked', held.principal); } catch { }   // (r1834's reads) a second press may move an earlier card's end on these scopes: that card says «replaced»
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl: byCommand ? 'forever' : ttl, until, grants: madeGrants, ...(byCommand ? { command: VUG.commandWords(q.command) } : { hosts: q.hosts }), changes: auditChangesOf(so.changes) });   // r4 (D): what it added, replaced and ended
     } else if (a === 'always') {
@@ -1351,7 +1351,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!f || typeof f.principal !== 'string' || !Array.isArray(f.entries) || !(Array.isArray(f.scopeHosts) || typeof f.scopeCmd === 'string')) return 'held';
     // (the fourth read) EVERY scope the press wrote — each entry it named × each of its hosts (or its one command): all listed with
     // the card's own end ⇒ 'held'; any missing ⇒ 'gone' (taken back, in part or whole: its command no longer runs as pressed);
-    // all listed, some with another end ⇒ 'replaced'
+    // all listed, some end moved EARLIER ⇒ 'replaced' (r2175 (1): an end moved LATER — the owner's Save, a second press, a standing
+    // Allow — still admits every run the card said: the card keeps «always allowed»)
     const want = Array.isArray(f.scopeHosts) ? f.scopeHosts.map(String) : [null];
     let moved = 0, missing = 0;
     for (const id of f.entries.slice(0, 64)) {
@@ -1363,7 +1364,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const scs = m && Array.isArray(m.scopes) ? m.scopes : [];
       for (const h of want.slice(0, 64)) {
         const sc = scs.find((x) => { try { return !!x && (h != null ? x.kind === 'host' && String(x.host) === h : x.kind === 'command' && !!x.command && GM.commandKeyOf(x.command) === f.scopeCmd); } catch { return false; } });
-        if (!sc) missing++; else if (Number(sc.until || 0) !== Number(f.until || 0)) moved++;
+        if (!sc) missing++; else { const e = sc.until == null ? Infinity : Number(sc.until), c = f.until == null ? Infinity : Number(f.until); if (e < c) moved++; }   // r2175 (1): only an end moved EARLIER is «replaced» — one moved LATER still admits every run the card said (it keeps «always allowed»)
       }
     }
     return missing ? 'gone' : moved ? 'replaced' : 'held';
@@ -1372,6 +1373,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // out; «deleted»: the entry deleted, r1825's word — then the 1-hour cards naming it too, once no entry they named holds their
   // window). A card past its until ended by its time (left as it reads). While For you is held unread its list is empty: nothing
   // is told (as the 1-hour window's road)
+  // r2175 (2): the paste door's delete that FAILED after it dropped the entry's use-grants row — the row is gone, so the cards it
+  // held are told (a read of the row: safe either way — a card the row still says stays as it reads)
+  function rowChanged(id) { try { return alwaysTakenBack(String(id || ''), 'revoked'); } catch { return 0; } }
   function alwaysTakenBack(id, word = 'revoked', pk = null) {
     if (!useGrants || !userTodos || typeof userTodos.resolvedOf !== 'function' || typeof userTodos.noteFact !== 'function') return 0;
     let n = 0;
@@ -2857,7 +2861,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+  return { scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowChanged, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }

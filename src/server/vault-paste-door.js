@@ -57,6 +57,7 @@ const VI = require('../vault-inventory.js');   // PURE: an entry's row (the name
 const V = require('../vault.js');   // B-3fb5: AGENT_NS_RE — the whole name of an agent's own entry (agent:<scope>/<name>)
 const VR = require('../vault-run.js');   // PURE: an entry's reference (B-3fb5: the delete line names it — the window's use counts end there)
 const VB = require('../vault-blocked.js');   // PURE: a caller's name in words; THE words toward an agent on a locked refusal
+const SS = require('../secret-shapes.js');   // B-a14b's last remainder (r2175 (5)): the request's words belted at the record's WRITE, as their readers do
 const URL_ = require('url');   // lane login-request-card: a site's Unicode form beside its punycode one (P.siteWords takes the function)
 
 const FROM_NAME = 'Vault';
@@ -254,7 +255,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
       // The entry's «Usable by agent runs» switch is the owner's 验证是你 act and NOTHING else flips it: r4 forged
       // `reauthed:true` here, so one paste opened the new secret to EVERY conversation's run door (ON is an allow-list). To let
       // it be used without the 8-hour limit (and by whoever the owner lists), the owner turns the switch on in the Vault window.
-      if (grantsAsker() && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, hosts: (q.target && q.target.hosts) || [], by, requestId: id, todoId: q.todoId || null }); if (g && g.ok) { grantHours = g.hours; grantFact = { grantedFor: '8h', until: g.until, conv: q.scope, entry: g.id, at: g.at, purpose: String(q.purpose || '').slice(0, 400) }; } } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }   // round 7 (MINOR): the grant is HOST-SCOPED to the hosts the request named (the words say «to those hosts»)
+      if (grantsAsker() && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, hosts: (q.target && q.target.hosts) || [], by, requestId: id, todoId: q.todoId || null }); if (g && g.ok) { grantHours = g.hours; grantFact = { grantedFor: '8h', until: g.until, conv: q.scope, entry: g.id, at: g.at, purpose: SS.redactSecrets(String(q.purpose || '')).text.slice(0, 400) }; } } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }   // round 7 (MINOR): the grant is HOST-SCOPED to the hosts the request named (the words say «to those hosts»)
     }
     let receipt = null;
     try { receipt = (vault.noteUse(entry, { by: 'agent', door: 'paste', conv: q.scope }, { outcome: 'ok', purpose: q.purpose, actor: who }) || {}).receipt || null; } catch { /* the store answered: the use line is the audit's */ }
@@ -423,6 +424,9 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   }
   /** A free entry's delete door (its row's 删除 in the Vault window) — `id` = the part after `secret:`. A locked vault forgets too
    *  (the engine's secretDrop needs no key). */
+  // B-a14b's last remainder (r2175 (2)): a delete that FAILED after its use-grants row was dropped still tells the run door, whose
+  // «Always» cards that row held then read what is true (a read of the row: safe either way)
+  const rowTold = (rid, out) => { if (vaultRun && typeof vaultRun.rowChanged === 'function') { try { vaultRun.rowChanged(rid); } catch { } } return out; };
   function dropEntry(id, { by = 'user' } = {}) {
     const entry = `${P.ENTRY_PREFIX}${String(id || '')}`;
     if (!/^secret:[\w.-]{1,160}$/.test(entry)) return named('entry_unknown_id');
@@ -435,10 +439,10 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const rowId = `secrets:${entry}#${P.ENTRY_FIELD}`;
     let label = entry;
     try { const s = (vault.secretNames() || []).find((x) => x && x.name === entry); const row = s ? VI.secretRowOf(s) : null; if (row && row.label) label = String(row.label); } catch { }
-    if (vaultJob) { let jd = null; try { jd = vaultJob.dropRow(rowId, { by }); } catch (e) { log(`${entry}: its Background-job approvals could not be removed — ${e.message}`); return named('store_failed'); } if (jd && !jd.ok) return named('store_failed'); }
+    if (vaultJob) { let jd = null; try { jd = vaultJob.dropRow(rowId, { by }); } catch (e) { log(`${entry}: its Background-job approvals could not be removed — ${e.message}`); return rowTold(rowId, named('store_failed')); } if (jd && !jd.ok) return rowTold(rowId, named('store_failed')); }
     const r = vault.secretDrop(entry);
-    if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(rowId, { label, why: 'revoked' }); } catch { } } return named('store_failed'); }   // the second adversarial read: its approvals are gone already — its jobs stop (taken back), never run on unapproved
-    if (r.already) return named('entry_unknown_id');
+    if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(rowId, { label, why: 'revoked' }); } catch { } } return rowTold(rowId, named('store_failed')); }   // the second adversarial read: its approvals are gone already — its jobs stop (taken back), never run on unapproved
+    if (r.already) return rowTold(rowId, named('entry_unknown_id'));
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
     try { if (vaultRun && typeof vaultRun.forgetEntry === 'function') vaultRun.forgetEntry(rowId); } catch (e) { log(`${entry}: the run door could not forget it — ${e.message}`); }   // B-a14b follow (r1700 (2), its read): as the agent entry's delete — a live grant to it (a pasted one) ends here, its passes and shapes go with it
     if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); } catch (e) { log(`${entry}: its Background jobs could not be stopped — ${e.message}`); } }   // every job that names it stops (a waiting one is refused)
@@ -464,10 +468,10 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const id = `secrets:${e}#${P.ENTRY_FIELD}`;
     let label = e.slice(e.lastIndexOf('/') + 1);
     try { const s = (vault.secretNames() || []).find((x) => x && x.name === e); const row = s ? VI.secretRowOf(s) : null; if (row && row.label) label = String(row.label); } catch { }
-    if (vaultJob) { let jd = null; try { jd = vaultJob.dropRow(id, { by }); } catch (x) { log(`${e}: its Background-job approvals could not be removed — ${x.message}`); return named('store_failed'); } if (jd && !jd.ok) return named('store_failed'); }
+    if (vaultJob) { let jd = null; try { jd = vaultJob.dropRow(id, { by }); } catch (x) { log(`${e}: its Background-job approvals could not be removed — ${x.message}`); return rowTold(id, named('store_failed')); } if (jd && !jd.ok) return rowTold(id, named('store_failed')); }
     const r = vault.secretDrop(e);
-    if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(id, { label, why: 'revoked' }); } catch { } } return named('store_failed'); }   // its approvals are gone already — its jobs stop (taken back)
-    if (r.already) return named('entry_unknown_id');
+    if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(id, { label, why: 'revoked' }); } catch { } } return rowTold(id, named('store_failed')); }   // its approvals are gone already — its jobs stop (taken back)
+    if (r.already) return rowTold(id, named('entry_unknown_id'));
     if (vaultRun && typeof vaultRun.forgetEntry === 'function') { try { vaultRun.forgetEntry(id); } catch (x) { log(`${e}: the run door could not forget it — ${x.message}`); } }
     index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');   // its words card answers nothing now
     const rf = VR.refFor('secrets', e, P.ENTRY_FIELD);
