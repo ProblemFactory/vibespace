@@ -96,8 +96,9 @@ function boot({ rootDir, env = process.env, log = (l) => console.log(l) } = {}) 
   // server.js requires next, and every child, reads the re-homed env by construction. scripts/test-throwaway-boot.mjs is the guard.
   const TR = require('./throwaway-root.js');
   TR.rehomeAtBoot({ root: rootDir, env });
+  TR.dropHandedAtBoot({ env });   // r2271: a hub started inside a VibeSpace drops what its parent handed (the handed mark) — before any child
   booted = create({ rootDir, switched, log });
-  const said = [TR.bootLine(), TR.unruledLine()].filter(Boolean);   // the unruled names: THE BOUND (主开发 r1222), said once
+  const said = [TR.bootLine(), TR.unruledLine(), TR.handedLine()].filter(Boolean);   // the unruled names: THE BOUND (主开发 r1222), said once
   setImmediate(() => { log(booted.line()); for (const l of said) log(l); });
   // B-9dd0 / B-ba47 shape H: a suite's hub (VS_NO_REAL_CLI=1) or a THROWAWAY copy (the one test) never runs the runtime check —
   // it would ask nodejs.org (runtimeCheckArmed: the update check's own verdict); the timer is set only when armed

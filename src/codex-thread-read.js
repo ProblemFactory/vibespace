@@ -252,7 +252,7 @@ function warmMissingThread(threadId, { locate, remote = false, codexCmd, timeout
   if (_inflight.has(threadId)) return _inflight.get(threadId);
   const p = (async () => {
     try {
-      const thread = await readThreadViaAppServer(threadId, { codexCmd, timeoutMs });
+      const thread = await readThreadViaAppServer(threadId, { codexCmd, timeoutMs, env: require('./agent-env.js').agentEnv(process.env) });   // r2271: the built env (the census row's promise)
       const records = threadToRecords(thread);
       if (!records.length) throw new Error('thread/read yielded no records');
       _cache.set(threadId, { records, at: Date.now() });

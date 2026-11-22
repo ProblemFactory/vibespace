@@ -1319,6 +1319,8 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const knobs = M.scaleKnobs(rec.scale || 1, { rule: M.scaleRuleOf(rec) }); // the same rule the launch recorded (lane D (a))
       const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(M.capsOf(rec, backends).scales ? knobs.env : {}), ...portalEnv, ...(rec.env || {}) };
       if (!sessionAuth) delete appEnv.XAUTHORITY;
+      // r2271: the app's env carries the handed mark (names only) — a hub started from this app's terminal drops what the app was handed
+      { const CE = require('./conversation-env.js'); appEnv[CE.HANDED_MARK] = CE.markOf(CE.handedNames(appEnv, env())); }
       // r2 (the verifier's race): xpra REPLACES the display's resource database ~1 s after its display is up — an app
       // started before read no Xft.dpi (Xvfb's 100 dpi: a "1.5×" xterm got a 7×14 cell) and a merge before it was wiped.
       // Wait for xpra's write (bounded; a miss is logged, the app still starts), THEN merge, THEN start the app.

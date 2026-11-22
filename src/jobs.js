@@ -216,7 +216,8 @@ class JobManager {
     // raw rows: a probe, a module's default when its caller hands none) took them. The builders (agentEnv / daemonEnv / serviceEnv / jobEnv / wrapperEnv)
     // drop every VIBESPACE_* outside their keep sets, so no conversation took them. The hub reads none of them (its own knobs are
     // VIBESPACE_JOBS_*, plural); each job it starts is handed its own at its spawn
-    for (const k of Object.keys(process.env)) if (k.startsWith('VIBESPACE_JOB_')) delete process.env[k];
+    // r2271: the drop itself now runs at the hub's BOOT, in the one act that drops what a parent handed (src/server/throwaway-root.js
+    // dropHandedAtBoot, called by src/server/runtime-boot.js before this engine or any child exists)
     // THE ONE FOR-YOU DOOR, at run time too (lane job-notify-user r4, accept-r3 unverified 0): the For-you store's dep is held
     // HERE and reached through _forYou alone; `this.d.notifyUser` is the STRAY door — a filing that skipped _forYou (a merge
     // that kept an older direct call) still reaches the store with its own shape, and the store's verdict is JOURNALED on

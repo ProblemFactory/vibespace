@@ -26,6 +26,7 @@ const os = require('os');
 const path = require('path');
 const SR = require('../server-root');
 const HV = require('../home-verdict');
+const CE = require('../conversation-env.js');   // r2271: the handed mark (names only) and the person's session names
 const HL = require('../home-links');
 const MPC = require('../mount-path-class');
 const { readRootFacts } = require('./root-facts');
@@ -174,4 +175,37 @@ function unruledLine(v = verdict) {
   return `[throwaway] handed ${v.unruled.length} name${v.unruled.length === 1 ? '' : 's'} that ${v.unruled.length === 1 ? 'is' : 'are'} neither a hub row nor a named NOT (src/home-verdict.js HUB_ROWS / HUB_NOT; not carried): ${v.unruled.join(', ')} — one the hub needs: add it to src/hub-env-knobs.json (its code must read it)`;
 }
 
-module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, SEAM_ENV, seamOf, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, view, bootLine, unruledLine };
+/** THE LAW (主开发 r2271): A HUB's OWN ENVIRONMENT NEVER HOLDS WHAT A PARENT CONVERSATION, JOB OR APP HANDED. Every road that
+ *  hands a child its env leaves a names-only mark (src/conversation-env.js HANDED_MARK: the conversation's spawn line, a job's run,
+ *  the remote command, the boot's re-adopt, a desktop app). A hub that finds it was started INSIDE a VibeSpace: at its boot, before
+ *  any child and before the jobs engine, it drops every name the mark lists, the mark, the app's process mark and the two
+ *  page-helper names, and keeps of the VibeSpace names ONLY its own knob rows (home-verdict.js HUB_ROWS — the throwaway start's
+ *  rule applied to the environment alone: no re-home, the data folder and the home untouched). Every child is then clean whatever
+ *  builder it rides; the builders keep their keeps (a device agent is not a hub). The job names (VIBESPACE_JOB_*) are dropped here
+ *  in every case — moved from the jobs engine's construction: the hub reads none of them (its own knobs are VIBESPACE_JOBS_*).
+ *  A hub with NO mark keeps everything else: an operator's own values stand. A person's session names are never dropped. */
+const PAGE_HELPER_ENV = Object.freeze(['CLAUDE_WEBUI_SESSION_ID', 'CLAUDE_WEBUI_PORT']);
+const APP_MARK_ENV = 'VIBESPACE_DESKTOP_APP';
+let handedDrop = null;
+function dropHandedAtBoot({ env = process.env } = {}) {
+  const has = Object.prototype.hasOwnProperty.call(env, CE.HANDED_MARK);
+  const listed = new Set(has ? CE.namesOfMark(env[CE.HANDED_MARK]) : []);
+  const rows = new Set(HV.HUB_ROWS.map((r) => r && r.name).filter(Boolean));
+  const person = new Set(CE.PERSON_SESSION_ENV);
+  const dropped = [];
+  for (const k of Object.keys(env)) {
+    if (person.has(k)) continue;
+    const job = k.startsWith('VIBESPACE_JOB_');
+    const handed = has && (k === CE.HANDED_MARK || listed.has(k) || k === APP_MARK_ENV || PAGE_HELPER_ENV.includes(k) || (k.startsWith('VIBESPACE_') && !rows.has(k)));
+    if (job || handed) { delete env[k]; dropped.push(k); }
+  }
+  handedDrop = { by: has ? 'mark' : 'none', dropped: dropped.sort() };
+  return handedDrop;
+}
+/** The boot narrative's one line for it (names only, never a value) — null when no mark was found. */
+function handedLine(d = handedDrop) {
+  if (!d || d.by !== 'mark') return null;
+  return `[env] started inside a VibeSpace (its handed mark): dropped ${d.dropped.length} name${d.dropped.length === 1 ? '' : 's'} a parent conversation, job or app handed — ${d.dropped.join(', ')}`;
+}
+
+module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, SEAM_ENV, seamOf, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, view, bootLine, unruledLine, dropHandedAtBoot, handedLine, PAGE_HELPER_ENV };

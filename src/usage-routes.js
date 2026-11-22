@@ -766,7 +766,7 @@ async function refreshViaCliPanel(key) {
   }
   const cliPanel = await new Promise((resolve) => {
     try {
-      const env = { ...process.env };
+      const env = require('./agent-env.js').agentEnv(process.env);   // r2271: a built env, never the hub's whole one (no VIBESPACE_* knob or credential of the hub's)
       delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
       // the secret store relocates (session-spawn parity); the org context and
       // the cwd are isolated by spawnPanelProbe from the root (B-855a): the

@@ -217,7 +217,7 @@ const JOB_NAMES = ['VIBESPACE_JOB_CWD', 'VIBESPACE_JOB_ID', 'VIBESPACE_JOB_RUN',
 /** the scene: the real engine starts a TASK through the real wrapper; its main is a stand-in hub (node) that constructs the jobs
  *  engine of `jobsPath` over a folder of its own (as a hub's boot does) and writes down, before and after: the job's names in its own
  *  env, in a child it starts on its OWN env (no env handed: a probe's road) and in the env a conversation is built with (agentEnv) */
-async function insideScene(jobsPath, tag) {
+async function insideScene(actPath, tag) {   // r2271: the drop is the hub's BOOT act (src/server/throwaway-root.js dropHandedAtBoot) — the stand-in runs it first, as a real hub does
   const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.mkdirSync(path.join(dd, 'inner'), { recursive: true });
   fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), WRAP);
   const rec = path.join(dd, 'rec.json');
@@ -228,7 +228,8 @@ async function insideScene(jobsPath, tag) {
     "const childNames = () => jobNames(JSON.parse(String(cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(Object.keys(process.env)))'], { encoding: 'utf8', timeout: 8000 }))));",
     "const look = () => ({ own: jobNames(Object.keys(process.env)), child: childNames(), conv: jobNames(Object.keys(A.agentEnv(process.env))), id: process.env.VIBESPACE_JOB_ID || null });",
     'const before = look();',
-    `const { JobManager } = require(${JSON.stringify(jobsPath)});`,
+    `require(${JSON.stringify(actPath)}).dropHandedAtBoot();`,
+    `const { JobManager } = require(${JSON.stringify(path.join(ROOT, 'src/jobs.js'))});`,
     `new JobManager({ dataDir: ${JSON.stringify(path.join(dd, 'inner'))}, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, memoryRungs: [] });`,
     'const after = look();',
     // a DAEMON it double-forks on its own env (sh puts it in the background and ends: re-parented, never the hub's child) — does the
@@ -253,15 +254,19 @@ async function insideScene(jobsPath, tag) {
   return { jobId: job.id, state: job.state, ...(out || { log: log.slice(-600) }) };
 }
 {
-  const DROP = "    for (const k of Object.keys(process.env)) if (k.startsWith('VIBESPACE_JOB_')) delete process.env[k];\n";
-  ok(JSRC.split(DROP).length === 2 && JSRC.indexOf(DROP) < JSRC.indexOf('    // THE ONE FOR-YOU DOOR, at run time too'), 'WIRING: the jobs engine drops every VIBESPACE_JOB_* once, at its construction (beside B-7ca1\'s reason)');
-  const cut = MJ.write('src/jobs.js', anchored(JSRC, DROP, '    delete process.env.VIBESPACE_JOB_RUN;   /* MUTANT: the release — the run mark alone */\n', 'b2c5c-u5-drop-cut'), 'b2c5c-u5-drop-cut');
-  const [real, red] = await Promise.all([insideScene(path.join(ROOT, 'src/jobs.js'), 'inside'), insideScene(cut, 'inside-mut')]);
+  // r2271: the drop moved from the jobs engine's construction to the hub's boot act — pinned there, its call right after the re-home
+  const TRSRC = fs.readFileSync(path.join(ROOT, 'src/server/throwaway-root.js'), 'utf8'), RBSRC = fs.readFileSync(path.join(ROOT, 'src/server/runtime-boot.js'), 'utf8');
+  const DROP = "    const job = k.startsWith('VIBESPACE_JOB_');\n";
+  ok(TRSRC.split(DROP).length === 2 && RBSRC.includes("  TR.rehomeAtBoot({ root: rootDir, env });\n  TR.dropHandedAtBoot({ env });") && !JSRC.includes("if (k.startsWith('VIBESPACE_JOB_')) delete process.env[k]"), 'WIRING: the hub drops every VIBESPACE_JOB_* once, at its BOOT (src/server/throwaway-root.js dropHandedAtBoot, called by runtime-boot right after the re-home, before the jobs engine or any child) — the jobs engine no longer does it');   // stale-pins: kept (a deliberate absence check)
+  // the release had NEITHER drop: the run mark alone, and no handed mark read (a job's run env lists its own names in the mark)
+  const HAS = '  const has = Object.prototype.hasOwnProperty.call(env, CE.HANDED_MARK);\n';
+  const cut = MJ.write('src/server/throwaway-root.js', anchored(anchored(TRSRC, DROP, "    const job = k === 'VIBESPACE_JOB_RUN';   /* MUTANT: the release — the run mark alone */\n", 'b2c5c-u5-drop-cut'), HAS, '  const has = false;   /* MUTANT: no handed mark read */\n', 'b2c5c-u5-mark-cut'), 'b2c5c-u5-drop-cut');
+  const [real, red] = await Promise.all([insideScene(path.join(ROOT, 'src/server/throwaway-root.js'), 'inside'), insideScene(cut, 'inside-mut')]);
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   ok(!!real.before && real.before.id === real.jobId && same(real.before.own, JOB_NAMES) && same(real.before.child, JOB_NAMES),
     'the scene: the job\'s spawn handed the stand-in hub (its main) the job\'s names — its id, run mark, bearer, directory — and a child it started on its own env took them all', real);
   ok(!!real.after && same(real.after.own, []) && same(real.after.child, []),
-    'A HUB STARTED INSIDE A JOB: after its jobs engine is built, its env holds none of the job\'s names and a child it starts on its own env takes none (no id a vibespace-job there would speak as, no bearer)', real.after);
+    'A HUB STARTED INSIDE A JOB: after its boot act (and its jobs engine), its env holds none of the job\'s names and a child it starts on its own env takes none (no id a vibespace-job there would speak as, no bearer)', real.after);
   ok(!!real.before && same(real.before.conv, []) && same(real.after.conv, []),
     'what the row feared for a CONVERSATION was never the road: the env a conversation is built with (agentEnv) dropped the job\'s names before and after (every VIBESPACE_* outside its keep set)', { before: real.before && real.before.conv, after: real.after && real.after.conv });
   ok(!!real.daemon && real.daemon.pid > 1 && real.daemon.byMark === false,
