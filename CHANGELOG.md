@@ -113,6 +113,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A large workflow that is still running no longer slows VibeSpace each time its card or window refreshes.
 - A command an agent runs with a vault value no longer holds VibeSpace while its output is checked for that value.
 - A signed-out visitor could load the app's own page files (never your data) through an address written with «..»; such an address is now refused.
+- On a phone, the window list keeps a waiting conversation marked after it is matched with another device, and tapping a closed window now says so.
 
 ## 2.369.415 — 2026-11-21
 
