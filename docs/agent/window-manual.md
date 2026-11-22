@@ -164,12 +164,16 @@ is that window's own image (its own origin; the CLI says «this image is ONE win
 `type`, `key` and `scroll` on it act on THAT window's pixels. Keys and text first give that window the X focus (xdotool
 `windowfocus`, no raise): the focus is LEFT there, as when a person clicks a window — the user's live view shows the
 popup focused, and nothing puts it back. A `click --at` gives the keyboard to the window of the app it lands in (as your click in
-a live view does); a key or a text never moves it. A key or a text on the APP's own handle goes where the keyboard is; when that is a
+a live view does). WHERE A KEY OR A TEXT GOES, in one place: on the APP's own handle with no aim it never moves the keyboard; on a
+window's own handle, into a showing dialog, or on a tree ref (`@e7`) it first gives that window (or field) the focus, as before.
+A key or a text on the APP's own handle goes where the keyboard is; when that is a
 window of the app this image does not show, the reply says so and names its own handle. It says nothing on a desktop the app
 does not own, nor after you aimed into that window (a click on it, its own handle, or a ref). A window's own handle reaches only the
 granted app's own windows on a desktop the app owns. Refused by name:
 - `window_gone` — that window closed, or it is not one of this app's (`screenshot <app handle>` names what it has now);
 - `window_list_unreadable` — the app's window list could not be read just now; nothing was done, try again;
+- `inject_failed` on a `click --at` — the window under the point closed between your screenshot and the click: its focus
+  could not be given, so nothing was clicked (the pointer moved); take a new screenshot;
 - `window_subject_pixels` — the tree verbs (`snapshot`, `@refs`) take the app's own handle, never a window's;
 - `window_subject_shared` — on a desktop shared with the user's own windows no window has a handle of its own: use the
   app's own handle, and ask the user about the other windows (they see them in the live view);
