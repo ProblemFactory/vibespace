@@ -133,6 +133,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - VibeSpace no longer pauses to reread the usage folder at each panel refresh; if the folder stops answering, the panel keeps its last readings and their age.
 - A browser that runs out of sight now shows a quiet «Hidden window» mark on the live view's bar; its full sentence is said once each run.
 - When VibeSpace cannot see a browser's sign-in prompts, the live view says what to do, offers «Watch again now» or «Connect again now», and answers every press.
+- While VibeSpace's transcript reader restarts, opening a conversation no longer freezes VibeSpace; its history says it is not loaded yet.
+- Loading earlier messages and the conversation minimap now say «try again» while the transcript reader restarts, instead of showing nothing.
+- If VibeSpace's transcript reader cannot come back, a conversation's history still loads after a few seconds, a little at a time, without freezing VibeSpace.
+- When a conversation's file stops answering, its history now says so and when it tries again, and fills in by itself once it can, without reopening the window.
 
 ## 2.369.415 — 2026-11-21
 
