@@ -1015,6 +1015,13 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
       finalizeCodexSubscription: () => ({ loggedIn: true }), _subscriptionLoginStatus: () => null,
       ...acctOverrides,
     };
+    // THE DECISION ROAD the finalize's same-account fold reads (B-360d, line 228; 主开发 r2067), in the real store's shapes over
+    // this stand-in's OWN list: every sign-in row it lists is read (its email is its file's answer); a stand-in that brings its own
+    // road keeps it
+    const at = Date.now();
+    const readRows = () => (accounts.list().accounts || []).map((a) => (a && (a.type === 'subscription' || a.type === 'pooled') ? { ...a, facts: { state: 'read', at } } : a));
+    const settled = async (ids = null) => ({ since: at, facts: new Map(readRows().filter((a) => a.facts && (!Array.isArray(ids) || ids.includes(a.id))).map((a) => [a.id, { state: 'read', auth: { loggedIn: true, email: a.email || null }, at, from: at, target: null }])) });
+    for (const [k, f] of Object.entries({ decisionList: () => ({ accounts: readRows() }), decisionRowOf: (id) => readRows().find((a) => a.id === id) || null, signinFactsNow: settled, signinFactsSettled: settled })) if (typeof accounts[k] !== 'function') accounts[k] = f;
     routes.create({
       app, rootDir: REPO, HOST: '127.0.0.1', CLAUDE_CMD: 'claude', NODE_CMD: 'node',
       CLAUDE_SUBSCRIPTION_LOGIN_HELPER: '/tmp/helper.js', activeSessions: new Map(), auth: { enabled: false },
@@ -1090,6 +1097,8 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
     const h = build({
       finalizeSubscription: () => ({ loggedIn: true, email: 'x@example.com' }),
       list: () => ({ accounts: [{ id: 'sub-other', backend: 'claude', type: 'subscription', email: 'x@example.com' }] }),
+      // the fresh row EXISTS (since line 228 the route asks, after its read-now, that the row it finalizes was not folded elsewhere)
+      get: (id) => (id === 'sub-1' ? { id: 'sub-1', backend: 'claude', type: 'subscription' } : null),
       mergeSubscription: () => ({ id: 'sub-other' }),
     }, w);
     const r = await call(h.post.get('/api/accounts/subscription/:id/finalize'), { params: { id: 'sub-1' } });

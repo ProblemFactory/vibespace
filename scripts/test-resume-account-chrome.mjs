@@ -105,6 +105,13 @@ try {
   const WIPED_AT = Math.round((NOW - 3 * DAY) / 1000) * 1000;
   const wipeB = () => { fs.writeFileSync(credsOf(B), JSON.stringify(WIPED(NOW + 17 * DAY))); fs.utimesSync(credsOf(B), new Date(WIPED_AT), new Date(WIPED_AT)); };
   wipeB();
+  // THE LIST ANSWERS ITS KEPT SIGN-IN FACTS (B-360d, line 228; 主开发 r2067): a file written BEHIND the store — here by this suite's
+  // own hand — is seen at the hub's next confirmation (the usage timer's settle confirms every folder by stamp every 30 s; a shown
+  // row older than 60 s is re-read), never at the very next read. So after each plant the suite waits, bounded, until the hub's
+  // list shows it, then goes on exactly as before.
+  const seenByHub = async (id, pred, what) => { const row = await until(async () => { const L = await api('/api/accounts'); const a = (L.accounts || []).find((x) => x.id === id); return a && pred(a) ? a : null; }, 75000, 500); check(`the hub's list shows ${what} (its next confirmation of a file written behind the store)`, !!row, row); return row; };
+  await seenByHub(B, (a) => a.loginState?.state === 'logged-out', 'Account B wiped');
+  await seenByHub(C, (a) => a.loggedIn === true, 'Account C signed in');
   const K = (await api('/api/accounts', { name: 'Account K', key: 'sk-ant-api03-' + 'k'.repeat(80) })).account?.id;
   const P = (await api('/api/accounts/pool', { name: 'Pool P', members: [C] })).id;
   await api('/api/accounts/default', { id: K });
@@ -188,11 +195,13 @@ try {
   check('desk: 「重新登录」 opens Manage agents and runs Account B\'s own re-login door', !!agents && agents.relogin.length === 1 && agents.relogin[0][0] === B && agents.relogin[0][1] === 'Account B', agents);
   // the login finishes: B's file holds a live login again, the list broadcasts ⇒ the bar is Resume again
   fs.writeFileSync(credsOf(B), JSON.stringify(LIVE('b')));
+  await seenByHub(B, (a) => a.loggedIn === true, 'Account B signed in again');
   await D.ev(`app.refreshAccounts().then(() => { ${relayBroadcastJs(`{ type: 'accounts-updated', accounts: app._accounts.accounts, defaultAccountId: app._accounts.defaultAccountId, defaultCodexAccountId: app._accounts.defaultCodexAccountId }`, 'app.ws.globalHandlers')} return true; })`);
   const back = await until(() => D.ev(`(() => { const f = ${barFacts(SID_DESK)}; return f && !f.account && /恢复此会话/.test(f.btns[0]?.text || '') ? f : null; })()`), 10000, 150);
   check('desk: the re-login finished (accounts-updated) ⇒ the bar is Resume again', !!back, back);
   // wiped again ⇒ the press re-reads the list (fresh facts) and refuses again
   wipeB();
+  await seenByHub(B, (a) => a.loginState?.state === 'logged-out', 'Account B wiped again');
   await press(D.S, D.ev, '.chat-resume-btn');
   const again = await until(() => D.ev(`(() => { const f = ${barFacts(SID_DESK)}; return f && f.account ? f : null; })()`), 15000, 150);
   check('desk: wiped again ⇒ the press re-reads the accounts list and refuses again (no create)', !!again && again.why === 'wiped' && (await D.ev('window.__creates.length')) === 0, again);

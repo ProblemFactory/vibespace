@@ -475,7 +475,7 @@ const I_RECV = {
   'src/lib/manage-agents.js|a': ['account', 'an account'], 'src/lib/manage-agents.js|c.account': ['account', 'an account'], 'src/lib/manage-agents.js|fin.account': ['account', 'an account'],
   'src/lib/manage-agents.js|fin.movedTo': ['account', 'an account'], 'src/lib/manage-agents.js|last.account': ['account', 'an account'], 'src/lib/manage-agents.js|last': ['account', 'an account'],
   'src/lib/manage-agents.js|p': ['account', 'a pool'], 'src/lib/manage-agents.js|r2.account': ['account', 'an account'],
-  'src/lib/manage-agents.js|r.account': ['account', 'an account'], 'src/lib/manage-agents.js|r.retargeted': ['account', 'an account'], 'src/lib/manage-agents.js|r': ['account', 'an account'], 'src/lib/manage-agents.js|sa': ['account', 'an account'],
+  'src/lib/manage-agents.js|r.account': ['account', 'an account'], 'src/lib/manage-agents.js|r.retargeted': ['account', 'an account'], 'src/lib/manage-agents.js|r': ['account', 'an account'], 'src/lib/manage-agents.js|sa': ['account', 'an account'], 'src/lib/manage-agents.js|x': ['account', 'an account (B-360d: each row the same-account fold could not compare, named in its toast)'],
   'src/lib/open-with.js|fv': ['file', 'a viewer verdict\'s app label'], 'src/lib/open-with.js|OFFICE_MODULES[fv.module]': ['file', 'an office module label'],
   'src/lib/plugin-client.js|def': ['plugin', 'a plugin window\'s label'], 'src/lib/plugin-client.js|d': ['plugin', 'a plugin\'s own notify text'],
   'src/lib/plugins-ui.js|meta': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|p': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|st': ['plugin', 'a plugin\'s status reason'],
