@@ -164,9 +164,21 @@ try { if (fs.existsSync(USAGE_STATUSLINE_CMD)) fs.chmodSync(USAGE_STATUSLINE_CMD
 // The user's OWN statusLine command (from ~/.claude/settings.json), so injected
 // VibeSpace terminal sessions render it transparently (pass-through) instead of
 // replacing it. Read fresh each spawn — cheap, and the user may change it.
-function userStatuslineCmd() {
+// r2345 (b): read OFF THE LOOP through the runner's guard, within 2 s — it was a synchronous read of the person's home at every
+// local terminal start; a home that does not answer (or an earlier read still out) passes no statusline through for that start
+// (the usage one still runs), said once per cause; a missing or unparsable file is no statusline, as before
+const STATUSLINE_READ_MS = 2000;
+let _statuslineUnreadSaid = null;
+async function userStatuslineCmd() {
+  const read = () => fs.promises.readFile(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8');
+  const r = typeof homeRead === 'function' ? await homeRead(read, STATUSLINE_READ_MS) : await read().then((value) => ({ value }), (error) => ({ error }));
+  if (!('value' in r)) {
+    if (r.held || r.timedOut) { const why = String(r.why || 'no answer').replace(/\d+ still out/, ''); if (_statuslineUnreadSaid !== why) { _statuslineUnreadSaid = why; console.warn(`[statusline] ~/.claude/settings.json was not read (${r.why}) — this start passes no statusline of the person's through; read again at the next start`); } }
+    return '';
+  }
+  _statuslineUnreadSaid = null;
   try {
-    const s = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'));
+    const s = JSON.parse(r.value);
     const sl = s && s.statusLine;
     if (sl && sl.type === 'command' && typeof sl.command === 'string' && sl.command.trim()) return sl.command;
   } catch {}

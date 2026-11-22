@@ -50,7 +50,7 @@ async function prepare(c) {
               // the member it started on. The link itself is the slot, so ship
               // its PATH and let the statusline resolve it per write.
               const acctKey = spawnAccount?.poolTarget || spawnAccount?.id || '__global__';
-              const orig = (userStatuslineCmd && userStatuslineCmd()) || '';
+              const orig = (userStatuslineCmd && await userStatuslineCmd()) || '';   // r2345 (b): off the loop, through the runner's guard (≤ 2 s)
               usageEnvPairs.push(`VIBESPACE_ACCOUNT_KEY=${acctKey}`);
               // resolveForSpawn NAMES the credential symlink (`linkPath`) — the
               // per-session plan-C link, else the pool default. Not derived
