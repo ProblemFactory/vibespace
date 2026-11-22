@@ -19,7 +19,7 @@ import { needsMe, settingsPolicy } from '../attention-model.js';
 import { takeoverBadge } from '../browser-takeover-request.js'; // lane browser-takeover-queue: the Browser badge = the waiting takeover requests in bands 1–4 (PURE)
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl, latestRender } from './utils.js';
 import { registerMenuItem } from './contributions.js';
-import { pluginProvides, pluginState } from './plugins-ui.js';
+import { pluginProvides, pluginState, relayRefusalWords } from './plugins-ui.js';
 import { registerWindowType } from './window-types.js';
 import { track } from './telemetry-client.js';
 import { censusRows, WORDS as MEMORY_WORDS } from '../memory-census.js'; // PURE: the server memory census's rows (lane server-memory-census)
@@ -1016,7 +1016,7 @@ export function installSidebarRail(Sidebar) {
           });
           if (sub === null) return;
           const r = await api('/api/instance-url/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sub: String(sub || '').trim() || undefined }) });
-          if (r?.error) { showToast(r.error, { type: 'error' }); return; }
+          if (r?.error) { showToast(relayRefusalWords(r), { type: 'error' }); return; }   // B-1217 its round: a relay refusal in the page's words
           showToast(tr('Mapped: {url}', { url: r.url }));
           rerender();
         });
@@ -1123,7 +1123,7 @@ export function installSidebarRail(Sidebar) {
               }
               // fetchJson never throws — a 4xx comes back as {error}; surface it
               const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: f.publicUrl ? 'DELETE' : 'POST', headers: { 'Content-Type': 'application/json' }, body: f.publicUrl ? undefined : body });
-              if (r?.error) showToast(r.error, { type: 'error' });
+              if (r?.error) showToast(relayRefusalWords(r), { type: 'error' });   // B-1217 its round: a relay refusal in the page's words
               else if (r?.publicUrl) showToast(tr('Published: {url}', { url: r.publicUrl }));
               render();
             });

@@ -3,7 +3,7 @@
 // mount list with live status, share-a-folder minting, import-a-link.
 import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl, fetchJson, hostsHeldWords } from './utils.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
-import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
+import { pluginProvides, relayRefusalWords } from './plugins-ui.js'; // the ONE relay probe (declared capability); a relay refusal's words (B-1217)
 import { t as tr, tc, deviceLocale, resolveLang } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
 import { dateOf, clockOf, stampAt as when } from './page-time.js';
 import { techFold } from './plain-words.js'; // lane ui-plain-words: the mechanics fold
@@ -1642,7 +1642,7 @@ export function installSidebarMounts(Sidebar) {
                 try {
                   // fetchJson never throws — a 4xx comes back as {error}
                   const r2 = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: f.published ? 'DELETE' : 'POST' });
-                  if (r2?.error) throw new Error(r2.error);
+                  if (r2?.error) throw new Error(relayRefusalWords(r2));   // B-1217 its round: a relay refusal in the page's words
                   showToast(f.published ? tr('Public URL removed') : tr('Public URL: {u}', { u: r2?.publicUrl || '?' }));
                   render();
                 } catch (e) { showToast(e.message, { type: 'error' }); pub.disabled = false; }

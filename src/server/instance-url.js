@@ -184,11 +184,11 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     app.get('/api/instance-url', (req, res) => res.json(status()));
     app.post('/api/instance-url/publish', async (req, res) => {
       try { res.json(await publish({ sub: req.body?.sub })); }
-      catch (e) { res.status(400).json({ error: e.message }); }
+      catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217 its round: the relay's code (the page words it)
     });
     app.delete('/api/instance-url/publish', async (req, res) => {
       try { res.json(await unpublish()); }
-      catch (e) { res.status(400).json({ error: e.message }); }
+      catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }
     });
   }
 

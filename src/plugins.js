@@ -400,17 +400,19 @@ class PluginManager {
   _supersede(id) { const f = this._fresh.get(id); if (f && f.ac) { try { f.ac.abort(new Error('superseded by an act')); } catch { } } this._fresh.delete(id); this._freshTok.delete(id); }
   // the act keeps its VERB's contract: a sync verb throws / returns in place (a caller catches a refusal where it calls — frp's
   // revoked identity), an async one returns its promise; either way the fresh read follows it
-  _act(id, verb) {
+  _act(id, verb, ...args) {
     this._hold.refuse('this plugin action');   // held: an install / start / stop / sign-in records its state — refused by name
     const fn = this._verb(id, verb); this._supersede(id);
     const after = () => { this.refreshStatus(id).catch(() => { }); };
-    let r; try { r = fn(); } catch (e) { after(); throw e; }
+    let r; try { r = fn(...args); } catch (e) { after(); throw e; }
     if (r && typeof r.then === 'function') return r.finally(after);
     after(); return r;
   }
   async install(id) { return this._act(id, 'install'); }
   start(id) { return this._act(id, 'start'); }
   stop(id) { return this._act(id, 'stop'); }
+  /** B-1217 its round (主开发 r2175 (1)): a person's own take-over of a relay client its instance did not start (the frp row) */
+  takeOver(id, args) { return this._act(id, 'takeOver', args); }
   /** the plugin's KEPT status (sync, no child — rank 13); a last refresh that did not answer is said with it (`statusError`) */
   status(id) { const st = this._verb(id, 'status')(); const f = this._statusFailed && this._statusFailed.get(id); return f ? { ...st, statusError: { at: f.at, why: f.why } } : st; }
   // Guided setup: the plugin's setup verb (tailscale: `tailscale up` prints the auth URL — captured for the UI,

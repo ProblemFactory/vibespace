@@ -2999,6 +2999,15 @@ export default {
   "Public URLs (frp)": "公网 URL (frp)",
   "Expose a machine’s dev server on the public internet via the frp relay — share a preview link. Off by default; needs the relay configured.": "经 frp 中继把机器上的开发服务器暴露到公网——分享预览链接。默认关闭；需要配置中继。",
   "relay not configured on this instance": "本实例未配置中继",
+  "held by the relay client pid {pid}, running since {since}": "由中继客户端（进程 {pid}）占用，自 {since} 起运行",   // B-1217 its round (lane bl-machines-b)
+  "held by the relay client pid {pid}": "由中继客户端（进程 {pid}）占用",   // B-1217 its round (lane bl-machines-b)
+  "Take it over": "接管",   // B-1217 its round (lane bl-machines-b)
+  "Take the relay over?": "接管中继？",   // B-1217 its round (lane bl-machines-b)
+  "This ends the relay client another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.": "这会结束这个主目录下另一个 VibeSpace 启动的中继客户端。如果那个 VibeSpace 还在运行，它的公开地址会停止，直到它重新启动自己的客户端。",   // B-1217 its round (lane bl-machines-b)
+  "This instance runs the relay now": "现在由本实例运行中继",   // B-1217 its round (lane bl-machines-b)
+  "The relay client changed since this page read it — look again": "本页读取之后中继客户端已变化——请重新查看",   // B-1217 its round (lane bl-machines-b)
+  "The other relay client did not end — nothing was started": "另一个中继客户端没有结束——没有启动任何东西",   // B-1217 its round (lane bl-machines-b)
+  "The other relay client was ended, but this instance’s own did not start: {why}": "另一个中继客户端已结束，但本实例自己的没有启动：{why}",   // B-1217 its round (lane bl-machines-b)
   "Another VibeSpace instance in this home runs the relay client — this instance leaves it alone": "这个主目录下的另一个 VibeSpace 实例在运行中继客户端——这个实例不去动它",   // B-1217 (lane bl-machines-b)
   "another VibeSpace instance in this home runs the relay — this one leaves it alone": "这个主目录下的另一个 VibeSpace 实例在运行中继——这个实例不去动它",   // B-1217 (lane bl-machines-b)
   "Relay": "中继",

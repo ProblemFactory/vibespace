@@ -850,6 +850,11 @@ app.post('/api/plugins/:id/start', async (req, res) => {
 app.post('/api/plugins/:id/stop', async (req, res) => {
   try { res.json(await plugins.stop(req.params.id)); } catch (e) { if (e && e.code && e.code !== 'plugins_unread') res.status(400).json({ error: e.message, code: e.code }); else pluginRefusal(res, e); }   // B-1217: a refusal's code (the page words it); a held plugins.json through pluginRefusal
 });
+app.post('/api/plugins/:id/takeover', async (req, res) => {   // B-1217 its round (主开发 r2175 (1)): the person's own press (the page's door: its cookie) — the one road that ends a relay client this instance did not start
+  const why = require('../write-origin.js').ownerPageWhy(req);   // its read (MUST): the person's own PAGE — every bearer, and a request no page of this instance made (a header-less curl with sign-in off)
+  if (why) { res.status(403).json({ error: why === 'bearer' ? 'taking the relay over is the person\'s own press — no token may press it' : 'taking the relay over is the person\'s own press on this instance\'s own page', code: why === 'bearer' ? 'agent_forbidden' : why }); return; }
+  try { const b = req.body || {}; res.json(await plugins.takeOver(req.params.id, { pid: b.pid, start: b.start, press: true })); } catch (e) { if (e && e.code && e.code !== 'plugins_unread') res.status(400).json({ error: e.message, code: e.code }); else pluginRefusal(res, e); }   // a held plugins.json through pluginRefusal (503), as start / stop
+});
 app.post('/api/plugins/:id/login', async (req, res) => {
   try { res.json(await plugins.loginStart(req.params.id)); } catch (e) { pluginRefusal(res, e); }
 });

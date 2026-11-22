@@ -13,6 +13,16 @@ import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
 import { pluginGitCredOf } from '../plugin-cred-state.js'; // hotfix 2.369.368: the ONE reader of /api/integrations/plugin-git's answer shape ({ integration: view })
 import { fleetPluginWords } from './browser-build-model.js'; // lane fleet-plugin-catalog: the cluster's plugin — its row fact + the panel's fleet line
+/** B-1217 (lane bl-machines-b; its round, 主开发 r2175): a relay refusal's words by its CODE on every door — the plugin card, a
+ *  forward's publish, the instance's address — in the page's language (never the hub's English); a held list by its code (2.369.417's
+ *  held words); another answer's own words otherwise */
+export function relayRefusalWords(x) {
+  const c = x && x.code;
+  return c === 'relay_held_elsewhere' ? t('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone')
+    : c === 'relay_takeover_moved' ? t('The relay client changed since this page read it — look again')
+    : c === 'relay_takeover_stuck' ? t('The other relay client did not end — nothing was started')
+    : String((x && (heldWordsOf(x) || x.error)) || '');   // a held plugins.json: worded by its code (2.369.417)
+}
 /** The plugin guide (docs/plugins.md on the project's home) — the folder layout and the smallest complete example live there. */
 const PLUGINS_DOCS_URL = 'https://github.com/ProblemFactory/vibespace/blob/master/docs/plugins.md';
 const JSON_HDR = { 'Content-Type': 'application/json' };   // 2.369.359: a JSON body SAYS it is JSON — fetch's default for a string body is text/plain, which express.json() skips, so the route read an EMPTY body and refused «source must be …» (the owner, installing the custom browser plugin)
@@ -206,7 +216,7 @@ export function installPluginsUI(App) {
         const isRelay = provides(p, 'relay');
         const isServe = provides(p, 'serve'), isTunnel = provides(p, 'tunnel'), isDictation = provides(p, 'dictation'), isDecision = provides(p, 'decision');
         const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
-          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.code === 'relay_held_elsewhere' ? t('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone') : (heldWordsOf(x) || x.error)); return x; });   // B-1217: the refusal in the page's language; a held plugins.json: worded by its code
+          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(relayRefusalWords(x)); return x; });   // B-1217: the refusal in the page's language (a held plugins.json: worded by its code, the helper's last answer)
         const act = async (fn) => { try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); } render(); };
         let chip, tone = '', chipTitle = '', onChip = null, swOn = !!p.enabled, swDisabled = false, onSwitch, install = null, fact = null;
         if (isDecision) {
@@ -267,6 +277,21 @@ export function installPluginsUI(App) {
             onChip = () => this._openPluginSettings(p.id);
           } else if (isRelay && p.configured) chipTitle = t('publishes forwarded ports to {host}', { host: p.publicHost || '' });
           if (isRelay && p.relay && !p.vaultLocked && (p.configured || p.relay.kind !== 'none')) { onChip = () => relaySheet(p, api, render); fact = relayFact(p.relay); }   // lane relay-token-per-instance
+          if (isRelay && p.heldElsewhere && p.held && p.held.pid) {   // B-1217 its round (主开发 r2175 (1)): WHAT holds it, and the person's own road out (offered only where this instance's own start can run)
+            const f = document.createElement('div'); f.className = 'plugin-row-fact';
+            f.append(document.createTextNode(p.held.since ? t('held by the relay client pid {pid}, running since {since}', { pid: p.held.pid, since: when(p.held.since, { words: true }) }) : t('held by the relay client pid {pid}', { pid: p.held.pid })), ' ');
+            const canRun = p.installed && p.configured !== false && !p.vaultLocked;
+            const take = document.createElement('button'); take.className = 'mounts-btn'; take.textContent = t('Take it over');
+            take.onclick = (ev) => { ev.stopPropagation(); act(async () => {
+              const ok = await showConfirmDialog({ title: t('Take the relay over?'), message: t('This ends the relay client another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.'), confirmText: t('Take it over'), danger: true });
+              if (!ok) return;
+              const r = await api('takeover', { body: JSON.stringify({ pid: p.held.pid, start: p.held.start }) });
+              if (r && r.startError) showToast(t('The other relay client was ended, but this instance’s own did not start: {why}', { why: relayRefusalWords(r.startError) }), { type: 'error' });
+              else showToast(t('This instance runs the relay now'));
+            }); };
+            if (canRun) f.append(take);
+            if (fact) { const both = document.createElement('div'); both.append(fact, f); fact = both; } else fact = f;
+          }
           if (loginNeeded) onChip = () => this._tailscaleLogin(p, api, render);
           if (p.self?.ips?.length) chipTitle = `${t('Tailnet address')}: ${p.self.ips[0]}`;
           if (p.statusError) chipTitle = t('Its status could not be read again just now — this is the last answer. Open the panel again to retry.');

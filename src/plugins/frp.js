@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { whichKept, whichNow, whichKnown } = require('./which-kept.js'); // lane hub-sync-holds: where frpc lives, KEPT — never a synchronous child on the loop's turn
-const { pidCmdline, pidAlive } = require('./proc.js');
+const { pidCmdline, pidAlive, pidArgv } = require('./proc.js');
 const { replaceShredding } = require('../secret-file.js');   // lane vault-e2e-password-fix-r2: an older frpc.toml held the token
 const os = require('os');
 const crypto = require('crypto');
@@ -31,13 +31,14 @@ const FRP_PORT_MAX = Number(process.env.VIBESPACE_FRP_PORT_MAX || 25000);
  *  recorded a run (`frpcRun`, written at its own start) owns only that run: the same pid and — once recorded — the same start time.
  *  No recorded run is this manager's ONLY when its record shows a start of its own from before runs were recorded (`legacy`:
  *  an older build's start left desiredUp) — an instance that never started a client (a fresh data folder) owns none. A run
- *  recorded by another data folder (`by`: a copy of data/ that runs elsewhere carries the same pid and start) is not this one's.
+ *  recorded by another data folder (`by`: a copy of data/ that runs elsewhere carries the same pid and start) is not this one's —
+ *  judged by `sameBy` when given (its round, 主开发 r2175 (3): what the two folders RESOLVE to, never their path strings).
  *  PURE: `startOf(pid)` answers the process's start time, or null when it cannot be read (then the pid decides) */
-function ownRunOf(run, pid, startOf, { legacy = false, by = '' } = {}) {
+function ownRunOf(run, pid, startOf, { legacy = false, by = '', sameBy = null } = {}) {
   if (!pid) return false;
   if (!run || !run.pid) return !!legacy;
   if (run.pid !== pid) return false;
-  if (run.by && by && run.by !== by) return false;
+  if (run.by && by && !(sameBy ? sameBy(run.by, by) : run.by === by)) return false;
   if (run.start == null) return true;
   const st = startOf(pid);
   return st == null || st === run.start;
@@ -169,14 +170,35 @@ module.exports = {
     // restarted or signalled from here) and SAID once (another instance holds this home's relay folder)
     const startOf = (pid) => { try { return require('../proc-identity.js').starttimeOf(pid); } catch { return null; } };
     const dataFolder = () => { try { return h.dataDir ? path.resolve(h.dataDir) : ''; } catch { return ''; } };
+    // its round (主开发 r2175 (3)): «ITS OWN» NEVER HANGS ON A PATH STRING — the recorded folder and this one compared by what they
+    // resolve to (a data folder moved behind a link is still its own); a recorded folder that no longer exists (the install moved
+    // or renamed) is not another instance
+    // its read: «gone» only by its own answer (ENOENT / ENOTDIR) — an unreadable folder (EACCES, EIO) is never «gone»; the pair's answer
+    // kept a few seconds (every status, every watch tick and every publish asks it)
+    const realOf = (p) => { try { return fs.realpathSync(p); } catch (e) { return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ? null : undefined; } };   // null: gone · undefined: not read
+    const sameMemo = new Map();
+    const sameBy = (recorded, mine) => {
+      if (recorded === mine) return true;
+      const k = recorded + '\0' + mine, m = sameMemo.get(k), now = Date.now();
+      if (m && now - m.at < 5000) return m.v;
+      const a = realOf(recorded), b = a === null ? null : realOf(mine);
+      const v = a === null ? true : typeof a === 'string' && typeof b === 'string' && a === b;
+      if (sameMemo.size > 32) sameMemo.clear();
+      sameMemo.set(k, { v, at: now }); return v;
+    };
+    // its read (S3): «a relay client» is the frpc THIS home's config starts — its program named frpc and that config's path in its
+    // argv, read in the take-over's own tick (a reused pid — a tail of the log, an editor on the config, another frpc service — is never it)
+    const isRelayClient = (pid) => { const a = pidArgv(pid); return path.basename(a[0] || '') === 'frpc' && a.includes(frpConf()); };
     const heldElsewhere = () => !!frpDaemonPid() && !ownRunPid();
     const heldRefusal = () => Object.assign(new Error('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone'), { code: 'relay_held_elsewhere' });
     let otherSaid = 0;
-    const ownRunPid = () => {
-      const pid = frpDaemonPid();
-      if (!pid) return null;
+    const ownRunPid = () => { const pid = frpDaemonPid(); return pid ? ownOf(pid) : null; };
+    /** ONE read of the pid file (its round: the home may be slow storage — status reads it once a call): the live relay client it
+     *  names (any) and that same pid when it is this manager's run (own) */
+    const heldNow = () => { const any = frpDaemonPid(); return { any, own: any ? ownOf(any) : null }; };
+    const ownOf = (pid) => {
       const p = h.peek();
-      if (ownRunOf(p.frpcRun, pid, startOf, { legacy: p.desiredUp === true, by: dataFolder() })) return pid;
+      if (ownRunOf(p.frpcRun, pid, startOf, { legacy: p.desiredUp === true, by: dataFolder(), sameBy })) return pid;
       if (otherSaid !== pid) { otherSaid = pid; console.log(`[plugins] frp: another instance holds this home's relay folder — its relay client (pid ${pid}) is not this instance's run; this instance leaves it alone (no judgement, no restart, no signal)`); }
       return null;
     };
@@ -439,7 +461,7 @@ module.exports = {
     const relayPublished = (sub) => {
       const p = h.peek();
       if (!['instance', 'cluster'].includes(p.frpcIdentity)) return;
-      const w = h.rec(), rid = runIdOf(w.frpcRun), thisRun = !!rid && w.frpcRun.pid === frpDaemonPid();
+      const w = h.rec(), rid = runIdOf(w.frpcRun), thisRun = !!rid && w.frpcRun.pid === ownRunPid();   // its round: its own run (pid and start), never a pid alone
       let dirty = false;
       if (!w.relayPublishedAt) { w.relayPublishedAt = Date.now(); dirty = true; }
       if (thisRun && w.frpcProxyRun !== rid) { w.frpcProxyRun = rid; dirty = true; }
@@ -492,8 +514,8 @@ module.exports = {
       } else throw Object.assign(new Error(`unknown relay op ${String(op).slice(0, 20)} (mint / rotate / revoke / upgraded / knock)`), { code: 'bad_op' });
     };
     /** the Relay card's facts — never the token (the registration line carries its sha256 only) */
-    const relayStatus = (c) => {
-      const r = relayRead(), rec = r.rec, ident = c.ident, p = h.peek(), running = !!ownRunPid();   // B-1217: its own run's login and run
+    const relayStatus = (c, own) => {
+      const r = relayRead(), rec = r.rec, ident = c.ident, p = h.peek(), running = own !== undefined ? !!own : !!ownRunPid();   // B-1217: its own run's login and run
       const lines = !rec ? [] : rec.revokedAt ? [RT.registrationLine(rec, sha256, 'revoke')] : [RT.registrationLine(rec, sha256, 'add'), ...(rec.rotatedAt ? [RT.registrationLine(rec, sha256, 'rotate')] : [])];
       return {
         kind: ident.kind, file: r.state, user: ident.user || null, instanceId: rec ? rec.instanceId : null, label: rec ? rec.label : null,
@@ -617,6 +639,9 @@ module.exports = {
       },
 
       start({ knock: withKnock = true } = {}) {
+        // B-1217: a live relay client in this home is the first fact — its own run is already up; ANOTHER run's is never doubled
+        // and is refused BY NAME (its round, 主开发 r2175 (2)) — never a silent «running»; the card offers the person's own take-over
+        { const hn = heldNow(); if (hn.any) { if (hn.own) return { running: true }; throw heldRefusal(); } }
         let cfg = frpCfg();
         if (cfg.vaultLocked) throw lockedRefusal('start');
         if (cfg.ident.kind === 'revoked') throw Object.assign(new Error(revokedWords), { code: 'relay_revoked' });   // fail closed: never the shared token in its place
@@ -625,7 +650,6 @@ module.exports = {
         if (!frpConfigured()) throw new Error('the frp relay is not configured on this instance (set VIBESPACE_FRPS_ADDR/TOKEN)');
         const bin = frpBin();
         if (!bin) throw new Error('frpc not installed — run install first');
-        if (frpDaemonPid()) { ownRunPid(); return { running: true }; }   // (B-1217: another instance's run is said, never doubled)
         const knock = withKnock ? cfg.token : '';
         frpWriteConf(cfg, !!knock);
         const logFrom = logSize();
@@ -656,7 +680,7 @@ module.exports = {
         watchLogin(false);
         endDrop();   // the episode ends with its run (a restart WITH the token, a settings change, the relay stopped)
         const any = frpDaemonPid(), pid = ownRunPid();   // B-1217: the kill law — never another instance's run
-        if (any && !pid) { watchLogin(false); throw heldRefusal(); }   // said by name: the relay this page shows is another instance's
+        if (any && !pid) throw heldRefusal();   // said by name: the relay this page shows is another instance's (the card offers the person's own take-over)
         if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
         if (pid || !any) { try { fs.unlinkSync(frpPidFile()); } catch { } }   // another run's pid file is its own
         const rec = h.rec();
@@ -666,11 +690,45 @@ module.exports = {
         return { stopped: true };
       },
 
+      /** its round (主开发 r2175 (1)): THE PERSON's OWN PRESS HAS A ROAD — a relay client this instance does not own (another
+       *  instance's, or one an instance gone for good left behind) is ended ONLY by this attended press: the route's `press` (the page's
+       *  own door; never the watch, the boot, a timer, an agent's road or a publish). The process the page showed is read again — its
+       *  number in the pid file, its start, that it is a relay client — in the SAME tick as the signal; then this instance starts its own */
+      async takeOver({ pid: askedPid, start: askedStart, press = false } = {}) {
+        if (press !== true) throw Object.assign(new Error('only a person\'s own press takes the relay over'), { code: 'relay_takeover_refused' });
+        const moved = () => Object.assign(new Error('The relay client changed since this page read it — look again'), { code: 'relay_takeover_moved' });
+        const no = verbs.canStart(); if (no) throw no;   // its read (S2): what start() would refuse is said BEFORE anything is ended
+        const pid = frpDaemonPid();
+        if (!pid || pid !== Number(askedPid) || askedStart == null) throw moved();
+        if (ownOf(pid)) return { running: true };   // it is this instance's own already: nothing to take over
+        const start = startOf(pid);
+        if (start == null || start !== Number(askedStart)) throw moved();
+        if (!isRelayClient(pid)) throw moved();
+        try { process.kill(pid, 'SIGTERM'); } catch { }   // THAT process only: its number, start and kind read in this same tick
+        const gone = () => { const st = require('../proc-identity.js').statOf(pid); return !st || st[0] === 'Z' || startOf(pid) !== start; };   // a zombie has ended
+        for (let i = 0; i < 60 && !gone(); i++) await new Promise((r) => setTimeout(r, 50));
+        if (!gone()) throw Object.assign(new Error('The other relay client did not end — nothing was started'), { code: 'relay_takeover_stuck' });
+        console.log(`[plugins] frp: the person took the relay over — the client pid ${pid} this instance did not start was ended; its own starts`);
+        try { return { tookOver: true, ...verbs.start() }; }
+        catch (e) { return { tookOver: true, startError: { error: String((e && e.message) || e), ...(e && e.code ? { code: e.code } : {}) } }; }   // ended, and its own did not start: both said
+      },
+      /** its read (S2): what start() would refuse before it spawns — the vault locked, a revoked identity, no relay configured, no
+       *  frpc — as its refusal, or null (the take-over asks it BEFORE ending anything) */
+      canStart() {
+        const cfg = frpCfg();
+        if (cfg.vaultLocked) return lockedRefusal('start');
+        if (cfg.ident.kind === 'revoked') return Object.assign(new Error(revokedWords), { code: 'relay_revoked' });
+        if (!frpConfigured()) return new Error('the frp relay is not configured on this instance (set VIBESPACE_FRPS_ADDR/TOKEN)');
+        if (!frpBin()) return new Error('frpc not installed — run install first');
+        return null;
+      },
+
       /** the fresh answer: the PATH's frpc asked again (async, bounded), then the same rows (lane hub-sync-holds, rank 13) */
       async statusAsync({ signal } = {}) { await frpBinNow(); if (signal && signal.aborted) throw (signal.reason || new Error('aborted')); return verbs.status(); },
       status() {
         const rec = h.peek();
         const c = frpCfg();
+        const hn = heldNow(), held = hn.any && !hn.own ? { pid: hn.any, start: startOf(hn.any), since: (() => { try { return require('../proc-identity.js').wallStartOf(startOf(hn.any)); } catch { return null; } })() } : null;   // its round: the pid file read ONCE a call
         return {
           installed: !!frpBin(),
           configured: frpConfigured(),
@@ -684,16 +742,17 @@ module.exports = {
           publicHost: c.serverAddr || null,
           subDomainHost: c.subDomainHost || null,     // subdomain mode when set
           fromEnv: c.fromEnv,                          // relay came from the cluster env
-          running: !!ownRunPid(),   // B-1217: its OWN run — another instance's client is not this instance's relay
-          pid: ownRunPid() || undefined,
-          heldElsewhere: heldElsewhere(),   // B-1217: another instance in this home runs the relay client (the card says so)
+          running: !!hn.own,   // B-1217: its OWN run — another instance's client is not this instance's relay
+          pid: hn.own || undefined,
+          heldElsewhere: !!held,   // B-1217: another instance in this home runs the relay client (the card says so)
+          ...(held ? { held } : {}),   // its round (r2175 (1)): WHAT holds it — the process number and since when, read now (the take-over's own facts)
           enabled: frpEffectiveEnabled(),        // default-on when cluster-injected
           desiredUp: !!rec.desiredUp,
           selfDialSub: rec.selfDialSub || '',          // stable subdomain for double-NAT self-publish (B-5c1e)
           portRange: [c.portMin, c.portMax],
           // echo the CURRENT effective config so the UI can prefill editable fields
           config: { serverAddr: c.serverAddr, serverPort: c.serverPort, hasToken: !!c.token, subDomainHost: c.subDomainHost },
-          relay: relayStatus(c),   // lane relay-token-per-instance: this instance's own identity (never its token)
+          relay: relayStatus(c, hn.own),   // lane relay-token-per-instance: this instance's own identity (never its token)
           // rank 13 round 2: where frpc lives is not known yet (no own bin, no finished `which`) ⇒ the row says «Checking…»,
           // never «not installed» with an Install over a frpc the PATH has
           ...(fs.existsSync(path.join(frpDir(), 'bin', 'frpc')) || whichKnown('frpc') ? {} : { checking: true }),

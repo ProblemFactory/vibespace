@@ -1178,10 +1178,10 @@ app.delete('/api/port-forward/:id', async (req, res) => {
 // public exposure (frp relay) — publish/unpublish a forward; body.sub = a
 // user-chosen FIXED subdomain (2.358.0; blank keeps prior/random)
 app.post('/api/port-forward/:id/publish', async (req, res) => {
-  try { res.json(await portForwards.publish(String(req.params.id), { sub: (req.body || {}).sub })); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await portForwards.publish(String(req.params.id), { sub: (req.body || {}).sub })); } catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it)
 });
 app.delete('/api/port-forward/:id/publish', async (req, res) => {
-  try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code
 });
 // main-domain PATH mount (2.358.0): /svc/<name>/ → the forward. body.public
 // (2.359.0) = shareable WITHOUT login; default private, auth enforced

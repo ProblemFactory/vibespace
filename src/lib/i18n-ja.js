@@ -2999,6 +2999,15 @@ export default {
   "Public URLs (frp)": "公開 URL (frp)",
   "Expose a machine’s dev server on the public internet via the frp relay — share a preview link. Off by default; needs the relay configured.": "frp リレー経由でマシンの開発サーバーをインターネットに公開 — プレビューリンクを共有。既定はオフ。リレーの設定が必要です。",
   "relay not configured on this instance": "このインスタンスにリレーが未設定です",
+  "held by the relay client pid {pid}, running since {since}": "リレークライアント（プロセス {pid}）が使用中、{since} から稼働",   // B-1217 its round (lane bl-machines-b)
+  "held by the relay client pid {pid}": "リレークライアント（プロセス {pid}）が使用中",   // B-1217 its round (lane bl-machines-b)
+  "Take it over": "引き継ぐ",   // B-1217 its round (lane bl-machines-b)
+  "Take the relay over?": "リレーを引き継ぎますか？",   // B-1217 its round (lane bl-machines-b)
+  "This ends the relay client another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.": "このホームで別の VibeSpace が起動したリレークライアントを終了します。その VibeSpace がまだ動いている場合、自分のクライアントを再び起動するまで、その公開アドレスは止まります。",   // B-1217 its round (lane bl-machines-b)
+  "This instance runs the relay now": "このインスタンスがリレーを動かしています",   // B-1217 its round (lane bl-machines-b)
+  "The relay client changed since this page read it — look again": "このページが読み取った後にリレークライアントが変わりました — もう一度確認してください",   // B-1217 its round (lane bl-machines-b)
+  "The other relay client did not end — nothing was started": "もう一方のリレークライアントが終了しませんでした — 何も起動していません",   // B-1217 its round (lane bl-machines-b)
+  "The other relay client was ended, but this instance’s own did not start: {why}": "もう一方のリレークライアントは終了しましたが、このインスタンス自身のものは起動しませんでした：{why}",   // B-1217 its round (lane bl-machines-b)
   "Another VibeSpace instance in this home runs the relay client — this instance leaves it alone": "このホームの別の VibeSpace インスタンスがリレークライアントを動かしています — このインスタンスは手を触れません",   // B-1217 (lane bl-machines-b)
   "another VibeSpace instance in this home runs the relay — this one leaves it alone": "このホームの別の VibeSpace インスタンスがリレーを動かしています — このインスタンスは手を触れません",   // B-1217 (lane bl-machines-b)
   "Relay": "リレー",

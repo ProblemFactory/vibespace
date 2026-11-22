@@ -18,6 +18,12 @@
 //  ④ A FRESH INSTANCE (its data folder never started a client) over another instance's running client: a settings change and a
 //     Stop never touch it — the Stop refused BY NAME (relay_held_elsewhere), the status «held elsewhere», not «running» — RED the
 //     release's reading of «no recorded run» (its own): the other instance's client ended
+//  ⑤ (its round, 主开发 r2175) a client LEFT BEHIND by an instance gone for good: Start refused by name; status says what holds it;
+//     the person's take-over ends THAT process (a bystander lives) and starts its own; refused with nothing ended: a process that
+//     moved, a reused pid (another start, or none sent), a pid-file process not this home's relay client, a start that cannot run —
+//     RED the release's silent «running»; RED each guard cut
+//  ⑥ a data folder moved behind a link, and one that no longer exists (the install moved): still its own — RED the path string
+//  ⑦ a take-over asked by anything but the person's press: refused, nothing touched — RED unattended
 //  (the reds plant the release's roads back together — stop()'s and start()'s guards each still cover the harm alone)
 // Run: node scripts/test-frp-own-run.mjs
 import './scratch.mjs';
@@ -44,7 +50,7 @@ const SHELL = ['/usr/bin/dash', '/bin/dash', '/usr/bin/bash', '/bin/bash'].find(
 const BIN = path.join(T, 'bin'); fs.mkdirSync(BIN); fs.symlinkSync(SHELL, path.join(BIN, 'frpc'));   // the stand-in client
 const HOLD = path.join(T, 'hold.fifo'); execFileSync('mkfifo', [HOLD], { stdio: 'ignore' });   // a FIFO no one writes: its open waits (an interruptible sleep)
 const kids = new Set(), kidStarts = new Map();   // every stand-in this suite started, with the start it had
-const client = async () => { const c = spawn(path.join(BIN, 'frpc'), ['-c', 'read x < "$1"', 'frpc', HOLD], { stdio: 'ignore' }); await new Promise((r) => c.once('spawn', r)); kids.add(c.pid); kidStarts.set(c.pid, PI.starttimeOf(c.pid)); return c.pid; };
+const client = async (conf = '') => { const c = spawn(path.join(BIN, 'frpc'), ['-c', 'read x < "$1"', 'frpc', HOLD, ...(conf ? [conf] : [])], { stdio: 'ignore' }); await new Promise((r) => c.once('spawn', r)); kids.add(c.pid); kidStarts.set(c.pid, PI.starttimeOf(c.pid)); return c.pid; };
 const ours = (pid) => kidStarts.get(pid) != null && PI.starttimeOf(pid) === kidStarts.get(pid);   // the pid this suite holds, still that process
 const endKids = () => { for (const pid of kids) { if (ours(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } } };
 process.on('exit', endKids);
@@ -65,7 +71,8 @@ try {
   const st = (v) => () => v;
   ok(ownRunOf({ pid: 10, start: 5 }, 10, st(5)) === true && ownRunOf({ pid: 10, start: 5 }, 11, st(5)) === false && ownRunOf({ pid: 10, start: 5 }, 10, st(6)) === false
     && ownRunOf({ pid: 10 }, 10, st(6)) === true && ownRunOf(null, 10, st(5)) === false && ownRunOf(null, 10, st(5), { legacy: true }) === true && ownRunOf({ pid: 10, start: 5 }, 10, st(null)) === true && ownRunOf({ pid: 10 }, 0, st(5)) === false
-    && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/b/data' }) === false && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/a/data' }) === true,
+    && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/b/data' }) === false && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/a/data' }) === true
+    && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/b/data', sameBy: () => true }) === true && ownRunOf({ pid: 10, start: 5, by: '/a/data' }, 10, st(5), { by: '/b/data', sameBy: () => false }) === false,
     '① its own pid and start ⇒ own; another pid, or its pid with another start (the pid came back), or a run another data folder recorded ⇒ not; no start recorded ⇒ by its pid; NO run recorded ⇒ own only by an older build\'s own start (legacy); a start that cannot be read ⇒ by its pid');
 
   console.log('② the kill law: stop()');
@@ -75,10 +82,10 @@ try {
     rec.frpcRun = own ? { pid, at: Date.now(), start: PI.starttimeOf(pid) } : { pid: 999999, at: Date.now() - 3600e3, start: 1 };
     const s0 = said.filter(OTHER).length, codes = [];
     for (let k = 0; k < 2; k++) { try { v.stop(); codes.push('stopped'); } catch (e) { codes.push(e && e.code); } }   // pressed twice: said ONCE
-    await sleep(150);
+    await until(() => !alive(pid), own || FRP !== FRP_REAL ? 2000 : 150);   // its round: its own end waited on (the fact); over another's, a short look
     return { alive: alive(pid), pidFile: fs.existsSync(path.join(h.dir, 'frpc.pid')), saidOther: said.filter(OTHER).length - s0, codes: codes.join(' ') };
   };
-  const FRP = require(path.join(REPO, 'src/plugins/frp.js'));
+  const FRP = require(path.join(REPO, 'src/plugins/frp.js')), FRP_REAL = FRP;
   const sOther = await stopOver(FRP, 'stop-other', { own: false }), sOwn = await stopOver(FRP, 'stop-own', { own: true });
   const RELSTOP = MC.load('src/plugins/frp.js', anchored(SRC, '        const any = frpDaemonPid(), pid = ownRunPid();', '        const any = frpDaemonPid(), pid = any;', 'B-1217 the release\'s stop'), 'rel-stop');
   const sOtherR = await stopOver(RELSTOP, 'stop-other-red', { own: false });
@@ -86,7 +93,8 @@ try {
     `② THE KILL LAW: stop() over ANOTHER run's client leaves it alive (${sOther.alive}) and its pid file in place (${sOther.pidFile}), refused BY NAME (${sOther.codes}), said once (${sOther.saidOther}); over its own run it ends it (${!sOwn.alive}) — RED the release's stop: another run's client signalled (${!sOtherR.alive})`, { sOther, sOwn, sOtherR });
 
   console.log('③ the watch over a home whose client is now another run\'s');
-  global.setInterval = (fn, ms, ...a) => SI(fn, ms === 60e3 ? 50 : ms, ...a);   // the plugin's 60-s login watch, quick
+  let ticks = 0;
+  global.setInterval = (fn, ms, ...a) => (ms === 60e3 ? SI((...x) => { ticks++; fn(...x); }, 50, ...a) : SI(fn, ms, ...a));   // the plugin's 60-s login watch, quick, its ticks counted
   const watchOver = async (FRPm, tag, { own }) => {
     const rec = { enabled: false, frpcIdentity: 'instance', frpcKnock: true, frpcLogFrom: 0 }, h = hostOf(tag, rec), v = FRPm.create(h);
     const mine = await client(); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(mine));
@@ -94,12 +102,12 @@ try {
     v.bootReplay();   // a frpc a previous life started: its login is watched again (its own run)
     let pid = mine;
     if (!own) {   // another instance under this home: its client replaces this one's (a stop of its own, a start of its own)
-      try { process.kill(mine, 'SIGKILL'); } catch { } await until(() => !alive(mine));
+      if (ours(mine)) { try { process.kill(mine, 'SIGKILL'); } catch { } } await until(() => !alive(mine));   // this suite's own stand-in, by its held pid and start
       pid = await client(); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(pid));
     }
     fs.appendFileSync(path.join(h.dir, 'frpc.log'), REFUSED);   // the newest login line in the home's log: the shared token refused
     const s0 = said.filter(OTHER).length;
-    await sleep(500);   // ten ticks of the watch
+    const t0 = ticks; await until(() => ticks >= t0 + 5 && (rec.knockTrialAt == null || !alive(pid)), 3000);   // its round: ten ticks of the watch counted, and a restart's end waited on (never a fixed sleep)
     const r = { alive: alive(pid), trial: rec.knockTrialAt != null, saidOther: said.filter(OTHER).length - s0 };
     try { v.stop(); } catch { }   // (over another run: refused by name — ②)
     return r;
@@ -121,9 +129,9 @@ try {
   const freshOver = async (FRPm, tag) => {
     const rec = { enabled: false }, h = hostOf(tag, rec), v = FRPm.create(h);   // its data folder never started a client: no run, no desiredUp
     const pid = await client(); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(pid));
-    v.applySettings(); await sleep(900);   // a relay row saved on this instance (the release: stop, then a start 800 ms later)
+    v.applySettings(); await until(() => !alive(pid), FRPm === FRP ? 300 : 2000);   // a relay row saved on this instance (the release: stop, then a start 800 ms later) — its end waited on
     let code = 'stopped'; try { v.stop(); } catch (e) { code = e && e.code; }
-    await sleep(150);
+    await until(() => !alive(pid), 150);
     let st = {}; try { st = v.status(); } catch { }
     return { alive: alive(pid), code, held: !!st.heldElsewhere, running: !!st.running };
   };
@@ -132,6 +140,90 @@ try {
   const frR = await freshOver(RELFRESH, 'fresh-red');
   ok(fr.alive && fr.code === 'relay_held_elsewhere' && fr.held && !fr.running && !frR.alive,
     `④ a FRESH instance (no run of its own) over another instance's client: a settings change and a Stop never touch it (it lives: ${fr.alive}); the Stop refused by name (${fr.code}); the status «held elsewhere» (${fr.held}), not «running» (${fr.running}) — RED «no recorded run» read as its own (the release): the other instance's client ended (${!frR.alive})`, { fr, frR });
+
+  console.log('⑤ a client left behind by an instance gone for good (its round, 主开发 r2175)');
+  // this instance's own client is gone; the pid file names a client another instance (a worktree hub, ended since) left behind:
+  // Start is refused BY NAME; status says WHAT holds it; the person's take-over ends THAT process only (a bystander lives) and then
+  // starts this instance's own. Each guard of the take-over on its own home, each with its own red: a process that moved since the
+  // page read it, the same pid with another start (a reused pid), no start sent, a pid-file process that is not this home's relay
+  // client, a start that cannot run (refused before anything is ended)
+  const homeOf = async (FRPm, tag) => {
+    const rec = { enabled: false, desiredUp: true }, h = hostOf(tag, rec), v = FRPm.create(h);
+    rec.frpcRun = { pid: 999999, at: Date.now() - 3600e3, start: 1, by: path.resolve(h.dataDir) };   // its own run: gone
+    const conf = path.join(h.dir, 'frpc.toml');
+    const other = await client(conf); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(other));
+    let started = 0; const realStart = v.start;
+    v.canStart = () => null; v.start = () => { started++; return { starting: true }; };   // this home has no relay: its own start stood in
+    return { rec, h, v, conf, other, realStart, started: () => started };
+  };
+  const take = async (H, args) => { try { const r = await H.v.takeOver({ press: true, ...args }); return r && r.tookOver ? 'took' : 'other'; } catch (e) { return (e && e.code) || 'threw'; } };
+  const heldOf = (H) => H.v.status().held || {};
+  const startOf0 = (H) => { try { const r = H.realStart(); return r && r.running ? 'running' : 'started'; } catch (e) { return (e && e.code) || 'threw'; } };
+  const A = await homeOf(FRP, 'left'), startCode = startOf0(A), stA = A.v.status(), bystander = await client(A.conf);
+  const caseMoved = async (M, tag) => { const H = await homeOf(M, tag), hd = heldOf(H), to = await client(H.conf); fs.writeFileSync(path.join(H.h.dir, 'frpc.pid'), String(to)); const code = await take(H, { pid: hd.pid, start: hd.start }); await until(() => !alive(to), M === FRP ? 100 : 2000); return { code, lives: alive(to) }; };
+  const caseStart = async (M, tag) => { const H = await homeOf(M, tag), hd = heldOf(H); const code = await take(H, { pid: hd.pid, start: hd.start + 1 }), none = M === FRP ? await take(H, { pid: hd.pid }) : 'n/a'; await until(() => !alive(H.other), M === FRP ? 100 : 2000); return { code, none, lives: alive(H.other) }; };
+  const caseKind = async (M, tag) => { const H = await homeOf(M, tag), not = await client(); fs.writeFileSync(path.join(H.h.dir, 'frpc.pid'), String(not)); const hd = heldOf(H); const code = await take(H, { pid: hd.pid, start: hd.start }); await until(() => !alive(not), M === FRP ? 100 : 2000); return { code, lives: alive(not) }; };
+  const caseCannot = async (M, tag) => { const H = await homeOf(M, tag); H.v.canStart = () => Object.assign(new Error('a revoked identity'), { code: 'relay_revoked' }); const hd = heldOf(H); const code = await take(H, { pid: hd.pid, start: hd.start }); await until(() => !alive(H.other), M === FRP ? 100 : 2000); return { code, lives: alive(H.other) }; };
+  const mv = await caseMoved(FRP, 'left-moved'), sx = await caseStart(FRP, 'left-start'), kd = await caseKind(FRP, 'left-kind'), cn = await caseCannot(FRP, 'left-cannot');
+  const aTook = await take(A, { pid: stA.held && stA.held.pid, start: stA.held && stA.held.start }); await until(() => !alive(A.other), 2000);
+  const cut1 = (a, b, label, tag) => MC.load('src/plugins/frp.js', anchored(SRC, a, b, label), tag);
+  const OLDSTART = cut1('        { const hn = heldNow(); if (hn.any) { if (hn.own) return { running: true }; throw heldRefusal(); } }\n', '        if (frpDaemonPid()) { ownRunPid(); return { running: true }; }\n', 'B-1217 the release\'s silent «running»', 'old-start');   // stale-pins: kept (a red control plants the old road back)
+  const startR = startOf0(await homeOf(OLDSTART, 'left-red-start'));
+  const mvR = await caseMoved(MC.load('src/plugins/frp.js', [   // the whole re-read cut (its pid AND its start: either alone refuses a moved process)
+    ['        if (!pid || pid !== Number(askedPid) || askedStart == null) throw moved();\n', '        if (!pid || askedStart == null) throw moved();\n'],
+    ['        if (start == null || start !== Number(askedStart)) throw moved();\n', '        if (start == null) throw moved();\n'],
+  ].reduce((t, [x, y], k) => anchored(t, x, y, `B-1217 the take-over's process not read again ${k + 1}`), SRC), 'no-reread'), 'left-red-pid');
+  const sxR = await caseStart(cut1('        if (start == null || start !== Number(askedStart)) throw moved();\n', '        if (start == null) throw moved();\n', 'B-1217 the take-over\'s start not read again', 'no-start'), 'left-red-start2');
+  const kdR = await caseKind(cut1('        if (!isRelayClient(pid)) throw moved();\n', '', 'B-1217 the take-over\'s kind not read again', 'no-kind'), 'left-red-kind');
+  const cnR = await caseCannot(cut1("        const no = verbs.canStart(); if (no) throw no;   // its read (S2): what start() would refuse is said BEFORE anything is ended\n", '', 'B-1217 the take-over ends before asking its start', 'no-pre'), 'left-red-pre');
+  ok(startCode === 'relay_held_elsewhere' && stA.heldElsewhere && stA.held && stA.held.pid === A.other && !!stA.held.since
+    && mv.code === 'relay_takeover_moved' && mv.lives && sx.code === 'relay_takeover_moved' && sx.none === 'relay_takeover_moved' && sx.lives
+    && kd.code === 'relay_takeover_moved' && kd.lives && cn.code === 'relay_revoked' && cn.lives
+    && aTook === 'took' && !alive(A.other) && alive(bystander) && A.started() === 1
+    && startR === 'running' && !mvR.lives && !sxR.lives && !kdR.lives && !cnR.lives,
+    `⑤ a client LEFT BEHIND by an instance gone for good: Start refused by name (${startCode}); the card's facts say what holds it (pid ${stA.held && stA.held.pid}); the person's take-over ends THAT process (${!alive(A.other)}) and no other (a bystander lives: ${alive(bystander)}), then starts its own (${A.started()}); refused, nothing ended: a process that moved (${mv.code}), the same pid with another start or none sent (${sx.code}, ${sx.none}), a pid-file process that is not this home's relay client (${kd.code}), a start that cannot run (${cn.code}) — RED each guard cut: the release's silent «running» (${startR}); the moved process (${!mvR.lives}), the reused pid (${!sxR.lives}), the stranger (${!kdR.lives}) and a client ended for a start that cannot run (${!cnR.lives})`,
+    { startCode, mv, sx, kd, cn, aTook, startR, mvR, sxR, kdR, cnR });
+
+  console.log('⑥ a data folder moved (behind a link; the install moved): still its own');
+  const movedFolder = async (FRPm, tag, how) => {
+    const rec = { enabled: false }, h = hostOf(tag, rec);
+    const pid = await client(); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(pid));
+    const real0 = path.join(T, 'data-real-' + tag); fs.mkdirSync(real0);
+    if (how === 'link') {   // recorded at its old real place; the folder moved to a new one and the old path is now a link to it
+      rec.frpcRun = { pid, at: Date.now(), start: PI.starttimeOf(pid), by: real0 };
+      const real1 = path.join(T, 'data-nvme-' + tag); fs.renameSync(real0, real1); fs.symlinkSync(real1, real0); h.dataDir = real1;
+    } else {   // the install moved or was renamed: the recorded folder is gone
+      rec.frpcRun = { pid, at: Date.now(), start: PI.starttimeOf(pid), by: path.join(T, 'gone-' + tag, 'data') }; h.dataDir = real0;
+    }
+    const v = FRPm.create(h); const st = v.status();
+    return { own: !!st.running, held: !!st.heldElsewhere };
+  };
+  const mvL = await movedFolder(FRP, 'mv-link', 'link'), mvG = await movedFolder(FRP, 'mv-gone', 'gone');
+  const BYSTRING = MC.load('src/plugins/frp.js', anchored(SRC, '  if (run.by && by && !(sameBy ? sameBy(run.by, by) : run.by === by)) return false;\n', '  if (run.by && by && run.by !== by) return false;\n', 'B-1217 its own by the path string'), 'by-string');   // stale-pins: kept (a red control plants the old road back)
+  const mvLR = await movedFolder(BYSTRING, 'mv-link-red', 'link'), mvGR = await movedFolder(BYSTRING, 'mv-gone-red', 'gone');
+  ok(mvL.own && !mvL.held && mvG.own && !mvG.held && !mvLR.own && mvLR.held && !mvGR.own,
+    `⑥ «its own» never hangs on a path string: a data folder moved behind a link (${mvL.own}) and a recorded folder that no longer exists — the install moved (${mvG.own}) — still own their client — RED the path string decides: held elsewhere over its own (${mvLR.held}, ${!mvGR.own})`, { mvL, mvG, mvLR, mvGR });
+
+  console.log('⑦ a take-over asked by anything but the person\'s press: refused');
+  const notPressed = async (FRPm, tag) => {
+    const rec = { enabled: false }, h = hostOf(tag, rec), v = FRPm.create(h);
+    const other = await client(path.join(h.dir, 'frpc.toml')); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(other));
+    v.canStart = () => null; v.start = () => ({ starting: true });   // this home has no relay: only the press decides here
+    let code = 'took'; try { await v.takeOver({ pid: other, start: PI.starttimeOf(other) }); } catch (e) { code = e && e.code; }
+    await until(() => !alive(other), FRPm === FRP ? 150 : 2000);
+    return { code, alive: alive(other) };
+  };
+  const np = await notPressed(FRP, 'np');
+  const NOPRESS = MC.load('src/plugins/frp.js', anchored(SRC, "        if (press !== true) throw Object.assign(new Error('only a person\\'s own press takes the relay over'), { code: 'relay_takeover_refused' });\n", '', 'B-1217 the take-over unattended'), 'no-press');
+  const npR = await notPressed(NOPRESS, 'np-red');
+  const WIRE = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'), WO = require(path.join(REPO, 'src/write-origin.js'));
+  const PUI = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8'), RAIL = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-rail.js'), 'utf8'), SMX = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8'), SJS = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), IURL = fs.readFileSync(path.join(REPO, 'src/server/instance-url.js'), 'utf8');
+  const page = PUI.includes("await api('takeover', { body: JSON.stringify({ pid: p.held.pid, start: p.held.start }) });") && PUI.includes("message: t('This ends the relay client another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.')")
+    && (RAIL.split('showToast(relayRefusalWords(r)').length - 1) === 2 && SMX.includes('throw new Error(relayRefusalWords(r2))')
+    && (SJS.split('portForwards.publish(String(req.params.id)').length - 1) === 1 && SJS.includes("res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it)")
+    && (IURL.split('...(e && e.code ? { code: e.code } : {})').length - 1) === 2;
+  ok(np.code === 'relay_takeover_refused' && np.alive && !npR.alive && page && WIRE.includes('plugins.takeOver(req.params.id, { pid: b.pid, start: b.start, press: true })') && (WIRE.split('plugins.takeOver(').length - 1) === 1 && WIRE.includes("const why = require('../write-origin.js').ownerPageWhy(req);") && WO.ownerPageWhy({ headers: {}, socket: {} }) !== null && WO.ownerPageWhy({ headers: { authorization: 'Bearer vsst_x' }, socket: {} }) === 'bearer',
+    `⑦ a take-over asked by anything but the person's press (the watch, the boot, a timer, a publish, an agent's road) is refused by name (${np.code}) and touches nothing (${np.alive}); only the page's own route presses it, and there only from the person's own page (a header-less request and every bearer refused); the card's take-over asks a plain confirm and sends the process it showed, and the relay's codes are worded on every door (the forward's publish and unpublish, the instance's address) — RED unattended: the client ended (${!npR.alive})`, { np, npR });
 } finally {
   global.setInterval = SI; console.log = log0; console.warn = warn0;
   endKids();   // by the pid and start this suite holds
