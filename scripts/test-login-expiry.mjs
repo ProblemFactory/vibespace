@@ -959,7 +959,7 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
     fs.writeFileSync(path.join(d, '.credentials.json'), JSON.stringify({
       claudeAiOauth: { accessToken: 'sk-ant-oat-x', refreshToken: 'sk-ant-ort-x', expiresAt: at + RH, refreshTokenExpiresAt: exp, scopes: ['user:inference'], subscriptionType: 'max' },
     }));
-    fs.writeFileSync(path.join(d, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: email, organizationName: 'Org' } }));
+    fs.writeFileSync(path.join(d, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: email, accountUuid: 'p-' + email.split('@')[0] + '-made-up', organizationUuid: 'org-made-up', organizationName: 'Org' } }));   // B-87fd identity unit 3: a CLI-shaped record (the person in the organisation)
   };
   const mkStore = (accts) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lereal-'));
@@ -971,20 +971,29 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
   /** THE REAL ANSWER for each of reloginResolve's four outcomes, captured from
    *  an actual call. `at` shifts the access-token expiry so two 'same' answers
    *  can differ the way two different logins do. */
-  const realResolve = (kind, { at = Date.now() } = {}) => {
+  // B-87fd identity unit 3: the relogin decides on the ONE comparison — BEFORE is what the row's folder named at the «sign in again»
+  // press (reloginBegin), so each scene signs the row in first, presses, then signs in as the scene's account; «moved» needs the other
+  // row's own kept facts (its folder signed in, settled)
+  const realResolve = async (kind, { at = Date.now() } = {}) => {
     const me = { id: 'sub-1', name: 'Fish Max', type: 'subscription', backend: 'claude', email: 'fish@example.com' };
     if (kind === 'pending') { const { am } = mkStore([me]); return am.reloginResolve('sub-1'); }
     if (kind === 'moved') {
       const other = { id: 'sub-2', name: 'Other Max', type: 'subscription', backend: 'claude', email: 'other@example.com' };
       const { dir, am } = mkStore([me, other]);
+      subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: 'fish@example.com', at });
+      subCreds(dir, 'sub-2', { exp: at + 29 * 24 * RH, email: 'other@example.com', at });
+      await am.signinFactsSettled(null, { withinMs: 0 });
+      am.reloginBegin('sub-1');
       subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: 'other@example.com', at });
       return am.reloginResolve('sub-1');
     }
     const { dir, am } = mkStore([me]);
+    subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: 'fish@example.com', at });
+    am.reloginBegin('sub-1');
     subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: kind === 'split' ? 'stranger@example.com' : 'fish@example.com', at });
     return am.reloginResolve('sub-1');
   };
-  const REAL = { same: realResolve('same'), moved: realResolve('moved'), split: realResolve('split'), pending: realResolve('pending') };
+  const REAL = { same: await realResolve('same'), moved: await realResolve('moved'), split: await realResolve('split'), pending: await realResolve('pending') };
   ck('FIXTURE SOURCE: the real reloginResolve answers {outcome} — and NEVER a top-level loggedIn (round 1 gated on exactly that)',
     REAL.same.outcome === 'same' && REAL.moved.outcome === 'moved' && REAL.split.outcome === 'split' && REAL.pending.outcome === 'pending'
     && ['same', 'moved', 'split', 'pending'].every((k) => REAL[k].loggedIn === undefined));
@@ -1077,7 +1086,7 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
     // …and the login the user is actually completing must NOT be skipped. This
     // is why the gate is a fingerprint and not an "already swept this account"
     // latch: re-logging a still-logged-in account answers 'same' from poll #1.
-    answer = realResolve('same', { at: Date.now() + 8 * RH });
+    answer = await realResolve('same', { at: Date.now() + 8 * RH });
     for (let i = 0; i < 10; i++) call(route, { params: { id: 'sub-1' } });
     ck('...and a genuinely NEW login arriving mid-poll still sweeps (never a boolean latch)', w.n === 2);
     for (let i = 0; i < 10; i++) call(route, { params: { id: 'sub-1' } });

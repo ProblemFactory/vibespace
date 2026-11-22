@@ -92,7 +92,9 @@ console.log('— §5 wiring');
   ck('the routes destructure it (an unread dep is the 2.355.0 unstaged-wiring class)', /getTelemetry, getUsageHistory, getLoginExpiryWatch(?:, getCliCmds = \(\) => null)?(?:, harnessSetting = null)? \}\) \{/.test(aur) /* int332: lane antigravity-card-fixes appends getCliCmds; 2.369.408: lane usage-predict appends harnessSetting (the vendor's own automatic-read row, one row per vendor) */);
   ck('every login FINALIZE route sweeps, gated on the login having actually succeeded', (() => {
     const calls = (aur.match(/sweepLoginExpiry\('[^']+'\)/g) || []).concat(aur.match(/sweepOnLoginTransition\([^)]*'[^']+'\)/g) || []);
-    return calls.length === 4
+    // B-87fd identity unit 3: the held sign-in's ANSWER is a login route too (a fifth sweep), gated on its account having signed in
+    return calls.length === 5
+      && /const r = accounts\.reloginAnswer\(req\.params\.id, req\.body && req\.body\.answer\);\n\s*if \(r\?\.account\?\.loggedIn\) \{\n\s*sweepOnLoginTransition\(req\.params\.id, r, 're-login'\);/.test(aur)
       // ROUND 2: gate on reloginResolve's REAL answer. `r.loggedIn` (round 1)
       // is a property that method returns on NONE of its four outcomes.
       // (the gate may now open a BLOCK — the 2026-09-08 login wake hangs on the

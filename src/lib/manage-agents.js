@@ -404,7 +404,18 @@ export function sayHostFoldUnjudged(hostId, r) {
   if (_hostFoldSaid.get(hostId) === said) return;
   _hostFoldSaid.set(hostId, said); showToast(said, { duration: 10000 });
 }
+/** THE HELD SIGN-IN's QUESTION (row B-87fd identity unit 3, 主开发 r2533): a sign-in into this row that the facts could not prove is
+ *  HELD, not adopted — the row asks in one plain sentence, with two presses named by what they do; answerable here, no dialog, no
+ *  greyed control, no clock. A question kept across a restart (its «before» lost) says so. '' when nothing is asked */
+export function reloginAskHtml(a) {
+  const q = a && a.reloginAsk;
+  if (!q) return '';
+  const said = q.lost ? t('A sign-in finished across a restart — is it the same account as this row?') : t('Is the new sign-in the same account as this row?');
+  const press = (answer, words) => `<button type="button" class="btn-create acct-relogin-answer" data-relogin-answer="${answer}" data-relogin-ask="${escHtml(a.id)}">${escHtml(words)}</button>`;
+  return `<span class="acct-relogin-ask"><span class="ob-warn">${escHtml(said)}</span> ${press('same', t('The same account: keep this row'))} ${press('another', t('Another account: make a new row'))}</span>`;
+}
 export function subIdentHtml(a, { email = '', hostSub = false, hostTag = '', local = true } = {}) {
+  if (a && a.reloginAsk) return reloginAskHtml(a) + (hostTag ? ` ${hostTag}` : '');   // the held sign-in's question before anything else
   if (signinUnread(a)) return factsWordsHtml(a) + (hostTag ? ` ${hostTag}` : '');   // B-360d: no claim until read
   // A ROW WHOSE FILE IS ITS LONG-LIVED TOKEN never signed in (acceptance r1 item 5): never «logged in» — its address and the
   // plan its stated shape names (a sign-in's or the person's), by the table's names
@@ -1364,6 +1375,11 @@ export function installManageAgents(App, ctx = {}) {
           // original record stays signed-out and keeps its history
           clearInterval(iv);
           showToast(t('The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.', { email: fin.freshEmail || '?', new: fin.account?.name || '', name: fin.keptName || a?.name || '' }), { duration: 10000 });
+          refresh?.();
+        } else if (fin?.outcome === 'ask') {
+          // the facts could not prove whose sign-in it is: HELD, the row asks (row B-87fd identity unit 3)
+          clearInterval(iv);
+          showToast(t('The new sign-in could not be matched to “{name}” — answer on its row whether it is the same account.', { name: fin.keptName || a?.name || '' }), { duration: 10000 });
           refresh?.();
         } else if (fin?.outcome === 'moved') {
           clearInterval(iv);
@@ -3863,6 +3879,21 @@ export function installManageAgents(App, ctx = {}) {
             else if (r && r.refused) showToast(inPools ? t('{name} answered, but the reading was refused as another account’s window — the pool keeps skipping it', { name }) : t('{name} answered, but the reading was refused as another account’s window — it stays inactive', { name }), { type: 'error' });
             else if (r && r.error && !r.lapsed) showToast(String(r.error), { type: 'error' }); // the ROUTE's own refusal (e.g. the refresh is Off in Settings — verify r2 ②), never a vendor's
             else showToast(inPools ? t('{name} still does not answer — the pool keeps skipping it', { name }) : t('{name} still does not answer — its subscription stays inactive', { name }), { type: 'error' });
+            refresh();
+          });
+        return;
+      }
+      // THE HELD SIGN-IN's two presses (row B-87fd identity unit 3): the answer said in words; a second press is answered by the hub
+      const askBtn = e.target.closest?.('[data-relogin-answer]');
+      if (askBtn) {
+        const target = askBtn.dataset.reloginAsk || id, answer = askBtn.dataset.reloginAnswer;
+        fetchJson(`/api/accounts/${encodeURIComponent(target)}/relogin-answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) })
+          .catch(() => null)
+          .then((r) => {
+            if (r && r.success && r.outcome === 'same') showToast(t('Kept on “{name}”.', { name: r.account?.name || a?.name || '' }));
+            else if (r && r.success && r.outcome === 'split') showToast(t('Saved as the new row “{new}”.', { new: r.account?.name || '' }));
+            else if (r && r.success) showToast(t('Nothing is waiting on “{name}” any more.', { name: a?.name || '' }));
+            else showToast(r?.error || t('Could not save the answer'), { type: 'error' });
             refresh();
           });
         return;

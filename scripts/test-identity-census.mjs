@@ -91,11 +91,13 @@ const win = (at, u, days) => ({ utilization: u, resetsAt: Math.floor(at / 1000) 
 
 // ── THE DOORS — each answers 'same' | 'different' | 'unproven' | 'unreachable' for a pair, reached through the product's own chain ──
 const DOORS = {};
-// reloginResolve (src/accounts.js): row y is the record; the person signs in again into its folder, and the login is x's
+// reloginResolve (src/accounts.js): row y is the record; the person presses «sign in again» (reloginBegin: its BEFORE), signs in into
+// its folder, and the login is x's — the door on the ONE comparison since identity unit 3 («ask» answers «unproven» here)
 DOORS.reloginResolve = async (p) => {
   if (!p.x.signedIn) return 'unreachable';   // a real sign-in always writes its address: a login with none is no person's
   const am = new AccountManager({ dataDir: tmpdir('vs-idc-relogin-'), onChange: () => { } });
   const id = makeRow(am, p.y);
+  am.reloginBegin(id);
   writeLogin(am.subDir(id), p.x.acct);
   try { const r = am.reloginResolve(id); return r.outcome === 'same' ? 'same' : r.outcome === 'split' || r.outcome === 'moved' ? 'different' : 'unproven'; }
   finally { await closeAm(am); }
@@ -189,8 +191,8 @@ const DEBT = [
   // the machine login's link: the organisation first
   ['_usageGlobalLink', 'false-merge', 'seats-one-org'],
   // the record alone (a.email, or a name with «@»): one address in two organisations is one account; a declared address that differs
-  // splits; a RENAMED row with no declared address has nothing to compare — relogin adopts any login, the host check links none
-  ['reloginResolve', 'false-merge', 'one-address-two-orgs'], ['reloginResolve', 'proven-split', 'same-declared-conflict'], ['reloginResolve', 'false-merge', 'strangers-renamed'],
+  // splits; a RENAMED row with no declared address has nothing to compare — the host check links none (reloginResolve's three rows
+  // LEFT with identity unit 3: it asks the one comparison)
   ['evaluateOnHost', 'false-merge', 'one-address-two-orgs'], ['evaluateOnHost', 'proven-split', 'same-declared-conflict'], ['evaluateOnHost', 'proven-split', 'same-renamed'],
 ];
 // doors not judged in-process — each with why (this list only falls too)
@@ -236,7 +238,9 @@ ok(!DEBT.some((r) => r[0] === 'sameAccount') && ![...found.keys()].some((k) => k
 // is today. A door that falls to «unproven» (or anything else) on one is RED; a kind it newly answers rightly is red until its
 // pin is written (the pin only rises)
 const RIGHT = {
-  reloginResolve: ['same-both-org', 'same-one-org', 'same-no-org', 'same-renamed', 'seats-one-org', 'strangers'],
+  // identity unit 3: the relogin on the one comparison — one-address-two-orgs and strangers-renamed now rightly DIFFERENT; same-no-org
+  // falls to «unproven» (ask) by ruling (b): one address with no organisation named proves no account
+  reloginResolve: ['same-both-org', 'same-one-org', 'same-renamed', 'seats-one-org', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
   evaluateOnHost: ['same-both-org', 'same-one-org', 'same-no-org', 'seats-one-org', 'strangers', 'strangers-renamed'],
   _usageGlobalLink: ['same-both-org', 'same-one-org', 'same-no-org', 'same-declared-conflict', 'same-renamed', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
   usageIdentityGroups: ['same-both-org', 'same-no-org', 'same-declared-conflict', 'same-renamed', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
@@ -266,11 +270,11 @@ ok(Object.keys(RIGHT).length === Object.keys(DOORS).length && Object.keys(RIGHT)
 // gone, is RED by name: judge it here, or restate its row. (A door of a NEW name is not found so — a code walk is a later
 // unit's; this census says that limit.) Each judged and unjudged door has its row, and no row is any other
 const DOOR_MARKS = {
-  reloginResolve: { 'reloginResolve(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 } },
+  reloginResolve: { 'reloginResolve(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'reloginBegin(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'reloginAnswer(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'beforeAfterVerdict(': { 'src/account-identity.js': 1, 'src/accounts.js': 1 } },
   evaluateOnHost: { 'evaluateOnHost(': { 'src/accounts.js': 1, 'src/ws-create.js': 2, 'src/routes/account-tails.js': 1, 'src/server/account-usage-routes.js': 1 } },
   _usageGlobalLink: { '_usageGlobalLink = ': { 'src/usage-routes.js': 4 } },
   usageIdentityGroups: { 'usageIdentityGroups(': { 'src/server/usage-pool-engine.js': 3 }, 'groupKeyOf(': { 'src/server/usage-pool-engine.js': 3 } },
-  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 2 } },
+  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 2, 'src/accounts.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 6 } },
   'usage-anchors identityKeyFor (alone)': { 'identityKeyFor(': { 'src/reading-repair.js': 1, 'src/usage-anchors.js': 1, 'src/server/usage-pool-engine.js': 1 } },
   // two of identityVerdict's four are a NAMESAKE: the mac helper's code-signing verdict (agentd), not an account door
   'oat-mint-model identityVerdict': { 'identityVerdict(': { 'src/oat-mint-model.js': 1, 'src/server/oat-mint.js': 1, 'src/mac-helper-identity.js': 1, 'src/agentd/stream-mac.js': 1 } },

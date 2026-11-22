@@ -29,6 +29,17 @@
  *      (one address may hold a seat in two organisations); two named organisations that differ ⇒ different; an organisation one
  *      row does not name ⇒ unproven — r1477 [1]'s weighing: a false merge moves the owner's money, a missed one costs one turn
  *   5. anything else — an organisation alone (two seats of one Team look exactly like this), or nothing ⇒ unproven: never merged
+ *
+ * beforeAfterVerdict({ before, after, word, lost }) → 'same' | 'different' | 'ask' — A DOOR THAT COMPARES ONE ROW BEFORE AND AFTER
+ * a sign-in into its folder (the relogin's resolve, identity unit 3 — 主开发 r2533 / r2536). `before` / `after` are records (or null),
+ * `word` the row's own word (its typed address, or a name that is an address), `lost` = the kept BEFORE is gone (a restart, its time):
+ *   R1  NOTHING TO DISAGREE WITH ⇒ same (in place, nothing asked): AFTER names nothing read (no seat, no address), or BEFORE names
+ *       nothing and the row has no word — a first sign-in is what names a row
+ *   R2  BEFORE names something read ⇒ sameAccount: same ⇒ same; different ⇒ different (moved / a new row); unproven ⇒ ask (read
+ *       facts that do not decide)
+ *   R3  A WORD CHECKS A READ: BEFORE's only fact is the row's word ⇒ equal to AFTER's read address (case-folded) ⇒ same; else ⇒ ask —
+ *       never a split on a word alone (a word can be a typo)
+ *   a LOST before with no word ⇒ ask (the row says the sign-in finished across a restart): unknown is not nothing
  */
 const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const addressOf = (v) => { const s = str(v); return s ? s.toLowerCase() : null; };
@@ -62,4 +73,13 @@ function sameAccount(x, y) {
   return 'unproven';
 }
 
-module.exports = { identityRecordOf, sameAccount };
+function beforeAfterVerdict({ before = null, after = null, word = null, lost = false } = {}) {
+  const readNames = (r) => !!(r && typeof r === 'object' && (r.seat || r.address));
+  if (!readNames(after)) return 'same';
+  if (readNames(before)) { const v = sameAccount(before, after); return v === 'unproven' ? 'ask' : v; }
+  const w = addressOf(word);
+  if (w) return after.address && w === after.address ? 'same' : 'ask';
+  return lost ? 'ask' : 'same';
+}
+
+module.exports = { identityRecordOf, sameAccount, beforeAfterVerdict };

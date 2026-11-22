@@ -111,6 +111,34 @@ function claudeFolderIdentity(dir, rd) {
   } catch { return null; }
 }
 
+/** THE LAST LOGIN OF A FOLDER WHOSE SIGN-IN THE CLI ITSELF ENDED (row B-87fd identity unit 3, 主开发 r2536 R4) — the relogin's
+ *  BEFORE ONLY: nothing else reads it, and who a folder IS stays claudeFolderIdentity's (law 5 untouched). → `{ email, seat, orgId }`
+ *  from the config's oauthAccount, or null. Only beside THE CLI's OWN BLANKED RESIDUE, by its EXACT shape (src/login-state.js,
+ *  src/login-expiry.js: a `/logout` or a passed refresh deadline blanks the tokens and keeps the deadline and scopes): accessToken
+ *  and refreshToken the empty string, expiresAt 0, a numeric refreshTokenExpiresAt, a non-empty list of scope strings, and no mark
+ *  of ours. A long-lived token, a live sign-in, a missing or malformed file are NOT it ⇒ null. No default reader (round wvjd20mpa).
+ *  UNPROVEN, said: whether the vendor's sign-out also clears the config's account block — the door is right either way (it falls
+ *  to the row's own word) */
+function claudeFolderLastLogin(dir, rd) {
+  if (!rd || typeof rd.facts !== 'function') return null;
+  try {
+    const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    const parse = (p, text) => (typeof rd.json === 'function' ? rd.json(p) : JSON.parse(text()));
+    const cp = path.join(dir, '.credentials.json');
+    const raw = parse(cp, () => rd.facts(cp).text);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw[OAT_FILE_MARK]) return null;
+    const o = raw.claudeAiOauth;
+    const residue = !!o && typeof o === 'object' && !Array.isArray(o) && o.accessToken === '' && o.refreshToken === '' && o.expiresAt === 0
+      && Number.isFinite(o.refreshTokenExpiresAt) && Array.isArray(o.scopes) && o.scopes.length > 0 && o.scopes.every((x) => typeof x === 'string' && x);
+    if (!residue) return null;
+    let acct = null;
+    try { const sp = path.join(dir, '.claude.json'); const c = parse(sp, () => rd.readText(sp)); acct = c && typeof c === 'object' && c.oauthAccount && typeof c.oauthAccount === 'object' ? c.oauthAccount : null; } catch { }
+    if (!acct) return null;
+    const out = { email: s(acct.emailAddress), seat: s(acct.accountUuid), orgId: s(acct.organizationUuid) };
+    return out.email || out.seat || out.orgId ? out : null;
+  } catch { return null; }
+}
+
 /** LOGIN LIFETIME of an account dir (2026-09-07). The SAME file parseAuth
  *  already reads, asked a different question: not "is there a token" but "when
  *  does this LOGIN SESSION end". Read-only, never refreshes. A dir with no
@@ -365,6 +393,8 @@ module.exports = {
     // shape (claudeLoginState) and our long-lived-token mark; the settings file keeps NO text (parseAuth read its identity at landing)
     // …and WHO the folder is signed in as, read in the same landing and kept in memory only (row B-87fd unit 2)
     folderIdentityOf: claudeFolderIdentity,
+    // …and the LAST login of a folder the CLI itself signed out — the relogin's BEFORE only (row B-87fd identity unit 3, R4)
+    folderLastLoginOf: claudeFolderLastLogin,
     displayKeep: (p) => (path.basename(p) === '.credentials.json' ? (o) => (o && typeof o === 'object' ? { claudeAiOauth: o.claudeAiOauth, ...(o[OAT_FILE_MARK] ? { [OAT_FILE_MARK]: o[OAT_FILE_MARK] } : {}) } : null) : null),
   },
   // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08: auto-resume is generic,

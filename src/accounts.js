@@ -28,6 +28,12 @@ const DISPLAY = require('./account-display-facts.js'); // B-360d (lane chrome-15
 const DECIDE_WITHIN_MS = 10000;
 // …and a person's act waits for the folders it compares at most this long (a stalled unrelated share never holds a press)
 const PERSON_BOUND_MS = 6000;
+// THE RELOGIN's BEFORE (row B-87fd identity unit 3): kept in memory from the «sign in again» press until its resolve — a sign-in
+// that takes longer reads as a LOST before (the row then asks, unless its own word settles it); the held sign-in's folder
+const RELOGIN_BEFORE_TTL_MS = 30 * 60e3;
+const RELOGIN_HELD = '.vibespace-relogin-held';
+/** the row's own WORD for its address: the typed one, else a name that is an address (the release's knownEmail) — or null */
+const reloginWordOf = (a) => { const w = (a && (a.email || (String(a.name || '').includes('@') ? a.name : ''))) || ''; return String(w).trim() || null; };
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
@@ -553,7 +559,7 @@ class AccountManager {
           // loginState (2026-09-07): the LOGIN SESSION's own deadline, so every
           // surface can warn BEFORE the refresh fails instead of after a dead
           // turn. 'unknown' where the harness declares no reader.
-          const row = { ...base, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...(info.rateLimitTier ? { rateLimitTier: info.rateLimitTier } : {}), loginState: this._loginStateShown(a), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
+          const row = { ...base, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...(info.rateLimitTier ? { rateLimitTier: info.rateLimitTier } : {}), loginState: this._loginStateShown(a), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}), ...(a.reloginAsk ? { reloginAsk: { at: a.reloginAsk.at, ...(a.reloginAsk.lost ? { lost: true } : {}) } } : {}) };   // the held sign-in's question (row B-87fd identity unit 3): a mark, no identity
           if (row.oat) { const door = this._oatFileDoor(a, row.loginState); if (door) row.oatFile = door; }
           // THE QUOTA PROBE (lane auto-cli-oat-unprobeable): the SAME verdict the auto-cli loop and the probe door read, off
           // the row's own facts — an oat-only row is probed through the token in its folder when the token carries
@@ -869,44 +875,107 @@ class AccountManager {
   //     signed-out untouched
   //   · fresh identity matches NO record → a NEW record is minted around it;
   //     this record reverts to signed-out untouched
-  //   · same identity (or the record never had one) → normal in-place refresh
-  // Identity = orgUuid when both sides have it, else email (case-insensitive).
   // The dir's .claude.json rides along with the creds — it carries the fresh
   // identity and belongs with the login, not with the old record.
+  // THE FIRST DOOR ON THE ONE COMPARISON (row B-87fd identity unit 3, 主开发 r2533 / r2536): BEFORE is what the row's folder named
+  // at the «sign in again» press (reloginBegin, kept in memory), AFTER what it names now; src/account-identity.js
+  // beforeAfterVerdict decides — R1 nothing to disagree with ⇒ in place; R2 read facts ⇒ sameAccount (same in place, different
+  // moved / a new row, unproven ⇒ ASK); R3 the row's own word checks AFTER's read address (equal in place, else ASK — never a split
+  // on a word alone). «ASK»: the sign-in is HELD in the row's folder (its RELOGIN_HELD subfolder: the CLI never reads it, nothing
+  // spawns on it), not adopted, until the person answers on the row (reloginAnswer) — no dialog, no clock. Law (5) holds on both
+  // sides: both are read through the harness's folderIdentityOf (a long-lived token names no seat; a config naming another login
+  // names none); BEFORE in a folder the CLI itself signed out reads its LAST login (folderLastLoginOf: the config beside the CLI's
+  // blanked residue, by its exact shape), and the row's own word outranks that config alone (a disagreeing word is a conflict ⇒ ask).
+  /** THE BEFORE, at the person's «sign in again» press: the folder read now (one fresh ask a file, B-403e), kept in memory for
+   *  RELOGIN_BEFORE_TTL_MS — never stored, never sent. → true when kept */
+  reloginBegin(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription' || !capsOf(this._acctBackend(a)).oauthUsage) return false;   // the declared capability the relogin route asks (never a harness id: test-architecture §78)
+    const be = this._acctBackend(a), creds = this._credsOf(be), dir = this.subDir(id), word = reloginWordOf(a);
+    try { this._lookAgain(id); } catch { }
+    let live = null, last = null;
+    try { live = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(dir, RR) : null; } catch { live = null; }
+    if (!live) { try { last = typeof creds.folderLastLoginOf === 'function' ? creds.folderLastLoginOf(dir, RR) : null; } catch { last = null; } }
+    const record = live ? accountIdentity.identityRecordOf({ harness: be, declared: a.email || null, auth: live })
+      : last ? accountIdentity.identityRecordOf({ harness: be, declared: word, auth: last }) : null;
+    if (!this._reloginBefore) this._reloginBefore = new Map();
+    this._reloginBefore.set(id, { record, word, at: Date.now() });
+    return true;
+  }
+  /** MOVE A SIGN-IN between folders: its credentials first — none to move ⇒ 0 and NOTHING at the destination is touched; then its
+   *  config — one the moved sign-in lacks is REMOVED at the destination (it would name the old login beside new credentials — law
+   *  (5)'s class). → the number of files moved */
+  _moveLogin(srcDir, destDir) {
+    fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
+    let moved = 0;
+    for (const f of ['.credentials.json', '.claude.json']) {
+      try { fs.renameSync(path.join(srcDir, f), path.join(destDir, f)); moved++; }
+      catch (e) { if (!moved) return 0; if (e && e.code === 'ENOENT') { try { fs.unlinkSync(path.join(destDir, f)); } catch { } } }
+    }
+    return moved;
+  }
   reloginResolve(id) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
     const fresh = this._lookAgain(id);   // B-403e: look again before the login is moved
     if (!fresh.loggedIn || fresh.oatFile) return { outcome: 'pending' }; // our long-lived-token file is not the login being completed
-    const norm = (s) => String(s || '').trim().toLowerCase();
-    const freshEmail = norm(fresh.email);
-    const knownEmail = norm(a.email || (String(a.name || '').includes('@') ? a.name : ''));
-    const sameIdentity = !knownEmail || !freshEmail || freshEmail === knownEmail;
-    if (sameIdentity) return { outcome: 'same', account: this.finalizeSubscription(id) };
-
-    // ── mismatch: move the fresh login out of this record's dir ──
-    const src = this.subDir(id);
-    const moveLogin = (destDir) => {
-      fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
-      for (const f of ['.credentials.json', '.claude.json']) {
-        try { fs.renameSync(path.join(src, f), path.join(destDir, f)); } catch { }
-      }
-    };
+    const kept = this._reloginBefore ? this._reloginBefore.get(id) : null;
+    const lost = !kept || Date.now() - kept.at > RELOGIN_BEFORE_TTL_MS;
+    if (this._reloginBefore) this._reloginBefore.delete(id);
+    const be = this._acctBackend(a), creds = this._credsOf(be), src = this.subDir(id);
+    let afterAuth = null;
+    try { afterAuth = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(src, RR) : null; } catch { afterAuth = null; }
+    const after = accountIdentity.identityRecordOf({ harness: be, declared: null, auth: afterAuth });
+    const verdict = accountIdentity.beforeAfterVerdict({ before: lost ? null : kept.record, after, word: lost ? reloginWordOf(a) : kept.word, lost });
+    if (verdict === 'same') {
+      if (a.reloginAsk) { delete a.reloginAsk; this._save(); }
+      return { outcome: 'same', account: this.finalizeSubscription(id) };
+    }
+    if (verdict === 'ask') {
+      // HELD, not adopted: the row stays signed out until the person answers on it (reloginAnswer)
+      this._moveLogin(src, path.join(src, RELOGIN_HELD));
+      a.reloginAsk = { at: Date.now(), ...(lost ? { lost: true } : {}) };
+      this._save();
+      this._displaySeed(a);   // B-360d: this folder just changed — its facts set in this step
+      this._notify();
+      return { outcome: 'ask', keptName: a.name, ...(lost ? { lost: true } : {}) };
+    }
+    // ── different: the row whose record is «same» as the sign-in, else a NEW row ──
+    if (a.reloginAsk) { delete a.reloginAsk; this._save(); }
     const other = this._state.accounts.find((x) => x.id !== id
       && capsOf(this._acctBackend(x)).oauthUsage && this._acctType(x) === 'subscription'
-      && norm(x.email || (String(x.name || '').includes('@') ? x.name : '')) === freshEmail);
+      && accountIdentity.sameAccount(this.identityRecordOf(x.id, { withinMs: RELOGIN_BEFORE_TTL_MS }), after) === 'same');
     if (other) {
-      moveLogin(this.subDir(other.id));
+      this._moveLogin(src, this.subDir(other.id));
       this._displaySeed(this.get(other.id)); this._displaySeed(a);   // B-360d: both folders just changed — their facts set in this step
       this._notify();
       return { outcome: 'moved', movedTo: { id: other.id, name: other.name }, freshEmail: fresh.email, keptName: a.name };
     }
     const created = this.createSubscription({ name: (fresh.email || 'Subscription').slice(0, 60) });
-    moveLogin(this.subDir(created.id));
+    this._moveLogin(src, this.subDir(created.id));
     this._displaySeed(a);   // B-360d: this record's folder lost its login in this step (the created one is seeded by its finalize)
     const finalized = this.finalizeSubscription(created.id);
     this._notify();
     return { outcome: 'split', account: finalized, freshEmail: fresh.email, keptName: a.name };
+  }
+  /** THE PERSON's ANSWER to a held sign-in («ask»), on the row: 'same' ⇒ the sign-in returns into this row (in place); 'another' ⇒ a
+   *  NEW row is made around it. → { outcome: 'same' | 'split' | 'none' (nothing asked) | 'gone' (nothing held any more) } */
+  reloginAnswer(id, answer) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
+    if (answer !== 'same' && answer !== 'another') throw new Error('answer must be «same» or «another»');
+    if (!a.reloginAsk) return { outcome: 'none' };
+    delete a.reloginAsk; this._save();
+    const held = path.join(this.subDir(id), RELOGIN_HELD);
+    if (answer === 'same') {
+      if (!this._moveLogin(held, this.subDir(id))) { this._notify(); return { outcome: 'gone' }; }
+      return { outcome: 'same', account: this.finalizeSubscription(id) };
+    }
+    const created = this.createSubscription({ name: 'Subscription' });
+    if (!this._moveLogin(held, this.subDir(created.id))) { this.remove(created.id); this._notify(); return { outcome: 'gone' }; }
+    const finalized = this.finalizeSubscription(created.id);
+    this._notify();
+    return { outcome: 'split', account: finalized, keptName: a.name };
   }
 
   finalizeSubscription(id) {

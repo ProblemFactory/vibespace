@@ -765,6 +765,8 @@ app.post('/api/accounts/:id/relogin', (req, res) => {
     });
     let baselineAttempt = null;
     try { baselineAttempt = accounts._subscriptionLoginStatus?.(a.id)?.attempt || null; } catch { }
+    // THE BEFORE (row B-87fd identity unit 3): what this row's folder names at the press, kept in memory for the resolve
+    try { accounts.reloginBegin(a.id); } catch { }
     res.json({ success: true, id: a.id, loginCmd, baselineAttempt });
   } catch (e) { failAcct(res, e); }
 });
@@ -785,6 +787,9 @@ app.post('/api/accounts/:id/relogin-finalize', (req, res) => {
     //   'pending'                  — nothing on disk yet: stay silent
     //   'same'  { account }        — the ordinary in-place re-login
     //   'split' { account }        — a stranger's login, minted as a new record
+    //   'ask'   { keptName, lost? } — the facts could not prove whose sign-in it
+    //                                is: HELD in the row's folder, not adopted —
+    //                                the person answers on the row (relogin-answer)
     //   'moved' { movedTo }        — the login belonged to ANOTHER record and
     //                                was relocated into it; that record's
     //                                ledger row is the one to retract, and
@@ -806,6 +811,20 @@ app.post('/api/accounts/:id/relogin-finalize', (req, res) => {
     } catch { }
     res.json({ success: true, ...r });
   } catch (e) { failAcct(res, e); }
+});
+
+// THE PERSON's ANSWER to a held sign-in (row B-87fd identity unit 3, 主开发 r2533): the row asked whether its new sign-in is the same
+// account — {answer: 'same'} returns it into the row (in place), {answer: 'another'} makes a new row around it; an answered or gone
+// question says so by name ('none' / 'gone'). A captured sign-in sweeps and wakes as the finalize's does.
+app.post('/api/accounts/:id/relogin-answer', (req, res) => {
+  try {
+    const r = accounts.reloginAnswer(req.params.id, req.body && req.body.answer);
+    if (r?.account?.loggedIn) {
+      sweepOnLoginTransition(req.params.id, r, 're-login');
+      wakeOnLoginSuccess(req.params.id, r, 're-login', r.account.id || req.params.id);
+    }
+    res.json({ success: true, ...r });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // THE FIRST SIGN-IN BECOMES THE DEFAULT (lane signin-card-real-screen): a card's row (signinPending, read before
