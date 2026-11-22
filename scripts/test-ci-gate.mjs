@@ -227,11 +227,12 @@ console.log('\n§2 tier hygiene');
   // and B-23e5 line 262's follow (主开发 r1733 (7)): 17 → 18 — test-safe-fs-path-memory restated 9.0 → 13.0 s (its remainder's legs) with its named debt B-4b9a
   // THE BOUND IS THE TRUE COUNT, A RATCHET THAT ONLY GOES DOWN (主开发 r1531, lane bl-release's restating line, 2026-11-22): the
   // fast tier's false rows restated at what they read ALONE, each ≥ 10 s with its named debt (family B-7e49, the fast tier's time) —
-  // 18 → 47 by that arithmetic (the train's 18 + this line's 29 new overs, after r2048's second readings). Its first entry is PINNED below (a raise is a ruling's: it edits that pin with its words).
+  // 18 → 47 by that arithmetic (the train's 18 + this line's 29 new overs, after r2048's second readings), and 47 → 48 AT THE PICK (int416, 主开发 r2183: the
+  // TRUE COUNT on the train: + test-safe-fs-path-memory, the one over the train took after this line's base, line 311's B-4b9a). Its first entry is PINNED below (a raise is a ruling's: it edits that pin with its words).
   // From here the count of named debts IS the bound (judged by COUNT, not by name): a NEW over is red until its line moves the
   // row heavy or cuts it; a cut that takes a row off the list is red until ITS OWN LINE appends the lower count to the ratchet; an
   // entry not below the one before it is red (a raise is a ruling's, never a line's arithmetic).
-  const FAST_OVER_RATCHET = [47];   // [r1531's true count, then each cut's lower count, in order]
+  const FAST_OVER_RATCHET = [48];   // [r1531's true count at the pick, then each cut's lower count, in order]
   const overBoundFindings = (count, ratchet) => {
     const bound = ratchet[ratchet.length - 1], out = [];
     if (ratchet.some((b, i) => i > 0 && b >= ratchet[i - 1])) out.push(`the ratchet does not go down: ${ratchet.join(' → ')}`);
@@ -244,7 +245,7 @@ console.log('\n§2 tier hygiene');
     && /does not go down/.test(overBoundFindings(FAST_OVER_RATCHET[0] - 3, [FAST_OVER_RATCHET[0], FAST_OVER_RATCHET[0] - 2, FAST_OVER_RATCHET[0] - 1, FAST_OVER_RATCHET[0] - 3]).join()) && /does not go down/.test(overBoundFindings(FAST_OVER_RATCHET[0] - 2, [FAST_OVER_RATCHET[0], FAST_OVER_RATCHET[0] - 2, FAST_OVER_RATCHET[0] - 2]).join())
     && overBoundFindings(FAST_OVER_RATCHET[0] - 2, [FAST_OVER_RATCHET[0], FAST_OVER_RATCHET[0] - 2]).length === 0,
     'CONTROLS: the bound on the count is green, a lowered ratchet on its count is green; one over too many, one under (a cut not yet appended), a ratchet that rises at its end, in its middle, or stays level are each red');
-  ok(FAST_OVER_RATCHET[0] === 47, `the ratchet's first entry is r1531's true count, 47 (a raise is a ruling's: its words edit this pin)`);
+  ok(FAST_OVER_RATCHET[0] === 48, `the ratchet's first entry is r1531's true count at the train's pick, 48 (the line's 47 + the train's test-safe-fs-path-memory; a raise is a ruling's: its words edit this pin)`);
   ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overBoundFindings(overRows.length, FAST_OVER_RATCHET).length === 0,
     `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept; the bound ON the true count (${overBoundFindings(overRows.length, FAST_OVER_RATCHET).join('; ') || FAST_OVER_RATCHET.join(' → ')})`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
