@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-function create({ rootDir, port, onHookFileCreated = null, applyThisMachine = null }) { // onHookFileCreated({harness, file, rel, at}) — the registration that CREATED a hook file (lane hooks-create: src/server/late-hooks.js tells the sessions that predate it)
+function create({ rootDir, port, onHookFileCreated = null, applyThisMachine = null, homeRead = null }) { // onHookFileCreated({harness, file, rel, at}) — the registration that CREATED a hook file (lane hooks-create: src/server/late-hooks.js tells the sessions that predate it)
   const ensureDir = (dir) => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); };
   const USAGE_CACHE_DIR = path.join(rootDir, 'data', 'usage-cache');
 // The harness registry + the settings/plan modules are needed by createHookHelper()
@@ -674,7 +674,7 @@ function ensureAgentHooks({ auto = false } = {}) {
   if (refused) return Promise.resolve({ skipped: true, refused });
   const held = settingsHeldNow();
   if (held) { replayAtLift(); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }   // B-225b: no write while the settings are held
-  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return ourRowsOnDisk().then((on) => (on.some((x) => x.ours) ? stripAgentHookEntries({ ifOptedOut: true }).then((removed) => ({ optedOut: true, removed })) : { optedOut: true }));   // r1675: opted out AND our rows still there (a removal the hub's stop lost) ⇒ ONE removal queued
+  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return (typeof homeRead === 'function' ? homeRead(ourRowsOnDisk) : ourRowsOnDisk().then((value) => ({ value }))).then((r) => (r.value ? (r.value.some((x) => x.ours) ? stripAgentHookEntries({ ifOptedOut: true }).then((removed) => ({ optedOut: true, removed })) : { optedOut: true }) : optedOutUnread(r)));   // r1675: opted out AND our rows still there (a removal the hub's stop lost) ⇒ ONE removal queued; r2224 (1): that look is a read under the home OUTSIDE a job — through the runner's guard (bounded, counted, refused while an earlier read is out), an unanswered look queues no removal and says why
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
   const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`;
@@ -717,6 +717,12 @@ function ensureAgentHooks({ auto = false } = {}) {
     if (_lastRootError && !_registeredAfterError && Object.values(results).some((x) => x && x.ok)) _registeredAfterError = { at: Date.now(), error: _lastRootError.error, since: _lastRootError.at };
     return results;
   }
+}
+// r2224 (1): the opted-out start's look at our rows did not answer (or was refused by the guard): no removal is queued, said by name
+function optedOutUnread(r) {
+  const why = `our hook entries on disk were not read (${r.why || (r.error && r.error.message) || r.error || 'no answer'}) — no removal asked; asked again at the next start`;
+  console.warn(`[hooks] opted out: ${why}`);
+  return { optedOut: true, error: why };
 }
 // which hook files still hold one of OUR entries, read off the loop; a file that cannot be read or parsed is said by name
 async function ourRowsOnDisk() {

@@ -30,6 +30,11 @@ console.log('— the daemon is a second holder: a cluster secret in the server e
   const daemonSrc = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   // B-6be2 (lane jobenv-strip-census): the daemon birth also drops the harness credential names — `daemonEnv(process.env, { drop: … })`
   check('WIRING: _spawnLocal spawns the daemon from daemonEnv(process.env[, { drop }])', /env:\s*\{\s*\.\.\.daemonEnv\(process\.env(?:\)|,\s*\{\s*drop:)/.test(clientSrc));
+  // r2224 (4): the hub's own local daemon is born WITHOUT the hub's inherited address — a pipe session's env is laid over the daemon's
+  // own, so a start with Integration OFF (which hands none) would get back the address of a VibeSpace the hub was started inside
+  const NO_API = /daemonEnv\(process\.env,\s*\{\s*drop:\s*[^\n]*\.concat\('VIBESPACE_API'\)\s*\}\)/;
+  check('WIRING (r2224 (4)): _spawnLocal drops VIBESPACE_API from the local daemon\'s birth env', NO_API.test(clientSrc));
+  check('CONTROL: the drop rule is red on the birth line without the name', !NO_API.test(clientSrc.replace(".concat('VIBESPACE_API')", '')));
   check('WIRING: spawnEnv() merges over daemonEnv(process.env), and the --stdio bridge + the upgrade re-exec are born from it too', daemonSrc.includes(ANCHOR) && (daemonSrc.match(/daemonEnv\(process\.env\)/g) || []).length >= 3);
   const RAW = /env:\s*(?:process\.env\b|\{\s*\.\.\.process\.env\b)/;
   check('WIRING: no `env: process.env` / `env: { ...process.env` literal survives in src/agentd/{client,agentd}.js', !RAW.test(clientSrc) && !RAW.test(daemonSrc));

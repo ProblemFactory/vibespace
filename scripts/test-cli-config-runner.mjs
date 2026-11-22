@@ -182,7 +182,7 @@ async function lookLegs(Rm) {
   const l = await lookLegs(R);
   ok(!!(l.stalled && l.stalled.ok === false && /the plan's files under the home could not be read within 80 ms/.test(l.stalled.why || '') && !l.order.includes('run STALLED') && l.next && l.next.ok === false && /the home still has not answered an earlier read/.test(l.next.why || '')),
     'a look under the home that never answers: the job ends at the bound — «the plan\'s files … could not be read», the helper not run — and the NEXT request ENDS at once, by name (r2109)', l);
-  const LOOK = "    const look = async () => { if (homeStuck > 0) return { held: true }; const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? { timedOut: true } : { value: r.value }; };";
+  const LOOK = "    const look = async () => { if (!files.length) return { value: [] }; if (homeStuck > 0) return { held: true }; const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? { timedOut: true } : { value: r.value }; };";
   const lm = await lookLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), LOOK, '    const look = async () => ({ value: await Promise.all(files.map((f) => exists(f.file))) });', 'an unbounded look'), 'look-unbounded')));
   ok(!lm.next, 'RED (an unbounded look — the follow\'s first form): the stalled look holds the queue — the next request never ends', lm);
 }
@@ -219,6 +219,7 @@ async function joinLegs(Rm) {
   ok(!!(!jm.runs.includes('PLAN-Y') && jm.y && jm.y.skipped), 'RED (the joiner\'s read dropped — the follow\'s first form): the press is answered «not run: no longer asked»', jm);
 }
 
+const BEFORE_GUARD = "      if (homeStuck > 0) return broke(job, `not run: the home still has not answered an earlier read (${homeStuck} still out) — nothing written by this hub, asked again at the next request`);   // r2224 (2): a «still asked» read that ran out of time is still out — `before` and the look ask nothing more\n";
 console.log('①g r2109: while an earlier read of the home is still out, a job asks the home NOTHING more — it fails at once, by name');
 async function heldLegs(Rm) {
   let stats = 0; const st = handStarter();
@@ -234,8 +235,63 @@ async function heldLegs(Rm) {
     'a held home: the first job ends at its bound; the NEXT job fails at once by name («the home still has not answered») and issues NO new read', h);
   const JOB_GUARD = "      if (homeStuck > 0) return broke(job, `not run: the home still has not answered an earlier read (${homeStuck} still out) — nothing written by this hub, asked again at the next request`);   // r2109: no new read\n";
   const LOOK_GUARD = 'if (homeStuck > 0) return { held: true }; ';
-  const hm = await heldLegs(require(MC.write(RUNNER_REL, anchored(anchored(src(RUNNER_REL), JOB_GUARD, '', 'no job guard'), LOOK_GUARD, '', 'no look guard'), 'held-asks-again')));
+  const hm = await heldLegs(require(MC.write(RUNNER_REL, anchored(anchored(anchored(src(RUNNER_REL), JOB_GUARD, '', 'no job guard'), BEFORE_GUARD, '', 'no guard after the reads'), LOOK_GUARD, '', 'no look guard'), 'held-asks-again')));
   ok(hm.stats > hm.statsAfterFirst, 'RED (no guard — the follow\'s second form): the next job issues a NEW read into the held home (one more stranded in the pool)', hm);
+}
+
+console.log('①h r2224 (3): THE COUNT RETURNS TO ZERO — once the held read answers, the next job runs (a runner that never runs again is the worst outcome)');
+async function releaseLegs(Rm) {
+  const held = []; let release = false; const st = handStarter();
+  const r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', home: ROOT, timeoutMs: 80, stat: () => (release ? Promise.reject(new Error('none')) : new Promise((res, rej) => { held.push(rej); })), journal: () => {}, warn: () => {} });
+  const first = await r.apply(() => planAt('.held'), 'a save', { kind: 'apply' });
+  release = true; for (const rej of held) rej(new Error('ESTALE: the home answered at last')); await tick(); await tick();   // the held read settles
+  let nextLanding = null; const next = r.apply(() => planAt('.held'), 'a press', { kind: 'apply+hooks' }).then((l) => { nextLanding = l; });
+  for (let k = 0; k < 60 && !nextLanding; k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }
+  return { first: { ok: first.ok, why: first.why }, next: nextLanding && { ok: nextLanding.ok, why: nextLanding.why }, runs: st.calls.length, pending: !!next };
+}
+{
+  const z = await releaseLegs(R);
+  ok(!!(z.first.ok === false && /could not be read within 80 ms/.test(z.first.why || '') && z.next && z.next.ok === true && z.runs === 1),
+    'a held home that answers at last: the first job ended at its bound; the read settles, the count returns to zero, and the NEXT job runs the helper and lands', z);
+  const BACK = 'homeStuck++; const back = () => { homeStuck--; }; p.then(back, back); }';
+  const zm = await releaseLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), BACK, 'homeStuck++; }', 'a count that never comes back'), 'stuck-for-ever')));
+  ok(!!(zm.next && zm.next.ok === false && /the home still has not answered an earlier read/.test(zm.next.why || '') && zm.runs === 0), 'RED (a count that never comes back): the home answered, yet every next job is refused — the runner never runs again', zm);
+}
+
+console.log('①i r2224 (2): a «still asked» read that ran out of time is still out — the job asks the home nothing more (its `before` included)');
+async function beforeLegs(Rm) {
+  let befores = 0; const st = handStarter();
+  const r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', timeoutMs: 80, stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+  const inflight = r.apply(() => 'PLAN-0', 'a save', { kind: 'apply' });
+  await tick();
+  const x = r.apply(() => 'PLAN-X', 'a start', { kind: 'k', when: () => new Promise(() => {}) });   // its read never answers (counted at the bound)
+  const y = r.apply(() => 'PLAN-Y', 'a press', { kind: 'k', when: async () => true, before: async () => { befores++; return {}; } });   // joins it, says yes
+  let all = null; const done = Promise.all([inflight, x, y]).then((v) => { all = v; });
+  for (let k = 0; k < 100 && !all; k++) { for (const call of st.calls) call.finish(okRun); await new Promise((res) => setTimeout(res, 10)); }   // ≤ 1 s (the bound is 80 ms)
+  return { befores, y: all && { ok: all[2].ok, why: all[2].why }, runs: st.calls.map((c) => c.o.envAdd.VIBESPACE_CLI_CONFIG), pending: !!done };
+}
+{
+  const b = await beforeLegs(R);
+  ok(!!(b.befores === 0 && b.y && b.y.ok === false && /not run: the home still has not answered an earlier read \(1 still out\)/.test(b.y.why || '') && !b.runs.includes('PLAN-Y')),
+    'one joined read ran out of time, another said yes: the job ends at once, by name, and its `before` (a read of the home) is never started', b);
+  const bm = await beforeLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), BEFORE_GUARD, '', 'no guard after the reads'), 'before-after-stuck')));
+  ok(bm.befores === 1, 'RED (no guard after the reads — the second follow\'s form): the `before` read starts while the timed-out read is still out', bm);
+}
+
+console.log('①j r2224 (5): a run whose own look ran out of time says ITS reason to the check, never the guard\'s');
+async function ownReasonLegs(Rm) {
+  const st = handStarter();
+  const r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', home: ROOT, timeoutMs: 80, stat: () => new Promise(() => {}), journal: () => {}, warn: () => {} });
+  const l = await r.apply(() => planAt('.held'), 'hooks', { kind: 'apply+hooks', after: async () => ({ claude: { ok: true } }) });
+  return { ok: l.ok, why: l.why, after: l.after };
+}
+{
+  const o = await ownReasonLegs(R);
+  ok(!!(o.ok === false && o.after && o.after.error === o.why && /the plan's files under the home could not be read within 80 ms/.test(o.after.error || '')),
+    'the look before the helper ran out of time: the check is told the RUN\'s reason («the plan\'s files … could not be read»), as r1813 asks', o);
+  const OWN = ' : landing.why } :';
+  const om = await ownReasonLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), OWN, ' : `the check of the files was not asked: the home still has not answered an earlier read (${homeStuck} still out)` } :', 'the guard\'s words for a broken run'), 'guard-words')));
+  ok(!!(om.after && /the check of the files was not asked/.test(om.after.error || '')), 'RED (the second follow\'s words): the broken run\'s check says «not asked: the home still has not answered» instead of the run\'s reason', om);
 }
 
 console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created read off the loop, the env, the hook command key by key');
@@ -245,7 +301,7 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
   const HOME0 = process.env.HOME; process.env.HOME = home;
   try {
     let SYNC = null;
-    const GEN = require(path.join(REPO, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });
+    const GEN = require(path.join(REPO, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });
     const asked = [];
     const starter = { run: (cmd, args, o = {}) => new Promise((resolve) => { asked.push({ cmd, args, envAdd: { ...(o.envAdd || {}) } }); let out = '', err = ''; const c = spawn(cmd, args, { env: { ...process.env, ...(o.envAdd || {}) }, stdio: ['ignore', 'pipe', 'pipe'] }); c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (code) => resolve({ started: true, code, stdout: out, stderr: err })); }) };
     SYNC = require(path.join(REPO, SYNC_REL)).create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs'), starter, hooksWanted: () => true, log: () => {}, warn: () => {} });
@@ -289,7 +345,7 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
     const kAfter = JSON.parse(fs.readFileSync(sf, 'utf8'));
     ok(stK.installed === true && stK.stale === false && rk.claude && rk.claude.ok === true && ['SessionStart', 'UserPromptSubmit', 'Stop'].every((ev) => cmdOf(kAfter, ev) === keptCmd) && !said.some((l) => l.startsWith('Hook command rewritten')),
       '(d) a kept spelling reads installed (the check starts nothing for it), and a registration over it keeps it, rewrites nothing and reads ok', { stK, rk, said });
-    const GENM = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), '  const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);', '  const sameRunner = (c) => c === hookCmd;', 'a plain string compare'), 'plain-compare')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });
+    const GENM = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), '  const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);', '  const sameRunner = (c) => c === hookCmd;', 'a plain string compare'), 'plain-compare')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });
     const stKm = GENM.agentHooksStatus().claude;
     ok(stKm.installed === false && stKm.stale === true, 'RED (a plain string compare): the kept spelling reads stale — the six-hourly check would start a run for it every time', stKm);
     // THE REMOVAL (the Integration switch off, «Remove hooks»): the helper's --uninstall strips ONLY our entries, never a managed key
@@ -368,10 +424,34 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       };
       const op = await optLegs(GEN);
       ok(op.r.optedOut === true && op.r.removed === true && !op.left, 'r1675: a start with the opt-out mark and our rows still in the file queues ONE removal — the rows are gone', op);
-      const OPT_NOW = /  if \(auto && fs\.existsSync\(HOOK_OPTOUT_FILE\)\) return ourRowsOnDisk\(\)[^\n]*/;
-      const GENO = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), OPT_NOW, '  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });', 'the cure\'s early return'), 'opt-out-early')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });   // stale-pins: kept (the cure's line, rebuilt for the red control)
+      const OPT_NOW = /  if \(auto && fs\.existsSync\(HOOK_OPTOUT_FILE\)\) return \(typeof homeRead[^\n]*/;
+      const GENO = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), OPT_NOW, '  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });', 'the cure\'s early return'), 'opt-out-early')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });   // stale-pins: kept (the cure's line, rebuilt for the red control)
       const opm = await optLegs(GENO);
       ok(opm.r.optedOut === true && !opm.r.removed && opm.left, 'RED (the cure\'s early return): opted out, nothing removed — our rows stay in the person\'s file', opm);
+      // r2224 (1): that look at our rows is a read under the home made OUTSIDE a job — it goes through the runner's guard: while an
+      // earlier read of the home is out it reads NOTHING, queues no removal and says why (the hook-root watch asks it at every backoff)
+      const heldOptLegs = async (GM) => {
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });   // our rows in the file
+        const RH = R.createCliConfigRunner({ starter: handStarter(), helperPath: '/x/helper.mjs', home: ROOT, timeoutMs: 80, stat: () => new Promise(() => {}), journal: () => {}, warn: () => {} });
+        await RH.apply(() => planAt('.held'), 'a save', { kind: 'apply' });   // a home that never answers: one read out
+        const queued = [];
+        const G = GM.create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => { queued.push(o.reason); return SYNC.applyThisMachine(o); }, homeRead: (fn) => RH.homeRead(fn) });
+        fs.writeFileSync(G.HOOK_OPTOUT_FILE, new Date().toISOString() + '\n');
+        const rf0 = fs.promises.readFile; let reads = 0;
+        fs.promises.readFile = (f, ...a) => { if (String(f).startsWith(home)) reads++; return rf0.call(fs.promises, f, ...a); };
+        let r = null; try { r = await G.ensureAgentHooks({ auto: true }); } finally { fs.promises.readFile = rf0; }
+        const left = oursIn(JSON.parse(fs.readFileSync(sf, 'utf8')));
+        fs.rmSync(G.HOOK_OPTOUT_FILE, { force: true });
+        return { r: r && { optedOut: r.optedOut, error: r.error || null, removed: !!r.removed }, reads, queued, left };
+      };
+      const ho = await heldOptLegs(require(path.join(REPO, 'src/server/agent-tool-generators.js')));
+      ok(!!(ho.r && ho.r.optedOut === true && !ho.r.removed && /our hook entries on disk were not read \(the home still has not answered an earlier read \(1 still out\)\)/.test(ho.r.error || '') && ho.reads === 0 && !ho.queued.length),
+        'r2224 (1): opted out while an earlier read of the home is out — the start reads NOTHING under the home, queues no removal, and says why by name', ho);
+      const GENU = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), "typeof homeRead === 'function' ? homeRead(ourRowsOnDisk) : ", '', 'the read outside the guard'), 'opt-out-unguarded'));
+      const hom = await heldOptLegs(GENU);
+      ok(hom.reads > 0, 'RED (the read outside the guard — the second follow\'s form): the opted-out start reads the hook files into the held home', hom);
+      ok(src('server.js').includes('homeRead: (fn) => harnessConfig.homeRead(fn)') && src(SYNC_REL).includes('function homeRead(fn) { return cliRunner ? cliRunner.homeRead(fn)'),
+        'WIRING (r2224 (1)): the hub hands the generators the runner\'s guarded read (server.js → harness-config-sync → the runner)');
       // r1813 (2): an Install pressed WHILE the start reads the mark and the rows (outside the queue): the start's removal reads the
       // mark again INSIDE its job — the Install, answered «ok», is never stripped after it
       const pressLegs = async (G) => {
@@ -385,7 +465,7 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const pl = await pressLegs(GEN);
       ok(!!(pl.install === true && pl.left && pl.start && pl.start.removed && /no longer asked/.test(pl.start.removed.skipped || '')), 'r1813: an Install pressed during the start\'s wait is answered ok and STAYS — the start\'s removal finds the mark gone in its own job and is not run', pl);
       const WHEN = "when: ifOptedOut ? stillOptedOut : null,";
-      const GENW = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), WHEN, 'when: null,', 'the mark read outside the queue'), 'no-when')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });
+      const GENW = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), WHEN, 'when: null,', 'the mark read outside the queue'), 'no-when')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });
       const plm = await pressLegs(GENW);
       ok(plm.install === true && !plm.left, 'RED (the mark read outside the queue — the r1675 form): the Install is answered ok, then the start\'s removal strips it', plm);
       // r1813 (3) the true words: a run that broke BEFORE its check says the run's own reason, never «the check … broke»

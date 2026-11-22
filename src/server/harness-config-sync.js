@@ -142,6 +142,9 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     const kind = strip ? (when ? 'strip-if-still-asked' : 'strip') : hooks ? 'apply+hooks' : 'apply';   // r1813: a conditional removal is its own kind (never joins a pressed one)
     return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? true : hooks })), reason, { uninstall: strip, kind, before, after, when });
   }
+  /** r2224 (1): a read under this machine's home made OUTSIDE a job (the opted-out start's look at our hook rows) — through the
+   *  runner's guard (bounded, counted, refused while an earlier read is out); no runner: the read as it is → { value } | { error } */
+  function homeRead(fn) { return cliRunner ? cliRunner.homeRead(fn) : Promise.resolve().then(fn).then((value) => ({ value }), (error) => ({ error })); }
   /** THE SPAWN GATE (r1407 (a)): null when this machine's config has landed (or nothing was asked: a refused or skipped
    *  server), else { late | failed, why } once the bound passes — the start goes on either way and says it once. A failed
    *  last landing is asked again here. */
@@ -228,7 +231,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     return harnesses.list().filter((h) => !harnesses.isBuiltin(h.id) && h.settings).map((h) => ({ id: h.id, settings: h.settings }));
   }
 
-  return { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigKeys, cliConfigPlan, cliConfigPlanB64, syncCliConfig, applyThisMachine, cliRunner, startGate, cliConfigStatus, onSettingsWrite, liveRows, contributedTables, HARNESS_SETTINGS };
+  return { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigKeys, cliConfigPlan, cliConfigPlanB64, syncCliConfig, applyThisMachine, homeRead, cliRunner, startGate, cliConfigStatus, onSettingsWrite, liveRows, contributedTables, HARNESS_SETTINGS };
 }
 
 module.exports = { create, configPlanSpecs, accessorsFor };

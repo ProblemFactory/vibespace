@@ -48,7 +48,8 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     const files = status ? [] : filesOf(planB64);
     // r1876: EVERY LOOK UNDER THE PERSON's HOME IS BOUNDED — one that does not come back counts as «not known», said by name
     // r2109: while an earlier read of the home is still out, a look asks NOTHING (no new read): it fails at once, by name
-    const look = async () => { if (homeStuck > 0) return { held: true }; const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? { timedOut: true } : { value: r.value }; };
+    // r2224: a look at NO file (a --status run: the helper reads, in its own process) asks the home nothing — never held
+    const look = async () => { if (!files.length) return { value: [] }; if (homeStuck > 0) return { held: true }; const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? { timedOut: true } : { value: r.value }; };
     const heldWhy = (then) => `the home still has not answered an earlier read (${homeStuck} still out) — ${then}`;
     const lb = await look();
     if (!lb.value) return { at: Date.now(), reason, ok: false, receipts: [], created: [], why: lb.held ? heldWhy('the helper was not run, nothing written by this hub, asked again at the next request') : `the plan's files under the home could not be read within ${timeoutMs} ms (a home that does not answer) — the helper was not run, nothing written by this hub` };
@@ -129,6 +130,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
           return { at: Date.now(), reason: job.reason, ok: true, receipts: [], created: [], why: null, skipped: 'not run: no longer asked when its turn came' };
         }
       }
+      if (homeStuck > 0) return broke(job, `not run: the home still has not answered an earlier read (${homeStuck} still out) — nothing written by this hub, asked again at the next request`);   // r2224 (2): a «still asked» read that ran out of time is still out — `before` and the look ask nothing more
       let before;
       if (typeof job.before === 'function') { const b = await bounded(job.before); before = b.value; }   // a before that did not answer in the bound: the run goes on without it
       let planB64 = null;
@@ -138,7 +140,8 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       const landing = before === undefined ? ran : { ...ran, before };
       if (typeof job.after === 'function') {
         const a = homeStuck > 0 ? { held: true } : await bounded(() => job.after(landing));   // r2109: no new read while one is out
-        landing.after = a.held ? { error: `the check of the files was not asked: the home still has not answered an earlier read (${homeStuck} still out)` } : a.timedOut ? { error: `the check of the files did not finish within ${timeoutMs} ms (a home that does not answer)` } : a.error ? { error: `the check after the landing broke: ${said(a.error)}` } : a.value;
+        // r2224 (5): a run that broke (its own look ran out of time, the read still out) says ITS reason, not the guard's
+        landing.after = a.held ? { error: landing.ok ? `the check of the files was not asked: the home still has not answered an earlier read (${homeStuck} still out)` : landing.why } : a.timedOut ? { error: `the check of the files did not finish within ${timeoutMs} ms (a home that does not answer)` } : a.error ? { error: `the check after the landing broke: ${said(a.error)}` } : a.value;
       }
       return landing;
     })()
@@ -152,6 +155,13 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
         return landing;
       })
       .finally(() => { inFlight = null; if (!queue.length) settle(last); pump(); });
+  }
+  /** r2224 (1): a read under the home made OUTSIDE a job (the opted-out start's look at our hook rows) goes through the SAME guard —
+   *  bounded by the run's bound, counted while it is out, refused at once while an earlier read is out → { value } | { error } |
+   *  { timedOut, why } | { held, why } */
+  function homeRead(fn) {
+    if (homeStuck > 0) return Promise.resolve({ held: true, why: `the home still has not answered an earlier read (${homeStuck} still out)` });
+    return bounded(fn).then((r) => (r.timedOut ? { timedOut: true, why: `the home did not answer within ${timeoutMs} ms` } : r));
   }
   /** --status: the managed keys read off disk BY THE HELPER (nothing written). Never queued behind an apply's waiter list:
    *  a read beside a write is a read. */
@@ -168,7 +178,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       watchers.add(w);
     });
   }
-  return { apply, status, landedWithin, last: () => last, busy: () => !!(inFlight || queue.length), BOUND_MS: boundMs };
+  return { apply, status, homeRead, landedWithin, last: () => last, busy: () => !!(inFlight || queue.length), BOUND_MS: boundMs };
 }
 
 module.exports = { createCliConfigRunner, BOUND_MS, RUN_TIMEOUT_MS };

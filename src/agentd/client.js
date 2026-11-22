@@ -366,7 +366,9 @@ class DeviceManager {
       detached: true, stdio: 'ignore',
       // B-6be2: born without an ambient account selector too — a daemon child's env is the server's laid over
       // the daemon's OWN, so a name the server deleted would come back from here (src/harness-env.js).
-      env: { ...daemonEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()) }), ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
+      // r2224 (4): and without the HUB's inherited address — a pipe session's env is laid over this daemon's own, so a start with
+      // Integration OFF (which hands none) would get back the address of a VibeSpace this hub was started inside; the daemon reads none
+      env: { ...daemonEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()).concat('VIBESPACE_API') }), ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
     });
     // ckpt61 cure 2: its error listener at once — a start that fails (a full file table: EMFILE / ENFILE) returns with no pid and
     // its 'error' queued for the next tick; unheard, that is an uncaught exception and the hub ends. The failed start is said; the
