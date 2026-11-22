@@ -730,7 +730,15 @@ console.log('— ⑬ the whole history: the steps before the journal\'s 800 KB r
     // turn): ONE warm parses at a time across conversations. A clock that moves 10 ms a call makes every slice check due (each warm yields
     // every 64 lines); two warms asked at once parse ONE after the other; CONTROL a copy without the queue interleaves them
     const BSRC = fs.readFileSync(path.join(REPO, 'src/agy-backfill.js'), 'utf8');
-    const BQ = mutantCopies('agy-warm-unqueued', REPO).load('src/agy-backfill.js', anchored(BSRC, '  const p = oneWarm(async () => {', /* stale-pins: kept — the control's PLANT (the warm unqueued), not a pin */ '  const p = (async (fn) => fn())(async () => {', 'the warm without its queue'), 'unqueued');
+    // THE CONTROL's SCENE HELD STILL (主开发 r1981, the whole tier's UTC row on Node 22 at 61a1c21f5: «unqueued: switches 1»): a warm awaits its
+    // store read — a chain of fs.promises calls — before it parses, and the copy's second read could come back only after the first warm's
+    // ten yields had parsed all 640 lines, so nothing was left to interleave. The copy now HOLDS both reads until both have returned (no
+    // timer, no longer wait): both warms then parse from the same turn, and the queue is the only thing that can keep them apart
+    const HOLD = '    const reader = storeReader(home, { log });\n';
+    const HELD = "    const reader = ((r) => ({ ...r, linesFrom: async (...a) => { const got = await r.linesFrom(...a); if (++HELD_READS.n >= 2) HELD_READS.go(); await HELD_READS.both; return got; } }))(storeReader(home, { log }));\n";
+    const TOP = "const { storeReader, snapshotsOf } = require('./agy-store-fs');\n";
+    const HELD_TOP = TOP + 'const HELD_READS = { n: 0 }; HELD_READS.both = new Promise((r) => { HELD_READS.go = r; });\n';
+    const BQ = mutantCopies('agy-warm-unqueued', REPO).load('src/agy-backfill.js', anchored(anchored(anchored(BSRC, '  const p = oneWarm(async () => {', /* stale-pins: kept — the control's PLANT (the warm unqueued), not a pin */ '  const p = (async (fn) => fn())(async () => {', 'the warm without its queue'), HOLD, HELD, 'the control holds both reads'), TOP, HELD_TOP, 'the control holds both reads (its gate)'), 'unqueued');
     const parsedOrder = async (B, tag) => {
       const ids = ['a', 'b'].map((k) => `c0de0000-0000-4000-8000-00000000${tag}${k}0`), seq = [];
       for (const [n, id] of ids.entries()) {
