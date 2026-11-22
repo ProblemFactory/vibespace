@@ -302,12 +302,15 @@ try {
   await D.ev(`(() => { const f = ${EMB}.querySelector('.task-log-edit[data-bl-id]'); const c = f && [...f.querySelectorAll('button')].find((b) => b.classList.contains('task-detail-btn')); if (c) c.click(); return !!c; })()`);   // Cancel: the editor closes, nothing written
   await until(() => D.ev(`!${EMB}.querySelector('.task-log-edit')`), 5000);   // a DOM query in the page, not a pin on the source — stale-pins: kept
   await typeInto(D, `JS:${EMB}.querySelector('.task-log-add')`, '重建时打在添加框的字');
+  // the FACT a removed box saved nothing waits on (r1886 (5)): every add the page hands its store is counted from here — a blur's save
+  // with no pointer down runs inside the removal itself (afterPointerUp), so a re-drawn box seen means any such save was already handed
+  await D.ev(`(() => { window.__vsBlAdds = 0; const sb = app.sidebar, orig = sb._taskUpdate; sb._taskUpdate = function (id, patch, o) { if (patch && patch.backlogAdd) window.__vsBlAdds++; return orig.call(this, id, patch, o); }; return true; })()`);
   await D.ev(`(() => { ${EMB}.querySelector('.task-log-add').__vsMark = 1; return true; })()`);
   await api('POST', `/api/tasks/${ir.id}/progress`, { note: '另一处写入的记录（重建 2）' });
   const addKept = await until(() => D.ev(`(() => { const a = ${EMB}.querySelector('.task-log-add'); if (!a || a.__vsMark) return null; return { text: a.value, focus: document.activeElement === a }; })()`), 10000);
-  await sleep(1500);   // a save on the removed box's blur would have landed by now
+  const handed = await D.ev('window.__vsBlAdds');   // the fact: no add was handed through the re-draw
   const addRows = ((await groupOf(ir.id)).backlog || []).filter((b) => /重建时打在添加框的字/.test(b.text)).length;
-  check('the ADD BOX keeps what was typed across a rebuild (the caret back), and the box the rebuild removed saved NOTHING on its blur', !!addKept && addKept.text === '重建时打在添加框的字' && addKept.focus && addRows === 0, { addKept, addRows });
+  check('the ADD BOX keeps what was typed across a rebuild (the caret back), and the box the rebuild removed saved NOTHING on its blur (no add handed to the store, none stored)', !!addKept && addKept.text === '重建时打在添加框的字' && addKept.focus && handed === 0 && addRows === 0, { addKept, handed, addRows });
   await D.ev(`(() => { const a = ${EMB}.querySelector('.task-log-add'); a.value = ''; return true; })()`);   // left empty: the next steps leave the tab (a blur parks a box that holds words)
   await shot(D.S, 'desk-backlog.png');
   // 活动记录 — the viewer, its note box (Enter)

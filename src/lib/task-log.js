@@ -568,6 +568,14 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       if (!sidebar._tasksFetching) sidebar._fetchTasks();
       return true;
     };
+    // r1886 (3): «Drop this edit» drops it NOW — an editor its row brought back on screen goes at that press, not at the next re-draw
+    const dropEdit = (id) => { blEdits().delete(id); (state.blHidden || new Set()).delete(id); (state.blHiddenOwnSaid || new Set()).delete(id); if (root.isConnected) render(); };
+    // r1886 (2): COPY IS AN ATTENDED PRESS — an action closes its notice at the press, so the words are shown again at once and stay until
+    // the copy answered: copied ⇒ that notice goes and «Copied» is said; a clipboard that refused is SAID and the words stay to select
+    const wordsNotice = (ed, words) => showToast(t('"{text}" was removed from this group\'s backlog meanwhile — what you typed: {words}', { text: clip80(ed.text), words: words.length > 400 ? words.slice(0, 399) + '…' : words }), { type: 'error', pinned: true, action: { label: t('Copy'), run: () => {
+      const kept = wordsNotice(ed, words);
+      import('./utils.js').then(({ copyText }) => copyText(words)).then((ok) => { if (ok) { try { kept.remove(); } catch { } showToast(t('Copied')); } else showToast(t('The clipboard refused the copy — the words are still in the notice, to select'), { type: 'error' }); }, () => showToast(t('The clipboard refused the copy — the words are still in the notice, to select'), { type: 'error' }));
+    } } });
     // the hub TOOK it as one row (`backlogRows` in its answer); a hub older than this page ignores a row and answers 200: said, never «done»
     const tookRow = (data) => { if (!data) return false; if (data.backlogRows) return true; showToast(t('This page is newer than VibeSpace — reload it once VibeSpace has restarted (nothing changed)'), { type: 'error' }); return false; };
     // → true (taken) · false (refused / not taken: what was typed stays) · null (nothing to send). `base` = what the fields were when the
@@ -655,7 +663,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
         ps.appendChild(o);
       }
       prioWrap.append(prioLbl, ps);
-      const opened = draft && draft.opened ? draft.opened : { text: ti.value, detail: ta.value, priority: ps.value };   // read back: the boxes' own form of the row
+      const opened = draft && draft.opened ? draft.opened : { text: ti.value, detail: ta.value, priority: ps.value, status: it.status || 'open' };   // read back: the boxes' own form of the row (+ the status it opened on)
       blEdits().set(it.id, { id: it.id, text: it.text, opened, ti: ti.value, ta: ta.value, ps: ps.value });
       const btns = document.createElement('div');
       btns.className = 'task-log-edit-btns';
@@ -667,11 +675,11 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
         const base = { ...it, text: opened.text.trim(), priority: opened.priority };
         if (opened.detail.trim()) base.detail = opened.detail.trim(); else delete base.detail;
         const took = await patchItem(it, (b) => { b.text = text; b.priority = ps.value; if (ta.value.trim()) b.detail = ta.value.trim(); else delete b.detail; return b; }, base);
-        if (took !== false) { blEdits().delete(it.id); render(); }   // taken (or nothing changed): closed; refused: it stays with what was typed
+        if (took !== false) { blEdits().delete(it.id); (state.blHiddenOwnSaid || new Set()).delete(it.id); render(); }   // taken (or nothing changed): closed; refused: it stays with what was typed
       };
       const cancel = document.createElement('button');
       cancel.className = 'task-detail-btn'; cancel.textContent = t('Cancel');
-      cancel.onclick = () => { blEdits().delete(it.id); render(); };
+      cancel.onclick = () => dropEdit(it.id);
       btns.append(save, cancel);
       form.append(ti, prioWrap, ta, btns);
       replaceEl.replaceWith(form);
@@ -845,15 +853,19 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
         if (into) { add.value = typedT; addDetail.value = typedD; if (typedD.trim()) addDetail.classList.remove('hidden'); state.blAdd = { text: typedT, detail: typedD, open: !!typedD.trim() }; }
         const words = typedT + (typedD.trim() ? ' — ' + typedD.trim() : '');
         if (into) showToast(t('"{text}" was removed from this group\'s backlog meanwhile — what you typed is in the add box', { text: clip80(ed.text) }), { type: 'error' });
-        else if (typed) showToast(t('"{text}" was removed from this group\'s backlog meanwhile — what you typed: {words}', { text: clip80(ed.text), words: words.length > 400 ? words.slice(0, 399) + '…' : words }), { type: 'error', pinned: true, action: { label: t('Copy'), run: () => { import('./utils.js').then(({ copyText }) => copyText(words)); } } });
+        else if (typed) wordsNotice(ed, words);
         else showToast(t('"{text}" was removed from this group\'s backlog meanwhile', { text: clip80(ed.text) }), { type: 'error' });
         continue;
       }
-      // still there, but this view's filter hides it now (closed or reopened meanwhile): the edit is KEPT — said each time it is hidden,
-      // with the one press that drops it
-      if (!hidden.has(ed.id)) {
-        hidden.add(ed.id);
-        showToast(t('"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again', { text: clip80(ed.text) }), { action: { label: t('Drop this edit'), run: () => { blEdits().delete(ed.id); hidden.delete(ed.id); } } });
+      // still there, but this view hides it now: the edit is KEPT, said by its CAUSE (r1886 (1)) with the one press that drops it — closed or
+      // reopened meanwhile (its status is not the one it opened on): said each time it is hidden; hidden by the person's OWN search or
+      // filter: said once for this editor (never again at each keystroke in the search box)
+      const moved = !!(ed.opened && ed.opened.status && (it.status || 'open') !== ed.opened.status);
+      const ownSaid = state.blHiddenOwnSaid || (state.blHiddenOwnSaid = new Set());
+      if (moved ? !hidden.has(ed.id) : !ownSaid.has(ed.id)) {
+        (moved ? hidden : ownSaid).add(ed.id);
+        showToast(moved ? t('"{text}" changed meanwhile and this view hides it now — your edit is kept until it shows again', { text: clip80(ed.text) })
+          : t('"{text}" is hidden by this view\'s search or filter — your edit is kept until it shows again', { text: clip80(ed.text) }), { action: { label: t('Drop this edit'), run: () => dropEdit(ed.id) } });
       }
     }
     const f = state.blFocus; state.blFocus = null;

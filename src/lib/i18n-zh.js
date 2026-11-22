@@ -12078,6 +12078,8 @@ export default {
   "\"{text}\" was removed from this group's backlog meanwhile": "「{text}」在此期间已从本组的搁置区移除", // B-0248 step 3: the Backlog tab
   "\"{text}\" was removed from this group's backlog meanwhile — what you typed: {words}": "「{text}」在此期间已从本组的搁置区移除——你输入的内容：{words}", // B-0248 step 3 follow: the Backlog tab
   "Drop this edit": "放弃这次编辑", // B-0248 step 3 follow: the Backlog tab
+  "\"{text}\" is hidden by this view's search or filter — your edit is kept until it shows again": "「{text}」被当前视图的搜索或筛选隐藏了——你的编辑会保留，直到它再次显示", // B-0248 step 3 follow 2 (r1886): the Backlog tab
+  "The clipboard refused the copy — the words are still in the notice, to select": "剪贴板拒绝了复制——文字仍在通知里，可以选中", // B-0248 step 3 follow 2 (r1886): the Backlog tab
   "\"{text}\" changed meanwhile and this view hides it now — your edit is kept until it shows again": "「{text}」在此期间有变化，当前视图把它隐藏了——你的编辑会保留，直到它再次显示", // B-0248 step 3: the Backlog tab
   "Context table budget per group (bytes)": "每组 Context 表的注入预算（字节）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一个任务组的 Context 表在对话听到的内容里最多占多少字节。各行按表中顺序、按各自选的深度告诉 agent；装不下的一行会退一档（内容 → 文件名 + 关键文件内容 → 文件名 → 只说明路径和说明）并写明。钩子在工具说明和常驻指令之外能带的空间也会限制它。0 = 只受那个空间限制。", // lane task-group-context

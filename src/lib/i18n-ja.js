@@ -12077,6 +12077,8 @@ export default {
   "\"{text}\" was removed from this group's backlog meanwhile": "「{text}」はその間にこのグループのバックログから削除されました", // B-0248 step 3: the Backlog tab
   "\"{text}\" was removed from this group's backlog meanwhile — what you typed: {words}": "「{text}」はその間にこのグループのバックログから削除されました——入力した内容：{words}", // B-0248 step 3 follow: the Backlog tab
   "Drop this edit": "この編集を破棄", // B-0248 step 3 follow: the Backlog tab
+  "\"{text}\" is hidden by this view's search or filter — your edit is kept until it shows again": "「{text}」は今の表示の検索またはフィルターで隠れています——編集内容は再び表示されるまで保持されます", // B-0248 step 3 follow 2 (r1886): the Backlog tab
+  "The clipboard refused the copy — the words are still in the notice, to select": "クリップボードがコピーを拒否しました——文字は通知に残っているので選択できます", // B-0248 step 3 follow 2 (r1886): the Backlog tab
   "\"{text}\" changed meanwhile and this view hides it now — your edit is kept until it shows again": "「{text}」はその間に変わり、今の表示では隠れています——編集内容は再び表示されるまで保持されます", // B-0248 step 3: the Backlog tab
   "Context table budget per group (bytes)": "グループごとの Context 表の注入予算（バイト）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一つのタスクグループの Context 表が、会話に伝える内容の中で何バイトまで使えるか。各行は表の順に、それぞれ選んだ深さで伝えます。入りきらない行は一段下げ（内容 → ファイル名 + 主要ファイルの内容 → ファイル名 → パスと説明だけ）、そのことを書き添えます。フックがツールの説明と常駐指示の横に運べる容量も上限になります。0 = その容量だけ。", // lane task-group-context
