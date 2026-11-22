@@ -883,6 +883,7 @@ function testCallSites(src) {
   const r = testCallSitesOf(src); TEST_SITES.set(src, r); return r;
 }
 function testCallSitesOf(src) {
+  if (!String(src).includes('.test(')) return [];   // B-7e49: every site holds «.test(» — a text without it has none (the scan below finds none)
   const s = src.replace(/^\s*(\*|\/\/).*$/gm, '');
   const handles = new Set(STORE_HANDLE_NAMES);
   for (const m of s.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g)) if (HANDLE_RHS_RE.test(m[2])) handles.add(m[1]);
@@ -893,7 +894,11 @@ function testCallSitesOf(src) {
   const regexBound = new Set();
   for (const m of s.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:\/(?![*/])|new RegExp\()/g)) regexBound.add(m[1]);
   const sites = [];
-  for (const m of s.matchAll(/([A-Za-z_$][\w$]*(?:\(\))?(?:\s*\.\s*[A-Za-z_$][\w$]*(?:\(\))?)*)\s*\.test\(\s*([^)]*)\)/g)) {
+  // B-7e49 (bl-vault's slice, r2173): the receiver's FIRST identifier character only — a match can start nowhere else: a later
+  // start in the same word is a suffix of it, and the scan from the word's first [A-Za-z_$] would have matched first (the word
+  // reaches back to the last match's «)» at most); the lookbehind skips each later start in O(1) where the scan re-read the rest
+  // of the word at every character (6.9 s of the suite's 13 s on the test machine). The same sites, in the same order
+  for (const m of s.matchAll(/(?<![A-Za-z_$][\w$]*)([A-Za-z_$][\w$]*(?:\(\))?(?:\s*\.\s*[A-Za-z_$][\w$]*(?:\(\))?)*)\s*\.test\(\s*([^)]*)\)/g)) {
     const recv = m[1].replace(/\s+/g, ''); const first = String(m[2]).split(',')[0].trim();
     const head = recv.split('.')[0].replace(/\(\)$/, '');
     if (regexBound.has(head)) continue;
