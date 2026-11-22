@@ -4385,28 +4385,49 @@ function resetCreditTriesHeldWords(H) {
     ? `the reset-credit attempt records cannot be read (${H.code}) — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder (reset-credit-tries.json) and its access (its owner and permissions)`
     : `the reset-credit attempt records could not be read (${H.code}) — no reset credit is used until they read again (they are read again at the next press and at the pool's next pass; a passing fault heals by itself)`;
 }
+/** the held notice's words, by the hold's CAUSE (passing / lasting) — line 463's smalls (r2550 (3)): chosen at every filing AND
+ *  redrawn when the cause changes, never the first words for ever */
+function heldNoticeWords(H) {
+  return {
+    text: H.lasting ? RESET_CREDIT_TRIES_LASTING_TEXT : RESET_CREDIT_TRIES_HELD_TEXT,
+    detail: `${path.basename(RESET_CREDIT_TRIES_FILE)} could not be read (${H.code}). It is kept as it is: nothing is written over it, and it is read again at the next reset-credit press${H.asideFailed ? '' : ' and at the pool\'s next evaluation'}. Until it reads, every reset-credit use — a press and the automatic one — is refused: a request made before the restart may have gone out, and a second one could spend a second credit.${H.lasting ? ' This cause does not pass by itself: check the file and its access (its owner and permissions, the folder it is in) — or, for bytes that could not be moved aside, move it aside yourself.' : ''}`,
+    i18n: { text: { key: H.lasting ? i18nKey('The reset-credit attempt records cannot be read — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder and its access') : i18nKey('The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do'), params: {} } },
+  };
+}
 function fileResetCreditTriesHeld() {
   const H = _resetCreditTriesHeld;
-  if (!H || H.filed) return false;
+  if (!H) return false;
   let todos = null;
   try { todos = getUserTodos(); } catch { todos = null; }
-  if (!todos || typeof todos.add !== 'function') return false;
+  if (!todos) return false;
+  const unread = typeof todos.isHeldUnread === 'function' && todos.isHeldUnread();   // B-44f3: never judged from a held (unread) For-you list
+  if (H.filed) {
+    // r2550 (3): THE WORDS FOLLOW THE CAUSE — a filed notice whose cause changed (a passing fault became a permission, or back) is redrawn
+    if (H.todoId && H.filedLasting !== H.lasting && !unread && typeof todos.redrawItem === 'function') {
+      try { const w = heldNoticeWords(H); todos.redrawItem((it) => it.id === H.todoId, { text: w.text, detail: w.detail, i18n: w.i18n }); H.filedLasting = H.lasting; } catch (e) { console.warn('[reset-credit] the held attempts\' notice could not be redrawn:', e.message); }
+    }
+    return true;
+  }
+  if (typeof todos.add !== 'function' || unread) return false;   // filed at the next press / pass, once For you reads
+  // r2550 (5): A HELD START ADOPTS the last run's open notice (found by its own words) — never a second notice the same
+  if (!H.adoptAsked && typeof todos.snapshot === 'function') {
+    H.adoptAsked = true;
+    try {
+      const old = (todos.snapshot().open || []).find((it) => it && it.origin === 'pool' && (it.text === RESET_CREDIT_TRIES_HELD_TEXT || it.text === RESET_CREDIT_TRIES_LASTING_TEXT));
+      if (old) { H.filed = true; H.todoId = old.id; H.filedLasting = old.text === RESET_CREDIT_TRIES_LASTING_TEXT; console.log(`[reset-credit] the last run's «attempt records could not be read» notice ${old.id} is this hold's — not filed twice`); return fileResetCreditTriesHeld(); }
+    } catch (e) { console.warn('[reset-credit] the last run\'s held notice could not be looked for:', e.message); }
+  }
   try {
-    const item = todos.add('webui:reset-credit', {
-      origin: 'pool',
-      text: H.lasting ? RESET_CREDIT_TRIES_LASTING_TEXT : RESET_CREDIT_TRIES_HELD_TEXT,
-      detail: `${path.basename(RESET_CREDIT_TRIES_FILE)} could not be read (${H.code}). It is kept as it is: nothing is written over it, and it is read again at the next reset-credit press${H.asideFailed ? '' : ' and at the pool\'s next evaluation'}. Until it reads, every reset-credit use — a press and the automatic one — is refused: a request made before the restart may have gone out, and a second one could spend a second credit.${H.lasting ? ' This cause does not pass by itself: check the file and its access (its owner and permissions, the folder it is in) — or, for bytes that could not be moved aside, move it aside yourself.' : ''}`,
-      urgency: 'normal', kind: 'notice',
-      i18n: { text: { key: H.lasting ? i18nKey('The reset-credit attempt records cannot be read — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder and its access') : i18nKey('The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do'), params: {} } },
-    });
-    H.filed = !!(item && item.id); H.todoId = (item && item.id) || null;
+    const w = heldNoticeWords(H);
+    const item = todos.add('webui:reset-credit', { origin: 'pool', text: w.text, detail: w.detail, urgency: 'normal', kind: 'notice', i18n: w.i18n });
+    H.filed = !!(item && item.id); H.todoId = (item && item.id) || null; H.filedLasting = H.lasting;
   } catch (e) { console.warn('[reset-credit] could not file the For-you notice about the held attempts file:', e.message); }
   return H.filed;
 }
 function holdResetCreditTries(a) {
   const was = _resetCreditTriesHeld;
   const code = String(a.code || 'unreadable');
-  _resetCreditTriesHeld = { code, why: String(a.why || 'the read failed'), at: was ? was.at : Date.now(), tries: (was ? was.tries : 0) + 1, filed: !!(was && was.filed), todoId: was ? was.todoId : null, saidPersist: !!(was && was.saidPersist), lasting: RESET_CREDIT_TRIES_LASTING.has(code), missingOnce: false /* r2899: a failed read starts the «two in a row» again */, asideFailed: !!a.asideFailed || !!(was && was.asideFailed) };
+  _resetCreditTriesHeld = { code, why: String(a.why || 'the read failed'), at: was ? was.at : Date.now(), tries: (was ? was.tries : 0) + 1, filed: !!(was && was.filed), todoId: was ? was.todoId : null, filedLasting: was ? was.filedLasting : null, adoptAsked: !!(was && was.adoptAsked), saidPersist: !!(was && was.saidPersist), lasting: RESET_CREDIT_TRIES_LASTING.has(code), missingOnce: false /* r2899: a failed read starts the «two in a row» again */, asideFailed: !!a.asideFailed || !!(was && was.asideFailed) };
   // line 429's follow (r2413 (3)): no timer — said as it is: read again at a press and at the pool's pass (a failed set-aside: a press alone)
   if (!was) console.warn(`[reset-credit] data/reset-credit-tries.json could not be read (${code}) — HELD: kept as it is, nothing is written over it, and no reset credit is used until it reads (an attempt made before this start may have gone out); read again at the next reset-credit press${_resetCreditTriesHeld.asideFailed ? '' : ' and at the pool\'s next pass'}, never on a timer${_resetCreditTriesHeld.lasting ? ' — a cause that does not pass by itself: check the file and its access' : ''}`);
   fileResetCreditTriesHeld();
@@ -4416,6 +4437,7 @@ function holdResetCreditTries(a) {
 function rereadResetCreditTries(by = 'press') {
   const H = _resetCreditTriesHeld;
   if (!H) return null;
+  if (_resetCreditTriesAsiding) return _resetCreditTriesReading;   // line 463's smalls (r2550 (1)(2)): a set-aside's rename is out — its own outcome settles the hold; no read starts meanwhile (the cap's count, the pool's 5 s)
   if (by !== 'press' && H.asideFailed) return null;   // line 429's follow (r2413 (1)): a set-aside that failed is tried again by a person's press alone, never the pool's round
   if (_resetCreditTriesReading) {
     if (by !== 'press' || Date.now() - _resetCreditTriesReadAt < RESET_CREDIT_REREAD_BOUND_MS || _resetCreditTriesReads >= RESET_CREDIT_REREADS_MAX) return _resetCreditTriesReading;
@@ -4455,7 +4477,7 @@ function asideTornTriesAsync(a, why, asideAs) {
   if (_resetCreditTriesAsiding) return Promise.resolve(0);   // one set-aside in flight: a second answer of the same bytes waits for it
   _resetCreditTriesAsiding = true;
   return fs.promises.rename(RESET_CREDIT_TRIES_FILE, asideAs).then(() => true, (e) => { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); return false; })
-    .then((ok) => { _resetCreditTriesAsiding = false; return _resetCreditTriesHeld ? settleTornTries(a, why, asideAs, ok) : 0; });
+    .then((ok) => { _resetCreditTriesAsiding = false; return settleTornTries(a, why, asideAs, ok); });   // line 463's smalls (r2550 (1)): ALWAYS settled — moved ⇒ said and its notice filed even when the hold already lifted; not moved ⇒ held
 }
 /** torn bytes after their set-aside: moved ⇒ the release's «set aside» (the attempts open before are unknown); not moved ⇒ their only
  *  copy, HELD (`asideFailed`: tried again by a person's press alone) */

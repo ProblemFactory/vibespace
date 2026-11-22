@@ -147,7 +147,7 @@ const ax = await asideRun(MUT.load('src/server/usage-pool-engine.js', anchored(E
 ok(!ax.code && ax.preview !== 'attempts_unread', 'RED CONTROL (a failed set-aside starts empty, the release\'s road): nothing held — the next write takes the only copy of those bytes — red', ax);
 
 console.log('③ the refusal in words');
-ok(RC.REFUSAL_CODES.includes('attempts_unread') && RC.refusalLine('attempts_unread').key !== RC.refusalLine('zzz').key && /could not be read/.test(RC.refusalLine('attempts_unread').key) && /until the file can be read/.test(RC.refusalLine('attempts_unread').key) && /attempts file in VibeSpace’s data folder and its access/.test(RC.refusalLine('attempts_unread').key) && !/data\//.test(RC.refusalLine('attempts_unread').key) && !/heals by itself/.test(RC.refusalLine('attempts_unread').key), 'attempts_unread is a refusal of the dialog\'s table with its own sentence, which says it heals by itself (never the generic «the server refused it»)', RC.refusalLine('attempts_unread'));
+ok(RC.REFUSAL_CODES.includes('attempts_unread') && RC.refusalLine('attempts_unread').key !== RC.refusalLine('zzz').key && /could not be read/.test(RC.refusalLine('attempts_unread').key) && /until the file can be read/.test(RC.refusalLine('attempts_unread').key) && /attempts file in VibeSpace’s data folder and its access/.test(RC.refusalLine('attempts_unread').key) && !/data\//.test(RC.refusalLine('attempts_unread').key) && !/heals by itself/.test(RC.refusalLine('attempts_unread').key), 'attempts_unread is a refusal of the dialog\'s table with its own sentence — «until the file can be read», the file and its access, never «heals by itself» (never the generic «the server refused it»)', RC.refusalLine('attempts_unread'));
 
 const EIO = () => Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
 /** a world whose START read failed (EIO): the attempts held from the start — `then(w)` runs inside it */
@@ -470,5 +470,100 @@ ok(c9b.as === 'attempts_unwritten' && c9b.verbs === 0 && c9b.left === 0 && !c9b.
 const c9x = await copyRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, "      } finally { try { fs.unlinkSync(tmp); } catch { } }   // r3154 (5)", '      } finally { }   // r3154 (5)', 'the copy left behind'), 'rct-sm-copy'), 'EACCES');
 ok(c9x.left > 0, 'RED CONTROL (the copy\'s removal only on the good roads): a failed link leaves the written copy beside the store — red', c9x);
 ok(/fs\.writeFileSync\(tmp, body, \{ flush: true \}\)/.test(ESRC) && /fs\.writeSync\(fd, body\); fs\.fsyncSync\(fd\);/.test(ESRC), 'MONEY RIDES THE WRITE: the copy is written synced (flush) before the link or the rename; the exclusive create is written whole and synced before the attempt can go out');
+
+console.log('⑩ line 463\'s smalls (r2550 (1)(2)): while a set-aside\'s rename is out, NO read starts — presses past the bound, the pool\'s passes');
+const TORN10 = '{"v":1,"tries":[{"key":"x","at":1';
+const renameOutRun = async (engine) => {
+  const items = [];
+  const H = await heldWorld(engine, { opts: { todos: { add: (k, it) => { items.push(it); return { id: `ut-10-${items.length}` }; } } } });
+  fs.writeFileSync(H.file, TORN10);   // torn when it is read again
+  const realP = fs.promises.readFile, realR = fs.promises.rename, realNow = Date.now;
+  let reads = 0, land = null;
+  fs.promises.readFile = function (p, ...a) { if (path.resolve(String(p)) === H.file) reads++; return realP.call(this, p, ...a); };
+  fs.promises.rename = function (a, b) { if (path.resolve(String(a)) === H.file) return new Promise((z) => { land = () => z(realR.call(fs.promises, a, b)); }); return realR.call(this, a, b); };
+  const out = {};
+  try {
+    await H.w.call('GET');
+    { const end = realNow() + 5000; while (!land && realNow() < end) await new Promise((z) => setTimeout(z, 5)); }   // the real read answers, then the rename starts
+    out.renaming = !!land; out.first = reads;
+    Date.now = () => realNow() + 61_000;   // past every bound: still nothing starts while the rename is out
+    await H.w.call('GET'); await H.w.call('GET');
+    quiet(() => H.w.eng.kickPoolEval({ kick: false })); await tick(); await tick();
+    out.during = reads;
+    if (land) land();
+    await settle(H.w); await tick();
+    out.held = !!heldOf(H.w); out.lost = items.some((it) => /could not be read at start|set aside/i.test(String(it.text || '')));
+  } finally { Date.now = realNow; fs.promises.readFile = realP; fs.promises.rename = realR; }
+  return out;
+};
+const ro = await renameOutRun(engMod);
+console.log(`    facts: ${JSON.stringify(ro)}`);
+ok(ro.renaming && ro.first === 1 && ro.during === 1 && !ro.held, 'while the set-aside\'s rename is out no read starts (two presses past the bound, a pool pass): its own outcome settles the hold', ro);
+const rox = await renameOutRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  if (_resetCreditTriesAsiding) return _resetCreditTriesReading;   // line 463\'s smalls (r2550 (1)(2)): a set-aside\'s rename is out — its own outcome settles the hold; no read starts meanwhile (the cap\'s count, the pool\'s 5 s)\n', '', 'reads during the rename'), 'rct-rename-read'));
+ok(rox.during > rox.first, 'RED CONTROL (no guard): presses and the pool\'s pass start reads while the rename is out — the cap of two does not count it — red', rox);
+
+console.log('⑪ line 463\'s smalls (r2550 (1)): the rename\'s end ALWAYS settles — «set aside as …» and the release\'s notice even when a read lifted the hold');
+// the race the round named, made exact: a second read starts while the rename is out, the rename LANDS on disk, the second read
+// answers «not there» and lifts the hold — and only then does the rename's own promise answer (the guard of ⑩ cut in every copy here)
+const raceRun = async (engine) => {
+  const items = [];
+  const H = await heldWorld(engine, { opts: { todos: { add: (k, it) => { items.push(it); return { id: `ut-11-${items.length}` }; } } } });
+  fs.writeFileSync(H.file, TORN10);
+  const realP = fs.promises.readFile, realR = fs.promises.rename, realNow = Date.now;
+  let n = 0, land = null, secondDone = null, gate = null;
+  const second = new Promise((z) => { secondDone = z; });
+  const opened = new Promise((z) => { gate = z; });
+  fs.promises.readFile = function (p, ...a) {
+    if (path.resolve(String(p)) !== H.file) return realP.call(this, p, ...a);
+    if (++n === 1) return realP.call(this, p, ...a);
+    return opened.then(() => realP.call(fs.promises, p, ...a)).finally(() => setTimeout(secondDone, 5));   // answers after the rename landed
+  };
+  fs.promises.rename = function (a, b) { if (path.resolve(String(a)) === H.file) return new Promise((z) => { land = () => z(realR.call(fs.promises, a, b).then(() => { gate(); return second; })); }); return realR.call(this, a, b); };
+  try {
+    await H.w.call('GET');
+    { const end = realNow() + 5000; while (!land && realNow() < end) await new Promise((z) => setTimeout(z, 5)); }
+    Date.now = () => realNow() + 61_000;
+    await H.w.call('GET');   // the second read starts while the rename is out
+    land();
+    await second; await new Promise((z) => setTimeout(z, 30)); await tick();   // the second read answered, then the rename's own end ran
+  } finally { Date.now = realNow; fs.promises.readFile = realP; fs.promises.rename = realR; }
+  return { reads: n, held: !!heldOf(H.w), lost: items.some((it) => /set aside|could not be read at start/i.test(String(it.text || ''))) };
+};
+const noGuard = anchored(ESRC, '  if (_resetCreditTriesAsiding) return _resetCreditTriesReading;   // line 463\'s smalls (r2550 (1)(2)): a set-aside\'s rename is out — its own outcome settles the hold; no read starts meanwhile (the cap\'s count, the pool\'s 5 s)\n', '', 'reads during the rename');
+const rc = await raceRun(MUT.load('src/server/usage-pool-engine.js', noGuard, 'rct-race-settle'));
+ok(rc.reads === 2 && !rc.held && rc.lost, 'the race exact (⑩\'s guard cut in a copy): the second read lifts the hold as «not there», then the rename answers — and its settle STILL files the release\'s notice (the bytes were set aside)', rc);
+// moved onto the train (r3509): the hotfix's «not there» read ONCE MORE (line 638) keeps the hold through the second read, so the
+// release-era race this control guards needs that re-read cut too — else the hold still stands at the rename's end and the copy settles
+const noGuardOnce = anchored(noGuard, '    if (H && !H.missingOnce) { H.missingOnce = true;', '    if (false) { H.missingOnce = true;', 'one «not there» lifts (the race of 463)');
+const rcx = await raceRun(MUT.load('src/server/usage-pool-engine.js', anchored(noGuardOnce, '    .then((ok) => { _resetCreditTriesAsiding = false; return settleTornTries(a, why, asideAs, ok); });', '    .then((ok) => { _resetCreditTriesAsiding = false; return _resetCreditTriesHeld ? settleTornTries(a, why, asideAs, ok) : 0; });', 'the settle only while held'), 'rct-race-skip'));   // stale-pins: kept (the control restores the line before these smalls)
+ok(rcx.reads === 2 && !rcx.lost, 'RED CONTROL (the settle only while held, as before — the guard cut too, and one «not there» lifting the hold as before the hotfix): the «set aside as …» line and the notice are never said — red', rcx);
+
+console.log('⑫ line 463\'s smalls (r2550 (3)): the notice\'s words follow the cause');
+const causeRun = async (engine) => {
+  const items = [], redrawn = [];
+  const todos = { add: (k, it) => { items.push(it); return { id: `ut-12-${items.length}` }; }, redrawItem: (pred, patch) => { if (pred({ id: 'ut-12-1' })) redrawn.push(patch); return 1; } };
+  const H = await heldWorld(engine, { opts: { todos } });   // EIO: a passing cause — the passing words
+  const realP = fs.promises.readFile;
+  fs.promises.readFile = async function (p, ...a) { if (path.resolve(String(p)) === H.file) throw Object.assign(new Error('EACCES: permission denied, open'), { code: 'EACCES' }); return realP.call(this, p, ...a); };
+  try { await H.w.call('GET'); await settle(H.w); } finally { fs.promises.readFile = realP; }   // the read again meets a permission
+  return { code: (heldOf(H.w) || {}).code || null, filed: items.length, first: items[0] && items[0].text, redrawn: redrawn.length, now: redrawn[0] && redrawn[0].text };
+};
+const cr = await causeRun(engMod);
+ok(cr.code === 'EACCES' && cr.filed === 1 && /heals by itself/.test(cr.first || '') && cr.redrawn === 1 && /until the file can be read/.test(cr.now || '') && !/heals by itself/.test(cr.now || ''), 'a passing fault (EIO) becomes a permission (EACCES) at the read again: the ONE notice is redrawn in the lasting words, never the first words for ever', cr);
+const crx = await causeRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '    if (H.todoId && H.filedLasting !== H.lasting && !unread && typeof todos.redrawItem === \'function\') {\n', '    if (false) {\n', 'the first words kept'), 'rct-cause-kept'));
+ok(crx.redrawn === 0, 'RED CONTROL (the words chosen once at filing, as before): a permission keeps saying «heals by itself» — red', crx);
+
+console.log('⑬ line 463\'s smalls (r2550 (5)): a HELD start adopts the last run\'s open notice — never two the same');
+const adoptRun = async (engine) => {
+  const added = [];
+  const last = { id: 'ut-last-run', origin: 'pool', status: 'open', text: 'The reset-credit attempt records could not be read — no reset credit is used until they read again; this heals by itself when they do' };
+  const todos = { add: (k, it) => { added.push(it); return { id: `ut-13-${added.length}` }; }, snapshot: () => ({ open: [last], resolved: [] }), get: (id) => (id === last.id ? last : null), setStatus: (id, st) => { if (id === last.id) last.status = st; } };
+  const H = await heldWorld(engine, { opts: { todos } });
+  return { held: !!heldOf(H.w), added: added.length, todoId: (heldOf(H.w) || {}).todoId || null };
+};
+const ad = await adoptRun(engMod);
+ok(ad.held && ad.added === 0 && ad.todoId === 'ut-last-run', 'a start that is itself HELD takes the last run\'s open «could not be read» notice as its own — no second notice the same', ad);
+const adx = await adoptRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  if (!H.adoptAsked && typeof todos.snapshot === \'function\') {\n', '  if (false) {\n', 'never adopted'), 'rct-adopt-never'));
+ok(adx.added === 1, 'RED CONTROL (never adopted, as before): the held start files its own beside the last run\'s — two the same — red', adx);
 
 report();
