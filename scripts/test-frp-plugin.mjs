@@ -101,7 +101,10 @@ async function hubChild(tag, args = [], plant = {}) {
   console.log('①p THE SAME HUB LAUNCHED FROM A POLLUTED ENV (planted: an agent conversation\'s session tokens, the cluster\'s shared token, a cloud key, proxies)');
   const rnd = () => crypto.randomBytes(8).toString('hex');
   const plant = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + rnd(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + rnd(), VIBESPACE_FRPS_TOKEN: 'frps-shared-' + rnd(), AWS_SECRET_ACCESS_KEY: 'aws-' + rnd(), HTTPS_PROXY: 'http://u:' + rnd() + '@127.0.0.1:9' };
-  const r = await hubChild('frp-hub-p', ['--polluted'], { ...plant, http_proxy: 'http://127.0.0.1:9', FRP_HUB_PLANTED: Object.keys(plant).join(',') });
+  // r2065 (lane bl-scratch): the child's FIRST import of scripts/scratch.mjs drops a caller's conversation names and BUILDS a re-homed
+  // child's env, so an inherited plant never reaches its hub; the plant also rides ONE carrier the child sets again BY NAME after its
+  // imports (scratch's own rule: «a harness that needs such a name sets it AFTER this import, in its own child, by name»)
+  const r = await hubChild('frp-hub-p', ['--polluted'], { ...plant, http_proxy: 'http://127.0.0.1:9', FRP_HUB_PLANTED: Object.keys(plant).join(','), FRP_HUB_PLANT: Buffer.from(JSON.stringify(plant), 'utf8').toString('base64') });
   check('①p the polluted-env legs passed (the child exited 0)', r.status === 0, `exit ${r.status}${r.signal ? ' ' + r.signal : ''}`);
 }
 {
@@ -170,6 +173,12 @@ process.on('SIGTERM', () => process.exit(0));
 }
 
 async function hubLegs() {
+  // r2065: the polluted launch's plant set again HERE, by name, after scratch.mjs's import dropped it (see ①p above) — before any
+  // hub module loads; the carrier itself goes, so the hub's env holds exactly what a polluted shell would have handed it
+  if (process.env.FRP_HUB_PLANT) {
+    for (const [k, v] of Object.entries(JSON.parse(Buffer.from(process.env.FRP_HUB_PLANT, 'base64').toString('utf8')))) process.env[k] = v;
+    delete process.env.FRP_HUB_PLANT;
+  }
   const ROOT = process.env.FRP_HUB_ROOT;
   const R = (rel) => require(path.join(REPO, rel));
   const PM = R('src/plugins.js');
