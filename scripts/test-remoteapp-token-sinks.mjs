@@ -60,6 +60,13 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const D = require(path.join(repo, 'src/desktop-display.js'));
 const K = require(path.join(repo, 'src/server/desktop-app-keeper.js'));
+// r1674 (the load row — seen red at 0cc12963d-20261121225448-both, UTC: «§9 threw — ENOENT … desktop-apps.json.tmp-<pid>-w»): a
+// sink scan LISTS the data dir, then reads each file — and the keeper's record file is written by the process's store writer
+// (a worker: its temp, then the rename — the atomic write), so a temp it listed was renamed before its read. NOT a product fault
+// (the write is the law's own). Each scan now waits for that FACT first — the record file DURABLE, the writer's own answer
+// (bounded by its own timeout) — and only then lists; a write that never lands is red by name, never a throw
+const SW = require(path.join(repo, 'src/store-writer.js'));
+const landed = async (dir, where, names = ['desktop-apps.json']) => { const d = {}; for (const n of names) d[n] = await SW.storeWriter().durable(path.join(dir, n)); const all = Object.values(d).every((x) => x === true); ok(all, `${where}: the store files' writes LANDED before the data dir is listed (the store writer's own answer: ${names.join(', ')})`, d); return all; };   // a file the writer never wrote answers true at once
 const A = require(path.join(repo, 'src/server/desktop-access.js'));
 const R = require(path.join(repo, 'src/routes/desktop-apps.js'));
 const express = require('express');
@@ -213,6 +220,7 @@ await section('§2 THE SINKS — the password\'s bytes nowhere but the child\'s 
   look('keeper + access logs', logs.join('\n'));
   look('desktop-apps.json', fs.readFileSync(path.join(dataDir, 'desktop-apps.json')));
   look('app.log', fs.readFileSync(path.join(keeper.logRoot, rec1.id, 'app.log')));
+  await landed(dataDir, '§2');
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.isFile() ? [path.join(d, e.name)] : []));
   const files = walk(dataDir);
   look(`every file under the data dir (${files.length})`, Buffer.concat(files.map((f) => fs.readFileSync(f))));
@@ -569,6 +577,7 @@ await section('§9 THE SINKS of the sealed chain — the password only in the se
   look('console', said.join('\n'));
   look('keeper + access + store logs', logs.join('\n'));
   look('desktop-apps.json', fs.readFileSync(path.join(sealedDir, 'desktop-apps.json')));
+  await landed(sealedDir, '§9', ['desktop-apps.json', 'integrations.json']);
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.isFile() ? [path.join(d, e.name)] : []));
   const files = walk(sealedDir);
   look(`every file under the data dir (${files.length}, integrations.json included)`, Buffer.concat(files.map((f) => fs.readFileSync(f))));
