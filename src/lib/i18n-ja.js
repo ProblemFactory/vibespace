@@ -10005,6 +10005,7 @@ export default {
   "Could not check this host for a VNC server just now: the lookup got no answer in time. Opening it looks again.": "このホストの VNC サーバーを今は確認できませんでした：検索が時間内に応答しませんでした。開くともう一度調べます。",
   "The desktop is up without its session: looking up {names} got no answer in time. Close the Desktop and open it again to retry.": "デスクトップは起動しましたがセッションがありません：{names} の検索が時間内に応答しませんでした。デスクトップを閉じて開き直すと再試行します。",
   "The process table was not read ({why}): which processes hold the memory is not known this time.": "プロセス表を読めませんでした（{why}）：今回はどのプロセスがメモリを使っているか分かりません。",
+  "The desktop started, but looking up {names} got no answer in time: it runs without them.": "デスクトップは起動しましたが、{names} の検索が時間内に応答しませんでした：それらなしで動いています。",
   "This host’s own screen is a Wayland session and cannot be shown yet — click here for the virtual desktop.": "このホスト自身の画面は Wayland セッションのため、まだ表示できません — ここをクリックすると仮想デスクトップを開きます。",
   "Checking machines…": "マシンを確認中…",
   "No paired Windows or Mac machine yet": "ペアリングした Windows / Mac はまだありません",

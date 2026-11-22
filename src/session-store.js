@@ -180,9 +180,34 @@ const TMUX_NO_REPLY_MS = 5000;
 const TMUX_NO_REPLY_MAX_MS = 5 * 60 * 1000;
 let _tmuxReader = null, _paneNoReply = null;   // { at, waitMs }
 function useTmuxReader(fn) { _tmuxReader = typeof fn === 'function' ? fn : null; _paneMapMemo = null; _paneNoReply = null; }   // a reader handed in starts from no memo (a new road)
-/** r2030 (3a): where tmux is, the release's own look (B-1425's guarded PATH walk, its mount dirs by their async stat) — the hub's
- *  reader asks it when the host has no `which` program */
-async function tmuxPathAsync() { await landTmuxMounts(); return tmuxOnPath(); }
+/** r2030 (3a) + r2262 MUST 2: where tmux is when the host has no `which` program — the walk along PATH OFF THE LOOP: every folder
+ *  (rooted or not, a storage root never) by an async stat bounded at TMUX_WALK_STAT_MS, one stat in flight per folder (a hung
+ *  mount holds one pool thread, never one per ask), PATH order kept: the first folder that answered «an executable tmux».
+ *  → its path; null = every folder answered and none holds tmux; undefined = no answer (a folder past its bound, none found) —
+ *  the reader says NO REPLY. No synchronous stat of a PATH folder on this road (the release walked in the sweep's worker). */
+const TMUX_WALK_STAT_MS = 2000;
+const _tmuxWalkInFlight = new Map();   // folder → its stat in flight
+let _tmuxWalkMemo = null;   // { at, path } — a whole answer only, kept TMUX_PATH_TTL_MS
+async function tmuxPathAsync({ statMs = TMUX_WALK_STAT_MS } = {}) {
+  const now = Date.now();
+  if (_tmuxWalkMemo && now - _tmuxWalkMemo.at < TMUX_PATH_TTL_MS) return _tmuxWalkMemo.path;
+  const dirs = String(process.env.PATH || '').split(path.delimiter).filter((d) => { if (!d) return false; const r = SP.rootOf(d); return !(r && r.kind === 'storage'); });
+  const answers = await Promise.all(dirs.map((d) => {
+    let p = _tmuxWalkInFlight.get(d);
+    if (!p) {
+      p = fs.promises.stat(path.join(d, 'tmux')).then((st) => st.isFile() && !!(st.mode & 0o111), () => false).finally(() => { if (_tmuxWalkInFlight.get(d) === p) _tmuxWalkInFlight.delete(d); });
+      _tmuxWalkInFlight.set(d, p);
+    }
+    let timer = null;
+    const late = new Promise((r) => { timer = setTimeout(() => r(undefined), statMs); if (timer.unref) timer.unref(); });
+    return Promise.race([p, late]).then((v) => { clearTimeout(timer); return v; });
+  }));
+  const at = answers.indexOf(true);
+  if (at >= 0) { const found = path.join(dirs[at], 'tmux'); _tmuxWalkMemo = { at: Date.now(), path: found }; return found; }
+  if (answers.includes(undefined)) return undefined;
+  _tmuxWalkMemo = { at: Date.now(), path: null };
+  return null;
+}
 async function getTmuxPaneMapAsync() {
   const now = Date.now();
   if (!require('worker_threads').isMainThread) return _handedPanes || new Map();   // B-323e: a worker never starts it
@@ -193,7 +218,12 @@ async function getTmuxPaneMapAsync() {
     if (_paneNoReply && now - _paneNoReply.at < _paneNoReply.waitMs) return _paneMapMemo ? _paneMapMemo.map : map;   // waiting after a no-reply: the last good map
     out = await Promise.resolve().then(() => _tmuxReader(TMUX_PANE_ARGS)).catch(() => undefined);
     if (out === undefined) {   // no reply: never kept as a reply — the last good map serves this sweep, the next ask waits
-      _paneNoReply = { at: Date.now(), waitMs: Math.min(_paneNoReply ? _paneNoReply.waitMs * 2 : TMUX_NO_REPLY_MS, TMUX_NO_REPLY_MAX_MS) };
+      const was = _paneNoReply ? _paneNoReply.waitMs : 0;
+      _paneNoReply = { at: Date.now(), waitMs: Math.min(was ? was * 2 : TMUX_NO_REPLY_MS, TMUX_NO_REPLY_MAX_MS) };
+      const old = _paneMapMemo ? `the map read at ${new Date(_paneMapMemo.at).toISOString()} serves` : 'no map read yet: none serves';
+      // r2262: SAID — one line at the first no-reply in a row, one when the wait reaches its cap (then every 5 min, silent)
+      if (!was) console.warn(`[sessions] tmux's pane list got no reply — ${old}; asked again in ${_paneNoReply.waitMs / 1000} s, the wait growing to ${TMUX_NO_REPLY_MAX_MS / 60000} min`);
+      else if (_paneNoReply.waitMs === TMUX_NO_REPLY_MAX_MS && was < TMUX_NO_REPLY_MAX_MS) console.warn(`[sessions] tmux's pane list still gets no reply — ${old}; asked every ${TMUX_NO_REPLY_MAX_MS / 60000} min from now`);
       return _paneMapMemo ? _paneMapMemo.map : map;
     }
     _paneNoReply = null;

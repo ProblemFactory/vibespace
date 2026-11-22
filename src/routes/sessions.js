@@ -19,11 +19,11 @@ const router = express.Router();
  *  r2030 (3a): a host with NO `which` program (the lookup's own ENOENT: `noLookup`) finds tmux the release's way — session-store's
  *  own look along PATH (`releaseLook`: B-1425's guarded walk) — never «no tmux» for that reason. r2030 (3b): a lookup with no reply
  *  serves its LAST GOOD path (known false, a path kept): the pane list is still asked with it. */
-function tmuxReaderVia(starter = () => require('../server/child-starter').childStarter(), lookup = (n) => require('../plugins/which-kept.js').whichFreshAnswer(n), releaseLook = () => require('../session-store').tmuxPathAsync()) {
+function tmuxReaderVia(starter = () => require('../server/child-starter').childStarter(), lookup = (n) => require('../plugins/which-kept.js').whichFreshAnswer(n), releaseLook = () => require('../session-store').tmuxPathAsync()) {   // r2262 MUST 2: releaseLook walks PATH off the loop
   return async (args) => {
     const found = await lookup('tmux');
     let bin = found && found.path;
-    if (found && found.noLookup) bin = await releaseLook();
+    if (found && found.noLookup) { bin = await releaseLook(); if (bin === undefined) return undefined; }   // r2262: the walk got no answer = no reply
     else if (!found || (!found.known && !bin)) return undefined;
     if (!bin) return '';
     const r = await starter().run(bin, args, { timeoutMs: 3000, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: process.env.PATH || '', ...(process.env.TMUX_TMPDIR ? { TMUX_TMPDIR: process.env.TMUX_TMPDIR } : {}) } });

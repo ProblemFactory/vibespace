@@ -136,7 +136,12 @@ class VncManager {
   }
 
   async _ensureRunning() {
-    if (await portListening(this.port)) return this.status(); // adopt — on the RECORDED display (constructor), B-956d
+    if (await portListening(this.port)) {   // adopt — on the RECORDED display (constructor), B-956d
+      // B-323e follow (主开发 r2262 MUST 1): a display OURS whose desktop session was not started for a no-reply — the reopen the
+      // toast names runs the session's lookups again and starts it there (once it starts, never again; a second no-reply is said again)
+      if (this._sessionNoReply && this._own) return this._sessionOn(await this._startSession());
+      return this.status();
+    }
     const found = await this._findXvnc({ fresh: true });
     if (!found.path) throw new Error(found.known ? 'no VNC server installed (Xtigervnc/Xvnc not on PATH)' : 'could not check whether a VNC server is installed — the lookup got no answer in time; try again');
     const xvnc = found.path;
@@ -159,9 +164,18 @@ class VncManager {
       await new Promise((r) => setTimeout(r, 100));
     }
     if (!(await portListening(this.port))) throw new Error('VNC server failed to start');
-    const sess = await this._startSession();
+    return this._sessionOn(await this._startSession());   // r2030 (3c): a bare screen says why
+  }
+
+  /** The Start's answer with its session's word (r2030 (3c) + r2262): no session for a no-reply ⇒ `session: 'no-reply'` and the
+   *  display is MARKED (the next open runs the lookups again); a session started without a helper that got no reply (the bus) ⇒
+   *  `session: 'partial'`; a session started, or none for no lookup's fault ⇒ the mark is cleared. */
+  async _sessionOn(sess) {
     const st = await this.status();
-    return sess && sess.noReply ? { ...st, session: 'no-reply', sessionNoReply: sess.noReply } : st;   // r2030 (3c): a bare screen says why
+    const noReply = sess && typeof sess === 'object' && Array.isArray(sess.noReply) ? sess.noReply : null;
+    if (noReply && !sess.cmd) { this._sessionNoReply = noReply; return { ...st, session: 'no-reply', sessionNoReply: noReply }; }
+    this._sessionNoReply = null;
+    return noReply ? { ...st, session: 'partial', sessionNoReply: noReply } : st;
   }
 
   /** Start Xvnc on `display` (null = the X server picks a free one) with `-displayfd 3`: resolves `{ child, display }`
@@ -235,7 +249,7 @@ class VncManager {
       const p = spawn(c, a, { detached: true, stdio: 'ignore', env });
       p.on('error', (e) => console.warn(`[vnc] the desktop session's ${cmd} could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
       p.unref();
-      if (noReply.length) console.warn(`[vnc] the desktop session ${cmd} was started, but the lookup of ${noReply.join(', ')} got no answer in time`);
+      if (noReply.length) { console.warn(`[vnc] the desktop session ${cmd} was started, but the lookup of ${noReply.join(', ')} got no answer in time`); return { cmd, noReply }; }   // r2262: said on the page too
       return cmd;
     }
     if (noReply.length) { console.warn(`[vnc] no desktop session was started: the lookup of ${noReply.join(', ')} got no answer in time — the display stays bare until the Desktop is opened again`); return { noReply }; }

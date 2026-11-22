@@ -47,6 +47,7 @@ export function openDesktop(app, { syncId } = {}) {
       if (!st || st.error || !st.running) return { ok: false, error: st?.error || null };
       // B-323e follow (r2030 (3c)): the server started but its desktop session's lookups got no reply — said, never a silent bare screen
       if (st.session === 'no-reply') showToast(t('The desktop is up without its session: looking up {names} got no answer in time. Close the Desktop and open it again to retry.', { names: (st.sessionNoReply || []).join(', ') }), { type: 'warn' });
+      else if (st.session === 'partial') showToast(t('The desktop started, but looking up {names} got no answer in time: it runs without them.', { names: (st.sessionNoReply || []).join(', ') }), { type: 'warn' });   // r2262: the bus helper alone
       return { ok: true };
     },
   });

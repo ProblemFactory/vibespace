@@ -73,7 +73,7 @@ function whichFreshAnswer(name, { maxAgeMs = MAX_AGE_MS } = {}) {
   return refresh(name, null, { press: maxAgeMs === 0 }).then(() => {
     const k2 = kept.get(name);
     if (k2 && k2.at && k2.at !== at0) return said(k2);
-    return { path: k2 && k2.at ? k2.path : null, known: false, ...(k2 && k2.at ? { keptAt: k2.at } : {}) };
+    return { path: k2 && k2.at ? k2.path : null, known: false, ...(k2 && k2.at ? { keptAt: k2.at } : {}), ...(k2 && k2.noLookup ? { noLookup: true } : {}) };   // r2262: a no-reply keeps the «no lookup program» fact
   });
 }
 /** has a lookup of this name FINISHED once? Before it, a caller says «checking» — never «not found» (rank 13 round 2) */

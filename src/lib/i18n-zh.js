@@ -10006,6 +10006,7 @@ export default {
   "Could not check this host for a VNC server just now: the lookup got no answer in time. Opening it looks again.": "暂时无法检查本机是否装有 VNC 服务器：查找没有及时回应。打开它时会再查一次。",
   "The desktop is up without its session: looking up {names} got no answer in time. Close the Desktop and open it again to retry.": "桌面已启动，但没有会话：查找 {names} 没有及时回应。关闭桌面再打开即可重试。",
   "The process table was not read ({why}): which processes hold the memory is not known this time.": "没有读到进程表（{why}）：这次不知道是哪些进程占用了内存。",
+  "The desktop started, but looking up {names} got no answer in time: it runs without them.": "桌面已启动，但查找 {names} 没有及时回应：它在没有它们的情况下运行。",
   "This host’s own screen is a Wayland session and cannot be shown yet — click here for the virtual desktop.": "本机自己的屏幕是 Wayland 会话，暂时无法显示 — 点这里打开虚拟桌面。",
   "Checking machines…": "正在查看机器…",
   "No paired Windows or Mac machine yet": "还没有配对的 Windows 或 Mac 机器",

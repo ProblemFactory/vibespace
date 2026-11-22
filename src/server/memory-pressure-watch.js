@@ -28,10 +28,11 @@ const PS_MAX_BUFFER = 8 * 1024 * 1024;   // r1381 (8): the starter's answer is O
 
 /** → { rows, notRead } — B-323e follow (r2030 (3c)): a read that failed, ran past its bound or got no reply is `notRead` (its why),
  *  never an empty table: the pressure item then says the table was not read, never «nothing holds the memory» */
+const NOT_READ_MAX = 200;
 function psTable() {
   return new Promise((resolve) => {
     via('ps', ['axo', 'pid=,ppid=,rss=,comm=,args='], { timeout: 15000, maxBuffer: PS_MAX_BUFFER }).then(({ err, stdout: out }) => {
-      if (err) return resolve({ rows: [], notRead: String((err && err.message) || err || 'not read') });
+      if (err) return resolve({ rows: [], notRead: String((err && err.message) || err || 'not read').slice(0, NOT_READ_MAX) });   // r2262: it goes into a For-you item whole — bounded
       const rows = [];
       for (const ln of String(out).split('\n')) {
         const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(ln);
