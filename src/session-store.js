@@ -720,7 +720,13 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
 }
 // r935 (a)'s rule for every put of a WHOLE read that waited (the main process's slices, the storage's retry — the move's read): never
 // over a NEWER entry of the same file (the same inode, a size at least the read's: an append folded in meanwhile stays)
-const putUnlessNewer = (id, entry) => { const c = _jsonlCache.get(id); if (!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0))) _jsonlCachePut(id, entry); };
+// r935 (a) — NEVER OVER A NEWER ENTRY OF THE SAME FILE: the cached copy wins only when it is the same inode, at least as large AND
+// strictly later by its modification time (主开发 r2246: a transcript cut shorter IN PLACE — an editor's save, a redirect — is a
+// newer file of the same inode; by its size alone its stale copy stayed, and the page was told «ready» over a history still «not
+// loaded», again and again). The SAFE side is to take the read: two times that are equal (a rewrite inside one clock tick, a
+// storage with coarse times) put the read — the parse's own stat then folds in anything newer as an append. A read that raced a
+// growth carries mtimeMs -1 and never displaces a cached copy at least as large.
+const putUnlessNewer = (id, entry) => { const c = _jsonlCache.get(id); if (!(c && entry && c.ino != null && c.ino === entry.ino && (c.size || 0) >= (entry.size || 0) && (c.mtimeMs || 0) > (entry.mtimeMs || 0))) _jsonlCachePut(id, entry); };
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 // ONE WARM A SESSION AT A TIME: a second ask while one is in flight joins it (the parse's 2 s re-warm, an attach, a page) — never a
 // second history read of the same file sent to the pool (the whole-state read: unjoined re-warms queued reads whose deadlines ended
@@ -753,7 +759,11 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     const t0 = performance.now();
     let r = null;
     if (C().poolGone()) { try { r = await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }); } catch { return false; } }
-    else { try { r = await warmPaged(known, { bulk }).p; } catch { return false; } }   // B-cd4b's pager in its person-first line (the move's read): the entry in pages, never one clone; a storage still hung refuses at its first page
+    // the POOL UP (主开发 r2246, the round's MUST): a file whose record says «the storage» NEVER holds the line the other conversations
+    // wait in — its retry is the one-shot on the GENERAL pool (two workers; a deadline there is remembered by the pool's path memory,
+    // so the next retry is refused at the door at once), never B-cd4b's warm line (one warm at a time on the hub) and its history lane
+    // (one worker, a 60 s page that the lane's memory never notes): one dead file held every other conversation's history
+    else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }
     if (!r || !r.entry) return false;
     _stampJsonlParse(r.bytes, performance.now() - t0);
     putUnlessNewer(claudeSessionId, r.entry);
@@ -792,10 +802,9 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
         if (r && r.fresh) return true;   // filled meanwhile: this turn read nothing
         if (!r || !r.entry) return false; // worker unavailable — sync path will parse inline
         _stampJsonlParse(r.bytes, performance.now() - (r.t0 || performance.now()));
-        // r935 (a): never over a NEWER entry of the same file (the same inode, a size at least the warm's: the sync road or the inline
-        // append put it while this warm waited in the line) — the put is skipped, the newer entry stays
-        const c = _jsonlCache.get(claudeSessionId);
-        if (!(c && r.entry && c.ino != null && c.ino === r.entry.ino && (c.size || 0) >= (r.entry.size || 0))) _jsonlCachePut(claudeSessionId, r.entry);
+        // r935 (a): never over a NEWER entry of the same file (the sync road or the inline append put it while this warm waited in the
+        // line) — one rule for every warm's put, its modification time with it (putUnlessNewer, above)
+        putUnlessNewer(claudeSessionId, r.entry);
         return true;
       })().finally(() => { if (_warmInFlight.get(fp) === w) _warmInFlight.delete(fp); });
       _warmInFlight.set(fp, w);

@@ -249,7 +249,7 @@ try {
       gapInfo: { hasFile: true, gap: null }, gapSlab: { messages: [] }, searchFull: { matches: [], truncated: false }, fullTurnmap: { turns: [] } };
     let CUR = null, K = 0;
     // one conversation a paced «Resume all» marked, its own service, one source of the reply
-    const conv = (TSm, backend, source, { failRead = 0 } = {}) => {
+    const conv = (TSm, backend, source, { failRead = 0, notLoaded = null } = {}) => {
       const sid = `a0b10000-0000-4000-8000-0000001${String(K++).padStart(5, '0')}`;
       fs.copyFileSync(FX['one under a page'], path.join(PROJ, sid + '.jsonl'));   // the gap family reads the file itself
       const remote = source !== 'local' && source !== 'hub-copy', asksDevice = source === 'device' || source === 'device-failed';
@@ -257,7 +257,7 @@ try {
       if (source === 'hub-copy') { live._normalizer = { total: 1, messages: [{ uuid: 'u-0' }], tailWindow: () => [], slice: () => [], turnMap: () => [], search: () => [] }; live._historyLoaded = true; }
       const c = { sid, live, seen: [], served: [], device: asksDevice };
       let fails = failRead;
-      const sm = () => ({ raw: () => [], rawAsync: async (o) => { c.seen.push(!!(o && o.bulk)); if (fails > 0) { fails--; throw new Error('planted: the pager\'s bound'); } }, chatStatus: () => ({}), taskState: () => ({}) });
+      const sm = () => ({ raw: () => [], rawAsync: async (o) => { c.seen.push(!!(o && o.bulk)); if (fails > 0) { fails--; throw new Error('planted: the pager\'s bound'); } }, chatStatus: () => ({}), taskState: () => ({}), ...(notLoaded ? { notLoaded } : {}) });
       const hosts = { fetchTranscript: async () => { }, linkState: () => 'online',
         deviceBounded: async () => (c.device ? { connect: async () => ({ info: { capabilities: ['transcript-op'] } }),
           transcriptOp: async (method) => { c.served.push(live._bulkRead === true); if (source === 'device-failed') throw new Error('planted: the device hung up'); return ANSWER[method]; } } : null) };
@@ -307,7 +307,7 @@ try {
       `every device that failed was SAID once (${good.warns.length} saying(s)), its local fallback then replied`, good.warns);
     // RED: THE TIP'S SHAPE — the consume inside three roads (view after its conversion, status, the todos read), no door
     const tip = anchored(anchored(anchored(anchored(tsSrc10,
-      'const reply = (out) => { if (!(r.gone && r.gone()) && !(out && out.notLoaded)) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
+      'const reply = (out) => { if (!(r.gone && r.gone()) && !said(out)) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
       '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n', '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n    BULK.replied(session);\n', 'tip-view'),
       '    return { chatStatus, taskState: sm.taskState?.() || null };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null };', 'tip-status'),
       '    const st = sm.taskState() || {};\n', '    const st = sm.taskState() || {};\n    BULK.replied(live);\n', 'tip-todos');
@@ -316,6 +316,21 @@ try {
     ok(redDev.length >= 10 && redDev.every((x) => !x.consumed && x.second.some((b) => b === true) === x.line) && redLocal.every((x) => x.consumed),
       `RED: the tip's shape ⇒ the device's reply leaves the mark on every door (${redDev.map((x) => x.name).join(' · ')}), the next read bulk again; its local roads consume (${redLocal.length})`, { redDev, redLocal });
     // A REPLY THAT FAILS keeps the mark — a throw (the pager's bound), the asker gone: the retry is still the first read
+    // 主开发 r2246: THE STATUS BESIDE A «NOT LOADED» PAGE spares the mark too — one request (/api/session-messages?withStatus=1: the page,
+    // then its status, one memo): the history said «not loaded», a refusal said, so the retry is still the first read. RED: the reply
+    // judging its own answer alone (the status carries no «not loaded» of its own: it consumed the mark)
+    const nlRun = (TSm) => stubbed(async () => {
+      const c = conv(TSm, 'claude', 'local', { notLoaded: 'transcript_reader_restarting' }); CUR = c;
+      const ref = c.ref();
+      const pg = await c.svc.page(ref, { offset: 0, limit: 50 }); const afterPage = c.live._bulkRead === true;
+      await c.svc.status(ref);
+      CUR = null; return { said: (pg && pg.notLoaded) || null, afterPage, kept: c.live._bulkRead === true };
+    });
+    const nl = await nlRun(TS10);
+    const ownAnswer = anchored(tsSrc10, "    const said = (out) => !!(out && out.notLoaded) || !!(r.memo && r.memo.view && r.memo.view.notLoaded);", "    const said = (out) => !!(out && out.notLoaded);", 'status-own-answer');
+    const nlr = await nlRun(require(M.write('src/transcript-service.js', ownAnswer, 'status-own-answer')));
+    ok(!!nl.out.said && nl.out.afterPage && nl.out.kept, `the status beside a «not loaded» page (one request) spares the mark: kept after the page (${nl.out.afterPage}) and after its status (${nl.out.kept})`, nl.out);
+    ok(!!nlr.out.said && nlr.out.afterPage && !nlr.out.kept, `RED: the reply judging its own answer alone ⇒ the status consumes the mark the page spared (${nlr.out.kept})`, nlr.out);
     const fails = await stubbed(async () => {
       const cT = conv(TS10, 'claude', 'local', { failRead: 1 }); CUR = cT;
       let threw = null; try { await cT.svc.page(cT.ref(), { offset: 0, limit: 50 }); } catch (e) { threw = e.message; }

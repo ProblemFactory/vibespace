@@ -232,8 +232,8 @@ console.log('⑤b the read note\'s two ends');
   C._setTranscriptPoolForTest(fail); fail.calls.length = 0;
   // a WARM first (the attach, a page — the hot roads warm before they parse): the pool alone, no find, no stat
   const Rw1 = await road('⑤b(a) a warm after the memory called the file the storage\'s', () => SS.warmSessionJsonlAsync(sa, cwd));
-  const asks = () => fail.calls.filter((o) => o === 'boundedParsedPage').length;   // a warm's ask of the pool: its pager's first page (B-cd4b unit 2)
-  ok(Rw1.reads.length === 0 && asks() === 1 && !fail.calls.includes('jsonlTail') && Rw1.out === false, `${Rw1.name}: no call of any kind on the transcript (${Rw1.reads.length}) — the pool alone asked (${asks()}), no one-shot after the storage's refusal`, { reads: Rw1.reads.slice(0, 4), calls: fail.calls });
+  const asks = () => fail.calls.filter((o) => o === 'jsonlTail').length;   // the storage's retry: the one-shot on the general pool (主开发 r2246 — never the warm line)
+  ok(Rw1.reads.length === 0 && asks() === 1 && !fail.calls.includes('boundedParsedPage') && Rw1.out === false, `${Rw1.name}: no call of any kind on the transcript (${Rw1.reads.length}) — the pool alone asked (${asks()}: the storage retry's one-shot on the general pool, never the warm line's page)`, { reads: Rw1.reads.slice(0, 4), calls: fail.calls });
   fail.calls.length = 0;
   const Ra = await road('⑤b(a) a parse of the grown file then', () => { const l = SS.parseSessionJsonl(sa, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   await new Promise((res) => setImmediate(res));

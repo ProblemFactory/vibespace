@@ -525,7 +525,8 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const r = norm(ref || {});
     const live = () => (r.sessionId ? liveSession(r) : null);
     if (r.memo && typeof r.memo.bulk !== 'boolean') r.memo.bulk = BULK.isBulk(live());   // the request's verdict, before any road reads
-    const reply = (out) => { if (!(r.gone && r.gone()) && !(out && out.notLoaded)) BULK.replied(live()); return out; };   // THE consume — here and nowhere in a road (row B-422c at the move: a «not loaded» answer is a refusal said: it consumes nothing)
+    const said = (out) => !!(out && out.notLoaded) || !!(r.memo && r.memo.view && r.memo.view.notLoaded);   // «not loaded» — this answer's, or the same request's history (主开发 r2246: the status beside a page that said it)
+    const reply = (out) => { if (!(r.gone && r.gone()) && !said(out)) BULK.replied(live()); return out; };   // THE consume — here and nowhere in a road (row B-422c at the move: a «not loaded» answer is a refusal said: it consumes nothing)
     const out = fn(ref, ...rest);
     return out && typeof out.then === 'function' ? out.then(reply) : reply(out);
   };
