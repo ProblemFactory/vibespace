@@ -17,9 +17,12 @@
 //   the round wqdnv452s: a LINK is never kept (this hub: its lstat; a paired machine: its agent's lstat, the copy's too); the kept
 //   copies in data/rewind-kept, beside the attachments' walk; a paired put-back drops a stale temp first; the manifest by a temp
 //   renamed over; no sweep takes a press being put back; changed-since, no manifest, the mount door, the bounds, the real pool
+//   its follow (r1859): the put-back's link check as strict as the keep's; one put-back of a press at a time; the REAL agent's stat
+//   action (agentd.js as its own fs worker); the one bound inside one conversation's walk
 //   RED CONTROLS (anchored copies): no hash compare, no size compare, the sweep without its mark, the total bound off, the put-back
 //   without keeping first, the put-back unfenced, relative paths kept, links planned, a paired copy's link unread, the stale temp
-//   not dropped first, the kept copies inside the attachments' folder, a press being put back swept
+//   not dropped first, the kept copies inside the attachments' folder, a press being put back swept, two put-backs of one press side
+//   by side, one conversation's walk unbound
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -86,7 +89,22 @@ console.log('— ① the decisions');
   console.log(`    (put-back plans: ${JSON.stringify({ pb, pb2, pb3, pb4 })})`);
   ok(JSON.stringify(pb) === '["/w/a.js:overwrite","/w/gone:remove"]' && JSON.stringify(pb2) === '["refused:kept-changed","remove"]' && JSON.stringify(pb3) === '["refused:kept-changed"]' && JSON.stringify(pb4) === '["refused:link","remove"]' && man.check === 'sha256' && pman.check === 'size',
     '① THE PUT-BACK names each path\'s act BEFORE it acts (r1304 (iv)): overwritten, removed (it did not exist then), created; a kept copy that no longer matches its manifest — this hub by its hash, a paired machine by its size and time — is REFUSED by name; a LINK standing at a path now is refused by name (a put-back must not write through it)');
+  const pAt = (isLink) => K.putBackPlanOf(pman, { '/w/a.js': { mode: 0o100644, size: 12, mtimeMs: T0 + 9, ...(isLink === 'none' ? {} : { isLink }) } }, { 0: { size: 10, mtimeMs: T0 + 1 } }).map((r) => `${r.act}${r.why ? ':' + r.why : ''}`).join();
+  ok(pAt(false) === 'overwrite' && pAt(true) === 'refused:link' && pAt('none') === 'refused:agent-too-old' && pAt(null) === 'refused:unreadable',
+    '① THE PUT-BACK on a paired machine is as strict as the keep (r1854): only an explicit «not a link» is overwritten — a link refused by name, an agent that does not say it «upgrade the agent», a link it could not read: unreadable', { f: pAt(false), t: pAt(true), u: pAt('none'), n: pAt(null) });
   ok([K.KEEP, K.KEEP_WHY, K.PUT_BACK_ACTS].every(Object.isFrozen) && K.DIR_MODE === 0o700 && K.FILE_MODE === 0o600, '① the tables frozen; the modes: the press folder 0700, each kept file 0600 (r1304 (iii))');
+}
+
+/** TWO CLIENTS, ONE PUT-BACK (r1859 (2)): A is held right after it reads its kept copies, until B is past the fence it asks first;
+ *  B is held at the same point until A has set its files mark (its first act after that read). → [A's answer, B's answer] */
+async function twoPutBacks(door, { session, conv, press, expect, dataRoot }) {
+  let releaseA, releaseB, aRead = false;
+  const aHeld = new Promise((r) => { releaseA = r; }), bHeld = new Promise((r) => { releaseB = r; });
+  const callA = async (op, payload) => { if (op === 'keptFacts') { const r = await call(op, payload); aRead = true; await aHeld; return r; } if (aRead) releaseB(); return call(op, payload); };
+  const callB = async (op, payload) => { if (op === 'keptFacts') { releaseA(); const r = await call(op, payload); await bHeld; return r; } return call(op, payload); };
+  const a = door.putBack({ session, conv, press, by: HUMAN, expect, now: T0 + 9820, hex8: '0000bab1', dataRoot, call: callA });
+  const b = door.putBack({ session, conv, press, by: HUMAN, expect, now: T0 + 9830, hex8: '0000bab2', dataRoot, call: callB });
+  return Promise.all([a, b.catch((e) => ({ ok: false, threw: String(e && e.message) }))]);
 }
 
 console.log('— ② this hub');
@@ -220,6 +238,15 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
   const dg = await KD.putBack({ session: { mode: 'chat' }, conv: 'conv-7', press: rg.press, by: HUMAN, expect: pg.rows, now: T0 + 9900, hex8: '0000b9b9', ...KA(root) });
   ok(rg.ok && dg.ok && dg.rows[0].done === true && fs.readFileSync(g, 'utf8') === 'g as kept\n' && !fs.existsSync(`${g}.${rg.press}.vs-tmp`),
     '② a stale temp of an old put-back beside the file: removed FIRST, then the kept bytes put back (the row done, no temp left)', dg.rows);
+  // ONE PUT-BACK OF A PRESS AT A TIME (r1859 (2)): a second client presses the same put-back while the first is acting
+  const w8 = path.join(SCRATCH, 'w8'); fs.mkdirSync(w8, { recursive: true }); const h8 = path.join(w8, 'h.txt'); fs.writeFileSync(h8, 'h as kept\n');
+  const rh8 = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-8', files: [h8], by: HUMAN, now: T0 + 9810, hex8: '0000bab0', ...KA(root) });
+  fs.writeFileSync(h8, 'h after\n');
+  const s8 = { mode: 'chat' };
+  const ph8 = await KD.putBack({ session: s8, conv: 'conv-8', press: rh8.press, by: HUMAN, dryRun: true, ...KA(root) });
+  const [first, second] = await twoPutBacks(KD, { session: s8, conv: 'conv-8', press: rh8.press, expect: ph8.rows, dataRoot: root });
+  ok(rh8.ok && first.ok && first.rows[0].done === true && !second.ok && second.reason === 'pending' && fs.readFileSync(h8, 'utf8') === 'h as kept\n',
+    '② TWO CLIENTS PRESS ONE PUT-BACK AT ONCE, both past its first fence: the second is refused by name (pending — the fence asked again right before the mark is set), the first ends whole', { first: first.rows, second });
   // THE REAL POOL (no `call`): the «rewind-keep» worker thread does the keep and its read-back
   const poolRoot = fs.mkdtempSync(path.join(SCRATCH, 'pool-'));
   const rp = await KD.keepFor({ session: { mode: 'chat' }, conv: 'conv-pool', files: [a], by: HUMAN, now: T0, hex8: '0000b7b7', dataRoot: poolRoot });
@@ -230,7 +257,7 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
 
 console.log('— ③ a paired machine (a stand-in agent with the agent\'s own file semantics)');
 /** the agent's file actions over a scratch «device» (src/agentd/agentd.js FS_ACTIONS: stat FOLLOWS links, copy never overwrites) */
-function standIn({ home, shortCopy = false, noPortable = false, deny = null, oldStat = false, linkCopy = false, hangCopy = false, hangList = false } = {}) {
+function standIn({ home, shortCopy = false, noPortable = false, deny = null, oldStat = false, linkCopy = false, hangCopy = false, hangList = false, slowPress = 0 } = {}) {
   const enoent = (p) => Object.assign(new Error(`ENOENT: no such file or directory, stat '${p}'`), { code: 'ENOENT' });
   const acts = [];
   // the client's ONE send point (src/agentd/client.js _request): an act without a valid string `by` is refused, never sent; a
@@ -240,7 +267,7 @@ function standIn({ home, shortCopy = false, noPortable = false, deny = null, old
     acts,
     fsHome: async () => { if (noPortable) throw Object.assign(new Error('daemon lacks fs-portable (capabilities gate) -- upgrade the agent on this machine'), { code: 'host_needs_daemon' }); return { home }; },
     fsStat: async (p) => { let st; try { st = fs.statSync(p); } catch { throw enoent(p); } const out = { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode }; if (!oldStat) { let link = null; try { link = fs.lstatSync(p).isSymbolicLink(); } catch { } out.link = link; } return { ok: true, stat: out }; },
-    fsList: async (p) => { if (hangList) return new Promise(() => { }); let names; try { names = fs.readdirSync(p, { withFileTypes: true }); } catch { throw enoent(p); } return { path: p, entries: names.map((e) => { let st = null; try { st = fs.statSync(path.join(p, e.name)); } catch { } return { name: e.name, isDir: e.isDirectory(), size: st ? st.size : 0, mtimeMs: st ? st.mtimeMs : 0 }; }) }; },
+    fsList: async (p) => { if (hangList) return new Promise(() => { }); if (slowPress && /[\\/]kp-[0-9a-z]+-[0-9a-f]{8}$/.test(p)) await new Promise((r) => setTimeout(r, slowPress)); let names; try { names = fs.readdirSync(p, { withFileTypes: true }); } catch { throw enoent(p); } return { path: p, entries: names.map((e) => { let st = null; try { st = fs.statSync(path.join(p, e.name)); } catch { } return { name: e.name, isDir: e.isDirectory(), size: st ? st.size : 0, mtimeMs: st ? st.mtimeMs : 0 }; }) }; },
     fsMkdir: async (p, { by } = {}) => { act('mkdir', by); fs.mkdirSync(p, { recursive: true }); return { ok: true }; },
     fsWrite: async (p, buf, { by } = {}) => { act('write', by); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, buf); return { ok: true }; },
     fsCopy: async (p, to, { by } = {}) => { act('copy', by); if (hangCopy) return new Promise(() => { }); if (linkCopy && !fs.existsSync(to)) { fs.symlinkSync(p, to); return { ok: true }; } fs.cpSync(p, to, { recursive: true, force: false, errorOnExist: false }); if (shortCopy && fs.statSync(to).isFile()) fs.truncateSync(to, Math.max(0, fs.statSync(to).size - 1)); return { ok: true }; },
@@ -297,6 +324,24 @@ function standIn({ home, shortCopy = false, noPortable = false, deny = null, old
   const ownerDm = standIn({ home });
   const ro = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: { kind: 'human', actBy: null }, now: T0 + 9950, hex8: '0000c5c5', dataRoot: hubRoot, call, dm: ownerDm });
   ok(ro.ok && ownerDm.acts.length >= 4 && ownerDm.acts.every(([, by]) => by === 'human:owner'), '③ a socket with no sign-in subject: EVERY agent act stamped human:owner (the person, never another string)', ownerDm.acts);
+  // THE REAL AGENT's stat action (r1859 (3)): src/agentd/agentd.js run as its own fs worker (the role its pool starts it in) —
+  // the field the keep reads is the one the agent says, not a hand copy of it
+  const { Worker } = await import('node:worker_threads');
+  const agentW = new Worker(path.join(REPO, 'src/agentd/agentd.js'), { workerData: { role: 'agentd-worker' } });
+  let wid = 0; const waits = new Map();
+  agentW.on('message', (m) => { const r = waits.get(m.id); if (r) { waits.delete(m.id); r(m); } });
+  const realStat = (p) => new Promise((resolve, reject) => { const id = ++wid; waits.set(id, (m) => (m.error ? reject(Object.assign(new Error(m.error), { code: m.code })) : resolve({ ok: m.ok, stat: m.stat }))); agentW.postMessage({ id, action: 'stat', path: p }); });
+  const realDm = { ...standIn({ home }), fsStat: realStat };
+  const sl = await realStat(l), sa = await realStat(a);
+  const rlr = await KD.keepFor({ session, conv: 'conv-p', files: [a, l], by: BY, now: T0 + 9970, hex8: '0000c8c8', dataRoot: hubRoot, call, dm: realDm });
+  const rar = await KD.keepFor({ session, conv: 'conv-p', files: [a], by: BY, now: T0 + 9971, hex8: '0000c8c9', dataRoot: hubRoot, call, dm: realDm });
+  await agentW.terminate();
+  ok(sl.stat.link === true && sa.stat.link === false && !rlr.ok && JSON.stringify(rlr.refusals) === JSON.stringify([{ path: l, why: 'link' }]) && rar.ok && rar.check === 'size',
+    '③ THE REAL AGENT\'s stat (src/agentd/agentd.js, its own fs worker): it says link: true for a link and false for a plain file; through it the keep refuses the link by name and keeps the file', { link: sl.stat.link, file: sa.stat.link, rlr: rlr.refusals, rar: rar.ok });
+  // the ONE bound holds inside one conversation's walk of presses too (r1859 (4)): each press folder's list is slow, the walk is not
+  const slowDm = standIn({ home, slowPress: 60 });
+  const hp = await KD.keepableOf({ session, conv: 'conv-p', files: [a], by: BY, now: T0, dataRoot: hubRoot, call, dm: slowDm, allMs: 40 });
+  ok(!hp.ok && hp.refusals[0].why === 'no-time', '③ the bound inside ONE conversation\'s walk: its press folders listed past the one bound — no-time, the total never guessed', hp.refusals);
   // the bounds: each agent call (here 40 ms) and the walk of the machine's kept copies (here none left) — past them: no-time.
   // The door's bound timers are unref'd (they never hold the hub open): this ref'd interval holds the suite's loop meanwhile
   const alive = setInterval(() => { }, 20);
@@ -368,6 +413,21 @@ console.log('— red controls');
   const rpl = await sweepAll.putBack({ session: { mode: 'chat' }, conv: 'c-r5', press: rp9, by: HUMAN, dryRun: true, dataRoot: rr, call: mid2 });
   await sweepAll.putBack({ session: { mode: 'chat' }, conv: 'c-r5', press: rp9, by: HUMAN, expect: rpl.rows, now: T0 + 2, hex8: '0000d6d6', dataRoot: rr, call: mid2 }).catch(() => null);
   ok(!!mk && mk.ok && mk.swept.includes(rp9), 'RED CONTROL (a press being put back swept): another conversation\'s keep in the middle of the put-back removes the press it is putting back');
+  // r1859's follow, its reds
+  const twoAtOnce = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "  if ((session && RQ.rewindOut(session, Date.now())) || PUTTING.has(press)) return { ok: false, reason: 'pending', cls: 'cannot' };\n", '', 'kept: one put-back of a press at a time'), 'two-at-once');
+  const tr = hubAt('two'), tw = hubAt('twow'), ta = path.join(tw, 't.txt'); fs.writeFileSync(ta, 't as kept\n');
+  const tk = await twoAtOnce.keepFor({ session: { mode: 'chat' }, conv: 'c-two', files: [ta], by: HUMAN, now: T0, hex8: '0000d7d7', ...KA(tr) });
+  fs.writeFileSync(ta, 't after\n');
+  const ts = { mode: 'chat' };
+  const tp = await twoAtOnce.putBack({ session: ts, conv: 'c-two', press: tk.press, by: HUMAN, dryRun: true, ...KA(tr) });
+  const [, t2] = await twoPutBacks(twoAtOnce, { session: ts, conv: 'c-two', press: tk.press, expect: tp.rows, dataRoot: tr });
+  ok(t2.ok === true, 'RED CONTROL (two put-backs of one press side by side): the second client\'s press goes out while the first is acting');
+  const walkUnbound = M.load('src/server/rewind-kept-door.js', anchored(DSRC, "      if (!e || !e.isDir || !K.PRESS_RE.test(e.name)) continue;\n      if (Date.now() - t0 > allMs) throw pastBound();\n", "      if (!e || !e.isDir || !K.PRESS_RE.test(e.name)) continue;\n", 'kept: one conversation\'s walk unbound'), 'walk-unbound');
+  const wh = hubAt('wbh'), whome = hubAt('wbd'), wf = path.join(hubAt('wbw'), 'w.txt'), wses = { mode: 'chat', host: 'h-2' }, WBY = { kind: 'human', actBy: 'human:tester' };
+  fs.writeFileSync(wf, 'w\n');
+  for (const [t, h] of [[T0 - 3000, '0000e1e1'], [T0 - 2000, '0000e2e2'], [T0 - 1000, '0000e3e3']]) await walkUnbound.keepFor({ session: wses, conv: 'c-wb', files: [wf], by: WBY, now: t, hex8: h, dataRoot: wh, call, dm: standIn({ home: whome }) });
+  const wu = await walkUnbound.keepableOf({ session: wses, conv: 'c-wb', files: [wf], by: WBY, now: T0, dataRoot: wh, call, dm: standIn({ home: whome, slowPress: 60 }), allMs: 40 });
+  ok(wu.ok === true, 'RED CONTROL (one conversation\'s walk unbound): its slow press folders are all listed past the one bound and the confirm answers');
 }
 
 report();

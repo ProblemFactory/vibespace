@@ -153,6 +153,8 @@ function putBackPlanOf(manifest, cur = {}, kept = {}) {
     if (paired) { if (!k || k.size !== r.keptSize || Number(k.mtimeMs) !== r.keptMtimeMs) return out('refused', 'kept-changed'); }
     else if (!k || k.sha256 !== r.sha256) return out('refused', 'kept-changed');
     if (now.absent) return out('create');
+    // a paired machine (r1854): ONLY an explicit false passes as «not a link» — said true: a link; unsaid: an agent too old; unread
+    if (paired && now.isLink !== false) return out('refused', now.isLink === true ? 'link' : now.isLink === undefined ? 'agent-too-old' : 'unreadable');
     const nowKind = now.isLink === true ? 'link' : kindOfMode(now.mode);
     if (nowKind === 'link') return out('refused', 'link');
     if (nowKind === 'folder' || nowKind === 'device' || nowKind === 'other') return out('refused', nowKind === 'folder' ? 'folder' : 'device');

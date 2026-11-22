@@ -95,10 +95,12 @@ async function pairedRoad(conv, dm, { by: who, host, callMs = K.KEEP.copyMs, all
   };
   const listOf = async (p) => { try { return ((await B(dm.fsList(p))) || {}).entries || []; } catch (e) { if (isAbsent(e)) return []; throw e; } };
   const pressAt = (name) => parseInt(name.slice(3, name.lastIndexOf('-')), 36);
-  const pressesOf = async (c) => {
+  const pastBound = () => Object.assign(new Error('timed out (the machine\'s kept copies not listed within the bound)'), { code: 'ETIMEDOUT' });
+  const pressesOf = async (c, t0 = Date.now()) => {   // the ONE bound holds inside one conversation's walk too (each press a list call)
     const out = [];
     for (const e of await listOf(join(base, c))) {
       if (!e || !e.isDir || !K.PRESS_RE.test(e.name)) continue;
+      if (Date.now() - t0 > allMs) throw pastBound();
       const kids = await listOf(join(base, c, e.name));
       const marked = kids.some((k) => k && k.name === K.MARK_FILE);
       out.push({ conv: c, name: e.name, folderMtimeMs: e.mtimeMs, mark: marked ? { kind: K.MARK_KIND, press: e.name, at: pressAt(e.name) } : null, bytes: kids.reduce((s, k) => s + (k && !k.isDir && /^\d+\.bin$/.test(k.name) ? Number(k.size) || 0 : 0), 0) });
@@ -125,8 +127,8 @@ async function pairedRoad(conv, dm, { by: who, host, callMs = K.KEEP.copyMs, all
     listAll: async () => {   // ONE bound for the whole walk (each call 10 s; all of them `allMs`): past it, the total is not known — no-time
       const out = [], t0 = Date.now();
       for (const c of (await listOf(base)).filter((e) => e && e.isDir && CONV_RE.test(e.name)).slice(0, PAIRED_CONVS_MAX)) {
-        if (Date.now() - t0 > allMs) throw Object.assign(new Error('timed out (the machine\'s kept copies not listed within the bound)'), { code: 'ETIMEDOUT' });
-        out.push(...(await pressesOf(c.name)));
+        if (Date.now() - t0 > allMs) throw pastBound();
+        out.push(...(await pressesOf(c.name, t0)));
       }
       return out;
     },
@@ -251,6 +253,9 @@ async function putBack({ session, conv, press, by, hosts = null, dryRun = false,
   if (dryRun) return { ok: true, dryRun: true, press, rows: plan };
   const key = (p) => JSON.stringify((p || []).map((r) => [r.path, r.act, r.why || null]));
   if (key(plan) !== key(expect)) return { ok: false, reason: 'changed-since', cls: 'moved', rows: plan };
+  // asked AGAIN right before the mark is set (no await between: nothing slips in) — two clients pressing one press at once: the
+  // second is refused by name, never two put-backs of one press side by side (one's stale-temp removal would undo the other's row)
+  if ((session && RQ.rewindOut(session, Date.now())) || PUTTING.has(press)) return { ok: false, reason: 'pending', cls: 'cannot' };
   const mark = { id: `put-${press}`, at: Date.now(), files: true, pty: (session && session.pty) || null };   // tied to its CLI process, like a press's
   if (session) RQ.setFilesOut(session, mark);   // ONE AT A TIME: a press, a confirm and the person's send wait on the put-back
   PUTTING.add(press);
