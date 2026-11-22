@@ -12129,7 +12129,15 @@ attempt instant, the wire text and the handle; landed ⇒ `sent` by actor
 `reconcile` with the receipt owed now and the unknown-outcome item retracted by
 this producer; not-landed ⇒ `failed`; else still unknown with `reconcile.n`
 counted — nothing is ever re-sent by the engine. `sweepSending()` runs from
-`start()`: a `sending` corpse becomes `unknown` by actor `boot` (`lost-at-boot`).
+`start()`: a `sending` corpse becomes `unknown` by actor `boot` (`lost-at-boot`),
+each corpse's whole step inside the per-proposal queue every press waits in
+(r2268), so a Check outcome pressed meanwhile settles after it. AN ITEM ABOUT A
+MESSAGE's OUTCOME NEVER OUTLIVES THE OUTCOME: the unknown-outcome item is named
+`outbox-unknown:<proposal id>` and filed in the outbox write that records its id,
+only while the proposal is still `unknown`; whoever settles the outcome retracts
+it by that name, and a heal (at the boot sweep and after each settle, bounded,
+one journal line with its count) retracts an open one whose proposal is
+already settled.
 THE SENDER HONESTY LINE is OFF by default (`channels.senderHonestyLine`; the
 adapter record's `senderHonestyLine` true/false/null overrides it via
 `setSenderHonesty`, audited) and appended at send time ONLY for an agent-drafted

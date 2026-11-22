@@ -15,6 +15,10 @@ const P = require('../channel-policy.js');
 const { owedOutcome, LIVE_FALLS, fallWhy } = require('../channel-groups.js');   // lane paced-wake-retry: a fall's cause and its words, from the ONE list
 const { isPress } = require('../write-origin.js');   // lane owner-press-attended r2: an attended receipt / send rides the door's PRESS (`pressed`)
 const ACL = require('../channel-acl.js');
+// r2268: an «unknown outcome» item's name is derived from its proposal's id (whoever settles the outcome retracts it by it);
+// the heal retracts at most HEAL_BOUND items a pass
+const UNKNOWN_ITEM_PREFIX = 'outbox-unknown:';
+const HEAL_BOUND = 200;
 const Drain = require('../channel-drain.js');
 const OF = require('../channel-outbox-files.js');
 const Plan = require('../channel-upload-plan.js');   // lane channel-upload-retry r2 (F3): the budget a send brings to its adapter (PURE)
@@ -1921,43 +1925,89 @@ function create(engineCtx) {
     try { const it = userTodos.get(todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(todoId, 'done', RESOLVED_BY); }
     catch (e) { log.warn(`[channels] outbox ${id}: could not close the fallen wake's item: ${(e && e.message) || e}`); }
   }
-  /** An unknown outcome owes the USER a look (§9.4), not the agent a verdict. */
+  /** An unknown outcome owes the USER a look (§9.4), not the agent a verdict.
+   *  r2268 (主开发, THE LAW: an item about a message's outcome never outlives the outcome): the item is keyed by a name
+   *  derived from the proposal's own id (UNKNOWN_ITEM_PREFIX + id), so whoever settles the outcome retracts it by that name
+   *  whether or not its id was recorded; it is filed INSIDE the outbox write that records its id, and only while the
+   *  proposal is still `unknown` — a settle that came first files nothing, a settle after it finds the item. */
   async function speakUnknown(p) {
     if (!userTodos || typeof userTodos.add !== 'function') return;
     try {
       const recU = adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
       const adapterLabel = recU ? (recU.label || recU.id) : p.adapterId;
       const title = String(conversationName(p.adapterId, p.convId) || p.title || p.convId || '').slice(0, 120);   // B-c127: the ladder (a compose: its subject)
-      const item = userTodos.add(INBOX_KEY, {
-        origin: 'channels', // B-328d
-        text: `Outbox: a send to ${title} has an UNKNOWN outcome`,
-        ...(p.convId ? { action: { type: 'open-channel', adapterId: p.adapterId, convId: p.convId, key: `${p.adapterId}/${p.convId}` } } : {}),   // B-c127: a click opens the conversation
-        detail: `A send in ${adapterLabel} · ${title}: the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else's room is worse than asking. Check the conversation on the platform; the Outbox window shows the proposal.\n\n${p.reason || ''}`,
-        urgency: 'high', by: 'agent', sessionName: 'Channels',
-        i18n: {
-          text: { key: i18nKey('Outbox: a send to {title} has an UNKNOWN outcome'), params: { title } },
-          detail: [
-            { key: i18nKey('A send in {adapter} · {title}: the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else\'s room is worse than asking.'), params: { adapter: adapterLabel, title } },
-            { key: i18nKey('Check the conversation on the platform; the Outbox window shows the proposal.') },
-          ],
-          source: INBOX_SOURCE,
-        },
+      await store.outbox.update((ob) => {
+        const q = ob.proposals[p.id];
+        if (!q || q.state !== 'unknown') return;   // r2268: the outcome was settled first — no item about it
+        const item = userTodos.add(INBOX_KEY, {
+          origin: 'channels', // B-328d
+          itemKey: UNKNOWN_ITEM_PREFIX + p.id,   // r2268: the item's name, derived from the proposal's id
+          text: `Outbox: a send to ${title} has an UNKNOWN outcome`,
+          ...(p.convId ? { action: { type: 'open-channel', adapterId: p.adapterId, convId: p.convId, key: `${p.adapterId}/${p.convId}` } } : {}),   // B-c127: a click opens the conversation
+          detail: `A send in ${adapterLabel} · ${title}: the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else's room is worse than asking. Check the conversation on the platform; the Outbox window shows the proposal.\n\n${p.reason || ''}`,
+          urgency: 'high', by: 'agent', sessionName: 'Channels',
+          i18n: {
+            text: { key: i18nKey('Outbox: a send to {title} has an UNKNOWN outcome'), params: { title } },
+            detail: [
+              { key: i18nKey('A send in {adapter} · {title}: the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else\'s room is worse than asking.'), params: { adapter: adapterLabel, title } },
+              { key: i18nKey('Check the conversation on the platform; the Outbox window shows the proposal.') },
+            ],
+            source: INBOX_SOURCE,
+          },
+        });
+        if (item && item.id) q.unknownTodoId = item.id;
       });
-      if (item && item.id) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = item.id; });
     } catch (e) { log.warn(`[channels] outbox ${p.id}: could not file the unknown-outcome item: ${(e && e.message) || e}`); }
   }
 
-  /** The unknown-outcome item is retracted by THIS producer, only its own
-   *  still-open id, the moment reconcile settles the proposal. */
+  /** The unknown-outcome item is retracted by THIS producer the moment the outcome is settled: found by the name derived
+   *  from the proposal's id (r2268 — never only by a recorded id, which a settle can outrun), and by the id an older
+   *  filing recorded; then the heal runs once, off the call (an item an earlier instance left behind). */
   async function retractUnknownItem(p) {
-    if (!p || !p.unknownTodoId) return;
-    const todoId = p.unknownTodoId;
-    await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = null; });
-    if (!userTodos || typeof userTodos.get !== 'function') return;
-    try {
-      const it = userTodos.get(todoId);
-      if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(todoId, 'done', RESOLVED_BY);
-    } catch (e) { log.warn(`[channels] outbox ${p.id}: could not retract the unknown-outcome item: ${(e && e.message) || e}`); }
+    if (!p) return;
+    const todoId = p.unknownTodoId || null;
+    if (todoId) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = null; });
+    if (userTodos && typeof userTodos.get === 'function') {
+      try {
+        const key = UNKNOWN_ITEM_PREFIX + p.id;
+        const ids = typeof userTodos.idsWhere === 'function'
+          ? userTodos.idsWhere((i) => i.sessionKey === INBOX_KEY && i.status === 'open' && (i.itemKey === key || (!!todoId && i.id === todoId)))
+          : (todoId ? [todoId] : []);
+        for (const id of ids) { const it = userTodos.get(id); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(id, 'done', RESOLVED_BY); }
+      } catch (e) { log.warn(`[channels] outbox ${p.id}: could not retract the unknown-outcome item: ${(e && e.message) || e}`); }
+    }
+    healUnknownSoon();
+  }
+  /** THE HEAL (r2268): an OPEN «unknown outcome» item whose proposal is already settled (any state but `unknown`) is
+   *  retracted — an item an instance from before the law kept (the settle outran the write of its id: the settled proposal
+   *  still names it), or a keyed one whose settle it missed. Bounded (HEAL_BOUND a pass), run at the boot sweep and after
+   *  each settle (deferred: never on the settle's own path), said once a pass in the journal with its count, no names. An
+   *  item whose proposal is gone from the outbox is left (nothing says its outcome). */
+  let healQueued = false;
+  function healUnknownSoon() {
+    if (healQueued) return;
+    healQueued = true;
+    const t = setImmediate(() => { healQueued = false; healUnknownItems().catch((err) => log.warn(`[channels] outbox: the unknown-outcome heal failed: ${(err && err.message) || err}`)); });
+    if (t && typeof t.unref === 'function') t.unref();
+  }
+  async function healUnknownItems() {
+    if (!userTodos || typeof userTodos.idsWhere !== 'function' || typeof userTodos.get !== 'function') return 0;
+    if (waitRead('~unknown-heal', () => healUnknownItems())) return 0;   // the For-you list held unread: the heal runs at its read
+    const props = (store.outbox.snapshot() || {}).proposals || {};
+    const settledHolds = new Map();   // an item id a SETTLED proposal still names → that proposal
+    for (const q of Object.values(props)) if (q && q.unknownTodoId && q.state !== 'unknown') settledHolds.set(q.unknownTodoId, q.id);
+    const settledKey = (k) => { if (typeof k !== 'string' || !k.startsWith(UNKNOWN_ITEM_PREFIX)) return false; const q = props[k.slice(UNKNOWN_ITEM_PREFIX.length)]; return !!q && q.state !== 'unknown'; };
+    const all = userTodos.idsWhere((i) => i.sessionKey === INBOX_KEY && i.status === 'open' && (settledHolds.has(i.id) || settledKey(i.itemKey)));
+    const ids = all.slice(0, HEAL_BOUND);
+    const stillOpen = new Set(all.slice(HEAL_BOUND));   // past the bound: the next pass
+    let n = 0, failed = 0;
+    for (const id of ids) { try { const it = userTodos.get(id); if (it && it.status === 'open') { userTodos.setStatus(id, 'done', RESOLVED_BY); n++; } } catch (e) { failed++; stillOpen.add(id); } }
+    if (failed) log.warn(`[channels] outbox: ${failed} «unknown outcome» item(s) could not be retracted now — the next settle or boot tries again`);
+    // a settled proposal forgets an item id only once that item is closed (or gone): a refused close keeps its link for the next pass
+    const clear = [...settledHolds].filter(([tid]) => !stillOpen.has(tid)).map(([, pid]) => pid).slice(0, HEAL_BOUND);
+    if (clear.length) await store.outbox.update((ob) => { for (const id of clear) { const q = ob.proposals[id]; if (q && q.state !== 'unknown') q.unknownTodoId = null; } });
+    if (n) log.warn(`[channels] outbox: ${n} «unknown outcome» item(s) retracted — their outcome was already settled`);
+    return n;
   }
 
   /**
@@ -2138,9 +2188,16 @@ function create(engineCtx) {
     // re-armed from the stamp (a reset already past ⇒ it goes out at once), never called unknown
     for (const p of proposalsFor().filter((x) => x.state === 'sending' && x.held)) armHeld(p.adapterId, Number(p.held.until) || now());
     const stuck = proposalsFor().filter((p) => p.state === 'sending' && !p.held);
-    for (const p of stuck) {
+    // r2268: each corpse's WHOLE step (the state, the audit OUTCOME line, the item and its key, the pointer) runs inside
+    // the per-proposal queue every press already waits in — a «Check outcome» pressed meanwhile settles after it
+    for (const p of stuck) await onProposal(p.id, () => sweepOne(p));
+    await healUnknownItems().catch((err) => log.warn(`[channels] outbox: the unknown-outcome heal failed: ${(err && err.message) || err}`));
+    return stuck.length;
+  }
+  async function sweepOne(p) {
+    {
       const tr = await transition(p.id, 'unknown', 'boot', (q) => { q.reason = 'outcome unknown: the server stopped between the attempt and the outcome; NOT retried automatically — check the conversation on the platform, or press Check outcome'; q.failure = { code: 'lost-at-boot', detail: null, at: now() }; });
-      if (!tr.ok) continue;
+      if (!tr.ok) return;
       const p1 = store.outbox.snapshot().proposals[p.id];
       auditOutbox(p1, 'outcome', { code: 'lost-at-boot', vendorMessageId: null, lost: true });
       await speakUnknown(p1);
@@ -2148,7 +2205,6 @@ function create(engineCtx) {
       notifyOutbox([p.id]); notify(p1.convId ? [p1.convId] : []);
       log.warn(`[channels] outbox ${p.id}: was 'sending' when the previous process stopped — now unknown (Check outcome settles it)`);
     }
-    return stuck.length;
   }
 
   /**

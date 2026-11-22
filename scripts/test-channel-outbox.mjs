@@ -453,20 +453,132 @@ console.log('§3 P4: idempotency + reconcile');
     // line: the proposal is `sending` on disk with its attempt stamped.
     await W.eng.store.outbox.update((ob) => { const q = ob.proposals[pz.proposal.id]; q.state = 'sending'; q.approvedBy = 'user'; q.attemptAt = Date.now(); q.wire = { text: q.text, honestyLine: false, at: q.attemptAt }; q.history.push({ state: 'sending', at: q.attemptAt, by: 'user' }); });
     W.eng.stop();
-    const { registry: r2 } = spyRegistry();
+    const { registry: r2, log: log2 } = spyRegistry();   // r2268 ALSO CURED: the sweep runs in THIS process — its own spy is the one that sees a send
     const W2 = mkEngine({ name: 'boot', registry: r2 });
     const openUnknown = () => W2.userTodos.snapshot().open.filter((i) => /UNKNOWN outcome/.test(i.text));
+    const auditOf = (op) => W2.eng.store.auditTail().filter((l) => l.op === op && l.proposalId === pz.proposal.id);
     ok(W2.eng.store.outbox.snapshot().proposals[pz.proposal.id].state === 'sending', 'FIXTURE: the corpse is `sending` on disk when the new process starts');
     W2.eng.start();
-    for (let i = 0; i < 40 && W2.eng.store.outbox.snapshot().proposals[pz.proposal.id].state === 'sending'; i++) await new Promise((r) => setTimeout(r, 25));
+    const sweep2 = W2.eng.sweepSending();   // a second sweep beside the boot one (the audit OUTCOME line stays ONE)
+    // r2268: wait for the sweep's END — its audit OUTCOME line and its item (filed with its key in one write), bounded —
+    // never on the state flip alone (the flip lands first, inside transition's write: 01a89a910's UTC@node22 red read there)
+    for (let i = 0; i < 200 && !(auditOf('outcome').length && openUnknown().length); i++) await new Promise((r) => setTimeout(r, 25));
+    await sweep2;
     const qz = W2.eng.store.outbox.snapshot().proposals[pz.proposal.id];
     ok(qz.state === 'unknown' && qz.history.slice(-1)[0].by === 'boot' && /server stopped between the attempt and the outcome/.test(qz.reason) && qz.failure.code === 'lost-at-boot', 'start() sweeps it into `unknown` by actor `boot` with the reason', JSON.stringify([qz.state, qz.reason]));
     ok(openUnknown().length === 1 && W2.eng.store.auditTail().some((l) => l.op === 'outcome' && l.proposalId === pz.proposal.id && l.code === 'lost-at-boot'), 'the user is asked to look and the audit OUTCOME line says lost-at-boot');
-    ok(log.sends.length === 0, 'NEGATIVE CONTROL: the boot sweep sent nothing');
+    ok(log.sends.length === 0 && log2.sends.length === 0, 'NEGATIVE CONTROL: the boot sweep sent nothing (the spy of the process that swept)');
+    ok(auditOf('outcome').length === 1, 'r2268: the audit OUTCOME line is written exactly ONCE for the corpse, a second sweep running beside the boot one', JSON.stringify(auditOf('outcome').length));
+    { const it = openUnknown()[0];
+      ok(!!it && it.itemKey === 'outbox-unknown:' + pz.proposal.id && qz.unknownTodoId === it.id, 'r2268: the item is named by the proposal\'s own id (outbox-unknown:<id>) and its id is recorded in the same write', JSON.stringify([it && it.itemKey, qz.unknownTodoId, it && it.id])); }
     ok((await W2.eng.sweepSending()) === 0, 'a second sweep finds nothing (idempotent)');
     const rz = await W2.eng.reconcile(pz.proposal.id);
     ok(rz.ok && rz.resolved && rz.state === 'sent' && openUnknown().length === 0, 'reconcile settles the corpse (landed ⇒ sent) and retracts the item');
     W2.eng.stop();
+  }
+
+  // r2268 (主开发: AN ITEM ABOUT A MESSAGE's OUTCOME NEVER OUTLIVES THE OUTCOME) — the corpse as the boot leg makes it
+  const corpse = (q, t) => { q.state = 'sending'; q.approvedBy = 'user'; q.attemptAt = t; q.wire = { text: q.text, honestyLine: false, at: t }; q.history.push({ state: 'sending', at: t, by: 'user' }); };
+  // THE WINDOW: «Check outcome» pressed while the boot sweep's state flip has not landed (the corpse reads `unknown`, no
+  // audit line, no item yet) — the press waits for the sweep's whole step, so the audit reads in order and no item is left
+  async function bootWindow(ENGmod, name) {
+    const { registry } = spyRegistry();
+    const W = mkEngine({ name, registry, engine: ENGmod });
+    await prime(W.eng);
+    const id = (await W.eng.propose(AGENT, A, C, { text: 'cut off [[fake:landed]]' })).proposal.id;
+    await W.eng.store.outbox.update((ob) => corpse(ob.proposals[id], Date.now()));
+    W.eng.stop();
+    const { registry: r2, log: log2 } = spyRegistry();
+    const W2 = mkEngine({ name, registry: r2, engine: ENGmod });
+    const openUnknown = () => W2.userTodos.snapshot().open.filter((i) => /UNKNOWN outcome/.test(i.text));
+    const ops = () => W2.eng.store.auditTail().filter((l) => l.kind === 'outbox' && l.proposalId === id).map((l) => l.op);
+    // THE HOLD: the ONE write whose own change moves the corpse sending → unknown (the sweep's state flip) lands only when
+    // the leg opens it — judged inside that write's change, never by a later read (another write landing with it would
+    // read `unknown` too and be held in its place)
+    const real = W2.eng.store.outbox.update;
+    let open = null, held = 0, opened = false;
+    const gate = new Promise((r) => { open = r; });
+    W2.eng.store.outbox.update = (fn, ...a) => {
+      let flip = false;
+      const run = real((ob) => { const was = ob.proposals[id] && ob.proposals[id].state; const r = fn(ob); flip = was === 'sending' && !!ob.proposals[id] && ob.proposals[id].state === 'unknown'; return r; }, ...a);
+      return run.then((v) => { if (flip && !held) { held++; return gate.then(() => v); } return v; });
+    };
+    W2.eng.start();
+    for (let i = 0; i < 300 && !held; i++) await new Promise((r) => setTimeout(r, 10));
+    const pressed = W2.eng.reconcile(id);   // a person presses «Check outcome» in the window
+    let settledInWindow = false;
+    pressed.then(() => { if (!opened) settledInWindow = true; }, () => {});
+    await new Promise((r) => setTimeout(r, 80));
+    const inWindow = W2.eng.store.outbox.snapshot().proposals[id].state;
+    opened = true; open();
+    const rz = await pressed;
+    for (let i = 0; i < 300 && !ops().includes('outcome'); i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 30));
+    const out = { held, settledInWindow, inWindow, rz: { ok: !!rz.ok, state: rz.state }, ops: ops(), open: openUnknown().length, sends: log2.sends.length, state: W2.eng.store.outbox.snapshot().proposals[id].state };
+    W2.eng.stop();
+    return out;
+  }
+  // THE HEAL and THE NAME: an instance from before the law boots with (a) an open item its SENT proposal still names (the
+  // window's leftover), (b) a keyed one whose proposal is sent, (c) a keyed one whose proposal is still unknown and never
+  // recorded the item's id. The boot sweep's heal retracts (a) and (b), leaves (c), says it once with the count; then
+  // «Check outcome» on (c) retracts its item BY ITS NAME at the settle (no second heal line)
+  async function healAndName(ENGmod, name) {
+    const { registry } = spyRegistry();
+    const W = mkEngine({ name, registry, engine: ENGmod });
+    await prime(W.eng);
+    const ids = [];
+    for (const t of ['landed before the restart [[fake:landed]]', 'landed too [[fake:landed]]', 'still unknown [[fake:landed]]']) ids.push((await W.eng.propose(AGENT, A, C, { text: t })).proposal.id);
+    const add = (text, extra) => W.userTodos.add('channels', { origin: 'channels', text, urgency: 'high', by: 'agent', sessionName: 'Channels', ...extra });
+    const ia = add('Outbox: a send to ops has an UNKNOWN outcome', {});
+    const ib = add('Outbox: a send to ops 2 has an UNKNOWN outcome', { itemKey: 'outbox-unknown:' + ids[1] });
+    const ic = add('Outbox: a send to ops 3 has an UNKNOWN outcome', { itemKey: 'outbox-unknown:' + ids[2] });
+    await W.eng.store.outbox.update((ob) => {
+      const t = Date.now();
+      ids.forEach((pid, k) => { const q = ob.proposals[pid]; corpse(q, t); const to = k < 2 ? 'sent' : 'unknown'; q.state = to; q.history.push({ state: to, at: t + 1, by: k < 2 ? 'reconcile' : 'adapter' }); });
+      ob.proposals[ids[0]].unknownTodoId = ia.id;
+    });
+    W.eng.stop();
+    const warns = [];
+    const W2 = mkEngine({ name, registry: spyRegistry().registry, engine: ENGmod, userTodos: W.userTodos, log: { log() {}, warn: (m) => warns.push(String(m)), error() {} } });
+    const st = (it) => (W.userTodos.get(it.id) || {}).status;
+    const healLines = () => warns.filter((l) => /«unknown outcome» item\(s\) retracted/.test(l));
+    W2.eng.start();
+    await W2.eng.sweepSending();   // the boot sweep, awaited: its heal has run when it answers (never a bound waited out)
+    for (let i = 0; i < 100 && !healLines().length && st(ia) === 'done'; i++) await new Promise((r) => setTimeout(r, 10));   // the heal's one line follows its clear's write
+    const boot = { a: st(ia), b: st(ib), c: st(ic), lines: healLines().slice(), aNames: W2.eng.store.outbox.snapshot().proposals[ids[0]].unknownTodoId || null };
+    const rc = await W2.eng.reconcile(ids[2]);
+    const atSettle = st(ic);
+    await new Promise((r) => setTimeout(r, 60));
+    const out = { boot, rc: { ok: !!rc.ok, state: rc.state }, atSettle, cAfter: st(ic), lines: healLines().slice(), ids };
+    W2.eng.stop();
+    return out;
+  }
+  {
+    const Q = '    for (const p of stuck) await onProposal(p.id, () => sweepOne(p));';
+    const H = '  async function healUnknownItems() {';
+    const K = '(i.itemKey === key || (!!todoId && i.id === todoId))';
+    const esrc = engineSource(REPO);
+    ok(esrc.split(Q).length === 2 && esrc.split(H).length === 2 && esrc.split(K).length === 2, 'r2268: the queued sweep line, the heal and the keyed retract are present once (the controls patch exactly them)');
+    const wv = await bootWindow(ENG, 'r2268-window');
+    ok(wv.held === 1 && wv.inWindow === 'unknown' && !wv.settledInWindow, 'r2268 THE WINDOW: «Check outcome» pressed while the boot sweep\'s state flip is held WAITS for the sweep\'s whole step (it never settles in the window)', JSON.stringify(wv));
+    ok(wv.rz.ok && wv.rz.state === 'sent' && wv.ops.filter((o) => o === 'outcome').length === 1 && JSON.stringify(wv.ops.slice(wv.ops.indexOf('outcome'))) === JSON.stringify(['outcome', 'reconcile-attempt', 'reconcile-outcome']), '…then settles it (landed ⇒ sent), the audit in order: the sweep\'s OUTCOME line (once) before the press\'s lines', JSON.stringify(wv.ops));
+    ok(wv.open === 0 && wv.sends === 0 && wv.state === 'sent', '…no «unknown outcome» item outlives the outcome, and nothing was sent (a corpse is never re-sent; sent only on the vendor\'s LANDED)', JSON.stringify(wv));
+    const hn = await healAndName(ENG, 'r2268-heal');
+    ok(hn.boot.a === 'done' && hn.boot.b === 'done' && hn.boot.aNames === null, 'r2268 THE HEAL: at boot, an open item whose proposal is already SENT is retracted — the one a settled proposal still names (the window\'s leftover) and a keyed one', JSON.stringify(hn.boot));
+    ok(hn.boot.c === 'open', '…the item of a proposal still UNKNOWN stays (it owes the person a look)', JSON.stringify(hn.boot));
+    ok(hn.boot.lines.length === 1 && /\b2\b/.test(hn.boot.lines[0]) && !hn.ids.some((x) => hn.boot.lines[0].includes(x)) && !/ops|landed|unknown \[/.test(hn.boot.lines[0]), '…said ONCE in the journal with its count, no names', JSON.stringify(hn.boot.lines));
+    ok(hn.rc.ok && hn.rc.state === 'sent' && hn.atSettle === 'done' && hn.lines.length === 1, 'r2268 THE NAME: «Check outcome» on a proposal whose item id was never recorded retracts the item BY ITS NAME at the settle (no heal needed: no second line)', JSON.stringify(hn));
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const MW = mutantCopies('chan-outbox-r2268', REPO);
+    const unqueued = MW.load('src/server/channels-engine.js', esrc.replace(Q, '    for (const p of stuck) await sweepOne(p);'), 'sweep-unqueued');
+    const wr = await bootWindow(unqueued, 'r2268-window-red');
+    ok(wr.held === 1 && wr.settledInWindow && wr.ops.indexOf('reconcile-outcome') < wr.ops.indexOf('outcome'), 'CONTROL: a copy whose boot sweep runs OUTSIDE the queue settles in the window and writes the sweep\'s OUTCOME line AFTER the settle — the window legs would go red', JSON.stringify(wr));
+    const noHeal = MW.load('src/server/channels-engine.js', esrc.replace(H, H + ' return 0;'), 'no-heal');
+    const hr = await healAndName(noHeal, 'r2268-heal-red');
+    ok(hr.boot.a === 'open' && hr.boot.b === 'open', 'CONTROL: a copy without the heal leaves both leftover items open for proposals already sent — the heal leg would go red', JSON.stringify(hr.boot));
+    const byId = MW.load('src/server/channels-engine.js', esrc.replace(K, '(!!todoId && i.id === todoId)'), 'retract-by-id-only');
+    const nr = await healAndName(byId, 'r2268-name-red');
+    ok(nr.atSettle === 'open' || nr.lines.length === 2, 'CONTROL: a copy that retracts only by a recorded id leaves the never-recorded item open at the settle (only a later heal takes it) — the name leg would go red', JSON.stringify(nr));
   }
 }
 
