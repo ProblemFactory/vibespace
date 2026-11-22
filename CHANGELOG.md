@@ -105,6 +105,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - What you type in a Task Group's Backlog (the add box, open edits) now stays when the list redraws for someone else's change.
 - Disconnecting a storage now says «Disconnecting…» while it waits, and says so when the storage did not disconnect.
 - On an ssh machine, Session Properties now says the CPU priority is below its ssh login, and no longer claims it for a terminal that joined a running shell.
+- At a start, VibeSpace reads its record of how each request was billed a piece at a time, instead of all of it into memory at once.
+- Once the one-time repair of older usage records has run, that record is trimmed at every start to what VibeSpace still reads, even while sessions work.
+- The one-time repair of older usage records no longer counts as done when it could not read that record; it runs again at the next start.
 
 ## 2.369.415 — 2026-11-21
 
