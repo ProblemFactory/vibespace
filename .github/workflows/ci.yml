@@ -318,11 +318,11 @@ jobs:
           # probes (claude --help, --version, the oat tick) and a self-found claude are refused by name (src/machine-probes.js
           # realCliRefusal: only a NAMED stand-in runs). THE SANCTIONS, BY NAME (each named suite reads the list, on the Actions runner
           # only): the two legs that run the installed claude ONLY against a loopback mock of the messages API with a made-up key
-          # (test-claude-steer-chrome §A, test-claude-wrapper-queue §A), on every major, and test-stdout-registry's wire leg ⓕ — one of
-          # the TWO rows the tree lets reach the vendor (test-chat-e2e is the other, in the fast job) — on the Node 22 shard alone, so it
-          # runs once a hosted run. No row joins the list but by the owner's word. test-ci-gate §2r holds all of it.
+          # (test-claude-steer-chrome §A, test-claude-wrapper-queue §A), on every major — ONE list. test-stdout-registry's wire leg ⓕ LEFT it
+          # (the coordinator's r2084): no sign-in reaches it on the runner, so it could measure nothing there; it is a measure a person
+          # runs by hand. No row joins the list but by the owner's word. test-ci-gate §2r holds all of it.
           VS_NO_REAL_CLI: '1'
-          VS_REAL_CLI_SANCTIONED: ${{ matrix.node == 22 && 'test-claude-steer-chrome §A; test-claude-wrapper-queue §A; test-stdout-registry ⓕ' || 'test-claude-steer-chrome §A; test-claude-wrapper-queue §A' }}
+          VS_REAL_CLI_SANCTIONED: 'test-claude-steer-chrome §A; test-claude-wrapper-queue §A'
       # A chrome suite that goes red HERE and green locally (2.369.125's
       # test-gear-menu Esc legs) leaves its screenshots on a runner nobody can
       # log into; ship them as an artifact so the failure can be read instead

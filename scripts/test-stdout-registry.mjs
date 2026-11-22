@@ -716,20 +716,18 @@ const wireVerdict = (res, why = '') => {
   //    THE SWITCH (lane claude-steer-inject r6, §ban-safety): this leg runs ONE REAL claude turn with the box's login — one of
   //    the TWO rows that may talk to the vendor (with test-chat-e2e); VS_NO_REAL_CLI=1 (every acceptance run sets it) skips it
   //    by name, before the probe starts.
-  //    THE SANCTION (B-ec25, r117, the coordinator's ruling r140, 2026-11-20): the hosted heavy job runs under VS_NO_REAL_CLI=1 and
-  //    sanctions THIS leg by name on its Node 22 shard alone (VS_REAL_CLI_SANCTIONED, a `;` list; test-ci-gate §2r) — once a hosted
-  //    run, on the Actions runner only; a lane env or a test machine that carries the word still skips. The probe starts the
-  //    installed claude with the HOME's own sign-in (scripts/probe-claude-stdout.mjs: vendor keys stripped, no CI secret read).
+  //    NO HOSTED SANCTION (the coordinator's r2084, the block's hosted run 44980743210): the wire leg LEFT the hosted heavy job's
+  //    sanction list. No sign-in reaches it on the runner (the CI secret goes to test-chat-e2e alone, r144), and this suite runs
+  //    re-homed (its PATH built, its HOME a temp one: f5a1eb87b), so the probe could measure nothing there — its skip on the runner
+  //    is BY DESIGN. BY HAND: on a machine with a signed-in claude, `node scripts/probe-claude-stdout.mjs` (no suite: not re-homed)
+  //    prints the census this leg judges; a suite run never carries the person's sign-in.
   let res = null, why = '';
-  const REAL_CLI_SANCTION = 'test-stdout-registry ⓕ';
-  const REAL_CLI_SANCTIONED = String(process.env.VS_REAL_CLI_SANCTIONED || '').split(';').map((x) => x.trim()).includes(REAL_CLI_SANCTION) && process.env.GITHUB_ACTIONS === 'true';
-  const noRealCli = process.env.VS_NO_REAL_CLI === '1' && !REAL_CLI_SANCTIONED;
-  if (process.env.VS_NO_REAL_CLI === '1' && REAL_CLI_SANCTIONED) console.log(`  (VS_NO_REAL_CLI=1 with the hosted heavy job's sanction «${REAL_CLI_SANCTION}»: the wire leg runs the installed claude — every other leg stays under the flag)`);
+  const noRealCli = process.env.VS_NO_REAL_CLI === '1';
   if (!noRealCli) try {
     const raw = require('child_process').execFileSync(process.execPath, [path.join(REPO, 'scripts/probe-claude-stdout.mjs')], { encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'ignore'] });
     res = JSON.parse(String(raw).trim().split('\n').filter(Boolean).pop() || '{}');
   } catch (e) { why = e.message; }
-  const verdict = noRealCli ? { skip: 'SKIPPED the wire leg (ⓕ): VS_NO_REAL_CLI=1 — the real claude turn is not run' } : wireVerdict(res, why);
+  const verdict = noRealCli ? { skip: `SKIPPED the wire leg (ⓕ): VS_NO_REAL_CLI=1 — the real claude turn is not run${process.env.GITHUB_ACTIONS === 'true' ? ' (by design on the hosted runner: no sign-in reaches it, r2084; by hand: node scripts/probe-claude-stdout.mjs)' : ''}` } : wireVerdict(res, why);
   if (verdict.skip) console.log(`  SKIP: ${verdict.skip}`);
   else {
     const n = (t) => res.types[t] || 0;

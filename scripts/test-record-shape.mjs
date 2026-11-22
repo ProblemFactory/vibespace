@@ -32,7 +32,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
-import { anchored } from './scratch.mjs'; // B-9ff2 step 2: the 2.1.328 controls' edits fail by name when their line moves
+import { anchored, handedCliCandidates } from './scratch.mjs'; // B-9ff2 step 2: the 2.1.328 controls' edits fail by name when their line moves
 // §4d (lane S1 verify r5): THE PERMISSION-OUTCOME SENTENCE CENSUS — the binary's OWN lists of the tool_result
 //   texts it writes for a permission outcome (`Gd()` and the exact is_error set) vs src/permission-outcome.js;
 //   the names are read off an anchor (the interrupt marker), never spelled; a newer build's extra sentence
@@ -129,6 +129,21 @@ function correctionSiteOf(text, wwName, corrNames) {
   } else out.misses.push('the caller createSyntheticErrorMessage(c.id,"user_interrupted",c.assistantMessage,F(c))');
   out.ok = !!out.sig && !!out.site && out.flagHeld === true && out.inBranch.length === corrNames.length && !!out.caller && out.ran;
   return out;
+}
+/** PURE (r2084): the record oracle's road to a real claude — { open, handed, pinned, why }. Under VS_NO_REAL_CLI=1 nothing; on the
+ *  hosted runner the handed env's candidates (the pin step's install) and a file named by hand; elsewhere only a file named by hand
+ *  (VIBESPACE_ORACLE_BINARY), never a person's install. */
+function oracleRoad({ hosted, noRealCli, pinned = null }) {
+  if (noRealCli) return { open: false, handed: false, pinned: null, why: 'VS_NO_REAL_CLI=1 — no real install is read here (r2084)' };
+  if (hosted) return { open: true, handed: true, pinned, why: '' };
+  if (pinned) return { open: true, handed: false, pinned, why: '' };
+  return { open: false, handed: false, pinned: null, why: "not the hosted runner (no GITHUB_ACTIONS=true) — a person's installed claude is never read (r2084); VIBESPACE_ORACLE_BINARY names a file by hand" };
+}
+/** PURE: the file the oracle reads on its road — the hand-named file first, then the handed candidates — or null. */
+function oracleBinary(road, candidates = [], isFileAt = (c) => { try { const real = fs.realpathSync(c); return fs.statSync(real).isFile() ? real : null; } catch { return null; } }) {
+  if (!road || !road.open) return null;
+  for (const c of [road.pinned, ...(road.handed ? candidates : [])].filter(Boolean)) { const r = isFileAt(c); if (r) return r; }
+  return null;
 }
 /** PURE (r1682): on a hosted run, why the installed claude is not the tree's pin — or null. Off a hosted run, null (the box judges by
  *  its own strict oracle; a test machine has no agent CLI). */
@@ -480,15 +495,14 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
     ok('§4 B-5e52: dumpBinary over a binary that names no build REFUSES by name — it never runs the file to ask (a missing file proves no run was tried)', /names no build/.test(String(said)), said);
     ok('§4 B-5e52: …and reads the build off a 0644 copy\'s stamp, or its versions-dir name', DUMP.versionOfBinary('/x/claude-copy', 'a VERSION:"2.1.322" b VERSION:"2.1.322"') === '2.1.322' && DUMP.versionOfBinary('/x/claude/versions/2.1.322', '') === '2.1.322');
   }
-  const findBinary = () => {
-    // VIBESPACE_ORACLE_BINARY pins the file the oracle reads (an older build under
-    // ~/.local/share/claude/versions/, or a scratch dump with a planted field — the drift-alarm proof).
-    const cands = process.env.VIBESPACE_ORACLE_BINARY ? [process.env.VIBESPACE_ORACLE_BINARY] : [];
-    for (const d of String(process.env.PATH || '').split(':')) if (d) cands.push(path.join(d, 'claude'));
-    cands.push(path.join(os.homedir(), '.local/bin/claude'), path.join(os.homedir(), '.claude/local/claude'));
-    for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile()) return real; } catch { } }
-    return null;
-  };
+  // THE ORACLE'S ROAD TO A REAL CLAUDE (the coordinator's r2084, the hosted run 44980743210). Since f5a1eb87b (B-ba47 pick B) a re-homed
+  // suite's PATH is BUILT — nothing of the handed PATH carried — and an agent CLI is reached ONLY through scripts/scratch.mjs
+  // REAL_CLI_ALLOW: the oracle had run nowhere since. This suite is a row, FENCED: it reads the bytes ONLY of the program the hosted
+  // runner's pin step installed (the runner's own mark, GITHUB_ACTIONS=true; the handed env's candidates). On a person's machine and
+  // under VS_NO_REAL_CLI=1 it reads NO real install — a named skip. VIBESPACE_ORACLE_BINARY (a file named BY HAND: a 0644 copy of a
+  // build, the kb's registration road) is read off the runner too, never under the switch; no gate sets it.
+  const road = oracleRoad({ hosted: process.env.GITHUB_ACTIONS === 'true', noRealCli: process.env.VS_NO_REAL_CLI === '1', pinned: process.env.VIBESPACE_ORACLE_BINARY || null });
+  const findBinary = () => oracleBinary(road, road.handed ? handedCliCandidates('claude') : []);
   // §4d THE CORRECTION'S CALL-SITE READER on made-up bundles — needs no binary (B-28b1's side run, the coordinator's r1543)
   {
     const WW = 'The user doesn\'t want to proceed with this tool use.';
@@ -539,8 +553,23 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   // ON A HOSTED RUN THE INSTALLED BUILD IS THE PIN, or the suite is RED (the coordinator's r1682, round wynbby0e0). The lenient branch
   // (a newer build's drift printed, not red) was for the mirror before B-28b1 (1); every hosted job installs the tree's pin since, so a
   // build that is not it is a failed pin step, a claude that shadows it on PATH, or no binary at all — never a skip.
-  const hostedWhy = hostedPinWhy({ hosted: !!process.env.GITHUB_ACTIONS, bin, size, installed, pinned });
-  if (process.env.GITHUB_ACTIONS) ok(`§4 the hosted runner's claude IS the tree's pin: installed ${installed || '(none)'}, pinned ${pinned} (B-28b1, r1682: never lenient)`, !hostedWhy, hostedWhy);
+  const hostedWhy = road.handed ? hostedPinWhy({ hosted: true, bin, size, installed, pinned }) : null;
+  if (process.env.GITHUB_ACTIONS === 'true' && !road.handed) console.log(`  §4 the hosted runner under VS_NO_REAL_CLI=1 (its other major's job): the oracle reads no install here — the Node 22 job reads the pin`);
+  if (road.handed) ok(`§4 the hosted runner's claude IS the tree's pin: installed ${installed || '(none)'}, pinned ${pinned} (B-28b1, r1682: never lenient)`, !hostedWhy, hostedWhy);
+  {
+    // THE FENCE (r2084): a planted program on the handed path is NOT read under the switch, nor off the runner; on the runner it is
+    const plantDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oracle-fence-')), planted = path.join(plantDir, 'claude');
+    try {
+      fs.writeFileSync(planted, 'a planted program, never a real install\n');
+      const at = (o) => oracleBinary(oracleRoad(o), [planted]);
+      const underSwitch = at({ hosted: true, noRealCli: true }), offRunner = at({ hosted: false, noRealCli: false }), onRunner = at({ hosted: true, noRealCli: false });
+      const byHand = at({ hosted: false, noRealCli: false, pinned: planted }), byHandSwitch = at({ hosted: false, noRealCli: true, pinned: planted });
+      ok('§4 THE FENCE (r2084): a planted program on the handed path is NOT read under VS_NO_REAL_CLI=1 (even on the runner), nor off the hosted runner; a file named by hand is read off the runner but never under the switch',
+        underSwitch === null && offRunner === null && byHandSwitch === null && byHand === fs.realpathSync(planted), { underSwitch, offRunner, byHand, byHandSwitch });
+      ok('§4 …CONTROL: on the hosted runner, with the switch off, the SAME planted program IS read (so the nulls above are the fence\'s, not a file that could not be read)', onRunner === fs.realpathSync(planted), { onRunner });
+      ok('§4 …and the road says why it is shut, by name (the switch; a person\'s machine)', /VS_NO_REAL_CLI=1/.test(oracleRoad({ hosted: true, noRealCli: true }).why) && /never read/.test(oracleRoad({ hosted: false, noRealCli: false }).why));
+    } finally { fs.rmSync(plantDir, { recursive: true, force: true }); }
+  }
   {
     const H = (o) => hostedPinWhy({ hosted: true, bin: '/x/claude', size: 200 * 1024 * 1024, installed: '2.1.328', pinned: '2.1.328', ...o });
     ok('§4 the hosted verdict (PURE): the pin is green; another build, a shim, no binary and an unread build are each RED by name; off a hosted run it judges nothing',
@@ -551,7 +580,7 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   ORACLE_MODE = !bin || size < 4 * 1024 * 1024 ? 'no binary (the binary oracle did not run)' : `STRICT on ${installed || '(unknown)'} (pinned ${pinned})${installed !== pinned ? ' — NOT THE PIN' : ''}`;
   const oracleOk = ok;   // r1682: every oracle leg is strict wherever it runs (the hosted verdict above names a build that is not the pin)
   if (!bin || size < 4 * 1024 * 1024) {
-    skip('binary oracle', bin ? `${bin} is ${size} bytes — a launcher/shim, not the CLI binary (install the native build to run this leg)` : 'no claude binary on PATH / ~/.local/bin / ~/.claude/local');
+    skip('binary oracle', bin ? `${bin} is ${size} bytes — a launcher/shim, not the CLI binary (install the native build to run this leg)` : road.open ? 'no claude binary on the road (the handed env / VIBESPACE_ORACLE_BINARY)' : road.why);
   } else {
     // THE EXTRACTOR (§4a): the helper names read off the anchor, never spelled. `strings` keeps memory
     // sane on a 230 MB ELF; the raw latin1 read is the fallback.

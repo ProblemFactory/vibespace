@@ -447,7 +447,6 @@ export const SELF_LOOKUP = Object.freeze({
   'test-pricing-tiers.mjs': 'claude — §3 reads the installed catalog as an oracle; re-homed, it says by name that it did not run',
   'test-queue-steer.mjs': 'codex — ⑥ / ⑩ the real `codex app-server`; re-homed, it says by name that it did not run',
   'test-record-clear-walk.mjs': 'claude — a HIDE row: its hub\u2019s PATH drops the folders holding it',
-  'test-record-shape.mjs': 'claude — the installed binary\u2019s shapes READ off it; re-homed, it says by name that it did not run',
   'test-toolbar-fold-ui.mjs': 'claude, codex — a HIDE row: its hub\u2019s PATH drops the folders holding them',
   'test-vendor-whitelist.mjs': 'the shipped oracles — (b) the live re-measurement under strace; re-homed, it says by name that it did not run',
 });
