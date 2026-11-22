@@ -2085,11 +2085,21 @@ class AccountManager {
    *  known account (a provider is a LABEL every member wears); null for an unknown id. */
   memberProviderOf(id) {
     const x = this.get(id);
-    if (!x) return null;
+    if (!x) return this._providerMemberOf(id);
     if (this._providerLookup) {
       try { const p = this._providerLookup(x); if (p && typeof p === 'object' && (p.id || p.kind)) return p; } catch { }
     }
     return this.firstPartyProviderOf(this._acctBackend(x) || 'claude');
+  }
+  /** A THIRD-PARTY PROVIDER's RECORD as a pool member (row B-d578, the pool's fallback unit (b), ruling r1516): a `pv-…` id is
+   *  no account — the provider store's own record names it (providerRecordOf: its registered lookup asked with the id). A record the store does not hold (deleted, or no store wired) still names a provider
+   *  of ITS OWN that lists no model (it serves nothing) — never null, which the pool reads as ITS OWN first-party provider
+   *  (and an unknown provider agrees with any in the PURE rules): a provider member is never a same-provider (hot) move. */
+  _providerMemberOf(id) {
+    if (!/^pv-/.test(String(id || '')) || builtInProviderOf(String(id))) return null;
+    const p = this.providerRecordOf(id);
+    if (p && typeof p === 'object' && (p.id || p.kind)) return p;
+    return { id: String(id), kind: 'unknown', label: String(id), models: [], modelsSource: 'none', known: false };
   }
   /** A harness's OWN subscription as a provider (its creds row's `loginLabel`) — what every same-backend subscription
    *  member answers, and what the engine reads for a member the store no longer knows (a deleted pool member was one). */

@@ -3663,20 +3663,45 @@ await (async () => {
     // cap of ANOTHER family (B's Fable week, the conversation on Sonnet) is no «cannot serve»: the carry stands, the resume lands on B.
     // RED: the check as it stood (no family) — an engine copy with the family argument cut reads every bucket and puts it back.
     {
-      const famLeg = (engMod) => {
+      const famLeg = (engMod, hinted = false) => {
         const { w, moved } = movedWorld('s8', engMod);
         const nowS = Math.floor(Date.now() / 1000);
         fsx.writeFileSync(path.join(w.cacheDir, w.B + '.json'), JSON.stringify({ fetchedAt: Date.now() - 1000, source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: nowS + 3 * 86400 }] }));
-        return { moved, r: w.quiet(() => w.eng.poolChooserForModel(w.Pl, { model: 'claude-sonnet-5', resumeOf: 'cid-s8' })), w };
+        return { moved, r: w.quiet(() => w.eng.poolChooserForModel(w.Pl, { model: 'claude-sonnet-5', hinted, resumeOf: 'cid-s8' })), w };
       };
       const f1 = famLeg(null);
       ck('engine: THE FAMILY — the moved-to member\'s Fable week spent while the conversation runs Sonnet: it still serves, the carry stands and the resume lands on B', f1.moved && f1.r === f1.w.B && f1.w.eng._crossPlacementOwed.has('cid-s8'), J({ moved: f1.moved, r: f1.r }));
       const { mutantCopies: mcF } = await import('./mutant-copy.mjs');
       const fsrc = fsx.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
       const { anchored: anchoredF } = await import('./scratch.mjs');
-      const famCopy = anchoredF(fsrc, 'if (memberCanServe(poolId, to, null, null, Date.now(), fam)) return to;', 'if (memberCanServe(poolId, to)) return to; /* PATCHED: no family */', 'the carry check without the family');
+      const famCopy = anchoredF(fsrc, 'if (memberCanServe(poolId, to, null, null, Date.now(), hinted ? null : fam)) return to;', 'if (memberCanServe(poolId, to)) return to; /* PATCHED: no family */', 'the carry check without the family');
       const f2 = famLeg(mcF('carry-family', path.resolve('.')).load('src/server/usage-pool-engine.js', famCopy, 'no-family'));
       ck('engine: CONTROL — the check with no family (as it stood) reads the other family\'s spent week as «cannot serve»: the resume goes back by the rules (red)', !!f2 && f2.moved && f2.r !== f2.w.B, J(f2 && { moved: f2.moved, r: f2.r }));
+      // (r2238) a HINTED family (a resume naming no model — the instance default stands in) is no fact about the conversation:
+      // the carry is judged under EVERY bucket then — the other family's spent week stops it, the rules place the resume
+      const fh = famLeg(null, true);
+      ck('engine: …the same scene with the family only HINTED (a resume naming no model): judged under every bucket, the carry is dropped and the rules place it', fh.moved && fh.r !== fh.w.B && !fh.w.eng._crossPlacementOwed.has('cid-s8'), J({ moved: fh.moved, r: fh.r }));
+    }
+    // POOL UNIT (b) (row B-d578, ruling r1516 — before any provider id reaches a decision): a THIRD-PARTY PROVIDER's record as a
+    // member names ITS OWN provider (accounts.memberProviderOf → providerRecordOf), and one the store does not hold names an
+    // «unknown» provider of its own that serves no model — never null, which the pool reads as its OWN first-party provider.
+    // RED: the release's accounts (a `pv-` id is no account ⇒ null) — the pool's reader then calls it the pool's own provider.
+    {
+      const { sameProvider, resolveModel } = require(path.resolve('src/account-pool-auto.js'));
+      const R = { id: 'pv-fixture-router', kind: 'openai-chat', label: 'Router', models: [{ id: 'router-1' }], modelsSource: 'manual' };
+      const look = (w) => (acct) => (acct.id === R.id ? R : acct.id === w.B ? Q : null);
+      const w = pworld(); w.am.setProviderLookup(look(w));
+      const own = w.eng.memberProvider(w.A), pr = w.eng.memberProvider(R.id), gone = w.eng.memberProvider('pv-fixture-gone');
+      ck('engine: POOL UNIT (b) — a provider\'s record as a member names ITS provider (the store\'s own record), never the pool\'s', !!pr && pr.id === R.id && !sameProvider(own, pr), J({ own: own && own.id, pr: pr && pr.id }));
+      ck('engine: …one the store does not hold names an «unknown» provider of ITS OWN that serves no model — not the pool\'s, not «agrees with any»', !!gone && gone.id === 'pv-fixture-gone' && gone.known === false && !sameProvider(own, gone) && resolveModel(gone, 'claude-sonnet-5') === null, J(gone));
+      ck('engine: …an ACCOUNT member is read as before (the first-party subscription, the DeepSeek row)', !!own && own.firstParty === true && w.eng.memberProvider(w.B)?.id === Q.id, J({ own, B: w.eng.memberProvider(w.B) }));
+      const { mutantCopies: mcB } = await import('./mutant-copy.mjs');
+      const { anchored: anchoredB } = await import('./scratch.mjs');
+      const asrc = fsx.readFileSync(path.resolve('src/accounts.js'), 'utf8');
+      const { AccountManager: AM0 } = mcB('pool-b-accounts', path.resolve('.')).load('src/accounts.js', anchoredB(asrc, '    if (!x) return this._providerMemberOf(id);', '    if (!x) return null;', 'the release: a provider id is no account'), 'release-member-provider');   // stale-pins: kept (the copy WRITES the release's line)
+      const am0 = new AM0({ dataDir: fsx.mkdtempSync(path.join(scr, 'pool-b-')) }); am0.setProviderLookup(look(w));
+      const p0 = am0.memberProviderOf(R.id);
+      ck('engine: CONTROL — the release\'s accounts answer null for the provider\'s id, and the pool\'s reader agrees it with ITS OWN provider (a hot, unasked move): red', p0 === null && sameProvider(p0, own), J({ p0 }));
     }
     // Deny: nothing moves, not asked again
     const wd = pworld(); wd.client(); wd.mk('s2'); wd.pass();

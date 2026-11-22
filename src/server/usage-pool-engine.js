@@ -844,8 +844,9 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // carry lives (crossCarryFor) AND the member can still serve (memberCanServe — the pin's own judgement: signed in, not at its
     // wall, not parked); else the carry is dropped, said once, and the rules below place it. A pin the person set AFTER the move
     // ended the carry already (setConversationPin); a pin's own cross move IS the carry. The POOL's default (`forDefault`) is
-    // never placed by one conversation's carry.
-    if (resumeOf && !forDefault) { const to = crossCarryFor(poolId, resumeOf); if (to) { if (memberCanServe(poolId, to, null, null, Date.now(), fam)) return to; dropCrossCarry(poolId, resumeOf, to); } }   // judged under THIS conversation's family (round wk9ee639n's must: another family's spent scoped cap is no «cannot serve»)
+    // never placed by one conversation's carry. A HINTED family (a resume that names no model: the instance default stands in,
+    // r2238) is no fact about the conversation, so the carry is judged under EVERY bucket then (fail closed: the rules place it).
+    if (resumeOf && !forDefault) { const to = crossCarryFor(poolId, resumeOf); if (to) { if (memberCanServe(poolId, to, null, null, Date.now(), hinted ? null : fam)) return to; dropCrossCarry(poolId, resumeOf, to); } }   // judged under THIS conversation's family (round wk9ee639n's must: another family's spent scoped cap is no «cannot serve»)
     // THE CONVERSATION'S PIN (2026-09-28): a resumed pinned conversation starts on its pin when
     // the pin can serve (the owner's choice, explicit — no warm or settle bar at a spawn); a pin
     // that cannot serve starts it where the automatic rules would (the pin kept on the session)
