@@ -33,6 +33,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import dns from 'node:dns';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { spawnSync, spawn, execFileSync } from 'node:child_process';
 
@@ -45,9 +46,19 @@ const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-store-writer-'));
 const MB = 1024 * 1024;
+// r1718 (a): EVERY SCRIPT THIS SUITE GENERATES IS PARSED BEFORE A THREAD OR A CHILD RUNS IT, and a text that does not parse fails
+// BY NAME. A template literal unescapes once, and a check of this file reads no template's text: line 248's box run (row 125)
+// wrote a raw newline into the slow stand-in's string, the stand-in never loaded, and the exit then waited for ever on it
+const parseError = (src, file) => { try { new vm.Script(`(function (exports, require, module, __filename, __dirname) {${src}\n})`, { filename: file }); return null; } catch (e) { return (e && e.message) || String(e); } };
+const generated = [];
+const writeScript = (file, src) => {
+  const e = parseError(src, file);
+  if (e) { console.error(`  ✗ the generated script ${path.basename(file)} does not parse (${e}) — no thread or child runs it`); throw new Error(`the generated script ${path.basename(file)} does not parse`); }
+  fs.writeFileSync(file, src); generated.push(path.basename(file));
+};
 // the slow storage: the writer's own thread script, sleeping `delayMs` before each write and recording how many run at once
 const SLOW = path.join(ROOT, 'slow-worker.cjs');
-fs.writeFileSync(SLOW, `'use strict';
+writeScript(SLOW, `'use strict';
 const { parentPort, workerData, threadId } = require('worker_threads');
 const fs = require('fs');
 const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
@@ -62,7 +73,7 @@ parentPort.on('message', (m) => {
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   // r1584: ITS OWN MARK — the storage time of each job, with its thread and kind (whole / append), so section 4 counts what
   // touched the storage at once (process.hrtime is the process's one clock: comparable across both lanes' threads)
-  if (process.env.VS_SLOW_MARKS) fs.appendFileSync(process.env.VS_SLOW_MARKS, JSON.stringify({ tid: threadId, ev: m.ev, append: !!m.append, t0: String(t0), t1: String(process.hrtime.bigint()) }) + '\n');
+  if (process.env.VS_SLOW_MARKS) fs.appendFileSync(process.env.VS_SLOW_MARKS, JSON.stringify({ tid: threadId, ev: m.ev, append: !!m.append, t0: String(t0), t1: String(process.hrtime.bigint()) }) + '\\n');
   Atomics.store(S, 2, err ? 2 : 1); Atomics.add(S, 1, 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
   parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
 });
@@ -307,7 +318,7 @@ try {
   {
     const FIFO = path.join(ROOT, 'never.fifo'); execFileSync('mkfifo', [FIFO]);
     const HUNG = path.join(ROOT, 'hung-worker.cjs');
-    fs.writeFileSync(HUNG, `'use strict';
+    writeScript(HUNG, `'use strict';
 const { parentPort, workerData } = require('worker_threads');
 const fs = require('fs');
 const S = new Int32Array(workerData.sab);
@@ -324,7 +335,7 @@ parentPort.on('message', (m) => {
     // at the same; the road's own unmoved stores at `unmovedMs` each (a synchronous write + its wait). The DRIVER plays
     // the service manager (its kill at the stop + the grace); after a crash with no stop asked there is no manager.
     const CHILD = path.join(ROOT, 'exit-child.cjs');
-    fs.writeFileSync(CHILD, `'use strict';
+    writeScript(CHILD, `'use strict';
 const path = require('path'), fs = require('fs'), cp = require('child_process');
 const dir = process.argv[2], mode = process.argv[3];
 const out = (s) => process.stdout.write(s + '\\n');
@@ -511,7 +522,7 @@ if (mode === 'scene') {
         `the install tree AND the data directory hanging from the signal — the line still came after the stop (${ih.lineMs} ms; the manager's kill); after the crash the keeper still ENDED it at the grace (${ihc.ms} ms)`, { ih: ih.lines, ihc: { sig: ihc.sig, ms: ihc.ms, lines: ihc.lines } }); }
     // THE MUTANT: a keeper that KILLS after a stop signal (round 4's law) — red by name: it cuts the manager's time short
     { const KM = path.join(ROOT, 'keeper-kills.js');
-      fs.writeFileSync(KM, fs.readFileSync(path.join(REPO, 'src/store-exit-keeper.js'), 'utf8').replace("if (kind === 'crash') process.kill(process.pid, 'SIGKILL');", "process.kill(process.pid, 'SIGKILL');").replace("require('./store-pace.js')", `require(${JSON.stringify(path.join(REPO, 'src/store-pace.js'))})`));
+      writeScript(KM, fs.readFileSync(path.join(REPO, 'src/store-exit-keeper.js'), 'utf8').replace("if (kind === 'crash') process.kill(process.pid, 'SIGKILL');", "process.kill(process.pid, 'SIGKILL');").replace("require('./store-pace.js')", `require(${JSON.stringify(path.join(REPO, 'src/store-pace.js'))})`));
       const km = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 900, env: { VS_KEEPER_PATH: KM }, tag: 'mutant-kills' });
       ok(!km.killedByDriver && km.sig === 'SIGKILL' && km.ms < 3000, `MUTANT «the keeper kills after a stop signal» is RED by name: the process died ${km.ms} ms after the stop — before the manager's grace (the driver kills at 3.9 s)`, { sig: km.sig, ms: km.ms, killed: km.killedByDriver }); }
     // E3 (c): A PROCESS THAT USES THE STORES IS NOT THE SERVER — no keeper thread (the server's boot starts it by name)
@@ -532,6 +543,9 @@ if (mode === 'scene') {
     { const r = spawnSync(process.execPath, [path.join(REPO, 'scripts/test-store-writer-r4.mjs')], { env: { ...process.env, VS_R4_PAIRS: 'all' }, encoding: 'utf8', timeout: 120000 });
       ok(r.status === 0 && /✓ MUST 1: an append cut AT ITS NEWLINE[^\n]*\(8 pairs\)/.test(r.stdout || ''), 'MUST 1, the whole matrix (2 cuts × 4 truncate outcomes, a kill before the retry, a new process): every pair green — test-store-writer-r4 with VS_R4_PAIRS=all', { status: r.status, tail: String(r.stdout || '').slice(-600) + String(r.stderr || '').slice(-300) }); }
   }
+  // r1718 (a): the generated scripts, each parsed before it ran — and the check's control: row 125's raw newline inside a string
+  ok(['slow-worker.cjs', 'hung-worker.cjs', 'exit-child.cjs', 'keeper-kills.js'].every((n) => generated.includes(n)), `every script this suite generates was PARSED before a thread or a child ran it (${generated.join(', ')})`, generated);
+  ok(/Invalid or unexpected token|Unterminated string/i.test(parseError("const line = 'a" + "\n" + "';", 'control.cjs') || ''), 'CONTROL: a raw newline inside a string (row 125\'s stand-in) does not parse — it is refused BY NAME before anything runs it');
   // ── ④ RED, RUN LAST ─────────────────────────────────────────────────────────────────────────────────────────────────
   // its mutant copy (scripts/mutant-copy.mjs) imports scratch.mjs, which re-homes a suite whose HOME is outside every temp root
   // (a hosted runner's): no leg before this one runs under a home changed half-way
