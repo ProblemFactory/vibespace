@@ -226,7 +226,11 @@ const STATUS = Object.freeze({
 // the door's sentence for the run's storage (a PARKED mount's own words when it is one — B-5ce7's cure), + where and that nothing ran
 const storageWords = (p) => `${DOOR.sentenceFor(p)} (the run's folder, its program or a template is on it) — nothing ran`;
 // r2161 (c): a lock that lands while a FINISHED child's output is scrubbed — the command RAN; a tool that cannot be repeated must not be run again blindly
-const LOCKED_AFTER_RAN = VB.agentWords('the command RAN to its end before the lock — do not run it again blindly; its output after the lock is withheld, and a new run waits until a person unlocks it on this instance\'s page');
+const LOCKED_AFTER_RAN = Object.freeze({   // 主开发 r2229: the words name how the child ended before the lock (its timeout, its caller leaving, or its own end)
+  end: VB.agentWords('the command RAN to its end before the lock — do not run it again blindly; its output after the lock is withheld, and a new run waits until a person unlocks it on this instance\'s page'),
+  timeout: VB.agentWords('the command RAN until its timeout stopped it, before the lock — do not run it again blindly; its output after the lock is withheld, and a new run waits until a person unlocks it on this instance\'s page'),
+  gone: VB.agentWords('the command RAN until its caller left, before the lock — do not run it again blindly; its output after the lock is withheld, and a new run waits until a person unlocks it on this instance\'s page'),
+});
 const MORE_WORDS = Object.freeze({
   run_unanswered: 'the command RAN, but its answer could not be written: its output is lost — do not run it again blindly; its receipt and its use are recorded',   // r1919 (2)
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
@@ -2743,7 +2747,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
           const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: stoppedBy === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
           if (spawnErr) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnErr }); resolve(named('spawn_failed', { why: spawnErr })); return; }   // no child ran: no receipt, no use
-          if (stoppedBy === 'lock') { const ranFirst = stoppedAt !== 'lock'; note('vault_locked', { ...line, killed: !ranFirst, ...(ranFirst ? { ran: true } : {}) }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(ranFirst ? { ...named('vault_locked', { killed: false, ran: true, receipt }), words: LOCKED_AFTER_RAN } : named('vault_locked', { killed: true })); return; }   // r2161 (c): a child that FINISHED before the lock — its words (and the CLI) say the command RAN
+          if (stoppedBy === 'lock') { const ranFirst = stoppedAt !== 'lock'; note('vault_locked', { ...line, killed: !ranFirst, ...(ranFirst ? { ran: true } : {}) }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(ranFirst ? { ...named('vault_locked', { killed: false, ran: true, receipt }), words: LOCKED_AFTER_RAN[stoppedAt === 'timeout' || stoppedAt === 'gone' ? stoppedAt : 'end'] } : named('vault_locked', { killed: true })); return; }   // r2161 (c): a child that FINISHED before the lock — its words (and the CLI) say the command RAN
           if (stoppedBy === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
           note('ran', line);
           resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes, ...(scrubbed.withheld ? { withheld: scrubbed.withheld } : {}) }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
@@ -2779,7 +2783,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       rec.child = child;
       runs.add(rec);
       if (verdict.window && child.pid) sayWindowUse(verdict.window, receipt);   // r7: a run the 1-hour window let through — ONE notice, nothing filed
-      child.on('error', (e) => { const why = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); if (!child.pid) { spawnError = why; finish(null, null); } else log(`vault-run: the child's error after its spawn (${why}) — it ran; its end is the run's answer`); });   // r2161 (a): the spawn-failed word (which gives a spent once-grant back) only when no pid was ever given
+      child.on('error', (e) => { const why = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); if (!child.pid) { spawnError = why; finish(null, null); } else { try { log(`vault-run: the child's error after its spawn (${why}) — it ran; its end is the run's answer`); } catch { } } });   // 主开发 r2229: the journal call inside a listener never throws out of it   // r2161 (a): the spawn-failed word (which gives a spent once-grant back) only when no pid was ever given
       if (child.stdout) child.stdout.on('data', (b) => take('out', b));
       if (child.stderr) child.stderr.on('data', (b) => take('err', b));
       if (m.stdin != null && child.stdin) { child.stdin.on('error', () => { }); child.stdin.end(m.stdin); }

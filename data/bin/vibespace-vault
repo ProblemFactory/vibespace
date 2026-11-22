@@ -296,7 +296,7 @@ const RUN_SAID = Object.freeze({
     scrub_work_bound: 'the command ran; scrubbing its output met its work bound, so the output after the words is withheld (scrub_work_bound) — do not run it again blindly',
   }),
   withheldOther: 'the command ran; the output after the words is withheld — do not run it again blindly',
-  ranLocked: 'the command ran to its end before the lock; its output after the lock is withheld — do not run it again blindly',   // r2161 (c)
+  ranLocked: 'the command ran before the lock; its output after the lock is withheld — do not run it again blindly',   // r2161 (c); r2229: no «to its end» (its timeout may have stopped it — the hub's words say which)
   hits: (n) => `${n} occurrence(s) of a stored secret blanked`,
   truncated: 'the output was cut at 2 MiB',
   timedOut: 'stopped at its timeout',
