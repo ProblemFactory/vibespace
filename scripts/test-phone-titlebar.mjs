@@ -348,7 +348,7 @@ console.log('§5 the wiring');
     && /if \(key === 'usage'\) return \{ el, glyph: \(\) => el\.innerHTML,/.test(mn), 'a ⋯ row repaints its glyph AND its value from the chip at every change (the ring\'s arc with its %) (r2)');
   ok(/row\(FILE_ICONS\.folder, t\('Files'\), \(\) => this\._pressFiles\(\)/.test(mn) && /this\._pressFiles = installNavFilesDoor\(app\);/.test(mn) && !/app\.openFileExplorer\(\)\),/.test(mn), 'LAW 3: the «+» sheet\'s 文件 row is the nav door\'s press (moved, not copied — the explorer this phone showed last)');
   const pf = read('src/lib/phone-files.js');
-  ok(/const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app\); \};\n  if \(btn\) btn\.onclick = press;\n  paint\(\);\n  return press;/.test(pf), 'phone-files.js: ONE press — the regular bar\'s button and the «+» row run it');
+  ok(/const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app, \{ pressed: true \}\); \};\n  if \(btn\) btn\.onclick = press;\n  paint\(\);\n  return press;/.test(pf), 'phone-files.js: ONE press — the regular bar\'s button and the «+» row run it');
   const ut = read('src/lib/user-todos-panel.js');
   ok(/const one = navOneBadge\(\{ urgent: cu, high: ch, loud: n, total, notices \}\);\n      mBtn\.innerHTML = UI_ICONS\.inbox \+ segs \+ \(one \? `<span class="mnav-one" data-seg="\$\{one\.seg\}">\$\{one\.count\}<\/span>` : ''\);/.test(ut),
     'the For-you chip carries its ONE-badge form beside the five — a .mnav-one, never a .ut-count (the badge\'s readers count those)');

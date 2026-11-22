@@ -84,7 +84,7 @@ export function registerCommandModeCommands() {
   registerCommand({ id: 'session.new', title: 'New session', run: (c) => c.app.showNewSessionDialog() });
   registerCommand({ id: 'sidebar.toggle', title: 'Toggle sidebar', run: (c) => c.app.sidebar.toggle() });
   registerCommand({ id: 'browser.open', title: 'Open a web view', run: (c) => c.app.openBrowser() });
-  registerCommand({ id: 'explorer.open', title: 'Open file explorer', run: (c) => c.app.openFileExplorer() });
+  registerCommand({ id: 'explorer.open', title: 'Open file explorer', run: (c) => c.app.openFileExplorer(undefined, { attended: true }) });   // B-23e5 (a): a person's command
   registerCommand({ id: 'desktop.next', title: 'Next desktop', run: (c) => desktopStep(c.app, +1) });
   registerCommand({ id: 'desktop.previous', title: 'Previous desktop', run: (c) => desktopStep(c.app, -1) });
   registerCommand({ id: 'activeWindow.moveToNextDesktop', title: 'Move window to next desktop', run: (c) => moveWinDesktop(c.app, +1) });

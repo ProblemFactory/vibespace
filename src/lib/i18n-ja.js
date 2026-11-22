@@ -978,6 +978,7 @@ export default {
   "{path} is not saved — {why}": "{path} は保存されていません — {why}",
   "retry": "再試行",
   "this folder or file is still being tried — wait for the answer to the first press": "このフォルダーまたはファイルはまだ試行中です — 最初の操作の結果をお待ちください",
+  "{name}: its folder did not answer — try again in a moment": "{name}：そのフォルダーが応答しませんでした — しばらくしてからもう一度お試しください",
   "{name}: the save before this one is still being tried — wait for its answer": "{name}：前回の保存がまだ試行中です — その結果をお待ちください",
   "{name} was not reloaded — {why}; the view shows it as before": "{name} は再読み込みされませんでした — {why}。表示は以前のままです",
   "the file readers are all busy — try again in a moment": "ファイルの読み取りがすべて処理中です — しばらくしてからもう一度お試しください",

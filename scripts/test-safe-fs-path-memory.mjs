@@ -420,18 +420,58 @@ console.log('①c the person\'s words: the files router says a remembered dead p
       ['src/lib/file-explorer-uploads.js', "this.app.openFile(entry.path, entry.name, { attended: true });", 'an upload\'s row pressed'],
       ['src/lib/file-explorer-ops.js', "this.app.openFileExplorer(fullPath, { attended: true }) });", 'the context menu\'s Open in new window, pressed'],
       ['src/lib/file-explorer.js', "this.app.openFileExplorer(bk.path, { host: bkHost || undefined, attended: true }) },", 'a bookmark\'s Open in new window, pressed'],
-      ['src/lib/file-explorer.js', "if (this._startPath) this.navigate(this._startPath, { attended: this._startPressed });", 'a new window\'s first listing — marked only when a press opened it (never a restore or a replay)'],
+      ['src/lib/file-explorer.js', "if (this._startPath) this.navigate(this._startPath, { attended: startPressed });", 'a new window\'s first listing — marked only when a press opened it, ONCE (never a restore, a replay, a later host change)'],
+      ['src/lib/file-explorer.js', "else this._loadHome({ attended: startPressed });", 'a window a press opened with no folder: its home listing, that press once'],
       ['src/lib/file-viewer.js', "{ headers: ATTENDED_HEADERS }).then((r) => (r.status === 503 ? r.json().catch(() => ({})) : null), () => null);", 'the viewers\' ⟳ Reload: its first call, the file\'s info'],
       ['src/lib/doc-window.js', "return new CodeEditor(sub, p, name, app, { host: h, attended }); };", 'the document window\'s Raw pane opened by a press (its first load once)'],
       ['src/lib/doc-window-ui.js', "showRaw({ pressed: true }); return; }", 'the Raw press (rich → raw)'],
       ['src/lib/doc-window-ui.js', "showRich(); await load({ pressed: true });", 'the Raw press back (raw → rich)'],
       ['src/lib/doc-window-ui.js', "setDirty(false); load({ pressed: true }); }, { signal });", 'the conflict bar\'s Reload pressed'],
+      // B-23e5 (a) (r1442): the helper-opened presses, marked through their helpers
+      ['src/lib/app.js', "this.openFileExplorer(undefined, { attended: true }));   // B-23e5 (a): pressed", 'the welcome screen\'s Files, pressed'],
+      ['src/lib/artifact-card.js', "action: () => app.openFileExplorer(dir, { host: b.host || undefined, attended: true }) });", 'an artifact card\'s Show in Files, pressed'],
+      ['src/lib/artifacts-window.js', "if (cv) return cv._openArtifact(b, { pressed });", 'an Artifacts row hands its press to the chat\'s one door'],
+      ['src/lib/artifacts-window.js', "openArtifactRow(app, sessionId, r._afRow, { pressed: true }); });", 'an Artifacts row pressed'],
+      ['src/lib/chat-renderers.js', "import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';", 'its import'],
+      ['src/lib/chat-renderers.js', "{ host: b.host || undefined, attended: true, from: this._sourceWinId()", 'an artifact card\'s open with no chat door (the card pressed)'],
+      ['src/lib/chat-renderers.js', "const open = () => rel ? this._openRelTarget(link, rel, { pressed: true }) : this._openLinkTarget(link, url, fp, { pressed: true });", 'a chat path link pressed (Ctrl+click, the touch menu\'s Open)'],
+      ['src/lib/chat-renderers.js', "action: () => rel ? this._openRelTarget(link, rel, { pressed: true }) : this._openLinkTarget(link, url, fp, { pressed: true }) },", 'a chat path link\'s context menu Open'],
+      ['src/lib/chat-renderers.js', "spend ? { headers: ATTENDED_HEADERS } : undefined);", 'a relative link\'s candidate probe — the press SPENT at the first storage refusal'],
+      ['src/lib/chat-renderers.js', "if (info.isDirectory) this.app.openFileExplorer(c, { host, from, attended: spend });", 'a relative link\'s folder opened by the press (unspent)'],
+      ['src/lib/chat-renderers.js', "else this.app.openFile(c, c.split('/').pop(), { host, from, attended: spend });", 'a relative link\'s file opened by the press (unspent)'],
+      ['src/lib/chat-renderers.js', "const openHit = (h) => { const from = this._sourceWinId(); return type === 'd' ? this.app.openFileExplorer(h, { host, from, attended: spend })", 'a located hit opened by the press (unspent)'],
+      ['src/lib/chat-renderers.js', "pressed ? { headers: ATTENDED_HEADERS } : undefined)", 'a path link\'s FIRST call — the file\'s info, marked when pressed'],
+      ['src/lib/chat-renderers.js', "this.app.openFileExplorer(cleanPath, { host, from: this._sourceWinId(), attended: pressed });", 'a path link\'s folder opened by the press'],
+      ['src/lib/chat-renderers.js', "this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum, host, from: this._sourceWinId(), attended: pressed });", 'a path link\'s file opened by the press'],
+      ['src/lib/chat-view.js', "onOpenArtifact: (b) => this._openArtifact(b, { pressed: true }), // lane artifacts-model", 'the Artifacts chip\'s row, pressed'],
+      ['src/lib/chat-view.js', "onOpenArtifact: (b) => this._openArtifact(b, { pressed: true }), // lane artifacts-registries", 'an artifact card pressed (the card and the chip\'s row share ONE door)'],
+      ['src/lib/chat-view.js', "...(pressed && !quiet ? { attended: true } : {}) });", 'the chat\'s artifact door: marked only when pressed — never the auto open (quiet)'],
+      ['src/lib/command-mode.js', "run: (c) => c.app.openFileExplorer(undefined, { attended: true }) });", 'the command «Open file explorer» (a person\'s command)'],
+      ['src/lib/design-home.js', "action: () => app.openFileExplorer(d.dir, { host: d.host || undefined, attended: true }) },", 'the design home\'s Show in Files, pressed'],
+      ['src/lib/file-explorer.js', "this.navigate(d.home || '/', { attended });", 'the home listing hands on the press it was given (only the window\'s opening press gives one)'],
+      ['src/lib/search-window.js', "const activate = (hit, { pressed = false } = {}) => {", 'the search window\'s hit door — marked only when pressed'],
+      ['src/lib/search-window.js', "activate(row._hit, { pressed: true }); };", 'a search hit\'s row pressed'],
+      ['src/lib/search-window.js', "if (r) activate(r._hit, { pressed: true });", 'a search hit chosen by Enter'],
+      ['src/lib/session-card.js', "run: (c) => c.app.openFileExplorer(c.s.cwd, { host: c.s.host || undefined, attended: true }) });", 'the command «Open working directory» (a person\'s command)'],
+      ['src/lib/setup-flows.js', "content.querySelector('#welcome-files')?.addEventListener('click', () => this.openFileExplorer(undefined, { attended: true }));", 'the setup welcome\'s Files, pressed'],
+      ['src/lib/setup-flows.js', "done(); this.openFileExplorer(undefined, { attended: true }); };", 'the onboarding\'s Files, pressed'],
+      ['src/lib/sidebar-mounts.js', "ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path, { attended: true }); }),", 'a mount row\'s Browse button, pressed'],
+      ['src/lib/sidebar-mounts.js', "if (m.mounted) { this.app.openFileExplorer(m.path, { attended: true }); return; }", 'a mounted row pressed'],
+      ['src/lib/sidebar-mounts.js', "open.onclick = () => this.app.openFileExplorer(m.mountpoint, { attended: true });", 'a storage row\'s Open, pressed'],
+      ['src/lib/phone-files.js', "return app.openFileExplorer(path || undefined, pressed ? { attended: true } : undefined);", 'the phone\'s Files door: marked only when a tap opened it'],
+      ['src/lib/phone-files.js', "return openFilesDoor(app, { pressed: true }); };", 'the phone nav\'s Files, tapped'],
+      ['src/lib/phone-files.js', "openFilesDoor(app, { path: c.path, pressed: true }); };", 'a For-you Files chip (a mount\'s too), tapped'],
+      ['src/lib/trailing-bar.js', "run: (app) => openFilesDoor(app, { pressed: true })", 'the trailing bar\'s Files, pressed'],
+      ['src/lib/chat-renderers.js', "{ from: this._sourceWinId(), attended: true });   // B-23e5 (a): the toast's Search by name, pressed", 'a missing link\'s toast: Search by name, pressed'],
+      ['src/lib/chat-renderers.js', "this.app.openFileExplorer(d, { host, from: this._sourceWinId(), attended: true }); return d; }", 'a missing link\'s toast: Open the nearest folder, pressed'],
+      ['src/lib/artifacts-window.js', "onOpen: (x) => openArtifactRow(app, sessionId, x, { pressed: true }) })); });", 'an Artifacts row\'s ⋯ Open beside, pressed'],
+      ['src/lib/artifacts-window.js', "if (b.path && app.openFile) app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, attended: pressed });", 'an Artifacts row with no chat door: its file, the row\'s press'],
     ];
     // a marked site: the header's constant or name, or a navigate / an open that passes `attended:` (the files' own mark — never the
     // spending ceiling's attended turns, another meaning)
     const TOKENS = ['X-VibeSpace-Attended', 'ATTENDED_HEADERS', 'refresh({ attended: true })', 'read({ pressed: true })', 'load({ pressed: true })', 'showRaw({ pressed: true })'];   // stale-pins: kept (the census's own tokens)
     const OPENS = ['navigate(', 'navigateUp(', 'openFile(', 'openEditor(', 'openDoc(', 'CodeEditor(', 'mountDocWindow(', 'openFileExplorer('];
-    const marked = (line) => TOKENS.some((t) => line.includes(t)) || /(?<!function )\b(load|read|showRaw)\(\{[^}]*\bpressed(?::(?!\s*false\b)|\s*[,}])/.test(line) || (OPENS.some((o) => line.includes(o)) && /\battended(\s*:(?!\s*false\b)|\s*[,}])/.test(line));   // `attended: …` (never `attended: false`) or handed on as `{ …, attended }`
+    const marked = (line) => TOKENS.some((t) => line.includes(t)) || /(?<!function )\b(load|read|showRaw|_openLinkTarget|_openRelTarget|_openArtifact|openArtifactRow|openFilesDoor|activate)\([^()]*\{[^}]*\bpressed(?::(?!\s*false\b)|\s*[,}])/.test(line) || (OPENS.some((o) => line.includes(o)) && /\battended(\s*:(?!\s*false\b)|\s*[,}])/.test(line));   // `attended: …` (never `attended: false`) or handed on as `{ …, attended }`
     const census = (read) => {
       const found = [];
       for (const f of fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n)) {
@@ -456,6 +496,7 @@ console.log('①c the person\'s words: the files router says a remembered dead p
       ['src/lib/file-explorer-ops.js', "    this.refresh();", 'the explorer\'s refresh after a file op'],
       ['src/lib/app.js', "action: 'openFileExplorer', replay: (app, spec, { syncId } = {}) => app.openFileExplorer(spec.path, { syncId, host: spec.host }),", 'a Files window\'s replay / restore (it never passes the press)'],
       ['src/lib/path-field.js', "'/api/dir-complete') + qs", 'the folder field\'s completion'],
+      ['src/lib/file-explorer.js', "    if (navigate) this._loadHome();", 'a host change\'s home listing (the window\'s press was used once)'],
       ['src/lib/doc-window-ui.js', "    await load({ first: true });", 'the document window\'s load when the file it waited for lands'],
       ['src/lib/doc-window-ui.js', "if (v === 'repaint') await load();", 'the document window\'s repaint after a change on disk'],
       ['src/lib/doc-window-ui.js', "if (S.mode !== 'raw') showRaw(); else", 'the document window\'s automatic raw view (a file the rich editor cannot keep)'],
@@ -471,20 +512,24 @@ console.log('①c the person\'s words: the files router says a remembered dead p
     // whose body opens a file or a folder (navigate / navigateUp / refresh / openFile / openEditor / openDoc / openFileExplorer /
     // reloadFromDisk / renderInto) carries the mark ON THAT CALL, or is an EXCEPTION row with its reason — a press with no mark is red BY
     // NAME. The presses OUTSIDE that surface (the chat's path links, the search window, artifact cards…) are r1442's next unit: printed here
-    const PRESS = /(\.onclick\s*=|addEventListener\(\s*'(?:click|dblclick|pointerup|keydown)'|\baction:\s*(?:async\s*)?\([^)]*\)\s*=>|\bact:\s*(?:async\s*)?\([^)]*\)\s*=>|\brun:\s*(?:async\s*)?\([^)]*\)\s*=>|onCommit:|\btool\('[\w-]+',[^\n]*\(\) =>)/;   // tool(…): the document window's toolbar
-    const OPENCALL = /\b(navigate|navigateUp|refresh|openFile|openEditor|openDoc|openFileExplorer|reloadFromDisk|renderInto|load|toggleRaw|showRaw)\(/g;
-    const SURFACE = ['file-explorer.js', 'file-explorer-ops.js', 'file-explorer-uploads.js', 'phone-files.js', 'path-field.js', 'explorer-listing.js', 'file-viewer.js', 'hex-viewer.js', 'code-editor.js', 'doc-window.js', 'doc-window-ui.js', 'external-editor.js'].map((n) => 'src/lib/' + n);
+    const PRESS = /(\.onclick\s*=|addEventListener\(\s*'(?:click|dblclick|pointerup|keydown)'|\baction:\s*(?:async\s*)?\([^)]*\)\s*=>|\bact:\s*(?:async\s*)?\([^)]*\)\s*=>|\brun:\s*(?:async\s*)?\([^)]*\)\s*=>|onCommit:|\btool\('[\w-]+',[^\n]*\(\) =>|\bopen:\s*\(b\)\s*=>|\bonOpenArtifact:\s*\(b\)\s*=>)/;   // tool(…): the document window's toolbar; open / onOpenArtifact: an artifact card's and the chip's press
+    // r1442 (a): THE CENSUS FOLLOWS THE NAMED HELPERS over all of src/lib — a chat path link (_openLinkTarget / _openRelTarget), the chat's
+    // artifact door (_openArtifact), an Artifacts row (openArtifactRow), and, in their own files only, the search window's hit door
+    // (activate), the document window's reads (load / toggleRaw / showRaw) and the Files window's refresh
+    const OWN = { 'src/lib/search-window.js': ['activate'], 'src/lib/doc-window-ui.js': ['load', 'toggleRaw', 'showRaw'], 'src/lib/file-explorer.js': ['refresh'], 'src/lib/file-explorer-ops.js': ['refresh'], 'src/lib/phone-files.js': ['refresh'], 'src/lib/file-explorer-uploads.js': ['refresh'] };
+    const callsOf = (f) => new RegExp(`\\b(navigate|navigateUp|openFile|openEditor|openDoc|openFileExplorer|reloadFromDisk|renderInto|_openLinkTarget|_openRelTarget|_openArtifact|openArtifactRow|openFilesDoor${(OWN[f] || []).map((x) => '|' + x).join('')})\\(`, 'g');
+    const SURFACE = fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n);
     const EXCEPT = [
       ['src/lib/code-editor.js', "run: () => this.reloadFromDisk() },", 'reloadFromDisk marks its own read unless {auto} (its DOORS row: the PRESSED reload)'],
       ['src/lib/code-editor.js', 'btnReload.onclick = () => this.reloadFromDisk();', 'reloadFromDisk marks its own read unless {auto} (its DOORS row: the PRESSED reload)'],
       ['src/lib/file-viewer.js', 'await FileViewer.renderInto(container, filePath, fileName, app, host);', 'the ⟳ Reload\'s re-render rides its first call, the marked info check above it (images and media load by src: no header can ride them)'],
       ['src/lib/doc-window-ui.js', '() => toggleRaw()', 'toggleRaw marks its own reads (showRaw({ pressed: true }) / load({ pressed: true }) — DOORS rows)'],
     ];
-    const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n);
+    const libFiles = SURFACE;
     const pressSites = (rd, files) => {
       const out = [];
       for (const f of files) {
-        const L = rd(f).split('\n');
+        const L = rd(f).split('\n'), OPENCALL = callsOf(f);
         L.forEach((l, i) => {
           if (!PRESS.test(l) || /^\s*(\/\/|\*)/.test(l)) return;
           const ind = l.length - l.trimStart().length, body = [l];
@@ -496,12 +541,10 @@ console.log('①c the person\'s words: the files router says a remembered dead p
     };
     const sitesNow = pressSites(readSrc, SURFACE), excepted = (x) => EXCEPT.some(([ef, text]) => ef === x.f && x.text.includes(text));
     const unmarkedPress = sitesNow.filter((x) => !x.marked && !excepted(x)), deadExcept = EXCEPT.filter(([ef, text]) => !sitesNow.some((x) => x.f === ef && x.text.includes(text)));
-    const plantedPress = pressSites((f) => (f === 'src/lib/file-explorer-ops.js' ? readSrc(f) + "\n    items.push({ label: t('Open'), action: () => this.navigate(fullPath, { attended: false }) });\n    row.addEventListener('dblclick', () => {\n      if (ok) this.app.openFile(p, n, { host });\n    });\n" : readSrc(f)), SURFACE).filter((x) => !x.marked && !excepted(x));   // stale-pins: kept (the planted RED presses: `attended: false` is no mark)
-    const outside = pressSites(readSrc, libFiles.filter((f) => !SURFACE.includes(f))).filter((x) => !x.marked && /^(openFile|openEditor|openDoc|openFileExplorer|navigate)$/.test(x.call));
-    console.log(`    the press census: ${sitesNow.length} opening calls inside press handlers of the Files window, its viewers and editors — ${sitesNow.filter((x) => x.marked).length} marked, ${sitesNow.filter(excepted).length} excepted`);
-    console.log(`    OUTSIDE this unit (r1442: the next unit marks them through their helpers), seen directly: ${outside.map((x) => `${x.f.split('/').pop()}:${x.at} ${x.call}`).join(', ') || 'none'} — through helpers (no direct call here): chat-renderers.js _openLinkTarget (a chat path link), search-window.js activate, an artifact card's open`);
-    ok(sitesNow.length >= 20 && !unmarkedPress.length && !deadExcept.length && plantedPress.length === 2 && plantedPress.every((x) => x.f === 'src/lib/file-explorer-ops.js'),
-      `THE PRESS CENSUS (structural, r1396 / r1442 (b)): every opening call inside a press handler of the Files window, its viewers and its editors carries the mark or is an exception with its reason — unmarked: ${unmarkedPress.map((x) => `${x.f}:${x.at} ${x.call}`).join(', ') || 'none'}; dead exception rows: ${deadExcept.length}; RED by name: a planted menu Open with \`attended: false\` and a planted double-click open (${plantedPress.map((x) => `${x.f.split('/').pop()}:${x.at} ${x.call}`).join(', ')})`, { unmarkedPress, deadExcept, plantedPress });
+    const plantedPress = pressSites((f) => (f === 'src/lib/file-explorer-ops.js' ? readSrc(f) + "\n    items.push({ label: t('Open'), action: () => this.navigate(fullPath, { attended: false }) });\n    row.addEventListener('dblclick', () => {\n      if (ok) this.app.openFile(p, n, { host });\n    });\n    items.push({ label: t('Open'), action: () => this._openLinkTarget(link, url, fp) });\n" : readSrc(f)), SURFACE).filter((x) => !x.marked && !excepted(x));   // stale-pins: kept (the planted RED presses: `attended: false` is no mark)
+    console.log(`    the press census: ${sitesNow.length} opening calls inside press handlers of src/lib (the named helpers followed) — ${sitesNow.filter((x) => x.marked).length} marked, ${sitesNow.filter(excepted).length} excepted`);
+    ok(sitesNow.length >= 20 && !unmarkedPress.length && !deadExcept.length && plantedPress.length === 3 && plantedPress.every((x) => x.f === 'src/lib/file-explorer-ops.js') && plantedPress.some((x) => x.call === '_openLinkTarget'),
+      `THE PRESS CENSUS (structural, r1396 / r1442 (a)(b)): every opening call inside a press handler of src/lib — the named helpers followed (a chat path link, the chat's artifact door, an Artifacts row, the search window's hit) — carries the mark or is an exception with its reason — unmarked: ${unmarkedPress.map((x) => `${x.f}:${x.at} ${x.call}`).join(', ') || 'none'}; dead exception rows: ${deadExcept.length}; RED by name: a planted menu Open with \`attended: false\` and a planted double-click open (${plantedPress.map((x) => `${x.f.split('/').pop()}:${x.at} ${x.call}`).join(', ')})`, { unmarkedPress, deadExcept, plantedPress });
     // r316 MUST 2: ONE PRESS, ONE WORKER — the listing a press sends carries the mark; the file-info probe after its refusal never does
     const fe = readSrc('src/lib/file-explorer.js'), fr = readSrc('src/routes/files.js');
     ok(fe.includes("const { data, info } = await listingAndProbe(fetch, `/api/files?path=${encodeURIComponent(dirPath)}${this._hp()}`, `/api/file/info?path=${encodeURIComponent(dirPath)}${this._hp()}`, init);") && fe.includes("if (info && !info.isDirectory) { this.app.openFile(")
@@ -1072,6 +1115,59 @@ console.log('①o r1733 (4)(5)(6): the rules its round found with no leg — eac
   const fr = rd('src/routes/files.js'), ops = rd('src/lib/file-explorer-ops.js');
   ok(bNow === 'no-idle-worker' && bRed === 'no-worker' && fr.includes("body.error.startsWith(NO_IDLE_HEAD)) body = { ...body, error: STORAGE_BUSY, code: 'storage_busy' };") && ops.includes("if (d && d.code === 'storage_busy') return t('the file readers are all busy — try again in a moment');"),
     `THE WORDS: a call while every worker is out on a look is refused «busy» (${bNow} ⇒ storage_busy, «the file readers are all busy — try again in a moment»); RED (the line cut, in a copy): «the file readers are restarting» (${bRed})`, { bNow, bRed });
+}
+
+console.log('①n r1442 (a): the helper-opened presses, driven lifted from source — a chat path link, a relative link, the chat\'s artifact door');
+{
+  const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8'), cvs = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+  const bodyOf = (text, head) => { const i = text.indexOf('\n' + head + '\n'); if (i < 0) return null; const j = text.indexOf('\n  }\n', i + 1); return j < 0 ? null : text.slice(i + head.length + 2, j); };
+  const LINK = '  _openLinkTarget(link, url, fp, { pressed = false } = {}) {', REL = '  async _openRelTarget(link, rel, { pressed = false } = {}) {';
+  const ART = '  _openArtifact(b, { quiet = false, pressed = false } = {}) {';
+  const DEAD503 = { status: 503, body: { error: 'this folder or file did not answer in time — try again in 30 s', code: 'storage_path_hung', params: { s: 30 } } };
+  const OKFILE = { status: 200, body: { isDirectory: false, size: 3 } };
+  const world = (answers) => {
+    const calls = [], opened = [], missing = [];
+    const fetchStub = async (url, init) => { const p = decodeURIComponent((/path=([^&]*)/.exec(url) || [])[1] || ''); calls.push({ url, p, marked: !!(init && init.headers && init.headers['X-VibeSpace-Attended']) }); const a = answers[p] || { status: 404, body: { error: 'ENOENT: no such file' } }; return { status: a.status, ok: a.status < 400, json: async () => a.body }; };   // stale-pins: kept (the stand-in fetch reads the mark)
+    const self = { _sessionCtx: () => ({ cwd: '/scratch-b23e5/proj', host: '' }), _sourceWinId: () => 'w1', _linkOp() {}, _linkMissing: (l, x) => missing.push(x.why), winInfo: { id: 'w1' }, sessionId: 's1',
+      app: { openFile: (p, n, o) => opened.push({ p, attended: !!(o && o.attended), quiet: !!(o && o.quiet) }), openFileExplorer: (p, o) => opened.push({ p, dir: true, attended: !!(o && o.attended) }) } };
+    return { calls, opened, missing, fetchStub, self };
+  };
+  const H = { 'X-VibeSpace-Attended': '1' };   // stale-pins: kept (the constant's value, handed to the lifted body)
+  // a chat PATH link: its first call (the file's info) carries the press; refused, the press is spent and nothing else is asked
+  const lb = bodyOf(cr, LINK);
+  const runLink = async (body, pressed, answers) => { const w = world(answers); const fn = new Function('fetch', 'ATTENDED_HEADERS', 'fsErrorText', 'window', `return function (link, url, fp, { pressed = false } = {}) {\n${body}\n};`)(w.fetchStub, H, (d) => d.error, { open() {} }); await fn.call(w.self, {}, null, '/scratch-b23e5/dead/a.md', { pressed }); await sleep(0); return w; };
+  const P_OK = lb ? await runLink(lb, true, { '/scratch-b23e5/dead/a.md': OKFILE }) : null, P_DEAD = lb ? await runLink(lb, true, { '/scratch-b23e5/dead/a.md': DEAD503 }) : null, U_OK = lb ? await runLink(lb, false, { '/scratch-b23e5/dead/a.md': OKFILE }) : null;
+  const LCUT = 'pressed ? { headers: ATTENDED_HEADERS } : undefined)';
+  const R_LINK = lb && lb.includes(LCUT) ? await runLink(lb.replace(LCUT, 'undefined)'), true, { '/scratch-b23e5/dead/a.md': OKFILE }) : null;   // stale-pins: kept (the release: the link's probe unmarked)
+  const said = (w) => w && { calls: w.calls.map((c) => (c.marked ? 'marked' : 'plain')).join(), opened: w.opened.map((o) => (o.attended ? 'attended' : 'plain')).join(), missing: w.missing.join() };
+  console.log('    a path link: ' + JSON.stringify({ pressedOk: said(P_OK), pressedDead: said(P_DEAD), plainOk: said(U_OK), red: said(R_LINK) }));
+  ok(!!P_OK && P_OK.calls.length === 1 && P_OK.calls[0].marked && P_OK.opened.length === 1 && P_OK.opened[0].attended
+      && !!P_DEAD && P_DEAD.calls.length === 1 && P_DEAD.calls[0].marked && !P_DEAD.opened.length && P_DEAD.missing.join() === 'error'
+      && !!U_OK && !U_OK.calls[0].marked && !U_OK.opened[0].attended && !!R_LINK && !R_LINK.calls[0].marked,
+    'A CHAT PATH LINK PRESSED (Ctrl+click, the menu\'s Open): its first call carries the mark and so does the open; refused by the storage, it is said and nothing else is asked; not pressed, nothing is marked; RED (the release\'s probe, lifted): unmarked', { P_OK: said(P_OK), P_DEAD: said(P_DEAD), U_OK: said(U_OK), R_LINK: said(R_LINK) });
+  // a RELATIVE link: its candidates probed one by one — the press SPENT at the first the storage refuses; the rest go unmarked
+  const rb = bodyOf(cr, REL);
+  const CANDS = ['/scratch-b23e5/proj/a/x.md', '/scratch-b23e5/proj/x.md'];
+  const runRel = async (body, answers) => { const w = world(answers); const fn = new Function('fetch', 'ATTENDED_HEADERS', 'relCandidates', 'showContextMenu', 'fsErrorText', `return async function (link, rel, { pressed = false } = {}) {\n${body}\n};`)(w.fetchStub, H, () => CANDS, () => {}, (d) => (d && d.error) || ''); await fn.call(w.self, { getBoundingClientRect: () => ({ left: 0, bottom: 0 }) }, 'x.md', { pressed: true }); return w; };
+  const REL1 = rb ? await runRel(rb, { [CANDS[0]]: DEAD503, [CANDS[1]]: OKFILE }) : null;
+  const RCUT = '        if (r.status === 503) spend = false;\n';
+  const R_REL = rb && rb.includes(RCUT) ? await runRel(rb.replace(RCUT, ''), { [CANDS[0]]: DEAD503, [CANDS[1]]: OKFILE }) : null;   // stale-pins: kept (the press never spent)
+  // the first candidate answers: the press rides on to the open (marked); every candidate refused by the storage: SAID, no search after
+  const REL_OK = rb ? await runRel(rb, { [CANDS[0]]: OKFILE }) : null, REL_ALL = rb ? await runRel(rb, { [CANDS[0]]: DEAD503, [CANDS[1]]: DEAD503 }) : null;
+  const REFUSED_LINE = (rb || '').split('\n').find((l) => l.startsWith('    if (refused) { this._linkMissing(')) || '';
+  const R_ALL = rb && REFUSED_LINE ? await runRel(rb.replace(REFUSED_LINE + '\n', ''), { [CANDS[0]]: DEAD503, [CANDS[1]]: DEAD503 }) : null;   // stale-pins: kept (the refusal said as «not found», a search after it)
+  console.log('    a relative link: ' + JSON.stringify({ now: said(REL1), red: said(R_REL), ok: said(REL_OK), all: said(REL_ALL), redAll: R_ALL && { locate: R_ALL.calls.some((c) => /locate/.test(c.url)), missing: R_ALL.missing.join() } }));
+  ok(!!REL_OK && REL_OK.calls.length === 1 && REL_OK.calls[0].marked && REL_OK.opened.length === 1 && REL_OK.opened[0].attended
+      && !!REL_ALL && !REL_ALL.calls.some((c) => /locate/.test(c.url)) && REL_ALL.missing.join() === 'error' && !REL_ALL.opened.length && !!R_ALL && R_ALL.calls.some((c) => /locate/.test(c.url)),
+    'A RELATIVE LINK: its first candidate answering, the open carries the press; every candidate refused by the storage, it is SAID («error», the storage\'s words) and nothing else is asked; RED (the refusal line cut, lifted): a search into the same storage and «not found»', { REL_OK: said(REL_OK), REL_ALL: said(REL_ALL) });
+  ok(!!REL1 && REL1.calls.map((c) => c.marked).join() === 'true,false' && REL1.opened.length === 1 && REL1.opened[0].p === CANDS[1] && !REL1.opened[0].attended
+      && !!R_REL && R_REL.calls.map((c) => c.marked).join() === 'true,true',
+    'A RELATIVE LINK PRESSED: its first candidate carries the press; refused by the storage the press is SPENT — the next candidate and the open go unmarked (one press, one try); RED (never spent, lifted): the next candidate is tried marked too', { REL1: said(REL1), R_REL: said(R_REL) });
+  // the chat's artifact door: marked only when pressed (the card, the chip's row) — never the auto open (quiet)
+  const ab = bodyOf(cvs, ART);
+  const runArt = (body, o) => { const w = world({}); const fn = new Function('serviceOpenSpec', 'serviceHref', 'location', `return function (b, { quiet = false, pressed = false } = {}) {\n${body}\n};`)(() => ({}), () => '', { origin: 'http://x' }); fn.call(w.self, { kind: 'file', path: '/scratch-b23e5/proj/report.md', name: 'report.md' }, o); return w.opened[0] || null; };
+  const art = ab ? { pressed: runArt(ab, { pressed: true }), auto: runArt(ab, { quiet: true, pressed: true }), plain: runArt(ab, {}) } : null;
+  ok(!!art && !!art.pressed && !!art.auto && !!art.plain && art.pressed.attended && !art.auto.attended && art.auto.quiet && !art.plain.attended, `THE CHAT'S ARTIFACT DOOR: a card or a chip's row pressed opens marked (${art && art.pressed.attended}); the AUTO open (quiet) never (${art && art.auto.attended}), nor a call that is no press (${art && art.plain.attended})`, art);
 }
 
 console.log('② the cost of one parked thread, measured (printed, never asserted)');

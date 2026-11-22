@@ -291,8 +291,9 @@ class FileExplorer {
     this.app.ws.onGlobal(this._bkHandler);
     this._offBkLift = onStoreLift('bookmarks.json', () => this._loadBookmarks());   // B-225b: read again at the lift (a word said while this page was away too)
 
-    if (this._startPath) this.navigate(this._startPath, { attended: this._startPressed });   // B-23e5: marked only when a press opened the window
-    else this._loadHome();
+    const startPressed = this._startPressed; this._startPressed = false;   // B-23e5: the window's opening press, used ONCE
+    if (this._startPath) this.navigate(this._startPath, { attended: startPressed });   // B-23e5: marked only when a press opened the window
+    else this._loadHome({ attended: startPressed });
   }
 
   _btn(text, title) { const b = document.createElement('button'); b.className = 'file-tool-btn'; b.textContent = text; b.title = title; return b; }
@@ -672,7 +673,7 @@ class FileExplorer {
     if (navigate) this._loadHome();
   }
 
-  async _loadHome() { try { const r = await fetch('/api/home?_=1' + this._hp()); const d = await r.json(); this.navigate(d.home || '/'); } catch { this.navigate('/'); } }
+  async _loadHome({ attended = false } = {}) { try { const r = await fetch('/api/home?_=1' + this._hp()); const d = await r.json(); this.navigate(d.home || '/', { attended }); } catch { this.navigate('/', { attended }); } }   // B-23e5 (a): a window a press opened with no folder lists the home as that press
 
   // Receive a file dragged from ANOTHER explorer window into this one. Uses
   // the copy endpoint's smart routing: same host -> remote cp; different host

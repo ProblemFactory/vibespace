@@ -283,6 +283,8 @@ export function inboxModel(app) {
     let gone = false;
     try {
       const r = await fetch(pr.url, { method: pr.method });
+      // B-23e5 (a): a storage that did not answer is said as such — never «is gone» (the For-you open itself stays unmarked: its own row)
+      if (r.status === 503) { showToast(t('{name}: its folder did not answer — try again in a moment', { name: row.name }), { type: 'error' }); return false; }
       const j = pr.method === 'GET' ? await r.json().catch(() => null) : null;
       gone = !r.ok || !!(j && (j.error || (row.kind !== 'design' && j.isDirectory)));
     } catch { gone = false; } // unreachable server: the door says what it can
@@ -305,6 +307,7 @@ export function inboxModel(app) {
     const host = tg.host || undefined;
     for (const c of tg.cands) {
       const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
+      if (info && /^storage_/.test(String(info.code || ''))) { showToast(t('{name}: its folder did not answer — try again in a moment', { name: String(ref) }), { type: 'error' }); return false; }   // B-23e5 (a): never «Not found» for a storage that did not answer
       if (!info || info.error) continue;
       if (info.isDirectory) app.openFileExplorer?.(c, { host });
       else app.openFile?.(c, c.split('/').pop(), { host, ...(tg.line ? { line: tg.line } : {}) });

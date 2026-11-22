@@ -444,7 +444,7 @@ class ChatView {
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
       onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter(), conversation: this._connectConversation() }), // lane outbox-chip-door: a row inside this conversation opens THIS conversation's Outbox, the proposal it names in view
       channelRowWords: rowProposalWords, // lane outbox-chip-door: the chip's rows say their proposals' state in the card's words
-      onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-model: the Artifacts chip's row → the file beside the chat
+      onOpenArtifact: (b) => this._openArtifact(b, { pressed: true }), // lane artifacts-model: the Artifacts chip's row → the file beside the chat (B-23e5: pressed)
       app: this.app, // lane artifacts-list-scale: the list's ⋯ (show in Files, a helper's conversation, a service's job / Ports)
       onOpenArtifactsWindow: () => this.app.openArtifacts?.({ sessionId: this.sessionId, name: String((this.winInfo && (this.winInfo.name || this.winInfo.title)) || '').split(' — ')[0] }), // lane artifacts-list-scale: the popover's ⤢ → the Artifacts window
       onOpenOutbox: () => this.app.openChannelOutbox?.({ filter: this._outboxFilter() }), // lane outbox-session-chip: the Outbox chip → the Outbox, «drafted by <this conversation>»
@@ -551,7 +551,7 @@ class ChatView {
       // lane door-healthy-chat: how many permission prompts this conversation has shown (the loaded ones + the pending set) — the third offers «let it work in this folder»
       getPermissionPromptCount: () => { const ids = new Set(); for (const m of this._messages || []) { const p = m?.permission; if (p && p.requestId != null && p.kind !== 'user_input' && m.toolName !== 'AskUserQuestion') ids.add(String(p.requestId)); } for (const a of this._pendingAsks || []) if (a && a.kind === 'main') ids.add(String(a.requestId)); return ids.size; },
       getSourceWinId: () => this.winInfo?.id || null, // split tabs v2 (F2): a path opened here is born beside THIS window — never the active one
-      onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-registries: the card and the chip's row share ONE door
+      onOpenArtifact: (b) => this._openArtifact(b, { pressed: true }), // lane artifacts-registries: the card and the chip's row share ONE door (B-23e5: pressed)
       // In-chat ACTION buttons (Compact now): product-authored text, so the
       // send owns neither the draft slot nor the store — `carriesUserText`
       // stays false EXPLICITLY (round-8: the flag is the difference between
@@ -4822,12 +4822,13 @@ class ChatView {
   showAgentCard(card) { return this._chatInput?.showAgentCard?.(card) || null; }
   /** Open a deliverable in its kind's viewer BESIDE this chat (`from` — the Cmd+click door). lane artifacts-registries: a
    *  published page opens its /p/ link (an unpublished one its source file), a design the Design window. */
-  _openArtifact(b, { quiet = false } = {}) {
+  // B-23e5 (a): `pressed` — the card, the chip's row; never the auto open (quiet)
+  _openArtifact(b, { quiet = false, pressed = false } = {}) {
     if (b && b.kind === 'service') { const o = serviceOpenSpec(b); if (this.app.openBrowser) this.app.openBrowser(o.url, { proxy: o.proxy }); else window.open(serviceHref(b), '_blank', 'noopener'); return; } // lane artifacts-services: the Web view, never a new tab by default; -url: proxy mode for a proxied row
     if (!b || !b.path) return;
     if (b.kind === 'page' && b.url && (b.state === 'published' || b.presented)) { const u = new URL(b.url, location.origin).href; if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank'); return; }
     if (b.kind === 'design') { this.app.openDesign({ host: b.host || '', dir: b.path, sessionId: this.sessionId }); return; }
-    this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null, ...(quiet ? { quiet: true } : {}) });
+    this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null, ...(quiet ? { quiet: true } : {}), ...(pressed && !quiet ? { attended: true } : {}) });
   }
   // ── LANE OUTBOX-SESSION-CHIP: the conversation wears its Outbox (src/outbox-chip.js verdict over lib/outbox-feed.js) ──
   /** The ids this conversation drafts under (the agent principal's id in every form — claude › backend › webui:<id>). */

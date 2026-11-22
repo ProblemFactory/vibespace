@@ -979,6 +979,7 @@ export default {
   "{path} is not saved — {why}": "{path} 没有保存——{why}",
   "retry": "重试",
   "this folder or file is still being tried — wait for the answer to the first press": "这个文件夹或文件仍在尝试中——请等待第一次点按的结果",
+  "{name}: its folder did not answer — try again in a moment": "{name}：它所在的文件夹没有响应——请稍后再试",
   "{name}: the save before this one is still being tried — wait for its answer": "{name}：上一次保存仍在尝试中——请等待它的结果",
   "{name} was not reloaded — {why}; the view shows it as before": "{name} 没有重新载入——{why}；视图保持原样",
   "the file readers are all busy — try again in a moment": "文件读取进程都在忙——请稍后再试",

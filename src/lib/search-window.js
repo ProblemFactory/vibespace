@@ -112,7 +112,7 @@ export function openSearchWindow(app, opts = {}) {
 
   const paintChips = () => { chips.textContent = ''; for (const [k, label] of SCOPES) { const c = el('button', 'search-chip' + (k === scope ? ' on' : ''), t(label)); c.onclick = () => { scope = k; paintChips(); run(); }; chips.append(c); } };
   const select = (i) => { sel = Math.max(-1, Math.min(rows.length - 1, i)); rows.forEach((r, j) => r.classList.toggle('active', j === sel)); if (sel >= 0) rows[sel].scrollIntoView({ block: 'nearest' }); };
-  const activate = (hit) => { if (hit.kind === 'artifact') app.openFile(hit.path, hit.path.split('/').pop(), { host: hit.host || '' }); else openMessageHit(app, hit).catch(() => { }); };
+  const activate = (hit, { pressed = false } = {}) => { if (hit.kind === 'artifact') app.openFile(hit.path, hit.path.split('/').pop(), { host: hit.host || '', attended: pressed }); else openMessageHit(app, hit).catch(() => { }); };   // B-23e5 (a): `pressed` — its row, Enter
 
   async function idleState() {
     clearTimeout(poll);
@@ -152,7 +152,7 @@ export function openSearchWindow(app, opts = {}) {
         const meta = el('span', 'search-hit-meta', h.kind === 'artifact' ? h.path.split('/').pop() : `${fmtTime(h.ts)} · ${hitWho(h)}`);
         if (h.kind === 'artifact') meta.title = h.path;
         row.replaceChildren(meta, snippetNode(h.snippet || {}));
-        row.onclick = () => { lost = false; activate(row._hit); };
+        row.onclick = () => { lost = false; activate(row._hit, { pressed: true }); };
         row._hit = h;
         return row;
       };
@@ -188,7 +188,7 @@ export function openSearchWindow(app, opts = {}) {
   box.onkeydown = (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); lost = false; select(sel + 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); lost = false; select(sel - 1); }
-    else if (enterSubmits(e)) { e.preventDefault(); if (lost) { status.textContent = t('The selected hit is no longer in the results — pick another'); return; } const r = rows[sel >= 0 ? sel : 0]; if (r) activate(r._hit); }   // never another hit than the one chosen; nobody chose ⇒ the top hit
+    else if (enterSubmits(e)) { e.preventDefault(); if (lost) { status.textContent = t('The selected hit is no longer in the results — pick another'); return; } const r = rows[sel >= 0 ? sel : 0]; if (r) activate(r._hit, { pressed: true }); }   // never another hit than the one chosen; nobody chose ⇒ the top hit
     else if (e.key === 'Escape') { e.preventDefault(); if (box.value) { box.value = ''; run(); } else { try { app.wm.closeWindow(winInfo.id); } catch { } } }
   };
   winInfo._searchSet = (nq, sc) => { box.value = String(nq || ''); if (sc && SCOPES.some(([k]) => k === sc)) scope = sc; paintChips(); run(); setTimeout(() => box.focus(), 0); };

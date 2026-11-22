@@ -21,7 +21,7 @@ import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabe
 import { subagentCardHtml, isSubagentToolRow, markConversationLinks, conversationLinksHtml } from './subagent-card.js'; // lane agy-subagent-cards: the card an Antigravity subagent shows + conversation:// links (PURE)
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
-import { fsErrorText } from './file-explorer-ops.js'; // lane file-preview-mount: a refusal the hub sent as a CODE (storage_sync_refused …) in the reader's words
+import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js'; // lane file-preview-mount: a refusal the hub sent as a CODE (storage_sync_refused …) in the reader's words
 import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
@@ -2009,7 +2009,7 @@ class ChatRenderers {
     // LANE ARTIFACTS-MODEL: a deliverable the agent wrote (derived from the harness's write record) — ONE card per file,
     // patched in place on every later write / edit; one click opens it beside the chat (the Cmd+click door, no Cmd)
     if (msg.noticeKind === 'artifact' && msg.content?.[0]?.type === 'artifact') {
-      return { el: renderArtifactCard(msg, { showJob: (id) => this.app?.openJobs?.({ focusJobId: id }), showPorts: (fid) => showInPorts(this.app, fid), open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() })) }), sideEffect: null };
+      return { el: renderArtifactCard(msg, { showJob: (id) => this.app?.openJobs?.({ focusJobId: id }), showPorts: (fid) => showInPorts(this.app, fid), open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, attended: true, from: this._sourceWinId() })) }), sideEffect: null };
     }
     // UNKNOWN EVENT / NEW FIELDS ON A KNOWN RECORD — NEVER DRAWN IN A PERSON'S CHAT (lane door-healthy-chat, 2.369.344 — the
     // naive studies on 2.369.342: pods that self-updated to a CLI this release had not registered filled every tester's first
@@ -3280,7 +3280,7 @@ class ChatRenderers {
       e.stopPropagation();
       const { url, fp, rel } = this._linkTargets(link);
       const kind = rel ? 'rel' : fp ? 'path' : 'url';
-      const open = () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp);
+      const open = () => rel ? this._openRelTarget(link, rel, { pressed: true }) : this._openLinkTarget(link, url, fp, { pressed: true });   // B-23e5 (a): a press — Ctrl+click, the touch menu's Open
       const copy = () => copyText(fp || rel || url).then(() => { this.flashLink(link, t('Copied!')); this._linkOp(kind, 'copied', fp || rel || url); });
       if (isTouch) {
         // No Ctrl/hover on touch — tap shows both actions (copy used to be impossible)
@@ -3314,7 +3314,7 @@ class ChatRenderers {
       const kind = rel ? 'rel' : fp ? 'path' : 'url';
       this._linkOp(kind, 'menu', fp || rel || url);
       showContextMenu(e.clientX, e.clientY, [
-        { label: (fp || rel) ? t('Open') : t('Open link'), action: () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp) },
+        { label: (fp || rel) ? t('Open') : t('Open link'), action: () => rel ? this._openRelTarget(link, rel, { pressed: true }) : this._openLinkTarget(link, url, fp, { pressed: true }) },   // B-23e5 (a): the menu's Open, pressed
         { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || rel || url).then(() => { this.flashLink(link, t('Copied!')); this._linkOp(kind, 'copied', fp || rel || url); }) },
       ]);
     });
@@ -3332,7 +3332,8 @@ class ChatRenderers {
    * order: cwd/rel → overlap-merge (rel's first segment matches a trailing cwd
    * segment) → cwd-parent/rel; first existing wins. Host-aware for remote
    * sessions. Probing happens only on an explicit open click. */
-  async _openRelTarget(link, rel) {
+  async _openRelTarget(link, rel, { pressed = false } = {}) {
+    let spend = !!pressed, refused = null;   // B-23e5 (a): a press is SPENT on the first candidate the storage refuses (503) — the rest go unmarked
     const { cwd, host } = this._sessionCtx();
     const cands = relCandidates(rel, cwd); // src/path-linkify.js — the For-you links probe the same candidates
     const seen = new Set();
@@ -3342,20 +3343,24 @@ class ChatRenderers {
       seen.add(c);
       asked++;
       try {
-        const r = await fetch(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
+        const r = await fetch(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`, spend ? { headers: ATTENDED_HEADERS } : undefined);
+        if (r.status === 503) spend = false;
         const info = await r.json();
+        if (r.status === 503 && !refused) refused = info || {};
         if (info && !info.error) {
           // open on the SESSION's host — a remote session's files live on the
           // remote machine; opening the bare path opened a nonexistent LOCAL
           // path (real report: remote-chat file links did nothing)
           const from = this._sourceWinId();
-          if (info.isDirectory) this.app.openFileExplorer(c, { host, from });
-          else this.app.openFile(c, c.split('/').pop(), { host, from });
+          if (info.isDirectory) this.app.openFileExplorer(c, { host, from, attended: spend });
+          else this.app.openFile(c, c.split('/').pop(), { host, from, attended: spend });
           this._linkOp('rel', info.isDirectory ? 'directory' : 'opened', rel, host);
           return;
         }
       } catch { threw++; }
     }
+    // B-23e5 (a): a candidate the STORAGE refused is said as such — never «not found», never a search into the same dead storage
+    if (refused) { this._linkMissing(link, { kind: 'rel', target: rel, path: [...seen][0] || rel, host, why: 'error', err: fsErrorText(refused) }); return; }
     // Last resort: bounded server-side search under the cwd — the reply may
     // reference a file that lives deeper (real case: `SCRIPTS.md` actually at
     // cwd/default_voice_examples/SCRIPTS.md). One hit opens; several offer a
@@ -3369,7 +3374,7 @@ class ChatRenderers {
         const { hits = [] } = await r.json();
         const exact = hits.filter(h => h.endsWith('/' + norm));
         const use = exact.length ? exact : hits;
-        const openHit = (h) => { const from = this._sourceWinId(); return type === 'd' ? this.app.openFileExplorer(h, { host, from }) : this.app.openFile(h, h.split('/').pop(), { host, from }); };
+        const openHit = (h) => { const from = this._sourceWinId(); return type === 'd' ? this.app.openFileExplorer(h, { host, from, attended: spend }) : this.app.openFile(h, h.split('/').pop(), { host, from, attended: spend }); };
         if (use.length === 1) { openHit(use[0]); this._linkOp('rel', type === 'd' ? 'directory' : 'opened', rel, host); return; }
         if (use.length > 1) {
           const rect = link.getBoundingClientRect();
@@ -3383,7 +3388,7 @@ class ChatRenderers {
   }
 
   /** Open a chat link target: file path (with optional :line suffix) in viewer/explorer, URL in new tab */
-  _openLinkTarget(link, url, fp) {
+  _openLinkTarget(link, url, fp, { pressed = false } = {}) {
     // A local filesystem path is NEVER an http target. Markdown links to local
     // files — `[doc](/home/x/y.md)` → `<a href="/home/x/y.md">` — arrive here as
     // `url` (from href), and window.open('/home/…') makes the browser resolve it
@@ -3401,7 +3406,8 @@ class ChatRenderers {
       // to local files) must resolve + open on the SESSION's host, not this
       // instance (real report: right-click → Open did nothing in remote chats).
       const { host } = this._sessionCtx();
-      return fetch(`/api/file/info?path=${encodeURIComponent(cleanPath)}${host ? '&host=' + encodeURIComponent(host) : ''}`)
+      // B-23e5 (a): a press's FIRST call carries the mark; refused by the storage it is spent (its words said, no second call)
+      return fetch(`/api/file/info?path=${encodeURIComponent(cleanPath)}${host ? '&host=' + encodeURIComponent(host) : ''}`, pressed ? { headers: ATTENDED_HEADERS } : undefined)
         .then(r => r.json())
         .then(info => {
           if (info.error) {
@@ -3410,10 +3416,10 @@ class ChatRenderers {
             const missing = /ENOENT|no such file|not found|does not exist/i.test(String(info.error));
             this._linkMissing(link, { kind: 'path', target: fp, path: cleanPath, host, why: missing ? 'not-found' : 'error', err: missing ? '' : fsErrorText(info) });
           } else if (info.isDirectory) {
-            this.app.openFileExplorer(cleanPath, { host, from: this._sourceWinId() });
+            this.app.openFileExplorer(cleanPath, { host, from: this._sourceWinId(), attended: pressed });
             this._linkOp('path', 'directory', fp, host);
           } else {
-            this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum, host, from: this._sourceWinId() });
+            this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum, host, from: this._sourceWinId(), attended: pressed });
             this._linkOp('path', 'opened', fp, host);
           }
         })
@@ -3464,7 +3470,7 @@ class ChatRenderers {
     const where = cwd || '~';
     const r = await fetchJson(`/api/file/locate?name=${encodeURIComponent(name)}${cwd ? '&root=' + encodeURIComponent(cwd) : ''}&type=f`);
     const hits = (r && Array.isArray(r.hits)) ? r.hits : [];
-    const openHit = (h) => this.app.openFile(h, h.split('/').pop(), { from: this._sourceWinId() });
+    const openHit = (h) => this.app.openFile(h, h.split('/').pop(), { from: this._sourceWinId(), attended: true });   // B-23e5 (a): the toast's Search by name, pressed
     if (hits.length === 1) { openHit(hits[0]); return hits; }
     if (hits.length > 1) {
       const rect = link.getBoundingClientRect();
@@ -3480,7 +3486,7 @@ class ChatRenderers {
     const up = (d) => { const x = d.replace(/\/+$/, ''); const i = x.lastIndexOf('/'); return i > 0 ? x.slice(0, i) : (i === 0 && x.length > 1 ? '/' : ''); };
     for (let d = up(String(p)); d; d = up(d)) {
       const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(d)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
-      if (info && !info.error && info.isDirectory) { this.app.openFileExplorer(d, { host, from: this._sourceWinId() }); return d; }
+      if (info && !info.error && info.isDirectory) { this.app.openFileExplorer(d, { host, from: this._sourceWinId(), attended: true }); return d; }   // B-23e5 (a): the toast's Open the nearest folder, pressed
       if (d === '/') break;
     }
     showToast(t('No folder on the way to {path} exists on {machine}', { path: p, machine: this._machineName(host) }), { type: 'error' });

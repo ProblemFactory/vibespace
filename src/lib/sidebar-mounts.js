@@ -673,7 +673,7 @@ export function installSidebarMounts(Sidebar) {
       // unmountable; submounts carry the mount state.
       if (m.mounted) {
         actions.append(
-          ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
+          ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path, { attended: true }); }),   // B-23e5 (a): pressed
           ibtn(MI.eject, m.disconnecting ? tr('Disconnecting…') : this._providerRow(m.type).unmountLabel ? tr(this._providerRow(m.type).unmountLabel) : 'Disconnect', async () => {
             // B-323e (主开发 r1501 (8)): a Disconnect in flight is SAID (the hub's own mark: every client's row, through every redraw), and
             // one that did not end the mount SAYS SO — the route answers success:false with a 200, which the page used to show as nothing
@@ -765,7 +765,7 @@ export function installSidebarMounts(Sidebar) {
         row.setAttribute('data-tip', m.mounted ? tr('Open in file explorer') : tr('Click to connect'));
         row.onclick = async (e) => {
           if (e.target.closest('button, a, input, details, .mounts-row-actions')) return;
-          if (m.mounted) { this.app.openFileExplorer(m.path); return; }
+          if (m.mounted) { this.app.openFileExplorer(m.path, { attended: true }); return; }   // B-23e5 (a): a mounted row pressed
           if (m.connecting) { showToast(tr('Already connecting…')); return; } // see the Connect button
           row.style.opacity = '0.6';
           try {
@@ -1418,7 +1418,7 @@ export function installSidebarMounts(Sidebar) {
         const open = document.createElement('button');
         open.className = 'mounts-icon-btn';
         open.innerHTML = MI.folder; open.title = tr('Open in Files');
-        open.onclick = () => this.app.openFileExplorer?.(m.mountpoint);
+        open.onclick = () => this.app.openFileExplorer(m.mountpoint, { attended: true });   // B-23e5 (a): pressed (a plain call: the census sees it)
         actions.append(open);
       } else {
         const viaLabel = m.via === 'tunnel' ? tr('via tunnel') : tr('via address');

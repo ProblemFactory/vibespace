@@ -445,7 +445,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const items = menuItems('session-card', ctx);
   const click = (label) => items.find((i) => i.label === label).action();
   click('Focus window'); click('Star'); click('Switch billing…'); click('Rename…'); click('Set status…'); click('Copy path'); click('Open working directory'); click('Properties…'); click('Go to window'); click('View History');
-  ok(J(calls) === J([['attachSession', 'sess-1', 'W', '/w', { mode: 'chat', backend: 'claude' }], ['toggleStar'], ['showBillingSwitcher', s, { x: 1, y: 2 }], ['rename', true, 'N'], ['status', true, true], ['openFileExplorer', '/w', { host: 'h1' }], ['openSessionProps', s], ['goToWindow', 'sess-1'], ['viewSession', 'abc', '/w', 'C', { backend: 'claude' }]]) && J(copyCalls) === J(['/w']),
+  ok(J(calls) === J([['attachSession', 'sess-1', 'W', '/w', { mode: 'chat', backend: 'claude' }], ['toggleStar'], ['showBillingSwitcher', s, { x: 1, y: 2 }], ['rename', true, 'N'], ['status', true, true], ['openFileExplorer', '/w', { host: 'h1', attended: true }], ['openSessionProps', s], ['goToWindow', 'sess-1'], ['viewSession', 'abc', '/w', 'C', { backend: 'claude' }]]) && J(copyCalls) === J(['/w']),
     'session-card actions call the same app/state handlers with the same arguments', J(calls));
   calls.length = 0; items.find((i) => i.label === 'What it may use…').action();
   ok(J(calls) === J([['openSessionProps', s, { section: 'may-use' }]]), 'unit what-it-may-use: «What it may use…» opens Properties AT that section (openSessionProps(s, {section: \'may-use\'}))', J(calls));

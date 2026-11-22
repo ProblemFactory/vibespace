@@ -209,7 +209,7 @@ export function openDesignHome(app, { syncId } = {}) {
     const items = [
       { label: t('Open'), action: () => openRow(d) },
       { label: t('Rename'), action: () => rename(d) },
-      { label: t('Show in Files'), action: () => app.openFileExplorer(d.dir, { host: d.host || undefined }) },
+      { label: t('Show in Files'), action: () => app.openFileExplorer(d.dir, { host: d.host || undefined, attended: true }) },   // B-23e5 (a): pressed
       ...(d.page ? [{ label: t('Copy published link'), action: () => { copyText(absUrl(d.page.path)); showToast(t('Link copied')); } }] : []),
       { separator: true },
       { label: t('Remove from the list'), action: () => unlist(d) },

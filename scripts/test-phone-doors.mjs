@@ -131,7 +131,7 @@ console.log('⑤ wiring pins');
   ok(/export function goPhoneHome\(app\) \{ if \(!app\.phoneHome\?\.show\?\.\(\)\) app\.sidebar\?\.toggle\?\.\(true\); \}/.test(pf) && read('src/lib/mobile-back.js').includes('window: () => { if (!home?.show?.()) sb.toggle(true); },'),
     'the explorer\'s ‹ is the back gesture\'s home rule (mobile-back.js close.window): the For-you page when it has rows, else the conversation list');
   ok(/if \(there\) \{ app\.goToWinId\(there\.id\); return there; \}/.test(pf) && !/\.revealWindow\(|\.focusWindow\(/.test(pf), 'the doors reveal an explorer through app.goToWinId (the counted door, test-architecture §62) — no new revealWindow / focusWindow site');
-  ok(/const paint = \(\) => btn\?\.classList\.toggle\('labelled', dayOneWords\(\[DOOR\]\)\);/.test(pf) && /const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app\); \};\n  if \(btn\) btn\.onclick = press;/.test(pf),
+  ok(/const paint = \(\) => btn\?\.classList\.toggle\('labelled', dayOneWords\(\[DOOR\]\)\);/.test(pf) && /const press = \(\) => \{ dayOneUsed\(DOOR\); paint\(\); return openFilesDoor\(app, \{ pressed: true \}\); \};\n  if \(btn\) btn\.onclick = press;/.test(pf),
     'the nav\'s word shows for the first week (or until used) — the rail\'s own day-one record (sidebar-rail.js dayOneWords / dayOneUsed over railLabels)');
   const sr = read('src/lib/sidebar-rail.js');
   ok(/export function dayOneWords\(doors\) \{\n  const v = railLabels\(\{ record: readRailRecord\(\), now: Date\.now\(\), doors \}\);\n  keepRailRecord\(v\.record\);\n  return v\.show;\n\}/.test(sr) && /export function dayOneUsed\(door\) \{ keepRailRecord\(railUsed\(readRailRecord\(\), door\)\); \}/.test(sr),

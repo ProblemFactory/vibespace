@@ -105,7 +105,7 @@ export function registerSessionCardMenu() {
   registerCommand({ id: 'session.copyId', title: () => tr('Copy session ID'), run: (c) => copyText(c.s.sessionId || '') });
   registerCommand({ id: 'session.copyPath', title: () => tr('Copy path'), run: (c) => copyText(c.s.cwd || '') });
   // Host-aware: a remote session's cwd opens in the explorer ON its host
-  registerCommand({ id: 'session.openCwd', title: () => tr('Open working directory'), run: (c) => c.app.openFileExplorer(c.s.cwd, { host: c.s.host || undefined }) });
+  registerCommand({ id: 'session.openCwd', title: () => tr('Open working directory'), run: (c) => c.app.openFileExplorer(c.s.cwd, { host: c.s.host || undefined, attended: true }) });   // B-23e5 (a): a person's command
   registerCommand({ id: 'session.findWindow', title: () => tr('Find window'), run: (c) => c.app.flashWindow(c.s.webuiId) });
   registerCommand({ id: 'session.goToWindow', title: () => tr('Go to window'), run: (c) => c.app.goToWindow(c.s.webuiId) });
   registerCommand({ id: 'session.moveWindow', title: () => tr('Move window…'), run: (c) => c.app.moveSessionWindow(c.s.webuiId) });

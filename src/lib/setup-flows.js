@@ -224,7 +224,7 @@ export function installSetupFlows(App) {
       content.innerHTML = content.dataset.saved;
       // re-wire the plain welcome buttons (innerHTML replace dropped listeners)
       content.querySelector('#welcome-new')?.addEventListener('click', () => this.showNewSessionDialog());
-      content.querySelector('#welcome-files')?.addEventListener('click', () => this.openFileExplorer());
+      content.querySelector('#welcome-files')?.addEventListener('click', () => this.openFileExplorer(undefined, { attended: true }));   // B-23e5 (a): pressed
     };
     const done = () => {
       // release the capture-phase keydown regardless of HOW the tour ended
@@ -469,7 +469,7 @@ export function installSetupFlows(App) {
         };
         content.querySelector('#ob-chat').onclick = () => go('chat');
         content.querySelector('#ob-term').onclick = (e) => { e.preventDefault(); go('terminal'); };
-        content.querySelector('#ob-files').onclick = (e) => { e.preventDefault(); done(); this.openFileExplorer(); };
+        content.querySelector('#ob-files').onclick = (e) => { e.preventDefault(); done(); this.openFileExplorer(undefined, { attended: true }); };   // B-23e5 (a): pressed
         content.querySelector('#ob-finish').onclick = (e) => { e.preventDefault(); done(); };
       }
       // ✕ close on every step (Escape works too)

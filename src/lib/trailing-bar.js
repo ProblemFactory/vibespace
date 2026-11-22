@@ -31,7 +31,7 @@ import { registerMenuItem } from './contributions.js';
 const DESTS = [
   { id: 'tasks', label: 'Task Groups', icon: () => RAIL_ICONS.tasks, on: (app) => app.sidebar?._activeTab === 'tasks',
     run: (app) => { const tab = document.querySelector('.sidebar-tab[data-tab="tasks"]'); if (tab) tab.click(); else { app.sidebar._activeTab = 'tasks'; app.sidebar._updateTabs?.(); app.sidebar._render?.(); } } },
-  { id: 'files', label: 'Files', existing: 'mobile-nav-files', on: (app, w) => w?.type === 'files', run: (app) => openFilesDoor(app) },
+  { id: 'files', label: 'Files', existing: 'mobile-nav-files', on: (app, w) => w?.type === 'files', run: (app) => openFilesDoor(app, { pressed: true }) },
   { id: 'channels', label: 'Channels', icon: () => RAIL_ICONS.channels, on: (app, w) => w?.type === 'channels', run: (app) => openChannelsWindow(app) },
   { id: 'browser', label: 'Agent browser', icon: () => RAIL_ICONS.browser, on: (app, w) => w?.type === 'browser-profiles', run: (app) => app.openBrowserProfiles?.() },
   { id: 'jobs', label: 'Background Work', icon: () => RAIL_ICONS.jobs, on: (app, w) => w?.type === 'jobs', run: (app) => openJobsWindow(app) },

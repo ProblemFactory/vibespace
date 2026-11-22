@@ -28,10 +28,10 @@ const z = (w) => Number(w.element?.style?.zIndex) || 0;
 
 /** Open the files: `path` ⇒ an explorer showing that folder (the one already there, else a new one); no path ⇒ the
  *  explorer this phone showed last, else a new one at home. Every reveal goes through app.goToWinId (the door). */
-export function openFilesDoor(app, { path = '' } = {}) {
+export function openFilesDoor(app, { path = '', pressed = false } = {}) {   // B-23e5 (a): `pressed` — a person's tap opens its first listing marked
   const there = path ? explorersHere(app).find((w) => w._explorer.currentPath === path) : filesDoorWindow(app);
   if (there) { app.goToWinId(there.id); return there; }
-  return app.openFileExplorer(path || undefined);
+  return app.openFileExplorer(path || undefined, pressed ? { attended: true } : undefined);
 }
 
 /** The explorer the door brings back (lane phone-titlebar-title r3 — the «+» sheet's 文件 row names it): the one this phone showed
@@ -61,7 +61,7 @@ export function filesDoorName(app, win) {
 export function installNavFilesDoor(app) {
   const btn = document.getElementById('mobile-nav-files');
   const paint = () => btn?.classList.toggle('labelled', dayOneWords([DOOR]));
-  const press = () => { dayOneUsed(DOOR); paint(); return openFilesDoor(app); };
+  const press = () => { dayOneUsed(DOOR); paint(); return openFilesDoor(app, { pressed: true }); };
   if (btn) btn.onclick = press;
   paint();
   return press;
@@ -91,7 +91,7 @@ export function filesCard(app) {
       b.dataset.kind = c.kind;
       b.textContent = chipText(c);
       b.title = tilde(c.path, home);
-      b.onclick = (e) => { e.stopPropagation(); openFilesDoor(app, { path: c.path }); };
+      b.onclick = (e) => { e.stopPropagation(); openFilesDoor(app, { path: c.path, pressed: true }); };
       return b;
     }));
   };

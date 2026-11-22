@@ -167,7 +167,7 @@ export function artifactRowMenu(b, { onOpen = null, app = null } = {}) {
   if (b.kind === 'service') return serviceItems(b, { showJob: (id) => app?.openJobs?.({ focusJobId: id }), showPorts: (fid) => showInPorts(app, fid) });
   const dir = String(b.path || '').replace(/\/[^/]*$/, '') || '/';
   const items = [{ label: t('Open beside'), action: () => onOpen && onOpen(b) }];
-  if (app && app.openFileExplorer && b.path) items.push({ label: t('Show in Files'), action: () => app.openFileExplorer(dir, { host: b.host || undefined }) });
+  if (app && app.openFileExplorer && b.path) items.push({ label: t('Show in Files'), action: () => app.openFileExplorer(dir, { host: b.host || undefined, attended: true }) });   // B-23e5 (a): pressed
   items.push({ label: t('Copy path'), action: () => copyText(b.path || '') });
   const v = b.via;
   if (app && v && v.kind === 'handover' && v.from && v.from.cid) items.push({ separator: true }, { label: t("Open {name}'s conversation", { name: v.from.name || v.from.cid.slice(0, 8) }), action: () => openConversation(app, v.from.cid, v.from.name || '') });

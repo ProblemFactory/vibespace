@@ -187,14 +187,14 @@ function cardRig(body, { phone = false, setting = true, store = new Map() } = {}
   ok(bad2.toasts.length === 2, 'CONTROL the toast without its device mark ⇒ the once leg is RED (2 toasts)');
 }
 {
-  const body = method(CV, '_openArtifact(b, { quiet = false } = {}) {');
-  const fn = new Function('b', '{ quiet = false } = {}', 'serviceOpenSpec', 'serviceHref', 'window', 'location', body);
+  const body = method(CV, '_openArtifact(b, { quiet = false, pressed = false } = {}) {');   // B-23e5 (a): the door also hears a press
+  const fn = new Function('b', '{ quiet = false, pressed = false } = {}', 'serviceOpenSpec', 'serviceHref', 'window', 'location', body);
   const calls = []; const self = { winInfo: { id: 'chat' }, app: { openFile: (...a) => calls.push(a) } };
   fn.call(self, { kind: 'doc', path: '/w/docs/BRIEF.md', name: 'BRIEF.md' }, { quiet: true });
   fn.call(self, { kind: 'doc', path: '/w/docs/NOTES.md', name: 'NOTES.md' });
   ok(calls[0]?.[2]?.quiet === true && calls[0]?.[2]?.from === 'chat', '_openArtifact(b, {quiet}) hands quiet to app.openFile with the chat as `from`', J(calls[0]));
-  ok(calls[1] && !('quiet' in calls[1][2]), 'the card\'s click (no quiet) opens exactly as before — no quiet key', J(calls[1]));
-  const callers = [...CV.matchAll(/_openArtifact\(([^)]*)\)/g)].map((m) => m[1]).filter((a) => a !== 'b, { quiet = false } = {}');
+  ok(calls[1] && !('quiet' in calls[1][2]), 'a call with no quiet and no press opens exactly as before — no quiet key (the card and the chip pass their press: B-23e5 (a))', J(calls[1]));
+  const callers = [...CV.matchAll(/_openArtifact\(([^)]*)\)/g)].map((m) => m[1]).filter((a) => a !== 'b, { quiet = false, pressed = false } = {}');
   ok(callers.filter((a) => /quiet/.test(a)).length === 1 && J(callers.filter((a) => /quiet/.test(a))) === J(['b, { quiet: true }']), '_onArtifactCard is the ONLY quiet caller in chat-view', J(callers));
   // every line of the client that asks an open door for quiet (a pass-through `x.quiet ? { quiet: true }` is the door's own)
   const libQuiet = fs.readdirSync(LIB).filter((f) => f.endsWith('.js')).flatMap((f) => fs.readFileSync(path.join(LIB, f), 'utf8').split('\n').filter((l) => /quiet: true/.test(l) && /openFile|openDoc|_openArtifact|createWindow/.test(l) && !/\bquiet \? \{ quiet: true \}/.test(l)).map((l) => f + ': ' + l.trim().slice(0, 60)));

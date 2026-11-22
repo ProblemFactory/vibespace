@@ -1033,7 +1033,7 @@ class App {
 
   _setupWelcome() {
     document.getElementById('welcome-new').addEventListener('click', () => this.showNewSessionDialog());
-    document.getElementById('welcome-files').addEventListener('click', () => this.openFileExplorer());
+    document.getElementById('welcome-files').addEventListener('click', () => this.openFileExplorer(undefined, { attended: true }));   // B-23e5 (a): pressed
     this._maybeShowOnboarding();
   }
 
