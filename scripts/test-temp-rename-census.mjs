@@ -115,7 +115,7 @@ const FAMILIES = {
   writer: { verdict: 'through the writer', classes: ['synced'], why: 'the store writer\'s thread (src/store-writer-worker.js writeJob): every store the writer holds — the temp synced before the rename since B-9275 unit 1' },
   'self-synced': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename, and a sync that fails fails the write (since B-ddf3 the person\'s files the hub cures one by one: a mail message\'s copy, a rescued transcript; a private credential file, the device identity, a sealed app secret, a webhook\'s store, the usage ledger\'s rewrite)' },
   'self-synced-best-effort': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename BEST EFFORT: a sync that FAILS (EIO, ENOSPC) is swallowed and the temp is still renamed — the vault\'s files, its TOTP and run-door stores, the automation store (round wl2wglpsq: rare, said here as it is)' },
-  secret: { verdict: 'cured', row: 'B-dc3f', classes: ['unsynced', 'synced'], why: 'the secret-bearing replace (src/secret-file.js): CURED in the hotfix 2.369.415 by another lane (row B-dc3f: synced, renamed, its folder synced) — it reads unsynced until that hotfix is under this tree, synced after; either is this row UNTIL THEN: once the hotfix is under this tree its classes narrow to synced (one word here), so a regression of the cure is red' },
+  secret: { verdict: 'cured', row: 'B-dc3f', classes: ['synced'], why: 'the secret-bearing replace (src/secret-file.js): CURED in the hotfix 2.369.415 by another lane (row B-dc3f: synced, renamed, its folder synced). The hotfix is under this tree, so the family admits SYNCED only: a regression of the cure is red' },
   store: { verdict: 'owed', row: 'B-574d', classes: ['unsynced', 'move'], why: 'a store or a record of the HUB written by its own temp + rename with no sync: after a power loss its name can point at an empty file, read back as damaged. The cure: through the store writer (synced since B-9275 unit 1) or one shared synced replace' },
   b0248: { verdict: 'owed', row: 'B-0248', classes: ['unsynced'], why: 'a store that moves onto the store writer in row B-0248 (lane bl-loop-b): synced once it is there' },
   spend: { verdict: 'owed', row: 'B-ef83', classes: ['unsynced'], why: 'the spend ledger (data/spend-budget.json): onto the store writer in row B-ef83' },
@@ -172,7 +172,7 @@ const ROWS = [
   ["src/browser-serve.js", "unsynced", "derived", "the build pointer, written again at each launch", "writeBuildView"],
   ["src/channel-outbox-files.js", "move", "store", "an approved attachment's folder: its files staged moments before in the same request (stage(), no sync), then renamed into place (round wl2wglpsq's must)", "commit"],
   ["src/channel-store.js", "unsynced", "store", "", "writeJsonAtomic", "createChannelStore > rewriteRecords", "createChannelStore > trim", "createChannelStore > prependRecords", "createChannelStore > trimSide", "createChannelStore > avatarPut", "createChannelStore > attachmentPut"],
-  ["src/channel-store.js", "move", "move", "", "createChannelStore > loadJsonFamily > setAside"],
+  ["src/channel-store.js", "move", "move", "the damaged door (B-f276 1b): a family's companion files set aside at «Start it empty», put back if the press cannot finish", "createChannelStore > startDamagedEmpty", "createChannelStore > startDamagedEmpty > back"],
   ["src/channels/webhook.js", "synced", "self-synced", "", "writeJsonAtomic"],
   ["src/channels/webhook.js", "unsynced", "store", "", "queueAppend"],
   ["src/claude-oat-probe.js", "move", "derived", "the probe's own scratch (a symlink, a variant folder)", "measure > repoint", "measure > runVariant", "measure > runVariant"],
@@ -196,8 +196,9 @@ const ROWS = [
   ["src/hosts.js", "unsynced", "store", "", "HostManager._persistDiscovery"],
   ["src/hosts.js", "move", "move", "", "HostManager.migrateDialTokenFile > later", "HostManager.migrateDialTokenFile", "HostManager._migrateDialTokensAtRead > later"],
   ["src/hosts.js", "unsynced", "derived", "a cache of a remote file, fetched again", "HostManager._fetchRemoteByFindOnce", "HostManager._fetchRemoteByFindOnce"],
-  ["src/job-logs-sweep-worker.js", "unsynced", "store", "", "orphaned"],
+  ["src/job-logs-sweep-worker.js", "unsynced", "store", "the remover child's count of what it removed (B-323e), read by the hub", "countWrite"],
   ["src/job-logs-sweep-worker.js", "move", "move", "", "stateOf"],
+  ["src/job-logs-sweep.js", "unsynced", "derived", "a batch's request file (B-323e), handed to its child by name at once and swept by the next pass: a torn one is never read again", "createRemover > writeRequest"],
   ["src/jobs.js", "unsynced", "store", "", "writeJsonAtomic", "JobManager._rewriteSpills"],
   ["src/jobs.js", "move", "move", "", "JobManager._unreadPrefetch", "JobManager._noteDone", "JobManager._logsHeldFile"],
   ["src/ledger-slot-backfill.js", "unsynced", "store", "", "_writeAtomic"],
@@ -216,10 +217,10 @@ const ROWS = [
   ["src/routes/files.js", "unsynced", "store", "", "writeExtractJournal"],
   ["src/routes/files.js", "move", "move", "", "crossHostTransfer"],
   ["src/routes/files.js", "unsynced", "person", "a file copied from another machine into the person's folder", "crossHostTransfer"],
-  ["src/routes/persistence.js", "unsynced", "b0248", "the layouts and settings", "writeJsonAtomic"],
+  ["src/routes/persistence.js", "unsynced", "store", "the layouts' owed mark (data/layouts.owed.json, B-0248: an episode's mark, its own temp + rename, unsynced) — the layouts and settings themselves are the store writer's since B-0248 step 2", "setup > writeMark"],
   ["src/safe-fs-worker.js", "move", "move", "", "rename", "move"],
   ["src/safe-fs-worker.js", "unsynced", "person", "the person's file copied or moved across devices (its .part)", "copy", "move"],
-  ["src/secret-file.js", "unsynced", "secret", "the secret-bearing replace", "replaceShredding"],
+  ["src/secret-file.js", "synced", "secret", "the secret-bearing replace (synced since the hotfix 2.369.415)", "replaceShredding"],
   ["src/server/agent-listener.js", "unsynced", "store", "", "keepPort"],
   ["src/server/agent-tool-generators.js", "unsynced", "derived", "an agent tool copied from the checkout at every start", "create > createBrowserVerbsCopy", "create > createBrowserStuckCopy", "create > createBrowserPasskeyCopy", "create > createBrowserReadBackCopy", "create > createCliTextCopy", "create > createCliCallCopy", "create > createFdCloseCopy", "create > createLocalIndexCopy"],
   ["src/server/apps-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
@@ -291,8 +292,10 @@ const ROWS = [
   ["src/server/usage-pool-engine.js", "unsynced", "store", "", "create > persistResetCreditTries"],
   ["src/server/usage-pool-engine.js", "move", "move", "", "create > loadResetCreditTries"],
   ["src/server/usage-probe-log.js", "move", "move", "", "appendProbeLog"],
+  ["src/server/provider-spawn.js", "unsynced", "derived", "a spawn plan's file (B-d578 P1-a: OpenCode's one config under the provider's home), written again from its plan at every spawn", "writePlanFile"],
   ["src/server/vault-engine.js", "synced", "self-synced-best-effort", "", "writeAtomic"],
   ["src/server/vault-run-door.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
+  ["src/server/vault-run-door.js", "move", "move", "the grant ends file that does not parse, set aside (its bytes kept)", "create"],
   ["src/server/vault-totp.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
   ["src/server/vault-use-grants.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/window-targets-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
@@ -326,7 +329,7 @@ const ROWS = [
   ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
   ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
 ];
-const OWED_MAX = 147;   // row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+const OWED_MAX = 147;   // the live-tip census cure (lane lg-store-writes, r1790): 147 stays, each step by name — −1 the layouts and settings (src/routes/persistence.js writeJsonAtomic: the store writer's since B-0248 step 2), +1 the layouts' owed mark (setup > writeMark: new, unsynced, B-574d owes it); the remover's count is the old site renamed (orphaned → countWrite). Before: row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
 // THE RATCHET (round wl2wglpsq): OWED_MAX is an EQUALITY with the census (a cure lowers it in the cure's own commit). A commit
 // could raise it and stay green here, so a rise above the KEPT baseline is red by name unless RISES names it with its row
 const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)
@@ -367,7 +370,7 @@ const REGION_ROWS = [
   ["data/bin", "data/bin/acp-wrapper.js", 2],
   ["data/bin", "data/bin/agy-wrapper.js", 5],
   ["data/bin", "data/bin/chat-wrapper.js", 3],
-  ["data/bin", "data/bin/codex-chat-wrapper.js", 2],
+  ["data/bin", "data/bin/codex-chat-wrapper.js", 3],   // + B-cd4b's said journal (the wrapper's hold): one more temp + rename
   ["data/bin", "data/bin/job-wrapper.js", 5],
   ["data/bin", "data/bin/pty-wrapper.js", 1],
   ["data/bin", "data/bin/vibespace-browser", 1],
@@ -388,7 +391,7 @@ const REGION_ROWS = [
   ["shell", "src/routes/files.js", 1],
   ["shell", "src/server/design-engine.js", 1],
   ["shell", "src/spawn/ssh.js", 1],
-];   // [region, file, count] — read on the census's base (round wl2wglpsq's cure): data/bin 29 renames in 14 files, shell 31 «mv» in 10 files
+];   // [region, file, count] — read on the census's base (round wl2wglpsq's cure): data/bin 30 renames in 14 files (B-cd4b's said journal +1 in the codex wrapper, at the live-tip cure), shell 31 «mv» in 10 files
 const regionCount = () => {
   const out = new Map(), add = (k, n) => { if (n) out.set(k, (out.get(k) || 0) + n); };
   for (const rel of trackedFiles(REPO, 'data/bin')) {
