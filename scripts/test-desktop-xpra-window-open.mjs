@@ -351,6 +351,13 @@ try {
     check(`the app MOVING itself (xdotool windowmove 400,300 — the client used to follow it off the pane) is put back at 0,0 (X: ${xm && `${xm.x},${xm.y}`})`, !!atOrigin && xm && xm.x === 0 && xm.y === 0, { atOrigin: atOrigin && atOrigin.m, x: xm });
     // a second top-level of the app's own display far off the screen — design 016 S2 (lane app-satellite-windows): it opens its
     // OWN VibeSpace window (a satellite of the same session) and lies in its slot of the root beside the main (S1 placed it inside)
+    // B-34bc's PRINT (主开发 r2377, tests only, it judges nothing): the page's own size asks TIME-STAMPED from here (a 100 ms poll of
+    // its client's last ask, in the local clock xpra's log uses) and where the hub's log stands, so the print after the measure says
+    // whether an ask was only LATE or never reached the display
+    const ask5 = { asks: [], last: '', srv0: srvLog.join('').length, timer: null };
+    const clock5 = () => { const d = new Date(), z = (n, w = 2) => String(n).padStart(w, '0'); return `${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())},${z(d.getMilliseconds(), 3)}`; };
+    const CLIENT5 = `(() => { const m = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)} && !w._desktopSatelliteWid); const c = m && m._desktopAppView && m._desktopAppView.client; return c && c.display ? c.display.width + 'x' + c.display.height : null; })()`;
+    ask5.timer = setInterval(() => { p1.evalJs(CLIENT5).then((k) => { if (k && k !== ask5.last) { ask5.last = k; ask5.asks.push({ seen: clock5(), size: k }); } }).catch(() => {}); }, 100);
     const second = spawn(XTERM, ['-T', 'vs-second-top', '-geometry', '40x10+2000+1500'], { env: xenv, stdio: 'ignore', detached: true }); xclipKids.push(second);
     const SATS = `[...app.wm.windows.values()].filter((w) => w._desktopAppId === ${JSON.stringify(appId)} && w._desktopSatelliteWid).map((w) => ({ title: w.title, wid: w._desktopSatelliteWid, bound: !!(w._desktopSatellite && w._desktopSatellite.bound), slot: [...app.wm.windows.values()].find((m) => m._desktopAppId === ${JSON.stringify(appId)} && !m._desktopSatelliteWid)._desktopAppView.client.slotOf(w._desktopSatelliteWid) }))`;
     const own = await until(async () => { const s = await p1.evalJs(WIN(appId)); const w = s && s.windows.find((x) => x.title === 'vs-second-top'); const sats = await p1.evalJs(SATS); const main = s && s.windows.find((x) => x.title === 'vs-xpra-title'); return w && main && sats.length === 1 && sats[0].bound && sats[0].wid === w.wid && sats[0].slot && w.x === sats[0].slot.x && w.y === sats[0].slot.y ? { w, main, sat: sats[0] } : null; }, 12000, 250);
@@ -365,6 +372,15 @@ try {
     { // B-34bc's measure: X's last read of the second window, and where the page and the display part (prints only)
       const xw5 = (((await p1.evalJs(`fetch('/api/desktop/apps/${appId}/windows').then((r) => r.json())`).catch(() => null)) || {}).windows || []).find((x) => x.title === 'vs-second-top') || null;
       console.log(`  MEASURE (B-34bc) the fifth leg: X's last read of the second ${JSON.stringify(xw5)}; ${JSON.stringify(await displayFacts(p1, appId, xenv, xw5 && xw5.id))}`);
+    }
+    { // B-34bc's PRINT (r2377): a bounded settle (3 s), then the page's time-stamped asks, X's root, xpra's last size lines and the hub
+      // relay's own lines for this window since the second top-level opened: an ask that was only late lands in this settle; one the
+      // relay cut or held (the pin, one active viewer, Watch) says so in its lines (prints only)
+      await sleep(3000);
+      clearInterval(ask5.timer);
+      const after = await displayFacts(p1, appId, xenv);
+      const relay5 = srvLog.join('').slice(ask5.srv0).split('\n').filter((l) => l.includes('[desktop-stream]')).slice(-12).map((l) => l.trim().slice(0, 220));
+      console.log(`  MEASURE 2 (B-34bc) the fifth leg, 3 s later: the page's asks (first seen, local clock) ${JSON.stringify(ask5.asks)}; X root ${after.xRoot}; xpra's last size lines ${JSON.stringify(Array.isArray(after.server) ? after.server.slice(-4) : after.server)}; the hub relay's lines since the second opened ${JSON.stringify(relay5)}`);
     }
     check('a second top-level the app opened at +2000+1500 (kind main, not transient) opens its OWN window (design 016 S2: titled "vs-xpra-title · vs-second-top") and lies in its slot of the root beside the main, and X agrees', !!own && own.sat.title === 'vs-xpra-title · vs-second-top' && own.w.x >= own.main.w && !!xSecond, { own, x: xSecond });
     const m4 = await mainNow();
