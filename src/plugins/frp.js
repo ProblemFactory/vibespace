@@ -188,7 +188,7 @@ module.exports = {
     // ITS READS: a folder's real path is asked OFF THE LOOP (the promise fs — a hung network mount never holds the hub's loop; it holds one
     // thread of the file system's shared pool at most, a folder's one ask in flight), one ask in
     // flight a folder, never one per ask of the verdict (every status, every watch tick and every publish asks it). A real path is
-    // KEPT for the process; any other answer is asked again on the first ask a minute later. «GONE» NEEDS TWO ANSWERS A MINUTE APART:
+    // KEPT for the process (r2638: a link re-pointed while the hub runs is read at its next start); any other answer is asked again on the first ask a minute later. «GONE» NEEDS TWO ANSWERS A MINUTE APART:
     // the first «gone» is unknown, and the plugin itself asks again a minute later (a mount's gap shorter than that is never «gone»);
     // until then — not answered, unreadable, gone once — the recorded run is NOT this instance's (another instance's client is never
     // taken for its own on one answer). An answer that may change the verdict (a client in the folder) is said at once: the card is
@@ -197,7 +197,20 @@ module.exports = {
     const REAL_AGAIN_MS = 60e3;
     const realKept = new Map();   // a folder → { v: its real path | null (gone) | undefined (not answered), at, p (the ask in flight), gone (1: gone once) }
     let booted = false;
-    const realSettled = () => { try { if (!frpDaemonPid()) return; h.notify(); if (booted && !watch && ownRunPid()) watchLogin(true); } catch { } };
+    // r2638 (a person's act is never lost in silence): a restart of this instance's own client asked while the folder's answer is still
+    // out (a settings change, the boot's move onto its own relay token, the unlock's restart, a relay op) is HELD — one — and applied
+    // when the answer makes the run its own; dropped when it shows another instance's client (never restarted from here)
+    let ownWait = null;
+    const realSettled = () => {
+      try {
+        if (!frpDaemonPid()) { ownWait = null; return; }   // no client: a held restart has nothing left to apply to (its next start reads the settings)
+        h.notify();
+        const heldFor = ownWait && ownRunPid() === ownWait.pid && (ownWait.start == null || startOf(ownWait.pid) === ownWait.start);   // its read: THE RUN it was held for, never a later one (a take-over meanwhile)
+        if (heldFor) { const w = ownWait; ownWait = null; console.log(`[plugins] frp: the folder's answer made the relay client this instance's own — the restart held meanwhile (${w.why}) runs now`); restartSoon(w.opts, w.why); }
+        else if (ownWait && !ownUnknown()) { console.log(`[plugins] frp: the restart held meanwhile (${ownWait.why}) is dropped — the relay client is another instance's, or not the run it was held for`); ownWait = null; }   // never restarted from here
+        if (booted && !watch && ownRunPid()) watchLogin(true);
+      } catch { }
+    };
     const realOf = (p, confirm = false) => {
       let k = realKept.get(p);
       if (!k) { if (realKept.size >= 64) realKept.clear(); k = { v: undefined, at: 0, p: null, gone: 0 }; realKept.set(p, k); }
@@ -220,11 +233,26 @@ module.exports = {
     };
     // its read: this instance's own folder AND the one its record names are asked at its start (off the loop)
     try { const own = dataFolder(), r0 = h.peek().frpcRun; if (own) realOf(own); if (r0 && r0.by) realOf(r0.by); } catch { }
+    /** r2638: is the pid file's client the run this record names — its pid, its start — with the folders' answers still out (not
+     *  answered, unreadable, gone once)? Then nobody knows yet whose it is: every road leans to «not its own», and says so */
+    const ownUnknown = () => {
+      const pid = frpDaemonPid(), run = h.peek().frpcRun, mine = dataFolder();
+      if (!pid || !run || run.pid !== pid || !run.by || !mine || run.by === mine) return false;
+      if (run.start != null) { const st = startOf(pid); if (st != null && st !== run.start) return false; }
+      const a = realKept.get(run.by), b = realKept.get(mine);
+      return !(a && a.v === null) && !(a && typeof a.v === 'string' && b && typeof b.v === 'string');
+    };
+    const heldRestart = (opts, why) => {
+      if (!ownUnknown()) return false;
+      if (!ownWait) { const pid = frpDaemonPid(); ownWait = { opts: opts || {}, why, pid, start: startOf(pid) }; console.log(`[plugins] frp: a restart of the relay client (${why}) is held — whose client it is is not yet known (its data folder is still being read); it runs when the answer makes it this instance's own`); }
+      return true;
+    };
+    const unknownRefusal = () => Object.assign(new Error('This home\'s relay client is not yet known as this instance\'s or another\'s — its data folder is still being read; try again in a minute, or take it over from its card'), { code: 'relay_owner_unknown' });
     // its read (S3): «a relay client» is the frpc THIS home's config starts — its program named frpc and that config's path in its
     // argv, read in the take-over's own tick (a reused pid — a tail of the log, an editor on the config, another frpc service — is never it)
     const isRelayClient = (pid) => { const a = pidArgv(pid); return path.basename(a[0] || '') === 'frpc' && a.includes(frpConf()); };
     const heldElsewhere = () => !!frpDaemonPid() && !ownRunPid();
-    const heldRefusal = () => Object.assign(new Error('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone'), { code: 'relay_held_elsewhere' });
+    const heldRefusal = () => (ownUnknown() ? unknownRefusal() : Object.assign(new Error('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone'), { code: 'relay_held_elsewhere' }));   // r2638: in the minute nobody knows, said so
     let otherSaid = 0;
     const ownRunPid = () => { const pid = frpDaemonPid(); return pid ? ownOf(pid) : null; };
     /** ONE read of the pid file (its round: the home may be slow storage — status reads it once a call): the live relay client it
@@ -476,7 +504,7 @@ module.exports = {
     let restarting = null;
     const restartSoon = (opts = {}, why = 'a relay change') => {
       if (restarting) return restarting;
-      if (frpDaemonPid() && !ownRunPid()) return Promise.resolve();   // B-1217: another instance's run is never restarted from here
+      if (frpDaemonPid() && !ownRunPid()) { heldRestart(opts, why); return Promise.resolve(); }   // B-1217: another instance's run is never restarted from here; r2638: one whose owner is not yet known — held
       const pid = frpDaemonPid();
       try { verbs.stop(); } catch { }
       restarting = (async () => {
@@ -625,12 +653,14 @@ module.exports = {
           restartSoon({}, 'with the shared token');
           return sealed;
         }
+        if (ownUnknown() && restartsAtUnlock(p)) heldRestart({}, 'with the shared token');   // r2638: whose client it is not yet known — held (its read: never reads the shared log for another's client)
         try { verbs.bootReplay(); } catch { }
         return sealed;
       },
       /** a relay row changed (the settings store's write hook): a running relay restarts into it */
       applySettings() {
         if (ownRunPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 800); }   // B-1217: its own run only
+        else heldRestart({}, 'a settings change');   // r2638: its folder still being read — held, applied when the answer makes it its own
       },
 
       // The cluster injects the relay env + wants it default-ON, so frp replays

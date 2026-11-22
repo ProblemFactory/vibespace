@@ -3009,7 +3009,8 @@ export default {
   "This instance’s relay token was revoked — mint a new one in Plugins › Public URLs and send its registration line to the relay admin": "本实例的中继令牌已被吊销——请在 插件 › 公网 URL 里重新生成，并把新登记行发给中继管理员",   // B-1217 its round r2329 (lane bl-machines-b)
   "This instance runs the relay now": "现在由本实例运行中继",   // B-1217 its round (lane bl-machines-b)
   "The relay client changed since this page read it — look again": "本页读取之后中继客户端已变化——请重新查看",   // B-1217 its round (lane bl-machines-b)
-  "The other relay client was not seen to end — nothing was started": "没有看到另一个中继客户端结束——没有启动任何东西",
+  "The other relay client was not seen to end — nothing was started": "没有看到另一个中继客户端结束——没有启动任何东西",   // B-1217 its round r2329 (lane bl-machines-b)
+  "This home’s relay client is not yet known as this instance’s or another’s — its data folder is still being read; try again in a minute, or take it over from its card": "还不知道这个主目录的中继客户端是本实例的还是另一个实例的——它的数据文件夹还在读取中；请一分钟后再试，或在它的卡片上接管",   // B-1217 r2638 (lane bl-machines-b)
   "This process’s start time could not be read, so it cannot be told from a later process with the same number — end process {pid} yourself, or stop the VibeSpace that runs it, then start the relay here.": "读不到这个进程的启动时间，无法把它与之后同号的进程区分开——请自己结束进程 {pid}，或停止运行它的那个 VibeSpace，然后在这里启动中继。",   // B-1217 its round (lane bl-machines-b)
   "The other relay client was ended, but this instance’s own did not start: {why}": "另一个中继客户端已结束，但本实例自己的没有启动：{why}",   // B-1217 its round (lane bl-machines-b)
   "Another VibeSpace instance in this home runs the relay client — this instance leaves it alone": "这个主目录下的另一个 VibeSpace 实例在运行中继客户端——这个实例不去动它",   // B-1217 (lane bl-machines-b)

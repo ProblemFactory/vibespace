@@ -3009,7 +3009,8 @@ export default {
   "This instance’s relay token was revoked — mint a new one in Plugins › Public URLs and send its registration line to the relay admin": "このインスタンスのリレートークンは失効しました — プラグイン › 公開 URL で新しく発行し、新しい登録行をリレー管理者に送ってください",   // B-1217 its round r2329 (lane bl-machines-b)
   "This instance runs the relay now": "このインスタンスがリレーを動かしています",   // B-1217 its round (lane bl-machines-b)
   "The relay client changed since this page read it — look again": "このページが読み取った後にリレークライアントが変わりました — もう一度確認してください",   // B-1217 its round (lane bl-machines-b)
-  "The other relay client was not seen to end — nothing was started": "もう一方のリレークライアントの終了を確認できませんでした — 何も起動していません",
+  "The other relay client was not seen to end — nothing was started": "もう一方のリレークライアントの終了を確認できませんでした — 何も起動していません",   // B-1217 its round r2329 (lane bl-machines-b)
+  "This home’s relay client is not yet known as this instance’s or another’s — its data folder is still being read; try again in a minute, or take it over from its card": "このホームのリレークライアントがこのインスタンスのものか別のものか、まだ分かりません — データフォルダーを読み取り中です。1 分後にもう一度お試しいただくか、カードから引き継いでください",   // B-1217 r2638 (lane bl-machines-b)
   "This process’s start time could not be read, so it cannot be told from a later process with the same number — end process {pid} yourself, or stop the VibeSpace that runs it, then start the relay here.": "このプロセスの開始時刻を読めないため、同じ番号の後のプロセスと区別できません — プロセス {pid} を自分で終了するか、それを動かしている VibeSpace を止めてから、ここでリレーを開始してください。",   // B-1217 its round (lane bl-machines-b)
   "The other relay client was ended, but this instance’s own did not start: {why}": "もう一方のリレークライアントは終了しましたが、このインスタンス自身のものは起動しませんでした：{why}",   // B-1217 its round (lane bl-machines-b)
   "Another VibeSpace instance in this home runs the relay client — this instance leaves it alone": "このホームの別の VibeSpace インスタンスがリレークライアントを動かしています — このインスタンスは手を触れません",   // B-1217 (lane bl-machines-b)

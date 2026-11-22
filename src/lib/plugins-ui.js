@@ -21,6 +21,7 @@ export function relayRefusalWords(x) {
   return c === 'relay_held_elsewhere' ? t('Another VibeSpace instance in this home runs the relay client — this instance leaves it alone')
     : c === 'relay_takeover_moved' ? t('The relay client changed since this page read it — look again')
     : c === 'relay_takeover_stuck' ? t('The other relay client was not seen to end — nothing was started')
+    : c === 'relay_owner_unknown' ? t('This home’s relay client is not yet known as this instance’s or another’s — its data folder is still being read; try again in a minute, or take it over from its card')   // r2638
     : c === 'relay_takeover_not_relay' ? t('The process the relay’s pid file names is not this home’s relay client — nothing was ended')   // r2329 (2): its own words
     : c === 'relay_revoked' ? t('This instance’s relay token was revoked — mint a new one in Plugins › Public URLs and send its registration line to the relay admin')
     : String((x && (heldWordsOf(x) || x.error)) || '');   // a held plugins.json: worded by its code (2.369.417)

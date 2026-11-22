@@ -29,6 +29,9 @@
 //     RED gone kept; the login watch armed by
 //     the answer that makes the run its own — RED never armed
 //  ⑦ a take-over asked by anything but the person's press: refused, nothing touched — RED unattended
+//  ⑧ (r2638) THE MINUTE NOBODY KNOWS: a settings change while its folder's answer is out is HELD and runs as one restart when the
+//     answer makes the run its own (a moved install; a gone folder's minute) — RED the held restart never replayed; dropped when it
+//     shows another instance's client (it lives, never restarted); a Stop in that minute is refused «not yet known» — RED the old words
 //  (the reds plant the release's roads back together — stop()'s and start()'s guards each still cover the harm alone)
 // Run: node scripts/test-frp-own-run.mjs
 import './scratch.mjs';
@@ -128,7 +131,7 @@ try {
   const wOther = await watchOver(FRP, 'watch-other', { own: false }), wOwn = await watchOver(FRP, 'watch-own', { own: true });
   const RELWATCH = MC.load('src/plugins/frp.js', [
     ["      if (!ownRunPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) { endDrop(); return null; }", "      if (!frpDaemonPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) { endDrop(); return null; }"],   // stale-pins: kept (the release's road, planted back in the red control)
-    ['      if (frpDaemonPid() && !ownRunPid()) return Promise.resolve();   // B-1217: another instance\'s run is never restarted from here\n', ''],
+    ['      if (frpDaemonPid() && !ownRunPid()) { heldRestart(opts, why); return Promise.resolve(); }   // B-1217: another instance\'s run is never restarted from here; r2638: one whose owner is not yet known — held\n', ''],
     ['        const any = frpDaemonPid(), pid = ownRunPid();', '        const any = frpDaemonPid(), pid = any;'],
     ['        if (ownRunPid()) watchLogin(true);', '        if (frpDaemonPid()) watchLogin(true);'],   // stale-pins: kept (the release's road, planted back in the red control)
   ].reduce((s, [a, b], k) => anchored(s, a, b, `B-1217 the release's watch ${k + 1}`), SRC), 'rel-watch');
@@ -240,11 +243,49 @@ try {
   const mvOR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, '          else if (k.v === null || (confirm && k.gone === 1)) k.v = null;', '          else if (true) k.v = null;', 'B-1217 one answer read as gone'), 'one-gone'), 'mv-gap-onegone', 'gap');
   const mvCR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, ' const t = setTimeout(() => realOf(p, true), REAL_AGAIN_MS); if (t && t.unref) t.unref(); }', ' }', 'B-1217 no confirming ask'), 'no-confirm'), 'mv-gone-noconfirm', 'gone');
   const mvNR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, ASKLINE, "      if (k.v === undefined && !k.p && (confirm || !k.at || Date.now() - k.at >= REAL_AGAIN_MS)) {", 'B-1217 gone kept'), 'gone-kept'), 'mv-gone-kept', 'gone');
-  const mvAR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, ' if (booted && !watch && ownRunPid()) watchLogin(true); } catch { } };', ' } catch { } };', 'B-1217 the answer arms nothing'), 'no-arm'), 'mv-link-noarm', 'link');
+  const mvAR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, '        if (booted && !watch && ownRunPid()) watchLogin(true);\n', '', 'B-1217 the answer arms nothing'), 'no-arm'), 'mv-link-noarm', 'link');
   const mvBR = await movedFolder(MC.load('src/plugins/frp.js', anchored(SRC, '      if (confirm && k.p) { k.p.then(() => realOf(p, true)); return k.v; }', '      if (confirm && k.p) return k.v;', 'B-1217 the confirm lost behind an ask'), 'confirm-lost'), 'mv-gone-busy', 'gone');
   ok(mvL.firstOwn && mvL.own && !mvL.held && !mvG.firstOwn && mvG.firstHeld && mvG.own && !mvG.held && mvG.again === false && !mvP.firstOwn && !mvP.own && mvP.held && !mvLR.own && mvLR.held && !mvGR.own
     && mvL.atCreate === 2 && mvL.perAsk === 0 && mvG.perAsk === 0 && mvPR.perAsk >= 20 && mvOR.firstOwn && !mvCR.own && !mvBR.own && mvNR.again === true && mvL.armed === 1 && mvG.armed === 1 && mvP.armed === 0 && mvAR.armed === 0,
     `⑥ «its own» never hangs on a path string: a data folder moved behind a link (${mvL.own}) and a recorded folder that no longer exists — the install moved — still own their client (${mvG.own}), the gone one by TWO answers a minute apart, the second the plugin's own ask (one answer: ${mvG.firstHeld ? 'held elsewhere' : 'its own'}); a folder at that path again is a path again (${mvG.again === false ? 'not its own' : 'its own'}); ANOTHER instance's folder missing at the first answer and back a minute later (a mount's gap) is never its own (${!mvP.firstOwn}, ${!mvP.own}) — RED the path string decides: held elsewhere over its own (${mvLR.held}, ${!mvGR.own}); the two folders asked off the loop at the start (${mvL.atCreate}) and none in twenty status reads (${mvL.perAsk}, ${mvG.perAsk}) — RED a resolve per ask: ${mvPR.perAsk}; RED one answer read as gone: another instance's client taken for its own (${mvOR.firstOwn}); RED no confirming ask: the moved install's client never its own (${!mvCR.own}); the confirm that comes while an ask is in flight follows it — RED it lost (${!mvBR.own}); RED gone kept: a folder back still read as gone (${mvNR.again}); the login watch armed by the answer that makes the run its own (${mvL.armed}, ${mvG.armed}; another's: ${mvP.armed}) — RED never armed (${mvAR.armed})`, { mvL, mvG, mvP, mvLR, mvGR, mvPR, mvOR, mvCR, mvBR, mvNR, mvAR });
+
+  console.log('⑧ the minute nobody knows (r2638): a restart asked meanwhile is held, then runs or is dropped; a Stop says «not yet known»');
+  const unknownMinute = async (FRPm, tag, how) => {
+    const rec = { enabled: false }, h = hostOf(tag, rec);
+    const pid = await client(); fs.writeFileSync(path.join(h.dir, 'frpc.pid'), String(pid));
+    const real0 = path.join(T, 'data-real-' + tag); fs.mkdirSync(real0);
+    const there = path.join(T, (how === 'gap' ? 'gap-' : 'gone-') + tag, 'data');
+    if (how === 'link') {   // a moved install: the record's old real place is now a link to the new one
+      rec.frpcRun = { pid, at: Date.now(), start: PI.starttimeOf(pid), by: real0 };
+      const real1 = path.join(T, 'data-nvme-' + tag); fs.renameSync(real0, real1); fs.symlinkSync(real1, real0); h.dataDir = real1;
+    } else { rec.frpcRun = { pid, at: Date.now(), start: PI.starttimeOf(pid), by: there }; h.dataDir = real0; }   // gone: its own; gap: another instance's, back later
+    const rp0 = fs.promises.realpath, ST1 = global.setTimeout, minute = [];
+    let asks = 0, settled = 0, ahead = 0, starts = 0;
+    fs.promises.realpath = (...a) => { asks++; return rp0(...a).finally(() => { settled++; }); };
+    Date.now = () => dn0() + ahead;
+    global.setTimeout = (fn, ms, ...a) => (ms === REAL_AGAIN ? (minute.push(fn), { unref() { } }) : ST1(fn, ms, ...a));
+    try {
+      const v = FRPm.create(h);
+      v.start = () => { starts++; return { starting: true }; };   // this home has no relay: the restart's own start counted, nothing spawned
+      const stop0 = v.stop; let stops = 0; v.stop = (...a) => { stops++; return stop0.apply(v, a); };   // its read: every stop counted exactly (the held restart's own, and this leg's one press)
+      if (how !== 'link') await until(() => settled === asks, 2000);   // gone / gap: the first answer («gone once») — still nobody knows
+      v.applySettings();   // a settings change in THE MINUTE: held (the link's answer is not back yet; the gone folder answered once)
+      let stopCode = 'stopped'; try { v.stop(); } catch (e) { stopCode = e && e.code; }   // a Stop in it: refused by name, the client lives
+      const s0 = starts, aliveMid = alive(pid);
+      if (how === 'gap') fs.mkdirSync(there, { recursive: true });   // another instance's folder answers again: a path that is not this one's
+      if (how === 'link') await until(() => settled === asks, 2000);
+      else { ahead += REAL_AGAIN + 1000; for (const f of minute.splice(0)) f(); await until(() => settled === asks, 2000); }   // the plugin's own confirming ask, a minute later
+      const replayed = stops > 1;   // the held restart's stop runs in the answer's own turn (realSettled → restartSoon), counted exactly — beside this leg's one press
+      if (replayed) await until(() => starts > 0, 3000);   // its start follows the client's end — a fact
+      return { stopCode, s0, aliveMid, replayed, stops, starts, alive: alive(pid) };
+    } finally { fs.promises.realpath = rp0; Date.now = dn0; global.setTimeout = ST1; }
+  };
+  const umL = await unknownMinute(FRP, 'um-link', 'link'), umG = await unknownMinute(FRP, 'um-gone', 'gone'), umP = await unknownMinute(FRP, 'um-gap', 'gap');
+  const umLR = await unknownMinute(MC.load('src/plugins/frp.js', anchored(SRC, "        if (heldFor) { const w = ownWait; ownWait = null;", "        if (false) { const w = ownWait; ownWait = null;", 'B-1217 the held restart never replayed'), 'no-replay'), 'um-link-red', 'link');
+  const umWR = await unknownMinute(MC.load('src/plugins/frp.js', anchored(SRC, "    const heldRefusal = () => (ownUnknown() ? unknownRefusal() :", "    const heldRefusal = () => (false ? unknownRefusal() :", 'B-1217 the old words in the minute'), 'old-words'), 'um-gone-red', 'gone');
+  ok(umL.stopCode === 'relay_owner_unknown' && umL.aliveMid && umL.s0 === 0 && umL.starts === 1 && umG.stopCode === 'relay_owner_unknown' && umG.s0 === 0 && umG.starts === 1
+    && umL.stops === 2 && umG.stops === 2 && umP.stopCode === 'relay_owner_unknown' && umP.stops === 1 && umP.starts === 0 && umP.alive && umLR.stops === 1 && umLR.starts === 0 && umWR.stopCode === 'relay_held_elsewhere',
+    `⑧ THE MINUTE NOBODY KNOWS: a settings change while the folder's answer is out is held (no start then: ${umL.s0}, ${umG.s0}) and runs as ONE restart when the answer makes the run its own — a moved install (${umL.starts}), a gone folder's minute (${umG.starts}); dropped when it shows ANOTHER instance's client (${umP.starts} starts, it lives: ${umP.alive}); a Stop in that minute is refused «not yet known» (${umL.stopCode}) and the client lives (${umL.aliveMid}) — RED the held restart never replayed (${umLR.starts}); RED the old words in the minute (${umWR.stopCode})`, { umL, umG, umP, umLR, umWR });
 
   console.log('⑦ a take-over asked by anything but the person\'s press: refused');
   const notPressed = async (FRPm, tag) => {
@@ -261,7 +302,7 @@ try {
   const WIRE = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'), WO = require(path.join(REPO, 'src/write-origin.js'));
   const PUI = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8'), RAIL = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-rail.js'), 'utf8'), SMX = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8'), SJS = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), IURL = fs.readFileSync(path.join(REPO, 'src/server/instance-url.js'), 'utf8');
   const page = PUI.includes("await api('takeover', { body: JSON.stringify({ pid: p.held.pid, start: p.held.start }) });") && PUI.includes("message: p.held.since ? t('This ends the relay client {pid} — running since {since} — that another VibeSpace in this home started. If that VibeSpace is still running, its public addresses stop until it starts its own again.', { pid: p.held.pid, since: when(p.held.since, { words: true }) })")
-    && PUI.includes("c === 'relay_takeover_not_relay' ? t(") && PUI.includes("c === 'relay_revoked' ? t(")
+    && PUI.includes("c === 'relay_takeover_not_relay' ? t(") && PUI.includes("c === 'relay_revoked' ? t(") && PUI.includes("c === 'relay_owner_unknown' ? t(")
     && PUI.includes('            if (canRun && p.held.start != null) f.append(take);') && PUI.includes("else if (canRun) f.append(document.createTextNode(t('This process’s start time could not be read, so it cannot be told from a later process with the same number — end process {pid} yourself")   // its read: no start read, no take-over offered (the press could never pass)
     && (RAIL.split('showToast(relayRefusalWords(r)').length - 1) === 2 && SMX.includes('throw new Error(relayRefusalWords(r2))')
     && (SJS.split('portForwards.publish(String(req.params.id)').length - 1) === 1 && SJS.includes("res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it)")
