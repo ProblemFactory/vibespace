@@ -2365,10 +2365,10 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     'const relaunchFitPlan = (g, next) => (!g || !next || closed ? null : (relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next }) || null));',
     '    const plan = relaunchFitPlan(geo, r.app);\n    retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)\n    relaunchPlanned = relaunchPlanFor(geo, r.app, plan);\n    fitAfterRelaunch(geo, r.app, plan);',
     '    const ask = fitAsk(g, p), fit = app.wm.fitSizeFor(winInfo.id, ask);\n    const pane = relaunchHandOver({ fit, chrome: g.chrome, uiScale: uiScale() });',
-    "return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height } } : null;",
+    "return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height }, landed: false } : null;",
     '    const done = app.wm.resizeWindowTo(winInfo.id, fitAsk(g, p));',
-    '    if (relaunchPlanned && relaunchPlanned.id === next.id && !(done && done.w === relaunchPlanned.fit.w && done.h === relaunchPlanned.fit.h)) relaunchPlanned = null;',
-    "    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; if (!p || p.id !== id) return null; const el = winInfo.element; return relaunchPlanHolds({ at: p.at, fit: p.fitCss, now: { w: el.style.width, h: el.style.height }, refused: !app.wm.fitSizeFor(winInfo.id, p.ask) }) ? { width: p.width, height: p.height } : null; },",
+    '    if (relaunchPlanned && relaunchPlanned.id === next.id) relaunchPlanned = relaunchPlanAfterFit(relaunchPlanned, done);',
+    "    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; if (!p || p.id !== id) return null; const el = winInfo.element; return relaunchPlanHolds({ at: p.at, fit: p.fitCss, now: { w: el.style.width, h: el.style.height }, refused: !app.wm.fitSizeFor(winInfo.id, p.ask), landed: !!p.landed }) ? { width: p.width, height: p.height } : null; },",
     "      if (!r || r.error || r.code === 'not-found') relaunchPlanned = null;",
   ];
   const pmiss = PINS.filter((x) => dsrc.split(x).length !== 2);
@@ -2381,31 +2381,38 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   // the fit lands; the fit asks 1818×1264 for the window (a pane of 1818×1232: 32 px of chrome, UI scale 1)
   const DF = await import('../src/lib/desktop-app-scale.js');
   const CH = { w: 0, h: 32 };
-  const scene = async (DFm, { fit, landed = null, person = null, refusedNow = false, paneAt = { w: 1634, h: 1232 } }) => {
+  const scene = async (DFm, { fit, landed = null, person = null, refusedNow = false, paneAt = { w: 1634, h: 1232 }, fitAnswer = undefined }) => {
     const el = { style: { width: '1634px', height: '1264px' } };
     const p = DFm.relaunchHandOver({ fit, chrome: CH, uiScale: 1 });
-    let planned = p ? { ...p, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: el.style.width, h: el.style.height } } : null;
-    if (landed) { el.style.width = landed.w + 'px'; el.style.height = landed.h + 'px'; } // the fit applied (resizeWindowTo's answer)
+    let planned = p ? { ...p, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: el.style.width, h: el.style.height }, landed: false } : null;
+    if (landed) { el.style.width = landed.w + 'px'; el.style.height = landed.h + 'px'; planned = DFm.relaunchPlanAfterFit(planned, landed); } // the fit applied (resizeWindowTo's answer) — the fit's own verdict on the plan
+    if (fitAnswer !== undefined) planned = DFm.relaunchPlanAfterFit(planned, fitAnswer); // r2391: the fit ran AFTER the plan was made and answered this (false: refused)
     if (person) { el.style.width = person.w + 'px'; el.style.height = person.h + 'px'; } // a resize by anything else in the «Starting…» wait
-    const read = () => { const q = planned; planned = null; if (!q) return null; return DFm.relaunchPlanHolds({ at: q.at, fit: q.fitCss, now: { w: el.style.width, h: el.style.height }, refused: refusedNow }) ? { width: q.width, height: q.height } : null; };
+    const read = () => { const q = planned; planned = null; if (!q) return null; return DFm.relaunchPlanHolds({ at: q.at, fit: q.fitCss, now: { w: el.style.width, h: el.style.height }, refused: refusedNow, landed: !!q.landed }) ? { width: q.width, height: q.height } : null; };
     return (await firstMap(V, read, false, paneAt)).first;
   };
   const SC = {
-    applied: { fit: { w: 1818, h: 1264 } },                                                         // the fit takes the plan, not landed yet at the connect
+    applied: { fit: { w: 1818, h: 1264 }, landed: { w: 1818, h: 1264 } },                           // the fit took the plan; landed at the read (the product's state: the same tick)
+    held: { fit: { w: 1818, h: 1264 } },                                                            // the fit HELD past the read (the stall suite's placed order): the window still at its old size
+    back: { fit: { w: 1818, h: 1264 }, landed: { w: 1818, h: 1264 }, person: { w: 1634, h: 1264 } }, // r2389: the fit landed, then the person put the window BACK at its old size (the same zone) in the wait
+    heldRefused: { fit: { w: 1818, h: 1264 }, fitAnswer: false },                                    // r2391: not landed, then the fit REFUSED (maximized meanwhile): no plan at the next read
+    heldOther: { fit: { w: 1818, h: 1264 }, fitAnswer: { w: 1700, h: 1264 } },                       // r2391: not landed, then the fit applied ANOTHER size: no plan
     refused: { fit: null },                                                                          // maximized (or the phone layout): the window manager refuses
-    capped: { fit: { w: 1700, h: 1264 }, paneAt: { w: 1700, h: 1232 } },                            // the workspace is 1700 wide: the fit lands capped
+    capped: { fit: { w: 1700, h: 1264 }, landed: { w: 1700, h: 1264 }, paneAt: { w: 1700, h: 1232 } }, // the workspace is 1700 wide: the fit lands capped
     wait: { fit: { w: 1818, h: 1264 }, landed: { w: 1818, h: 1264 }, person: { w: 1750, h: 1264 }, paneAt: { w: 1750, h: 1232 } }, // the person resized it in the wait
     refusedNow: { fit: { w: 1818, h: 1264 }, refusedNow: true },                                    // maximized in the wait: the window takes no fit now
-    fraction: { fit: { w: 1225.56, h: 951.26 }, paneAt: { w: 1226, h: 919 } },                       // a fractional fit (relaunchPaneCss keeps 0.01 px)
+    fraction: { fit: { w: 1225.56, h: 951.26 }, landed: { w: 1225.56, h: 951.26 }, paneAt: { w: 1226, h: 919 } }, // a fractional fit (relaunchPaneCss keeps 0.01 px)
   };
   const got = {}; for (const [k, v] of Object.entries(SC)) got[k] = await scene(DF, v);
+  ok(same(got.heldRefused, [1634, 1232]) && same(got.heldOther, [1634, 1232]), 'B-92aa r2391: a not-landed plan never outlives its relaunch — the fit then REFUSED, or applying another size, leaves NO plan at the next read: the pane (1634×1232)', { heldRefused: got.heldRefused, heldOther: got.heldOther });
+  ok(same(got.held, [1818, 1232]) && same(got.back, [1634, 1232]), 'B-92aa r2389: the window\'s size from BEFORE the fit holds the plan only while the fit has NOT run (held past the read: 1818×1232, the stall\'s order); once it ran, the window put BACK at that size in the wait (the same zone) drops it — the pane, 1634×1232', { held: got.held, back: got.back });
   ok(same(got.applied, [1818, 1232]) && same(got.refused, [1634, 1232]) && same(got.refusedNow, [1634, 1232]) && same(got.capped, [1700, 1232]) && same(got.wait, [1750, 1232]),
     'B-92aa r2217: the first map takes ONLY a size the window takes — the fit\'s plan when the window takes it (1818×1232, the fit not landed yet); a REFUSED fit (maximized, the phone layout) hands no plan: the pane (1634×1232); a fit CAPPED at the workspace hands the capped pane (1700×1232: what the pane then measures — no refit); a resize of the window in the wait drops the plan: the person\'s pane (1750×1232); a window maximized in the wait: the pane', got);
   ok(same(got.fraction, [1226, 919]), `B-92aa r2217 (a): a FRACTIONAL fit (1225.56×951.26 for the window) maps WHOLE pixels, as the pane measures them (${got.fraction}: 1226×919 — never a pixel narrow and refit)`, got.fraction);
   ok(same(DF.relaunchHandOver({ fit: null }), null) && same(DF.relaunchHandOver({ fit: { w: 1000, h: 800 }, chrome: { w: 0, h: 40 }, uiScale: 1.25 }), { width: 1250, height: 960 }) && DF.relaunchHandOver({ fit: { w: 20, h: 20 }, chrome: { w: 0, h: 40 } }) === null
-    && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' } }) === true && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '900px', h: '700px' } }) === true
+    && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' }, landed: false }) === true && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' } }) === false && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '900px', h: '700px' } }) === true
     && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '880px', h: '700px' } }) === false && DF.relaunchPlanHolds({ at: { w: '', h: '' }, fit: { w: '900px', h: '700px' }, now: { w: '', h: '' }, refused: true }) === false,
-    'B-92aa r2217 (PURE): relaunchHandOver — refused ⇒ null; the pane = the size × the UI scale − the chrome, whole px (1000×800 at 1.25, 40 px of chrome ⇒ 1250×960); nothing left past the chrome ⇒ null; relaunchPlanHolds — the window unsized as at the plan, or at the fit\'s size ⇒ holds; any other size, or a fit refused now ⇒ dropped');
+    'B-92aa r2217 (PURE): relaunchHandOver — refused ⇒ null; the pane = the size × the UI scale − the chrome, whole px (1000×800 at 1.25, 40 px of chrome ⇒ 1250×960); nothing left past the chrome ⇒ null; relaunchPlanHolds — at the fit\'s size ⇒ holds; at its size from before the fit ⇒ holds only while the fit has not run; any other size, or a fit refused now ⇒ dropped');
   // RED CONTROLS: (1) 76cc2bb77's hand-over — the asked plan handed whatever the window manager says — maps 1818 where the window
   // refused (the pane stays 1634), where it capped (1700), and where the person resized it in the wait (1750); (2) a desktop-app-scale copy
   // whose hand-over keeps the fraction maps a pixel narrow (the client floors 1225.56); (3) a copy whose plan always holds maps the
@@ -2417,9 +2424,15 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   const DFnoRound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  const width = Math.round(Number(fit.w) * s - (Number(c.w) || 0)), height = Math.round(Number(fit.h) * s - (Number(c.h) || 0));', '  const width = Number(fit.w) * s - (Number(c.w) || 0), height = Number(fit.h) * s - (Number(c.h) || 0);', 'B-92aa r2217 control: the fraction kept'), 'b92aa-fraction')).href);
   const redFraction = await scene(DFnoRound, SC.fraction);
   ok(redFraction && redFraction[0] === 1225, `RED CONTROL (B-92aa r2217 (a)): a hand-over that keeps the fraction maps ${redFraction} — a pixel narrower than the 1226 px pane, refit after`, redFraction);
-  const DFholds = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return same(now, at) || same(now, fit);', '  return true;', 'B-92aa r2217 control: the plan always holds'), 'b92aa-holds')).href);
+  const DFholds = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return same(now, fit) || (!landed && !!at && same(now, at));', '  return true;', 'B-92aa r2217 control: the plan always holds'), 'b92aa-holds')).href);
   const redWait = await scene(DFholds, SC.wait);
   ok(same(redWait, [1818, 1232]), `RED CONTROL (B-92aa r2217): a plan that always holds maps the older plan (${redWait}) over the person's resize in the wait (the pane: 1750×1232)`, redWait);
+  const DFatAny = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return same(now, fit) || (!landed && !!at && same(now, at));', '  return same(now, fit) || (!!at && same(now, at));', 'B-92aa r2389 control: e659077a0\'s «at» branch'), 'b92aa-at-any')).href);
+  const redBack = await scene(DFatAny, SC.back);
+  const DFkeeps = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return done && done.w === plan.fit.w && done.h === plan.fit.h ? { ...plan, landed: true } : null;', '  return { ...plan, landed: !!done };', 'B-92aa r2391 control: the fit\'s verdict ignored'), 'b92aa-keeps')).href);
+  const redHeldRefused = await scene(DFkeeps, SC.heldRefused);
+  ok(same(redHeldRefused, [1818, 1232]), `RED CONTROL (B-92aa r2391): a plan kept whatever the fit did — the fit refused, and the next read still maps the plan (${redHeldRefused}) in a 1634×1232 pane`, redHeldRefused);
+  ok(same(redBack, [1818, 1232]), `RED CONTROL (B-92aa r2389, e659077a0's «at» branch): the window put back at its old size after the fit maps the fit's plan (${redBack}) in a 1634×1232 pane — cropped, nothing refits it`, redBack);
 
   // r2217 (b) THE MARK GOES AT THE FIRST MAIN WHATEVER THE MODE, and (c) A WATCHING PANE'S HELLO TAKES THE PANE (as at the release);
   // the plan is READ either way (one connect's: never left for a later one)

@@ -86,13 +86,23 @@ export function relaunchHandOver({ fit = null, chrome = null, uiScale = 1 } = {}
   return width >= 1 && height >= 1 ? { width, height } : null;
 }
 /**
- * …and whether a handed plan still holds when the first connect reads it (r2217): the window still takes a fit (`refused`
- * false — not maximized, minimized, chained or on the phone layout NOW) and its own size is the one it had when the plan was
- * made (`at`: the fit not landed yet) or the one the fit applies (`fit`). Any other size — the person resized it in the
- * «Starting…» wait, a snap, a layout — drops the plan. Sizes as the window's own style strings ('' = never sized).
+ * …and whether a handed plan still holds when the first connect reads it (r2217; r2389): the window still takes a fit (`refused`
+ * false — not maximized, minimized, chained or on the phone layout NOW) and its own size is EXACTLY the fit's (`fit`). Its size
+ * from before the fit (`at`) counts only while the fit has NOT run yet (`landed` false); once the fit ran, a window back at its
+ * old size (the person snapped it into the same zone in the «Starting…» wait) drops the plan, as does any other size. Sizes as
+ * the window's own style strings ('' = never sized).
+ * IN THE PRODUCT THE FIT RUNS IN THE PLAN's OWN TICK (relaunchAt: relaunchPlanFor, then fitAfterRelaunch), so the not-landed
+ * branch is met by NO road today: it is the order's own safety — if the fit ever lands later again, the first map still takes
+ * the plan — and the stall suite (its copy holds the fit past the map) is its one reader (the coordinator's r2391).
  */
-export function relaunchPlanHolds({ at = null, fit = null, now = null, refused = false } = {}) {
-  if (refused || !at || !fit || !now) return false;
+/** …and THE FIT's OWN VERDICT on a plan not read yet (r2391): the fit applied exactly the plan's size ⇒ the plan, now `landed`; refused
+ *  (false) or another size ⇒ null — a not-landed plan never outlives its relaunch. desktop-app-window.js fitAfterRelaunch asks it. */
+export function relaunchPlanAfterFit(plan, done) {
+  if (!plan || !plan.fit) return null;
+  return done && done.w === plan.fit.w && done.h === plan.fit.h ? { ...plan, landed: true } : null;
+}
+export function relaunchPlanHolds({ at = null, fit = null, now = null, refused = false, landed = true } = {}) {
+  if (refused || !fit || !now) return false;
   const same = (a, b) => String(a.w) === String(b.w) && String(a.h) === String(b.h);
-  return same(now, at) || same(now, fit);
+  return same(now, fit) || (!landed && !!at && same(now, at));
 }

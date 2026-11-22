@@ -178,7 +178,7 @@ import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into �
 import { shortModeBadge } from './live-bar-layout.js';
 import { minPaneCss } from './xpra-proto.js';
 import { seamlessVerdict, windowSeamless, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
-import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel, relaunchHandOver, relaunchPlanHolds } from './desktop-app-scale.js';
+import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel, relaunchHandOver, relaunchPlanHolds, relaunchPlanAfterFit } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, satellitePlacement, setSatelliteOffset } from './desktop-app-prefs.js';
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
 import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
@@ -510,7 +510,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   // anything else before the read (relaunchPlanHolds), and when the successor's record never answers a running app
   let relaunchPlanned = null;
   const viewOpts = () => ({
-    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; if (!p || p.id !== id) return null; const el = winInfo.element; return relaunchPlanHolds({ at: p.at, fit: p.fitCss, now: { w: el.style.width, h: el.style.height }, refused: !app.wm.fitSizeFor(winInfo.id, p.ask) }) ? { width: p.width, height: p.height } : null; },
+    firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; if (!p || p.id !== id) return null; const el = winInfo.element; return relaunchPlanHolds({ at: p.at, fit: p.fitCss, now: { w: el.style.width, h: el.style.height }, refused: !app.wm.fitSizeFor(winInfo.id, p.ask), landed: !!p.landed }) ? { width: p.width, height: p.height } : null; },
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
@@ -1094,14 +1094,16 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (!g || !next || closed || !p) return null;
     const ask = fitAsk(g, p), fit = app.wm.fitSizeFor(winInfo.id, ask);
     const pane = relaunchHandOver({ fit, chrome: g.chrome, uiScale: uiScale() });
-    return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height } } : null;
+    return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height }, landed: false } : null;
   };
   const fitAfterRelaunch = (g, next, p) => {
     if (!g || !next || closed || !p) return false;
     const done = app.wm.resizeWindowTo(winInfo.id, fitAsk(g, p));
     winInfo._desktopRelaunchFit = { pane: p, chrome: { ...g.chrome }, from: renderOf(g.from), to: renderOf(next), applied: !!done }; // the raw handle the heavy suite reads
     // B-92aa (r2217): THE RESIZE'S OWN RESULT DECIDES — a plan not read yet stays only when the window applied exactly its size
-    if (relaunchPlanned && relaunchPlanned.id === next.id && !(done && done.w === relaunchPlanned.fit.w && done.h === relaunchPlanned.fit.h)) relaunchPlanned = null;
+    // (PURE relaunchPlanAfterFit); r2389: from here on only the fit's own size holds it (a window put BACK at its old size in the
+    // wait drops it). In the product this runs in the plan's own tick, so no read ever meets a not-landed plan (r2391)
+    if (relaunchPlanned && relaunchPlanned.id === next.id) relaunchPlanned = relaunchPlanAfterFit(relaunchPlanned, done);
     return done;
   };
   async function relaunchAt(choice, scale) {
