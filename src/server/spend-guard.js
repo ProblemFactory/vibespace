@@ -125,7 +125,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // ledger WITHOUT it (no stricter than the release: every road the same, said by its code) and asks again every LOCK_UNMADE_RETRY_MS
   let lockUnmade = null, unmadeTimer = null;
   // r1648 (d): the episode's For-you item is filed ONCE; at boot it is OWED until the guard is built (fileInbox's state is not yet)
-  let unlockedFiled = false, unlockedOwed = false, building = true;
+  let unlockedFiled = false, unlockedOwed = false, building = true, unlockedCloseOwed = false;
   // THIS guard's lock: a token of its own (two guards of one process, or two containers whose hubs are both pid 1 with one hostname,
   // never take each other's lock for their own) and its pid space (a pid's identity proves a holder only inside the same one)
   const myToken = require('crypto').randomBytes(9).toString('hex');
@@ -173,7 +173,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         const cannot = !e || e.code !== 'EEXIST' ? String((e && e.code) || 'lock failed') : null;
         let text = null, mt = 0;
         try { text = fs.readFileSync(lockFile, 'utf-8'); mt = fs.statSync(lockFile).mtimeMs; }
-        catch (e2) { if (e2 && e2.code === 'ENOENT') { if (cannot) return { took: false, error: cannot }; continue; } return { took: false, holder: { unreadable: String(e2.code || 'unreadable') } }; }   // there and not readable: HELD, never stale
+        catch (e2) { if (e2 && e2.code === 'ENOENT') { if (cannot) return { took: false, error: cannot }; continue; } return { took: false, holder: { unreadable: String(e2.code || 'unreadable'), ...(cannot ? { lockUnreadable: String(e2.code || 'unreadable') } : {}) } }; }   // there and not readable: HELD, never stale
         let h = null; try { h = JSON.parse(text); } catch { h = null; }
         if (holderLive(h, text, mt, now)) return { took: false, holder: h || { torn: true } };
         if (cannot) return { took: false, error: cannot };   // a lock nobody lives behind, and this process cannot make one
@@ -191,16 +191,18 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     return { took: false, holder: { contended: true } };   // three rounds lost to other takers: held, asked again
   };
   // B-ef83 r1648: `lockUnwritable` = NO holder, the lock cannot be written (its code) — held by the TRUE reason, healed by the retry
-  const heldOf = (h, now) => ({ pid: Number(h && h.pid) || null, host: (h && h.host) ? String(h.host).slice(0, 120) : null, since: now, lockUnwritable: h && h.lockUnwritable ? String(h.lockUnwritable) : null });
+  const heldOf = (h, now) => ({ pid: Number(h && h.pid) || null, host: (h && h.host) ? String(h.host).slice(0, 120) : null, since: now, lockUnwritable: h && h.lockUnwritable ? String(h.lockUnwritable) : null, lockUnreadable: h && h.lockUnreadable ? String(h.lockUnreadable) : null });
   {
     const now0 = Date.now();
     const lk = takeLock(now0);
     if (lk.took) {
       lockOurs = true; releaseAtExit(lockFile, myToken);
+      unlockedCloseOwed = true;   // r1801 (4): an earlier run's «kept without the lock» item closes (the store answers later in boot)
       if (staleTaken) log(`[spend] data/spend-budget.lock named a process that is gone (pid ${staleTaken.pid || '?'}${staleTaken.host ? ' on ' + staleTaken.host : ''}) — this process keeps the ledger now`);
     } else if (lk.holder) {
       heldBy = heldOf(lk.holder, now0);
-      log(`[spend] data/spend-budget.json is kept by another VibeSpace process on this data folder (pid ${heldBy.pid || '?'}${heldBy.host ? ' on ' + heldBy.host : ''}) — this one never writes it and starts no turn nobody typed until the lock is its own (asked again every ${LOCK_RETRY_MS / 1000} s)`);
+      log(heldBy.lockUnreadable ? `[spend] data/spend-budget.lock is there and cannot be read (${heldBy.lockUnreadable}), and the folder refuses a new one — it may be a live keeper's: this process never writes the ledger and starts no turn nobody typed until the lock reads or can be made (asked again every ${LOCK_RETRY_MS / 1000} s)`
+        : `[spend] data/spend-budget.json is kept by another VibeSpace process on this data folder (pid ${heldBy.pid || '?'}${heldBy.host ? ' on ' + heldBy.host : ''}) — this one never writes it and starts no turn nobody typed until the lock is its own (asked again every ${LOCK_RETRY_MS / 1000} s)`);
     } else keepUnmade(lk.error, now0);
   }
   let state = A.emptyBudget();
@@ -443,7 +445,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   let timer = null;
   const writeNow = () => {
     if (heldBy) {   // B-ef83: another process keeps the ledger — this one's count is not the record, and never written over it
-      if (!heldBy.saidWrite) { heldBy.saidWrite = true; log('[spend] data/spend-budget.json is not written by this process while another keeps it'); }
+      if (!heldBy.saidWrite) { heldBy.saidWrite = true; log(heldBy.lockUnwritable ? `[spend] data/spend-budget.json is not written by this process while its lock cannot be written (${heldBy.lockUnwritable})` : heldBy.lockUnreadable ? `[spend] data/spend-budget.json is not written by this process while its lock is there and cannot be read (${heldBy.lockUnreadable})` : '[spend] data/spend-budget.json is not written by this process while another keeps it'); }
       return;
     }
     if (unreadable) {   // B-3b0f: never written over while it cannot be read — the empty count must not become the record
@@ -487,7 +489,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
   const overCapNow = (now) => (heldBy ? [] : unreadable || settingsHeld() ? ['*'] : A.waitingOverCap(state, limits(), now));   // (B-225b: the settings HELD — no cap is known either: every waiting frame is held, none judged on the defaults)   // B-ef83: a process that does not keep the ledger judges no waiting frame (the keeper counted them) — none pulled
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');
-  const ledgerFact = () => { if (heldBy) return heldBy.lockUnwritable ? { lockUnwritable: true, error: heldBy.lockUnwritable } : { held: true, pid: heldBy.pid, host: heldBy.host }; if (unreadable) return { unreadable: true, error: unreadable.error }; const sh = settingsHeld(); return sh ? { settingsUnread: true, kind: sh.kind || null, code: sh.code || null } : null; };   // B-3b0f / B-ef83, handed to every layer (the batch too)
+  const ledgerFact = () => { if (heldBy) return heldBy.lockUnwritable ? { lockUnwritable: true, error: heldBy.lockUnwritable } : heldBy.lockUnreadable ? { lockUnreadable: true, error: heldBy.lockUnreadable } : { held: true, pid: heldBy.pid, host: heldBy.host }; if (unreadable) return { unreadable: true, error: unreadable.error }; const sh = settingsHeld(); return sh ? { settingsUnread: true, kind: sh.kind || null, code: sh.code || null } : null; };   // B-3b0f / B-ef83, handed to every layer (the batch too)
 
   /** Retire the holds whose producer never came back. THE COUNT IS A CENSUS,
    *  not garbage collection: a hold that timed out is a site that authorized a
@@ -678,7 +680,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const wait = promisedHere > 0 && behind.length ? behind[0] : null;
     // THE KEY IS THE PLACE (follow-up 2): the account, the cap, the conversation the frames wait behind — never the oldest frame
     // (a queue that drains one frame a turn would mint a new key, and a new notice, at every carry)
-    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'settings-unread' ? `inbox|*|${v.why}` : `inbox|${key || '?'}|${v.why}`;   // B-3b0f: ONE notice for the instance, not one per account
+    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'ledger-lock-unreadable' || v.why === 'settings-unread' ? `inbox|*|${v.why}` : `inbox|${key || '?'}|${v.why}`;   // B-3b0f: ONE notice for the instance, not one per account
     const lastInbox = Number(state.notices[inboxSig]) || 0;
     // THE SEAM WITH LAWS 2 + 3 (shape C — 主开发 2026-11-13 15:30Z): while a «messages waiting» For-you item stands for the
     // conversation these frames wait behind (src/server/wait-watch.js, the same key `<backend>:<cid>`), IT speaks: the spending
@@ -695,13 +697,14 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + (v.why === 'settings-unread' ? 'The settings data/settings.json could not be read: the spending limits are not known, so none run until it reads again. Nothing was used up; every waiting turn is judged again against your limits the moment it reads.\n\n'   // B-225b
           : v.why === 'ledger-unreadable' ? `The ledger data/spend-budget.json could not be read (${unreadable ? unreadable.error : '?'}): no count can be said, so none run until it reads again or is removed.\n\n`   // B-3b0f
           : v.why === 'ledger-lock-unwritable' ? `VibeSpace cannot write data/spend-budget.lock (${heldBy && heldBy.lockUnwritable ? heldBy.lockUnwritable : '?'}: the folder refuses it), and no other process keeps the ledger: it starts no turn nobody typed until it can. It asks again every ${LOCK_RETRY_MS / 1000} s, by itself; your own typed turns are not affected.\n\n`   // B-ef83 r1648 (b)/(c)
+          : v.why === 'ledger-lock-unreadable' ? `data/spend-budget.lock is there and VibeSpace cannot read it (${heldBy && heldBy.lockUnreadable ? heldBy.lockUnreadable : '?'}), and the folder refuses a new one: it may be a live keeper's, so this process starts no turn nobody typed until the lock reads or can be made. It asks again every ${LOCK_RETRY_MS / 1000} s, by itself; your own typed turns are not affected.\n\n`   // r1801 (1)
           : v.why === 'ledger-held-elsewhere' ? `Another VibeSpace process on this data folder keeps the ledger data/spend-budget.json (pid ${heldBy ? heldBy.pid : '?'}${heldBy && heldBy.host ? ' on ' + heldBy.host : ''}): this one counts none, so none run until that process ends (or data/spend-budget.lock is removed, if none runs).\n\n`   // B-ef83
           : `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
           + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`)
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
-        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'settings-unread' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' ? HELD_ITEM : v.why === 'settings-unread' ? SETTINGS_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
+        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'ledger-lock-unreadable' || v.why === 'settings-unread' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'ledger-lock-unreadable' ? HELD_ITEM : v.why === 'settings-unread' ? SETTINGS_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -892,7 +895,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         let h = null; try { h = JSON.parse(t); } catch { h = null; }
         if (!h || h.token !== myToken) return lockLost(h);
         const at = new Date(); return fs.promises.utimes(lockFile, at, at);
-      }).catch((e) => { if (e && e.code === 'ENOENT') return lockLost(null); }).finally(() => { if (lockOurs) armBeat(); });
+      }).catch((e) => { if (e && e.code === 'ENOENT') return lockLost(null); }).finally(() => { if (unlockedCloseOwed && closeItemsNow(UNLOCKED_ITEM)) unlockedCloseOwed = false; if (lockOurs) armBeat(); });   // r1801 (4): the owed close rides the beat (no new timer)
     }, LOCK_BEAT_MS);
   }
   function lockLost(h) {
@@ -919,20 +922,34 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const same = !!lockUnmade && lockUnmade.error === error;
     lockUnmade = { error, since: same ? lockUnmade.since : now };
     if (!same) log(`[spend] data/spend-budget.lock ${how}could not be made (${error}: the folder refuses it) and no other process holds it — this process keeps the ledger without it, and asks again every ${LOCK_UNMADE_RETRY_MS / 1000} s`);
-    if (!same && !unlockedFiled) { if (building) unlockedOwed = true; else fileUnlocked(error); }   // ONCE an episode
+    if ((!same || unlockedOwed) && !unlockedFiled) { if (building) unlockedOwed = true; else unlockedOwed = !fileUnlocked(error); }   // ONCE an episode; owed until the store answers (r1801's must: the 60 s ask files it)
     armUnmadeRetry();
   }
+  /** → true when the item is FILED (or owed to For you's read, which files it); false while no store answers (still owed) */
   function fileUnlocked(error) {
-    unlockedFiled = true;
+    let ut = null; try { ut = getUserTodos(); } catch { ut = null; }
+    if (!ut || typeof ut.add !== 'function') return false;   // the store comes later in boot: the 60 s ask files it then
     const words = i18nKey('VibeSpace counts turns nobody typed without the lock of their record — the data folder refuses it ({code}). A second VibeSpace process on this folder would count its own; VibeSpace asks again every minute.');
     fileInbox(words.replace('{code}', error), `data/spend-budget.lock could not be made (${error}) and no other process holds it: this process keeps the ledger data/spend-budget.json without the lock. It asks again every ${LOCK_UNMADE_RETRY_MS / 1000} s; this notice closes when the lock is made.`,
-      'normal', null, { text: { key: words, params: { code: error } } }, null, UNLOCKED_ITEM);
+      'normal', null, { text: { key: words, params: { code: error } } }, null, UNLOCKED_ITEM, { sig: 'unlocked|' + error, at: Date.now() });
+    unlockedFiled = true;   // filed — or owed to the store's read (fileInbox's own owed road files it there)
+    return true;
+  }
+  // r1801 (4)'s OWED close (a boot that made the lock at once): only when the store answers and is READ — never a wait registered at
+  // the read for an item that may not be there (the beat asks again); → true when closed (or nothing to close)
+  function closeItemsNow(itemKey) {
+    let ut = null; try { ut = getUserTodos(); } catch { ut = null; }
+    if (!ut || (typeof ut.isHeldUnread === 'function' && ut.isHeldUnread())) return false;
+    try { if (typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === itemKey && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }
+    return true;
   }
   // the episode's notice closes when its state ends — and, For you held unread, at its read (its list reads empty until then)
   function closeItems(itemKey) {
     const close = () => { try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === itemKey && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { } };
     let ut0 = null; try { ut0 = getUserTodos(); } catch { ut0 = null; }
+    if (!ut0) return false;   // no store yet: the close stays owed
     if (ut0 && typeof ut0.isHeldUnread === 'function' && ut0.isHeldUnread() && typeof ut0.whenRead === 'function') ut0.whenRead(close, "the spend ledger's unlocked notice"); else close();
+    return true;
   }
   function armUnmadeRetry() {
     if (!lockUnmade || unmadeTimer) return;
@@ -945,10 +962,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (lk.took) {
       const was = lockUnmade; lockUnmade = null; lockOurs = true; releaseAtExit(lockFile, myToken);
       log(`[spend] data/spend-budget.lock is made now (it could not be since ${new Date(was.since).toISOString()}: ${was.error}) — this process keeps the ledger under it`);
-      unlockedFiled = false; closeItems(UNLOCKED_ITEM);   // the episode is over: its notice is no longer true
+      unlockedFiled = false; unlockedOwed = false; if (!closeItems(UNLOCKED_ITEM)) unlockedCloseOwed = true;   // the episode is over: its notice is no longer true
       armBeat(); return;
     }
-    if (lk.holder) { lockUnmade = null; unlockedFiled = false; closeItems(UNLOCKED_ITEM); lockLost(lk.holder); return; }   // another process made it meanwhile: the record is that one's
+    if (lk.holder) { lockUnmade = null; unlockedFiled = false; unlockedOwed = false; if (!closeItems(UNLOCKED_ITEM)) unlockedCloseOwed = true; lockLost(lk.holder); return; }   // another process made it meanwhile: the record is that one's
     keepUnmade(lk.error, now);
   }
   function armLockRetry() {
@@ -999,14 +1016,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     return true;
   }
   if (heldBy) armLockRetry(); else armBeat();
-  building = false; if (unlockedOwed && lockUnmade && !unlockedFiled) fileUnlocked(lockUnmade.error);   // r1648 (d): the boot's episode, said now
+  building = false; if (unlockedOwed && lockUnmade && !unlockedFiled) unlockedOwed = !fileUnlocked(lockUnmade.error);   // r1648 (d): the boot's episode, said now — or by the 60 s ask once the store answers
+  if (unlockedCloseOwed && closeItemsNow(UNLOCKED_ITEM)) unlockedCloseOwed = false;   // r1801 (4): never a wait at For you's read
   armRecheck();   // B-3b0f, the readers' round: an unreadable ledger re-reads itself (async, unref'd, once a minute)
   if (resetWriteOwed) { resetWriteOwed = false; flush(); }   // B-23c3: the record a reset left is written at once — the next boot reads it whole
   fileResetNotice(); armNoticeRetry();
   return {
     // r1648 (d): the ledger's lock state for the usage meter's note — 'unlocked' (kept without it since boot) | 'refused' (turns nobody
     // typed held: the lock cannot be written) | null
-    ledgerNotice: () => (heldBy && heldBy.lockUnwritable ? { state: 'refused', error: heldBy.lockUnwritable, since: heldBy.since } : lockUnmade ? { state: 'unlocked', error: lockUnmade.error, since: lockUnmade.since } : null),
+    ledgerNotice: () => (heldBy && heldBy.lockUnwritable ? { state: 'refused', error: heldBy.lockUnwritable, since: heldBy.since } : heldBy && heldBy.lockUnreadable ? { state: 'unreadable', error: heldBy.lockUnreadable, since: heldBy.since } : lockUnmade ? { state: 'unlocked', error: lockUnmade.error, since: lockUnmade.since } : null),
     authorize, authorizeBatch, previewBatch, notePress, notePressEnd, pressesToday, renewHolds, note, release, recheckLedger, lockAgain, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
@@ -1020,7 +1038,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       chargesUnhinted, holdsOpen: A.expirePending(pending, Date.now()).live.length, holdsExpired,
       ledgerUnreadable: unreadable ? { error: unreadable.error, since: unreadable.since } : null,   // B-3b0f
       ledgerResets: marker ? marker.resets : 0, ledgerLastReset: marker ? marker.lastReset : null, ledgerSeq: seq,   // B-23c3
-      ledgerHeldBy: heldBy ? { pid: heldBy.pid, host: heldBy.host, since: heldBy.since } : null,   // B-ef83
+      ledgerHeldBy: heldBy ? { pid: heldBy.pid, host: heldBy.host, since: heldBy.since, cause: heldBy.lockUnwritable ? 'lock-unwritable' : heldBy.lockUnreadable ? 'lock-unreadable' : 'another-process' } : null,   // B-ef83 (r1801 (5): which state a hold is)
       ledgerLockUnmade: lockUnmade ? { error: lockUnmade.error, since: lockUnmade.since } : null,   // B-ef83 smalls: kept WITHOUT the lock (the folder refuses it)
       ledgerLockUnwritable: heldBy && heldBy.lockUnwritable ? { error: heldBy.lockUnwritable, since: heldBy.since } : null,   // r1648 (b)/(c): held, no holder
       // lane owner-press-attended: the presses the ceiling neither refused nor counted, by reason (the last 24 h)

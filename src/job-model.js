@@ -1119,6 +1119,7 @@ const NOTIF_TAIL = Object.freeze({
   // B-ef83 r1648: a hold the CEILING did not cause says its own cause (a word, never the cap's by default)
   'spend-held': 'These were held because another VibeSpace process on this data folder kept the record of turns nobody typed.',
   'spend-lock': 'These were held because VibeSpace could not write the lock of its record of turns nobody typed.',
+  'spend-lockread': 'These were held because the lock of the record of turns nobody typed was there and could not be read.',
   'spend-ledger': 'These were held because the record of turns nobody typed could not be read.',
   'wrapper-no-steer': 'These were held because this process predates mid-turn notifications.',
   'off': 'These were held while auto-notify was off.',
@@ -1134,7 +1135,7 @@ const NOTIF_TAIL_DETAIL = Object.freeze({
 });
 function notifTailSentence(items) {
   const list = Array.isArray(items) ? items : [];
-  const SPEND_WHY = { 'ledger-held-elsewhere': 'spend-held', 'ledger-lock-unwritable': 'spend-lock', 'ledger-unreadable': 'spend-ledger' };
+  const SPEND_WHY = { 'ledger-held-elsewhere': 'spend-held', 'ledger-lock-unwritable': 'spend-lock', 'ledger-lock-unreadable': 'spend-lockread', 'ledger-unreadable': 'spend-ledger' };
   const kindOf = (h) => (h && h.kind === 'spend-cap' && SPEND_WHY[h.why]) || (h && h.kind) || 'not-running';
   const kinds = [...new Set(list.map((n) => kindOf(n && n.held)))];
   const base = kinds.length === 1 && NOTIF_TAIL[kinds[0]] ? NOTIF_TAIL[kinds[0]] : 'These were held until now (' + kinds.join(', ') + ').';

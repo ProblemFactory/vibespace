@@ -304,6 +304,9 @@ function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, time
     if (why === 'identity-unknown') return { text: t('Not handed over — VibeSpace could not tell which account this turn would bill. The notices keep waiting.'), door: 'usage' };
     if (why === 'ledger-unreadable') return { text: t('Not handed over — VibeSpace could not read its record of turns nobody typed, so it starts none until the record reads again. The notices keep waiting.'), door: null };   // B-3b0f
     if (why === 'settings-unread') return { text: t('Not handed over — VibeSpace could not read its settings, so the spending limits are not known and it starts none until they read again. The notices keep waiting.'), door: null };   // B-225b
+    // r1801 (3): a hand-over refused because the record's LOCK cannot be written / is there and cannot be read says THAT (never the ceiling, never a raw code)
+    if (why === 'ledger-lock-unwritable') return { text: t('Not handed over — VibeSpace cannot write the lock of its record of turns nobody typed, so it starts none until it can; it asks again by itself. The notices keep waiting.'), door: null };
+    if (why === 'ledger-lock-unreadable') return { text: t('Not handed over — the lock of the record of turns nobody typed is there and cannot be read, so VibeSpace starts none until it reads; it asks again by itself. The notices keep waiting.'), door: null };
     if (why === 'ledger-held-elsewhere') return { text: t('Not handed over — another VibeSpace process on this data folder keeps the record of turns nobody typed, so this one starts none until that process ends. The notices keep waiting.'), door: null };   // B-ef83
     if (why) return { text: t('Not handed over — the spend ceiling refused this turn ({why}). The notices keep waiting.', { why: String(why).slice(0, 60) }), door: null };
     // r3 (accept-r2 claim 0): a refusal with NO `why` is not a cap — the current hub sends one when the authorizer itself
@@ -345,6 +348,7 @@ const HELD_WHY = Object.freeze({
   'paced': 'they were held for the wake pace — delivered now',   // lane paced-wake-retry: a parked wake's frame
   'spend-cap': 'the spending ceiling held them',
   'spend-ledger': 'the record of turns nobody typed could not be read, so they were held',   // B-0a33 (2) r2: the ledger's own reason, never the cap's
+  'spend-lockread': 'the lock of the record of turns nobody typed was there and could not be read, so they were held',   // r1801 (1)
   'spend-lock': 'VibeSpace could not write the lock of its record of turns nobody typed, so they were held',   // B-ef83 r1648: the lock unwritable, no other process
   'spend-held': 'another VibeSpace process on this data folder kept the record of turns nobody typed, so they were held',   // B-ef83 smalls: a restart's overlap held them (ledger-held-elsewhere), never the cap's words
   'wrapper-no-steer': 'this agent’s process predates mid-turn notifications',
@@ -352,7 +356,7 @@ const HELD_WHY = Object.freeze({
   'groups-unread': "VibeSpace could not read its Task Groups, so only a group could say whether this conversation may see them — judged now",   // lane bl-windows: the Task Groups store held unread (job-model HELD_KINDS)
 });
 /** the why-key of a held record: its kind, except a may-have-landed one (verify r2) — the hand-over card must say a repeat is possible */
-function heldKeyOf(held) { return held && typeof held === 'object' ? (held.maybeDelivered === true ? 'maybe-delivered' : held.kind === 'spend-cap' && held.why === 'ledger-unreadable' ? 'spend-ledger' : held.kind === 'spend-cap' && held.why === 'ledger-held-elsewhere' ? 'spend-held' : held.kind === 'spend-cap' && held.why === 'ledger-lock-unwritable' ? 'spend-lock' : held.kind || null) : null; }
+function heldKeyOf(held) { return held && typeof held === 'object' ? (held.maybeDelivered === true ? 'maybe-delivered' : held.kind === 'spend-cap' && held.why === 'ledger-unreadable' ? 'spend-ledger' : held.kind === 'spend-cap' && held.why === 'ledger-held-elsewhere' ? 'spend-held' : held.kind === 'spend-cap' && held.why === 'ledger-lock-unwritable' ? 'spend-lock' : held.kind === 'spend-cap' && held.why === 'ledger-lock-unreadable' ? 'spend-lockread' : held.kind || null) : null; }
 function heldWhyOf(kinds) {
   const ks = [...new Set((Array.isArray(kinds) ? kinds : []).filter((k) => HELD_WHY[k]))];
   if (!ks.length) return null;

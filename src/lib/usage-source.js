@@ -369,6 +369,7 @@ export function spendLedgerNote(sl, { t = (s, p) => String(s).replace(/\{(\w+)\}
   if (!sl || typeof sl !== 'object') return null;
   const code = String(sl.error || '?').slice(0, 40);
   if (sl.state === 'refused') return t('Turns nobody typed are held — VibeSpace cannot write the lock of their record ({code}); they start again by themselves once it can', { code });
+  if (sl.state === 'unreadable') return t('Turns nobody typed are held — the lock of their record is there and cannot be read ({code}); they start again by themselves once it reads', { code });   // r1801 (1)
   if (sl.state === 'unlocked') return t('Turns nobody typed are counted without the lock of their record — the data folder refuses it ({code}); VibeSpace asks again every minute', { code });
   return null;
 }
