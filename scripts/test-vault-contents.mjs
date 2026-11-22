@@ -50,7 +50,12 @@ const fakeStore = (labelOf = (k) => `row ${k}`) => ({
 });
 const WIRING = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
 // the mount config door's text: its ONE answer (B-ee0a) and its two routes (GET, and the page's POST) — run in a stand-in app below
-const MOUNT_ROUTE = (() => { const i = WIRING.indexOf('function mountConfigAnswer('); const p = WIRING.indexOf("app.post('/api/mounts/:id/config', ", i); const j = WIRING.indexOf('\n});', p); return i > 0 && p > i && j > p ? WIRING.slice(i, j + 4) : null; })();
+const extractMountRoute = (text) => { const i = text.indexOf('function mountConfigAnswer('); const p = text.indexOf("app.post('/api/mounts/:id/config', ", i); const j = text.indexOf('\n});', p); return i > 0 && p > i && j > p ? text.slice(i, j + 4) : null; };
+const MOUNT_ROUTE = extractMountRoute(WIRING);
+// (r1061, owed) THE EXTRACTION SAYS BY NAME WHEN IT FINDS NOTHING: a moved anchor would compile an app with no routes and every leg
+// below would go red as a 404. CONTROL: the same extraction over the wiring with its anchor renamed finds nothing — the check names it.
+ok(!!MOUNT_ROUTE, `the mount config door's text is found in src/server/mounts-plugins-wiring.js (mountConfigAnswer through its POST route)${MOUNT_ROUTE ? '' : " — NOT FOUND: an anchor moved («function mountConfigAnswer(», «app.post('/api/mounts/:id/config', »); the mount legs below cannot run"}`);
+ok(extractMountRoute(WIRING.replace('function mountConfigAnswer(', 'function mountConfigReply(')) === null, 'CONTROL: the same extraction over the wiring with its anchor renamed finds NOTHING — the check above says so by name, never a 404');
 const refuseAgentBearer = (req, res) => { if (/^Bearer\s+(vsst_|jbt_)/i.test(String(req.headers.authorization || ''))) { res.status(403).json({ error: 'agent', code: 'agent_forbidden' }); return true; } return false; };
 /** A patched copy lives in a scratch dir: every relative require is made absolute against the original file's dir. */
 const at = (file) => (s) => s.replace(/require\((['"])(\.{1,2}\/[^'"]+)\1\)/g, (m, q, p) => `require(${JSON.stringify(path.resolve(path.join(REPO, path.dirname(file)), p))})`);
@@ -86,7 +91,7 @@ async function hub(tag, { contentsSrc = null, routesSrc = null, accountsSrc = nu
   const mDir = path.join(dataDir, 'mounts-store'); fs.mkdirSync(mDir, { recursive: true });   // its own dir: no vault.json beside its key (this suite's engine registers none)
   const mounts = new MountManager({ dataDir: mDir, broadcast: () => {}, getSetting: () => undefined });
   mounts._state.mounts.push({ id: 'mnt1', name: 'Team bucket', type: 's3', endpoint: 'https://s3.example.invalid', bucket: 'b', accessKey: 'AK', secretKeyEnc: mounts._enc(PLANT_MOUNT) }); mounts._save();
-  new Function('app', 'mounts', 'refuseAgentBearer', 'personOnlyDoor', MOUNT_ROUTE)(app, mounts, refuseAgentBearer, require(path.join(REPO, 'src/routes/account-tails.js')).personOnlyDoor);
+  if (MOUNT_ROUTE) new Function('app', 'mounts', 'refuseAgentBearer', 'personOnlyDoor', MOUNT_ROUTE)(app, mounts, refuseAgentBearer, require(path.join(REPO, 'src/routes/account-tails.js')).personOnlyDoor);   // (not found: said by name at the top)
   if (persistence) {
     const P = require(path.join(REPO, 'src/routes/persistence.js'));
     if (!persistenceUsed) { persistenceUsed = true; P.setup({ dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth, getHosts: () => null, getMounts: () => null, getTasks: () => null, getAccounts: () => ({ list: () => ({ accounts: [] }), exportBundle: () => ({ accounts: [{ id: 'e-c', key: PLANT.c }] }) }), getUsageHistory: () => null, onSettingsWrite: () => {} }); }
