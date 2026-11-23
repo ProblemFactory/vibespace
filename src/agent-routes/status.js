@@ -94,6 +94,11 @@ app.post('/api/agent/user-todo', async (req, res) => {
         if (grantFields) return res.status(400).json({ error: 'one ask carries one action — --grant or --propose, not both; nothing was filed', code: 'propose-bad' });
         const AS = require('../ask-setting.js');
         const key0 = String(add.propose).split('=')[0].trim();
+        // r3104 (a) (lane bl-loop-b): THE HOLDS UNREAD — while data/setting-holds.json cannot be read the store's list reads EMPTY (holdOf:
+        // null for every row), so a change of a ceiling is never judged as «no hold» (a lasting value above a raise's «before»): refused
+        // by the hold's own words, nothing filed
+        const shUnread = AS.isProposable(key0) && req.app.locals.settingHolds && typeof req.app.locals.settingHolds.unreadWords === 'function' ? req.app.locals.settingHolds.unreadWords() : null;
+        if (shUnread) return res.status(503).json({ error: `${shUnread}. Nothing was filed — ask again once it reads`, code: 'setting_holds_unread' });
         const held = AS.isProposable(key0) && req.app.locals.settingHolds && typeof req.app.locals.settingHolds.holdOf === 'function' ? req.app.locals.settingHolds.holdOf(key0) : null;   // law A: a live hold's «before» is the row's lasting value
         const v = AS.askVerdict({ propose: add.propose, until: add.until }, { present: AS.isProposable(key0) ? serverSetting(key0) : undefined, tzOffsetMin: Number.isFinite(Number(add.tzOffsetMin)) ? Number(add.tzOffsetMin) : undefined, lasting: held ? held.lasting : undefined });
         if (!v.ok) return res.status(400).json({ error: v.error, code: v.code });

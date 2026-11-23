@@ -610,7 +610,9 @@ class SettingsUI {
       // worded BY ITS CODE (the check's words-7): a settings file that refused says so and that the row stays — never «unreachable»
       if (!(r && r.ok)) {
         const why = !r ? t('server unreachable') : r.code === 'return-failed' ? t('the settings file could not be written — it stays at {value}', { value: Number(r.value) })
-          : r.code === 'spend_row_owner_only' ? t('only your own page can change it — nothing changed') : t('this change cannot be pressed here — change it on the row');
+          : r.code === 'spend_row_owner_only' ? t('only your own page can change it — nothing changed')
+          : r.code === 'setting_holds_unread' ? t('the record of raised ceilings could not be read, so the hold cannot end until it reads — you can still lower it on its row')   // r3095: the holds' file held — its own sentence
+          : t('this change cannot be pressed here — change it on the row');
         showToast(t('Could not end the hold: {why}', { why }), { type: 'error', duration: 9000 });
       } else if (r.changedByHand) showToast(t('You had changed it by hand, so the hold had already ended — it stays at {value}', { value: Number(r.value) }));
     };

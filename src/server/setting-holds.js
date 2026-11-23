@@ -27,6 +27,9 @@ const path = require('path');
 const AS = require('../ask-setting.js');
 const SR = require('../store-read.js');
 const HOLD = require('../store-read-hold.js');   // r3004 (lane bl-loop-b): data/setting-holds.json under the store-read law
+// r3095: the «could not be read» notice's own key (a restart while held files the same item; the read that lifts it closes it) and the
+// torn bytes' (a start that meets the same torn file again says it once)
+const UNREAD_KEY = 'setting-holds-unread', TORN_KEY = 'setting-holds-torn';
 const HOLDS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.holds === undefined || (!!v.holds && typeof v.holds === 'object' && !Array.isArray(v.holds)));
 
 const STORE_NAME = 'setting-holds.write';
@@ -58,18 +61,24 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   let ownWrite = 0;   // the store's own settings write in flight — patchSettings is synchronous, the change hook fires inside it
   const write = (patch) => { ownWrite++; try { patchSettings(patch); } finally { ownWrite--; } };
   /** A FAILED ACT REACHES THE OWNER: a For-you notice in the Spending family (origin spend — the producer censuses), worded in the
-   *  owner's language from its `i18n` lines, the row named by its label with its link. The only items this store files. */
-  const notifyOwner = ({ text, detail, i18n }) => { try { if (userTodos) userTodos.add('accounts', { origin: 'spend', text: String(text).slice(0, 300), detail, urgency: 'high', by: 'agent', sessionName: 'Spending', kind: 'notice', ...(i18n ? { i18n } : {}) }); } catch (e) { log(`[setting-holds] the owner's notice could not be filed: ${e && e.message}`); } };
+   *  owner's language from its `i18n` lines, the row named by its label with its link. The only items this store files. → the item
+   *  filed (r3095: a keyed notice's id, so its producer closes it), or null */
+  const notifyOwner = ({ text, detail, i18n, itemKey = null }) => { try { if (userTodos) return userTodos.add('accounts', { origin: 'spend', text: String(text).slice(0, 300), detail, urgency: 'high', by: 'agent', sessionName: 'Spending', kind: 'notice', ...(i18n ? { i18n } : {}), ...(itemKey ? { itemKey } : {}) }) || null; } catch (e) { log(`[setting-holds] the owner's notice could not be filed: ${e && e.message}`); } return null; };
   const produce = () => JSON.stringify({ v: 1, holds });
   // r3004 (lane bl-loop-b): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of this file as «no hold» and the
   // owner's next timed raise saved only itself: every EARLIER raised ceiling lost its way back and stayed raised for good. HELD: no
   // hold is known, so no timed raise (and no «End now») is taken — refused by name; nothing is written over the file; it is read
-  // again off the loop, and the owner is told which ceilings stand above their default now. Torn bytes are kept aside once per
-  // content, then it starts empty — said to the owner (a raised ceiling may then stay: check the three). A restart while held reads
-  // the same file again. Nothing removes by this store's silence (no sweep, no bound, no migration reads its names)
+  // again off the loop, and the owner is told each ceiling's value now. Torn bytes are kept aside once per content, then it starts
+  // empty — said to the owner with each ceiling now. A restart while held reads the same file again. Nothing removes by this
+  // store's silence (no sweep, no bound, no migration reads its names).
+  // r3095 (主开发): EVERY WORD A PERSON READS is about the ceilings, never a file's path (the path and the copy's name are in the
+  // journal): a notice names each ceiling with its value now and its default, and which stand raised (`ceilingLines`); torn bytes
+  // file ONE notice (the lift's), never a «could not be read» before it; the «could not be read» notice is CLOSED by the read
+  // that lifts the hold; the refusal says a ceiling can still be lowered on its row
+  let liftP = null, unreadId = null;
   const hold = HOLD.create({ file, valid: HOLDS_SHAPE, code: 'setting_holds_unread', aside: (mark) => file + '.corrupt-' + mark,
-    words: (h) => `data/setting-holds.json could not be read (${h.code}) — while it cannot be read a raised ceiling cannot go back by itself and no timed raise is taken; VibeSpace reads it again every few minutes and writes nothing over it`,
-    log: (m) => log('[setting-holds] ' + m), onLift: (v, f) => { lifted(v, f).catch((e) => log(`[setting-holds] the lift failed: ${(e && e.message) || e}`)); } });
+    words: (h) => `the record of the raised ceilings could not be read (${h.code}) — while it cannot be read a raised ceiling does not go back by itself and no timed raise is taken; you can still lower a ceiling on its row. VibeSpace reads it again every few minutes and writes nothing over it`,
+    log: (m) => log('[setting-holds] ' + m), onLift: (v, f) => { liftP = lifted(v, f).catch((e) => log(`[setting-holds] the lift failed: ${(e && e.message) || e}`)); } });
   /** the holds on disk — the store writer's own act; false = not durable (the caller refuses the press); held: nothing is written */
   async function save() { if (!hold.writable('a hold change')) return false; try { W().dirty(file, { name: 'setting-holds.write', produce, allowEmpty: true }); return (await W().durable(file)) !== false; } catch { return false; } }
   const saveLater = (what) => { save().then((ok) => { if (!ok) log(`[setting-holds] ${what} is not on disk yet — the next start reads the row and ends what it no longer holds`); }); };
@@ -185,28 +194,65 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   async function start() {
     let read; try { read = { text: await fs.promises.readFile(file, 'utf8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: HOLDS_SHAPE });
-    if (hold.start(a0) === 'held') { unread(hold.held().code); return list(); }   // r3004: held — nothing known, nothing written
+    if (hold.start(a0) === 'held') {   // r3004: held — nothing known, nothing written
+      // r3095 (2): TORN BYTES — their copy is made first, then it lifts: ONE notice (the lift's, each ceiling now), never a «could
+      // not be read» before it; only a copy that cannot be made leaves it held, said as unread
+      if (a0.state === 'corrupt' && (await hold.again())) { await liftP; return list(); }
+      if (hold.held()) unread(hold.held().code);
+      return list();
+    }
     holds = a0.state === 'data' && a0.value.holds ? a0.value.holds : {};
+    settleUnread();   // r3095 (1): a start that reads closes the notice an earlier start left open
     return adopt();
   }
-  /** the owner told ONCE a hold: the file could not be read — which ceilings stand above their default NOW (they may be raised) */
-  function unread(why) {
-    const links = Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ');
-    const above = Object.keys(AS.PROPOSABLE).filter((k) => { const v = presentOf(k); return Number.isFinite(v) && v > AS.PROPOSABLE[k].def; }).map(AS.LINK).join(' · ') || '—';
-    notifyOwner({ text: 'The setting holds could not be read', detail: `data/setting-holds.json could not be read (${why}). A raised ceiling may not go back by itself — check the three ceilings: ${links}. While it cannot be read no timed raise is taken and nothing is written over it; VibeSpace reads it again every few minutes. Above their default now: ${above}`,
-      i18n: { text: { key: 'The setting holds could not be read' }, detail: [{ key: 'data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}', params: { why: String(why), links } },
-        { key: 'While it cannot be read no timed raise is taken and nothing is written over it; VibeSpace reads it again every few minutes. Above their default now: {rows}', params: { rows: above } }] } });
-    log(`[setting-holds] unreadable: ${why}`);
+  /** r3095: EACH CEILING as a person reads it — its value now, its default, and whether it stands RAISED (above its default). While
+   *  the settings themselves cannot be read every row would read its default, so its value is «not known» (never a guess) */
+  function ceilingLines() {
+    const known = !isHeld(), s = known ? readSettings() || {} : {};
+    return Object.keys(AS.PROPOSABLE).map((k) => {
+      const def = String(AS.PROPOSABLE[k].def), link = AS.LINK(k);
+      if (!known) return { raised: null, en: `${labelEn(k)}: not known now (the settings could not be read) — its default is ${def}: ${link}`, i18n: { key: '{label}: not known now (the settings could not be read) — its default is {def}: {link}', params: { label: LABEL(k), def, link } } };
+      const raw = rawOf(s, k), none = raw !== undefined && noNumber(raw), v = valueIn(s, k), raised = !none && Number.isFinite(v) && v > AS.PROPOSABLE[k].def;
+      const value = none ? { key: 'none' } : String(v), valueEn = none ? 'none' : String(v);
+      return raised ? { raised, en: `${labelEn(k)}: ${valueEn} now, raised above its default ${def}: ${link}`, i18n: { key: '{label}: {value} now, raised above its default {def}: {link}', params: { label: LABEL(k), value, def, link } } }
+        : { raised, en: `${labelEn(k)}: ${valueEn} now — its default is ${def}: ${link}`, i18n: { key: '{label}: {value} now — its default is {def}: {link}', params: { label: LABEL(k), value, def, link } } };
+    });
   }
-  /** r3004: THE HOLD LIFTED — the holds read (null: empty after torn bytes were kept aside, said); what the start skipped runs now */
+  /** the owner told ONCE a hold (its own key: a restart while held files the same item): the record could not be read — EACH
+   *  ceiling with its value now and its default, the raised ones marked; closed by the read that lifts the hold (`settleUnread`) */
+  function unread(why) {
+    const rows = ceilingLines();
+    const it = notifyOwner({ itemKey: UNREAD_KEY, text: 'The setting holds could not be read', detail: [`The record of the raised ceilings could not be read (${why}). While it cannot be read a raised ceiling does not go back by itself, no timed raise is taken and nothing is written over the record; VibeSpace reads it again every few minutes. You can still lower a ceiling on its row. Each ceiling now:`, ...rows.map((r) => r.en)].join('\n'),
+      i18n: { text: { key: 'The setting holds could not be read' }, detail: [{ key: 'The record of the raised ceilings could not be read ({why}). While it cannot be read a raised ceiling does not go back by itself, no timed raise is taken and nothing is written over the record; VibeSpace reads it again every few minutes. You can still lower a ceiling on its row. Each ceiling now:', params: { why: String(why) } }, ...rows.map((r) => r.i18n)] } });
+    if (it && it.id) unreadId = it.id;
+    log(`[setting-holds] ${file} unreadable: ${why} — the owner is told each ceiling now (${rows.map((r) => r.en).join('; ')})`);
+  }
+  /** r3095 (1): the read that lifts the hold, or a start that reads, CLOSES the «could not be read» notice — this start's, or one an
+   *  earlier start left open (its key finds it); a person's own resolve stands as it is */
+  function settleUnread() {
+    const ids = new Set(unreadId ? [unreadId] : []); unreadId = null;
+    if (!userTodos || typeof userTodos.resolveAnswered !== 'function') return;
+    try {
+      if (typeof userTodos.openItems === 'function') for (const i of userTodos.openItems() || []) if (i && i.itemKey === UNREAD_KEY && i.sessionKey === 'accounts') ids.add(i.id);
+      if (ids.size) userTodos.resolveAnswered([...ids], 'agent');
+    } catch (e) { log(`[setting-holds] the «could not be read» notice could not be closed: ${(e && e.message) || e}`); }
+  }
+  /** r3004: THE HOLD LIFTED — the holds read (null: empty after torn bytes were kept aside); what the start skipped runs now.
+   *  r3095: the «could not be read» notice closed (1); torn bytes said in ONE notice with each ceiling now (2) — the list damaged,
+   *  WHERE its damaged bytes are kept (the copy's base name, never a path: r3104) and what the person can do, never «restore» it;
+   *  the empty store written ONCE after their copy is made (4), so the next start reads it, never the torn
+   *  bytes again; a moment that passed while held returns at once — the lift's own pass arms it, once */
   async function lifted(v, f) {
     holds = v && v.holds ? v.holds : {};
+    settleUnread();
     if (f && f.setAside) {
-      const links = Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ');
-      notifyOwner({ text: 'The setting holds did not parse', detail: `data/setting-holds.json did not parse; its bytes are kept aside as ${f.setAside}. A raised ceiling may not go back by itself — check the three ceilings: ${links}`,
-        i18n: { text: { key: 'The setting holds did not parse' }, detail: [{ key: 'data/setting-holds.json did not parse; its bytes are kept aside as {copy}. A raised ceiling may not go back by itself — check the three ceilings: {links}', params: { copy: String(f.setAside), links } }] } });
+      const rows = ceilingLines();
+      log(`[setting-holds] ${file} did not parse: its bytes are kept aside as ${f.setAside} — it starts empty; the owner is told each ceiling now (${rows.map((r) => r.en).join('; ')})`);
+      notifyOwner({ itemKey: TORN_KEY, text: 'The setting holds did not parse', detail: [`The record of the raised ceilings was damaged: it did not parse. Its damaged bytes are kept beside it as ${f.setAside}; putting them back would bring the damage back. It starts empty, so a raised ceiling does not go back by itself: lower it on its row, or raise it again for a time; or mend its file by hand and restart VibeSpace. Each ceiling now:`, ...rows.map((r) => r.en)].join('\n'),
+        i18n: { text: { key: 'The setting holds did not parse' }, detail: [{ key: 'The record of the raised ceilings was damaged: it did not parse. Its damaged bytes are kept beside it as {copy}; putting them back would bring the damage back. It starts empty, so a raised ceiling does not go back by itself: lower it on its row, or raise it again for a time; or mend its file by hand and restart VibeSpace. Each ceiling now:', params: { copy: String(f.setAside) } }, ...rows.map((r) => r.i18n)] } });
     }
-    await adopt();
+    await adopt();   // the lift's own pass (the start's): judged and re-armed
+    if (f && f.setAside && !(await save())) log('[setting-holds] the empty store is not on disk yet after the torn bytes were kept aside — the next start meets them again (their copy is not made twice)');
     tell();
   }
   /** the holds as read: a hold the row no longer holds ends (law B), a hold that cannot be kept is said, the rest re-armed */

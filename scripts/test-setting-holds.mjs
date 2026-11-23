@@ -176,7 +176,7 @@ console.log('③ THE HOLD STORE — one act, the hold on disk FIRST; one hold pe
   {
     const k = mk({ file: '{ not json' });
     await k.H.start();
-    ok(k.owner.length === 1 && /could not be read/.test(k.owner[0].text) && Object.keys(AS.PROPOSABLE).every((key) => k.owner[0].detail.includes(`vibespace://settings/${key}`)), 'holds that cannot be read at boot reach the owner (a raised ceiling may not return by itself) — each of the three ceilings with its link', k.owner);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
+    ok(k.owner.length === 1 && /did not parse/.test(k.owner[0].text) && Object.keys(AS.PROPOSABLE).every((key) => k.owner[0].detail.includes(`vibespace://settings/${key}`)), 'holds that cannot be read at boot reach the owner (a raised ceiling may not return by itself) — each of the three ceilings with its link (r3095 (2): torn bytes file ONE notice, the lift\'s «did not parse»)', k.owner);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   }
 }
 
@@ -204,12 +204,13 @@ console.log('⑤ the agent\'s ask — the route builds the action, or refuses by
   const express = require(path.join(REPO, 'node_modules/express'));
   const filed = [], settings = { [DAY]: 800 };
   const app = express(); app.use(express.json());
-  require(path.join(REPO, 'src/agent-routes/status.js')).register(app, {
+  const deps5 = {
     activeSessions: new Map(), sessionStatus: { get: () => null }, sessionStatusKey: (s, id) => `claude:${id}`, clearAsAgent: () => { }, bookkept: () => { },
     agentSession: () => [{ name: 'lane', cwd: '/tmp', host: 'local' }, 'w-fixture'], toolOn: () => true, toolDisabled: (res) => res.status(403).end(), handoverItems: () => [],
     serverSetting: (k) => settings[k],
     userTodos: { rekey: () => { }, add: (key, o) => { const it = { id: `t${filed.length + 1}`, key, ...o }; filed.push(it); return it; }, forSession: () => [], idsWhere: () => [], get: () => null },
-  });
+  };
+  require(path.join(REPO, 'src/agent-routes/status.js')).register(app, deps5);
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const base = `http://127.0.0.1:${srv.address().port}`;
   const ask = (add) => new Promise((resolve) => { const d = Buffer.from(JSON.stringify({ add: { text: 'The lanes hit today\'s ceiling — raise it?', ...add } })); const q = http.request(`${base}/api/agent/user-todo`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': d.length } }, (res) => { let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => { let j = {}; try { j = JSON.parse(t); } catch { j = { raw: t.slice(0, 300) }; } resolve({ status: res.statusCode, json: j }); }); }); q.write(d); q.end(); });
@@ -231,8 +232,29 @@ console.log('⑤ the agent\'s ask — the route builds the action, or refuses by
   ok(e.status === 400 && e.json.code === 'raise-over-hold' && e.json.error.includes(`vibespace://settings/${DAY}`) && filed.length === n0, 'LAW A at the ask: on a held raise (1600, before 800) a lasting 1200 is refused raise-over-hold by name, with the row\'s link, nothing filed', e.json);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const f = await ask({ propose: `${DAY}=800` });
   ok(filed.length === n0 + 1 && filed[filed.length - 1].action.value === 800, '…while a lasting 800 (at the «before») is filed', { status: f.status });
+  // r3104 (a): THE HOLDS UNREAD — the store's list reads EMPTY (holdOf: null for every row); the ask is refused by the hold's own
+  // words, never judged as «no hold» (a lasting 1200 over a raise whose «before» is 800 would be filed as a plain lower)
+  const UW = 'the record of the raised ceilings could not be read (EIO) — a stand-in of the held words';
+  const unreadHolds = { holdOf: () => null, unreadWords: () => UW };
+  app.locals.settingHolds = unreadHolds;
+  const n1 = filed.length;
+  const g = await ask({ propose: `${DAY}=1200` });
+  ok(g.status === 503 && g.json.code === 'setting_holds_unread' && g.json.error.startsWith(UW) && /Nothing was filed/.test(g.json.error) && filed.length === n1,
+    'r3104 (a): the holds UNREAD — an agent\'s ask to change a ceiling is refused 503 by the hold\'s own words, nothing filed (never judged as «no hold»)', g.json);
   delete app.locals.settingHolds;
   srv.close();
+  {   // RED in a copy of the route without the check: the same ask is FILED as a plain lasting lower (the release's lookup through an empty list)
+    const Module = require('node:module'), f5 = path.join(REPO, 'src/agent-routes/status.js');
+    let src5 = read('src/agent-routes/status.js'); const cut5 = "        if (shUnread) return res.status(503).json({ error: `${shUnread}. Nothing was filed — ask again once it reads`, code: 'setting_holds_unread' });\n";
+    const has5 = src5.includes(cut5); src5 = src5.replace(cut5, '');
+    const m5 = new Module(f5, null); m5.filename = f5; m5.paths = Module._nodeModulePaths(path.dirname(f5)); m5._compile(src5, f5);
+    const app2 = express(); app2.use(express.json()); m5.exports.register(app2, deps5); app2.locals.settingHolds = unreadHolds;
+    const srv2 = await new Promise((r) => { const s2 = app2.listen(0, '127.0.0.1', () => r(s2)); });
+    const base2 = `http://127.0.0.1:${srv2.address().port}`;
+    const g2 = await new Promise((resolve) => { const d = Buffer.from(JSON.stringify({ add: { text: 'The lanes hit today\'s ceiling — lower it?', propose: `${DAY}=1200` } })); const q = http.request(`${base2}/api/agent/user-todo`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': d.length } }, (res) => { let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => { let j = {}; try { j = JSON.parse(t); } catch { j = { raw: t.slice(0, 300) }; } resolve({ status: res.statusCode, json: j }); }); }); q.write(d); q.end(); });
+    srv2.close();
+    ok(has5 && g2.status === 200 && filed.length === n1 + 1 && filed[filed.length - 1].action.value === 1200, 'RED control (the route asks no hold — the release\'s lookup through the empty list): the lasting 1200 is FILED as a plain lower (red)', { has5, status: g2.status });
+  }
 }
 
 console.log('⑥ the wiring and the words (pins)');
@@ -460,16 +482,25 @@ console.log('⑨ r3004 THE STORE-READ LAW — a failed read HOLDS the holds: no 
   const IDAY = 'spend.unattendedPerIdentityDay', H = 3600e3;
   const turns = async (n = 200, until = () => false) => { for (let i = 0; i < n && !until(); i++) await new Promise((r) => setImmediate(r)); };
   // the store writer stood in by one that WRITES what the store produces (what the real writer lands) — the file is read back
-  const mk9 = (M = SH, { bytes = null } = {}) => {
+  // r3095: the For-you stand-in files each notice under its own id and records the producer's closes; `settingsHeld` / `readSt` =
+  // data/settings.json held (a held settings store reads every row at its default: {}); a recording timer and a driven clock
+  const mk9 = (M = SH, { bytes = null, settingsHeld = () => null, readSt = null, open = [] } = {}) => {
     const dir = dirOf(), file = path.join(dir, 'setting-holds.json');
     const earlier = { v: 1, holds: { [DAY]: { key: DAY, value: 1600, before: 800, untilAt: NOW + 6 * H, at: NOW - H }, [HOUR]: { key: HOUR, value: 60, before: 30, untilAt: NOW + 4 * H, at: NOW - H } } };
     fs.writeFileSync(file, bytes != null ? bytes : JSON.stringify(earlier));
-    const st = { [DAY]: 1600, [HOUR]: 60, [IDAY]: 200 }, owner = [], logs = [];
+    const st = { [DAY]: 1600, [HOUR]: 60, [IDAY]: 200 }, owner = [], logs = [], closed = [], patches = [], armed = [];
+    let clock = NOW;
     const writer = { dirty: (f, o) => { fs.writeFileSync(f, o.produce()); }, durable: async () => true };
-    const S = M.create({ dataDir: dir, readSettings: () => st, patchSettings: (pt) => { for (const [k, v] of Object.entries(pt)) { if (v === null) delete st[k]; else st[k] = v; } },
-      userTodos: { add: (key, n) => { owner.push(n); return { id: 'n' }; } }, log: (m) => logs.push(m), now: () => NOW, writer, setTimer: () => ({}), clearTimer: () => { } });
-    return { S, dir, file, st, owner, logs, before: fs.readFileSync(file) };
+    const S = M.create({ dataDir: dir, readSettings: () => (readSt ? readSt() : st), patchSettings: (pt) => { patches.push(pt); for (const [k, v] of Object.entries(pt)) { if (v === null) delete st[k]; else st[k] = v; } },
+      userTodos: { add: (key, n) => { owner.push({ ...n, sessionKey: key }); return { id: 'ut-' + owner.length }; }, openItems: () => open, resolveAnswered: (ids, by) => { closed.push(...ids.map((id) => ({ id, by }))); return ids; } },
+      log: (m) => logs.push(m), now: () => clock, writer, settingsHeld,
+      setTimer: (fn, ms) => { const x = { fn, ms, live: true }; armed.push(x); return x; }, clearTimer: (x) => { if (x) x.live = false; } });
+    return { S, dir, file, st, owner, logs, closed, patches, armed, setClock: (v) => { clock = v; }, before: fs.readFileSync(file) };
   };
+  // r3095 (5): NO FILE PATH in a person's words — the notices (text, detail, every i18n line and param), the refusal, the GET words
+  const pathIn = (...xs) => xs.map((x) => JSON.stringify(x === undefined ? null : x)).filter((j) => /setting-holds\.json|data\/|\.corrupt-/.test(j));
+  const lineOf = (n, key) => ((n && n.i18n && n.i18n.detail) || []).find((l) => l && l.params && l.params.link === `vibespace://settings/${key}`) || null;   // stale-pins: kept — the scheme's link text as this suite's input
+  const RAISED = '{label}: {value} now, raised above its default {def}: {link}', AT = '{label}: {value} now — its default is {def}: {link}', UNKNOWN = '{label}: not known now (the settings could not be read) — its default is {def}: {link}';
   // the PLACED refusal of the store's own read (its one readFile of this file answers EIO; no mount, no mode change)
   const refused = async (k, fn) => { const rf0 = fs.promises.readFile; fs.promises.readFile = async function (f, ...a) { if (String(f) === k.file) throw Object.assign(new Error('EIO: a placed refusal'), { code: 'EIO' }); return rf0.call(this, f, ...a); }; try { return await fn(); } finally { fs.promises.readFile = rf0; } };
   const raise = (k) => k.S.take({ key: IDAY, value: 400, untilRel: 2 * H, shown: 200 });
@@ -481,9 +512,17 @@ console.log('⑨ r3004 THE STORE-READ LAW — a failed read HOLDS the holds: no 
     const n = k.owner[0] || {}, lines = (n.i18n && n.i18n.detail) || [];
     ok(!r.ok && r.status === 503 && r.code === 'setting_holds_unread' && /could not be read \(EIO\)/.test(r.error) && !e.ok && e.code === 'setting_holds_unread' && same && k.st[IDAY] === 200 && k.st[DAY] === 1600 && k.S.list().length === 0,
       'r3004: the holds\' read REFUSED (EIO) — the next timed raise is REFUSED by name (setting_holds_unread), «End now» too; NOTHING is written over the file (its bytes as they were); no ceiling moved', { r, e, same });
-    ok(k.owner.length === 1 && n.text === 'The setting holds could not be read' && lines.length === 2 && lines[1].params.rows.includes(`vibespace://settings/${DAY}`) && lines[1].params.rows.includes(`vibespace://settings/${HOUR}`) && !lines[1].params.rows.includes(`vibespace://settings/${IDAY}`),
-      'the owner is told ONCE: the file could not be read, no timed raise is taken, and WHICH ceilings stand above their default now (the two raised; not the one at its default)', n);   // stale-pins: kept — the scheme's link text as this suite's input
+    const lD = lineOf(n, DAY), lH = lineOf(n, HOUR), lI = lineOf(n, IDAY);
+    ok(k.owner.length === 1 && n.text === 'The setting holds could not be read' && n.itemKey === 'setting-holds-unread' && lines.length === 1 + Object.keys(AS.PROPOSABLE).length
+      && lD && lD.key === RAISED && lD.params.value === '1600' && lD.params.def === '800' && lH && lH.key === RAISED && lH.params.value === '60' && lH.params.def === '30' && lI && lI.key === AT && lI.params.value === '200' && lI.params.def === '200',
+      'r3095: the owner is told ONCE (its own key): EACH ceiling with its value now and its default — the two above it marked raised, the one at it not', lines.map((l) => [l.key.slice(0, 24), l.params && l.params.value]));
+    const leak = pathIn(n.text, n.detail, n.i18n, r.error, e.error, k.S.unreadWords());
+    ok(leak.length === 0 && /you can still lower a ceiling on its row/.test(r.error) && /You can still lower a ceiling on its row/.test(n.detail) && k.logs.some((m) => m.includes(k.file)),
+      'r3095: NO FILE PATH in a person\'s words (the notice, the refusal, the held words) — the refusal says a ceiling can still be lowered on its row; the path is in the journal', leak);
     const lifted = await k.S._hold.again();   // the read again, off the loop — the file reads now
+    await turns(50);
+    ok(lifted && k.closed.length === 1 && k.closed[0].id === 'ut-1',
+      'r3095 (1): the read that lifts the hold CLOSES the «could not be read» notice — the producer\'s own answer to its own item', k.closed);
     const r2 = await raise(k), after = JSON.parse(fs.readFileSync(k.file, 'utf8'));
     ok(lifted && k.S._hold.held() === null && r2.ok && after.holds[DAY] && after.holds[HOUR] && after.holds[IDAY] && after.holds[DAY].before === 800 && after.holds[HOUR].before === 30,
       'the file READS AGAIN — the hold lifts, the two earlier holds are back with their way back (800, 30), and the next timed raise keeps all three', Object.keys(after.holds));
@@ -492,26 +531,104 @@ console.log('⑨ r3004 THE STORE-READ LAW — a failed read HOLDS the holds: no 
     if (kx) await refused(kx, () => kx.S.start());
     const rx = kx ? await raise(kx) : null, ax = kx ? JSON.parse(fs.readFileSync(kx.file, 'utf8')) : null;
     ok(!!rx && rx.ok && !ax.holds[DAY] && !ax.holds[HOUR], 'RED control (the press and the save not held — the release): the timed raise is taken and the file then holds ONLY the new hold — the earlier ceilings lose their way back (red)', ax && Object.keys(ax.holds));
+    const mC = mutantSH([['    holds = v && v.holds ? v.holds : {};\n    settleUnread();\n', '    holds = v && v.holds ? v.holds : {};\n']]);
+    const kc = mC ? mk9(mC) : null;
+    if (kc) { await refused(kc, () => kc.S.start()); await kc.S._hold.again(); await turns(50); }
+    ok(!!kc && kc.owner.length === 1 && kc.S._hold.held() === null && kc.closed.length === 0, 'RED control (the lift closes nothing — the release\'s notice): the holds read again, and the «could not be read» notice stays open for good (red)', kc && kc.closed);
+    const mP = mutantSH([["    words: (h) => `the record", "    words: (h) => file + ` — the record"]]);
+    const kp = mP ? mk9(mP) : null;
+    if (kp) await refused(kp, () => kp.S.start());
+    const rp = kp ? await raise(kp) : null;
+    ok(!!rp && pathIn(rp.error).length === 1, 'RED control (the held words name the file): the census above sees the path in the refusal (red)', rp && rp.error);
+  }
+  {   // r3095 (3): THE SETTINGS THEMSELVES HELD at the start too — every row would read its default: each value is «not known», never a guess
+    const k = mk9(SH, { settingsHeld: () => ({ code: 'EIO' }), readSt: () => ({}) });
+    await refused(k, () => k.S.start());
+    const n = k.owner[0] || {}, rows = ((n.i18n && n.i18n.detail) || []).slice(1);
+    ok(k.owner.length === 1 && rows.length === Object.keys(AS.PROPOSABLE).length && rows.every((l) => l.key === UNKNOWN && l.params.value === undefined && l.params.def === String(AS.PROPOSABLE[l.params.link.split('/').pop()].def)),
+      'r3095 (3): data/settings.json held as well — each ceiling\'s value is said «not known now», with its default; never the default as its value', rows.map((l) => l.key.slice(0, 30)));
+    k.S.stop();
+    const mK = mutantSH([['    const known = !isHeld(), s = ', '    const known = true, s = ']]);
+    const kk = mK ? mk9(mK, { settingsHeld: () => ({ code: 'EIO' }), readSt: () => ({}) }) : null;
+    if (kk) await refused(kk, () => kk.S.start());
+    const rk = kk ? ((kk.owner[0] && kk.owner[0].i18n.detail) || []).slice(1) : [];
+    ok(rk.length > 0 && rk.every((l) => l.key === AT && l.params.value === l.params.def), 'RED control (the held settings read as known): each ceiling is said AT ITS DEFAULT — a guess, the raised ones hidden (red)', rk.map((l) => l.params && l.params.value));
+    if (kk) kk.S.stop();
+  }
+  {   // r3095 (7): A MOMENT PASSES WHILE HELD — nothing is armed on a guess; at the lift the return fires at once, ONCE
+    const run = async (M) => {
+      const k = mk9(M);
+      await refused(k, () => k.S.start());
+      const armedHeld = k.armed.length;
+      k.setClock(NOW + 5 * H);   // HOUR's moment (NOW + 4 h) passes while held; DAY's (NOW + 6 h) not yet
+      await k.S._hold.again(); await turns(50);
+      const fire = async () => { const due = k.armed.filter((x) => x.live && x.ms === 0); for (const x of due) { x.live = false; x.fn(); } await turns(50); return due.length; };
+      const first = await fire();
+      await k.S._hold.again(); const again = await fire();   // a later read again (not held) and the due waits fired again
+      const dayWait = k.armed.find((x) => x.live && x.ms === H);
+      return { k, armedHeld, first, again, back: k.patches.filter((p) => Object.prototype.hasOwnProperty.call(p, HOUR)), dayWait, after: JSON.parse(fs.readFileSync(k.file, 'utf8')) };
+    };
+    const o = await run(SH);
+    ok(o.armedHeld === 0 && o.first === 1 && o.again === 0 && o.back.length === 1 && o.back[0][HOUR] === 30 && o.k.st[HOUR] === 30 && o.k.st[DAY] === 1600 && !!o.dayWait && !o.after.holds[HOUR] && !!o.after.holds[DAY],
+      'r3095 (7): a hold whose moment PASSED WHILE HELD — nothing armed while held; at the lift it goes back at once (60 → 30), ONCE; the other hold waits its hour; the file then holds only it', { armedHeld: o.armedHeld, first: o.first, again: o.again, back: o.back, st: o.k.st });
+    const mA = mutantSH([['    await adopt();   // the lift\'s own pass (the start\'s): judged and re-armed\n', '']]);
+    const ox = mA ? await run(mA) : null;
+    ok(!!ox && ox.first === 0 && ox.back.length === 0 && ox.k.st[HOUR] === 60, 'RED control (the lift re-arms nothing): the passed moment never comes — the ceiling stays raised at 60 (red)', ox && ox.k.st);
   }
   {   // A RESTART while held reads the same file again: nothing was written, so the holds come back whole
     const k = mk9();
     await refused(k, () => k.S.start()); k.S.stop();
-    const k2 = { ...k, owner: [] };
-    const S2 = SH.create({ dataDir: k.dir, readSettings: () => k.st, patchSettings: () => { }, userTodos: { add: (key, n) => { k2.owner.push(n); return { id: 'n' }; } }, now: () => NOW, writer: { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
+    const k2 = { ...k, owner: [], closed: [] };
+    const left = [{ id: 'ut-left', itemKey: 'setting-holds-unread', sessionKey: 'accounts', status: 'open' }];   // the notice the held start filed, still open
+    const mk2 = (M) => M.create({ dataDir: k.dir, readSettings: () => k.st, patchSettings: () => { }, userTodos: { add: (key, n) => { k2.owner.push(n); return { id: 'n' }; }, openItems: () => left, resolveAnswered: (ids) => { k2.closed.push(...ids); return ids; } }, now: () => NOW, writer: { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
+    const S2 = mk2(SH);
     await S2.start();
     ok(S2.list().length === 2 && S2._hold.held() === null && k2.owner.length === 0, 'a RESTART while held reads the same file again — the two holds whole, nothing said (nothing was lost)', S2.list().map((h) => h.key));
+    ok(k2.closed.length === 1 && k2.closed[0] === 'ut-left', 'r3095 (1): the restart\'s read CLOSES the «could not be read» notice the held start left open (found by its key)', k2.closed);
     S2.stop();
+    const mS = mutantSH([['    settleUnread();   // r3095 (1): a start that reads closes', '    // r3095 (1): a start that reads closes']]);
+    k2.closed = [];
+    const S3 = mS ? mk2(mS) : null;
+    if (S3) { await S3.start(); S3.stop(); }
+    ok(!!S3 && k2.closed.length === 0, 'RED control (a start that reads closes nothing): the earlier start\'s notice stays open for good (red)', k2.closed);
   }
-  {   // TORN BYTES: held while kept aside ONCE (byte for byte), then it starts empty — said, the three ceilings named
+  {   // TORN BYTES: kept aside ONCE (byte for byte) before the start answers, then it starts empty — ONE notice with each ceiling now
     const torn = '{"v":1,"holds":{"' + DAY + '":{"key":';
-    const k = mk9(SH, { bytes: torn });
-    await k.S.start();
-    await turns(400, () => k.S._hold.held() === null);
-    const copies = fs.readdirSync(k.dir).filter((f) => f.startsWith('setting-holds.json.corrupt-'));
+    const tornRun = async (M) => {
+      const k = mk9(M, { bytes: torn });
+      await k.S.start();
+      const atStart = k.S._hold.held() === null;
+      await turns(400, () => k.S._hold.held() === null); await turns(50);
+      const copies = fs.readdirSync(k.dir).filter((f) => f.startsWith('setting-holds.json.corrupt-'));
+      return { k, atStart, copies, now: fs.readFileSync(k.file, 'utf8') };
+    };
+    const o = await tornRun(SH), k = o.k;
     const said = k.owner.find((n) => n.text === 'The setting holds did not parse');
-    ok(k.S._hold.held() === null && copies.length === 1 && fs.readFileSync(path.join(k.dir, copies[0]), 'utf8') === torn && !!said && said.i18n.detail[0].params.copy === copies[0] && Object.keys(AS.PROPOSABLE).every((key) => said.detail.includes(`vibespace://settings/${key}`)),
-      'TORN BYTES: kept aside once as their own copy (byte for byte), THEN it starts empty — the owner told where the bytes are and that a raised ceiling may not go back (the three ceilings)', { copies, said: said && said.text });   // stale-pins: kept — the scheme's link text as this suite's input
+    const lD = lineOf(said, DAY), lI = lineOf(said, IDAY);
+    ok(o.atStart && o.copies.length === 1 && fs.readFileSync(path.join(k.dir, o.copies[0]), 'utf8') === torn && k.owner.length === 1 && !!said && said.itemKey === 'setting-holds-torn'
+      && lD && lD.key === RAISED && lD.params.value === '1600' && lI && lI.key === AT && ((said.i18n.detail || []).length === 1 + Object.keys(AS.PROPOSABLE).length),
+      'r3095 (2): TORN BYTES — kept aside once (byte for byte) BEFORE the start answers, then it starts empty; ONE notice (never a «could not be read» before it), naming each ceiling now with its default, the raised one marked', { copies: o.copies, owner: k.owner.map((n) => n.text) });
+    const head = (said && said.i18n.detail[0]) || {}, words = [said && said.text, said && said.detail, said && said.i18n].map((x) => JSON.stringify(x === undefined ? null : x));
+    ok(!words.some((j) => j.includes(k.dir) || /data\//.test(j)) && head.params && head.params.copy === o.copies[0] && said.detail.includes(`kept beside it as ${o.copies[0]}`) && !/restore/i.test(words.join(' ')) && /mend its file by hand and restart/.test(said.detail) && /lower it on its row, or raise it again/.test(said.detail) && k.logs.some((m) => m.includes(o.copies[0])),
+      'r3095 (5) + r3104: the torn notice says the list was DAMAGED and WHERE its damaged bytes are kept — the copy by its base name, never a path — and what the person can do (lower or raise again; or mend its file by hand and restart), never «restore» it', said && said.detail);
+    ok(JSON.stringify(JSON.parse(o.now)) === JSON.stringify({ v: 1, holds: {} }), 'r3095 (4): after the torn lift the EMPTY store is written ONCE (the copy made first) — the next start reads it, never the torn bytes again', o.now);
     k.S.stop();
+    const m2 = mutantSH([['      if (a0.state === \'corrupt\' && (await hold.again())) { await liftP; return list(); }\n', '']]);
+    const o2 = m2 ? await tornRun(m2) : null;
+    ok(!!o2 && o2.k.owner.length === 2 && o2.k.owner[0].text === 'The setting holds could not be read', 'RED control (the start does not wait for the copy): TWO notices — a «could not be read» before the «did not parse» (red)', o2 && o2.k.owner.map((n) => n.text));
+    if (o2) o2.k.S.stop();
+    const m4 = mutantSH([["    if (f && f.setAside && !(await save())) log(", "    if (false && !(await save())) log("]]);
+    const o4 = m4 ? await tornRun(m4) : null;
+    ok(!!o4 && o4.now === torn, 'RED control (no save after the torn lift): the torn bytes stay at the name — the next start meets them again (red)', o4 && o4.now);
+    if (o4) o4.k.S.stop();
+  }
+  {   // r3095 (6): the words a person reads at the two presses — the card's by its code, «End now» its own sentence (zh + ja beside each)
+    const acts = read('src/lib/user-todos-actions.js'), ui = read('src/lib/settings-ui.js'), zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+    const CARD = 'the record of raised ceilings could not be read — no timed raise is taken until it reads; you can still lower a ceiling on its row';
+    const END = 'the record of raised ceilings could not be read, so the hold cannot end until it reads — you can still lower it on its row';
+    const inDict = (d, k2) => d.includes('\n  ' + JSON.stringify(k2) + ': ');
+    ok(acts.includes(`setting_holds_unread: () => t('${CARD}')`) && ui.includes(`r.code === 'setting_holds_unread' ? t('${END}')`) && [CARD, END].every((k2) => inDict(zh, k2) && inDict(ja, k2)),
+      'r3095 (6): the card says a ceiling can still be lowered on its row, and «End now» has its own sentence for the held code — each in zh and ja');
   }
 }
 
