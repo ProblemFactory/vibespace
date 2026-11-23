@@ -1877,7 +1877,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     };
     const cr = await corruptLeg(DOOR);
     ok(cr.asides === 1 && cr.keptBytes && cr.fileNow === 1, `B-a14b: bytes that do not parse are set aside under a dated name (kept), the ends start empty and the next end is written fresh — ${JSON.stringify(cr)}`, cr);
-    const mcr = M.load('src/server/vault-run-door.js', anchored(SRCa, "    if (a.state === 'corrupt') {\n      const to = `vault-grant-ends.json.corrupt-", "    if (false) {\n      const to = `vault-grant-ends.json.corrupt-", 'test-vault-run B-a14b: corrupt read as empty'), 'a14b-corrupt');
+    const mcr = M.load('src/server/vault-run-door.js', anchored(SRCa, '    const st = endsHold.start(a);', "    const st = endsHold.start(a.state === 'corrupt' ? { state: 'missing' } : a);", 'test-vault-run B-a14b: corrupt read as empty'), 'a14b-corrupt');
     const crr = await corruptLeg(mcr);
     ok(crr.asides === 0 && crr.fileNow === 1, `RED control: a corrupt ends file read as empty ⇒ its bytes written over by the next end (nothing set aside) — ${JSON.stringify(crr)}`, crr);
     // the fold's read: a PLANTED ends file — a record is kept WHOLE or not at all (a conversation past its bound is not loaded: cut,
@@ -1894,7 +1894,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     };
     const pl = await plantLeg(DOOR);
     ok(pl.listedS.join('|') === 'time:this conversation words' && !pl.valueBack && pl.head8 === 'paste ', `the fold read: a planted ends file — a record past its bound not loaded (this conversation sees its own words only), a value in a purpose comes back belted — ${JSON.stringify(pl)}`, pl);
-    const mpl = M.load('src/server/vault-run-door.js', anchored(SRCa, "        if (e.conv.length > 200 || e.id.length > 400) continue;", "        e.conv = e.conv.slice(0, 200); e.id = e.id.slice(0, 400);", 'test-vault-run the fold read: the cut'), 'a14b-plant-cut');
+    const mpl = M.load('src/server/vault-run-door.js', anchored(SRCa, '    if (e.conv.length > 200 || e.id.length > 400) return null;', '    e.conv = e.conv.slice(0, 200); e.id = e.id.slice(0, 400);', 'test-vault-run the fold read: the cut'), 'a14b-plant-cut');
     const plr = await plantLeg(mpl);
     ok(plr.listedS.join('|') === 'used:another conversation words', `RED control: the record cut to its bound ⇒ another conversation's end sits under this one's key and says its words here — ${JSON.stringify(plr)}`, plr);
     const mpl2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "purpose: SS.redactSecrets(String(e.purpose || '')).text.slice(0, 400),", "purpose: String(e.purpose || '').slice(0, 400),", 'test-vault-run the fold read: no belt'), 'a14b-plant-belt');
@@ -1920,7 +1920,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     else {
       const hl = await heldLeg(DOOR);
       ok(hl.listed === 1 && hl.modeKept && hl.sizeKept, `B-a14b: an ends store whose read fails is HELD — the end said from memory, the file never written over — ${JSON.stringify(hl)}`, hl);
-      const mhl = M.load('src/server/vault-run-door.js', anchored(SRCa, "    if (a.state === 'unreadable') { endsHeld = true;", "    if (a.state === 'unreadable') { endsHeld = false;", 'test-vault-run B-a14b: a held read written over'), 'a14b-held');
+      const mhl = M.load('src/server/vault-run-door.js', anchored(SRCa, '    const st = endsHold.start(a);', "    const st = endsHold.start(a.state === 'unreadable' ? { state: 'missing' } : a);", 'test-vault-run B-a14b: a held read written over'), 'a14b-held');
       const hlr = await heldLeg(mhl);
       ok(!hlr.modeKept, `RED control: a held read that lets the writer write ⇒ the unreadable file replaced — ${JSON.stringify(hlr)}`, hlr);
     }

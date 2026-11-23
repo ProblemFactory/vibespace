@@ -149,6 +149,7 @@ const HAS_PROC_FD = (() => { try { return fs.existsSync('/proc/' + process.pid +
 const VB = require('../vault-blocked.js');
 const SS = require('../secret-shapes.js');
 const HC = require('../hidden-chars.js');
+const HOLD = require('../store-read-hold.js');   // r3002 (d): the grant ends under the store-read law
 const SR = require('../store-read.js');   // PURE (B-f276): what ONE read of a store answers — B-a14b: the grant ends read at the start
 const DOOR = require('../mount-door.js');   // B-afc4: a blocked storage path is answered by name, never read (a cwd, a tool, a template)
 const PI = require('../proc-identity.js');   // a run folder's hub: its identity, never a bare pid (the boot sweep)
@@ -476,37 +477,78 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  empty; a READ that fails is held until the next start — nothing is written over it (the ends stay in memory, said once). */
   const ENDED_MS = 24 * 3600e3, ENDED_MAX = 200, ENDS_SAID = new Set(['time', 'used', 'lock', 'restart']);   // B-a14b's remainder (r1482): + a restart (the vault locks at each start)
   const endedGrants = new Map();
+  // r3230's reader table: an end TAKEN BACK while the ends are HELD (the entry deleted or switched off, a new approval of the pair) —
+  // the held file's old record of it must not come back at the lift's merge: when, by entry and by pair, kept beside the held ends
+  // (`gone` in the side file, so a restart while held knows it too), and forgotten once the ends read
+  const goneEntriesHeld = new Map(), gonePairsHeld = new Map();
   const ENDS_FILE = path.join(dataDir, 'vault-grant-ends.json');
   const ENDS_VALID = (d) => !!d && typeof d === 'object' && Array.isArray(d.ends);
-  let endsHeld = false, endsAside = null;   // endsAside: a set-aside rename in flight — the saves wait for it
+  // r3002 (d) — THE ENDS UNDER THE STORE-READ LAW, on src/store-read-hold.js (no hold of their own). The release HELD a read that
+  // failed until the next start, but the ends made WHILE held lived in memory only — never folded, a restart lost them, and only a
+  // journal line said so. Now: HELD, the file is read again off the loop; every end made meanwhile is kept in memory AND in a side
+  // file of its own (vault-grant-ends.json.pending, through the store writer, 0600, the same records): a restart while held reads
+  // them back; the lift — or the next start that reads — MERGES the file's ends with the held ones (a pair's newest end stands),
+  // writes them once, and the side file goes once they landed. Torn bytes are kept aside once (the hold's copy), then the ends
+  // start empty (the held ones kept). WHO REMOVES BY THIS STORE's SILENCE: nobody — an end is news only (the run refusal's «ended»
+  // words: a grant whose end is not known is refused as any closed entry; the search: this file is the store's one reader)
+  const PENDING_FILE = ENDS_FILE + '.pending';
+  let pendingOwed = false;   // the side file holds ends the main file does not (written while held, or read back at a start)
+  const endOf = (e, t0) => {
+    if (!e || typeof e !== 'object' || typeof e.conv !== 'string' || typeof e.id !== 'string' || !ENDS_SAID.has(e.endedBy) || !(t0 - Number(e.endedAt) <= ENDED_MS)) return null;
+    if (e.conv.length > 200 || e.id.length > 400) return null;   // a record kept WHOLE or not at all — ONE string for its key and its fields (wl932b4e8): a cut would put two pairs under one key
+    const conv = e.conv, id = e.id;
+    return { conv, id, endedAt: Number(e.endedAt), endedBy: e.endedBy, once: !!e.once, purpose: SS.redactSecrets(String(e.purpose || '')).text.slice(0, 400), grantAt: Number(e.grantAt) || 0 };   // the purpose through the request's own belt FIRST, then cut
+  };
+  /** read ends merged in: the pair's key as pairOf spells it; the NEWEST end of a pair stands (a held life's end over the file's) */
+  const mergeEnds = (list) => {
+    const t0 = now();
+    for (const e of Array.isArray(list) ? list : []) {
+      const r = endOf(e, t0); if (!r) continue;
+      const k = `${r.conv}\n${r.id}`, had = endedGrants.get(k);
+      if ((goneEntriesHeld.get(r.id) || 0) >= r.endedAt || (gonePairsHeld.get(k) || 0) >= r.endedAt) continue;   // r3230's reader table: taken back while held
+      if (!had || !(had.endedAt > r.endedAt)) endedGrants.set(k, r);   // a tie: the later record stands (one file read in its order, as the release read it)
+    }
+    while (endedGrants.size > ENDED_MAX) endedGrants.delete(endedGrants.keys().next().value);
+  };
+  // r3104: THE TORN LIFT TOLD IN PLACE — the ends' damaged bytes kept aside (the hold's copy, by base name) and when: said beside the
+  // ended list (the agent's `vibespace-vault uses`) for the 24 hours an end is news; written into the ends file so a restart says it too
+  let endsLost = null;
+  const lostOf = (d) => (d && typeof d.aside === 'string' && /^vault-grant-ends\.json\.corrupt-[\w.-]{1,80}$/.test(d.aside) && now() - Number(d.asideAt) <= ENDED_MS ? { name: d.aside, at: Number(d.asideAt) } : null);
+  const endsHold = HOLD.create({
+    file: ENDS_FILE, valid: ENDS_VALID, code: 'vault_grant_ends_unread', aside: (m) => `${ENDS_FILE}.corrupt-${m}`,
+    words: (h) => `vault-grant-ends.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. Nothing is written over it: the approvals that end meanwhile are kept beside it and folded in once it reads`,
+    log: (m) => log('data/' + m),
+    onLift: (v, f) => { if (f && f.setAside) endsLost = { name: path.basename(String(f.setAside)), at: now() }; if (v && Array.isArray(v.ends)) mergeEnds(v.ends); goneEntriesHeld.clear(); gonePairsHeld.clear(); endsSave(); },
+  });
+  // r3230's reader table: a PAIR's end taken back while held (a new approval of the pair, a standing one) — every taking back of a
+  // pair passes the map's own delete, so it is said there (the held file's old record of it never comes back at the lift)
+  // …and a pair SET again (an end made anew — grantEnded deletes, then sets) is no longer taken back: its new record stands
+  { const del = Map.prototype.delete, set = Map.prototype.set; endedGrants.delete = function (k) { if (endsHold.held()) gonePairsHeld.set(k, now()); return del.call(this, k); }; endedGrants.set = function (k, v) { gonePairsHeld.delete(k); return set.call(this, k, v); }; }
   {
     let read;
     try { read = { text: readBounded(ENDS_FILE, STORE_MAX).toString('utf8') }; } catch (e) { read = { error: e }; }
-    let a = SR.storeAnswer(read, { valid: ENDS_VALID });
-    if (a.state === 'corrupt') {
-      const to = `vault-grant-ends.json.corrupt-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(3).toString('hex')}`;
-      endsAside = fs.promises.rename(ENDS_FILE, path.join(dataDir, to)).then(() => { log(`data/vault-grant-ends.json did not parse — set aside as data/${to} (its bytes kept); the ends start empty`); }, (e) => { if (e && e.code === 'ENOENT') return; endsHeld = true; log(`data/vault-grant-ends.json did not parse and could NOT be set aside (${(e && e.code) || e}) — held: never written over`); }).finally(() => { endsAside = null; });   // ENOENT: gone meanwhile — nothing to keep
-      a = SR.afterSetAside(a, to);
-    }
-    if (a.state === 'unreadable') { endsHeld = true; log(`data/vault-grant-ends.json could not be read (${a.why}) — held until the next start: the ends stay in memory, nothing is written over it`); }
-    if (a.state === 'data') {
-      const t0 = now();
-      for (const e of a.value.ends) {
-        if (!e || typeof e !== 'object' || typeof e.conv !== 'string' || typeof e.id !== 'string' || !ENDS_SAID.has(e.endedBy) || !(t0 - Number(e.endedAt) <= ENDED_MS)) continue;
-        if (e.conv.length > 200 || e.id.length > 400) continue;   // a record kept WHOLE or not at all — ONE string for its key and its fields (wl932b4e8): a cut would put two pairs under one key
-        const conv = e.conv, id = e.id;
-        endedGrants.set(`${conv}\n${id}`, { conv, id, endedAt: Number(e.endedAt), endedBy: e.endedBy, once: !!e.once, purpose: SS.redactSecrets(String(e.purpose || '')).text.slice(0, 400), grantAt: Number(e.grantAt) || 0 });   // the pair's key, as pairOf spells it; the purpose through the request's own belt FIRST, then cut (a value across the cut is whole for the belt; the belt bounds its own input, INPUT_MAX, and the file is read bounded — no head cut before it: a shrinking belt would pull a cut value under the 400)
-      }
-      while (endedGrants.size > ENDED_MAX) endedGrants.delete(endedGrants.keys().next().value);
-    }
+    const a = SR.storeAnswer(read, { valid: ENDS_VALID });
+    const st = endsHold.start(a);
+    let pend = null;   // a held life before this one left its ends beside the file
+    try { pend = JSON.parse(readBounded(PENDING_FILE, STORE_MAX).toString('utf8')); } catch { pend = null; }
+    { const g = pend && pend.gone && typeof pend.gone === 'object' ? pend.gone : {}, t0 = now(); for (const [m, list] of [[goneEntriesHeld, g.entries], [gonePairsHeld, g.pairs]]) for (const x of Array.isArray(list) ? list.slice(0, ENDED_MAX) : []) if (Array.isArray(x) && typeof x[0] === 'string' && x[0].length <= 700 && t0 - Number(x[1]) <= ENDED_MS) m.set(x[0], Number(x[1])); }   // r3230's reader table: a held life's taken-back ends, first
+    if (st === 'data') { mergeEnds(a.value.ends); endsLost = lostOf(a.value); }
+    if (pend && Array.isArray(pend.ends) && pend.ends.length) { mergeEnds(pend.ends); pendingOwed = true; }
+    if (goneEntriesHeld.size || gonePairsHeld.size) pendingOwed = true;   // a side file of taken-back ends only goes at the fold too
+    if (st !== 'held') { goneEntriesHeld.clear(); gonePairsHeld.clear(); }   // the ends read: nothing is held to come back
+    if (st !== 'held' && pendingOwed) endsSave();   // folded now (the side file goes once the ends landed)
   }
-  /** the ends → their file, paced (the writer reads them when the write is due); held ⇒ nothing is written */
+  /** the ends → their file, paced (the writer reads them when the write is due); HELD ⇒ the side file instead (never the held file) */
   function endsSave() {
-    if (endsHeld) return;
-    if (endsAside) { endsAside.then(() => endsSave(), () => { }); return; }
     try {
       const w = writer || require('../store-writer.js').storeWriter();
-      w.dirty(ENDS_FILE, { name: 'vault-grant-ends.write', produce: () => JSON.stringify({ v: 1, ends: [...endedGrants.values()].filter((e) => now() - e.endedAt <= ENDED_MS) }), mode: 0o600 });
+      const body = () => JSON.stringify({ v: 1, ends: [...endedGrants.values()].filter((e) => now() - e.endedAt <= ENDED_MS), ...(endsLost && now() - endsLost.at <= ENDED_MS ? { aside: endsLost.name, asideAt: endsLost.at } : {}), ...(goneEntriesHeld.size || gonePairsHeld.size ? { gone: { entries: [...goneEntriesHeld], pairs: [...gonePairsHeld] } } : {}) });   // r3104: the torn copy's name rides the file for its 24 hours
+      if (!endsHold.writable('a grant end')) { w.dirty(PENDING_FILE, { name: 'vault-grant-ends-pending.write', produce: body, mode: 0o600 }); pendingOwed = true; return; }
+      w.dirty(ENDS_FILE, { name: 'vault-grant-ends.write', produce: body, mode: 0o600 });
+      if (pendingOwed) {
+        pendingOwed = false;
+        w.durable(ENDS_FILE).then((ok) => { if (!ok) { pendingOwed = true; return; } try { w.forget(PENDING_FILE); } catch { } fs.promises.unlink(PENDING_FILE).catch(() => { }); }, () => { pendingOwed = true; });
+      }
     } catch (e) { log(`the grant ends could not be handed to the writer (${e.message})`); }
   }
   const offTimeOf = (g, since = Number(g && g.at) || 0) => { let t = 0; for (const id of (g && Array.isArray(g.entries) ? g.entries : [])) { const o = offAt.has(id) ? (offAt.get(id) || 0) : 0; if (o && o >= since && o > t) t = o; } return t; };   // when the owner switched an entry of this grant (or late pass) OFF at or after `since` — its approval; 0: not since (B-a14b follow, r901)
@@ -1074,6 +1116,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
+    if (!on && endsHold.held()) { goneEntriesHeld.set(key, now()); endsSave(); }   // r3230's reader table: the held file's ends of it never come back at the lift
     if (!on) { for (const [p, e] of endedGrants) if (e.id === key && endedGrants.delete(p)) endsSave(); offAt.delete(key); offAt.set(key, now()); while (offAt.size > ENDED_MAX) offAt.delete(offAt.keys().next().value); }   // B-a14b: the owner's OFF is its own news (entry_not_runnable) — and an end of a grant given before it never speaks over it
     if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
     if (!on) for (const [pair, lp] of [...lateOnce]) if (lp && (lp.entries || []).includes(key)) lateOnce.delete(pair);   // B-a14b follow (its read): a late «allow once» pass naming the entry is taken back too — never outliving its switch (as forgetEntry takes its passes back; an open late card stays the owner's own to answer)
@@ -1644,6 +1687,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const g of [...inFlight]) if (g && Array.isArray(g.entries) && g.entries.includes(key)) { if (g.ran) grantEnded(g, 'used'); else if (!g.pendingEnd) g.pendingEnd = { by: 'deleted', at: now() }; dropped++; }
     for (const [p, x] of [...seen]) if (x && Array.isArray(x.entries) && x.entries.includes(key)) { seen.delete(p); dropped++; }   // (the read) a shape the owner allowed once this unlock — as the OFF takes it: never a value pasted later under the name
     let gone = 0; for (const [p, e] of [...endedGrants]) if (e && e.id === key && endedGrants.delete(p)) gone++;
+    if (endsHold.held()) { goneEntriesHeld.set(key, now()); gone++; }   // r3230's reader table: its end in the held file never comes back at the lift
     if (gone) endsSave();
     try { alwaysTakenBack(key, 'deleted'); } catch { }   // (r1834's reads) the cards of the use-grants road whose grant went with the entry's row (the delete drops the row first): «deleted» — the «Always» cards and the 1-hour ones
     return { ok: true, dropped };
@@ -2200,6 +2244,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !usableHere(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && offSinceOf(dOn, e.id) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry THIS conversation can use now — ON, and its member resumed where a press opened it — is never «ask again»; B-a14b)
         .map((e) => ({ entry: refOfId(e.id), ...wordsOfId(e.id), endedBy: e.endedBy, endedAt: new Date(e.endedAt).toISOString(), once: e.once, purpose: e.purpose })),
       uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],
+      // r3104 (a): a lookup of the ended list while the ends are HELD says so (never a list read as whole); a TORN lift says what was lost and where
+      ...(endsHold.held() ? { endedUnread: `${endsHold.words()} — until then the list of approvals that ended may miss one that ended before this start` } : {}),
+      ...(endsLost && t - endsLost.at <= ENDED_MS ? { endedLost: `the list of approvals that ended (data/vault-grant-ends.json) was damaged and started empty — its damaged bytes are kept beside it as ${endsLost.name} (not a copy to restore); an approval that ended before then is not listed: ask again (vibespace-vault request <entry>) if you still need one` } : {}),
     };
   }
 
@@ -3039,7 +3086,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
   return { _storeHeld: () => (storeHeld ? { ...storeHeld } : null), scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, useRowDropped, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
-    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants,
+    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants, _endsHold: endsHold,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }
 

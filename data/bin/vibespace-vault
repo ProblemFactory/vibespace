@@ -270,6 +270,8 @@ async function usesCmd() {
   if (d.standingUndecided) console.log(`  standing approvals waiting for the user: ${(d.standingUndecided.entries || []).join(', ')} — ${d.standingUndecided.words}`);   // r3205 (2)
   // B-a14b: an approval that ENDED is listed as itself (an agent once reported a lost 8-hour approval as a bug) — how and when
   // it ended, and the request that asks again
+  if (d.endedUnread) console.log(`grants that ended: ${d.endedUnread}`);   // r3104 (a): the ends held — the list below may miss one
+  if (d.endedLost) console.log(`grants that ended: ${d.endedLost}`);   // r3104: a torn lift — what was lost and where its bytes are kept
   if (d.ended && d.ended.length) {
     console.log('grants that ended (the last 24 hours):');
     const how = { time: 'its 8 hours ran out', used: 'its one run was used', lock: 'a lock of the vault ended it', restart: 'the hub restarted (the vault locks at each start)' };   // B-a14b's remainder: + a restart

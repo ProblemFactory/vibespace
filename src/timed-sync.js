@@ -68,6 +68,7 @@ const STORES = Object.freeze({
   'desktop-apps.write': row('write', 'desktop-apps', 'src/desktop-serve.js', ['save']),   // through the store writer on the hub (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the desktop app records — an act; the device agent writes at the call)
   'device-alerts.write': row('write', 'device-alerts', 'src/server/device-alerts.js', ['save']),   // through the store writer (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the device alerts' dedup ledger)
   'vault-grant-ends.write': row('write', 'vault-grant-ends', 'src/server/vault-run-door.js', ['endsSave']),   // through the store writer (bl-vault B-a14b, 主开发 r542: the grants that ended — kept across a restart, paced, 0600)
+  'vault-grant-ends-pending.write': row('write', 'vault-grant-ends.pending', 'src/server/vault-run-door.js', ['endsSave']),   // r3002 (d): the ends made while the store is held, beside it (folded in once it reads)
   'user-state.write': row('write', 'user-state', 'src/routes/persistence.js', ['writeUserStateFile']),   // through the store writer (lane bl-loop-b, B-0248 (c): the conversation list — an act, answered after its landing)
   'bookmarks.write': row('write', 'bookmarks', 'src/routes/persistence.js', ['writeBookmarks']),   // through the store writer (lane bl-loop-b, B-0248 (c): an act, answered after its landing)
   'custom-themes.write': row('write', 'custom-themes', 'src/routes/persistence.js', ['writeCustomThemes']),   // through the store writer (lane bl-loop-b, B-0248 (c): an act, answered after its landing)
