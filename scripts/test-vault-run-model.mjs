@@ -1445,7 +1445,8 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js (and of its scru
     ['a long reason reference clipped with no marker (r27 — b034bdf64)', "away: away.map((a) => ({ ...clipFold('ref', a.ref || ''),", "away: away.map((a) => ({ ref: clipStr(a.ref || '').text,", foldLeg27],
     // lane lg-vault-file (r858): THE RED CONTROLS of ⑦g — each cure put back the release's way
     ['the sweep moves no cut', '    if (!rs.some(([k, a]) => a < cut.get(k))) continue;   // it starts at or past every cut it covers', '    continue;   // it starts at or past every cut it covers', (Vm) => SCRUB.cutLeg(Vm, 60).out],
-    ['the cut tail ignores the arrival order\'s finds', '    if (ar) for (const f of scan(ar.all, true, ar.idxAt).finds) finds.push(ar.rangesOf(f.s, f.e));', '', (Vm) => SCRUB.cut2Leg(Vm, 60).out],
+    // the END's line, anchored with the end's next line: the settle (round wi8mtvm6c) reads the same arrival finds in a line of its own
+    ['the cut tail ignores the arrival order\'s finds', '    if (ar) for (const f of scan(ar.all, true, ar.idxAt).finds) finds.push(ar.rangesOf(f.s, f.e));\n    settleCuts(finds, start, spend);   // THE ONE SWEEP', '    settleCuts(finds, start, spend);   // THE ONE SWEEP', (Vm) => SCRUB.cut2Leg(Vm, 60).out],
     ['the cut ignores the arrival order\'s own tail', '      const q = cutTailStart(ar.all);', '      const q = ar.all.length;', (Vm) => SCRUB.cut2Leg(Vm, 60).out],
     ['the sweep follows no cut it moved', '{ cut.set(k, a); reach(k); }', '{ cut.set(k, a); }', (Vm) => SCRUB.chainLeg(Vm, 20)],
     ['the sweep\'s ranges unsorted', 'l.sort((x, y) => y[0] - x[0]);', 'l.sort((x, y) => x[0] - y[0]);', (Vm) => SCRUB.sweepLeg(Vm, 300)],

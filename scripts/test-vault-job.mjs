@@ -280,10 +280,11 @@ async function legQuietLine(wrap = null) {
   const logOf = (j) => { try { return fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { return ''; } };
   const t0 = Date.now();
   const line = await W.untilMs(() => logOf(svc).includes('listening on the service socket'), 1600);
+  const heldThen = svc.state === 'up' && !fs.existsSync(path.join(W.root, 'out', 'release'));   // a service that runs is «up»   // seen while the job still holds its quiet: never its end's flush (an event, no clock judged)
   const hit = await W.untilMs(() => task._untilHit === true, 2600 - (Date.now() - t0));
   rows.line = line.ok; rows.hit = hit.ok;
   if (wrap) { W.release(); W.end(); return rows; }
-  row(line.ok && line.ms <= 1600, 'r2600 — a short last line before a QUIET is in the log within the quiet\'s second (a service\'s «listening on …» — never missing for its whole life)', line);
+  row(line.ok && heldThen, 'r2600 — a short last line before a QUIET is in the log DURING the quiet, the job still running and still held (a service\'s «listening on …» — never missing for its whole life)', { line, heldThen, state: svc.state });
   row(hit.ok, 'r2600 — a task\'s until-marker before a quiet FIRES (the until scan reads the log: the task ends as it did in 2.369.415)', { hit, untilHit: task._untilHit });
   W.release(); W.end();
   return rows;
