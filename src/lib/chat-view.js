@@ -2990,7 +2990,7 @@ class ChatView {
     // row B-422c: a history the transcript reader refused (its kept copy, or nothing) is a FAILED fetch — the view that stands is never
     // replaced by a short one; the person is told «try again» (a toast, at most one each few seconds; the 2 s poll stays quiet)
     if (data && data.notLoaded) {
-      const info = { storageHung: !!data.storageHung, readerGone: !!data.readerGone, readerCause: data.readerCause || null, notKnownYet: !!data.notKnownYet, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null };
+      const info = { storageHung: !!data.storageHung, readerGone: !!data.readerGone, readerCause: data.readerCause || null, notKnownYet: data.notKnownYet || false, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null };
       if (!quietRefusal) this._sayReaderRestarting(info);
       throw Object.assign(new Error(this._readerAskWords(info)), { code: data.notLoaded });
     }
@@ -3751,7 +3751,7 @@ class ChatView {
    *  reader's listing promises no time: none said) */
   _readerAskWords(info, now = Date.now()) {
     const at = retryAtOf(info, now);
-    if (info && info.notKnownYet && !info.storageHung) return t('Its saved history is not known yet — it fills in here by itself.');   // B-a60e (r2439 (3)): its own cause, its own words (before the reader's table, r3077); r2743: the storage's cause first — the table says it
+    if (info && info.notKnownYet && !info.storageHung) return info.notKnownYet === 'folder' ? t('A folder of its saved history cannot be read.') : t('Its saved history is not known yet — it fills in here by itself.');   // r2873 (d): a folder that can never be listed is said, never promised for ever   // B-a60e (r2439 (3)): its own cause, its own words (before the reader's table, r3077); r2743: the storage's cause first — the table says it
     return readerAskWords(info, readerKindOf(info) === 'gone' && !at ? null : this._clockOf(at));
   }
   /** the page's own clock (src/lib/page-time.js — the page's language and zone) */
@@ -3766,7 +3766,8 @@ class ChatView {
     if (this._readOnly) this._listenHistoryReady();   // a view: the hub tells it too (its view waits on that history — r1461 (2))
     const at = this._reaskEvent({ type: 'not-loaded', code, info }).due;   // the time the page REALLY asks again (the back-off, an earlier ask kept)
     let words;
-    if (info && info.notKnownYet && !info.storageHung) { words = t('Its saved history is not known yet — it fills in here by itself.'); this._notKnownYetSaid = true; }   // B-a60e (主开发 r2439 (3)): the rollout index has not found it YET — one more cause at this door, its own words; r2743: the storage's cause FIRST when both hold (the table says it, with its time)
+    if (info && info.notKnownYet) this._notKnownYetSaid = true;   // r2873: armed whenever the cause holds, whichever words are shown (the storage's come first)
+    if (info && info.notKnownYet && !info.storageHung) words = info.notKnownYet === 'folder' ? t('A folder of its saved history cannot be read.') : t('Its saved history is not known yet — it fills in here by itself.');   // r2873 (d): a folder that can never be listed is said, never promised for ever   // B-a60e (主开发 r2439 (3)): the rollout index has not found it YET — one more cause at this door, its own words; r2743: the storage's cause FIRST when both hold (the table says it, with its time)
     else words = readerLineWords(info, this._clockOf(at));   // r3077: in the words of the cause it has; the page asks again by itself
     const el = this._historyNotLoadedEl, inner = el && el.isConnected ? el.querySelector('.chat-system') : null;
     if (inner) { inner.textContent = words; return; }   // the line stands: only its words change (no row added, none moved)

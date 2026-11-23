@@ -4,7 +4,7 @@ const {
   CODEX_SESSIONS_DIR,
   extractCodexThreadMeta,
   findCodexSessionJsonlPath,
-  codexRolloutLookup, codexRolloutLookupAsync, findCodexSessionJsonlPathAsync, rolloutIndexEpoch,   // B-a60e remainder: the rollout index (never a walk on this thread)
+  codexRolloutLookup, codexRolloutLookupAsync, findCodexSessionJsonlPathAsync, rolloutIndexEpoch, rolloutIndexUnreadable,   // B-a60e remainder: the rollout index (never a walk on this thread)
   parseCodexSessionJsonl,
   transcriptWorkerCall,
 } = require('./adapters/codex');
@@ -855,7 +855,7 @@ class CodexSessionMessages {
   _markRead(partial, threadId) {
     this._partial = !!partial.unknown; this._partialEpoch = rolloutIndexEpoch();
     this.notFound = !partial.unknown && !!partial.absent;
-    if (partial.unknown) { if (!this.notLoaded) this.notLoaded = NOT_LOADED; this.notLoadedNotKnown = true; }   // r2743 (2): a re-read began from nothing (_resetNotLoaded): what it marks is this read's alone
+    if (partial.unknown) { if (!this.notLoaded) this.notLoaded = NOT_LOADED; this.notLoadedNotKnown = rolloutIndexUnreadable() ? 'folder' : true; }   // r2873 (d): 'folder' — the index's walks keep failing: a folder of its history cannot be read   // r2743 (2): a re-read began from nothing (_resetNotLoaded): what it marks is this read's alone
     noteHistoryMark(this.notLoaded ? 'noteAwaiting' : 'noteReadable', threadId);   // any cause (line 411's own or this one) waits; none ⇒ readable
   }
 
@@ -885,7 +885,11 @@ class CodexSessionMessages {
       const ancestry = await resolveCodexForkAncestryAsync(threadId, this._session?.forkedFrom || [], { partial });
       if (threadId) { const got = await codexRolloutLookupAsync(threadId); if (!got.known) partial.unknown = true; else if (!got.fp) partial.absent = true; }
       if (this._all && this._partial && partial.unknown && this._partialEpoch === rolloutIndexEpoch()) return this._all;   // nothing moved since the last «not known yet» read: the same answer, no second read
-      this._resetNotLoaded();   // r2743 (2): a read that runs starts from nothing — every cause below is THIS read's
+      // r2743 (2): a read that runs starts from nothing — every cause below is THIS read's; r2873 (b): a read that THROWS leaves the
+      // reader's marks as they were (a reused reader never reads as loaded over a partial history)
+      const kept = { notLoaded: this.notLoaded, notLoadedStorage: this.notLoadedStorage, notLoadedRetryAt: this.notLoadedRetryAt, notLoadedReaderGone: this.notLoadedReaderGone, notLoadedNotKnown: this.notLoadedNotKnown, notFound: this.notFound };
+      this._resetNotLoaded();
+      try {
       // B-f3f9: THE WHOLE READ IN THE WORKER — every file of the ancestry and the thread's own read, parsed, cut, tagged and merged,
       // then the live buffer merged, in the transcript worker's history lane; only the FINAL records cross (in pages), each re-tagged
       // here with its file's thread. A file it cannot name (a missing rollout: the thread/read copy), a pool that is down, or a refusal
@@ -921,6 +925,7 @@ class CodexSessionMessages {
       const all = await mergeCodexRecordsAsync(history, live);
       if (!this._all || this._partial) { this._all = all; this._markRead(partial, threadId); }
       return this._all;
+      } catch (e) { Object.assign(this, kept); throw e; }   // r2873 (b)
     }, { bulk });
     // A READ THAT MAY BE DROPPED IS NEVER THE READER'S SHARED MEMO (主开发 03:16Z, the follow-up's third item): a job carrying `wanted` can
     // end as nothing — a second caller joining it would get that nothing though it wanted the records. Such a job is its caller's
@@ -1108,7 +1113,13 @@ async function listCodexThreadsAsync({ activeSessions } = {}) {
 }
 
 // oneReadAtATime: the hub's one-history-read-at-a-time gate, a person's line before a bulk resume's (lane resume-all-paced L3) — test-codex-attach-off-loop ⑤ ⑥
+/** r2873 (a): THE FINAL WORD («not found»), ONE place — the reader found the rollout ABSENT (a whole walk begun after the miss), and
+ *  the conversation is not one this hub started fresh (`_bornHere`): a restored or resumed one is TOLD, never left with a promise that
+ *  silently goes away; a fresh one (asked before its file is written) keeps «not known yet» and the re-ask. → the payload's field */
+function finalWordFor(sm, session) { return sm && sm.notFound && !(session && session._bornHere) ? { historyNotFound: true } : {}; }
+
 module.exports = {
+  finalWordFor,
   CODEX_SESSIONS_DIR,
   CodexSessionMessages,
   findCodexSessionJsonlPath,

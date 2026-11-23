@@ -253,11 +253,11 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     // row B-422c: a history the transcript reader refused (its kept copy, or the live buffer alone) is SAID in every answer built on
     // it — `notLoaded`, the page's «not loaded yet» — never a short history passed off as the whole one
     const notLoaded = sm.notLoaded || null;
-    const notLoadedInfo = notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null, notKnownYet: !!sm.notLoadedNotKnown } : null;   // r1243: which door, when again; B-a60e (r2439): «not known yet» one more cause
+    const notLoadedInfo = notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null, notKnownYet: sm.notLoadedNotKnown || false } : null;   // r1243: which door, when again; B-a60e (r2439): «not known yet» one more cause
     if (r.memo) r.memo.view = { mm, session, notLoaded, notLoadedInfo };
     return { mm, session, notLoaded, notLoadedInfo };
   }
-  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, readerGone: !!v.notLoadedInfo.readerGone, readerCause: v.notLoadedInfo.readerCause || null, ...(v.notLoadedInfo.notKnownYet ? { notKnownYet: true } : {}), retryAt: v.notLoadedInfo.retryAt, retryIn: Number(v.notLoadedInfo.retryAt) ? Math.max(0, v.notLoadedInfo.retryAt - Date.now()) : null } : {}) } : {});   // retryIn: the delay from the hub's now (a page's clock is not the hub's)
+  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, readerGone: !!v.notLoadedInfo.readerGone, readerCause: v.notLoadedInfo.readerCause || null, ...(v.notLoadedInfo.notKnownYet ? { notKnownYet: v.notLoadedInfo.notKnownYet } : {}), retryAt: v.notLoadedInfo.retryAt, retryIn: Number(v.notLoadedInfo.retryAt) ? Math.max(0, v.notLoadedInfo.retryAt - Date.now()) : null } : {}) } : {});   // retryIn: the delay from the hub's now (a page's clock is not the hub's)
 
   async function page(ref, { offset, limit, untilUuid } = {}) {
     const r0 = norm(ref);

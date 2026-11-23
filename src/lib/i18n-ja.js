@@ -1152,6 +1152,7 @@ export default {
   "No messages in this session's transcript yet.": "このセッションの記録にはまだメッセージがありません。",
   "Its saved history is not known yet — it fills in here by itself.": "保存された履歴はまだ確認できていません。ここに自動で表示されます。",
   "Its saved history was not found.": "保存された履歴は見つかりませんでした。",
+  "A folder of its saved history cannot be read.": "保存された履歴のフォルダーの一つが読み取れません。",
   "No results": "結果なし",
   "No saved presets. Save current workspace as a preset.": "保存済みプリセットはありません。現在のワークスペースをプリセットとして保存してください。",
   "No sessions": "セッションなし",

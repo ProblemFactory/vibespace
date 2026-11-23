@@ -454,11 +454,11 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         const st = await svc.status(cref2), pg = await svc.page(cref2);
         return { st: !!(st.notLoaded || st.notKnownYet), pg: !!(pg.notLoaded && pg.notKnownYet) };
       });
-      const CAUSE = '...(v.notLoadedInfo.notKnownYet ? { notKnownYet: true } : {}), ';
+      const CAUSE = '...(v.notLoadedInfo.notKnownYet ? { notKnownYet: v.notLoadedInfo.notKnownYet } : {}), ';
       const g11 = await travel({ createTranscriptService }), r11 = await travel(mutantCopies('a60e-no-flag', REPO).load('src/transcript-service.js', anchored(tsSrc, CAUSE, '', 'a60e-no-cause'), 'no-flag'));
       const PAGE_SRC = ['src/lib/chat-view.js', 'src/lib/session-lifecycle.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8')).join('\n');
       const said = PAGE_SRC.split("t('Its saved history is not known yet — it fills in here by itself.')").length - 1;
-      const handed = PAGE_SRC.split('notKnownYet: !!data.notKnownYet').length - 1;
+      const handed = PAGE_SRC.split('notKnownYet: data.notKnownYet || false').length - 1;
       ok(!g11.st && g11.pg && !r11.pg && said === 2 && handed === 2,
         `a rollout «not known yet»: the service's status says nothing new (${!g11.st}), its page says the cause (${g11.pg}); the page words it in its own sentence (${said}: line 411's line, its toast); the HTTP roads hand the cause on (${handed}: the history pill's fetch, the resume's first page); RED (the page without the cause): ${r11.pg}`);
       AD._resetRolloutIndexForTests();
@@ -704,7 +704,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const refusingPool = { call() { return Promise.reject(Object.assign(new Error('a stand-in deadline'), { status: 503, safeFsTimeout: true, deadline: true })); } };
       const boundPool = { call() { return Promise.reject(Object.assign(new Error('a stand-in heap bound'), { code: 'heap_bound' })); } };   // line 411's «not loaded» that the next read gets past (no storage memory of the file)
       const OLD_MARK = "    if (partial.unknown) { if (!this.notLoaded) { this.notLoaded = NOT_LOADED; this._notLoadedByIndex = true; } this.notLoadedNotKnown = true; }\n    else if (this.notLoadedNotKnown) { this.notLoadedNotKnown = false; if (this._notLoadedByIndex) { this.notLoaded = null; this._notLoadedByIndex = false; } }\n";   // stale-pins: kept (the red control: the moved form's mark, set and cleared without a fresh start)
-      const NEW_MARK = csSrcF.split('\n').find((l) => l.startsWith('    if (partial.unknown) { if (!this.notLoaded) this.notLoaded = NOT_LOADED; this.notLoadedNotKnown = true; }')) + '\n';
+      const NEW_MARK = csSrcF.split('\n').find((l) => l.startsWith('    if (partial.unknown) { if (!this.notLoaded) this.notLoaded = NOT_LOADED; this.notLoadedNotKnown = ')) + '\n';
       const RESET = csSrcF.split('\n').find((l) => l.startsWith('      this._resetNotLoaded();')) + '\n';
       const csPairsRed = mutantCopies('a60e-pairs-red', REPO).load('src/codex-session-store.js', anchored(anchored(csSrcF, NEW_MARK, OLD_MARK, 'a60e-old-mark'), RESET, '', 'a60e-no-reset'), 'pairs-red');
       const pairRoad = async (CSm, tag) => {
@@ -731,17 +731,73 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       };
       const g24 = await pairRoad(CS, 'a1'), r24 = await pairRoad(csPairsRed, 'b2');   // hex tags: the ids stay UUID-shaped (the index reads a rollout's id from its name)
       ok(g24.a.r1.nl && g24.a.r1.nk && g24.a.r2.nl && g24.a.r2.storage && !g24.a.r2.nk && g24.b.b1.nl && !g24.b.b1.storage && !g24.b.b2.nl
-        && (!r24.a.r2.nl || r24.b.b2.nl),
+        && !r24.a.r2.nl && r24.b.b2.nl,   // r2873 (c): a red for EACH pair
         `r2743 (2) the loaded mark's pairs: (a) «not known yet», then the storage refuses the re-read — still «not loaded» with the storage's cause (${g24.a.r2.nl}, ${g24.a.r2.storage}), ours cleared (${!g24.a.r2.nk}); (b) the pool refused (line 411's «not loaded»), then the history came in — «not loaded» gone (${!g24.b.b2.nl}); RED (no fresh start): (a) loaded while the storage refused ${!r24.a.r2.nl}, (b) «not loaded» over the history ${r24.b.b2.nl}`);
-      // (25) (3) THE FINAL WORD IS NEVER SAID OF A CONVERSATION THAT IS RUNNING: the live attach's payload carries no historyNotFound (while
-      // it runs: «not known yet» and the re-ask; a new conversation may be asked before its file is written); the VIEW reply carries it (a
-      // conversation that is not running, or a live window whose session ended). RED: the moved form's attach line
+      // (25) r2743 (3) as r2873 (a) meant it — THE FINAL WORD, driven through the reader, the attach's one rule and the page's decision: a
+      // whole walk finds a thread's rollout ABSENT (the reader's `notFound`); a conversation this hub started FRESH (`_bornHere`) gets no
+      // final word on the live attach (it keeps «not known yet» and the re-ask); a restored / resumed one is TOLD «not found» — the page's
+      // PURE decision turns its line into the final word and its re-ask cancels. RED: the moved small's rule (no live attach told)
+      const tGone = 'eeeeeeee-0000-4000-8000-0000000a6100';   // a thread with no rollout anywhere
+      const FINAL = csSrcF.split('\n').find((l) => l.startsWith('function finalWordFor(sm, session) {')) + '\n';
+      const csNoFinal = mutantCopies('a60e-no-final', REPO).load('src/codex-session-store.js', anchored(csSrcF, FINAL, 'function finalWordFor(sm, session) { return {}; }\n', 'a60e-no-final'), 'no-final');
+      const finalRoad = async (CSm) => {
+        AD._resetRolloutIndexForTests(); AD._setRolloutTimingForTests({ retryMs: 0 });
+        try {
+          await reask(CSm, tGone);   // its miss
+          await AD.refreshCodexRolloutIndex();   // a whole walk begun after it
+          const rd = rdOf(CSm, tGone); await rd.rawAsync();
+          const fresh = CSm.finalWordFor(rd, { _bornHere: true }), restored = CSm.finalWordFor(rd, { _bornHere: false });
+          const stop = HR.reaskNext({ ...HR.REASK_IDLE, code: 'transcript_reader_restarting', due: Date.now() + 5000 }, { type: 'loaded' });
+          return { notFound: !!rd.notFound, fresh, restored, pageFresh: HR.endsNotFound(fresh, true), pageRestored: HR.endsNotFound(restored, true), stop: stop.act };
+        } finally { AD._setRolloutTimingForTests({}); AD._resetRolloutIndexForTests(); }
+      };
+      const g25 = await finalRoad(CS), r25 = await finalRoad(csNoFinal);
       const WSH = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-      const liveLine = WSH.split('\n').find((l) => l.includes("const livePayload = { type: 'attached'")) || '';
-      const viewHas = WSH.includes('viewOnly: true, ...(sm.notFound ? { historyNotFound: true } : {}), historyNotLoaded:');
-      const OLD_LIVE = "              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', ...(sm && sm.notFound ? { historyNotFound: true } : {}), historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader";   // stale-pins: kept (the red control: the moved form's attach line)
-      const silent = (l) => l.length > 50 && !l.includes('historyNotFound');
-      ok(silent(liveLine) && viewHas && !silent(OLD_LIVE), `r2743 (3) the live attach says no final word (${silent(liveLine)}); the view reply carries it (${viewHas}); RED (the moved form's attach line): ${silent(OLD_LIVE)}`);
+      const wired = (WSH.split('\n').find((l) => l.includes("const livePayload = { type: 'attached'")) || '').includes("require('./codex-session-store.js').finalWordFor(sm, session)");
+      ok(g25.notFound && !g25.pageFresh && g25.pageRestored && g25.stop === 'cancel' && wired && r25.notFound && !r25.pageRestored,
+        `r2873 (a) the final word: absent after a whole walk (${g25.notFound}); a fresh conversation keeps «not known yet» (${!g25.pageFresh}); a restored one is told «not found», the line its final word (${g25.pageRestored}), the re-ask ${g25.stop}; the live attach asks the one rule (${wired}); RED (the moved small's rule): a restored one told ${r25.pageRestored}`);
+      // (26) r2873 (b) — A RE-READ THAT THROWS LEAVES THE MARKS AS THEY WERE: a reader «not loaded» · «not known yet» (the folder refused),
+      // the index then moved, the re-read's worker read THROWS: the reader still says «not loaded» · «not known yet». RED: the catch that
+      // does not put them back (a reused reader would read as loaded over its partial history)
+      const RESTORE = csSrcF.split('\n').find((l) => l.startsWith('      } catch (e) { Object.assign(this, kept); throw e; }')) + '\n';
+      const csNoRestore = mutantCopies('a60e-no-restore', REPO).load('src/codex-session-store.js', anchored(csSrcF, RESTORE, '      } catch (e) { throw e; }\n', 'a60e-no-restore'), 'no-restore');
+      const throwRoad = async (CSm) => {
+        AD._resetRolloutIndexForTests(); AD._setRolloutTimingForTests({ retryMs: 0 }); let failing = true; const real = AD.codexHistoryMergedPagedAsync;
+        try {
+          return await withReaddir((p0) => (failing && p0 === rdir ? 'fail' : null), async () => {
+            const rd = rdOf(CSm, tid2); await rd.rawAsync(); const before = { nl: !!rd.notLoaded, nk: !!rd.notLoadedNotKnown };
+            failing = false; await AD.refreshCodexRolloutIndex();
+            AD.codexHistoryMergedPagedAsync = async () => { throw new Error('a stand-in read that throws'); };
+            let threw = false; try { await rd.rawAsync(); } catch { threw = true; } finally { AD.codexHistoryMergedPagedAsync = real; }
+            return { before, threw, after: { nl: !!rd.notLoaded, nk: !!rd.notLoadedNotKnown } };
+          });
+        } finally { AD.codexHistoryMergedPagedAsync = real; AD._setRolloutTimingForTests({}); AD._resetRolloutIndexForTests(); }
+      };
+      const g26 = await throwRoad(CS), r26 = await throwRoad(csNoRestore);
+      ok(g26.before.nl && g26.before.nk && g26.threw && g26.after.nl && g26.after.nk && r26.threw && !r26.after.nl,
+        `r2873 (b) a re-read that throws: the reader still «not loaded» · «not known yet» (${g26.after.nl}, ${g26.after.nk}); RED (no marks put back): reads as loaded (${!r26.after.nl})`);
+      // (27) r2873 (d) — A FOLDER THAT CAN NEVER BE LISTED IS SAID, NEVER PROMISED FOR EVER: the index's walks fail three times in a row (the
+      // folder refuses every listing): the reader's cause is 'folder', the page says «A folder of its saved history cannot be read.» (en / zh /
+      // ja); before that, «not known yet». RED: an index whose walks never count as unreadable, the reader wired to it
+      const UNR = adSrc.split('\n').find((l) => l.startsWith('const UNREADABLE_AFTER = ')) + '\n';
+      const mu = mutantCopies('a60e-never-unreadable', REPO), adUnrPath = mu.write('src/adapters/codex.js', anchored(adSrc, UNR, 'const UNREADABLE_AFTER = 1e9;\n', 'a60e-never-unreadable'), 'never-unreadable');
+      const csUnr = mu.load('src/codex-session-store.js', anchored(csSrcF, "require('./adapters/codex')", `require(${JSON.stringify(adUnrPath)})`, 'a60e-never-unreadable-reader', { count: 'any' }), 'never-unreadable-reader');
+      const folderRoad = async (A, CSm) => {
+        A._resetRolloutIndexForTests(); A._setRolloutTimingForTests({ retryMs: 0 });
+        try {
+          return await withReaddir((p0) => (p0 === rdir ? 'fail' : null), async () => {
+            const first = await reask(CSm, tid2);
+            for (let i = 0; i < 3; i++) await A.refreshCodexRolloutIndex();
+            const rd = rdOf(CSm, tid2); await rd.rawAsync();
+            return { first: first.notKnown, cause: rd.notLoadedNotKnown, streak: A.rolloutIndexStats().walks };
+          });
+        } finally { A._setRolloutTimingForTests({}); A._resetRolloutIndexForTests(); }
+      };
+      const g27 = await folderRoad(AD, CS), r27 = await folderRoad(require(adUnrPath), csUnr);
+      const FOLD = 'A folder of its saved history cannot be read.', CV27 = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+      const fWords = [valOf(fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), FOLD), valOf(fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8'), FOLD)];
+      ok(g27.first && g27.cause === 'folder' && r27.cause === true && CV27.split("t('" + FOLD + "')").length - 1 === 2 && fWords.every((w) => typeof w === 'string' && w.length > 4),
+        `r2873 (d) a folder that can never be listed: after ${g27.streak} walks the cause is ${JSON.stringify(g27.cause)} and the page says so (the line and the toast; zh / ja ${fWords.join(' · ')}); RED (never unreadable): ${JSON.stringify(r27.cause)}`);
       AD._resetRolloutIndexForTests();
       fs.rmSync(rfile, { force: true });
     }

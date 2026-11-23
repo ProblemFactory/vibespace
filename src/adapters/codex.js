@@ -489,6 +489,10 @@ function rolloutIndexEpoch() { return ROLLOUT_INDEX.ended; }
  *  index has seen them. → the index it left */
 async function refreshCodexRolloutIndex() { if (ROLLOUT_INDEX.running) await ROLLOUT_INDEX.running; return (await (requestRolloutWalk() || Promise.resolve(ROLLOUT_INDEX.last))); }
 /** What the index has done (a leg reads it): its walks, the last walk's facts, whether one runs. */
+/** r2873 (d): THE INDEX's WALKS KEEP FAILING — UNREADABLE_AFTER failed walks in a row (a folder of the tree that can never be listed: a
+ *  walk «could not be whole» each time). A reader's «not known yet» then says a folder cannot be read instead of promising for ever */
+const UNREADABLE_AFTER = 3;
+function rolloutIndexUnreadable() { const l = ROLLOUT_INDEX.last; return ROLLOUT_INDEX.failStreak >= UNREADABLE_AFTER && !!l && !l.ok && !l.cut; }
 function rolloutIndexStats() { const l = ROLLOUT_INDEX.last; return { walks: ROLLOUT_INDEX.walks, ended: ROLLOUT_INDEX.ended, asks: ROLLOUT_INDEX.asks, running: !!ROLLOUT_INDEX.running, retrying: !!ROLLOUT_INDEX.retry, failStreak: ROLLOUT_INDEX.failStreak, missed: ROLLOUT_INDEX.missAt.size, kept: CODEX_PATH_KEPT.size, last: l ? { ok: l.ok, rollouts: l.rollouts, dirs: l.dirs, startedAt: l.startedAt, endedAt: l.endedAt } : null }; }
 function _resetRolloutIndexForTests() {
   ROLLOUT_INDEX.gen++; ROLLOUT_INDEX.ended++;   // every walk still out is detached (its end writes nothing); readers re-read
@@ -2073,7 +2077,7 @@ module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
-  findCodexSessionJsonlPath, findCodexSessionJsonlPathAsync, codexRolloutLookup, codexRolloutLookupAsync, warmCodexRolloutIndex, refreshCodexRolloutIndex, rolloutIndexEpoch, rolloutIndexStats, noteCodexRollout, _resetRolloutIndexForTests, _setRolloutTimingForTests,   // B-a60e remainder: THE ROLLOUT INDEX
+  findCodexSessionJsonlPath, findCodexSessionJsonlPathAsync, codexRolloutLookup, codexRolloutLookupAsync, warmCodexRolloutIndex, refreshCodexRolloutIndex, rolloutIndexEpoch, rolloutIndexUnreadable, rolloutIndexStats, noteCodexRollout, _resetRolloutIndexForTests, _setRolloutTimingForTests,   // B-a60e remainder: THE ROLLOUT INDEX
   CODEX_NONE_FRESH_MS, CODEX_ASK_BOUND_MS,
   normalizeCodexSource,
   parseCodexSessionJsonl,

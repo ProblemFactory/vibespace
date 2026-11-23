@@ -1153,6 +1153,7 @@ export default {
   "No messages in this session's transcript yet.": "此会话的记录中还没有消息。",
   "Its saved history is not known yet — it fills in here by itself.": "它保存的历史暂时还无法确定——会在这里自动补上。",
   "Its saved history was not found.": "没有找到它保存的历史。",
+  "A folder of its saved history cannot be read.": "无法读取它保存的历史所在的一个文件夹。",
   "No results": "无结果",
   "No saved presets. Save current workspace as a preset.": "没有已存预设。将当前工作区保存为预设。",
   "No sessions": "无会话",
