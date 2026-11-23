@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A stored secret a background job prints in two pieces (a pause between them, or its child printing the rest after it ends) no longer lands whole in its log.
 - While the accounts list cannot be read, no unattended turn is spent, and no claim, warning or setting is pruned or filed under the wrong account.
 - Window shares and agent window leases are no longer dropped when the list of desktop apps cannot be read.
+- A run switch you turned off in the Vault window stays off when VibeSpace once cannot read its run settings; a switch pressed then is refused with a note.
 
 ## 2.369.416 — 2026-11-23
 
