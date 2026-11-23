@@ -874,6 +874,8 @@ class AccountManager {
     if (rte) { if (was !== rte) { a.loginTie = { rte }; this._save(); } }   // a live sign-in's deadline — or the CLI's blanked residue's, its login's
     else if (a.loginTie) { delete a.loginTie; this._save(); }
   }
+  /** the row's tie DROPPED (r2972 1): after an unvouched outcome the folder holds a sign-in nothing tied — the next press seeds from it */
+  _dropLoginTie(id) { const a = this.get(id); if (this._loginTies) this._loginTies.delete(id); if (a && a.loginTie) { delete a.loginTie; this._save(); } }
   /** a tie on record for row `id` (its deadline on the row, or its refresh token's fingerprint this process saw) */
   _hasTie(id) { const a = this.get(id); return !!((a && a.loginTie) || (this._loginTies && this._loginTies.has(id))); }
   /** → (claudeAiOauth) ⇒ tied to the login session the product's own sign-in saw for row `id` (its deadline, or its refresh token's hash) */
@@ -933,6 +935,9 @@ class AccountManager {
     const was = this._reloginBefore && this._reloginBefore.get(id);
     if (was && Date.now() - was.at <= RELOGIN_BEFORE_TTL_MS) {
       const st0 = this._loginStatusRaw(id);
+      // r2972 3: the run's SUCCESS already sits unjudged (the tab closed, the watch stopped): judged FIRST, then this press begins
+      // afresh — never a second command whose later sign-in lands with no watcher
+      if (st0 && st0.attempt === was.attempt && st0.state === 'success') { try { this.reloginResolve(id); } catch { } if (this._reloginBefore) this._reloginBefore.delete(id); return this.reloginBegin(id); }
       if (!(st0 && st0.attempt === was.attempt && st0.state === 'error')) return { attempt: was.attempt, joined: true };
     }
     const be = this._acctBackend(a), creds = this._credsOf(be), dir = this.subDir(id), word = reloginWordOf(a);
@@ -992,6 +997,9 @@ class AccountManager {
     try { afterAuth = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(src, RR, { tied: vouched ? () => true : this._tiedFn(id) }) : null; } catch { afterAuth = null; }
     const after = accountIdentity.identityRecordOf({ harness: be, declared: null, auth: afterAuth });
     const verdict = accountIdentity.beforeAfterVerdict({ before: lost ? null : kept.record, after, word: lost ? reloginWordOf(a) : kept.word, lost });
+    // r2972 1: an unvouched sign-in ties nothing AND unties the row — the next press seeds from its folder. Never on an ASK: its sign-in
+    // is held out of the folder and the answer ties it, and a hold that FAILS leaves an unproven sign-in live that must never be a seed
+    if (!vouched && verdict !== 'ask') this._dropLoginTie(id);
     if (verdict === 'same') return { outcome: 'same', account: this.finalizeSubscription(id, { tie: vouched }) };   // a stale success ties nothing
     if (verdict === 'ask') {
       // HELD, not adopted: the row stays signed out until the person answers on it (reloginAnswer). The MARK goes on disk BEFORE the
@@ -1398,6 +1406,7 @@ class AccountManager {
     this._oatCheckReplaced(fromId, foldedCheck, 'the row was folded into ' + (into.name || intoId));
     if (into.oatEnc) this.syncOatFile(intoId).catch(() => { }); // ours is re-derived on the survivor
     this._noteLoginTie(intoId, { fresh: true });   // the MERGE carries the tie onto the survivor: its folder now holds the folded sign-in (r2915)
+    if (this._loginTies) this._loginTies.delete(fromId);   // …and the folded row's own fingerprint leaves with it (r2972 5)
     this._displayForget(from); this._displaySeed(into);   // B-360d: the folded folder is gone; the survivor's facts are what the fold just wrote
     this._notify();
     return this.rowOf(intoId);   // B-360d: one row by its id, never a whole list

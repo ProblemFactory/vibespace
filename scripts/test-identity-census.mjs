@@ -272,7 +272,7 @@ ok(Object.keys(RIGHT).length === Object.keys(DOORS).length && Object.keys(RIGHT)
 // gone, is RED by name: judge it here, or restate its row. (A door of a NEW name is not found so — a code walk is a later
 // unit's; this census says that limit.) Each judged and unjudged door has its row, and no row is any other
 const DOOR_MARKS = {
-  reloginResolve: { 'reloginResolve(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'reloginBegin(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'reloginAnswer(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'beforeAfterVerdict(': { 'src/account-identity.js': 1, 'src/accounts.js': 1 } },
+  reloginResolve: { 'reloginResolve(': { 'src/accounts.js': 2, 'src/server/account-usage-routes.js': 1 }, 'reloginBegin(': { 'src/accounts.js': 2, 'src/server/account-usage-routes.js': 1 }, 'reloginAnswer(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'beforeAfterVerdict(': { 'src/account-identity.js': 1, 'src/accounts.js': 1 } },   // + the press judging an unjudged success first, then pressing afresh (r2972 3): the same door
   evaluateOnHost: { 'evaluateOnHost(': { 'src/accounts.js': 1, 'src/ws-create.js': 2, 'src/routes/account-tails.js': 1, 'src/server/account-usage-routes.js': 1 } },
   _usageGlobalLink: { '_usageGlobalLink = ': { 'src/usage-routes.js': 4 } },
   usageIdentityGroups: { 'usageIdentityGroups(': { 'src/server/usage-pool-engine.js': 3 }, 'groupKeyOf(': { 'src/server/usage-pool-engine.js': 3 } },
