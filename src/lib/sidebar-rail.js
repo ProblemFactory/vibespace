@@ -1096,6 +1096,7 @@ export function installSidebarRail(Sidebar) {
           const svcM = /^service:\s*(.+)$/.exec(f.label || '');
           const svcWords = svcM ? (svcM[1] === CLEARED_TEXT ? clearedText() : svcM[1]) : null;   // a cleared job's service in THIS device's words (verify r8)
           row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${svcM ? ` <span class="ports-svc">${escHtml(svcWords)}</span>` : ''} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
+          if (f.ownerGone) row.insertAdjacentHTML('beforeend', `<div class="empty-hint empty-hint-inline">${escHtml(tr('Its background job is gone: this forward and its public address stay until you remove it here.'))}</div>`);   // r3327: a job row whose job is gone, said on it
           // the proto chip is the override handle
           const chip = row.querySelector('.ports-proto');
           if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);

@@ -13444,6 +13444,8 @@ export default {
   "Not published: port {port} is already forwarded by hand in the Ports panel. Publish it there, or remove that forward and start the service again.": "未发布：端口 {port} 已在“端口”面板中手动转发。请在那里发布，或移除该转发后重新启动服务。",
   "Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.": "未发布：端口 {port} 已转发给另一个仍在运行的服务。请停止那个服务，或为此服务换一个端口。",
   "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.": "未移除：无法读取端口转发列表，因此无法撤下此服务的公开地址。请先停止它；等端口转发列表能读取后再移除。",
+  "Stopped, not removed: the list of forwards could not be read, so this service's public address could not be taken down yet. Remove it once the list of forwards reads.": "已停止，未移除：无法读取端口转发列表，因此暂时无法撤下此服务的公开地址。等端口转发列表能读取后再移除。",
+  "Its background job is gone: this forward and its public address stay until you remove it here.": "它的后台任务已不存在：这个转发及其公开地址会一直保留，直到你在这里移除它。",
   "Not restarted: it ran VibeSpace itself.": "未自动重启：它运行的是 VibeSpace 本身。",
   "Runs VibeSpace: its memory bound ends it whole.": "运行 VibeSpace：超出内存上限会让它整体结束。",
   "Memory bound": "内存上限",

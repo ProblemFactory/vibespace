@@ -297,6 +297,8 @@ class PortForwardManager {
   }
 
   list() {
+    const jm = (() => { try { return this.getJobs && this.getJobs(); } catch { return null; } })();
+    const gone = (id) => { try { return !!id && !!jm && typeof jm.ownerKnown === 'function' && jm.ownerKnown(id) === false; } catch { return false; } };   // r3327
     return this._state.forwards.map((r) => ({
       id: r.id, hostId: r.hostId, remotePort: r.remotePort, label: r.label || '',
       targetHost: r.targetHost || null, // set = a LAN machine reached via this device (jump host)
@@ -312,6 +314,7 @@ class PortForwardManager {
       publicSub: r.publicSub || null, pathMount: r.pathMount || null, pathPublic: !!r.pathPublic,
       ownerJob: r.ownerJob || null,   // r3228: the job whose service this row is (written by the jobs engine only); a person's row has none
       relayUnanswered: this._relayUnanswered.has(r.id),   // r3287: its replay's relay call did not answer within the bound — left as it is
+      ownerGone: gone(r.ownerJob),   // r3327: its background job is gone (the engine can say so) — the Ports panel says it; unknown is never «gone»
     }));
   }
 
@@ -665,6 +668,7 @@ class PortForwardManager {
     }
     this._published.delete(id);
     this._healRetryAt.delete(id);
+    this._pubGen.delete(id); this._relayUnanswered.delete(id);   // r3327: the row leaves — its marks with it
     this._state.forwards = this._state.forwards.filter((r) => r.id !== id);
     this._persist();
     this._emit();
@@ -724,7 +728,10 @@ class PortForwardManager {
     const gen0 = this._pubGen.get(id) || 0;
     try { if (this.plugins) await this.plugins.frpUnpublish(rec.publicName || id); } catch { }
     // r3287: a publish that landed while this unpublish waited (a start in the same window) stands — its address is never cleared under it
-    if ((this._pubGen.get(id) || 0) !== gen0) { this.log(`[ports] unpublish ${id}: a publish came meanwhile — the new address stands`); return; }
+    if ((this._pubGen.get(id) || 0) !== gen0) {   // r3327: said to the caller (a person's Unpublish press reads it), never a silent success
+      this.log(`[ports] unpublish ${id}: a publish came meanwhile — the new address stands`);
+      throw Object.assign(new Error('not unpublished: this forward was published again while the relay was asked — it is public again; unpublish it again'), { code: 'republished_meanwhile', status: 409 });
+    }
     rec.publicUrl = null; rec.publicName = null; delete rec.protoPending;
     if (!keepName) { rec.publicSub = null; rec.publicPort = null; rec.publicProto = null; if (this._state.names) delete this._state.names[id]; }
     this._published.delete(id);
@@ -882,6 +889,7 @@ class PortForwardManager {
       if (l) { for (const s of l.sockets) { try { s.destroy(); } catch {} } try { l.server.close(); } catch {} this._live.delete(rec.id); }
       this._published.delete(rec.id);
       this._healRetryAt.delete(rec.id);
+      this._pubGen.delete(rec.id); this._relayUnanswered.delete(rec.id);   // r3327
     }
     this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);
     this._persist();

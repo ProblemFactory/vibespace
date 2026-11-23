@@ -13443,6 +13443,8 @@ export default {
   "Not published: port {port} is already forwarded by hand in the Ports panel. Publish it there, or remove that forward and start the service again.": "公開されていません：ポート {port} はポートパネルで手動で転送されています。そこで公開するか、その転送を削除してからサービスを再起動してください。",
   "Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.": "公開されていません：ポート {port} はまだ動いている別のサービスに転送されています。そちらを止めるか、このサービスに別のポートを使ってください。",
   "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.": "削除されていません：ポート転送の一覧を読み込めないため、このサービスの公開アドレスを取り下げられませんでした。今は停止し、ポート転送の一覧が読み込めるようになってから削除してください。",
+  "Stopped, not removed: the list of forwards could not be read, so this service's public address could not be taken down yet. Remove it once the list of forwards reads.": "停止しました（削除はしていません）：ポート転送の一覧を読み込めないため、このサービスの公開アドレスをまだ取り下げられません。ポート転送の一覧が読み込めるようになってから削除してください。",
+  "Its background job is gone: this forward and its public address stay until you remove it here.": "このバックグラウンドジョブはもうありません：この転送とその公開アドレスは、ここで削除するまで残ります。",
   "Not restarted: it ran VibeSpace itself.": "再起動しません：VibeSpace 自身を実行していました。",
   "Runs VibeSpace: its memory bound ends it whole.": "VibeSpace を実行中：メモリ上限を超えると丸ごと終了します。",
   "Memory bound": "メモリ上限",

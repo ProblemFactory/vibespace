@@ -206,6 +206,7 @@ const archiveOrder = (a, b) => ((b.archivedAt || 0) - (a.archivedAt || 0)) || (M
 
 // r3287: the words of a service's removal refused while the list of forwards cannot be read (the card says them in the reader's language)
 const RM_PORTS_HELD = "not removed: the list of forwards could not be read, so this service's public address could not be taken down — stop it now; remove it once the list of forwards reads";
+const RM_PORTS_HELD_STOPPED = "stopped, not removed: the list of forwards could not be read, so this service's public address could not be taken down yet — remove it once the list of forwards reads";   // r3327: a stopped (or archived) service
 
 class JobManager {
   /** deps: { dataDir, broadcast(type,payload), notifyUser({words,fact,urgency,jobId,jobName,ownerCid})→{ok,why?}, log,
@@ -1390,6 +1391,8 @@ class JobManager {
     const i = arch.findIndex((r) => r.id === id);
     if (i < 0) return (this._loadArchive() || []).some((r) => r.id === id) ? { error: 'its removal is not on disk yet — it finishes by itself', code: 'being-removed' } : { error: 'no such archived job' };
     if (this._notifsUnread && arch[i].clearedAt) return { error: this._notifsClearedWords(id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
+    // r3327: an ARCHIVED service's removal while port-forwards.json is held — refused by name as a live one's is (its row would name nobody)
+    if (this._mayOwnForward(arch[i]) && this._portsHeld()) return { error: RM_PORTS_HELD_STOPPED, code: 'ports_unread', stopped: true };
     const tell = (r) => { if (answer) { try { answer(r); } catch (e) { this.d.log('[jobs] a removal answer failed:', (e && e.message) || e); } } };
     // the removal's end rides the REAL landing (its dir, the pages told); the reply is bounded at 15 s, under the CLI's write budget
     // r1917: logsGone() asked between the hand-off and the landing WAITS for the landing — never «gone» for a folder the remover was not
@@ -3475,10 +3478,12 @@ class JobManager {
     return p;
   }
   async _forwardsPass(why) {
-    if (!this.ready || this.readOnly || this._recordsHeld()) return null;   // r3287 (a)(d): this engine not ready / read-only / its records held
+    if (!this.ready || this.readOnly) return null;   // r3287 (d): this engine not ready / read-only
     const pf = this.d.getPorts && this.d.getPorts();
     if (!pf || (typeof pf.heldWords === 'function' && pf.heldWords())) return null;   // held: nothing is known — the lift runs it
-    if (typeof pf.replayedOnce === 'function' && !pf.replayedOnce()) return null;     // r3287: the Ports list has not replayed yet — its replay's end asks
+    for (const job of this.jobs.values()) { if (job.kind !== 'service') continue; delete job.publishHeld; if (job._publish && job._publish.state === 'held') job._publish = null; }   // r3327: the Ports list reads now: its held words go, whatever else waits
+    if (this._recordsHeld()) return null;   // r3287 (a): its records held — their lift asks
+    if (typeof pf.replayedOnce !== 'function' || !pf.replayedOnce()) return null;     // r3287: the Ports list has not replayed yet — its replay's end asks; r3428 law 2: a store that cannot SAY it has replayed (a suite's stand-in) never gets a pass
     const boundMs = Number(pf.relayBoundMs) > 0 ? Number(pf.relayBoundMs) : 20000;
     const out = { why, claimed: [], kept: [], down: [], published: [], unknown: [], unanswered: [], inFlight: [] }, served = new Set();
     const wants = (job) => !!job && job.kind === 'service' && !!job.publish && ['up', 'starting'].includes(job.state) && (job.ports || []).length > 0;
@@ -3499,11 +3504,13 @@ class JobManager {
       if (!rec0.ownerJob) continue;
       const rec = listed().find((r) => r.id === rec0.id);
       if (!rec || rec.ownerJob !== rec0.ownerJob) continue;   // gone or taken meanwhile (a start in the same window)
-      if (rec.relayUnanswered) { out.unanswered.push(rec.id); served.add(rec.ownerJob); continue; }   // its replay's relay call did not answer: left as it is (its job is not published again over it)
       const live = this.jobs.get(rec.ownerJob);
       const job = live && !LS.isSkeleton(live) ? live : null;
       const archived = job ? null : (() => { try { return this.archivedById(rec.ownerJob); } catch { return null; } })();
       if (!job && !archived) { out.unknown.push(rec.id); continue; }   // UNKNOWN KEEPS — its address and its name
+      // its replay's relay call did not answer: a row its job still asks for is left as it is (not published again over it); r3327: a row
+      // of a job the engine KNOWS no longer asks is taken down all the same (its unpublish is bounded) — never left for the heal sweep
+      if (rec.relayUnanswered && job && wants(job)) { out.unanswered.push(rec.id); served.add(rec.ownerJob); continue; }
       if (job && job._publish && job._publish.state === 'publishing') { out.inFlight.push(rec.id); continue; }   // a start in flight owns it now
       if (job && wants(job) && Number(job.ports[0]) === Number(rec.remotePort)) {
         job._pfId = rec.id; delete job.publishNotOwned; delete job.publishRefusal; served.add(job.id);
@@ -5316,16 +5323,33 @@ class JobManager {
     this._save();
     return { ok: true, ...said(eff) };
   }
+  /** r3327: a service that can own a Ports row — it asks to publish on a port, or holds one */
+  _mayOwnForward(job) { return !!job && job.kind === 'service' && ((!!job.publish && (job.ports || []).length > 0) || !!job._pfId); }
+  /** r3327: port-forwards.json held (its read failed) — a removal that would leave a row nobody owns waits */
+  _portsHeld() { try { const pf = this.d.getPorts && this.d.getPorts(); return !!(pf && typeof pf.heldWords === 'function' && pf.heldWords()); } catch { return false; } }
+  /** r3327: does this engine KNOW the job a row names? true (live or archived), false (it can say: no such job), null (it cannot say:
+   *  not ready, read-only or its records held) — the Ports panel's «its background job is gone» */
+  ownerKnown(id) {
+    if (!this.ready || this.readOnly || this._recordsHeld()) return null;
+    const live = this.jobs.get(id);
+    if (live) return !LS.isSkeleton(live) ? true : null;
+    try { return this.archivedById(id) ? true : false; } catch { return null; }
+  }
   rm(job, { stop, orphan } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     // r3287 (round wbbbpdgvd, line ten): a SERVICE's removal while port-forwards.json is held is REFUSED by name — its public address could
     // not be taken down, and an unknown row is kept (never read as removed); the stop is not refused
-    if (job && job.kind === 'service') { const pf = this.d.getPorts && this.d.getPorts(); if (pf && typeof pf.heldWords === 'function' && pf.heldWords()) return { error: RM_PORTS_HELD, code: 'ports_unread' }; }
+    // r3327: only a service that can own a row (it asks to publish, or holds one); a remove-with-stop STOPS it and refuses only the removal
+    if (this._mayOwnForward(job) && this._portsHeld()) {
+      if (stop && this._verifyAlive(this._readStamp(job))) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; return { error: RM_PORTS_HELD_STOPPED, code: 'ports_unread', stopped: true }; }
+      return ['up', 'starting'].includes(job.state) ? { error: RM_PORTS_HELD, code: 'ports_unread' } : { error: RM_PORTS_HELD_STOPPED, code: 'ports_unread', stopped: true };
+    }
     if (this._notifsUnread && job && job.clearedAt) return { error: this._notifsClearedWords(job.id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
     const alive = this._verifyAlive(this._readStamp(job));
     if (alive && !stop && !orphan) return { error: `${job.id} is still running — vibespace-job rm ${job.id} --stop (kill then remove), or --orphan to abandon the live process (tracked nowhere after that)` };
     if (alive && stop) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; }   // B-2c5c: never removed while it runs as this hub
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
+    const addressKept = !!(alive && orphan && this._mayOwnForward(job));   // r3327: its forward and public address stay (its process runs on): said
     const last = job.runs && job.runs[job.runs.length - 1];
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
     this.jobs.delete(job.id); this._dirty = true; this._save();
@@ -5355,7 +5379,7 @@ class JobManager {
       this._vaultGone([job]);
     });
     try { this.d.broadcast('jobs-updated', { id: job.id, removed: true }); } catch { }
-    return { ok: true };
+    return { ok: true, ...(addressKept ? { addressKept: true } : {}) };
   }
   progress(job, text) { job.progress = String(text).slice(0, 300); this._touch(job); return { ok: true }; }
   ask(job, panel) {

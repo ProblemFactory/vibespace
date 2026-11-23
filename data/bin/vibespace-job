@@ -454,6 +454,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         console.log('removed — one of its runs is still running; its log files are deleted 14 days after it ends');
       } else if (rmAns && rmAns.logsKept === 'unjudgeable') {
         console.log('removed — one of its runs could not be checked; its log files are deleted once it can be told it has ended');
+      } else if (rmAns && rmAns.addressKept) {   // r3327: --orphan of a published service — its process runs on, its forward and public address stay
+        console.log('removed — it was left running, so its forward and its public address stay: remove the forward in the Ports panel to take the address down');
       } else console.log('removed');
       break;
     }

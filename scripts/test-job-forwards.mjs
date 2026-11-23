@@ -103,8 +103,8 @@ const S2 = svc('jb-fwdgone01', 47412), RMH = "not removed: the list of forwards 
 const removal = (JM) => scene({ JM, rows: [ownedRow(S2, 47412)], jobs: [S2], whileHeld: async (c) => { c.facts.rm = c.E.rm(c.E.jobs.get(S2.id), { stop: true }); c.facts.still = c.E.jobs.has(S2.id); if (c.facts.still) await stopWhileHeld(c, S2.id); } });
 const r2 = await removal();
 ok(!!r2.facts.rm && r2.facts.rm.code === 'ports_unread' && r2.facts.rm.error === RMH && r2.facts.still === true && lastFor(r2, 'pf-__local__-47412') === 'unpublish' && !r2.rows.length && r2.names.includes('pf-__local__-47412'), `§2: rm of a service while held refused by name («${r2.facts.rm && r2.facts.rm.error}»), the record kept; the stop is not refused — at the lift its address down, its name KEPT for its next start`, r2);
-const RM_GUARD = "    if (job && job.kind === 'service') { const pf = this.d.getPorts && this.d.getPorts(); if (pf && typeof pf.heldWords === 'function' && pf.heldWords()) return { error: RM_PORTS_HELD, code: 'ports_unread' }; }\n";
-const r2red = await removal(loadJM(anchored(JSRC, RM_GUARD, '', 'rm-while-held'), 'rm-while-held'));
+const RM_GUARD = "    if (this._mayOwnForward(job) && this._portsHeld()) {\n";
+const r2red = await removal(loadJM(anchored(JSRC, RM_GUARD, '    if (false) {\n', 'rm-while-held'), 'rm-while-held'));
 ok(r2red.facts.still === false, 'RED CONTROL §2: the removal\'s refusal cut (in a copy) — the service leaves the records while its row cannot be closed', r2red.facts);
 const S2b = svc('jb-fwdlost01', 47418);
 const unknownScene = (JM) => scene({ JM, rows: [ownedRow(S2b, 47418)], jobs: [S2b], whileHeld: async (c) => { c.E.jobs.delete(S2b.id); } });   // a record the engine can no longer name
@@ -283,8 +283,8 @@ async function startScene({ JM = JobManager, PFM = PortForwardManager, rows = []
   try { clearInterval(pf._watch); if (pf._hold && pf._hold.stop) pf._hold.stop(); } catch { }
   return { atReplay, after };
 }
-const GATE = "    if (!this.ready || this.readOnly || this._recordsHeld()) return null;   // r3287 (a)(d): this engine not ready / read-only / its records held\n";
-const guardsCut = (src) => anchored(anchored(src, GATE, '', 'r3228-form'), UNKNOWN_KEEPS, '', 'r3228-form');   // the r3228 form: no gate, no unknown keeps
+const GATE = "    if (!this.ready || this.readOnly) return null;   // r3287 (d): this engine not ready / read-only\n", GATE_HELD = "    if (this._recordsHeld()) return null;   // r3287 (a): its records held — their lift asks\n";
+const guardsCut = (src) => anchored(anchored(anchored(src, GATE, '', 'r3228-form'), GATE_HELD, '', 'r3228-form'), UNKNOWN_KEEPS, '', 'r3228-form');   // the r3228 form: no gate, no unknown keeps
 
 console.log('§9 MUST 1: the jobs list HELD at a start (a placed refusal of its read), the Ports list readable with a published job row');
 const A9 = svc('jb-fwdheld09', 47421, { publishedUrl: 'https://was-47421.relay.test/', lastPublicUrl: 'https://was-47421.relay.test/' });
@@ -338,7 +338,7 @@ console.log('§13 HOLD 3 + the shoulds\' words: the card says the removal\'s ref
   const RMW = "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.";
   const OWNED = 'Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.';
   const P13 = read('src/lib/jobs-panel.js'), Z13 = read('src/lib/i18n-zh.js'), J13 = read('src/lib/i18n-ja.js');
-  ok(P13.includes(`if (r?.error && r.code === 'ports_unread' && act === 'rm') r.error = t("${RMW}");`) && [RMW, OWNED].every((k) => Z13.includes(`  "${k}": "`) && J13.includes(`  "${k}": "`)), 'the card\'s remove press shows the removal\'s refusal in words (never a bare code), zh and ja carry both sentences');
+  ok(P13.includes(`if (r?.error && r.code === 'ports_unread' && act === 'rm') r.error = r.stopped ? t("`) && P13.includes(`: t("${RMW}");`) && [RMW, OWNED].every((k) => Z13.includes(`  "${k}": "`) && J13.includes(`  "${k}": "`)), 'the card\'s remove press shows the removal\'s refusal in words (never a bare code), zh and ja carry both sentences');
   const ownedSnap = globalThis.__fwdOwnedSnap;
   ok(!!ownedSnap && LAYOUT.publishBlockedNote(ownedSnap, tt) === tt(OWNED, { port: 47417 }), 'should 1: a row of ANOTHER live service — the card names that, never «by hand»', ownedSnap && { state: ownedSnap.publishState, refusal: ownedSnap.publishRefusal });
 }
