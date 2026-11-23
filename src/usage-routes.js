@@ -1670,6 +1670,7 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
   const raw = isGlobal ? _rateLimitCache : (_accountUsage[key] || usageWrite.readCacheObject(USAGE_CACHE_DIR, key));
   const lanes = req.body && req.body.lanes === 'all' ? 'all' : (Array.isArray(req.body && req.body.lanes) ? req.body.lanes.slice(0, 16).map(String) : []);
   const r = resetClaims.claim(key, lanes, raw);
+  if (!r.ok && r.code === 'reset_claims_unread') return res.status(503).json({ error: r.error, code: r.code });   // r3003 (b): the claims could not be read — refused by name
   if (!r.ok) return res.status(r.code === 'no-reading' ? 409 : 400).json({ error: r.code === 'no-reading' ? 'this account has no reading yet — nothing to mark as reset' : r.code === 'too-low' ? 'that limit reads under 5 % used — its next reading could show no reset' : r.code === 'bad-key' ? 'bad account' : 'unknown lane', code: r.code, ...(r.lanes ? { lanes: r.lanes } : {}) });
   let wall = null;
   try { wall = !isGlobal && typeof accounts.placeWallOf === 'function' ? accounts.placeWallOf(key) : null; } catch { wall = null; }
@@ -1689,6 +1690,7 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
 app.post('/api/accounts/:id/reset-claim/dismiss', (req, res) => {
   if (pressBearer(req.headers)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
   const lane = req.body && typeof req.body.lane === 'string' ? req.body.lane.slice(0, 80) : null;
+  { const w = typeof resetClaims.unreadWords === 'function' ? resetClaims.unreadWords() : null; if (w) return res.status(503).json({ ok: false, code: 'reset_claims_unread', error: w }); }   // r3003 (b): held — refused by name
   const ok = resetClaims.dismiss(String(req.params.id || ''), lane);
   const notDurable = () => res.status(503).json({ ok, code: 'not-durable', error: NOT_DURABLE_WORDS });   // the dismissal applied, not on disk yet (law F)
   (ok ? resetClaims.persisted() : Promise.resolve(true)).then((durable) => (durable === false ? notDurable() : res.json({ ok })), notDurable);

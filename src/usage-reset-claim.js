@@ -23,6 +23,8 @@
 const fs = require('fs');
 const path = require('path');
 const quotaModel = require('./quota-model.js');
+const SR = require('./store-read.js');   // B-f276 family (r3003 (b)): the store-read law's three answers
+const HOLD = require('./store-read-hold.js');   // …and its hold: usage-reset-claims.json under the law
 
 const MAX_AGE_MS = 7 * 86400e3;
 const OUTCOME_KEEP_MS = 24 * 3600e3;
@@ -100,19 +102,33 @@ function sanitize(j, t) {
 function create({ file, now = () => Date.now(), log = (...a) => console.log(...a), known = null } = {}) {
   let isKnown = typeof known === 'function' ? known : null, nameFn = null;
   let state = { v: 1, claims: {}, outcomes: {}, seen: {} };
+  // B-f276 family (主开发 r3003 (b), lane hub-loop-stalls): THE STORE-READ LAW (src/store-read-hold.js). The release read a failed read
+  // or torn bytes as EMPTY with its rewrite mark set, and the save ran AT THE START with no act of anybody: the person's «I reset it»
+  // claims, their outcomes and the said-once reset memory gone (a reset said again). HELD: nothing is written over the file; a
+  // person's claim and dismissal are refused BY NAME (`reset_claims_unread`); what a reading would note (a lane measured, a reset
+  // seen, a fall held) is NOT noted while the claims are unknown — nothing said on an empty memory, the next reading after the lift
+  // says it once; the pool reads no claim meanwhile (the release's behaviour before any claim). Read again off the loop. LIFTED: the
+  // claims read, as at a start. TORN: kept aside once, then empty — saved ONCE (no remover reads this store's silence: the next
+  // start would only hold again)
+  const hold = file ? HOLD.create({ file, valid: isObj, code: 'reset_claims_unread', aside: (m) => file + '.corrupt-' + m,
+    words: (h) => `the reset claims could not be read (${h && h.code}) — VibeSpace reads them again by itself every few minutes. Nothing was lost or changed: nothing is written over them, and marking a limit as reset waits until they read`,
+    log: (l) => log(`[reset-claim] ${l}`), onLift: (v, facts) => lifted(v, facts) }) : null;
+  const isHeld = () => !!(hold && hold.held());
   {
-    let j = null, unreadable = null;
-    try { j = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : null; } catch (e) { if (e && e.code !== 'ENOENT') unreadable = e.code || 'not JSON'; }
-    const r = sanitize(j, now());
+    let read = null;
+    if (file) { try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; } }
+    const a = read ? SR.storeAnswer(read, { valid: isObj }) : { state: 'missing' };
+    const st = hold ? hold.start(a) : 'missing';
+    const r = sanitize(st === 'data' ? a.value : null, now());
     state = r.state;
-    if (unreadable) log(`[reset-claim] ${file}: unreadable (${unreadable}) — no claim is kept from it; it is rewritten now`);
-    if (r.dropped.length) log(`[reset-claim] ${file}: dropped ${r.dropped.length} malformed entr${r.dropped.length === 1 ? 'y' : 'ies'} (${r.dropped.slice(0, 4).join('; ')}${r.dropped.length > 4 ? '; …' : ''}) — the rest stands; the file is rewritten without them`);
-    var _rewrite = !!(unreadable || r.dropped.length);   // said ONCE: the clean state replaces the bad bytes (below, once `save` exists)
+    if (r.dropped.length) log(`[reset-claim] ${file}: dropped ${r.dropped.length} malformed entr${r.dropped.length === 1 ? 'y' : 'ies'} (${r.dropped.slice(0, 4).join('; ')}${r.dropped.length > 4 ? '; …' : ''}) — the rest kept; it is rewritten now`);
+    var _rewrite = !!r.dropped.length;   // said ONCE: the clean state replaces the bad entries (below, once `save` exists) — never an unread file
   }
   let dirty = false, failSaid = false;
   const W = () => require('./store-writer.js').storeWriter();
   // THE STORE WRITER (K2): `act` = a person's claim / dismissal — rank 0, the writer's next write (persisted() awaits it)
   function save({ act = false } = {}) {
+    if (hold && !hold.writable('a write of the reset claims')) return;   // HELD: never over a file that could not be read
     dirty = true;
     if (!file) return;
     W().dirty(file, { name: 'reset-claims.write', mode: 0o600, ...(act ? { rank: 0 } : {}),
@@ -128,10 +144,19 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   const listeners = new Set(), claimListeners = new Set();
   const changed = (key) => { for (const fn of listeners) { try { fn(key); } catch { } } };
   if (_rewrite) save();
+  /** the hold LIFTED: the claims read (null: torn bytes kept aside — none), as at a start; every surface told */
+  function lifted(v, facts) {
+    const r = sanitize(v, now());
+    state = r.state;
+    if (r.dropped.length) log(`[reset-claim] ${file}: dropped ${r.dropped.length} malformed entr${r.dropped.length === 1 ? 'y' : 'ies'} at its read again — the rest kept`);
+    if (r.dropped.length || (facts && facts.setAside)) save();
+    changed(null);
+  }
 
   /** A person's claim over the account's reading `raw`: `lanes` = 'all' (every lane the reading draws with a spend) |
    *  [lane…]. → { ok: true, lanes, at } | { ok: false, code: 'bad-key' | 'no-reading' | 'bad-lane', lanes? } */
   function claim(key, lanes, raw, { by = 'person' } = {}) {
+    if (isHeld()) return { ok: false, code: 'reset_claims_unread', error: hold.words() };   // HELD: refused by name
     const k = String(key || '');
     if (!KEY_RE.test(k)) return { ok: false, code: 'bad-key' };
     const known = quotaModel.lanesOfReading(raw).filter((x) => x.usedPct != null); // a lane that states no spend can show no reset
@@ -170,6 +195,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
    *  record's own `refusedAt`); a stored age never does (the carry rule keeps an unchanged number's older one, and a
    *  sibling's bucket rides a write unmeasured) — the write path's statements do (noteLanesRead) */
   function settle(key, raw) {
+    if (isHeld()) return;   // HELD: nothing settles on a memory that could not be read
     const c = state.claims[String(key || '')];
     if (!c) return;
     const refusals = quotaModel.lanesOfReading(raw).filter((x) => x.refusedAt != null && c.lanes[x.lane] && x.refusedAt >= (Number(c.lanes[x.lane].at) || 0)).map((x) => ({ ...x, at: x.refusedAt, refused: true }));
@@ -178,6 +204,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   /** THE LANES A WRITE MEASURED (usage-cache-write onLanesRead — a ⟳ that re-read a claimed cap at the same 97 % is the
    *  contradiction, though the carry rule keeps that window's older age in the file) */
   function noteLanesRead(key, lanes) {
+    if (isHeld()) return;   // HELD: not noted (the next reading after the lift notes it)
     const k = String(key || '');
     if (!Array.isArray(lanes) || !lanes.length) return;
     // A HELD FALL ENDS AT THE LANE'S NEXT MEASUREMENT (law 3, P3): whatever it says — a reading that confirms the fall then
@@ -228,6 +255,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
    *  still-ahead reset) — said ONCE per (account, lane, reset instant ± 60 s), across restarts: one journal line and one
    *  outcome the account's row draws («X 的 Fable 上限已重置»); a claim on that lane ends. `name` words the account. */
   function noteResetSeen(key, resets, { name = null } = {}) {
+    if (isHeld()) return 0;   // HELD: the said-once memory is unknown — nothing said now (the next reading after the lift says it once)
     const k = String(key || '');
     if (!KEY_RE.test(k) || !Array.isArray(resets) || !resets.length) return 0;
     let n = 0;
@@ -254,6 +282,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   /** LAW 3 (P3): a FALL HELD UNCONFIRMED. `falls` = [{lane, before, after, resetsAt (s), readAt (ms)}] — said once per lane
    *  and held fall; it ends at the lane's next measurement (noteLanesRead) or at the window's own reset (prune). */
   function noteFallHeld(key, falls, { name = null, movedAgoS = null } = {}) {
+    if (isHeld()) return 0;   // HELD: not noted
     const k = String(key || '');
     if (!KEY_RE.test(k) || !Array.isArray(falls) || !falls.length) return 0;
     let n = 0;
@@ -272,6 +301,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   }
   /** The person read the note: its outcome goes (one lane, or every outcome of the account). */
   function dismiss(key, lane = null) {
+    if (isHeld()) return false;   // HELD: the route refuses by name (unreadWords)
     const k = String(key || '');
     if (!state.outcomes[k]) return false;
     state.outcomes[k] = lane ? state.outcomes[k].filter((o) => o.lane !== lane) : [];
@@ -291,6 +321,8 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   const anyClaimed = (ids) => (Array.isArray(ids) ? ids : []).some((id) => !!state.claims[String(id)]);
   return {
     claim, viewOf, settle, noteLanesRead, dismiss, forClients, noteResetSeen, noteFallHeld, persisted, anyClaimed, file,
+    // r3003 (b): the hold — the person's words while held (null: read), its facts, a torn lift's copy, one read again
+    unreadWords: () => (hold ? hold.words() : null), heldFacts: () => (hold ? hold.held() : null), tornCopy: () => { const t = hold && hold.torn(); return t ? t.copy : null; }, readAgain: () => (hold ? hold.again() : Promise.resolve(false)),
     get: (key) => state.claims[String(key)] || null,
     outcomesOf: (key) => (state.outcomes[String(key)] || []).slice(),
     onChange: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
