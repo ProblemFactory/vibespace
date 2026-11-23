@@ -2559,8 +2559,11 @@ class AccountManager {
         try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { }
       }
     } catch { }
-    // lane lg-group-parents (B-526c unit 2): the PIN RECORDS (data/pool-pins) of conversations that are gone — no meta on disk
-    try { PinRecord.sweep(this.dataDir, (key) => fs.existsSync(path.join(this.dataDir, 'session-meta', key + '.json'))); } catch { }
+    // lane lg-group-parents (B-526c unit 2): the PIN RECORDS (data/pool-pins) of conversations that are gone — no meta on disk.
+    // r3078 — THE KEEP TEST tells «not there» from every other failure (unknown is not gone): only ENOENT — the conversation's meta is
+    // gone — lets its pin go; any other failed look (a refused stat, a storage that does not answer) KEEPS the pin this pass (an
+    // exists check answered «no» on ANY error). The sweep's listings already remove nothing when they fail (src/pool-pin-record.js).
+    try { PinRecord.sweep(this.dataDir, (key) => { try { fs.statSync(path.join(this.dataDir, 'session-meta', key + '.json')); return true; } catch (e) { return !(e && e.code === 'ENOENT'); } }); } catch { }
     // (q-055 M2) an UNPLACED mark of a conversation that no longer exists goes with it
     let cleared = false;
     for (const p of this._state.accounts) for (const k of Object.keys((p && p.unplaced && p.unplaced.links) || {})) if (!liveKeys.has(k)) cleared = this._clearUnplaced(p.id, k) || cleared;

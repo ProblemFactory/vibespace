@@ -129,7 +129,9 @@ function writeBack({ readSessionMeta, writeSessionMeta }, sockFile) {
     writeSessionMeta(sockFile, { ...cur, poolPin: pin }, { prev: cur });
   };
 }
-/** The records whose conversation is gone (`keep(key)` false — its meta is not on disk) and half-made swaps — removed. → how many. */
+/** The records whose conversation is gone (`keep(key)` false — its meta is NOT THERE: the caller's keep test answers false only for
+ *  «not there», r3078) and half-made swaps — removed. A listing that fails removes nothing (the pools' folder: none; one pool's: that
+ *  pool is skipped). → how many. */
 function sweep(dataDir, keep) {
   const root = path.join(dataDir, 'pool-pins');
   let dropped = 0;

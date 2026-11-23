@@ -184,6 +184,35 @@ console.log('① PURE: the record says both, the record decides, the bound, the 
   const dropped = PR.sweep(D, (k) => k === 'cw-a' || k === 'cw-c');
   const left = fs.readdirSync(path.dirname(PR.recordPath(D, 'pool-1', 'x'))).sort();
   ok(!!(dropped === 2 && J(left) === J(['cw-a', 'cw-c'])), `the sweep: a gone conversation's record and a half-made swap go (${dropped}), the live ones stay (${J(left)})`, { dropped, left });
+  // r3078 — THE KEEP TEST tells «not there» from every other failure (unknown is not gone): through the REAL AccountManager's boot
+  // sweep, a PLACED refusal of the look at the conversation's meta (its stat answers EIO; an exists check answers «no» then, as it
+  // does on any error) KEEPS the pin that pass; a conversation whose meta is NOT THERE loses its pin, as before. RED: today's exists check
+  {
+    const ACC_SRC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+    const TODAY = "    try { PinRecord.sweep(this.dataDir, (key) => fs.existsSync(path.join(this.dataDir, 'session-meta', key + '.json'))); } catch { }\n";   // stale-pins: kept (today's keep test — the red control's line)
+    const CURE = "    try { PinRecord.sweep(this.dataDir, (key) => { try { fs.statSync(path.join(this.dataDir, 'session-meta', key + '.json')); return true; } catch (e) { return !(e && e.code === 'ENOENT'); } }); } catch { }\n";
+    const keepWorld = (name) => {
+      const d = path.join(ROOT, name, 'data');
+      fs.mkdirSync(path.join(d, 'session-meta'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'session-meta', 'cw-kept.json'), JSON.stringify({ accountId: 'pool-1' }));
+      PR.write(d, 'pool-1', 'cw-kept', { memberId: 'm-a', at: 5, by: 'user' });
+      PR.write(d, 'pool-1', 'cw-gone', { memberId: 'm-b', at: 5, by: 'user' });
+      return d;
+    };
+    const refusedLook = (file, fn) => {
+      const st = fs.statSync, ex = fs.existsSync;
+      fs.statSync = function (p0, ...a2) { if (String(p0) === file) throw Object.assign(new Error(`EIO: a placed refusal of the look, '${p0}'`), { code: 'EIO' }); return st.call(this, p0, ...a2); };
+      fs.existsSync = function (p0) { return String(p0) === file ? false : ex.call(this, p0); };   // what an exists check answers on that error
+      try { return fn(); } finally { fs.statSync = st; fs.existsSync = ex; }
+    };
+    const sweepIn = (AM, d) => { const am = new AM({ dataDir: d }); refusedLook(path.join(d, 'session-meta', 'cw-kept.json'), () => am.sweepSessionPoolLinks(new Set())); let left = []; try { left = fs.readdirSync(path.dirname(PR.recordPath(d, 'pool-1', 'x'))).sort(); } catch { left = []; } return left; };
+    const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+    const kept = sweepIn(AccountManager, keepWorld('keep-cure'));
+    ok(!!(ACC_SRC.split(CURE).length === 2 && J(kept) === J(['cw-kept'])), `r3078 the sweep's keep test: a REFUSED LOOK at a conversation's meta keeps its pin that pass; a conversation whose meta is not there loses it, as before (${J(kept)})`, kept);
+    const Today = MUT.load('src/accounts.js', anchored(ACC_SRC, CURE, TODAY, 'today\'s keep test'), 'today-keep');
+    const lost = sweepIn(Today.AccountManager, keepWorld('keep-red'));
+    ok(!!(J(lost) === J([])), `r3078 RED today's exists check (false on any error): one refused look removes the person's pin (${J(lost)})`, lost);
+  }
   const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
   const SITE = /PinRecord\.restorePin\(path\.dirname\(META_DIR\), meta, sockFile, pinAtBoot\(sockFile\)\);/;
   const wiring = (src) => [...src.matchAll(/= sessionFromMeta\(meta, \{/g)].map((m) => { const at = m.index; return SITE.test(src.slice(Math.max(0, src.lastIndexOf('\n', src.lastIndexOf('\n', at) - 1)), at)); });
