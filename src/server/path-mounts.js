@@ -41,6 +41,9 @@ function create({ getPortForwards, requestAuthed = () => true }) {
     // /svc/<name> without the trailing slash: relative asset URLs in the app
     // would resolve against /svc/ — redirect once to the canonical form
     if (!/^\/svc\/[^/?#]+\//.test(req.originalUrl || req.url)) return res.redirect(302, `/svc/${p.name}/`);
+    // r3104 (a): while port-forwards.json is held its list reads EMPTY — the hold's words, never «no service mounted»
+    const heldW = (() => { try { return getPortForwards()?.heldWords?.() || null; } catch { return null; } })();
+    if (heldW) return res.status(503).json({ error: heldW, code: 'ports_unread' });
     const t = resolve(p.name);
     if (!t) return res.status(404).json({ error: `no service mounted at /svc/${p.name} — mount one from the Ports panel` });
     if (!t.rec?.pathPublic && !requestAuthed(req)) return res.status(401).json({ error: 'this service requires a VibeSpace login (the mount is not public)' });

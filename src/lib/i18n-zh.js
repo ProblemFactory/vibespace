@@ -3096,6 +3096,8 @@ export default {
   "Ports": "端口",
   "Active forwards": "活跃转发",
   "No forwards yet — scan a machine below": "还没有转发——在下方扫描一台机器",
+  "The list of port forwards was damaged; its damaged bytes are kept beside it as {name}. Add the forwards again, or mend the file by hand and restart VibeSpace.": "端口转发列表已损坏；损坏的内容另存为 {name}。请重新添加转发，或手动修复该文件后重启 VibeSpace。",
+  "VibeSpace could not read its list of port forwards; it reads it again every few minutes. Nothing is lost: new forwards wait until it reads.": "VibeSpace 无法读取端口转发列表，几分钟后会自动重读。不会丢失任何内容：新的转发会等到读取成功后再进行。",
   "Scan ports": "扫描端口",
   "Scanning…": "扫描中…",
   "Forward this port here": "把这个端口转发到本机",

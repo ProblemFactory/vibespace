@@ -1078,6 +1078,7 @@ const STORE_READS = [
   // B-f276's family, its third form, unit 2 (lane bl-ci, 主开发 r3145 + r3181): the person's edited prices, which the START wrote the defaults
   // over after a failed read — held through src/store-read-hold.js
   { file: 'src/usage-history.js', store: 'usage-history/pricing.json', state: 'answer', mark: /const a0 = SR\.storeAnswer\(read, \{ valid: PRICING_SHAPE \}\);\s+const st = this\._pricingHold\.start\(a0\);/ },
+  { file: 'src/port-forward.js', store: 'port-forwards.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: PF_SHAPE \}\);\n    this\._state = this\._hold\.start\(a\) === 'data' \? a\.value : \{ forwards: \[\] \};/ },   // r3009 (lane bl-machines-a): on the store-read hold
 ];
 const READ_DEBT_CAP = 0;     // 1 → 0: msg-retry.json — bl-windows B-f276's remainder unit 2 (moved onto the release 2.369.417, r3478); 2 → 1: browser-kept.json — the sweep's fail-closed law (lane bl-windows, 主开发 r3006): never set aside, never written over (a row judged by hand); lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json, 6 → 5: job-notifications.json — bl-jobs B-f276's remainder, 5 → 4: user-todos.json — bl-windows B-44f3, 4 → 3: channels/*.json — bl-windows B-f276 unit 1, 3 → 2: reset-credit-tries.json — bl-windows B-f276's remainder)
 const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17): DEBT_CAP never passes it
@@ -1092,6 +1093,7 @@ const SITES = { 'src/server/browser-dialogs.js': 1, 'src/server/browser-passkey-
 SITES['src/server/plugin-loader.js'] = 1;   // bl-browser-a (主开发 r3305): plugin-registry.json's torn bytes, kept aside by the helper
 SITES['src/usage-history.js'] = 1;   // bl-ci (r3145 unit 2): pricing.json's torn bytes, kept aside by the helper
 SITES['src/server/sealed-json.js'] = 1;   // r3334 unit 2 (lane bl-chat-b): dropline-oauth.json's torn bytes, kept aside by the helper
+SITES['src/port-forward.js'] = 1;   // bl-machines-a (r3009, 1 of 2): port-forwards.json's torn bytes, kept aside by the helper
 const tokenHit = new Map();   // a text's verdict, once (the controls re-run the census over copies that differ in ONE file)
 function setAsideFiles(texts) {
   const out = [];

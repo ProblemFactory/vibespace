@@ -3096,6 +3096,8 @@ export default {
   "Ports": "ポート",
   "Active forwards": "アクティブな転送",
   "No forwards yet — scan a machine below": "まだ転送がありません——下でマシンをスキャン",
+  "The list of port forwards was damaged; its damaged bytes are kept beside it as {name}. Add the forwards again, or mend the file by hand and restart VibeSpace.": "ポート転送の一覧が壊れていました。壊れた内容は {name} として横に保存されています。転送を追加し直すか、ファイルを手で直して VibeSpace を再起動してください。",
+  "VibeSpace could not read its list of port forwards; it reads it again every few minutes. Nothing is lost: new forwards wait until it reads.": "VibeSpace はポート転送の一覧を読み取れませんでした。数分ごとに読み直します。何も失われません。新しい転送は読み取れるまで待ちます。",
   "Scan ports": "ポートをスキャン",
   "Scanning…": "スキャン中…",
   "Forward this port here": "このポートをここへ転送",

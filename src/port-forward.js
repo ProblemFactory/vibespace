@@ -57,6 +57,12 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
+// r3009 (B-f276 family, lane bl-machines-a): port-forwards.json under THE STORE-READ LAW (src/store-read-hold.js, one helper for
+// every store of the family) — see the constructor's read
+const HOLD = require('./store-read-hold.js');
+const SR = require('./store-read.js');
+const PF_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // { forwards: [...], names?: {...} }
+
 class PortForwardManager {
   /** @param deps { hosts, dataDir, broadcast, log, plugins, serverSetting } */
   constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting, getJobs }) {
@@ -68,7 +74,20 @@ class PortForwardManager {
     this.broadcast = broadcast || (() => {});
     this.log = log || (() => {});
     this._live = new Map(); // id → { server, sockets:Set, rec }
-    try { this._state = JSON.parse(fs.readFileSync(this.file, 'utf-8')); } catch { this._state = { forwards: [] }; }
+    // r3009 (B-f276 family, lane bl-machines-a): THE STORE-READ LAW. The release read ANY failure as «no forwards», and the next
+    // write — a person's Forward, a published service's forward, the heal sweep, a protocol change — wrote over the file: every forward,
+    // label and protocol override and the kept public subdomain and port gone (the public URLs change). HELD: no forward is listed (the
+    // Ports panel says why — heldWords), every change is refused by name, nothing is written over it, the boot's replay waits and runs
+    // at the lift; nothing is torn down or re-minted (the relay's proxies stay as they are: nothing here removes by the list's
+    // silence); it is read again off the loop; torn bytes are kept aside once per content, then the list starts empty
+    this._hold = HOLD.create({
+      file: this.file, valid: PF_SHAPE, code: 'ports_unread', aside: (mark) => this.file + '.corrupt-' + mark,
+      words: (h) => `port-forwards.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No forward is lost: nothing is written over it, and new forwards wait until it reads.`,
+      log: (m) => this.log('[ports] ' + m), onLift: (v, f) => this._lifted(v, f),
+    });
+    let read; try { read = { text: fs.readFileSync(this.file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: PF_SHAPE });
+    this._state = this._hold.start(a) === 'data' ? a.value : { forwards: [] };
     if (!Array.isArray(this._state.forwards)) this._state.forwards = [];
     // vscode-style NEW-port watch: sweep machines with a LIVE device link and
     // announce listeners that appeared since the last sweep (the machine's
@@ -222,10 +241,23 @@ class PortForwardManager {
     }
   }
 
-  _persist() { try { writeJsonAtomic(this.file, this._state); } catch (e) { this.log('port-forward persist: ' + e.message); } }
+  _persist() { if (!this._hold.writable('a forward change')) return; try { writeJsonAtomic(this.file, this._state); } catch (e) { this.log('port-forward persist: ' + e.message); } }   // r3009: held ⇒ nothing written over the file
+  /** r3009: the words the Ports panel reads while port-forwards.json is held (null when it reads) */
+  heldWords() { return this._hold.words(); }
+  /** r3104: after torn bytes lifted as empty — the copy's base name (the panel says the list was damaged and where those bytes are kept;
+   *  never «restore it»: they are the damaged bytes) — null otherwise */
+  tornCopy() { return this._tornCopy || null; }
+  /** r3009: the hold LIFTED — the records read (null: empty); the boot's replay runs now if it was asked while held; every page is told */
+  _lifted(v, facts) {
+    this._state = v || { forwards: [] };
+    this._tornCopy = (facts && facts.setAside) || null;   // r3104: torn bytes lifted as EMPTY — the panel says where they are kept
+    if (!Array.isArray(this._state.forwards)) this._state.forwards = [];
+    this._emit();
+    if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => {}); }
+  }
 
   _emit() {
-    this.broadcast?.({ type: 'port-forwards-updated', forwards: this.list() });
+    this.broadcast?.({ type: 'port-forwards-updated', forwards: this.list(), held: this.heldWords(), torn: this.tornCopy() });
   }
 
   list() {
@@ -248,6 +280,7 @@ class PortForwardManager {
   /** User override of the detected protocol ('http'|'https'|'tcp'|null=auto).
    *  A published forward is transparently re-published in the new mode. */
   async setProtoOverride(id, proto) {
+    this._hold.refuse("changing a forward's protocol");   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
     if (proto !== null && !['http', 'https', 'tcp'].includes(proto)) throw new Error('proto must be http, https, tcp or null (auto)');
@@ -476,6 +509,7 @@ class PortForwardManager {
   /** Start a forward (idempotent by hostId+remotePort). Binds a local port and
    *  pipes each connection into device.tcpForward(remotePort). */
   async forward(hostId, remotePort, { label = '', targetHost = '' } = {}) {
+    this._hold.refuse('adding a forward');   // r3009: held — refused by name, nothing written
     remotePort = Number(remotePort);
     if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) throw new Error('invalid remote port');
     // targetHost = another machine on the device's LAN (jump-host forward);
@@ -567,6 +601,7 @@ class PortForwardManager {
 
   /** Tear down a forward and forget it. */
   async unforward(id, { keepName = false } = {}) {
+    this._hold.refuse('removing a forward');   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     // keepName = a Background Work service stopping: its public name waits for the next start (forward() restores it)
     if (keepName && rec && (rec.publicSub || rec.publicPort)) (this._state.names = this._state.names || {})[id] = { sub: rec.publicSub || null, port: rec.publicPort || null, proto: rec.publicProto || rec.proto || null };
@@ -590,6 +625,7 @@ class PortForwardManager {
    *  name under subDomainHost; persisted, so it survives restarts like the
    *  broker-assigned ones; a taken name fails loudly at the relay). */
   async publish(id, { sub } = {}) {
+    this._hold.refuse('publishing a forward');   // r3009: held — refused by name, nothing written
     if (!this.plugins) throw new Error('public URLs are not available on this instance');
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
@@ -632,6 +668,7 @@ class PortForwardManager {
   /** Take a forward's public URL down. An EXPLICIT unpublish (the user, the API) is the one act that forgets the public
    *  name (lane job-publish-stable); keepName = a stopping service, whose next start publishes the same name again. */
   async unpublish(id, { keepName = false } = {}) {
+    this._hold.refuse('unpublishing a forward');   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) return;
     try { if (this.plugins) await this.plugins.frpUnpublish(rec.publicName || id); } catch { }
@@ -647,6 +684,7 @@ class PortForwardManager {
    *  re-establishment — and they sit behind VibeSpace auth (a feature the
    *  public frp URL deliberately lacks). name=null unmounts. */
   setPathMount(id, name, { public: pub } = {}) {
+    this._hold.refuse("changing a forward's path");   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
     if (name === null || name === undefined || name === '') { rec.pathMount = null; rec.pathPublic = false; this._persist(); this._emit(); return { pathMount: null }; }
@@ -710,6 +748,7 @@ class PortForwardManager {
    *  next machine link (dial machines routinely re-dial AFTER our +5s boot
    *  restore — the single-attempt restore was a review finding). */
   async restore() {
+    if (this._hold.held()) { this._restoreAsked = true; return; }   // r3009: held — the list is unread, not empty: the replay runs at the lift
     for (const rec of this._state.forwards) {
       if (this._live.has(rec.id)) continue;
       try {

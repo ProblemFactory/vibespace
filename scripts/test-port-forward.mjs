@@ -389,6 +389,45 @@ try {
     await down();
     fs.rmSync(pdir, { recursive: true, force: true });
   }
+  // ── r3009 (B-f276 family, lane bl-machines-a): THE STORE-READ LAW for port-forwards.json. A read that FAILS (a PLACED refusal of
+  // the read call: EIO, made-up records) is never «no forwards»: the person's next Forward and the boot's replay write NOTHING over the
+  // file, the new Forward is refused BY NAME, and the list says why (the Ports panel reads it) ──
+  {
+    const sdir = fs.mkdtempSync(path.join(path.dirname(dataDir), 'pf-hold-')), sfile = path.join(sdir, 'port-forwards.json');
+    const KEPT = { forwards: [{ id: 'pf-kept-1', hostId: '__local__', remotePort: 5501, label: 'kept forward', publicUrl: 'https://kept-sub.relay.example.test', publicName: 'kept-sub', publicSub: 'kept-sub', proto: 'http' }] };
+    fs.writeFileSync(sfile, JSON.stringify(KEPT, null, 2)); const before = fs.readFileSync(sfile, 'utf8');
+    const realRead = fs.readFileSync;
+    fs.readFileSync = function (q, ...a) { if (String(q) === sfile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
+    let ph = null; try { ph = new PortForwardManager({ hosts, dataDir: sdir, broadcast: () => {}, log: () => {} }); } finally { fs.readFileSync = realRead; }
+    if (ph._hold && ph._hold.stop) ph._hold.stop();   // the hold's own re-read ladder stays out of this scene (its law is the helper's)
+    let fwdErr = null; try { await ph.forward('__local__', 5502, { label: 'a new forward' }); } catch (e) { fwdErr = e; }
+    await ph.restore().catch(() => {});
+    const after = fs.readFileSync(sfile, 'utf8');
+    const listed = typeof ph.heldWords === 'function' ? ph.heldWords() : null;
+    check('r3009: port-forwards.json read FAILED (a placed EIO) — the person\'s next Forward and the boot replay write NOTHING over it: the file\'s content survives', after === before, after.slice(0, 240));
+    check('r3009: …the new Forward is refused BY NAME (503 ports_unread), and the store says why (the Ports panel\'s words), never an empty list', !!fwdErr && fwdErr.status === 503 && fwdErr.code === 'ports_unread' && /could not be read/.test(String(listed || '')), JSON.stringify({ err: fwdErr && fwdErr.message, code: fwdErr && fwdErr.code, listed }));
+    // r3104 (a): a SECOND ROAD that looks a forward up through the list — /svc/<name> (src/server/path-mounts.js) — answers the hold's
+    // words while held (503 ports_unread), never «no service mounted»
+    const PM = require('../src/server/path-mounts.js').create({ getPortForwards: () => ph, requestAuthed: () => true });
+    const svc = await new Promise((resolve) => { const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ c: this.c, b }); }, redirect(c, u) { resolve({ c, u }); } }; PM.handler({ originalUrl: '/svc/kept-sub/', url: '/svc/kept-sub/', headers: {} }, res); });
+    check('r3104 (a): while held, /svc/<name> answers the hold\'s words (503 ports_unread), never «no service mounted»', svc.c === 503 && svc.b && svc.b.code === 'ports_unread' && /could not be read/.test(String(svc.b.error)), JSON.stringify(svc));
+    clearInterval(ph._watch);
+    fs.rmSync(sdir, { recursive: true, force: true });
+  }
+  // r3104: TORN BYTES — kept aside once (the helper), the list then starts EMPTY, and the store NAMES the copy for the Ports panel
+  // («the list was damaged; its damaged bytes are kept beside it as <name>» — never «restore it»: they are the damaged bytes)
+  {
+    const tdir = fs.mkdtempSync(path.join(path.dirname(dataDir), 'pf-torn-')), tfile = path.join(tdir, 'port-forwards.json');
+    fs.writeFileSync(tfile, '{"forwards": [{"id": "pf-torn-1", "hostId": "__local__", "remotePo');
+    const pt = new PortForwardManager({ hosts, dataDir: tdir, broadcast: () => {}, log: () => {} });
+    const t0 = Date.now(); while (!(typeof pt.tornCopy === 'function' && pt.tornCopy()) && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 25));
+    const copy = typeof pt.tornCopy === 'function' ? pt.tornCopy() : null;
+    const copyOk = !!copy && fs.existsSync(path.join(tdir, copy)) && fs.readFileSync(path.join(tdir, copy), 'utf8') === '{"forwards": [{"id": "pf-torn-1", "hostId": "__local__", "remotePo';
+    const zh = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/lib/i18n-zh.js'), 'utf8');
+    check('r3104: torn port-forwards.json — its bytes kept aside once, the list starts empty, and the store names the copy for the Ports panel (its sentence in zh too)', copyOk && /^port-forwards\.json\.corrupt-/.test(copy) && pt.list().length === 0 && zh.includes('"The list of port forwards was damaged; its damaged bytes are kept beside it as {name}.'), JSON.stringify({ copy, n: pt.list().length }));
+    if (pt._hold && pt._hold.stop) pt._hold.stop(); clearInterval(pt._watch);
+    fs.rmSync(tdir, { recursive: true, force: true });
+  }
 } catch (e) {
   failed++; console.error('  ✗ harness threw:', e.stack || e.message);
 } finally {

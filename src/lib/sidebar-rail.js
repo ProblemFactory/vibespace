@@ -1076,13 +1076,15 @@ export function installSidebarRail(Sidebar) {
       // lane ui-controls-and-bugs (the walk's major: the forwards and the input box drawn TWICE): render() is ONE latest
       // render — built off-DOM, a newer call drops an older build, one replaceChildren lands it (utils.js latestRender)
       const render = latestRender(c, async (out) => {
-        let fwds = [];
-        try { fwds = ((await api('/api/port-forwards')) || {}).forwards || []; } catch { }
+        let fwds = [], fwdsHeld = null;   // r3009: port-forwards.json held (unread, never «empty») — the hub's words ride the list
+        let fwdsTorn = null;   // r3104: the list was damaged — its bytes kept aside under this name
+        try { const fr = (await api('/api/port-forwards')) || {}; fwds = fr.forwards || []; fwdsHeld = fr.held || null; fwdsTorn = fr.torn || null; } catch { }
         await this._renderInstanceUrlRow(out, api, render);
         // active forwards
         const sec = document.createElement('div');
         sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('Active forwards'))}</div>`;
-        if (!fwds.length) sec.innerHTML += `<div class="empty-hint empty-hint-inline">${escHtml(tr('No forwards yet — scan a machine below'))}</div>`;
+        if (fwdsTorn) sec.innerHTML += `<div class="empty-hint empty-hint-inline">${escHtml(tr('The list of port forwards was damaged; its damaged bytes are kept beside it as {name}. Add the forwards again, or mend the file by hand and restart VibeSpace.', { name: fwdsTorn }))}</div>`;
+        if (!fwds.length) sec.innerHTML += `<div class="empty-hint empty-hint-inline">${escHtml(fwdsHeld ? tr('VibeSpace could not read its list of port forwards; it reads it again every few minutes. Nothing is lost: new forwards wait until it reads.') : tr('No forwards yet — scan a machine below'))}</div>`;
         for (const f of fwds) {
           const row = document.createElement('div');
           row.className = 'ports-row';
