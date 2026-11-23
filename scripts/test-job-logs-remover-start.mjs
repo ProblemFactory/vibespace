@@ -144,7 +144,26 @@ try {
     };
     const { a: cut, gone } = await cutOf(slowOf(WORKER, 3));
     ok(cut.error && /no answer in/.test(cut.error) && cut.partial && cut.partial.removed >= 1 && cut.partial.removed <= gone && gone - cut.partial.removed <= 1, `the REAL remover cut at its bound answers what it removed, read from its count file once its child ended — ${cut.partial && cut.partial.removed} said, ${gone} gone (a kill between a removal and its write may lag one)`, cut);
-    ok(cut.countFile && has(D3, cut.countFile) && !has(D3, cut.countFile + '.tmp'), 'the count read is READ ONLY: the file stays until the record that counts it is on disk and a later batch forgets it');
+    // r3301 (B-3dbd unit 2): a .tmp beside the count file after the cut answer is the CUT CHILD's own write, killed between its
+    // writeFileSync(.tmp) and its renameSync (a loaded machine makes that likelier) — the count read itself is read only (countOf:
+    // it reads and says «cut while it was written»), and a later batch's forget removes the file and its .tmp. So the law is judged
+    // on the read (its code writes nothing) and on the file that stays; the child's cut write is said, never a red of the read
+    const WKsrc0 = fs.readFileSync(WORKER, 'utf8'), cofA = WKsrc0.indexOf('function countOf('), cofB = cofA < 0 ? -1 : WKsrc0.indexOf('\n}\n', cofA);
+    const cofBody = cofA >= 0 && cofB > cofA ? WKsrc0.slice(cofA, cofB) : '';
+    const readWrites = cofBody ? (cofBody.match(/\bfs\.(?:write|rename|unlink|rm|mkdir|copy|append|open|truncate)\w*\(/g) || []) : ['(countOf not found)'];
+    if (has(D3, cut.countFile + '.tmp')) console.log(`    · the cut child left ${cut.countFile}.tmp — its count write cut by the kill (between its write and its rename); a later batch's forget removes it`);
+    ok(!!cut.countFile && has(D3, cut.countFile) && readWrites.length === 0, `the count read is READ ONLY: the file stays until the record that counts it is on disk and a later batch forgets it — the read's own code writes nothing (${readWrites.join(', ') || 'no write, rename or unlink in countOf'})`, { countFile: cut.countFile, readWrites });
+    // THE PLACED FORM (主开发 r3301 / r3343): the cut lands INSIDE the child's count write — its SECOND count file's rename held 5 s,
+    // past the 400 ms bound — so its .tmp is left every run, without load. The law holds there too: the first count file stays, the
+    // read writes nothing, and the .tmp beside it is the cut child's
+    const cutWriteOf = (worker) => { const f = path.join(T, `cutwrite-${path.basename(worker)}.cjs`); fs.writeFileSync(f, `const fs = require('fs'); const rm = fs.rmSync, ren = fs.renameSync; const sab = new Int32Array(new SharedArrayBuffer(4)); let n = 0; fs.rmSync = function (...a) { Atomics.wait(sab, 0, 0, 3); return rm.apply(this, a); }; fs.renameSync = function (...a) { if (String(a[0]).endsWith('.tmp') && ++n === 2) Atomics.wait(sab, 0, 0, 5000); return ren.apply(this, a); };\nrequire(${JSON.stringify(worker)});\n`); return f; };
+    for (const x of fs.readdirSync(D3)) if (x !== 'job-logs') fs.rmSync(path.join(D3, x), { recursive: true, force: true });   // the first cut's count files gone: this scene's own
+    for (let i = 0; i < 400; i++) seedRun(L3, 'jb-0ld0000c', B + i * 1000);
+    const { a: cutP } = await cutOf(cutWriteOf(WORKER));
+    const tmpP = !!cutP.countFile && has(D3, cutP.countFile + '.tmp');
+    let fileRemoved = null; try { fileRemoved = JSON.parse(fs.readFileSync(path.join(D3, cutP.countFile), 'utf8')).removed; } catch { }
+    ok(!!cutP.countFile && tmpP && has(D3, cutP.countFile) && readWrites.length === 0 && !!cutP.partial && Number.isInteger(fileRemoved) && cutP.partial.removed === fileRemoved,
+      `PLACED: the cut inside the child's second count write leaves its .tmp (${tmpP}) — the first count file stays and IS what the answer read (${cutP.partial && cutP.partial.removed} removed, the file says ${fileRemoved}), the read wrote nothing: the .tmp is the cut child's, never the read's`, { cutP, fileRemoved });
     const WRITE = '  if (!countFile) return false;\n  try { fs.writeFileSync(countFile + \'.tmp\'';
     const noCount = MC.write('src/job-logs-sweep-worker.js', anchored(WKsrc, WRITE, '  return false;\n  try { fs.writeFileSync(countFile + \'.tmp\'', 'red-no-count'), 'red-no-count');
     const { a: cutR } = await cutOf(slowOf(noCount, 3));
@@ -332,15 +351,19 @@ try {
     ok(!c4r.a.partial && !c4r.a.partialUnknown, 'RED: the same answered with neither a count nor «not known» — the pass would say «nothing removed»', c4r.a);
     // find 6: a request file write the logs folder never answers — none is started beside it
     const stuck = async (L) => {
-      const realWF = fs.promises.writeFile; let calls = 0, release = null;
-      fs.promises.writeFile = function (...a) { calls++; if (calls === 1) return new Promise((r, j) => { release = () => realWF.apply(fs.promises, a).then(r, j); }); return realWF.apply(fs.promises, a); };
+      const realWF = fs.promises.writeFile, realRN = fs.promises.rename; let calls = 0, release = null, released = null, renamedR = null;
+      const renamed = new Promise((r) => { renamedR = r; });   // the released write's request file renamed into place: its write's last step
+      fs.promises.rename = function (...a) { const pr = realRN.apply(fs.promises, a); if (released && String(a[0]).endsWith('.tmp')) pr.then(() => renamedR(), () => renamedR()); return pr; };
+      fs.promises.writeFile = function (...a) { calls++; if (calls === 1) return new Promise((r, j) => { release = () => { released = realWF.apply(fs.promises, a).then(r, j); }; }); return realWF.apply(fs.promises, a); };
       try {
         const R = L.createRemover({ logsDir: L8, timeoutMs: 150, runImpl: (c, a) => { dropReq(a); return Promise.resolve({ started: true, code: 0, stdout: JSON.stringify(ANS) + '\n' }); } });
         const s1 = await R.sweep({ keep: KEEP0, cutoff: 1, max: 1, orphanDir: D8 }), s2 = await R.sweep({ keep: KEEP0, cutoff: 1, max: 1, orphanDir: D8 });
-        const atS2 = calls; if (release) release(); await sleep(50);
+        // r3301 (B-3dbd unit 2): «once it returns» is a FACT — the released write's own promise settled, then one turn for the remover's
+        // own handler — never 50 ms (on the pod the released write took longer and the third batch was rightly refused)
+        const atS2 = calls; if (release) release(); if (released) { await released.catch(() => { }); await Promise.race([renamed, sleep(5000)]); } await new Promise((r) => setImmediate(r));   // the request write is mkdir + writeFile + rename: it RETURNED once its rename settled
         const s3 = await R.sweep({ keep: KEEP0, cutoff: 1, max: 1, orphanDir: D8 });
         return { s1, s2, s3, atS2, calls };
-      } finally { fs.promises.writeFile = realWF; }
+      } finally { fs.promises.writeFile = realWF; fs.promises.rename = realRN; }
     };
     const w6 = await stuck(LS);
     ok(/was not written in/.test(w6.s1.error || '') && /has not answered its last request file write/.test(w6.s2.error || '') && w6.atS2 === 1 && !w6.s3.error && w6.calls === 2, 'find 6: a request file write past its bound that has not returned — the next batch starts no second write beside it; once it returns, the batches go on', w6);
