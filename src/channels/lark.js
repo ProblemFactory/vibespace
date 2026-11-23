@@ -1296,7 +1296,8 @@ function create(record = {}, deps = {}) {
   // r3188 (a): AT THE LIFT the file's memo is taken in, merged with what this copy learned meanwhile — an author's fields learned since
   // win over the file's (they are newer), the file's fill the rest; the own id from the file stands unless the vendor named another since
   if (peopleStore && typeof peopleStore.onLift === 'function') {
-    peopleStore.onLift((file) => {
+    const offLift = peopleStore.onLift((file) => {
+      if (typeof offLift === 'function') offLift();   // r3279 (3): once — a lift is once a hold
       const fp = (file && file.people && typeof file.people === 'object') ? file.people : {};
       const merged = { ...fp };
       for (const [id, p] of Object.entries(memo.people)) { const f = fp[id] || {}; merged[id] = { ...f, ...p, at: Math.min(Number(f.at) || Infinity, Number(p.at) || Infinity) === Infinity ? now() : Math.min(Number(f.at) || Infinity, Number(p.at) || Infinity) }; }

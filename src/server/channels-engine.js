@@ -923,7 +923,7 @@ function create(deps = {}) {
       // `pace` (lane R5): the adapter AWAITS it before every request it sends
       // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
       // then meters it — the per-second shape is enforced call by call.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m), held: () => !!(store.peopleHeld && store.peopleHeld(rec.id)), onLift: (fn) => (store.onPeopleLift ? store.onPeopleLift(rec.id, fn) : () => { }) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); }, held: (convId) => !!store.index.entry(rec.id, String(convId), { create: false }),   /* B-2f6c: the row exists (a lost cursor reads it once) */
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m), held: () => !!(store.peopleHeld && store.peopleHeld(rec.id)), onLift: (fn) => { const off = store.onPeopleLift ? store.onPeopleLift(rec.id, fn) : () => { }; const l = liftOffs.get(rec.id) || []; l.push(off); liftOffs.set(rec.id, l); return off; } }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); }, held: (convId) => !!store.index.entry(rec.id, String(convId), { create: false }),   /* B-2f6c: the row exists (a lost cursor reads it once) */
         // lane webhook-l1-server: the account's OWN data directory (data/channels/<id>/), the channels secret-box, a stored
         // record by its vendor id, an instance setting — handed to every adapter, read by the ones that need them
         ownDir: path.join(dataDir, 'channels', String(rec.id)), secrets: { seal: (v) => box.enc(v), open: (v) => box.dec(v) }, findRecord: (convId, vendorId) => (store.index.entry(rec.id, String(convId), { create: false }) ? store.findRecord(rec.id, String(convId), String(vendorId)) : null), setting: (key) => { try { return serverSetting(key); } catch { return undefined; } },
@@ -3203,8 +3203,12 @@ function create(deps = {}) {
     if (trimNow) { try { store.trim(rec.id, convId); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }
     // lane channels-list-polish: the account's own id resolved once (a sign-in that never named it), and this
     // conversation's authors handed to the people warm-up (the adapter's bounds; never awaited by the pass)
-    // r3188 (i): NEVER while the account's people memo is HELD — the file may hold the id: a vendor call nobody pressed, at every pass
-    if (typeof e.adapter.resolveSelf === 'function' && !selfIdOf(rec) && !selfUnknown(rec)) await e.adapter.resolveSelf().catch((err) => { if (err && err.code === 'rate-limited') throw err; });
+    // r3279 (1), r3188 (i) WITHDRAWN: asked while the people memo is held too, as the release did — ONE vendor call (the adapter's own
+    // pacing), never repeated once it answers; it writes nothing while held (the adapter's save returns, the store refuses) and the
+    // vendor's id stands at the lift. Without it a held memo kept the id unknown for the whole hold: the person's own sends judged and
+    // fanned out to the watchers as news (a billed turn nobody typed)
+    if (typeof e.adapter.resolveSelf === 'function' && !selfIdOf(rec)) await e.adapter.resolveSelf().catch((err) => { if (err && err.code === 'rate-limited') throw err; });
+    if (selfSettle.has(rec.id) && selfIdOf(rec)) settleSelf(rec.id).catch((err) => log.warn(`[channels] ${rec.id}: the rows indexed while its own id was unknown were not settled: ${(err && err.message) || err}`));   // r3279 (2): the id known now
     if (typeof e.adapter.warmPeople === 'function') {
       const en0 = store.index.live()[`${rec.id}/${convId}`];
       const ids = (en0 && Array.isArray(en0.authors) ? en0.authors : []).filter((a) => a && a.id && !a.isSelf && !a.isBot).map((a) => String(a.id));
@@ -3248,27 +3252,28 @@ function create(deps = {}) {
   // mark moved to the newest own message and the count re-derived past it, the «@ you» instants judged — never left wrong for good
   const selfUnknown = (rec) => !!(rec && store.peopleHeld && store.peopleHeld(rec.id));
   const SELF_SETTLE_MAX = 2000;
-  const selfSettle = new Map();   // adapterId → Set(convId) indexed while its own id was unknown
+  const selfSettle = new Map();   // adapterId → Set(convId) indexed while its own id was unknown (`over`: noted past the bound)
   function noteSelfUnknown(rec, convId) {
     let s = selfSettle.get(rec.id);
     if (!s) {
-      s = new Set(); selfSettle.set(rec.id, s);
-      if (store.onPeopleLift) store.onPeopleLift(rec.id, () => { settleSelf(rec.id).catch((err) => log.warn(`[channels] ${rec.id}: the rows indexed while its own id was unknown were not settled: ${(err && err.message) || err}`)); });
+      s = new Set(); s.over = 0; selfSettle.set(rec.id, s);
+      // r3279 (3): the hook removes itself once it fired (a lift is once a hold); a settle with no id yet keeps the set (r3279 (2))
+      if (store.onPeopleLift) { const off = store.onPeopleLift(rec.id, () => { off(); settleSelf(rec.id).catch((err) => log.warn(`[channels] ${rec.id}: the rows indexed while its own id was unknown were not settled: ${(err && err.message) || err}`)); }); }
     }
-    if (s.size < SELF_SETTLE_MAX) s.add(String(convId));
+    if (s.size < SELF_SETTLE_MAX) s.add(String(convId)); else if (!s.has(String(convId))) s.over++;
   }
   async function settleSelf(adapterId) {
     const s = selfSettle.get(adapterId);
-    selfSettle.delete(adapterId);
-    if (!s || !s.size) return 0;
+    if (!s || !s.size) { selfSettle.delete(adapterId); return 0; }
     const rec = adapterRecords().adapters.find((r) => r && r.id === adapterId);
     const self = rec ? selfIdOf(rec) : null;
-    if (!self) return 0;   // the memo read again with no own id: nothing to settle (the adapter resolves it as before)
-    let n = 0;
+    if (!self) return 0;   // r3279 (2): no own id yet — the noted rows are KEPT, settled when a pass learns it
+    selfSettle.delete(adapterId);
+    let n = 0, cut = 0;
     for (const convId of s) {
       if (engineCtx.stopped) break;
       let recs = [];
-      try { const t = await store.readTailAsync(adapterId, convId, { limit: 200 }); recs = (t && t.records) || []; } catch { continue; }
+      try { const t = await store.readTailAsync(adapterId, convId, { limit: 200 }); recs = (t && t.records) || []; if (t && !t.whole && recs.length >= 200) cut++; } catch { continue; }
       await store.index.update(() => {
         const en = store.index.entry(adapterId, convId, { create: false });
         if (!en) return;
@@ -3280,7 +3285,10 @@ function create(deps = {}) {
       });
       n++;
     }
-    if (n) { log.log(`[channels] ${adapterId}: its people memo read again — ${n} conversation(s) indexed meanwhile settled with its own id`); try { notify([...s].map((c) => `${adapterId}/${c}`)); } catch { } }
+    if (n) { log.log(`[channels] ${adapterId}: its own id known again — ${n} conversation(s) indexed meanwhile settled with it`); try { notify([...s].map((c) => `${adapterId}/${c}`)); } catch { } }
+    // r3279 (4): what the settle does NOT reach, said once: the conversations past the bound and the own messages older than a
+    // conversation's last 200 records (their rows heal at the next own send there, or a mark-read)
+    if (s.over || cut) log.warn(`[channels] ${adapterId}: the rows indexed while its own id was unknown were settled, but not all — ${s.over ? `${s.over} conversation(s) past the bound of ${SELF_SETTLE_MAX}` : ''}${s.over && cut ? '; ' : ''}${cut ? `${cut} conversation(s) with more than their last 200 records since` : ''}: those heal at the next own send there, or a mark-read`);
     return n;
   }
   function countFresh(rec, convId, en, fresh) {
@@ -5442,7 +5450,11 @@ function create(deps = {}) {
    *  inherits them — an exit never refills a bucket. The census in
    *  test-channels-aggregate ③g reads this file: `live.delete(` has this ONE
    *  site and every lifecycle verb takes it. */
+  // r3279 (3): the people memo's lift hooks a live adapter added — removed with its live copy (a rebuilt adapter's dead copy never writes)
+  const liftOffs = new Map();   // adapterId → [remover]
   function dropLive(id, why) {
+    for (const off of liftOffs.get(id) || []) { try { off(); } catch { } }
+    liftOffs.delete(id);
     // lane search-card-open (.233): the vendor-search memo outlives a rebuild (options, client, disabled) but not the
     // account — a disconnect or a removal forgets it, file and all (a later sign-in may be someone else)
     if (why === 'disconnected' || why === 'removed') { forgetSearchMemo(id); forgetFeedMemo(id); }   // lane lark-search-miss: the miss memo too

@@ -2335,41 +2335,56 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // written-over ledgers among them) is REBUILT once at its first use: OFF the loop, over that one account's folder, LRU_REBUILD_READS
   // metas read at a time. Meanwhile a new file is admitted and counted in memory, the ledger is NOT saved and NOTHING is evicted
   // (under-evicting for a minute is fine, evicting from a part of the truth is not); at its landing what the folder holds is merged in
-  // (what was admitted meanwhile wins) and the ledger saved once. A meta that does not parse is counted by its file's own size, said
-  // once, never removed. THE REBUILD REMOVES NO FILE (r2943)
+  // (what was admitted meanwhile wins) and the ledger saved once. A meta that is missing or does not parse is counted by its file's own
+  // size, said once, never removed by the rebuild. THE REBUILD REMOVES NO FILE (r2943). r3279: a WHOLE walk is the truth (an entry
+  // whose file is not there leaves); a walk that could not list every folder is UNFINISHED (lruUnfinished below)
   const LRU_V = 2;
   const LRU_REBUILD_READS = 8;
+  const LRU_RETRY_MS = 30e3, LRU_RETRY_MAX_MS = 15 * 60e3;   // r3279 (7): a walk that did not end whole is tried again after a wait that doubles
   const lruRebuilding = new Map();   // adapterId → its rebuild in flight (one an account)
+  // r3279 (6) + (7): an account whose ledger is NOT its folder's whole truth (a rebuild owed or in flight, a walk that could not list every
+  // folder): nothing is evicted from it, it is saved without its `v: 2`, it is walked again at a later use once its wait passed, and a
+  // failed walk is said ONCE an account
+  const lruUnfinished = new Map();   // adapterId → { tries, retryAt, said, why }
+  const lruAdmitted = new Map();     // adapterId → Set(key) admitted while its rebuild ran (they win at the merge, never pruned by it)
   const lruOk = (v) => !!v && typeof v === 'object' && !!v.items && typeof v.items === 'object' && !Array.isArray(v.items);
   /** the ledger from its read's answer (`{text}` | `{error}`), cached; a rebuild started when it cannot be taken as it is */
   function lruAnswer(adapterId, read) {
     let v = null;
     if (read && typeof read.text === 'string') { try { v = JSON.parse(read.text); } catch { v = null; } }
     const good = lruOk(v);
-    const l = good ? v : { v: LRU_V, items: {} };
+    const l = good ? v : { v: 1, items: {} };
     lruCache.set(adapterId, l);
     if (!good || Number(v.v) !== LRU_V) {
       const why = read && read.error ? (read.error.code === 'ENOENT' ? 'missing' : `unreadable (${read.error.code || 'error'})`) : good ? 'written by an earlier version' : 'torn';
-      lruStartRebuild(adapterId, why);
+      lruUnfinished.set(adapterId, { tries: 0, retryAt: 0, said: false, why }); lruStartRebuild(adapterId, why);
     }
     return l;
   }
+  /** r3279 (7): a later use of an unfinished ledger walks it again once its wait passed (never at every hit) */
+  function lruRetry(adapterId) {
+    const u = lruUnfinished.get(adapterId);
+    if (u && !closed && !lruRebuilding.has(adapterId) && now() >= u.retryAt) lruStartRebuild(adapterId, u.why || 'unfinished');
+  }
+  const lruAdmit = (adapterId, key) => { const a = lruAdmitted.get(adapterId); if (a) a.add(key); };
   function lruOf(adapterId) {
     const l = lruCache.get(adapterId);
-    if (l) return l;
+    if (l) { lruRetry(adapterId); return l; }
     let read;
     try { read = { text: fs.readFileSync(lruFile(adapterId), 'utf-8') }; } catch (error) { read = { error }; }
     return lruAnswer(adapterId, read);
   }
-  /** the account's cached files from its folder, off the loop → { found: { key: {bytes, usedAt} }, bad } | null (purged / closed meanwhile) */
+  /** the account's cached files from its folder, off the loop → { found: { key: {bytes, usedAt} }, bad, failed } | null (purged / closed
+   *  meanwhile). `failed`: a conversation's folder that could not be listed (r3279 (6): the walk is UNFINISHED, never the truth) */
   async function lruWalk(adapterId, ep) {
     const root = path.join(attRoot, safeSeg(adapterId));
     let convs = [];
     try { convs = (await fs.promises.readdir(root, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
     const jobs = [];
+    let failed = null;
     for (const c of convs) {
       let names = [];
-      try { names = await fs.promises.readdir(path.join(root, c)); } catch { continue; }
+      try { names = await fs.promises.readdir(path.join(root, c)); } catch (e) { if (!e || e.code !== 'ENOENT') failed = failed || (e && e.code) || 'error'; continue; }
       for (const nm of names) if (!nm.endsWith('.json') && !nm.includes('.tmp-')) jobs.push([c, nm]);
     }
     const found = {};
@@ -2384,36 +2399,56 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         try { const st = await fs.promises.stat(f); if (st.isFile()) { found[`${c}/${nm}`] = { bytes: st.size, usedAt: Math.round(st.mtimeMs) || 0 }; bad++; } } catch { /* gone meanwhile */ }
       }));
     }
-    return { found, bad };
+    return { found, bad, failed };
   }
   function lruStartRebuild(adapterId, why) {
     if (lruRebuilding.has(adapterId)) return lruRebuilding.get(adapterId);
     const ep = purgeSeq.get(adapterId) || 0;
+    if (!lruUnfinished.has(adapterId)) lruUnfinished.set(adapterId, { tries: 0, retryAt: 0, said: false, why });
+    lruAdmitted.set(adapterId, new Set());
     const p = lruWalk(adapterId, ep).then((r) => {
-      if (lruRebuilding.get(adapterId) === p) lruRebuilding.delete(adapterId);   // ended, whatever it found
+      if (lruRebuilding.get(adapterId) !== p) return;   // r3279 (10): the account was forgotten meanwhile — a later rebuild owns its state
+      lruRebuilding.delete(adapterId);   // ended, whatever it found
+      const admitted = lruAdmitted.get(adapterId) || new Set();
+      lruAdmitted.delete(adapterId);
       if (!r || closed || (purgeSeq.get(adapterId) || 0) !== ep) return;
       const l = lruCache.get(adapterId);
       if (!l) return;
-      let added = 0;
+      let added = 0, pruned = 0;
       for (const [k, x] of Object.entries(r.found)) if (!l.items[k]) { l.items[k] = x; added++; }   // in place: what was admitted meanwhile wins
+      // r3279 (9): the only strays are the store's own — a blob whose meta write never landed (a crash between its rename and its meta)
+      if (r.bad) warn(`[channels] ${adapterId}: ${r.bad} cached attachment(s) have a meta that is missing or does not parse — counted by their own size, evictable like any cached file`);
+      if (r.failed) { lruLater(adapterId, `${r.failed}: a conversation's folder could not be listed`); return; }   // r3279 (6): UNFINISHED — counted what could be read
+      // r3279 (8): a WHOLE walk — the folder is the truth: an entry whose file is not there leaves (never one admitted meanwhile)
+      for (const k of Object.keys(l.items)) if (!r.found[k] && !admitted.has(k)) { delete l.items[k]; pruned++; }
+      lruUnfinished.delete(adapterId);
       l.v = LRU_V;
-      if (r.bad) warn(`[channels] ${adapterId}: ${r.bad} cached attachment(s) have a meta that does not parse — counted by their own size, never removed`);
-      if (added || why !== 'missing') warn(`[channels] ${adapterId}: the attachment ledger (lru.json) ${why} — rebuilt from the folder: ${Object.keys(r.found).length} cached file(s), ${added} put back in the count`);
+      if (added || pruned || why !== 'missing') warn(`[channels] ${adapterId}: the attachment ledger (lru.json) ${why} — rebuilt from the folder: ${Object.keys(r.found).length} cached file(s), ${added} put back in the count${pruned ? `, ${pruned} entry(ies) with no file left` : ''}`);
       if (Object.keys(l.items).length) { lruDirty.add(adapterId); lruTouch(adapterId); }   // saved ONCE, by the ledger's own coalesced flush (never a second synchronous write site)
-    }).catch((e) => { if (lruRebuilding.get(adapterId) === p) lruRebuilding.delete(adapterId); warn(`[channels] ${adapterId}: the attachment ledger could not be rebuilt from its folder (${(e && e.code) || (e && e.message) || e}) — nothing is evicted until it is (asked again at the next use)`); lruCache.delete(adapterId); });
+    }).catch((e) => { if (lruRebuilding.get(adapterId) === p) lruRebuilding.delete(adapterId); if ((purgeSeq.get(adapterId) || 0) !== ep) return; lruAdmitted.delete(adapterId); lruLater(adapterId, (e && e.code) || (e && e.message) || String(e)); });
     lruRebuilding.set(adapterId, p);
     return p;
+  }
+  /** r3279 (6) + (7): a walk that did not end WHOLE — the ledger stays unfinished (what it holds kept, nothing evicted, saved without its
+   *  mark), its next walk after a wait that doubles (30 s → 15 min), said ONCE an account */
+  function lruLater(adapterId, why) {
+    const u = lruUnfinished.get(adapterId) || { tries: 0, retryAt: 0, said: false, why: 'unfinished' };
+    u.tries++;
+    u.retryAt = now() + Math.min(LRU_RETRY_MAX_MS, LRU_RETRY_MS * 2 ** (u.tries - 1));
+    if (!u.said) { u.said = true; warn(`[channels] ${adapterId}: the attachment ledger could not be rebuilt whole from its folder (${why}) — what could be read is counted, nothing is evicted and it is not saved as the truth until a walk lists every folder (tried again later)`); }
+    lruUnfinished.set(adapterId, u);
+    const l = lruCache.get(adapterId);
+    if (l && Object.keys(l.items).length) lruDirty.add(adapterId);
   }
   // r3188: never saved while it is rebuilt (its landing saves once) — but at the store's CLOSE a ledger still being rebuilt is
   // saved UNFINISHED (no `v: 2`): what was admitted meanwhile is kept, and the next first use rebuilds it again (never taken as the truth)
   function lruSave(adapterId) {
-    if (lruRebuilding.has(adapterId) && !closed) { lruDirty.add(adapterId); return; }
     const l = lruOf(adapterId);
-    if (lruRebuilding.has(adapterId) && !closed) { lruDirty.add(adapterId); return; }   // its first read started a rebuild just now
+    if (lruRebuilding.has(adapterId) && !closed) { lruDirty.add(adapterId); return; }
     lruDirty.delete(adapterId);
     if (goneAccounts.has(adapterId)) return;   // 主开发 r2819: a purged account's ledger is never written again
     fs.mkdirSync(path.join(attRoot, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
-    l.v = lruRebuilding.has(adapterId) ? 1 : LRU_V;
+    l.v = lruUnfinished.has(adapterId) ? 1 : LRU_V;   // UNFINISHED (a rebuild in flight at a close, a walk that failed): saved without its mark
     writeJsonAtomic(lruFile(adapterId), l, { mode: 0o600 });
   }
   /** A cache HIT only moves a recency stamp (R3 §23): the ledger is written
@@ -2616,14 +2651,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const l = lruOf(adapterId);
     const k = `${safeSeg(convId)}/${h}`;
     if (l.items[k]) { l.items[k].usedAt = now(); lruTouch(adapterId); }
-    if (!l.items[k] && lruRebuilding.has(adapterId) && meta && Number.isFinite(Number(meta.bytes))) l.items[k] = { bytes: Number(meta.bytes), usedAt: now() };   // r3188: a hit while it is rebuilt counts in memory (a statement of its own: a control's cut of the line above leaves it whole)
+    if (!l.items[k] && lruRebuilding.has(adapterId) && meta && Number.isFinite(Number(meta.bytes))) { l.items[k] = { bytes: Number(meta.bytes), usedAt: now() }; lruAdmit(adapterId, k); }   // r3188: a hit while it is rebuilt counts in memory (a statement of its own: a control's cut of the line above leaves it whole)
     return { file, meta };
   }
   /** B-360d r1360 (the loop-hold digest: 2 holds were ingest's held bodies asking attachmentGet — a synchronous open of a
    *  meta on the network share, per attachment): THE SAME ANSWER OFF THE LOOP — the meta and the bytes' stat on the thread
    *  pool, the account's LRU ledger read the same way at its first use. For ingest's road (persistHeldBodies). */
   async function lruOfAsync(adapterId) {
-    if (lruCache.has(adapterId)) return lruCache.get(adapterId);
+    if (lruCache.has(adapterId)) { lruRetry(adapterId); return lruCache.get(adapterId); }
     const ep = purgeSeq.get(adapterId) || 0;
     let read;
     try { read = { text: await fs.promises.readFile(lruFile(adapterId), 'utf-8') }; } catch (error) { read = { error }; }
@@ -2641,7 +2676,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!l || (purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): purged during the wait — no answer, no touch
     const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];
     if (hit) { hit.usedAt = now(); lruTouch(adapterId); }   // attachmentGet's touch on the async road, in words of its own (test-channels-images anchors the synchronous one)
-    if (!l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`] && lruRebuilding.has(adapterId) && meta && Number.isFinite(Number(meta.bytes))) l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`] = { bytes: Number(meta.bytes), usedAt: now() };   // r3188: a hit while it is rebuilt counts in memory (a statement of its own)
+    if (!l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`] && lruRebuilding.has(adapterId) && meta && Number.isFinite(Number(meta.bytes))) { l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`] = { bytes: Number(meta.bytes), usedAt: now() }; lruAdmit(adapterId, `${safeSeg(convId)}/${attSlot(attId, msg)}`); }   // r3188: a hit while it is rebuilt counts in memory (a statement of its own)
     return { file, meta };
   }
 
@@ -2677,9 +2712,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const l = lruOf(adapterId);
     const key = `${safeSeg(convId)}/${h}`;
     l.items[key] = { bytes: buf.length, usedAt: now() };
+    lruAdmit(adapterId, key);   // r3279: admitted while its rebuild runs (never pruned by it)
     const evicted = [];
     let total = Object.values(l.items).reduce((n, x) => n + (Number(x && x.bytes) || 0), 0);
-    if (total > budgetBytes && !lruRebuilding.has(adapterId)) {   // r3188: NEVER from a part of the truth (its rebuild in flight)
+    if (total > budgetBytes && !lruRebuilding.has(adapterId) && !lruUnfinished.has(adapterId)) {   // r3188 + r3279: NEVER from a part of the truth (a rebuild in flight, a walk unfinished)
       const order = Object.entries(l.items).filter(([k]) => k !== key).sort((a, b) => (Number(a[1].usedAt) || 0) - (Number(b[1].usedAt) || 0));
       for (const [k, x] of order) {
         if (total <= budgetBytes) break;
@@ -3234,6 +3270,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     for (const k of [...stampMap.keys()]) if (String(k).startsWith(pre)) { stampMap.delete(k); stampsDirty = true; }
     lruCache.delete(adapterId);
     lruDirty.delete(adapterId);
+    lruRebuilding.delete(adapterId); lruUnfinished.delete(adapterId); lruAdmitted.delete(adapterId);   // r3279 (10): a rebuild in flight ends with the account
     purgeSeq.set(adapterId, (purgeSeq.get(adapterId) || 0) + 1);
     goneAccounts.add(adapterId);
     // B-92fc (主开发 r2819): THE ACCOUNT'S OWN FOLDER goes too (data/channels/<account>/: its pictures, the people memo, the memos) —

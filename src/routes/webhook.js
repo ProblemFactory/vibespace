@@ -328,8 +328,7 @@ async function syncRow(slug, options) {
   // lands merged at its lift (no other path's caller names are written over from the held stand-in)
   const named = st.callers(slug).map((c) => [`caller:${c.id}`, { name: c.name, at: D.now() }]);
   const put = (p) => { for (const [k, v] of named) p.people[k] = v; return p; };
-  if (typeof e.store.peopleUpdate === 'function') e.store.peopleUpdate(ADAPTER_ID, put);
-  else { const people = e.store.peopleRead(ADAPTER_ID); e.store.peopleWrite(ADAPTER_ID, put({ self: people.self, people: { ...people.people } })); }
+  e.store.peopleUpdate(ADAPTER_ID, put);   // the production store carries it (r3279: no second road kept beside it)
   // lane webhook-l2-ui: EVERY client hears of it NOW (a caller registered on one appears on the other without a reload) —
   // the index write alone broadcasts nothing; the engine's one notify door names this path's row
   try { if (typeof e.notify === 'function') e.notify([`${ADAPTER_ID}/${slug}`]); } catch { }
