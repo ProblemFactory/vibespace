@@ -388,6 +388,7 @@ console.log('\n§2 tier hygiene');
 // tree, since its walk writes a parent link into every node (the other three write nothing). Each section reads its own results
 // below, in its own order, and falls back to its own parse for a file the pass did not see.
 let ONE_PASS = null;
+const ONE_PASS_GUARD = 'THE ONE PASS: this tree was already walked by the census (its parent links are on it) — a helper never reads it';
 const onePass = async () => {
   const t0 = performance.now(), acorn = createRequire(import.meta.url)('acorn');
   const WC = await import('./wall-clock-census.mjs');
@@ -402,6 +403,9 @@ const onePass = async () => {
       strict: (src) => { if (src !== text) return acorn.parse(src, WC.PARSE_OPTIONS); if (!getStrict()) throw strictErr; return strict; },
       acorn: { parse: (src, o) => {
         if (src !== text || !lenientAsk(o)) return acorn.parse(src, o);   // a page's own code a suite ships, a planted text: its own parse
+        // THE GUARD (主开发 r3135 (4)): the census's walk writes a parent link into every node, the root's included; a helper never reads
+        // such a tree (its walk would follow the link back up): refused BY NAME, so the helper says it could not read the file
+        if (getStrict() && Object.prototype.hasOwnProperty.call(strict, '_p')) throw new Error(ONE_PASS_GUARD);
         if (getStrict()) return strict;
         if (!l) { l = true; try { lenient = acorn.parse(text, { ...WC.PARSE_OPTIONS, allowReturnOutsideFunction: true }); } catch (e) { lenientErr = e; } }
         if (lenientErr) throw lenientErr;
@@ -413,19 +417,25 @@ const onePass = async () => {
   const files = walk(path.join(REPO, 'scripts'));
   const fastAt = new Map(SUITES.filter((r) => r.tier === 'fast').map((r) => [path.join(REPO, 'scripts', r.name + '.mjs'), r]));
   const suiteAt = new Set(SUITES.map((r) => path.join(REPO, 'scripts', r.name + '.mjs')));
+  // ONE FILE'S ROAD (the pass and its controls run the same one): the three helpers on the shared tree, then the census LAST
+  const perFile = (text, { suite = false, row = null } = {}) => {
+    const one = treeOf(text), out = { pageLoops: oldPageLoops(text, one.acorn), appWaits: oldAppWaits(text, one.acorn) };
+    if (suite) out.lastReads = lastReadWaits(text, one.acorn);
+    if (row) out.census = WC.censusRow(row, text, one.strict);   // LAST: its walk writes a parent link into every node
+    out.parses = one.parses();
+    return out;
+  };
   const pageLoops = new Map(), appWaits = new Map(), lastReads = new Map(), census = new Map();
   let parses = 0;
   for (const f of files) {
-    const text = fs.readFileSync(f, 'utf8'), one = treeOf(text);
-    pageLoops.set(f, oldPageLoops(text, one.acorn));
-    appWaits.set(f, oldAppWaits(text, one.acorn));
-    if (suiteAt.has(f)) lastReads.set(f, lastReadWaits(text, one.acorn));
-    const row = fastAt.get(f);
-    if (row) census.set(row.name, WC.censusRow(row, text, one.strict));   // LAST: its walk writes a parent link into every node
-    parses += one.parses();
+    const row = fastAt.get(f), r = perFile(fs.readFileSync(f, 'utf8'), { suite: suiteAt.has(f), row });
+    pageLoops.set(f, r.pageLoops); appWaits.set(f, r.appWaits);
+    if (r.lastReads) lastReads.set(f, r.lastReads);
+    if (r.census) census.set(row.name, r.census);
+    parses += r.parses;
   }
   console.log(`  (THE ONE PASS, r2572 (5): ${files.length} scripts read once, ${parses} parse(s) for §2e · §2k · §2m · §2p, ${Math.round(performance.now() - t0)} ms; printed, never judged)`);
-  return { pageLoops, appWaits, lastReads, census };
+  return { pageLoops, appWaits, lastReads, census, perFile, treeOf, WC };
 };
 console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
 {
@@ -449,6 +459,35 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   for (const h of held) console.log('      held by the ratchet: ' + h);
   const nFast = SUITES.filter((r) => r.tier === 'fast').length;
   ok(suites.length === nFast && nFast > 300, `the census read every fast suite (${suites.length} of ${nFast})`);
+  // THE FIXED POINT'S KINDS (主开发 r3135 (1)): every node kind the body of the census's fixed point acts on is one of WC.FLOW_KINDS,
+  // and each of those is acted on — read from the module's own text (the body between its loop over `kin` and flow's return), where
+  // each kind is spelled `n.type === '<kind>'` (any other spelling of n.type there is red too). A branch on an eighth kind is RED here,
+  // never dead; the CONTROL plants one in a copy of the text.
+  {
+    const kindsActedOn = (src) => {
+      const a0 = src.indexOf('for (const n of kin) {'), b0 = a0 < 0 ? -1 : src.indexOf('  return { all, isSpan, spanFields };', a0);
+      if (a0 < 0 || b0 < 0) return null;
+      const body = src.slice(a0, b0), eq = [...body.matchAll(/\bn\.type === '(\w+)'/g)].map((m) => m[1]);
+      return { kinds: [...new Set(eq)], otherSpellings: (body.match(/\bn\.type\b/g) || []).length - eq.length };
+    };
+    const wcSrc = fs.readFileSync(path.join(REPO, 'scripts', 'wall-clock-census.mjs'), 'utf8');
+    const got = kindsActedOn(wcSrc), K = WC.FLOW_KINDS;
+    const extra = got ? got.kinds.filter((k) => !K.includes(k)) : null, unused = got ? K.filter((k) => !got.kinds.includes(k)) : null;
+    const plantSrc = wcSrc.replace('for (const n of kin) {\n', "for (const n of kin) {\n      if (n.type === 'ForInStatement') spans.add('planted');\n");
+    const plant = kindsActedOn(plantSrc);
+    ok(!!got && !extra.length && !unused.length && got.otherSpellings === 0 && plantSrc !== wcSrc && !!plant && plant.kinds.includes('ForInStatement') && !K.includes('ForInStatement'),
+      `THE FIXED POINT'S KINDS (r3135 (1)): the census's fixed point acts on exactly its ${K.length} listed kinds (${got ? got.kinds.join(', ') : 'the body not found'})${extra && extra.length ? ' — NOT LISTED: ' + extra.join(', ') : ''}${unused && unused.length ? ' — listed, never acted on: ' + unused.join(', ') : ''}${got && got.otherSpellings ? ' — ' + got.otherSpellings + ' other spelling(s) of n.type' : ''}; CONTROL: a branch planted on an eighth kind (ForInStatement) is seen`);
+  }
+  // THE ONE PASS'S GUARD (主开发 r3135 (4)): a helper never reads a tree the census already walked — planted the WRONG way round (the census
+  // first, on a text with a clock), the helper's ask is REFUSED by name, so its section says it could not read that file
+  {
+    const t = "const t0 = Date.now();\nif (Date.now() - t0 > 5) console.log('x');\n";
+    const one = ONE_PASS.treeOf(t);
+    const row = WC.censusRow({ name: 'planted-guard', tier: 'fast' }, t, one.strict);   // the census FIRST: its walk links every node
+    let refused = null;
+    try { one.acorn.parse(t, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true, allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true, locations: true }); } catch (e) { refused = e.message; }
+    ok(Array.isArray(row.findings) && refused === ONE_PASS_GUARD, `THE ONE PASS'S GUARD (r3135 (4)): a tree the census walked is never handed to a helper — the census first, then a helper's ask: ${refused ? 'refused by name' : 'NOT refused'}`);
+  }
   ok(!v.problems.length, `no literal wall-clock bound under ${WC.LITERAL_FLOOR_MS} ms in a fast suite; the ≥ ${WC.LITERAL_FLOOR_MS} ms ones are the ratchet's (${held.length} in ${Object.keys(baseline).length} suites, only falling)${v.problems.length ? ' — ' + v.problems.join(' | ') : ''}`);
   ok(!held.length && !Object.keys(baseline).length, `THE RATCHET IS AT 0 (lane wall-clock-ratchet-down): no literal wall-clock bound held in any fast suite, the baseline empty — the next one is a NEW one, RED (${held.length} held, ${Object.keys(baseline).length} baseline rows)`);
   // THE RATIO (lane cpu-ratio-controls): no fast suite judges a growth on the clock — one measurement at two input sizes compared
@@ -1444,14 +1483,29 @@ console.log('\n§2j a suite reads no history master does not have');
     // «<sha>^{commit}» each rev-parse --verify resolved) and judged against ONE walk of HEAD's history (a commit is an ancestor of HEAD,
     // or HEAD itself, exactly when rev-list HEAD lists it, as merge-base --is-ancestor answers). Each verdict is the one the road above
     // gave, and a sha that does not peel to a commit (missing, ambiguous, a blob or a tree) keeps that road, one by one.
-    {
-      const shas = [...new Set(reads.map((r) => r.sha))];
-      const peel = spawnSync('git', ['-C', REPO, 'cat-file', '--batch-check=%(objectname) %(objecttype)'], { input: shas.map((x) => x + '^{commit}').join('\n') + '\n', encoding: 'utf8', env: GIT_ENV });
-      const walked = spawnSync('git', ['-C', REPO, 'rev-list', 'HEAD'], { encoding: 'utf8', env: GIT_ENV, maxBuffer: 1 << 28 });
+    const batchCommitVerdicts = (root, shas) => {   // → Map sha → 'on' | 'off', for the shas that peel to a commit (the rest: the road above)
+      const v = new Map();
+      const peel = spawnSync('git', ['-C', root, 'cat-file', '--batch-check=%(objectname) %(objecttype)'], { input: shas.map((x) => x + '^{commit}').join('\n') + '\n', encoding: 'utf8', env: GIT_ENV });
+      const walked = spawnSync('git', ['-C', root, 'rev-list', 'HEAD'], { encoding: 'utf8', env: GIT_ENV, maxBuffer: 1 << 28 });
       if (peel.status === 0 && walked.status === 0) {
         const onHead = new Set(walked.stdout.split('\n').filter(Boolean)), out = peel.stdout.split('\n');
-        shas.forEach((x, i) => { const m = /^([0-9a-f]{40}) commit$/.exec(out[i] || ''); if (m) memo.set(x, onHead.has(m[1]) ? 'on' : 'off'); });
+        shas.forEach((x, i) => { const m = /^([0-9a-f]{40}) commit$/.exec(out[i] || ''); if (m) v.set(x, onHead.has(m[1]) ? 'on' : 'off'); });
       }
+      return v;
+    };
+    for (const [x, verdict] of batchCommitVerdicts(REPO, [...new Set(reads.map((r) => r.sha))])) memo.set(x, verdict);
+    // CONTROL (主开发 r3135 (3)): the batch's «off» — over a scratch repository of the suite's own, a list holding its HEAD, the root it
+    // stands on, a commit that is NO ancestor (a side branch) and an absent sha: HEAD and the root on, the side commit OFF, the absent
+    // one left to the one-by-one road (a batch that answered «on» for every commit is red here)
+    {
+      const sr = makeRepo('batch-off');
+      const A = commit(sr, 'a.txt', 'a\n', 'the root');
+      git(sr, ['checkout', '-q', '-b', 'side']);
+      const S = commit(sr, 'b.txt', 'b\n', 'a side commit');
+      git(sr, ['checkout', '-q', 'main']);
+      const H = commit(sr, 'c.txt', 'c\n', 'HEAD');
+      const v = batchCommitVerdicts(sr, [H, A, S, '0'.repeat(40)]);
+      ok(v.get(H) === 'on' && v.get(A) === 'on' && v.get(S) === 'off' && !v.has('0'.repeat(40)), `CONTROL (r3135 (3)): the batch over a scratch repository: its HEAD and root ON, a side commit that is no ancestor OFF, an absent sha left to the road one by one (${JSON.stringify(Object.fromEntries([...v].map(([k, x]) => [k.slice(0, 7), x])))})`);
     }
     ok(verdictOf(git(REPO, ['rev-parse', 'HEAD'])) === 'on' && verdictOf('0'.repeat(40)) === 'off', 'the oracle: HEAD is on master; an absent object is off master (a full clone holds every ancestor)');
     const blob = git(REPO, ['rev-parse', 'HEAD:package.json']), tree = git(REPO, ['rev-parse', 'HEAD:scripts/lib']);
@@ -1503,6 +1557,9 @@ console.log('\n§2k one page-target waiter: no loop under scripts/ waits for a p
     'a correct nested waiter': `for (const face of faces) { for (let i = 0; i < 40 && !t; i++) { try { t = (await (await fetch(${U})).json()).find((x) => x.type === 'page'); } catch { } if (!t) await sleep(250); } try { await go(face); } catch { await sleep(100); } }`,
   };
   const seenOld = Object.entries(OLD).map(([k, v]) => [k, oldPageLoops(v, acorn).length]), seenCured = Object.entries(CURED).map(([k, v]) => [k, oldPageLoops(v, acorn).length]);
+  // THE ONE PASS (主开发 r3135 (2)): over this section's planted texts the pass's road gives oldPageLoops the answer its own parse gives
+  const passK = Object.entries({ ...OLD, ...CURED }).filter(([, v]) => JSON.stringify(ONE_PASS.perFile(v).pageLoops) !== JSON.stringify(oldPageLoops(v, acorn))).map(([k]) => k);
+  ok(!passK.length && Object.values(OLD).every((v) => ONE_PASS.perFile(v).pageLoops.length > 0), `THE ONE PASS (r3135 (2)): over this section's planted texts the pass hands oldPageLoops what its own parse gives — each old form found through it too${passK.length ? ' — DIFFERS: ' + passK.join(', ') : ''}`);
   ok(seenOld.every(([, n]) => n === 1), `CONTROLS: each old shape, planted, is FOUND by the tree (${seenOld.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
   ok(seenCured.every(([, n]) => n === 0), `CONTROLS: the correct shapes are NOT found (${seenCured.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
   const stub = (pageAt, die = 0) => { let asks = 0; return { list: async () => { ++asks; if (die && asks >= die) throw new Error('refused'); return asks >= pageAt ? [{ type: 'browser' }, { type: 'page', id: 'p1' }] : [{ type: 'browser' }]; }, asks: () => asks }; };
@@ -1619,6 +1676,9 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
     'a wait for something else': "await waitFor('!!document.body', 20000); await evalJs('app.ready.then(() => true)');",
   };
   const seenOld = Object.entries(OLD).map(([k, v]) => [k, oldAppWaits(v, acorn).length]), seenCured = Object.entries(CURED).map(([k, v]) => [k, oldAppWaits(v, acorn).length]);
+  // THE ONE PASS (主开发 r3135 (2)): over this section's planted texts the pass's road gives oldAppWaits the answer its own parse gives
+  const passM = Object.entries({ ...OLD, ...CURED }).filter(([, v]) => JSON.stringify(ONE_PASS.perFile(v).appWaits) !== JSON.stringify(oldAppWaits(v, acorn))).map(([k]) => k);
+  ok(!passM.length && Object.values(OLD).every((v) => ONE_PASS.perFile(v).appWaits.length > 0), `THE ONE PASS (r3135 (2)): over this section's planted texts the pass hands oldAppWaits what its own parse gives — each old form found through it too${passM.length ? ' — DIFFERS: ' + passM.join(', ') : ''}`);
   ok(seenOld.every(([, n]) => n === 1), `CONTROLS: each old shape, planted, is FOUND by the tree (${seenOld.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
   ok(seenCured.every(([, n]) => n === 0), `CONTROLS: the correct shapes are NOT found (${seenCured.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
 
@@ -1932,6 +1992,9 @@ console.log('\n§2p a wait that runs out says so: no suite returns its last read
   const NOT = { 'the break form, marked': BRK("return (o.length >= n ? o : markTimedOut(o, 40 * 25, 'byText')).sort((a, b) => a - b);"), 'the one mark (markTimedOut)': POLL("return markTimedOut(r, 40 * 25, 'settle');"), 'a timed-out mark': POLL('return { ...r, timedOut: true };'), 'a null when it runs out': POLL('return null;'), 'its test IS its read': 'const until = async (f) => { for (let i = 0; i < 9; i++) { const v = await f(); if (v) return v; await sleep(9); } return f(); };', 'in page code, a timed-out mark': PAGE('return { timedOut: true, last: read() };') };
   const seen = (o) => Object.entries(o).map(([k, v]) => [k, lastReadWaits(v, acorn).filter((y) => !y.error).length]);
   const sN = seen(NAMED), sX = seen(NOT);
+  // THE ONE PASS (主开发 r3135 (2)): over this section's planted texts the pass's road gives lastReadWaits the answer its own parse gives
+  const passP = Object.entries({ ...NAMED, ...NOT }).filter(([, v]) => JSON.stringify(ONE_PASS.perFile(v, { suite: true }).lastReads) !== JSON.stringify(lastReadWaits(v, acorn))).map(([k]) => k);
+  ok(!passP.length && Object.values(NAMED).every((v) => ONE_PASS.perFile(v, { suite: true }).lastReads.filter((y) => !y.error).length > 0), `THE ONE PASS (r3135 (2)): over this section's planted texts the pass hands lastReadWaits what its own parse gives — each named shape found through it too${passP.length ? ' — DIFFERS: ' + passP.join(', ') : ''}`);
   ok(sN.every(([, n]) => n === 1), `CONTROLS: the shape, planted, is NAMED (${sN.map(([k, n]) => `${k}: ${n}`).join(' · ')})`);
   ok(sX.every(([, n]) => n === 0), `CONTROLS: its cures and look-alikes are NOT named (${sX.map(([k, n]) => `${k}: ${n}`).join(' · ')})`);
   // THE ONE MARK (scripts/lib/timed-out.mjs, 主开发 r1197): a wait that runs out answers its read with its TRUTHINESS KEPT — a null stays

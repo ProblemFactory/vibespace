@@ -227,8 +227,7 @@ function flow(src, { seed = [], injected = new Set(), ast = null } = {}) {
   const sizeOf = () => marks.size + spans.size + spanFields.size + spanFns.size + spanArrays.size + spanArrayFields.size + clockFns.size + spanMaps.size + [...tupleArrays.values()].reduce((a, t) => a + t.size, 0);
   // THE FIXED POINT READS ONLY THESE NODE KINDS (every statement of its body opens with one of them; B-54a9, 主开发 r2572 (3)):
   // each pass visits them alone, the rest of the tree is never stepped through again — the same marks, spans and fields
-  const FLOW_KINDS = new Set(['VariableDeclarator', 'AssignmentExpression', 'FunctionDeclaration', 'AssignmentPattern', 'CallExpression', 'ForOfStatement', 'Property']);
-  const kin = all.filter((n) => FLOW_KINDS.has(n.type));
+  const kin = all.filter((n) => FLOW_KIND_SET.has(n.type));   // FLOW_KINDS (below), held to this body by test-ci-gate §2e
   const bind = (id, v) => {   // (once per flow, not once per node and pass)
     if (!v || !id || id.type !== 'Identifier') return;
     if (isClock(v) || (un(v).type === 'Identifier' && marks.has(un(v).name))) marks.add(id.name);
@@ -615,6 +614,12 @@ export function censusRow(r, src, parseSuite = parse, readFile = undefined) {
   const fields = ast ? productSpanFields(src, readFile, ast) : [];
   return { name: r.name, findings: ast ? wallClockFindings(src, { fields, ast }) : [] };
 }
+
+/** THE NODE KINDS the census's fixed point acts on (flow's loop over `kin`): each statement of its body opens with `n.type === '<one of
+ *  these>'`. test-ci-gate §2e reads that body and holds it to this list both ways (主开发 r3135 (1)): a branch on an eighth kind is RED
+ *  there, never dead. */
+export const FLOW_KINDS = Object.freeze(['VariableDeclarator', 'AssignmentExpression', 'FunctionDeclaration', 'AssignmentPattern', 'CallExpression', 'ForOfStatement', 'Property']);
+const FLOW_KIND_SET = new Set(FLOW_KINDS);
 
 /** the census's own parse options (test-ci-gate's ONE PASS parses each script once with these) */
 export const PARSE_OPTIONS = Object.freeze({ ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true, allowAwaitOutsideFunction: true });
