@@ -60,6 +60,7 @@ function writeJsonAtomic(file, obj) {
 const STATUS = Object.freeze({ vault_use_marks_unread: 503, marks_undecided: 409, row_changed: 409, except_unnamed: 409, window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
   marks_undecided: 'this row\'s marks were lost (vault-use-marks.json was damaged) — its members are kept, unverified; open «Who may use it» and save the row as you want it (验证是你): that decides it — a single ✕ or press cannot vouch for the members it leaves; nothing was written',   // r3002 (a); r3130 (c) (e)
+  vault_use_marks_unread: 'the vault-use marks (data/vault-use-marks.json) could not be read — nothing was changed; VibeSpace reads them again by itself',   // r3104 (a): the route\'s words for the held code (a page with no row of its own reads these)
   row_changed: 'someone changed who may use it since this page read it — nothing was written; the row as it is now is answered (use): save again over it',   // B-f212's remainder
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
   command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
@@ -137,7 +138,8 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   // under its own mark. A sidecar MISSING is the release's generation 0 (rows written before the sidecar existed verify there)
   const MARKS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   let marksStarted = false, tornLift = null;
-  let undecided = new Set();            // resources whose generation is unknown (torn / missing marks)
+  let undecided = new Set();            // resources whose generation is unknown (torn marks)
+  let undecidedAside = null;            // r3104: WHERE the torn marks' bytes are kept (the hold's copy, by base name) — said beside each undecided row
   const marksHold = MARK_FILE ? HOLD.create({
     file: MARK_FILE, valid: MARKS_SHAPE, code: 'vault_use_marks_unread', aside: (mk) => `${MARK_FILE}.corrupt-${mk}`,
     words: (h) => `vault-use-marks.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No grant is lost: nothing is written over it, each «used with no card by» grant waits unverified (a run asks its card), and a change to who may use a stored value is refused until it reads`,
@@ -150,17 +152,19 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   // read only when both verify (a missing or failing second mark = no undecided row: the release's own answer for those rows)
   const genBody = (seq, res) => JSON.stringify({ v: 1, gen: Number(seq) || 0, res: Object.fromEntries(Object.keys(res).sort().map((k) => [k, Number(res[k]) || 0])) });
   const UND_LABEL = 'vault-use-undecided-v1';
-  const undecidedBody = (seq, und) => JSON.stringify({ gen: Number(seq) || 0, undecided: [...und].sort() });
+  const undecidedBody = (seq, und, aside = null) => JSON.stringify({ gen: Number(seq) || 0, undecided: [...und].sort(), ...(aside ? { aside: String(aside) } : {}) });   // r3104: WHERE the torn bytes are kept rides under this mark too
   /** a read sidecar → its generations (and its undecided rows) when its mark verifies; else nothing changes (fail closed) */
   const applyMarks = (raw) => {
     if (!raw || typeof raw !== 'object') return false;
     const res = raw.res && typeof raw.res === 'object' && !Array.isArray(raw.res) ? Object.fromEntries(Object.keys(raw.res).filter((k) => GM.resourceShapeOk(U.DOOR, k)).map((k) => [k, Number(raw.res[k]) || 0])) : {};
     const und = Array.isArray(raw.undecided) ? raw.undecided.filter((k) => typeof k === 'string' && GM.resourceShapeOk(U.DOOR, k)) : [];
+    const asideRead = und.length && typeof raw.aside === 'string' && /^vault-use-marks\.json\.corrupt-[\w.-]{1,80}$/.test(raw.aside) ? raw.aside : null;
     const g = Number(raw.gen) || 0;
     const macOk = (label, body, got) => { let want = null; try { want = vault.macOf(label, body); } catch { want = null; } const h = typeof got === 'string' && /^[0-9a-f]{64}$/.test(got) ? got : null; return !!(want && h && crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(want, 'hex'))); };
     if (!(g >= markGen && macOk(GEN_LABEL, genBody(g, res), raw.mark))) return false;
     genSeq = Math.max(genSeq, g); markGen = g; genByRes = Object.assign(Object.create(null), res);
-    undecided = und.length && macOk(UND_LABEL, undecidedBody(g, und), raw.undecidedMark) ? new Set(und) : new Set();   // r3130 MUST 1: only under its OWN mark
+    const undOk = und.length && macOk(UND_LABEL, undecidedBody(g, und, asideRead), raw.undecidedMark);
+    undecided = undOk ? new Set(und) : new Set(); undecidedAside = undOk ? asideRead : null;   // r3130 MUST 1: only under its OWN mark
     return true;
   };
   /** torn marks say nothing of the rows that exist: each whose members do not all verify at generation 0 is UNDECIDED, written under the mark */
@@ -175,7 +179,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   const loadGen = () => {
     if (!MARK_FILE || !unlocked()) return;
     if (marksHeld()) return;   // r3002 (a): held — the law reads it again off the loop; nothing verifies until it reads
-    if (tornLift) { const was = tornLift; tornLift = null; marksStarted = true; genLoaded = true; settleSilence(`was torn (kept aside as ${was.setAside})`); return; }
+    if (tornLift) { const was = tornLift; tornLift = null; marksStarted = true; genLoaded = true; undecidedAside = was.setAside || null; settleSilence(`was torn (kept aside as ${was.setAside})`); return; }
     let read; try { read = { text: fs.readFileSync(MARK_FILE, 'utf-8') }; } catch (error) { read = { error }; }
     if (!marksStarted) {   // r3002 (a): THE FIRST READ while unlocked, through the law
       const st = marksHold.start(SR.storeAnswer(read, { valid: MARKS_SHAPE }));
@@ -191,7 +195,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     let raw = null; try { raw = JSON.parse(read.text); } catch { return; }
     applyMarks(raw);
   };
-  const saveGen = () => { if (!MARK_FILE || !marksHold.writable('a vault-use generation')) return; try { const body = genBody(genSeq, genByRes); const mark = vault.macOf(GEN_LABEL, body); if (!mark) return; const doc = { ...JSON.parse(body), mark }; if (undecided.size) { const umark = vault.macOf(UND_LABEL, undecidedBody(genSeq, undecided)); if (!umark) return; doc.undecided = [...undecided].sort(); doc.undecidedMark = umark; } writeJsonAtomic(MARK_FILE, doc); markGen = genSeq; } catch (e) { log(`[vault-use] the mark generation could not be written (${e.message})`); } };
+  const saveGen = () => { if (!MARK_FILE || !marksHold.writable('a vault-use generation')) return; try { const body = genBody(genSeq, genByRes); const mark = vault.macOf(GEN_LABEL, body); if (!mark) return; const doc = { ...JSON.parse(body), mark }; if (undecided.size) { const umark = vault.macOf(UND_LABEL, undecidedBody(genSeq, undecided, undecidedAside)); if (!umark) return; doc.undecided = [...undecided].sort(); if (undecidedAside) doc.aside = String(undecidedAside); doc.undecidedMark = umark; } writeJsonAtomic(MARK_FILE, doc); markGen = genSeq; } catch (e) { log(`[vault-use] the mark generation could not be written (${e.message})`); } };
   // lane vault-use-grants round 5 (MINOR, item 6): the generation moves in TWO steps — `nextGen` computes the generation a
   // write WILL take (it does NOT persist), and `commitGen` records it only AFTER the grants write landed. r4 bumped+persisted
   // BEFORE the write, so a refused 257th member (too_many) or a failed grants.json write invalidated every existing member of
@@ -511,7 +515,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // round 6 (MINOR item 6): while locked the members cannot be verified — list them «unverified until unlocked» (names/hosts,
     // never the value, never as a held grant), so a hand-written data/grants.json member is not shown as a real grant.
     if (raw && !unlocked()) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; }
-    if (raw) { loadGen(); const why = marksHeld() ? 'marks_unread' : undecided.has(String(id)) ? 'marks_undecided' : null; if (why) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, unverifiedWhy: why, rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; } }   // r3002 (a): listed, never as a held grant
+    if (raw) { loadGen(); const why = marksHeld() ? 'marks_unread' : undecided.has(String(id)) ? 'marks_undecided' : null; if (why) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, unverifiedWhy: why, ...(why === 'marks_undecided' && undecidedAside ? { marksAside: undecidedAside } : {}), rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; } }   // r3002 (a): listed, never as a held grant
     const p = U.publicGrants(verifiedRow(raw), { now: now() });
     const by = (counts && counts.grants) || {};
     return { ...p, rev: revSeen(id), to: p.to.map((e) => ({ ...e, uses: (by[e.grant] && by[e.grant].uses) || 0, convs: (by[e.grant] && by[e.grant].convs) || 0 })) };   // r11: by its grant id (`grant`); B-f212's remainder: the row's stamp (`rev`) a Save sends back
@@ -531,6 +535,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
    *  never a value. A LOCKED vault cannot verify its members (publicFor's rule) ⇒ ONE answer that says so. */
   function mayUseFor(facts = {}) {
     if (!unlocked()) return [{ door: U.DOOR, resource: '*', name: '', ok: false, code: 'vault_locked' }];
+    loadGen(); if (marksHeld()) return [{ door: U.DOOR, resource: '*', name: '', ok: false, code: 'vault_use_marks_unread' }];   // r3104 (a): a lookup through the list while held says so — never «nothing held»
     const bare = (k) => { const m = /^(group|conversation):(.+)$/.exec(String(k || '')); return m ? (m[1] === 'group' ? { kind: 'group', id: m[2] } : { kind: 'conversation', key: m[2] }) : null; };
     const nameOf = (id) => { const m = /^[^:]+:([^#]*)(?:#(.*))?$/.exec(String(id)); return m ? (m[2] && m[2] !== 'value' ? `${m[1]} · ${m[2]}` : m[1]) : String(id); };
     const out = [];
@@ -545,7 +550,9 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     }
     return out;
   }
-  return { _marksHold: marksHold, rowsOf, verdictFor, heldBy, mayUseFor, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  /** r3104 (a): the hold's words while the marks are held (a second road's lookup — the agent's list — says it), else null */
+  const marksUnread = () => { if (!unlocked()) return null; loadGen(); return marksHeld() ? marksHold.words() : null; };
+  return { _marksHold: marksHold, marksUnread, rowsOf, verdictFor, heldBy, mayUseFor, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };

@@ -12861,6 +12861,10 @@ export default {
   "Unverified until you unlock the vault — not in use until then.": "在你解锁保险库之前无法验证——在此之前不生效。", // lane vault-use-grants (round 6)
   "Saved — these members are in use again": "已保存——这些成员重新生效了", // r3130
   "The vault-use marks could not be read — this shows who may use it as last read; nothing is lost": "保险库的使用标记读不出来——这里显示的是上次读到的可使用者；没有丢失任何东西", // r3130
+  "unknown — the vault-use marks could not be read (nothing is lost; they are read again by itself)": "未知——保险库的使用标记读不出来（没有丢失任何东西；会自动再读）", // r3104 (a)
+  "The vault-use marks could not be read — nothing was changed; VibeSpace reads them again by itself": "保险库的使用标记读不出来——没有做任何改动；VibeSpace 会自动再读", // r3104 (a)
+  "This row's marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed": "这一行的标记丢失了——按你想要的样子保存整行（验证是你）即可决定它；单独一个 ✕ 无法为它留下的成员作保。没有做任何改动", // r3104 (a); r3130 (e)
+  "The damaged marks are kept beside the store as {name} — they are not a copy to restore.": "损坏的标记保存在存储旁边，名为 {name}——它不是可以用来恢复的副本。", // r3104 (a)
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "无法验证：保险库的使用标记读不出来——在读出之前不生效；没有丢失任何东西。", // r3002 (a)
   "Unverified: this row's marks were lost — save it again (验证是你) to keep these members; not in use until then.": "无法验证：这一行的标记丢失了——再保存一次（验证是你）即可保留这些成员；在此之前不生效。", // r3002 (a)
   "Un-pause this — let it be used again": "取消暂停——让它重新可用", // lane vault-use-grants (round 6)

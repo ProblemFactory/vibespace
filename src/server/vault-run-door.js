@@ -1109,7 +1109,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const ew = wordsOfRow(row);   // lane vault-entry-description: its name and description (another agent's or the owner's words — belted)
       out.push({ ref: r ? r.ref : null, store: ref.store, label: ew.name, ...(ew.note ? { note: ew.note } : {}), kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(hd.scopes), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
     }
-    return { ok: true, entries: out.filter((x) => x.ref) };
+    let standingUnread = null; try { standingUnread = useGrants && typeof useGrants.marksUnread === 'function' ? useGrants.marksUnread() : null; } catch { standingUnread = null; }   // r3104 (a): the standing approvals' marks held — said, never «none held»
+    return { ok: true, entries: out.filter((x) => x.ref), ...(standingUnread ? { standingUnread } : {}) };
   }
 
   // ── THE CARD (exit-proxy's ask: one per conversation × shape, 60 s, the item and the ask ONE state) ──

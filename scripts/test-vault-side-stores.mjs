@@ -71,17 +71,20 @@ async function main() {
     const before = jsonOr(w.MARKS);
     const ug = w.mk();
     const pr = placeRefusal(w.MARKS);
-    let save = null, pub = null, run = null;
+    let save = null, pub = null, run = null, mayUse = null, words = null;
     try {
       save = ug.setRow(w.e1, { to: [w.m1, { kind: 'conversation', key: 'cid-made-up-3', hosts: ['192.168.1.1'] }] }, { reauthed: true });
       pub = ug.publicFor(w.e2);
       run = ug.verdictFor(w.e2, { conversationKeys: ['cid-made-up-2'] }, { hosts: ['192.168.1.1'], destinationKnown: true });
+      mayUse = ug.mayUseFor({ conversationKeys: ['cid-made-up-2'] });
+      words = ug.marksUnread();
     } finally { pr.lift(); }
     const after = jsonOr(w.MARKS);
     ok(!!save && !save.ok && save.code === 'vault_use_marks_unread' && /could not be read/.test(save.error || '') && JSON.stringify(after) === JSON.stringify(before), '(a) a read that failed HOLDS the marks: the owner\'s next Save is refused by name (what is known: «could not be read»), and nothing is written over the file', save && (save.ok ? 'the Save went through' : save.code));
     ok(!!pub && pub.unverified === true && pub.unverifiedWhy === 'marks_unread' && (pub.to || []).length === 1, '(a) …while held, the Vault window lists the other entry\'s member «unverified — the marks could not be read», never as a held grant', pub && { unverified: pub.unverified, why: pub.unverifiedWhy, members: (pub.to || []).length });
     ok(!!run && !(run.ok === true && run.member), '(a) …and a run is never let through on a mark that could not be checked (fail CLOSED: it asks its card)');
     ok(w.stale.length === 0, '(a) …and nobody is told a FORGERY for a read that failed (no «could not be trusted» notice)', `stale notices ${w.stale.length}`);
+    ok(Array.isArray(mayUse) && mayUse.length === 1 && mayUse[0].code === 'vault_use_marks_unread' && typeof words === 'string' && /could not be read/.test(words), '(a) …a lookup through the list says it is held (r3104): «what it may use» lists the held state by its code, and a second road (the agent\'s list) is handed the hold\'s words — never «nothing held»', { mayUse: mayUse && mayUse.map((r) => r.code), words: !!words });
     const ug3 = w.mk();   // the next life, reading fine
     ok(w.verified(ug3, w.e2) === 1 && w.verified(ug3, w.e1) === 1 && w.stale.length === 0, '(a) …once the file reads, every member verifies again: nothing was lost', { e1: w.verified(ug3, w.e1), e2: w.verified(ug3, w.e2), stale: w.stale.length });
   }
@@ -119,6 +122,7 @@ async function main() {
     const r = await silenceScene(UG, 'torn');
     ok(r.asideN === 1, '(a) TORN bytes are kept aside ONCE (a dated copy beside the store)', `copies ${r.asideN}`);
     ok(!!r.add && !r.add.ok && r.add.code === 'marks_undecided' && r.kept, '(a) …and the REMOVER removes ZERO: a write built on the verified view (the card\'s «Always») is refused by name on an undecided row, and its member stays in the grants store', { add: r.add && (r.add.ok ? 'written' : r.add.code), kept: r.kept });
+    ok(!!r.pub && /^vault-use-marks\.json\.corrupt-/.test(r.pub.marksAside || '') && !!r.pubR && r.pubR.marksAside === r.pub.marksAside, '(a) …the window says WHERE the damaged marks are kept (the copy\'s base name), after a restart too — and what to do: save the row again (never «restore that copy»)', { aside: r.pub && r.pub.marksAside, afterRestart: r.pubR && r.pubR.marksAside });
     ok(!!r.pub && r.pub.unverifiedWhy === 'marks_undecided' && !!r.pubR && r.pubR.unverifiedWhy === 'marks_undecided' && r.stale === 0, '(a) …the row is UNDECIDED (listed «its marks were lost — save it again»), across a restart, with no forgery notice', { why: r.pub && r.pub.unverifiedWhy, afterRestart: r.pubR && r.pubR.unverifiedWhy, stale: r.stale });
     ok(!!r.save && r.save.ok && r.after === 1 && !!r.e1after && r.e1after.unverifiedWhy === 'marks_undecided', '(a) …the owner\'s Save of the row decides it (its member verifies again); the other row stays undecided until its own Save', { save: r.save && (r.save.ok ? 'ok' : r.save.code), verified: r.after, other: r.e1after && r.e1after.unverifiedWhy });
   }

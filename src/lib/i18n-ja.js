@@ -12860,6 +12860,10 @@ export default {
   "Unverified until you unlock the vault — not in use until then.": "保管庫のロックを解除するまで検証できません——それまでは使用されません。", // lane vault-use-grants (round 6)
   "Saved — these members are in use again": "保存しました——これらのメンバーは再び使用されます", // r3130
   "The vault-use marks could not be read — this shows who may use it as last read; nothing is lost": "保管庫の使用マークを読み取れません——最後に読み取った使用者を表示しています。失われたものはありません", // r3130
+  "unknown — the vault-use marks could not be read (nothing is lost; they are read again by itself)": "不明——保管庫の使用マークを読み取れません（失われたものはありません。自動で読み直します）", // r3104 (a)
+  "The vault-use marks could not be read — nothing was changed; VibeSpace reads them again by itself": "保管庫の使用マークを読み取れません——何も変更していません。VibeSpace が自動で読み直します", // r3104 (a)
+  "This row's marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed": "この行のマークが失われました——行全体を望む形で保存すると（验证是你）決まります。✕ ひとつでは残すメンバーを保証できません。何も変更していません", // r3104 (a); r3130 (e)
+  "The damaged marks are kept beside the store as {name} — they are not a copy to restore.": "壊れたマークはストアの横に {name} として残してあります——復元に使うコピーではありません。", // r3104 (a)
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "検証できません：保管庫の使用マークを読み取れません——読み取れるまで使用されません。失われたものはありません。", // r3002 (a)
   "Unverified: this row's marks were lost — save it again (验证是你) to keep these members; not in use until then.": "検証できません：この行のマークが失われました——もう一度保存すると（验证是你）これらのメンバーが保たれます。それまでは使用されません。", // r3002 (a)
   "Un-pause this — let it be used again": "一時停止を解除——再び使用可にする", // lane vault-use-grants (round 6)

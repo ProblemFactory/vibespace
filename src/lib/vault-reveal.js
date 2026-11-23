@@ -45,6 +45,8 @@ export function revealWords(r) {
   if (c === 'not_found') return t('That stored value is not there any more');
   if (c === 'unreadable') return t('That stored value could not be opened');
   if (c === 'not_revealable') return t('That stored value is never shown — VibeSpace uses it itself');
+  if (c === 'vault_use_marks_unread') return t('The vault-use marks could not be read — nothing was changed; VibeSpace reads them again by itself');   // r3104 (a): the page's own words for the held code (until the family's table)
+  if (c === 'marks_undecided') return t('This row\'s marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed')   // r3130 (e);
   // B-ee0a: with no vault set up, the whole key answers only a person on this page (the hub refuses the rest by name)
   const cw = credentialDoorWords(r);
   if (cw) return cw;
