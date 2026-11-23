@@ -4687,6 +4687,7 @@ export default {
   "VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).": "VibeSpace 暂时读不到哪些插件已开启、已信任 — 没有更改任何东西，也没有丢失任何插件。几分钟后再试（它会自己再读一次）。",
   "the browsers’ passkeys": "浏览器的通行密钥",   // r3261
   "The saved passkeys were damaged, so this list started again empty. Their damaged bytes are kept beside the list, untouched.": "保存的通行密钥已损坏，所以这个列表重新从空开始。损坏的字节原样保留在列表旁边。",   // r3632
+  "the requests waiting for you to take over": "等你接管的请求",   // r3261
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到 API 提案 — 没有做出任何决定，也没有执行任何请求。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到应用提案 — 没有安装或更改任何东西。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到设计列表 — 没有更改任何东西，设计文件夹保持原样。几分钟后再按一次（它会自己再读一次）。",
@@ -4696,6 +4697,7 @@ export default {
   "The record of raised spending ceilings could not be read, so nothing was changed. VibeSpace reads it again by itself every few minutes; press again then. You can still lower a ceiling on its row.": "无法读取被调高支出上限的记录，因此没有做任何更改。VibeSpace 每隔几分钟会自动重新读取，届时请再按一次。你仍可以在上限所在的那一行把它调低。",
   "The list of browsers you set aside can't be read right now, so nothing was set aside or deleted. VibeSpace reads it again by itself every few minutes — try again then.": "暂时无法读取已搁置浏览器的列表，因此没有搁置或删除任何内容。VibeSpace 会每隔几分钟自动重新读取，届时请再试一次。",
   "The passkeys saved in your agent browsers can't be read right now, so nothing was changed and no passkey was offered to a site or registered. VibeSpace reads them again by itself every few minutes — try again then.": "暂时无法读取代理浏览器中保存的通行密钥，所以没有做任何更改，也没有向网站提供或注册通行密钥。VibeSpace 每隔几分钟会自动再读一次 — 到时再试。",   // r3488: passkeys_unread's own row
+  "The requests waiting for you to take over a browser can't be read right now, so nothing was asked, ended or run on those browsers. VibeSpace reads them again by itself every few minutes — try again then.": "暂时无法读取等你接管浏览器的请求，所以没有发出新请求、没有结束任何请求，也没有在这些浏览器上执行操作。VibeSpace 每隔几分钟会自动再读一次 — 到时再试。",   // r3488: takeovers_unread's own row
   "VibeSpace cannot read who may use your stored values right now — nothing was changed and no permission is lost. It reads the list again by itself; try again in a few minutes.": "VibeSpace 暂时读不出谁可以使用你存储的值——没有做任何改动，也没有丢失任何授权。它会自动再读这份列表，请过几分钟再试。",
   "in a moment": "马上",
   "Another VibeSpace or tool holds port {port} — finish or cancel it there, or paste the redirect URL back here.": "另一个 VibeSpace 或工具正占用端口 {port} — 在那边完成或取消它, 或者把重定向 URL 粘贴回这里。",
@@ -12543,6 +12545,8 @@ export default {
   // lane browser-takeover-queue: the takeover requests — «Waiting for you», the live view's line, the For-you item
   "takeover::Waiting for you": "等你接管",
   "No browser is waiting for you": "没有等你接管的浏览器",
+  "The requests waiting for you could not be read right now — VibeSpace reads them again by itself. Nothing was lost; asking, Done and page actions wait until they read.": "暂时无法读取等你接管的请求 — VibeSpace 会自动再读。没有丢失任何请求；请求接管、完成和页面操作都会等到读到之后。",   // r3261
+  "The list of requests waiting for you was damaged, so it started again empty. A conversation can ask you again.": "等你接管的请求列表已损坏，所以重新从空开始。对话可以再请求你一次。",   // r3261
   "Agent browser · {n} waiting for you": "Agent 浏览器 · {n} 等你接管",
   "you are driving": "你正在操作",
   "you are driving · since {time}": "你正在操作 · 自 {time} 起",

@@ -202,6 +202,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   store_unread: 503,   // the B-f276 remainder: the profile registry is held (unread)
   plugin_registry_unread: 503,   // B-f276 (r3305): the plugin registry is held — an engine profile's start, create or Change build refused by its name
   passkeys_unread: 503,   // r3261: the passkey store is held (unread) — a profile's removal waits for it
+  takeovers_unread: 503,   // r3261: the takeover requests are held (unread) — the queue, an ask, a Done and a page verb wait for them
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
@@ -1242,7 +1243,7 @@ const TAKEOVERS_ARE_USERS = 'the takeover queue is the person\'s — an agent re
 router.get('/api/browser/takeovers', (req, res) => {
   if (refuseAgentBearer(req, res, TAKEOVERS_ARE_USERS)) return;
   const k = keeperOr503(res); if (!k) return;
-  try { res.json({ requests: typeof k.takeoverRequests === 'function' ? k.takeoverRequests({ viewer: { kind: 'owner' } }) : [] }); } catch (e) { fail(res, e); }
+  try { const dmg = typeof k.takeoversDamaged === 'function' ? k.takeoversDamaged() : null; res.json({ requests: typeof k.takeoverRequests === 'function' ? k.takeoverRequests({ viewer: { kind: 'owner' } }) : [], ...(dmg ? { damaged: dmg } : {}) }); } catch (e) { fail(res, e); }   // r3261: held ⇒ 503 takeovers_unread; a torn queue lifted empty says so
 });
 /** The person's Done / Hand back on a request: TAKEN ⇒ the explicit handback of its lease (the keeper moves the request to
  *  done in the same event; the handback's ONE delivery names it); WAITING ⇒ resolved `done` (the announcer tells the agent once). */

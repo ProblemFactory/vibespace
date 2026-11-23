@@ -4686,6 +4686,7 @@ export default {
   "VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).": "VibeSpace はいま、どのプラグインがオンで信頼済みかを読み込めません — 何も変更されておらず、プラグインも失われていません。数分後にもう一度お試しください（自動でもう一度読み込みます）。",
   "the browsers’ passkeys": "ブラウザのパスキー",   // r3261
   "The saved passkeys were damaged, so this list started again empty. Their damaged bytes are kept beside the list, untouched.": "保存したパスキーが壊れていたため、この一覧は空から始め直しました。壊れたバイトは一覧の横にそのまま残しています。",   // r3632
+  "the requests waiting for you to take over": "あなたの引き継ぎを待つリクエスト",   // r3261
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace は API の提案をいま読めません — 何も決定・実行していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace はアプリの提案をいま読めません — 何もインストール・変更していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace はデザインの一覧をいま読めません — 何も変更しておらず、デザインのフォルダーもそのままです。数分後にもう一度押してください（自動でもう一度読みます）。",
@@ -4695,6 +4696,7 @@ export default {
   "The record of raised spending ceilings could not be read, so nothing was changed. VibeSpace reads it again by itself every few minutes; press again then. You can still lower a ceiling on its row.": "引き上げた支出上限の記録を読み込めないため、何も変更していません。VibeSpace は数分ごとに自動で読み直します。その後もう一度押してください。上限はその行でいつでも下げられます。",
   "The list of browsers you set aside can't be read right now, so nothing was set aside or deleted. VibeSpace reads it again by itself every few minutes — try again then.": "取り置いたブラウザの一覧を今は読み取れないため、取り置きも削除も行っていません。VibeSpace は数分ごとに自動で読み直します。そのあとでもう一度お試しください。",
   "The passkeys saved in your agent browsers can't be read right now, so nothing was changed and no passkey was offered to a site or registered. VibeSpace reads them again by itself every few minutes — try again then.": "エージェントブラウザに保存したパスキーを今は読み取れないため、何も変更せず、サイトへのパスキーの提示や登録もしていません。VibeSpace が数分ごとに自動で読み直します — そのときにもう一度お試しください。",   // r3488: passkeys_unread's own row
+  "The requests waiting for you to take over a browser can't be read right now, so nothing was asked, ended or run on those browsers. VibeSpace reads them again by itself every few minutes — try again then.": "ブラウザの引き継ぎを待つリクエストを今は読み取れないため、依頼も終了も、それらのブラウザでの操作もしていません。VibeSpace が数分ごとに自動で読み直します — そのときにもう一度お試しください。",   // r3488: takeovers_unread's own row
   "VibeSpace cannot read who may use your stored values right now — nothing was changed and no permission is lost. It reads the list again by itself; try again in a few minutes.": "VibeSpace は今、保存した値を誰が使えるかを読み取れません——何も変更しておらず、許可は失われていません。一覧は自動で読み直されます。数分後にもう一度お試しください。",
   "in a moment": "まもなく",
   "Another VibeSpace or tool holds port {port} — finish or cancel it there, or paste the redirect URL back here.": "別の VibeSpace またはツールがポート {port} を保持しています — そちらで完了またはキャンセルするか、リダイレクト URL をここに貼り付けてください。",
@@ -12542,6 +12544,8 @@ export default {
   // lane browser-takeover-queue: the takeover requests — «Waiting for you», the live view's line, the For-you item
   "takeover::Waiting for you": "あなたの操作待ち",
   "No browser is waiting for you": "あなたの操作を待っているブラウザはありません",
+  "The requests waiting for you could not be read right now — VibeSpace reads them again by itself. Nothing was lost; asking, Done and page actions wait until they read.": "あなたの引き継ぎを待つリクエストを今は読み取れません — VibeSpace が自動で読み直します。失われたものはありません。依頼・完了・ページ操作は読み取れるまで待ちます。",   // r3261
+  "The list of requests waiting for you was damaged, so it started again empty. A conversation can ask you again.": "あなたの引き継ぎを待つリクエストの一覧が壊れていたため、空から始め直しました。会話はもう一度あなたに依頼できます。",   // r3261
   "Agent browser · {n} waiting for you": "エージェントブラウザ · {n} 件があなたの操作待ち",
   "you are driving": "あなたが操作中",
   "you are driving · since {time}": "あなたが操作中 · {time} から",

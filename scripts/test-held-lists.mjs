@@ -181,6 +181,7 @@ const CALLERS = { 'src/hosts.js': ['hosts.json'], 'src/machine-mounts.js': ['mac
   'src/server/vault-engine.js': { sites: 1, stores: ['vault.json'] },   // lg-vault-env's vault record (unit (b)): the engine names its file through src/vault.js VAULT_FILE, never a quoted literal
   'src/server/browser-dialogs.js': ['browser-passkeys.json'],   // r3261: bl-browser-b's passkey store
   'src/usage-history.js': ['pricing.json'],   // r3145 unit 2 (bl-ci; r3488: a unit that adds a hold carries its row): the person's edited prices
+  'src/server/browser-keeper.js': ['browser-takeovers.json'],   // r3261: bl-browser-b's takeover requests
   // A STORE MADE PER THING from ONE create site (r3314): { sites, stores } — `sites` the file's create sites, `stores` the names the hub lists them
   // by (a shape's example where each thing has its own file), checked against the notice's names, not against the file's literals
   'src/server/session-stdout.js': { sites: 1, stores: ['cw-1-1700000000000.json'] },

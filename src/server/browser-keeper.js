@@ -62,6 +62,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const B = require('../browser-profiles.js');
 const SR = require('../store-read.js');   // the remainder of B-f276 (bl-jobs): a registry read that FAILED is no answer — HELD, never written over
+const STH = require('../store-read-hold.js');   // r3261: the takeover requests through the tree's ONE hold
 /** a registry the store-read law calls data: a plain object with its profiles list (a parse that is not one is CORRUPT — it was a silent
  *  EMPTY registry, then written over the file) */
 const REG_VALID = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.profiles);
@@ -6998,22 +6999,58 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const requests = new Map(); // id → record
   let requestsLoaded = false;
   const requestListeners = new Set();
-  function loadRequests() {
-    if (requestsLoaded) return;
-    requestsLoaded = true;
-    let j = null;
-    try { j = JSON.parse(fs.readFileSync(REQUESTS_FILE, 'utf8')); } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[browser] ${path.basename(REQUESTS_FILE)} unreadable — no takeover requests loaded: ${e && e.message}`); }
-    for (const r of Array.isArray(j && j.requests) ? j.requests : []) {
+  // r3261 (主开发, its second unit; lane bl-machines-b's census of the stores, «37 more»): THE TAKEOVER REQUESTS UNDER THE STORE-READ
+  // LAW. The release read ANY failure of the file as an empty queue, and the next write (an agent's ask, the person's Done, an item's
+  // note, a lease's end) wrote it over: every open request waiting for a person lost, and a page verb ran on a browser a person had
+  // been asked to take over (`human_asked` saw no request). Now its ONE read answers through src/store-read.js and the tree's ONE hold
+  // (src/store-read-hold.js): HELD, no request is known — the queue, a request by its id and a browser's open request answer the
+  // hold BY NAME (takeovers_unread, 503 on the routes); every writer is refused by name before any side effect; nothing is written over
+  // the file; a page verb is refused (whether a person was asked cannot be told: fail closed); the file is read again off the loop;
+  // LIFTED with no restart (a request `taken` waits again, as at a start). Torn bytes are kept aside once
+  // (`browser-takeovers.json.corrupt-<mark>`, 0600), then it starts empty with the DAMAGED mark in the new file (`damaged {copy, at}`:
+  // the queue's answer says it, read back at a start, gone when a store without it is read).
+  const TQ_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.requests === undefined || Array.isArray(v.requests));
+  const tqDamagedOf = (v) => (v && v.damaged && typeof v.damaged === 'object' && typeof v.damaged.copy === 'string' && v.damaged.copy ? { copy: v.damaged.copy, at: Number(v.damaged.at) || null } : null);
+  let tqDamaged = null;
+  function takeRequests(v) {
+    requests.clear();
+    for (const r of Array.isArray(v && v.requests) ? v.requests : []) {
       if (!r || !TQ.ID_RE.test(String(r.id || '')) || !TQ.STATES.includes(r.state)) continue;
       requests.set(r.id, r.state === 'taken' ? { ...r, state: 'waiting', takenBy: null } : r);
     }
   }
+  const tqHold = STH.create({
+    file: REQUESTS_FILE, valid: TQ_SHAPE, code: 'takeovers_unread', aside: (mark) => REQUESTS_FILE + '.corrupt-' + mark, now,
+    words: (h) => `the requests waiting for a person to take over a browser could not be read (browser-takeovers.json in VibeSpace's data folder: ${h.code}); VibeSpace reads them again every few minutes. No request is lost: nothing is written over them, none is filed or ended, and no page action runs until they read`,
+    log: (l) => { try { log.warn?.('[browser] ' + l); } catch { /* a log is never the store's */ } },
+    onLift: (v, f) => {
+      takeRequests(v);
+      tqDamaged = !v && f && f.setAside ? { copy: String(f.setAside), at: now() } : tqDamagedOf(v);
+      if (!v && tqDamaged) saveRequests();   // the new empty queue carries the damaged mark at once (a restart still says it)
+      try { broadcast?.({ type: 'browser-takeovers-updated', requests: takeoverRequests(), ...(tqDamaged ? { damaged: { ...tqDamaged } } : {}) }); } catch (e) { log.warn?.(`[browser] takeover requests not broadcast at their read: ${e && e.message}`); }
+    },
+  });
+  /** the hold's refusal BY NAME — every writer's answer while the requests are unread */
+  const tqRefusal = (what) => ({ ok: false, code: 'takeovers_unread', status: 503, error: `${what}: ${tqHold.words()}` });
+  const tqUnread = (what) => namedError('takeovers_unread', `${what}: ${tqHold.words()}`);
+  function loadRequests() {
+    if (requestsLoaded) return;
+    requestsLoaded = true;
+    let read; try { read = { text: fs.readFileSync(REQUESTS_FILE, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: TQ_SHAPE });
+    if (tqHold.start(a) === 'data') { takeRequests(a.value); tqDamaged = tqDamagedOf(a.value); }
+  }
+  /** Are the requests HELD (their file could not be read)? — the announcer asks before an item's press moves anything */
+  function takeoversHeld() { loadRequests(); return !!tqHold.held(); }
+  /** a torn queue lifted empty: { copy, at } (the copy's base name) — null when none */
+  function takeoversDamaged() { loadRequests(); return tqDamaged ? { ...tqDamaged } : null; }
   function saveRequests() {
     // the closed ones keep a short tail (the CLI's after-the-fact question), the open ones all
     const all = [...requests.values()];
     const closed = all.filter((r) => !TQ.isOpen(r)).sort((a, b) => (Number(b.doneAt) || 0) - (Number(a.doneAt) || 0));
     for (const r of closed.slice(TQ.LIMITS.closedKept)) requests.delete(r.id);
-    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(REQUESTS_FILE, { version: 1, requests: [...requests.values()] }); return true; }
+    if (!tqHold.writable('a takeover request change')) return false;   // r3261: HELD — nothing is written over the file
+    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(REQUESTS_FILE, { version: 1, requests: [...requests.values()], ...(tqDamaged ? { damaged: { ...tqDamaged } } : {}) }); return true; }
     catch (e) { log.warn?.(`[browser] could not write ${path.basename(REQUESTS_FILE)}: ${e && e.message}`); return false; }
   }
   /** Does the conversation still hold the browser a request is about (the live view's own rule)? */
@@ -7024,14 +7061,17 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   const requestLive = (r) => { try { return B.keyCarried(r.browserKey, sessionLiveKeys()); } catch { return true; } };
   /** THE QUEUE as the viewer may see it (PURE queueOf over the keeper's facts). */
-  function takeoverRequests({ viewer = { kind: 'owner' } } = {}) { ensureLoaded(); loadRequests(); return TQ.queueOf([...requests.values()], { viewer, leaseHeld: requestLeaseHeld, live: requestLive }); }
-  function takeoverRequest(id) { loadRequests(); const r = requests.get(String(id || '')); return r ? { ...r } : null; }
+  function takeoverRequests({ viewer = { kind: 'owner' } } = {}) { ensureLoaded(); loadRequests(); if (tqHold.held()) throw tqUnread('the takeover queue'); /* r3261: HELD — never an empty queue */ return TQ.queueOf([...requests.values()], { viewer, leaseHeld: requestLeaseHeld, live: requestLive }); }
+  function takeoverRequest(id) { loadRequests(); if (tqHold.held()) throw tqUnread('a takeover request'); /* r3261: HELD — never «no such request» */ const r = requests.get(String(id || '')); return r ? { ...r } : null; }
   function openRequestFor(browserKey, profileId = null) {
     loadRequests();
     const lk = TQ.leaseKeyOf({ browserKey, profileId });
     for (const r of requests.values()) if (TQ.isOpen(r) && TQ.leaseKeyOf(r) === lk) return r;
     return null;
   }
+  /** a browser's open request as the agent's route asks it (its --status, its withdraw): the hold BY NAME while held (r3261) — the
+   *  keeper's own callers (an input event, a lease's end, the page verb's gate) ask `openRequestFor`, which never throws */
+  function openRequestAsked(browserKey, profileId = null) { loadRequests(); if (tqHold.held()) throw tqUnread("this browser's takeover request"); return openRequestFor(browserKey, profileId); }
   function onTakeoverRequest(fn) { requestListeners.add(fn); return () => requestListeners.delete(fn); }
   /** ONE write, ONE broadcast, then the listeners (the For-you item, the agent's telling) — per change of a record. */
   function requestChanged(rec, ev) {
@@ -7045,6 +7085,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    */
   function requestTakeover({ browserKey, profileId = null, sessionId = null, conversationKey = null, conversationName = '', text = '', url = '', title = '' } = {}) {
     ensureLoaded(); loadRequests();
+    if (tqHold.held()) return tqRefusal('asking a person to take over');   // r3261: HELD — nothing is filed over requests that could not be read
     const p = profileId ? profile(profileId) : null;
     const lease = { browserKey: String(browserKey || ''), profileId: p && !isEph(p) ? p.id : null };
     const v = TQ.askVerdict({ text, lease: lease.browserKey ? lease : null });
@@ -7081,6 +7122,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** The agent's withdraw / the person's Done (without a takeover) / a parked flag — by id. `how` ∈ withdraw | done. */
   function resolveTakeoverRequest(id, how, { pressed = null } = {}) {
     loadRequests();
+    if (tqHold.held()) return tqRefusal(how === 'withdraw' ? 'withdrawing the request' : 'marking the request done');   // r3261: HELD — never «not found»
     const rec = requests.get(String(id || ''));
     if (!rec) return { ok: false, code: 'not_found', error: 'no such takeover request' };
     if (!TQ.isOpen(rec)) return { ok: false, code: 'closed', error: `request ${rec.id} is already ${rec.state}`, request: { ...rec } };
@@ -7092,6 +7134,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  band 4, still listed) and a reply the person sent through it (`replied` — the CLI's wait wakes and says so). */
   function noteRequestItem(id, { itemId, parked, conversationKey, replied = false } = {}) {
     loadRequests();
+    if (tqHold.held()) return null;   // r3261: HELD — an item's note waits (the announcer puts the item back first)
     const rec = requests.get(String(id || ''));
     if (!rec) return null;
     const next = { ...rec, ...(itemId !== undefined ? { itemId: itemId || null } : {}), ...(parked !== undefined ? { parked: !!parked } : {}), ...(conversationKey ? { conversationKey: String(conversationKey).slice(0, 200) } : {}), ...(replied ? { repliedAt: now() } : {}) };
@@ -7113,6 +7156,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function endLeaseRequest(browserKey, profileId = null) { const rec = openRequestFor(browserKey, profileId); if (rec) moveRequest(rec, 'lease-gone'); }
   /** `human_asked` while a request WAITS on this lease (nobody took over yet) — null otherwise. */
   function askedVerdictFor(browserKey, profileId = null, { handles = [] } = {}) {
+    loadRequests(); if (tqHold.held()) return { ...tqRefusal('this page action did NOT run — whether a person was asked to take over this browser cannot be told'), handles };   // r3261: fail closed
     const rec = openRequestFor(browserKey, profileId);
     return rec && rec.state === 'waiting' ? TQ.humanAskedRefusal(rec, { handles, now: now(), ...(askWaitMs ? { waitMs: askWaitMs } : {}) }) : null;
   }
@@ -7473,7 +7517,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (v.kind === 'attachment' && switching.has(v.attachment.profileId)) { const rr = SW.restartingRefusal(profile(v.attachment.profileId)); return { ...rr, handles: v.handles || [] }; }
       const paused = pausedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [], verb }); // the refused verb goes on the handback's re-run list
       if (paused) { log.log?.(`[browser] ${bk}: refused with browser_paused (the user drives${v.kind === 'attachment' ? ' ' + v.attachment.profileId : ' the ephemeral browser'})`); return withOpenRequest(paused, bk, v.kind === 'attachment' ? v.attachment.profileId : null); }
-      { const asked = askedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [] }); if (asked) { log.log?.(`[browser] ${bk}: refused with human_asked (request ${asked.request.id} waits for a person)`); return asked; } } // lane browser-takeover-queue
+      { const asked = askedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [] }); if (asked) { log.log?.(asked.request ? `[browser] ${bk}: refused with human_asked (request ${asked.request.id} waits for a person)` : `[browser] ${bk}: refused with ${asked.code} (the takeover requests could not be read)`); return asked; } } // lane browser-takeover-queue
       // lane browser-windows: no `browser_busy` between conversations any more (owner ruling A (2) retired) — another
       // conversation's agent works in its OWN window of this browser and never holds this one up (measured: one daemon each)
     }
@@ -8997,7 +9041,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { try { offCapLift(); } catch { } detachGrants(); if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { try { offCapLift(); } catch { } try { tqHold.stop(); } catch { /* r3261: the requests' read again ends with the keeper */ } detachGrants(); if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -9415,7 +9459,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     browse, humanOf, humanTargetFor, humanInputState, humanAttach, humanTake, humanPass, humanRelease, noteHumanInput, navigateHuman, closeHuman, quitHuman, endHuman, holdersOn, setViewerAlive, humanKeepOf: (id) => { const h = humans.get(String(id || '')); return h ? humanKeepOf(h) : null; },
     // P3 (§4.3 / §4.3.1): the input side — takeover/handback/idle, the typed paused refusal, the confirmation registry
     takeoverIdleMs, inputStateFor, inputsFor, inputSummaryFor, takeover, handback, handbackWakesFor, passControl, noteUserInput, noteUserUrl, pausedVerdictFor, onInput,
-    requestTakeover, resolveTakeoverRequest, takeoverRequests, takeoverRequest, openRequestFor, onTakeoverRequest, noteRequestItem, // lane browser-takeover-queue: the request record's ONE writer
+    requestTakeover, resolveTakeoverRequest, takeoverRequests, takeoverRequest, openRequestFor: openRequestAsked /* r3261: the hold by name */, onTakeoverRequest, noteRequestItem, takeoversHeld, takeoversDamaged, _takeoverHold: tqHold, // lane browser-takeover-queue: the request record's ONE writer
     interruptionFor, interruptionOf, setInFlightReader, awaitInterruptionSettled, // the owner's ruling (2026-09-27): a takeover interrupts, tells, and the handback reminds
     clock: () => now(), // the ONE clock a takeover's instant and a /resolve's instant are compared on (the route stamps with it)
     notePending, resolvePending, pendingFor, pendingAllFor, answerConfirmation, onConfirmation,

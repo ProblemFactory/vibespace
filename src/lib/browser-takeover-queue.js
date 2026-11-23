@@ -14,6 +14,7 @@
 // explicit handback); Reply = the request's For-you item's reply (the ONE typing road — the agent reads it as the person's
 // message; the request stays open).
 import { t, tc } from './i18n.js';
+import { techFold } from './plain-words.js';   // r3261: where a damaged queue's bytes are kept — in the fold, never on the face
 import { fetchJson, showToast, showInputDialog } from './utils.js';
 import { agoText } from './user-todos-row.js';
 import { waitingCount } from '../browser-takeover-request.js';
@@ -88,7 +89,9 @@ export function createTakeoverSection(app) {
   head.append(title, sub);
   const list = el('div', 'btq-list');
   const empty = el('div', 'bprof-empty chat-status-dim btq-empty', t('No browser is waiting for you'));
-  sec.append(head, list, empty);
+  const note = el('div', 'btq-note');   // r3261: the hold / the damaged queue, said in place
+  sec.append(head, note, list, empty);
+  let noteSig = null;
   const rows = new Map(); // request id → { row, sig, parts }
   const act = (label, cls, title0, fn) => { const b = el('button', 'file-tool-btn bprof-btn btq-act ' + cls, label); b.type = 'button'; if (title0) b.title = title0; b.onclick = (ev) => { ev.stopPropagation(); fn(); }; return b; };
   function buildRow(req) {
@@ -159,7 +162,14 @@ export function createTakeoverSection(app) {
     for (const [id, entry] of [...rows]) if (!seen.has(id)) { entry.row.remove(); rows.delete(id); }
     const n = waitingCount(reqs);
     sub.textContent = reqs.length ? (n ? t('{n} waiting', { n }) : t('you are driving')) : '';
-    empty.style.display = reqs.length ? 'none' : '';
+    const held = !!app._browserTakeoversHeld, dmg = app._browserTakeoversDamaged || null;
+    const ns = JSON.stringify([held, dmg && dmg.copy]);
+    if (ns !== noteSig) {   // r3261: HELD — the hold in place of «No browser is waiting for you»; a torn queue lifted empty says so, its copy in the fold
+      noteSig = ns; note.textContent = '';
+      if (held) note.appendChild(el('div', 'bprof-empty chat-status-dim', t('The requests waiting for you could not be read right now — VibeSpace reads them again by itself. Nothing was lost; asking, Done and page actions wait until they read.')));
+      else if (dmg) { note.appendChild(el('div', 'bprof-empty chat-status-dim', t('The list of requests waiting for you was damaged, so it started again empty. A conversation can ask you again.'))); const fd = techFold([t('Its damaged bytes are kept beside it as: {name}', { name: String(dmg.copy || '') })], { mono: true }); if (fd) note.appendChild(fd); }
+    }
+    empty.style.display = reqs.length || held ? 'none' : '';
     sec.classList.toggle('btq-has', reqs.length > 0);
     return { n, shown: reqs.length };
   }
@@ -171,13 +181,13 @@ export function takeoverWindowTitle(n) { return n > 0 ? t('Agent browser · {n} 
 /** The App's ONE copy of the queue + its listeners (the window, the rail, every live view). */
 export function installBrowserTakeovers(App) {
   App.prototype.refreshBrowserTakeovers = function () {
-    return fetchJson('/api/browser/takeovers').then((d) => { if (d && !d.error && Array.isArray(d.requests)) this._setBrowserTakeovers(d.requests); return this._browserTakeovers || []; }).catch(() => this._browserTakeovers || []);
+    return fetchJson('/api/browser/takeovers').then((d) => { if (d && d.code === 'takeovers_unread') { this._browserTakeoversHeld = true; this._setBrowserTakeovers([]); } /* r3261: HELD — said in place, never an empty queue */ else if (d && !d.error && Array.isArray(d.requests)) { this._browserTakeoversHeld = false; this._browserTakeoversDamaged = d.damaged || null; this._setBrowserTakeovers(d.requests); } return this._browserTakeovers || []; }).catch(() => this._browserTakeovers || []);
   };
   App.prototype._setBrowserTakeovers = function (list) {
     this._browserTakeovers = Array.isArray(list) ? list : [];
     for (const fn of [...(this._browserTakeoverHooks || [])]) { try { fn(this._browserTakeovers); } catch (e) { console.warn('[browser] takeover hook failed', e); } }
   };
-  App.prototype._onBrowserTakeoversUpdated = function (msg) { if (msg && Array.isArray(msg.requests)) this._setBrowserTakeovers(msg.requests); };
+  App.prototype._onBrowserTakeoversUpdated = function (msg) { if (msg && Array.isArray(msg.requests)) { this._browserTakeoversHeld = false; if (msg.damaged !== undefined) this._browserTakeoversDamaged = msg.damaged || null; this._setBrowserTakeovers(msg.requests); } };   // r3261: a broadcast is a read queue (the lift's carries its damaged mark)
   /** Subscribe to the queue (called at once with the current list when one is known). → unsubscribe */
   App.prototype.onBrowserTakeovers = function (fn) {
     if (typeof fn !== 'function') return () => {};

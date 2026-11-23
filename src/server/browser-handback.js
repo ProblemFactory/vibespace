@@ -495,6 +495,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
    *  wait); a dismissal / a batch «Mark all seen» parks the request (band 4, still listed); the ✓ is the person's Done. */
   function onItemStatus(it, { status, by, batch, pressed = null } = {}) {
     if (!isRequestItem(it) || status === 'open' || !keeper || typeof keeper.takeoverRequest !== 'function') return;
+    if (typeof keeper.takeoversHeld === 'function' && keeper.takeoversHeld()) { try { userTodos.setStatus(it.id, 'open', 'system'); } catch { /* gone */ } log.warn?.(`[browser] takeover request item ${it.id}: put back — the requests could not be read, so nothing moved`); return; }   // r3261: HELD — the item stays, its request is never ended unread
     const rec = keeper.takeoverRequest(it.action.requestId);
     if (!rec || !TQ.isOpen(rec)) return;
     if (by === 'reply') { try { userTodos.setStatus(it.id, 'open', 'system'); } catch { /* gone */ } keeper.noteRequestItem(rec.id, { replied: true }); return; }

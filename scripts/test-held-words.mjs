@@ -77,6 +77,7 @@ function tableOf(src) {
 
 // NOT A HOLD: a 503 of the tree that is no store held unread — each with its why (a held list's words would be untrue there)
 const NOT_HELD = {
+  exit_answer_unreadable: 'a browser\'s exit check whose answer could not be read (src/server/browser-keeper.js, the profile\'s own proxy road) — not a list VibeSpace keeps; it is caught since that file holds the takeover requests through the store-read hold (r3261\'s second unit: the hold-create scan reads a nearby `.create({ allow … })` with this code) — its own sentence',
   unavailable: 'a door whose engine is not on this server (a feature off / not wired) — its own sentence',
   'not-durable': 'a person\'s act kept in memory, not on disk yet — channel-words / ws words «not on disk yet» (written later)',
   'todos-not-on-disk': 'B-0248 (lane bl-loop-b): a For-you act made, its write not on disk yet (the store writer still to land it) — the For-you handlers word it (src/lib/user-todos-actions.js, -panel.js), en / zh / ja',
