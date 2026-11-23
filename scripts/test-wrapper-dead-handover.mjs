@@ -286,7 +286,10 @@ const RED_PENDING = ssRed('pending', '    if (forkSource && historySessionId ===
 const R_NOFORK = redWrapper('nofork', [["const IS_FORK = args.includes('--fork-session');", 'const IS_FORK = false;   // MUTANT: the fork flag never read']]);
 const R_INPROC = redWrapper('inproc', [['  const { tail, from } = await tailViaChild(file);', "  const { tail, from } = await (async () => { const st = await fs.promises.stat(file); return { tail: await fs.promises.readFile(file, 'utf8'), from: Math.max(0, st.size - DEAD_TAIL_MAX) }; })();   // MUTANT: read in this process"]]);
 const R_NOCOMPACT = redWrapper('nocompact', [['        else if (compactAt && !(d.at && compactAt < d.at)) { left.push(d.msgId); compacted++; }\n', '']]);
-const R_NOHEAD = redWrapper('nohead', [['    for (const r of [...all.values()]) if (r.copy) { const head =', '    for (const r of []) if (r.copy) { const head =']]);
+const R_NOHEAD = redWrapper('nohead', [['    if (!r.copy || Buffer.byteLength(JSON.stringify({ v: 1, conv: recordsName(), frames: [r] })) <= HANDED_FILE_MAX) continue;', '    continue;   // MUTANT: no head kept']]);
+const R_HEADLATE = redWrapper('headlate', [['    if (!r.copy || Buffer.byteLength(JSON.stringify({ v: 1, conv: recordsName(), frames: [r] })) <= HANDED_FILE_MAX) continue;', '    continue;   // MUTANT: the head kept only AFTER the drop (the cure as it was)'],
+  ["  if (Buffer.byteLength(text) > HANDED_FILE_MAX) { sayOnce('big:' + file,", "  if (Buffer.byteLength(text) > HANDED_FILE_MAX) { for (const r of [...all.values()]) if (r.copy) { const head = { ...r, copy: null }; all.set(r.msgId, head); if (HR.has(r.msgId)) HR.set(r.msgId, head); } text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] }); }\n  if (Buffer.byteLength(text) > HANDED_FILE_MAX) { sayOnce('big:' + file,"]]);
+const R_ANYSUMMARY = redWrapper('anysummary', [["else if (r && r.type === 'summary' && Date.parse(r.timestamp)) compactAt = Math.max(compactAt, Date.parse(r.timestamp));", "else if (r && r.type === 'summary') compactAt = Math.max(compactAt, Date.parse(r.timestamp) || Infinity); /* MUTANT: any summary line (mid-line: never a // comment) */"]]);
 const PI_SRC = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8');
 const RED_VERDICTS = M.load('src/proc-identity.js', anchored(PI_SRC, "    if (!(rows instanceof Map) || !rows.size) return 'unknown';", "    if (!(rows instanceof Map) || !rows.size) return 'gone';   // MUTANT: a failed listing read as gone", 'the identity RED listing'), 'listing');
 const HR_SRC = fs.readFileSync(path.join(ROOT, 'src/handed-records.js'), 'utf8');
@@ -372,6 +375,7 @@ async function diesWith(tag, { wrapper = WRAPPER, text = null, transcript = 'sma
   await until(() => recordsOf(c).has(MS), 3000);
   if (transcript === 'big-newer') { const later = new Date(Date.now() + 60000).toISOString(); const pad = 'the turn says more '.repeat(14); const lines = []; for (let i = 0; i < 12000; i++) lines.push(J({ sessionId: c.conv, cwd: c.cwd, type: 'assistant', uuid: uuid(20000 + i), timestamp: later, message: { id: 'msg_p' + i, role: 'assistant', content: [{ type: 'text', text: pad }] } })); fs.writeFileSync(c.tfile(), lines.join('\n') + '\n'); }
   if (transcript === 'fifo') { fs.rmSync(c.tfile(), { force: true }); spawnSyncLocal('mkfifo', [c.tfile()]); }
+  if (transcript === 'titled') writeTranscript(c, c.conv, [{ type: 'summary', summary: 'A conversation title', leafUuid: uuid(985 + k) }, { type: 'user', uuid: uuid(990 + k), timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'start' } }]);   // a TITLE line (no time) — no compaction; the frame's record not in it
   if (transcript === 'compacted') writeTranscript(c, c.conv, [{ type: 'user', uuid: uuid(960 + k), timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'start' } }, { type: 'system', subtype: 'compact_boundary', uuid: uuid(970 + k), timestamp: new Date(Date.now() + 1000).toISOString() }]);   // the whole file, compacted after the send, the frame's record not in it
   killCli(w);
   // ⑲'s evidence is the exit itself: nothing ever opens the pipe for writing, so a wrapper whose exit an fs call holds never exits
@@ -399,7 +403,7 @@ const { spawnSync: spawnSyncLocal } = await import('node:child_process');
 const ROOTUSER = typeof process.getuid === 'function' && process.getuid() === 0;
 const BIGCOPY = 'x'.repeat(170 * 1024);   // 48 of them read under the 8 MB bound; the frame after them passes it
 const HUGE = 'h'.repeat(9 * 1024 * 1024);   // one message past the records file's 8 MB bound
-const [U10, U10r, U11, U14, U14r, U16, U19, U7, U7m, U7r, U17b, U17c, U18t, U18r, U18rr, U11r, U20, U25, U25r, U24, U24r, U19r] = await Promise.all([
+const [U10, U10r, U11, U14, U14r, U16, U19, U7, U7m, U7r, U17b, U17c, U18t, U18r, U18rr, U11r, U20, U25, U25r, U24, U24r, U19r, U24b, U24br, U25t, U25tr] = await Promise.all([
   nextWrapper('next'), nextWrapper('next-red', R_SKIPID.path), forkScene(),
   diesWith('window', { transcript: 'big-newer' }), diesWith('window-red', { wrapper: R_NOWINDOW.path, transcript: 'big-newer' }),
   diesWith('long', { text: 'LONG-START ' + 'w'.repeat(12000) + ' LONG-END' }), diesWith('fifo', { transcript: 'fifo', onExit: (x) => laneDone(x) }),
@@ -418,6 +422,8 @@ const [U10, U10r, U11, U14, U14r, U16, U19, U7, U7m, U7r, U17b, U17c, U18t, U18r
   diesWith('compact', { transcript: 'compacted' }), diesWith('compact-red', { wrapper: R_NOCOMPACT.path, transcript: 'compacted' }),
   handsOver('huge', { frames: ['mH-huge', 'mA-after'], texts: [HUGE, words('mA-after')] }), handsOver('huge-red', { wrapper: R_NOHEAD.path, frames: ['mH-huge', 'mA-after'], texts: [HUGE, words('mA-after')] }),
   pipeRed(),
+  handsOver('huge2', { frames: ['mS-small', 'mH2-huge'], texts: [words('mS-small'), HUGE] }), handsOver('huge2-red', { wrapper: R_HEADLATE.path, frames: ['mS-small', 'mH2-huge'], texts: [words('mS-small'), HUGE] }),
+  diesWith('titled', { transcript: 'titled' }), diesWith('titled-red', { wrapper: R_ANYSUMMARY.path, transcript: 'titled' }),
 ]);
 
 say('⑩ THE NEXT WRAPPER judges what a killed wrapper left handed — by each record\'s OWN CLI, before the transcript');
@@ -455,12 +461,12 @@ WD.section('⑪');
   ok(pendingRed && adoptedRed && oldRed, 'RED: a drawer that draws for a fork still borrowing its parent\'s id, a drawer that keeps the parent in the chain, and a restore that does not read a pre-.134 record each draw the parent\'s «Not delivered» in the fork', { pendingRed, adoptedRed, oldRed });
   // THE ASSIGNMENTS — where production builds the session: ws-create's literal, boot-restore's sessionFromMeta (each with its control)
   const WC = fs.readFileSync(path.join(ROOT, 'src/ws-create.js'), 'utf8'), BRT = fs.readFileSync(path.join(ROOT, 'src/server/boot-restore.js'), 'utf8');
-  const wcPin = (t) => /\{[^}]*\bforkSourceOf\b[^}]*\} = require\('\.\/claude-lock-capture'\)/.test(t) && /\n\s+_forkRequested: !!data\.fork && !!capsOf\(backend\)\.fork,[^\n]*\n\s+_forkSourceId: forkSourceOf\(data\),/.test(t)
+  const wcPin = (t) => /\{[^}]*\bforkSourceOf\b[^}]*\} = require\('\.\/claude-lock-capture'\)/.test(t) && /\n\s+_forkRequested: !!data\.fork && !!capsOf\(backend\)\.fork,[^\n]*\n\s+_forkSourceId: capsOf\(backend\)\.fork \? forkSourceOf\(data\) : null,/.test(t)
     && t.includes('forkSourceId: (data.fork && (data.forkedFromId || data.resumeId)) ? String(data.forkedFromId || data.resumeId) : undefined,');
   const brPin = (t) => /\{[^}]*\brestoredForkSource\b[^}]*\} = require\('\.\.\/claude-lock-capture'\)/.test(t) && /function sessionFromMeta\(meta, transportFacts\) \{\n  return \{[\s\S]{0,1500}?\n    _forkSourceId: restoredForkSource\(meta\),/.test(t);
   const same = ['p-1', 'x-2'].every((id) => LC.forkSourceOf({ fork: true, resumeId: id }) === id) && LC.forkSourceOf({ fork: true, forkedFromId: 'x-3', resumeId: 'p-3' }) === 'x-3' && LC.forkSourceOf({ resumeId: 'p-4' }) === null;
-  ok(wcPin(WC) && brPin(BRT) && same && !wcPin(anchored(WC, '            _forkSourceId: forkSourceOf(data),', '            // (MUTANT: no fork source)', 'the create RED')) && !brPin(anchored(BRT, '    _forkSourceId: restoredForkSource(meta),', '    // (MUTANT: no fork source)', 'the restore RED')),
-    'ws-create\'s session carries _forkSourceId by forkSourceOf (the meta\'s forkSourceId is the same rule) and boot-restore\'s sessionFromMeta (all three restore roads) by restoredForkSource — CONTROL: either assignment removed, its pin is red');
+  ok(wcPin(WC) && brPin(BRT) && same && !wcPin(anchored(WC, '            _forkSourceId: capsOf(backend).fork ? forkSourceOf(data) : null,', '            _forkSourceId: forkSourceOf(data),   // MUTANT: not asked of the capability', 'the create RED')) && !brPin(anchored(BRT, '    _forkSourceId: restoredForkSource(meta),', '    // (MUTANT: no fork source)', 'the restore RED')),
+    'ws-create\'s session carries _forkSourceId by forkSourceOf, asked of the harness\'s fork capability as _forkRequested is (r3330; the meta\'s forkSourceId is the same rule) and boot-restore\'s sessionFromMeta (all three restore roads) by restoredForkSource — CONTROL: either assignment removed, its pin is red');
 }
 
 say('⑫ A FRAME IN FLIGHT after a Resume is never drawn — through the store\'s own line');
@@ -620,10 +626,19 @@ WD.section('㉔');
   ok(!U24r.recs.has('mH-huge') && U24r.recs.has('mA-after'), 'RED: a copy that keeps no head loses that frame\'s record entirely (the next write dropped it to fit; the writes after it were never stopped)', { keys: [...U24r.recs.keys()] });
 }
 
+{
+  const a = U24b.recs.get('mS-small'), h = U24b.recs.get('mH2-huge');
+  ok(!!a && typeof a.copy === 'string' && !!h && h.copy === null && !/not finished left/.test(U24b.log),
+    'a small handed frame and then one frame of 9 MB: the huge one loses its words FIRST (its head kept) and the small one stays whole — nothing is dropped to make room (r3330)', { keys: [...U24b.recs.keys()] });
+  ok(!U24br.recs.has('mS-small') && U24br.recs.get('mH2-huge')?.copy === null, 'RED: the head kept only after the drop (the cure as it was) drops the small frame whole to fit, then strips the huge one — neither can be drawn', { keys: [...U24br.recs.keys()] });
+}
+
 say('㉕ A COMPACTION AT OR AFTER THE SEND proves no absence');
 WD.section('㉕');
 ok(U25.rec?.state === 'handed' && /compacted at or after the send — its absence proves nothing/.test(U25.log) && U25r.rec?.state === 'undelivered',
   `a whole transcript compacted after the send, the frame's record not in it: left «${U25.rec?.state}» and said — RED: a copy without the guard calls it «${U25r.rec?.state}»`);
+ok(U25t.rec?.state === 'undelivered' && U25tr.rec?.state === 'handed',
+  `a TITLE summary line (no time) is no compaction: the whole transcript still proves the frame «${U25t.rec?.state}» — RED: a guard that takes any summary line leaves it «${U25tr.rec?.state}» (send it again quietly off)`);
 
 say('⑦b TWO WRITERS — the merge and the forward-only state, each with its control');
 WD.section('⑦b');

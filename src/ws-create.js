@@ -1299,7 +1299,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
             _forkRequested: !!data.fork && !!capsOf(backend).fork, // per-harness (codex thread/fork since 2.369.21)
-            _forkSourceId: forkSourceOf(data),   // B-5a4d root (r3282): the conversation a fork was made FROM, on the LIVE session too (the meta's forkSourceId below, the same one rule)
+            _forkSourceId: capsOf(backend).fork ? forkSourceOf(data) : null,   // B-5a4d root (r3282): the conversation a fork was made FROM, on the LIVE session too (the meta's forkSourceId below, the same rule); r3330: asked of the harness's fork capability as the request flag above is
             // resume spawn marker (2.219.0): lets the parser adopt claude's
             // IMPLICIT fork (locked-conversation resume mints a new id)
             _resumeSpawn: !!SP.resumeMayFork && !!(data.resume && data.resumeId),

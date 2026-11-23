@@ -306,6 +306,14 @@ function writeRecords() {
     catch (e) { sayOnce('torn:' + file, `${path.basename(file)} is torn and ${e && e.code === 'EEXIST' ? 'a torn copy is already kept aside' : 'could not be kept aside'} — nothing is written over it`); return false; }
   }
   const all = mergeRecords(new Map(got.kind === 'ok' ? got.map : []), HR);
+  // r3330: a record whose words ALONE pass the file's bound loses its words FIRST (its head stays: id, state, times, its CLI); the
+  // others are dropped below only if the file is still over the bound — never a small frame dropped to make room for one huge one
+  for (const r of [...all.values()]) {
+    if (!r.copy || Buffer.byteLength(JSON.stringify({ v: 1, conv: recordsName(), frames: [r] })) <= HANDED_FILE_MAX) continue;
+    const head = { ...r, copy: null, copyGone: `past the file's bound (${HANDED_FILE_MAX} bytes)` };
+    all.set(r.msgId, head); if (HR.has(r.msgId)) HR.set(r.msgId, head);
+    log(`handed records: ${r.msgId}: one record alone passes ${HANDED_FILE_MAX} bytes — its words are not kept, its head is (nothing of it is drawn: the journal is where it is said)`);
+  }
   const dropped = [];
   const order = () => [...all.values()].sort((x, y) => (x.settledAt || x.at || 0) - (y.settledAt || y.at || 0));
   const drop = () => { const list = order(); const victim = list.find((r) => FINISHED.has(r.state)) || list[0]; all.delete(victim.msgId); if (!FINISHED.has(victim.state)) dropped.push(`${victim.msgId} (${victim.state})`); };
@@ -313,10 +321,6 @@ function writeRecords() {
   let text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] });
   while (Buffer.byteLength(text) > HANDED_FILE_MAX && all.size > 1) { drop(); text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] }); }
   if (dropped.length) log(`handed records: past ${HANDED_MAX} records or ${HANDED_FILE_MAX} bytes — ${dropped.length} record(s) not finished left ${path.basename(file)}: ${dropped.join(', ')}`);
-  if (Buffer.byteLength(text) > HANDED_FILE_MAX) {   // r3282: one record alone past the file's bound — its WORDS go, its head stays
-    for (const r of [...all.values()]) if (r.copy) { const head = { ...r, copy: null, copyGone: `past the file's bound (${HANDED_FILE_MAX} bytes)` }; all.set(r.msgId, head); if (HR.has(r.msgId)) HR.set(r.msgId, head); log(`handed records: ${r.msgId}: one record alone passes ${HANDED_FILE_MAX} bytes — its words are not kept, its head is (nothing can be drawn of it)`); }
-    text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] });
-  }
   if (Buffer.byteLength(text) > HANDED_FILE_MAX) { sayOnce('big:' + file, `one record alone passes ${HANDED_FILE_MAX} bytes — not written`); return false; }
   const tmp = `${file}.${process.pid}.tmp`;
   try { fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, file); }
@@ -404,12 +408,13 @@ async function readTailFor(stamped) {
   const { tail, from } = await tailViaChild(file);
   const where = new Map();
   let first = from === 0 ? 0 : null;
-  // r3282 (a compaction): the CLI is read to APPEND its compaction (a compact_boundary / summary record; the records before it stay in
+  // r3282 (a compaction): the CLI is read to APPEND its compaction (a compact_boundary record, or a summary record WITH a time — a title
+  // summary line carries none and is no compaction, r3330; the records before it stay in
   // the file) — not verified for every version, so a compaction at or after a send proves no absence for it (left, said)
   let compactAt = 0;
   for (const line of tail.split('\n')) {
     if (first === null && line.includes('"timestamp"')) { try { const r = JSON.parse(line); if (r && typeof r.timestamp === 'string' && Date.parse(r.timestamp)) first = Date.parse(r.timestamp); } catch { } }
-    if (line.includes('"compact_boundary"') || line.includes('"type":"summary"')) { try { const r = JSON.parse(line); if (r && ((r.type === 'system' && r.subtype === 'compact_boundary') || r.type === 'summary')) compactAt = Math.max(compactAt, Date.parse(r.timestamp) || Infinity); } catch { } }
+    if (line.includes('"compact_boundary"') || line.includes('"type":"summary"')) { try { const r = JSON.parse(line); if (r && r.type === 'system' && r.subtype === 'compact_boundary') compactAt = Math.max(compactAt, Date.parse(r.timestamp) || Infinity); else if (r && r.type === 'summary' && Date.parse(r.timestamp)) compactAt = Math.max(compactAt, Date.parse(r.timestamp)); } catch { } }   // r3330: a title summary line (no time) is no compaction
     for (const d of stamped) {
       if (where.has(d.msgId) || !line.includes(d.cliUuid)) continue;
       let r = null; try { r = JSON.parse(line); } catch { continue; }
