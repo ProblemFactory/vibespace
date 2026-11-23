@@ -1627,6 +1627,16 @@ function registerWsHandler(wss, ctx) {
               const subHost = data.hostId || parentSession?.host || null;
               // r2865: ids not of the CLI's shape are refused by name (the helper says it) BEFORE any file call — the pull too
               const aimed = require('./server/subagent-transcript').idsRefusal(claudeId, agentId);
+              // r2991 (b): the words fit the cause — a parent of ANOTHER harness keeps no Claude Code sub-agent log; no conversation named
+              // (the parent's harness by its DECLARED row: store.pictures.subagents — its sub-agents keep records under
+              // <conversation>/subagents/, src/harnesses/*.js — never a branch on a harness id)
+              const subBackend = String(parentSession?.backend || data.backend || 'claude');
+              const subHarness = (() => { try { return harnessOf(subBackend); } catch { return null; } })();
+              const keepsAgentFiles = !!subHarness?.store?.pictures?.subagents;
+              const aimedWords = !aimed ? null
+                : !keepsAgentFiles ? `its parent is a ${subHarness?.label || subBackend} conversation, and no Claude Code sub-agent log is kept for it here`
+                : !claudeId ? 'no conversation was named for this agent'
+                : aimed;
               if (!aimed && subHost && hosts && /^[\w-]+$/.test(agentId)) {
                 try {
                   const p = await hosts.fetchAgentJsonl(String(subHost), agentId, { claudeSessionId: claudeId });
@@ -1639,7 +1649,7 @@ function registerWsHandler(wss, ctx) {
                   subFetchErr = e.message;
                 }
               }
-              const got = await require('./server/subagent-transcript').agentTranscript({ claudeSessionId: claudeId, agentId, exactDir: path.join(projectsDir, cwdToProjectDir(cwd)), first: pulled, root: projectsDir });
+              const got = aimed ? { fp: null, refused: aimedWords } : await require('./server/subagent-transcript').agentTranscript({ claudeSessionId: claudeId, agentId, exactDir: path.join(projectsDir, cwdToProjectDir(cwd)), first: pulled, root: projectsDir });
               if (got.refused) refused = got.refused;
               else if (got.fp) { rawMsgs = got.records.filter((m) => m && (m.type === 'user' || m.type === 'assistant' || m.type === 'result')); meta = got.meta || {}; }
               const subMM = new MessageManager(subId);

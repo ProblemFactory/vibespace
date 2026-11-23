@@ -292,11 +292,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     // Watch a subagent JSONL file for new messages (fills gap: text/thinking not in stream-json)
     const startSubagentWatcher = (toolUseId, agentId, attempt = 0, found = undefined) => {
       if (session.subagentWatchers.has(toolUseId)) return;
-      // THE FINDER (lane lg-recovery, 主开发 r2374, the unit's commit 2 — src/server/subagent-transcript.js): the place kept and the
-      // cwd's folder by ONE stat each (the release's first candidate); a file in another project folder, or one not written yet,
-      // through the hub's ONE listing of the projects root — asynchronous, shared, at most once a second for the hub (the release
-      // listed the root synchronously at every try of every watcher: every agent a workflow starts paid it). The watcher below is
-      // the release's; a start found by the listing goes on when it answers (`found`), this entry holding the place meanwhile
+      // THE FINDER (lane lg-recovery, 主开发 r2374, the unit's commit 2; wholly in src/server/subagent-transcript.js since r2874):
+      // the place kept and the cwd's folder first, then the hub's ONE listing of the projects root — asynchronous, shared, at most
+      // once a second for the hub, bounded (r2881), each place judged by its real path below its project folder (r2865, r2991). The
+      // release listed the root synchronously at every try of every watcher. The start goes on when the look answers (`found`),
+      // this entry holding the place meanwhile
       const projectsDir = path.join(os.homedir(), '.claude', 'projects');
       const T = require('../subagent-transcript');
       let watchFile = found || null;

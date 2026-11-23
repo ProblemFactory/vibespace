@@ -32,6 +32,7 @@
 //     - readAgentTranscript reads only a path this helper judged: no third door can hand it one.
 //     All of it on the helper's own road (fs.promises), nothing synchronous on the loop.
 const fsp = require('fs').promises;
+const FSC = require('fs').constants;
 const path = require('path');
 const os = require('os');
 
@@ -46,8 +47,8 @@ function idsRefusal(claudeSessionId, agentId) {
 
 const PLACE_MAX = 256;
 const _places = new Map();   // `${conversation}\0${agent}` → the transcript's path, kept (the newest last, the oldest dropped)
-const _stats = { finds: 0, aimed: 0, outside: 0, unanswered: 0, first: 0, kept: 0, exact: 0, walked: 0, listings: 0, listingsShared: 0, missed: 0, reads: 0, shared: 0, refused: 0, inFlight: 0, maxInFlight: 0, waiting: 0, maxWaiting: 0 };
-const stats = () => ({ ..._stats, places: _places.size });
+const _stats = { finds: 0, aimed: 0, outside: 0, unanswered: 0, unfinished: 0, skipped: 0, first: 0, kept: 0, exact: 0, walked: 0, listings: 0, listingsShared: 0, missed: 0, reads: 0, shared: 0, refused: 0, inFlight: 0, maxInFlight: 0, waiting: 0, maxWaiting: 0 };
+const stats = () => ({ ..._stats, places: _places.size, marked: _unanswered.size, walking: _walks.size });
 
 const projectsRoot = () => path.join(os.homedir(), '.claude', 'projects');
 // THE HUB'S ONE LISTING of the projects root for the live watchers' finder (commit 2, 主开发 r2374): asynchronous, shared, at most
@@ -70,7 +71,16 @@ function sharedListing(root) {
 // whole find answers by FIND_BOUND_MS, and past it the ask is REFUSED BY NAME («… did not answer within N s»), never silence; the
 // look that did not answer keeps its folder MARKED until it returns, so a later find starts no look there (refused by name at
 // once), and the first ask after it returned is served.
+//   ITS WORDS TRUE (r2991 (a)): a folder is said not to answer only when a look there has been out half the bound or more — then
+//   it is marked and the walk ends. A walk still going at the bound (every look answering, or waiting behind healthy ones: a large
+//   projects folder on a slow home) is NOT cut: «the walk … did not finish», it goes on, and its answer is KEPT — a place found is
+//   the next ask's kept place, a miss is the next ask's answer for MISS_KEPT_MS (the release answered in the end too). An ask of
+//   the same thing while it goes on joins it. A marked PROJECT folder is skipped by a walk (as a folder with no such file); only
+//   when nothing is found is the ask refused by its name. The projects root marked refuses at once.
 const FIND_BOUND_MS = 10000;
+const MISS_KEPT_MS = 60000;
+const _walks = new Map();    // the ask → its walk, while it runs (asks of the same thing join it)
+const _missedPast = new Map();   // the ask → when its walk, past a bound, ended finding nothing
 let findBoundMs = FIND_BOUND_MS;   // a suite may set it (_setFindBoundForTest)
 const _unanswered = new Map();   // folder → the look out there that did not answer within a find's bound (until it returns)
 const _tail = new Map();         // folder → its last look (the next one there waits for it)
@@ -79,15 +89,19 @@ const stopOf = (why) => Object.assign(new Error(why), { [STOP]: true });
 const isStop = (e) => !!(e && e[STOP]);
 const folderName = (key, root) => (key === root ? 'the projects folder' : `the folder ${path.basename(key)}`);
 function looker(root) {
-  const ctx = { ended: false, out: null, waiting: null };
+  const ctx = { ended: false, out: null, waiting: null, skipped: null, judgeRoot: path.resolve(projectsRoot()), realProj: new Map() };
   const keyOf = (p) => { const rel = path.relative(root, p); if (!rel) return root; if (rel.split(path.sep)[0] === '..' || path.isAbsolute(rel)) return path.dirname(p); return path.join(root, rel.split(path.sep)[0]); };
   ctx.look = (p, fn) => {
     if (ctx.ended) return Promise.reject(stopOf('the find has ended'));
     const key = keyOf(p);
-    if (_unanswered.has(key)) { _stats.unanswered++; return Promise.reject(stopOf(`${folderName(key, root)} did not answer (a look there is still out)`)); }
+    if (_unanswered.has(key)) {
+      if (key === root) { _stats.unanswered++; return Promise.reject(stopOf(`${folderName(key, root)} did not answer (a look there is still out)`)); }
+      _stats.skipped++; if (!ctx.skipped) ctx.skipped = key;   // a marked project folder: skipped, as one with no such file
+      return Promise.reject(new Error('skipped'));
+    }
     const prev = _tail.get(key);
     let lp = null;
-    const run = () => { if (ctx.ended) throw stopOf('the find has ended'); ctx.waiting = null; ctx.out = { key, lp }; return fn(); };
+    const run = () => { if (ctx.ended) throw stopOf('the find has ended'); ctx.waiting = null; ctx.out = { key, lp, at: Date.now() }; return fn(); };
     ctx.waiting = key;
     lp = prev ? prev.then(run, run) : Promise.resolve().then(run);
     _tail.set(key, lp);
@@ -98,18 +112,41 @@ function looker(root) {
   return ctx;
 }
 
-// THE JUDGE (r2865): a candidate is its REAL path when that is a file at <real root>/<a folder>/<sid>/subagents/[workflows/<a run>/]
-// <want> — else null, exactly as a missing file (a link leading out, a climb, another conversation's folder all answer alike)
+// THE JUDGE (r2865): a candidate is its REAL path when that is a file of THIS conversation's own subagents folder — else null,
+// exactly as a missing file (a link leading out, a climb, another conversation's folder all answer alike).
+// BELOW THE PROJECT FOLDER (r2991, the round's must): the candidate's own project folder — read from its shape, a direct child of
+// the hub's projects root — may itself be a link to anywhere, and so may the projects root (the release allowed both: a project
+// folder on other storage is a setup the usage walk knows). The judgement stands on THAT folder's real path: the file's real path
+// must be exactly <its real path>/<this conversation>/subagents/[workflows/<one run>/]<the agent's file>.
 const JUDGED_MAX = 512;
 const _judged = new Set();   // the real paths this helper judged: readAgentTranscript reads no other (the newest last)
 const judged = (real) => { _judged.delete(real); _judged.add(real); if (_judged.size > JUDGED_MAX) _judged.delete(_judged.values().next().value); return real; };
-async function placeOf(p, realRoot, sid, want, L) {
+// the candidate's own project folder, read from its shape: <proj>/<sid>/subagents/<want> or <proj>/<sid>/subagents/workflows/<run>/<want>
+function projectOf(p, sid, want) {
+  if (path.basename(p) !== want) return null;
+  let d = path.dirname(p);
+  if (path.basename(path.dirname(d)) === 'workflows') d = path.dirname(path.dirname(d));
+  if (path.basename(d) !== 'subagents' || path.basename(path.dirname(d)) !== sid) return null;
+  return path.dirname(path.dirname(d));
+}
+async function insideOwn(p, real, sid, want, L, ctx) {
+  const proj = projectOf(p, sid, want);
+  if (!proj || path.dirname(proj) !== ctx.judgeRoot) return false;
+  let realProj = ctx.realProj.get(proj);
+  if (realProj === undefined) {
+    try { realProj = await L(proj, () => fsp.realpath(proj)); } catch (e) { if (isStop(e)) throw e; realProj = null; }
+    ctx.realProj.set(proj, realProj);
+  }
+  if (!realProj) return false;
+  const own = path.join(realProj, sid, 'subagents');
+  if (path.dirname(real) === own) return path.basename(real) === want;
+  const rest = path.relative(own, real).split(path.sep);
+  return rest.length === 3 && rest[0] === 'workflows' && rest[1] !== '..' && rest[2] === want;
+}
+async function placeOf(p, sid, want, L, ctx) {
   let real;
   try { real = await L(p, () => fsp.realpath(p)); if (!(await L(p, () => fsp.stat(real))).isFile()) return null; } catch (e) { if (isStop(e)) throw e; return null; }
-  const rel = realRoot ? path.relative(realRoot, real) : '';
-  const parts = rel && !path.isAbsolute(rel) ? rel.split(path.sep) : [];
-  const inside = parts.length > 0 && parts[0] !== '..' && parts[1] === sid && parts[2] === 'subagents'
-    && ((parts.length === 4 && parts[3] === want) || (parts.length === 6 && parts[3] === 'workflows' && parts[5] === want));
+  const inside = await insideOwn(p, real, sid, want, L, ctx);
   if (!inside) { _stats.outside++; return null; }
   return judged(real);
 }
@@ -120,11 +157,11 @@ async function pulledOf(p, want, L) {
 }
 const keep = (key, fp) => { _places.delete(key); _places.set(key, fp); if (_places.size > PLACE_MAX) _places.delete(_places.keys().next().value); return fp; };
 
-/** `<subDir>/workflows/<run>/agent-<id>.jsonl`, in the listing's order — or null */
+/** `<subDir>/workflows/<run>/agent-<id>.jsonl`, in the listing's order — { fp: its real path, cand: the place asked } or null */
 async function inWorkflows(subDir, want, place, L) {
   let runs = [];
   try { runs = await L(subDir, () => fsp.readdir(path.join(subDir, 'workflows'))); } catch (e) { if (isStop(e)) throw e; return null; }
-  for (const run of runs) { const fp = await place(path.join(subDir, 'workflows', run, want)); if (fp) return fp; }
+  for (const run of runs) { const cand = path.join(subDir, 'workflows', run, want), fp = await place(cand); if (fp) return { fp, cand }; }
   return null;
 }
 
@@ -134,40 +171,59 @@ async function inWorkflows(subDir, want, place, L) {
  *  folder>`), or null; `first` = paths the caller already holds (a remote parent's pulled copy), asked before anything. The judge's
  *  root is the hub's own projects root, whatever `root` is walked. Never a synchronous call. BOUNDED (r2881): { fp: null, refused,
  *  unanswered: true } when a folder did not answer within findBoundMs (or a look there is still out). */
+const markUnanswered = (out) => { _unanswered.set(out.key, out.lp); const clear = () => { if (_unanswered.get(out.key) === out.lp) _unanswered.delete(out.key); }; out.lp.then(clear, clear); };
 async function findAgentTranscript(opts = {}) {
   _stats.finds++;
   const refused = idsRefusal(opts.claudeSessionId, opts.agentId);
   if (refused) { _stats.aimed++; return { fp: null, refused, aimed: true }; }
-  const root = opts.root || projectsRoot(), ctx = looker(root);
+  const root = opts.root || projectsRoot();
+  const ask = [opts.claudeSessionId, opts.agentId, opts.exactDir || '', root, opts.workflows !== false, !!opts.shared, ...(opts.first || [])].join('\0');
+  const missedAt = _missedPast.get(ask);
+  if (missedAt !== undefined) { if (Date.now() - missedAt < MISS_KEPT_MS) return { fp: null }; _missedPast.delete(ask); }   // the kept answer of a walk past a bound
+  let walk = _walks.get(ask);
+  if (!walk) {
+    const ctx = looker(root);
+    walk = { ctx, past: false };
+    walk.p = findWithin(opts, root, ctx).catch((e) => (isStop(e) ? { fp: null, refused: e.message, unanswered: true } : { fp: null }));
+    _walks.set(ask, walk);
+    const w = walk;
+    w.p.then((r) => {
+      if (_walks.get(ask) === w) _walks.delete(ask);
+      if (w.past && r && !r.fp && !r.refused) { _missedPast.set(ask, Date.now()); while (_missedPast.size > PLACE_MAX) _missedPast.delete(_missedPast.keys().next().value); }
+    });
+  }
   let timer = null;
   const late = new Promise((res) => { timer = setTimeout(() => res(LATE), findBoundMs); });
-  const work = findWithin(opts, root, ctx).catch((e) => (isStop(e) ? { fp: null, refused: e.message, unanswered: true } : { fp: null }));
-  const got = await Promise.race([work, late]);
+  const got = await Promise.race([walk.p, late]);
   clearTimeout(timer);
   if (got !== LATE) return got;
-  ctx.ended = true;
-  const out = ctx.out, at = out ? out.key : (ctx.waiting || root);
-  if (out) { _unanswered.set(out.key, out.lp); const clear = () => { if (_unanswered.get(out.key) === out.lp) _unanswered.delete(out.key); }; out.lp.then(clear, clear); }
-  _stats.unanswered++;
-  return { fp: null, refused: `${folderName(at, root)} did not answer within ${findBoundMs / 1000} s`, unanswered: true };
+  const out = walk.ctx.out;
+  const stalled = !!out && Date.now() - out.at >= findBoundMs / 2;
+  if (stalled) {   // a look out that long: its folder did not answer — marked, the walk ends
+    walk.ctx.ended = true;
+    if (_walks.get(ask) === walk) _walks.delete(ask);   // an ended walk is joined by no later ask: that one meets the mark at once
+    markUnanswered(out);
+    _stats.unanswered++;
+    return { fp: null, refused: `${folderName(out.key, root)} did not answer within ${findBoundMs / 1000} s`, unanswered: true };
+  }
+  walk.past = true;   // still going: not cut — it goes on, its answer kept for the next ask
+  _stats.unfinished++;
+  return { fp: null, refused: `the walk of the projects folder did not finish within ${findBoundMs / 1000} s (it goes on: ask again)`, unanswered: true };
 }
 async function findWithin({ claudeSessionId: sid, agentId, exactDir = null, first = [], workflows = true, shared = false }, root, ctx) {
   const want = `agent-${agentId}.jsonl`, key = `${sid}\0${agentId}`, L = ctx.look;
   for (const p of first) { const fp = await pulledOf(p, want, L); if (fp) { _stats.first++; return { fp, how: 'first' }; } }
-  let realRoot = null;
-  const pr = projectsRoot();
-  try { realRoot = await L(pr, () => fsp.realpath(pr)); } catch (e) { if (isStop(e)) throw e; }
-  const place = (p) => placeOf(p, realRoot, sid, want, L);
+  const place = (p) => placeOf(p, sid, want, L, ctx);   // the place KEPT is the one asked (judged again at each ask), never its real path
   const kept = _places.get(key);
   const keptFp = kept ? await place(kept) : null;
   if (keptFp) { _stats.kept++; return { fp: keptFp, how: 'kept' }; }
   if (kept) _places.delete(key);
   const exactSub = exactDir ? path.join(exactDir, sid, 'subagents') : null;
   if (exactSub) {
-    const direct = await place(path.join(exactSub, want));
-    if (direct) { _stats.exact++; return { fp: keep(key, direct), how: 'exact' }; }
+    const cand = path.join(exactSub, want), direct = await place(cand);
+    if (direct) { _stats.exact++; keep(key, cand); return { fp: direct, how: 'exact' }; }
     const wf = workflows ? await inWorkflows(exactSub, want, place, L) : null;
-    if (wf) { _stats.exact++; return { fp: keep(key, wf), how: 'exact' }; }
+    if (wf) { _stats.exact++; keep(key, wf.cand); return { fp: wf.fp, how: 'exact' }; }
   }
   let dirs = [];
   // shared: the live watchers' road — the hub's one listing, at most once a second
@@ -175,12 +231,14 @@ async function findWithin({ claudeSessionId: sid, agentId, exactDir = null, firs
   for (const d of dirs) {
     const sub = path.join(root, d, sid, 'subagents');
     if (sub === exactSub) continue;
-    const direct = await place(path.join(sub, want));
-    if (direct) { _stats.walked++; return { fp: keep(key, direct), how: 'walked' }; }
+    const cand = path.join(sub, want), direct = await place(cand);
+    if (direct) { _stats.walked++; keep(key, cand); return { fp: direct, how: 'walked' }; }
     const wf = workflows ? await inWorkflows(sub, want, place, L) : null;
-    if (wf) { _stats.walked++; return { fp: keep(key, wf), how: 'walked' }; }
+    if (wf) { _stats.walked++; keep(key, wf.cand); return { fp: wf.fp, how: 'walked' }; }
   }
   _stats.missed++;
+  // a folder skipped as marked may hold it: the ask is refused by THAT folder's name, never answered as missing
+  if (ctx.skipped) return { fp: null, refused: `${folderName(ctx.skipped, root)} did not answer (a look there is still out)`, unanswered: true };
   return { fp: null };
 }
 
@@ -191,6 +249,11 @@ const _sharing = new Map();   // the file → its read's promise, while it waits
 // THE META READ'S BOUND (r2594 (3)): the agent's small .meta.json is read inside the ONE chain — a read that never returns would hold
 // every later sub-agent read of the hub with no word; past this bound the read is REFUSED by name (the pool has its own: 60 s a call)
 const META_BOUND_MS = 2000;
+// r2991 (c): the meta file is read by the path that was judged — through a handle opened with no link followed at its last part
+async function readJudged(p) {
+  const fh = await fsp.open(p, FSC.O_RDONLY | (FSC.O_NOFOLLOW || 0));
+  try { return await fh.readFile('utf-8'); } finally { await fh.close().catch((e) => console.warn(`[subagent] a meta file's close failed (${path.basename(p)}): ${(e && e.message) || e}`)); }
+}
 const LATE = Symbol('late');
 function readAgentTranscript(fp, { reader = null, metaRead = null, metaBoundMs = META_BOUND_MS } = {}) {
   // r2865: ONLY a path this helper judged (findAgentTranscript's answer) — a third door cannot hand it another
@@ -211,7 +274,7 @@ function readAgentTranscript(fp, { reader = null, metaRead = null, metaBoundMs =
       const metaPath = fp.replace(/\.jsonl$/, '.meta.json');
       // r2865: the meta file is read only when its real path is itself (fp is already real): a link beside it is not read
       const text = await Promise.race([
-        fsp.realpath(metaPath).then((r) => (r === metaPath ? (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath) : null)).catch(() => null),
+        fsp.realpath(metaPath).then((r) => (r === metaPath ? (metaRead || readJudged)(metaPath) : null)).catch(() => null),
         new Promise((res) => { timer = setTimeout(() => res(LATE), metaBoundMs); }),
       ]);
       clearTimeout(timer);
@@ -236,11 +299,11 @@ async function agentTranscript(opts = {}) {
   return got.refused ? { fp: found.fp, refused: got.refused } : { fp: found.fp, how: found.how, records: got.records, meta: got.meta };
 }
 
-/** the place kept for this conversation and agent (the live watcher asks it before its one stat of the cwd's folder), or null */
+/** the place kept for this conversation and agent (the one asked, judged again at each ask), or null */
 const keptPlace = (claudeSessionId, agentId) => _places.get(`${claudeSessionId}\0${agentId}`) || null;
 
-function _resetForTest() { _places.clear(); _judged.clear(); _unanswered.clear(); _tail.clear(); findBoundMs = FIND_BOUND_MS; _sharing.clear(); _chain = Promise.resolve(); _listing = null; listingMaxAgeMs = LISTING_MAX_AGE_MS; for (const k of Object.keys(_stats)) _stats[k] = 0; }
+function _resetForTest() { _places.clear(); _judged.clear(); _unanswered.clear(); _tail.clear(); _walks.clear(); _missedPast.clear(); findBoundMs = FIND_BOUND_MS; _sharing.clear(); _chain = Promise.resolve(); _listing = null; listingMaxAgeMs = LISTING_MAX_AGE_MS; for (const k of Object.keys(_stats)) _stats[k] = 0; }
 const _setListingMaxAgeForTest = (ms) => { listingMaxAgeMs = ms; };
 const _setFindBoundForTest = (ms) => { findBoundMs = ms; };
 
-module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, keptPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, FIND_BOUND_MS, _resetForTest, _setListingMaxAgeForTest, _setFindBoundForTest };
+module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, keptPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, FIND_BOUND_MS, MISS_KEPT_MS, _resetForTest, _setListingMaxAgeForTest, _setFindBoundForTest };

@@ -23,6 +23,14 @@
 //   ⑩ THE FIND'S BOUND (主开发 r2881): the projects folder's listing STALLED by placement — the route and the attach answer BY NAME
 //      at the bound, the next ask while it is out starts no second look (refused by name at once), the first ask after it returned
 //      is served; RED: today's finder (no bound, no count of its looks)
+//   ⑩b THE BOUND'S WORDS (r2991 (a)): a large healthy projects folder on a slow home (every look 1 ms, the agent's folder listed last)
+//      — «the walk … did not finish», nothing marked, the walk goes on and its answer is KEPT (a place: the next ask served; a miss:
+//      answered «none» as the release did in the end); RED: the bound that ends every walk (the next ask refused again)
+//   ⑪ A PROJECT FOLDER THAT IS ITSELF A LINK (r2991, the round's must): its own sub-agent shows on the route, the attach, the walked
+//      road and the live watcher; a link inside its subagents folder that points out, and another conversation's file reached
+//      through the linked folder's parent, answer as missing; RED: the judge against the real projects root (05d3d860d), and a copy
+//      with no judge. Also (r2991 (b)) the attach's words fit a parent of another harness and a conversation not named, and (lens 3)
+//      an aimed conversation id with a remote parent asks no remote pull (RED: the pull unguarded)
 //   ⑥ WHOLE: an agent past the histories' head + tail bound (2 MiB + 32 MiB) comes back entire; CONTROL: the bounded read hides its middle
 //   ⑧ THE READ CANNOT BE AIMED (主开发 r2865, lane bl-machines-a's find): on the route and the attach, an id climbing into another
 //      conversation or out of the projects folder, and a conversation id with a parent step, are refused by name before any file
@@ -98,9 +106,9 @@ const WSH_PATH = path.join(REPO, 'src/ws-handler.js');
 const T = require(path.join(REPO, 'src/server/subagent-transcript.js'));
 const CX = require(path.join(REPO, 'src/adapters/codex.js'));
 const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
-function hub(WSH) {
+function hub(WSH, extra = {}) {
   // ws-handler takes path / fs / os from its ctx: the hub's own modules (this fs is the counted one)
-  const ctx = new Proxy({ path, fs, os, hosts: null, telemetry: { record() {} }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: new Map(), WS_OPEN: 1, readLayouts: () => ({}), writeLayouts: () => {} }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const ctx = new Proxy({ path, fs, os, hosts: null, ...extra, telemetry: { record() {} }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: new Map(), WS_OPEN: 1, readLayouts: () => ({}), writeLayouts: () => {} }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
   const on = {};
   const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
   WSH.registerWsHandler(wss, ctx);
@@ -112,10 +120,10 @@ function hub(WSH) {
   };
   return { connect };
 }
-const attachOf = async (H, agentId, { cwd = CWD, sock = null } = {}) => {
+const attachOf = async (H, agentId, { cwd = CWD, sock = null, sid = SID, more = {} } = {}) => {
   const s = sock || H.connect();
   const sessionId = `sub-agent-${agentId}`, before = s.frames.length;   // the frames this attach caused (a connection may say things first)
-  s.send({ type: 'attach', sessionId, parentSessionId: null, claudeSessionId: SID, cwd });
+  s.send({ type: 'attach', sessionId, parentSessionId: null, claudeSessionId: sid, cwd, ...more });
   const mine = () => s.frames.slice(before).filter((x) => x.sessionId === sessionId);
   for (let i = 0; i < 600; i++) { const f = mine().find((x) => x.type === 'attached' || x.type === 'error'); if (f) return { frame: f.type === 'attached' ? f : null, frames: mine() }; await sleep(25); }   // an error ends the wait (a red, never 15 s)
   return { frame: null, frames: mine() };
@@ -128,7 +136,7 @@ const releaseCards = async (fp, { attach = true, id = 'ref' } = {}) => {
 };
 const MUT = mutantCopies('subagent-transcript', REPO);
 const WSH_SRC = fs.readFileSync(WSH_PATH, 'utf-8');
-const HELPER_CALL = (() => { const a = WSH_SRC.indexOf("              const got = await require('./server/subagent-transcript').agentTranscript("); if (a < 0) return 'THE HELPER CALL'; const b = WSH_SRC.indexOf('\n', WSH_SRC.indexOf('              else if (got.fp) {', a)); return WSH_SRC.slice(a, b + 1); })();
+const HELPER_CALL = (() => { const a = WSH_SRC.indexOf("              const got = aimed ? { fp: null, refused: aimedWords } : await require('./server/subagent-transcript').agentTranscript("); if (a < 0) return 'THE HELPER CALL'; const b = WSH_SRC.indexOf('\n', WSH_SRC.indexOf('              else if (got.fp) {', a)); return WSH_SRC.slice(a, b + 1); })();
 
 console.log('① THE ATTACH — a 5 MB agent, 300 project folders: the release\'s cards, nothing listed or read whole on the loop');
 {
@@ -415,7 +423,7 @@ console.log('⑨ THE CUT (主开发 r2874 (1)) — a transcript cut and written 
   fs.rmSync(fp, { force: true });
   const HR = harness(red);
   let rr;
-  try { rr = await counted(() => scene(HR, 250)); } finally { HR.close(); }
+  try { rr = await counted(() => scene(HR, 100)); } finally { HR.close(); }   // (each look is read by hand, awaited: 0.1 s more is plenty for a red that cannot tell)
   ok(rr.said.length < 90 && syncOf('statSync') + syncOf('openSync') > 0, `RED CONTROL: the release's read tells ${rr.said.length} of 90 (from the old offset after the cut) with ${syncOf('statSync') + syncOf('openSync')} synchronous calls on the loop — the legs above would be RED`);
 }
 
@@ -440,7 +448,7 @@ console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that 
     const at = await attachOf(H, BW);
     const looks = rootLooks;
     gate.release(); gate = null;
-    await sleep(60);   // the held listing returns: its folder's mark is cleared
+    for (let i = 0; i < 300 && T.stats().marked > 0; i++) await sleep(10);   // (a count: until the held listing has returned and its folder's mark is cleared)
     const r3 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
     ok(r1.code === 503 && /the projects folder did not answer within 0\.2 s/.test(r1.body.refused || ''), `a stalled listing of the projects folder: the route answers BY NAME at the bound (${r1.code}, «${r1.body.refused}», ${ms1} ms)`);
     // «at once» by the census, never a clock: the mark's own refusal (not the bound's) and one listing of the folder in all
@@ -449,8 +457,9 @@ console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that 
     ok(r3.code === 200 && (r3.body.messages || []).length > 0, `the first ask after the stalled look returned is served (${r3.code}, ${(r3.body.messages || []).length} cards)`);
     // RED: today's finder — no bound, no count of its looks — planted in a copy
     const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
-    const unbounded = MUT.load('src/server/subagent-transcript.js', anchored(anchored(HSRC,
-      '  const got = await Promise.race([work, late]);\n', '  const got = await work;\n', 'the find\'s bound'),
+    const unbounded = MUT.load('src/server/subagent-transcript.js', anchored(anchored(anchored(HSRC,
+      '  const got = await Promise.race([walk.p, late]);\n', '  const got = await walk.p;\n', 'the find\'s bound'),
+      '  let walk = _walks.get(ask);\n', '  let walk = null;\n', 'an ask joins the walk going on'),
       '  ctx.look = (p, fn) => {\n', '  ctx.look = (p, fn) => Promise.resolve().then(fn);\n  ctx.counted = (p, fn) => {\n', 'the counted looks'), 'find-unbounded');
     rootLooks = 0; stall();
     const u1 = unbounded.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
@@ -461,6 +470,39 @@ console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that 
     await Promise.all([u1, u2]);
     ok(a1.late && a2.late && stacked === 2, `RED CONTROL: today's finder never answers while the folder is stalled (neither ask in 0.6 s) and stacks a second look on it (${stacked}) — the legs above would be RED`);
   } finally { if (gate) gate.release(); fs.promises.readdir = hooked; T._resetForTest(); }
+}
+
+console.log('⑩b THE BOUND\'S WORDS (主开发 r2991 (a)) — a large healthy projects folder on a slow home: «did not finish», the walk goes on, its answer kept');
+{
+  const realRp = fs.promises.realpath, realRd = fs.promises.readdir;
+  const LAST = cwdToProjectDir(OTHER_CWD);   // BW's folder, listed LAST (a placement: the walk reaches it past the bound)
+  const slow = () => new Promise((r) => setTimeout(r, 1));   // ~600 looks a walk: well past the 0.2 s bound, no look near half of it
+  fs.promises.realpath = async function (p, ...a) { if (typeof p === 'string' && p.startsWith(PROJ)) await slow(); return realRp.call(fs.promises, p, ...a); };
+  fs.promises.readdir = async function (p, ...a) { if (typeof p === 'string' && p.startsWith(PROJ)) await slow(); const names = await realRd.call(fs.promises, p, ...a); return p === PROJ ? [...names.filter((n) => n !== LAST), ...names.filter((n) => n === LAST)] : names; };
+  const settle = async (M) => { for (let i = 0; i < 1000 && M.stats().walking > 0; i++) await sleep(10); };   // (a count: until the walk that went on has ended)
+  try {
+    T._resetForTest(); T._setFindBoundForTest(200);
+    const r1 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
+    const marked1 = T.stats().marked;
+    await settle(T);
+    const k0 = T.stats().kept;
+    const r2 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
+    ok(r1.code === 503 && /the walk of the projects folder did not finish within 0\.2 s/.test(r1.body.refused || '') && marked1 === 0, `a walk past the bound with every look answering is said as a walk that did not finish, never as a folder that did not answer; nothing marked («${r1.body.refused}», marked ${marked1})`);
+    ok(r2.code === 200 && (r2.body.messages || []).length > 0 && T.stats().kept === k0 + 1, `…it went on, and the next ask is served from the place it kept (${r2.code}, ${(r2.body.messages || []).length} cards)`);
+    const NONE = 'e0000000000000ee';
+    const r3 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: NONE });
+    await settle(T);
+    const r4 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: NONE });
+    ok(/did not finish/.test(r3.body.refused || '') && r4.code === 200 && (r4.body.messages || []).length === 0 && !r4.body.refused, `…an agent that is nowhere: the walk past the bound ends finding nothing, and the next ask is answered «none», as the release answered in the end (${r4.code}${r4.body.refused ? ', «' + r4.body.refused + '»' : ''})`);
+    // RED: the bound as it was (05d3d860d) — any look out at the bound ends the walk and names its folder; the next ask walks again
+    const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
+    const cut = MUT.load('src/server/subagent-transcript.js', anchored(HSRC, '  const stalled = !!out && Date.now() - out.at >= findBoundMs / 2;\n', '  const stalled = !!out;\n', 'the bound\'s words'), 'bound-cuts');
+    cut._setFindBoundForTest(200);
+    const c1 = await cut.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
+    for (let i = 0; i < 300 && cut.stats().marked > 0; i++) await sleep(10);
+    const c2 = await cut.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
+    ok(/did not answer/.test(c1.refused || '') && !!c2.refused && !c2.records, `RED CONTROL: the bound that ends every walk names a folder that answered («${c1.refused}») and refuses the next ask again («${c2.refused}») — the legs above would be RED`);
+  } finally { fs.promises.realpath = realRp; fs.promises.readdir = realRd; T._resetForTest(); }
 }
 
 console.log('⑥ WHOLE — an agent past the histories\' head + tail bound (2 MiB + 32 MiB) comes back entire');
@@ -523,12 +565,80 @@ console.log('⑧ THE READ CANNOT BE AIMED (主开发 r2865) — whatever a calle
     anchored(anchored(anchored(HSRC,
       '  const refused = idsRefusal(opts.claudeSessionId, opts.agentId);\n', '  const refused = null;   /* stale-pins: kept — the helper before r2865, planted as leg ⑧\'s RED control */\n', 'the shape test'),
       '  if (!inside) { _stats.outside++; return null; }\n', '', 'the real-path judge'),
-      "fsp.realpath(metaPath).then((r) => (r === metaPath ? (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath) : null))", "Promise.resolve().then(() => (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath))", 'the meta judge'), 'lawless');   // stale-pins: kept — the helper's meta read before r2865, planted as leg ⑧'s RED control
+      "fsp.realpath(metaPath).then((r) => (r === metaPath ? (metaRead || readJudged)(metaPath) : null))", "Promise.resolve().then(() => (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath))", 'the meta judge'), 'lawless');   // stale-pins: kept — the helper's meta read before r2865, planted as leg ⑧'s RED control
   const lB = await lawless.agentTranscript({ claudeSessionId: SID, agentId: toB, exactDir: DIR, root: PROJ });
   const lOut = await lawless.agentTranscript({ claudeSessionId: SID, agentId: toOut, root: PROJ });
   const lLink = await lawless.agentTranscript({ claudeSessionId: SID, agentId: LINKED, exactDir: DIR, root: PROJ });
   const lMeta = await lawless.agentTranscript({ claudeSessionId: SID, agentId: META_LINKED, exactDir: DIR, root: PROJ });
   ok(J(lB.records).includes('WORDS-OF-CONVERSATION-B') && J(lOut.records).includes('WORDS-OUTSIDE') && J(lLink.records).includes('WORDS-OUTSIDE') && J(lMeta.meta).includes('WORDS-OUTSIDE'), 'RED CONTROL: a copy without the shape test and the real-path judge returns conversation B\'s words, the outside file\'s (on the walked road too, and through the link) and the linked meta — the legs above would be RED');
+}
+
+console.log('⑪ A PROJECT FOLDER THAT IS ITSELF A LINK (主开发 r2991) — judged below its own real path: its own sub-agent shows, a way out of it does not');
+{
+  T._resetForTest();
+  const said = (w, i) => ({ type: i % 2 ? 'assistant' : 'user', uuid: `${w}-${i}`, timestamp: new Date(Date.UTC(2026, 10, 23, 7, 0, i)).toISOString(), message: { role: i % 2 ? 'assistant' : 'user', content: [{ type: 'text', text: `${w} line ${i}` }] } });
+  const write = (fp, w) => { fs.mkdirSync(path.dirname(fp), { recursive: true }); fs.writeFileSync(fp, [0, 1, 2, 3].map((i) => J(said(w, i)) + '\n').join('')); fs.writeFileSync(fp.replace('.jsonl', '.meta.json'), J({ agentType: 'general-purpose', description: `${w} meta` })); return fp; };
+  const LCWD = '/home/userL/work/linked', SID_L = '0b5e7c1a-3333-4444-8555-966677778888', SID_O = '0b5e7c1a-4444-4555-8666-977788889999';
+  const DISK = path.join(HOME, 'other-disk'), REALP = path.join(DISK, 'proj'), LINKP = path.join(PROJ, cwdToProjectDir(LCWD));
+  fs.mkdirSync(REALP, { recursive: true }); fs.symlinkSync(REALP, LINKP);   // the project folder on other storage: a link under the projects root
+  const L1 = 'f1000000000000a1', L2 = 'f1000000000000a2', L3 = 'f1000000000000a3';
+  write(path.join(REALP, SID_L, 'subagents', `agent-${L1}.jsonl`), 'plum-linked-folder-own-words');
+  const OUT = write(path.join(DISK, 'secret.jsonl'), 'WORDS-OUT-OF-THE-LINKED-FOLDER');
+  fs.symlinkSync(OUT, path.join(REALP, SID_L, 'subagents', `agent-${L2}.jsonl`));   // a link inside its subagents folder that points out
+  write(path.join(DISK, 'other-proj', SID_O, 'subagents', `agent-${L3}.jsonl`), 'WORDS-OF-ANOTHER-CONVERSATION');
+  fs.symlinkSync(path.join('..', '..', '..', 'other-proj', SID_O, 'subagents', `agent-${L3}.jsonl`), path.join(REALP, SID_L, 'subagents', `agent-${L3}.jsonl`));   // another conversation's file, through the linked folder's parent
+  const text = (r) => J(r && r.body);
+  const ownR = await ASK(ROUTE, { claudeSessionId: SID_L, cwd: LCWD, agentId: L1 });
+  const walkR = await ASK(ROUTE, { claudeSessionId: SID_L, agentId: L1 });
+  const H = hub(require(WSH_PATH));
+  const ownA = await attachOf(H, L1, { sid: SID_L, cwd: LCWD });
+  // the live watcher on the same conversation (its finder: the helper's, shared, no workflows)
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const CSM = require(path.join(REPO, 'src/server/stdout/claude-stream-json.js'));
+  const CS = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf-8');
+  const engine = { _vsuPending: new Map(), resolveUsageKey: () => '__global__', usageEstimator: { noteLive() {} }, modelsMatch: () => false, servedDefinesModel: () => false, rerouteAnnouncedBy: () => null };
+  for (const part of (/const \{([^}]*)\} = engine;/.exec(CS) || ['', ''])[1].split(',')) { const name = part.split(':')[0].replace(/\/\/.*$/, '').trim(); if (/^[A-Za-z_$][\w$]*$/.test(name) && !(name in engine)) engine[name] = () => {}; }
+  const active = new Map(), bcast = [];
+  const { attach } = CSM.create({ activeSessions: active, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(HOME, 'none'), checkClaudeGoalStatus() {}, noteModelSeen() {}, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
+  const ws = { mode: 'chat', backend: 'claude', name: 'linked', cwd: LCWD, host: null, claudeSessionId: SID_L, backendSessionId: SID_L, sockName: 'cw-linked', buffer: '', createdAt: Date.now(), _webuiId: 'sess-linked', _taskRecords: {} };
+  ws._normalizer = new MessageManager('sess-linked'); active.set('sess-linked', ws);
+  quiet(); try { attach(ws, 'sess-linked', { data: null, onData() {}, onExit() {} }, { feedLive: N.feedLive, broadcastToSession: (x, id, m) => bcast.push(m), broadcastActiveSessions() {}, readSessionMeta: () => ({}), writeSessionMeta() {}, updateSessionTodos() {}, applyTaskToolUpdate() {}, emitTaskListTodos() {} }); ws._startSubagentWatcher(`tu-${L1}`, L1); } finally { loud(); }
+  const watched = () => bcast.filter((m) => m.type === 'subagent-message' && m.parentToolUseId === `tu-${L1}`).length;
+  for (let i = 0; i < 300 && !watched(); i++) await sleep(10);
+  const told = watched();
+  for (const w of (ws.subagentWatchers || new Map()).values()) { try { if (w && w.retry) clearTimeout(w.retry); if (w && w.watcher && w.watcher.close) w.watcher.close(); } catch { } }
+  active.clear();
+  ok(ownR.code === 200 && text(ownR).includes('plum-linked-folder-own-words') && walkR.code === 200 && text(walkR).includes('plum-linked-folder-own-words') && !!ownA.frame && J(ownA.frame.messages).includes('plum-linked-folder-own-words') && told > 0,
+    `a project folder that is a link to other storage still shows its own sub-agent: the route (${ownR.code}), the walked road (${walkR.code}), the attach (${ownA.frame ? (ownA.frame.messages || []).length : 'none'} cards) and the live watcher (${told} told)`);
+  const outR = await ASK(ROUTE, { claudeSessionId: SID_L, cwd: LCWD, agentId: L2 }), othR = await ASK(ROUTE, { claudeSessionId: SID_L, cwd: LCWD, agentId: L3 }), noneR = await ASK(ROUTE, { claudeSessionId: SID_L, cwd: LCWD, agentId: 'f1000000000000a9' });
+  ok(outR.code === 200 && !text(outR).includes('WORDS-OUT') && text(outR) === text(noneR), `…a link inside its subagents folder that points out answers as a missing agent (${outR.code}, ${(outR.body.messages || []).length} messages)`);
+  ok(othR.code === 200 && !text(othR).includes('WORDS-OF-ANOTHER') && text(othR) === text(noneR), `…another conversation's file reached through the linked folder's parent answers as a missing agent (${othR.code}, ${(othR.body.messages || []).length} messages)`);
+  // RED 1: the judge against the real PROJECTS ROOT (05d3d860d), planted in a copy: the linked folder's own agent is no place
+  const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
+  const rootJudge = MUT.load('src/server/subagent-transcript.js', anchored(HSRC, '  const inside = await insideOwn(p, real, sid, want, L, ctx);\n',
+    "  const realRoot = await fsp.realpath(projectsRoot()).catch(() => null), rel = realRoot ? path.relative(realRoot, real) : '', parts = rel && !path.isAbsolute(rel) ? rel.split(path.sep) : [];\n  const inside = parts.length > 0 && parts[0] !== '..' && parts[1] === sid && parts[2] === 'subagents' && ((parts.length === 4 && parts[3] === want) || (parts.length === 6 && parts[3] === 'workflows' && parts[5] === want));\n",   // stale-pins: kept — the 05d3d860d judge, planted as ⑪'s RED control
+    'the judge below the project folder'), 'root-judge');
+  const rj = await rootJudge.agentTranscript({ claudeSessionId: SID_L, agentId: L1, exactDir: LINKP, root: PROJ });
+  ok(!rj.fp, `RED CONTROL: the judge against the real projects root answers the linked folder's own agent as no place (found ${rj.fp}) — the leg above would be RED`);
+  // RED 2: no judge at all — the link out and the other conversation's file are read
+  const noJudge = MUT.load('src/server/subagent-transcript.js', anchored(HSRC, '  if (!inside) { _stats.outside++; return null; }\n', '', 'the judge'), 'no-judge');
+  const n2 = await noJudge.agentTranscript({ claudeSessionId: SID_L, agentId: L2, exactDir: LINKP, root: PROJ }), n3 = await noJudge.agentTranscript({ claudeSessionId: SID_L, agentId: L3, exactDir: LINKP, root: PROJ });
+  ok(J(n2.records).includes('WORDS-OUT-OF-THE-LINKED-FOLDER') && J(n3.records).includes('WORDS-OF-ANOTHER-CONVERSATION'), 'RED CONTROL: a copy with no judge reads the link out and the other conversation\'s file — the two legs above would be RED');
+  // r2991 (b): the attach's words fit the cause
+  const codexA = await attachOf(H, 'abc123', { sid: 'thread-of-a-codex-parent', more: { backend: 'codex' } });
+  const noSidA = await attachOf(H, 'abc124', { sid: '' });
+  ok(/its parent is a Codex conversation/.test((codexA.frame || {}).loadRefused || '') && /no conversation was named/.test((noSidA.frame || {}).loadRefused || ''), `the attach's words fit the cause: a parent of another harness («${(codexA.frame || {}).loadRefused}»), no conversation named («${(noSidA.frame || {}).loadRefused}»)`);
+  // lens 3: an aimed conversation id with a REMOTE parent asks no remote pull (the release pulled with the id unchecked)
+  let pulls = 0;
+  const hostsStub = { fetchAgentJsonl: async () => { pulls++; return null; } };
+  const HR = hub(require(WSH_PATH), { hosts: hostsStub });
+  await attachOf(HR, 'b1', { sid: `${SID}/../${SID_L}`, more: { hostId: 'machine-x' } });
+  const okPulls = pulls;
+  const WSRC = fs.readFileSync(WSH_PATH, 'utf-8');
+  const unguarded = MUT.load('src/ws-handler.js', anchored(WSRC, 'if (!aimed && subHost && hosts && /^[\\w-]+$/.test(agentId)) {', 'if (subHost && hosts && /^[\\w-]+$/.test(agentId)) {', 'the pull asks the shape first'), 'pull-unguarded');   // stale-pins: kept — the release's unguarded pull, planted as ⑪'s RED control
+  await attachOf(hub(unguarded, { hosts: hostsStub }), 'b1', { sid: `${SID}/../${SID_L}`, more: { hostId: 'machine-x' } });
+  ok(okPulls === 0 && pulls === 1, `an aimed conversation id with a remote parent asks NO remote pull (${okPulls}); RED CONTROL: the pull unguarded asks it (${pulls - okPulls})`);
+  T._resetForTest();
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
