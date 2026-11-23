@@ -20,6 +20,8 @@
 //      the untrimmed ring draws; after a restart (the wrapper's copy) the bubble too
 //   ⑥ THE CENSUS — every write of a session's ring in the tree (every spelling of the field), each a row: a claude ring's
 //      write goes through trimRing with its session; RED: the release's fifth writer in a copy; a new write site planted
+//   ⑦ A HAND-OVER NEVER SETTLED (a wrapper that died mid-turn), the copy carried past the CLI's own record: ONE bubble, in its
+//      transcript place with no chip (round w5ibyr58u); 300 of the person's records between them change nothing (no cap)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -153,11 +155,19 @@ WD.section('④');
   ok(r.dropped > 0 && out.includes(copy(ids[5]) + '\n') && !out.includes(copy(ids[0]) + '\n') && warned.length === 1 && warned[0].includes('conv-guard') && warned[0].includes(`${r.dropped} owed record`) && r.droppedIds.every((id) => warned[0].includes(id)),
     `past a guard of 130 000 chars: the newest owed kept, ${r.dropped} oldest left — and the journal says so ONCE, by conversation, count and msgIds («${(warned[0] || '').slice(0, 120)}…»)`, { dropped: r.dropped, warned });
   const kw = []; const kwWas = console.warn; console.warn = (...a) => kw.push(a.join(' '));
-  const kinds = CR.trimRingOf(handover('msg-kind', 'handed') + '\n' + copy('msg-kind', 'k') + '\n' + lines(800000), { owedMax: 10 });
-  CR.trimRing(handover('msg-kind', 'handed') + '\n' + copy('msg-kind', 'k') + '\n' + lines(800000), {}, 'conv-kinds', { owedMax: 10 });
+  WORDS['msg-kind'] = 'k';
+  const kindRing = queue(['msg-kind']) + '\n' + handover('msg-kind', 'handed') + '\n' + copy('msg-kind', 'k') + '\n' + lines(800000);   // the last queue, a hand-over, a copy — all owed
+  const kinds = CR.trimRingOf(kindRing, { owedMax: 10 });
+  CR.trimRing(kindRing, {}, 'conv-kinds', { owedMax: 10 });
   console.warn = kwWas;
-  ok(kinds.dropped === 2 && kinds.droppedKinds.message === 1 && kinds.droppedKinds.handover === 1 && kw.length === 1 && kw[0].includes('2 owed record') && kw[0].includes('msg-kind') && kw[0].includes('1 hand-over record'),
-    `the last guard SAYS WHAT IT LISTS: a held message by its msgId, a hand-over record by its kind (no id of its own) — «${(kw[0] || '').slice(0, 140)}»`, { kinds: kinds.droppedKinds, kw });
+  const saysKinds = (k, line) => k.dropped === 3 && k.droppedKinds.message === 1 && k.droppedKinds.queue === 1 && k.droppedKinds.handover === 1 && !!line && line.includes('3 owed record') && line.includes('msg-kind') && line.includes('1 queue record') && line.includes('1 hand-over record');
+  // REDs (round w5ibyr58u: the words had no control): a copy that counts every dropped record without an id as a hand-over; a copy whose line drops the kinds
+  const ALLHAND = require(M.write('src/chat-ring.js', anchored(CR_SRC, "else if (r.type === 'queue_changed') droppedKinds.queue++; else droppedKinds.handover++;", 'else droppedKinds.handover++;   // MUTANT: every record without an id is a hand-over', 'all-handover'), 'all-handover'));
+  const NOKINDS = require(M.write('src/chat-ring.js', anchored(CR_SRC, "${rest ? ` (and ${rest}, no id of their own)` : ''}", '', 'no-kinds'), 'no-kinds'));
+  const redLine = (mod) => { const w = []; const was = console.warn; console.warn = (...a) => w.push(a.join(' ')); try { mod.trimRing(kindRing, {}, 'conv-kinds', { owedMax: 10 }); } finally { console.warn = was; } return { k: mod.trimRingOf(kindRing, { owedMax: 10 }), line: w[0] || '' }; };
+  const rAll = redLine(ALLHAND), rNo = redLine(NOKINDS);
+  ok(kw.length === 1 && saysKinds(kinds, kw[0]) && !saysKinds(rAll.k, rAll.line) && !saysKinds(rNo.k, rNo.line),
+    `the last guard SAYS WHAT IT LISTS: a held message by its msgId, the queue record and the hand-over record by kind (no id of their own) — «${(kw[0] || '').slice(0, 160)}» — RED: a copy counting every record without an id as a hand-over (${JSON.stringify(rAll.k.droppedKinds)}), a copy whose line drops the kinds`, { kinds: kinds.droppedKinds, kw, rAll: rAll.k.droppedKinds, rNo: rNo.line.slice(0, 200) });
   const sys = CR.trimRingOf(lines(20000) + queue([], 2) + '\n' + lines(800000), {});
   ok(sys.buffer.startsWith(queue([], 2) + '\n'), 'a queue holding only frames VibeSpace typed (no msgId) keeps its strip row through a trim');
   ok(CR.OWED_MAX === 32 * 1024 * 1024 && CR.RING_MAX - CR.RING_KEEP === 250000, 'THE NUMBERS: the ring is bounded by RING_MAX (750 000) + what is owed, and what is owed by OWED_MAX (32 MiB — the queue caps no count, a frame only the socket\'s 100 MiB); the next trim ≥ 250 000 chars of stream away');
@@ -209,11 +219,23 @@ WD.section('⑦');
     return mm.messages.filter((m) => m.role === 'user' && JSON.stringify(m.content).includes(WORDS[M2])).length;
   };
   const MM_SRC = fs.readFileSync(path.join(ROOT, 'src/message-manager.js'), 'utf8');
-  const NOLATE = require(M.write('src/message-manager.js', anchored(MM_SRC, "      if (raw.webui_copy && raw._fromWebui && raw.msgId && typeof raw.cliUuid === 'string' && raw.cliUuid && this._cliUserUuids && this._cliUserUuids.has(raw.cliUuid)) { this.userMessageIds.set(String(raw.msgId), this._cliUserUuids.get(raw.cliUuid)); return; }\n", '', 'no-late-claim'), 'no-late-claim')).MessageManager;
+  const NOLATE = require(M.write('src/message-manager.js', anchored(MM_SRC, "      if (raw.webui_copy && raw._fromWebui && raw.msgId && typeof raw.cliUuid === 'string' && raw.cliUuid && this._cliUserUuids && this._cliUserUuids.has(raw.cliUuid)) { this.userMessageIds.set(String(raw.msgId), this._cliUserUuids.get(raw.cliUuid)); (this._cliPlaced || (this._cliPlaced = new Set())).add(String(raw.msgId)); return; }\n", '', 'no-late-claim'), 'no-late-claim')).MessageManager;
   const carriedFirst = trimmed.startsWith(copy(M2) + '\n');
   const u = bubblesOf(untrimmed, MessageManager), t = bubblesOf(trimmed, MessageManager), tRel = bubblesOf(trimmed, NOLATE), uRel = bubblesOf(untrimmed, NOLATE);
   ok(carriedFirst && u === 1 && t === 1 && uRel === 1 && tRel === 2,
     `a copy whose hand-over never settled, CARRIED past the CLI's own record of the frame by a trim: ONE bubble (untrimmed ${u}, trimmed ${t}) — RED: a normalizer whose claim runs only when the copy comes first draws ${tRel} after the trim (${uRel} untrimmed)`, { carriedFirst, u, t, uRel, tRel });
+  // round w5ibyr58u: THAT bubble is the CLI's, and it STAYS — the carried 'handed' record after the mapped copy never floats it to the
+  // end and never puts a waiting chip on it (no settle will come: the wrapper is dead). Its place = where the transcript alone draws it.
+  const placeOf = (buffer, MMClass) => {
+    const sm = new SS.SessionMessages({ cwd: CWD, backend: 'claude', buffer, backendSessionId: SID, claudeSessionId: SID }, 'chat-ring-suite');
+    const mm = new MMClass('chat-ring-suite'); mm.convertHistory(sm.raw());
+    const i = mm.messages.findIndex((m) => m.role === 'user' && JSON.stringify(m.content).includes(WORDS[M2]));
+    return { i, n: mm.messages.length, chip: i >= 0 ? (mm.messages[i].queueState || null) : null };
+  };
+  const MOVES = require(M.write('src/message-manager.js', anchored(MM_SRC, '    if (this._cliPlaced && this._cliPlaced.has(String(msgId))) return true;\n', '', 'moves-cli-bubble'), 'moves-cli-bubble')).MessageManager;
+  const own = placeOf('', MessageManager), pt = placeOf(trimmed, MessageManager), pm = placeOf(trimmed, MOVES), pu = placeOf(untrimmed, MessageManager);
+  ok(own.i > 0 && own.i < own.n - 1 && pt.i === own.i && pt.chip === null && (pm.i !== own.i || pm.chip !== null),
+    `…and that ONE bubble is the CLI's, IN ITS PLACE with NO chip: index ${pt.i} of ${pt.n} (the transcript alone draws it at ${own.i}), chip ${pt.chip} — RED: the tree before (no memory of the mapped msgId) floats it to ${pm.i} of ${pm.n} with chip «${pm.chip}» (untrimmed, the copy first: index ${pu.i}, chip ${pu.chip} — the release's claim)`, { own, pt, pm, pu });
   // r2794 (2): the copy is carried for the life of the conversation object — 300 of the person's own records between the CLI's record
   // of the frame and the carried copy never let the second bubble back (the map of drawn stamps has no cap)
   const SID2 = '22222222-0000-4000-8000-000000000072', CWD2 = '/tmp/chat-ring-suite-handed-many';

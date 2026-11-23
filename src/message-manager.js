@@ -2042,6 +2042,10 @@ class MessageManager extends MessageWindow {
     const id = this.userMessageIds.get(String(msgId));
     const msg = id ? this.messageIndex.get(id) : null;
     if (!msg) return false;
+    // A BUBBLE THE CLI ALREADY RECORDED IS IN ITS PLACE AND STAYS THERE (line 500's follow, round w5ibyr58u): a msgId the order-free
+    // rule mapped onto it (a carried copy that came AFTER the CLI's record) takes no chip and no place from a later record — that
+    // 'handed' was written by a wrapper that died, and no settle will ever come. A bubble exists: nothing to stamp, nothing to say.
+    if (this._cliPlaced && this._cliPlaced.has(String(msgId))) return true;
     // THE DELIVERY ORDER (lane midturn-order): the chip's state says where the bubble is drawn — afloat below everything
     // that happened while the agent has not read it, in its place once it has (src/queue-chips.js `place`)
     this._placeByChip(msg, state);
@@ -2347,8 +2351,10 @@ class MessageManager extends MessageWindow {
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
       // ORDER-FREE (line 500's follow, 主开发 r2710): a copy whose stamp names a CLI record ALREADY drawn is that record's bubble — the
       // claim below runs only when the copy comes first; a ring trim can carry a copy the wrapper never settled (it died mid-turn)
-      // past the CLI's own record (src/chat-ring.js header), and the merge then puts the copy after it. Never a second bubble.
-      if (raw.webui_copy && raw._fromWebui && raw.msgId && typeof raw.cliUuid === 'string' && raw.cliUuid && this._cliUserUuids && this._cliUserUuids.has(raw.cliUuid)) { this.userMessageIds.set(String(raw.msgId), this._cliUserUuids.get(raw.cliUuid)); return; }
+      // past the CLI's own record (src/chat-ring.js header), and the merge then puts the copy after it. Never a second bubble —
+      // and the CLI's bubble STAYS where it is (round w5ibyr58u): the msgId is remembered (`_cliPlaced`), so a carried 'handed' or
+      // 'queued' record after it never floats that bubble and never puts a waiting chip on it (_stampQueueChip)
+      if (raw.webui_copy && raw._fromWebui && raw.msgId && typeof raw.cliUuid === 'string' && raw.cliUuid && this._cliUserUuids && this._cliUserUuids.has(raw.cliUuid)) { this.userMessageIds.set(String(raw.msgId), this._cliUserUuids.get(raw.cliUuid)); (this._cliPlaced || (this._cliPlaced = new Set())).add(String(raw.msgId)); return; }
       if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit, raw.mergedSendUuids, true)) { this._turnStartPending = true; return; } // seam touch-chip-cause × claude-steer: the copied frame DELIVERED as a turn's prompt — that turn opens at its next record
       // AN isMeta COMPANION LINE IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own
       // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every

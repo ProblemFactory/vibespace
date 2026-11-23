@@ -32,7 +32,12 @@
 //     that dead wrapper's file. Carried, the copy can come AFTER the CLI's own record of the frame (the merge anchors the carried
 //     head before the kept tail's first transcript match, src/session-store.js); the normalizer's claim ran only for a copy that
 //     comes first — so src/message-manager.js now also takes a copy whose stamp names a CLI record ALREADY drawn as that bubble
-//     (one bubble, never two; test-chat-ring ⑦ with its RED).
+//     (one bubble, never two; test-chat-ring ⑦ with its RED) — and that bubble STAYS in its place with no chip: a carried 'handed'
+//     or 'queued' record of a msgId so mapped stamps and moves nothing (round w5ibyr58u). What the order-free rule does NOT do:
+//     reconcile the bubble's content with the copy (the copy-first claim's claimedContent — a picture the copy keeps by reference
+//     that the CLI's record lacks, a CLI «[Image could not be processed]» line): the bubble shows what the CLI's record holds.
+//     A copy with NO stamp (cliUuid null — an older wrapper build) carried past its CLI record still draws a second bubble, as
+//     the release did.
 //   · THE MEMORY IS ONE TRIM STALE: the trigger reads what the LAST trim carried; an owed record that settles after it still counts
 //     until the next trim (that trim runs up to its size later, once) — never earlier, never twice.
 //   · THE LAST GUARD names what it drops by kind: held messages by msgId, a queue record and a hand-over record by kind (they have
