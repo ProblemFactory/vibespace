@@ -3581,13 +3581,14 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
     doorHeld = RD(f, KEY);
   } finally { fs.readFileSync = real; console.warn = w0; }
   const markWhile = RU(KEY);
-  const doorStill = RD(f, KEY);   // the file answers again — still unknown: a refused reading is owed until a write replays it
+  const doorStill = RD(f, KEY);   // the file answers again: r3200 — the waiting readings are written AT THIS READ (an idle account has no writer)
+  const fiveAtRead = (() => { try { return QM.lanesOfReading(JSON.parse(fs.readFileSync(f, 'utf8'))).find((l) => l.lane === 'plan:5h') || null; } catch { return null; } })();
   const rw3 = W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { sevenDay: { utilization: 0.52, resetsAt: nowSec + 3 * 86400 }, fetchedAt: Date.now() + 2, source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' });
   const o = JSON.parse(fs.readFileSync(f, 'utf8'));
   const five = QM.lanesOfReading(o).find((l) => l.lane === 'plan:5h');
   const lines = warned.filter((l) => /\[usage-write\]/.test(l) && /could not be read/.test(l));
-  ok(rw && rw.ok === false && rw2 && rw2.ok === false && doorHeld === UNREAD && !!markWhile && markWhile.owed === 2 && doorStill === UNREAD && rw3 && rw3.ok === true && !!five && five.usedPct >= 100 && RU(KEY) === null,
-    'r3136 (1) THE REFUSED READING WAITS IN MEMORY: two writes refused while the file\'s read fails (the door answers the unread mark, two owed); when it answers again the account stays unknown until the next write REPLAYS them first — the wall at 100 % is on file though the last reading did not state it; then the mark clears', { rw: rw && rw.ok, rw2: rw2 && rw2.ok, owed: markWhile && markWhile.owed, five: five && five.usedPct });
+  ok(rw && rw.ok === false && rw2 && rw2.ok === false && doorHeld === UNREAD && !!markWhile && markWhile.owed === 2 && !!doorStill && doorStill !== UNREAD && !!fiveAtRead && fiveAtRead.usedPct >= 100 && rw3 && rw3.ok === true && !!five && five.usedPct >= 100 && RU(KEY) === null,
+    'r3136 (1) THE REFUSED READING WAITS IN MEMORY: two writes refused while the file\'s read fails (the door answers the unread mark, two owed); the first read that answers WRITES them first (r3200: no write needed) — the wall at 100 % is on file though the last reading did not state it, and stays there through the next write; then the mark clears', { rw: rw && rw.ok, rw2: rw2 && rw2.ok, owed: markWhile && markWhile.owed, five: five && five.usedPct });
   ok(lines.length === 1 && /account sub-r3136wall/.test(lines[0]) && !/@|org-|[0-9a-f]{8}-[0-9a-f]{4}/i.test(lines[0]),
     'r3136 (1) SAID ONCE AN EPISODE, by the account\'s kind and an opaque id — never an address, an organisation id or a name holding either', lines);
 }
@@ -3600,7 +3601,7 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   const KEY = 'sub-r3136tool', nowSec = Math.floor(Date.now() / 1000), f = path.join(dir, KEY + '.json');
   const shim = path.join(dir, 'refuse-once.cjs');
   fs.writeFileSync(shim, "const fs = require('fs'), path = require('path'); const want = process.env.R3136_REFUSE ? path.resolve(process.env.R3136_REFUSE) : null; const real = fs.readFileSync; fs.readFileSync = function (p, ...a) { if (want && typeof p === 'string' && path.resolve(p) === want) { const e = new Error('a placed refusal'); e.code = 'EIO'; throw e; } return real.call(this, p, ...a); };\n");
-  const render = (env = {}) => execFileSync(process.execPath, [TOOL], { input: JSON.stringify({ session_id: 'sess-r3136', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: { five_hour: { used_percentage: 12, resets_at: nowSec + 3600, status: 'allowed' }, seven_day: { used_percentage: 46, resets_at: nowSec + 200000, status: 'allowed' } } }), encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: dir, VIBESPACE_ACCOUNT_KEY: KEY, HOME: dir, ...env } });
+  const render = (env = {}) => execFileSync(process.execPath, [TOOL], { input: JSON.stringify({ session_id: 'sess-r3136', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: { five_hour: { used_percentage: 12, resets_at: nowSec + 3600, status: 'allowed' }, seven_day: { used_percentage: 46, resets_at: nowSec + 200000, status: 'allowed' } } }), encoding: 'utf8', env: (() => { const e = { ...process.env, VIBESPACE_USAGE_CACHE: dir, VIBESPACE_ACCOUNT_KEY: KEY, HOME: dir, ...env }; for (const k of ['VIBESPACE_ACCOUNT_LINK', 'NODE_OPTIONS']) if (!(k in env)) delete e[k]; return e; })() })   // (the round wm0bn4boo: no inherited account link or preload);
   const age = () => { const old = Date.now() - 60000; fs.utimesSync(f, old / 1000, old / 1000); };   // past the tool's own 8 s throttle
   W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.2, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.4, resetsAt: nowSec + 200000 }, scopedWeekly: [{ name: 'Fable', utilization: 0.97, resetsAt: nowSec + 200000 }], scopedFetchedAt: Date.now() - 600e3, overage: { status: 'rejected', inUse: false }, fetchedAt: Date.now() - 600e3, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude' });
   age();
@@ -3617,6 +3618,97 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   ok(b1.equals(b0), 'r3136 THE STATUSLINE TOOL: its read of the stored file refused (placed, in its own process) — it writes NOTHING over the file (byte for byte; the next render states its reading again)');
   ok(copies.length === 1 && fs.readFileSync(path.join(dir, copies[0])).equals(torn) && !!o && !!o.startedAgain && o.startedAgain.setAside === copies[0],
     `r3136 THE STATUSLINE TOOL: torn bytes met twice are kept aside ONCE (${copies.length} copies), then the render starts the file again marked «started again» (its copy named)`, o && o.startedAgain);
+}
+
+// r3136 commit 2 / r3200 (the round wm0bn4boo's shoulds, ruled by 主开发): the writer's own parts the consumers need. Made-up accounts
+// and readings; a failed read is a PLACED refusal of that one read call (EIO), undone by the leg; a fresh account per block.
+console.log('㉔b r3200: the waiting readings keep a wall, replay at the read, the torn line names no copy, spend control and overage are stated only by their own fields');
+{
+  const RD2 = typeof W.readReading === 'function' ? W.readReading : () => null;
+  const UNREAD2 = W.UNREAD_READING || Symbol('no unread mark at this tree');
+  const refusing = (file) => { const real = fs.readFileSync; fs.readFileSync = function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(file)) throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); return real.call(this, p0, ...a); }; return () => { fs.readFileSync = real; }; };
+  const nowSec = Math.floor(Date.now() / 1000);
+  const fiveOf = (f) => { try { return QM.lanesOfReading(JSON.parse(fs.readFileSync(f, 'utf8'))).find((l) => l.lane === 'plan:5h') || null; } catch { return null; } };
+  // (1) PAST THE BOUND A WALL IS KEPT AHEAD OF PLAIN READINGS: a wall first, then eight plain weekly-only readings, all refused
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3200w-')); tmpDirs.push(dir);
+    const KEY = 'sub-r3200wall', f = W.cacheFileFor(dir, KEY);
+    W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.4, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.5, resetsAt: nowSec + 3 * 86400 }, fetchedAt: Date.now() - 60e3, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude' });
+    const undo = refusing(f), w0 = console.warn; console.warn = () => { };
+    try {
+      W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 1, resetsAt: nowSec + 3600, status: 'rejected' }, fetchedAt: Date.now(), source: 'rate-limit-event' }, source: 'rate-limit-event', familyOf: familyOfScopedBucket, backend: 'claude', refused: ['plan:5h'] });
+      for (let i = 1; i <= 8; i++) W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { sevenDay: { utilization: 0.5 + i / 100, resetsAt: nowSec + 3 * 86400 }, fetchedAt: Date.now() + i, source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' });
+    } finally { undo(); console.warn = w0; }
+    const owed = typeof W.readingUnread === 'function' && W.readingUnread(KEY) ? W.readingUnread(KEY).owed : null;
+    W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { sevenDay: { utilization: 0.6, resetsAt: nowSec + 3 * 86400 }, fetchedAt: Date.now() + 20, source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' });
+    const five = fiveOf(f);
+    ok(owed === 8 && !!five && five.usedPct >= 100,
+      `r3200 PAST EIGHT WAITING READINGS THE OLDEST PLAIN ONE GOES, NEVER A WALL: a wall then eight weekly-only readings refused (${owed} kept) — when the file answers the wall reaches it (five-hour ${five && five.usedPct} %)`);
+  }
+  // (2) REPLAYED AT THE READ: an idle account (no writer after the episode) is never left unknown once its file reads again
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3200r-')); tmpDirs.push(dir);
+    const KEY = 'sub-r3200read', f = W.cacheFileFor(dir, KEY);
+    W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.3, resetsAt: nowSec + 3600 }, fetchedAt: Date.now() - 60e3, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude' });
+    const undo = refusing(f), w0 = console.warn; console.warn = () => { };
+    let held = null;
+    try { W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 1, resetsAt: nowSec + 3600, status: 'rejected' }, fetchedAt: Date.now(), source: 'rate-limit-event' }, source: 'rate-limit-event', familyOf: familyOfScopedBucket, backend: 'claude', refused: ['plan:5h'] }); held = RD2(f, KEY); }
+    finally { undo(); console.warn = w0; }
+    const back = RD2(f, KEY);
+    const five = fiveOf(f);
+    ok(held === UNREAD2 && !!back && back !== UNREAD2 && !!five && five.usedPct >= 100 && (typeof W.readingUnread !== 'function' || W.readingUnread(KEY) === null),
+      'r3200 THE WAITING READING IS WRITTEN AT THE READ: while the read fails the door answers unknown; the first read that answers writes the waiting wall at once and answers the file — no write needed, no account left unknown', { held: held === UNREAD2, back: back === UNREAD2 ? 'unread' : typeof back, five: five && five.usedPct });
+  }
+  // (3) THE TORN LINE NAMES NO COPY (its name carries the account's file key) — the opaque word only, once per content
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3200t-')); tmpDirs.push(dir);
+    const KEY = 'host-h3200-sub-r3200torn', f = W.cacheFileFor(dir, KEY);
+    const torn = Buffer.from('{"limits":[{"limitId":"plan","windows":[{"kind":"5h","util');
+    const said = [], w0 = console.warn; console.warn = (...a) => said.push(a.join(' '));
+    try {
+      for (let i = 0; i < 2; i++) { fs.writeFileSync(f, torn); W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.2, resetsAt: nowSec + 3600 }, fetchedAt: Date.now() + i, source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }); }
+    } finally { console.warn = w0; }
+    const lines = said.filter((l) => /\[usage-write\]/.test(l) && /did not parse/.test(l));
+    ok(lines.length === 1 && !/\.corrupt-|h3200|r3200torn/.test(lines[0]) && /an account/.test(lines[0]),
+      'r3200 THE TORN LINE: said ONCE for the same torn bytes met twice, by the opaque word — never the copy\'s file name (it carries the account\'s own key and a machine\'s id)', lines);
+  }
+  // (4) CODEX, after torn bytes: spend control is stated by TRUE or FALSE only — a reading that sends null says nothing
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3200c-')); tmpDirs.push(dir);
+    const KEY = 'sub-r3200codex', f = W.cacheFileFor(dir, KEY);
+    fs.writeFileSync(f, '{"limits":[{"limitId":"codex","win');
+    const w0 = console.warn; console.warn = () => { };
+    let u1 = null, u2 = null;
+    try {
+      W.writeReading({ cacheDir: dir, key: KEY, set: CODEXQ.toLimitSet(CODEX_PLAN, { identity: KEY, source: 'codex-rate-limits', fetchedAt: Date.now() }), source: 'codex-rate-limits', backend: 'codex' });
+      u1 = RUK(JSON.parse(fs.readFileSync(f, 'utf8')));
+      W.writeReading({ cacheDir: dir, key: KEY, set: CODEXQ.toLimitSet({ ...CODEX_PLAN, spendControlReached: false }, { identity: KEY, source: 'codex-rate-limits', fetchedAt: Date.now() + 1 }), source: 'codex-rate-limits', backend: 'codex' });
+      u2 = RUK(JSON.parse(fs.readFileSync(f, 'utf8')));
+    } finally { console.warn = w0; }
+    const cx1 = Array.isArray(u1) && u1.includes('resetCredits') && !u1.includes('overage'), cx2 = Array.isArray(u1) && u1.includes('spendControl'), cx3 = Array.isArray(u2) && !u2.includes('spendControl') && u2.includes('resetCredits');
+    if (!(cx1 && cx2 && cx3)) { let keys = null; try { keys = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8'))); } catch { keys = 'unparsable'; } console.log('    r3200 codex detail:', JSON.stringify({ u1, u2, keys })); }
+    ok(cx1, 'r3200 CODEX AFTER TORN BYTES: the file that started again reads by the HARNESS\'s own fact — its reset credits unknown, never overage');
+    ok(cx2, 'r3200 CODEX AFTER TORN BYTES: a reading whose spend control is null leaves it UNKNOWN (null says nothing)');
+    ok(cx3, 'r3200 CODEX AFTER TORN BYTES: a reading that says false states the spend control (the credits still unknown)');
+  }
+  // (5) OVERAGE is stated only by the producer's OWN fields: an object spread from a sibling's older copy states nothing
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3200o-')); tmpDirs.push(dir);
+    const KEY = 'sub-r3200over', f = W.cacheFileFor(dir, KEY);
+    fs.writeFileSync(f, '{"limits":[{"limitId":"plan","win');
+    const w0 = console.warn; console.warn = () => { };
+    let u1 = null, u2 = null;
+    const sib = { inUse: false, status: 'rejected', asOf: Date.now() - 3600e3 };
+    try {
+      W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.2, resetsAt: nowSec + 3600 }, overage: sib, fetchedAt: Date.now(), source: 'rate-limit-event' }, measuredAt: Date.now(), source: 'rate-limit-event', familyOf: familyOfScopedBucket, backend: 'claude', stated: ['plan:5h'], overageStated: false });
+      u1 = RUK(JSON.parse(fs.readFileSync(f, 'utf8')));
+      W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.21, resetsAt: nowSec + 3600 }, overage: { ...sib, asOf: Date.now() + 1 }, fetchedAt: Date.now() + 1, source: 'rate-limit-event' }, measuredAt: Date.now() + 1, source: 'rate-limit-event', familyOf: familyOfScopedBucket, backend: 'claude', stated: ['plan:5h'], overageStated: true });
+      u2 = RUK(JSON.parse(fs.readFileSync(f, 'utf8')));
+    } finally { console.warn = w0; }
+    const cap = fs.readFileSync(path.join(ROOT, 'src/rate-limit-capture.js'), 'utf8');
+    ok(Array.isArray(u1) && u1.includes('overage') && Array.isArray(u2) && !u2.includes('overage') && /const overageStated = !!\(ev\.overage && Object\.values\(ev\.overage\)\.some\(\(v\) => v !== undefined\)\);/.test(cap) && (cap.match(/refusalMarks, overageStated/g) || []).length === 2,
+      'r3200 OVERAGE AFTER TORN BYTES is stated by the event\'s OWN fields only: a reading carrying a sibling\'s older copy (overageStated false) leaves it UNKNOWN; the event that states it does — and the stream capture says which, at both its writes', { u1, u2 });
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

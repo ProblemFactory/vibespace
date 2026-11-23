@@ -235,7 +235,7 @@ export function itemView(item, ctx = {}) {
   // B-0b8c (lane browser-probe-transient): the browser version could not be read — Check again (one probe now), first
   // …and (lane cli-self-measure) a held Claude Code's check failed / could not run / was stopped — Check again (the hub's own check once more): ONE verb family
   // …and (B-5ce7) a parked mount — Reconnect (its row names the verb), the same family
-  const checkAsk = !resolved && i.action && (i.action.type === 'browser-floor-check' || i.action.type === 'cli-check-again' || i.action.type === 'mount-reconnect' || i.action.type === 'queued-file-unread' || i.action.type === 'channel-store-damaged') ? i.action.type : null;   // B-f276 1b: a damaged channels file's Start it empty
+  const checkAsk = !resolved && i.action && (i.action.type === 'browser-floor-check' || i.action.type === 'cli-check-again' || i.action.type === 'mount-reconnect' || i.action.type === 'queued-file-unread' || i.action.type === 'usage-reading-unread' || i.action.type === 'channel-store-damaged') ? i.action.type : null;   // B-f276 1b: a damaged channels file's Start it empty
   // lane channel-names-readable: a channel account's sign-in lacks a permission — Re-authorize…, first
   const reauthAsk = !resolved && i.action && i.action.type === 'channel-reauth' && i.action.adapterId ? { adapterId: String(i.action.adapterId) } : null;
   const cardActs = !card ? null : resolved ? [...(cardOpen ? ['app-open'] : []), 'reopen', 'copy']

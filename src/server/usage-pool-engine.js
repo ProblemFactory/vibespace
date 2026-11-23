@@ -537,6 +537,9 @@ const cliUnmeasuredNotice = require('./cli-unmeasured-notice.js').create({ accou
 const cliSelfMeasure = require('./cli-self-measure.js').create({ accounts: () => { try { return getAccounts(); } catch { return null; } }, dataDir: path.join(rootDir, 'data'), app, enabled: () => { try { return serverSetting('accounts.cliSelfMeasure') !== false; } catch { return true; } }, onMembersBack: (ids) => { for (const id of ids) { try { onMemberReadingFresh(id, 'cli-measured', { placeable: true }); } catch {} } }, onCheckEnded: () => { const ar = getAutoResume(); if (ar && ar.armedIds && ar.refreshStatus) { let ids = []; try { ids = ar.armedIds() || []; } catch {} for (const id of ids) { try { ar.refreshStatus(id); } catch {} } } } });
 setInterval(() => { try { sweepUsageAnchors(); } catch {} try { cliUnmeasuredNotice.tick(); } catch {} try { cliSelfMeasure.tick().catch(() => {}); } catch {} }, 60000);
 setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
+// r3136 / r3200: an account's usage reading file that cannot be read — ONE For-you item with the person's «Set it aside» (its door)
+const usageReadingForYou = require('./usage-reading-for-you.js').create({ app, todos: () => getUserTodos(), cacheDir: USAGE_CACHE_DIR, nameOf: (k) => nameOf(k), backendOf: (k) => { try { return accounts.get(k)?.backend || null; } catch { return null; } }, readNow: (k) => readRawReading(k), log: (l) => console.warn(l) });
+{ const t = setTimeout(() => { try { usageReadingForYou.tick(); } catch {} }, 30000); if (t && t.unref) t.unref(); }   // an earlier run's open item, judged once For you answers (and at every mark / lift after)
 
 // ── Plan C (B-a612, 2.315.0): per-session pool placement ────────────────────
 // One pool, many links: each session bills the member its OWN symlink points
@@ -606,6 +609,7 @@ function poolReadCache(poolId, now = Date.now()) {
   const rawBasis = poolId ? poolBasisRaw(poolId) : false;
   return (id) => {
     const raw = reading(id);
+    if (raw && typeof raw === 'object' && typeof raw.held === 'string') return raw;   // r3136: a mark — no estimate, no claim view over it
     if (rawBasis) return raw;
     // usage-predict P5: only a lane whose verdict is ON on THIS instance is overlaid — a learning, provisional or off lane is the raw reading
     try { return estOverlayCache(raw, usageEstimator.poolEstimateFor(id, raw, now)); } catch { return raw; }
@@ -627,7 +631,10 @@ function withBareDoor(fn) { const was = _bareDoor; _bareDoor = true; try { retur
 function poolReadReading({ group = true } = {}) {
   return (id) => {
     let raw = null;
-    try { raw = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, id + '.json'), { via: RR }); } catch { }
+    // r3136 (主开发 r3146): a read that FAILED or torn bytes answer the frozen UNREAD mark — never «no reading», never a sibling's
+    // file standing in for it; a file NOT THERE stays «no reading» exactly as before
+    raw = usageWrite.readReading(path.join(USAGE_CACHE_DIR, id + '.json'), id, { via: RR });
+    if (raw === usageWrite.UNREAD_READING) return raw;
     if (group) try {
       for (const [, g] of usageIdentityGroupsCached()) {
         if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
@@ -773,7 +780,7 @@ const spendGuard = require('./spend-guard.js').create({
   serverSetting,
   identityOf: (session) => fireIdentityFor(session),
   listHeld: () => accountsHeld(),   // r3088: a refusal while the accounts list is unread names that cause
-  readCacheFor: (key) => readRawUsageCache(key),
+  readCacheFor: (key) => readRawReading(key),   // r3136: the guard reads the UNREAD mark as «overage unknown by name»
   // the ACCOUNT reader, not the slot one — an oat-only subscription serves
   // turns with no credential file at all (see accountCredentialState)
   credentialStateOf: (key) => accountCredentialState(key),
@@ -800,8 +807,13 @@ function reserveFloorPct() {
  *  is a fact a producer STATED; an estimate may not authorize an irreversible
  *  act (P7), and it may not bar one either. */
 function readRawUsageCache(id) {
-  try { return usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), { via: RR }); }
-  catch { return null; }
+  const r = readRawReading(id);
+  return r === usageWrite.UNREAD_READING ? null : r;   // r3136: the stamp/window readers keep «nothing» for a failed read, as before
+}
+/** r3136 (主开发 r3146): the same raw read, but a read that FAILED or torn bytes answer the frozen UNREAD mark — read by the
+ *  consumers that hold on it (the spend guard's overage facts, the wall probe, the automatic reset-credit rung) */
+function readRawReading(id) {
+  return usageWrite.readReading(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), id, { via: RR });
 }
 function overageMemberIds(members) {
   try {
@@ -2383,6 +2395,19 @@ function wallCount(key, now = Date.now()) {
 // The account system's usability answer for a scope (pool id OR cache key),
 // model-projected. Pool = any member usable / min over members' blockedUntil.
 function sessionPoolOf(session) { try { const p = session && session._accountId; return p && !session.host && isPoolId(p) ? p : null; } catch { return null; } }
+/** r3136 (主开发 r3146) — THE READING's OWN HOLD for a verdict: the account's usage reading could not be read (the door's UNREAD
+ *  mark), or after torn bytes a lane this decision draws is not stated again (the plan windows; the family's cap while no
+ *  enumerating reading has stated the caps) ⇒ NOT usable, nothing known: the pre-fire gate, the wall's arm and the wake hold,
+ *  as for the accounts list's hold — and asked AFTER it (no list: no identity, no reading to ask). null = no hold. */
+function readingHoldOf(raw, fam) {
+  if (raw === usageWrite.UNREAD_READING || (raw && typeof raw === 'object' && raw.held === 'unread')) return { usable: false, known: false, blockedUntil: 0, readingUnread: true, reason: 'its usage reading could not be read — unknown until it reads again' };
+  let unk = [];
+  try { unk = usageWrite.restartUnknowns(raw); } catch { unk = []; }
+  if (!unk.length) return null;
+  const lanes = unk.filter((u) => u === 'plan:5h' || u === 'plan:7d');
+  if (fam && unk.includes('model:*') && !(raw && Array.isArray(raw.scopedWeekly) && raw.scopedWeekly.some((b) => b && familyOfScopedBucket(b.name) === fam))) lanes.push('model:' + fam);
+  return lanes.length ? { usable: false, known: false, blockedUntil: 0, readingUnread: true, restarted: lanes, reason: `its usage reading started again after damaged bytes — not stated again yet: ${lanes.join(', ')}` } : null;
+}
 function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only = null } = {}) {
   // r3044 (1): a scope that names an account (a pool or a member) while the list is unread: NOT usable, nothing known — every
   // caller (the wall's arm, the probe ladder, the pre-fire gate) holds; the machine's own logins need no list
@@ -2465,9 +2490,10 @@ function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only 
     let heldListed = true;
     if (heldId) { try { heldListed = (accounts.poolMembers(scope) || []).some((m) => m.id === heldId); } catch { heldListed = false; } }
     const readLogin = poolReadLogin();
+    const verdictOf = (r0) => readingHoldOf(r0, fam) || quotaVerdict(proj(r0), nowSec);   // r3136: a member whose reading cannot be told is no way out
     const walled = session ? sessionWalledMembers(session._webuiId) : new Set();
     const verdicts = ordered.map((m) => {
-      const v = quotaVerdict(proj(read(m.id)), nowSec);
+      const v = verdictOf(read(m.id));
       const li = readLogin(m.id);
       if (!loginUsable(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: `${loginBucketLabel(li)} — re-login needed` } };
       if (memberLapsed(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' } }; // verify r1 ①
@@ -2508,7 +2534,8 @@ function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only 
   }
   // a subscription bound DIRECTLY whose record says lapsed: the same refusal (verify r1 ①⑤)
   if (/^sub-/.test(String(scope || '')) && memberServeLapsed(scope)) return { ...quotaVerdict(proj(read(scope)), nowSec), usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' };
-  return quotaVerdict(proj(read(scope)), nowSec);
+  const r0 = read(scope);
+  return readingHoldOf(r0, fam) || quotaVerdict(proj(r0), nowSec);   // r3136: an account bound directly whose reading cannot be told holds the fire
 }
 
 /** PURE (B-73fe). THE CAUSE an arm carries so its card can say what the
@@ -3782,6 +3809,9 @@ const WALL_PROBE_BACKOFF = [0, 1800000, 3600000, 7200000];
 function scheduleWallProbe(session, scope, model, attempt, { once = false } = {}) {
   const id = session._webuiId;
   { const lh = !machineLoginKey(scope) ? accountsHeld() : null; if (lh) { sayHeldOnce('probe:' + id, lh, `[wall] ${id}: no wall probe — the accounts list could not be read (${lh.code || 'unread'}); the conversation waits`); return; } }
+  // r3136 (主开发 r3146): after the list's hold — an account bound directly whose usage reading file cannot be read: a probe's
+  // answer could not be written (its write is refused), so none is asked of the vendor; the conversation waits, its next reading decides
+  { const a0 = accounts.get(scope); if (a0 && a0.type !== 'pooled' && readRawReading(scope) === usageWrite.UNREAD_READING) { sayHeldOnce('probe-reading:' + id, { code: 'reading-unread' }, `[wall] ${id}: no wall probe — this account's usage reading file could not be read; the conversation waits`); return; } }
   if (once && session._wallProbeTimer) return;
   if (attempt >= WALL_PROBE_BACKOFF.length) { console.log(`[wall] ${id}: no reset time after ${attempt} probes — giving up (manual resume needed)`); return; }
   try { clearTimeout(session._wallProbeTimer); } catch { }
@@ -5746,6 +5776,16 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
     if (ci.unknown && ci.listHeld) {   // 主开发 r3197: the accounts list UNREAD — its own cause, never «started before the stamp»
       if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (the accounts list could not be read — no credit is spent until it reads) mode=${mode}`);
       return 'skipped';
+    }
+    // r3136 (主开发 r3146), after the identity (the accounts list) is known: the account's usage reading file could not be read, or
+    // after torn bytes its reset credits are not stated again — how many it holds is unknown: the automatic rung keeps the credit
+    // (a person's own press, consumeResetCreditFor, is not this rung)
+    if (!ci.unknown) {
+      const rc0 = key ? readRawReading(key) : null;
+      if (rc0 === usageWrite.UNREAD_READING || usageWrite.restartUnknowns(rc0).includes('resetCredits')) {
+        if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (reading-unread — this account's usage reading cannot be told, so its credits are unknown) mode=${mode}`);
+        return 'skipped';
+      }
     }
     if (ci.unknown) {
       if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (held-unknown — this process started before the pool stamped its member and no slot-transition row names the pool default at its start; it is re-stamped at its next restart) mode=${mode}`);

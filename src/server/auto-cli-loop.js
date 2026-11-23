@@ -203,7 +203,14 @@ function createAutoCliLoop(d) {
         if (probeEligibility(a) === SIGNIN_UNKNOWN) continue;   // no attempt, no failure, nothing said (a skipped probe costs nothing)
         if (a.type !== 'subscription' || a.pooled || capsOf(a.backend).quotaProbe !== 'cli-usage' || unprobeable(a, now) || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, an account the probe cannot PROVE is never sent (oat-only / no login — unprobeable, lane auto-cli-oat-unprobeable), and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
         let raw = null, mem = [a.id];
-        try { raw = usageWrite.readCacheJson(path.join(d.USAGE_CACHE_DIR, a.id + '.json')); } catch { }
+        // r3136 (主开发 r3146 (5)): a reading file whose READ FAILS NOW asks NO probe — its answer could not be written (the write is
+        // refused): fewer vendor calls, never more. The loop asks the file itself, not the reading door: once the file reads again
+        // a probe is what lands the readings owed in memory, so the account is judged by its own schedule at once (the file's own
+        // age: one probe at most, no catch-up burst). Not there, or torn bytes: the ordinary first read (no reading) — that read's
+        // write keeps torn bytes aside and starts the file again
+        let readFailed = false;
+        try { raw = usageWrite.readCacheJson(path.join(d.USAGE_CACHE_DIR, a.id + '.json')); } catch (e) { raw = null; readFailed = !!e && e.code !== 'ENOENT' && !(e instanceof SyntaxError); }
+        if (readFailed) continue;
         try {
           for (const [, g] of d.usageIdentityGroupsCached()) {
             if (!g.accountIds.includes(a.id)) continue;

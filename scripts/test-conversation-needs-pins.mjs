@@ -78,6 +78,7 @@ const PRODUCERS = {
   'src/server/tls.js': { origin: 'server', scope: 'group', types: [] },
   'src/server/desktop-app-keeper.js': { origin: 'server', scope: 'group', types: ['desktop-app-notify'] },
   'src/server/mount-health-watch.js': { origin: 'server', scope: 'group', types: [] },
+  'src/server/usage-reading-for-you.js': { origin: 'server', scope: 'group', types: ['usage-reading-unread'] },   // r3136 / r3200: an account's unreadable usage file — ONE item an account, its Set it aside door
   'src/server/queued-file-for-you.js': { origin: 'server', scope: 'group', types: ['queued-file-unread'] },   // B-e3fe follow-up: an unreadable data/msg-queued.json — ONE item, its Set it aside door
   'src/server/mount-for-you.js': { origin: 'server', scope: 'group', types: ['mount-reconnect', 'mount-reauth'] },   // B-e40d: + a replaced preset client's Re-authorize   // B-5ce7: a parked mount's item carries its Reconnect
   'src/server/hooks-late.js': { origin: 'agent', scope: 'group', types: [] },

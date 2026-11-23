@@ -498,38 +498,56 @@ function readStored(file) {
   try { const buf = fs.readFileSync(file); read = { text: buf.toString('utf-8'), buf }; } catch (e) { read = { error: e }; }
   return { ...SR.storeAnswer(read), buf: read.buf || null };
 }
-/** torn bytes beside the file, ONCE per content → the copy's basename, or null (no place for it) */
+/** torn bytes beside the file, ONCE per content → { name: the copy's basename, fresh: kept by THIS call }, or null (no place for it) */
 function keepTornAside(file, buf) {
   const dir = path.dirname(file), head = path.basename(file) + '.corrupt-';
   let names = [];
   try { names = fs.readdirSync(dir).filter((n) => n.startsWith(head)).sort().slice(-COPY_LOOK); } catch { names = []; }
-  for (const n of names.reverse()) { try { const b = fs.readFileSync(path.join(dir, n)); if (b.length === buf.length && b.equals(buf)) return n; } catch { /* not this one */ } }
+  for (const n of names.reverse()) { try { const b = fs.readFileSync(path.join(dir, n)); if (b.length === buf.length && b.equals(buf)) return { name: n, fresh: false }; } catch { /* not this one */ } }
   for (let k = 0; k < 5; k++) {
     const to = path.join(dir, head + Date.now() + (k ? '-' + k : ''));
-    try { fs.writeFileSync(to, buf, { flag: 'wx', mode: 0o600 }); return path.basename(to); } catch (e) { if (!e || e.code !== 'EEXIST') return null; }
+    try { fs.writeFileSync(to, buf, { flag: 'wx', mode: 0o600 }); return { name: path.basename(to), fresh: true }; } catch (e) { if (!e || e.code !== 'EEXIST') return null; }
   }
   return null;
 }
+const _onUnreadMarked = new Set();   // r3200: (key, {code, at}) — an episode BEGINS for that account (its For-you item is filed)
+function onUnreadMarked(fn) { if (typeof fn === 'function') _onUnreadMarked.add(fn); return () => _onUnreadMarked.delete(fn); }
 function markUnread(key, code) {
   const k = String(key);
-  _unread.set(k, { code: String(code || 'unreadable'), at: Date.now() });
-  if (_unread.size > OWED_KEYS) _unread.delete(_unread.keys().next().value);
+  const fresh = !_unread.has(k);
+  _unread.set(k, { code: String(code || 'unreadable'), at: fresh ? Date.now() : _unread.get(k).at });
+  if (_unread.size > OWED_KEYS) { const old = _unread.keys().next().value; _unread.delete(old); _unreadSaid.delete(old); }   // (the round: an evicted key's next episode is said again)
   if (!_unreadSaid.has(k)) {
     _unreadSaid.add(k);
-    try { console.warn(`[usage-write] ${accountWord(k)}: its reading file could not be read (${String(code || 'unreadable')}) — nothing is written over it; a reading for it waits in memory and is written once the file reads; until then the account reads unknown`); } catch { }
+    // the round's word: TORN BYTES are not «nothing written over it» — the next reading keeps them aside and starts the file again
+    const torn = String(code || '') === 'torn bytes';
+    try { console.warn(torn ? `[usage-write] ${accountWord(k)}: its reading file did not parse — the account reads unknown until a reading starts the file again (the bytes are kept aside first)` : `[usage-write] ${accountWord(k)}: its reading file could not be read (${String(code || 'unreadable')}) — nothing is written over it; a reading for it waits in memory and is written once the file reads; until then the account reads unknown`); } catch { }
   }
+  if (fresh) for (const fn of _onUnreadMarked) { try { fn(k, { ..._unread.get(k) }); } catch { } }
 }
+const _onUnreadLifted = new Set();   // r3136 commit 2: (key) — the account's reading file reads again (the guard closes its notice)
+function onUnreadLifted(fn) { if (typeof fn === 'function') _onUnreadLifted.add(fn); return () => _onUnreadLifted.delete(fn); }
 function clearUnread(key) {
   const k = String(key);
-  if (_unread.delete(k) && _unreadSaid.delete(k)) { try { console.log(`[usage-write] ${accountWord(k)}: its reading file reads again`); } catch { } }
+  if (!_unread.delete(k)) return;
+  if (_unreadSaid.delete(k)) { try { console.log(`[usage-write] ${accountWord(k)}: its reading file reads again`); } catch { } }
+  for (const fn of _onUnreadLifted) { try { fn(k); } catch { } }
 }
-/** a refused write: the account marked unknown, its reading owed (never a replace's — the repair migration runs again) */
+/** r3200 (the round's should): a waiting reading that STATES A WALL — a refusal it names, or a lane at 100 % or more */
+function statesWall(a) {
+  if (!a || typeof a !== 'object') return false;
+  if ((Array.isArray(a.refused) && a.refused.length) || (Array.isArray(a.refusalMarks) && a.refusalMarks.length)) return true;
+  try { return !!a.obj && typeof a.obj === 'object' && quotaModel.lanesOfReading(a.obj).some((l) => Number(l.usedPct) >= 100); } catch { return false; }
+}
+/** a refused write: the account marked unknown, its reading owed (never a replace's — the repair migration runs again). Past the
+ *  bound the OLDEST PLAIN reading goes first: a wall stated early in the episode outlives later plain ones (only walls ⇒ the oldest) */
 function refuseUnread(key, code, args, replace) {
+  key = String(key);
   markUnread(key, code);
   if (!replace && args) {
-    let l = _owed.get(key) || [];
+    const l = _owed.get(key) || [];
     l.push(args);
-    if (l.length > OWED_MAX) l = l.slice(-OWED_MAX);
+    while (l.length > OWED_MAX) { const i = l.findIndex((a) => !statesWall(a)); l.splice(i >= 0 ? i : 0, 1); }
     _owed.delete(key); _owed.set(key, l);
     if (_owed.size > OWED_KEYS) _owed.delete(_owed.keys().next().value);
   }
@@ -561,13 +579,57 @@ function restartUnknowns(obj) {
  *  UNREAD_READING — the read FAILED or the bytes are torn: the account is marked unknown, never «no reading» */
 const UNREAD_READING = Object.freeze({ held: 'unread' });
 function readReading(file, key, { via = null } = {}) {
-  try { const v = readCacheJson(file, { via }); if (key != null && _owed.has(String(key))) return UNREAD_READING; if (key != null) clearUnread(key); return v; }
-  catch (e) { if (e && e.code === 'ENOENT') return null; if (key != null) markUnread(key, e instanceof SyntaxError ? 'torn bytes' : ((e && e.code) || 'unreadable')); return UNREAD_READING; }
+  const k = key != null ? String(key) : null;
+  const failed = (e) => { if (e && e.code === 'ENOENT') return null; if (k != null) markUnread(k, e instanceof SyntaxError ? 'torn bytes' : ((e && e.code) || 'unreadable')); return UNREAD_READING; };
+  let v;
+  try { v = readCacheJson(file, { via }); } catch (e) { return failed(e); }
+  if (k != null && _owed.has(k)) {
+    // r3200 (the round's should): the file READS AGAIN while readings wait for it — they are written NOW, at this read, in order
+    // (an idle account has no writer that would replay them): the door then answers the file they leave
+    if (_replaying.has(k)) return UNREAD_READING;
+    replayOwed(k);
+    if (_owed.has(k)) return UNREAD_READING;   // a replay refused again: still unknown
+    try { v = readCacheJson(file, { via }); } catch (e) { return failed(e); }
+  }
+  if (k != null) clearUnread(k);
+  return v;
+}
+const _replaying = new Set();
+/** the waiting readings of `key`, written in order (each through the one writer) — bounded: OWED_MAX, once an episode */
+function replayOwed(key) {
+  const k = String(key), owed = _owed.get(k);
+  if (!owed) return;
+  _owed.delete(k); _replaying.add(k);
+  try { for (const a of owed) { try { writeCacheObject(a); } catch { } } } finally { _replaying.delete(k); }
+}
+/** r3200 (主开发: «a way out for the person from a hold that never ends»): THE PERSON's SET-ASIDE of an account's reading file that
+ *  cannot be read (owned by another user, a bad inode) or does not parse. Read ONCE MORE first: a file that reads (or is gone) is
+ *  never moved ({state:'none'}). Else it is RENAMED beside itself (`<file>.unreadable-<iso>`: nothing deleted) and a file that
+ *  STARTED AGAIN takes its place — every gating fact UNKNOWN until a reading states it (restartUnknowns), never «no reading» as for
+ *  a new account; the readings waiting in memory are written over it at once. → { ok, state: 'none'|'pass' (set aside), setAside?, why? } */
+function setAsideReading({ cacheDir, key, backend = null, now = Date.now() }) {
+  if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
+  const k = String(key), file = cacheFileFor(cacheDir, k);
+  const st = readStored(file);
+  if (st.state === 'data' || st.state === 'missing') { if (_owed.has(k)) replayOwed(k); if (!_owed.has(k)) clearUnread(k); return { ok: true, state: 'none' }; }
+  const aside = `${file}.unreadable-${new Date(now).toISOString().replace(/[:.]/g, '-')}`;
+  // the instant it starts again = the FIRST waiting reading's own (what they state is the freshest the account knows), else now
+  const owedAts = (_owed.get(k) || []).map((a) => Number(a && a.measuredAt) || Number(a && a.obj && a.obj.fetchedAt) || 0).filter((x) => x > 0);
+  const stub = { startedAgain: { at: owedAts.length ? Math.min(...owedAts) : now, setAside: path.basename(aside), enumerated: false, overage: false, spendControl: false, resetCredits: false }, ...(backend ? { backend: String(backend) } : {}) };
+  // the new file is made FIRST (beside), then the old one moved aside, then the new one put in place: never a moment with no file
+  // but the last rename's (a failure there puts the old one back)
+  try { fs.writeFileSync(file + '.tmp', JSON.stringify(stub)); } catch (e) { return { ok: false, why: `the new file could not be made (${(e && e.code) || (e && e.message) || e}) — nothing was moved` }; }
+  try { fs.renameSync(file, aside); } catch (e) { try { fs.unlinkSync(file + '.tmp'); } catch { } return { ok: false, why: `the file could not be set aside (${(e && e.code) || (e && e.message) || e}) — nothing was moved` }; }
+  try { fs.renameSync(file + '.tmp', file); } catch (e) { try { fs.renameSync(aside, file); } catch { } return { ok: false, why: `the new file could not be put in place (${(e && e.code) || (e && e.message) || e}) — the old one was put back` }; }
+  try { console.warn(`[usage-write] ${accountWord(k)}: its reading file was set aside by the person's press (kept beside the file) — it starts again, every fact unknown until a reading states it`); } catch { }
+  replayOwed(k);
+  if (!_owed.has(k)) clearUnread(k);
+  return { ok: true, state: 'pass', setAside: path.basename(aside) };
 }
 /** r3136: { code, at } while the account's reading file did not answer (a reader asks it: unknown, never «no reading»), else null */
 function readingUnread(key) { const u = _unread.get(String(key)); return u ? { ...u, owed: (_owed.get(String(key)) || []).length } : null; }
 
-function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
+function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, overageStated = null, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
   if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
   const file = cacheFileFor(cacheDir, key);
   const at = Number(measuredAt) || Number(obj && obj.fetchedAt) || Date.now();
@@ -583,15 +645,15 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   let tornKept = null;
   if (stored.state === 'corrupt') {
     const kept = keepTornAside(file, stored.buf);
-    tornKept = kept;
+    tornKept = kept ? kept.name : null;
     if (!kept) return refuseUnread(key, 'torn bytes, not kept aside', args0, replace);
-    try { console.warn(`[usage-write] ${accountWord(key)}: its reading file did not parse — its bytes are kept aside as ${kept}; this reading starts the file again`); } catch { }
+    // r3200: the copy's NAME is never said (it carries the account's own file key — the opaque word is the rule); once per content
+    if (kept.fresh) { try { console.warn(`[usage-write] ${accountWord(key)}: its reading file did not parse — its bytes are kept aside beside the file; this reading starts the file again`); } catch { } }
     stored = { state: 'missing' };
   }
   // the file answers: a write refused in the episode before is replayed FIRST, in order (a wall it stated is not lost)
-  if (!replace && _owed.has(key)) {
-    const owed = _owed.get(key); _owed.delete(key);
-    for (const a of owed) { try { writeCacheObject(a); } catch { } }
+  if (!replace && _owed.has(String(key)) && !_replaying.has(String(key))) {
+    replayOwed(key);
     stored = readStored(file);
     if (stored.state !== 'data' && stored.state !== 'missing') return refuseUnread(key, stored.code || 'torn bytes', args0, replace);
     if (stored.state === 'data') tornKept = null;   // the replay started the file again (its mark is on it): this write merges over that
@@ -732,9 +794,17 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
       // an ENUMERATING reading (the producer's own parse enumerated its caps — the panel, the approved automatic read): it states
       // every cap, an empty list meaning «no cap» FOR THIS MARK ONLY (it retires nothing: the retire rule above is unchanged)
       if ((Array.isArray(authoritativeScopes) && authoritativeScopes.length) || quotaModel.scopedEnumeration(obj) || quotaModel.scopedEnumeration(stated)) sa.enumerated = true;   // `stated` = the enumerating producer's own parse (its flag is not spread)
-      if (obj && obj.overage && typeof obj.overage === 'object') sa.overage = true;
-      if (obj && obj.spendControlReached !== undefined) sa.spendControl = true;
-      if (obj && obj.resetCredits !== undefined) sa.resetCredits = true;
+      // r3200 (the round's shoulds): a producer whose object spreads another file (the stream capture: the identity's freshest
+      // sibling) says whether ITS OWN event stated overage (`overageStated`) — never a sibling's older copy; spend control is
+      // stated by true or false only (a codex reading sends null when the vendor said nothing); reset credits by their own record
+      // (a TYPED producer states these in its own set, never at the object's top: codex's spend control in its plan limit's flag,
+      // claude's overage as its `overage` limit's flags — either is this write's own)
+      const ownSet = set || lifted;
+      const flagStated = (f) => !!(ownSet && Array.isArray(ownSet.limits) && ownSet.limits.some((l) => l && l.flags && typeof l.flags[f] === 'boolean'));
+      const overSet = !!(set && Array.isArray(set.limits) && set.limits.some((l) => l && l.scope === 'overage' && l.flags && Object.keys(l.flags).length));
+      if (((obj && obj.overage && typeof obj.overage === 'object') || overSet) && overageStated !== false) sa.overage = true;
+      if ((obj && typeof obj.spendControlReached === 'boolean') || flagStated('spendControl')) sa.spendControl = true;
+      if (obj && obj.resetCredits && typeof obj.resetCredits === 'object') sa.resetCredits = true;
       if (restartUnknowns({ ...out, startedAgain: sa }).length) out.startedAgain = sa; else delete out.startedAgain;
     } else delete out.startedAgain;
   }
@@ -805,7 +875,7 @@ module.exports = {
   cacheFileFor, isCacheFileName, readCacheObject, readCacheJson, listCacheDir,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
-  readingUnread, readReading, UNREAD_READING, restartUnknowns, // r3136: unknown, never «no reading»; after torn bytes, each fact until stated
+  readingUnread, readReading, UNREAD_READING, restartUnknowns, onUnreadLifted, onUnreadMarked, setAsideReading, // r3136: unknown, never «no reading»; after torn bytes, each fact until stated
   carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading, onVendorReset, noteVendorResets, noteDirectWrite, onLanesRead, lanesReadAt,
   onWritten, noteWritten,
   DERIVED_KEYS,

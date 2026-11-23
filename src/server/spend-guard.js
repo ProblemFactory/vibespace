@@ -37,6 +37,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const A = require('../spend-authorizer.js');
+const UW = require('../usage-cache-write.js');   // r3136: the reading's own unknowns (the door's mark; after torn bytes, the facts not stated again)
+const READING_ITEM = 'spend-reading-unread:';   // r3136: the For-you item a held reading's refusal files — ONE an account, closed when the reading lands
 // B-ef83: a pid is never an identity — the lock's holder is proven by its start tick. Bound under names of their OWN: in this file
 // «identityOf» is a BILLING resolver (the engine's answer, handed in), and the billing-slot census (B-87fd) reads names
 const { identityOf: procIdentityOf, aliveIdentity: procAliveIdentity } = require('../proc-identity.js');
@@ -515,10 +517,14 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
    *  zero consumers). Everything that asks "is real money being spent on this
    *  account right now" — the authorizer, the pool's voluntary-target rule and
    *  the two panels — resolves through this. */
+  // r3136 (主开发 r3146): a fact the reading cannot tell — the file could not be read (the door's mark), or after torn bytes the
+  // fact is not stated again — is UNKNOWN BY NAME (`unread`): the authorizer refuses an unattended turn on it, never «no overage»
+  const untold = (cache, fact) => !!(cache && typeof cache === 'object' && (cache.held === 'unread' || UW.restartUnknowns(cache).includes(fact)));
   function overageFor(key) {
     if (!key || !readCacheFor) return null;
     let cache = null;
     try { cache = readCacheFor(key); } catch { cache = null; }
+    if (untold(cache, 'overage')) return { ...A.overageState(null), unread: true };
     return A.overageState(cache);
   }
 
@@ -531,8 +537,32 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     if (!key || !readCacheFor) return null;
     let cache = null;
     try { cache = readCacheFor(key); } catch { cache = null; }
+    if (untold(cache, 'spendControl')) return { ...A.spendControlState(null), unread: true };
     return A.spendControlState(cache);
   }
+  // r3136: the accounts a «reading unread» notice was filed for — each closed when its reading tells again (a write lands, or the
+  // file reads again): checked at each of those moments, only while one stands (a sync read of that account's file each)
+  const readingHeld = new Set();
+  let offReadingLift = null;
+  const closeReadingItem = (k) => { try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === READING_ITEM + k && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { } };
+  const checkReadingLift = () => {
+    for (const k of [...readingHeld]) {
+      const o = overageFor(k), sc = spendControlFor(k);
+      if ((o && o.unread) || (sc && sc.unread)) continue;
+      readingHeld.delete(k);
+      const sig = `inbox|${k}|reading-unread`;
+      if (state.notices[sig]) { delete state.notices[sig]; persist(); }
+      closeReadingItem(k);
+    }
+    if (!readingHeld.size && offReadingLift) { const off = offReadingLift; offReadingLift = null; off(); }
+  };
+  const watchReadingLift = (k) => {
+    if (!k) return;
+    readingHeld.add(k);
+    if (offReadingLift) return;
+    const a = UW.onUnreadLifted(() => checkReadingLift()), b = UW.onWritten(() => checkReadingLift());
+    offReadingLift = () => { try { a(); } catch { } try { b(); } catch { } };
+  };
 
   function credentialFor(key) {
     if (!key || !credentialStateOf) return null;
@@ -712,10 +742,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     const heldSig = 'held|' + inboxSig;
     if (waitItemStands && now - lastInbox > REFUSE_INBOX_MS && now - (Number(state.notices[heldSig]) || 0) > REFUSE_INBOX_MS) { state.notices[heldSig] = now; persist(); log(`[spend-guard] ${v.why}: the spending notice at ${wait.key} is not filed — its «messages waiting» item stands and speaks for that turn`); }
     if (v.why === 'settings-unread') watchSettingsLift();   // (cure 3: armed at the first refusal — the lift resolves what this hold said)
-    if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands && !(v.why === 'settings-unread' && settingsSilent())) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure); the held settings' notice only past the silent rungs (cure 3)
+    if (v.why === 'reading-unread') watchReadingLift(key);   // r3136: ONE notice an account per hold, closed when its reading tells again
+    // r3200: an account whose reading FILE cannot be read has its own For-you item with the person's way out (Set it aside —
+    // src/server/usage-reading-for-you.js): IT speaks, one item an account; this notice is filed for the hold after torn bytes only
+    const fileItemSpeaks = v.why === 'reading-unread' && !!key && !!UW.readingUnread(key);
+    if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands && !fileItemSpeaks && !(v.why === 'settings-unread' && settingsSilent())) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure); the held settings' notice only past the silent rungs (cure 3)
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
         + (v.why === 'settings-unread' ? 'The settings data/settings.json could not be read: the spending limits are not known, so none run until it reads again. Nothing was used up; every waiting turn is judged again against your limits the moment it reads.\n\n'   // B-225b
+          : v.why === 'reading-unread' ? "This account's usage reading cannot be told: its file started again after damaged bytes and has not yet said whether paid overage (or, for Codex, its spend control) is in use. Turns nobody typed on it wait until a reading says so; your own messages are not held. Nothing was used up.\n\n"   // r3136
           : v.why === 'ledger-unreadable' ? `The ledger data/spend-budget.json could not be read (${unreadable ? unreadable.error : '?'}): no count can be said, so none run until it reads again or is removed.\n\n`   // B-3b0f
           : v.why === 'ledger-lock-unwritable' ? `VibeSpace cannot write data/spend-budget.lock (${heldBy && heldBy.lockUnwritable ? heldBy.lockUnwritable : '?'}: the folder refuses it), and no other process keeps the ledger: it starts no turn nobody typed until it can. It asks again every ${LOCK_RETRY_MS / 1000} s, by itself; your own typed turns are not affected.\n\n`   // B-ef83 r1648 (b)/(c)
           : v.why === 'ledger-lock-unreadable' ? `data/spend-budget.lock is there and VibeSpace cannot read it (${heldBy && heldBy.lockUnreadable ? heldBy.lockUnreadable : '?'}), and the folder refuses a new one: it may be a live keeper's, so this process starts no turn nobody typed until the lock reads or can be made. It asks again every ${LOCK_RETRY_MS / 1000} s, by itself; your own typed turns are not affected.\n\n`   // r1801 (1)
@@ -725,7 +760,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
-        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'ledger-lock-unreadable' || v.why === 'settings-unread' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'ledger-lock-unreadable' ? HELD_ITEM : v.why === 'settings-unread' ? SETTINGS_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
+        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'ledger-lock-unreadable' || v.why === 'settings-unread' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' || v.why === 'ledger-lock-unwritable' || v.why === 'ledger-lock-unreadable' ? HELD_ITEM : v.why === 'settings-unread' ? SETTINGS_ITEM : v.why === 'reading-unread' ? READING_ITEM + (key || '?') : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;

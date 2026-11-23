@@ -570,6 +570,15 @@ const ROWS = [
     c: [pin('src/foryou-actions.js', /\{ type: 'mount-reconnect', identity: 'mountId', producer: 'src\/server\/mount-for-you\.js',/, 'THE registry row: one producer, one identity (the mount), one door (a check: Reconnect)')],
     d: [decl('no agent wrote words here to be read and approved: the item names a storage, a count and a provider label the record keeps')],
     gate: [['scripts/test-mount-liveness.mjs', 'the cure: Reconnect on a parked mount whose storage answers']] },
+  // r3136 / r3200 (主开发: a way out of a hold that never ends): an account's usage reading file that CANNOT BE READ — ONE item an
+  // account while it cannot; its only door (Set it aside) reads the file once more, then renames it beside itself; nothing is granted
+  { id: 'usage-reading-unread', surface: 'an account\'s unreadable usage file — "VibeSpace could not read the usage file of {account}: automatic turns on it wait …" (Set it aside in For you; one item an account)',
+    doors: [['A', 'src/server/usage-reading-for-you.js', /^usage-reading-unread$/]],
+    a: [pin('src/server/usage-reading-for-you.js', /const params = \{ account: String\(name \|\| 'an account'\) \};/, 'the item\'s words ARE the writer\'s own fact: the account whose file it could not read (by its name), in fixed sentences')],
+    b: [pin('src/usage-cache-write.js', /if \(st\.state === 'data' \|\| st\.state === 'missing'\) \{ if \(_owed\.has\(k\)\) replayOwed\(k\); if \(!_owed\.has\(k\)\) clearUnread\(k\); return \{ ok: true, state: 'none' \}; \}/, 'the press reads the file ONCE MORE first: a file that reads again or is gone is never moved — «nothing to set aside»'), pin('src/server/usage-reading-for-you.js', /const w = require\('\.\.\/write-origin\.js'\)\.ownerPageWhy\(req\);/, 'a person\'s press: the owner\'s own page, never a bearer')],
+    c: [pin('src/foryou-actions.js', /\{ type: 'usage-reading-unread', identity: 'account', producer: 'src\/server\/usage-reading-for-you\.js',/, 'THE registry row: one producer, one identity (the account), one door (a check: Set it aside)'), pin('src/server/usage-reading-for-you.js', /action: \{ type: TYPE, account: k \}, itemKey: TYPE \+ ':' \+ k \}\);/, 'ONE item an account (its itemKey) — a re-file updates it, never a second')],
+    d: [decl('no agent wrote words here to be read and approved: the item names an account of this hub by its name in fixed sentences')],
+    gate: [['scripts/test-spend-paths.mjs', '§14 (d) «Set it aside»'], ['scripts/test-spend-paths.mjs', '§14 (d) …the door is a PERSON']] },
   // B-e3fe follow-up (主开发 04:02Z): an UNREADABLE data/msg-queued.json — ONE item while it cannot be read; its only door
   // (Set it aside) renames the file beside it after one more read; nothing is granted
   { id: 'queued-file-unread', surface: 'an unreadable record of waiting messages — "VibeSpace could not read data/msg-queued.json, its record of messages waiting behind running turns …" (Set it aside in For you; one item)',

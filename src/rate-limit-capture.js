@@ -446,9 +446,11 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
     const stated = own.map(laneKey).filter((k) => QM.isLaneKey(k)), refused = own.filter((l) => l.dead).map(laneKey).filter((k) => QM.isLaneKey(k));
     // a GUESSED lane's dead mark is still a refusal's number (r5): stamped so (`refusalMarks`), told to no claim
     const refusalMarks = lanes.filter((l) => l.kind === 'fiveHour' && ev.guessed && l.dead).map(laneKey).filter((k) => QM.isLaneKey(k));
+    // r3200: overage is STATED by this event's own fields only — the object above spreads the freshest sibling's copy
+    const overageStated = !!(ev.overage && Object.values(ev.overage).some((v) => v !== undefined));
     const w = usageWrite.writeCacheObject({
       cacheDir, key, obj: cache, measuredAt: now,
-      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude', passiveAnswer: passive, stated, refused, refusalMarks,
+      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude', passiveAnswer: passive, stated, refused, refusalMarks, overageStated,
     });
     if (!w.ok) return { ok: false, dead, wroteReading: false, error: w.why || 'write refused' };
     for (const id of ids) {
@@ -460,7 +462,7 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
         delete c2.limits; // the sibling's own limits are rebuilt from its own (now updated) view
         // THE STAMP TRAVELS WITH THE REFUSAL (r4): the identity's twin is told what THIS event stated and refused — the same
         // lanes, the same quota — so its window carries the mark too, never a «measured» 100 %
-        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude', passiveAnswer: passive, stated, refused, refusalMarks });
+        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude', passiveAnswer: passive, stated, refused, refusalMarks, overageStated });
       } catch { }
     }
     return { ok: true, dead, wroteReading: reading, lanes: lanes.map((l) => (l.kind === 'scoped' ? 'scoped:' + l.scopedName : l.kind)), modelCapLane: ev.modelCapLane || null };

@@ -378,5 +378,42 @@ console.log('§5 resolveAccount reads the record, not list()');
   ok(`§5 100 ledger lines resolve with ${reads} file reads (list() read every login per line)`, reads === 0, String(reads));
 }
 
+// ── §6 r3136 (主开发 r3146 (5)): THE AUTO USAGE CHECK asks no vendor probe for an account whose usage file's read FAILS — its
+// answer could not be written (the write is refused): fewer vendor calls, never more. A file NOT THERE («never read») is probed
+// as before (the bootstrap). Made-up accounts; the failed read is a PLACED refusal of that one read call (EIO), undone by the leg.
+console.log('§6 r3136: no probe for an account whose usage file cannot be read; «never read» and a stale file are probed as before');
+{
+  // as §4's due tick: the world stamped from the loop's own instant, X's reading and its last read three hours old, the folder's kept
+  // reply refreshed after each write straight into it (else the identity group's kept copy of X's reading stands in for the file)
+  const w = mkWorld({ members: 4, pooled: 0, hot: true, at: T });
+  const X = w.ids[0], fX = path.join(w.cacheDir, X + '.json'), nowS = Math.floor(T / 1000), AGO = 3 * 3600e3;
+  fs.writeFileSync(fX, JSON.stringify({ fetchedAt: T - AGO, source: 'cli-usage', fiveHour: { utilization: 0.2, resetsAt: nowS + 4 * 3600 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 } }));
+  const refreshFolder = async () => { if (w.eng.usageFolder) await w.eng.usageFolder.refresh(); };
+  await refreshFolder();
+  const tickOnce = async (tag) => {
+    const spent = [];
+    const loop = createAutoCliLoop({
+      serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined), accounts: w.am, autoCliReady: () => true,
+      USAGE_CACHE_DIR: w.cacheDir, usageIdentityGroupsCached: () => w.eng.usageIdentityGroupsCached(), usageEstimator: { estimateFor: () => null },
+      projectionRereadFor: (id, now, idx) => w.eng.projectionRereadFor(id, now, idx), projectionBillingIndex: w.eng.projectionBillingIndex, lastMemberReadAt: (id) => (id === X ? T - AGO : T),
+      usage: { refreshViaCliPanel: async (k) => { spent.push(k); return false; } },
+      onMemberReadingFresh() { }, dataDir: path.join(w.root, 'loop-r3136-' + tag), now: () => T, rand: () => 0.5, log() { }, warn() { },
+    });
+    await loop.tick();
+    return spent;
+  };
+  await w.am.signinFactsSettled(); await new Promise((r) => setTimeout(r, 150));   // as §4: a sign-in row not confirmed decides nothing
+  const stale = await tickOnce('stale');
+  const realRead = fs.readFileSync;
+  fs.readFileSync = function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(fX)) throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); return realRead.call(this, p0, ...a); };
+  let refused = null;
+  try { refused = await tickOnce('refused'); } finally { fs.readFileSync = realRead; }
+  fs.rmSync(fX, { force: true });
+  await refreshFolder();
+  const never = await tickOnce('never');
+  ok('§6 r3136: a stale reading is probed; the SAME account whose usage file\'s read fails is NOT probed (its answer could not be written); a file not there («never read») is probed as before',
+    stale.includes(X) && !!refused && !refused.includes(X) && never.includes(X), JSON.stringify({ stale: stale.length, staleX: stale.includes(X), refusedX: refused && refused.includes(X), neverX: never.includes(X) }));
+}
+
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
 process.exit(fail ? 1 : 0);

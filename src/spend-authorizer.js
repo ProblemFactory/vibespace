@@ -727,6 +727,12 @@ function authorizeUnattendedSpend({
   // ATTENDED (lane owner-press-attended): a person's per-occurrence press — the BUDGET neither refuses nor counts it.
   // Answered BEFORE the caps (a full hour of stamps does not refuse it) and with no hold (spend-guard reads `attended`).
   if (isAttended(reason)) return { ok: true, attended: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
+  // r3136 (主开发 r3146 (3)) — THE ACCOUNT's USAGE READING CANNOT BE TOLD: its file could not be read, or after torn bytes its overage
+  // (claude) or its spend control (codex) is not stated again — whether this turn would bill paid overage is unknown, so an
+  // UNATTENDED turn waits (a tightening). A person's attended press is answered above; a person's typed turn is no spend reason.
+  if ((overage && overage.unread) || (spendControl && spendControl.unread)) {
+    return no('reading-unread', `${name}'s usage reading cannot be told right now — whether this turn would bill paid overage is unknown, so unattended turns wait until it reads again`);
+  }
   // B-3b0f: THE LEDGER COULD NOT BE READ — a count that restarted from nothing is not a count, so no cap below can be
   // judged; every unattended turn is refused BY NAME until the file reads again or is removed (spend-guard `ledger`)
   // B-ef83: ANOTHER HUB PROCESS HOLDS THE LEDGER (its lock, data/spend-budget.lock): this process's count is not the count — two

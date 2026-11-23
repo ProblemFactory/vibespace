@@ -536,6 +536,9 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
     if (readLogin && (!loginSwitchTarget(readLogin(m.id)) || memberLapsed(readLogin(m.id)))) continue; // a lapsed subscription is never ranked (its stale cache would win)
     if (provOf && (!sameProvider(fromProvider, provOf(m.id)) || fallbackOnlyOf(provOf(m.id)))) continue;
     const c = readCache(m.id);
+    // r3136 (the reader table, r3230): a member whose reading cannot be told (the door's mark, or a file started again whose caps no
+    // enumerating reading stated) is no FUTURE switch target either — the live evict path picks ranked[0], the device walks the list
+    if (c && typeof c === 'object' && (typeof c.held === 'string' || (c.startedAgain && typeof c.startedAgain === 'object' && !c.startedAgain.enumerated))) continue;
     const r = accountRemaining(c, nowSec);
     const br = bucketRems(c, nowSec);
     const row = { id: m.id, name: m.name, eff: r.known ? r.remaining : UNKNOWN_REMAINING_PCT, deadline: weeklyDeadline(c, nowSec), loginPenalty: readLogin ? loginRank(readLogin(m.id)) : 0 };
@@ -635,6 +638,16 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const prioRank = priorityRankOf(priority);
   const order = priorityOrder(priority);
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
+  // r3136 (主开发 r3146) — A MEMBER HELD: its reading is a mark with no numbers ({ held: 'unread' }: the usage reading file could
+  // not be read), or a file that STARTED AGAIN after torn bytes and whose caps no enumerating reading has stated yet. Never a
+  // target, never a proving pick; a START on a held default goes to the best measured member that can settle; a running
+  // conversation on it is judged as on any unknown member — but A WALL IS A FACT ABOUT THE MEMBER: a held current that walled
+  // THIS conversation (`exclude`) leaves as from any walled member. One predicate for ANY held mark (B-6a92's reviewed rule, .417)
+  const restartedUnknown = (r) => { const sa = r && typeof r === 'object' ? r.startedAgain : null; return !!(sa && typeof sa === 'object' && !sa.enumerated); };
+  const markedHeld = (r) => !!(r && typeof r === 'object' && (typeof r.held === 'string' || restartedUnknown(r)));
+  const isHeld = (id) => markedHeld(readCache(id)) || (typeof readReading === 'function' && markedHeld(readReading(id)));
+  const curHeldStart = !!placing && isHeld(currentId);
+  const curHeldWalled = !!excluded && excluded.has(currentId) && isHeld(currentId);
   const notMember = membership != null && !(typeof membership.has === 'function' ? membership : new Set(membership)).has(currentId);
   // `explain` keeps the historical contract (null = no switch) for every
   // existing caller and test, while letting the engine ask WHY nothing
@@ -706,8 +719,8 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // Per-KIND thresholds (user-designed): what matters is ABSOLUTE headroom —
   // a weekly bucket at 88% still holds ~$200, a 5h bucket at 90% one long
   // turn. exhausted = ANY bucket under its kind's (hot-raised) threshold.
-  const exhausted = notMember || curLoginDead || (cur.known && curBr.some(soft));
-  const hardDead = notMember || curLoginDead || (cur.known && curBr.some(dead));
+  const exhausted = notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(soft));
+  const hardDead = notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(dead));
   // No data on the current target → we cannot judge exhaustion; staying put is
   // safer than flapping on ignorance (the ledger will teach us eventually).
   // A DEAD LOGIN is not ignorance, so it overrides the no-data hold: the file
@@ -717,7 +730,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // THE PROVING SPAWN asks first (see PROVING_HOLD_MS): an unread default is itself a guess a spawn may prove, so the
   // hold is answered after that rule — the verdict is 'no-data' exactly as before when it picks nobody
   const provingOn = !!placing && !pinned && proving != null;
-  const noDataHold = !cur.known && !proactive && !curLoginDead && !notMember && !prioRank;
+  const noDataHold = !cur.known && !proactive && !curLoginDead && !notMember && !prioRank && !curHeldStart && !curHeldWalled;
   if (noDataHold && !provingOn) return none('no-data');
   if (!exhausted && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
 
@@ -758,6 +771,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const crossRows = [];
   for (const m of members) {
     if (m.id === currentId) continue;
+    if (isHeld(m.id)) continue;   // r3136: its reading cannot be told — never a target
     if (excluded && excluded.has(m.id)) { excludedN++; rejectedMembers.push({ id: m.id, name: m.name }); continue; } // just rejected this session — not a candidate
     let xRow = null;
     if (provOf) {
@@ -875,6 +889,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     for (const r of cands) {
       if (topRank != null && prioRank(r.id) !== topRank) continue;
       if (held(r.id)) continue;
+      if (isHeld(r.id)) continue;   // r3136: a held member is never proved (nothing it reads can be written)
       const c = readingOf(r.id);
       const state = memberProofState(c, nowMs);
       if (state === 'proven') continue;
@@ -924,7 +939,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // the COLD move to the held-apart member (another provider's: the model re-resolved; a fallback-only one: last)
     if (provOf && hardDead && !placing && xMode === 'allow' && crossRows.length) {
       const best = crossRows[0];
-      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...(best.cross ? { switchMode: 'cold' } : {}), cross: crossOf(best), ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(best.id) < priority.length ? prioRank(best.id) + 1 : null } : {}) };
+      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...(best.cross ? { switchMode: 'cold' } : {}), cross: crossOf(best), ...(curHeldWalled ? { escape: 'held-walled' } : {}), ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(best.id) < priority.length ? prioRank(best.id) + 1 : null } : {}) };
     }
     // SPEAK which wall we hit. 'all-logins-expired' is its own reason because
     // it points at a completely different action from 'no-members' (re-login
@@ -971,6 +986,8 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     return { toLoginNear: { id: pick.id, name: pick.name, ...(loginBlocked.find((b) => b.id === pick.id) || {}) } };
   };
   const bestSettle = pool.find((r) => r.settleOk) || null;
+  // r3136: a START on a held default goes to the best measured member that can settle (with none it stays, as any unknown default)
+  if (curHeldStart && bestSettle) return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: null, toRemaining: bestSettle.remaining, reason: 'held-unread', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(bestSettle.id) < priority.length ? prioRank(bestSettle.id) + 1 : null } : {}) };
   // which rule ORDERED the target (reporting — the notices say "(priority #2)"):
   // present only under a manual priority, so automatic verdicts are byte-identical
   const placed = (pick) => (prioRank ? { placedBy: 'priority', priorityRank: prioRank(pick.id) < priority.length ? prioRank(pick.id) + 1 : null } : {});
@@ -1014,7 +1031,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // reaches this branch).
       // a member the pool no longer LISTS leaves first: membership is the fact the
       // owner changed, whatever its login or quota also say
-      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...scrapsInfo(best), ...placed(best) };
+      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...(curHeldWalled ? { escape: 'held-walled' } : {}), ...scrapsInfo(best), ...placed(best) };
     }
     // soft-exhausted (only a hot-raised threshold tripped): still usable,
     // so only move somewhere that can actually SETTLE
@@ -1223,7 +1240,9 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     if (!m || typeof m.id !== 'string' || lapsed(m.id)) return;
     const ap = apart(m.id);
     if (ap < 0) return;
-    const v = quotaVerdict(readCache(m.id), nowSec, { tier: 'hard' });
+    const rd = readCache(m.id);
+    if (rd && typeof rd === 'object' && typeof rd.held === 'string') return;   // r3136: never parked on a member whose reading cannot be told
+    const v = quotaVerdict(rd, nowSec, { tier: 'hard' });
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
     rows.push({ id: m.id, at, credits: !!(credits && credits.has(m.id)), rank: rank ? rank(m.id) : 0, i, ap });
   });

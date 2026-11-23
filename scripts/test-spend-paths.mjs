@@ -6124,5 +6124,139 @@ console.log('§B-64c1 the attended tally, worded for the Diagnostics report (a r
     Object.values(pins).every(Boolean), pins);
 }
 
+// ── §14 r3136 / r3146 / r3200: A USAGE READING THAT CANNOT BE TOLD HOLDS THE UNATTENDED TURN — never «no reading» ───────────
+// Made-up accounts and readings; a failed read is a PLACED refusal of that one read call (EIO) for one file's inode, undone by the
+// leg — never a mount or a mode. At the base (the writer's commit alone) every consumer below reads the mark as «no reading».
+console.log('\n§14 r3136: a usage reading that cannot be told holds the unattended turn, said once, with the person\'s way out');
+{
+  const UW = require(path.join(REPO, 'src/usage-cache-write.js'));
+  const UNREAD = UW.UNREAD_READING || Symbol('no unread mark at this tree');
+  const FY = (() => { try { return require(path.join(REPO, 'src/server/usage-reading-for-you.js')); } catch { return null; } })();
+  const refuse = (file) => {   // refuses the read of THAT file (its inode): a file put in its place reads
+    const ino = fs.statSync(file).ino, real = fs.readFileSync;
+    fs.readFileSync = function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(file)) { let same = false; try { same = fs.statSync(p0).ino === ino; } catch { same = false; } if (same) throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); } return real.call(this, p0, ...a); };
+    return () => { fs.readFileSync = real; };
+  };
+  const mkTodos = () => { const items = []; return { items,
+    add: (key, it) => { const ex = items.find((x) => x.itemKey && x.itemKey === it.itemKey && x.status === 'open'); if (ex) return { id: ex.id }; const x = { id: 'ut' + (items.length + 1), key, status: 'open', ...it }; items.push(x); return { id: x.id }; },
+    idsWhere: (f) => items.filter(f).map((x) => x.id), setStatus: (id, st) => { const x = items.find((i) => i.id === id); if (x) x.status = st; }, forSession: (keys) => items.filter((x) => keys.includes(x.key)) }; };
+  const now = Date.now(), nowS = Math.floor(now / 1000);
+  const reading = (extra = {}) => ({ fetchedAt: now, source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: nowS + 3600 }, sevenDay: { utilization: 0.2, resetsAt: nowS + 3 * 86400 }, ...extra });
+  // (a) THE PURE RULE (r3146 (3))
+  const ID = { key: 'sub-r3136a', name: 'Alpha' };
+  const untold = { ...A.overageState(null), unread: true };
+  const v1 = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, overage: untold, now });
+  const v2 = A.authorizeUnattendedSpend({ reason: 'outbox-wake-now', identity: ID, overage: untold, now });
+  const v3 = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, overage: A.overageState(null), now });
+  ok('§14 (a) THE PURE RULE: an unattended turn on an account whose reading cannot be told is refused BY NAME (reading-unread); a person\'s press passes; a reading merely silent on overage («unknown») passes as before',
+    v1.ok === false && v1.why === 'reading-unread' && v2.ok === true && v2.attended === true && v3.ok === true, JSON.stringify({ v1: v1.why, v2: v2.ok, v3: v3.ok }));
+  // (b) THE GUARD, after torn bytes: overage not stated again — ONE notice across N refusals, no counter moved, closed at the lift
+  const caches = {}, ut = mkTodos();
+  const g = guardMod.create({ dataDir: tmpdir('vs-r3136-guard-'), serverSetting: () => undefined, identityOf: (s) => (s && s.id ? { key: s.id, name: s.id } : null), readCacheFor: (k) => (k in caches ? caches[k] : null), getUserTodos: () => ut, log: () => { } });
+  const RK = 'sub-r3136t';
+  caches[RK] = { fetchedAt: now, source: 'statusline', fiveHour: { utilization: 0.1, resetsAt: nowS + 3600 }, startedAgain: { at: now - 1000, setAside: 'r3136.json.corrupt-1', enumerated: false, overage: false, spendControl: false, resetCredits: false } };
+  const rs = [1, 2, 3].map(() => g.authorize({ reason: 'auto-resume', session: { id: RK } }));
+  const pressed = g.authorize({ reason: 'outbox-wake-now', session: { id: RK } });
+  const told = ut.items.filter((i) => i.itemKey === 'spend-reading-unread:' + RK);
+  ok('§14 (b) AFTER TORN BYTES, overage not stated again: three unattended turns refused by name, ONE notice for the account across the three, a person\'s press passes, and no counter moved for a refused turn',
+    rs.every((r) => r.ok === false && r.why === 'reading-unread') && told.length === 1 && told[0].status === 'open' && pressed.ok === true && !!rs[2].counts && rs[2].counts.hour === 0 && rs[2].counts.day === 0,
+    JSON.stringify({ whys: rs.map((r) => r.why), told: told.length, hour: rs[2].counts && rs[2].counts.hour }));
+  caches[RK] = reading({ fetchedAt: now + 1, source: 'rate-limit-event', overage: { inUse: false, status: 'rejected', asOf: now + 1 } });
+  if (typeof UW.noteWritten === 'function') UW.noteWritten(path.join(os.tmpdir(), RK + '.json'), '{}');
+  const lifted = g.authorize({ reason: 'auto-resume', session: { id: RK } });
+  ok('§14 (b) …a reading that states overage again lands: the notice is CLOSED by itself and the turn passes',
+    told.length === 1 && told[0].status === 'done' && lifted.ok === true, JSON.stringify({ status: told[0] && told[0].status, lifted: lifted.why }));
+  // (c) A READ THAT FAILS: the door's mark; the file's own item speaks (no guard notice); «never read» passes; the read again lifts
+  const dir = tmpdir('vs-r3136-door-'), MK = 'sub-r3136m', f = path.join(dir, MK + '.json');
+  fs.writeFileSync(f, JSON.stringify(reading()));
+  let door = null, rm = [];
+  { const undo = refuse(f); try { door = UW.readReading ? UW.readReading(f, MK) : null; caches[MK] = door; rm = [1, 2, 3].map(() => g.authorize({ reason: 'auto-resume', session: { id: MK } })); } finally { undo(); } }
+  const guardTold = ut.items.filter((i) => i.itemKey === 'spend-reading-unread:' + MK);
+  ok('§14 (c) A READ THAT FAILS: the door answers the UNREAD mark (never null), the turns are refused by name — and the guard files no notice of its own (the file\'s For-you item, with its way out, speaks)',
+    door === UNREAD && rm.every((r) => r.ok === false && r.why === 'reading-unread') && guardTold.length === 0, JSON.stringify({ door, whys: rm.map((r) => r.why), guardTold: guardTold.length }));
+  const NK = 'sub-r3136n', door0 = UW.readReading ? UW.readReading(path.join(dir, NK + '.json'), NK) : undefined;
+  caches[NK] = door0;
+  const rn = g.authorize({ reason: 'auto-resume', session: { id: NK } });
+  ok('§14 (c) «NEVER READ» IS NOT «UNREAD»: an account whose file is not there reads «no reading» (null, no mark) and its turn passes as before',
+    door0 === null && rn.ok === true && (!UW.readingUnread || UW.readingUnread(NK) === null), JSON.stringify({ door0, rn: rn.why }));
+  const door2 = UW.readReading ? UW.readReading(f, MK) : null; caches[MK] = door2;
+  const rl = g.authorize({ reason: 'auto-resume', session: { id: MK } });
+  ok('§14 (c) …the file reads again: the mark lifts at that read and the turn passes', !!door2 && door2 !== UNREAD && UW.readingUnread(MK) === null && rl.ok === true, JSON.stringify({ rl: rl.why }));
+  // (d) THE WAY OUT (r3200): ONE For-you item an account while its file cannot be read; «Set it aside» renames it beside itself and a
+  // file that STARTED AGAIN takes its place — the waiting reading (a wall) written over it at once, every other fact unknown
+  const ut2 = mkTodos(), routes = {};
+  const dir2 = tmpdir('vs-r3136-fy-'), K = 'sub-r3136fy', f2 = path.join(dir2, K + '.json');
+  UW.writeCacheObject({ cacheDir: dir2, key: K, obj: reading({ fetchedAt: now - 60e3, overage: { inUse: false, status: 'rejected', asOf: now - 60e3 } }), source: 'on-demand', backend: 'claude' });
+  const fy = FY ? FY.create({ app: { post: (p, h) => { routes[p] = h; } }, todos: () => ut2, cacheDir: dir2, nameOf: () => 'Gamma', backendOf: () => 'claude', readNow: (k) => UW.readReading(UW.cacheFileFor(dir2, k), k) }) : null;
+  const bytes0 = fs.readFileSync(f2);
+  let door3 = null, w1 = null, r = null, bearer = null;
+  { const undo = refuse(f2); try {
+    door3 = UW.readReading ? UW.readReading(f2, K) : null;
+    w1 = UW.writeCacheObject({ cacheDir: dir2, key: K, obj: { fetchedAt: now, source: 'rate-limit-event', fiveHour: { utilization: 1, resetsAt: nowS + 3600, status: 'rejected' } }, measuredAt: now, source: 'rate-limit-event', backend: 'claude', refused: ['plan:5h'] });
+    const route = FY && routes[FY.ROUTE];
+    if (route) { const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } }; route({ params: { account: K }, headers: { authorization: 'Bearer r3136-agent' } }, res); bearer = res; }
+    r = fy ? fy.setAside(K) : null;
+  } finally { undo(); } }
+  const items = ut2.items.filter((i) => i.action && i.action.type === 'usage-reading-unread');
+  ok('§14 (d) THE WAY OUT IS SAID: a file whose read fails is told ONCE in For you — an action item (origin server, «Usage») naming the account by its name, with its own type and account; a write meanwhile is refused (owed)',
+    door3 === UNREAD && !!w1 && w1.ok === false && items.length === 1 && items[0].origin === 'server' && items[0].sessionName === 'Usage' && items[0].action.account === K && items[0].i18n.text.key === (FY && FY.TEXT) && items[0].i18n.text.params.account === 'Gamma',
+    JSON.stringify({ door3, w1: w1 && w1.ok, items: items.map((i) => ({ a: i.action, s: i.status })) }));
+  ok('§14 (d) …the door is a PERSON\'s: a request carrying a bearer token is refused (403) and nothing is moved',
+    !!bearer && bearer.code === 403 && bearer.body && bearer.body.ok === false, JSON.stringify(bearer && { code: bearer.code, body: bearer.body }));
+  const aside = fs.readdirSync(dir2).filter((n) => n.startsWith(K + '.json.unreadable-'));
+  let o = null; try { o = JSON.parse(fs.readFileSync(f2, 'utf8')); } catch { o = null; }
+  const unk = o ? UW.restartUnknowns(o) : null;
+  const five = o ? require(path.join(REPO, 'src/quota-model.js')).lanesOfReading(o).find((l) => l.lane === 'plan:5h') : null;
+  ok('§14 (d) «Set it aside»: the file RENAMED beside itself (its bytes kept byte for byte, nothing deleted), a file that STARTED AGAIN in its place — the waiting wall written over it at once and stated, every other gating fact UNKNOWN (never «no reading») — the mark lifted, the item resolved by itself',
+    !!r && r.ok === true && r.state === 'pass' && aside.length === 1 && fs.readFileSync(path.join(dir2, aside[0])).equals(bytes0) && !!o && !!o.startedAgain && o.startedAgain.setAside === aside[0]
+      && Array.isArray(unk) && unk.includes('plan:7d') && unk.includes('overage') && !unk.includes('plan:5h') && !!five && five.usedPct >= 100 && UW.readingUnread(K) === null && items.length === 1 && items[0].status === 'done',
+    JSON.stringify({ r, aside, unk, five: five && five.usedPct, status: items[0] && items[0].status }));
+  const r2 = fy ? fy.setAside(K) : null;
+  ok('§14 (d) …a press on a file that reads: «nothing to set aside», no file moved', !!r2 && r2.ok === true && r2.state === 'none' && fs.readdirSync(dir2).filter((n) => n.includes('.unreadable-')).length === 1, JSON.stringify(r2));
+  // (e) THE ENGINE's GATE, an account bound DIRECTLY (r3146 (2)): a read that fails holds the fire; «never read» does not;
+  // after torn bytes the lanes not stated again hold it
+  const w = mkWorld();
+  const sD = { backend: 'claude', mode: 'chat', _webuiId: 'sess-r3136d', claudeSessionId: 'cid-r3136d', _accountId: w.M2, _servedModel: 'claude-fable-5', _servedModelAt: now, pty: { write() { } }, name: 'direct' };
+  w.sessions.set(sD._webuiId, sD);
+  const fM2 = path.join(w.cacheDir, w.M2 + '.json');
+  const qOpen = w.eng.quotaVerdictFor(w.M2, { session: sD });
+  await tick(5);
+  let qHeld = null; { const undo = refuse(fM2); try { qHeld = w.eng.quotaVerdictFor(w.M2, { session: sD }); } finally { undo(); } }
+  await tick(5);
+  fs.writeFileSync(fM2, '{"fiveHour":{"utilization":0.1,"resets');   // torn bytes; the next reading (five-hour only) starts the file again
+  const tornAt = Date.now() + 1000;   // newer than every reading this world wrote (the identity group's freshest stands in for an older one)
+  UW.writeCacheObject({ cacheDir: w.cacheDir, key: w.M2, obj: { fetchedAt: tornAt, source: 'statusline', fiveHour: { utilization: 0.1, resetsAt: nowS + 3600 } }, measuredAt: tornAt, source: 'statusline', backend: 'claude' });
+  await tick(5);
+  const qTorn = w.eng.quotaVerdictFor(w.M2, { session: sD });
+  fs.rmSync(fM2, { force: true });
+  await tick(5);
+  const qNever = w.eng.quotaVerdictFor(w.M2, { session: sD });
+  ok('§14 (e) THE DIRECT GATE: an account bound directly whose reading file cannot be read is NOT USABLE and nothing is known (the fire waits) — it was usable a moment before; after torn bytes the weekly lane not stated again holds it; a file NOT THERE is «no usage data» as before (not held)',
+    qOpen.usable === true && qHeld && qHeld.usable === false && qHeld.readingUnread === true && qHeld.known === false && qTorn.usable === false && Array.isArray(qTorn.restarted) && qTorn.restarted.includes('plan:7d') && !qTorn.restarted.includes('plan:5h') && qNever.usable !== false && !qNever.readingUnread,
+    JSON.stringify({ qOpen: qOpen.usable, qHeld, qTorn: qTorn && { u: qTorn.usable, r: qTorn.restarted }, qNever: qNever && { u: qNever.usable, why: qNever.reason } }));
+  // (f) THE POOL's PICK: a member whose reading cannot be told is never a target (the escape goes to a measured member or none) —
+  // B has LESS left than an unknown member is counted at, so a pick that reads the mark as «no reading» takes C
+  const POOL = require(path.join(REPO, 'src/account-pool-auto.js'));
+  const pc = { A: reading({ fiveHour: { utilization: 0.995, resetsAt: nowS + 3600 } }), B: reading({ fiveHour: { utilization: 0.65, resetsAt: nowS + 3600 } }), C: UNREAD };
+  const dec = (cs) => POOL.decidePoolSwitch({ currentId: 'A', members: [{ id: 'A', name: 'A' }, { id: 'C', name: 'C' }, { id: 'B', name: 'B' }], readCache: (id) => (id in cs ? cs[id] : null), nowSec: nowS, hot: true });
+  const dBoth = dec(pc), dOnlyHeld = dec({ A: pc.A, B: reading({ fiveHour: { utilization: 1, resetsAt: nowS + 3600, status: 'rejected' } }), C: UNREAD });
+  ok('§14 (f) THE POOL: an exhausted current leaves for the MEASURED member, never the one whose reading cannot be told; with no measured way out the held member is still no target',
+    !!dBoth && dBoth.to === 'B' && (!dOnlyHeld || dOnlyHeld.to !== 'C'), JSON.stringify({ both: dBoth && dBoth.to, onlyHeld: dOnlyHeld && (dOnlyHeld.to || dOnlyHeld.reason) }));
+  const ranked = POOL.rankPoolMembers({ members: [{ id: 'B', name: 'B' }, { id: 'C', name: 'C' }], readCache: (id) => (id in pc ? pc[id] : null), nowSec: nowS }) || [];
+  ok('§14 (f) …and the RANKED list the live evict path and the device\'s offline order walk never holds the member whose reading cannot be told (a measured member with less left stays)',
+    Array.isArray(ranked) && ranked.some((r) => r.id === 'B') && !ranked.some((r) => r.id === 'C'), JSON.stringify(ranked.map((r) => r.id)));
+  // (g) THE THREE HOLDS NO LEG HERE DRIVES, pinned by their lines (each absent at the base): the wall probe asks no vendor for an
+  // account whose file cannot be read — AFTER the accounts list's hold (no list: no identity, no reading to ask); the automatic
+  // reset-credit rung keeps the credit once the identity is known; the delivery wake waits on the reading's hold by name
+  const ENG = read('src/server/usage-pool-engine.js'), WAKE = read('src/server/delivery-wake.js');
+  const listAt = ENG.indexOf("{ const lh = !machineLoginKey(scope) ? accountsHeld() : null; if (lh) { sayHeldOnce('probe:' + id, lh,");
+  const readingAt = ENG.indexOf("{ const a0 = accounts.get(scope); if (a0 && a0.type !== 'pooled' && readRawReading(scope) === usageWrite.UNREAD_READING) { sayHeldOnce('probe-reading:' + id,");
+  const rungAt = ENG.indexOf("if (rc0 === usageWrite.UNREAD_READING || usageWrite.restartUnknowns(rc0).includes('resetCredits')) {");
+  const held3 = { wallProbeAfterTheList: listAt > 0 && readingAt > listAt && readingAt - listAt < 600, rungAfterTheIdentity: rungAt > 0 && ENG.lastIndexOf('if (!ci.unknown) {', rungAt) > rungAt - 200,
+    wakeWaitsByName: /limit = q \? \(q\.readingUnread \? \{ unread: true, why: `its account's usage reading cannot be told \(\$\{q\.reason\}\)` \}/.test(WAKE) };
+  ok('§14 (g) THE THREE HOLDS BY THEIR LINES: the wall probe skips an account whose file cannot be read, asked after the accounts list; the reset-credit rung keeps the credit once the identity is known; the wake waits on the reading\'s hold by name',
+    Object.values(held3).every(Boolean), JSON.stringify(held3));
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);

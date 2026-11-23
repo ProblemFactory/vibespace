@@ -104,7 +104,7 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     try {
       const scope = payer._accountId && isPoolScope(payer._accountId) ? payer._accountId : (usageCacheKeyFor ? usageCacheKeyFor(payer) : null);
       const q = scope && quotaVerdictFor ? quotaVerdictFor(scope, { session: payer }) : null;
-      limit = q ? { usable: q.usable !== false, blockedUntil: Number(q.blockedUntil) || null } : null;   // no reading at all: the guard's
+      limit = q ? (q.readingUnread ? { unread: true, why: `its account's usage reading cannot be told (${q.reason})` } : { usable: q.usable !== false, blockedUntil: Number(q.blockedUntil) || null }) : null;   // r3136: the reading's hold waits by name   // no reading at all: the guard's
     } catch (e) { limit = { unread: true, why: `its account's limit could not be read (${String((e && e.message) || e).slice(0, 120)})` }; log(`[delivery-wake] ${cid}: ${limit.why} — it waits`); }
     let probe = null;
     if (verdict.ok && ended.ok && identity && !(limit && (limit.usable === false || limit.unread))) {

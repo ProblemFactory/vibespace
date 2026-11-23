@@ -9390,6 +9390,13 @@ export default {
   "Reconnected — the storage answers again": "已重新连接 — 存储重新响应",
   "Connected — the storage is still being checked; it is parked again if its listing keeps hanging": "已连接 — 仍在检查该存储；如果列目录继续挂起，会再次保持断开",
   "Could not reconnect the storage": "无法重新连接该存储",
+  // r3136 / r3200: an account's usage reading file that cannot be read (src/server/usage-reading-for-you.js, its For-you row)
+  "VibeSpace could not read the usage file of {account}: automatic turns on it wait until it reads again, and your own messages are not held": "VibeSpace 无法读取 {account} 的用量文件：在它重新读出之前，这个账号上的自动轮次会等待；你自己发的消息不受影响",
+  "VibeSpace reads it again by itself. If this stays (a file left owned by another user, a damaged disk), repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted) and starts again, and the account counts as unknown until its next usage reading": "VibeSpace 会自己再读。如果一直这样（文件属于另一个用户、磁盘损坏），请修好文件，或者按「放到一旁」：文件会改名放在原处旁边（不删除任何内容）并重新开始，在下一次用量读数之前，这个账号按未知处理",
+  "Rename the unreadable usage file aside now — nothing is deleted, and it starts again with every fact unknown until its next reading": "现在把无法读取的用量文件改名放到一旁 — 不删除任何内容；它会重新开始，在下一次读数之前所有事实都按未知处理",
+  "Set aside — the usage file starts again; the account counts as unknown until its next reading": "已放到一旁 — 用量文件重新开始；在下一次读数之前，这个账号按未知处理",
+  "The usage file reads again — nothing to set aside": "用量文件已能再次读取 — 无需放到一旁",
+  "Could not set the usage file aside": "无法把用量文件放到一旁",
   // B-e3fe follow-up: the unreadable record of waiting messages (src/server/queued-file-for-you.js, its For-you row)
   "VibeSpace could not read {file}, its record of messages waiting behind running turns: the messages waiting now are kept in memory only until it reads again": "VibeSpace 无法读取 {file}（它记录排在运行中回合后面的等待消息）：现在等待的消息只保存在内存中，直到它能再次读取",
   "A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted), messages recorded only in it are no longer waited for, and the record is written again from what waits now.": "在那之前重启会丢失这些消息的内容。请修复该文件，或点「放到一旁」：文件会在原处改名（不删除任何内容），只记录在其中的消息不再等待，记录会根据现在等待的消息重新写入。",

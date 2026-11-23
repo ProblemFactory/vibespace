@@ -9389,6 +9389,13 @@ export default {
   "Reconnected — the storage answers again": "再接続しました — ストレージが再び応答します",
   "Connected — the storage is still being checked; it is parked again if its listing keeps hanging": "接続しました — ストレージはまだ確認中です。一覧が止まり続けると再び切断したままになります",
   "Could not reconnect the storage": "ストレージを再接続できませんでした",
+  // r3136 / r3200: an account's usage reading file that cannot be read (src/server/usage-reading-for-you.js, its For-you row)
+  "VibeSpace could not read the usage file of {account}: automatic turns on it wait until it reads again, and your own messages are not held": "VibeSpace は {account} の使用量ファイルを読み取れませんでした。再び読めるまで、このアカウントの自動ターンは待機します。あなた自身のメッセージは止められません",
+  "VibeSpace reads it again by itself. If this stays (a file left owned by another user, a damaged disk), repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted) and starts again, and the account counts as unknown until its next usage reading": "VibeSpace は自分で読み直します。続く場合（ファイルが別のユーザーの所有のまま、ディスクの損傷など）は、ファイルを直すか「脇に移す」を押してください。ファイルは名前を変えてそばに移され（何も削除されません）、新しく始まります。次の使用量の読み取りまで、このアカウントは不明として扱われます",
+  "Rename the unreadable usage file aside now — nothing is deleted, and it starts again with every fact unknown until its next reading": "読めない使用量ファイルを今すぐ名前を変えて脇に移す — 何も削除されず、新しく始まります。次の読み取りまで、すべての事実は不明として扱われます",
+  "Set aside — the usage file starts again; the account counts as unknown until its next reading": "脇に移しました — 使用量ファイルは新しく始まります。次の読み取りまで、このアカウントは不明として扱われます",
+  "The usage file reads again — nothing to set aside": "使用量ファイルは再び読めます — 脇に移すものはありません",
+  "Could not set the usage file aside": "使用量ファイルを脇に移せませんでした",
   // B-e3fe follow-up: the unreadable record of waiting messages (src/server/queued-file-for-you.js, its For-you row)
   "VibeSpace could not read {file}, its record of messages waiting behind running turns: the messages waiting now are kept in memory only until it reads again": "VibeSpace は {file}（実行中のターンの後ろで待つメッセージの記録）を読めませんでした：今待っているメッセージは、再び読めるまでメモリにだけ保持されます",
   "A restart before then loses their words. Repair the file, or press Set it aside: the file is renamed beside it (nothing is deleted), messages recorded only in it are no longer waited for, and the record is written again from what waits now.": "それまでに再起動すると、その内容は失われます。ファイルを修復するか、「脇に移す」を押してください：ファイルは同じ場所で名前が変わり（何も削除されません）、そのファイルにだけ記録されたメッセージは待たれなくなり、記録は今待っているものから書き直されます。",
