@@ -9877,7 +9877,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, healGrainRows, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -10260,6 +10260,9 @@ function create(deps = {}) {
     // lane lg-group-parents (B-526c): an Access-dialog act the stop cut short (on disk in the grants rows, its index copy still in the pace) is completed FIRST — queued on the index before anything this boot reads a grain through it; a boot that owes any part sweeps after it (every other boot sweeps in this turn, as before)
     const owedAtBoot = grainActsOwedNow(), completing = completeGrainActs(owedAtBoot).catch((err) => log.warn(`[channels] boot: the grain completion failed: ${(err && err.message) || err}`));
     track(completing);
+    // r2541 (a): AFTER the completion (a row that carries is today's road), a grants row an older release rewrote short takes what it
+    // carries from the index's copy — once a row, said by name (channels-access healGrainRows)
+    track(completing.then(() => healGrainRows()).catch((err) => log.warn(`[channels] boot: the grants heal failed: ${(err && err.message) || err}`)));
     // B-dfa4 cut 3: the three censuses and the heal's plan — ONE walk (bootSweep), in this turn for a small store, in slices for a big one
     const bootSaid = (r) => {
       if (!r) return;

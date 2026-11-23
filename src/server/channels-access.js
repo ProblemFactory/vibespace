@@ -2681,6 +2681,77 @@ function create(engineCtx) {
     notify([], { full: true });
     return { completed: got.completed, skipped: owed.skipped };
   }
+  /**
+   * r2541 (a) / r2548 — THE HEAL AT A START: a grants row an OLDER release rewrote WITHOUT what this release carries (its row model
+   * kept six fields: the entry's WHO, never its settings, never the row's `rule` / `blocks`) takes them from the channel index's
+   * copy, by name in the journal, ONCE a row (a healed row carries: the next start finds it whole). WHO stays the row's. A row and a
+   * copy that DISAGREE are never guessed — THE LATER STAMP OF THE ACT WINS, both ways: an entry later than its index watcher keeps
+   * the record (its act's settings are not in the index: said, never healed from an older copy); a carrying row later than the
+   * index is today's completion (completeGrainActs, run first). A watcher the row names and the index never got (a stop between the
+   * two writes, then the older release's rewrite) is SAID LOST by name — nothing is invented. Each said once per version of its row
+   * (the index's `grainSkipsSaid`, the completion's own ledger). → {healed: [words], lost: [words], later: [words]}.
+   */
+  async function healGrainRows() {
+    let rows = [];
+    try { rows = CG.rowsShort(); } catch { rows = []; }
+    const out = { healed: [], lost: [], later: [] };
+    if (!rows.length) return out;
+    const accounts = new Set(adapterRecords().adapters.map((r) => r.id));
+    const said = store.index.table('grainSkipsSaid') || {}, newSaid = {};
+    const pas = store.index.table('patternAssignments') || {}, aas = store.index.table('accountAssignments') || {}, filters = store.index.table('filters') || {};
+    const stampOf = (row) => Math.max(0, ...row.to.map((e) => Number(e.at) || 0));
+    const changes = [];
+    for (const row of rows) {
+      const m = /^(account|rule|conversation):(.+)$/.exec(row.resource);
+      if (!m) continue;
+      const kind = m[1] === 'rule' ? 'pattern' : m[1], id = m[2];
+      let holder = null, scope = null;
+      if (kind === 'account') { holder = aas[id] || null; scope = { kind: 'adapter', id }; }
+      else if (kind === 'pattern') { holder = pas[id] || null; scope = { kind: 'pattern', id }; }
+      else { const aid = [...accounts].find((a) => id.startsWith(`${a}/`)); holder = aid ? store.index.live()[id] || null : null; scope = { kind: 'conversation', id }; }
+      const tell = (list, words) => { const key = `heal|${row.door}|${row.resource}`, st = stampOf(row); if (said[key] === st) return; list.push(words); newSaid[key] = st; };
+      if (!holder) {   // the index never got this grain (a stop between the two writes, then the older release's rewrite): nothing to take from — said LOST, never invented
+        if (row.door === DOORS_WATCH) for (const e of row.to) tell(out.lost, `${pkOf(GM_toChannel(e))} on ${row.resource} (its settings: the index never got them)`);
+        else if (kind === 'pattern') tell(out.lost, `rule ${id} (its record: the index never got it)`);
+        continue;
+      }
+      const rule = kind === 'pattern' && holder.pattern && holder.adapterId ? { adapterId: holder.adapterId, pattern: holder.pattern, ...(Number(holder.updatedAt) > 0 ? { at: Number(holder.updatedAt) } : {}) } : null;
+      if (row.door === DOORS_REACH) {
+        if (!rule) continue;
+        if (stampOf(row) > (Number(holder.updatedAt) || 0)) { tell(out.later, `rule ${id} (its record: the record's act is later than the index's copy)`); continue; }
+        changes.push({ door: DOORS_REACH, resource: row.resource, to: row.to, except: row.except, rule });
+        out.healed.push(`rule ${id} (its record, on its reach row)`);
+        continue;
+      }
+      const ws = Array.isArray(holder.watchers) ? holder.watchers : [];
+      let healedHere = 0;
+      const to = row.to.map((e) => {
+        const pk = pkOf(GM_toChannel(e));
+        const w = ws.find((x) => x && x.principal && pkOf(x.principal) === pk) || null;
+        if (!w || typeof w.notify !== 'string') { tell(out.lost, `${pk} on ${row.resource} (its settings: the index never got them)`); return e; }
+        if ((Number(e.at) || 0) > (Number(w.updatedAt || w.createdAt) || 0)) { tell(out.later, `${pk} on ${row.resource} (its record's act is later than the index's copy)`); return e; }
+        const body = w.mode === 'filtered' && w.filterId && filters[w.filterId] ? filterBody(filters[w.filterId]) : null;
+        const ne = CG.entryOfWatch(w, body, []);
+        if (!ne || typeof ne.notify !== 'string') return e;   // not carried whole (a body past its bound): the row stays as it reads
+        healedHere++;
+        return ne;
+      });
+      if (!healedHere) continue;
+      const blocks = [...scopeBlocksOf(scope)].map(([key, v]) => ({ key, ...(v && Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v && typeof v.by === 'string' && v.by ? { by: v.by } : {}) }));
+      changes.push({ door: DOORS_WATCH, resource: row.resource, to, except: row.except, blocks, ...(rule ? { rule } : {}) });
+      out.healed.push(`${row.resource} (${healedHere} watcher${healedHere === 1 ? '' : 's'}' settings${blocks.length ? `, ${blocks.length} block${blocks.length === 1 ? '' : 's'}` : ''}${rule ? ', its rule' : ''})`);
+    }
+    if (changes.length) {
+      const r = CG.healRows(changes);
+      if (!r || !r.ok) { log.warn(`[channels] boot: the grants rows an older release rewrote could not be healed from the index's copy (${(r && (r.code || r.error)) || 'refused'}) — the next start tries again`); out.healed = []; }
+    }
+    if (out.healed.length) log.log(`[channels] boot: healed ${out.healed.length} grants row${out.healed.length === 1 ? '' : 's'} from the channel index's copy (an older release rewrote them without what they carry): ${out.healed.slice(0, 8).join(' · ')}${out.healed.length > 8 ? ` · and ${out.healed.length - 8} more` : ''}`);
+    if (out.lost.length) log.warn(`[channels] boot: ${out.lost.length} watcher setting${out.lost.length === 1 ? '' : 's'} LOST — an older release rewrote the row after a stop, before the index got them (said once): ${out.lost.slice(0, 8).join(' · ')}${out.lost.length > 8 ? ` · and ${out.lost.length - 8} more` : ''}`);
+    if (out.later.length) log.warn(`[channels] boot: ${out.later.length} grants entr${out.later.length === 1 ? 'y' : 'ies'} not healed — the record's act is later than the index's copy (said once): ${out.later.slice(0, 8).join(' · ')}${out.later.length > 8 ? ` · and ${out.later.length - 8} more` : ''}`);
+    if (Object.keys(newSaid).length) await store.index.update((ix) => { const t2 = ix.grainSkipsSaid && typeof ix.grainSkipsSaid === 'object' ? ix.grainSkipsSaid : (ix.grainSkipsSaid = {}); Object.assign(t2, newSaid); });
+    if (out.healed.length) notify([], { full: true });
+    return out;
+  }
   function auditGrant(op, principal, site, t, by) {
     try { store.audit({ kind: 'acl', op, principal, scope: site.scope, level: op === 'grant' ? 'visible' : null, origin: 'access', at: t, by }); } catch {}
   }
@@ -3341,7 +3412,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, healGrainRows, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   };
 }
 

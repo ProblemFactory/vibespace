@@ -395,6 +395,28 @@ function create({ grants = null, dataDir = null } = {}) {
     }
     return out;
   }
+  /** r2541 (a) / r2548 — THE HEAL's READ: every channel row an OLDER release rewrote WITHOUT what this release carries (its row model
+   *  kept the entry, dropped the settings and the row's fields): a watch row with entries none of which holds settings and no
+   *  `blocks` field (nor `cleared`), a rule's reach row with no `rule`. → [{door, resource, to, except}] (an unreadable store ⇒ none). */
+  function rowsShort() {
+    const out = [];
+    for (const door of [DOORS.watch, DOORS.reach]) {
+      const ix = doorIndex(door);
+      if (ix.unreadable) return [];
+      for (const [resource, r] of ix.rows) {
+        if (r.unknown) continue;
+        if (door === DOORS.watch && r.to.length && !r.blocks && !r.cleared && !r.to.some((e) => typeof e.notify === 'string')) out.push({ door, resource, to: r.to, except: r.except });
+        if (door === DOORS.reach && resource.startsWith('rule:') && !r.rule) out.push({ door, resource, to: r.to, except: r.except });
+      }
+    }
+    return out;
+  }
+  /** THE HEAL's WRITE: whole rows (`{door, resource, to, except, rule?, blocks?}`), WHO as stored — through the ONE writer, together. */
+  function healRows(changes, by = 'boot') {
+    const s = S();
+    if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
+    return changes.length ? s.setMany(changes.map((c) => ({ removeExcept: [], ...c })), by) : { ok: true, changed: [] };
+  }
   /** One principal's row in a conversation's `#user` / `#request` row (null level ⇒ removed). */
   function setLevel(res, principal, level, { at = null, by = 'user' } = {}) {
     const s = S();
@@ -442,6 +464,7 @@ function create({ grants = null, dataDir = null } = {}) {
     DOORS, RES, grainResource, rowOf, resourcesOf, refusalOf, watchAdmitsFor, exceptBare, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
     entryOfWatch, watcherOfEntry, rowsCarrying, CARRY_BODIES_MAX,   // lane lg-group-parents B-526c
+    rowsShort, healRows,   // r2541 (a): the heal at a start
   };
 }
 
