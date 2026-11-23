@@ -2,8 +2,12 @@
 // test-held-words — THE FAMILY's HELD CODES ON THE PAGE, a census (B-f276 family, 主开发 r3032 unit A, lane bl-phone-ui).
 // A store whose file could not be read is HELD (src/store-read-hold.js and the older holds): its route answers the store's code with
 // 503 and the HUB's own sentence — English, the file's name, the read's error code. The page says it in its OWN words, from ONE table
-// in its refusal pass (src/lib/utils.js HELD_WORDS, beside heldWordsOf; the older holds keep their own branches there), and a held code
-// the table does not know yet takes ONE generic sentence by a stated pattern (HELD_CODE_RE). This suite:
+// in its refusal pass (src/lib/utils.js HELD_WORDS, beside heldWordsOf; the older holds keep their own branches there), and a list
+// hold the census classed with no row takes ONE generic sentence (HELD_GENERIC; HELD_CODE_RE is the pattern codes are FOUND by). This suite:
+//   ①b THE ENDING (主开发 r3123, a must of this unit): every code of the tree whose name ends in unread / unreadable, WHATEVER its
+//     status, has a class — a LIST HOLD the step words (a row, an older branch, or HELD_GENERIC: the generic sentence) or one it must
+//     LEFT_ALONE (a hold worded by its own door, or no list hold at all: a vault's key, a proxy login, a browser's tabs, a state word); a code
+//     of that ending with no class is red by name. The step words ONLY the classed list holds: a new code keeps its own words until judged.
 //   ① THE CENSUS — every code a route of the tree answers with 503 (read from the source: `status(503).json({… code: '…'`, an error
 //     carrying `status: 503` and its `code`, every caller of the store-read hold's create({ code })) is CLASSIFIED: a row of the table,
 //     an older hold's own branch, the generic one by the pattern, or NOT A HOLD with its why (NOT_HELD below). A new code with none is
@@ -65,7 +69,9 @@ function tableOf(src) {
   const re = /\nconst HELD_CODE_RE = \/(.+)\/([a-z]*);/.exec(src);
   // the older holds' own branches (heldWordsOf and refusalWords word these codes before the table is asked)
   const older = new Set([...src.matchAll(/d && d\.code === '([A-Za-z0-9_-]+)' \?/g), ...src.matchAll(/body\.code === '([A-Za-z0-9_-]+)'\) return \{ \.\.\.body, said: body\.error/g)].map((m) => m[1]));
-  return { rows, pattern: re ? new RegExp(re[1], re[2]) : null, older };
+  const g = /\nconst HELD_GENERIC = new Set\(\[([^\]]*)\]\);/.exec(src);
+  const generic = new Set(g ? [...g[1].matchAll(/'([A-Za-z0-9_-]+)'/g)].map((m) => m[1]) : []);
+  return { rows, pattern: re ? new RegExp(re[1], re[2]) : null, older, generic };
 }
 
 // NOT A HOLD: a 503 of the tree that is no store held unread — each with its why (a held list's words would be untrue there)
@@ -102,11 +108,11 @@ const NOT_HELD = {
 function census(codes, table) {
   const red = [], held = [], generic = [];
   for (const [code, files] of [...codes].sort(([a], [b]) => a.localeCompare(b))) {
-    const row = table.rows.includes(code) || table.older.has(code), pat = !!table.pattern && table.pattern.test(code), not = Object.prototype.hasOwnProperty.call(NOT_HELD, code);
-    if (not && pat) red.push(`${code}: listed NOT_HELD but the pattern words it as a held list (${[...files].join(', ')})`);
+    const row = table.rows.includes(code) || table.older.has(code), gen = table.generic.has(code), not = Object.prototype.hasOwnProperty.call(NOT_HELD, code);
+    if (not && (row || gen)) red.push(`${code}: listed NOT_HELD but the step words it as a held list (${[...files].join(', ')})`);
     else if (row) held.push(code);
-    else if (pat) generic.push(code);
-    else if (!not) red.push(`${code}: a 503 with no row, no older branch, not the pattern and not NOT_HELD (${[...files].join(', ')}) — classify it`);
+    else if (gen) generic.push(code);
+    else if (!not) red.push(`${code}: a 503 with no row, no older branch, not a classed list hold (HELD_GENERIC) and not NOT_HELD (${[...files].join(', ')}) — classify it`);
   }
   const dead = Object.keys(NOT_HELD).filter((c) => !codes.has(c));
   return { red, held, generic, dead };
@@ -120,6 +126,41 @@ ok(['storage_unread', 'tokens_unread', 'plugins_unread', 'hosts-unread', 'store_
 ok(C.red.length === 0, `every 503 code of the tree is classified — ${C.held.length} worded by a row or an older branch (${C.held.join(', ')}), ${C.generic.length} by the generic sentence (${C.generic.join(', ')}), ${Object.keys(NOT_HELD).length - C.dead.length} not a hold`, C.red);
 ok(C.dead.length === 0, 'every NOT_HELD row names a live 503 code (a dead row is red)', C.dead);
 ok(TABLE.rows.every((c) => CODES.has(c)), 'every row of the table names a code the tree answers (no row for nothing)', TABLE.rows.filter((c) => !CODES.has(c)));
+
+
+// ①b THE ENDING (r3123): every code of the tree ending in unread / unreadable, whatever its status — classed by groups, each with its why
+const LEFT_ALONE = [
+  ['own', 'a job or For-you record of its own (its For-you item or its door words the hold)', ['archive-unread', 'archive_unread', 'groups-unread', 'notifs-unread', 'sweep-record-unread', 'todos_unread', 'task-groups-unread', 'queued-file-unread']],
+  ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
+  ['own', 'another store whose own door words its hold (its lane gives it a row of the table when its cure lands)', ['desktop_apps_unread', 'registry_unread', 'store-unreadable', 'store_unreadable', 'records-unreadable', 'kept-unreadable', 'signin-held-unread', 'template_unread', 'version-unread']],
+  ['not', 'a state or fact word, not a list\'s refusal code (store-read\'s own states, a row\'s field)', ['unread', 'unreadable']],
+  ['not', 'a key, a credential or a vault entry (the vault and its key files word it — a locked vault is never an unreadable list)', ['key-unreadable', 'key_unreadable', 'oat-unreadable', 'proxy_credential_unreadable', 'vault-reveal-unreadable', 'entry_unreadable', 'job_secrets_unreadable', 'job_secrets_record_unreadable', 'host-key-known-unreadable', 'table_unreadable', 'command_unreadable']],
+  ['not', 'a machine\'s, a browser\'s or the system\'s own file or answer — not a list VibeSpace keeps', ['file_unreadable', 'folder_unreadable', 'mp_unreadable', 'realpath_unreadable', 'status-unreadable', 'strace-old-unread', 'own-file-unread', 'browser-project-config-unreadable', 'kernel_plan_unread', 'exit_answer_unreadable', 'reach_unreadable', 'window_list_unreadable', 'ref_unreadable', 'tabs_unreadable', 'builds_unreadable', 'browser_engine_environment_unread', 'relay_unreadable', 'members-unreadable', 'jump-unread', 'windows-unread', 'windows-policy-unread', 'harness_unread']],
+  ['not', 'a verdict\'s input (a conversation\'s groups could not be read — the asking door words its refusal)', ['groups_unreadable']],
+];
+const LEFT = new Map(LEFT_ALONE.flatMap(([kind, why, codes]) => codes.map((c) => [c, { kind, why }])));
+function endingsOf(sources, pattern) {
+  const at = new Map();
+  if (!pattern) return at;
+  for (const [f, src] of sources) for (const m of src.matchAll(/'([A-Za-z0-9_-]+)'/g)) if (pattern.test(m[1])) { if (!at.has(m[1])) at.set(m[1], new Set()); at.get(m[1]).add(f); }
+  return at;
+}
+function endingCensus(found, table) {
+  const red = [], step = [], left = [];
+  for (const [code, files] of [...found].sort(([a], [b]) => a.localeCompare(b))) {
+    const worded = table.rows.includes(code) || table.older.has(code) || table.generic.has(code), leftAlone = LEFT.has(code);
+    if (worded && leftAlone) red.push(`${code}: both worded by the step and classed to leave alone (${LEFT.get(code).kind})`);
+    else if (worded) step.push(code);
+    else if (leftAlone) left.push(code);
+    else red.push(`${code}: a code ending in unread / unreadable with no class (${[...files].slice(0, 3).join(', ')}) — a list hold (a row or HELD_GENERIC) or one the step leaves alone (LEFT_ALONE, with its why)`);
+  }
+  return { red, step, left, dead: [...LEFT.keys()].filter((c) => !found.has(c)), deadGeneric: [...table.generic].filter((c) => !found.has(c)) };
+}
+console.log('①b THE ENDING — every code ending in unread / unreadable, whatever its status');
+const ENDINGS = endingsOf(SOURCES, TABLE.pattern), E = endingCensus(ENDINGS, TABLE);
+ok(ENDINGS.size >= 60 && TABLE.generic.size >= 10, 'control setup: the census finds the tree\'s codes of that ending (all statuses) and reads HELD_GENERIC from utils.js', { found: ENDINGS.size, generic: [...TABLE.generic] });
+ok(E.red.length === 0, `every code of the tree ending in unread / unreadable has a class — ${E.step.length} worded by the step (a row, an older branch, HELD_GENERIC), ${E.left.length} the step leaves alone (${LEFT.size} classed: own words or no list hold)`, E.red);
+ok(E.dead.length === 0 && E.deadGeneric.length === 0, 'every classed code names a live code of the tree (no dead class)', { dead: E.dead, deadGeneric: E.deadGeneric });
 
 console.log('② THE WORDS — zh and ja for every sentence; no file named');
 const rowSentences = (() => {
@@ -164,10 +205,17 @@ ok(!!D && word('storage_unread') === '«VibeSpace cannot read its storage list r
   && word('tokens_unread') === '«VibeSpace cannot read its folder links right now — nothing was changed. Try again in a few minutes (it reads them again by itself).»'
   && /^«VibeSpace cannot read its plugins’ settings right now — nothing was changed/.test(word('plugins_unread') || '') && /^«Paused: a channels file could not be read/.test(word('store-blocked') || ''),
   'a held answer of the family is worded by its code, from the table: the storage list, the folder links, the plugins\' settings, the channels\' held files', D);
-ok(!!D && ['TASK_GROUPS_UNREAD', 'records-unread', 'frobs_unread'].every((c) => word(c) === GEN), 'a held code the table does not know yet (the pattern) takes the ONE generic sentence — never the hub\'s English', D && { TASK_GROUPS_UNREAD: word('TASK_GROUPS_UNREAD'), frobs_unread: word('frobs_unread') });
-ok(!!D && Object.keys(D).filter((k) => !['other', 'success'].includes(k)).every((k) => D[k].said && /data folder/.test(D[k].said) && !/\.json|data folder|\(EIO\)/.test(D[k].error) && D[k].held === D[k].error),
+ok(!!D && ['TASK_GROUPS_UNREAD', 'records-unread'].every((c) => word(c) === GEN), 'a classed list hold with no row of its own (HELD_GENERIC) takes the ONE generic sentence — never the hub\'s English', D && { TASK_GROUPS_UNREAD: word('TASK_GROUPS_UNREAD'), records: word('records-unread') });
+ok(!!D && word('frobs_unread') === HUB('frobs_unread', 'frobs.json').error, 'a code of that ending NOBODY classed keeps its own words through the step (the generic sentence never reaches an unjudged code — r3123)', D && D.frobs_unread);
+ok(!!D && Object.keys(D).filter((k) => !['other', 'success', 'frobs_unread'].includes(k)).every((k) => D[k].said && /data folder/.test(D[k].said) && !/\.json|data folder|\(EIO\)/.test(D[k].error) && D[k].held === D[k].error),
   'the hub\'s own sentence is kept as `said` (the journal\'s), the page\'s carries no file name; heldWordsOf agrees with the pass', D);
 ok(!!D && D.other.error === 'no such mount' && D.success.error === undefined && D.success.ok === true, 'another refusal passes as it came; an answer that is no refusal is not touched (a held code on a success is no refusal)', D && { other: D.other, success: D.success });
+
+// r3123 (3): each code the census classes «left alone» keeps ITS OWN words through the step — the vault's unreadable key first
+const LEFT_LEGS = [['key-unreadable', 'the vault key file .vault-key could not be read (EACCES) — unlock with the second password again'], ['proxy_credential_unreadable', 'the vault is locked — a person unlocks it, then starts the browser again'], ['unreadable', 'the read failed'], ['tabs_unreadable', 'the browser\'s tabs could not be read'], ['groups_unreadable', 'this conversation\'s groups could not be read'], ['store_unreadable', 'the grants could not be read']];
+const leftThrough = (P) => (P ? LEFT_LEGS.map(([code, error]) => { const w = P.refusalWords({ error, code }); return { code, kept: w.error === error && w.said === undefined, held: P.heldWordsOf({ error, code }) }; }) : null);
+const SK = leftThrough(passOf(UTILS));
+ok(!!SK && SK.every((x) => x.kept && x.held === null), 'every code left alone keeps its own words through the step and heldWordsOf answers null for it — the vault\'s unreadable key, a proxy login, a bare «unreadable», a browser\'s tabs, a conversation\'s groups, a store worded by its own door', SK);
 
 console.log('④ THE PHONE — the Files card says a held storage list');
 const PH_KEEP = "fetchJson('/api/mounts').then((d) => ({ mounts: d && Array.isArray(d.mounts) ? d.mounts : [], held: !!(d && d.unread) }))";
@@ -182,9 +230,16 @@ console.log('CONTROLS — each over a copy in memory, RED by name');
   const planted2 = new Map(SOURCES); planted2.set('src/frobs2.js', "const HOLD = require('./store-read-hold.js');\nconst h = HOLD.create({ file, code: 'frob_bad', aside, words });\n");
   const P2 = census(heldCodesOf(planted2), TABLE);
   ok(P2.red.some((r) => r.startsWith('frob_bad:')), 'CONTROL: a new store-read hold created with a code of its own (not the pattern, no row) is RED by name', P2.red);
-  const cut = tableOf(anchored(UTILS, "\nconst HELD_CODE_RE = /(?:^|[_-])(?:unread|unreadable)$/i;", '\nconst HELD_CODE_RE = /(?!)/;', 'held-words: the pattern cut'));
-  const P3 = census(CODES, cut);
-  ok(P3.red.some((r) => r.startsWith('TASK_GROUPS_UNREAD:')), 'CONTROL: the pattern cut — the held codes it carried (TASK_GROUPS_UNREAD, …) are RED by name', P3.red);
+  const GSET = /\nconst HELD_GENERIC = new Set\(\[[^\]]*\]\);/.exec(UTILS)[0];
+  const cut = tableOf(anchored(UTILS, GSET, GSET.replace("'TASK_GROUPS_UNREAD', ", ''), 'held-words: a classed list hold dropped'));
+  const P3 = census(CODES, cut), E3 = endingCensus(ENDINGS, cut);
+  ok(P3.red.some((r) => r.startsWith('TASK_GROUPS_UNREAD:')) && E3.red.some((r) => r.startsWith('TASK_GROUPS_UNREAD:')), 'CONTROL: a list hold dropped from HELD_GENERIC — its code is RED by name in both censuses (the 503s, the ending)', { P3: P3.red, E3: E3.red });
+  const plantedE = new Map(SOURCES); plantedE.set('src/frobs3.js', "throw Object.assign(new Error('x'), { code: 'frob_unreadable', status: 409 });\n");
+  const E4 = endingCensus(endingsOf(plantedE, TABLE.pattern), TABLE);
+  ok(E4.red.some((r) => r.startsWith('frob_unreadable:')), 'CONTROL: a new code of that ending answered with ANOTHER status (409) and no class is RED by name (the census covers every status — r3123)', E4.red);
+  const STEP = "HELD_GENERIC.has(c) ? heldGenericWords() : null; }";
+  const today = leftThrough(passOf(anchored(UTILS, STEP, "c && HELD_CODE_RE.test(c) ? heldGenericWords() : null; }", 'held-words: the step as unit A had it (the pattern alone)')));   // stale-pins: kept — the step as unit A had it, planted as the RED control (r3123)
+  ok(!!today && today.filter((x) => !x.kept).length >= 5 && !today.find((x) => x.code === 'key-unreadable').kept, 'CONTROL: the step as unit A had it (the pattern alone) rewords the codes left alone — the vault\'s unreadable key told as «one of its saved lists»: RED', today);
   const ROW = "  storage_unread: () => t('VibeSpace cannot read its storage list right now — nothing was changed. Try again in a few minutes (it reads it again by itself).'),   // mounts.json (src/mounts.js)\n";
   const D4 = drive(passOf(anchored(UTILS, ROW, '', 'held-words: a row cut')));
   ok(!!D4 && D4.storage_unread.error === GEN, 'CONTROL: the storage list\'s row cut — its own sentence is lost (the generic one stands in): the row\'s check above goes RED', D4 && D4.storage_unread);
