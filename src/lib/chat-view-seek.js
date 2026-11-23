@@ -280,6 +280,8 @@ export function installChatSeek(ChatView) {
       for (const el of list.children) if (!el._isSeekSentinel) { if (!last.has(el)) ro.observe(el); last.set(el, el.offsetHeight); }
       // the remembered line moves with the mover's OWN write (as the watch's answer moves it): a put-back of +X leaves the
       // content the line names X lower; a person's scroll in the same frame stays for the frame's own reading (fr.at moves alike)
+      // — it DEPENDS on every stamped writer calling _traceExpect BEFORE its write (stW is read at the stamp; checked over every
+      // writer at round wjyz36f09: a writer that stamped after its write would leave its own move unshifted)
       const moved = list.scrollTop - stW;
       fr.before += moved; fr.at += moved;
     };

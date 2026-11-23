@@ -242,6 +242,11 @@
 .chat-message-list {
   flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;
   user-select: text; cursor: text;
+  /* B-3e8b: THE LIST IS ITS ROWS' offsetParent — every row offsetTop is read against the list's own scrollTop (the anchors,
+     the runs pass, the trims, the jumps). Without it a row's offsetTop counted from .chat-view, and the search bar above the
+     list (in flow) shifted every one by its height: opening search one notch into the tail, the runs pass's own put-back
+     anchored on a card already out of sight and the card being read moved 314 px (measured), and stayed there. */
+  position: relative;
 }
 
 /* Messages */
