@@ -461,11 +461,11 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
 {
   const WS = require(path.join(REPO, 'src/window-stamp.js'));
   const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
-  const held = (engMod = realEng, { ownReading = true, again = null, ro = null, cli = null, logins = null, routesMod = null, withGlobal = false, rowOrg = null, globalOrg = null } = {}) => {
+  const held = (engMod = realEng, { ownReading = true, again = null, ro = null, cli = null, logins = null, routesMod = null, withGlobal = false, rowOrg = null, globalOrg = null, amOpts = null } = {}) => {
     // `again`: the same data folder and accounts under a FRESH engine (a restart: no in-memory window cache)
     const root = again ? again.root : endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-held-')));
     const dataDir = path.join(root, 'data');
-    const am = again ? again.am : new AccountManager({ dataDir });
+    const am = again ? again.am : new AccountManager({ dataDir, ...(amOpts || {}) });   // `amOpts`: e.g. a file door the leg holds (r2809)
     const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 });
     const V = again ? again.V : am.createSubscription({ name: 'Vela' }).id; if (!again) login(V);
     const O = again ? again.O : am.createSubscription({ name: 'Orin' }).id; if (!again) login(O);
@@ -663,12 +663,27 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   // …and BEFORE the sign-in is confirmed (the decision road's own law, named and judged here): the row is its own identity, so a hold
   // forms naming Orin; once the sign-in is confirmed the hold is NOT shown — a row is never held on a name of its own account, at every
   // read of a hold (r8) — read by a fresh engine (its groups' 30 s memo new) over the same folder and accounts
-  const MU = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN } });
+  // r2809 (the candidate's red, box zone, Node 24): «before» is a STATE the leg holds, never a moment — the account folders are read
+  // off the loop at the start and the identity groups' memo is cleared at every usage-folder reply (B-360d part 3 U3), so the
+  // confirmation could land inside the six readings and merge the two rows (the decision road's law, rightly): the folder reads go
+  // through a door this leg opens only after the readings, and the leg checks the sign-in is still unconfirmed when it judges:
+  // the decision road's identity record of each row names no login yet (the create's own seed: no address, no organisation,
+  // no seat); after the door opens and the reads settle, Vela's names Orin's login (the confirmation landed)
+  const SafeFsC = require(path.join(REPO, 'src/safe-fs.js')).SafeFs;
+  const realDoorMU = new SafeFsC({ poolSize: 1, name: 'rt-held-door' });
+  let openMU = null; const openedMU = new Promise((r) => { openMU = r; });
+  const doorMU = { call: async (...a) => { await openedMU; return realDoorMU.call(...a); } };
+  const MU = held(realEng, { ro: roP, cli: binHeld, logins: { V: ORIN, O: ORIN }, amOpts: { safeFs: doorMU } });
   await run6(MU);
+  const muIdOf = (id) => MU.am.identityRecordOf(id, { withinMs: 60000 }), muNoLogin = (id) => { const r = muIdOf(id); return !r || (!r.address && !r.org && !r.seat); };
+  const muUnconfirmed = muNoLogin(MU.V) && muNoLogin(MU.O);
   const muWit = MU.wit() || {}, muBefore = sideOf((await MU.usage()), MU.V);
+  openMU();
   await MU.am.signinFactsSettled();
+  const muConfirmed = (muIdOf(MU.V) || {}).address === ORIN.email;
   const MU2 = held(realEng, { again: MU }), muAfter = sideOf((await MU2.usage()), MU2.V);
-  ok('B-6a92 BOUND 1 BEFORE THE SIGN-IN IS CONFIRMED (B-360d\'s decision road): the row is its own identity — a hold forms naming Orin, and once the sign-in is confirmed it is not shown (never held on a name of its own account)', !!muWit.foreign && !!muBefore && !muAfter, J({ foreign: muWit.foreign, muBefore, muAfter }));
+  try { realDoorMU.close(); } catch { }
+  ok('B-6a92 BOUND 1 BEFORE THE SIGN-IN IS CONFIRMED (B-360d\'s decision road): the row is its own identity — a hold forms naming Orin, and once the sign-in is confirmed it is not shown (never held on a name of its own account)', muUnconfirmed && muConfirmed && !!muWit.foreign && !!muBefore && !muAfter, J({ muUnconfirmed, muConfirmed, foreign: muWit.foreign, muBefore, muAfter }));
   // EACH REFUSAL CODE IN A WORLD (the table below covers every combination), each with its true remedy
   const U = held(realEng, { ro: roP, cli: binHeld });   // nothing names which account Vela is: no organisation, no login, no address
   await run6(U);
