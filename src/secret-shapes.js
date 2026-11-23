@@ -67,7 +67,9 @@
  *   (CONTAINER_HEADS: `session_id`, `token_value`, `key_id`); a credential word that only MODIFIES a DESCRIPTOR head
  *   (DESCRIPTOR_HEADS, an explicit allowlist: usage / type / ttl / sock / policy / name / path / scope …) names a
  *   fact ABOUT a credential and is public (`token_usage`, `auth_type`, `TOKEN_TTL`, `SSH_AUTH_SOCK`,
- *   `secret_scanning`, `password_policy`). Every other head keeps the old verdict — hidden (`SECRET_KEY_BASE`,
+ *   `secret_scanning`, `password_policy`). Row B-4f7f (主开发 r2803 / r2982): a head whose last piece is an ACT or a THING
+ *   that is not a credential (NOT_CREDENTIAL_HEADS, a table FOUND in the lanes' own line files: `secret-scan`, `auth.json`,
+ *   `StrictHostKeyChecking`) holds nothing either. Every other head keeps the old verdict — hidden (`SECRET_KEY_BASE`,
  *   `token_blob`, `auth_payload`: fail closed). r4 (α): an ADDRESS head (url / uri / endpoint) is no descriptor — a
  *   credential-named address (`AUTH_URL`, `SECRET_WEBHOOK_URL`, `token_uri`) is masked whole as on the base (a capability
  *   URL, a connection string, an encoded nested holder all ride behind it). A PUBLIC query value is judged DECODED ONCE
@@ -522,6 +524,13 @@ const CONTAINER_HEADS = new Set(['id', 'ids', 'value', 'val', 'string', 'str', '
 // r4 (α): url / uri / endpoint are NOT descriptors — a credential-named ADDRESS (`AUTH_URL`, `SECRET_WEBHOOK_URL`, `token_uri`) is the
 // credential's carrier: a capability URL, a connection string or an encoded nested holder all hide behind it, so it keeps the base's verdict
 const DESCRIPTOR_HEADS = new Set(['usage', 'type', 'ttl', 'sock', 'policy', 'scanning', 'through', 'name', 'path', 'file', 'dir', 'mode', 'method', 'kind', 'count', 'len', 'length', 'size', 'expires', 'expiry', 'expiration', 'scope', 'format', 'prefix', 'version', 'enabled', 'required', 'issuer', 'audience']);
+// row B-4f7f (主开发 r2803 / r2982; lane mask-value-shape): a head whose LAST piece is an act or a thing that is not a credential
+// holds nothing — the table FOUND in the line files (int359/sched-1117/lines, 1894 files: every head the belt took only by failing
+// closed, by its last piece), never guessed. NOT on it, each failing closed because a person can truly write a secret after such a
+// head: pin / pins (a PIN), helper (its command), args / options (whatever was typed), reset (a reset code or link), local / pre (a
+// credential's variant: DB_PASSWORD_LOCAL), info / set / box (a thing that may carry one), store (--password-store holds on purpose:
+// KNOWN_FLAG_VALUES keeps its closed list). Every word here carries a leg of its kind in test-secret-shapes (a word without one is red)
+const NOT_CREDENTIAL_HEADS = new Set(['scan', 'watch', 'build', 'checking', 'check', 'js', 'mjs', 'json', 'law', 'line', 'dialog', 'schema', 'form', 'ui', 'real', 'pty', 'alias', 'startup', 'brain', 'dns', 're', 'source', 'locked', 'for', 'asked', 'nice', 'unread', 'use', 'off', 'pinned', 'of', 'only', 'why']);
 // r5 (M2 + M3): a userinfo HOLDS a secret only when it carries a PASSWORD — `scheme://user:pw@`, `scheme://:pw@`, and an EMPTY one
 // `scheme://key:@` (HTTP Basic's API-key form, curl's `-u key:` — the key is the user) — and it is looked for ANYWHERE in the decoded value
 // (a redirect nests one: `?next=https://a/b?r=https://u:pw@h`); a bare `user@` (`ssh://git@github.com`, `https://alice@social.example`) is
@@ -605,7 +614,8 @@ function nameWords(k) {
   return words;
 }
 /** Does a NAME hold a secret? A credential word as its HEAD, under a CONTAINER head, or under any head the descriptor allowlist
- *  does not name (fail closed: an address — url / uri / endpoint — too, r4 α); a DESCRIPTOR head is public. Never a value's shape. */
+ *  does not name (fail closed: an address — url / uri / endpoint — too, r4 α); a DESCRIPTOR head is public, and so is a head
+ *  that is an act or a thing (NOT_CREDENTIAL_HEADS, B-4f7f). Never a value's shape. */
 const NAME_VERDICT = new Map();   // r4: the verdict per name, memoised beside its words (a head storm asks one name thousands of times)
 function holderName(k) {
   const key = String(k || ''), known = NAME_VERDICT.get(key);
@@ -619,7 +629,7 @@ function holderVerdict(k) {
   if (!words.some((w) => SECRET_WORDS.has(w))) return false;
   const head = words[words.length - 1];
   if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;
-  return !DESCRIPTOR_HEADS.has(head);                                              // a head the table does not name: fail closed
+  return !DESCRIPTOR_HEADS.has(head) && !NOT_CREDENTIAL_HEADS.has(head);         // a head neither table names: fail closed
 }
 // R7 (inbox-verify F1; lane mask-value-shape r3 — ONE linear walk): the HEAD `[?&;#]name=` is found by a bounded regex (no value
 // quantifier — r2's `[closers]+$` over a 64 KiB value backtracked: 1.9 s at 60 000 dots, verify r4 F1's shape); a HOLDER's value is
@@ -988,4 +998,4 @@ function redactByValue(raw, { typed = false } = {}) {
   return { text, redacted: n };
 }
 
-module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, KNOWN_FLAG_VALUES, secretName, holderName, maskedLink, redactSecrets, hasTokenShape, redactByValue, wordValue, randomRun };
+module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, NOT_CREDENTIAL_HEADS, KNOWN_FLAG_VALUES, secretName, holderName, maskedLink, redactSecrets, hasTokenShape, redactByValue, wordValue, randomRun };
