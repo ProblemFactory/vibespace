@@ -118,7 +118,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
                 forkedFrom: session.forkedFrom || null,
                 permissionMode: session._permissionMode || null, effort: session._effort || null,
                 createdAt: session.createdAt, webuiSessionId: id, mode: session.mode,
-              }, { durable: true });
+              }, { durable: true, whole: true });   // r3141: a whole record from the live conversation (restates a torn one)
               broadcastActiveSessions();
             }
             if (Array.isArray(msg.models) && msg.models.length) { try { noteHarnessModels?.(session.backend, msg.models); } catch {} }

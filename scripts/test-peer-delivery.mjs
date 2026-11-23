@@ -589,7 +589,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   ok('age sweep CONTROL: a temp YOUNGER than the age is left alone', fs.existsSync(youngTmp), left);
   ok('age sweep CONTROL: a LIVE session\'s aged temp is left alone (the same id rule as its .buf / .json)', fs.existsSync(liveTmp), left);
   ok('age sweep CONTROL: a file not shaped <id>.buf / <id>.json / <id>.json.<pid>.tmp is never touched', fs.existsSync(stranger), left);
-  ok('age sweep WIRING: server.js\'s boot sweep IS this function over BUFFERS_DIR with the live-session check — no inline pattern of its own', /sweepAgedWrapperFiles\(BUFFERS_DIR, \{ cutoff, isActive: \(id\) => activeSessions\.has\(id\) \}\)/.test(srv) && !srv.includes('(buf|json)'));
+  ok('age sweep WIRING: server.js\'s boot sweep IS this function over BUFFERS_DIR with the live-session check — no inline pattern of its own', /sweepAgedWrapperFiles\(BUFFERS_DIR, \{ cutoff, isActive: \(id\) => activeSessions\.has\(id\)(?: \|\| require\('\.\/src\/server\/session-meta-verdict\.js'\)\.keeps\(id\))? \}\)/.test(srv) && !srv.includes('(buf|json)'));
   fs.rmSync(SD, { recursive: true, force: true });
 }
 

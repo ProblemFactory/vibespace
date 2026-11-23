@@ -175,7 +175,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
               createdAt: session.createdAt,
               webuiSessionId: id,
               mode: session.mode,
-            }, { durable: true });
+            }, { durable: true, whole: true });   // r3141: a whole record from the live conversation (restates a torn one)
             broadcastActiveSessions();
           }
           // Track turn lifecycle: streaming state + activity label

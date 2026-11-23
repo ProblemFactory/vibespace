@@ -330,6 +330,9 @@ function retireDeadSocket(sockFile, socketPath) {
   // sessions keep the old cleanup.
   try {
     const dm = readSessionMeta(sockFile) || {};
+    // r3137 (2): an UNREAD record is a LIVE conversation to every sweep — its dead socket's record is KEPT as it is (never deleted,
+    // never written over as stopped from nothing): its read answers off the loop, and the next start judges it whole
+    if (require('./session-meta-verdict.js').isUnread(dm)) { deadTally.kept.push(sockFile); console.log(`    ↳ ${sockFile}: its record could not be read — kept as it is (nothing removed or written over)`); return; }
     if ((dm.host || dm.dialDeviceId) && !dm.orphanedAt) {
       writeSessionMeta(sockFile.replace(/\.orphan$/, ''), { ...dm, orphanedAt: Date.now() }, { sync: true });
       const op = path.join(META_DIR, sockFile + '.json');
@@ -832,6 +835,9 @@ function restoreSessions() {
     if (!socketAlive) { retireDeadSocket(sockFile, socketPath); yield; continue; }   // unit 3's follow (r1050): a retire is real work (a sync meta write, a rename) — counted in its batch
 
     const meta = readSessionMeta(sockFile);
+    // r3137 (2): a live socket whose record is UNREAD is NOT re-adopted under a new id (its pool link, its attach config and its
+    // browser would be swept as another's): it is left running, nothing of it removed, and adopted at the next start once it reads
+    if (require('./session-meta-verdict.js').isUnread(meta)) { console.log(`  ⏸ ${sockFile}: its record could not be read — left running, not adopted under a new id (nothing of it removed)`); yield; continue; }
     const id = meta.webuiSessionId || ('sess-' + (++sessionCounterRef.value) + '-' + Date.now());
     persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5: before any writer persists the boot instant as its createdAt
 

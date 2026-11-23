@@ -91,26 +91,39 @@ console.log('③ NO REMOVER REMOVES BY IT');
   // the removers that judge a record in their own code: they ask the same verdict
   const BR = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8'), SRV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const retire = (BR.match(/function retireDeadSocket\([\s\S]*?\n {2}\}\n/) || [''])[0];
-  ok(!!(/isUnread\(dm\)/.test(retire) && /isUnread\(meta\)/.test(BR) && /activeSessions\.has\(m\[1\]\) \|\| [^\n]*anyUnread\(\)/.test(SRV) && /isActive: \(id\) => activeSessions\.has\(id\) \|\| [^\n]*anyUnread\(\)/.test(SRV)),
+  ok(!!(/isUnread\(dm\)/.test(retire) && /isUnread\(meta\)/.test(BR) && /activeSessions\.has\(m\[1\]\) \|\| [^\n]*keeps\(m\[1\]\)/.test(SRV) && /isActive: \(id\) => activeSessions\.has\(id\) \|\| [^\n]*keeps\(id\)/.test(SRV)),
     'the dead socket\'s retire keeps an unread record, the re-adopt keeps an unread live conversation for its read (no new id), and the two aged sweeps (attach configs, wrapper files) keep everything while any record is unread — by their code');
 }
 
-console.log('④ TORN BYTES — kept aside once, the record lifts empty with the waiting changes on it');
+console.log('④ TORN BYTES — kept aside once; the record STAYS UNREAD until a whole record restates it (r3141)');
 {
   const d = 'vs-smheld-sock-torn', fd = path.join(META_DIR, d + '.json');
   const TORN = '{"webuiSessionId":"sess-made-up-torn","name":"a made-up';
   fs.writeFileSync(fd, TORN);
   const m = SS.readSessionMeta(d);
-  SS.writeSessionMeta(d, { ...m, seenMarks: ['after-torn'] });
+  SS.writeSessionMeta(d, { ...m, seenMarks: ['after-torn'] });   // a class A writer: it never restates a record
   land(d);
-  await sleep(200);
-  for (let i = 0; i < 20 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(d + '.json.corrupt-')); i++) await sleep(25);
-  land(d); await sleep(50); land(d);
+  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(d + '.json.corrupt-')); i++) await sleep(25);
+  await sleep(50); land(d);
   const copies = fs.readdirSync(META_DIR).filter((n) => n.startsWith(d + '.json.corrupt-'));
   const copyBytes = copies[0] ? realReadSync.call(fs, path.join(META_DIR, copies[0]), 'utf8') : null;
+  const kept = realReadSync.call(fs, fd, 'utf8'), stillUnread = unread(SS.readSessionMeta(d));
+  // the pool-link sweep while only that torn record is unread: the link its bytes name is kept, another conversation's is swept
+  const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  const linkDir = path.join(TMP, 'pool-links', 'pool-made-up-2'); fs.mkdirSync(linkDir, { recursive: true });
+  fs.writeFileSync(path.join(linkDir, 'sess-made-up-torn'), 'made-up link'); fs.writeFileSync(path.join(linkDir, 'sess-made-up-gone'), 'made-up link');
+  const fake = { dataDir: TMP, _state: { accounts: [] }, _clearUnplaced: () => false, _save: () => { } };
+  AccountManager.prototype.sweepSessionPoolLinks.call(fake, new Set());
+  const tornLink = fs.existsSync(path.join(linkDir, 'sess-made-up-torn')), goneLink = fs.existsSync(path.join(linkDir, 'sess-made-up-gone'));
+  ok(!!(unread(m) && copies.length === 1 && copyBytes === TORN && kept === TORN && stillUnread && tornLink && !goneLink),
+    `torn bytes: an UNREAD record (never «{}»), their copy kept aside ONCE byte for byte (${copies.join(', ') || 'none'}); the record STAYS UNREAD (its bytes on disk as they were; a writer's change waits), and a sweep keeps what those bytes name (that link kept, another conversation's swept) — RED: the release wrote a stub over them, no copy`, { copies, kept: kept.slice(0, 40), tornLink, goneLink });
+  // a WHOLE record from the live conversation restates it (the five writers that list every key the session holds)
+  const FULL = { webuiSessionId: 'sess-made-up-torn', name: 'the live conversation', cwd: '/made/up/live' };
+  SS.writeSessionMeta(d, { ...SS.readSessionMeta(d), ...FULL }, { durable: true, whole: true });
+  land(d); await sleep(50); land(d);
   const now = onDisk(d);
-  ok(!!(unread(m) && copies.length === 1 && copyBytes === TORN && now && now.seenMarks && now.seenMarks[0] === 'after-torn'),
-    `torn bytes: an UNREAD record (never «{}»), their copy kept aside ONCE byte for byte (${copies.join(', ') || 'none'}), then the record lifts EMPTY with the waiting change saved on it — RED: the release wrote the stub over them, no copy`, { copies, now });
+  ok(!!(now && now.name === 'the live conversation' && now.seenMarks && now.seenMarks[0] === 'after-torn' && !unread(SS.readSessionMeta(d))),
+    `a WHOLE record from the live conversation restates the torn one (name, folder, and the change that waited: ${JSON.stringify(now && { name: now.name, seenMarks: now.seenMarks })}); its torn bytes stay in their copy`);
 }
 
 console.log('⑤ THE PERSON — the family\'s live list names each unread record');

@@ -1619,7 +1619,7 @@ probeSockets().finally(() => hubForm.then((d) => { hubPort = require('./src/serv
   setTimeout(() => {
     const cutoff = Date.now() - 7 * 86400000;
     // <id>.buf / <id>.json / <id>.json.<pid>.tmp (a wrapper killed between its sidecar temp and the rename, ci358-reds round 2) — src/server/wrapper-files.js
-    let swept = require('./src/server/wrapper-files.js').sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff, isActive: (id) => activeSessions.has(id) });
+    let swept = require('./src/server/wrapper-files.js').sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff, isActive: (id) => activeSessions.has(id) || require('./src/server/session-meta-verdict.js').keeps(id) });
     // data/agentd/session-*.json attach configs (0600, vsht_ host token +
     // full spawn command) — the kill-path unlink needs the live session, so
     // pod recreation leaked one per dial/agentd session forever (audit
@@ -1628,7 +1628,7 @@ probeSockets().finally(() => hubForm.then((d) => { hubPort = require('./src/serv
     try {
       for (const fn of fs.readdirSync(AGENTD_DIR)) {
         const m = fn.match(/^session-(.+)\.json$/);
-        if (!m || activeSessions.has(m[1])) continue;
+        if (!m || activeSessions.has(m[1]) || require('./src/server/session-meta-verdict.js').keeps(m[1])) continue;
         try {
           const st = fs.statSync(path.join(AGENTD_DIR, fn));
           if (st.mtimeMs > cutoff) continue;

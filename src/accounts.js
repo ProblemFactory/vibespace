@@ -2551,11 +2551,15 @@ class AccountManager {
   sweepSessionPoolLinks(liveKeys) {
     const root = path.join(this.dataDir, 'pool-links');
     let dropped = 0;
+    // r3137 (2): while any conversation's record is UNREAD (src/server/session-meta-verdict.js) the sweep cannot tell which link that
+    // record names — it removes NOTHING (the next start sweeps again)
+    const SMV = require('./server/session-meta-verdict.js');
+    if (SMV.anyUnreadable()) { console.warn('[pool] the per-session link sweep removed nothing: a conversation\'s record could not be read, and a link it names is kept'); return 0; }
     try {
       for (const poolId of fs.readdirSync(root)) {
         const dir = path.join(root, poolId);
         let entries = []; try { entries = fs.readdirSync(dir); } catch { continue; }
-        for (const k of entries) if (!liveKeys.has(k)) { try { fs.unlinkSync(path.join(dir, k)); dropped++; } catch { } }
+        for (const k of entries) if (!liveKeys.has(k) && !SMV.namedByTorn(k)) { try { fs.unlinkSync(path.join(dir, k)); dropped++; } catch { } }   // (r3141: a link a kept torn record names is kept)
         try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { }
       }
     } catch { }

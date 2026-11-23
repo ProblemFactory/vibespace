@@ -130,7 +130,7 @@ const OWNERS = Object.freeze([
       name('claude-level-signal'),   // B-24e2: the background signal's declaration + the build's identity, out of the catalog (PURE; the catalog, the device's scan)
       name('left-behind|left-behind-door|left-behind-line'),   // B-69a7: what a stopped turn's command tool left running — the read (SHARED; the hub and the device agent) and the hub's door
       name('managed-claude-settings'),   // lane lg-providers (主开发 23:45Z): does the machine's managed Claude settings set a key helper, credential or address (the create, the provider Test)
-      name('usage-walker|design-fs|window-live-wiring|exit-call|exit-facts|unexpected-exit|account-material|login-shell|remote-cli|login-state|conversation-ops|conversation-facts|sessions|sessions-(?:assemble|sweep|sweep-worker)|session-(?:brain|stdout|store|schema)|desktop-(?:access|backends|display|fit|pin|serve|stream|viewers|webrtc)')] },
+      name('usage-walker|design-fs|window-live-wiring|exit-call|exit-facts|unexpected-exit|account-material|login-shell|remote-cli|login-state|conversation-ops|conversation-facts|sessions|sessions-(?:assemble|sweep|sweep-worker)|session-(?:brain|stdout|store|schema|meta-verdict)|desktop-(?:access|backends|display|fit|pin|serve|stream|viewers|webrtc)')] },
 ].map((o) => Object.freeze({ ...o, rules: Object.freeze(o.rules) })));
 // THE SHARED HELPERS — ONE short list: modules that hold NO state and belong to nobody. The walk passes a helper's frame
 // (counting `viaHelper`), so its time is the owner's that called it. A helper matches no owner's rule.

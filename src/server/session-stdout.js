@@ -491,6 +491,16 @@ function knownOnDisk(dir, fp) {
   return knownMeta.has(fp);
 }
 const storeWriter = () => require('../store-writer.js').storeWriter();
+// r3137 (lane bl-chat-c — SESSION-META UNDER THE STORE-READ LAW): a record whose read FAILED or whose bytes do NOT PARSE is UNREAD
+// (src/server/session-meta-verdict.js) — never the empty record «not there» (ENOENT) is. NOTHING is written over it: a writer's
+// change WAITS (its fields kept for that record, the newest per field) and is saved MERGED over the record the moment it reads; the
+// one delete road keeps it. Its re-read is OFF the loop by the family's helper (src/store-read-hold.js), ONE helper per UNREAD
+// record (made at its failed read, stopped at its lift): the helper's ladder, one read in flight with its copy, the family's ceiling
+// shared with every store, torn bytes copied aside once per content then lifted EMPTY, and its live list for the one notice.
+const SMV = require('./session-meta-verdict.js');
+const metaHolds = new Map();     // sockName → its helper while unread (and after a torn lift: listed with its copy until the process ends)
+const waitingMeta = new Map();   // file → the fields written while its record was unread (saved merged at the read)
+const metaValid = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const metaSeq = new Map();   // fp → writes handed to the store so far (patchSessionMeta's «did one land while I read?»)
 const metaPatchChain = new Map();   // fp → the newest patch in flight: the patches of ONE file land in the order they were asked
 /** PATCH a session's meta with NO synchronous read on the caller's road (lg-recovery U2 cure, law 2 — the bulk flip; U1's
@@ -544,8 +554,43 @@ function patchMetaOnce(sockName, fp, patch, tries, owner, tok = null) {
 function readSessionMeta(sockName) {
   const fp = path.join(META_DIR, sockName + '.json');
   const owed = pendingMeta.get(fp);
-  if (owed !== undefined) { try { return JSON.parse(owed); } catch { return {}; } }
-  try { return timedSync('session-meta.read', () => JSON.parse(fs.readFileSync(fp, 'utf-8'))); } catch { return {}; }
+  if (owed !== undefined) { try { return JSON.parse(owed); } catch { return SMV.unreadMeta({ code: 'its pending copy did not parse' }); } }
+  // r3137: THE VERDICT AT THE ONE READ (its own sync read, as before: no second read) — data · «not there» (ENOENT: the empty record,
+  // a new conversation's first write) · UNREAD (a failed read, torn bytes: held, re-read off the loop)
+  let read;
+  try { read = { text: timedSync('session-meta.read', () => fs.readFileSync(fp, 'utf-8')) }; } catch (error) { read = { error }; }
+  const a = require('../store-read.js').storeAnswer(read, { valid: metaValid });
+  if (a.state === 'data') { if (SMV.isMarked(sockName)) liftMeta(sockName, a.value); return a.value; }
+  if (a.state === 'missing' && !SMV.isMarked(sockName)) return {};
+  if (a.state !== 'missing') holdMeta(sockName, fp, a, read);   // (a «missing» right after a failed read: the helper reads it once more)
+  return SMV.unreadMeta(SMV.factsOf(sockName) || { code: a.code || 'unreadable' });
+}
+/** r3137: the record could not be read — marked UNREAD, its helper made (once) and started on this read's own answer */
+function holdMeta(sockName, fp, a, read = null) {
+  if (SMV.isMarked(sockName) && metaHolds.has(sockName)) return;
+  SMV.mark(sockName, { code: String(a.code || a.state), torn: a.state === 'corrupt', ...(a.state === 'corrupt' && read && typeof read.text === 'string' ? { text: read.text.slice(0, 1 << 20) } : {}) });
+  let h = metaHolds.get(sockName);
+  if (!h) {
+    h = require('../store-read-hold.js').create({ file: fp, valid: metaValid, aside: (mark) => fp + '.corrupt-' + mark, code: 'session-meta-unread',
+      words: (f) => `this conversation's record could not be read (${(f && f.code) || 'unreadable'}) — nothing is written over it; changes wait until it reads`,
+      log: (m) => console.warn('[session] ' + m),
+      // r3141: TORN BYTES are copied aside once, and the record STAYS UNREAD (never lifted as an empty record: its account, resume id and
+      // folder are in the copy only) until a WHOLE record from the live conversation restates it, or a read answers
+      onLift: (value, facts) => { if (value === null && facts && facts.setAside) { const f = SMV.factsOf(sockName); if (f) f.copy = facts.setAside; return; } liftMeta(sockName, value); } });
+    metaHolds.set(sockName, h);
+  }
+  try { h.start(a); } catch (e) { console.warn(`[session] ${sockName}: its record's hold did not start (${e.message}) — it stays unread`); }
+}
+/** r3137: the record READ again (a sync read that answered, or its helper's lift: `value` null = lifted empty after torn bytes kept
+ *  aside) — the changes that waited are saved ONCE, merged over it */
+function liftMeta(sockName, value) {
+  if (!SMV.isMarked(sockName)) return;
+  SMV.clear(sockName);
+  const h = metaHolds.get(sockName);
+  if (h) { metaHolds.delete(sockName); try { h.stop(); } catch { } }
+  const fp = path.join(META_DIR, sockName + '.json'), w = waitingMeta.get(fp);
+  waitingMeta.delete(fp);
+  if (w && Object.keys(w).length) writeSessionMeta(sockName, { ...(value || {}), ...w }, { durable: true });
 }
 // Tombstones (2.89.1): teardown deletes the meta, but debounced/straggler
 // writers (status flush, todo coalesce, attribution) can fire AFTER the delete
@@ -590,8 +635,26 @@ const browserBindings = () => _browserBindings || (_browserBindings = require('.
  *  — a caller that renames / reads the file itself right after (boot-restore's retireDeadSocket): written here, now.
  *  Everything else (stamps, caches, rings re-derived) is paced. Census ⑦ (scripts/test-store-write-census.mjs) pins every
  *  call by scope. */
-function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev = undefined, flagOnly = false } = {}) {
+function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev = undefined, flagOnly = false, whole = false } = {}) {
   if (_metaTombstones.has(sockName)) return Promise.resolve(true);
+  // r3141: a WHOLE record from the live conversation (`whole`: the five writers that restate every key the session holds) restates a
+  // TORN record — the mark ends, the changes that waited ride under it; keys the live conversation does not list come from nowhere
+  // (said once: the torn bytes stay in their copy)
+  if (whole && SMV.isMarked(sockName) && (SMV.factsOf(sockName) || {}).torn) {
+    const f = SMV.factsOf(sockName), fpw = path.join(META_DIR, sockName + '.json'), w = waitingMeta.get(fpw);
+    SMV.clear(sockName); waitingMeta.delete(fpw);
+    const h = metaHolds.get(sockName); if (h) { metaHolds.delete(sockName); try { h.stop(); } catch { } }
+    console.warn(`[session] ${sockName}: its torn record (kept aside${f && f.copy ? ' as ' + f.copy : ''}) is restated whole from the live conversation — keys it does not list are only in that copy`);
+    return writeSessionMeta(sockName, { ...(w || {}), ...Object.fromEntries(Object.entries(meta || {})) }, { durable, sync, flagOnly });
+  }
+  // r3137 (1): NO WRITER SAVES OVER A RECORD IT COULD NOT READ — the change WAITS for the record (its fields, the newest per field;
+  // the unread mark is a symbol and is not one of them) and is saved merged over it the moment it reads
+  if (SMV.isMarked(sockName) || SMV.isUnread(meta)) {
+    const fpw = path.join(META_DIR, sockName + '.json');
+    waitingMeta.set(fpw, { ...(waitingMeta.get(fpw) || {}), ...Object.fromEntries(Object.entries(meta || {})) });
+    if (!SMV.isMarked(sockName)) { const now = readSessionMeta(sockName); if (!SMV.isUnread(now)) { const w = waitingMeta.get(fpw); waitingMeta.delete(fpw); return writeSessionMeta(sockName, { ...now, ...w }, { durable, sync, flagOnly }); } }   // (it read meanwhile: merged now)
+    return Promise.resolve(false);
+  }
   sessionMetaOwnerConflict(sockName, meta, prev);
   // SESSION-BRAIN step 1 (design §session-brain campaign): the buffer's OWNER
   // is EXPLICIT in every session record. Today the server writes
@@ -649,6 +712,8 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev 
   return done;
 }
 function deleteSessionMeta(sockName) {
+  // r3137 (2): NO REMOVER REMOVES BY AN UNREAD RECORD — the one delete road (a dead socket's retire, a teardown) keeps it
+  if (SMV.isMarked(sockName)) { console.warn(`[session] ${sockName}: its record could not be read — kept (never removed on a failed read)`); return false; }
   _metaTombstones.set(sockName, Date.now());
   if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
   const fp = path.join(META_DIR, sockName + '.json');

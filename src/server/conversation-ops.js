@@ -113,7 +113,7 @@ function renameSession(deps, data) {
       createdAt: session.createdAt,
       webuiSessionId: targetId,
       mode: session.mode || 'terminal',
-    }, { durable: true });
+    }, { durable: true, whole: true });   // r3141: a whole record from the live conversation (restates a torn one)
   }
   broadcastActiveSessions();
   return { ok: true, targetId, name: session.name };

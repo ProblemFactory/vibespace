@@ -668,7 +668,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 createdAt: session.createdAt,
                 webuiSessionId: id,
                 mode: session.mode,
-              }, { durable: true });
+              }, { durable: true, whole: true });   // r3141: a whole record from the live conversation (restates a torn one)
             }
             broadcastActiveSessions();
           }

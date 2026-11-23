@@ -2158,7 +2158,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                   createdAt: session.createdAt,
                   webuiSessionId: id,
                   mode: sessionMode,
-                }, { durable: true });
+                }, { durable: true, whole: true });   // r3141: a whole record from the live conversation (restates a torn one)
                 delete session._codexThreadBaseline;
                 delete session._captureReservedThreadId;
                 broadcastActiveSessions();
