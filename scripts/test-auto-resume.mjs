@@ -1729,7 +1729,11 @@ await (async () => {
   });
   const SRV_PF = 'persistFlag: (id, s) => { if (s && s.sockName) { try { patchSessionMeta(s.sockName, { autoResume: s._autoResume === undefined ? undefined : !!s._autoResume }, { owner: id }).then((ok) => { if (!ok) console.warn(`[auto-resume] ${id}: the auto-continue choice is kept in memory only — its meta could not be patched (a restart would forget it)`); }); } catch { } } }';
   ok('17c. PIN: server.js hands the core the store\'s patch as persistFlag (no read of the meta on the caller\'s road)', read('server.js').includes(SRV_PF) && /const \{ setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patchSessionMeta,/.test(read('server.js')));
-  const curedPF = (id, s2) => { if (s2 && s2.sockName) { try { so.patchSessionMeta(s2.sockName, { autoResume: s2._autoResume === undefined ? undefined : !!s2._autoResume }, { owner: id }); } catch { } } };   // = SRV_PF (its log aside)
+  // r3301 (B-3dbd unit 2): each patch's OWN promise is kept, so the leg waits on the patches' CHAIN settling, never on a clock
+  // that races the chain's own bound (on the pod a first link's read ran out its 10 s and the leg stopped looking at 10.5 s)
+  const pend = [];
+  const LINK_MS = Number((/const PATCH_LINK_MS = (\d+) \* 1000;/.exec(read('src/server/session-stdout.js')) || [])[1] || 10) * 1000, CHAIN_BOUND = 2 * LINK_MS + 5000;   // the product's own link bound, read from its source: two links (ON, OFF) and a margin
+  const curedPF = (id, s2) => { if (s2 && s2.sockName) { try { pend.push(so.patchSessionMeta(s2.sockName, { autoResume: s2._autoResume === undefined ? undefined : !!s2._autoResume }, { owner: id })); } catch { } } };   // = SRV_PF (its log aside; its promise kept)
   const oldPF = (id, s2) => { if (s2 && s2.sockName) { try { so.writeSessionMeta(s2.sockName, { ...(so.readSessionMeta(s2.sockName) || {}), autoResume: s2._autoResume === undefined ? undefined : !!s2._autoResume }); } catch { } } };   // the U2 tip's
   const SYNC = ['readFileSync', 'writeFileSync', 'renameSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync', 'openSync', 'writeSync', 'closeSync', 'fsyncSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'appendFileSync', 'copyFileSync', 'accessSync', 'realpathSync', 'readSync', 'fstatSync'];
   let calls = 0; const orig = {};
@@ -1746,6 +1750,9 @@ await (async () => {
     let armedOn = 0; const a0 = attrib;
     const inLoop = await count(async () => { ar.setEnabledAll(true); armedOn = [...active.keys()].filter((id) => ar.statusFor(id).armed).length; ar.setEnabledAll(false); });
     const after = await count(() => new Promise((r) => setTimeout(r, 500)));   // the reads off the loop land, the writer's thread writes
+    const t0c = Date.now(), mine = pend.splice(0);
+    await Promise.race([Promise.allSettled(mine), new Promise((r) => setTimeout(r, CHAIN_BOUND))]);   // the chain settled (each link ends by its own bound), then the disk below
+    const chainMs = Date.now() - t0c;
     // r2226 (1): THE LAST FLAG READ BY STATE. The OFF patch's write is the store writer's PACED write: when the ON patch's write
     // lands first (its read off the loop came late, as under five lanes), the OFF write waits its gap (½ s for a small file), and a
     // fixed read at 500 ms saw ON. The disk is read until the flag is OFF (bounded): the leg judges the flip, not the pace
@@ -1753,7 +1760,7 @@ await (async () => {
     const at500 = rd();
     let last = at500; for (const t0 = Date.now(); !(last && last.autoResume === false) && Date.now() - t0 < 10000;) { await new Promise((r) => setTimeout(r, 20)); last = rd(); }
     last = last || {};
-    return { inLoop, after, armedOn, flag: last.autoResume, name: last.name, attrib: attrib - a0, at500: at500 ? at500.autoResume : null };
+    return { inLoop, after, armedOn, flag: last.autoResume, name: last.name, attrib: attrib - a0, at500: at500 ? at500.autoResume : null, chainMs, patches: mine.length };
   };
   await flip(require(AR_PATH), curedPF, SETS[0]);   // warm: the meta folder is listed once per process (the store's first-version rule)
   const c5 = await flip(require(AR_PATH), curedPF, SETS[1]), c50 = await flip(require(AR_PATH), curedPF, SETS[2]);
