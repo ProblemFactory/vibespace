@@ -1018,7 +1018,7 @@ const LEGS = {
       'src/server/usage-pool-engine.js': [4, 'get_usage (stated), the codex push (another harness), the banner and its twins — the refusal door: both carry `refused`', 2],
       'src/server/stream-wall.js': [1, 'the stream wall — the refusal door (`refused`)', 1],
       'src/usage-routes.js': [9, 'the unsaid-change settle (the file itself), the panel and the OAuth answer (stated), host readings, the paired machine\'s mirror (the remote statusline: no device can write a refusal there — the device\'s file has one writer, the statusline hook), codex keys — measurements', 0],
-      'src/usage-cache-write.js': [1, 'writeReading: a typed producer (its set states its windows)', 0],
+      'src/usage-cache-write.js': [2, 'writeReading: a typed producer (its set states its windows); r3136: the owed replay — a reading refused while its file could not be read, written once the file reads (its own arguments, as given)', 0],
       'src/quota-model-migrate.js': [1, 'a repair (replace)', 0],
       'src/reading-repair.js': [1, 'a repair (replace)', 0],
     };

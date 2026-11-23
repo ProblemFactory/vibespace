@@ -3546,7 +3546,7 @@ console.log('㉔ r3136 (the store census, form 3 item 2): an account\'s reading 
   const ra = JSON.parse(fs.readFileSync(f, 'utf8'));
   const unk = RUK(ra);
   const whole = { fiveHour: { utilization: 0.3, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.5, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.97, resetsAt: nowSec + 3 * 86400 }], scopedFetchedAt: Date.now(), overage: { status: 'rejected', inUse: false }, fetchedAt: Date.now() + 1000, source: 'on-demand' };
-  if (QM.markScopedEnumeration) QM.markScopedEnumeration(whole); else whole[QM.SCOPED_ENUMERATED] = true;
+  QM.markScopedEnumeration(whole, true, 1);   // the panel's own parse: it enumerated its caps and named one
   W.writeCacheObject({ cacheDir: dir, key: KEY, obj: whole, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', authoritativeScopes: QM.authoritativeScopesOf(whole) });
   const rb = JSON.parse(fs.readFileSync(f, 'utf8'));
   ok(!!ra.startedAgain && ra.startedAgain.setAside === copies[0] && Array.isArray(unk) && ['plan:7d', 'model:*', 'overage'].every((x) => unk.includes(x)) && !unk.includes('plan:5h') && !rb.startedAgain && Array.isArray(RUK(rb)) && RUK(rb).length === 0,

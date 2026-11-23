@@ -59,6 +59,7 @@
 const fs = require('fs');
 const path = require('path');
 const quotaModel = require('./quota-model.js');
+const SR = require('./store-read.js');   // r3136: the store-read law's one answer (data / missing / unreadable / corrupt)
 
 /** THE cache filename rule, in ONE place. Every producer spelled this inline;
  *  a key that sanitises differently in two places is two different accounts. */
@@ -71,7 +72,10 @@ function cacheFileFor(cacheDir, key) {
 function isCacheFileName(fn) { return /\.json$/.test(fn) && !fn.startsWith('__models__'); }
 
 function readCacheObject(cacheDir, key) {
-  try { return readCacheJson(cacheFileFor(cacheDir, key)) || null; } catch { return null; }
+  // r3136: a read that FAILS (not «not there») marks the account unknown — a consumer that gates spend or placement asks
+  // readingUnread and HOLDS; a read that answers clears the mark only while no refused write is owed (it is replayed by the next write)
+  try { const v = readCacheJson(cacheFileFor(cacheDir, key)) || null; if (!_owed.has(String(key))) clearUnread(key); return v; }
+  catch (e) { if (!(e && e.code === 'ENOENT')) markUnread(key, e instanceof SyntaxError ? 'torn bytes' : ((e && e.code) || 'unreadable')); return null; }
 }
 /** THE CACHE MODULE'S READERS (lane lg-store-writes, B-0248 U6.1): every hub read of a file in the readings folder goes
  *  through these — so that when the folder's writes move off the main thread (U6.5) ONE place consults the pending copy
@@ -465,6 +469,104 @@ function atomicWrite(file, text, { replace = false } = {}) {
  *                                complete list — see `retireUnnamedScopes`.
  * @returns {{ok:boolean, why?:string, errors?:string[], limits?:Array, file?:string}}
  */
+// ── r3136 (the store census, form 3 item 2): AN ACCOUNT's READING FILE IS NEVER MERGED OVER A READ THAT FAILED ──────────────
+// «not there» (ENOENT: a first reading), «the read failed» (refused: EIO, a lock, a storage gone) and «the bytes do not parse» are
+// three answers (src/store-read.js). The read-merge-write stays SYNCHRONOUS (the readings' standing rule); nothing else is added
+// on the loop but the torn case's own copy.
+//  · FAILED: the write is REFUSED for that account and its reading is KEPT IN MEMORY (bounded: OWED_MAX an account, OWED_KEYS
+//    accounts; a restart forgets it) — replayed in order before the next write of that account whose read answers, because a
+//    reading may carry a WALL the next one does not state (an ordinary reading dropped is replaced by the next; a lost wall is
+//    not). Said ONCE an episode in the journal, by the account's kind and an opaque id only. While the mark stands every reader
+//    asked answers UNKNOWN for that account (readingUnread): a consumer that gates spend or placement HOLDS.
+//  · TORN BYTES: kept aside ONCE per content (`<file>.corrupt-<ms>`, compared byte for byte with the newest copies — no digest
+//    written under data/) BEFORE the name is written; then the reading starts the file again. No place for the copy ⇒ refused
+//    like a failed read (the live file is then their only copy).
+const OWED_MAX = 8, OWED_KEYS = 256, COPY_LOOK = 20;
+const _owed = new Map();      // key → [the refused writes' arguments], oldest first
+const _unread = new Map();    // key → { code, at }: the account's reading file did not answer
+const _unreadSaid = new Set();
+/** the account in a journal line: its kind and an OPAQUE id — never an address, an organisation id or a name holding either */
+function accountWord(key) {
+  const k = String(key || '');
+  if (k === '__global__') return "the hub's own login";
+  if (/^(sub|pool|acct|key)-[A-Za-z0-9]{4,40}$/.test(k)) return `account ${k}`;
+  return 'an account';
+}
+/** ONE read of a reading file → the law's answer, with its bytes */
+function readStored(file) {
+  let read;
+  try { const buf = fs.readFileSync(file); read = { text: buf.toString('utf-8'), buf }; } catch (e) { read = { error: e }; }
+  return { ...SR.storeAnswer(read), buf: read.buf || null };
+}
+/** torn bytes beside the file, ONCE per content → the copy's basename, or null (no place for it) */
+function keepTornAside(file, buf) {
+  const dir = path.dirname(file), head = path.basename(file) + '.corrupt-';
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => n.startsWith(head)).sort().slice(-COPY_LOOK); } catch { names = []; }
+  for (const n of names.reverse()) { try { const b = fs.readFileSync(path.join(dir, n)); if (b.length === buf.length && b.equals(buf)) return n; } catch { /* not this one */ } }
+  for (let k = 0; k < 5; k++) {
+    const to = path.join(dir, head + Date.now() + (k ? '-' + k : ''));
+    try { fs.writeFileSync(to, buf, { flag: 'wx', mode: 0o600 }); return path.basename(to); } catch (e) { if (!e || e.code !== 'EEXIST') return null; }
+  }
+  return null;
+}
+function markUnread(key, code) {
+  const k = String(key);
+  _unread.set(k, { code: String(code || 'unreadable'), at: Date.now() });
+  if (_unread.size > OWED_KEYS) _unread.delete(_unread.keys().next().value);
+  if (!_unreadSaid.has(k)) {
+    _unreadSaid.add(k);
+    try { console.warn(`[usage-write] ${accountWord(k)}: its reading file could not be read (${String(code || 'unreadable')}) — nothing is written over it; a reading for it waits in memory and is written once the file reads; until then the account reads unknown`); } catch { }
+  }
+}
+function clearUnread(key) {
+  const k = String(key);
+  if (_unread.delete(k) && _unreadSaid.delete(k)) { try { console.log(`[usage-write] ${accountWord(k)}: its reading file reads again`); } catch { } }
+}
+/** a refused write: the account marked unknown, its reading owed (never a replace's — the repair migration runs again) */
+function refuseUnread(key, code, args, replace) {
+  markUnread(key, code);
+  if (!replace && args) {
+    let l = _owed.get(key) || [];
+    l.push(args);
+    if (l.length > OWED_MAX) l = l.slice(-OWED_MAX);
+    _owed.delete(key); _owed.set(key, l);
+    if (_owed.size > OWED_KEYS) _owed.delete(_owed.keys().next().value);
+  }
+  return { ok: false, why: `refusing to write ${accountWord(key)}: its reading file could not be read (${String(code || 'unreadable')}) — nothing is written over it`, unread: true };
+}
+/** r3136 (主开发 r3146 (2)), PURE: the gating facts a file that STARTED AGAIN after torn bytes has not stated since — each reads
+ *  UNKNOWN for its own consumer: 'plan:5h' / 'plan:7d' (a reading that measured the window states it), 'model:*' (an absent
+ *  cap: only an enumerating reading states it), 'overage' (claude), 'spendControl' and 'resetCredits' (codex). [] = whole. */
+function restartUnknowns(obj) {
+  const sa = obj && typeof obj === 'object' ? obj.startedAgain : null;
+  if (!sa || typeof sa !== 'object') return [];
+  const at = Number(sa.at) || 0, out = [];
+  let lanes = [];
+  try { lanes = quotaModel.lanesOfReading(obj); } catch { lanes = []; }
+  const statedLane = (l) => sa.enumerated || lanes.some((x) => x.lane === l && (Number(x.at) || 0) >= at);
+  if (!statedLane('plan:5h')) out.push('plan:5h');
+  if (!statedLane('plan:7d')) out.push('plan:7d');
+  if (!sa.enumerated) out.push('model:*');
+  // the harness's own fact (src/backend-caps.js): a backend with stored reset credits states them and its spend control;
+  // the others state overage — never a branch on a harness id here
+  let credits = false;
+  try { credits = !!require('./backend-caps.js').capsOf(backendOfCacheObject(obj)).resetCredit; } catch { credits = false; }
+  if (!credits && !sa.overage) out.push('overage');
+  if (credits && !sa.spendControl) out.push('spendControl');
+  if (credits && !sa.resetCredits) out.push('resetCredits');
+  return out;
+}
+/** THE READING-DOOR's ONE READ (r3136): `null` = NOT THERE (a new account: «no reading», exactly as before), the reading, or
+ *  UNREAD_READING — the read FAILED or the bytes are torn: the account is marked unknown, never «no reading» */
+const UNREAD_READING = Object.freeze({ held: 'unread' });
+function readReading(file, key, { via = null } = {}) {
+  try { const v = readCacheJson(file, { via }); if (key != null && _owed.has(String(key))) return UNREAD_READING; if (key != null) clearUnread(key); return v; }
+  catch (e) { if (e && e.code === 'ENOENT') return null; if (key != null) markUnread(key, e instanceof SyntaxError ? 'torn bytes' : ((e && e.code) || 'unreadable')); return UNREAD_READING; }
+}
+/** r3136: { code, at } while the account's reading file did not answer (a reader asks it: unknown, never «no reading»), else null */
+function readingUnread(key) { const u = _unread.get(String(key)); return u ? { ...u, owed: (_owed.get(String(key)) || []).length } : null; }
+
 function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
   if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
   const file = cacheFileFor(cacheDir, key);
@@ -474,7 +576,28 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   // file can say which halves are which (carryUnmeasuredLimits).
   // (r5) a REPLACE reads it too, for the stored record's word on itself only (carryStamps below) — never its numbers
   let prevObj = null, storedObj = null;
-  try { storedObj = JSON.parse(fs.readFileSync(file, 'utf-8')) || null; } catch { storedObj = null; }
+  const args0 = arguments[0];
+  // r3136: the read's three answers — never «nothing stored» for a read that failed
+  let stored = readStored(file);
+  if (stored.state === 'unreadable') return refuseUnread(key, stored.code, args0, replace);
+  let tornKept = null;
+  if (stored.state === 'corrupt') {
+    const kept = keepTornAside(file, stored.buf);
+    tornKept = kept;
+    if (!kept) return refuseUnread(key, 'torn bytes, not kept aside', args0, replace);
+    try { console.warn(`[usage-write] ${accountWord(key)}: its reading file did not parse — its bytes are kept aside as ${kept}; this reading starts the file again`); } catch { }
+    stored = { state: 'missing' };
+  }
+  // the file answers: a write refused in the episode before is replayed FIRST, in order (a wall it stated is not lost)
+  if (!replace && _owed.has(key)) {
+    const owed = _owed.get(key); _owed.delete(key);
+    for (const a of owed) { try { writeCacheObject(a); } catch { } }
+    stored = readStored(file);
+    if (stored.state !== 'data' && stored.state !== 'missing') return refuseUnread(key, stored.code || 'torn bytes', args0, replace);
+    if (stored.state === 'data') tornKept = null;   // the replay started the file again (its mark is on it): this write merges over that
+  }
+  clearUnread(key);
+  storedObj = stored.state === 'data' ? (stored.value || null) : null;
   if (!replace) prevObj = storedObj;
   let prevSet = quotaModel.makeLimitSet({ identity: key });
   if (prevObj) {
@@ -595,6 +718,26 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
     if (view.resetCredits !== undefined) out.resetCredits = view.resetCredits;
     else if (prevObj && prevObj.resetCredits && typeof prevObj.resetCredits === 'object') out.resetCredits = prevObj.resetCredits;
   }
+  // r3136 (主开发 r3146 (2)): AFTER TORN BYTES THE FILE IS NOT A WHOLE READING. The first reading starts it again and the facts
+  // it did not state are LOST, not «absent»: `startedAgain` says so — the instant, the copy, and what has been STATED since (a
+  // lane a reading measured is stated by its own age; an ENUMERATING reading — the panel's, the approved automatic read's —
+  // states every plan window and cap, the absent ones included; overage, spend control and reset credits by a reading that
+  // carries them). Kept on every write until all are stated; a consumer reads each fact not yet stated as UNKNOWN for its
+  // own decision only (restartUnknowns). Never on a REPLACE (the repair names what survives).
+  if (!replace) {
+    const was = tornKept ? { at, setAside: tornKept, enumerated: false, overage: false, spendControl: false, resetCredits: false }   // `at` = this reading's own instant: what it states is stated
+      : (prevObj && prevObj.startedAgain && typeof prevObj.startedAgain === 'object' ? prevObj.startedAgain : null);
+    if (was) {
+      const sa = { ...was };
+      // an ENUMERATING reading (the producer's own parse enumerated its caps — the panel, the approved automatic read): it states
+      // every cap, an empty list meaning «no cap» FOR THIS MARK ONLY (it retires nothing: the retire rule above is unchanged)
+      if ((Array.isArray(authoritativeScopes) && authoritativeScopes.length) || quotaModel.scopedEnumeration(obj) || quotaModel.scopedEnumeration(stated)) sa.enumerated = true;   // `stated` = the enumerating producer's own parse (its flag is not spread)
+      if (obj && obj.overage && typeof obj.overage === 'object') sa.overage = true;
+      if (obj && obj.spendControlReached !== undefined) sa.spendControl = true;
+      if (obj && obj.resetCredits !== undefined) sa.resetCredits = true;
+      if (restartUnknowns({ ...out, startedAgain: sa }).length) out.startedAgain = sa; else delete out.startedAgain;
+    } else delete out.startedAgain;
+  }
   // `fetchedAt` IS NEVER INVENTED HERE. It means "this file was promoted to
   // freshest at t", the producers own that decision (the sibling fan-out
   // deliberately withholds it), and the repair writes an identity-only remnant
@@ -662,6 +805,7 @@ module.exports = {
   cacheFileFor, isCacheFileName, readCacheObject, readCacheJson, listCacheDir,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
+  readingUnread, readReading, UNREAD_READING, restartUnknowns, // r3136: unknown, never «no reading»; after torn bytes, each fact until stated
   carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading, onVendorReset, noteVendorResets, noteDirectWrite, onLanesRead, lanesReadAt,
   onWritten, noteWritten,
   DERIVED_KEYS,

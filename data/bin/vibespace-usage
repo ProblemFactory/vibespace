@@ -557,6 +557,19 @@ function slotStateFile(p) {
   const id = String((p && p.session_id) || path.basename(process.env.VIBESPACE_ACCOUNT_LINK || '')).replace(/[^\w.-]/g, '_');
   return id ? path.join(CACHE_DIR, '.slot-' + id.slice(0, 80)) : null;
 }
+/** r3136: torn bytes beside the file, ONCE per content (the newest twenty copies compared byte for byte; no digest written under
+ *  the data folder) → the copy's basename, or null (no place for it: the live file stays their only copy, nothing is written) */
+function keepTornAside(f, buf) {
+  const dir = path.dirname(f), head = path.basename(f) + '.corrupt-';
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => n.startsWith(head)).sort().slice(-20); } catch { names = []; }
+  for (const n of names.reverse()) { try { const b = fs.readFileSync(path.join(dir, n)); if (b.length === buf.length && b.equals(buf)) return n; } catch { /* not this one */ } }
+  for (let k = 0; k < 5; k++) {
+    const to = path.join(dir, head + Date.now() + (k ? '-' + k : ''));
+    try { fs.writeFileSync(to, buf, { flag: 'wx', mode: 0o600 }); return path.basename(to); } catch (e) { if (!e || e.code !== 'EEXIST') return null; }
+  }
+  return null;
+}
 function readSlotState(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } }
 function writeSlotState(f, st, fresh) {
   try {
@@ -651,8 +664,17 @@ function writeUsage(p) {
   // five_hour say «no 5h limit» (r4; the witness block above, mirrored from src/quota-model.js).
   const fiveHour = win(rl.five_hour);
   const sevenDay = win(rl.seven_day);
-  let prev = null;
-  try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch {}
+  let prev = null, tornKept = null;
+  // r3136 (the store census, form 3 item 2): «NOT THERE» IS TOLD FROM «THE READ FAILED» AND FROM «THE BYTES DO NOT PARSE» — the
+  // hub's writer (src/usage-cache-write.js) has the same rule. A read that FAILED writes NOTHING over the file: this render's
+  // reading is dropped (a render is its own process: nothing can wait in memory), and the next render states it again within
+  // seconds while the conversation runs. TORN BYTES are kept aside ONCE per content (compared byte for byte with the newest
+  // copies), then this render starts the file again, marked `startedAgain` (what it did not state is unknown, not absent).
+  {
+    let buf = null;
+    try { buf = fs.readFileSync(f); } catch (e) { if (!(e && e.code === 'ENOENT')) return; }
+    if (buf) { try { prev = JSON.parse(buf.toString('utf-8')); } catch { tornKept = keepTornAside(f, buf); if (!tornKept) return; prev = null; } }
+  }
   // STATE WHAT YOU MEASURED; KEEP EVERYTHING ELSE BY CONSTRUCTION (r2).
   //
   // This used to be an object literal that ENUMERATED the fields worth
@@ -695,6 +717,8 @@ function writeUsage(p) {
     scopedWeekly: scopedMeasured.length ? [...prevScoped.filter((s) => !measuredName(s)), ...scopedMeasured] : prevScoped,
     overallStatus: ((five && five.status === 'limited') || (sevenDay && sevenDay.status === 'limited')) ? 'limited' : 'allowed',
     fetchedAt: now, source: 'passive',
+    // r3136: after torn bytes this render starts the file again — a whole reading only once every gating fact is stated again
+    ...(tornKept ? { startedAgain: { at: now, setAside: tornKept, enumerated: false, overage: false, spendControl: false, resetCredits: false } } : {}),
   };
   // THE LIMITS THIS PRODUCER MEASURED ARE THE ONES IT DROPS. `limits` is the
   // canonical half (src/usage-cache-write.js) and every entry carries its own
