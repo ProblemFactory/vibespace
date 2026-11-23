@@ -33,6 +33,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE REMOVER BY ITS SILENCE (r3019): the Vault row's Remove of an orphaned key refuses a key a kept torn copy names (`providers_torn_named`).
 - TESTS: scripts/test-provider-store-held.mjs (NEW, fast; red copies: no hold, no copy check).
 
+### bl-browser-b — r3008: browser-forgotten.json under the store-read law (one chain: bl-jobs' f43b21128 first, the tree's one hold)
+- THE FIND (lane bl-machines-b's census, batch 3): src/server/browser-trace.js `loadForgotten` took ANY failed read as an empty ledger and the next Forget / Delete wrote that over the file — the rows naming the moved-aside `.forgotten-` folders (with their sign-ins) were lost, the folders stayed on disk with no row.
+- THE CURE, on src/store-read-hold.js: its one read at the start answers through `storeAnswer`; unreadable ⇒ HELD (no rows known, `forgottenUnread` in the housekeeping view and its panel line en/zh/ja, the two Forgets and the Delete refused 503 `forgotten_unread` before anything moves, nothing written, read again off the loop); torn ⇒ kept aside once, then empty, the panel saying in place that the list was damaged and where its bytes are kept (`forgottenDamaged`, r3104: never «restore that copy»).
+- THE REMOVER QUESTION (r3019): NO REMOVER — a `.forgotten-` folder is removed only by deleteForgotten (a person's click on a named row); orphanCandidates skips `.forgotten-` names; nothing else lists or removes them (read over the tree: every use of isForgottenName / FORGOTTEN_SUFFIX / forgottenDirName / loadForgotten).
+- LEGS: test-browser-housekeeping ③b — two placed refusals (a ledger that does not parse; one this process may not read): refused by name, never written over, the same rows after the read again, torn bytes kept aside byte for byte, a Forget afterwards as before (RED at the candidate d458fc27d: run 483b263b6-20261123064018-box, 4 ✗); test-store-write-census ⑧ gains its answer row.
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)

@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - When the accounts file cannot be read, VibeSpace keeps it untouched, changes nothing and starts no conversation on another login until it reads again.
+- If the list of browsers you set aside cannot be read, VibeSpace now says so and keeps it instead of starting it empty, so those browsers can still be deleted.
 
 ## 2.369.416 — 2026-11-23
 
