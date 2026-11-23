@@ -44,6 +44,14 @@ function editAnchor(text, from, to, file, mode = 'one') {
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** THE DOOR OPEN, waited for by its own state (主开发 r2827): the door says open and its path is a socket — asked every 10 ms up to
+ *  `ms`; at the bound the answer says NOT open (a verdict never rests on a fixed sleep) → { open, state, waitedMs } */
+const isSock = (p) => { try { return fs.lstatSync(p).isSocket(); } catch { return false; } };
+async function untilOpen(door, sock, ms = 10000) {
+  const t0 = Date.now(), opened = () => door.state().open === true && isSock(sock);
+  while (Date.now() - t0 < ms && !opened()) await sleep(10);
+  return { open: opened(), state: door.state(), waitedMs: Date.now() - t0 };   // a fresh read after the loop: open, or NOT open at the bound
+}
 const leg = async (name, fn) => { try { await fn(); } catch (e) { ok(false, `${name} ran to its end`, e && e.stack); } };
 const MUT = mutantCopies('apps-ops-door', repo);
 
@@ -197,10 +205,31 @@ await leg('§4', async () => {
   let a;
   try { a = W.install({ app: { use() { } }, access: STUB.create({ log: quiet, delayMs: 5 }), dataDir: path.join(root, 'wiring'), log: quiet, throwawayRoot: false, env: {} }); } finally { process.env.HOME = prev; }
   ok(a.door && a.door.path === sock && !fs.existsSync(sock), 'install() (server.js runs it BEFORE listen): the door exists, nothing listens');
+  // afterListen() STARTS the door's open and resolves with the replay, not with the door (src/server/apps-wiring.js): the law is the
+  // ORDER (after afterListen the door opens), so the leg waits for the door's own state, bounded, and names it at the bound
   await a.afterListen();
-  await sleep(50);
-  ok(a.door.state().open === true && fs.lstatSync(sock).isSocket(), 'afterListen(): the operator door is open (server.js calls it 2.5 s after listen)');
+  const got = await untilOpen(a.door, sock, 10000);
+  ok(got.open, `afterListen(): the operator door is open (server.js calls it 2.5 s after listen)${got.open ? '' : ` — NOT OPEN within 10 s: ${JSON.stringify(got.state)}, a socket at the path: ${isSock(sock)}`}`);
   await a.door.close();
+  // RED CONTROL (主开发 r2827): the door's open HELD (a placed stall the test releases, not a duration). The release's read — a fixed
+  // 50 ms, then the state — says NOT open while the hold stands; the bounded wait sees the door open once the hold is released.
+  {
+    const home2 = homeOf('wiring-held'), sock2 = D.socketPath(home2);
+    process.env.HOME = home2;
+    let b;
+    try { b = W.install({ app: { use() { } }, access: STUB.create({ log: quiet, delayMs: 5 }), dataDir: path.join(root, 'wiring-held'), log: quiet, throwawayRoot: false, env: {} }); } finally { process.env.HOME = prev; }
+    const realOpen = b.door.open;
+    let release = null, held = 0;
+    const hold = new Promise((r) => { release = r; });
+    b.door.open = () => { held++; return hold.then(() => realOpen()); };
+    await b.afterListen();
+    await sleep(50);
+    const releaseRead = b.door.state().open === true && isSock(sock2);   // the release's form: a fixed sleep, then the read
+    release();
+    const waited = await untilOpen(b.door, sock2, 10000);
+    ok(held === 1 && !releaseRead && waited.open, `RED CONTROL: with the door's open held, the release's fixed 50 ms read says NOT open (${releaseRead ? 'it said open' : 'not open'}); once the hold is released, the bounded wait sees it open (${waited.open ? `in ${waited.waitedMs} ms` : 'NOT OPEN within 10 s'})`);
+    await b.door.close();
+  }
   const srv = fs.readFileSync(path.join(repo, 'server.js'), 'utf8');
   ok(/setTimeout\(\(\) => appsWiring\.afterListen\(\), 2500\)/.test(srv) && !/apps-ops-door/.test(srv), 'server.js unchanged: the door rides the apps wiring\'s afterListen (no second boot-path line)');
 });
