@@ -661,7 +661,9 @@ export async function showConnectAccountDialog(app, kinds, { kind = null, flowId
     const r = await post(`/api/channels/adapters/${enc(k.kind)}/connect`, { flowId, name: v.name || undefined, options: optionValues(v, k.optionsSchema, sfx, 1), ...choiceBody(v, sfx) });
     if (steps) steps.connected();
     close();
-    showToast(tr('{name} connected', { name: r && r.adapter ? accountName(r.adapter) : (v.name || k.label) }));
+    const connected = r && r.adapter ? accountName(r.adapter) : (v.name || k.label);
+    showToast(tr('{name} connected', { name: connected }));
+    joinedToast(r, connected);
   }, { id: 'chan-account-connect', onClose: () => endNeedingDialog() });
   ctx.body.dataset.chanDialog = 'connect';
   // lane pod-oauth-callback: choosing a company preset that names an option's value (the Lark app's brand) sets it
@@ -936,6 +938,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
     const d = await post(`/api/channels/adapters/${enc(a.id)}/duplicate`, { name: vals.name || copyName });
     dupId = d.adapter.id;
     createdName = vals.name || copyName;
+    joinedToast(d, createdName);
     const patch = {};
     const opts = changedOptions(vals, spec.optionsSchema, cfg.options || {}, 1);
     if (Object.keys(opts).length) patch.options = opts;
@@ -995,6 +998,14 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
 }
 
 // ── REMOVE (§8.1 #5, D5: refused BY NAME while referenced) ────────────────
+/** r2878 + r2943 (B-92fc): what is left of a removed account's local copy, by kind, in the person's words (none named = its local copy) —
+ *  the removal's toast, the Channels panel's line and the add's note read the same words */
+export function purgeLeftText(left) {
+  const KINDS = { logs: tr('its messages'), files: tr('its fetched files'), own: tr('its pictures and memos') };
+  return Array.isArray(left) && left.length ? left.map((k) => KINDS[k] || tr('its local copy')).join(', ') : tr('its local copy');
+}
+/** r2943 (B-92fc, L3): an account added under the id of a removed one whose local copy was not all removed — said ONCE, at the add */
+function joinedToast(r, name) { if (r && r.leftJoined) showToast(tr('"{name}" was added under the id of a removed account whose local copy was not all removed — what was left ({left}) is now part of this account', { name, left: purgeLeftText(r.leftJoined.left) }), { type: 'warn', duration: 12000 }); }
 /** Remove an account: confirm → DELETE; `409 account-referenced` opens the
  *  refusal naming each reference. Resolves true when the account is gone. */
 export async function removeAccount(app, a) {
@@ -1007,8 +1018,9 @@ export async function removeAccount(app, a) {
   const r = await fetchJson(`/api/channels/adapters/${enc(a.id)}`, { method: 'DELETE' });
   if (r && r.code === 'account-referenced') { showRemoveRefusedDialog(app, a, (r.detail && r.detail.refs) || []); return false; }
   if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return false; }
-  // 主开发 r2878 (B-92fc): part of its local copy COULD NOT be removed now — what is left, by kind, and that it is tried again
-  if (r && Array.isArray(r.purgeLeft) && r.purgeLeft.length) { const KINDS = { logs: tr('its messages'), files: tr('its fetched files'), own: tr('its pictures and memos') }; showToast(tr('Removed "{name}" — {left} could not be removed from disk now; VibeSpace tries again when it starts', { name, left: r.purgeLeft.map((k) => KINDS[k] || k).join(', ') }), { type: 'warn', duration: 12000 }); return true; }
+  // 主开发 r2878 + r2943 (B-92fc): part of its local copy COULD NOT be removed now — what is left, by kind, and that the Channels panel lists
+  // it with «Try again» (or that it could not be noted there); a journal owed beside it is said in the same toast
+  if (r && Array.isArray(r.purgeLeft) && r.purgeLeft.length) { const left = purgeLeftText(r.purgeLeft); showToast((r.markUnwritten ? tr('Removed "{name}" — {left} could not be removed from disk now, and VibeSpace could not note it to list it again', { name, left }) : tr('Removed "{name}" — {left} could not be removed from disk now; the Channels panel lists it with Try again', { name, left })) + (r.journalOwed ? ' ' + tr('Some of its saved data is not erased from disk yet either; it is erased when the disk takes the next write') : ''), { type: 'warn', duration: 12000 }); return true; }
   // B-360d unit 1 (r1542 (1)): a removal whose journal is not rewritten yet says so — some of its data stays on disk until then
   if (r && r.journalOwed) { showToast(tr('Removed "{name}" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write', { name }), { type: 'warn', duration: 9000 }); return true; }
   showToast(tr('Removed "{name}"', { name }));

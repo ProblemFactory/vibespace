@@ -400,6 +400,12 @@ router.post('/api/channels/adapters/:id/duplicate', async (req, res) => {
 router.delete('/api/channels/adapters/:id', async (req, res) => {
   try { forHost(req); if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return; res.json(await engine().remove(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
 });
+/** TRY AGAIN (r2943, B-92fc): the Channels panel's line naming what is left of a removed account's local copy — its purge once more, a
+ *  PERSON's press (nothing removes it by itself). `404 not-pending`; `409 records-held` / `record-stands` / `records-unwritten` / `bad-id`
+ *  by name, nothing removed → `{ok, id, done, purgeLeft?}` */
+router.post('/api/channels/purge-left/:id/retry', async (req, res) => {
+  try { forHost(req); if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return; res.json(await engine().purgeAgain(req.params.id)); } catch (e) { fail(res, e); }
+});
 /** THE OWNER'S CONFIG (D3): every parameter the Edit dialog prefills — never the custom client's secret (THE WRITE-ONLY
  *  LAW, lane ui-controls-and-bugs: `client.secretSet` says it is held). Cookie-auth only, never broadcast, never logged, never an
  *  agent route (the agent surface is /api/agent/channels/* and does not

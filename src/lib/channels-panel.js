@@ -92,7 +92,23 @@ import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
 import './channel-outbox.js';
 // r4 (design-integrations-per-account, chunk 3): the account dialogs — every
 // one the storage dialog component (src/lib/mounts-dialog.js, D1)
-import { accountEnableDoor, showConnectAccountDialog, showReauthAccountDialog, showEditAccountDialog, showDuplicateAccountDialog, removeAccount, accountName, clientChipText, providerOf } from './channel-account-dialogs.js';
+import { accountEnableDoor, showConnectAccountDialog, showReauthAccountDialog, showEditAccountDialog, showDuplicateAccountDialog, removeAccount, accountName, clientChipText, providerOf, purgeLeftText } from './channel-account-dialogs.js';
+/** r2943 (B-92fc, L1): one removed account's leftovers on the first screen — what is left, and «Try again», the person's press (nothing
+ *  removes it by itself; a second press while one runs waits for it — the control stays live) */
+function purgeLeftLine(p) {
+  const purgeNote = noteLine('chan-purge-left-note', t('A removed account ({id}): {left} could not be removed from disk — nothing removes it by itself', { id: p.id, left: purgeLeftText(p.left) }), { warn: true });
+  let busy = null;
+  purgeNote.appendChild(btn(t('Try again'), () => {
+    if (busy) return;
+    busy = (async () => {
+      const r = await fetchJson(`/api/channels/purge-left/${encodeURIComponent(p.id)}/retry`, { method: 'POST' });
+      if (!r || r.error) showToast(routeErrorText(r), { type: 'error' });
+      else if (r.done) showToast(t('The rest of the removed account {id} was removed from disk', { id: p.id }));
+      else showToast(t('{left} of the removed account {id} could still not be removed — it stays listed', { id: p.id, left: purgeLeftText(r.purgeLeft) }), { type: 'warn', duration: 9000 });
+    })().catch(() => { }).finally(() => { busy = null; });
+  }));
+  return purgeNote;
+}
 import { enterSubmits } from './chat-enter-keys.js';
 
 /** A short, honest freshness chip. The server sends `{kind, state, seconds}`
@@ -1680,6 +1696,9 @@ export function renderChannelsPanel(app, c) {
         continue;
       }
     }
+    // r2943 (B-92fc, L1): WHAT IS LEFT of a removed account's local copy — said HERE, on the first screen, with its one press: nothing
+    // removes it by itself (never at a start, never on a timer); «Try again» is the person's
+    for (const pl of (d && d.purgeLeft) || []) into.appendChild(purgeLeftLine(pl));
 
     // ── THE FIRST SCREEN: the group list (ONE element across draws, its rows reconciled) ──
     const listEl = keep('groups', () => { const l = document.createElement('div'); l.className = 'chan-groups'; return l; });

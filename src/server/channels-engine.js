@@ -3343,6 +3343,7 @@ function create(deps = {}) {
       // unexplained in the panel
       paused: indexHeld() ? pausedFacts() : null,   // B-f276 A3 (r566 #8): the first screen is never an empty inbox as the truth
       quarantined: (store.quarantined || []).map(({ file, to, why, kind, at, blocked, held, lifts, readsAt, readsAs, loadedAt, done }) => ({ file, to: to || null, why, kind: kind || null, at, blocked: !!blocked, held: !!held, lifts: lifts || null, readsAt: readsAt || null, readsAs: readsAs || null, loadedAt: loadedAt || null, done: !!done })),   // B-f276: a HELD file and what lifts it
+      purgeLeft: store.pendingList ? store.pendingList() : [],   // r2943 (B-92fc, L1): what is left of a removed account — the panel's line and its «Try again»
       judging: attention.on(),   // lane decision-attention: the LLM plugin judges the first screen (the account ⋯ "never judge" row)
       at: t,
     };
@@ -9894,7 +9895,7 @@ function create(deps = {}) {
   const {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,
     newRecord, mountClientsFor, viewOptions, startOAuth, oauthStatus, oauthCancel, consentLandingOf, oauthLanding, oauthCallback, connect, reauthorize,
-    recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, setupView, duplicate,
+    recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, purgeAgain, setupView, duplicate,
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,
     connectOffer, connectOffers, connectTaught, consentChainOf,
@@ -10525,6 +10526,7 @@ function create(deps = {}) {
     duplicate: ['refused', 'async', 'refused while paused (no allow row): adds a new record to adapters.json only, no rows, no grants channels-auth.js:1291'],
     referencesOf: ['refused', 'sync', 'refused while paused (no allow row): an index read channels-auth.js:1153 + accountGrainOf index table answer the empty held list; grants + outbox still read'],
     remove: ['refused', 'async', 'removeRecord runs CG.removeAccount channels-auth.js:1208 before an index write :1218: held ⇒ grants gone, rows kept; the empty referencesOf passes the reference check'],
+    purgeAgain: ['refused', 'async', 'r2943 (B-92fc): a person’s Try again on the panel line of a removed account’s leftovers — the store purge refuses by name while adapters.json is not read or a record carries the id; no index read'],
     setLabel: ['refused', 'async', 'refused while paused (no allow row): adapters.json label + clientSwapCheck channels-auth.js:1301'],
     setCustomSecret: ['refused', 'async', 'refused while paused (no allow row): adapters.json credential only channels-auth.js:1317'],
     adapterConfig: ['refused', 'sync', 'refused while paused (no allow row): a view of the record channels-auth.js:1329'],
@@ -10754,7 +10756,7 @@ function create(deps = {}) {
     // r4 (design-integrations-per-account): the account's own client, the
     // transient consent, duplicate / remove with its reference check, the
     // owner-only config (D3), the in-place edits and the legacy own → custom copy
-    clientFor, startOAuth, oauthStatus, oauthCancel, oauthCallback, oauthLanding, consentLandingOf, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
+    clientFor, startOAuth, oauthStatus, oauthCancel, oauthCallback, oauthLanding, consentLandingOf, duplicate, referencesOf, remove, purgeAgain, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
     inlineLegacyClient, inlineLegacyClients, DUPLICATE_FIELDS, DUPLICATE_NEVER,
     // a fresh record of a connectable type, never stored — the suites' baseline for "a copy differs only where DUPLICATE_FIELDS says"
     blankRecord: (kind) => newRecord(connectableFor(kind), { id: kind }),

@@ -380,6 +380,9 @@ function create(engineCtx) {
     if (!choice || !choice.fromMount) return null;
     return { mountId: String(choice.fromMount.mountId), name: cleanLabel(choice.fromMount.name), clientIdPrefix: String((choice.credential && choice.credential.appId) || '').slice(0, 12) };
   }
+  // r2943 (L3): an account added under the id of a removed one whose local copy was not all removed — what was left is now part of this
+  // one: said ONCE in the add's answer (the store said it in the journal) → {} | { leftJoined: { left: [kinds] | null } }
+  const joinedNote = async (id) => { let j = null; try { j = store.joinedOf ? await store.joinedOf(id) : null; } catch { j = null; } return j ? { leftJoined: { left: j.left } } : {}; };
   const withMount = (answer, choice) => { const m = mountNamed(choice); return m ? { ...answer, fromMount: m } : answer; };
   /** ONE audit line per copy a verb BEGINS a consent with (start / connect /
    *  re-authorize — Connect's re-check of the same client is not a copy). */
@@ -903,9 +906,10 @@ function create(engineCtx) {
     try { flow = await e.adapter.auth.begin(); noteChain(flow, null, null); }
     catch (err) { dropLive(rec.id, 'connect refused'); paceCarry.delete(rec.id); throw err; }   // a refused begin on a fresh record leaves nothing behind (not even its ghost bucket)
     await store.adapters.update((a) => { a.adapters.push(rec); });
+    const joined = await joinedNote(rec.id);
     auditMountCopy(choice, mod, rec.id);
     notify([]);
-    return withMount({ adapter: adapterView(rec), flow: safeFlow(flow) }, choice);
+    return withMount({ adapter: adapterView(rec), flow: safeFlow(flow), ...joined }, choice);
   }
   async function connectFromFlow(mod, b) {
     sweepPending();
@@ -955,13 +959,14 @@ function create(engineCtx) {
     // pending's newest token and becomes where the later pages write (memTokens forwards to the account's own door)
     const chained = [...chainPending.values()].includes(p);
     await store.adapters.update((a) => { if (chained) { Object.assign(rec.auth, { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, morePending: p.tokenMeta.morePending || 0, morePendingScopes: p.tokenMeta.morePendingScopes || [], nextPageCount: p.tokenMeta.nextPageCount || 0, morePendingPages: p.tokenMeta.morePendingPages || 0 }); p.connectedId = rec.id; } a.adapters.push(rec); });   // int349: the newest page's counts too (channel-row-notices' row)
+    const joined = await joinedNote(rec.id);
     const e = adapterFor(rec);
     await refreshAuth(e);
     log.log(`[channels] ${rec.id}: connected${rec.auth.user ? ` as ${rec.auth.user}` : ''} (${rec.credentialKey})`);
     notify([]);
     if (!engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after connect failed:', err && err.message));
     if (!engineCtx.stopped && engineCtx.timer) syncPushLanes().catch(() => {});
-    return withMount({ adapter: adapterView(rec), flow: null }, p.choice);   // verify r3: which mount's client this account was minted under
+    return withMount({ adapter: adapterView(rec), flow: null, ...joined }, p.choice);   // verify r3: which mount's client this account was minted under
   }
   /** RE-AUTHORIZE one ACCOUNT by its adapter id (the mount semantics, r4
    *  §2.4): the SAME client ⇒ its consent begins under it (a custom client
@@ -1201,8 +1206,9 @@ function create(engineCtx) {
     // B-360d unit 1, 主开发 r1542 (1): «forget its data» whose journal could not be rewritten now says so to the PERSON — removed,
     // with bytes of it still in the index's journal on disk until the storage takes the retry (never only a log line and an audit row)
     // `note`: a LOG-GRADE field, English only (主开发 r2455) — the panel words journalOwed from its own tr() key, in every language
-    // 主开发 r2878: part of its local copy COULD NOT be removed now — the person is told what is left (its kinds) and that it is tried again
-    if (purged && Array.isArray(purged.left) && purged.left.length) return { ok: true, removed: true, id: rec.id, purgeLeft: purged.left.slice(), ...(purged.journalClean === false ? { journalOwed: true } : {}), note: 'removed — part of its local copy could not be removed now; it is tried again when VibeSpace starts' };
+    // 主开发 r2878 + r2943: part of its local copy COULD NOT be removed now — the person is told what is left (its kinds) and that the
+    // Channels panel lists it with «Try again» (nothing removes it by itself), or that it could not be noted there (markUnwritten)
+    if (purged && Array.isArray(purged.left) && purged.left.length) return { ok: true, removed: true, id: rec.id, purgeLeft: purged.left.slice(), ...(purged.journalClean === false ? { journalOwed: true } : {}), ...(purged.markUnwritten ? { markUnwritten: true } : {}), note: purged.markUnwritten ? 'removed — part of its local copy could not be removed now, and it could not be noted for the Channels panel (purge-pending.json not written)' : 'removed — part of its local copy could not be removed now; the Channels panel lists it with Try again' };
     if (purged && purged.purged && purged.journalClean === false) return { ok: true, removed: true, id: rec.id, journalOwed: true, note: 'removed — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write' };
     return { ok: true, removed: true, id: rec.id };
   }
@@ -1227,10 +1233,14 @@ function create(engineCtx) {
       if (ix.accountAssignments) delete ix.accountAssignments[rec.id];
       if (ix.patternAssignments) for (const [id, pa] of Object.entries(ix.patternAssignments)) if (pa && pa.adapterId === rec.id) delete ix.patternAssignments[id];
     }, { durable: true });
-    // 主开发 r2878: a purge's MARK on disk BEFORE the record leaves — a crash from here on is finished by the next start
-    if (purgesOnRemove(rec) && typeof store.purgeBegin === 'function') { const marked = await store.purgeBegin(rec.id).catch(() => false); if (marked === false) log.warn(`[channels] ${rec.id}: the purge's mark could not be written — a crash in the middle of this removal would leave its local copy for a person to remove`); }
-    await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); });
-    return purgeIfDeclared(rec);   // r1542 (1): its answer reaches the person (remove())
+    // 主开发 r2878 + r2943: the purge's MARK on disk BEFORE the record leaves — a crash from here on leaves its local copy LISTED on the
+    // Channels panel (never removed by itself); a mark not written is answered to the person with what is left (markUnwritten)
+    let marked = true;
+    if (purgesOnRemove(rec) && typeof store.purgeBegin === 'function') { marked = await store.purgeBegin(rec.id).catch(() => false); if (marked === false) log.warn(`[channels] ${rec.id}: the purge's mark could not be written — a crash in the middle of this removal would leave its local copy unlisted, for a person to remove`); }
+    try { await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); }); }
+    catch (e) { try { if (store.purgeNotBegun) store.purgeNotBegun(rec.id); } catch { } throw e; }
+    const purged = await purgeIfDeclared(rec);   // r1542 (1): its answer reaches the person (remove())
+    return marked === false && purged && Array.isArray(purged.left) && purged.left.length ? { ...purged, markUnwritten: true } : purged;
   }
   /** design 012: THE SETUP REPORT an adapter writes into its record's state (`state.setup.probes` — the first real
    *  install's answers, by name): a closed list of names, each value a short word, a boolean or a list of scope names. */
@@ -1263,13 +1273,38 @@ function create(engineCtx) {
     let journalClean = true;
     try { if (store.index.journalDurable) journalClean = (await store.index.journalDurable()) !== false; } catch { journalClean = false; }
     if (!journalClean) log.warn(`[channels] ${rec.id}: removed — its rows left index.json, but the index's journal could not be rewritten now (the storage did not take it): its older lines leave at the next compaction`);
+    // r2943 (L2): a purge REFUSED by name (the accounts' records not read, a record under the id, a bad id) — NOTHING was removed: its
+    // local copy is answered as left, whole, and stays listed (its mark stands)
+    if (r && r.refused) {
+      log.warn(`[channels] ${rec.id}: removed, but its local copy was NOT removed (${r.refused}: ${r.error})`);
+      try { store.audit({ kind: 'account', op: 'purge-refused', id: rec.id, why: r.refused, at: now() }); } catch {}
+      return { purged: false, left: ['logs', 'files', 'own'], proposals: ended.length, journalClean, refused: r.refused };
+    }
     // 主开发 r2878: ONE OF THREE a folder — removed, was not there, COULD NOT BE REMOVED; «purged» only when nothing is left
     const said = (k, what) => (r.states && r.states[k] ? (r.states[k].state === 'removed' ? what : r.states[k].state === 'absent' ? `no ${what}` : `${what} NOT removed (${r.states[k].code})`) : what);
     const left = Array.isArray(r.left) ? r.left : [];
-    if (left.length) log.warn(`[channels] ${rec.id}: removed, but part of its local copy could NOT be removed now (${left.map((x) => `${x.folder}: ${x.code}`).join('; ')}) — kept in purge-pending.json, finished at the next start or the next removal`);
+    if (left.length) log.warn(`[channels] ${rec.id}: removed, but part of its local copy could NOT be removed now (${left.map((x) => `${x.folder}: ${x.code}`).join('; ')}) — listed on the Channels panel with Try again (nothing removes it by itself)`);
     else log.log(`[channels] ${rec.id}: removed with its local copy (${said('logs', 'message logs')}, ${said('files', 'fetched files')}, ${said('own', 'pictures and memos')}, ${ended.length} ended proposal(s)) — the adapter declares purge-on-remove`);
     try { store.audit({ kind: 'account', op: left.length ? 'purge-left' : journalClean ? 'purge' : 'purge-owed', id: rec.id, proposals: ended.length, ...(left.length ? { left: left.map((x) => x.folder) } : {}), at: now() }); } catch {}
-    return { purged: !left.length, left: left.map((x) => x.what), proposals: ended.length, journalClean };   // r1542 (1): the person's answer says a failed compaction
+    return { purged: !left.length, left: left.map((x) => x.what), proposals: ended.length, journalClean, ...(r.markUnwritten ? { markUnwritten: true } : {}) };   // r1542 (1): the person's answer says a failed compaction
+  }
+  /** r2943 (B-92fc, L1): «TRY AGAIN» — a PERSON's press on the Channels panel's line that shows what is left of a removed account: its
+   *  purge once more. L2: refused by name while the accounts' records are not read, while a record carries the id, or while their file
+   *  holds a change not on disk yet (a removal whose record write failed is no removal) → { ok, id, done, purgeLeft? } */
+  async function purgeAgain(adapterId) {
+    const id = String(adapterId || '');
+    if (!(store.pendingList ? store.pendingList() : []).some((x) => x.id === id)) throw httpErr(404, 'not-pending', `nothing of a removed account ${JSON.stringify(id).slice(0, 80)} is listed to try again`);
+    let onDisk = false;
+    try { onDisk = await Promise.race([store.adapters.landed().then(() => true), new Promise((z) => { const t = setTimeout(() => z(false), 10000); if (t.unref) t.unref(); })]); } catch { onDisk = false; }
+    if (!onDisk) throw httpErr(409, 'records-unwritten', 'the accounts\' file (adapters.json) holds a change that is not on disk yet — nothing was removed; try again in a moment');
+    const r = await store.purgeAccount(id);
+    if (r && r.refused) throw httpErr(409, r.refused, r.error);
+    const left = Array.isArray(r && r.left) ? r.left : [];
+    if (left.length) log.warn(`[channels] ${id}: tried again — part of its local copy could still NOT be removed (${left.map((x) => `${x.folder}: ${x.code}`).join('; ')}) — it stays listed`);
+    else log.log(`[channels] ${id}: tried again — the rest of its local copy was removed`);
+    try { store.audit({ kind: 'account', op: left.length ? 'purge-again-left' : 'purge-again', id, ...(left.length ? { left: left.map((x) => x.folder) } : {}), at: now() }); } catch {}
+    notify([]);
+    return { ok: true, id, done: !left.length, ...(left.length ? { purgeLeft: left.map((x) => x.what) } : {}), ...(r.markUnwritten ? { markUnwritten: true } : {}) };
   }
   /** DUPLICATE an account (r4 §8.1 #2, D4): a NEW record of the same type
    *  carrying EXACTLY `DUPLICATE_FIELDS` (the custom secret re-sealed), named
@@ -1306,9 +1341,10 @@ function create(engineCtx) {
       }
     }
     await store.adapters.update((a) => { a.adapters.push(dup); });
+    const joined = await joinedNote(dup.id);
     log.log(`[channels] ${src.id}: duplicated as ${dup.id} (unauthorized — its own sign-in follows)`);
     notify([]);
-    return { adapter: adapterView(dup) };
+    return { adapter: adapterView(dup), ...joined };
   }
   /** RENAME / THE CUSTOM SECRET (the Edit dialog's in-place saves): `label`;
    *  `credential {appId, appSecret}` replaces a custom client's SECRET in
@@ -1551,7 +1587,7 @@ function create(engineCtx) {
   return {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,
     newRecord, mountClientsFor, viewOptions, startOAuth, oauthStatus, oauthCancel, consentLandingOf, oauthLanding, oauthCallback, connect, reauthorize,
-    recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, setupView, duplicate,
+    recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, purgeAgain, setupView, duplicate,
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,
     connectOffer, connectOffers, connectTaught,   // lane pod-oauth-callback: the chat's Connect row
