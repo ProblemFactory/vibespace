@@ -162,7 +162,7 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // autoResume} (src/stopped-by.js) — the card's chip («因用量停止 · 重置 14:00» + «自动继续：开/关») and the filter
   // row's «因限额/过载停止 (N)» draw it, so it GATES — on a scalar projection (never the object, the trap above). It
   // moves at most twice per stop (set at the turn end, cleared when the session runs) plus a toggle.
-  stoppedBy: { digest: (v) => (v && typeof v === 'object' ? `${v.kind}|${v.at || ''}|${v.resetsAt || ''}|${v.autoResume === true ? 'on' : v.autoResume === false ? 'off' : ''}|${v.waiting || ''}|${v.resetsAt && v.resetsAt <= Date.now() ? 'passed' : ''}` : '') },   // «waiting» and a reset that PASSED redraw the card
+  stoppedBy: { digest: (v) => (v && typeof v === 'object' ? `${v.kind}|${v.at || ''}|${v.resetsAt || ''}|${v.autoResume === true ? 'on' : v.autoResume === false ? 'off' : ''}|${v.waiting || ''}|${v.resetsAt && v.resetsAt <= Date.now() ? 'passed' : ''}|${v.held ? 'held' : ''}|${v.lost || ''}` : '') },   // «waiting» and a reset that PASSED redraw the card
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */

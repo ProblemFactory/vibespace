@@ -2394,6 +2394,149 @@ await (async () => {
   ok('18b. RED: the timed-only form (the chain\'s first) lets a member that read «usable» continue it into the cap', mT.hits === 1 && !!rT && rT.sent === 0 && rT.sentDoors >= 1, mT.err || JSON.stringify(rT));
 }
 
+// ── 19. r3004 THE STORE-READ LAW (lane bl-loop-b): a failed read of data/auto-resume.json HOLDS the waits and the loop-breaker ──
+// The release read ANY failure as «nothing armed, nothing refused» and the next arm wrote the file over (the legs at d458fc27d).
+// Held: nothing written over it, NO automatic continue (the breaker unread = «assume it was broken»), the conversation told once;
+// the read again brings the file's waits and memory back beside the new arms; a recovery meanwhile stays dropped.
+console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and the loop-breaker (src/store-read-hold.js)');
+{
+  const AR_SRC = read('src/server/auto-resume.js');
+  const mkWith = (createFn, dir) => {
+    const sent = [], notes = [], casts = [], sessions = new Map();
+    const ar = createFn({ dataDir: dir, activeSessions: sessions, serverSetting: (k) => (k === 'claude.autoResumeOnLimit' ? true : undefined),
+      sendToSession: (id, s2, text, carried) => { sent.push({ id, text, note: carried && carried.note || null }); return true; }, notify: (id, s2, text) => notes.push({ id, text }), broadcast: (id, m) => casts.push(m) });
+    return { ar, sent, notes, casts, sessions, dir };
+  };
+  const seed = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-held-')), f = path.join(dir, 'auto-resume.json'), now = Date.now();
+    fs.writeFileSync(f, JSON.stringify({ armed: { w1: { at: now - 60e3, resetsAt: now + 3600e3, reason: '5h limit', cid: 'c1', fired: false } },
+      fires: { w1: { windowStart: now - 60e3, count: 1, fails: [{ at: now - 30e3, key: 'acct:a1' }], last: { at: now - 30e3 } } } }));
+    return { dir, f, before: fs.readFileSync(f) };
+  };
+  // the PLACED refusal of the module's own read (its one readFileSync of this file answers EIO; no mount, no mode change)
+  const refusedRead = (f, fn) => { const rs0 = fs.readFileSync; fs.readFileSync = function (p2, ...a) { if (String(p2) === f) throw Object.assign(new Error('EIO: a placed refusal'), { code: 'EIO' }); return rs0.call(this, p2, ...a); }; try { return fn(); } finally { fs.readFileSync = rs0; } };
+  const heldScene = (createFn) => {
+    const z = seed();
+    const a = refusedRead(z.f, () => mkWith(createFn, z.dir));
+    a.sessions.set('w1', sess()); a.sessions.set('w2', sess());
+    const resets = Date.now() + 60000;
+    a.ar.armIfEnabled('w2', a.sessions.get('w2'), resets, '5h limit');
+    const fileSame = fs.readFileSync(z.f).equals(z.before);
+    const timed = a.ar.tick(resets + GRACE_MS + 1), now2 = a.ar.fireNow('w2', 'a pool move');
+    return { z, a, fileSame, timed, now2, st: a.ar.statusFor('w2') };
+  };
+  const H = heldScene(create);
+  ok('19a. THE READ REFUSED (EIO): a new wall still arms in memory, but NOTHING is written over the file (its bytes as they were), NO automatic continue goes (the timed one, a pool move\'s), the conversation is told ONCE in its chat, and its status says why',
+    H.a.ar._hold.held() && H.fileSame && H.timed === 0 && H.now2 === false && H.a.sent.length === 0 && H.a.notes.filter((n) => n.id === 'w2' && /读不到它的记录/.test(n.text)).length === 1 && typeof H.st.held === 'string' && /could not be read \(EIO\)/.test(H.st.held),
+    JSON.stringify({ held: !!H.a.ar._hold.held(), same: H.fileSame, timed: H.timed, now: H.now2, sent: H.a.sent.length, notes: H.a.notes, st: H.st.held }));
+  const lifted = await H.a.ar._hold.again();
+  const after = JSON.parse(fs.readFileSync(H.z.f, 'utf8'));
+  ok('19b. THE READ AGAIN lifts it: the file\'s promised continue and its loop-breaker record come back BESIDE the arm made meanwhile — the file then holds both',
+    lifted && H.a.ar._hold.held() === null && H.a.ar._armed.has('w1') && H.a.ar._armed.has('w2') && H.a.ar._fires.has('w1') && !!after.armed.w1 && !!after.armed.w2 && !!after.fires.w1, JSON.stringify({ armed: Object.keys(after.armed || {}), fires: Object.keys(after.fires || {}) }));
+  const mSave = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, "    if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file\n", '', 'auto-resume.js'));
+  const HX = heldScene(mSave.create), axf = JSON.parse(fs.readFileSync(HX.z.f, 'utf8'));
+  ok('19a RED control (the save not held — the release): the new arm writes the file over — the other conversation\'s promise and its loop-breaker record are GONE from it (red)', !HX.fileSame && !axf.armed.w1 && !(axf.fires || {}).w1, JSON.stringify(axf));
+  const mFire = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, /    if \(hold\.held\(\)\) \{ if \(!heldSaid\.has\('fire:' \+ id\)\)[^\n]*\n/, '', 'auto-resume.js'));
+  const HF = heldScene(mFire.create);
+  ok('19a RED control (the fire not held): a continue goes on a guess while the loop-breaker\'s memory is unread (red)', HF.timed + (HF.now2 ? 1 : 0) > 0 && HF.a.sent.length > 0, JSON.stringify({ timed: HF.timed, now: HF.now2, sent: HF.a.sent.length }));
+  // 19c. a RECOVERY while held: the conversation armed only in the unread file recovers — its promise must not come back at the lift
+  const recScene = (createFn) => {
+    const z = seed();
+    const a = refusedRead(z.f, () => mkWith(createFn, z.dir));
+    a.sessions.set('w1', sess());
+    a.ar.noteRecovered('w1', 'the user typed');
+    return { z, a };
+  };
+  const R = recScene(create); await R.a.ar._hold.again();
+  ok('19c. A RECOVERY while held (the user typed into a conversation armed only in the unread file): at the lift its promise stays DROPPED — never a stale, billed continue', R.a.ar._hold.held() === null && !R.a.ar._armed.has('w1'), JSON.stringify([...R.a.ar._armed.keys()]));
+  const mRec = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, /    if \(hold\.held\(\)\) goneHeld\.add\(id\);   \/\/ r3004: its promise may be one[^\n]*\n/, '', 'auto-resume.js'));
+  const RX = recScene(mRec.create); await RX.a.ar._hold.again();
+  ok('19c RED control (a drop while held not remembered): the recovered conversation\'s promise comes back at the lift (red)', RX.a.ar._armed.has('w1'));
+  // 19d. a RESTART while held reads the same file again — nothing was written, so it all comes back
+  {
+    const z = seed();
+    const a = refusedRead(z.f, () => mkWith(create, z.dir)); a.ar.stop();
+    const b = mkWith(create, z.dir);
+    ok('19d. A RESTART while held reads the same file again — the promise and the loop-breaker record whole', b.ar._hold.held() === null && b.ar._armed.has('w1') && b.ar._fires.has('w1'));
+    b.ar.stop();
+  }
+  // 19e. TORN BYTES: kept aside once (byte for byte), then it starts empty
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-torn-')), f = path.join(dir, 'auto-resume.json'), torn = '{"armed":{"w1":{"at":';
+    fs.writeFileSync(f, torn);
+    const a = mkWith(create, dir);
+    for (let i = 0; i < 400 && a.ar._hold.held(); i++) await new Promise((r) => setImmediate(r));
+    const copies = fs.readdirSync(dir).filter((n) => n.startsWith('auto-resume.json.corrupt-'));
+    ok('19e. TORN BYTES: held while kept aside ONCE as their own copy (byte for byte), then it starts empty', a.ar._hold.held() === null && copies.length === 1 && fs.readFileSync(path.join(dir, copies[0]), 'utf8') === torn && a.ar._armed.size === 0, JSON.stringify(copies));
+    a.ar.stop();
+  }
+  // 19f. r3104 (5 of r3095, the family's words): NO PATH in a person's words — the held words (the status, the refusal) and the chat card
+  // name the record by its plain name
+  {
+    const leak = [H.st.held, ...H.a.notes.map((n) => n.text)].filter((w) => /auto-resume\.json|data\//.test(String(w)));
+    ok('19f. r3104: the held words and the chat card name the record by its plain name — no path under the data folder', leak.length === 0 && /^the record of waiting continues could not be read/.test(H.st.held), JSON.stringify(leak));
+  }
+  // 19g. r3104 (b): a batch NO DOOR PRESSED while held is refused BY ITS CODE — the route answers 503 with it and the dialog words it
+  {
+    const z = seed();
+    const a = refusedRead(z.f, () => mkWith(create, z.dir));
+    const r = a.ar.resumeBatch({ pressed: null });
+    a.ar.stop();
+    const routes = read('src/server/bulk-resume-routes.js'), dlg = read('src/lib/bulk-resume.js'), zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+    const KEY = 'The record of waiting continues could not be read, so a resume nobody pressed waits until it reads — press Resume on this page to continue them now.';
+    ok('19g. r3104 (b): a batch no door pressed, while held, is refused by its code (auto_resume_unread); the route answers 503 with it, and the dialog words it in en / zh / ja (never the hub\'s English)',
+      r && r.ok === false && r.code === 'auto_resume_unread' && /if \(r && r\.ok === false && r\.code === 'auto_resume_unread'\) return res\.status\(503\)\.json\(r\);/.test(routes)
+      && dlg.includes("msg.startsWith('the record of waiting continues could not be read') ? 'auto_resume_unread'") && dlg.includes(`if (code === 'auto_resume_unread') return t('${KEY}');`) && [zh, ja].every((d) => d.includes('\n  ' + JSON.stringify(KEY) + ': ')), JSON.stringify(r));
+  }
+  // 19h. r3104: TORN BYTES TOLD IN PLACE — a conversation stopped by a usage limit, auto-continue on, no wait: its status carries the
+  // copy's base name (`lost`), the card's live fact too; the record keeps the fact, so a restart still says it; a running one says nothing
+  {
+    const tornScene = async (createFn) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-lost-')), f = path.join(dir, 'auto-resume.json');
+      fs.writeFileSync(f, '{"armed":{"w1":{"at":');
+      const a = mkWith(createFn, dir);
+      for (let i = 0; i < 400 && a.ar._hold.held(); i++) await new Promise((r2) => setImmediate(r2));
+      const stopped = sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60e3, resetsAt: Date.now() + 3600e3 } });
+      a.sessions.set('w1', stopped); a.sessions.set('w3', sess());
+      const copy = fs.readdirSync(dir).find((n) => n.startsWith('auto-resume.json.corrupt-')) || null;
+      const st1 = a.ar.statusFor('w1'), st3 = a.ar.statusFor('w3');
+      const lf = SBm19.liveFactOf(stopped._stoppedBy, st1);
+      a.ar.stop();
+      const b = mkWith(createFn, dir); b.sessions.set('w1', stopped);
+      const stR = b.ar.statusFor('w1'); b.ar.stop();
+      return { copy, st1, st3, lf, stR, file: (() => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } })() };
+    };
+    const SBm19 = require(path.join(REPO, 'src/stopped-by.js'));
+    const o = await tornScene(create);
+    ok('19h. r3104: TORN BYTES told IN PLACE — the stopped conversation (a usage limit, auto-continue on, no wait) carries the copy\'s base name in its status and its card\'s live fact; the record keeps the fact (a restart still says it); a running conversation says nothing',
+      !!o.copy && o.st1.lost === o.copy && o.lf.lost === o.copy && !o.st3.lost && o.file && o.file.damaged && o.file.damaged.copy === o.copy && o.stR.lost === o.copy, JSON.stringify({ copy: o.copy, lost: o.st1.lost, lf: o.lf.lost, st3: o.st3.lost, restart: o.stR.lost, file: o.file && o.file.damaged }));
+    const mL = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, /    if \(f && f\.setAside\) \{ damaged = [^\n]*\n/, '', 'auto-resume.js'));
+    const oX = await tornScene(mL.create);
+    ok('19h RED control (the torn lift records nothing): the stopped conversation is told nothing — its promised continue lost in silence (red)', !!oX.copy && !oX.st1.lost && !oX.lf.lost, JSON.stringify({ lost: oX.st1.lost }));
+    const card = read('src/lib/session-card.js'), bar = read('src/lib/chat-status-bar.js'), zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+    const K_CARD = 'The record of waiting continues was damaged; its damaged bytes are kept beside it as {copy}. If this session was waiting to continue, it does not continue by itself: open it to continue, or mend its file by hand and restart VibeSpace.';
+    const K_BAR = 'The record of waiting continues was damaged; its damaged bytes are kept beside it as {copy}. If this session was waiting to continue, it does not continue by itself: continue it yourself, or mend its file by hand and restart VibeSpace.';
+    ok('19h. …the card\'s tip and the chat chip say it (where the damaged bytes are kept, and what the person can do — never «restore»), each in zh and ja',
+      card.includes(`: stopF.lost ? tr('${K_CARD}', { copy: String(stopF.lost) })`) && bar.includes(`title = t('${K_BAR}', { copy: a.lost }) + ' ' + title;`) && [K_CARD, K_BAR].every((k2) => !/restore/i.test(k2) && [zh, ja].every((d) => d.includes('\n  ' + JSON.stringify(k2) + ': '))));
+  }
+  // 19i. r3004 + r3104: HELD, the chip and the card never promise «continues by itself»: the live fact's wait is none (`held`), the chip's
+  // label «waiting» and its words say it does not continue until the record reads
+  {
+    const SBh = require(path.join(REPO, 'src/stopped-by.js'));
+    const q = { kind: 'quota', at: 1, resetsAt: Date.now() + 3600e3 };
+    const lh = SBh.liveFactOf(q, { resume: 'prompt', enabled: true, armed: true, held: 'the record of waiting continues could not be read (EIO)' }), lt = SBh.liveFactOf(q, { resume: 'prompt', enabled: true, armed: true });
+    ok('19i. HELD: the card\'s live fact keeps no wait (waiting false, held) where the same arm unheld waits «timed»', lh.waiting === false && lh.held === true && lt.waiting === 'timed' && !lt.held, JSON.stringify({ lh, lt }));
+    const SBsrc = read('src/stopped-by.js');
+    const mH = MUTX.load('src/stopped-by.js', editAnchor(SBsrc, '  const waiting = !can || held ? false :', '  const waiting = !can ? false :', 'stopped-by.js'));
+    const lx = mH && typeof mH.liveFactOf === 'function' ? mH.liveFactOf(q, { resume: 'prompt', enabled: true, armed: true, held: 'x' }) : null;
+    ok('19i RED control (the held record not asked): the card says the session continues by itself at its reset («timed») while nothing can (red)', !!lx && lx.waiting === 'timed', JSON.stringify(lx));
+    const bar = read('src/lib/chat-status-bar.js'), card = read('src/lib/session-card.js');
+    ok('19i. …the chat chip says «waiting» (never «continues at») and why, the card\'s tip says it does not continue by itself until the record reads; its optimistic repaint keeps no wait',
+      bar.includes("const arLabel = a.armed && heldAr ? ' ' + escHtml(t('waiting')) : a.armed ? (ck ?") && /if \(heldAr\) title = a\.armed \? t\('Usage limit hit — the record of waiting continues could not be read/.test(bar)
+      && card.includes("tchip.dataset.tip = on ? (stopF.held ? tr('Auto-continue is on, but the record of waiting continues could not be read") && card.includes("stopF.waiting = !on || !(ahead > 0) || stopF.held ? false :"));
+  }
+}
+
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix

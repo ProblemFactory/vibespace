@@ -1074,13 +1074,20 @@ export class ChatStatusBar {
       // minutes, never a reset days away (the server drops the facet the moment that check ends)
       const ck = a.armed && a.cause && a.cause.checking ? a.cause.checking : null;
       if (ck) title = t('Claude Code {v} is being checked on this machine (about {n} min) — this session continues by itself when it passes, if those accounts can take it. Click to cancel.', { v: String(ck.cli || '?'), n: String(ck.typicalMin || 5) });
+      // r3004 / r3104 (lane bl-loop-b): THE RECORD OF WAITING CONTINUES — unread: nothing continues by itself until it reads (never
+      // «continues at»); damaged at its read: a continue THIS stopped conversation was promised may be lost (where its damaged bytes
+      // are kept, by their base name, and what the person can do)
+      const heldAr = typeof a.held === 'string' && !!a.held;
+      if (heldAr) title = a.armed ? t('Usage limit hit — the record of waiting continues could not be read, so this session does not continue by itself until it reads; VibeSpace reads it again every few minutes.')
+        : t('The record of waiting continues could not be read — nothing continues by itself until it reads; VibeSpace reads it again every few minutes.') + ' ' + title;
+      else if (typeof a.lost === 'string' && a.lost) title = t('The record of waiting continues was damaged; its damaged bytes are kept beside it as {copy}. If this session was waiting to continue, it does not continue by itself: continue it yourself, or mend its file by hand and restart VibeSpace.', { copy: a.lost }) + ' ' + title;
       const arState = a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? ' chat-status-autoresume-on' : ' chat-status-dim');
       // lane ui-controls-and-bugs (the walk's MAJOR: a bare «09:22 PM», one press turned it off): the chip SAYS what it means —
       // «21:22 自动继续» / «自动继续：关» — and a press opens it (below), never acts at once
       // THE STRIP'S ARRANGEMENT (lane mask-value-shape — the owner's angle on the strip, 2026-11-14): an auto-continue that is
       // OFF (or on, not armed) is a row of «对话设置», its words its present value there; ARMED, with its time, it is row 1's
       const offWords = ' ' + escHtml(t('Auto-continue: off'));
-      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: resetAt }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
+      const arLabel = a.armed && heldAr ? ' ' + escHtml(t('waiting')) : a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: resetAt }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
       title = title.replace(CANCEL_TAIL, '');   // a press OPENS the panel now and cancelling is its own row: the old «Click to cancel.» is not said (the acceptance reader)
       this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
       (a.armed ? chip : inDoor)('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}<span class="chat-status-words">${arLabel}</span>`);   // ARMED: its time on row 1; else a row of «对话设置»

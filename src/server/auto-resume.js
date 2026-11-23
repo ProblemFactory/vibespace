@@ -41,6 +41,10 @@
 const fs = require('fs');
 const { GENERIC_LEGACY_KEYS } = require('../harness-settings'); // PURE: the legacy spelling of the generic auto-resume default
 const path = require('path');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3004 (lane bl-loop-b): data/auto-resume.json under the store-read law
+const AR_OBJ = (o) => o === undefined || (!!o && typeof o === 'object' && !Array.isArray(o));
+const AR_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && AR_OBJ(v.armed) && AR_OBJ(v.fires);
 const { windowOpened } = require('../auto-resume-signal.js'); // PURE: does this reading say the wall is gone?
 const harnesses = require('../harnesses');                    // the descriptor registry: THE resume verb lives there
 const { toAgentText } = require('../peer-text.js');          // PURE: the one belt on a name an agent reads (the account label)
@@ -422,7 +426,26 @@ function writeJsonAtomic(file, obj) {
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
   modelOf = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
-  let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
+  // r3004 (lane bl-loop-b): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of this file as «nothing armed,
+  // nothing refused» and the next save wrote it over: a promised continue AND the loop-breaker's memory (its quarantines, the edges
+  // spent) gone, said to nobody. HELD: the loop-breaker's memory unread means «assume it was broken» — NO automatic continue fires
+  // (a timed one, a pool move's, a claim's, a reading's, a batch no door pressed): each waits; nothing is written over the file;
+  // a new wall still arms in memory and its conversation is told once (the card in the chat) that it does not continue by itself
+  // until the records read; statusFor carries `held`. LIFTED: the file's waits and memory come back beside what was armed meanwhile;
+  // an arm dropped while held (a recovery, the toggle, a gone session) stays dropped — a stale promise would be a billed continue
+  // nobody needed. Torn bytes are kept aside once, then it starts empty. A restart while held reads the same file again. Nothing
+  // removes by this store's silence (its readers only show a status or ask before a fire)
+  let hold = null;
+  const goneHeld = new Set(), heldSaid = new Set();
+  // r3104 (lane bl-loop-b): TORN BYTES TOLD IN PLACE. At a torn lift the record starts empty, so a continue a stopped conversation was
+  // promised may be lost: `damaged` (the copy's base name, when) is kept in the record itself (a restart still says it) for the
+  // waiting bound; a conversation stopped by a usage limit, with auto-continue on and no wait, carries `lost` in its status — its
+  // chip and its card say the record was damaged, where the damaged bytes are kept, and what the person can do (continue it; or
+  // mend its file by hand and restart) — never «restore» them
+  let damaged = null;
+  const damagedNow = (now = Date.now()) => (damaged && now - (Number(damaged.at) || 0) < MAX_WAIT_MS ? damaged : null);
+  class ArmMap extends Map { delete(k) { if (hold && hold.held()) goneHeld.add(k); return super.delete(k); } }
+  let armed = new ArmMap(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
   const wfOf = new Map(); // B-3437: webuiId -> {rec, run, at, ask} — the Workflow run the wall cut short, kept OFF the arm record (never persisted)
   // named only FRESH and only when the continue really goes after the run's proven limit lifted: a fire BEFORE its arm's own
@@ -445,11 +468,32 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   const wfOut = new Set();       // every read still OUT — the cap's count (U3 cure 3: a read that has not returned stays counted until it returns, its arm gone or not)
   const wfNotReadSaid = new Set();   // arms held «not read: the folder's storage does not answer» (said once)
   const WF_HUNG_MS = 5 * 60 * 1000, wfHungSaid = new Set();
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  const loadInto = (raw) => {
     for (const [k, v] of Object.entries(raw && raw.armed ? raw.armed : {})) armed.set(k, v);
     for (const [k, v] of Object.entries(raw && raw.fires ? raw.fires : {})) if (v && typeof v === 'object') fires.set(k, v);
-  } catch { }
+    const d = raw && raw.damaged;   // r3104: a torn lift's fact, kept for the waiting bound
+    if (d && typeof d === 'object' && typeof d.copy === 'string' && Number.isFinite(Number(d.at))) damaged = { copy: d.copy.slice(0, 200), at: Number(d.at) };
+  };
+  hold = HOLD.create({ file, valid: AR_SHAPE, code: 'auto_resume_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `the record of waiting continues could not be read (${h.code}) — no conversation continues by itself until it reads (its waits and its loop-breaker's memory are unread); VibeSpace reads it again every few minutes and writes nothing over it`,   // r3104: the list by its plain name, never a path
+    log: (m) => log('[auto-resume] ' + m), onLift: (v, f) => lifted(v, f) });
+  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; } const a0 = SR.storeAnswer(read, { valid: AR_SHAPE }); if (hold.start(a0) === 'data') loadInto(a0.value); }
+  /** r3004: THE HOLD LIFTED — the file's waits and loop-breaker memory come back beside what was armed meanwhile (the newer arm of a
+   *  conversation stands; a failure noted meanwhile joins its record); an arm dropped while held stays dropped; written once, said again.
+   *  r3104: torn bytes (`f.setAside`, the copy's base name) — `damaged` recorded, so each stopped conversation that may have lost its
+   *  promise says it in place (statusFor `lost`); the copy's name in the journal too */
+  function lifted(v, f) {
+    if (f && f.setAside) { damaged = { copy: String(f.setAside).slice(0, 200), at: Date.now() }; log(`[auto-resume] the record of waiting continues did not parse — its damaged bytes are kept beside it as ${f.setAside}; it starts empty (a stopped conversation that may have lost its continue says so on its chip and its card)`); }
+    const mem = new Map(armed), memFires = new Map(fires);
+    armed.clear(); fires.clear();
+    if (v) loadInto(v);
+    for (const k of goneHeld) armed.delete(k);
+    for (const [k, r] of mem) { const f = armed.get(k); if (!f || (Number(r && r.at) || 0) >= (Number(f && f.at) || 0)) armed.set(k, r); }
+    for (const [k, r] of memFires) { const f = fires.get(k); if (!f) fires.set(k, r); else if (r && Array.isArray(r.fails) && r.fails.length) fires.set(k, { ...f, fails: [...(Array.isArray(f.fails) ? f.fails : []), ...r.fails] }); }
+    goneHeld.clear(); heldSaid.clear();
+    save();
+    for (const k of armed.keys()) { try { emit(k); } catch { } }
+  }
   let timer = null;
 
   // THE HARNESS'S RESUME VERB (owner ruling 2026-09-08) — `{form, deliver}` or
@@ -474,6 +518,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 
   let saveHeld = 0, saveOwed = false;   // U2 cure (law 2): a bulk flip holds every save and writes the arms' store ONCE after its loop
   const save = () => {
+    if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file
     if (saveHeld) { saveOwed = true; return; }
     try {
       // prune breaker records that can no longer refuse anything (their
@@ -504,7 +549,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
           || (!!(r.edgeHeld && r.edgeHeld.until > now) && armed.has(k));
         if (!live) fires.delete(k);
       }
-      writeJsonAtomic(file, { armed: Object.fromEntries(armed), fires: Object.fromEntries(fires) });
+      writeJsonAtomic(file, { armed: Object.fromEntries(armed), fires: Object.fromEntries(fires), ...(damagedNow() ? { damaged } : {}) });   // r3104: + a torn lift's fact for the waiting bound
     }
     catch (e) { log('[auto-resume] persist failed: ' + e.message); }
   };
@@ -525,6 +570,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const a = armed.get(id) || null;
     const verb = session ? verbFor(session) : null;
     return {
+      ...(hold.held() ? { held: hold.words() } : {}),   // r3004: its records unread — nothing continues by itself
+      ...(!a && damagedNow() && session && enabledFor(session) && (normalizeStoppedBy(session._stoppedBy) || {}).kind === 'quota' ? { lost: damagedNow().copy } : {}),   // r3104: stopped by a limit, no wait, the record damaged since — its continue may be lost
       enabled: enabledFor(session),
       explicit: session && session._autoResume !== undefined ? !!session._autoResume : null,
       globalDefault: globalDefault(),
@@ -556,6 +603,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const session = activeSessions.get(id);
     if (session) session._autoResume = !!on;
     if (session && persistFlag) { try { persistFlag(id, session); } catch (e) { log('[auto-resume] persisting the flag failed: ' + e.message); } }
+    if (!on && hold.held()) goneHeld.add(id);   // r3004: an unread promise of this conversation goes with the switch too
     if (!on && armed.has(id)) { armed.delete(id); save(); }
     // TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure): a session a usage wall already STOPPED is armed on that
     // wall's own stated reset — the card's switch promises «continues by itself when its limit resets», and before this
@@ -700,6 +748,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // THE PERSON'S OWN ACT (the owner's ruling 2026-11-18, B): the press starts all N, ATTENDED — none counted against the
     // unattended caps, no stamp; every slot still asked before each continue (paid overage refused by name). A batch no door
     // pressed is N automatic continues: its gated twin, each counted like any auto-resume
+    if (hold.held() && !isPress(pressed)) return { ok: false, why: 'held', code: 'auto_resume_unread', error: hold.words() };   // r3004: N automatic continues on a guess — they wait
     const paid = isPress(pressed) ? { spendReason: 'bulk-resume' } : { spendReason: 'auto-resume' };
     const now = Date.now();
     const plan = stoppedPlan(now);
@@ -943,6 +992,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const rec = { at, resetsAt: resets, reason: reason || 'usage limit', cid: session.claudeSessionId || null, fired: false, lane, bucket, scopedName, watch, cause };
     armed.set(id, rec);
     save();
+    if (hold.held() && !heldSaid.has('arm:' + id)) { heldSaid.add('arm:' + id); try { if (notify) notify(id, session, '自动继续暂时读不到它的记录，在读到之前不会自动继续这个任务；VibeSpace 每隔几分钟会重新读取，也不会覆盖它。'); } catch { } }   // r3004: said once where the person meets it
     const via = cause && cause.soonest && cause.soonest.name ? `, via ${cause.soonest.name}/${cause.soonest.bucket && cause.soonest.bucket.label ? cause.soonest.bucket.label : '?'}` : '';
     log(`[auto-resume] ${id}: ${watch ? 'watching' : 'armed'} for ${new Date(resets).toISOString()} (${reason}${lane ? `, lane ${lane}` : ''}${bucket ? `, bucket ${bucket}` : ''}${via})`);
     // DELAYED announcement (2.368.34): a dead event often races the pool
@@ -1010,6 +1060,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // early return below) would never see the proof that the fire worked.
     if (worked) noteFireOutcome(id, true, why);
     const a = armed.get(id);
+    if (hold.held()) goneHeld.add(id);   // r3004: its promise may be one the unread file holds — gone at the lift too (never a stale continue)
     if (!a || a.fired) return;
     // A REMOVED-MEMBER HOLD (the owner's 全B, 2026-09-28) is armed AT the turn end it follows — the turn that
     // completed normally is the one it let finish, never evidence that the wall lifted (the member it ran on left
@@ -1352,6 +1403,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 
   function attemptFire(id, session, a, kind, why, cause = null, origin = null, { claim = false } = {}) {
     const now = Date.now();
+    // r3004: the loop-breaker's memory unread = «assume it was broken» — no automatic continue on a guess: it waits (the arm stays)
+    if (hold.held()) { if (!heldSaid.has('fire:' + id)) { heldSaid.add('fire:' + id); log(`[auto-resume] ${id}: not continued — ${hold.words()}`); } return false; }
     if (session._arFiring) return false;   // a gate is already running for this session (also breaks fireNow ⇄ beforeFire re-entry)
     // THE FOLDER'S STORAGE DOES NOT ANSWER (U3 cure 3 — 主开发's law): every read the cap allows is out and none returned, and THIS
     // arm of a usage wall has no answer of its own — it is NOT fired (not continuing is the safe mistake; the arm stays and fires
@@ -1665,7 +1718,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     timer = setInterval(() => { try { tick(); } catch (e) { log('[auto-resume] tick failed: ' + e.message); } }, TICK_MS);
     if (timer.unref) timer.unref();
   }
-  const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+  const stop = () => { if (timer) { clearInterval(timer); timer = null; } hold.stop(); };
 
   return {
     armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
@@ -1673,7 +1726,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, stopBatch, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
-    _armed: armed, _fires: fires, _wfOf: wfOf, _wfPending: wfPending, _wfOut: wfOut,
+    _armed: armed, _fires: fires, _wfOf: wfOf, _wfPending: wfPending, _wfOut: wfOut, _hold: hold,
   };
 }
 

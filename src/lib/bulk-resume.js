@@ -59,7 +59,8 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 /** A door's refusal code (a plan read keeps it; a refused POST reaches here through api() as its message alone). */
 function codeOf(r) {
   const msg = r && r.message ? String(r.message) : '';
-  return (r && r.code) || (msg === 'a resume of the stopped sessions is already running' ? 'in_flight' : msg === 'auto-continue is not running' ? 'not_running' : msg === 'the bulk acts are pressed on this instance’s own page' ? 'not_a_page' : null);
+  return (r && r.code) || (msg === 'a resume of the stopped sessions is already running' ? 'in_flight' : msg === 'auto-continue is not running' ? 'not_running' : msg === 'the bulk acts are pressed on this instance’s own page' ? 'not_a_page'
+    : msg.startsWith('the record of waiting continues could not be read') ? 'auto_resume_unread' : null);   // r3104 (b): the held record's refusal
 }
 /** A door's refusal in the person's words, by its code (never the hub's English sentence). */
 function answerWords(r) {
@@ -67,6 +68,7 @@ function answerWords(r) {
   if (code === 'not_running') return t('Auto-continue is not running on this hub — reopen VibeSpace and try again.');
   if (code === 'in_flight') return t('A resume of these sessions is already running — following it here.');
   if (code === 'not_a_page') return t('The bulk acts are pressed on this VibeSpace page only.');
+  if (code === 'auto_resume_unread') return t('The record of waiting continues could not be read, so a resume nobody pressed waits until it reads — press Resume on this page to continue them now.');
   return null;
 }
 /** The spend ceiling's refusal of a WHOLE batch, in the person's words: the bucket, what it has left, what the batch needs. */

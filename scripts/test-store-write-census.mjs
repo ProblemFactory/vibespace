@@ -1004,6 +1004,8 @@ const STORE_READS = [
   { file: 'src/plugins.js', store: 'plugins.json', state: 'answer', mark: /const a0 = SR\.storeAnswer\(read, \{ valid: PLUGINS_SHAPE \}\);\n    this\._state = this\._hold\.start\(a0\) === 'data' \? a0\.value : \{ plugins: \{\} \};/ },
   // r3004 (lane bl-loop-b): the setting holds through src/store-read-hold.js — a failed read HOLDS (no timed raise, nothing written)
   { file: 'src/server/setting-holds.js', store: 'setting-holds.json', state: 'answer', mark: /const a0 = SR\.storeAnswer\(read, \{ valid: HOLDS_SHAPE \}\);\n    if \(hold\.start\(a0\) === 'held'\)/ },
+  // r3004 (lane bl-loop-b): the auto-continue waits and the loop-breaker through src/store-read-hold.js — held: no automatic continue
+  { file: 'src/server/auto-resume.js', store: 'auto-resume.json', state: 'answer', mark: /const a0 = SR\.storeAnswer\(read, \{ valid: AR_SHAPE \}\); if \(hold\.start\(a0\) === 'data'\) loadInto\(a0\.value\);/ },
 ];
 const READ_DEBT_CAP = 1;     // 2 → 1: browser-kept.json — the sweep's fail-closed law (lane bl-windows, 主开发 r3006): never set aside, never written over (a row judged by hand); lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json, 6 → 5: job-notifications.json — bl-jobs B-f276's remainder, 5 → 4: user-todos.json — bl-windows B-44f3, 4 → 3: channels/*.json — bl-windows B-f276 unit 1, 3 → 2: reset-credit-tries.json — bl-windows B-f276's remainder)
 const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17): DEBT_CAP never passes it
@@ -1014,7 +1016,7 @@ const treeTexts = () => new Map(censusFiles(REPO).map((f) => [f, repoText(f)]));
 /** the files whose CODE holds a set-aside name (a string or template piece with `.corrupt-` — never a comment) */
 const SET_ASIDE = /\.(corrupt|unreadable)-/, SET_ASIDE_G = /\.(corrupt|unreadable)-/g;   // the two names the tree sets bytes aside under
 // the set-aside names per file, EXACT — a second store with a set-aside in a file that already has a row is red by its count
-const SITES = { 'src/jobs.js': 3, 'src/app-serve.js': 1, 'src/channel-store.js': 1, 'src/hosts.js': 1, 'src/job-logs-sweep-worker.js': 1, 'src/job-logs-sweep.js': 1, 'src/machine-mounts.js': 1, 'src/mounts.js': 1, 'src/plugins.js': 1, 'src/server/setting-holds.js': 1, 'src/webdav.js': 1, 'src/server/conversation-deliver.js': 1, 'src/server/integration-store.js': 1, 'src/server/job-secrets-door.js': 2, 'src/server/queued-wakes.js': 1, 'src/server/usage-pool-engine.js': 1, 'src/server/vault-run-door.js': 1, 'src/server/writes-lost.js': 1, 'src/user-todos.js': 1 };
+const SITES = { 'src/jobs.js': 3, 'src/app-serve.js': 1, 'src/channel-store.js': 1, 'src/hosts.js': 1, 'src/job-logs-sweep-worker.js': 1, 'src/job-logs-sweep.js': 1, 'src/machine-mounts.js': 1, 'src/mounts.js': 1, 'src/plugins.js': 1, 'src/server/setting-holds.js': 1, 'src/server/auto-resume.js': 1, 'src/webdav.js': 1, 'src/server/conversation-deliver.js': 1, 'src/server/integration-store.js': 1, 'src/server/job-secrets-door.js': 2, 'src/server/queued-wakes.js': 1, 'src/server/usage-pool-engine.js': 1, 'src/server/vault-run-door.js': 1, 'src/server/writes-lost.js': 1, 'src/user-todos.js': 1 };
 const tokenHit = new Map();   // a text's verdict, once (the controls re-run the census over copies that differ in ONE file)
 function setAsideFiles(texts) {
   const out = [];

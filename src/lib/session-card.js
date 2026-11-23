@@ -444,7 +444,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         tchip.setAttribute('aria-pressed', on ? 'true' : 'false');
         const words = stoppedChipWords(stopF, tr, { autoResumeOn: on, waiting: on ? (stopF.waiting || false) : null, clock: stopClock });
         tchip.innerHTML = `<span class="chip-icon">${UI_ICONS.autoContinue || ''}</span><span class="chip-text">${escHtml(words.toggle)}</span>`;
-        tchip.dataset.tip = on ? (stopF.waiting === 'timed' ? tr('Auto-continue is on: this session continues by itself when its limit resets — click to turn it off')
+        tchip.dataset.tip = on ? (stopF.held ? tr('Auto-continue is on, but the record of waiting continues could not be read — this session does not continue by itself until it reads; open it to continue')   // r3004 / r3104
+            : stopF.lost ? tr('The record of waiting continues was damaged; its damaged bytes are kept beside it as {copy}. If this session was waiting to continue, it does not continue by itself: open it to continue, or mend its file by hand and restart VibeSpace.', { copy: String(stopF.lost) })
+            : stopF.waiting === 'timed' ? tr('Auto-continue is on: this session continues by itself when its limit resets — click to turn it off')
             : stopF.waiting === 'early' ? tr('Auto-continue is on, but this reset is too far to wait for — the session continues only if the limit clears early — click to turn it off')
             : tr('Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue'))
           : tr('Auto-continue is off: this session waits for you — click to have it continue by itself when its limit resets');
@@ -458,7 +460,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         stopF.autoResume = on;
         const ahead = Number(stopF.resetsAt) - Date.now();   // what the server arms (auto-resume.js setEnabled — a wait within its bound, else a watch); the next list restates it
         const bound = Number(stopF.waitBoundMs) || 0;   // the SERVER's waiting bound (statusFor maxWaitMs) — none known ⇒ no timed promise
-        stopF.waiting = !on || !(ahead > 0) ? false : bound && ahead <= bound ? 'timed' : (stopF.bucket ? 'early' : false);
+        stopF.waiting = !on || !(ahead > 0) || stopF.held ? false : bound && ahead <= bound ? 'timed' : (stopF.bucket ? 'early' : false);   // r3004: held — no wait is kept by itself
         paintToggle(on);
       };
       line.appendChild(tchip);

@@ -74,8 +74,10 @@ function liveFactOf(sb, status = null) {
   const f = normalizeStoppedBy(sb);
   if (!f) return null;
   const can = !!(status && status.resume) && f.kind === 'quota';
-  const waiting = !can ? false : status.watch ? (status.bucket ? 'early' : false) : status.armed ? 'timed' : false;
-  return { ...f, autoResume: can ? !!status.enabled : null, waiting, waitBoundMs: can && Number(status.maxWaitMs) > 0 ? Number(status.maxWaitMs) : null };   // the server's bound (the card's optimistic paint)
+  const held = can && typeof status.held === 'string' && !!status.held;   // r3004: the record of waiting continues unread — no wait is kept by itself
+  const waiting = !can || held ? false : status.watch ? (status.bucket ? 'early' : false) : status.armed ? 'timed' : false;
+  return { ...f, autoResume: can ? !!status.enabled : null, waiting, waitBoundMs: can && Number(status.maxWaitMs) > 0 ? Number(status.maxWaitMs) : null,
+    ...(held ? { held: true } : {}), ...(can && typeof status.lost === 'string' && status.lost ? { lost: status.lost.slice(0, 200) } : {}) };   // r3104: + the damaged record's copy (its base name)   // the server's bound (the card's optimistic paint)
 }
 
 /** THE FILTER PREDICATE — the sidebar's «stopped by a limit or overload» filter and the bulk resume's candidate set. */

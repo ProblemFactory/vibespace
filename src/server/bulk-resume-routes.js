@@ -147,6 +147,7 @@ function create({ activeSessions, pressesToday = null, getAutoResume = () => nul
         const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 2000) : null;
         const r = ar.resumeBatch({ limit, ids, pressed: pressOf(req) });
         if (r && r.ok === false && r.why === 'in-flight') return res.status(409).json({ ...r, error: 'a resume of the stopped sessions is already running', code: 'in_flight' });
+        if (r && r.ok === false && r.code === 'auto_resume_unread') return res.status(503).json(r);   // r3104 (b): the record unread — refused by its code (the dialog words it)
         res.json(r);
       } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
     });
