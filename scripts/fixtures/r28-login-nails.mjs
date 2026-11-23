@@ -267,8 +267,11 @@ async function runColdLockedPair(repoDir, kind, { control = false } = {}) {
     const fillStep = await runStep('cold-step1-fill', control ? ['--no-landing-wait'] : [], stallEnv);
     if (stallFlag) fs.rmSync(stallFlag, { force: true });
     if (!fillStep.ok || !fillStep.pid) return { ok: false, kind, stage: 'step1', fillStep };
+    // r3317 (B-3dbd unit 2): AT A RED the facts that place it, no values — the fences on disk BETWEEN the two processes
+    const fencesBetween = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')); return Object.values(j.loginFences || {}).reduce((n, v) => n + ((v && Array.isArray(v.fences)) ? v.fences.length : 0), 0); } catch (e) { return `unread (${(e && e.code) || 'error'})`; } })();
     const bootStep = await runStep('cold-step2-locked', [`--pid=${fillStep.pid}`, `--secret=${fillStep.secret}`]);
-    return { ok: bootStep.ok === true, kind, fillStep, bootStep };
+    const { secret: _secret, ...fillFacts } = fillStep;   // the made-up secret is never in what a red prints
+    return { ok: bootStep.ok === true, kind, fillStep: fillFacts, fencesBetween, bootStep };
   } finally {
     await fk.close();
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -369,6 +372,7 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
     });
 
     if (mode === 'cold-step2-locked') {
+      const tBoot = Date.now();   // r3317: the cold boot's own clock (its times said at a red)
       // Brand-new OS process #2: vault is NEVER unlocked, LF memory is 100% empty!
       vault2 = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
       const grants2 = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
@@ -437,7 +441,7 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
         });
         return { status: r.status, json: await r.json() };
       };
-      await dialogs2.arm(PID);
+      const armed = await dialogs2.arm(PID); const armMs = Date.now() - tBoot;
       dialogs2.bindTab?.({ profileId: PID, browserKey: KEY }, tid);
       dialogs2.noteActiveTab?.({ profileId: PID, browserKey: KEY }, tid);
 
@@ -445,6 +449,11 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
       await post2('/api/agent/browser/resolve', { wrapper: true, argv: ['get', 'value', TARGET_SEL], targetId: tid });
       await new Promise((r) => setTimeout(r, 35));
       const readHeld = await post2('/api/agent/browser/resolve', { wrapper: true, argv: ['get', 'value', TARGET_SEL], targetId: tid });
+      const readMs = Date.now() - tBoot;
+      // which road answered, by the refusal's own words (never a value): «restarted while…» = the fences restored from the record,
+      // «can no longer verify…» = the record's road before the restore, nothing = no fence answered (the read went through)
+      const errOf = (r) => String((r && r.json && (r.json.error || r.json.message)) || '');
+      const road = readHeld.status === 409 ? (/restarted while a filled login secret/.test(errOf(readHeld)) ? 'the fences restored (await_vault)' : /can no longer verify/.test(errOf(readHeld)) ? 'the record before the restore (unknown_typed)' : 'a refusal: ' + (readHeld.json && readHeld.json.code)) : `no fence answered (${readHeld.status})`;
       const med2 = await openMediatedCdpSession(WebSocket, medGrant.url, tid);
       const medHeld = await med2.call('Runtime.evaluate', { expression: '1+1', returnByValue: true }, med2.sid);
       med2.close();
@@ -454,6 +463,7 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
         kind,
         mode,
         readHeldStatus: readHeld.status,
+        armed: { ok: !!(armed && armed.ok), watched: !!(armed && armed.watched), code: (armed && armed.code) || null }, road, armMs, readMs,
         readHeldCode: readHeld.json?.code || null,
         medHeldErr: medHeld.error?.message || null,
       };
