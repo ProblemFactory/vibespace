@@ -44,7 +44,7 @@ const crypto = require('crypto');
 const V = require('../vault.js');
 const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
-const { runMigrations } = require('../migration-runner.js');
+const { runMigrations, ledgerFileOf } = require('../migration-runner.js');
 const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped, this lock epoch (lane vault-locked-refusal-notice)
 const VU = require('../vault-use.js');   // PURE: the use's ONE shape, its audit line, the daily failure count (lane vault-use-law)
 
@@ -696,7 +696,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
         if (lost.length) load(); else try { fs.unlinkSync(FILE); } catch { }   // a file NOT put back lives in the record alone (read back, every key proven): the vault stays set up, LOCKED — the next unlock resumes its seal
         audit('vault-setup-refused', { ip, code: 'migration_failed', why: (res && res.error) || 'seal', ...(lost.length ? { kept: lost } : {}) });
         // r3244: a migration ledger that could not be read ran nothing — the refusal says THAT, never «a key file could not be sealed»
-        if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `data/migrations.json could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };
+        if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `${ledgerFileOf(path.join(dataDir, 'migrations.json'))} could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };   // r3288 (5): the runner's one source of its name
         return { ok: false, code: 'migration_failed', why: lost.length ? `a key file could not be sealed and ${lost.join(', ')} could not be put back — the vault record holds every key: unlock it to finish the seal` : 'a key file could not be sealed — every file was put back, nothing changed' };
       }
       const { sealing, ...done } = back;

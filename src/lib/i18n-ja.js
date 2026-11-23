@@ -13467,6 +13467,7 @@ export default {
   "Its bytes do not hold a migration ledger, and it does not mend by itself: restore it from a copy, or move it aside — every migration then runs again at the next start.": "中身が移行記録になっておらず、自然には直りません：コピーから戻すか、別の場所へ移してください——次の起動ですべての移行がもう一度実行されます。",   // lane lg-group-parents r3244: the unread ledger's For-you item
   "Reading it failed ({error}); it is read again at the next start.": "読み取りに失敗しました（{error}）；次の起動でもう一度読みます。",   // lane lg-group-parents r3244: the unread ledger's For-you item
   "This notice closes by itself at the first start whose ledger reads.": "移行記録が読める最初の起動で、この通知は自動で閉じます。",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "It does not read at a second start either: check that {file} is a file the server can read, or move it aside — every migration then runs again at the next start.": "2 回目の起動でも読めませんでした：{file} がサーバーの読めるファイルか確かめるか、別の場所へ移してください——次の起動ですべての移行がもう一度実行されます。",   // lane lg-group-parents r3288 (3): a read error that stays
   "Its error: {error}": "エラー：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "何も記録していません——次回の起動時に再試行します。サーバーログに行全体があります。",
   "Migrations": "データ移行", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)

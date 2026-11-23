@@ -51,7 +51,10 @@ const LEDGER_WORDS = Object.freeze({
   torn: i18nKey('Its bytes do not hold a migration ledger, and it does not mend by itself: restore it from a copy, or move it aside — every migration then runs again at the next start.'),
   read: i18nKey('Reading it failed ({error}); it is read again at the next start.'),
   closes: i18nKey('This notice closes by itself at the first start whose ledger reads.'),
+  stays: i18nKey('It does not read at a second start either: check that {file} is a file the server can read, or move it aside — every migration then runs again at the next start.'),
 });
+/** r3288 (5): the ledger's PLAIN name — «data/migrations.json» (its folder's own name and its own), ONE source for the item and the vault */
+const ledgerFileOf = (ledgerPath) => path.join(path.basename(path.dirname(ledgerPath)), path.basename(ledgerPath));
 const fillWords = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
 // an error's FIRST line as a screen may carry it (the For-you item, the hub's toast): the belt sees the WHOLE line, THEN the
 // cut (r4, review R3-F1: a token cut at 300 first is no longer a shape the belt knows — secret-shapes: never cut inside a value)
@@ -70,10 +73,16 @@ function sayFailed(todos, id, e, warn) {
 function sayLedgerUnread(todos, ledgerPath, ledger, warn) {
   const store = inboxOf(todos);
   if (!store) return;
+  // r3288 (1): For you itself held unread at this start (two unread files at once) — its add would be refused: the item waits
+  // for the store's own «when it reads» door, as the «ran» close does
+  if (typeof store.isHeldUnread === 'function' && store.isHeldUnread()) { try { store.whenRead(() => sayLedgerUnread(todos, ledgerPath, ledger, warn), 'the unread migration ledger\'s notice'); } catch { } return; }
   try {
-    const file = path.join(path.basename(path.dirname(ledgerPath)), path.basename(ledgerPath));   // «data/migrations.json» — never the whole path
+    const file = ledgerFileOf(ledgerPath);   // «data/migrations.json» — never the whole path
+    // r3288 (3): a read error that does not mend by itself (the ledger's name is a folder; a permission that stays) gets the way out
+    // too — at once for a folder, else from the SECOND start that cannot read it (its item is open from the first)
+    const again = !ledger.torn && (String(ledger.unread) === 'EISDIR' || ((typeof store.idsWhere === 'function' && store.idsWhere((i) => i.sessionKey === FAILED_INBOX_KEY && i.itemKey === LEDGER_ITEM && i.status === 'open')) || []).length > 0);
     const head = { key: LEDGER_WORDS.text, params: { file } };
-    const lines = [ledger.torn ? { key: LEDGER_WORDS.torn } : { key: LEDGER_WORDS.read, params: { error: String(ledger.unread) } }, { key: LEDGER_WORDS.closes }];
+    const lines = [ledger.torn ? { key: LEDGER_WORDS.torn } : { key: LEDGER_WORDS.read, params: { error: String(ledger.unread) } }, ...(again ? [{ key: LEDGER_WORDS.stays, params: { file } }] : []), { key: LEDGER_WORDS.closes }];
     store.add(FAILED_INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Migrations', itemKey: LEDGER_ITEM, text: fillWords(head), detail: lines.map(fillWords).join('\n'), i18n: { text: head, detail: lines, source: { key: FAILED_WORDS.source } } });
   } catch (x) { warn(`[migrate] the unread ledger's For-you notice was not filed — ${(x && x.message) || x}`); }
 }
@@ -204,4 +213,4 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
   return results;
 }
 
-module.exports = { runMigrations, failedLine, FAILED_INBOX_KEY, FAILED_WORDS, LEDGER_ITEM, LEDGER_WORDS };
+module.exports = { runMigrations, failedLine, FAILED_INBOX_KEY, FAILED_WORDS, LEDGER_ITEM, LEDGER_WORDS, ledgerFileOf };

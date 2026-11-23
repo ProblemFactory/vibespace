@@ -3756,8 +3756,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     process.on('unhandledRejection', onUn);
     fs.readFileSync = function (p0, ...a) { if (String(p0) === f) throw Object.assign(new Error(`EIO: a placed refusal of the read, '${p0}'`), { code: 'EIO' }); return real.call(this, p0, ...a); };
     release();
-    const t0 = Date.now(), settle = () => { if (!(late.length || unhandled.length) && Date.now() - t0 < 2000) return setImmediate(settle); setImmediate(() => { fs.readFileSync = real; process.off('unhandledRejection', onUn); done({ res, warned, late, unhandled, bytes: real.call(fs, f, 'utf8') }); }); };   // r3244 (a reader's small): the late answer awaited, bounded — never a fixed sleep
-    setImmediate(settle);
+    const t0 = Date.now(), settle = () => { if (!(late.length || unhandled.length) && Date.now() - t0 < 2000) return setTimeout(settle, 5); setTimeout(() => { fs.readFileSync = real; process.off('unhandledRejection', onUn); done({ res, warned, late, unhandled, bytes: real.call(fs, f, 'utf8') }); }, 5); };   // r3244 / r3288 (4): the late answer awaited on a short timer, bounded — never a fixed sleep nor a spinning immediate
+    setTimeout(settle, 5);
   });
   const fe = world('r2999-step', LEDGER), e = await stepped(require('../src/migration-runner.js'), fe);
   ok(e.res[0] && e.res[0].status === 'started' && e.bytes === LEDGER && e.late.length === 1 && e.late[0].status === 'failed' && e.late[0].code === 'ledger-unread' && e.unhandled.length === 0 && e.warned.some((m) => /r2999-step ended but is not recorded/.test(m)),
@@ -3798,7 +3798,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   const notices = [], TH = forYou();
   const mmH = create({ rootDir: rootH, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k), userTodos: TH });
   refused(ledH, 'EIO', () => mmH.runLocalMigrations({ only: ['2026-10-vault-always-to-grants'] }));
-  ok(notices.filter((k) => k === 'migrations-ledger-unread').length === 1 && !notices.some((k) => /^migration-failed:/.test(k)) && fs.readFileSync(ledH, 'utf8') === LEDGER && TH.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM).length === 1 && /data\/migrations\.json could not be read/.test(TH.items[0].text),
+  ok(notices.filter((k) => k === 'migrations-ledger-unread').length === 1 && !notices.some((k) => /^migration-failed:/.test(k)) && fs.readFileSync(ledH, 'utf8') === LEDGER && TH.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM).length === 1 && /data\/migrations\.json could not be read/.test(TH.items[0].text),   // stale-pins: kept (the item's words built at run time: «{file} could not be read» with the ledger's plain name)
     'r2999 THE HUB: its boot\'s migrations over an unreadable ledger — ONE notice (migrations-ledger-unread), no notice an id, the ledger untouched, and ONE For-you item naming data/migrations.json (r3244)', { notices, items: TH.items });
   {
     const MIG_SRC2 = fs.readFileSync(path.join(REPO_R, 'src/server/migrations.js'), 'utf8');
@@ -3813,7 +3813,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   // THE VAULT's SETUP over an unread ledger names THAT cause (r3244's should) — pinned: the setup needs a vault world (its suite runs it)
   {
     const VE = fs.readFileSync(path.join(REPO_R, 'src/server/vault-engine.js'), 'utf8');
-    ok(VE.includes("if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `data/migrations.json could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };") && /unread: ledger\.unread \}\)\);/.test(runSrc2),
+    ok(VE.includes("if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `${ledgerFileOf(path.join(dataDir, 'migrations.json'))} could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };") && VE.includes("const { runMigrations, ledgerFileOf } = require('../migration-runner.js');") && /unread: ledger\.unread \}\)\);/.test(runSrc2),
       'r3244 PIN: the vault\'s setup over an unread ledger refuses with THAT cause (data/migrations.json could not be read), never «a key file could not be sealed»; the runner hands the cause on each held row');
   }
   // THE DEVICE: its registry goes through the same runner (src/agentd/agentd.js) — its own journal line, nothing rewritten
@@ -4006,6 +4006,97 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       "            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { rep.sampled.push({ shard: f, error: e.code || e.message }); continue; }\n", 'mg1-step-today');   // stale-pins: kept (today's sample)
     const b = await stepped(Today, 'step-red');
     ok(b.recorded, 'MG1 ⑧ RED today\'s sample: the refused shard is an error row of the report — recorded, its dedup never runs', b);
+  }
+}
+// ── r3288 (MG1's follow, line 703's round w07bu3d00): the unread ledger's item WAITS for a held For you and is filed at its read;
+// a read error that stays names its way out; the closing call has its red; the server hands the store; a SECOND run over its own
+// result (a ledger moved aside runs every migration again) reopens no closed notice and expires only the notices it was written for
+{
+  console.log('r3288 the unread ledger\'s item and a second run');
+  const RUN = require('../src/migration-runner.js'), RSRC = fs.readFileSync(path.join(REPO_ROOT, 'src/migration-runner.js'), 'utf8');
+  const MUTF = mutantCopies('migrations-r3288', REPO_ROOT);
+  const ledgerAt = (name, text) => { const d = path.join(tmp, name); fs.mkdirSync(d, { recursive: true }); const f = path.join(d, 'migrations.json'); fs.writeFileSync(f, text); return f; };
+  const LED = JSON.stringify({ applied: { 'r3288-a': 1795000000000 } });
+  const refusing = (file, code, fn) => { const real = fs.readFileSync; fs.readFileSync = function (p0, ...a) { if (String(p0) === file) throw Object.assign(new Error(`${code}: a placed refusal of the read, '${p0}'`), { code }); return real.call(this, p0, ...a); }; try { return fn(); } finally { fs.readFileSync = real; } };
+  const forYou = ({ held = false } = {}) => {
+    const st = { held, items: [], waits: [] };
+    Object.assign(st, {
+      isHeldUnread: () => st.held, whenRead: (fn) => { st.waits.push(fn); },
+      add(key, it) { if (st.held) throw Object.assign(new Error('For you is held unread'), { code: 'todos-unread' }); const old = st.items.find((y) => y.itemKey === it.itemKey && y.status === 'open'); if (old) { Object.assign(old, it); return old; } const x = { id: 't' + (st.items.length + 1), key, ...it, status: 'open' }; st.items.push(x); return x; },
+      idsWhere(fn) { return st.items.filter((i) => fn({ ...i, sessionKey: i.key })).map((i) => i.id); },
+      setStatus(id, s2) { const i = st.items.find((y) => y.id === id); if (i) i.status = s2; },
+      read() { st.held = false; for (const fn of st.waits.splice(0)) fn(); },
+    });
+    return st;
+  };
+  const start = (R, f, code, todos) => { const go = () => R.runMigrations({ ledgerPath: f, migrations: [{ id: 'r3288-a', run: () => { } }], log: () => { }, warn: () => { }, todos }); return code ? refusing(f, code, go) : go(); };
+  const mine = (T) => T.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM);
+  // (1) FOR YOU ITSELF HELD at that start: the item waits for the store's own «when it reads» door
+  {
+    const T = forYou({ held: true }), f = ledgerAt('r3288-held', LED);
+    start(RUN, f, 'EIO', T);
+    const before = mine(T).length; T.read();
+    ok(before === 0 && mine(T).length === 1 && mine(T)[0].status === 'open', 'r3288 (1) For you ITSELF held at that start: the item is not refused into a journal line — it is filed at the store\'s read, ONE item', { before, items: T.items });
+    const NoWait = MUTF.load('src/migration-runner.js', anchored(RSRC, "  if (typeof store.isHeldUnread === 'function' && store.isHeldUnread()) { try { store.whenRead(() => sayLedgerUnread(", "  if (false) { try { store.whenRead(() => sayLedgerUnread(", 'the item without its wait'), 'r3288-no-wait');
+    const T2 = forYou({ held: true }); start(NoWait, ledgerAt('r3288-held-red', LED), 'EIO', T2); T2.read();
+    ok(mine(T2).length === 0, 'r3288 (1) RED without the wait (today): the refused add is a journal line — nothing is filed when the store reads', T2.items);
+  }
+  // (3) A READ ERROR THAT STAYS names its way out: from the second start that cannot read it, and at once for a folder in its place
+  {
+    const T = forYou(), f = ledgerAt('r3288-stays', LED);
+    start(RUN, f, 'EACCES', T); const first = mine(T)[0] ? mine(T)[0].detail : '';
+    start(RUN, f, 'EACCES', T); const second = mine(T)[0] ? mine(T)[0].detail : '';
+    ok(!/second start/.test(first) && /It does not read at a second start either: check that r3288-stays\/migrations\.json is a file the server can read, or move it aside/.test(second) && mine(T).length === 1,
+      'r3288 (3) a read error that STAYS (EACCES twice): the first start says «read again at the next start», the second adds the way out — still ONE item', { first, second });
+    const TD = forYou(); start(RUN, ledgerAt('r3288-dir', LED), 'EISDIR', TD);
+    ok(/It does not read at a second start either/.test((mine(TD)[0] || {}).detail || ''), 'r3288 (3) …the ledger\'s name a FOLDER (EISDIR, which never mends): the way out at the first start', TD.items);
+  }
+  // (4) THE CLOSING CALL's red; the server hands the For-you store to the registry
+  {
+    const NoClose = MUTF.load('src/migration-runner.js', anchored(RSRC, '  sayRan(todos, LEDGER_ITEM);', '  // (r3288 red: no close)', 'the start without its close'), 'r3288-no-close');
+    const T = forYou(), f = ledgerAt('r3288-close-red', LED);
+    start(NoClose, f, 'EIO', T); start(NoClose, f, null, T);
+    ok(mine(T).length === 1 && mine(T)[0].status === 'open', 'r3288 (4) RED without the closing call: the ledger reads again and the item stays OPEN for good', T.items);
+    const SV = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
+    ok(SV.split('\n').some((l) => l.includes("require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice,") && /\buserTodos \/\* 2\.369\.152/.test(l) && l.includes('.runLocalMigrations(')), 'r3288 (4) PIN: the server hands the registry its LIVE For-you store (the item\'s road on production, never a leg\'s hand)');
+  }
+  // (2) A SECOND RUN over its own result reopens no closed notice and expires only the notices it was written for
+  {
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const MIG_SRC3 = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
+    // (a) the retired job secrets: renamed by its first run, its notice CLOSED by the person — the second run keeps it closed
+    const jsWorld = (name) => {
+      const root = path.join(tmp, 'r3288-js-' + name), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(path.join(dataDir, 'job-secrets.retired.json'), JSON.stringify({ GH_TOKEN: 'v-' + crypto.randomBytes(8).toString('hex') }), { mode: 0o600 });
+      const live = new UserTodoManager({ dataDir, expirySweepMs: 0 });
+      const it = live.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', itemKey: '2026-10-job-secrets-retired', text: 'A plain file kept secrets for background jobs outside the vault', detail: 'd' });
+      live.setStatus(it.id, 'done', 'user');
+      return { root, live };
+    };
+    const jsItems = (w) => { const sn = w.live.snapshot() || {}; return [...(sn.open || []), ...(sn.resolved || [])].filter((i) => i.sessionKey === 'vault' && i.itemKey === '2026-10-job-secrets-retired'); };
+    const jsRun = (mod, w) => mod.create({ rootDir: w.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: w.live }).runLocalMigrations({ only: ['2026-10-job-secrets-retired'] }).find((x) => x.id === '2026-10-job-secrets-retired');
+    const wa = jsWorld('cure'), ra = jsRun({ create }, wa), ia = jsItems(wa);
+    ok(ra && ra.status === 'ran' && ia.length === 1 && ia[0].status === 'done' && /kept as the owner left it \(closed\)/.test(JSON.stringify(ra.report || '')), 'r3288 (2a) the retired job secrets\' SECOND run (its file renamed by the first): the notice the person CLOSED stays closed (its sibling\'s rule)', { ra, items: ia.map((i) => i.status) });
+    const NoGuard = MUTF.load('src/server/migrations.js', anchored(MIG_SRC3, '        if (!st) {\n          const live = liveTodos();', '        if (false) {\n          const live = liveTodos();', 'the second run without its guard'), 'r3288-js-red');
+    const wb = jsWorld('red'); jsRun(NoGuard, wb);
+    ok(jsItems(wb).some((i) => i.status === 'open'), 'r3288 (2a) RED without the guard (today): the second run REOPENS the notice the person closed', jsItems(wb).map((i) => i.status));
+    // (b) the spending notices' expiry: a setting-holds notice (structured words, no expiry) is not the notices it was written for
+    const H = 3600e3, spWorld = (name) => {
+      const root = path.join(tmp, 'r3288-sp-' + name), d = path.join(root, 'data'); fs.mkdirSync(d, { recursive: true });
+      const now = Date.now();
+      fs.writeFileSync(path.join(d, 'user-todos.json'), JSON.stringify({ items: [
+        { id: 'ut-holds', sessionKey: 'accounts', text: 'The setting holds could not be read', detail: 'data/setting-holds.json could not be read (EIO).', urgency: 'high', kind: 'notice', status: 'open', by: 'agent', sessionName: 'Spending', origin: 'spend', i18n: { text: { key: 'The setting holds could not be read' } }, createdAt: now - 48 * H, resolvedAt: null, resolvedBy: null },
+        { id: 'ut-old', sessionKey: 'accounts', text: 'Account A has used 10 of its 12 unattended turns this hour (83%).', detail: 'd', urgency: 'normal', status: 'open', by: 'agent', sessionName: 'Spending', createdAt: now - 48 * H, resolvedAt: null, resolvedBy: null },
+      ] }));
+      return { root, d };
+    };
+    const spRun = (mod, w) => { mod.create({ rootDir: w.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations({ only: ['2026-09-spend-notices-expire'] }); const j = JSON.parse(fs.readFileSync(path.join(w.d, 'user-todos.json'), 'utf8')); return Object.fromEntries((j.items || []).map((i) => [i.id, i])); };
+    const sa = spRun({ create }, spWorld('cure'));
+    ok(sa['ut-holds'] && sa['ut-holds'].status === 'open' && sa['ut-old'] && sa['ut-old'].status === 'done' && sa['ut-old'].resolvedBy === 'expired',
+      'r3288 (2b) the spending notices\' expiry takes only the notices it was WRITTEN FOR: an old spend notice expires; a setting-holds notice (structured words, no expiry) stays open', { holds: sa['ut-holds'] && sa['ut-holds'].status, old: sa['ut-old'] && sa['ut-old'].status });
+    const NoOwn = MUTF.load('src/server/migrations.js', anchored(MIG_SRC3, " && !(it.i18n && typeof it.i18n === 'object');", ';', 'the expiry without its own notices\' test'), 'r3288-sp-red');
+    const sb = spRun(NoOwn, spWorld('red'));
+    ok(sb['ut-holds'] && sb['ut-holds'].status === 'done', 'r3288 (2b) RED without the test (today): the expiry closes the setting-holds notice too — older than a day, no expiry of its own', sb['ut-holds'] && sb['ut-holds'].status);
   }
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

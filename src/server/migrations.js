@@ -404,7 +404,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         if (!path.isAbsolute(dir)) dir = path.join(homeDir, '.agent-browser', dir);
         let dst = null; try { dst = fs.statSync(dir); } catch (e) { if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) throw MR.unread(`the legacy browser profile folder (${path.basename(dir)})`, e); }   // MG1: not there = nothing to adopt; any other failed stat = not run (r3246 (1): never the whole path)
         const isDir = !!(dst && dst.isDirectory());
-        if (!isDir) { console.log(`[migrate] legacy browser profile: nothing to adopt (${dir} is not a directory)`); return; }
+        if (!isDir) { console.log(`[migrate] legacy browser profile: nothing to adopt (${path.basename(dir)} is not a directory)`); return; }   // r3288 (5): never the whole path
         // A keeper built HERE only touches the registry file (no broadcast, no
         // timer, not installed as the process's keeper — that one is wired
         // later with real deps and reads what this wrote).
@@ -616,7 +616,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       note: "SPEND NOTICES LIVED FOREVER AS ACTIONS (owner's instance, measured 2026-09-22: 33 open 'For you' items, 15 from Spending, 13 of them filed before the notice lane existed (2.369.118) — no kind, so in the ACTION list colouring the badge — and 137–288 h old: '… has used 10 of its 12 unattended turns this hour (83%)', '… 48 of 60 today (80%)', 'VibeSpace refused the Stop bookkeeping mini-turn …', warnings about hour/day windows that closed weeks ago). The producer now stamps expiresAt and the store expires it; this moves what the store already holds into the lane: every Spending item (sessionName 'Spending' in the 'accounts' row — the name spend-guard's one fileInbox freezes on every item it files, and nothing else writes) becomes kind 'notice'; an OPEN one gets the end of the window it was about (its detail's `Scope: hour` = filing + 1 h, a refusal = + 6 h, anything else + 24 h — the longest window any spend notice talks about): past ⇒ resolved 'expired' with resolvedAt = that end (when it SHOULD have died, so it sorts as old history — kept in the ledger, never deleted), still ahead ⇒ stamped as its expiresAt so it cannot live forever either. Written through the live store and flushed before the ledger row; counts in the ledger's report row.",
       run() {
         const { noticeExpiry } = require('./spend-guard.js');
-        const isSpend = (it) => !!it && it.sessionName === 'Spending' && it.sessionKey === 'accounts';
+        // r3288 (2): only the notices it was WRITTEN FOR — spend-guard's words as they were filed then, plain text with no structured
+        // words (`i18n`): every Spending notice that carries structured words is a later producer's (the setting holds' three
+        // notices; spend-guard's own later ones carry their expiry too) — a second run (a ledger moved aside runs every migration
+        // again) takes nothing it was not written for
+        const isSpend = (it) => !!it && it.sessionName === 'Spending' && it.sessionKey === 'accounts' && !(it.i18n && typeof it.i18n === 'object');
         const live = liveTodos();   // B-44f3: refused by name while For you is held unread
         let store = live, priv = false;
         if (!store || typeof store.reshapeItems !== 'function') {
@@ -1002,6 +1006,14 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           fs.renameSync(from, to);
         } else if (!MR.exists(to, JOB_SECRETS_RETIRED)) return settle({ store: 'absent' });   // MG1: «absent» only when not there
         if (fs.lstatSync(to).isFile()) fs.chmodSync(to, 0o600);   // a symlink's target is not ours to chmod
+        // r3288 (2): a SECOND run over its own result (a ledger moved aside runs every migration again) never reopens the notice the
+        // person CLOSED — its sibling's rule (2026-11-job-secrets-buttons): a keyed item that is not open stays as the owner left it
+        if (!st) {
+          const live = liveTodos();   // B-44f3: refused by name while For you is held unread
+          const ids = (fn) => (live && typeof live.idsWhere === 'function' ? live.idsWhere(fn) || [] : []);
+          const keyed = ids((i) => i.sessionKey === 'vault' && i.itemKey === JOB_SECRETS_ITEM), open = ids((i) => i.sessionKey === 'vault' && i.itemKey === JOB_SECRETS_ITEM && i.status === 'open');
+          if (keyed.length && !open.length) { console.log('[migrate] job-secrets-retired: its notice is kept as the owner left it (closed)'); return { store: 'renamed-earlier', to: 'data/' + JOB_SECRETS_RETIRED, notice: 'kept as the owner left it (closed)' }; }
+        }
         // its NAMES only — the values are parsed to find the names and never leave this function (no log, no ledger, no notice)
         const { names, lines } = jsLines();
         const rep = { store: st ? 'renamed' : 'renamed-earlier', to: 'data/' + JOB_SECRETS_RETIRED, names: names ? names.length : null };

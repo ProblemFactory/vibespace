@@ -13468,6 +13468,7 @@ export default {
   "Its bytes do not hold a migration ledger, and it does not mend by itself: restore it from a copy, or move it aside — every migration then runs again at the next start.": "它的内容不是迁移记录，也不会自行修复：请从备份恢复它，或把它移到别处——下次启动时所有迁移会重新运行。",   // lane lg-group-parents r3244: the unread ledger's For-you item
   "Reading it failed ({error}); it is read again at the next start.": "读取它失败（{error}）；下次启动时会再读一次。",   // lane lg-group-parents r3244: the unread ledger's For-you item
   "This notice closes by itself at the first start whose ledger reads.": "迁移记录能读出的第一次启动时，这条通知会自行关闭。",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "It does not read at a second start either: check that {file} is a file the server can read, or move it aside — every migration then runs again at the next start.": "第二次启动时也读不出：请检查 {file} 是不是服务器能读的文件，或把它移到别处——下次启动时所有迁移会重新运行。",   // lane lg-group-parents r3288 (3): a read error that stays
   "Its error: {error}": "它的错误：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "没有记录任何内容——下次启动时会重试；服务器日志里有完整的一行。",
   "Migrations": "数据迁移", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
