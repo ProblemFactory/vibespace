@@ -12859,6 +12859,8 @@ export default {
   "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "该条目已关闭，授权暂停——打开「可供 agent 运行使用」即可恢复。", // lane vault-use-grants
   "paused by you": "你暂停了它", // lane vault-use-grants (round 7)
   "Unverified until you unlock the vault — not in use until then.": "在你解锁保险库之前无法验证——在此之前不生效。", // lane vault-use-grants (round 6)
+  "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "无法验证：保险库的使用标记读不出来——在读出之前不生效；没有丢失任何东西。", // r3002 (a)
+  "Unverified: this row's marks were lost — save it again (验证是你) to keep these members; not in use until then.": "无法验证：这一行的标记丢失了——再保存一次（验证是你）即可保留这些成员；在此之前不生效。", // r3002 (a)
   "Un-pause this — let it be used again": "取消暂停——让它重新可用", // lane vault-use-grants (round 6)
   "every {host} host": "{host} 下的每个主机", // lane vault-use-grants (round 3)
   "every {host} host (incl. other customers’ endpoints)": "{host} 下的每个主机（含其他客户的端点）", // lane vault-use-grants (round 3)

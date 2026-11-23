@@ -224,7 +224,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       }
       for (const x of u.except || []) chips.append(el('span', 'vw-ak-chip vw-use-chip vw-use-except', t('except {name}', { name: nameOf(x, app) })));
       host.append(chips);
-      if (u.unverified && live.length) host.append(el('div', 'vw-use-paused-note', t('Unverified until you unlock the vault — not in use until then.')));
+      if (u.unverified && live.length) host.append(el('div', 'vw-use-paused-note', u.unverifiedWhy === 'marks_unread' ? t('Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.') : u.unverifiedWhy === 'marks_undecided' ? t('Unverified: this row\'s marks were lost — save it again (验证是你) to keep these members; not in use until then.') : t('Unverified until you unlock the vault — not in use until then.')));   // r3002 (a): the marks held / a row undecided
       else if (paused) host.append(el('div', 'vw-use-paused-note', t('Paused while the entry is off — turn «Usable by agent runs» on to restore these.')));
     }
     if (u.used && u.used.uses) host.append(el('div', 'vw-ak-used vw-use-count', t('used {n}× by {m} conversations', { n: u.used.uses, m: u.used.convs })));

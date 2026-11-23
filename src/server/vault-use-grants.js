@@ -43,6 +43,8 @@
  */
 const crypto = require('crypto');
 const fs = require('fs');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3002 (a): the vault-use marks under the store-read law
 const path = require('path');
 const GM = require('../grant-model.js');
 const U = require('../vault-use-grant.js');
@@ -55,8 +57,9 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-const STATUS = Object.freeze({ row_changed: 409, except_unnamed: 409, window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
+const STATUS = Object.freeze({ vault_use_marks_unread: 503, marks_undecided: 409, row_changed: 409, except_unnamed: 409, window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
+  marks_undecided: 'this row\'s marks were lost (vault-use-marks.json was damaged or missing) — its members are kept, unverified; open «Who may use it» and save the row again (验证是你) to keep them; nothing was written',   // r3002 (a)
   row_changed: 'someone changed who may use it since this page read it — nothing was written; the row as it is now is answered (use): save again over it',   // B-f212's remainder
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
   command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
@@ -122,25 +125,81 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   let genLoaded = false;                // B-f212's remainder: the sidecar was read once while unlocked (the pages' stamps are memory after)
   const staleNoted = new Set();         // resources a `grant_stale` For-you row already named (once, until the owner re-grants)
   const exceptCanon = (except) => (Array.isArray(except) ? except : []).map((x) => GM.principalKey(x)).filter(Boolean).sort();
-  const genBody = (seq, res) => JSON.stringify({ v: 1, gen: Number(seq) || 0, res: Object.fromEntries(Object.keys(res).sort().map((k) => [k, Number(res[k]) || 0])) });
+  // r3002 (a) — THE MARKS UNDER THE STORE-READ LAW (src/store-read-hold.js). The release read a failed read (or torn bytes) of the
+  // sidecar as «no generations» and went on: every member then failed its mark — dropped by name, the row REWRITTEN WITHOUT IT at
+  // the next write built on the verified view (addMember: the card's «Always», a standing request, the carries; the window prune),
+  // and a «could not be trusted» notice blamed a forgery for a read that failed. Now the first read while unlocked goes through the
+  // law: HELD, no member verifies (a run asks its card, as while locked), no stale notice is filed, every write is refused by name
+  // BEFORE the grants store is touched, and the file is read again off the loop. WHO REMOVES BY THIS STORE's SILENCE: every write
+  // built on the verified view (it rewrites a row without the members that fail). So TORN bytes (kept aside once) never lift as «no
+  // generations»: each row whose members do not verify at generation 0 is UNDECIDED — kept, unverified, never alarmed, never
+  // rewritten by a machine write — until the owner saves it again (setRow, 验证是你) or drops its entry; the list rides the sidecar
+  // under its own mark. A sidecar MISSING is the release's generation 0 (rows written before the sidecar existed verify there)
+  const MARKS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  let marksStarted = false, tornLift = null;
+  let undecided = new Set();            // resources whose generation is unknown (torn / missing marks)
+  const marksHold = MARK_FILE ? HOLD.create({
+    file: MARK_FILE, valid: MARKS_SHAPE, code: 'vault_use_marks_unread', aside: (mk) => `${MARK_FILE}.corrupt-${mk}`,
+    words: (h) => `vault-use-marks.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No grant is lost: nothing is written over it, each «used with no card by» grant waits unverified (a run asks its card), and a change to who may use a stored value is refused until it reads`,
+    log: (m) => log('[vault-use] ' + m),
+    onLift: (v, f) => { if (f && f.setAside) tornLift = { setAside: f.setAside }; marksStarted = false; if (unlocked()) loadGen(); said(); },
+  }) : null;
+  const marksHeld = () => !!(marksHold && marksHold.held());
+  const genBody = (seq, res, und = []) => JSON.stringify({ v: 1, gen: Number(seq) || 0, res: Object.fromEntries(Object.keys(res).sort().map((k) => [k, Number(res[k]) || 0])), ...(und.length ? { undecided: [...und].sort() } : {}) });
+  /** a read sidecar → its generations (and its undecided rows) when its mark verifies; else nothing changes (fail closed) */
+  const applyMarks = (raw) => {
+    if (!raw || typeof raw !== 'object') return false;
+    const res = raw.res && typeof raw.res === 'object' && !Array.isArray(raw.res) ? Object.fromEntries(Object.keys(raw.res).filter((k) => GM.resourceShapeOk(U.DOOR, k)).map((k) => [k, Number(raw.res[k]) || 0])) : {};
+    const und = Array.isArray(raw.undecided) ? raw.undecided.filter((k) => typeof k === 'string' && GM.resourceShapeOk(U.DOOR, k)) : [];
+    const g = Number(raw.gen) || 0;
+    let want = null; try { want = vault.macOf(GEN_LABEL, genBody(g, res, und)); } catch { want = null; }
+    const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;
+    if (!(want && got && g >= markGen && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) return false;
+    genSeq = Math.max(genSeq, g); markGen = g; genByRes = Object.assign(Object.create(null), res); undecided = new Set(und);
+    return true;
+  };
+  /** torn marks say nothing of the rows that exist: each whose members do not all verify at generation 0 is UNDECIDED, written under the mark */
+  const settleSilence = (why) => {
+    let rows = [];
+    try { rows = store().rowsOfDoor(U.DOOR).filter((r) => r && okId(r.resource) && (r.to || []).length && !(String(r.resource) in genByRes) && (r.to || []).some((e) => !verifyMember(r.resource, e, exceptCanon(r.except), 0))).map((r) => String(r.resource)); } catch { rows = []; }
+    if (!rows.length) return;
+    for (const id of rows) undecided.add(id);
+    log(`[vault-use] vault-use-marks.json ${why}: ${rows.length} row(s) of «used with no card by» grants wait UNDECIDED — kept, unverified (a run asks its card), never rewritten by a machine write — until the owner saves each row again`);
+    saveGen();
+  };
   const loadGen = () => {
     if (!MARK_FILE || !unlocked()) return;
+    if (marksHeld()) return;   // r3002 (a): held — the law reads it again off the loop; nothing verifies until it reads
+    if (tornLift) { const was = tornLift; tornLift = null; marksStarted = true; genLoaded = true; settleSilence(`was torn (kept aside as ${was.setAside})`); return; }
+    let read; try { read = { text: fs.readFileSync(MARK_FILE, 'utf-8') }; } catch (error) { read = { error }; }
+    if (!marksStarted) {   // r3002 (a): THE FIRST READ while unlocked, through the law
+      const st = marksHold.start(SR.storeAnswer(read, { valid: MARKS_SHAPE }));
+      if (st === 'held') return;
+      marksStarted = true; genLoaded = true;
+      if (st === 'missing') return;   // no sidecar: the release's generation 0
+      let raw = null; try { raw = JSON.parse(read.text); } catch { raw = null; }
+      applyMarks(raw);   // a mark that does not verify changes nothing (an unverifiable sidecar never lowers a generation — fail closed)
+      return;
+    }
     genLoaded = true;
-    let raw = null; try { raw = JSON.parse(fs.readFileSync(MARK_FILE, 'utf-8')); } catch { return; }   // no sidecar yet / unreadable ⇒ keep our in-memory view (an unverifiable sidecar never lowers a generation — fail closed)
-    if (!raw || typeof raw !== 'object') return;
-    const res = raw.res && typeof raw.res === 'object' && !Array.isArray(raw.res) ? Object.fromEntries(Object.keys(raw.res).filter((k) => GM.resourceShapeOk(U.DOOR, k)).map((k) => [k, Number(raw.res[k]) || 0])) : {};
-    const g = Number(raw.gen) || 0;
-    let want = null; try { want = vault.macOf(GEN_LABEL, genBody(g, res)); } catch { want = null; }
-    const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;
-    if (!(want && got && g >= markGen && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) return;
-    genSeq = Math.max(genSeq, g); markGen = g; genByRes = Object.assign(Object.create(null), res);
+    if (read.error) return;   // read once in this life: memory holds the generations (a later failed read never lowers them)
+    let raw = null; try { raw = JSON.parse(read.text); } catch { return; }
+    applyMarks(raw);
   };
-  const saveGen = () => { if (!MARK_FILE) return; try { const body = genBody(genSeq, genByRes); const mark = vault.macOf(GEN_LABEL, body); if (!mark) return; writeJsonAtomic(MARK_FILE, { ...JSON.parse(body), mark }); markGen = genSeq; } catch (e) { log(`[vault-use] the mark generation could not be written (${e.message})`); } };
+  const saveGen = () => { if (!MARK_FILE || !marksHold.writable('a vault-use generation')) return; try { const body = genBody(genSeq, genByRes, [...undecided]); const mark = vault.macOf(GEN_LABEL, body); if (!mark) return; writeJsonAtomic(MARK_FILE, { ...JSON.parse(body), mark }); markGen = genSeq; } catch (e) { log(`[vault-use] the mark generation could not be written (${e.message})`); } };
   // lane vault-use-grants round 5 (MINOR, item 6): the generation moves in TWO steps — `nextGen` computes the generation a
   // write WILL take (it does NOT persist), and `commitGen` records it only AFTER the grants write landed. r4 bumped+persisted
   // BEFORE the write, so a refused 257th member (too_many) or a failed grants.json write invalidated every existing member of
   // the entry (their macs were made at the old generation, which no longer verified) ⇒ a false «forged» alarm.
-  const nextGen = () => { loadGen(); return Math.max(genSeq, markGen) + 1; };
+  const nextGen = () => { loadGen(); if (marksHeld()) return null; return Math.max(genSeq, markGen) + 1; };   // r3002 (a): null while the marks are held (the callers refuse first: marksRefused)
+  /** r3002 (a): a write refused BEFORE the grants store is touched — the marks held (every write), or this row UNDECIDED and the
+   *  write not the owner's own decision (only a whole Save — setRow — and an entry's drop decide) → a named refusal | null */
+  const marksRefused = (id, { decides = false } = {}) => {
+    loadGen();
+    if (marksHeld()) return { ok: false, code: 'vault_use_marks_unread', error: marksHold.words() };
+    if (!decides && undecided.has(String(id))) return named('marks_undecided');
+    return null;
+  };
   // B-f212's remainder (主开发 r1163): THE ROW'S STAMP is its generation. A Save is judged against it read fresh (`revOf`); a page is
   // given it from memory once the sidecar was read in this life (`revSeen` — the first page of a hub after a restart loads it, so a
   // row with no members left never hands a page a stamp the judgment would not match; after that every write of this one writer
@@ -149,7 +208,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   const revNow = (id) => Number(genByRes[String(id)]) || 0;
   const revOf = (id) => { loadGen(); return revNow(id); };
   const revSeen = (id) => { if (!genLoaded) loadGen(); return revNow(id); };
-  const commitGen = (id, gen) => { const g = Number(gen) || 0; genSeq = Math.max(genSeq, g); genByRes[String(id)] = g; staleNoted.delete(String(id)); saveGen(); return g; };   // a fresh owner write clears the stale notice for this resource
+  const commitGen = (id, gen) => { const g = Number(gen) || 0; genSeq = Math.max(genSeq, g); genByRes[String(id)] = g; undecided.delete(String(id)); staleNoted.delete(String(id)); saveGen(); return g; };   // a fresh owner write clears the stale notice for this resource
 
   // lane vault-standing-request: a member's COMMANDS and its SOURCE (+ its `at`) are under the mac too — appended ONLY when the
   // member has them, so every member written before keeps the very canon (and mac) it was stamped with.
@@ -171,6 +230,9 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // (heldBy / useVerdict list none, runs stay refused with vault_locked); publicFor shows them «unverified until unlocked».
     if (!unlocked()) return { ...row, to: [], unverifiedLocked: true };
     loadGen();
+    // r3002 (a): the marks held, or this row UNDECIDED (its marks lost): «cannot verify», never «forged» — no member held, no alarm
+    if (marksHeld()) return { ...row, to: [], unverifiedMarks: 'marks_unread' };
+    if (undecided.has(String(row.resource))) return { ...row, to: [], unverifiedMarks: 'marks_undecided' };
     const xc = exceptCanon(row.except), gen = genByRes[row.resource] || 0;
     const to = (row.to || []).filter((e) => verifyMember(row.resource, e, xc, gen));
     if ((row.to || []).length && to.length < (row.to || []).length && typeof onStale === 'function' && !staleNoted.has(row.resource)) { staleNoted.add(row.resource); try { onStale(row.resource); } catch { } }   // a member dropped (forged / `except` widened / an older row replayed) ⇒ name it ONCE (round 4 item 4)
@@ -216,6 +278,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function setRow(id, { to = [], except = [], removeExcept = [], rev } = {}, { by = 'user', reauthed = false } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
+    { const refused = marksRefused(id, { decides: true }); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     // B-f212's remainder (主开发 r1163): A SAVE OVER A ROW IT NEVER SAW IS REFUSED BY NAME — `rev` is the stamp of the row the page
     // read; another write since moved it ⇒ `row_changed`, nothing written, the row that holds answered with its stamp. Judged
     // here, before anything else this Save does, and nothing is awaited from here to the write below. A stamp is an integer (a
@@ -279,6 +342,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, legacy = false, window = null } = {}, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
+    { const refused = marksRefused(id); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     const was = verifiedRow(rowOf(id));
     const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), carry: by === 'migration', window });   // r7: `window` — the run card's «Allow for 1 hour» (its end)   // r4: per scope — a scope it names is added, or replaced when there with another end / ended; nothing else moves (the carry: the EARLIER end)
     if (!plan.ok) return named(plan.code);
@@ -295,6 +359,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, window = null } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
+    { const refused = marksRefused(id); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     const was = verifiedRow(rowOf(id));
     const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), window });
     if (!plan.ok) return named(plan.code);
@@ -316,6 +381,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function restoreRow(id, snap, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
+    { const refused = marksRefused(id); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     const row = snap && snap.row ? snap.row : null;
     const to = row && Array.isArray(row.to) ? row.to : [], except = row && Array.isArray(row.except) ? row.except : [];
     const g = store();
@@ -328,6 +394,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function revoke(id, principalKey, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
+    { const refused = marksRefused(id); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     const was = verifiedRow(rowOf(id));
     if (!was) return { ok: true, removed: false };
     const plan = U.withoutMember(was, principalKey, { now: now() });   // r8: the row's ended windows pruned with it
@@ -344,6 +411,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function revokeWindow(id, principalKey, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
+    { const refused = marksRefused(id); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     const was = verifiedRow(rowOf(id));
     if (!was) return { ok: true, removed: false, until: null };
     const plan = U.withoutWindow(was, principalKey, { now: now() });
@@ -361,6 +429,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function pruneWindows(id, { by = 'system' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
+    { const refused = marksRefused(id); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     const was = verifiedRow(rowOf(id));
     if (!was) return { ok: true, swept: 0 };
     const sw = U.withoutEndedWindows(was.to || [], now());
@@ -383,6 +452,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function drop(id, { by = 'user' } = {}) {
     if (!okId(id) || !rowOf(id)) return { ok: true, removed: false };
     if (!unlocked()) return named('vault_locked');
+    { const refused = marksRefused(id, { decides: true }); if (refused) return refused; }   // r3002 (a): the marks held / this row undecided — refused before the grants store is touched
     const g = store();
     const gen = nextGen();
     const w = g.remove(U.DOOR, String(id), by);
@@ -406,10 +476,12 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
    *  → { ok, healed: [{resource, principal, host, tool}], legacy: [{resource, principal, host}], failed } | vault_locked. */
   function carryWildcards(toolOfWild, { by = 'migration' } = {}) {
     if (!unlocked()) return named('vault_locked');
+    loadGen(); if (marksHeld()) return { ok: false, code: 'vault_use_marks_unread', error: marksHold.words() };   // r3002 (a): run again at the next unlock
     const healed = [], legacy = []; let failed = 0;
     for (const raw of store().rowsOfDoor(U.DOOR)) {
       const id = raw && raw.resource;
       if (!okId(id)) continue;
+      if (undecided.has(String(id))) continue;   // r3002 (a): an undecided row is never rewritten by a machine write
       const was = verifiedRow(raw);
       const plan = U.withWildTools(was, toolOfWild, { now: now() });   // r4 (D): `legacy` names only a LIVE wildcard scope
       if (!plan.ok) continue;
@@ -432,6 +504,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // round 6 (MINOR item 6): while locked the members cannot be verified — list them «unverified until unlocked» (names/hosts,
     // never the value, never as a held grant), so a hand-written data/grants.json member is not shown as a real grant.
     if (raw && !unlocked()) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; }
+    if (raw) { loadGen(); const why = marksHeld() ? 'marks_unread' : undecided.has(String(id)) ? 'marks_undecided' : null; if (why) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, unverifiedWhy: why, rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; } }   // r3002 (a): listed, never as a held grant
     const p = U.publicGrants(verifiedRow(raw), { now: now() });
     const by = (counts && counts.grants) || {};
     return { ...p, rev: revSeen(id), to: p.to.map((e) => ({ ...e, uses: (by[e.grant] && by[e.grant].uses) || 0, convs: (by[e.grant] && by[e.grant].convs) || 0 })) };   // r11: by its grant id (`grant`); B-f212's remainder: the row's stamp (`rev`) a Save sends back
@@ -465,7 +538,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     }
     return out;
   }
-  return { rowsOf, verdictFor, heldBy, mayUseFor, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  return { _marksHold: marksHold, rowsOf, verdictFor, heldBy, mayUseFor, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };
