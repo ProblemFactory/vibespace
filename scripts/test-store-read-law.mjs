@@ -44,6 +44,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const H = new Mod.HostManager({ dataDir: d });
     const held = !!(H.unreadWords && H.unreadWords()), listedWhileHeld = H.list().length;
     let refused = null; try { H.reshapeStore((st) => st); } catch (e) { refused = e; }   // a change while held (the release: saved)
+    if (typeof H._copies === 'function') await H._copies().refresh();   // (B-f276 family unit 2 commit 3: the sweep asks the kept copies — read first, as the boot's 60 s give them)
     H.sweepJsonlCache();   // its read r1 (M1): the boot's sweep, 60 s on — the held list must not make every machine's cache an orphan
     const cacheKept = fs.existsSync(CACHE);
     const ran = [], lifts = []; if (H.whenRead) H.whenRead(() => ran.push('swept')); H.onReadAgain = () => lifts.push(1);   // its read r1 (S5, S1)
@@ -384,9 +385,9 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const held = { unreadWords: () => 'hosts.json could not be read (EACCES)', get: () => { throw new Error('host not found'); }, deviceBounded: async () => { throw new Error('no device'); }, isLocal: () => false };
     const codeOf = async (A) => { try { await A.create({ hosts: held, log: { log() { }, warn() { } } }).call('h-0001', 'status', {}); return 'answered'; } catch (e) { return e && e.code; } };
     const got = await codeOf(ACC);
-    const DSRC = fs.readFileSync(path.join(ROOT, 'src/server/desktop-access.js'), 'utf8'), NH = '    notHeld();\n    if (!hostKnown(hostId)) throw named(';
+    const DSRC = fs.readFileSync(path.join(ROOT, 'src/server/desktop-access.js'), 'utf8'), NH = '    notHeld();\n    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named(';   // (B-f276 family unit 2 commit 3: the line asks the kept copies too)
     ok(DSRC.split(NH).length === 2, 'control setup: the anchor of the control «a held list is unavailable» is in desktop-access.js');
-    const gotx = await codeOf(MJ.load('src/server/desktop-access.js', anchored(DSRC, NH, '    /* MUTANT: no hold check */\n    if (!hostKnown(hostId)) throw named(', 'srl-389a'), 'no-held-check'));
+    const gotx = await codeOf(MJ.load('src/server/desktop-access.js', anchored(DSRC, NH, '    /* MUTANT: no hold check */\n    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named(', 'srl-389a'), 'no-held-check'));
     ok(got === 'host_unavailable' && gotx === 'unsupported-host', 'its read r2 (X1): a desktop call on a machine while hosts.json is HELD answers host_unavailable (the keeper marks it offline); CONTROL (no hold check, in a copy): «unsupported-host» — the code on which the keeper DELETES every machine\'s desktop-app records', { got, gotx });
   }
   const ER = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
@@ -490,6 +491,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const M = new Mod.MachineMounts(deps(d, revoked, logs));
     clearInterval(M._sweep);
     const held = !!(M.unreadWords && M.unreadWords()), listedWhileHeld = M.list().length;
+    if (typeof M._copies === 'function') await M._copies().refresh();   // (B-f276 family unit 2 commit 3: the sweep asks the kept copies — restore reads them first)
     M.gcOrphanTokens();   // the boot's restore runs it 5 s on
     const revokedWhileHeld = revoked.slice();
     let refused = null; try { await M.unmount('mm-0001'); } catch (e) { refused = e; }
@@ -550,8 +552,9 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     rx2.M.mountTokens.unreadWords = r.M.mountTokens.unreadWords;
     ok(/could not be read/.test(String(r.M.revokeHeldFor('h-0001'))) && rx2.M.revokeHeldFor('h-0001') === null, 'THE UN-PAIRING (round wgbjnr750): after a torn lift with the folder links held, revokeHeldFor names the hold (the un-pairing refused before any side effect) — RED CONTROL (in a copy): no refusal');
     const MSRCt = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8');
-    const rx = await run(MJ.load('src/machine-mounts.js', anchored(MSRCt, "          if (tornAt && !(Number(t.createdAt) > tornAt)) { unknown++; continue; }   // minted before the torn lift: its record is UNKNOWN — kept\n", '', 'srl-u2-torn-sweep'), 'torn-sweep-unasked'), 'mounts-torn-sweep-ctl');
-    ok(rx.revoked.includes('tok-0001'), 'RED CONTROL — the mark not asked (the release\'s road, in a copy): the same restore revokes the machine\'s token over the empty list', rx.revoked);
+    const CUT2 = anchored(anchored(MSRCt, "          if (tornAt && !(Number(t.createdAt) > tornAt)) { unknown++; continue; }   // minted before the torn lift: its record is UNKNOWN — kept\n", '', 'srl-u2-torn-sweep'), "          if (this._copies().names(t.id)) { unknown++; continue; }", "          if (false) { unknown++; continue; }", 'srl-u2-torn-sweep-copies');
+    const rx = await run(MJ.load('src/machine-mounts.js', CUT2, 'torn-sweep-unasked'), 'mounts-torn-sweep-ctl');
+    ok(rx.revoked.includes('tok-0001'), 'RED CONTROL — neither the mark nor the kept copy asked (the release\'s road, in a copy): the same restore revokes the machine\'s token over the empty list', rx.revoked);
   }
   // «missing» right after an unreadable answer: read once more before anything is written there
   {

@@ -290,6 +290,31 @@ try {
     ok(H.CEILING === 4 && first === 4 && second === 4, 'twenty-four held stores over reads that never answer hold FOUR reads; the others wait their turn, ladders armed — and the ceiling frees with its reads (the next tries read four again)', { first, second });
   }
   {
+    console.log('⑤ the helper (主开发 r3144): the copy of torn bytes is written WHOLE — a part name, synced, put in place only when whole');
+    const wholeRun = async (Mod, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'w.json'), TORN = 'torn {"made": "up"'; fs.writeFileSync(f, TORN);
+      const op = fs.promises.open, wf = fs.promises.writeFile; let failOnce = true;
+      const enospc = () => Object.assign(new Error('ENOSPC: no space left on device (placed)'), { code: 'ENOSPC' });
+      fs.promises.open = async function (p, ...a) { const fh = await op.call(fs.promises, p, ...a); if (failOnce && String(p).startsWith(d + path.sep) && String(p) !== f) { failOnce = false; fh.writeFile = async (b) => { await fh.write(Buffer.from(b).subarray(0, 3)); throw enospc(); }; } return fh; };
+      fs.promises.writeFile = async function (p, data, o) { if (failOnce && String(p).startsWith(d + path.sep) && String(p) !== f) { failOnce = false; await wf.call(fs.promises, p, Buffer.from(data).subarray(0, 3), o); throw enospc(); } return wf.call(fs.promises, p, data, o); };
+      let h = null, left = null, heldAfter = null;
+      try {
+        h = Mod.create({ file: f, code: 'w', aside: (m) => f + '.corrupt-' + m, words: () => 'w' });
+        h.start({ state: 'corrupt', why: 'did not parse' });
+        await until(() => !failOnce); await new Promise((r) => setTimeout(r, 50));
+        left = fs.readdirSync(d).filter((n) => n !== 'w.json'); heldAfter = !!h.held();
+      } finally { fs.promises.open = op; fs.promises.writeFile = wf; }
+      await h.again();
+      const copies = fs.readdirSync(d).filter((n) => n.startsWith('w.json.corrupt-'));
+      const r = { left, heldAfter, up: !h.held(), copies: copies.length, whole: copies.some((n) => fs.readFileSync(path.join(d, n), 'utf8') === TORN), parts: fs.readdirSync(d).filter((n) => n.endsWith('.part')).length };
+      h.stop(); return r;
+    };
+    const wr = await wholeRun(H, 'whole');
+    ok(wr.left.length === 0 && wr.heldAfter && wr.up && wr.copies === 1 && wr.whole && wr.parts === 0, 'three bytes written then «no space»: NO file is left (no part, no short copy), the store stays held; the next try writes the copy WHOLE and lifts', wr);
+    const wrx = await wholeRun(mutant('src/store-read-hold.js', [["      const w = await writeWhole(to, buf, log);   // r3144: whole under a part name, synced, put in place only when whole", "      const w = await fs.promises.writeFile(to, buf, { flag: 'wx', mode: 0o600 }).then(() => ({ ok: true }), (error) => ({ error }));"]]), 'whole-ctl');
+    ok(wrx.left.length >= 1, 'RED CONTROL — the copy written straight to its dated name (the round\'s finding): a SHORT file is left at a copy\'s name for good', wrx);
+  }
+  {
     console.log('⑤ the helper: the live holds as a list; readAgainOf; a torn lift says so');
     const d = dirOf('list'), f = path.join(d, 'l.json'); fs.writeFileSync(f, '{"made": 1}');
     const h = H.create({ file: f, code: 'l', aside: (m) => f + '.corrupt-' + m, words: () => 'l' }); h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
@@ -415,6 +440,70 @@ try {
     ok(r3.length === 1, 'RED CONTROL — the hold not asked (the release\'s road, in a copy): the held store\'s silence ends the proposal as «the account was removed»', r3);
     const CA = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf8');
     ok(/const mountsHeld = \(\(\) => \{ try \{ const m = getMounts\(\); return !!\(m && typeof m\.unreadWords === 'function' && m\.unreadWords\(\)\); \}/.test(CA) && CA.includes("ok: true, ...(mountsHeld ? { mountsHeld: true } : {}), creds:"), 'the owner view says mounts.json is held (pin: the view the sweep reads)');
+  }
+  {
+    console.log('⑦ B-f276 family unit 2 commit 3 (主开发 r3115 (2)): A REMOVER NEVER REMOVES WHAT A KEPT COPY OF TORN BYTES STILL NAMES');
+    // the helper's question itself
+    const dq = dirOf('copies-q'), fq = path.join(dq, 'q.json'); fs.writeFileSync(fq, '{}'); fs.writeFileSync(fq + '.corrupt-1700000000000', '{"items": [{"id": "keep-me"');
+    const C = H.copiesOf({ file: fq, prefix: 'q.json.corrupt-' });
+    const before = C.names('anything-at-all');   // not read yet: unknown keeps
+    await C.refresh();
+    const a1 = C.names('keep-me'), a2 = C.names('other');
+    fs.unlinkSync(fq + '.corrupt-1700000000000'); await C.refresh();
+    const a3 = C.names('keep-me');
+    const rdq = fs.promises.readdir; fs.promises.readdir = function (p, ...x) { if (String(p) === dq) return Promise.reject(Object.assign(new Error('EIO (placed)'), { code: 'EIO' })); return rdq.call(fs.promises, p, ...x); };
+    try { await C.refresh(); } finally { fs.promises.readdir = rdq; }
+    const a4 = C.names('never-written');
+    ok(before === true && a1 === true && a2 === false && a3 === false && a4 === true, 'copiesOf: an id a kept copy holds (as a JSON string) is NAMED, another is not; the copy cleared: not named; not read yet, or its folder did not answer: NAMED (unknown keeps)', { before, a1, a2, a3, a4 });
+    // machine-mounts: the orphan token sweep — the restart-proof half (no mark: a list that READ, a copy beside it naming the token)
+    const MMd = (d, revoked) => ({ dataDir: d, hosts: { get: () => null, findByDeviceId: () => null }, mountTokens: { list: () => [{ id: 'tok-made0001', kind: 'reverse-mount' }], revoke: (id) => revoked.push(id) }, broadcast() { }, log() { } });
+    const mmRun = async (MOD, tag, copy) => {
+      const d = dirOf(tag), f = path.join(d, 'machine-mounts.json'); fs.writeFileSync(f, '{"mounts": []}');
+      if (copy) fs.writeFileSync(f + '.corrupt-1700000000000', '{"mounts": [{"id": "mm-made0001", "dir": "push", "tokenId": "tok-made0001"');
+      const revoked = [], M = new MOD.MachineMounts(MMd(d, revoked)); clearInterval(M._sweep);
+      try { await M.restore(); } catch { }
+      return revoked;
+    };
+    const MMM = require('../src/machine-mounts.js');
+    const m1 = await mmRun(MMM, 'mm-copy', true), m2 = await mmRun(MMM, 'mm-nocopy', false);
+    const mx = await mmRun(mutant('src/machine-mounts.js', [["          if (this._copies().names(t.id)) { unknown++; continue; }", ""]]), 'mm-copy-ctl', true);
+    ok(m1.length === 0 && m2.join() === 'tok-made0001', 'machine-mounts\' orphan sweep (a restart: no mark): a token a kept copy names is KEPT; with no copy it is revoked as today', { m1, m2 });
+    ok(mx.join() === 'tok-made0001', 'RED CONTROL — the copies not asked (in a copy): the sweep revokes the token the kept copy names', mx);
+    // hosts.json: the transcript caches (H1)
+    const hRun = async (MOD, tag, copy) => {
+      const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, '{"hosts": []}');
+      fs.mkdirSync(path.join(d, 'remote-jsonl', 'h-made0001'), { recursive: true }); fs.writeFileSync(path.join(d, 'remote-jsonl', 'h-made0001', 'a.jsonl'), '{}\n');
+      if (copy) fs.writeFileSync(f + '.corrupt-1700000000000', '{"hosts": [{"id": "h-made0001", "name": "made-up"');
+      const Hm = new MOD.HostManager({ dataDir: d });
+      await Hm._copies().refresh(); Hm.sweepJsonlCache();
+      return fs.existsSync(path.join(d, 'remote-jsonl', 'h-made0001'));
+    };
+    const HM = require('../src/hosts.js');
+    const h1 = await hRun(HM, 'h-copy', true), h2 = await hRun(HM, 'h-nocopy', false);
+    const hx = await hRun(mutant('src/hosts.js', [["      if (!live.has(d)) { if (this.namedByCopy(d)) continue; try {", "      if (!live.has(d)) { try {"]]), 'h-copy-ctl', true);
+    ok(h1 === true && h2 === false, 'hosts.json (H1): a machine a kept copy names keeps its transcript cache; with no copy the cache is removed as today', { h1, h2 });
+    ok(hx === false, 'RED CONTROL — the copies not asked (in a copy): the cache of the machine the copy names is removed');
+    // the exit lists (H2)
+    const prune = (EP, named) => { const set = []; const me = Object.create(EP.ExitProxyManager.prototype); Object.assign(me, { _grants: () => ({ rowsOfDoor: () => [{ resource: 'h-made0001:use', except: [] }, { resource: 'h-made0002:run', except: [] }], setMany: (rows) => { set.push(...rows.map((r) => r.resource)); return { ok: true }; } }), hosts: { held: () => false, namedByCopy: (id) => named.has(id) }, _hosts: () => [], log() { } }); me.pruneLists(); return set; };
+    const EPm = require('../src/exit-proxy.js');
+    const e1 = prune(EPm, new Set(['h-made0001'])), e2 = prune(EPm, new Set());
+    const ex = prune(mutant('src/exit-proxy.js', [["return !ids.has(id) && !named(id);", "return !ids.has(id);"]]), new Set(['h-made0001']));
+    ok(e1.join() === 'h-made0002:run' && e2.length === 2, 'the exit lists (H2): a machine a kept copy names keeps its two lists; the others are pruned as today', { e1, e2 });
+    ok(ex.includes('h-made0001:use'), 'RED CONTROL — the copies not asked (in a copy): the named machine\'s lists are emptied', ex);
+    // the desktop-app records (H3): a machine a kept copy names is «unavailable», never «not a paired machine» (the keeper drops on that)
+    const daCall = async (DA, id) => { const A = DA.create({ hosts: { get: () => null, isLocal: () => false, namedByCopy: (x) => x === 'h-made0001', deviceBounded: async () => { throw new Error('never asked'); }, unreadWords: () => null }, install: false }); try { await A.call(id, 'status', {}); return 'ok'; } catch (e) { return e && e.code; } };
+    const DAm = require('../src/server/desktop-access.js');
+    const d1 = await daCall(DAm, 'h-made0001'), d2 = await daCall(DAm, 'h-made0002');
+    const dx = await daCall(mutant('src/server/desktop-access.js', [["    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named('host_unavailable', 'this machine is named by a kept copy of the damaged machines list — pair it again to use it') : named('unsupported-host',", "    if (!hostKnown(hostId)) throw named('unsupported-host',"]]), 'h-made0001');
+    ok(d1 === 'host_unavailable' && d2 === 'unsupported-host', 'the desktop-app records (H3): a machine a kept copy names is UNAVAILABLE (the keeper keeps its records); another unknown machine is «not a paired machine» as today', { d1, d2 });
+    ok(dx === 'unsupported-host', 'RED CONTROL — the copies not asked (in a copy): «not a paired machine» — the keeper would drop its records', dx);
+    // jobs: the keeper's release (J1) — a job no longer listed that a kept copy names is unknown
+    const J = require('../src/browser-job-principal.js');
+    const jm = { jobs: new Map(), namedByCopy: (id) => id === 'jb-made0001' };
+    const JX = mutant('src/browser-job-principal.js', [["  if (!j && jm && typeof jm.namedByCopy === 'function') { try { if (jm.namedByCopy(String(jobId))) return 'unknown'; } catch { return 'unknown'; } }", ""]]);
+    ok(J.jobRunningIn(jm, 'jb-made0001') === 'unknown' && J.jobRunningIn(jm, 'jb-made0002') === false && JX.jobRunningIn(jm, 'jb-made0001') === false, 'jobs (J1): a job no longer listed that a kept copy names is UNKNOWN (its handle kept); another is not running as today; RED CONTROL (in a copy): read as not running');
+    const VJD = fs.readFileSync(path.join(REPO, 'src/server/vault-job-door.js'), 'utf8');
+    ok(VJD.includes("keep: (x) => !!(jm && (jm.jobs.has(x) || (typeof jm.namedByCopy === 'function' && jm.namedByCopy(String(x)))))"), 'jobs (J3, pin): the vault-job row\'s prune keeps a job a kept copy names');
   }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));

@@ -340,6 +340,8 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
    *  the engine refuses the job in these words) */
   let heldAsk = false;   // ONE waiter while For you is held (every re-judge of every waiting job asks here)
   function ask(job, v = {}) {
+    // B-f276 family unit 2 (r3115 (2)): the jobs' kept copies are read when a card is filed — the press's prune (memberWith) is judged by them
+    try { if (jm && typeof jm.readCopies === 'function') jm.readCopies().catch(() => { }); } catch { /* the prune keeps every id the copies are not read for */ }
     if (!userTodos || typeof userTodos.add !== 'function') { log(`[vault-job] no For-you store is wired — the approval card of ${VJ.askJobIdOf(job)} is not filed (the job waits)`); return { ok: true, filed: 0 }; }   // a door built without the tray (a scripted engine): the L1a wait, said in the journal
     // B-44f3 (For you HELD UNREAD — its file could not be read): no card can be filed and the open ones are unread — the job WAITS
     // (never refused for it: a refusal would fail it and end a schedule's next fire); at the read every waiting job is judged
@@ -508,7 +510,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const at = now(), plan = [];
     for (const e of q.entries) {
       const row0 = rowsFor(e)[0] || null;
-      const next = VJ.memberWith(row0, q.conv, q.jobId, { keep: (x) => !!(jm && jm.jobs.has(x)), at });   // the ids of jobs gone (archived, collected) leave as it is written
+      const next = VJ.memberWith(row0, q.conv, q.jobId, { keep: (x) => !!(jm && (jm.jobs.has(x) || (typeof jm.namedByCopy === 'function' && jm.namedByCopy(String(x))))), at });   // B-f276 family unit 2 (r3115 (2)): a job a kept copy of torn jobs.json names keeps its place   // the ids of jobs gone (archived, collected) leave as it is written
       if (!next) { const label = entryLabelOf(refOf(q.jobId, e).entry); return { ok: false, code: 'too_many_jobs', words: VJ.fullRowWords(label), entry: label }; }
       plan.push({ e, row0, next });
     }

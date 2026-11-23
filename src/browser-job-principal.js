@@ -48,6 +48,8 @@ function jobRunningIn(jm, jobId) {
   // are the jobs that existed (one handle each at most); none is closed by a timer — the person ends it in the jobs panel (its state
   // then final), or its own record says it ended
   if (j && j.state === 'unverified') return 'unknown';
+  // r3115 (2): a job NO LONGER LISTED that a kept copy of torn jobs.json still names is unknown too — its handle kept
+  if (!j && jm && typeof jm.namedByCopy === 'function') { try { if (jm.namedByCopy(String(jobId))) return 'unknown'; } catch { return 'unknown'; } }
   return isRunningJob(j);
 }
 function ownerConversationOf(job) {

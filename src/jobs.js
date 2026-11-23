@@ -29,6 +29,7 @@ const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
 const SR = require('./store-read.js'); // B-f276: THE STORE READ — a read that failed is no answer (never set aside, never «empty»)
+const HOLD = require('./store-read-hold.js');   // B-f276 family unit 2 commit 3: the kept copies' question (copiesOf)
 const NOTIFS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // job-notifications.json: {conversationId: [notice, …]}
 const asideOf = (file) => file + '.corrupt-' + now();   // the ONE set-aside name (the load's and the read again's — test-store-write-census ⑧ counts it once)
 const READ_AGAIN_MS = 10_000;   // cure r1: a read again past this is said slow; the next try is armed before it is awaited
@@ -291,6 +292,13 @@ class JobManager {
   }
 
   // ── lifecycle ───────────────────────────────────────────────────────────
+  /** 主开发 r3115 (2): A REMOVER NEVER REMOVES WHAT A KEPT COPY OF TORN BYTES STILL NAMES: does a kept copy of jobs.json's torn bytes still name job `id`? (from memory; unknown ⇒ yes) — the browser
+   *  keeper's release (browser-job-principal jobRunningIn) and the vault-job row's prune (vault-job-door memberWith) ask it first. The
+   *  copies are read at the FIRST ask (not at the start: the engine's start reads nothing more — until they are read, every id is named) */
+  namedByCopy(id) { return this._copies().names(String(id)); }
+  /** read the kept copies now (off the loop) — the vault-job door asks it when it files a card, so the person's press is judged by them */
+  readCopies() { return this._copies().refresh(); }
+  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this.file, prefix: path.basename(asideOf(this.file)).replace(/\d+$/, '') })); }
   init() {
     try {
       fs.mkdirSync(this.logsDir, { recursive: true });

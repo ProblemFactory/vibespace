@@ -18,6 +18,7 @@ const os = require('os');
 const path = require('path');
 const FC = require('./fd-close.js');   // B-15ac: the ONE close of a written file (a failed close said in the journal)
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
+const HOLD = require('./store-read-hold.js');   // B-f276 family unit 2 commit 3: the kept copies' question (copiesOf)
 const READ_WAITS_MAX = 256;   // 主开发 01:20Z (4): the waits for a held hosts.json's read are BOUNDED (keyed ones replace: one a key)
 const READ_MS = 60_000;   // the B-f276 remainder's cure: a read again that does not answer in this long is let go (the next try reads afresh)
 const crypto = require('crypto');
@@ -353,6 +354,7 @@ class HostManager {
     try { this._persistedDisc = JSON.parse(fs.readFileSync(this._discFile, 'utf-8')) || {}; } catch { }
     this._discPersistTimer = null;
     this._load();
+    try { this._copies().refresh().catch(() => { }); } catch { }   // B-f276 family unit 2 commit 3: the kept copies read off the loop at the start
   }
 
   _persistDiscovery(id, sessions) {
@@ -388,6 +390,11 @@ class HostManager {
    *  re-dials with a fresh stream) so hosts.device() rebuilds it. */
   invalidateDevice(id) { try { this._devices?.get(id)?.stop?.(); } catch { } this._devices?.delete(id); }
 
+  /** 主开发 r3115 (2): A REMOVER NEVER REMOVES WHAT A KEPT COPY OF TORN BYTES STILL NAMES: does a kept copy of hosts.json's torn bytes still name machine `id`? (from memory; unknown ⇒ yes) — the
+   *  removers by the list's silence ask it first: the transcript caches (sweepJsonlCache), the exit lists (exit-proxy pruneLists),
+   *  the desktop-app records (desktop-access: such a machine is «unavailable», never «not a paired machine») */
+  namedByCopy(id) { return this._copies().names(String(id)); }
+  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, '') })); }
   _load() {
     let read;
     try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
@@ -1211,7 +1218,7 @@ class HostManager {
     const cutoff = Date.now() - 30 * 86400000;
     for (const d of dirs) {
       const dir = path.join(base, d);
-      if (!live.has(d)) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} continue; }
+      if (!live.has(d)) { if (this.namedByCopy(d)) continue; try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} continue; }   // (B-f276 family unit 2: a machine a kept copy names keeps its cache)
       let files = [];
       try { files = fs.readdirSync(dir); } catch { continue; }
       for (const f of files) {

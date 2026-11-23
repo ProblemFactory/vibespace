@@ -24,6 +24,7 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
+const HOLD = require('./store-read-hold.js');   // B-f276 family unit 2 commit 3: the kept copies' question (copiesOf)
 const { execFile } = require('child_process');   // (B-323e: its two probe children — ls, realpath — ride THE STARTER)
 const PI = require('./proc-identity.js');   // B-323e: a probe child's end the hub may never hear, asked of /proc by its pid
 const MD = require('./server/push-mount-door.js'); // B-7f0b (r1220): a push mount's tunnel ends at its OWN door (that mount's /dav, its own pass), never the hub's whole web port
@@ -1253,6 +1254,7 @@ class MachineMounts {
         // never touched
         if (t.kind === 'reverse-mount' && !referenced.has(t.id)) {
           if (tornAt && !(Number(t.createdAt) > tornAt)) { unknown++; continue; }   // minted before the torn lift: its record is UNKNOWN — kept
+          if (this._copies().names(t.id)) { unknown++; continue; }   // 主开发 r3115 (2): A REMOVER NEVER REMOVES WHAT A KEPT COPY OF TORN BYTES STILL NAMES — the restart-proof half (the mark above is this run's fast road)
           try { this.mountTokens.revoke?.(t.id); n++; } catch { }
         }
       }
@@ -1263,7 +1265,10 @@ class MachineMounts {
   }
 
   /** Boot: heal every recorded mount whose machine is reachable. */
+  /** the kept copies of this store's torn bytes (src/store-read-hold.js copiesOf) — their prefix is this store's own set-aside name */
+  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, '') })); }
   async restore() {
+    try { await this._copies().refresh(); } catch { }   // B-f276 family unit 2 commit 3: the sweep below answers from memory — read first (off the loop)
     this.gcOrphanTokens();
     if (this._pairsOnce) await this._pairsOnce;   // r4: a dial-in's heal ran one already — waited for, then
     this._pairsOnce = this._recheckPairs().catch(() => { });   // B-844b / B-6c4f: the real paths and the held records FIRST — a held record's folder is another's (r5: restore's own check, fresh)

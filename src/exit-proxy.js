@@ -236,7 +236,8 @@ class ExitProxyManager {
       if (!g) return 0;
       if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) return 0;   // the B-f276 remainder's belt: a HELD list removed no machine
       const ids = new Set(this._hosts().map((h) => String(h.id)));
-      const gone = g.rowsOfDoor('exit').filter((r) => !ids.has(String(r.resource).replace(/:(use|run)$/, '')));
+      const named = (id) => { try { return !!(this.hosts && typeof this.hosts.namedByCopy === 'function' && this.hosts.namedByCopy(id)); } catch { return true; } };   // B-f276 family unit 2 (r3115 (2)): a machine a kept copy of torn hosts.json names keeps its lists
+      const gone = g.rowsOfDoor('exit').filter((r) => { const id = String(r.resource).replace(/:(use|run)$/, ''); return !ids.has(id) && !named(id); });
       if (!gone.length) return 0;
       const w = g.setMany(gone.map((r) => ({ door: 'exit', resource: r.resource, to: [], except: [], removeExcept: r.except || [] })), 'machine-removed');   // lane held-except-doors: the machine is gone — its exceptions go by name
       return w.ok ? gone.length : 0;

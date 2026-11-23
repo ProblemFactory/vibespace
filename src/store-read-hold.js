@@ -33,6 +33,29 @@
 const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js');
+const NO_LINK = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV']);   // a hard link the FILESYSTEM refuses (not a name there)
+/** THE COPY WRITTEN WHOLE (主开发 r3144): under a PART name (hidden — `.<name>.part`, never a copy's prefix: no reader lists it),
+ *  0600 from its first byte, synced, then put in place by an exclusive hard link only when whole (a filesystem with no links: an
+ *  exclusive copy, removed if it fails part-way — it is ours). A write or a sync that fails removes the part and fails the keep:
+ *  no short file is ever left at a copy's name. → { ok } | { error } */
+async function writeWhole(to, buf, log = () => { }) {
+  const part = path.join(path.dirname(to), '.' + path.basename(to) + '.part');
+  let fh = null;
+  try { fh = await fs.promises.open(part, 'wx', 0o600); await fh.writeFile(buf); await fh.sync(); }
+  catch (e) {
+    if (fh) { try { await fh.close(); } catch (e2) { log(`${path.basename(part)} did not close after its write failed (${(e2 && e2.code) || e2})`); } }
+    await fs.promises.unlink(part).catch(() => { }); return { error: e };
+  }
+  try { await fh.close(); } catch (e) { await fs.promises.unlink(part).catch(() => { }); return { error: e }; }   // a close that fails fails the keep (its bytes may not be whole)
+  try { await fs.promises.link(part, to); }
+  catch (e) {
+    if (!e || !NO_LINK.has(e.code)) { await fs.promises.unlink(part).catch(() => { }); return { error: e }; }
+    try { await fs.promises.copyFile(part, to, fs.constants.COPYFILE_EXCL); }
+    catch (e2) { if (!e2 || e2.code !== 'EEXIST') await fs.promises.unlink(to).catch(() => { }); await fs.promises.unlink(part).catch(() => { }); return { error: e2 }; }
+  }
+  await fs.promises.unlink(part).catch(() => { });
+  return { ok: true };
+}
 const COPY_LOOK = 20;   // the newest copies of torn bytes compared at a keep (more beside one store are a person's to clear)
 const CEILING = 4;      // round wom600meg (2): the helper's reads in flight across ALL stores (the hub's file pool is shared)
 let active = 0;         // …the reads (with their copies) in flight now, every store's
@@ -75,7 +98,9 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     }
     for (let k = 0; k < 5; k++) {
       const to = aside(String(now()) + (k ? '-' + k : ''));
-      try { await fs.promises.writeFile(to, buf, { flag: 'wx', mode: 0o600 }); return path.basename(to); } catch (e) { if (!e || e.code !== 'EEXIST') return null; }
+      const w = await writeWhole(to, buf, log);   // r3144: whole under a part name, synced, put in place only when whole
+      if (w.ok) { const c = COPIES.get(file + '\n' + prefix); if (c) c.refresh().catch(() => { }); return path.basename(to); }   // (a copy added: its store's copies' answer read again)
+      if (!w.error || w.error.code !== 'EEXIST') return null;
     }
     return null;
   }
@@ -145,6 +170,52 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
   return H;
 }
 
+/** THE KEPT COPIES' QUESTION (主开发 r3115 (2) — the family's law: A REMOVER NEVER REMOVES WHAT A KEPT COPY OF TORN BYTES STILL
+ *  NAMES). copiesOf({ file, prefix }) → { names(id), ready(), refresh() } for a store whose torn bytes are kept beside it under
+ *  `prefix…` (the store's own set-aside name; a store not on this helper hands its own). `names(id)` answers from MEMORY — true when
+ *  one of the newest COPY_LOOK copies holds the id as it is written in the file (a JSON string: `"<id>"`), false when none does;
+ *  an id that cannot be judged (the copies not read yet, their folder or a copy did not answer) is NAMED (unknown keeps). The
+ *  copies are read OFF THE LOOP — again when a copy is added here, and once a minute at most while asked (a copy a person cleared
+ *  is seen then), ONE read in flight a store — so a remover's tick makes no read of its own. It holds across restarts with no mark
+ *  to lose: a person ends it by pairing the thing again (its id then in the live list) or by clearing the copy. */
+const COPIES = new Map();
+const RELIST_MS = 60e3;
+function copiesOf({ file, prefix } = {}) {
+  if (!file || !prefix) throw new Error('store-read-hold: copiesOf needs the file and its copies\' prefix');
+  const keyOf = file + '\n' + prefix;
+  if (COPIES.has(keyOf)) return COPIES.get(keyOf);
+  const dir = path.dirname(file);
+  let texts = null, failed = false, listedAt = 0, names = null, inflight = null;
+  async function refresh() {
+    if (inflight) return inflight;
+    inflight = (async () => {
+      try {
+        const all = (await fs.promises.readdir(dir)).filter((n) => n.startsWith(prefix)).sort().slice(-COPY_LOOK);
+        listedAt = Date.now();
+        if (texts && !failed && names && names.join('\n') === all.join('\n')) return;   // the same copies: the answer stands
+        const read = [];
+        for (const n of all) read.push(await fs.promises.readFile(path.join(dir, n), 'utf8'));
+        texts = read; names = all; failed = false;
+      } catch { failed = true; listedAt = Date.now(); }
+    })().finally(() => { inflight = null; });
+    return inflight;
+  }
+  const C = {
+    /** true: a kept copy names `id` — or it cannot be judged (unknown keeps); false: no kept copy names it */
+    names(id) {
+      if (!inflight && Date.now() - listedAt >= RELIST_MS) refresh().catch(() => { });
+      if (!texts || failed) return true;
+      const look = JSON.stringify(String(id));
+      return texts.some((t) => t.includes(look));
+    },
+    /** the copies were read (false: every id is named) */
+    ready: () => !!texts && !failed,
+    refresh,
+  };
+  COPIES.set(keyOf, C);
+  return C;
+}
+
 /** THE LIVE HOLDS (round wom600meg (3)): every hold alive, and every lift from torn bytes of this run (held: false, its copy named) —
  *  a frozen list of frozen rows; nothing here acts */
 function holds() { const out = []; for (const h of LIVE) { const e = h._entry(); if (e) out.push(Object.freeze(e)); } return Object.freeze(out); }
@@ -157,4 +228,4 @@ async function readAgainOf(which) {
   return named.length === 1 ? named[0].again() : false;
 }
 
-module.exports = { create, holds, readAgainOf, onHoldsChange, CEILING };
+module.exports = { create, holds, readAgainOf, onHoldsChange, copiesOf, CEILING };

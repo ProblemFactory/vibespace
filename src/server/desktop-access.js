@@ -113,6 +113,9 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (!hosts || typeof hosts.get !== 'function') return false;
     try { return !!hosts.get(hostId); } catch { return false; }
   }
+  /** B-f276 family unit 2 (r3115 (2)): a machine no longer listed that a kept copy of torn hosts.json still NAMES — unavailable (a
+   *  transient), never «not a paired machine» (the desktop-app keeper drops every record of a machine on that code) */
+  function namedByCopy(hostId) { try { return !!(hosts && typeof hosts.namedByCopy === 'function' && hosts.namedByCopy(hostId)); } catch { return true; } }
   // B-69a7: this machine's desktop apps (every part's pid, the keeper's own records) are the hub's — never a conversation's leftover
   try { require('../proc-identity.js').keepOut('desktop-apps', () => { const ds = typeof local === 'function' ? local() : local; return ds && typeof ds.liveRecords === 'function' ? ds.liveRecords().flatMap((r) => Object.values(r.pids || {}).filter((p) => Number.isInteger(p) && p > 1).map((p) => [p, 0])) : []; }); } catch { }
   /** the B-f276 remainder (its read r2, X1): a HELD hosts.json knows no machine — a transient «unavailable», never «not a paired
@@ -126,7 +129,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   async function deviceOf(hostId) {
     if (!hosts || typeof hosts.deviceBounded !== 'function') throw named('host_unavailable', 'remote machines are not configured on this instance');
     notHeld();
-    if (!hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
+    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named('host_unavailable', 'this machine is named by a kept copy of the damaged machines list — pair it again to use it') : named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
     let dm;
     try { dm = await hosts.deviceBounded(hostId, connectMs); }
     catch (e) { throw named(e && e.code === 'host_needs_daemon' ? 'host_needs_daemon' : 'host_unavailable', `${hostId}: ${e && e.message}`); }
@@ -909,7 +912,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const st = credentialsOf();
     if (!st || typeof st.machineView !== 'function') throw named('host_unavailable', 'the integration store is not wired on this instance');
     if (!isLocal(hostId)) notHeld();
-    if (isLocal(hostId) || !hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
+    if (isLocal(hostId) || !hostKnown(hostId)) throw !isLocal(hostId) && namedByCopy(hostId) ? named('host_unavailable', 'this machine is named by a kept copy of the damaged machines list — pair it again to use it') : named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
     const view = st.machineView(RA.CREDENTIAL_ROW, hostId);
     let last = null;
     try { const ds = typeof local === 'function' ? local() : local; last = ds && typeof ds.listApps === 'function' ? ds.listApps().find((r) => r.remoteapp && r.remoteapp.hostId === hostId && r.rdp) || null : null; } catch { last = null; }
