@@ -1066,7 +1066,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
   };
   const r12 = await f12();
   ok(r12.a0.length === 1 && r12.gone && r12.a0.every((h) => r12.a1.includes(h)), 'F12: the merge moves the folded record\'s .dead-* archives (byte-identical) into the survivor before its dir goes', r12);
-  const mF12 = mutantStore({ acc: [["      require('./account-material.js').moveCredentialArchives(fromDir, intoDir);\n", '']] });
+  const mF12 = mutantStore({ acc: [["      const moved = require('./account-material.js').moveCredentialArchives(fromDir, intoDir);\n", '      const moved = null;\n']] });
   const r12m = mF12 ? await f12(mF12) : null;
   ok(!!r12m && r12m.a1.length === 0, 'RED control (F12): the r1 merge destroys them with the dir — the leg above catches it', r12m);
 }
@@ -1173,7 +1173,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
   for (const k of ['remint:before-aside', 'remint:before-link', 'clear:before-aside', 'clear:before-unlink', 'strip:before-aside', 'strip:before-link']) T2[k] = await toc(undefined, k);
   ok(Object.values(T2).every((x) => x.landed && x.fresh !== 'LOST'), 'F2 toctou (the verifier\'s probe, ported to the new acts): a CLI login landing at every point of a re-mint swap, a clearOat and a strip — before the move aside, before the link into the empty name, before the aside\'s unlink — is never LOST', T2);
   ok(['remint:before-aside', 'clear:before-aside', 'strip:before-aside'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed') && ['remint:before-link', 'strip:before-link'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed'), 'F2: a login that is what moved goes straight back (refused · changed); one that took the empty name stays where it landed (refused · changed)', T2);
-  const mF2r = mutantStore({ mat: [["    else if (expect !== undefined) {\n      const aside = await moveAside(dest, expect);\n      try { await linkInto(tmp, dest); } catch (e) { await putBack(aside, dest); throw e; } // a login that took the empty name stays; ours goes back or rests archived\n      try { await fsp.unlink(aside); } catch { }\n    } else await fsp.rename(tmp, dest);\n", "    else { if (expect !== undefined) await stillSame(dest, expect); await fsp.rename(tmp, dest); }\n"], ['  await fsp.unlink(await moveAside(p, seen.stat)); // F2: rename aside → check → unlink (never the name itself)\n', '  await stillSame(p, seen.stat);\n  await fsp.unlink(p);\n']] });
+  const mF2r = mutantStore({ mat: [["    else if (expect !== undefined) {\n      const aside = await moveAside(dest, expect);\n      try { await linkInto(tmp, dest); } catch (e) {   // a login that took the empty name stays; ours goes back or rests archived\n        // r2928: the put-back's three replies — the aside is the file the verdict read (moveAside proved it): when it cannot go back\n        // it becomes what `asideAs` says (OUR long-lived token never rests in an archive), and 'kept' is said true\n        const pb = await putBack(aside, dest);\n        if (pb !== 'back') await settleAside(aside, asideAs);\n        if (pb === 'kept') e.restsArchived = true;\n        throw e;\n      }\n      try { await fsp.unlink(aside); } catch { }\n    } else await fsp.rename(tmp, dest);\n", "    else { if (expect !== undefined) await stillSame(dest, expect); await fsp.rename(tmp, dest); }\n"], ['  await fsp.unlink(await moveAside(p, seen.stat)); // F2: rename aside → check → unlink (never the name itself)\n', '  await stillSame(p, seen.stat);\n  await fsp.unlink(p);\n']] });
   const T2m = {};
   if (mF2r) for (const k of ['remint:old-rename', 'clear:old-unlink', 'strip:old-rename']) T2m[k] = await toc(mF2r, k);
   ok(!!mF2r && Object.values(T2m).every((x) => x.landed && x.fresh === 'LOST'), 'RED control (F2): c9fea70ad\'s check-then-rename / check-then-unlink — a login landing after the stat guard is LOST in all three acts (the legs above catch it)', T2m);
@@ -1282,9 +1282,33 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     // at its archive name and its own name is EMPTY; said so by the member's name, never «what is there stands»
     const TF = await tick(undefined, 'remint', 'in-place', { linkErr: 'EIO' });
     ok(TF.landed === 1 && !TF.freshStands && TF.arch === 1 && TF.fact.code === 'changed' && TF.saidArch === 1 && TF.said === 0 && !TF.sumInText, 'r2824: a put-back that FAILS (link EIO) — the fresher file rests archived in its folder, its name empty; the journal says THAT by the member\'s name (once), not «what is there stands»', TF);
-    const mTF = mutantStore({ mat: [["if (pb === 'kept') e.restsArchived = true; ", '']] });
+    const mTF = mutantStore({ mat: [["if (pb === 'kept') e.restsArchived = true; return e; };", 'return e; };']] });   // the refusal helper's own mark (unique: the sync swap's link-in road marks in its own words)
     const TFX = mTF ? await tick(mTF, 'remint', 'in-place', { linkErr: 'EIO' }) : null;
     ok(!!TFX && TFX.saidArch === 0 && TFX.said === 1, 'RED control (the kept put-back not marked) ⇒ the journal says «what is there stands» over an empty name (red)', TFX);
+    // r2928 THE LAW on the async roads: a vendor sign-in takes the EMPTY name right before ours goes in (the put-back answers
+    // 'taken'); the aside is OUR file as read (the product judged it ours by its mark) — it keeps the CLI's keys alone, our token
+    // rests in no archive (the hub writes ours again); the sign-in that landed stays
+    const lawScene = async (M, kind) => {
+      const am = mk8(M); await nv(am, '2.1.296');
+      const m = am.createSubscription({ name: 'Law' + kind }).id; put(am, m, login(NOW, { dead: true })); await so(am, m, OAT);
+      const p = credsOf(am, m), tag = 'law-' + kind + '-' + crypto.randomBytes(3).toString('hex');
+      { const j = readJ(p); j.mcpOAuth = { s: tag }; cliWrite(p, j); await am.syncOatFiles(); }
+      const fr = login(NOW); let landed = false; const arch0 = new Set(allArch(am, m));
+      const un = hook(fsp8, 'link', function (k0, s0, d, ...r) { if (!landed && String(d) === p && /\.tmp$/.test(String(s0))) { landed = true; fs.writeFileSync(p, JSON.stringify(fr), { mode: 0o600 }); } return k0.call(this, s0, d, ...r); });
+      try { if (kind === 'remint') await so(am, m, OAT2); else await co(am, m); } finally { un(); }
+      const fresh = allArch(am, m).filter((f) => !arch0.has(f)).map((f) => fs.readFileSync(path.join(am.subDir(m), f), 'utf8'));
+      return { landed, fresh: where(am, m, fr), newArch: fresh.length, oursArchived: fresh.some((t) => t.includes(OAT)), keysKept: fresh.some((t) => t.includes(tag)) };
+    };
+    for (const kind of ['strip', 'remint']) {
+      const L = await lawScene(undefined, kind);
+      ok(L.landed && L.fresh === 'in place' && !L.oursArchived && L.keysKept, `r2928 THE LAW (the ${kind} road): a vendor sign-in took the empty name before ours — it stays; the aside (ours as read) keeps the CLI's keys alone, our token rests in no archive`, L);
+    }
+    const mLS = mutantStore({ mat: [['{ expect: seen.stat, asideAs: JSON.stringify(keep) }', '{ expect: seen.stat }']] });
+    const LSX = mLS ? await lawScene(mLS, 'strip') : null;
+    ok(!!LSX && LSX.landed && LSX.oursArchived, 'RED control (the strip\'s verdict not handed to the writer: the aside kept whole) ⇒ our token rests in an archive (red)', LSX);
+    const mLR = mutantStore({ acc: [['...(!v.archive && ours ? { asideAs } : {})', '...({})']] });
+    const LRX = mLR ? await lawScene(mLR, 'remint') : null;
+    ok(!!LRX && LRX.landed && LRX.oursArchived, 'RED control (the re-mint\'s verdict not handed to the writer) ⇒ our earlier token rests in an archive (red)', LRX);
     // r2824 (4): THE STAT AFTER THE BYTES — a same-size refresh placed right before the read's stat (after its bytes) is refused: the
     // pair is a newer stat with the bytes read; the old order (the stat first) takes the refresh as read and writes over it
     const TS = await tick(undefined, 'remint', 'in-place', { at: 'stat' });

@@ -1137,7 +1137,7 @@ class AccountManager {
    *  when asked, hostLogins union, metadata kept on the survivor, the dup
    *  record spliced WITHOUT the delete-path host cleanup (its host dirs are
    *  renamed to the survivor by the caller first). */
-  mergeSubscription(fromId, intoId, { preferFromCreds = false, liveAccountIds = null } = {}) {
+  mergeSubscription(fromId, intoId, { preferFromCreds = false, liveAccountIds = null, facts = null } = {}) {   // facts: {stood} filled for the login route's reply (r2928 (4))
     const from = this._state.accounts.find((x) => x.id === fromId);
     const into = this._state.accounts.find((x) => x.id === intoId);
     if (!from || !into || fromId === intoId) throw new Error('bad merge pair');
@@ -1162,6 +1162,7 @@ class AccountManager {
       throw new Error('macOS Keychain-backed subscriptions cannot be merged across config directories');
     }
     // local creds: bring the dup's dir over when it's fresher/the only login
+    let foldKept = null;   // r2928 (3): why the folded row's sign-in could not be moved (its folder is then kept)
     try {
       const fromDir = this.subDir(fromId), intoDir = this.subDir(intoId);
       const intoCreds = path.join(intoDir, '.credentials.json');
@@ -1180,7 +1181,8 @@ class AccountManager {
       if (v.fold) {
         // the survivor's old file ARCHIVED first (`.dead-<ms>-m<hex>`, 0600, the one writer): as it was read — or, OUR
         // file, only the CLI's other keys (our token is the store's: the survivor's sync re-derives it)
-        if (v.archive) require('./account-material.js').writePrivateFile(`${intoCreds}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`, v.aside);
+        // r2928 (8): nothing is archived BEFORE the guard's verdict — the swap's aside IS the survivor's archive, settled as the verdict
+        // says (a sign-in whole, ours' CLI keys alone, or removed), so a refused swap leaves no archive of a word already rotated
         fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
         fs.chmodSync(intoDir, 0o700);
         // r2822: THE SURVIVOR's FILE IS SWAPPED ONLY WHILE IT IS THE FILE THE VERDICT READ — the content guard's sync form, on the
@@ -1192,21 +1194,36 @@ class AccountManager {
           const src = path.join(fromDir, f);
           const bytes = f === '.credentials.json' ? (v.write && JSON.stringify(v.write)) : (fs.existsSync(src) ? fs.readFileSync(src) : null);
           // the one 0600 atomic writer of account-dir material (tmp `wx` 0600 + fchmod + fsync + rename / the guarded swap)
-          const creds = f === '.credentials.json', guard = creds ? { expectBytes: intoBytes } : {};
-          try { if (bytes) require('./account-material.js').writePrivateFile(path.join(intoDir, f), bytes, guard); } catch (e) { if (creds && e && (e.code === 'changed' || e.code === 'symlink')) stood = e; else throw e; }
+          const creds = f === '.credentials.json', guard = creds ? { expectBytes: intoBytes, asideAs: v.archive ? v.aside : null } : {};
+          // r2928 (2): ANY failure of the survivor's write stands the survivor (never the best-effort catch's silence)
+          try { if (bytes) require('./account-material.js').writePrivateFile(path.join(intoDir, f), bytes, guard); } catch (e) { if (creds && e) stood = e; else throw e; }
         }
         if (stood) {
-          const fc = path.join(fromDir, '.credentials.json');
-          try { fs.renameSync(fc, `${fc}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`); } catch { }
+          // the folded row's file is archived beside the survivor's (moved with the archives below), never lost — and OUR long-lived
+          // token in it is not kept (r2928 (1)): an our-token file keeps the CLI's keys alone, or goes with its folder
+          const fc = path.join(fromDir, '.credentials.json'), fromOurs = oatFileOurs(fromObj, fromId), restF = fromOurs ? credsRestOf(fromObj) : null;
+          const arch = `${fc}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`;
+          let foldedWhy = null;
+          try { if (!fromOurs) fs.renameSync(fc, arch); else if (restF && Object.keys(restF).length) require('./account-material.js').writePrivateFile(arch, JSON.stringify(restF)); } catch (e) { if (!(e && e.code === 'ENOENT')) foldedWhy = String((e && e.code) || 'error'); }
+          if (foldedWhy) foldKept = foldedWhy;
+          const folded = !fromOurs ? 'the folded row\'s file is archived beside it' : restF && Object.keys(restF).length ? 'the CLI\'s keys of the folded row\'s file are archived beside it (our token in it is not kept)' : 'the folded row\'s file held our token alone, which is not kept';
+          const code = String(stood.code || 'error');
           console.log(stood.restsArchived
-            ? `[accounts] ${into.name || intoId}: its credential file changed since the merge read it and could not go back to its name — the fresher file rests archived in its folder and its own name is empty; the folded row's file is archived beside it`
-            : `[accounts] ${into.name || intoId}: its credential file changed or went since the merge read it — the folded row's file is not written over it; what is there stands, and the folded row's file is archived beside it`);
+            ? (code === 'changed'
+              ? `[accounts] ${into.name || intoId}: its credential file changed since the merge read it and could not go back to its name — the fresher file rests archived in its folder and its own name is empty; ${folded}`
+              : `[accounts] ${into.name || intoId}: the merge could not write its credential file (${code}) and the file read could not go back to its name — it rests archived in its folder and its own name is empty; ${folded}`)
+            : code === 'changed' || code === 'symlink'
+              ? `[accounts] ${into.name || intoId}: its credential file changed or went since the merge read it — the folded row's file is not written over it; what is there stands, and ${folded}`
+              : `[accounts] ${into.name || intoId}: the merge could not write its credential file (${code}) — what is there stands, and ${folded}`);
+          if (facts) facts.stood = { why: stood.restsArchived ? 'archived' : code === 'changed' || code === 'symlink' ? 'changed' : 'error', code };
         }
       }
       // the folded dir's archived dead logins MOVE to the survivor before the rm (verify r1 F12 — never destroyed)
       fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
-      require('./account-material.js').moveCredentialArchives(fromDir, intoDir);
-      fs.rmSync(fromDir, { recursive: true, force: true });
+      const moved = require('./account-material.js').moveCredentialArchives(fromDir, intoDir);
+      // r2928 (3): the folded row's folder is NOT removed while a sign-in of it could not be moved — said by name, once
+      if (foldKept || (moved && moved.left)) console.log(`[accounts] ${into.name || intoId}: the folded row's sign-in could not be moved beside it (${foldKept || 'an archive did not move'}) — its folder ${path.basename(fromDir)} is kept, not removed`);
+      else fs.rmSync(fromDir, { recursive: true, force: true });
     } catch { /* best-effort file consolidation */ }
     if (from.hostLogins) into.hostLogins = { ...(from.hostLogins), ...(into.hostLogins || {}) };
     if (!into.email && from.email) into.email = from.email;
@@ -2016,7 +2033,9 @@ class AccountManager {
       if (v.verdict === 'materialize') {
         // a login there is archived first (whole — never lost); the new file keeps the CLI's other keys either way
         if (v.archive) out.archived = await material.archiveCredentialFile(dir, now, { expect: seen.stat });
-        await material.writeCredentialFile(dir, oatFileMerge(seen.fileState === 'present' ? seen.file : null, body), { expect: v.archive ? null : seen.stat });
+        // r2928: replacing OUR file — an aside that cannot go back keeps the CLI's keys alone, never our token
+        const rest = !v.archive && ours ? credsRestOf(seen.file) : null, asideAs = rest && Object.keys(rest).length ? JSON.stringify(rest) : null;
+        await material.writeCredentialFile(dir, oatFileMerge(seen.fileState === 'present' ? seen.file : null, body), { expect: v.archive ? null : seen.stat, ...(!v.archive && ours ? { asideAs } : {}) });
         out.wrote = true;
       } else if (v.cleanup) {
         out.removed = await material.removeCredentialFile(dir, { isOurs: (f) => oatFileOurs(f, id), rest: credsRestOf, expect: seen.stat });
@@ -2028,13 +2047,15 @@ class AccountManager {
       out.verdict = 'write-failed'; out.code = String((e && e.code) || 'error');
       // r2697: the file CHANGED since it was read (the vendor's program wrote it): ours is not written, the fresher file stands — said
       // ONCE an episode in the journal, by the member's name (never a token, a content sum or the file's bytes)
-      if (out.code === 'changed' && e && e.restsArchived) {   // r2824 (1): it could not go back — said TRUE, once an episode
+      if (e && e.restsArchived) {   // r2824 (1) / r2928 (2): it could not go back — said TRUE, once an episode
         const said = (this._oatArchSaid ||= new Set());
-        if (!said.has(id)) { said.add(id); console.log(`[oat-file] ${a.name || id}: its credential file changed since it was read and could not go back to its name — the fresher file rests archived in its folder and its own name is empty, so the next sync writes ours there`); }
+        if (!said.has(id)) { said.add(id); console.log(out.code === 'changed'
+          ? `[oat-file] ${a.name || id}: its credential file changed since it was read and could not go back to its name — the fresher file rests archived in its folder and its own name is empty, so the next sync writes ours there`
+          : `[oat-file] ${a.name || id}: ours could not be written (${out.code}) and the file read could not go back to its name — its own name is empty, so the next sync writes ours there (the CLI's keys in it rest archived in its folder)`); }
       } else if (out.code === 'changed' && this._oatFileFacts.get(id)?.code !== 'changed') console.log(`[oat-file] ${a.name || id}: its credential file changed or went since it was read — ours is not written; what is there stands`);
     }
     const was = this._oatFileFacts.get(id);
-    if (out.code !== 'changed' && this._oatArchSaid) this._oatArchSaid.delete(id);   // the episode ended: a next failed put-back is said again
+    if (out.verdict !== 'write-failed' && this._oatArchSaid) this._oatArchSaid.delete(id);   // the episode ended: a next failed put-back is said again
     this._oatFileFacts.set(id, { verdict: out.verdict, at: now, ...(out.code ? { code: out.code } : {}), ...(out.reason ? { reason: out.reason } : {}), ...(out.held ? { held: true } : {}) });
     out.doorMoved = !!(out.wrote || out.removed) || !was || was.verdict !== out.verdict || was.code !== out.code || was.reason !== out.reason || !!was.held !== !!out.held;
     if (out.doorMoved && !quiet) this._notify();

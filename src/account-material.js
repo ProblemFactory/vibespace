@@ -67,7 +67,7 @@ function repointPoolSymlink(linkPath, targetDir, credsPath = null) {
  *  or ACL that widens it throws before the rename). `expectBytes` (when given) =
  *  the bytes the caller's verdict READ at `dest` (null: no file there) — the
  *  swap is the content guard's sync form (swapSync): a change refuses 'changed'. */
-function writePrivateFile(dest, bytes, { expectBytes } = {}) {
+function writePrivateFile(dest, bytes, { expectBytes, asideAs } = {}) {
   const tmp = dest + `.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   let fd;
   try {
@@ -78,7 +78,7 @@ function writePrivateFile(dest, bytes, { expectBytes } = {}) {
     fs.fsyncSync(fd);
     fs.closeSync(fd); fd = undefined;
     if (expectBytes === undefined) fs.renameSync(tmp, dest);
-    else swapSync(tmp, dest, expectBytes);
+    else swapSync(tmp, dest, expectBytes, asideAs);
   } finally {
     if (fd !== undefined) { try { fs.closeSync(fd); } catch { } }
     try { fs.unlinkSync(tmp); } catch { }
@@ -87,24 +87,41 @@ function writePrivateFile(dest, bytes, { expectBytes } = {}) {
 /** r2822 — THE CONTENT GUARD's SYNC FORM, for the duplicate-account merge (it runs on the loop: its caller sweeps the survivor's
  *  file right after it). The same steps and the same compare as the oat acts' swap: the name moved aside FIRST, the MOVED file's
  *  sum compared with the sum of the bytes the merge's verdict read (`was`; null = no file was there), put back on a change; the
- *  tmp linked into the EMPTY name (no hard links: an exclusive copy); the aside goes. A change refuses 'changed', a symlink 'symlink'. */
-function swapSync(tmp, dest, was) {
+ *  tmp linked into the EMPTY name (no hard links: an exclusive copy). A change refuses 'changed', a symlink 'symlink'.
+ *  r2928: THE ASIDE IS THE SURVIVOR's ARCHIVE — nothing is archived before the verdict. Once ours is in, or when the read file
+ *  cannot go back (a third write took the name: `taken`; an I/O error: 'kept', said true), the aside becomes what `asideAs` says
+ *  (settleAsideSync: OUR long-lived token never rests in an archive). A file GONE at the move aside ('went'): ours goes into the
+ *  empty name by link(2), which still refuses a sign-in that landed there. */
+function swapSync(tmp, dest, was, asideAs) {
   let aside = null;
   if (was != null) {
     aside = `${dest}.dead-${Date.now()}-a${crypto.randomBytes(4).toString('hex')}`;
-    try { fs.renameSync(dest, aside); } catch (e) { throw e.code === 'ENOENT' ? changed() : e; }
-    const sl = fs.lstatSync(aside).isSymbolicLink();
-    let now = null; if (!sl) { try { now = fs.readFileSync(aside); } catch { } }
-    if (sl || !now || sumOf(now) !== sumOf(was)) throw refused(putBackSync(aside, dest), sl);
+    try { fs.renameSync(dest, aside); } catch (e) { if (e.code !== 'ENOENT') throw e; aside = null; }   // went: the empty name below
+    if (aside) {
+      const sl = fs.lstatSync(aside).isSymbolicLink();
+      let now = null; if (!sl) { try { now = fs.readFileSync(aside); } catch { } }
+      if (sl || !now || sumOf(now) !== sumOf(was)) throw refused(putBackSync(aside, dest), sl);
+    }
   }
+  // the put-back's three replies on the link-in road too (r2928 (2)): the read file goes back, rests settled, or is said kept
+  const back = (e) => { if (!aside) return e; const pb = putBackSync(aside, dest); if (pb !== 'back') settleAsideSync(aside, asideAs, was); if (pb === 'kept') e.restsArchived = true; if (pb === 'taken') e.taken = true; return e; };
   let taken = false;
   try { fs.linkSync(tmp, dest); } catch (e) {
     if (e.code === 'EEXIST') taken = true;
-    else if (!LINKLESS.includes(e.code)) { if (aside) putBackSync(aside, dest); throw e; }
-    else { try { taken = !copyIntoSync(tmp, dest); } catch (e2) { if (aside) putBackSync(aside, dest); throw e2; } }
+    else if (!LINKLESS.includes(e.code)) throw back(e);
+    else { try { taken = !copyIntoSync(tmp, dest); } catch (e2) { throw back(e2); } }
   }
-  if (taken) { if (aside) putBackSync(aside, dest); throw changed(); }   // a sign-in that took the empty name stays
-  if (aside) { try { fs.unlinkSync(aside); } catch { } }
+  if (taken) throw back(Object.assign(changed(), { taken: true }));   // a sign-in that took the empty name stays
+  if (aside) settleAsideSync(aside, asideAs, was);
+}
+/** r2928 — THE LAW: an aside whose bytes are OUR OWN long-lived token is never kept as an archive. `as` is the caller's verdict on
+ *  the file it read (which the aside is, proved by the compare, so its bytes are `was`): null = ours with nothing else — removed (the hub writes ours again
+ *  at its next sync); bytes = what the archive keeps (a person's or the vendor's sign-in whole, or ours' CLI keys alone); undefined
+ *  = kept as it is. The archive is 0600. */
+function settleAsideSync(aside, as, was) {
+  if (as === null) { try { fs.unlinkSync(aside); } catch { } return; }
+  if (as !== undefined && !Buffer.from(as).equals(Buffer.from(was))) { try { writePrivateFile(aside, as); } catch { } return; }
+  try { fs.chmodSync(aside, 0o600); } catch { }
 }
 /** putBack's sync form → 'back' | 'taken' | 'kept' (as putBack) */
 function putBackSync(aside, p) {
@@ -135,7 +152,7 @@ function copyIntoSync(src, dest) {
  *  aside FIRST and is checked after it moved (moveAside), the tmp is linked into
  *  the empty name, the aside goes; a stat check before a rename could not stop a
  *  login landing after the check (lost: 14–50 µs, measured). */
-async function writePrivateFileAsync(dest, bytes, { expect } = {}) {
+async function writePrivateFileAsync(dest, bytes, { expect, asideAs } = {}) {
   const tmp = dest + `.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   let fh;
   try {
@@ -148,13 +165,28 @@ async function writePrivateFileAsync(dest, bytes, { expect } = {}) {
     if (expect === null) await linkInto(tmp, dest);
     else if (expect !== undefined) {
       const aside = await moveAside(dest, expect);
-      try { await linkInto(tmp, dest); } catch (e) { await putBack(aside, dest); throw e; } // a login that took the empty name stays; ours goes back or rests archived
+      try { await linkInto(tmp, dest); } catch (e) {   // a login that took the empty name stays; ours goes back or rests archived
+        // r2928: the put-back's three replies — the aside is the file the verdict read (moveAside proved it): when it cannot go back
+        // it becomes what `asideAs` says (OUR long-lived token never rests in an archive), and 'kept' is said true
+        const pb = await putBack(aside, dest);
+        if (pb !== 'back') await settleAside(aside, asideAs);
+        if (pb === 'kept') e.restsArchived = true;
+        throw e;
+      }
       try { await fsp.unlink(aside); } catch { }
     } else await fsp.rename(tmp, dest);
   } finally {
     if (fh !== undefined) { try { await fh.close(); } catch { } }
     try { await fsp.unlink(tmp); } catch { }
   }
+}
+
+/** settleAsideSync's twin off the loop (the strip and the re-mint roads): null = removed; bytes = what the archive keeps;
+ *  undefined = kept as it is (a person's or the vendor's sign-in is always kept) */
+async function settleAside(aside, as) {
+  if (as === undefined) return;
+  if (as === null) { try { await fsp.unlink(aside); } catch { } return; }
+  try { await writePrivateFileAsync(aside, as); } catch { }
 }
 
 // r2697 THE CONTENT A GUARD COMPARES: the sha256 of the bytes READ, kept in MEMORY ONLY beside the stat object it was read with (a
@@ -223,7 +255,7 @@ const LINKLESS = ['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV'];
 /** `src`'s bytes into the EMPTY name `dest` — the no-hard-link twin of link(2): an EXCLUSIVE copy (COPYFILE_EXCL never replaces),
  *  then 0600 and synced before the caller removes the source. THE RESIDUE, as it is (r2824 (3)): the copy creates the sign-in's own
  *  name BEFORE its bytes are synced, so a power loss on a file system without hard links can leave a short file there — the source
- *  stays whole at its archive or temp name (no atomic no-replace exists without link(2)). The second open is read-only: it is for the
+ *  stays whole at its archive or temp name (no atomic no-replace exists without link(2)). After such a loss the member is then refused by name (its sign-in file cannot be read) and nothing heals it by itself from the whole file beside it (r2928 (6)). The second open is read-only: it is for the
  *  mode and the sync alone (a vendor file with no owner write bit still takes them, r2824 (2)). → true | false (a file is there) */
 async function copyInto(src, dest) {
   try { await fsp.copyFile(src, dest, fs.constants.COPYFILE_EXCL); } catch (e) { if (e && e.code === 'EEXIST') return false; throw e; }
@@ -265,12 +297,12 @@ async function readCredentialFile(dir) {
  *  (accounts' oat sync is its only caller): the dir 0700 and never a symlink
  *  (F8), the file 0600, atomic, guarded by `expect` (F7). `body` is an object
  *  — login-expiry's oatFileMerge — anything else is refused by name (F4). */
-async function writeCredentialFile(dir, body, { expect } = {}) {
+async function writeCredentialFile(dir, body, { expect, asideAs } = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('a credential file must be a JSON object'), { code: 'not-an-object' });
   try { if ((await fsp.lstat(dir)).isSymbolicLink()) throw Object.assign(new Error('the account folder is a symlink'), { code: 'dir-symlink' }); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
   await fsp.chmod(dir, 0o700);
-  await writePrivateFileAsync(path.join(dir, '.credentials.json'), JSON.stringify(body), { expect });
+  await writePrivateFileAsync(path.join(dir, '.credentials.json'), JSON.stringify(body), { expect, asideAs });
 }
 
 /** Rename a member's .credentials.json aside — `.credentials.json.dead-<ms>`
@@ -311,7 +343,7 @@ async function removeCredentialFile(dir, { isOurs, rest = null, expect } = {}) {
   if (expect !== undefined && (!expect || expect.ino !== seen.stat.ino || expect.mtimeMs !== seen.stat.mtimeMs || expect.size !== seen.stat.size)) throw changed();
   if (expect && (!READ_SUMS.get(expect) || READ_SUMS.get(expect) !== READ_SUMS.get(seen.stat))) throw changed();   // r2697: the bytes read then and now (no sum: no trust)
   const keep = rest ? rest(seen.file) : null;
-  if (keep && typeof keep === 'object' && Object.keys(keep).length) { await writePrivateFileAsync(p, JSON.stringify(keep), { expect: seen.stat }); return 'stripped'; }
+  if (keep && typeof keep === 'object' && Object.keys(keep).length) { await writePrivateFileAsync(p, JSON.stringify(keep), { expect: seen.stat, asideAs: JSON.stringify(keep) }); return 'stripped'; }   // r2928: an aside that cannot go back keeps the CLI's keys alone, never our token
   await fsp.unlink(await moveAside(p, seen.stat)); // F2: rename aside → check → unlink (never the name itself)
   return true;
 }
@@ -329,6 +361,7 @@ function moveCredentialArchives(fromDir, intoDir) {
     for (let n = 1; (() => { try { fs.lstatSync(path.join(intoDir, name)); return true; } catch { return false; } })(); n++) name = `${f}-m${n}`;
     try { fs.renameSync(path.join(fromDir, f), path.join(intoDir, name)); moved.push(name); } catch { }
   }
+  moved.left = names.length - moved.length;   // r2928 (3): an archive that could not move — its folder is not removed
   return moved;
 }
 

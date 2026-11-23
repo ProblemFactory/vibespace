@@ -1431,6 +1431,8 @@ export default {
   "Session id not known — resume it from the sidebar": "セッション ID が不明です——サイドバーから再開してください",
   "Dismiss": "閉じる",
   "✓ Recognized as existing account “{name}” — merged (freshest login kept)": "✓ 既存アカウント「{name}」と認識——統合しました（最新のログインを保持）",
+  "Recognized as existing account “{name}” — its sign-in changed on this machine while merging, so it stays as it is; your new sign-in is kept beside it": "既存アカウント「{name}」と認識——統合中にこのマシン上のログインが変わったため、そのまま残しました。新しいログインはその横に保存されています",
+  "Recognized as existing account “{name}” — the merge could not place a sign-in for it (yours is kept beside its file); sign in again": "既存アカウント「{name}」と認識——統合でログインを配置できませんでした（あなたのログインはそのファイルの横に保存されています）。もう一度ログインしてください",
   "Log in on {host} as “{name}”…": "「{name}」として {host} でログイン…",
   "New subscription — log in on {host}…": "新しいサブスクリプション——{host} でログイン…",
   "· master held by VibeSpace": "・マスターは VibeSpace が保持",

@@ -892,7 +892,8 @@ app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
     if (dupOf) {
       const dup = dupOf;
       try {
-        const merged = accounts.mergeSubscription(req.params.id, dup.id, { preferFromCreds: true, liveAccountIds: liveAccountIdSet() });
+        const mf = {};   // r2928 (4): the merge's own facts — a guard that STOOD is told in the reply, never a journal line alone
+        const merged = accounts.mergeSubscription(req.params.id, dup.id, { preferFromCreds: true, liveAccountIds: liveAccountIdSet(), facts: mf });
         // AGAIN, AFTER THE MERGE (round-2 verifier). The sweep above ran
         // while the fresh credentials were still in the THROWAWAY record's
         // dir — the survivor, which is the record carrying the open warning,
@@ -908,7 +909,7 @@ app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
         // credentials now live in; the throwaway above is about to stop
         // existing.
         wakeOnLoginSuccess(dup.id, merged, 'subscription login merge', merged?.id || dup.id);
-        return res.json({ success: true, ...fin, merged: true, account: merged, ...adoptFirstSignin(cardRow, fin, (merged && merged.id) || dup.id) });
+        return res.json({ success: true, ...fin, merged: true, account: merged, ...(mf.stood ? { mergeStood: mf.stood } : {}), ...adoptFirstSignin(cardRow, fin, (merged && merged.id) || dup.id) });
       } catch (me) {
         // THE FOLD DID NOT HAPPEN, SO THIS RECORD IS STILL THE ONE HOLDING
         // THE LOGIN (r3) — it gets the edge the gate above deferred. Above

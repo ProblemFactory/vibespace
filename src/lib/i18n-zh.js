@@ -1432,6 +1432,8 @@ export default {
   "Session id not known — resume it from the sidebar": "会话 id 未知——请从侧栏 resume",
   "Dismiss": "关闭",
   "✓ Recognized as existing account “{name}” — merged (freshest login kept)": "✓ 识别为已有账号“{name}”——已合并（保留最新登录）",
+  "Recognized as existing account “{name}” — its sign-in changed on this machine while merging, so it stays as it is; your new sign-in is kept beside it": "识别为已有账号“{name}”——合并时本机上它的登录发生了变化，因此保持原样；你的新登录已保存在它旁边",
+  "Recognized as existing account “{name}” — the merge could not place a sign-in for it (yours is kept beside its file); sign in again": "识别为已有账号“{name}”——合并未能为它放置登录（你的登录已保存在它的文件旁边）；请重新登录",
   "Log in on {host} as “{name}”…": "以“{name}”在 {host} 上登录…",
   "New subscription — log in on {host}…": "新订阅——在 {host} 上登录…",
   "· master held by VibeSpace": "· 主副本存于 VibeSpace",
