@@ -10,7 +10,8 @@
 //      (RED: the release's text in a copy, in a worker)
 //   ③ the memory watch's `ps` (RED: the old road)
 //   ④ the version asks the hub hands the starter (RED: a copy without the hand-off)
-//   ⑤ the lookup (which-kept): through the starter, kept; an aborted ask stops waiting and records nothing (RED: the old road)
+//   ⑤ the lookup (which-kept): through the starter, kept; an aborted ask stops waiting and records nothing (RED: the old road);
+//      (r2802) one lookup program a name at a time — the next ask while the aborted one's child runs joins it (RED: the abort frees the slot)
 //      + the proxy plugin's runner reads the starter (census; RED: the release's text)
 //   ⑥ the certificate pass's runner (its answer table) and its default; the display's lookup asynchronous through the starter
 //      (RED: the release's synchronous lookup); the keeper's version ask (census; RED: the release's text)
@@ -202,7 +203,7 @@ WD.section('④');
   ok(read('server.js').includes("const machineProbes = require('./src/machine-probes'); machineProbes.useStarter(require('./src/server/child-starter').execFileVia(require('./src/server/child-starter').childStarter()));"), 'the hub hands it at the module\'s require (server.js) — the device agent never does');
 }
 
-say('⑤ THE LOOKUP — through the starter, kept; an aborted ask stops waiting and records nothing; a no-reply is said as one');
+say('⑤ THE LOOKUP — through the starter, kept; an aborted ask stops waiting and records nothing; one program a name at a time; a no-reply is said as one');
 WD.section('⑤');
 {
   let slowLanded = false;   // the stand-in's own (late) answer has landed — the abort's proof, never a wall-clock bound
@@ -216,6 +217,24 @@ WD.section('⑤');
   const slow = await p; const ms = Date.now() - t0, landedFirst = slowLanded;
   await new Promise((r) => setTimeout(r, 500));   // r1381 (6): the stand-in's own answer lands (at 400 ms) BEFORE the assert
   ok(slow === null && landedFirst === false && slowLanded === true && !WK.whichKnown('vs-slow-cmd'), `an aborted ask stops waiting at once (${ms} ms: BEFORE the stand-in's own answer landed) and records nothing — not even once the late answer has landed; its child ends at the starter's own bound`, { slow, ms, landedFirst });
+  // r2802 (主开发, from an independent verification): ONE LOOKUP PROGRAM A NAME AT A TIME — an aborted ask ends only ITS waiting; the next
+  // ask of that name while the child still runs JOINS it (no second `which`) and gets — and keeps — the child's own answer
+  const WK_SRC = read('src/plugins/which-kept.js');
+  const joinScene = async (WKm) => {
+    let landed = false; const prev = answer;
+    answer = (cmd, args) => (cmd === 'which' && args[0] === 'vs-join-cmd' ? new Promise((r) => setTimeout(() => { landed = true; r({ started: true, code: 0, stdout: '/x/vs-join-cmd\n' }); }, 300)) : prev(cmd, args));
+    const nOf = () => askedOf('which').filter((x) => x.args[0] === 'vs-join-cmd').length, a0 = nOf();
+    try {
+      const ac2 = new AbortController(); const first = WKm.whichNow('vs-join-cmd', { signal: ac2.signal }); ac2.abort(new Error('the dialog closed'));
+      const firstGot = await first;   // ended at its own abort — the last answer (none)
+      const second = await WKm.whichNow('vs-join-cmd');   // asked while the first child still runs
+      return { firstGot, second, programs: nOf() - a0, landed, known: WKm.whichKnown('vs-join-cmd') };
+    } finally { answer = prev; }
+  };
+  const one = await joinScene(WK);
+  const twoR = await joinScene(require(M.write('src/plugins/which-kept.js', anchored(WK_SRC, '    const end = () => { if (over) return; over = true; look.waiting -= 1;', '    const end = () => { if (over) return; over = true; look.waiting -= 1; if (k.pending === look) k.pending = null;', 'B-323e the abort frees the slot'), 'abort-frees')));   // stale-pins: kept (today's road planted back — the leg's RED)
+  ok(one.firstGot === null && one.second === '/x/vs-join-cmd' && one.programs === 1 && one.landed && one.known && twoR.programs === 2,
+    `ONE LOOKUP PROGRAM A NAME AT A TIME (r2802): an aborted ask ends only its waiting (${one.firstGot}); the next ask of that name while the child runs JOINS it — ${one.programs} program — and gets and keeps its answer (${one.second}) — RED the abort frees the slot (today's road): ${twoR.programs} programs for one name`, { one, twoR });
   const silent = await WK.whichFreshAnswer('vs-silent-cmd');
   ok(silent.known === false && silent.path === null && !WK.whichKnown('vs-silent-cmd'), 'a NO-REPLY is said as one ({known: false}) — never «not found», nothing kept', silent);
   const SRC = read('src/plugins/which-kept.js');

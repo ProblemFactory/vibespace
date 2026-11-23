@@ -26,30 +26,39 @@ const backingOff = (k, now = Date.now()) => !!(k && k.noReplyAt && now - k.noRep
 function refresh(name, signal, { press = false } = {}) {
   const k = kept.get(name) || { path: null, at: 0, n: 0, pending: null, noLookup: false, noReplyAt: 0, waitMs: 0 };
   kept.set(name, k);
-  if (k.pending) return k.pending;
-  if (!press && backingOff(k)) return Promise.resolve(k.at ? k.path : null);   // r2030 (3b): waiting after a no-reply — the last good answer, no new child
-  const p = new Promise((resolve) => {
+  if (signal && signal.aborted) return Promise.resolve(k.at ? k.path : null);   // its read: an ask ABORTED before it asks starts nothing (as before)
+  if (!k.pending) {
+    if (!press && backingOff(k)) return Promise.resolve(k.at ? k.path : null);   // r2030 (3b): waiting after a no-reply — the last good answer, no new child
+    // r2802 (主开发, from an independent verification): ONE LOOKUP PROGRAM A NAME AT A TIME. The slot (`k.pending`) is the child's OWN
+    // life — taken until its answer, or the starter's bound (TIMEOUT_MS) — never an ask's: an aborted ask ends only ITS waiting, and an
+    // ask that comes meanwhile joins the one that runs (before, the abort freed the slot while the child ran, and the next ask started a
+    // second `which` beside it — the Log-in dialog's 3 s asks could stack them). `waiting` counts the asks still waiting on it. The
+    // starter's bound is TIMEOUT_MS on its timer, about 9 s at its fault (5 s plus its guards); a joiner never waits past it
+    const look = { waiting: 0, p: null };
+    look.p = Promise.resolve().then(() => runWhich(name)).then((r) => r, () => null).then((r) => {
+      // only a `which` that RAN to its answer is kept: the starter's no answer, timed out or killed ⇒ the last answer stands (never «not
+      // found») and the next lookup waits (r2030 (3b)); no `which` program at all (ENOENT) is kept as THAT fact (`noLookup`, r2030 (3a)):
+      // a caller that had its own look before (the tmux road) looks its own way. An answer NO ask waits for any more (every one aborted)
+      // records nothing — an aborted ask records nothing (r1351); one ask still waiting is enough to keep it
+      const keep = look.waiting > 0;
+      const ran = !!(r && r.started !== false && !r.unknown && !r.timedOut && !r.signal), noWhich = !!(r && r.started === false && r.error === 'ENOENT');
+      if (keep && (ran || noWhich)) { k.noLookup = noWhich; k.noReplyAt = 0; k.waitMs = 0; }
+      else if (r && (r.unknown || r.timedOut || r.signal)) { k.noReplyAt = Date.now(); k.waitMs = Math.min(k.waitMs ? k.waitMs * 2 : NO_REPLY_WAIT_MS, NO_REPLY_WAIT_MAX_MS); }   // a NO-REPLY (a child may still run — one on a hung mount outlives the starter's kill): wait, EVEN WHEN NO ASK WAITS any more (its read: the wait guards the host, it records no answer)
+      if (keep && (ran || noWhich)) { k.path = r.code === 0 ? (String(r.stdout || '').trim().split('\n')[0] || null) : null; k.at = Date.now(); k.n += 1; }
+    }).finally(() => { if (k.pending === look) k.pending = null; });   // the slot freed at the CHILD's end (a `which` that could not be started ends at once: no child runs — round 3, it never stays «pending»)
+    k.pending = look;
+  }
+  const look = k.pending;
+  // THIS ASK's waiting: it ends at the lookup's answer, or at this ask's own abort (which ends nothing else — the child runs on)
+  return new Promise((resolve) => {
     const done = () => resolve(k.at ? k.path : null);
     if (signal && signal.aborted) return done();
+    look.waiting += 1;
     let over = false;
-    const end = () => { if (over) return; over = true; if (signal) signal.removeEventListener('abort', end); if (k.pending === p) k.pending = null; done(); };   // an aborted ask stops waiting: nothing recorded
+    const end = () => { if (over) return; over = true; look.waiting -= 1; if (signal) signal.removeEventListener('abort', end); done(); };
     if (signal) signal.addEventListener('abort', end, { once: true });
-    Promise.resolve().then(() => runWhich(name)).then((r) => {
-      // only a `which` that RAN to its answer is kept: aborted, the starter's no answer, timed out or killed ⇒ the last answer
-      // stands (never «not found») and the next lookup waits (r2030 (3b)); no `which` program at all (ENOENT) is kept as THAT fact
-      // (`noLookup`, r2030 (3a)): a caller that had its own look before (the tmux road) looks its own way — never «not found» for it
-      const ran = !!(r && r.started !== false && !r.unknown && !r.timedOut && !r.signal), noWhich = !!(r && r.started === false && r.error === 'ENOENT');
-      if (!over && (ran || noWhich)) { k.noLookup = noWhich; k.noReplyAt = 0; k.waitMs = 0; }
-      else if (!over && r && (r.unknown || r.timedOut || r.signal)) { k.noReplyAt = Date.now(); k.waitMs = Math.min(k.waitMs ? k.waitMs * 2 : NO_REPLY_WAIT_MS, NO_REPLY_WAIT_MAX_MS); }   // a NO-REPLY (a child may still run): wait; a start that failed (no child) asks again next time
-      if (!over && (ran || noWhich)) { k.path = r.code === 0 ? (String(r.stdout || '').trim().split('\n')[0] || null) : null; k.at = Date.now(); k.n += 1; }
-      end();
-    }, end);   // a `which` that could not be STARTED: still unknown — the next ask tries again (no child runs: nothing to wait for); never a rejection
+    look.p.then(end, end);
   });
-  // the memo is set BEFORE it can be cleared: a lookup that ends at once (a spawn that threw) must never stay «pending» for the
-  // process's life (round 3 — it poisoned that name)
-  k.pending = p;
-  p.then(() => { if (k.pending === p) k.pending = null; });
-  return p;
 }
 /** the kept answer — never a SYNCHRONOUS child: a stale or missing one starts ONE async `which` (spawned from this call, it runs off the loop) */
 function whichKept(name, { maxAgeMs = MAX_AGE_MS } = {}) {
@@ -58,8 +67,9 @@ function whichKept(name, { maxAgeMs = MAX_AGE_MS } = {}) {
   return k ? k.path : null;
 }
 /** a fresh answer (async, bounded by the child's timeout; `signal` — the asker's abort — stops the WAITING). The lookup is SHARED
- *  by name and its `which` is the hub's STARTER's child (B-323e): an aborted ask stops waiting at once and records nothing; the
- *  child runs to the starter's bound (TIMEOUT_MS, SIGKILL there), nothing started beside it. */
+ *  by name and its `which` is the hub's STARTER's child (B-323e): an aborted ask stops waiting at once and records nothing (unless
+ *  another ask still waits on that lookup); the child runs to its answer or the starter's bound (TIMEOUT_MS on its timer, SIGKILL
+ *  there), and nothing is started beside it — ONE LOOKUP PROGRAM A NAME AT A TIME (r2802). */
 function whichNow(name, { signal } = {}) { return refresh(name, signal); }
 /** B-323e (r1381): the kept answer when fresh, else a fresh one, SAID WITH whether it is known: {path, known} — known false = the
  *  lookup got no reply (the starter's no answer, its bound): never «not found». maxAgeMs 0 = a person's press: always looks again —
