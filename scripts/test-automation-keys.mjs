@@ -821,6 +821,16 @@ const shown = (x) => ({ inAwait: x.inAwait, placed: x.placed, r1: x.r1 && { ok: 
   const O = await storeRace(ENG, 'opened');
   ok(O.inAwait && O.placed === 1 && survived(O) && refusedByName(O) && O.r1.ok === true && Array.isArray(O.after.opened) && O.after.opened.some((o) => o.keyId === O.keyId && o.webuiId === 'w-race'),
     'r3001 THE OPENED ROW: a use waiting inside its open while another use\'s re-read FAILS — the opened row is written from a GOOD read (the key, its grant and the row all on file), the failed read\'s use refused by name', shown(O));
+  // RED CONTROL (in a copy, the release's writers): the writer's guard, the stamp's read and the opened note's read taken out — the
+  // stamp and the opened note write the failed read's EMPTY list over the file (the census's race, made by a held promise)
+  const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
+  let src = editAnchor(ESRC, "    if (db && db.bad) throw Object.assign(new Error(STORE_UNREAD), { code: 'store_unread' });\n", '', 'src/server/automation-engine.js');
+  src = editAnchor(src, "    if (db.bad) db = read();   // r3001: another use's re-read failed meanwhile — the row is written from a GOOD read, never from that one\n    if (db.bad) { log(`the opened row of ${keyId} is not recorded: ${STORE_UNREAD}`); return; }\n", '', 'src/server/automation-engine.js');
+  src = editAnchor(src, "    db = read();\n    if (db.bad) return done({ ...named('failed', `${STORE_UNREAD} — nothing ran`), args: v0.args }, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });\n", '', 'src/server/automation-engine.js');
+  const MXR = M.load('src/server/automation-engine.js', src, 'r3001-written-over');
+  const SX = await storeRace(MXR, 'stamp'), OX = await storeRace(MXR, 'opened');
+  ok(SX.placed === 1 && !survived(SX) && OX.placed === 1 && !survived(OX),
+    'RED CONTROL (r3001, the release\'s writers in a copy): the stamp and the opened note write the failed read\'s empty list over the file — the legs above can fail', { stamp: shown(SX), opened: shown(OX) });
 }
 console.log('⑫c MUTANT — the config read BEFORE the folder judge');
 {
