@@ -845,8 +845,8 @@ console.log('— ⑩ B-9584 (B) r2497: the place reader rides the mediator\'s gr
   ok(!okWire(w1), `⑩ RED — the reader taken out of the judge call: the clear and the permission are ADMITTED on both roads (an agent clears a listed site's position) ${JSON.stringify(w1)}`, JSON.stringify(w1));
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const grants = ksrc.split('await mediator.grantFor({').length - 1, withPlace = ksrc.split(', place: () => placeKindFor(p.id) });').length - 1;
-  ok(grants === 3 && withPlace === 3 && /function placeKindFor\(pid\) \{ try \{ const p = profile\(String\(pid \|\| ''\)\); if \(!p\) return null; const g = ENV\.resolveEnvironment\(p\.environment, ENV\.keptExitOf\(p\)\)\.geolocation; return g \? g\.kind : null;/.test(ksrc),
-    `⑩ r2497 (1) PIN: the keeper's ${grants} grants each hand the place reader (${withPlace} of them), and the reader is the profile's own location kind`, { grants, withPlace });
+  ok(grants === 3 && withPlace === 3 && /function placeKindFor\(pid\) \{ \{ const r = runningPlaceKind\(pid\); if \(r !== undefined\) return r; \} try \{ const p = profile\(String\(pid \|\| ''\)\); if \(!p\) return null; const g = ENV\.resolveEnvironment\(p\.environment, ENV\.keptExitOf\(p\)\)\.geolocation; return g \? g\.kind : null;/.test(ksrc),
+    `⑩ r2497 (1) PIN: the keeper's ${grants} grants each hand the place reader (${withPlace} of them), and the reader is the running browser's location kind, else the profile's own (r2767 (a))`, { grants, withPlace });
   for (const c of copiesCensus(MUTP.files, MUTP.dir, REPO, { label: '⑩ controls: ' })) ok(c.pass, c.name, c.detail);
 }
 

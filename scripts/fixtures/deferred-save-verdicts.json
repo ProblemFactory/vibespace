@@ -925,9 +925,9 @@
   "why": "its act's last step: the release's own synchronous save"
  },
  {
-  "key": "browser-keeper · src/server/browser-keeper.js · create > setEnvironment · commitSync()",
-  "verdict": "sync-last",
-  "why": "its act's last step: the release's own synchronous save"
+  "key": "browser-keeper · src/server/browser-keeper.js · create > setEnvironment · commit()",
+  "verdict": "none",
+  "why": "read at the next start only"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > moveProxyPassword · save()",

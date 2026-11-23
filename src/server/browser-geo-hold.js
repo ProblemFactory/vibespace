@@ -122,9 +122,10 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
     return job;
   }
   async function grantJob(h, ctx, deadline) {
+    h.granted.add(ctx);   // r2767: a context once granted on THIS socket — the take-back reads it, whatever a regrant does to the jobs
     const at = ctx ? { browserContextId: ctx } : {};
     const ms = () => Math.max(1, Math.min(boundMs, deadline - now()));   // r2311 (small): the phase's own bound, never a call's bound per site
-    if (now() >= deadline) { h.ungranted += h.plan.sites.length; say(`${h.profileId}: no grant was sent in a browser context in time — its listed sites read «denied»`); told(h, h.plan.sites.length); return true; }
+    if (now() >= deadline) { h.ungranted += h.plan.sites.length; say(`${h.profileId}: no grant was sent in a browser context in time — its listed sites read «denied»`); told(h, h.plan.sites.length, ctx); return true; }
     let failed = 0;
     const d = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', ...at }, null, ms());
     if (!fine(d)) say(`${h.profileId}: the every-origin denial was not set on its browser (${d && d.timeout ? 'no answer' : 'refused'}) — the profile's own stored denial stands under it`);
@@ -134,12 +135,12 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
       const g = await call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'granted', origin, ...at }, null, ms());
       if (!fine(g)) { h.ungranted++; failed++; say(`${h.profileId}: a listed site was not granted its place (${g && g.timeout ? 'no answer' : 'refused'}) — it reads «denied»`); }
     }
-    told(h, failed);
+    told(h, failed, ctx);
     return true;
   }
   /** r2311 (ii) A GRANT THAT FAILED IS TOLD: after every grant job with a list, how many of its sites were not given the place (never an
    *  origin) — the keeper's record stops saying every listed site reads it, and the person is told. */
-  function told(h, failed) { if (h.plan.sites.length) emit({ kind: 'grants', profileId: h.profileId, failed, of: h.plan.sites.length, at: now() }); }
+  function told(h, failed, ctx = '') { if (h.plan.sites.length) emit({ kind: 'grants', profileId: h.profileId, ctx: String(ctx || ''), failed, of: h.plan.sites.length, at: now() }); }   // r2767 (b): the context (an opaque id, never an origin) so the keeper sums the run
   /** r2311 (i) THE HOLD GRANTS AGAIN after another client reset the browser's permissions or left (the dialog watch's takeover reset,
    *  its socket gone — measured: the listed site read «denied» after that client left): on its OWN live socket, every context again
    *  (the every-origin denial, then the listed origins), within the phase's own bound. Not held (arming, lost, down, gone) ⇒ false. */
@@ -157,8 +158,8 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
   async function taintCtx(h, ctx) {
     h.dirty.add(ctx);
     const job = h.granting.get(ctx);
-    if (!job) return;
-    await job;
+    if (!job && !h.granted.has(ctx)) return;   // r2767 REQUIRED: once granted on this socket, ALWAYS taken back — a regrant in flight cleared the jobs, not the grants
+    if (job) await job;
     const at = ctx ? { browserContextId: ctx } : {};
     const by = now() + grantMs;   // r2497 (4): every take-back SENT at once, all under the grant phase's one deadline — never one bound each, none skipped
     const takeBack = (origin) => call(h, 'Browser.setPermission', { permission: { name: 'geolocation' }, setting: 'denied', origin, ...at }, null, Math.max(1, Math.min(boundMs, by - now())));
@@ -200,7 +201,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
       if (!LOOPBACK.test(String(url || ''))) return done({ ok: false, code: 'place_not_held', error: 'the browser answered no loopback debugging address' });
       try { ws = new WebSocketImpl(url, { perMessageDeflate: false, handshakeTimeout: Math.min(armMs, 5000), maxPayload: 4 * 1024 * 1024 }); } catch (e) { return done({ ok: false, code: 'place_not_held', error: String(e && e.message) }); }
       h.ws = ws; h.id = 0; h.waiting = new Map(); h.tabs = new Map(); h.pending = new Set(); h.seen = new Set();
-      h.ctxs = new Set(); h.granting = new Map(); h.dirty = new Set(); h.release = new Set();   // B-9584 (B): grants live on THIS socket only — a new one starts with none;
+      h.ctxs = new Set(); h.granting = new Map(); h.granted = new Set(); h.dirty = new Set(); h.release = new Set();   // B-9584 (B): grants live on THIS socket only — a new one starts with none;
       // r2311 (2): NO '' seed — a grant with no context id IS the default context's, and the browser names that context by its id too, so
       // a seeded '' was granted even when the default context's own id was tainted; '' is now only a target that names no context
       const tArm = timer(() => { try { ws.terminate ? ws.terminate() : ws.close(); } catch { /* gone */ } done({ ok: false, code: 'place_not_held', error: `the browser did not take this profile's place within ${Math.round(armMs / 1000)} s` }); }, armMs);   // its socket goes with it: never a second auto-attach beside the next try
@@ -267,7 +268,7 @@ function create({ WebSocketImpl = WS, now = Date.now, log = console, boundMs = B
     const u0 = typeof url === 'function' ? url() : url;
     if (typeof u0 !== 'string' || !LOOPBACK.test(u0)) return { ok: false, code: 'place_not_held', error: 'the browser answered no loopback debugging address' };
     disarm(pid, 'armed again');
-    const h = { profileId: pid, url, plan: pl, state: 'arming', after, unplaced: 0, ungranted: 0, heldAt: 0, lostAt: 0, rearming: false, ctxs: new Set(), granting: new Map(), dirty: new Set() };
+    const h = { profileId: pid, url, plan: pl, state: 'arming', after, unplaced: 0, ungranted: 0, heldAt: 0, lostAt: 0, rearming: false, ctxs: new Set(), granting: new Map(), granted: new Set(), dirty: new Set() };
     holds.set(pid, h);
     const r = await connect(h);
     if (!r.ok && holds.get(pid) === h) { h.state = 'gone'; holds.delete(pid); try { h.ws && h.ws.close(); } catch { /* */ } }

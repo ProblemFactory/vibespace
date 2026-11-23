@@ -669,7 +669,7 @@ console.log('— ④b the user browsing a profile (Browse yourself): every agent
   const bsrc = read('src/browser-profiles.js');
   const lneedle = "  if (l.human === true || /^hu-[0-9a-f]{8}$/.test(String(l.browserKey || ''))) return null;";
   ok(bsrc.includes(lneedle), 'the agent lease-view needle (the control below removes it)');
-  const Bh = M.load('src/browser-profiles.js', editAnchor(editAnchor(bsrc, lneedle, '', "src/browser-profiles.js"), "  delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;\n", '', "src/browser-profiles.js"), 'agent-sees-human');
+  const Bh = M.load('src/browser-profiles.js', editAnchor(editAnchor(bsrc, lneedle, '', "src/browser-profiles.js"), "  createdAt: 'when it was made',\n", "  createdAt: 'when it was made',\n  lastUsedAt: 'the pre-fix view', recordMine: 'the pre-fix view',\n", "src/browser-profiles.js")   /* B-9584 U3 r2767: the agent view is a kept list now — the pre-fix shape is these two keys given a row */, 'agent-sees-human');
   const facts = { browserKey: Bk, taskIds: [], groupsUnreadable: false };
   const real = JSON.stringify(B.agentDigestView(k.list(), facts, (id) => k.profile(id)));
   const pre = JSON.stringify(Bh.agentDigestView(k.list(), facts, (id) => k.profile(id)));

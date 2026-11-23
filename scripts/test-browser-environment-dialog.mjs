@@ -10,6 +10,10 @@
 //   ③ THE FORM (src/lib/browser-environment-form.js, PURE): a kept environment round-trips through the fields; «this machine's» or
 //      «Blocked» drops the list of sites (r2497 (5)); the page's own check is U1's verdict; «Automatic» said from the kept exit.
 //   ④ THE WORDS (src/lib/browser-environment-words.js): every code the verdict and the door can answer has the page's sentence.
+//   ⑥ r2767 MUST — AN AGENT's VIEW OF A PROFILE IS MADE FROM WHAT AN AGENT MAY SEE: a record carrying every field the code writes goes
+//      through the view; every key out is a ROW of AGENT_VIEW_ROWS with its reason; the place and its sites never out. REDs: the view
+//      as the record spread (the place handed back), a planted field passed with no row.
+//   ⑦ r2767 (a): ONE PLAN WHILE A BROWSER RUNS — after a save place → this machine's while it runs, the gates still judge a place.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -84,6 +88,20 @@ console.log('— ② the route: a person\'s cookie door only');
   const table = (/const ENV_STATUS = Object\.freeze\(\{([^}]*)\}\)/.exec(RB) || [])[1] || '';
   ok(/browser_place_unsupported: 409/.test(table) && /env_sites_engine: 409/.test(table) && /env_sites_unoffered: 409/.test(table) && /'not-found': 404/.test(table) && /ENV_STATUS\[r\.code\] \|\| 400/.test(RB),
     '② its status table: the refusals of where it is set 409, no profile 404, the verdict\'s own codes 400', table);
+  // r2767 (c): SHOWN BY A REQUEST — the real router on a loopback port, a stand-in keeper; a made-up sign-in of each kind (a
+  // conversation's, a job's, an automation key's) gets the refusal by name and never reaches the keeper; the person's cookie door does
+  const express = require('express'), RBm = require('../src/routes/browser.js'), calls = [];
+  RBm.setup({ keeper: { setEnvironment: (id) => { calls.push(id); return { ok: true, changed: false, restartNeeded: false }; } } });
+  const app = express(); app.use(express.json()); app.use(RBm.router);
+  const srv = await new Promise((res) => { const sv = app.listen(0, '127.0.0.1', () => res(sv)); });
+  const post = (auth) => fetch(`http://127.0.0.1:${srv.address().port}/api/browser/profiles/bp-000000e1/environment`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: J({ environment: null }) })
+    .then(async (x) => ({ status: x.status, body: await x.json().catch(() => null) }));
+  const asked = [];
+  for (const kind of ['vsst_', 'jbt_', 'vsak_']) asked.push(await post(['Bearer ', kind, 'stand-in-0000'].join('')));   // made up at run time, never a token literal
+  const person = await post(null);
+  await new Promise((res) => srv.close(res));
+  ok(asked.length === 3 && asked.every((x) => x.status === 403 && x.body && x.body.code === 'agent_forbidden') && person.status === 200 && J(calls) === J(['bp-000000e1']),
+    '② r2767 (c) BY A REQUEST: a conversation\'s, a job\'s and an automation key\'s sign-in each get 403 agent_forbidden and never reach the keeper; the person\'s request does', { asked, person, calls });
 }
 
 console.log('— ③ the form: the fields round-trip, the list dropped beside «this machine\'s» or «Blocked», Automatic said from the kept exit');
@@ -118,7 +136,7 @@ console.log('— ④ the words: every code the verdict and the door can answer h
   ok(codes.size >= 12 && missing.length === 0 && Wd.envWords('zzz_new', T).known === false && /zzz_new/.test(Wd.envWords('zzz_new', T).text), `④ every code (${codes.size}) the verdict and the door answer has the page's sentence; an unknown code is named by its code`, { codes: [...codes], missing });
   ok(/Automatic now: Europe\/Paris/.test(Wd.autoWords({ value: 'Europe/Paris', from: 'exit' }, T)) && /none is kept yet/.test(Wd.autoWords({ value: null, said: 'no_exit' }, T)), '④ Automatic\'s line: its value now and whence, or that nothing is kept');
   const DLG = read('src/lib/browser-environment-dialog.js');
-  ok(/`\/api\/browser\/profiles\/\$\{encodeURIComponent\(r\.id\)\}\/environment`, \{ method: 'POST'/.test(DLG) && /const f = read\(\), v = checkOf\(f\);\n      if \(!v\.ok\) \{ sayCode\(v\.code, v\.error\); return; \}/.test(DLG) && !/\.disabled = true;(?![^\n]*busy)/.test(DLG.replace('busy = true; save.disabled = true;', '')),
+  ok(/`\/api\/browser\/profiles\/\$\{encodeURIComponent\(r\.id\)\}\/environment`, \{ method: 'POST'/.test(DLG) && /const f = read\(\), v = checkOf\(f\);\n      if \(!v\.ok\) \{ sayCode\(v\.code\); return; \}/.test(DLG) && !/\.disabled = true;(?![^\n]*busy)/.test(DLG.replace('busy = true; save.disabled = true;', '')),
     '④ the dialog posts to the keeper\'s one door after the page\'s own check; no control greyed but the save while it is sent', null);
 }
 
@@ -131,5 +149,44 @@ console.log('— ⑤ r2311 (i): the dialog watch\'s reset and its leaving ask th
     && /geoRegrant: \(profileId\) => \(geoHoldOwn \? geoHoldOwn\.regrant\(String\(profileId \|\| ''\)\)\.catch\(\(\) => false\) : Promise\.resolve\(false\)\)/.test(KS)
     && /return \{ arm, disarm, heldOf, factOf, rearmNow, regrant, dispose,/.test(GS),
     '⑤ PIN: after the watch resets the browser\'s permissions (a takeover) and when its socket closes, the keeper asks the place hold to grant again (the hold\'s own regrant: legs and REDs in test-browser-geo-hold; the real browser in test-browser-geo-hold-chrome)');
+}
+
+console.log('— ⑥ r2767 MUST: an agent\'s view of a profile is made from what an agent may see — every key out is a row with its reason');
+{
+  const B = require('../src/browser-profiles.js');
+  // every field the code writes on a profile record: the new record's own keys + every `p.<field> =` of the keeper, the profiles
+  // module, the engines and the routes (printed) — each planted on one record, the person's place and an exit among them
+  const SRC = ['src/server/browser-keeper.js', 'src/browser-profiles.js', 'src/server/browser-engines.js', 'src/routes/browser.js'].map(read).join('\n');
+  const written = new Set();
+  for (const m of SRC.matchAll(/\b(?:p|pr|prof|profile)\.([a-zA-Z_]\w*)\s*=(?!=)/g)) written.add(m[1]);
+  const base = B.newProfileRecord({ id: 'bp-000000e7', label: 'Census', dir: path.join(ROOT, 'census'), now: 1 });
+  for (const k of Object.keys(base)) written.add(k);
+  const recordOf = () => { const r = { ...base }; for (const k of written) if (!(k in r)) r[k] = { planted: k }; r.environment = { location: { ...PLACE, sites: ['https://listed.example'] } }; r.egress = { publicIp: '203.0.113.9', country: 'FR', timezone: 'Europe/Paris', checkedAt: 1, source: 'measured' }; return r; };
+  const censusOf = (Bm) => { const v = Bm.agentProfileView(recordOf(), { browserKey: 'bk-000000e7' }, { mediated: true }); const rows = B.AGENT_VIEW_ROWS; return { v, noRow: Object.keys(v).filter((k) => !Object.prototype.hasOwnProperty.call(rows, k) || typeof rows[k] !== 'string' || rows[k].length < 8) }; };
+  const c0 = censusOf(B);
+  ok(written.size >= 25 && c0.noRow.length === 0 && !('environment' in c0.v) && !('egress' in c0.v) && !/12\.5|45\.25|listed\.example|203\.0\.113/.test(J(c0.v)) && c0.v.id === 'bp-000000e7' && 'use' in c0.v && 'scope' in c0.v,
+    `⑥ the agent's view of a record carrying all ${written.size} fields the code writes: every key out (${Object.keys(c0.v).length}) is a row with its reason; the place, its sites and the kept exit never out`, { noRow: c0.noRow, keys: Object.keys(c0.v) });
+  const MUT6 = mutantCopies('env-dialog-view', REPO), bsrc = read('src/browser-profiles.js');
+  const spread = MUT6.load('src/browser-profiles.js', anchored(bsrc, '  for (const k of Object.keys(AGENT_VIEW_ROWS)) {', '  Object.assign(out, pub, ex); for (const k of []) {', 'view RED the record spread'), 'view-spread');
+  const r1 = censusOf(spread);
+  ok(r1.noRow.includes('environment') && r1.noRow.includes('egress'), '⑥ RED — the view as the record spread (the old shape): the place and the kept exit come out with no row', r1.noRow);
+  const planted = MUT6.load('src/browser-profiles.js', anchored(bsrc, '  out.scope = scopeOf(p);', '  out.plantedField = 1; out.scope = scopeOf(p);', 'view RED a planted field'), 'view-planted');
+  const r2 = censusOf(planted);
+  ok(J(r2.noRow) === J(['plantedField']), '⑥ RED — a field the view passes with no row of its own is red by its name', r2.noRow);
+  for (const c of copiesCensus(MUT6.files, MUT6.dir, REPO, { label: '⑥ controls: ' })) ok(c.pass, c.name, c.detail);
+}
+
+console.log('— ⑦ r2767 (a): one plan while a browser runs — the gates judge by what it was started with until its restart');
+{
+  const k = mkK(), p = k.createProfile({ label: 'Running' });
+  await k.setEnvironment(p.id, { environment: { location: PLACE } });
+  k._reg().browsers[p.id] = { profileId: p.id, state: 'ready', environment: { applied: { location: 'fixed' } } };   // started with the place (its record only)
+  const r = await k.setEnvironment(p.id, { environment: { location: null } });   // the person saves «this machine's» while it runs
+  const whileRuns = { kind: k.placeKindFor(p.id), held: k.geoHeldFor(p.id) };
+  delete k._reg().browsers[p.id];   // its restart (no running record)
+  const after = { kind: k.placeKindFor(p.id), held: k.geoHeldFor(p.id) };
+  ok(r.ok && r.restartNeeded === true && whileRuns.kind === 'place' && !!whileRuns.held && whileRuns.held.kind === 'place' && after.kind === null && after.held === null,
+    '⑦ a save from a place to «this machine\'s» while the browser runs: the mediator\'s and the dialog watch\'s gates still judge a place until its restart; after it, the saved setting', { r, whileRuns, after });
+  k.shutdown?.();
 }
 report();

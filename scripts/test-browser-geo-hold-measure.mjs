@@ -108,6 +108,8 @@ const F = {};
 // ── THE CONTROL: Chrome reads a stored grant we write (else (b) cannot be read) ──
 {
   const c = await chrome(prefsWith({ site: 1 }));
+  // 主开发 r2842: the browser's OWN version answer, once, at the start — a fact run keeps the line that says what it measured on
+  { const v = await c.cdp.send('Browser.getVersion').catch(() => null); F.browser = v ? { product: v.product, protocol: v.protocolVersion, program: CHROME } : { answer: 'none', program: CHROME }; console.log(`browser: ${v ? v.product : 'no version answer'} · ${CHROME}`); }
   const t = await openTab(c, 'ctl');
   F.control = { read: said(await readOf('ctl', 0)), stored: storedOf(c) };
   await stop(c);

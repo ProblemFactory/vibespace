@@ -87,7 +87,7 @@ export function openEnvironmentDialog(app, r, { onDone = null, onClose = null } 
     busy = true; save.disabled = true;
     try {
       const f = read(), v = checkOf(f);
-      if (!v.ok) { sayCode(v.code, v.error); return; }   // the page's own check (the server judges again)
+      if (!v.ok) { sayCode(v.code); return; }   // the page's own check (the server judges again); its words by code, never the typed text echoed (r2767)
       const res = await fetchJson(`/api/browser/profiles/${encodeURIComponent(r.id)}/environment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyOf(f)) });
       if (!res || res.error || res.ok === false) { sayCode(res && res.code, ''); return; }
       showToast(res.restartNeeded ? t('{label} takes its environment at its next start', { label }) : t('{label}\'s environment is saved', { label }), { duration: 5000 });

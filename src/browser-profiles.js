@@ -1847,32 +1847,65 @@ function agentUseOf(p, facts = {}) {
   if (v.code === 'excepted') return { mode: 'only', you: false, via: null, excepted: true };
   return { mode: 'only', you: false, via: null };
 }
-/** A digest row as an agent may see it: the record's public view MINUS `owner` / `createdBy` / `scopeAt` / the list,
- *  PLUS `use` for the asking conversation. `extra` = the digest's own derived fields (mediated, scope). */
+/** B-9584 U3 (主开发 r2767) — THE LAW: AN AGENT's VIEW OF A PROFILE IS MADE FROM WHAT AN AGENT MAY SEE, NEVER FROM THE RECORD MINUS WHAT IT
+ *  MAY NOT. Every key an agent reads is a ROW here with its reason; a field the code writes that no row names never leaves (the census
+ *  leg, scripts/test-browser-environment-dialog.mjs ⑥, feeds a record carrying every field the code writes through this view). NOT
+ *  here, on purpose: owner / createdBy / scopeAt (the list's own; `scope` and `use` say what an agent may know of it), lastUsedAt /
+ *  recordMine (the person's — browse yourself verify r1 H1), egress (the kept exit — the person's and the engine's), languageTold (the
+ *  store's bookkeeping), proxyCredential / proxyLive / proxyLiveLogin (a login's name, the running road — B-8b87), grantUse (it names
+ *  other conversations), environment (the person's place and the sites that may read it — B-9584 U3; a later unit that needs a shape
+ *  here gives the modes only and the sites as a count, never a coordinate or a site). */
+const AGENT_VIEW_ROWS = Object.freeze({
+  id: 'the profile\'s id — the name every verb takes',
+  label: 'its label — how the person and the agent name it',   // ui-words: a reason row of the agent view's census (never drawn on a page)
+  dir: 'its data folder — the agent\'s own browser commands run there',
+  provider: 'its browser provider (chromium, an engine) — which verbs apply',
+  fingerprintSeed: 'its fingerprint seed — a launch fact the agent\'s driver reads',
+  proxy: 'its proxy ADDRESS (the public view: never the login) — an agent needs where its traffic goes at most',
+  proxyPasswordInProfile: 'a flag that its saved address still carries a password (the person moves it) — no secret',
+  host: 'the paired machine it runs on, or none — where the agent\'s commands land',
+  cdpPort: 'its fixed debugging port, if the person set one — a launch fact',
+  allowedDomains: 'the sites it is limited to, if any — the agent must know what it may open',
+  sharing: 'whether its conversations share it (owner / instance) — how a lease behaves',
+  record: 'whether its screen is recorded — the agent is told it is filmed',
+  lastChromiumMajor: 'the Chrome major it last ran — a build fact',
+  lastBackend: 'the backend it last ran — a build fact',
+  legacy: 'a pre-list record — how its sharing reads',
+  defaultBackend: 'the backend it is for — which build a verb starts',
+  lastSwitchAt: 'when its backend last switched — a build fact',
+  createdAt: 'when it was made',
+  notes: 'the person\'s note on what it is for — written for its users',
+  ephemeral: 'a conversation\'s own browser, not a named profile',
+  browser: 'its build by KIND (a chrome path never — reduced below)',
+  buildMissing: 'a build it cannot find, by KIND (a path never — reduced below)',
+  kernelLive: 'an engine kernel\'s live fact (reduced below to the fact, never the keeper\'s bookkeeping)',
+  lastVerbAt: 'when its browser last served a verb — the browser fact\'s pin_pending',
+  verbBeforeAt: 'the verb before that — a daemon gone before this verb (B-346d)',
+  renamedFrom: 'the paired machine it was renamed from — the agent\'s old name still resolves',
+  mediated: 'the digest\'s derived fact: its CDP goes through the mediator',
+  scope: 'what the list makes of it for agents (derived, never the list itself)',
+  use: 'whether the ASKING conversation may use it (derived for that asker)',
+});
+/** A digest row as an agent may see it: ONLY the rows of AGENT_VIEW_ROWS, from the record's public view and the digest's own
+ *  derived fields (`extra`: mediated), PLUS `scope` and `use` for the asking conversation. */
 function agentProfileView(p, facts = {}, extra = {}) {
   if (!p) return null;
-  // eslint-disable-next-line no-unused-vars
-  const { owner, createdBy, scopeAt, ...rest } = publicProfileView(p);
-  // eslint-disable-next-line no-unused-vars
-  const { use: _u, owner: _o, createdBy: _c, scopeAt: _s, ...ex } = extra || {};
-  // BROWSE YOURSELF verify r1 (H1): `lastUsedAt` moves when the USER browses it (and when another conversation does — the
-  // identity class) and `recordMine` is his own switch: neither is an agent's to read (the CLI prints neither)
-  delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;
-  // the exit check (the owner 2026-11-17): a profile's kept exit (public address, country, time zone) is the person's — and the
-  // engine plugin's at its launch — never an agent's to read
-  delete rest.egress; delete ex.egress;
-  delete rest.languageTold; delete ex.languageTold;   // B-9584 U2b: the store's own bookkeeping (a language was once told), never an agent's
-  // B-8b87 (主开发 13:47Z): an agent needs a profile's proxy ADDRESS at most — never the login's NAME (it holds the user name) nor the
-  // running browser's road (the person's card reads those)
-  for (const k of ['proxyCredential', 'proxyLive', 'proxyLiveLogin']) { delete rest[k]; delete ex[k]; }
-  delete rest.grantUse; delete ex.grantUse;   // lane grants-unify: the list's mirror names other conversations — never an agent's to read
+  const pub = publicProfileView(p), ex = extra && typeof extra === 'object' ? extra : {};
+  const out = {};
+  for (const k of Object.keys(AGENT_VIEW_ROWS)) {
+    if (k === 'scope' || k === 'use') continue;   // derived below, for this asker
+    if (Object.prototype.hasOwnProperty.call(ex, k)) out[k] = ex[k];
+    else if (Object.prototype.hasOwnProperty.call(pub, k)) out[k] = pub[k];
+  }
   // verify r1 (F5, lane browser-admin): a build's PATH never reaches an agent — a chrome file the user named is a fact by
   // KIND only (versions cross, paths do not); a vanished one is named by kind too (the rule browser-builds.agentChoiceView
   // spells; kept inline here so this file stays import-free)
-  if (rest.browser && rest.browser.kind === 'path') rest.browser = { kind: 'path' };
-  if (rest.buildMissing && rest.buildMissing.kind === 'path') rest.buildMissing = { ...rest.buildMissing, what: null };
-  if (rest.kernelLive) rest.kernelLive = { engine: rest.kernelLive.engine, version: rest.kernelLive.version, why: rest.kernelLive.why, probe: rest.kernelLive.probe, live: rest.kernelLive.live }; // B-cf42: the fact, never the keeper's own bookkeeping (filed, at)
-  return { ...rest, ...ex, scope: scopeOf(p), use: agentUseOf(p, facts) };
+  if (out.browser && out.browser.kind === 'path') out.browser = { kind: 'path' };
+  if (out.buildMissing && out.buildMissing.kind === 'path') out.buildMissing = { ...out.buildMissing, what: null };
+  if (out.kernelLive) out.kernelLive = { engine: out.kernelLive.engine, version: out.kernelLive.version, why: out.kernelLive.why, probe: out.kernelLive.probe, live: out.kernelLive.live }; // B-cf42: the fact, never the keeper's own bookkeeping
+  out.scope = scopeOf(p);
+  out.use = agentUseOf(p, facts);
+  return out;
 }
 /**
  * A CONVERSATION ON ANOTHER MACHINE NEVER USES A PROFILE (identity verify r2, 2026-09-28): a profile's browser runs on
@@ -3715,7 +3748,7 @@ module.exports = {
   SCOPES, scopeOf, notOwnerRefusal, migrateScopeAll, joinOrLaunch,
   // "Who can use it" is a LIST (2026-09-27): the ONE reader, the admission's words, the agent's view, the whole-list rule,
   // the write's verdicts, the pick that writes the list, the migration
-  WHO_KINDS, WHO_MAX, whoRow, normalizeWho, whoMayUse, useDigestOf, groupsUnreadableRefusal, agentUseOf, agentProfileView,
+  AGENT_VIEW_ROWS, WHO_KINDS, WHO_MAX, whoRow, normalizeWho, whoMayUse, useDigestOf, groupsUnreadableRefusal, agentUseOf, agentProfileView,
   remoteSessionRefusal, ownRow, agentLeaseRow, agentDigestView, // identity verify r2 (2026-09-28): a remote session never uses a profile; the agent's digest
   freshBrowserKey, FRESH_KEY_TRIES, // identity verify r4 (2026-09-28): the fresh-key rule — a key the store still names is never minted again
   agentBrowserView, agentAnswerView, echoesOf, BELT_EXCEPTIONS, MASKED_KEY, MASKED_ID, KEY_IN_TEXT_RE, BELT_MAX_DEPTH, // identity verify r3 (2026-09-28): the browser record's view + THE SERVER BELT every agent answer passes

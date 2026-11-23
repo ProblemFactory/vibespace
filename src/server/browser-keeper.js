@@ -556,7 +556,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const digestExtras = new Set();
   const changeListeners = new Set(); // lane S2: `onChange` — the browser fact's re-publish hook (notify() fans out)
   function emitLease(ev) {
-    if (ev && ev.profileId && ev.kind === 'browser-stopped') { if (geoHoldOwn) geoHoldOwn.disarm(String(ev.profileId), 'the browser stopped'); geoSaid.delete(String(ev.profileId)); }   // B-9584 U2c
+    if (ev && ev.profileId && ev.kind === 'browser-stopped') { if (geoHoldOwn) geoHoldOwn.disarm(String(ev.profileId), 'the browser stopped'); geoSaid.delete(String(ev.profileId)); geoGrantsRun.delete(String(ev.profileId)); }   // B-9584 U2c
     // verify r3 #2 (site-reset): the persisted witness dies with the browser — a stop, or a FRESH start (an adoption keeps it:
     // the tabs are still there; a named browser that outlives a VibeSpace restart is adopted at load with no event at all)
     if (ev && ev.profileId && (ev.kind === 'browser-stopped' || (ev.kind === 'browser-ready' && !ev.adopted))) { dropLeaseTabs(ev.profileId); endFolderNotice(ev.profileId, ev.kind === 'browser-stopped' ? 'browser-ended' : 'browser-restarted'); }   // B-0645 cure: the folder notice ends with its browser
@@ -1624,7 +1624,16 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** The plan a STOCK profile's browser is held to (a named profile on this machine, never an engine's — the kernel takes its own). */
   /** B-9584 (B), r2311 (3)(4): the profile's location KIND as the person set it — 'place', 'blocked' or null — read live by the CDP
    *  mediator at an agent's geolocation call (a tab's position, the location permission): refused while it is not null. */
-  function placeKindFor(pid) { try { const p = profile(String(pid || '')); if (!p) return null; const g = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p)).geolocation; return g ? g.kind : null; } catch { return null; } }
+  /** r2767 (a) ONE PLAN WHILE A BROWSER RUNS: every gate (the mediator's, the dialog watch's) judges by what the RUNNING browser was
+   *  started with — its record's applied location — until its restart; no running browser (or one started with no environment) ⇒ the
+   *  saved setting. → 'place' | 'blocked' | null, or undefined when no running record says. */
+  function runningPlaceKind(pid) {
+    const rg = reg.browsers[String(pid || '')];
+    if (!rg || !(rg.state === 'ready' || rg.state === 'starting') || !rg.environment || !rg.environment.applied) return undefined;
+    const loc = rg.environment.applied.location;
+    return loc === 'fixed' ? 'place' : loc === 'blocked' ? 'blocked' : null;
+  }
+  function placeKindFor(pid) { { const r = runningPlaceKind(pid); if (r !== undefined) return r; } try { const p = profile(String(pid || '')); if (!p) return null; const g = ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p)).geolocation; return g ? g.kind : null; } catch { return null; } }
   function geoPlanFor(p, envR = null) {
     if (!p || isEph(p) || p.host || (p.browser && p.browser.kind === 'plugin')) return null;
     return geoPlanOf((envR || ENV.resolveEnvironment(p.environment, ENV.keptExitOf(p))).geolocation);
@@ -1634,7 +1643,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const PLACE_SAID = 'fixed on its tabs — every site is denied the location (the profile\'s own setting): no site is allowed the place';
   /** B-9584 (B): with sites on the profile's list, «fixed» says that ONLY they read the place (their count, never an origin). */
   /** r2311 (ii): the record's words when some listed sites were not given the place (the browser refused or did not answer). */
-  const placeSaidShort = (of, n) => `fixed — ${of - n} of the ${of} site${of === 1 ? '' : 's'} on its list read the place; ${n} ${n === 1 ? 'was' : 'were'} not given it (${n === 1 ? 'it reads' : 'they read'} «denied»); every other site is denied the location (the profile\'s own setting)`;
+  const placeSaidShort = (of, n) => `fixed — ${n} of the ${of} grant${of === 1 ? '' : 's'} of the sites on its list (each site, in each browser context) ${n === 1 ? 'was' : 'were'} not given — there ${n === 1 ? 'it reads' : 'they read'} «denied»; every other site is denied the location (the profile\'s own setting)`;
+  const geoGrantsRun = new Map();   // r2767 (b): pid → Map(context → its latest grant job { failed, of }) — cleared when the hold's socket goes
   const placeSaid = (g) => { const n = g && Array.isArray(g.sites) ? g.sites.length : 0; return n ? `fixed — only the ${n} site${n === 1 ? '' : 's'} on its list read the place; every other site is denied the location (the profile\'s own setting)` : PLACE_SAID; };
   const NOT_APPLIED_SAID = 'not applied — this browser is not held to a place or «blocked»: its sites get this machine\'s answer';
   /** r2172 (a): a place or «blocked» is held only on a NAMED profile of THIS machine's stock browser (the stored denial + the hold). An
@@ -1730,7 +1740,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const said = geoSaid.get(pid) || new Set(); geoSaid.set(pid, said);
     // r2172 (c): THE RECORD TELLS THE TRUTH while it runs — «confirmed» falls when the hold is lost or down, comes back when it holds again
     { const rg = reg.browsers[pid]; const v = ev.kind === 'held' ? true : ev.kind === 'lost' || ev.kind === 'down' ? false : null;
-      if (v !== null && rg && rg.environment && rg.environment.applied && rg.environment.applied.location === 'fixed' && rg.environment.confirmed !== v) { rg.environment.confirmed = v; commit(); } }
+      if (v !== null && rg && rg.environment && rg.environment.applied && rg.environment.applied.location === 'fixed' && rg.environment.confirmed !== v) { rg.environment.confirmed = v; commit(); }
+      if (ev.kind === 'lost' || ev.kind === 'down') geoGrantsRun.delete(pid); }   // r2767 (b): the grants died with the socket — the next socket's jobs make the count
     const file = (key, text, detail, kind = 'notice') => {
       if (said.has(key)) return; said.add(key);
       if (!userTodos || typeof userTodos.add !== 'function') return;
@@ -1744,10 +1755,12 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (told) commit();
       file('closed', `"${label}": a tab was closed — its place could not be given to it in time`, `VibeSpace gives every tab of "${label}" its place before the tab runs; this one did not take it in time, and a site on the profile's list would have read this machine's location there — so the tab was closed${ev.shut === false ? ' (the browser did not close it: its browser context gives no site the place until the browser restarts)' : ''}. Open the page again; if this keeps happening, restart the browser.`);
     } else if (ev.kind === 'grants') {   // r2311 (ii): A GRANT THAT FAILED IS TOLD — the record's words follow the latest grant job; the person told once a run
-      const n = Math.max(0, Number(ev.failed) || 0), of = Math.max(0, Number(ev.of) || 0);
+      const runG = geoGrantsRun.get(pid) || new Map(); geoGrantsRun.set(pid, runG);
+      runG.set(String(ev.ctx || ''), { failed: Math.max(0, Number(ev.failed) || 0), of: Math.max(0, Number(ev.of) || 0) });   // r2767 (b): each context's latest job
+      let n = 0, of = 0; for (const v of runG.values()) { n += v.failed; of += v.of; }   // the run's whole count — a later context that succeeds never writes over one that failed
       const rg = reg.browsers[pid];
       if (rg && rg.environment && rg.environment.applied && rg.environment.applied.location === 'fixed') {
-        const words = n ? placeSaidShort(of, n) : placeSaid({ sites: Array(of).fill('') });
+        const words = n ? placeSaidShort(of, n) : placeSaid({ sites: Array(Math.max(0, Number(f && f.sites) || Number(ev.of) || 0)).fill('') });   // all given: the LIST's own count
         if (rg.environment.locationSaid !== words) { rg.environment.locationSaid = words; commit(); }
       }
       if (n) file('ungranted', `"${label}": ${n === 1 ? 'a site' : `${n} sites`} on its list ${n === 1 ? 'was' : 'were'} not given its place`, `VibeSpace gives each site on the list of "${label}" its place on the browser's own connection; the browser did not take it for ${n} of the ${of} site${of === 1 ? '' : 's'}, so ${n === 1 ? 'it reads' : 'they read'} «denied» — never this machine's location. Restart the browser to try again.`);
@@ -7689,7 +7702,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (sites.length && engine) return { ok: false, code: 'env_sites_engine', error: 'an engine\'s profile gives its place to every site (its kernel holds it) — a list of sites is kept only on this machine\'s own browser' };
       if (JSON.stringify(p.environment || null) === JSON.stringify(next)) return { ok: true, changed: false, restartNeeded: false, profile: pview(p) };
       if (next) p.environment = next; else delete p.environment;
-      commitSync();
+      commit();   // r2767 (d): no next step needs it on disk (the browser reads it at its next start) — a person's press on a folder that may sit on a mount
       const rec = reg.browsers[p.id];
       const restartNeeded = !!(rec && (rec.state === 'ready' || rec.state === 'starting'));
       log.log?.(`[browser] ${p.id}: its environment set — ${JSON.stringify(ENV.environmentLogView(next || {}))}${restartNeeded ? ' (at its next start)' : ''}`);   // the log view: no place, no origin
@@ -9325,7 +9338,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
     geoRegrant: (profileId) => (geoHoldOwn ? geoHoldOwn.regrant(String(profileId || '')).catch(() => false) : Promise.resolve(false)),   // r2311 (i): the dialog watch's reset or leaving ⇒ the hold grants again
-    cdpEndpointFor, geoHeldFor: (profileId) => { let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
+    placeKindFor,   // r2767 (a): the profile's location kind the gates judge by (the running browser's, else the saved)
+    cdpEndpointFor, geoHeldFor: (profileId) => { const r = runningPlaceKind(profileId); if (r !== undefined) return r === 'place' ? ((geoHoldOwn && geoHoldOwn.heldOf(String(profileId || ''))) || { kind: 'place' }) : r === 'blocked' ? { kind: 'blocked' } : null; let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* r2767 (a): the running browser's plan until its restart */ /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
     // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports
