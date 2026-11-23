@@ -43,6 +43,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
 // THE SAME project-cwd ladder the walk uses (src/usage-walker.js): this
 // migration must answer "which repo did this agent work for" exactly the way
@@ -68,7 +69,7 @@ function _writeAtomic(fp, text) {
  *  of MB and must never be materialized whole. */
 function _eachLine(fp, onLine) {
   let fd;
-  try { fd = fs.openSync(fp, 'r'); } catch { return 0; }
+  try { fd = fs.openSync(fp, 'r'); } catch (e) { MR.absentOr(e, fp); return 0; }
   let read = 0;
   try {
     let rest = Buffer.alloc(0);
@@ -83,7 +84,7 @@ function _eachLine(fp, onLine) {
       rest = Buffer.from(data.subarray(lineStart)); // copy: `data` is about to be reused
     }
     if (rest.length) onLine(rest);
-  } catch { } finally { try { fs.closeSync(fd); } catch { } }
+  } catch (e) { MR.absentOr(e, fp); } finally { try { fs.closeSync(fd); } catch { } }   // MG1: a read failing mid-file inside a migration = not run
   return read;
 }
 
@@ -97,25 +98,25 @@ function buildRidOrigins({ projectsDir, onProgress = null }) {
   const projectCwdFor = makeProjectCwdReader();
   let bytes = 0;
   let projDirs = [];
-  try { projDirs = fs.readdirSync(projectsDir); } catch { }
+  try { projDirs = fs.readdirSync(projectsDir); } catch (e) { MR.absentOr(e, 'projects'); }
   for (const pd of projDirs.sort()) {
     if (isFixtureProjectDir(pd)) continue;
     const pdAbs = path.join(projectsDir, pd);
     let entries = [];
-    try { entries = fs.readdirSync(pdAbs); } catch { continue; }
+    try { entries = fs.readdirSync(pdAbs); } catch (e) { MR.absentOr(e, pdAbs); continue; }
     const found = [];             // {fp, sid, origin, wf?, agent?}
     const mains = [];
     for (const fn of entries.sort()) {
       if (fn.endsWith('.jsonl')) { found.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, ''), origin: 'main' }); mains.push(path.join(pdAbs, fn)); continue; }
       if (!/^[0-9a-f-]{36}$/i.test(fn)) continue;
       const subDir = path.join(pdAbs, fn, 'subagents');
-      let subs = []; try { subs = fs.readdirSync(subDir); } catch { continue; }
+      let subs = []; try { subs = fs.readdirSync(subDir); } catch (e) { MR.absentOr(e, subDir); continue; }
       for (const sf of subs.sort()) {
         if (sf.endsWith('.jsonl')) { found.push({ fp: path.join(subDir, sf), sid: fn, origin: 'subagent', agent: sf.replace(/\.jsonl$/, '') }); continue; }
         if (sf !== 'workflows') continue;
-        let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch { continue; }
+        let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch (e) { MR.absentOr(e, 'workflows'); continue; }
         for (const wf of wfs.sort()) {
-          let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch { continue; }
+          let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch (e) { MR.absentOr(e, wf); continue; }
           for (const af of afs.sort()) if (af.startsWith('agent-') && af.endsWith('.jsonl')) found.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn, origin: 'workflow', wf, agent: af.replace(/\.jsonl$/, '') });
         }
       }
@@ -127,7 +128,7 @@ function buildRidOrigins({ projectsDir, onProgress = null }) {
     found.sort((a, b) => (a.origin === 'main' ? 0 : 1) - (b.origin === 'main' ? 0 : 1));
     for (const f of found) {
       if (isFixtureSid(f.sid)) continue;
-      let st; try { st = fs.statSync(f.fp); } catch { continue; }
+      let st; try { st = fs.statSync(f.fp); } catch (e) { MR.absentOr(e, f.fp); continue; }
       if (!st.isFile()) continue;
       const idx = files.length;
       const desc = { origin: f.origin, wf: f.wf || null, agent: f.agent || null, sid: f.sid, own: null, parent: null };
@@ -180,7 +181,7 @@ function backfillUsageOrigin({ dataDir, id, projectsDir = path.join(os.homedir()
   };
 
   let shardNames = [];
-  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch { }
+  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch (e) { MR.absentOr(e, 'usage-history'); }
   report.shards = shardNames.length;
   if (!shardNames.length) { report.ms = Date.now() - t0; return report; }
 
@@ -189,7 +190,7 @@ function backfillUsageOrigin({ dataDir, id, projectsDir = path.join(os.homedir()
 
   for (const name of shardNames) {
     const fp = path.join(historyDir, name);
-    let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
+    let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); continue; }
     const out = [];
     let dirty = false;
     for (const line of text.split('\n')) {

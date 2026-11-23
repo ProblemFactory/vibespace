@@ -28,7 +28,8 @@ function isWindowProducer(p) { return p === null || (typeof p === 'string' && PR
 /** THE ONE READER: the account's `.window-` stamp, or null (absent, unreadable, not an object) */
 function readWindowStamp(cacheDir, key) {
   // through the cache module's reader (lane lg-store-writes, B-0248 U6.3), required here as the writer below is (no cycle at load)
-  try { const j = require('./usage-cache-write.js').readCacheJson(path.join(cacheDir, windowSidecarName(key))); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; }
+  // MG1 (r2929): inside a migration's run a stamp there and unread (or torn) throws — not run; every other reader keeps «null»
+  try { const j = require('./usage-cache-write.js').readCacheJson(path.join(cacheDir, windowSidecarName(key))); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch (e) { require('./migration-reads.js').absentOr(e, windowSidecarName(key)); return null; }
 }
 
 /** THE ONE WRITER. `producer` is mandatory (see above; undefined or malformed ⇒ throws). The stamp's own `producer` /

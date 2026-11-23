@@ -36,11 +36,14 @@ const fs = require('fs');
 const path = require('path');
 const { accountLoginState } = require('./login-state.js');
 const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthUsage — the accounts a reading can land on
+// MG1 (r2929): inside a migration's run a failed read (anything but «not there») or bytes that do not parse THROW — not run, the
+// next start tries again; the boot's and the hourly identity repair (and every other caller) keep each catch's own answer
+const MR = require('./migration-reads.js');
 
-function _readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } }
+function _readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) { MR.absentOr(e, f); return null; } }
 // a READING (a file of data/usage-cache): through the cache module's reader (lane lg-store-writes, B-0248 U6.3 — the one place
 // that will consult a write still on its way first); null on any failure, as _readJson
-function _readCacheJson(f) { try { return _usageWrite.readCacheJson(f); } catch { return null; } }
+function _readCacheJson(f) { try { return _usageWrite.readCacheJson(f); } catch (e) { MR.absentOr(e, f); return null; } }
 function _writeAtomic(f, text) { fs.writeFileSync(f + '.tmp', text); fs.renameSync(f + '.tmp', f); }
 // THE ONE WRITE PATH, in its REPLACE mode (src/usage-cache-write.js). This
 // migration is the single writer allowed to replace a cache's limits instead of
@@ -104,6 +107,9 @@ function deathMarkers(members, { now = Date.now() } = {}) {
   const out = new Map();
   for (const m of members || []) {
     if (!m || !m.id || !m.credsPath) continue;
+    // MG1: inside a migration a credentials file there and UNREAD throws (never a death dated by a failed read); one that reads
+    // and does not parse stays what it is — the login's own state (it cannot produce a reading)
+    if (MR.inMigration()) MR.readText(m.credsPath, m.id + '/' + path.basename(m.credsPath));
     const st = accountLoginState(m.credsPath, { now, backend: m.backend || 'claude', oatMintedAt: m.oatMintedAt || null });
     if (st.usable) continue;
     if (!st.since) continue; // dead but undateable ⇒ we can prove nothing about any entry
@@ -251,7 +257,7 @@ async function prefetchAnchorRows(anchorsDir, { next = () => new Promise((r) => 
 function _readAnchorFiles(anchorsDir) {
   const files = [];
   let names = [];
-  try { names = fs.readdirSync(anchorsDir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { return files; }
+  try { names = fs.readdirSync(anchorsDir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch (e) { MR.absentOr(e, 'usage-anchors'); return files; }
   const pre = _prefetched; _prefetched = null;
   if (pre && pre.dir === anchorsDir && pre.files.length === names.length && names.every((n, i) => n === pre.names[i])
     && pre.files.every((f) => { try { const st = fs.statSync(f.file); return st.size === f.size && st.mtimeMs === f.mtimeMs; } catch { return false; } })) {
@@ -259,7 +265,7 @@ function _readAnchorFiles(anchorsDir) {
   }
   for (const fn of names) {
     const fp = path.join(anchorsDir, fn);
-    let txt = ''; try { txt = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
+    let txt = ''; try { txt = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); continue; }
     const rows = [];
     for (const line of txt.split('\n')) {
       if (!line) continue;
@@ -274,7 +280,7 @@ function _readAnchorFiles(anchorsDir) {
 function repairUsageCaches({ cacheDir, archiveDir, markers, anchorFiles, id }) {
   const res = { scanned: 0, foreign: 0, restored: 0, blanked: 0 };
   let names = [];
-  try { names = _usageWrite.listCacheDir(cacheDir).filter((f) => f.endsWith('.json') && f !== '__models__.json'); } catch { return res; }
+  try { names = _usageWrite.listCacheDir(cacheDir).filter((f) => f.endsWith('.json') && f !== '__models__.json'); } catch (e) { MR.absentOr(e, 'usage-cache'); return res; }
   for (const fn of names) {
     const key = fn.slice(0, -5);
     const marker = markers.get(key);
@@ -402,7 +408,7 @@ function _sessionKeyMap(dataDir) {
   const out = new Map();
   const dir = path.join(dataDir, 'session-meta');
   let files = [];
-  try { files = fs.readdirSync(dir); } catch { return out; }
+  try { files = fs.readdirSync(dir); } catch (e) { MR.absentOr(e, dir); return out; }
   for (const fn of files) {
     if (!fn.endsWith('.json')) continue;
     const m = _readJson(path.join(dir, fn));
@@ -432,7 +438,7 @@ function sessionKeysFor(keyMap, sid, ts) {
 function repairAttribution({ dataDir, historyDir, archiveDir, markers, transitions, id }) {
   const res = { scanned: 0, foreign: 0, reattributed: 0, archived: 0, emptied: 0, unjoinable: 0 };
   const fp = path.join(historyDir, 'attribution.ndjson');
-  let txt = ''; try { txt = fs.readFileSync(fp, 'utf-8'); } catch { return res; }
+  let txt = ''; try { txt = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); return res; }
   const keyMap = _sessionKeyMap(dataDir || path.dirname(historyDir));
   const out = [], archived = [];
   // Which conversations LOSE their last entry here (2026-09-07 r2) — see the
@@ -539,8 +545,8 @@ function findJournal(dataDir) {
     for (const f of fs.readdirSync(path.join(dataDir, 'archive'))) {
       if (/^pool-journal.*\.log$/.test(f)) cands.push(path.join(dataDir, 'archive', f));
     }
-  } catch { }
-  for (const c of cands) { try { if (fs.statSync(c).isFile()) return c; } catch { } }
+  } catch (e) { MR.absentOr(e, 'archive'); }
+  for (const c of cands) { try { if (fs.statSync(c).isFile()) return c; } catch (e) { MR.absentOr(e, c); } }
   return null;
 }
 
@@ -971,7 +977,7 @@ function identityCacheKeys(cacheDir, windows, { accounts = null } = {}) {
   }
   let names = [];
   // the predicate is `usageIdentityGroups`', verbatim
-  try { names = fs.readdirSync(cacheDir).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return out; }
+  try { names = fs.readdirSync(cacheDir).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch (e) { MR.absentOr(e, 'usage-cache'); return out; }
   for (const fn of names.sort()) {
     const key = fn.slice(0, -5);
     const cache = _readJson(path.join(cacheDir, fn));
@@ -1278,7 +1284,7 @@ function _dominantAt(hist, minRows, dominance) {
 }
 function _readNdjson(f) {
   const out = [];
-  let txt = ''; try { txt = fs.readFileSync(f, 'utf-8'); } catch { return out; }
+  let txt = ''; try { txt = fs.readFileSync(f, 'utf-8'); } catch (e) { MR.absentOr(e, f); return out; }
   for (const l of txt.split('\n')) { if (!l) continue; try { out.push(JSON.parse(l)); } catch { } }
   return out;
 }

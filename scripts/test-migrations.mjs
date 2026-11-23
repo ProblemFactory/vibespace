@@ -2128,7 +2128,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const ctlRoot = path.join(tmp, 'cxcrash-ctl'); fs.mkdirSync(path.join(ctlRoot, 'data', 'usage-history'), { recursive: true });
     fs.writeFileSync(path.join(ctlRoot, 'data', 'usage-history', 'events-2026-07.ndjson'), jul.join('\n') + '\n');
     fs.writeFileSync(path.join(ctlRoot, 'data', 'usage-history', 'events-2026-08.ndjson'), aug.join('\n') + '\n');
-    const psrc = fs.readFileSync(PURGE, 'utf8');
+    const psrc = fs.readFileSync(PURGE, 'utf8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(path.dirname(PURGE), f))})`);   // its own relative requires (MG1: ./migration-reads.js) resolve from the copy's folder
     const cut = "const fresh = out.filter((line) => !archived.has(name + '\\n' + JSON.parse(line).rid));";
     const ctlFile = path.join(tmp, 'purge-no-resume.js');
     fs.writeFileSync(ctlFile, psrc.replace(cut, 'const fresh = out;'));
@@ -3275,7 +3275,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     try { // A — MUTANT: the proof dropped (an executable file is enough again) ⇒ the cut unpack is carried — A's legs go red
       const MA = mutantCopies('migrations-cloak-proof', REPO_ROOT);
       const srcA = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
-      const gate = "    const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));";
+      const gate = "    const mark = MR.exists(path.join(dataDir, CLOAK_OLD.unpackMark), CLOAK_OLD.unpackMark);";   // MG1: the mark read strictly (existsSync answered false for any stat error)
       ok(srcA.split(gate).length === 2, 'A CONTROL scope: the proof is read where the patched copy drops it');
       const noProof = MA.load('src/server/migrations.js', editAnchor(srcA, gate, "    return { present: true, proven: true, why: 'executable' };\n" + gate, "src/server/migrations.js"), 'no-proof');
       const wm = seedC('proof-mut', { reg: world() }); const seamM = proofOf(wm, 'marker');
@@ -3779,6 +3779,180 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   const dv = refused(fd, 'EIO', () => require('../src/migration-runner.js').runMigrations({ ledgerPath: fd, migrations: [], log: (m) => lines.push(m), warn: (m) => lines.push(m) }));
   ok(AG.includes("runMigrations({ ledgerPath: path.join(STATE, 'migrations.json'), migrations: DEVICE_MIGRATIONS, log: (m) => process.stderr.write(m + '\\n'), warn: (m) => process.stderr.write(m + '\\n') });") && !!dv.ledgerUnread && lines.filter((m) => /is there and could not be read \(EIO\)/.test(m)).length === 1 && fs.readFileSync(fd, 'utf8') === LEDGER,
     'r2999 THE DEVICE: its registry\'s ledger goes through the same runner (pinned) — an unreadable one runs nothing, rewrites nothing, and says it once in the device\'s journal (its warn → stderr)', lines);
+}
+// ── MG1 (row B-f276, r2929 / r2944): A MIGRATION WHOSE INPUT COULD NOT BE READ HAS NOT RUN — one leg for each kind of read, each with
+// a PLACED refusal of the read call (that fs function answers EIO for that one path: never a mount, never a mode change) and its red
+// (today's read planted back in a copy); only «not there» is nothing to do. The device registry has no migration of its own
+// (DEVICE_MIGRATIONS is empty): its ledger's read is r2999's leg above.
+{
+  console.log('MG1 a migration whose input could not be read has not run');
+  const MIG_SRC = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
+  const MUT = mutantCopies('migrations-mg1', REPO_ROOT);
+  const today = (from, to, what, mode) => MUT.load('src/server/migrations.js', editAnchor(MIG_SRC, from, to, 'src/server/migrations.js', mode), what);
+  const placed = (calls, file) => {   // → restore(): `calls` refused (EIO) for `file`
+    const real = {};
+    for (const k of calls) { real[k] = fs[k]; fs[k] = function (p0, ...a) { if (String(p0) === file) throw Object.assign(new Error(`EIO: a placed refusal of ${k}, '${p0}'`), { code: 'EIO' }); return real[k].call(this, p0, ...a); }; }
+    return () => { for (const k of calls) fs[k] = real[k]; };
+  };
+  const refusing = (calls, file, fn) => { const undo = placed(calls, file); try { return fn(); } finally { undo(); } };
+  const quietly = (fn) => { const o = [console.log, console.warn]; console.log = console.warn = () => { }; try { return fn(); } finally { [console.log, console.warn] = o; } };
+  const world = (name) => { const r = path.join(tmp, 'mg1-' + name); fs.mkdirSync(path.join(r, 'data', 'archive'), { recursive: true }); return { r, d: path.join(r, 'data') }; };
+  const runOne = (mod, r, id, opts = {}) => {
+    const notices = [];
+    const res = quietly(() => mod.create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k), ...opts }).runLocalMigrations({ only: [id] }).find((x) => x.id === id));
+    let led = {}; try { led = JSON.parse(fs.readFileSync(path.join(r, 'data', 'migrations.json'), 'utf8')); } catch { }
+    return { res, notices, recorded: !!(led.applied && led.applied[id]), report: led.reports ? led.reports[id] : undefined };
+  };
+  const notRun = (x) => !!(x.res && x.res.status === 'failed' && x.res.code === 'migration-input-unread' && !x.recorded);
+  const MIG = { create };
+  // ① THE MIGRATION'S OWN READ OF A STORE (2026-08-archive-dormant-task-plans, data/task-groups.json): unreadable, torn, not there
+  {
+    const ID = '2026-08-archive-dormant-task-plans', DOC = JSON.stringify({ tasks: { t1: { plan: ['a', 'b'] } } });
+    const a = world('own-eio'), fa = path.join(a.d, 'task-groups.json'); fs.writeFileSync(fa, DOC);
+    const ra = refusing(['readFileSync'], fa, () => runOne(MIG, a.r, ID));
+    ok(notRun(ra) && fs.readFileSync(fa, 'utf8') === DOC, 'MG1 ① its OWN read of a store refused (EIO): NOT RUN — failed by that cause, not recorded, the store untouched (the next start tries again)', ra.res);
+    const b = world('own-torn'), fb = path.join(b.d, 'task-groups.json'); fs.writeFileSync(fb, DOC.slice(0, 15));
+    const rb = runOne(MIG, b.r, ID);
+    ok(notRun(rb) && /do not parse/.test(rb.res.error), 'MG1 ① …its bytes there and TORN: not run (never «no store»)', rb.res);
+    const c = world('own-none'), rc = runOne(MIG, c.r, ID);
+    ok(rc.res && rc.res.status === 'ran' && rc.recorded, 'MG1 ① …NOT THERE: nothing to do — recorded as before', rc.res);
+    const Today = today("        const doc = MR.readJson(f, 'task-groups.json'); if (!doc) return; // no store yet = nothing to do; MG1: unread or torn = not run\n",
+      "        let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; } // no store yet = nothing to do\n", 'mg1-own-today');   // stale-pins: kept (today's read — the red control's line)
+    const red = world('own-red'), fr = path.join(red.d, 'task-groups.json'); fs.writeFileSync(fr, DOC);
+    const rr = refusing(['readFileSync'], fr, () => runOne(Today, red.r, ID));
+    ok(rr.res && rr.res.status === 'ran' && rr.recorded, 'MG1 ① RED today\'s read: the unreadable store reads as «no store yet» — recorded as run, never tried again', rr.res);
+    // ⑨ AN EARLIER ARCHIVE it adds to, refused: never written over with this run's plans alone
+    const e = world('arch-eio'), fe = path.join(e.d, 'task-groups.json'), arch = path.join(e.d, 'archive', 'task-plans-legacy.json');
+    fs.writeFileSync(fe, DOC); const ARCH = JSON.stringify({ t0: ['earlier'] }); fs.writeFileSync(arch, ARCH);
+    const re = refusing(['readFileSync'], arch, () => runOne(MIG, e.r, ID));
+    ok(notRun(re) && fs.readFileSync(arch, 'utf8') === ARCH && fs.readFileSync(fe, 'utf8') === DOC, 'MG1 ⑨ the earlier ARCHIVE it adds to refused (EIO): not run — the archive and the store as they were', re.res);
+    const TodayA = today("        const prev = MR.readJson(out, 'archive/' + path.basename(out)) || {};   // MG1: an earlier archive unread is never written over with this run's alone\n",
+      "        let prev = {}; try { prev = JSON.parse(fs.readFileSync(out, 'utf-8')); } catch { }\n", 'mg1-arch-today', 'first');   // stale-pins: kept (today's read); 'first': the archived members' read has the same text, after it
+    const e2 = world('arch-red'), fe2 = path.join(e2.d, 'task-groups.json'), arch2 = path.join(e2.d, 'archive', 'task-plans-legacy.json');
+    fs.writeFileSync(fe2, DOC); fs.writeFileSync(arch2, ARCH);
+    const re2 = refusing(['readFileSync'], arch2, () => runOne(TodayA, e2.r, ID));
+    ok(re2.recorded && !JSON.parse(fs.readFileSync(arch2, 'utf8')).t0, 'MG1 ⑨ RED today\'s read: the earlier archive is written over with this run\'s plans alone (its entry lost)', re2.res);
+  }
+  // ② ITS OWN LISTING (2026-10-usage-ledger-dedup, data/usage-history)
+  {
+    const ID = '2026-10-usage-ledger-dedup';
+    const a = world('list-eio'), dir = path.join(a.d, 'usage-history'); fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, 'events-2026-10.ndjson'), '{"rid":"r1"}\n');
+    const ra = refusing(['readdirSync'], dir, () => runOne(MIG, a.r, ID));
+    ok(notRun(ra), 'MG1 ② its own LISTING refused (EIO): not run (never «no shards»)', ra.res);
+    const Today = today("        names = (MR.list(dir, 'usage-history') || []).filter((f) => LD.SHARD_RE.test(f)).sort();   // MG1: not there = no shards; any other failed list = not run\n",
+      "        try { names = fs.readdirSync(dir).filter((f) => LD.SHARD_RE.test(f)).sort(); } catch { }\n", 'mg1-list-today');   // stale-pins: kept (today's listing)
+    const b = world('list-red'), dirb = path.join(b.d, 'usage-history'); fs.mkdirSync(dirb); fs.writeFileSync(path.join(dirb, 'events-2026-10.ndjson'), '{"rid":"r1"}\n');
+    const rb = refusing(['readdirSync'], dirb, () => runOne(Today, b.r, ID));
+    ok(rb.recorded && rb.report && rb.report.shards === 0, 'MG1 ② RED today\'s listing: «no shards» — recorded, the dedup never runs', rb.report);
+  }
+  // ③ ITS OWN STAT (2026-10-vault-always-to-grants, data/vault-run.json — a report that says «nothing waits»)
+  {
+    const ID = '2026-10-vault-always-to-grants', DOC = JSON.stringify({ always: [{ shape: 'x' }, { shape: 'y' }] });
+    const a = world('stat-eio'), f = path.join(a.d, 'vault-run.json'); fs.writeFileSync(f, DOC);
+    const ra = refusing(['statSync'], f, () => runOne(MIG, a.r, ID));
+    ok(notRun(ra), 'MG1 ③ its own STAT refused (EIO): not run (never «nothing waits»)', ra.res);
+    const ok2 = runOne(MIG, world('stat-ok').r, ID);
+    ok(ok2.recorded && ok2.report && ok2.report.alwaysRows === 0 && ok2.report.store === false, 'MG1 ③ …not there: «nothing waits», recorded as before', ok2.report);
+    const Today = today("        { const st = MR.stat(f, 'vault-run.json'); present = !!(st && st.isFile()); if (present && st.size <= 1024 * 1024) { const d = MR.readJson(f, 'vault-run.json'); n = Array.isArray(d && d.always) ? d.always.length : 0; } }   // MG1: not there = nothing waits; unread or torn = not run\n",
+      "        try { const st = fs.statSync(f); present = st.isFile(); if (present && st.size <= 1024 * 1024) { const d = JSON.parse(fs.readFileSync(f, 'utf-8')); n = Array.isArray(d && d.always) ? d.always.length : 0; } } catch { /* absent / unreadable: nothing waits */ }\n", 'mg1-stat-today');   // stale-pins: kept (today's read)
+    const b = world('stat-red'), fb = path.join(b.d, 'vault-run.json'); fs.writeFileSync(fb, DOC);
+    const rb = refusing(['statSync'], fb, () => runOne(Today, b.r, ID));
+    ok(rb.recorded && rb.report && rb.report.alwaysRows === 0, 'MG1 ③ RED today\'s stat: an unreadable file reads «nothing waits» — recorded', rb.report);
+  }
+  // ④ A SHARED HELPER'S READ (2026-09-backfill-quota-limits → src/quota-model-migrate.js, the usage-cache folder's listing):
+  // strict inside the migration's run, the helper's own answer for every other caller
+  {
+    const ID = '2026-09-backfill-quota-limits';
+    const mk = (name) => { const w = world(name), dir = path.join(w.d, 'usage-cache'); fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, 'sub-a.json'), JSON.stringify({ fetchedAt: 1, fiveHour: { utilization: 0.1, resetsAt: 2 } })); return { ...w, dir }; };
+    const a = mk('helper-eio');
+    const ra = refusing(['readdirSync'], a.dir, () => runOne(MIG, a.r, ID));
+    ok(notRun(ra), 'MG1 ④ a SHARED HELPER\'s read inside the migration refused (EIO): not run', ra.res);
+    const QM = require('../src/quota-model-migrate.js');
+    let direct = null, threw = null; try { direct = refusing(['readdirSync'], a.dir, () => QM.backfillLimits({ cacheDir: a.dir, archiveDir: path.join(a.d, 'archive') })); } catch (e) { threw = e; }
+    ok(!threw && direct && direct.scanned === 0, 'MG1 ④ …the same helper called OUTSIDE a migration keeps its own answer (no throw)', threw ? threw.message : direct);
+    const Today = today('MIGRATIONS).map(strictRun), todos: userTodos,', 'MIGRATIONS), todos: userTodos,', 'mg1-helper-today');
+    const b = mk('helper-red');
+    const rb = refusing(['readdirSync'], b.dir, () => runOne(Today, b.r, ID));
+    ok(rb.res && rb.res.status === 'ran' && rb.recorded, 'MG1 ④ RED the registry without its strict runs (today): the helper\'s catch reads «no readings» — recorded', rb.res);
+  }
+  // ⑤ THE LIVE ACCOUNT STORE UNREAD (accounts.json, the live AccountManager — 2026-09-pool-manual-priority). On the train the store
+  // holds itself when its read fails, and the migration asks that hold (heldThrows, r3044 (3)): MG1's own guard for a store with no
+  // hold is not carried (the move onto the train, r3509) — these legs judge the guard that stands
+  {
+    const ID = '2026-09-pool-manual-priority';
+    const DOC = JSON.stringify({ accounts: [{ id: 'pool-m', type: 'pooled', name: 'Pool', auto: false, members: [] }] }, null, 2);
+    const { AccountManager } = require('../src/accounts.js');
+    const mk = (name) => { const w = world(name), f = path.join(w.d, 'accounts.json'); fs.writeFileSync(f, DOC); const am = quietly(() => refusing(['readFileSync'], f, () => new AccountManager({ dataDir: w.d }))); return { ...w, f, am }; };
+    const a = mk('acct-loaded-empty');
+    ok(!a.am.get('pool-m') && !!(typeof a.am.held === 'function' && a.am.held()), 'MG1 ⑤ the scene is real: the live store\'s load was refused (EIO), it holds nothing, and its hold says so');
+    const ra = runOne(MIG, a.r, ID, { accounts: a.am });
+    ok(notRun(ra) && /could not be read/.test(ra.res.error) && fs.readFileSync(a.f, 'utf8') === DOC, 'MG1 ⑤ the file reads now but the live store is still held (its read again not yet landed): not run — the file as it was', ra.res);
+    const b = mk('acct-still-eio');
+    const rb = refusing(['readFileSync'], b.f, () => runOne(MIG, b.r, ID, { accounts: b.am }));
+    ok(notRun(rb) && /could not be read/.test(rb.res.error), 'MG1 ⑤ …the file still refused (EIO): not run', rb.res);
+    const Today = today('        heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start\n        const rep = am.migrateManualPools();\n', '        const rep = am.migrateManualPools();\n', 'mg1-acct-today');
+    const c = mk('acct-red');
+    const rc = runOne(Today, c.r, ID, { accounts: c.am });
+    ok(!!(rc.recorded && JSON.parse(fs.readFileSync(c.f, 'utf8')).accounts[0].auto === false), 'MG1 ⑤ RED without the guard (today): the empty store reshapes nothing — recorded, the manual pool never reshaped', rc.res);
+  }
+  // ⑥ A KEEPER'S STORE (2026-09-runaway-parks-void, data/desktop-apps.json): never recorded «via none» over an unread file
+  const OLD_RUNAWAY = 'stopped as a runaway: RSS 9 GB over the limit';
+  const OLD_APPS = () => JSON.stringify({ apps: { a1: { lastError: OLD_RUNAWAY } }, runawayParkedUntil: { a1: 1 } });
+  {
+    const ID = '2026-09-runaway-parks-void';
+    const a = world('keeper-eio'), f = path.join(a.d, 'desktop-apps.json'); fs.writeFileSync(f, OLD_APPS());
+    const ra = refusing(['readFileSync'], f, () => runOne(MIG, a.r, ID));
+    ok(notRun(ra) && fs.readFileSync(f, 'utf8') === OLD_APPS(), 'MG1 ⑥ a keeper\'s store refused (EIO): not run — never recorded «via none», the store as it was', ra.res);
+    const Today = today("    disk = MR.readJson(file, path.basename(file));   // MG1: not there = no store; unread or torn = not run (never recorded over a false «none», the keeper never skipped)\n",
+      "    try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { disk = null; }\n", 'mg1-keeper-today', 'first');   // stale-pins: kept (today's read)
+    const b = world('keeper-red'), fb = path.join(b.d, 'desktop-apps.json'); fs.writeFileSync(fb, OLD_APPS());
+    const rb = refusing(['readFileSync'], fb, () => runOne(Today, b.r, ID));
+    ok(rb.recorded && rb.report && rb.report.desktop && rb.report.desktop.via === 'none', 'MG1 ⑥ RED today\'s read: recorded with its report «via none» over a store that is there', rb.report);
+  }
+  // (b) MACHINES ALREADY MARKED: the record tells «ran over nothing» (via none) from «ran» (via keeper / file) — 2026-11-keeper-reshapes-retried
+  // reshapes once more each store whose record says none (or has no report: a ledger from before reports) and that is there in the old shape
+  {
+    const ID = '2026-11-keeper-reshapes-retried';
+    const marked = (name, reports) => {
+      const w = world(name);
+      fs.writeFileSync(path.join(w.d, 'desktop-apps.json'), JSON.stringify({ apps: { a1: { lastError: OLD_RUNAWAY } }, runawayParkedUntil: { a1: 1 } }));
+      fs.writeFileSync(path.join(w.d, 'browser-profiles.json'), JSON.stringify({ browsers: { b1: { lastError: OLD_RUNAWAY } }, runawayParkedUntil: { b1: 1 } }));
+      fs.writeFileSync(path.join(w.d, 'migrations.json'), JSON.stringify({ applied: { '2026-09-runaway-parks-void': 1, '2026-09-desktop-apps-host-key': 1 }, ...(reports ? { reports } : {}) }));
+      return w;
+    };
+    const read = (w, n) => JSON.parse(fs.readFileSync(path.join(w.d, n), 'utf8'));
+    const a = marked('retry-none', { '2026-09-runaway-parks-void': { at: 1, desktop: { via: 'none', parks: 0, rewritten: 0 }, browser: { via: 'file', parks: 1, rewritten: 1 } }, '2026-09-desktop-apps-host-key': { at: 1, via: 'none', records: 0, stamped: 0 } });
+    const ra = runOne(MIG, a.r, ID), da = read(a, 'desktop-apps.json'), ba = read(a, 'browser-profiles.json');
+    ok(ra.recorded && !('runawayParkedUntil' in da) && da.apps.a1.lastError !== OLD_RUNAWAY && da.apps.a1.hostId === 'local' && ('runawayParkedUntil' in ba),
+      'MG1 (b) a store whose record says «via none» and is there in the old shape is reshaped once more (desktop apps: voided and keyed); one whose record says it RAN (via file) is left as it is', { da, ba, report: ra.report });
+    const b = marked('retry-noreport', null);
+    const rb = runOne(MIG, b.r, ID), db = read(b, 'desktop-apps.json'), bb = read(b, 'browser-profiles.json');
+    ok(rb.recorded && !('runawayParkedUntil' in db) && !('runawayParkedUntil' in bb), 'MG1 (b) THE LIMIT, said: a ledger from before reports cannot tell — both stores are reshaped once more (each reshape is idempotent)', rb.report);
+    const c = world('retry-fresh');
+    const rc = runOne(MIG, c.r, ID);
+    ok(!!(rc.recorded && rc.report && !Object.keys(rc.report).filter((k) => k !== 'at').length), 'MG1 (b) an instance where the two never ran before (they run, read strictly, in the same pass): nothing retried', rc.report);
+  }
+  // ⑧ A STEPPED MIGRATION'S READ (2026-10-usage-ledger-dedup, a shard's sample): the step fails — never recorded with an error row
+  {
+    const ID = '2026-10-usage-ledger-dedup';
+    const stepped = async (mod, name) => {
+      const w = world(name), dir = path.join(w.d, 'usage-history'), shard = path.join(dir, 'events-2026-10.ndjson');
+      fs.mkdirSync(dir); fs.writeFileSync(shard, '{"rid":"r1"}\n{"rid":"r1"}\n');
+      const notices = [], undo = placed(['statSync'], shard);
+      try {
+        const res = quietly(() => mod.create({ rootDir: w.r, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k) }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID));
+        let led = {};
+        for (let i = 0; i < 100; i++) { await new Promise((z) => setTimeout(z, 10)); try { led = JSON.parse(fs.readFileSync(path.join(w.d, 'migrations.json'), 'utf8')); } catch { led = {}; } if ((led.applied && led.applied[ID]) || notices.includes('migration-failed:' + ID)) break; }
+        return { res, notices, recorded: !!(led.applied && led.applied[ID]) };
+      } finally { undo(); }
+    };
+    const a = await stepped(MIG, 'step-eio');
+    ok(a.res && a.res.status === 'started' && !a.recorded && a.notices.includes('migration-failed:' + ID), 'MG1 ⑧ a STEPPED migration\'s read refused (EIO, a shard\'s sample): the step fails — not recorded, said (the next start tries again)', a);
+    const Today = today("            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { if (e && e.code === 'ENOENT') { rep.sampled.push({ shard: f, error: 'ENOENT' }); continue; } throw MR.unread('usage-history/' + f, e); }   // MG1: a shard gone since the list is skipped; one unread = the step fails (not recorded)\n",
+      "            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { rep.sampled.push({ shard: f, error: e.code || e.message }); continue; }\n", 'mg1-step-today');   // stale-pins: kept (today's sample)
+    const b = await stepped(Today, 'step-red');
+    ok(b.recorded, 'MG1 ⑧ RED today\'s sample: the refused shard is an error row of the report — recorded, its dedup never runs', b);
+  }
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

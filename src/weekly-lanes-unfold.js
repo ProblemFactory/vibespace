@@ -46,6 +46,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 const usageWrite = require('./usage-cache-write.js');
 const quotaModel = require('./quota-model.js');
 const readingLag = require('./reading-lag.js');
@@ -68,7 +69,7 @@ function tailLines(file, bytes) {
     const lines = buf.toString('utf8').split('\n');
     if (st.size > len) lines.shift();
     return lines;
-  } catch { return []; }
+  } catch (e) { MR.absentOr(e, file); return []; }
   finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
 }
 
@@ -79,7 +80,7 @@ function tailLines(file, bytes) {
 function slotKeyForSession(dataDir, sid) {
   const tail = String(sid).replace(/^sess-/, '');
   let meta = null;
-  try { meta = JSON.parse(fs.readFileSync(path.join(dataDir, 'session-meta', 'cw-' + tail + '.json'), 'utf8')); } catch { return { key: null, why: 'no session-meta' }; }
+  try { meta = JSON.parse(fs.readFileSync(path.join(dataDir, 'session-meta', 'cw-' + tail + '.json'), 'utf8')); } catch (e) { MR.absentOr(e, 'session-meta'); return { key: null, why: 'no session-meta' }; }
   if (!meta || typeof meta !== 'object') return { key: null, why: 'unreadable session-meta' };
   if ((meta.backend || 'claude') !== 'claude') return { key: null, why: 'not a claude session' };
   if (meta.host) return { key: null, why: 'remote session (host-keyed caches are out of scope)' };
@@ -87,7 +88,7 @@ function slotKeyForSession(dataDir, sid) {
   if (!acct) return { key: '__global__', why: 'machine login' };
   const subsDir = path.join(dataDir, 'subs');
   let isPool = false;
-  try { isPool = fs.lstatSync(path.join(subsDir, acct)).isSymbolicLink(); } catch { isPool = false; }
+  try { isPool = fs.lstatSync(path.join(subsDir, acct)).isSymbolicLink(); } catch (e) { MR.absentOr(e, acct); isPool = false; }
   if (!isPool) return { key: acct, why: 'own subscription' };
   const linkTarget = (p) => { try { return path.basename(fs.readlinkSync(p)); } catch { return null; } };
   const own = linkTarget(path.join(dataDir, 'pool-links', acct.replace(/[^\w-]/g, ''), String(sid).replace(/[^\w.-]/g, '')));
@@ -153,7 +154,7 @@ function unfoldWeeklyLanes({ dataDir, id = 'weekly-lanes-unfold', now = Date.now
   for (const fn of files) {
     report.scanned++;
     const key = fn.replace(/\.json$/, '');
-    const obj = usageWrite.readCacheObject(cacheDir, key);
+    let obj = null; try { obj = usageWrite.readCacheJson(usageWrite.cacheFileFor(cacheDir, key)) || null; } catch (e) { MR.absentOr(e, fn); obj = null; }   // readCacheObject's own read, strict inside a migration (MG1)
     if (!obj) continue;
     if (usageWrite.backendOfCacheObject(obj) === 'codex') continue;
     let set; try { set = usageWrite.limitsOfCache(obj, { identity: key, backend: 'claude', familyOf: familyOfScopedBucket }); } catch { continue; }
@@ -169,13 +170,13 @@ function unfoldWeeklyLanes({ dataDir, id = 'weekly-lanes-unfold', now = Date.now
   // ② the newest windowed event per key, from the buffers linked to that slot
   const newest = new Map();
   let bufs = [];
-  try { bufs = fs.readdirSync(bufDir).filter((f) => /^sess-.*\.buf$/.test(f)); } catch { bufs = []; }
+  try { bufs = fs.readdirSync(bufDir).filter((f) => /^sess-.*\.buf$/.test(f)); } catch (e) { MR.absentOr(e, 'session-buffers'); bufs = []; }
   for (const bf of bufs) {
     const sid = bf.replace(/\.buf$/, '');
     const slot = slotKeyForSession(dataDir, sid);
     if (!slot.key || !cands.has(slot.key)) continue;
     const file = path.join(bufDir, bf);
-    let st; try { st = fs.statSync(file); } catch { continue; }
+    let st; try { st = fs.statSync(file); } catch (e) { MR.absentOr(e, file); continue; }
     const ev = newestWindowedEvent(file, tailBytes);
     if (!ev) continue;
     report.buffers++;
@@ -199,7 +200,7 @@ function unfoldWeeklyLanes({ dataDir, id = 'weekly-lanes-unfold', now = Date.now
       fs.writeFileSync(path.join(archiveDir, key.replace(/[^\w.-]/g, '_') + '.json'), JSON.stringify(c.obj));
       const man = path.join(archiveDir, '_migration.json');
       let m = { migration: id, at: now, keys: [] };
-      try { m = JSON.parse(fs.readFileSync(man, 'utf8')); } catch { }
+      try { m = JSON.parse(fs.readFileSync(man, 'utf8')); } catch (e) { MR.absentOr(e, man); }
       if (!m.keys.includes(key)) m.keys.push(key);
       fs.writeFileSync(man, JSON.stringify(m, null, 2));
     } catch (e) { say(key, 'refused', `archive failed: ${e.message}`, { plan7d: c.w7.usedPct, sid: hit.sid }); continue; }

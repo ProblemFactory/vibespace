@@ -40,6 +40,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 
 const REPLAY_WINDOW_MS = 2000; // = the walkers' FORK REPLAY window
 
@@ -50,7 +51,7 @@ function _day(ms) { return new Date(ms).toISOString().slice(0, 10); }
 // null = unreadable (a compressed rollout, a torn line).
 function _forkInstant(fp) {
   if (!/\.jsonl$/.test(fp)) return null;
-  let fd; try { fd = fs.openSync(fp, 'r'); } catch { return null; }
+  let fd; try { fd = fs.openSync(fp, 'r'); } catch (e) { MR.absentOr(e, fp); return null; }
   try {
     let buf = Buffer.alloc(0);
     const chunk = Buffer.alloc(256 * 1024);
@@ -64,7 +65,7 @@ function _forkInstant(fp) {
     const r = JSON.parse(buf.toString('utf-8'));
     if (r?.type !== 'session_meta') return 0;
     return r.payload?.forked_from_id ? (Date.parse(r.payload.timestamp || r.timestamp) || null) : 0;
-  } catch { return null; } finally { try { fs.closeSync(fd); } catch { } }
+  } catch (e) { if (!(e instanceof SyntaxError)) MR.absentOr(e, fp); return null; } finally { try { fs.closeSync(fd); } catch { } }   // MG1: a read failing inside a migration = not run; a first line that does not parse stays kept (counted), as before
 }
 
 /**
@@ -80,10 +81,10 @@ function purgeCodexForkReplays({ dataDir, codexSessionsDir, id, now = Date.now()
 
   // ① every codex row, first copy of a rid (the loader's dedup)
   let shardNames = [];
-  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch { }
+  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch (e) { MR.absentOr(e, 'usage-history'); }
   const rows = [], seen = new Set(), texts = new Map();
   for (const name of shardNames) {
-    let text = ''; try { text = fs.readFileSync(path.join(historyDir, name), 'utf-8'); } catch { continue; }
+    let text = ''; try { text = fs.readFileSync(path.join(historyDir, name), 'utf-8'); } catch (e) { MR.absentOr(e, name); continue; }
     texts.set(name, text);
     for (const line of text.split('\n')) {
       if (!line) continue;
@@ -110,7 +111,7 @@ function purgeCodexForkReplays({ dataDir, codexSessionsDir, id, now = Date.now()
 
   // ③ …that sit in a LOCAL fork's replay window
   let rollouts = [];
-  if (twins.length) { try { rollouts = fs.readdirSync(codexSessionsDir, { recursive: true }); } catch { } }
+  if (twins.length) { try { rollouts = fs.readdirSync(codexSessionsDir, { recursive: true }); } catch (e) { MR.absentOr(e, 'codex sessions'); } }
   const fileOf = new Map();
   for (const rel of rollouts) {
     const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i.exec(String(rel));
@@ -134,9 +135,9 @@ function purgeCodexForkReplays({ dataDir, codexSessionsDir, id, now = Date.now()
   // `drop` — they leave the shard again but are not archived a second time
   const archived = new Set();
   if (drop.size && !dryRun) {
-    let names = []; try { names = fs.readdirSync(archiveDir).filter((f) => /^codex-fork-replays-.*\.ndjson$/.test(f)); } catch { }
+    let names = []; try { names = fs.readdirSync(archiveDir).filter((f) => /^codex-fork-replays-.*\.ndjson$/.test(f)); } catch (e) { MR.absentOr(e, 'archive'); }
     for (const f of names) {
-      let t = ''; try { t = fs.readFileSync(path.join(archiveDir, f), 'utf-8'); } catch { continue; }
+      let t = ''; try { t = fs.readFileSync(path.join(archiveDir, f), 'utf-8'); } catch (e) { MR.absentOr(e, f); continue; }
       for (const l of t.split('\n')) {
         if (!l) continue;
         try { const a = JSON.parse(l); if (a && a.migration === id && a.entry) archived.add(a.file + '\n' + a.entry.rid); } catch { } // a torn last line = not archived

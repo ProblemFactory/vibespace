@@ -23,6 +23,7 @@
 // migration and any future re-attribution read it), live file keeps the tail.
 const fs = require('fs');
 const path = require('path');
+const MR = require('./migration-reads.js'); // MG1 (r2929): strict only inside a migration's run (every other reader keeps its answer)
 
 const MAX_LINES = 20000;      // ≈2.4MB at ~120B/line; a busy pool writes a few hundred a day
 const DEDUP_MS = 60000;       // an identical consecutive (session → to) inside a minute is one fact
@@ -135,7 +136,7 @@ class SlotTransitions {
     const rows = [];
     let bytes = -1, clean = true;
     const eat = (fp, live = false) => {
-      let buf; try { buf = fs.readFileSync(fp); } catch { return; }
+      let buf; try { buf = fs.readFileSync(fp); } catch (e) { MR.absentOr(e, fp); return; }   // MG1: inside a migration an unread record = not run
       // the live file's size is its BYTES before decoding — the backstop compares it with the size on disk (a byte that is no
       // valid text, left by a hand, decodes to more bytes and would make them differ for ever)
       if (live) { bytes = buf.length; clean = !buf.length || buf[buf.length - 1] === 0x0a; }
@@ -149,7 +150,7 @@ class SlotTransitions {
       for (const f of fs.readdirSync(this.archiveDir)) {
         if (/^slot-transitions-\d+\.jsonl$/.test(f)) eat(path.join(this.archiveDir, f));
       }
-    } catch { }
+    } catch (e) { if (e && e.code === MR.CODE) throw e; MR.absentOr(e, this.archiveDir); }
     eat(this.file, true);
     rows.sort((a, b) => a.at - b.at);
     for (const r of rows) Object.freeze(r);

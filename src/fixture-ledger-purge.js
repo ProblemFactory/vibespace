@@ -41,6 +41,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 const { isFixtureSid, isFixtureCwd, isFixtureProjectDir } = require('./fixture-guard.js');
 
 function _writeAtomic(fp, text) {
@@ -48,7 +49,7 @@ function _writeAtomic(fp, text) {
   fs.writeFileSync(fp + '.tmp', text);
   fs.renameSync(fp + '.tmp', fp);
 }
-function _readJson(fp) { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch { return null; } }
+function _readJson(fp) { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { MR.absentOr(e, fp); return null; } }
 /** Append-only, DATED shard: two rotations in the same millisecond must not
  *  overwrite each other (the slot-transitions r2 lesson). */
 function _appendArchive(archiveDir, name, rows) {
@@ -95,10 +96,10 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
   const removedTs = [];      // instants whose cost must no longer be claimed
   const sids = new Set();
   let shardNames = [];
-  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch { }
+  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch (e) { MR.absentOr(e, 'usage-history'); }
   for (const name of shardNames) {
     const fp = path.join(historyDir, name);
-    let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
+    let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); continue; }
     const lines = text.split('\n');
     const keep = [], drop = [];
     for (const line of lines) {
@@ -163,7 +164,7 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
   // ── ③ attribution entries naming a synthetic conversation ──────────────
   {
     const fp = path.join(historyDir, 'attribution.ndjson');
-    let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch { }
+    let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); }
     if (text != null) {
       const keep = [], drop = [];
       for (const line of text.split('\n')) {
@@ -193,10 +194,10 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
       return lo < removedTs.length && removedTs[lo] <= to;
     };
     let anchorFiles = [];
-    try { anchorFiles = fs.readdirSync(anchorsDir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { }
+    try { anchorFiles = fs.readdirSync(anchorsDir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch (e) { MR.absentOr(e, 'usage-anchors'); }
     for (const name of anchorFiles) {
       const fp = path.join(anchorsDir, name);
-      let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
+      let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); continue; }
       const out = []; let voided = 0;
       for (const line of text.split('\n')) {
         if (!line) continue;

@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { runMigrations, failedLine } = require('../migration-runner.js'); // failedLine: an error's first line as a screen may carry it
+const MR = require('../migration-reads.js'); // MG1 (r2929): a migration whose input could not be READ has not run — its strict readers (only «not there» is nothing to do)
 const { RETIRED_2026_10, stripRetiredSettings } = require('../retired-settings.js'); // PURE: the one retired-key list (the schema re-exports it); 2026-10-settings-rows-retired strips the keys it shipped with
 const { redactSecrets } = require('../secret-shapes.js'); // PURE: the one secret-shape rule (2026-10-job-secrets-retired shows no name it flags)
 
@@ -217,7 +218,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const subsDir = path.join(dataDir, 'subs');
         const members = [];
         let names = [];
-        try { names = fs.readdirSync(subsDir); } catch { return; }
+        names = MR.list(subsDir, 'data/subs'); if (!names) return;   // MG1: not there = nothing to do; any other failed read = not run
         // A member's credential DIR is only half its login (2026-09-07 r2): an
         // account with a wiped dir and a valid LONG-LIVED TOKEN still spawns
         // (`oatOnly`) and still produces readings under its own key, so
@@ -236,13 +237,13 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         })();
         for (const d of names) {
           if (!/^sub-[\w-]+$/.test(d)) continue;                  // pools are symlinks, con-* are login scratch
-          try { if (fs.lstatSync(path.join(subsDir, d)).isSymbolicLink()) continue; } catch { continue; }
+          { const ls = MR.lstat(path.join(subsDir, d), 'data/subs/' + d); if (!ls || ls.isSymbolicLink()) continue; }   // MG1: gone since the list = skipped; unread = not run
           members.push({ id: d, backend: 'claude', credsPath: path.join(subsDir, d, '.credentials.json'), oatMintedAt: oatMinted[d] || null });
         }
         const transitions = new SlotTransitions({ dataDir });
         let journalText = null;
         const jf = findJournal(dataDir);
-        if (jf) { try { journalText = fs.readFileSync(jf, 'utf-8'); } catch { } }
+        if (jf) journalText = MR.readText(jf, path.basename(jf));   // MG1: a journal found and then unread = not run
         const rep = repairReadings({ dataDir, members, transitions, id: '2026-09-reattribute-readings-by-slot', journalText });
         const touched = (rep.caches?.foreign || 0) + (rep.anchors?.dropped || 0) + (rep.attribution?.foreign || 0);
         // Say what happened even when it is nothing — a repair nobody can see
@@ -397,11 +398,12 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const B = require('../browser-profiles.js');
         const K = require('./browser-keeper.js');
         let cfg = {};
-        try { cfg = JSON.parse(fs.readFileSync(path.join(homeDir, B.USER_CONFIG_REL), 'utf-8')) || {}; } catch { cfg = {}; }
+        cfg = MR.readJson(path.join(homeDir, B.USER_CONFIG_REL), B.USER_CONFIG_REL) || {};   // MG1: not there = the default profile; unread or torn = not run (never the wrong folder)
         let dir = B.configNamesProfile(cfg) ? String(cfg.profile) : path.join(homeDir, '.agent-browser', 'default-profile');
         if (dir.startsWith('~/')) dir = path.join(homeDir, dir.slice(2));
         if (!path.isAbsolute(dir)) dir = path.join(homeDir, '.agent-browser', dir);
-        let isDir = false; try { isDir = fs.statSync(dir).isDirectory(); } catch { isDir = false; }
+        let dst = null; try { dst = fs.statSync(dir); } catch (e) { if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) throw MR.unread(dir, e); }   // MG1: not there = nothing to adopt; any other failed stat = not run
+        const isDir = !!(dst && dst.isDirectory());
         if (!isDir) { console.log(`[migrate] legacy browser profile: nothing to adopt (${dir} is not a directory)`); return; }
         // A keeper built HERE only touches the registry file (no broadcast, no
         // timer, not installed as the process's keeper — that one is wired
@@ -485,7 +487,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           // nothing to stamp unless a real adapter record exists — then the
           // run FAILS by name so the runner retries it on a boot that has one
           // (a recorded no-op would leave the record legacy for good).
-          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')); } catch { return; }
+          const doc = MR.readJson(path.join(dataDir, 'channels', 'adapters.json'), 'channels/adapters.json'); if (!doc) return;   // MG1: not there = nothing to do; unread or torn = not run
           const { REAL_ADAPTERS } = require('./channels-engine.js');
           const real = new Set(REAL_ADAPTERS.map((m) => m.kind));
           const pending = (doc && Array.isArray(doc.adapters) ? doc.adapters : []).filter((r) => r && real.has(r.kind) && !(typeof r.credentialKey === 'string' && r.credentialKey));
@@ -515,7 +517,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         if (!eng || typeof eng.inlineLegacyClients !== 'function') {
           // No engine on this boot: a record naming `own` makes the run FAIL by
           // name (retried on a boot that has one); none is a success.
-          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')); } catch { return; }
+          const doc = MR.readJson(path.join(dataDir, 'channels', 'adapters.json'), 'channels/adapters.json'); if (!doc) return;   // MG1: not there = nothing to do; unread or torn = not run
           const pending = (doc && Array.isArray(doc.adapters) ? doc.adapters : []).filter((r) => r && r.credentialKey === 'own');
           if (pending.length) throw new Error(`no channels engine to move the saved client onto ${pending.length} account(s) (${pending.map((r) => r.id).join(', ')}) — retried on a boot that has one`);
           return;
@@ -545,7 +547,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           // No engine on this boot: an index still carrying `tracked` makes the
           // run FAIL by name so a boot with an engine retries it (a recorded
           // no-op would leave the rows with a gate nothing reads).
-          let doc; try { doc = require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch { return; }   // B-360d unit 1 (law 8): the family, never index.json alone
+          let doc; try { doc = require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch (e) { throw MR.unread('channels/' + ((e && e.file) || 'index.json'), e); }   // B-360d unit 1 (law 8): the family, never index.json alone; MG1: null when not there, a throw for anything else — not run
           const pending = Object.values((doc && doc.conversations) || {}).filter((e) => e && 'tracked' in e).length;
           if (pending) throw new Error(`no channels engine to migrate ${pending} conversation(s) off the retired tracked flag — retried on a boot that has one`);
           return;
@@ -573,7 +575,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         if (!eng || typeof eng.migrateGrants !== 'function') {
           // No engine on this boot: an index still holding a pre-split record
           // FAILS the run by name (retried on a boot that has one).
-          let doc; try { doc = require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch { return; }   // B-360d unit 1 (law 8): the family, never index.json alone
+          let doc; try { doc = require('../channel-store.js').readIndexFamily(path.join(dataDir, 'channels')); } catch (e) { throw MR.unread('channels/' + ((e && e.file) || 'index.json'), e); }   // B-360d unit 1 (law 8): the family, never index.json alone; MG1: null when not there, a throw for anything else — not run
           const convs = Object.values((doc && doc.conversations) || {}).filter((e) => e && e.assignment && e.assignment.principal).length;
           const grains = [...Object.values((doc && doc.accountAssignments) || {}), ...Object.values((doc && doc.patternAssignments) || {})].filter((g) => g && g.principal).length;
           if (convs || grains) throw new Error(`no channels engine to split ${convs} conversation assignment(s) and ${grains} account/rule assignment(s) into access + notification — retried on a boot that has one`);
@@ -596,7 +598,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         const eng = typeof channels === 'function' ? channels() : channels;
         if (!eng || typeof eng.migrateThreads !== 'function') {
-          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')); } catch { return; }
+          const doc = MR.readJson(path.join(dataDir, 'channels', 'adapters.json'), 'channels/adapters.json'); if (!doc) return;   // MG1: not there = nothing to do; unread or torn = not run
           const pending = ((doc && doc.adapters) || []).filter((r) => r && !['propose', 'direct', 'off'].includes(r.reactionPolicy)).length;
           if (pending) throw new Error(`no channels engine to stamp the reaction policy on ${pending} account(s) — retried on a boot that has one`);
           return;
@@ -618,7 +620,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const live = liveTodos();   // B-44f3: refused by name while For you is held unread
         let store = live, priv = false;
         if (!store || typeof store.reshapeItems !== 'function') {
-          if (!fs.existsSync(path.join(dataDir, 'user-todos.json'))) return { matched: 0, rekinded: 0, expired: 0, stamped: 0, store: 'absent' };
+          if (!MR.exists(path.join(dataDir, 'user-todos.json'), 'user-todos.json')) return { matched: 0, rekinded: 0, expired: 0, stamped: 0, store: 'absent' };   // MG1: «absent» only when not there
           const { UserTodoManager } = require('../user-todos.js');
           store = new UserTodoManager({ dataDir, expirySweepMs: 0 });
           priv = true;
@@ -727,7 +729,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         { const tm0 = typeof tasks === 'function' ? tasks() : tasks; const held = tm0 && typeof tm0.unreadRefusal === 'function' ? tm0.unreadRefusal('this migration') : null; if (held) throw new Error(held); }   // THE STORE HELD UNREAD (lane bl-windows): never a write of a held store — run again at the next start
         const f = path.join(dataDir, 'task-groups.json');
-        let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; } // no store yet = nothing to do
+        const doc = MR.readJson(f, 'task-groups.json'); if (!doc) return; // no store yet = nothing to do; MG1: unread or torn = not run
         const recs = doc.tasks || {};   // (named apart from the live store `tasks` the hold check above asks — lane bl-windows)
         const archived = {};
         for (const [id, t] of Object.entries(recs)) {
@@ -737,7 +739,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         if (!Object.keys(archived).length) return;
         fs.mkdirSync(archiveDir, { recursive: true });
         const out = path.join(archiveDir, 'task-plans-legacy.json');
-        let prev = {}; try { prev = JSON.parse(fs.readFileSync(out, 'utf-8')); } catch { }
+        const prev = MR.readJson(out, 'archive/' + path.basename(out)) || {};   // MG1: an earlier archive unread is never written over with this run's alone
         fs.writeFileSync(out + '.tmp', JSON.stringify({ ...prev, ...archived }, null, 2));
         fs.renameSync(out + '.tmp', out);
         fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
@@ -792,7 +794,13 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         const pm = typeof plugins === 'function' ? plugins() : plugins;
         if (!pm || typeof pm.migrateConfigToSettings !== 'function') return { skipped: 'no plugin manager' };
+        // MG1 (r2944): the manager's load has a bare catch and no hold — the file read here first (unread or torn = not run), and a
+        // plan the disk holds that the manager did not act on means its load did not read the file (not run)
+        const disk = MR.readJson(path.join(dataDir, 'plugins.json'), 'plugins.json');
+        let sv = {}; try { const st0 = typeof settings === 'function' ? settings() : settings; sv = (st0 && typeof st0.read === 'function' && st0.read()) || {}; } catch { sv = {}; }
+        const owed = disk ? require('../plugin-settings.js').migrationPlan(disk, sv) : null;
         const rep = pm.migrateConfigToSettings();
+        if (owed && (Object.keys(owed.patch || {}).length || Object.keys(owed.strip || {}).length) && !(rep.moved || []).length && !Object.keys(rep.stripped || {}).length) throw pluginsUnloaded();
         console.log('[migrate] plugin-config-to-settings:', JSON.stringify(rep));
         return rep;
       },
@@ -846,7 +854,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         if (n) {
           fs.mkdirSync(archiveDir, { recursive: true });
           const out = path.join(archiveDir, 'task-group-archived-members.json');
-          let prev = {}; try { prev = JSON.parse(fs.readFileSync(out, 'utf-8')); } catch { }
+          const prev = MR.readJson(out, 'archive/' + path.basename(out)) || {};   // MG1: an earlier archive unread is never written over with this run's alone
           const merged = { ...prev };
           for (const [id, keys] of Object.entries(gone)) merged[id] = [...new Set([...(Array.isArray(prev[id]) ? prev[id] : []), ...keys])];
           fs.writeFileSync(out + '.tmp', JSON.stringify(merged, null, 2));
@@ -869,7 +877,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         const f = path.join(dataDir, 'vault-run.json');
         let n = 0, present = false;
-        try { const st = fs.statSync(f); present = st.isFile(); if (present && st.size <= 1024 * 1024) { const d = JSON.parse(fs.readFileSync(f, 'utf-8')); n = Array.isArray(d && d.always) ? d.always.length : 0; } } catch { /* absent / unreadable: nothing waits */ }
+        { const st = MR.stat(f, 'vault-run.json'); present = !!(st && st.isFile()); if (present && st.size <= 1024 * 1024) { const d = MR.readJson(f, 'vault-run.json'); n = Array.isArray(d && d.always) ? d.always.length : 0; } }   // MG1: not there = nothing waits; unread or torn = not run
         const rep = { store: present, alwaysRows: n, carriedAt: n ? 'the first unlocked read of the run door (the mark verified)' : 'nothing to carry' };
         console.log('[migrate] vault-always-to-grants:', JSON.stringify(rep));
         return rep;
@@ -904,7 +912,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         const eng = typeof channels === 'function' ? channels() : channels;
         if (!eng || typeof eng.openAccessPointers !== 'function') {
-          if (!fs.existsSync(path.join(dataDir, 'channels'))) return { open: 0, hidden: 0, back: 0, store: 'absent' };
+          if (!MR.exists(path.join(dataDir, 'channels'), 'channels')) return { open: 0, hidden: 0, back: 0, store: 'absent' };   // MG1: «absent» only when not there
           throw new Error('no channels engine to name the open access requests — retried on a boot that has one');
         }
         const ids = new Set(eng.openAccessPointers());
@@ -913,7 +921,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const live = liveTodos();   // B-44f3: refused by name while For you is held unread
         let store = live, priv = false;
         if (!store || typeof store.reshapeItems !== 'function') {
-          if (!fs.existsSync(path.join(dataDir, 'user-todos.json'))) return { open: ids.size, hidden: 0, back: 0, store: 'absent' };
+          if (!MR.exists(path.join(dataDir, 'user-todos.json'), 'user-todos.json')) return { open: ids.size, hidden: 0, back: 0, store: 'absent' };   // MG1: «absent» only when not there
           const { UserTodoManager } = require('../user-todos.js');
           store = new UserTodoManager({ dataDir, expirySweepMs: 0 });
           priv = true;
@@ -938,7 +946,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const LD = require('../usage-ledger-dedup.js');
         const dir = path.join(dataDir, 'usage-history');
         let names = [];
-        try { names = fs.readdirSync(dir).filter((f) => LD.SHARD_RE.test(f)).sort(); } catch { }
+        names = (MR.list(dir, 'usage-history') || []).filter((f) => LD.SHARD_RE.test(f)).sort();   // MG1: not there = no shards; any other failed list = not run
         if (!names.length) return { shards: 0, deduped: 0 };
         const uh = typeof usageHistory === 'function' ? usageHistory() : usageHistory;
         const turn = () => new Promise((r) => setImmediate(r));
@@ -946,7 +954,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           const rep = { shards: names.length, sampled: [], deduped: 0, before: 0, after: 0, removed: 0, archived: 0, journal: [] };
           for (const f of names) {
             await turn(); // one shard's sample per loop turn (≤ 16 MiB read)
-            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { rep.sampled.push({ shard: f, error: e.code || e.message }); continue; }
+            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { if (e && e.code === 'ENOENT') { rep.sampled.push({ shard: f, error: 'ENOENT' }); continue; } throw MR.unread('usage-history/' + f, e); }   // MG1: a shard gone since the list is skipped; one unread = the step fails (not recorded)
             const ratio = sh.ratio == null ? null : Math.round(sh.ratio * 100) / 100;
             rep.sampled.push({ shard: f, size: sh.size, ratio });
             if (!(sh.size > 1024 ** 3 || (ratio != null && ratio > 1.2))) continue;
@@ -981,10 +989,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           return rep;
         };
         let st = null;
-        try { st = fs.lstatSync(from); } catch { /* absent — nothing was stored, or an earlier run renamed it */ }
+        st = MR.lstat(from, JOB_SECRETS_FILE);   // not there — nothing was stored, or an earlier run renamed it; MG1: any other failed stat = not run
         if (st && !st.isFile() && !st.isSymbolicLink()) return settle({ store: 'not-a-file' });   // a directory / socket by that name was never the store
         if (st) {
-          if (fs.existsSync(to)) {
+          if (MR.exists(to, JOB_SECRETS_RETIRED)) {   // MG1: existsSync answers false for any stat error
             // r3 (review F2): the runner runs inside hub.listen's callback, before any client connects — the failure is said
             // in For you too, and the error carries `told` so the runner files no second item for it
             let told = false;
@@ -992,7 +1000,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
             throw Object.assign(new Error(`data/${JOB_SECRETS_RETIRED} already exists beside data/${JOB_SECRETS_FILE} — nothing moved (never over the owner's bytes); move one of them aside and restart`), { told });
           }
           fs.renameSync(from, to);
-        } else if (!fs.existsSync(to)) return settle({ store: 'absent' });
+        } else if (!MR.exists(to, JOB_SECRETS_RETIRED)) return settle({ store: 'absent' });   // MG1: «absent» only when not there
         if (fs.lstatSync(to).isFile()) fs.chmodSync(to, 0o600);   // a symlink's target is not ours to chmod
         // its NAMES only — the values are parsed to find the names and never leave this function (no log, no ledger, no notice)
         const { names, lines } = jsLines();
@@ -1047,12 +1055,13 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         const to = path.join(dataDir, JOB_SECRETS_RETIRED);
         let st = null;
-        try { st = fs.lstatSync(to); } catch { return { notice: 'none (no retired file)' }; }
+        st = MR.lstat(to, JOB_SECRETS_RETIRED); if (!st) return { notice: 'none (no retired file)' };   // MG1: any other failed stat = not run
         if (!st.isFile()) return { notice: 'none (not a file)' };
-        if (fs.existsSync(path.join(dataDir, JOB_SECRETS_FILE))) return { notice: 'none (two files — 2026-10-job-secrets-retired says so)' };
+        if (MR.exists(path.join(dataDir, JOB_SECRETS_FILE), JOB_SECRETS_FILE)) return { notice: 'none (two files — 2026-10-job-secrets-retired says so)' };
         const live = liveTodos();   // B-44f3: refused by name while For you is held unread
         let store = live, priv = false;
         if (!store || typeof store.idsWhere !== 'function') { const { UserTodoManager } = require('../user-todos.js'); store = new UserTodoManager({ dataDir, expirySweepMs: 0 }); priv = true; }
+        if (priv && typeof store.isHeldUnread === 'function' && store.isHeldUnread()) { try { store.stop(); } catch { } throw Object.assign(new Error('user-todos.json is there and could not be read — not run: the next start tries again'), { code: MR.CODE }); }   // MG1: a held private store answers no item — never «no open notice»
         let keyed = [], open = [];
         try {
           keyed = store.idsWhere((i) => i.sessionKey === 'vault' && i.itemKey === JOB_SECRETS_ITEM) || [];
@@ -1085,7 +1094,27 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-11-keeper-reshapes-retried',
+      note: "MG1 (row B-f276, r2929 (b)): 2026-09-runaway-parks-void and 2026-09-desktop-apps-host-key read a store that was THERE and could not be read as «no store», and were recorded over nothing. Their ledger report tells that from a run that reshaped (`via: 'none'` beside 'keeper' / 'file'); a ledger written before reports rode it has none, and is read as «over nothing». Each such store that is there NOW in the old shape is reshaped once more, through its live keeper or its file (both reshapes are idempotent).",
+      run() {
+        const L = MR.readJson(path.join(dataDir, 'migrations.json'), 'migrations.json') || {};
+        const applied = (L && L.applied) || {}, reports = (L && L.reports) || {};
+        const overNothing = (id, part) => { if (!applied[id]) return false; const r = reports[id]; const x = r && (part ? r[part] : r); return !x || x.via === 'none'; };
+        const recs = (doc, key) => Object.values(doc && doc[key] && typeof doc[key] === 'object' ? doc[key] : {});
+        const parked = (doc, key) => !!doc && ('runawayParkedUntil' in doc || recs(doc, key).some((r) => r && typeof r.lastError === 'string' && r.lastError.startsWith(OLD_RUNAWAY_PREFIX)));
+        const unkeyed = (doc) => recs(doc, 'apps').some((r) => r && typeof r === 'object' && !(typeof r.hostId === 'string' && r.hostId));
+        const DA = path.join(dataDir, 'desktop-apps.json'), BP = path.join(dataDir, 'browser-profiles.json');
+        const rep = {};
+        if (overNothing('2026-09-runaway-parks-void', 'desktop') && parked(MR.readJson(DA, 'desktop-apps.json'), 'apps')) rep.desktop = voidRunaway(DA, 'apps', desktopKeeper);
+        if (overNothing('2026-09-runaway-parks-void', 'browser') && parked(MR.readJson(BP, 'browser-profiles.json'), 'browsers')) rep.browser = voidRunaway(BP, 'browsers', browserKeeper);
+        if (overNothing('2026-09-desktop-apps-host-key') && unkeyed(MR.readJson(DA, 'desktop-apps.json'))) rep.hostKey = stampDesktopHostKey(DA, desktopKeeper);
+        console.log('[migrate] keeper-reshapes-retried:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
+  const pluginsUnloaded = () => Object.assign(new Error('plugins.json holds records the live plugin manager did not load at this start — not run: the next start tries again'), { code: MR.CODE });
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`
    *  = leave data/grants.json on disk even when nothing was carried (false on the rollback re-run below). */
@@ -1183,7 +1212,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     if (inStore && !(st && typeof st.renameRecord === 'function')) throw new Error(`data/integrations.json holds the ${FROM} row and no live integration store was handed in — nothing was moved`);
     // the card's retired model field → the plugin's judgeModel row (only where settings holds none), FIRST
     const model = st && typeof st.plainOf === 'function' ? (st.plainOf(FROM, ['model']).model || st.plainOf(TO, ['model']).model || '') : '';
+    // MG1 (r2944): the manager's load has a bare catch and no hold — plugins.json read here (unread or torn = not run); a record the
+    // disk holds under the old id that the manager did not move means its load did not read the file (not run)
+    const pdisk = pm && typeof pm.renamePlugin === 'function' ? MR.readJson(path.join(dataDir, 'plugins.json'), 'plugins.json') : null;
     const plug = pm && typeof pm.renamePlugin === 'function' ? pm.renamePlugin(FROM, TO, { seed: model ? { judgeModel: model } : {} }) : { settings: { moved: [], dropped: [], seeded: [] }, record: 'none', config: null };
+    if (pdisk && pdisk.plugins && pdisk.plugins[FROM] && plug.record === 'none') throw pluginsUnloaded();
     const store = inStore ? st.renameRecord(FROM, TO, { drop: ['model'] }) : { moved: false, dropped: false };
     return { settings: plug.settings, plugins: plug.record, config: plug.config, integrations: store, judgeModel: plug.settings.seeded.length ? 'seeded' : model ? 'kept' : 'none' };
   }
@@ -1228,23 +1261,24 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   /** What the earlier download's install proof says WITHOUT hashing it: a final verdict, or `{needHash, file, stamp}`. */
   function cloakDownloadFacts() {
     const dl = path.join(dataDir, CLOAK_OLD.download);
-    let exec = false; try { fs.accessSync(dl, fs.constants.X_OK); exec = fs.statSync(dl).isFile(); } catch { exec = false; }
+    const dst = MR.stat(dl, CLOAK_OLD.download);   // MG1: not there = absent; any other failed stat = not run
+    let exec = false; if (dst && dst.isFile()) { try { fs.accessSync(dl, fs.constants.X_OK); exec = true; } catch (e) { if (!(e && e.code === 'EACCES')) throw MR.unread(CLOAK_OLD.download, e); } }   // EACCES = not executable: never an install
     if (!exec) return { present: false, proven: false, why: 'absent' };
-    const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));
-    let st = null; try { st = JSON.parse(fs.readFileSync(path.join(dataDir, CLOAK_OLD.stamp), 'utf-8')); } catch { st = null; }
+    const mark = MR.exists(path.join(dataDir, CLOAK_OLD.unpackMark), CLOAK_OLD.unpackMark);
+    const st = MR.readJson(path.join(dataDir, CLOAK_OLD.stamp), CLOAK_OLD.stamp);   // MG1: not there = no install stamp; unread or torn = not run
     if (!st || typeof st !== 'object') return { present: true, proven: false, why: mark ? 'an unpack the update cut (its marker, no install stamp)' : 'no install stamp' };
     if (st.chromium !== cloakMeasured.chromium || st.sha256 !== cloakMeasured.sha256) return { present: true, proven: false, why: `the install stamp names Chromium ${String(st.chromium).slice(0, 40)}, not the measured build` };
     return { needHash: true, file: dl, stamp: st };
   }
   function migrateCloakToPlugin() {
     let held = null; // a pending run's verdict (the hash ran once already)
-    try { const a = JSON.parse(fs.readFileSync(path.join(archiveDir, `${CLOAK_MIGRATION_ID}.json`), 'utf-8')); const p = a && Array.isArray(a.runs) ? a.runs.find((x) => x && x.pending === true) : null; held = p && p.rep && p.rep.download ? p.rep.download : null; } catch { held = null; }
+    { const a = MR.readJson(path.join(archiveDir, `${CLOAK_MIGRATION_ID}.json`), `archive/${CLOAK_MIGRATION_ID}.json`); const p = a && Array.isArray(a.runs) ? a.runs.find((x) => x && x.pending === true) : null; held = p && p.rep && p.rep.download ? p.rep.download : null; }   // MG1: not there = no pending run; unread or torn = not run
     if (held) return cloakMigrateNow({ present: true, proven: !!held.proven, why: String(held.why || '') });
     const f = cloakDownloadFacts();
     if (!f.needHash) return cloakMigrateNow(f);
     const run = sha256Of(f.file).then(
       (got) => cloakMigrateNow(got === f.stamp.sha256 ? { present: true, proven: true, why: 'the install stamp and the file\'s SHA-256 agree' } : { present: true, proven: false, why: 'the file is not the one its install stamp names (its SHA-256 differs)' }),
-      (e) => cloakMigrateNow({ present: true, proven: false, why: `the file could not be read to its end (${(e && e.code) || 'error'})` }));
+      (e) => { throw MR.unread(CLOAK_OLD.download, e); });   // MG1: the download could not be read to its end = not run (the step fails; never «unproven» over an unread file)
     browserBootGate = run.then(() => null, () => null);
     return run;
   }
@@ -1385,8 +1419,8 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     // the install slot's restart (it ran when the keeper was made, before this): a CloakBrowser install it found running
     try { const k = typeof browserKeeper === 'function' ? browserKeeper() : browserKeeper; const ri = k && typeof k.retiredInstall === 'function' ? k.retiredInstall() : null; if (ri && ri.kind === P && ri.result !== 'gone') rep.install = { result: ri.result, pid: ri.pid, step: ri.step }; } catch { /* no keeper */ }
     // a licence key the integration store holds for the CloakBrowser row — PRESENCE only, never its value (it stays where it is)
-    try { const d = JSON.parse(fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8')); const r = d && d.integrations && d.integrations[CLOAK_OLD.integration]; rep.licence = !!(rep.licence || (r && r.values && typeof r.values === 'object' && Object.keys(r.values).length)); } catch { /* none */ }
-    if (fs.existsSync(path.join(dataDir, CLOAK_OLD.cacheDir))) rep.left = [...new Set([...rep.left, 'data/' + CLOAK_OLD.cacheDir.split(path.sep).join('/')])];
+    { const d = MR.readJson(path.join(dataDir, 'integrations.json'), 'integrations.json'); const r = d && d.integrations && d.integrations[CLOAK_OLD.integration]; rep.licence = !!(rep.licence || (r && r.values && typeof r.values === 'object' && Object.keys(r.values).length)); }   // MG1: not there = no licence; unread or torn = not run
+    if (MR.exists(path.join(dataDir, CLOAK_OLD.cacheDir), CLOAK_OLD.cacheDir)) rep.left = [...new Set([...rep.left, 'data/' + CLOAK_OLD.cacheDir.split(path.sep).join('/')])];
     // (an old row stored EMPTY is stripped and archived, but tells nobody anything: a user who never ran CloakBrowser hears nothing)
     const somethingNow = !!(rep.profiles.length || rep.defaults.length || rep.seeds.added.length || rep.settings.program !== 'none' || rep.settings.sites !== 'none' || Object.values(rep.settings.old).some((v) => String(v == null ? '' : v).trim()) || rep.ended.length || rep.proposals.length || rep.install || rep.licence || rep.hints.tier.length || rep.hints.dropped.length);
     const settingsToWrite = Object.keys(rep.settings.old).length || Object.keys(plan.set).some((row) => sdoc[row] !== plan.set[row]);
@@ -1532,7 +1566,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   function migrateExitLists() {
     const E = require('../exit-reach.js');
     const file = path.join(dataDir, 'hosts.json');
-    if (!fs.existsSync(file)) return { converted: [], defaulted: 0, kept: 0, via: 'none' };
+    if (!MR.exists(file, 'hosts.json')) return { converted: [], defaulted: 0, kept: 0, via: 'none' };   // MG1: «none» only when not there (existsSync answers false for any stat error)
     let disk;
     try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch (e) { throw new Error(`data/hosts.json is unreadable (${e.message}) — exit access not migrated; nothing was touched`); }
     if (!disk || !Array.isArray(disk.hosts)) throw new Error('data/hosts.json has no hosts list — exit access not migrated; nothing was touched');
@@ -1576,7 +1610,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
    *  Returns the counts; a missing / unreadable file = nothing to do. */
   function voidRunaway(file, recordsKey, keeperOrGetter) {
     let disk = null;
-    try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { disk = null; }
+    disk = MR.readJson(file, path.basename(file));   // MG1: not there = no store; unread or torn = not run (never recorded over a false «none», the keeper never skipped)
     const parksOnDisk = disk && disk.runawayParkedUntil && typeof disk.runawayParkedUntil === 'object' ? Object.keys(disk.runawayParkedUntil).length : 0;
     const shape = (doc) => {
       let rewritten = 0;
@@ -1608,7 +1642,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
    *  when there is one (voidRunaway's reason), else the file (atomic, its mode kept). Returns the counts. */
   function stampDesktopHostKey(file, keeperOrGetter) {
     let disk = null;
-    try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { disk = null; }
+    disk = MR.readJson(file, path.basename(file));   // MG1: not there = no store; unread or torn = not run (never recorded over a false «none», the keeper never skipped)
     const shape = (doc) => {
       let stamped = 0;
       const recs = doc && doc.apps && typeof doc.apps === 'object' ? Object.values(doc.apps) : [];
@@ -1628,6 +1662,8 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     return { file: path.basename(file), via: 'file', records, stamped };
   }
 
+  // MG1 (r2929): every run with the shared helpers' reads strict (src/migration-reads.js `during` — its synchronous part)
+  const strictRun = (m) => ({ ...m, run: () => MR.during(() => m.run()) });
   function runLocalMigrations({ only = null } = {}) {   // `only` = ids (a suite's one boot of one migration)
     // lane hub-loop-stalls commit 2: the live ledger's cursors are written by the store writer — an owed write is settled
     // before any migration reads or rewrites _cursors.json (never an older state landing after a migration's own)
@@ -1646,7 +1682,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       return r.deferred ? owed.map((f) => ({ file: f, name: path.basename(f), why: 'the hub is exiting' })) : (r.left || []);
     };
     // `todos` (r3, review F2b): a failed row is ONE For-you item keyed by its id, resolved by the run that succeeds (the runner's)
-    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS, todos: userTodos, landStores, onLate: (r) => {
+    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: (Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS).map(strictRun), todos: userTodos, landStores, onLate: (r) => {
       // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's —
       // through the SAME door (B-44f3, the first read's should: a For-you refusal there waits for the read too, never «next restart»).
       // A toast reaches every client's screen: its error is the runner's failedLine — belted whole, then cut (r4, review N3)

@@ -83,12 +83,13 @@
 const fs = require('fs');
 const { eachLineSync } = require('./ndjson-lines.js'); // row B-360d: the OTel stash read by its rows, never one string
 const path = require('path');
+const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 const { decideLagShadow } = require('./reading-lag.js');
 const { deathMarkers, isForeign, _sessionKeyMap, sessionKeysFor } = require('./reading-repair.js');
 
 const PRE_FIRST_GRACE_MS = 10 * 60 * 1000; // usage-history `_acctAt`: spawn-ordering skew before the first entry
 
-function _readJson(fp) { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch { return null; } }
+function _readJson(fp) { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { MR.absentOr(e, fp); return null; } }
 function _writeAtomic(fp, text) {
   fs.mkdirSync(path.dirname(fp), { recursive: true });
   fs.writeFileSync(fp + '.tmp', text);
@@ -140,9 +141,9 @@ const _isRekeyLine = (a) => a.action ? a.action === 'rekeyed' : /re-keyed to /.t
 function readPriorArchive(archiveDir, id) {
   const keys = new Set();
   let open = [], lastComplete = null, unparseable = 0;
-  let names = []; try { names = fs.readdirSync(archiveDir).filter((f) => /^ledger-by-slot-\d{4}-\d{2}-\d{2}\.ndjson$/.test(f)).sort(); } catch { }
+  let names = []; try { names = fs.readdirSync(archiveDir).filter((f) => /^ledger-by-slot-\d{4}-\d{2}-\d{2}\.ndjson$/.test(f)).sort(); } catch (e) { MR.absentOr(e, 'archive'); }
   for (const f of names) {
-    let text = ''; try { text = fs.readFileSync(path.join(archiveDir, f), 'utf-8'); } catch { continue; }
+    let text = ''; try { text = fs.readFileSync(path.join(archiveDir, f), 'utf-8'); } catch (e) { MR.absentOr(e, f); continue; }
     for (const line of text.split('\n')) {
       if (!line) continue;
       let a; try { a = JSON.parse(line); } catch { unparseable++; continue; } // a torn tail (quota r3) — counted, never guessed at
@@ -189,7 +190,7 @@ function readOtelStash(historyDir) {
  *  `corrective` when its writer can only have been the OTel corrective path. */
 function readAttribution(historyDir, stashBySid) {
   const fp = path.join(historyDir, 'attribution.ndjson');
-  let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch { }
+  let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); }
   const lines = [], bySid = new Map();
   if (text == null) return { fp, exists: false, lines, bySid };
   for (const raw of text.split('\n')) {
@@ -241,10 +242,10 @@ function membersOffDisk(dataDir) {
   const oat = {};
   for (const a of (accountsOffDisk(dataDir)?.accounts || [])) if (a && a.id && a.oatEnc && a.oatMintedAt) oat[a.id] = Number(a.oatMintedAt) || 0;
   const out = [];
-  let names = []; try { names = fs.readdirSync(subsDir); } catch { return out; }
+  let names = []; try { names = fs.readdirSync(subsDir); } catch (e) { MR.absentOr(e, 'subs'); return out; }
   for (const d of names) {
     if (!/^sub-[\w-]+$/.test(d)) continue;
-    try { if (fs.lstatSync(path.join(subsDir, d)).isSymbolicLink()) continue; } catch { continue; }
+    try { if (fs.lstatSync(path.join(subsDir, d)).isSymbolicLink()) continue; } catch (e) { MR.absentOr(e, d); continue; }
     out.push({ id: d, backend: 'claude', credsPath: path.join(subsDir, d, '.credentials.json'), oatMintedAt: oat[d] || null });
   }
   return out;
@@ -397,10 +398,10 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
   }
 
   let shardNames = [];
-  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch { }
+  try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch (e) { MR.absentOr(e, 'usage-history'); }
   for (const name of shardNames) {
     const fp = path.join(historyDir, name);
-    let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
+    let text = ''; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { MR.absentOr(e, fp); continue; }
     const out = [], arch = [];
     let dirty = false;
     for (const line of text.split('\n')) {
@@ -477,9 +478,9 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
   if (touchedAccts.size && relearn) {
     const anchorsDir = path.join(dataDir, 'usage-anchors');
     const idents = new Set();
-    let files = []; try { files = fs.readdirSync(anchorsDir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { }
+    let files = []; try { files = fs.readdirSync(anchorsDir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch (e) { MR.absentOr(e, 'usage-anchors'); }
     for (const f of files) {
-      let text = ''; try { text = fs.readFileSync(path.join(anchorsDir, f), 'utf-8'); } catch { continue; }
+      let text = ''; try { text = fs.readFileSync(path.join(anchorsDir, f), 'utf-8'); } catch (e) { MR.absentOr(e, f); continue; }
       for (const line of text.split('\n')) {
         if (!line) continue;
         let a; try { a = JSON.parse(line); } catch { continue; }
