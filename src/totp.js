@@ -262,8 +262,19 @@ function addPlanOf({ way = 'link', uri = '', seed = '', name = '', digits = null
   return bad ? { ...bad, facts } : { ok: true, way, facts, name: typed, body: { seed: text, name: typed, digits: facts.digits, period: facts.period, algorithm: facts.algorithm } };
 }
 
+/** r3275 (4): the Vault window's ONE note for the two-step grants list — from its answer's grantsUnread / grantsTorn / grantsLost —
+ *  drawn once in the window's head, never in every row; and whether «Use for…» may open its picker (never while the list is
+ *  held: a picker with every box unticked would read as «nobody is granted»). PURE. → { held, note: null | { kind, name } } */
+function grantsNotesOf(data) {
+  const d = data && typeof data === 'object' ? data : {};
+  if (d.grantsUnread) return { held: true, note: { kind: d.grantsTorn ? 'torn' : 'unread' } };
+  if (typeof d.grantsLost === 'string' && d.grantsLost) return { held: false, note: { kind: 'lost', name: d.grantsLost } };
+  return { held: false, note: null };
+}
+
 module.exports = {
   ALGORITHMS, DIGITS_MIN, DIGITS_MAX, PERIOD_MIN, PERIOD_MAX, SEED_MIN_BYTES, SEED_MAX_BYTES, NAME_RE, ENTRY_PREFIX, SOURCES, SUBJECT_RE, VIEW_PACE_MAX, VIEW_PACE_CEILING, USE_PACE_MAX,
   base32Decode, base32Encode, hotp, totp, verify, configOf, valueOf, recordOf, parseOtpauth, uriOf, nameOf, entryOf, nameOfEntry, grantOf, useVerdict,
   ADD_DEFAULTS, ADD_CHOICES, ADD_WAYS, addPlanOf,   // lane vault-totp-add: the add dialog's model
+  grantsNotesOf,   // r3275 (4): the window's one note + the picker's gate
 };

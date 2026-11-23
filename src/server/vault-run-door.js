@@ -921,8 +921,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     let c = null;
     try { c = useGrants.carry(db.always, { toolOfWild: VR.wildcardToolOf }); } catch (e) { log(`the «always» rows could not be carried (${e.message}) — they stay in data/${STORE_FILE}`); return; }
     c = c || {};
-    const waited = new Set((Array.isArray(c.waitedFor) ? c.waitedFor : []).map((x) => `${x.resource}\n${x.conv}`));
-    const keep = c.held ? db.always.slice() : db.always.map((a) => ({ ...a, entries: (Array.isArray(a.entries) ? a.entries : []).filter((id) => waited.has(`${id}\n${a.conv}`)) })).filter((a) => a.entries.length);
+    const waited = new Set((Array.isArray(c.waitedFor) ? c.waitedFor : []).map((x) => `${x.row}\n${x.resource}\n${x.conv}`));   // r3275 (6): by ROW as well as entry × conversation
+    const keep = c.held || (!Array.isArray(c.waitedFor) && c.waits) ? db.always.slice() : db.always.map((a, i) => ({ ...a, entries: (Array.isArray(a.entries) ? a.entries : []).filter((id) => waited.has(`${i}\n${id}\n${a.conv}`)) })).filter((a) => a.entries.length);   // r3275 (6): an answer that waits but names nothing keeps EVERY row (fail closed)
     for (const k of ['carried', 'expired', 'hostless', 'failed', 'legacy', 'waits']) c[k] = Number(c[k]) || 0;
     const r = save({ runnable: db.runnable, always: keep });
     audit('vault-run-always-carried', { carried: c.carried, expired: c.expired, hostless: c.hostless, failed: c.failed, legacy: c.legacy, waits: c.waits, rows: c.carried + c.expired + c.hostless + c.failed + c.waits, saved: !!r.ok });   // r3205: the rows that wait are counted
@@ -2159,7 +2159,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const uf = useFacts(caller) || {};
       const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
       return useGrants.undecidedFor({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])].filter(Boolean).map(String))] }).map((h) => refOfId(h.id)).filter(Boolean);
-    } catch { return []; }
+    } catch (e) { log(`the standing approvals waiting for the user could not be listed (${(e && e.message) || e}) — none is said`); return []; }   // r3275 (6): the agent's road is never silent
   }
   function standingOf(caller) {
     if (!useGrants || !caller || !caller.conversationId) return [];

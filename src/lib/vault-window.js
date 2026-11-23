@@ -41,6 +41,7 @@ import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.j
 import { wideHeaderDoors, loginHeld, showLoginGrantPicker, showAnySiteDialog, showAnyAccountDialog } from './vault-login-grants.js';   // the owner 2026-11-17: what a login holds (its two-step door), the three grant dialogs + the wider doors on the «Web logins» head
 const LOGIN_DOORS = Object.freeze({ held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog });   // handed to each login row (it imports no dialog — the paste box's bundle stays as it is)
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
+import { totpNote } from './vault-totp-row.js';   // r3275 (4): the two-step grants list's ONE note (its own line: test-vault-kinds-census cuts the line above by its text)
 import { addOrderOf, familyOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY (lane vault-entry-description: familyOf — which kinds carry a name and a description) — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
 import { buttonsOf } from '../foryou-actions.js'; // B-ef1b: a band item's DECLARED buttons (the registry's words; runAction runs them)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
@@ -253,6 +254,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   const hideAllB = btnEl(t('Hide all'), 'vw-hide-all');
   hideAllB.hidden = true;
   note.append(noteText, timer, hideAllB, showAllB);
+  const totpNoteEl = vwEl('span', 'vw-note-text vw-totp-note'); totpNoteEl.hidden = true; note.insertBefore(totpNoteEl, timer);   // r3275 (4): the two-step grants list's ONE note
   const list = vwEl('div', 'vw-list');
   pane.append(bar, note, list);
   body.append(rail, pane);
@@ -706,6 +708,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     root.classList.toggle('vw-locked', locked);
     noteText.textContent = '';
     showAllB.hidden = state !== 'unlocked';
+    { const tn = state === 'unlocked' && st.totp ? totpNote(st.totp) : null; totpNoteEl.textContent = tn || ''; totpNoteEl.hidden = !tn; }   // r3275 (4): once, in the window's head (no two-step entry ⇒ no grant to lose: nothing to say)
     if (state === 'not_set_up') noteText.textContent = t('Set a second password first — stored values are shown only behind it');
     else if (d && !locked) noteText.textContent = t('{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes. Every reveal is recorded.', { n: (d.rows || []).length });
     if (locked) {

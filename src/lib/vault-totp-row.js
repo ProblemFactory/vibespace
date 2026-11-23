@@ -15,7 +15,7 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, copyText, createModalShell } from './utils.js';
 import { CLIPBOARD_CLEAR_MS } from '../vault-inventory.js';
-import { addPlanOf, ADD_DEFAULTS, ADD_CHOICES } from '../totp.js';   // PURE: the add dialog's model (scripts/test-totp.mjs ⑩)
+import { addPlanOf, ADD_DEFAULTS, ADD_CHOICES, grantsNotesOf } from '../totp.js';   // PURE: the add dialog's model (scripts/test-totp.mjs ⑩)
 import { showUnlock } from './vault-unlock.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -114,9 +114,7 @@ export function totpExtras(row, data, { refresh, signal, show } = {}) {
   const box = el('div', 'vw-ak vw-totp');
   box.dataset.totp = name;
   const grants = el('div', 'vw-ak-grants');
-  if (data && data.grantsLost) { grants.append(el('span', 'vw-ak-to', t('The grants list was damaged and started empty — its damaged bytes are kept beside it as {name} (not a copy to restore); grant the codes again, or mend the file by hand and restart.', { name: data.grantsLost }))); }   // r3104: what was lost, where its bytes are, what to do
-  if (data && data.grantsUnread) { grants.append(el('span', 'vw-ak-to', t('The grants of the two-step codes could not be read — nothing is lost; they show again once they read.'))); }   // r3002 (c): the store held
-  if (data && (data.grantsUnread || data.grantsLost)) box.append(grants);
+  // r3275 (4): the list's note (held, torn, lost) is drawn ONCE in the Vault window's head (totpNote) — never in every row
   if (!(data && data.grantsUnread) && entry.grants.length) {
     grants.append(el('span', 'vw-ak-to', t('Code granted to:')));
     for (const g of entry.grants) {
@@ -134,8 +132,15 @@ export function totpExtras(row, data, { refresh, signal, show } = {}) {
   const useB = el('button', 'vw-btn vw-totp-grant', t('Use for…'));
   useB.type = 'button';
   useB.title = t('Grant the current code (never the seed) to a running conversation or a task group');
-  useB.onclick = () => showTotpGrantPicker(entry, data, { refresh });
+  useB.onclick = () => { if (grantsNotesOf(data).held) { showToast(failWords({ code: 'vault_grants_unread' }), { type: 'error' }); return; } showTotpGrantPicker(entry, data, { refresh }); };   // r3275 (4): while held the picker never opens all unticked (it would read as «nobody is granted») — the press says the hold
   return { value: [viewB, code, copyB], box, doors: [useB], stop };
+}
+
+/** r3275 (4): the two-step grants list's ONE note for the Vault window's head (held, torn, lost) — null when there is none */
+export function totpNote(data) {
+  const n = grantsNotesOf(data).note;
+  if (!n) return null;
+  return n.kind === 'torn' ? t('The grants list is damaged — its bytes are kept beside it once, then it starts empty; grant the codes again then. Until then no grant gives a code.') : n.kind === 'unread' ? t('The grants of the two-step codes could not be read — nothing is lost; they show again once they read.') : t('The grants list was damaged and started empty — its damaged bytes are kept beside it as {name} (not a copy to restore); grant the codes again, or mend the file by hand and restart.', { name: n.name });
 }
 
 /** 用于…: every running conversation and Task Group, multi-select; checked = granted (a conversation's grant from an earlier

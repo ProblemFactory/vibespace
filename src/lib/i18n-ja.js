@@ -12955,6 +12955,8 @@ export default {
   "This row's marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed": "この行のマークが失われました——行全体を望む形で保存すると（验证是你）決まります。✕ ひとつでは残すメンバーを保証できません。何も変更していません", // r3104 (a); r3130 (e)
   "The damaged marks are kept beside the store as {name} — they are not a copy to restore.": "壊れたマークはストアの横に {name} として残してあります——復元に使うコピーではありません。", // r3104 (a)
   "The grants of the two-step codes could not be read — nothing was changed; VibeSpace reads them again by itself": "2段階コードの許可を読み取れません——何も変更していません。VibeSpace が自動で読み直します", // r3104 (c)
+  "The grants list is damaged — its bytes are kept beside it once, then it starts empty; grant the codes again then. Until then no grant gives a code.": "許可の一覧が壊れています——内容を一度だけ横に残し、空から始めます。そのあとでコードを許可し直してください。それまで、許可によってコードが渡されることはありません。", // r3275
+  "Saved «{name}», but its code was not given — give it in Vault ▸ Two-step codes ▸ Use for…": "「{name}」を保存しましたが、コードは渡されていません — 「保管庫 ▸ 2 段階認証コード ▸ 使用先…」から渡してください", // r3275
   "The grants list was damaged and started empty — its damaged bytes are kept beside it as {name} (not a copy to restore); grant the codes again, or mend the file by hand and restart.": "許可の一覧が壊れていたため、空から始めました——壊れた内容は {name} として横に残してあります（復元に使うコピーではありません）。コードを許可し直すか、ファイルを手で直して再起動してください。", // r3104 (c)
   "The grants of the two-step codes could not be read — nothing is lost; they show again once they read.": "2段階コードの許可を読み取れません——失われたものはありません。読み取れたら再び表示されます。", // r3002 (c)
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "検証できません：保管庫の使用マークを読み取れません——読み取れるまで使用されません。失われたものはありません。", // r3002 (a)

@@ -237,7 +237,7 @@ async function main() {
     ok(r.held && r.kept === 1 && r.carried && r.left === 0, '(a) THE RUN DOOR\'s carry of an old «always» row while the marks are HELD: the row STAYS in data/vault-run.json for the next read — and the next life, the marks read, carries it (the list then empty)', r);
     const M = mutantCopies('vault-side-stores-carry', REPO);
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-    const r2 = await alwaysScene(M.load('src/server/vault-run-door.js', anchored(SRC, 'const keep = c.held ? db.always.slice() : ', 'const keep = false ? db.always.slice() : ', 'carry-keeps-nothing'), 'carry-keeps-nothing'));
+    const r2 = await alwaysScene(M.load('src/server/vault-run-door.js', anchored(SRC, 'const keep = c.held || (!Array.isArray(c.waitedFor) && c.waits) ? db.always.slice() : ', 'const keep = false ? db.always.slice() : ', 'carry-keeps-nothing'), 'carry-keeps-nothing'));
     ok(r2.kept === 0 && !r2.carried, '(a) CONTROL (a door whose carry keeps nothing): the held read empties the list and the row is never carried — red', r2);
   }
   // ── r3205 (round wg20wcxhh on line 669): the round's SMALLS and its readers' shoulds ──
@@ -260,14 +260,17 @@ async function main() {
       const pr = placeRefusal(w.MARKS);
       let heldUses = null;
       try { heldUses = door(w.mk()).usesFor(me); } finally { pr.lift(); }
+      const ex = w.mk().setRow(w.e2, { to: [w.m2, { kind: 'everyone', hosts: ['192.168.1.1'] }], except: [{ kind: 'conversation', key: 'cid-made-up-7' }] }, { reauthed: true });   // r3275 (6): e2's row leaves one conversation out
       const ug = w.mk(); await decideE1(w, ug);
       const may = ug.mayUseFor({ conversationKeys: ['cid-made-up-2'] }) || [];
+      const mayLeft = ug.mayUseFor({ conversationKeys: ['cid-made-up-7'] }) || [];
       const d = door(ug), ref = `vault://secrets/${nameOfId(w.e2)}/secret`;
       const usesUnd = ((d.usesFor(me) || {}).standingUndecided || {}).entries || [], listUnd = ((d.runnableFor(me) || {}).standingUndecided || {}).entries || [];
-      return { heldWords: !!(heldUses && /could not be read/.test(String(heldUses.standingUnread || ''))), mayUnd: may.some((r) => r.resource === w.e2 && r.code === 'marks_undecided' && r.ok === false), usesUnd: usesUnd.includes(ref), listUnd: listUnd.includes(ref) };
+      return { exOk: !!(ex && ex.ok), mayExc: mayLeft.some((r) => r.resource === w.e2 && r.code === 'excepted' && r.ok === false), heldWords: !!(heldUses && /could not be read/.test(String(heldUses.standingUnread || ''))), mayUnd: may.some((r) => r.resource === w.e2 && r.code === 'marks_undecided' && r.ok === false), usesUnd: usesUnd.includes(ref), listUnd: listUnd.includes(ref) };
     };
     const r = await usesScene(RUNR);
     ok(r.heldWords, '(a) r3205 (1): the agent\'s `uses` while the marks are HELD carries the hold\'s words, as `list` does — never «none» from a held list', r);
+    ok(r.exOk && r.mayExc, '(a) r3275 (6): an UNDECIDED row\'s 除了 still says «left out» in «what it may use» (the excepted answer, never skipped)', r);
     ok(r.mayUnd && r.usesUnd && r.listUnd, '(a) r3205 (2): an UNDECIDED row that names the conversation is listed as unknown in «what it may use», and as waiting for the user in the agent\'s list and uses', r);
     const M = mutantCopies('vault-side-stores-uses', REPO);
     const SRCd = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
@@ -275,7 +278,7 @@ async function main() {
     const r2 = await usesScene(M.load('src/server/vault-run-door.js', noHeldUses, 'uses-no-hold'));
     ok(!r2.heldWords, '(a) CONTROL (a door whose uses drops the hold\'s words): `uses` says nothing of the hold — red', r2);
     const SRCg = fs.readFileSync(path.join(REPO, 'src/server/vault-use-grants.js'), 'utf8');
-    const noUnd = anchored(anchored(SRCg, "if (rv && U.holds(rv)) out.push({ ...base, ok: false, code: 'marks_undecided' }); continue; }", '}', 'may-no-undecided'), 'if (v && U.holds(v)) out.push({ id: String(row.resource) });', '', 'list-no-undecided');
+    const noUnd = anchored(anchored(SRCg, "if (rv && U.holds(rv)) out.push({ ...base, ok: false, code: 'marks_undecided' });", 'if (false) { }', 'may-no-undecided'), 'if (v && U.holds(v)) out.push({ id: String(row.resource) });', '', 'list-no-undecided');
     const r3 = await usesScene(RUNR, M.load('src/server/vault-use-grants.js', noUnd, 'no-undecided'));
     ok(!r3.mayUnd && !r3.usesUnd && !r3.listUnd, '(a) CONTROL (a copy without the undecided answers): the undecided row is skipped as «nothing held» everywhere — red', r3);
   }
@@ -294,13 +297,20 @@ async function main() {
   {
     // SMALL 4: an entry's delete while HELD, at the PASTE DOOR's own reply — the hold's code and words, and the entry stays
     const PD = require(path.join(REPO, 'src/server/vault-paste-door.js'));
+    const pasteScene = async (pdMod) => {
     const w = await marksWorld();
-    const paste = PD.create({ vault: w.vault, useGrants: w.mk(), log: () => { } });
+    const ugp = w.mk(), paste = pdMod.create({ vault: w.vault, useGrants: ugp, log: () => { } });
     const pr = placeRefusal(w.MARKS);
     let r = null;
     try { r = paste.dropEntry(nameOfId(w.e2).slice('secret:'.length)); } finally { pr.lift(); }
     const still = (w.vault.secretNames() || []).some((x) => x && `secrets:${x.name}#secret` === w.e2);
-    ok(!!r && !r.ok && r.code === 'vault_use_marks_unread' && /could not be read/.test(String(r.words || r.error || '')) && still, '(a) r3205 (4): an entry\'s delete while HELD, at the paste door\'s own reply: the hold\'s code and words — the entry stays', { code: r && r.code, words: !!(r && (r.words || r.error)), still });
+    return { r, still, holdWords: ugp._marksHold.words() }; };
+    const { r, still, holdWords } = await pasteScene(PD);
+    ok(!!r && !r.ok && r.code === 'vault_use_marks_unread' && /could not be read/.test(String(r.words || '')) && r.words === holdWords && still, '(a) r3205 (4): an entry\'s delete while HELD, at the paste door\'s own reply: the hold\'s code and words — the entry stays', { code: r && r.code, words: !!(r && (r.words || r.error)), still });
+    const MP = mutantCopies('vault-side-stores-paste', REPO);
+    const SRCp = fs.readFileSync(path.join(REPO, 'src/server/vault-paste-door.js'), 'utf8');
+    const rp = await pasteScene(MP.load('src/server/vault-paste-door.js', anchored(SRCp, /named\('vault_use_marks_unread', \{ words: dr\.error \|\| MORE_WORDS\.vault_use_marks_unread \}\)/g, "named('vault_use_marks_unread')", 'paste-no-words', { count: 'any' }), 'paste-no-words'));
+    ok(rp.r && rp.r.code === 'vault_use_marks_unread' && rp.r.words !== rp.holdWords, '(a) CONTROL (r3275 (5): a paste door that drops the hold\'s words): its reply says the generic words, not the hold\'s — red', { same: rp.r && rp.r.words === rp.holdWords });
   }
   {
     // ALSO (the round's readers): an old «always» row of TWO entries, one UNDECIDED — the door keeps ONLY the entry that waited; the
@@ -348,7 +358,7 @@ async function main() {
     const mk = () => vtMod.create({ dataDir, vault, log: () => { } });
     const t0 = mk();
     const seed = Array.from(crypto.randomBytes(20)).map((b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[b % 32]).join('');   // a made-up seed, built here
-    const r = [t0.addEntry({ seed, issuer: 'MadeUp', account: 'made-up-account', name: 'madeup-code' }), t0.grant('madeup-code', ['group:T-made-up-one']), t0.grant('madeup-code', ['group:T-made-up-two'])];
+    const r = [t0.addEntry({ seed, issuer: 'MadeUp', account: 'made-up-account', name: 'madeup-code' }), t0.grant('madeup-code', ['group:T-made-up-one']), t0.grant('madeup-code', ['group:T-made-up-two']), t0.agentAdd({ seed, name: 'own-code' }, { owner: 'cid-made-up-own' })];   // r3275 (2): + an agent's OWN seed (no grant)
     if (!r.every((x) => x && x.ok)) throw new Error('the two-step world: ' + r.map((x) => x && x.code).join(','));
     return { dataDir, vault, mk, FILE: path.join(dataDir, 'vault-grants.json') };
   }
@@ -358,7 +368,12 @@ async function main() {
     const before = fs.readFileSync(w.FILE, 'utf8');
     const pr = placeRefusal(w.FILE);
     let t1, g = null, l = null, u = null, dr = null;
-    try { t1 = w.mk(); g = t1.grant('madeup-code', ['group:T-made-up-three']); l = t1.list(); u = t1.use(caller, 'madeup-code'); dr = t1.drop('madeup-code'); } finally { pr.lift(); }
+    const seed2 = Array.from(crypto.randomBytes(20)).map((b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[b % 32]).join('');   // made up, built here
+    const gid = (JSON.parse(before).grants[0] || {}).id;
+    let ad = null, ag = null, ux = null, own = null;
+    try { t1 = w.mk(); g = t1.grant('madeup-code', ['group:T-made-up-three']); l = t1.list(); u = t1.use(caller, 'madeup-code'); dr = t1.drop('madeup-code'); ad = t1.addEntry({ seed: seed2, name: 'held-add' }); ag = t1.agentAdd({ seed: seed2, name: 'held-agent-add' }, { owner: 'cid-made-up-own' }); ux = t1.ungrant(gid); own = t1.use({ conversationId: 'cid-made-up-own', scope: 'cid-made-up-own', groups: [], run: 'r'.repeat(24) }, 'own-code'); } finally { pr.lift(); }
+    ok([ad, ag, ux].every((x) => !!x && !x.ok && x.code === 'vault_grants_unread' && /could not be read/.test(x.why || '')) && fs.readFileSync(w.FILE, 'utf8') === before, '(c) r3275 (1) (5): while held the window\'s add, an agent\'s add and a ✕ each answer the hold\'s own code and words — nothing stored, nothing written', { add: ad && ad.code, agentAdd: ag && ag.code, ungrant: ux && ux.code });
+    ok(!!own && own.ok && typeof own.code === 'string' && own.code.length >= 6, '(c) r3275 (2): an agent\'s OWN seed is answered while held (its road needs no grant, as the release answered it)', { own: own && (own.ok ? 'given' : own.code) });
     ok(!!dr && !dr.ok && dr.code === 'vault_grants_unread' && /could not be read/.test(dr.why || '') && fs.readFileSync(w.FILE, 'utf8') === before, '(c) …an entry\'s DELETE while held answers the hold\'s own code and words (r3230\'s reader table): the entry and its grants stay', { code: dr && dr.code });
     ok(!!g && !g.ok && /could not be read/.test(g.why || '') && fs.readFileSync(w.FILE, 'utf8') === before, '(c) a read that failed at the start HOLDS the grants: the next grant is refused by name («could not be read»), nothing written over the file', g && (g.ok ? 'granted' : g.code));
     ok(!!g && g.code === 'vault_grants_unread' && !!l && !!l.grantsUnread && !!u && !u.ok && u.code === 'vault_grants_unread', '(c) …the window\'s list says the grants could not be read, and an agent\'s request for its code is answered the HOLD\'s code — never «not granted» (r3104; no code is given: fail closed)', { grant: g && g.code, listed: !!(l && l.grantsUnread), use: u && (u.ok ? 'given' : u.code) });
@@ -392,13 +407,73 @@ async function main() {
     const lostBefore = t.list().grantsLost;
     const g = t.grant('madeup-code', ['group:T-made-up-five']);
     const lostAfter = t.list().grantsLost;
-    ok(lostBefore === copies[0] && !lostAfter, '(c) …the window says the list was damaged and WHERE its bytes are kept (the copy\'s base name) — what to do: grant again or mend by hand, never «restore that copy» — until the person\'s next grant', { before: lostBefore, named: copies[0], after: lostAfter || null });
+    ok(!!copies[0] && lostBefore === copies[0] && !lostAfter, '(c) …the window says the list was damaged and WHERE its bytes are kept (the copy\'s base name) — what to do: grant again or mend by hand, never «restore that copy» — until the person\'s next grant', { before: lostBefore, named: copies[0], after: lostAfter || null });
     ok(copies.length === 1 && copyBytes === later && !!g && g.ok, '(c) a file of another LAYOUT (no grants array) at the start is kept aside ONCE (its bytes, byte for byte), then the store starts empty and takes grants again', { copies: copies.length, same: copyBytes === later, grant: g && (g.ok ? 'ok' : g.code) });
+  }
+  {
+    // r3275 (5) (7): a carried row is never USED (a group grant this reader cannot read, the caller in that group); a row that is not
+    // an object is carried too; the carried rows go with their entry's delete; a file gone by hand takes them with it
+    const w = await totpWorld();
+    const doc = JSON.parse(fs.readFileSync(w.FILE, 'utf8'));
+    const entryOf0 = doc.grants[0].entry;
+    doc.grants.push({ ...doc.grants[0], subject: 'group:T-made-up-nine', run: 'r'.repeat(24) }, 'a later scalar row', 7);   // grantOf rejects a group grant with a run
+    fs.writeFileSync(w.FILE, JSON.stringify(doc));
+    const t = w.mk();
+    const used = t.use({ conversationId: 'cid-made-up-n', groups: ['T-made-up-nine'], run: 'r'.repeat(24) }, 'madeup-code');
+    const g = t.grant('madeup-code', ['group:T-made-up-six']);
+    const after = JSON.parse(fs.readFileSync(w.FILE, 'utf8')).grants;
+    const dr = t.drop('madeup-code');
+    const afterDrop = JSON.parse(fs.readFileSync(w.FILE, 'utf8')).grants;
+    ok(!!used && !used.ok && used.code === 'not_granted', '(c) r3275 (5): a CARRIED row is never used — a group grant this reader cannot read gives its group no code', { use: used && used.code });
+    ok(!!g && g.ok && after.includes('a later scalar row') && after.includes(7), '(c) r3275 (7): a row that is not an object is carried too (every row the reader cannot read)', { grant: g && (g.ok ? 'ok' : g.code) });
+    ok(!!dr && dr.ok && !afterDrop.some((x) => x && typeof x === 'object' && x.entry === entryOf0) && afterDrop.includes('a later scalar row'), '(c) r3275 (5): the carried rows of an entry go with its delete (a stale grant never covers a new seed); a row of no entry stays', { left: afterDrop.length });
+    const w2 = await totpWorld();
+    const d2 = JSON.parse(fs.readFileSync(w2.FILE, 'utf8'));
+    d2.grants.push({ ...d2.grants[0], subject: 'team:made-up-later-kind' });
+    fs.writeFileSync(w2.FILE, JSON.stringify(d2));
+    const t2 = w2.mk(); t2.grant('madeup-code', ['group:T-made-up-six']);
+    fs.rmSync(w2.FILE, { force: true });   // the file gone by hand
+    const g2 = t2.grant('madeup-code', ['group:T-made-up-eight']);
+    const after2 = JSON.parse(fs.readFileSync(w2.FILE, 'utf8')).grants;
+    ok(!!g2 && g2.ok && !after2.some((x) => x && x.subject === 'team:made-up-later-kind'), '(c) r3275 (7): a file gone by hand takes its carried rows with it (the next grant writes none back)', { rows: after2.length });
+  }
+  {
+    // r3275 (3): TORN bytes in MID-LIFE (a hand edit) take the family's road — held (the words say «damaged»), kept aside ONCE, lifted
+    // by the read again; then the window names the copy and the list takes grants again
+    const w = await totpWorld();
+    const t = w.mk(); t.list();   // a life that read fine
+    fs.writeFileSync(w.FILE, '{"v":1,"grants":[');
+    const g = t.grant('madeup-code', ['group:T-made-up-seven']);
+    const lt = t.list();
+    await until(() => fs.readdirSync(w.dataDir).some((n) => n.startsWith('vault-grants.json.corrupt-')) && (() => { try { return Array.isArray(JSON.parse(fs.readFileSync(w.FILE, 'utf8')).grants); } catch { return false; } })(), 3000);
+    await sleep(20);
+    const copies = fs.readdirSync(w.dataDir).filter((n) => n.startsWith('vault-grants.json.corrupt-'));
+    const lost = t.list().grantsLost;
+    const g2 = t.grant('madeup-code', ['group:T-made-up-seven']);
+    ok(!!g && g.code === 'vault_grants_unread' && /damaged/.test(g.why || '') && !!lt && lt.grantsTorn === true, '(c) r3275 (3): torn bytes in MID-LIFE are HELD — a grant is refused with the hold\'s words («damaged»), and the window\'s list says torn', { grant: g && g.code, torn: lt && lt.grantsTorn });
+    ok(copies.length === 1 && !!copies[0] && lost === copies[0] && !!g2 && g2.ok, '(c) …kept aside ONCE and lifted by the read again in the same life: the window names the copy, the list takes grants again', { copies: copies.length, lost, grant: g2 && (g2.ok ? 'ok' : g2.code) });
+  }
+  {
+    // r3275 (5): a red for the code's OWN held check — a copy without it answers «not granted» while held
+    const M = mutantCopies('vault-side-stores-c-use', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-totp.js'), 'utf8');
+    const noHeld = anchored(SRC, "if (!own.ok && own.code === 'not_granted') return done(named(hold.held() ? 'vault_grants_unread' : 'failed', hold.words() || `${GRANTS_FILE} could not be read`)); }", '}', 'use-no-held');
+    const w = await totpWorld(M.load('src/server/vault-totp.js', noHeld, 'use-no-held'));
+    const pr = placeRefusal(w.FILE);
+    let u = null;
+    try { u = w.mk().use(caller, 'madeup-code'); } finally { pr.lift(); }
+    ok(!!u && !u.ok && u.code === 'not_granted', '(c) CONTROL (r3275 (5): a copy without the code\'s held check): an agent\'s request while held is answered «not granted» — red', { code: u && u.code });
+  }
+  {
+    // r3275 (4): THE PAGE's model — the Vault window's ONE note in its three states (held, torn, lost) and none, and the picker's gate
+    const TM = require(path.join(REPO, 'src/totp.js'));
+    const n1 = TM.grantsNotesOf({ grantsUnread: 'x' }), n2 = TM.grantsNotesOf({ grantsUnread: 'x', grantsTorn: true }), n3 = TM.grantsNotesOf({ grantsLost: 'vault-grants.json.corrupt-made-up' }), n4 = TM.grantsNotesOf({ entries: [] });
+    ok(n1.held && n1.note.kind === 'unread' && n2.held && n2.note.kind === 'torn' && !n3.held && n3.note.kind === 'lost' && n3.note.name === 'vault-grants.json.corrupt-made-up' && !n4.held && n4.note === null, '(c) r3275 (4): the window\'s ONE note — held, torn, lost, or none; «Use for…» opens no picker while held', { n1, n2, n3, n4 });
   }
   {
     const M = mutantCopies('vault-side-stores-c', REPO);
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-totp.js'), 'utf8');
-    const cut = 'else if (raw && typeof raw === \'object\') carried.push(raw);';
+    const cut = 'else carried.push(raw);';
     ok(SRC.split(cut).length === 2, '(c) the carry is there once (the control below takes it out)');
     const r = await carryScene(M.load('src/server/vault-totp.js', anchored(SRC, cut, '', 'no-carry'), 'no-carry'));
     ok(!!r.g && r.g.ok && !r.carried, '(c) CONTROL (a copy that drops the rows it cannot read): the later row is written over by the next grant — red', { carried: r.carried });

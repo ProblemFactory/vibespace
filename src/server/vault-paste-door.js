@@ -364,7 +364,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     try { r = totp.addEntry(input, { who: String(by).slice(0, 40) }); }
     catch (e) { log(`${q.requestId}: the two-step code could not be saved (${(e && e.code) || 'error'})`); return named('store_failed'); }
     finally { input.seed = null; input.uri = null; }
-    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }
+    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && (r.error || r.why)) || MORE_WORDS[c] || P.WORDS[c] || c }; }   // r3275: the two-step store says its words in `why`
     const name = String(r.name);
     let allowed = false, whyNot = null;
     if (t.allow === true && q.conv && typeof totp.grant === 'function') {

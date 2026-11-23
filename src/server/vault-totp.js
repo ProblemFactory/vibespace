@@ -67,7 +67,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   const GRANTS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.grants);
   const hold = HOLD.create({
     file: FILE, valid: GRANTS_SHAPE, code: 'vault_grants_unread', aside: (m) => `${FILE}.corrupt-${m}`,
-    words: (h) => `${GRANTS_FILE} in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No grant is lost: nothing is written over it, no two-step code is given to anybody until it reads, and a grant or its ✕ is refused until then`,
+    words: (h) => (/^torn/.test(String((h && h.code) || '')) ? `${GRANTS_FILE} in VibeSpace's data folder is damaged (${h.code}): VibeSpace keeps its bytes beside it once, then starts the list empty — grant the codes again then; until then no code that needs a grant is given, and a grant, its ✕ or a new two-step entry is refused` : `${GRANTS_FILE} in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No grant is lost: nothing is written over it, no code that needs a grant is given until it reads (an agent's own seed and a browser login's fill need none), and a grant, its ✕ or a new two-step entry is refused until then`),   // r3275 (2) (3): the words true in each state
     log: (s) => log(s),
     onLift: (v, f) => { if (f && f.setAside) { try { writeGrants([], [], f.setAside); } catch (e) { log(`${GRANTS_FILE} could not be started empty after its bytes were kept aside (${e.code || e.message})`); } } },   // r3104: the empty store names WHERE the damaged bytes are (said in the window until the person's next grant)
   });
@@ -87,16 +87,19 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     if (hold.held()) return { grants: [], carried: [], bad: true };   // r3002 (c): held — read again off the loop; nothing granted until then
     let read; try { read = { text: fs.readFileSync(FILE, 'utf8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: GRANTS_SHAPE });
-    if (a.state === 'missing') return { grants: [], carried: [], bad: false };
-    if (a.state !== 'data') { log(`${GRANTS_FILE} could not be read (${a.code}) — no code is granted and nothing is written over it until it reads`); return { grants: [], carried: [], bad: true }; }
+    if (a.state === 'missing') { carriedNow = []; return { grants: [], carried: [], bad: false }; }   // r3275 (7): a file gone takes its carried rows with it
+    if (a.state !== 'data') { hold.start(a); log(`${GRANTS_FILE} could not be read (${a.code}) — no code is granted and nothing is written over it until it reads`); return { grants: [], carried: [], bad: true }; }
     // r3002 (c): a row the reader cannot read is CARRIED verbatim (never dropped, never used)
     const grants = [], carried = [];
-    for (const raw of a.value.grants) { const g = T.grantOf(raw); if (g) grants.push(g); else if (raw && typeof raw === 'object') carried.push(raw); }
+    for (const raw of a.value.grants) { const g = T.grantOf(raw); if (g) grants.push(g); else carried.push(raw); }   // r3275 (7): EVERY row the reader cannot read is carried, an object or not
     carriedNow = carried;
     const lostAside = typeof a.value.aside === 'string' && /^vault-grants\.json\.corrupt-[\w.-]{1,80}$/.test(a.value.aside) ? a.value.aside : null;
     return { grants, carried, bad: false, lostAside };
   }
   let carriedNow = [];   // the rows the last read carried — every write puts them back as they were
+  /** r3275 (1) (3): is the list held NOW? A door that reads the grants asks it first — and a read that fails in mid-life takes the
+   *  family's road there (the read sets the hold), so the door answers the hold's code and words, never a plain «failed» */
+  const heldNow = () => { if (!hold.held()) readGrants(); return !!hold.held(); };
   const writeGrants = (grants, carried = carriedNow, aside = null) => writeJsonAtomic(FILE, { v: 1, grants: [...grants, ...carried], ...(aside ? { aside } : {}) });   // r3104: `aside` only on the torn lift's empty start — the next grant or ✕ writes it away
   const publicGrant = (g, live) => ({ id: g.id, subject: g.subject, at: g.at, by: g.by, ...(live ? { live: !!live(g) } : {}) });
   /** Every grant of `entry` gone (a delete, an add over a stale name). → true | false (could not be written). */
@@ -104,7 +107,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     const { grants, bad } = readGrants();
     if (bad) return false;
     const left = grants.filter((g) => g.entry !== entry);
-    const carriedLeft = carriedNow.filter((r) => r.entry !== entry);   // r3002 (c): a carried row of the deleted entry goes with it
+    const carriedLeft = carriedNow.filter((r) => !(r && typeof r === 'object' && r.entry === entry));   // r3002 (c): a carried row of the deleted entry goes with it
     if (left.length === grants.length && carriedLeft.length === carriedNow.length) return true;
     try { writeGrants(left, carriedLeft); return true; } catch (e) { log(`${GRANTS_FILE} could not be written (${e.code || e.message})`); return false; }
   }
@@ -153,6 +156,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
       return { ok: true, preview: true, name: p.name, exists, issuer: p.value.issuer, account: p.value.account, digits: p.value.digits, period: p.value.period, algorithm: p.value.algorithm, code: c.code, secondsLeft: c.secondsLeft };
     }
     if (exists) return named('exists', 'a two-step code of that name is in the vault already — delete it first, or pick another name');
+    if (heldNow()) return named('vault_grants_unread', hold.words());   // r3275 (1): an add drops the entry's old grants first — while held it answers the hold, nothing stored
     if (!dropGrantsOf(entry)) return named('failed', `${GRANTS_FILE} could not be read or written — nothing is stored`);   // a stale grant never covers a new seed
     const put = vault.secretPut(entry, JSON.stringify(p.value));
     p.value.seed = null;
@@ -170,6 +174,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     if (!p.ok) return p;
     const entry = T.entryOf(p.name);
     if (has(entry)) { p.value.seed = null; return named('exists', 'a two-step code of that name is in the vault already — pick another name (the user deletes one in the Vault window)'); }
+    if (heldNow()) { p.value.seed = null; return named('vault_grants_unread', hold.words()); }   // r3275 (1): an agent's add, the same
     if (!dropGrantsOf(entry)) { p.value.seed = null; return named('failed', `${GRANTS_FILE} could not be read or written — nothing is stored`); }   // a stale grant never covers a new seed
     const put = vault.secretPut(entry, JSON.stringify(p.value), { kind: 'agent-typed', actor: actor ? clip(actor, 128) : null, owner: clip(owner, 128) });
     p.value.seed = null;
@@ -200,7 +205,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   function drop(name, { who = null, ip = null } = {}) {
     const entry = T.entryOf(String(name == null ? '' : name));
     if (!entry || !has(entry)) return named('not_found');
-    if (hold.held()) return named('vault_grants_unread', hold.words());   // r3230's reader table: an entry's delete while HELD answers the hold's own code and words (the entry and its grants stay)
+    if (heldNow()) return named('vault_grants_unread', hold.words());   // r3230's reader table: an entry's delete while HELD answers the hold's own code and words (the entry and its grants stay)
     if (!dropGrantsOf(entry)) return named('failed', `${GRANTS_FILE} could not be read or written — nothing was deleted`);
     const d = vault.secretDrop(entry);
     if (!d || !d.ok) return named('failed', d && d.code);
@@ -247,7 +252,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
    *  still runs — `live(grant)` from the wiring). Names only — never a value, never a run digest. */
   function list({ live = () => true } = {}) {
     const { grants, bad, lostAside } = readGrants();
-    return { ok: true, state: vaultState(), ...(bad ? { grantsUnread: hold.words() || `${GRANTS_FILE} could not be read` } : {}), ...(lostAside ? { grantsLost: lostAside } : {}), entries: names().map((s) => ({ name: T.nameOfEntry(s.name), at: s.at || null, grants: grants.filter((g) => g.entry === s.name).map((g) => publicGrant(g, live)) })) };
+    return { ok: true, state: vaultState(), ...(bad ? { grantsUnread: hold.words() || `${GRANTS_FILE} could not be read`, ...(/^torn/.test(String((hold.held() || {}).code || '')) ? { grantsTorn: true } : {}) } : {}), ...(lostAside ? { grantsLost: lostAside } : {}), entries: names().map((s) => ({ name: T.nameOfEntry(s.name), at: s.at || null, grants: grants.filter((g) => g.entry === s.name).map((g) => publicGrant(g, live)) })) };
   }
 
   // ── AN AGENT's door ──
@@ -259,7 +264,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     const done = (r, via = null) => { vault.audit('vault-totp-use', { by: 'agent', subject, entry: entry || clip(name, 130), ip, ok: !!r.ok, ...(r.ok ? { via } : { code: r.code }) }); return r; };
     if (!entry) return done(named('not_granted'));
     const { grants, bad } = readGrants();
-    if (bad) return done(named('vault_grants_unread', hold.words() || `${GRANTS_FILE} could not be read`));   // r3104 (a): a lookup through the list while held says so — never «not granted»
+    if (bad) { const own = T.useVerdict({ grants: [], entry, caller, vaultState: vaultState(), owner: ownerOf(entry) }); if (!own.ok && own.code === 'not_granted') return done(named(hold.held() ? 'vault_grants_unread' : 'failed', hold.words() || `${GRANTS_FILE} could not be read`)); }   // r3104 (a) + r3275 (2): the OWNER road (an agent's own seed) needs no grant and is answered as the release did; a road that needs a grant meets the hold's words — never «not granted»
     const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState(), owner: ownerOf(entry) });   // owner: lane vault-agent-own (a seed it added itself)
     if (!v.ok) return done(v);
     const t = now(), k = subject;

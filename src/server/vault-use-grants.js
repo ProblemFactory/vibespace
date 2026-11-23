@@ -471,12 +471,14 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   /** THE CARRY: data/vault-run.json's «always» rows (read by the run door, its mark verified) → members, through the ONE
    *  writer, by 'migration'. → { carried, expired, hostless, failed }. */
   function carry(always, { resourceOf = (x) => x, toolOfWild = null } = {}) {
-    const plan = U.alwaysCarry(always, { now: now(), resourceOf, toolOfWild });
+    const rowsIn = Array.isArray(always) ? always : [];
+    const plans = rowsIn.map((a) => U.alwaysCarry([a], { now: now(), resourceOf, toolOfWild }));   // r3275 (6): BY ROW — two old rows may name the same entry × conversation
+    const plan = { members: plans.flatMap((p, row) => p.members.map((m) => ({ ...m, row }))), expired: plans.reduce((n, p) => n + p.expired, 0), hostless: plans.reduce((n, p) => n + p.hostless, 0) };
     loadGen(); if (marksHeld()) return { held: true, carried: 0, expired: plan.expired, hostless: plan.hostless, failed: 0, legacy: 0, waits: plan.members.length };   // r3130 (a): nothing carried while held — the rows stay for the next read
     let carried = 0, failed = 0, legacy = 0, waits = 0; const waitedFor = [];   // r3205: which (entry, conversation) waited — the door keeps only those
     for (const m of plan.members) {
       const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until, tool: m.tool || null, legacy: !!m.legacy }, { by: 'migration' });
-      if (!r.ok && (r.code === 'marks_undecided' || r.code === 'vault_use_marks_unread')) { waits++; waitedFor.push({ resource: String(m.resource), conv: (m.principal && m.principal.key) || null }); continue; }   // r3130 (a): it waits for the row's decision — never «failed»   // r2: a carried wildcard keeps the CLI it was minted by; r3: one whose CLI nobody can name is carried as a LEGACY member
+      if (!r.ok && (r.code === 'marks_undecided' || r.code === 'vault_use_marks_unread')) { waits++; waitedFor.push({ row: m.row, resource: String(m.resource), conv: (m.principal && m.principal.key) || null }); continue; }   // r3130 (a): it waits for the row's decision — never «failed»   // r2: a carried wildcard keeps the CLI it was minted by; r3: one whose CLI nobody can name is carried as a LEGACY member
       if (r.ok) { carried++; if (m.legacy) legacy++; } else { failed++; log(`[vault-use] an «always» row could not be carried (${m.resource}: ${r.code})`); }
     }
     return { carried, expired: plan.expired, hostless: plan.hostless, failed, legacy, waits, waitedFor };
@@ -542,7 +544,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     for (const row of store().rowsOfDoor(U.DOOR)) {
       const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
       const base = { door: U.DOOR, resource: String(row.resource), name: nameOf(row.resource) };
-      if (undecided.has(String(row.resource))) { let rv = null; try { rv = U.useVerdict([row], facts, { destinationKnown: false, now: now() }); } catch { rv = null; } if (rv && U.holds(rv)) out.push({ ...base, ok: false, code: 'marks_undecided' }); continue; }   // r3205 (2): an UNDECIDED row that names this caller as stored is listed as unknown — never skipped as «nothing held» (it fails closed: a run asks its card)
+      if (undecided.has(String(row.resource))) { let rv = null; try { rv = U.useVerdict([row], facts, { destinationKnown: false, now: now() }); } catch { rv = null; } if (rv && U.holds(rv)) out.push({ ...base, ok: false, code: 'marks_undecided' }); else if (rv && rv.code === 'excepted') { const p = bare(rv.except); out.push({ ...base, ok: false, code: 'excepted', ...(p ? { except: p } : {}) }); } continue; }   // r3275 (6): an undecided row's 除了 still says «left out»   // r3205 (2): an UNDECIDED row that names this caller as stored is listed as unknown — never skipped as «nothing held» (it fails closed: a run asks its card)
       if (U.holds(v)) {
         const m = v.member || {}; const p = bare(m.principal || (v.entry ? GM.principalKey(v.entry) : ''));
         out.push({ ...base, ok: true, via: m.via || (v.entry && v.entry.kind), ...(p && p.kind === 'group' ? { groupId: p.id } : {}), detail: { hosts: Array.isArray(m.hosts) ? m.hosts.slice(0, 16) : [], until: m.until || null } });
