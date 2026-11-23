@@ -116,8 +116,8 @@ const runMerge = (M, row) => {
   fs.writeFileSync(cfgOf(am, into), JSON.stringify({ oauthAccount: { emailAddress: 's@example.com', tag: 'into' } })); fs.writeFileSync(cfgOf(am, from), JSON.stringify({ oauthAccount: { emailAddress: 's@example.com', tag: 'from' } }));
   const before = readB(credsOf(am, into));
   casts.length = 0;
-  const std = captureStd(); let ret = null, err = null, out;
-  try { ret = am.mergeSubscription(from, into, { preferFromCreds: !!row.preferFrom, liveAccountIds: new Set(row.live ? [into] : []) }); } catch (e) { err = e; } finally { out = std(); }
+  const std = captureStd(); let ret = null, err = null, out; const un = row.at ? row.at(am, into, from) : null;   // r2822: a write placed AT a point of the merge
+  try { ret = am.mergeSubscription(from, into, { preferFromCreds: !!row.preferFrom, liveAccountIds: new Set(row.live ? [into] : []) }); } catch (e) { err = e; } finally { if (un) un(); out = std(); }
   const file = readB(credsOf(am, into));
   return { am, into, from, before, file, fileJ: readJ(credsOf(am, into)), arch: archivesOf(am.subDir(into)), cfgTag: readJ(cfgOf(am, into))?.oauthAccount?.tag, fromGone: !fs.existsSync(am.subDir(from)), rowGone: !am.list().accounts.some((a) => a.id === from), casts, out, ret, err, intoB, fromB, dataDir };
 };
@@ -204,6 +204,55 @@ for (const t of TABLE) console.log(`    · ${t.row} · after ${t.after} · contr
 {
   const r = runMerge({ AccountManager }, { ...ROWS[0], live: true });
   ok(r.err && r.err.code === 'merge-account-live' && same(r.file, r.before) && r.arch.length === 0 && !r.fromGone, 'the live guard (B-3f8a) is unchanged: a running session on either side ⇒ refused (merge-account-live), not one byte moved', { code: r.err && r.err.code, arch: r.arch.length });
+}
+
+console.log('§2b r2822 — THE SURVIVOR REFRESHED AT THE POINT: its fresh file stands, the folded row\'s file archived beside it, said once');
+{
+  // the vendor's program writes the survivor's file AT a point of the merge's swap (a hook on the very call, never a race): right
+  // before the guard moves the name aside (a refresh in place), or right before ours goes into the empty name (a sign-in landing)
+  const hookOf = (k, test, act) => { const k0 = fs[k]; fs[k] = function (...a) { if (test(...a)) act(...a); return k0.apply(this, a); }; return () => { fs[k] = k0; }; };
+  const scene = (M, row, { at, linkless = false, linkErr = linkless ? 'EPERM' : null, widen = false }) => {
+    const fresh = login(), freshB = J(fresh); let landed = false;
+    const r = runMerge(M, { ...row, at: (am, into) => {
+      const p = credsOf(am, into);
+      const un = [at === 'aside'
+        ? hookOf('renameSync', (s0, d) => !landed && String(s0) === p && /\.dead-\d+-a/.test(String(d)), (s0) => { landed = true; fs.writeFileSync(s0, freshB); if (widen) fs.chmodSync(s0, 0o644); })
+        : hookOf('linkSync', (s0, d) => !landed && String(d) === p && /\.tmp$/.test(String(s0)), (s0, d) => { landed = true; fs.writeFileSync(d, freshB, { mode: 0o600 }); })];
+      // …and the RELEASE's write point (its plain rename of the tmp onto the name), where a red control's copy writes: the same moment
+      un.push(hookOf('renameSync', (s0, d) => !landed && String(d) === p && /\.tmp$/.test(String(s0)), (s0, d) => { landed = true; fs.writeFileSync(d, freshB, { mode: 0o600 }); }));
+      if (linkErr) { const l0 = fs.linkSync; fs.linkSync = function () { throw Object.assign(new Error(linkErr + ': a stand-in'), { code: linkErr }); }; un.push(() => { fs.linkSync = l0; }); }
+      return () => { for (const u of un.reverse()) u(); };
+    } });
+    const fromBytes = Buffer.isBuffer(r.fromB) ? r.fromB : J(r.fromB);
+    return { landed, stands: same(r.file, freshB), dupArchived: r.arch.some((a) => same(a.bytes, fromBytes)), asideLeft: r.arch.filter((a) => /-a[0-9a-f]{8}$/.test(a.name)).length, cfg: r.cfgTag, fromGone: r.fromGone, rowGone: r.rowGone, err: r.err && r.err.message,
+      mode: (() => { try { return fs.statSync(credsOf(r.am, r.into)).mode & 0o777; } catch { return null; } })(), restsSaid: r.out.filter((l) => l.includes('Into') && /could not go back to its name/.test(l)).length,
+      said: r.out.filter((l) => l.includes('Into') && /changed or went since the merge read it/.test(l)).length, leaks: SECRETS.filter((x) => has(r.out.join('\n'), x)).length };
+  };
+  const GUARD = "guard = creds ? { expectBytes: intoBytes } : {}";
+  const mNoGuard = mutant({ acc: [[GUARD, 'guard = {}']] });
+  const S1 = scene({ AccountManager }, ROWS[0], { at: 'aside' });
+  ok(S1.landed && S1.stands && S1.dupArchived && S1.cfg === 'into' && S1.fromGone && S1.rowGone && S1.said === 1 && S1.leaks === 0 && !S1.err, 'r2822: the survivor\'s login REFRESHED right before the merge moves its file aside — the fresh file STANDS (and its .claude.json), the folded row\'s file is archived beside it, the rows still fold, said ONCE by the member\'s name with no token', S1);
+  const S1X = mNoGuard ? scene(mNoGuard, ROWS[0], { at: 'aside' }) : null;
+  ok(!!S1X && S1X.landed && !S1X.stands, 'RED control (the merge\'s guard cut: the plain rename it had) ⇒ the refreshed login is written over (red)', S1X);
+  const S2 = scene({ AccountManager }, ROWS.find((r) => r.name.startsWith('survivor-absent')), { at: 'link' });
+  ok(S2.landed && S2.stands && S2.dupArchived && S2.said === 1 && !S2.err, 'r2822: the survivor had NO file at the read and a sign-in lands in the empty name right before ours goes in — it stays, the folded row\'s file archived beside it, said once', S2);
+  const S2X = mNoGuard ? scene(mNoGuard, ROWS.find((r) => r.name.startsWith('survivor-absent')), { at: 'link' }) : null;
+  ok(!!S2X && S2X.landed && !S2X.stands, 'RED control (the guard cut) ⇒ the sign-in that landed is renamed over (red)', S2X);
+  const S3 = scene({ AccountManager }, ROWS[0], { at: 'aside', linkless: true, widen: true });
+  ok(S3.landed && S3.stands && S3.asideLeft === 0 && S3.dupArchived && S3.mode === 0o600 && !S3.err, 'r2822 with NO hard links (link EPERM): the put-back copies the refreshed file (0644) back into its empty name (an exclusive copy, then 0600) — it stands at its name, no aside left', S3);
+  const PUT = "    else if (LINKLESS.includes(e && e.code)) { try { back = copyIntoSync(aside, p); taken = !back; } catch { } }\n";
+  const mPut = mutant({ mat: [[PUT, '']] });
+  const S3X = mPut ? scene(mPut, ROWS[0], { at: 'aside', linkless: true }) : null;
+  ok(!!S3X && !S3X.stands && S3X.asideLeft === 1, 'RED control (the sync put-back\'s copy cut) ⇒ the refreshed file rests at a .dead name and its own name is empty (red)', S3X);
+  const mMode = mutant({ mat: [['  try { fs.fchmodSync(fd, 0o600); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }', '  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }']] });
+  const S3M = mMode ? scene(mMode, ROWS[0], { at: 'aside', linkless: true, widen: true }) : null;
+  ok(!!S3M && S3M.stands && S3M.mode === 0o644, 'RED control (the sync copy\'s mode line cut) ⇒ the copy back keeps the source\'s 0644 (red)', S3M);
+  // r2824 (1): a put-back that FAILS (link EIO, outside the no-hard-link list): the fresher file rests archived, its name empty — said so
+  const S4 = scene({ AccountManager }, ROWS[0], { at: 'aside', linkErr: 'EIO' });
+  ok(S4.landed && !S4.stands && S4.asideLeft === 1 && S4.dupArchived && S4.restsSaid === 1 && S4.said === 0 && S4.leaks === 0 && !S4.err, 'r2824: the merge\'s put-back FAILS (link EIO) — the refreshed file rests archived, its name empty, the folded row\'s file archived beside it; said THAT by the member\'s name, not «what is there stands»', S4);
+  const mKept = mutant({ mat: [["if (pb === 'kept') e.restsArchived = true; ", '']] });
+  const S4X = mKept ? scene(mKept, ROWS[0], { at: 'aside', linkErr: 'EIO' }) : null;
+  ok(!!S4X && S4X.restsSaid === 0 && S4X.said === 1, 'RED control (the kept put-back not marked) ⇒ «what is there stands» said over an empty name (red)', S4X);
 }
 
 console.log('§3 THE SPIES — no token byte on a merge\'s outbound paths, OUR token in no file');

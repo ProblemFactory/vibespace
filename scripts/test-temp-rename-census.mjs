@@ -156,10 +156,10 @@ export function judge(sites, rows, families = FAMILIES) {
 
 // ── THE ROWS: [file, class, family, note, ...one scope per site] ─────────────────────────────────────────────────────────────
 const ROWS = [
-  ["src/account-material.js", "move", "move", "", "repointPoolSymlink", "moveAside", "archiveCredentialFile", "moveCredentialArchives"],   // r2697 (lane bl-loop-b): − linkInto — its no-hard-link fallback is an exclusive copy now, never a check-then-rename
+  ["src/account-material.js", "move", "move", "", "repointPoolSymlink", "moveAside", "swapSync", "archiveCredentialFile", "moveCredentialArchives"],   // r2697 (lane bl-loop-b): − linkInto — its no-hard-link fallback is an exclusive copy now, never a check-then-rename
   ["src/account-material.js", "synced", "self-synced", "", "writePrivateFile", "writePrivateFileAsync"],
   ["src/accounts.js", "unsynced", "store", "", "AccountManager._save"],
-  ["src/accounts.js", "move", "move", "", "AccountManager.reloginResolve > moveLogin"],
+  ["src/accounts.js", "move", "move", "", "AccountManager.reloginResolve > moveLogin", "AccountManager.mergeSubscription"],   // r2822 (lane bl-loop-b): the folded row's file set aside as an archive when the survivor's file stood
   ["src/adapters/codex.js", "unsynced", "derived", "a decompressed copy of a .zst transcript (made again from it)", "plainJsonlPath"],
   ["src/agentd/agentd.js", "move", "move", "", "rename", "move", "noteAct", "log"],
   ["src/agentd/agentd.js", "synced", "self-synced", "", "part-commit", "deviceIdentity", "writeDropped", "dropReportHead"],   // lg-remote-hardening (r1669): the pool report's dropped count and its head's drop, synced before the rename (a sync that fails fails the write)

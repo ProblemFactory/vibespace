@@ -64,8 +64,10 @@ function repointPoolSymlink(linkPath, targetDir, credsPath = null) {
 /** Write `bytes` to `dest` atomically, 0600, never through a half-written file.
  *  The tmp is opened O_EXCL (`wx`) so a planted file/symlink at its name is an
  *  error, not a target; the mode is re-asserted on the fd and checked (a umask
- *  or ACL that widens it throws before the rename). */
-function writePrivateFile(dest, bytes) {
+ *  or ACL that widens it throws before the rename). `expectBytes` (when given) =
+ *  the bytes the caller's verdict READ at `dest` (null: no file there) — the
+ *  swap is the content guard's sync form (swapSync): a change refuses 'changed'. */
+function writePrivateFile(dest, bytes, { expectBytes } = {}) {
   const tmp = dest + `.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   let fd;
   try {
@@ -75,11 +77,53 @@ function writePrivateFile(dest, bytes) {
     if ((fs.fstatSync(fd).mode & 0o777) !== 0o600) throw new Error('private mode not applied');
     fs.fsyncSync(fd);
     fs.closeSync(fd); fd = undefined;
-    fs.renameSync(tmp, dest);
+    if (expectBytes === undefined) fs.renameSync(tmp, dest);
+    else swapSync(tmp, dest, expectBytes);
   } finally {
     if (fd !== undefined) { try { fs.closeSync(fd); } catch { } }
     try { fs.unlinkSync(tmp); } catch { }
   }
+}
+/** r2822 — THE CONTENT GUARD's SYNC FORM, for the duplicate-account merge (it runs on the loop: its caller sweeps the survivor's
+ *  file right after it). The same steps and the same compare as the oat acts' swap: the name moved aside FIRST, the MOVED file's
+ *  sum compared with the sum of the bytes the merge's verdict read (`was`; null = no file was there), put back on a change; the
+ *  tmp linked into the EMPTY name (no hard links: an exclusive copy); the aside goes. A change refuses 'changed', a symlink 'symlink'. */
+function swapSync(tmp, dest, was) {
+  let aside = null;
+  if (was != null) {
+    aside = `${dest}.dead-${Date.now()}-a${crypto.randomBytes(4).toString('hex')}`;
+    try { fs.renameSync(dest, aside); } catch (e) { throw e.code === 'ENOENT' ? changed() : e; }
+    const sl = fs.lstatSync(aside).isSymbolicLink();
+    let now = null; if (!sl) { try { now = fs.readFileSync(aside); } catch { } }
+    if (sl || !now || sumOf(now) !== sumOf(was)) throw refused(putBackSync(aside, dest), sl);
+  }
+  let taken = false;
+  try { fs.linkSync(tmp, dest); } catch (e) {
+    if (e.code === 'EEXIST') taken = true;
+    else if (!LINKLESS.includes(e.code)) { if (aside) putBackSync(aside, dest); throw e; }
+    else { try { taken = !copyIntoSync(tmp, dest); } catch (e2) { if (aside) putBackSync(aside, dest); throw e2; } }
+  }
+  if (taken) { if (aside) putBackSync(aside, dest); throw changed(); }   // a sign-in that took the empty name stays
+  if (aside) { try { fs.unlinkSync(aside); } catch { } }
+}
+/** putBack's sync form → 'back' | 'taken' | 'kept' (as putBack) */
+function putBackSync(aside, p) {
+  let back = false, taken = false;
+  try { fs.linkSync(aside, p); back = true; } catch (e) {
+    if (e && e.code === 'EEXIST') taken = true;
+    else if (LINKLESS.includes(e && e.code)) { try { back = copyIntoSync(aside, p); taken = !back; } catch { } }
+  }
+  if (!back) { try { fs.chmodSync(aside, 0o600); } catch { } return taken ? 'taken' : 'kept'; }
+  try { fs.unlinkSync(aside); } catch { }
+  return 'back';
+}
+/** copyInto's sync form (its residue the same): an exclusive copy into the EMPTY name, then 0600 and synced through a read-only
+ *  open → true | false (a file is there) */
+function copyIntoSync(src, dest) {
+  try { fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL); } catch (e) { if (e && e.code === 'EEXIST') return false; throw e; }
+  const fd = fs.openSync(dest, 'r');
+  try { fs.fchmodSync(fd, 0o600); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  return true;
 }
 
 /** writePrivateFile's twin OFF the loop (fs.promises): the same tmp `wx` 0600 +
@@ -129,6 +173,9 @@ async function sameBytes(p, expect) {
 }
 const changed = () => Object.assign(new Error('the credential file changed since it was read'), { code: 'changed' });
 const symlinked = () => Object.assign(new Error('the credential file is a symlink'), { code: 'symlink' });
+/** a refusal after a put-back: 'kept' (it could not go back — the fresher file rests at its archive name, its own name EMPTY) is said
+ *  true by the caller (r2824 (1): restsArchived), never «what is there stands» */
+const refused = (pb, sl = false) => { const e = sl ? symlinked() : changed(); if (pb === 'kept') e.restsArchived = true; return e; };
 /** `tmp` into the EMPTY name `dest`: link(2) never replaces (EEXIST = a file landed ⇒ 'changed'); a filesystem
  *  without hard links falls back to an exclusive copy (r2697: never a replace either). */
 async function linkInto(tmp, dest) {
@@ -151,31 +198,36 @@ async function moveAside(p, expect) {
   const aside = `${p}.dead-${Date.now()}-a${crypto.randomBytes(4).toString('hex')}`;
   try { await fsp.rename(p, aside); } catch (e) { throw e.code === 'ENOENT' ? changed() : e; }
   const st = await fsp.lstat(aside);
-  if (!expect || st.isSymbolicLink() || st.ino !== expect.ino || st.mtimeMs !== expect.mtimeMs || st.size !== expect.size) { await putBack(aside, p); throw st.isSymbolicLink() ? symlinked() : changed(); }
+  if (!expect || st.isSymbolicLink() || st.ino !== expect.ino || st.mtimeMs !== expect.mtimeMs || st.size !== expect.size) throw refused(await putBack(aside, p), st.isSymbolicLink());
   // r2697: …and its BYTES: the inode MOVED is out of the name, so the compare decides on the file the act acts on. A refresh after the
   // rename lands at the name (link(2) of ours then refuses EEXIST, or the CLI's own rename replaces ours: the fresher file stands)
-  if (!(await sameBytes(aside, expect))) { await putBack(aside, p); throw changed(); }
+  if (!(await sameBytes(aside, expect))) throw refused(await putBack(aside, p));
   return aside;
 }
 /** The aside back into its EMPTY name (link(2) never replaces); a name a third write took meanwhile leaves it where
- *  it is — an archive (0600). */
+ *  it is — an archive (0600). → 'back' | 'taken' (a third write holds the name) | 'kept' (it could not go back: an
+ *  I/O error, a full disk — it rests archived and its own name is EMPTY; the caller says so, r2824 (1)) */
 async function putBack(aside, p) {
-  let back = false;
+  let back = false, taken = false;
   try { await fsp.link(aside, p); back = true; } catch (e) {
     // r2697 (its fresh read's must): a filesystem WITHOUT hard links — the aside goes back by an EXCLUSIVE copy into the empty name (never
     // a replace: EEXIST = a third write took it, the aside stays archived), so the fresher file stands at its name, not at a .dead name
-    if (LINKLESS.includes(e && e.code)) { try { back = await copyInto(aside, p); } catch { } }
+    if (e && e.code === 'EEXIST') taken = true;
+    else if (LINKLESS.includes(e && e.code)) { try { back = await copyInto(aside, p); taken = !back; } catch { } }
   }
-  if (!back) { try { await fsp.chmod(aside, 0o600); } catch { } return; }   // never throws: the refusal's own code is what the caller says
+  if (!back) { try { await fsp.chmod(aside, 0o600); } catch { } return taken ? 'taken' : 'kept'; }   // never throws: the caller says it
   try { await fsp.unlink(aside); } catch { }
+  return 'back';
 }
 const LINKLESS = ['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV'];
 /** `src`'s bytes into the EMPTY name `dest` — the no-hard-link twin of link(2): an EXCLUSIVE copy (COPYFILE_EXCL never replaces),
- *  0600, SYNCED before the caller removes the source (a crash never leaves the name half-written with its source gone)
- *  → true | false (a file is there) */
+ *  then 0600 and synced before the caller removes the source. THE RESIDUE, as it is (r2824 (3)): the copy creates the sign-in's own
+ *  name BEFORE its bytes are synced, so a power loss on a file system without hard links can leave a short file there — the source
+ *  stays whole at its archive or temp name (no atomic no-replace exists without link(2)). The second open is read-only: it is for the
+ *  mode and the sync alone (a vendor file with no owner write bit still takes them, r2824 (2)). → true | false (a file is there) */
 async function copyInto(src, dest) {
   try { await fsp.copyFile(src, dest, fs.constants.COPYFILE_EXCL); } catch (e) { if (e && e.code === 'EEXIST') return false; throw e; }
-  const fh = await fsp.open(dest, 'r+');
+  const fh = await fsp.open(dest, 'r');
   try { await fh.chmod(0o600); await fh.sync(); } finally { await fh.close(); }
   return true;
 }
@@ -239,8 +291,7 @@ async function archiveCredentialFile(dir, at = Date.now(), { expect } = {}) {
   if (expect) {
     const st = await fsp.lstat(dst);
     if (st.ino !== expect.ino || st.mtimeMs !== expect.mtimeMs || st.size !== expect.size || !(await sameBytes(dst, expect))) {   // r2697: and its bytes
-      await putBack(dst, src);   // link back, or (no hard links) an exclusive copy back: the fresher file at its name
-      throw changed();
+      throw refused(await putBack(dst, src));   // link back, or (no hard links) an exclusive copy back: the fresher file at its name
     }
   }
   try { await fsp.chmod(dst, 0o600); } catch { }

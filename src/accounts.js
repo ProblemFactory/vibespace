@@ -1183,11 +1183,24 @@ class AccountManager {
         if (v.archive) require('./account-material.js').writePrivateFile(`${intoCreds}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`, v.aside);
         fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
         fs.chmodSync(intoDir, 0o700);
+        // r2822: THE SURVIVOR's FILE IS SWAPPED ONLY WHILE IT IS THE FILE THE VERDICT READ — the content guard's sync form, on the
+        // same read (intoBytes): a refresh by the vendor's program between that read and this write STANDS (and so does its
+        // .claude.json); the folded row's file is archived beside it (moved with the archives below), never lost; said once by name
+        let stood = false;
         for (const f of ['.credentials.json', '.claude.json']) {
+          if (stood) break;
           const src = path.join(fromDir, f);
           const bytes = f === '.credentials.json' ? (v.write && JSON.stringify(v.write)) : (fs.existsSync(src) ? fs.readFileSync(src) : null);
-          // the one 0600 atomic writer of account-dir material (tmp `wx` 0600 + fchmod + fsync + rename)
-          if (bytes) require('./account-material.js').writePrivateFile(path.join(intoDir, f), bytes);
+          // the one 0600 atomic writer of account-dir material (tmp `wx` 0600 + fchmod + fsync + rename / the guarded swap)
+          const creds = f === '.credentials.json', guard = creds ? { expectBytes: intoBytes } : {};
+          try { if (bytes) require('./account-material.js').writePrivateFile(path.join(intoDir, f), bytes, guard); } catch (e) { if (creds && e && (e.code === 'changed' || e.code === 'symlink')) stood = e; else throw e; }
+        }
+        if (stood) {
+          const fc = path.join(fromDir, '.credentials.json');
+          try { fs.renameSync(fc, `${fc}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`); } catch { }
+          console.log(stood.restsArchived
+            ? `[accounts] ${into.name || intoId}: its credential file changed since the merge read it and could not go back to its name — the fresher file rests archived in its folder and its own name is empty; the folded row's file is archived beside it`
+            : `[accounts] ${into.name || intoId}: its credential file changed or went since the merge read it — the folded row's file is not written over it; what is there stands, and the folded row's file is archived beside it`);
         }
       }
       // the folded dir's archived dead logins MOVE to the survivor before the rm (verify r1 F12 — never destroyed)
@@ -2015,9 +2028,13 @@ class AccountManager {
       out.verdict = 'write-failed'; out.code = String((e && e.code) || 'error');
       // r2697: the file CHANGED since it was read (the vendor's program wrote it): ours is not written, the fresher file stands — said
       // ONCE an episode in the journal, by the member's name (never a token, a content sum or the file's bytes)
-      if (out.code === 'changed' && this._oatFileFacts.get(id)?.code !== 'changed') console.log(`[oat-file] ${a.name || id}: its credential file changed or went since it was read — ours is not written; what is there stands`);
+      if (out.code === 'changed' && e && e.restsArchived) {   // r2824 (1): it could not go back — said TRUE, once an episode
+        const said = (this._oatArchSaid ||= new Set());
+        if (!said.has(id)) { said.add(id); console.log(`[oat-file] ${a.name || id}: its credential file changed since it was read and could not go back to its name — the fresher file rests archived in its folder and its own name is empty, so the next sync writes ours there`); }
+      } else if (out.code === 'changed' && this._oatFileFacts.get(id)?.code !== 'changed') console.log(`[oat-file] ${a.name || id}: its credential file changed or went since it was read — ours is not written; what is there stands`);
     }
     const was = this._oatFileFacts.get(id);
+    if (out.code !== 'changed' && this._oatArchSaid) this._oatArchSaid.delete(id);   // the episode ended: a next failed put-back is said again
     this._oatFileFacts.set(id, { verdict: out.verdict, at: now, ...(out.code ? { code: out.code } : {}), ...(out.reason ? { reason: out.reason } : {}), ...(out.held ? { held: true } : {}) });
     out.doorMoved = !!(out.wrote || out.removed) || !was || was.verdict !== out.verdict || was.code !== out.code || was.reason !== out.reason || !!was.held !== !!out.held;
     if (out.doorMoved && !quiet) this._notify();
