@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a restart on slow or failing storage, a running conversation's agent browser no longer loses its setup and its own browser folder to the cleanup.
 - A stored secret a background job prints in two pieces (a pause between them, or its child printing the rest after it ends) no longer lands whole in its log.
 - While the accounts list cannot be read, no unattended turn is spent, and no claim, warning or setting is pruned or filed under the wrong account.
+- Window shares and agent window leases are no longer dropped when the list of desktop apps cannot be read.
 
 ## 2.369.416 — 2026-11-23
 
