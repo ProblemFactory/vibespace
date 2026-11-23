@@ -87,6 +87,7 @@ const NOT_HELD = {
   no_audit: 'the audit log engine absent',
   host_unavailable: 'a paired machine not answering — the machine\'s own state, not a list of VibeSpace\'s',
   transcript_reader_restarting: 'the transcript reader restarting — a moment\'s wait',
+  'path-hung': 'the transcript pool remembers a conversation\'s file hung on its storage (row B-422c\'s probe, src/adapters/codex.js) — the person\'s storage, not a VibeSpace list; said as the reader\'s storage refusal (src/lib/reader-words.js)',
   storage_parked: 'a mount\'s network storage parked (the person\'s own storage, not a VibeSpace list) — mount-door\'s parked sentence',
   'storage-blocked': 'a mount root not answering (mount-door) — the person\'s storage, not a VibeSpace list',
   'still-reading': 'a summary still being read past its bound — a wait',

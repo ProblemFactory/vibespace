@@ -718,6 +718,9 @@ function readerRefusedAnswer(e, now = Date.now()) {
 }
 /** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
 const POOL_BUSY = Symbol('the pool had no idle worker: the call was not sent');   // r2506: an idleOnly call's own answer, never a failure
+// a pool failure as the reader's refusal BY NAME, noted on the file and on the pool, its next try said (poolRead's, and the probe's
+// own door ask below)
+function poolRefusalNoted(e, fp, op) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); r.readerGone = poolGone(); return r; }
 async function poolRead(op, payload, opts) {
   const fp = payload && payload.fp;   // unit 2: the FILE's state — a refusal notes it, any answer for it (a result, or the op's own error) forgives it
   const pool = _transcriptPoolGet();
@@ -725,8 +728,8 @@ async function poolRead(op, payload, opts) {
   let out;
   try { out = await pool.call(op, payload, opts); }
   catch (e) {
-    if (opts && opts.idleOnly && e && e.code === 'no-idle-worker') return POOL_BUSY;   // NOT sent (no worker idle): nothing noted, the pool not marked refusing
-    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); r.readerGone = poolGone(); throw r; }   // its next try, after the record took the refusal
+    if (opts && opts.idleOnly && e && (e.code === 'no-idle-worker' || e.code === 'no-worker')) return POOL_BUSY;   // NOT sent (no worker idle, or none alive at the send — r2715): nothing noted, the pool not marked refusing
+    if (!pool.inPlace && isPoolFailure(e)) throw poolRefusalNoted(e, fp, op);   // its next try, after the record took the refusal
     poolAnswered(fp, op);   // the op's own error: a worker ran it — the pool answered
     throw e;
   }
@@ -745,17 +748,34 @@ async function scanJsonlUserTurnsAsync(fp, backend, sent = null) { return poolRe
 async function readJsonlTailAsync(fp, { dropSubagent = false } = {}) {
   return poolRead('jsonlTail', { fp, dropSubagent });
 }
-/** 主开发 r2344 (1) / r2506: THE STORAGE RETRY'S PROBE — one small read of the file (its first bytes: the worker's `probe`, fileIsZst's
- *  open + 4 bytes + close) under a SHORT bound on the general pool, sent ONLY to a worker IDLE at the send (idleOnly: a deadline queued
- *  behind a healthy call would end that call). → true: the worker came back within the bound (fileIsZst swallows every error of its
- *  read, so the probe has no op error of its own: an answer means the storage answered); 'busy': NOT sent — no general worker idle
- *  (nothing noted, the pool not marked refusing); a pool failure (its deadline above all: the storage still hangs) REJECTS with the
- *  refusal by name, noted on the file — and the deadline is remembered by the pool's path memory for calls this short. Answering
- *  forgives nothing (not a history read): the paged read after it does. */
+/** 主开发 r2344 (1) / r2506 / r2715: THE STORAGE RETRY'S PROBE — one small read of the file (its first bytes: the worker's `probe`,
+ *  fileIsZst's open + 4 bytes + close) under a SHORT bound on the general pool. THE LAW, from the worker's side: NO CALL OTHER THAN
+ *  THE PROBE IS EVER IN A WORKER WHOSE BOUND IS THE PROBE's — none before it (idleOnly: sent only to a worker idle at the send; none
+ *  idle, or none alive ⇒ NOT sent), none handed to that worker while it is out (SafeFs's `look`: the worker leaves the hand-out until
+ *  the probe answers or its deadline ends it). The `look` word skips the pool's path memory, so the probe asks that memory ITSELF
+ *  first: a file it remembers dead is refused at the door, no worker. It never takes the LAST worker (keepOne, r2718: another live
+ *  worker stays in the hand-out, else not sent). And ONE PROBE ON THE POOL AT A TIME (r2715, its third side: with
+ *  every live worker out on a look the pool refuses every other call, so two probes would leave no worker for anyone): the same
+ *  file's second asker gets the first's answer; another file's retry finds the probe out ⇒ 'busy' (its gap unspent).
+ *  → true: the worker came back within the bound (fileIsZst swallows every error of its read, so the probe has no op error of its
+ *  own: an answer means the storage answered); 'busy': NOT sent (nothing noted, the pool not marked refusing); a pool failure (its
+ *  deadline above all: the storage still hangs) REJECTS with the refusal by name, noted on the file — its deadline remembered by the
+ *  pool's path memory for calls this short. Answering forgives nothing (not a history read): the paged read after it does. */
 let STORAGE_PROBE_MS = 1500;   // a suite's own bound: _setSlicedForTest({ probeMs })
+let _probeOut = null;   // { fp, p }: the ONE probe out on the pool — set in the same turn of the loop as its send
 async function probeTranscriptAsync(fp) {
-  const out = await poolRead('probe', { fp }, { timeoutMs: STORAGE_PROBE_MS, idleOnly: true });
-  return out === POOL_BUSY ? 'busy' : true;
+  if (_probeOut) return _probeOut.fp === fp ? _probeOut.p : 'busy';
+  const pool = _transcriptPoolGet();
+  if (pool && !pool.inPlace && typeof pool._hungOf === 'function') {   // the path memory, asked first (the look word skips it)
+    const h = pool._hungOf({ fp }, 'probe', STORAGE_PROBE_MS);
+    if (h) throw poolRefusalNoted(Object.assign(new Error(`the transcript pool remembers ${h.path} hung — the probe was not sent`), { status: 503, code: 'path-hung', hungPath: h.path }), fp, 'probe');
+  }
+  // keepOne (r2718): THE PROBE NEVER TAKES THE LAST WORKER — while it is out every other call is handed out exactly as if the pool had
+  // one worker fewer: never ended and never refused because of the probe. (A worker that dies by ITS OWN bound while the probe is out
+  // is the pool's own matter — a deadline of that worker's call — not this law's.)
+  const p = poolRead('probe', { fp }, { timeoutMs: STORAGE_PROBE_MS, idleOnly: true, look: true, keepOne: true }).then((out) => (out === POOL_BUSY ? 'busy' : true));
+  _probeOut = { fp, p };
+  try { return await p; } finally { if (_probeOut && _probeOut.p === p) _probeOut = null; }
 }
 async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent = false } = {}) {
   const pool = _transcriptPoolGet();
@@ -909,10 +929,10 @@ function storageRetryDue(fp, { claim = true } = {}) {
 }
 // the retry's gap SPENT — by a retry that was sent (主开发 r2506: a probe not sent, no worker idle, spends nothing)
 const spendRetryGap = (r, now) => { r.retryGap = Math.min(STORAGE_RETRY_MAX_MS, (r.retryGap || STORAGE_RETRY_MS) * 2); r.retryAt = now + r.retryGap; };   // the next retry waits twice as long (30 s, 1 min, 2 … ≤ 8 min)
-function storageRetryClaim(fp) { const r = fp && _fileRefusals.get(fp); if (r && (r.storage || r.ownDeadline)) spendRetryGap(r, Date.now()); }
+function storageRetryClaim(fp) { const r = fp && _fileRefusals.get(fp); const now = Date.now(); if (r && (r.storage || r.ownDeadline) && now >= (r.retryAt || 0)) spendRetryGap(r, now); }   // once a retry: two askers answered by one probe spend one gap
 let _poolRefusedAt = 0;
 const POOL_WIDE = new Set(['no-worker']);   // SafeFs's own code (src/safe-fs.js NO_WORKER); its `no-idle-worker` (NO_IDLE: an `idleOnly` call while every worker
-// is busy) is ORDINARY LOAD, never a pool that refuses — dropped ON PURPOSE (round w5gioyat2 asked; no transcript call passes idleOnly)
+// is busy) is ORDINARY LOAD, never a pool that refuses — dropped ON PURPOSE (round w5gioyat2 asked); the one transcript call that passes idleOnly, the storage retry's probe (r2506), takes it as its own answer — POOL_BUSY in poolRead, never a failure
 function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') { _poolRefusedAt = Date.now(); _poolRefusedCause = e && e.readerCause !== undefined ? e.readerCause : readerCauseOf(e); } }
 let _poolRefusedCause = null;   // r3077: the cause of the pool-wide refusal standing (its own words at the page)
 // an answer of the pool ends «refusing every call»; only a HISTORY READ's answer forgives the file (a task scan or a gap read answered

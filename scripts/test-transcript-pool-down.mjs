@@ -402,7 +402,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   // (5b) A DUE STORAGE RETRY WHILE THE POOL ONLY REFUSED A MOMENT AGO (no worker: refusing every call, NOT gone) asks the POOL again —
   // never the main process's own read of a file the pool called hung (that road is the pool GONE's alone: the double fault, ⑤c of
   // the heavy suite). RED (the follow's first tip): the warm read it on the main process and parked the hub's one sliced place in it
-  await new Promise((res) => setTimeout(res, 400));   // past the record's gap ((5)'s retry doubled it 60 → 120 ms): the retry is DUE
+  await new Promise((res) => setTimeout(res, 200));   // past the record's gap ((5)'s retry doubled it 60 → 120 ms): the retry is DUE
   const Nr = refusing({ status: 503, code: 'no-worker' }); C._setTranscriptPoolForTest(Nr);
   try { await C.jsonlGapInfoAsync(path.join(projDir, 'gap-only.jsonl')); } catch { }   // the pool refuses every call now
   const premise = C.poolRefusing() && !C.poolGone() && C.fileStorageHung(claudeFp);
@@ -410,7 +410,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   ok(premise && w5b === false && tails(Nr) === 1 && C.fileStorageHung(claudeFp), `a due storage retry while the pool refuses for a while (no worker) asks the pool (${tails(Nr)} ask) — the file the pool called hung is not read on the main process (warm ${w5b}, still the storage's)`, { premise, warmed: w5b, asks: tails(Nr) });
   // …THE CONTROL: the pool GONE (closed for good) ⇒ the due retry IS the main process's own read (r1243 item 3) — the file answers, the
   // warm loads it, the storage mark ends
-  await new Promise((res) => setTimeout(res, 700));   // past the gap again (the retry above doubled it: 240 ms)
+  await new Promise((res) => setTimeout(res, 350));   // past the gap again (the retry above doubled it: 240 ms)
   const G = { _closed: true, calls: [], call(op) { this.calls.push(op); return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 })); } };
   C._setTranscriptPoolForTest(G);
   const premiseG = C.poolGone() && C.fileStorageHung(claudeFp);
@@ -456,7 +456,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
     // THE ORDER, read (test-ci-gate §2e: never a clock bound): the healthy warm answers before the leg releases anything — every dead
     // call it waited on ended by its OWN short bound (counted at that moment). The window is only the REDs': a warm still waiting when
     // it closes is one held behind dead reads that no bound of theirs would end
-    const wy = await Promise.race([SM.warmSessionJsonlAsync(y, cwd), new Promise((res) => setTimeout(() => res('still waiting'), 1000))]);
+    const wy = await Promise.race([SM.warmSessionJsonlAsync(y, cwd), new Promise((res) => setTimeout(() => res('still waiting'), 700))]);
     const byBound = P.boundEnds, dead = P.deadCalls.slice();
     P.endAll();   // the dead reads end at their deadlines
     const wxOut = await Promise.race([Promise.all(wx), new Promise((res) => setTimeout(() => res('still out'), 3000))]);
@@ -472,7 +472,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const h8 = await lineRun(SS0, 'a');
   const h8g = await lineRun(MC.load('src/session-store.js', anchored(SSsrc, PROBED, '    else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }', 'retry-one-shot-general'), 'retry-one-shot-general'), 'b');   // stale-pins: kept — r2246's road, planted back as RED (i)
   const h8w = await lineRun(MC.load('src/session-store.js', anchored(SSsrc, PROBED, '    else { try { r = await warmPaged(known, { bulk }).p; } catch { return false; } }', 'retry-on-warm-line'), 'retry-on-warm-line'), 'c');   // stale-pins: kept — the moved form's road, planted back as RED (ii)
-  ok(h8.premise && h8.dead.join() === 'probe,probe' && h8.wy === true && h8.byBound >= 1 && Array.isArray(h8.wx) && h8.wx.every((x) => x === false), `(8) two files the storage holds, their retries in step: each PROBES (${h8.dead.join()}) and costs its bound; a healthy conversation's warm answers before the leg releases anything (the dead calls ended by their own bound: ${h8.byBound})`, h8);
+  ok(h8.premise && h8.dead.join() === 'probe' && h8.wy === true && Array.isArray(h8.wx) && h8.wx.every((x) => x === false), `(8) two files the storage holds, their retries in step: ONE probe is out (${h8.dead.join()}: one on the pool at a time, r2715 — the other retry not sent), it costs its bound; a healthy conversation's warm answers before the leg releases anything (the other worker free: ${h8.byBound} dead calls had ended by then)`, h8);
   ok(h8g.premise && h8g.dead.join() === 'jsonlTail,jsonlTail' && h8g.wy === 'still waiting', `RED (i): the retry as a one-shot on the general pool (${h8g.dead.join()}) ⇒ both general workers held, the healthy conversation's task scan waits (${h8g.wy} at 1000 ms)`, h8g);
   ok(h8w.premise && h8w.dead.join() === 'boundedParsedPage' && h8w.wy === 'still waiting', `RED (ii): the retry on the warm line (${h8w.dead.join()}) ⇒ the healthy conversation's warm waits behind the dead file's page (${h8w.wy} at 1000 ms)`, h8w);
   // THE PUT's RULE as each form had it (主开发 r2506's law now; earlier forms planted back as REDs)
@@ -570,73 +570,193 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const l12 = await lateRun(SS0, 'b1111111-2222-4333-8444-555555555581'), l12r = await lateRun(SSTIMED, 'b1111111-2222-4333-8444-555555555582');
   ok(l12.sent && l12.newer === 700 && l12.wOut === false && l12.n === 700 && l12.reads === 0, `(12) the older read landing last never replaces the newer copy: the history stays ${l12.n} records, nothing folded on the loop (${l12.reads}); the warm whose put was skipped is not «ready» (${l12.wOut})`, l12);
   ok(l12r.sent && l12r.reads > 0, `RED: the timed-read rule ⇒ the older read goes over the newer copy — the next parse folds on the loop (${l12r.reads} reads)`, l12r);
-  // (8b) THE PROBE's BOUND ENDS ONLY THE PROBE (主开发 r2506, round wsjcggt2p's MUST): both general workers run HEALTHY long calls (two
-  // conversations' reads, held), a dead file's retry comes due — modelled as the real pool does it: a call goes to the least busy worker
-  // even when it runs something, and a call's deadline, from its SEND, ends the WORKER it sits on (whatever runs there; the pool's memory
-  // then names the op that worker was running). The probe is sent only to an IDLE worker: none ⇒ NOT sent — no healthy call ended, no
-  // healthy file marked, the retry's gap NOT spent (asked again at once); a worker freed ⇒ the probe runs there and costs its bound.
-  // RED: today's send (the probe not idle-only) — queued behind a healthy call, its deadline ends THAT call and marks ITS file
-  const busyPool = (dead, healthy) => {
-    const slots = [{ cur: null, q: [] }, { cur: null, q: [] }];
-    const P = { calls: [], idleRefused: 0, sent: [], ended: [], hung: new Set(), running: [] };
-    const start = (s, job) => { s.cur = job; job.run(); };
-    const done = (s, job) => { if (s.cur === job) { s.cur = null; const n = s.q.shift(); if (n) start(s, n); } else { const i = s.q.indexOf(job); if (i >= 0) s.q.splice(i, 1); } };
+  // THE POOL, MODELLED TRUE (主开发 r2715 / r2718 — as src/safe-fs.js call() hands a call out): to the least busy LIVE worker that is NOT
+  // out on a look (ties: the first), queued behind what it runs; none ⇒ refused (every live worker looking: «no idle worker»; none alive:
+  // «no worker»); `idleOnly`: refused when the picked worker runs anything; `keepOne`: refused unless ANOTHER live worker stays in the
+  // hand-out; `look`: that worker leaves the hand-out while the call is out; a call's deadline, from its SEND, ENDS ITS WORKER — EVERY
+  // call in it rejected, the pool's memory naming the op the worker was running — and the worker is gone (until revived)
+  const modelPool = (n, { dead = new Set(), healthy = new Set() } = {}) => {
+    const W = Array.from({ length: n }, (_, i) => ({ i, alive: true, looking: null, cur: null, q: [] }));
+    const P = { W, calls: [], sent: [], ended: [], probeRefused: 0, hung: new Set(), running: [] };
+    const load = (w) => (w.cur ? 1 : 0) + w.q.length;
+    const pick = () => { let best = null; for (const w of W) { if (!w.alive || w.looking) continue; if (!best || load(w) < load(best)) best = w; } return best; };
+    const busy = () => Object.assign(new Error('every worker of the transcript pool is busy — the call was not sent'), { status: 503, code: 'no-idle-worker' });
+    const settle = (w, j) => { if (w.cur === j) w.cur = null; else { const k = w.q.indexOf(j); if (k >= 0) w.q.splice(k, 1); } if (w.looking === j) w.looking = null; if (!w.cur && w.alive) { const nx = w.q.shift(); if (nx) { w.cur = nx; nx.run(); } } };
     P._hungOf = (payload) => (payload && P.hung.has(payload.fp) ? { path: payload.fp, ms: 30000 } : null);   // the pool's path memory
     P.call = (op, payload, opts = {}) => new Promise((resolve, reject) => {
       P.calls.push(op);
-      const free = slots.find((s) => !s.cur);
-      if (opts.idleOnly && !free) { P.idleRefused++; reject(Object.assign(new Error('every worker of the transcript pool is busy — the call was not sent'), { status: 503, code: 'no-idle-worker' })); return; }
-      if (op === 'probe') P.sent.push(payload.fp);
-      const s = free || slots.reduce((a, b) => (b.q.length < a.q.length ? b : a));
-      const fp = payload && payload.fp, job = { fp, settled: false };
-      const fin = (fn, v) => { if (job.settled) return; job.settled = true; done(s, job); fn(v); };
-      job.end = (e) => fin(reject, e); job.ok = (v) => fin(resolve, v);
-      job.run = () => { if (healthy.has(fp)) P.running.push(job); else if (!dead.has(fp)) Promise.resolve(TW.runOp(op, payload)).then((x) => job.ok(x.result), (e) => job.end(e)); };
-      if (opts.timeoutMs) setTimeout(() => {   // its deadline, from the SEND: the worker it sits on is ended
-        if (job.settled) return;
-        const dl = () => Object.assign(new Error('a stand-in deadline'), { status: 503, safeFsTimeout: true });
-        const run = s.cur;
-        if (run && run !== job) { P.ended.push(run.fp); P.hung.add(run.fp); run.end(dl()); } else P.hung.add(fp);
-        job.end(dl());
-      }, opts.timeoutMs);
-      if (s.cur) s.q.push(job); else start(s, job);
+      const refuse = (e) => { if (op === 'probe') P.probeRefused++; reject(e); };
+      const w = pick();
+      if (!w) return refuse(W.some((x) => x.alive && x.looking) ? busy() : Object.assign(new Error('no worker of the transcript pool is alive'), { status: 503, code: 'no-worker' }));
+      if (opts.idleOnly && load(w)) return refuse(busy());
+      if (opts.keepOne && !W.some((x) => x !== w && x.alive && !x.looking)) return refuse(busy());
+      const fp = payload && payload.fp, j = { op, fp, done: false, w, reject };
+      j.ok = (v) => { if (j.done) return; j.done = true; settle(w, j); resolve(v); };
+      j.end = (e) => { if (j.done) return; j.done = true; settle(w, j); reject(e); };
+      j.run = () => { if (healthy.has(fp)) P.running.push(j); else if (!dead.has(fp)) Promise.resolve(TW.runOp(op, payload)).then((x) => j.ok(x.result), (e) => j.end(e)); };
+      if (op === 'probe') P.sent.push(fp);
+      if (opts.look) w.looking = j;
+      if (opts.timeoutMs) setTimeout(() => { if (!j.done) P.endWorker(w, j); }, opts.timeoutMs);
+      if (w.cur) w.q.push(j); else { w.cur = j; j.run(); }
     });
-    P.freeOne = () => { const j = P.running.shift(); if (j) j.ok(null); };
+    P.endWorker = (w, by) => {   // `by`'s deadline ends ITS worker: every call in it rejected
+      const all = [w.cur, ...w.q].filter(Boolean); w.q = []; w.cur = null; w.looking = null; w.alive = false;
+      if (all[0]) P.hung.add(all[0].fp);
+      for (const j of all) { if (j.done) continue; j.done = true; if (j !== by) P.ended.push(j.fp); j.reject(Object.assign(new Error('a stand-in deadline'), { status: 503, safeFsTimeout: true })); }
+    };
+    P.free = () => { const j = P.running.shift(); if (j) j.ok(null); };
     P.freeAll = () => { for (const j of P.running.splice(0)) j.ok(null); };
     return P;
   };
   const CXsrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
-  const probeRun = async (CM, SM, tag) => {
-    const [x, h1, h2] = ['1', '2', '3'].map((k) => `c${tag}${k}11111-2222-4333-8444-555555555555`), fpOf = (id) => path.join(projDir, id + '.jsonl');
+  const PROBE_OPTS = '{ timeoutMs: STORAGE_PROBE_MS, idleOnly: true, look: true, keepOne: true }';
+  const ONE_MARK = "  if (_probeOut) return _probeOut.fp === fp ? _probeOut.p : 'busy';\n";
+  const pairOf = (from, to, tag) => { const cx = MC.write('src/adapters/codex.js', anchored(CXsrc, from, to, tag), tag); return { CM: require(cx), SM: MC.load('src/session-store.js', anchored(SSsrc, "require('./adapters/codex')", () => `require(${JSON.stringify(cx)})`, tag + '-ss', { count: 4 }), tag + '-ss') }; };
+  const fpOf = (id) => path.join(projDir, id + '.jsonl');
+  const ids = (tag, n) => Array.from({ length: n }, (_, k) => `c${tag}${k}11111-2222-4333-8444-555555555555`);
+  const storageOf = async (CM, fps) => {   // these files: the storage's, their retries due at once (the gap set when the refusal is noted: first)
+    CM._setSlicedForTest({ storageRetryMs: 0 });
+    CM._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' }));
+    for (const f of fps) { try { await CM.readJsonlTailAsync(f, { dropSubagent: true }); } catch { } }
+    CM._setSlicedForTest({ storageRetryMs: 60000, probeMs: 100 });   // a SPENT gap now waits 2 minutes: a second ask at once tells it apart
+  };
+  const answer = (pr) => pr.then(() => 'answered', (e) => (e && e.code) || 'failed');
+  const sleepT = (ms) => new Promise((res) => setTimeout(res, ms));
+  // (8b) THE PROBE's BOUND ENDS ONLY THE PROBE, BEFORE ITS SEND (r2506): both general workers on HEALTHY long calls, a dead file's retry
+  // due: NOT sent (no worker idle) — no healthy call ended, none marked, the gap unspent (asked again at once); a worker freed ⇒ the probe
+  // runs there, alone, and costs its bound. RED: the probe not idle-only (look and keepOne kept) — queued behind a healthy call, its
+  // deadline ends THAT worker: the healthy call ended, its file marked
+  const run8b = async (CM, SM, tag) => {
+    const [x, h1, h2] = ids(tag, 3);
     for (const id of [x, h1, h2]) fs.writeFileSync(fpOf(id), lines.slice(0, 300).join('\n') + '\n');
-    CM._setSlicedForTest({ storageRetryMs: 0 });   // the retry due at once (the gap set when the refusal is noted: first)
-    CM._setTranscriptPoolForTest(refusing({ status: 503, code: 'path-hung' })); try { await CM.readJsonlTailAsync(fpOf(x), { dropSubagent: true }); } catch { }
-    CM._setSlicedForTest({ storageRetryMs: 60000, probeMs: 200 });   // a SPENT gap now waits 2 minutes: a second ask at once tells it apart
-    const P = busyPool(new Set([fpOf(x)]), new Set([fpOf(h1), fpOf(h2)]));
-    CM._setTranscriptPoolForTest(P);
-    const longs = [h1, h2].map((id) => CM.jsonlGapInfoAsync(fpOf(id)).then(() => 'answered', (e) => (e && e.code) || 'failed'));   // two healthy long calls: both workers busy
+    await storageOf(CM, [fpOf(x)]);
+    const P = modelPool(2, { dead: new Set([fpOf(x)]), healthy: new Set([fpOf(h1), fpOf(h2)]) }); CM._setTranscriptPoolForTest(P);
+    const longs = [h1, h2].map((id) => answer(CM.jsonlGapInfoAsync(fpOf(id))));
     await new Promise((res) => setImmediate(res));
-    const w1 = await SM.warmSessionJsonlAsync(x, cwd);   // the retry due: both workers busy
-    await new Promise((res) => setTimeout(res, 300));   // a placed wait past the probe's bound (any deadline of it has fired)
-    const w2 = await SM.warmSessionJsonlAsync(x, cwd);   // asked again at once: due only if the first spent nothing
-    const busyPhase = { idleRefused: P.idleRefused, sent: P.sent.length, ended: P.ended.slice(), h1Hung: CM.fileStorageHung(fpOf(h1)), h2Hung: CM.fileStorageHung(fpOf(h2)) };
-    P.freeOne();   // one healthy call answers: a worker idle
-    await new Promise((res) => setImmediate(res));
-    const w3 = await SM.warmSessionJsonlAsync(x, cwd);   // the probe runs there, costs its bound
+    const w1 = await SM.warmSessionJsonlAsync(x, cwd); await sleepT(200);
+    const w2 = await SM.warmSessionJsonlAsync(x, cwd);
+    const busyPhase = { probeRefused: P.probeRefused, sent: P.sent.length, ended: P.ended.slice(), hHung: [h1, h2].some((id) => CM.fileStorageHung(fpOf(id))) };
+    P.free(); await new Promise((res) => setImmediate(res));
+    const w3 = await SM.warmSessionJsonlAsync(x, cwd);
     const freed = { sent: P.sent.length, ended: P.ended.slice(), xHung: CM.fileStorageHung(fpOf(x)) };
     P.freeAll();
-    const healthyOut = await Promise.all(longs);
-    return { w1, w2, w3, busyPhase, freed, healthyOut, healthyHung: [h1, h2].map((id) => CM.fileStorageHung(fpOf(id))) };
+    return { w1, w2, w3, busyPhase, freed, healthyOut: await Promise.all(longs), healthyHung: [h1, h2].map((id) => CM.fileStorageHung(fpOf(id))) };
   };
-  const p8 = await probeRun(C, SS0, 'a');
-  const cxSend = MC.write('src/adapters/codex.js', anchored(CXsrc, "{ timeoutMs: STORAGE_PROBE_MS, idleOnly: true }", "{ timeoutMs: STORAGE_PROBE_MS }", 'probe-not-idle-only'), 'probe-not-idle-only');   // stale-pins: kept — today's send (d135c99f2), planted back as the RED
-  const CX = require(cxSend), SSsend = MC.load('src/session-store.js', anchored(SSsrc, "require('./adapters/codex')", () => `require(${JSON.stringify(cxSend)})`, 'session-store-on-the-codex-copy', { count: 4 }), 'probe-not-idle-only');
-  const p8r = await probeRun(CX, SSsend, 'b');
-  ok(p8.busyPhase.idleRefused === 2 && p8.busyPhase.sent === 0 && p8.busyPhase.ended.length === 0 && !p8.busyPhase.h1Hung && !p8.busyPhase.h2Hung && p8.w1 === false && p8.w2 === false
-    && p8.freed.sent === 1 && p8.freed.ended.length === 0 && p8.freed.xHung && p8.healthyOut.every((x) => x === 'answered') && p8.healthyHung.every((x) => !x),
-    `(8b) the probe's bound ends only the probe: both workers busy ⇒ NOT sent (${p8.busyPhase.idleRefused} asks, the gap unspent), no healthy call ended, no healthy file marked; a worker freed ⇒ the probe ran there (${p8.freed.sent}), the dead file still the storage's; both healthy calls answered`, p8);
-  ok(p8r.busyPhase.ended.length >= 1 && (p8r.busyPhase.h1Hung || p8r.busyPhase.h2Hung) && p8r.healthyOut.some((x) => x !== 'answered'), `RED: today's send (the probe not idle-only) ⇒ queued behind a healthy call, its deadline ended THAT call and marked ITS file the storage's (ended: ${p8r.busyPhase.ended.length})`, p8r);
-  CX._setSlicedForTest({}); C._setSlicedForTest({});
+  const p8 = await run8b(C, SS0, 'a');
+  const R8b = pairOf(PROBE_OPTS, '{ timeoutMs: STORAGE_PROBE_MS, look: true, keepOne: true }', 'probe-not-idle-only');   // stale-pins: kept — the send without idleOnly, planted back as the RED
+  const p8r = await run8b(R8b.CM, R8b.SM, 'b');
+  ok(p8.busyPhase.probeRefused === 2 && p8.busyPhase.sent === 0 && !p8.busyPhase.ended.length && !p8.busyPhase.hHung && p8.w1 === false && p8.w2 === false
+    && p8.freed.sent === 1 && !p8.freed.ended.length && p8.freed.xHung && p8.healthyOut.every((x) => x === 'answered') && p8.healthyHung.every((x) => !x),
+    `(8b) both workers busy ⇒ the probe NOT sent (${p8.busyPhase.probeRefused} asks: the gap unspent), no healthy call ended, none marked; a worker freed ⇒ the probe ran there (${p8.freed.sent}), the dead file still the storage's`, p8);
+  ok(p8r.busyPhase.ended.length >= 1 && p8r.healthyOut.some((x) => x !== 'answered'), `RED: the probe not idle-only ⇒ queued behind a healthy call, its deadline ended THAT worker — the healthy call ended (${p8r.busyPhase.ended.length})`, p8r);
+  // (8c) THE PROBE ALONE IN ITS WORKER, AFTER ITS SEND (r2715): the probe out to a dead file, the other worker on a healthy long call, a
+  // healthy call arrives — handed out as if the pool had one worker fewer (behind the long call), ANSWERED, never ended, its file not
+  // refused. RED: the probe without `look` — the new call ties onto the probe's worker and is ended at the probe's bound
+  const run8c = async (CM, SM, tag) => {
+    const [x, h1, h2] = ids(tag, 3);
+    for (const id of [x, h1, h2]) fs.writeFileSync(fpOf(id), lines.slice(0, 300).join('\n') + '\n');
+    await storageOf(CM, [fpOf(x)]);
+    const P = modelPool(2, { dead: new Set([fpOf(x)]), healthy: new Set([fpOf(h1)]) }); CM._setTranscriptPoolForTest(P);
+    const wx = SM.warmSessionJsonlAsync(x, cwd);   // the probe: out on worker 0
+    await new Promise((res) => setImmediate(res));
+    const long = answer(CM.jsonlGapInfoAsync(fpOf(h1)));   // worker 1: a healthy long call
+    await new Promise((res) => setImmediate(res));
+    const h2out = answer(CM.jsonlGapInfoAsync(fpOf(h2)));   // the healthy call that arrives while the probe is out
+    await sleepT(200);   // a placed wait past the probe's bound (100 ms)
+    P.freeAll();
+    return { sent: P.sent.length, wx: await wx, h2: await h2out, long: await long, ended: P.ended.slice(), h2Refused: CM.fileRefused(fpOf(h2)) || CM.fileStorageHung(fpOf(h2)) };
+  };
+  const p8c = await run8c(C, SS0, 'c');
+  const R8c = pairOf(PROBE_OPTS, '{ timeoutMs: STORAGE_PROBE_MS, idleOnly: true, keepOne: true }', 'probe-without-look');   // stale-pins: kept — the send without look, planted back as the RED
+  const p8cr = await run8c(R8c.CM, R8c.SM, 'd');
+  ok(p8c.sent === 1 && p8c.h2 === 'answered' && !p8c.ended.length && !p8c.h2Refused && p8c.wx === false, `(8c) a healthy call arriving while the probe is out is handed out beside it, ANSWERED (${p8c.h2}), never ended, its file not refused`, p8c);
+  ok(p8cr.sent === 1 && p8cr.h2 !== 'answered' && p8cr.ended.length >= 1, `RED: the probe without look ⇒ the healthy call tied onto the probe's worker and was ended at its bound (${p8cr.h2})`, p8cr);
+  // (8d) ONE PROBE ON THE POOL AT A TIME (r2715's third side): two dead files due together — ONE probe sent, the other retry NOT sent, its
+  // gap unspent (asked again once the first's probe settles: sent then). On THREE workers here, so keepOne cannot be what holds the second
+  // (on the transcript pool's two it would be: the law holds by either). RED: the one-probe mark taken away — two probes out
+  const R1 = pairOf(ONE_MARK, '', 'one-probe-mark-gone');   // stale-pins: kept — the mark taken away, planted back as the RED (8d, 8e)
+  const run8d = async (CM, SM, tag) => {
+    const [x1, x2] = ids(tag, 2);
+    for (const id of [x1, x2]) fs.writeFileSync(fpOf(id), lines.slice(0, 300).join('\n') + '\n');
+    await storageOf(CM, [fpOf(x1), fpOf(x2)]);
+    const P = modelPool(3, { dead: new Set([fpOf(x1), fpOf(x2)]) }); CM._setTranscriptPoolForTest(P);
+    const w1 = SM.warmSessionJsonlAsync(x1, cwd);
+    await new Promise((res) => setImmediate(res));
+    const w2 = await SM.warmSessionJsonlAsync(x2, cwd);   // the first's probe is out
+    const atOnce = P.sent.slice();
+    await w1; await sleepT(150);
+    const w3 = await SM.warmSessionJsonlAsync(x2, cwd);   // asked again: due only if its gap is unspent
+    return { atOnce, w2, w3, after: P.sent.slice() };
+  };
+  const p8d = await run8d(C, SS0, 'e'), p8dr = await run8d(R1.CM, R1.SM, 'f');
+  ok(p8d.atOnce.length === 1 && p8d.w2 === false && p8d.after.length === 2, `(8d) two dead files due together: ONE probe out (${p8d.atOnce.length}), the other not sent and its gap unspent — sent once the first settled (${p8d.after.length})`, p8d);
+  ok(p8dr.atOnce.length === 2, `RED: the one-probe mark taken away ⇒ two probes out at once (${p8dr.atOnce.length})`, p8dr);
+  // (8e) ONE ASKER MORE OF THE SAME FILE JOINS (r2715): two asks of one file inside the bound — one probe, the second answered as the
+  // first's. RED: the mark taken away — a second probe of the same file
+  const run8e = async (CM, tag) => {
+    const [x] = ids(tag, 1); fs.writeFileSync(fpOf(x), lines.slice(0, 300).join('\n') + '\n');
+    CM._setSlicedForTest({ probeMs: 100 });
+    const P = modelPool(3, { dead: new Set([fpOf(x)]) }); CM._setTranscriptPoolForTest(P);
+    const a = answer(CM.probeTranscriptAsync(fpOf(x))), b = answer(CM.probeTranscriptAsync(fpOf(x)));
+    const sent = P.sent.length;
+    return { sent, a: await a, b: await b };
+  };
+  const p8e = await run8e(C, 'g'), p8er = await run8e(R1.CM, 'h');
+  ok(p8e.sent === 1 && p8e.a === p8e.b, `(8e) two askers of one dead file inside the bound: ONE probe (${p8e.sent}), the second answered as the first's (${p8e.b})`, p8e);
+  ok(p8er.sent === 2, `RED: the mark taken away ⇒ a second probe of the same file (${p8er.sent})`, p8er);
+  // (8f) THE PROBE NEVER TAKES THE LAST WORKER (r2718): the other general worker GONE at the send (ended by a bound, not yet back) — the
+  // probe NOT sent (its gap unspent), and a healthy call is handed out and answered. RED: the probe without keepOne — it takes the last
+  // worker out of the hand-out and the healthy call is refused
+  const run8f = async (CM, SM, tag) => {
+    const [x, h] = ids(tag, 2);
+    for (const id of [x, h]) fs.writeFileSync(fpOf(id), lines.slice(0, 300).join('\n') + '\n');
+    await storageOf(CM, [fpOf(x)]);
+    const P = modelPool(2, { dead: new Set([fpOf(x)]) }); P.W[1].alive = false; CM._setTranscriptPoolForTest(P);
+    const wx = SM.warmSessionJsonlAsync(x, cwd);
+    await new Promise((res) => setImmediate(res));
+    const hOut = await answer(CM.jsonlGapInfoAsync(fpOf(h)));
+    const sent = P.sent.length;
+    const wxOut = await wx;
+    return { sent, hOut, wx: wxOut };
+  };
+  const p8f = await run8f(C, SS0, 'i');
+  const R8f = pairOf(PROBE_OPTS, '{ timeoutMs: STORAGE_PROBE_MS, idleOnly: true, look: true }', 'probe-without-keepone');   // stale-pins: kept — the send without keepOne, planted back as the RED
+  const p8fr = await run8f(R8f.CM, R8f.SM, 'j');
+  ok(p8f.sent === 0 && p8f.hOut === 'answered' && p8f.wx === false, `(8f) the other worker gone at the send: the probe NOT sent (${p8f.sent}), the healthy call answered (${p8f.hOut})`, p8f);
+  ok(p8fr.sent === 1 && p8fr.hOut !== 'answered', `RED: the probe without keepOne ⇒ it took the last worker; the healthy call refused (${p8fr.hOut})`, p8fr);
+  // (8h) THE PROBE ASKS THE PATH MEMORY ITSELF (r2715 / r2718: its `look` word skips the pool's own ask): a file the pool remembers
+  // hung — its retry's probe refused at the door: NOT sent (no call reaches the pool), the refusal the storage's by name. RED: the door
+  // ask put out — the probe is sent to the file the pool remembers dead and holds a worker for its bound
+  const R8h = pairOf("    if (h) throw poolRefusalNoted(", "    if (false) throw poolRefusalNoted(", 'probe-no-door-ask');   // stale-pins: kept — the door ask put out, planted back as the RED
+  const run8h = async (CM, tag) => {
+    const [x] = ids(tag, 1); fs.writeFileSync(fpOf(x), lines.slice(0, 300).join('\n') + '\n');
+    CM._setSlicedForTest({ probeMs: 100 });
+    const P = modelPool(2, { dead: new Set([fpOf(x)]) }); P.hung.add(fpOf(x)); CM._setTranscriptPoolForTest(P);
+    const out = await answer(CM.probeTranscriptAsync(fpOf(x)));
+    return { out, calls: P.calls.length, sent: P.sent.length, hung: CM.fileStorageHung(fpOf(x)) };
+  };
+  const p8h = await run8h(C, 'm'), p8hr = await run8h(R8h.CM, 'n');
+  ok(p8h.calls === 0 && p8h.out === 'transcript_reader_restarting' && p8h.hung, `(8h) a file the pool remembers hung: the probe refused at the door (${p8h.out}), NOT sent (${p8h.calls} calls), the storage's`, p8h);
+  ok(p8hr.sent === 1, `RED: the door ask put out ⇒ the probe sent to the file the pool remembers dead (${p8hr.sent})`, p8hr);
+  // (8g) SafeFs's OWN keepOne, REAL (src/safe-fs.js call()): two real transcript workers, one out on a held LOOK — a keepOne call is refused
+  // as busy and never sent; the control: the same call without keepOne is sent and answered
+  {
+    const { SafeFs: SF } = require(path.join(REPO, 'src/safe-fs.js'));
+    const K = new SF({ workerPath: path.join(REPO, 'src/transcript-worker.js'), name: 'keepone-leg', poolSize: 2, timeouts: { default: 5000 } });
+    const fOK = fpOf(ids('k', 1)[0]); fs.writeFileSync(fOK, lines.slice(0, 50).join('\n') + '\n');
+    const sab = new SharedArrayBuffer(4);
+    try {
+      const hold = K.call('__hold', { sab, ms: 5000 }, { look: true }).catch(() => null);
+      await sleepT(50);
+      let k1 = null; try { await K.call('probe', { fp: fOK }, { keepOne: true }); k1 = 'sent'; } catch (e) { k1 = (e && e.code) || 'failed'; }
+      let k0 = null; try { await K.call('probe', { fp: fOK }, {}); k0 = 'sent'; } catch (e) { k0 = (e && e.code) || 'failed'; }
+      Atomics.store(new Int32Array(sab), 0, 1); Atomics.notify(new Int32Array(sab), 0);
+      await hold;
+      ok(k1 === 'no-idle-worker' && k0 === 'sent', `(8g) SafeFs keepOne, real: with the other worker out on a look the keepOne call is refused as busy (${k1}); without it the call is sent (${k0})`, { k1, k0 });
+    } finally { K.close(); }
+  }
+  for (const R of [R8b, R8c, R1, R8f]) R.CM._setSlicedForTest({});
+  C._setSlicedForTest({});
 }
 C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 

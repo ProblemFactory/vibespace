@@ -857,7 +857,8 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     // wait in. Its retry first PROBES the file — one small read (its first bytes) under a short bound, on the general pool: a file that
     // does not answer costs that bound and nothing else (its deadline is remembered by the pool's path memory for calls that short: the
     // next retry's probe is refused at the door). A file that ANSWERS joins B-cd4b's paged warm line like any other (person first): read
-    // in pages, never one whole clone; the line is held by no dead file, and two dead files in step never hold both general workers.
+    // in pages, never one whole clone; the line is held by no dead file. A dead file holds ONE general worker for the probe's bound —
+    // alone in it (r2715) — and only one probe is out on the pool at a time, so two dead files never take both.
     // THE PROBE's BOUND ENDS ONLY THE PROBE (主开发 r2506): it is sent only to a general worker IDLE at the send (the pool's own
     // idleOnly) — a deadline queued behind a healthy call would end THAT call and mark ITS file the storage's. None idle ⇒ NOT sent:
     // nothing ended, nothing marked, the retry's gap NOT spent — asked again at the next ask. A file whose first bytes answer but which

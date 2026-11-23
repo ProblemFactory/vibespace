@@ -528,6 +528,10 @@ class SafeFs {
     // `idleOnly` (B-d833 H9): the least busy live worker has a call in flight ⇒ no worker is idle ⇒ refused at once, never queued
     // (a lane's op waits by its lane's own rule: serial lanes never take this option)
     if (opts.idleOnly && rec.inflight.size) return Promise.reject(noIdleRefusal(this._words));
+    // `keepOne` (row B-422c, 主开发 r2718: the transcript pool's storage probe): sent only when, with it out, another live worker is
+    // still in the hand-out — a call that looks takes its worker out of the hand-out, and the last one would leave every other call
+    // refused for its bound. None ⇒ refused at once as busy, never sent
+    if (opts.keepOne && !(this._workers || []).some((r) => r !== rec && r.alive && r.worker && !r.looking)) return Promise.reject(noIdleRefusal(this._words));
     const sent = this._send(rec, op, payload, timeoutMs, !!opts.attended, !!opts.look);
     if (held.length) { const off = () => { for (const x of held) if (this._trying && this._trying.get(x.path) === sent) this._trying.delete(x.path); }; for (const x of held) (this._trying = this._trying || new Map()).set(x.path, sent); sent.then(off, off); }
     return sent;
