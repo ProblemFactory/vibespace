@@ -965,7 +965,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               if (!rescued) {
                 // the last resort (lane resume-account-door): a refusal the resume bar's verdict did not foresee names the doors too
                 // a THIRD-PARTY provider's refusal says itself, with its code (an unlock door for vault_locked — lane lg-providers r1)
-                if (/^(provider-|vault_|key-unreadable|no-key)/.test(String(e && e.code || ''))) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: e.code, message: e.message })); return; }
+                if (/^(provider-|providers_|vault_|key-unreadable|no-key)/.test(String(e && e.code || ''))) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: e.code, message: e.message })); return; }
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message + ' — log it in again in Manage agents, or pick another account in Session Properties.' }));
                 return;
               }

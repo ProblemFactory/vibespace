@@ -8,7 +8,8 @@
 // decides — the PURE record does.
 import { t } from './i18n.js';
 import { createModalShell, escHtml, fetchJson } from './utils.js';
-import { enterSubmits } from './chat-enter-keys.js';   // an Enter that is not an IME's commit (test-enter-census)
+import { enterSubmits } from './chat-enter-keys.js';
+import { techFold } from './plain-words.js';   // (r3106 (2)) the damaged list's kept bytes, named in the one fold door   // an Enter that is not an IME's commit (test-enter-census)
 import { REGION_WORDS, KEY_ERRORS, MODEL_ERRORS, FIT_WORDS, WIRES, fits } from '../model-providers.js';
 import { VERDICT_WORDS, REFUSAL_WORDS, refusalWords } from '../provider-test-model.js';
 import { BACKEND_META, getBackendMeta } from './agent-meta.js';
@@ -33,6 +34,7 @@ export async function openProviderWizard({ backend, onDone = null } = {}) {   //
   if (!live()) return;
   if (!list || list.error || !Array.isArray(list.shipped)) { body.textContent = t('Could not read the providers — {reason}', { reason: (list && list.error) || t('server unreachable') }); return; }
   if (list.unread) body.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline pw-held', textContent: t('VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.') }));   // (B-f276 family) held: an add is refused by name until it reads
+  if (list.damaged) { body.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline pw-damaged', textContent: t('The list of model providers was damaged, so it starts empty — VibeSpace kept the damaged bytes aside (their name is below). Add the providers again: each gets a new key; their old keys stay in the Vault window until you remove them there.') })); const f = techFold([String(list.damaged.copy || '')], { mono: true }); if (f) body.appendChild(f); }   // (r3106 (2))
   const fitsHere = (s) => !!(s.fits && s.fits[backend] && s.fits[backend].ok);
   const cards = [...list.shipped].sort((a, b) => Number(fitsHere(b)) - Number(fitsHere(a)));   // the ones the opening agent can use first
   const st = { step: 'pick', preset: null, region: 'global', provider: null, tests: {}, testedModel: null, busy: false, error: '', draft: {} };

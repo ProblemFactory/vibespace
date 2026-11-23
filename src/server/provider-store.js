@@ -51,11 +51,12 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
   // since a key the torn list named would then read as named by nothing, the ONE remover by this store's silence (the Vault row's
   // Remove of an «orphaned» key) refuses a key a kept copy still names (remove, below).
   let records = [];
+  let damaged = null;   // (r3106 (2)) {copy, at}: this start lifted the list EMPTY over torn bytes kept aside under `copy`
   const hold = HOLD.create({
     file, valid: PROVIDERS_SHAPE, code: 'providers_unread', aside: (mark) => file + '.corrupt-' + mark,
     words: (h) => `providers.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No model provider is lost: nothing is written over it, a conversation that names a provider waits, and adding or changing a provider is refused until it reads.`,
     log: (m) => log('[providers] ' + m),
-    onLift: (v) => { records = load(v); try { onLift?.(); } catch { } },
+    onLift: (v, facts) => { records = load(v); if (facts && facts.setAside) damaged = { copy: String(facts.setAside), at: now() }; try { onLift?.(); } catch { } },   // (r3106 (2)) lifted EMPTY over torn bytes: the list WAS DAMAGED — said where the person meets it
   });
   let read0; try { read0 = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read0 = { error }; }
   const a0 = SR.storeAnswer(read0, { valid: PROVIDERS_SHAPE });
@@ -132,6 +133,8 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     generationOf: (id) => gen.get(id) || 0,
     /** (B-f276 family) the words a person reads while providers.json is held — null when it reads */
     unread: () => hold.words(),
+    /** (r3106 (2)) {copy, at} when this start lifted the list EMPTY over torn bytes (kept aside under `copy`) — else null */
+    damaged: () => damaged,
     /** the hold's facts — {file, code, since} | null */
     held: () => hold.held(),
     /** (the start's read) a refused read or a re-read in flight: no caller may take the empty list for «no provider» */
@@ -255,7 +258,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
       return { ok: true, provider: filled(next) };
     }); },
     /** the record, then its sealed key (a locked vault forgets too — secretDrop needs no key) */
-    remove(id) { return one(async () => {
+    remove(id, { keptCopyOk = false } = {}) { return one(async () => {
       const h = heldNo('removing a model provider'); if (h) return h;   // held: no record is known — never «an orphaned key»
       const p = thirdParty(id);
       if (MP.presetOf(id)) return { ok: false, code: 'built-in' };
@@ -265,8 +268,8 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
       if (!p) {
         // THE REMOVER BY THIS STORE's SILENCE (r3019): torn bytes start the list empty — a key the torn list named reads as named by
         // nothing. A key a kept copy of the torn list still names is never removed as an orphan: refused by name, the copy named
-        const kept = await keptCopyNaming(id);
-        if (kept) { log(`[providers] ${id}: not removed — its key is named in ${kept}, the copy of a torn providers.json kept aside`); return { ok: false, code: 'providers_torn_named', copy: kept, error: "A damaged copy of the provider list that VibeSpace kept aside still names this key's provider — nothing was removed. Restore that copy in VibeSpace's data folder, or remove it there, first." }; }
+        const kept = keptCopyOk ? null : await keptCopyNaming(id);   // (r3106 (1)) a person's CONFIRMED press removes it — never the store's silence alone
+        if (kept) { log(`[providers] ${id}: not removed — its key is named in ${kept}, the copy of a torn providers.json kept aside (a confirmed Remove takes it)`); return { ok: false, code: 'providers_torn_named', copy: kept, error: "The list of model providers was damaged. VibeSpace kept its damaged bytes aside, and they still name this key's provider — nothing was removed. A provider added again is a new provider to VibeSpace with a NEW key, so this old key is not taken back: if you added it again, or it is of no use any more, press Remove again and confirm to remove this old key." }; }
         let had = false;
         try { had = !!v0 && typeof v0.secretNames === 'function' && v0.secretNames().some((n) => n.name === MP.keyEntryOf(id)); } catch { had = false; }
         if (!had) return { ok: false, code: 'unknown' };

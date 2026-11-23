@@ -68,9 +68,11 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
   // an async door's throw answers 500 with words — Express 4 never answers a rejected handler (the request would hang)
   const door = (fn) => (req, res) => Promise.resolve().then(() => fn(req, res)).catch(() => { if (!res.headersSent) res.status(500).json({ ok: false, code: 'failed', error: 'the provider could not be changed' }); });
   app.use('/api/providers', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+  // (r3106 (5)) HELD: every door but the list answers the hold's own words by name — never «unknown provider» for a record only unread
+  app.use('/api/providers', (req, res, next) => { if (req.path !== '/list' && typeof providers.unread === 'function' && providers.unread()) return refuse(res, { code: 'providers_unread' }); next(); });
   app.post('/api/providers/list', (req, res) => {
     if (!person(req, res)) return;
-    res.json({ shipped: MP.SHIPPED.map(shippedPub), shippedAt: MP.SHIPPED_AT, providers: providers.thirdParty().map(pub), ...(typeof providers.unread === 'function' && providers.unread() ? { unread: true } : {}) });   // (B-f276 family) held: the list is UNREAD — the page says so, never «no provider»
+    res.json({ shipped: MP.SHIPPED.map(shippedPub), shippedAt: MP.SHIPPED_AT, providers: providers.thirdParty().map(pub), ...(typeof providers.unread === 'function' && providers.unread() ? { unread: true } : {}), ...(typeof providers.damaged === 'function' && providers.damaged() ? { damaged: { copy: providers.damaged().copy } } : {}) });   // (B-f276 family) held: the list is UNREAD — the page says so, never «no provider»
   });
   app.post('/api/providers', door(async (req, res) => {
     if (!person(req, res)) return;
@@ -108,11 +110,13 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
   }));
   app.delete('/api/providers/:id', door(async (req, res) => {
     if (!person(req, res)) return;
-    const r = await providers.remove(String(req.params.id));
+    const r = await providers.remove(String(req.params.id), { keptCopyOk: req.query && req.query.kept === 'remove' });   // (r3106 (1)) ?kept=remove: the person CONFIRMED the old key's removal
     if (!r.ok) { if (r.code === 'write-failed') changed('remove', String(req.params.id || '')); return refuse(res, r); }   // B-ee0a (its delta read): a failed write touched the records (undone, or a new key kept) — the lists move
     changed('remove', r.id);
     res.json({ ok: true, id: r.id, keyDropped: r.keyDropped, ...(r.orphan ? { orphan: true } : {}) });
   }));
 }
 
-module.exports = { registerProviderRoutes };
+/** (r3106 (5)) the hold's words, the same at every door that names a provider (the models routes too) */
+const PROVIDERS_UNREAD_WORDS = WORDS.providers_unread;
+module.exports = { PROVIDERS_UNREAD_WORDS, registerProviderRoutes };

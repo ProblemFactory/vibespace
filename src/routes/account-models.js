@@ -20,6 +20,9 @@ const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.header
 
 function registerAccountModelRoutes(app, { accounts, providers }) {
   // the target: a roster account, or a projected third-party row (no account record yet: the wizard is Train 2)
+  const UNREAD_WORDS = require('./providers.js').PROVIDERS_UNREAD_WORDS;
+  /** (r3106 (5)) the list is HELD and this target is (or may be) a provider: a pv- id, or an account whose provider the list holds */
+  const heldFor = (id) => typeof providers.unread === 'function' && !!providers.unread() && (/^pv-/.test(id) || !(accounts && typeof accounts.get === 'function' && accounts.get(id)) || !!(accounts.get(id) || {}).provider);
   const targetOf = (id) => {
     const a = accounts && typeof accounts.get === 'function' ? accounts.get(id) : null;
     if (a) return { account: { id: a.id, name: (typeof accounts.nameShownOf === 'function' ? accounts.nameShownOf(a.id) : a.name) || a.id, backend: a.backend || 'claude', type: a.type || 'api' }, provider: providers.forAccount(a) };
@@ -39,6 +42,7 @@ function registerAccountModelRoutes(app, { accounts, providers }) {
   });
   app.put('/api/accounts/:id/models', async (req, res) => { try {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'the owner enters an account\'s models — an agent cannot', code: 'agent_forbidden' });
+    if (heldFor(String(req.params.id))) return res.status(503).json({ error: UNREAD_WORDS, code: 'providers_unread' });   // (r3106 (5)) held: the hold's words, never «unknown account»
     const t = targetOf(String(req.params.id));
     { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: 'the accounts list could not be read — try again once it reads', code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!t) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
@@ -51,6 +55,7 @@ function registerAccountModelRoutes(app, { accounts, providers }) {
     if (!kept) return res.status(500).json({ error: 'the models could not be written yet — the hub tries again', code: 'write-failed' });
     if (r.ok) return res.json({ ok: true, provider: answer({ account: t.account, provider: r.provider }).provider });   // the same shape the GET answers — never the address, the tail or the key's place (the chain cure's read, R8)
     if (r.code === 'invalid') return res.status(400).json({ error: 'some rows are not valid', code: 'invalid', errors: r.errors });
+    if (r.code === 'providers_unread') return res.status(503).json({ error: UNREAD_WORDS, code: 'providers_unread' });   // (r3106 (5)) never the «listed by the harness» sentence
     return res.status(409).json({ error: 'these models are listed by the harness or the provider — they are not entered here', code: r.code });
   } catch (e) { if (!res.headersSent) res.status(500).json({ error: 'the models could not be saved', code: 'failed' }); } });   // an async handler's throw never hangs the request (Express 4)
 }

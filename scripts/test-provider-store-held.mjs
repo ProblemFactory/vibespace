@@ -7,6 +7,9 @@
 //   ② a START while held reads the same file again (still held while it fails; whole when it reads)
 //   ③ torn bytes are kept aside ONCE, then the list starts empty — and THE REMOVER BY ITS SILENCE (the Vault row's Remove of an
 //     «orphaned» key) removes ZERO of the keys the torn list named; a true orphan is still removed
+//   ④ (r3106) the damaged list said (the kept bytes named), a lost provider's conversation told so, the old key removed by a
+//     CONFIRMED press only; ⑤ every provider door while held answers the hold's words
+//   ⑥ (r3216) the usage door answers each kind in its one catch (the accounts list's, the provider list's held, its no-holds, a login)
 //   RED COPIES: a store without the hold writes over the file; a remover without the kept copy's check drops a named key.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -106,6 +109,62 @@ console.log('— ③ torn bytes: kept aside once, then empty — the remover by 
     { lifted, copies, copies2, named: named.code, keysKept, orphan });
 }
 
+console.log('— ④ the damaged list said, the old key removed by a confirmed press (r3106)');
+{
+  const w = await place('damaged');
+  fs.writeFileSync(w.file, w.before.slice(0, w.before.length - 3));
+  const s = PS.create({ dataDir: w.DATA, vault: () => w.vault, log: () => {} });
+  await settle(120);
+  const dmg = s.damaged();
+  const spawn = PSP.create({ providers: s, dataDir: w.DATA });
+  let lost = null; try { spawn(w.a.id, 'claude', {}); } catch (e) { lost = e; }
+  const lostModel = PSP.modelFor(s, w.a.id, null, 'claude');
+  ok(!!dmg && /^providers\.json\.corrupt-/.test(dmg.copy) && !!lost && lost.code === 'providers_damaged' && /was damaged/.test(lost.message) && !/removed/.test(lost.message) && lostModel.code === 'providers_damaged' && !/removed/.test(lostModel.message),
+    '④ torn bytes lifted EMPTY: the store says the list WAS DAMAGED and names the kept bytes; a conversation naming a provider it held is told the list was damaged (providers_damaged) — never «it was removed»', { dmg, lost: lost && lost.code, model: lostModel.code });
+  const refusedFirst = await s.remove(w.a.id);
+  const confirmed = await s.remove(w.a.id, { keptCopyOk: true });
+  ok(refusedFirst.code === 'providers_torn_named' && /new provider to VibeSpace with a NEW key/.test(refusedFirst.error) && !/[Rr]estore/.test(refusedFirst.error) && confirmed.ok === true && confirmed.orphan === true && !s.hasKey(w.a.id) && s.hasKey(w.b.id),
+    '④ …the old key the damaged list names: the first Remove says the truth (a provider added again has a NEW key — nothing to restore) and keeps it; a CONFIRMED Remove removes that one key only', { first: refusedFirst.code, confirmed });
+  const fresh = PS.create({ dataDir: scratchDir('provider-store-held-clean'), vault: () => w.vault, log: () => {} });
+  ok(fresh.damaged() === null, '④ …a list that read (or was absent) is not «damaged»');
+}
+
+console.log('— ⑤ every provider door while held answers the hold\'s words (r3106 (3) (4) (5))');
+{
+  const w = await place('doors');
+  const lift = refuseReads(w.file);
+  let s; try { s = PS.create({ dataDir: w.DATA, vault: () => w.vault, log: () => {} }); } finally { lift(); }
+  const R = require(path.join(REPO, 'src/routes/providers.js'));
+  const uses = [];
+  const app = { use: (p, f) => uses.push([p, f]), get() { }, post() { }, put() { }, patch() { }, delete() { } };
+  R.registerProviderRoutes(app, { providers: s });
+  const answer = (method, sub) => { let out = null; const res = { set() { return res; }, status(c) { out = { status: c }; return res; }, json(b) { out = { ...(out || {}), body: b }; return res; } };
+    for (const [p, f] of uses) { if (p !== '/api/providers') continue; let go = false; f({ method, path: sub, query: {} }, res, () => { go = true; }); if (!go) return out; } return { passed: true }; };
+  const del = answer('DELETE', '/' + w.a.id), refresh = answer('POST', '/' + w.a.id + '/models/refresh'), list = answer('POST', '/list');
+  ok(del && del.status === 503 && del.body.code === 'providers_unread' && del.body.error === R.PROVIDERS_UNREAD_WORDS && refresh && refresh.status === 503 && list && list.passed === true,
+    '⑤ held: a provider door (the Vault row\'s Remove, a models refresh) answers 503 providers_unread with the hold\'s words — never «unknown provider»; the list still answers (unread)', { del, refresh, list });
+  const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const WS = read('src/ws-create.js'), DOOR = read('src/server/cli-usage-door.js'), AM = read('src/routes/account-models.js'), PM = read('src/routes/provider-models.js'), VW = read('src/lib/vault-window.js');
+  ok(WS.includes("if (/^(provider-|providers_|vault_|key-unreadable|no-key)/.test(String(e && e.code || '')))") && DOOR.includes("if (e && /^providers_/.test(String(e.code || ''))) return { ok: false, status: e.code === 'providers_unread' ? 503 : 409, code: e.code, error: e.message };")
+    && AM.includes("if (heldFor(String(req.params.id))) return res.status(503).json({ error: UNREAD_WORDS, code: 'providers_unread' });") && AM.includes("if (r.code === 'providers_unread') return res.status(503)")
+    && PM.includes("if (/^pv-/.test(id) && typeof providers.unread === 'function' && providers.unread()) return res.status(503)") && VW.includes("reason: heldWordsOf(r) ||"),
+    '⑤ …the create\'s last-resort pass carries providers_* by its code (never «log it in again»), the usage door answers it (never «login needed»), the models routes answer the hold\'s words, the Vault row\'s refusal is worded by heldWordsOf (zh / ja)');
+}
+
+console.log('— ⑥ the usage door answers each kind of refusal in its ONE catch (r3216: the move onto the hotfix trial)');
+{
+  const DM = require(path.join(REPO, 'src/server/cli-usage-door.js'));
+  const named = (code) => Object.assign(new Error('placed: ' + code), { code });
+  const throwsFor = { 'a-acc': named('accounts_unread'), 'a-pvu': named('providers_unread'), 'a-pvd': named('providers_damaged'), 'a-pvt': named('providers_torn_named'), 'a-login': new Error('not signed in') };
+  const accounts = { get: (id) => (throwsFor[id] ? { id, backend: 'claude' } : null), resolveForSpawn: (id) => { throw throwsFor[id]; } };
+  const harnessOf = () => ({ label: 'Claude Code', quota: { onDemand: { argv: ['usage'], judge: () => ({ verdict: 'reading' }) } } });
+  const door = DM.createCliUsageDoor({ accounts, harnessOf, cliCmds: { check: async () => '/bin/true' }, cacheDir: scratchDir('provider-store-held-door'), log: () => {} });
+  const got = {};
+  for (const id of Object.keys(throwsFor)) { const r = await door.read(id, { person: true }); got[id] = [r.status, r.code]; }
+  ok(JSON.stringify(got) === JSON.stringify({ 'a-acc': [503, 'accounts_unread'], 'a-pvu': [503, 'providers_unread'], 'a-pvd': [409, 'providers_damaged'], 'a-pvt': [409, 'providers_torn_named'], 'a-login': [409, 'login-needed'] }),
+    '⑥ the usage door, ONE catch: the accounts list held ⇒ 503 accounts_unread (that unit\'s answer, unchanged); the provider list held ⇒ 503 providers_unread; the two provider codes that are no holds ⇒ 409 by their code; any other refusal ⇒ 409 login-needed', got);
+}
+
 console.log('— RED COPIES');
 {
   const NOHOLD = "  const heldNo = (what) => (hold.held() ? { ok: false, code: 'providers_unread', error: hold.refusal(what).message } : null);";
@@ -118,7 +177,7 @@ console.log('— RED COPIES');
   await s.add({ preset: 'deepseek', key: KEY, label: 'Router C' });
   const after = idsIn(w.file) || [];
   ok(!after.includes(w.a.id) && after.length === 1, 'CONTROL: a store without the hold writes ONLY the new record over the file after a refused read ⇒ ① goes RED', after);
-  const NOCOPY = "        const kept = await keptCopyNaming(id);";
+  const NOCOPY = "        const kept = keptCopyOk ? null : await keptCopyNaming(id);";
   const P3 = M.load('src/server/provider-store.js', anchored(SRC, NOCOPY, '        const kept = null;', 'the remover reads no kept copy'), 'no-copy-check');
   const w3 = await place('red-remover', P3);
   fs.writeFileSync(w3.file, w3.before.slice(0, w3.before.length - 3));

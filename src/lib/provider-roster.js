@@ -7,7 +7,8 @@ import { agoText, createModalShell, escHtml, fetchJson, showConfirmDialog, showC
 import { VERDICT_WORDS, refusalWords } from '../provider-test-model.js';
 import { KEY_ERRORS, conversationsOn } from '../model-providers.js';
 import { openAccountModelsDialog } from './account-models.js';
-import { nameHelpers } from './browser-who-dialog.js';   // the name a conversation wears in the sidebar (the remove confirm names it so)
+import { nameHelpers } from './browser-who-dialog.js';
+import { techFold } from './plain-words.js';   // (r3106 (2)) the damaged list's kept bytes, named in the one fold door   // the name a conversation wears in the sidebar (the remove confirm names it so)
 
 /** the page's live conversations with the names the SIDEBAR shows them by → [{ accountId, name }] (the remove confirms read it) */
 export function namedLiveRows(app) {
@@ -80,6 +81,8 @@ export async function renderProviderRows(body, backend, { refresh = () => { }, s
   const r = await fetchJson('/api/providers/list', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });   // a person's read (U1 cure (B))
   // (B-f276 family) providers.json HELD — the list is UNREAD, never «no provider»: said where the person meets it
   if (r && r.unread && sec.isConnected) { sec.hidden = false; sec.append(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline acct-providers-held', textContent: t('VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.') })); return; }
+  // (r3106 (2)) LIFTED EMPTY over torn bytes: the list WAS DAMAGED — said in place, the kept bytes' name in a fold
+  if (r && r.damaged && sec.isConnected) { sec.hidden = false; const w = Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline acct-providers-damaged', textContent: t('The list of model providers was damaged, so it starts empty — VibeSpace kept the damaged bytes aside (their name is below). Add the providers again: each gets a new key; their old keys stay in the Vault window until you remove them there.') }); const f = techFold([String(r.damaged.copy || '')], { mono: true }); sec.append(w); if (f) sec.append(f); }
   const rows = (r && Array.isArray(r.providers) ? r.providers : []).filter((p) => p.fits && p.fits[backend] && p.fits[backend].ok);
   if (!rows.length || !sec.isConnected) { sec.remove(); return; }   // no provider serves this harness: no section (the add door is the roster's own)
   const head = document.createElement('div'); head.className = 'acct-providers-head';

@@ -83,7 +83,7 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
     const cmd = await cliCmds.check(be, { force: true });
     if (!cmd) return { ok: false, status: 409, code: 'not-installed', error: `${harnessOf(be)?.label || be} is not installed on this machine` };
     let spawnEnv = null;
-    try { spawnEnv = accounts.resolveForSpawn(id, be); } catch (e) { if (e && e.code === 'accounts_unread') return { ok: false, status: 503, code: 'accounts_unread', error: e.message }; return { ok: false, status: 409, code: 'login-needed', loginNeeded: true, error: e.message }; }   // the B-f276 family (r2947): a held list is never «sign in again»
+    try { spawnEnv = accounts.resolveForSpawn(id, be); } catch (e) { if (e && e.code === 'accounts_unread') return { ok: false, status: 503, code: 'accounts_unread', error: e.message }; if (e && /^providers_/.test(String(e.code || ''))) return { ok: false, status: e.code === 'providers_unread' ? 503 : 409, code: e.code, error: e.message }; return { ok: false, status: 409, code: 'login-needed', loginNeeded: true, error: e.message }; }   // the B-f276 family (r2947): a held list is never «sign in again»; (lane lg-providers, r3106 (3)) a held provider list is neither: its held code 503, the two that are no holds 409
     if (!spawnEnv || !spawnEnv.localEnv) return { ok: false, status: 409, code: 'no-account-env', error: 'this account has no spawn environment of its own' };
     const creds = harnessOf(be)?.creds || {};
     const env = { ...agentEnv(), ...spawnEnv.localEnv };

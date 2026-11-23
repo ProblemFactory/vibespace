@@ -24,7 +24,7 @@
 // 「需要你」 item's door in For you (focus = its row).
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
-import { fetchJson, showToast, showConfirmDialog, copyText, createModalShell, showContextMenu } from './utils.js';
+import { fetchJson, showToast, showConfirmDialog, copyText, createModalShell, showContextMenu, heldWordsOf } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
@@ -332,7 +332,13 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const w = confirmWords(d.confirm, row, app);
     if (!(await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true }))) return;
     const r = await fetchJson(d.path, { method: d.method, headers: { 'Content-Type': 'application/json' }, ...(d.method === 'POST' ? { body: '{}' } : {}) });
-    if (!r || r.error || r.ok === false) { showToast(t('Could not delete — {reason}', { reason: r && r.code === 'providers_torn_named' ? t('A damaged copy of the provider list that VibeSpace kept aside still names this key\'s provider — nothing was removed. Restore that copy in VibeSpace\'s data folder, or remove it there, first.') : (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
+    if (r && r.code === 'providers_torn_named') {   // (r3106 (1)) the old key a damaged list still names: removed only by a CONFIRMED press
+      if (!(await showConfirmDialog({ title: t('Remove this old key?'), message: t('The list of model providers was damaged. VibeSpace kept its damaged bytes aside, and they still name this key\'s provider — nothing was removed. A provider added again is a new provider to VibeSpace with a NEW key, so this old key is not taken back: if you added it again, or it is of no use any more, press Remove again and confirm to remove this old key.') + ' ' + t('The damaged list still names this key\'s provider. A provider added again has a new key, so this old key is no longer used by any provider in the list. Remove it?'), confirmText: t('Remove'), danger: true }))) return;
+      const r2 = await fetchJson(d.path + (d.path.includes('?') ? '&' : '?') + 'kept=remove', { method: d.method, headers: { 'Content-Type': 'application/json' } });
+      if (!r2 || r2.error || r2.ok === false) { showToast(t('Could not delete — {reason}', { reason: heldWordsOf(r2) || (r2 && (r2.error || r2.code)) || t('server unreachable') }), { type: 'error' }); return; }
+      showToast(t('Deleted')); refresh(); return;
+    }
+    if (!r || r.error || r.ok === false) { showToast(t('Could not delete — {reason}', { reason: heldWordsOf(r) || (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }   // (r3106 (4)) a held store's refusal in the page's words
     showToast(t('Deleted'));
     refresh();
   }

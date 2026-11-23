@@ -40,6 +40,7 @@ function create({ providers, dataDir, harnessOf = (id) => require('../harnesses'
   return function providerSpawnFor(id, backend, opts = {}) {
     if (typeof providers.unread === 'function' && providers.unread()) throw named('providers_unread', `VibeSpace cannot read its list of model providers right now, so this conversation on ${id} waits — nothing was started; try again in a few minutes (it reads the list again by itself)`);   // (B-f276 family, r3000) providers.json HELD: the provider is unread, never «removed» — refused BY NAME, never started on another one nor on no provider's settings
     const p = providers.thirdParty().find((r) => r.id === id) || null;
+    if (!p && typeof providers.damaged === 'function' && providers.damaged()) throw named('providers_damaged', `the list of model providers was damaged (VibeSpace kept its damaged bytes aside) and this conversation's provider is not in it any more — nothing was started; add the provider again in the account dialog, then pick it for this conversation`);   // (r3106 (2)) never «it was removed»
     if (!p) throw named('provider-unknown', `unknown model provider ${id} — it was removed; pick another account for this conversation`);
     let h = null;
     try { h = harnessOf(backend); } catch { h = null; }
@@ -76,6 +77,7 @@ function create({ providers, dataDir, harnessOf = (id) => require('../harnesses'
 function modelFor(providers, id, model, backend = null, harnessOf = (b) => require('../harnesses').get(b)) {
   if (typeof providers.unread === 'function' && providers.unread()) return { ok: false, code: 'providers_unread', message: `VibeSpace cannot read its list of model providers right now, so this conversation on ${id} waits — nothing was started; try again in a few minutes (it reads the list again by itself)` };   // (B-f276 family) held: unread, never «removed»
   const p = providers.thirdParty().find((r) => r.id === id) || null;
+  if (!p && typeof providers.damaged === 'function' && providers.damaged()) return { ok: false, code: 'providers_damaged', message: `the list of model providers was damaged (VibeSpace kept its damaged bytes aside) and this conversation's provider is not in it any more — nothing was started; add the provider again in the account dialog, then pick it for this conversation` };   // (r3106 (2))
   if (!p) return { ok: false, code: 'provider-unknown', message: `unknown model provider ${id} — it was removed; pick another account for this conversation` };
   if (backend && !MP.fitsHarness(p, backend)) { let label = backend; try { label = (harnessOf(backend) || {}).label || backend; } catch { } return { ok: false, code: 'provider-unfit', message: `${p.label} does not offer what ${label} needs` }; }
   const want = typeof model === 'string' ? model.trim() : '';
