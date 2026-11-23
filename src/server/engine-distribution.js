@@ -148,7 +148,11 @@ const RECORD_FILE = 'browser-engines.json';
 const VERSION_MS = 5000;
 const STALL_MS = 120000;
 const ANSWER_MS = 10000;
-const LATE_LOOK_MS = 50;      // B-4d35 r3: an ask whose ONE bound is spent only LOOKS at a put-back — one that finds nothing aside ends within it
+// B-3dbd (主开发 r3305; bl-tests-a's finding): an ask whose ONE bound is spent judges a put-back by its own FACT — it waits for the
+// put-back's LOOK (its stats: is anything aside, is a kernel in its place) to end, bounded GENEROUSLY here (said if it passes), and
+// is refused only by a put-back that is really RENAMING. Before: 50 ms of wall clock raced the look's real file reads — on a busy
+// machine the measure was refused «being put back» with nothing aside and a kernel in its place
+const PUT_BACK_LOOK_MS = 10000;
 const LAND_WAIT_MS = 30000;    // lane fleet-plugin-catalog r2 (N3) / r3 (N2): a start's WHOLE ask (the waiting kernel's landing + its hold), a measure, a put-back waits at most this — ONCE — for a landing in progress (a landing never waits for a start)
 const LAUNCH_HOLD_MS = 120000; // … a start's hold ends at its spawn — or after this, whatever happens to the start
 const MANIFEST_MAX = 256 * 1024;
@@ -179,6 +183,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   const userKernelSaid = new Set(); // L1b r2: an owner's-program engine whose record holds a downloaded kernel — said ONCE per hub life
   const restoring = new Map(); // id → the put-back in flight (one at a time: installKernel, measure and the boot may all ask)
   const asked = new Map(); // r7 (p2): id → the not-whole count its put-back in flight holds (restoreAside takes it; putBack may end it early)
+  // B-3dbd: id → the put-back's own fact — `renaming` (its rename of the place is in flight) and `look` (settles when its stats end:
+  // nothing aside, a kernel in its place, a read it could not make, or the rename about to start)
+  const putBackFacts = new Map();
   const fleetLast = { at: null, outcome: null, code: null, error: null, plugin: null, why: null, ref: null, from: null, to: null, kernel: null, got: null };
   // lane fleet-plugin-catalog r2 (N3): ONE critical section per engine — a LANDING (an install's, a waiting kernel's) holds the place
   // alone; a START (the keeper from its in-use check to its spawn), a MEASURE, a PUT-BACK hold it shared; one writer of rec.next
@@ -669,9 +676,17 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   async function waitPutBack(sid, p, ask) {
     if (await within(p, 0)) return true; // already over — nothing to wait for, nothing to say
     // round 3 (the second adversarial read): an ask whose ONE bound is spent (it waited out a landing that only deletes — r5: it goes
-    // on) only LOOKS — a put-back that finds nothing aside, or a kernel in its place, ends within LATE_LOOK_MS; one still renaming is
-    // refused by name. Never a second bound (round 2's fresh one let an ask wait twice and the «within 30 seconds» was not true)
-    if (ask.late) return within(p, LATE_LOOK_MS);
+    // on) only LOOKS; never a second bound for the put-back's RENAME (round 2's fresh one let an ask wait twice and the «within 30
+    // seconds» was not true). B-3dbd (主开发 r3305): the look judges by the put-back's own FACT — a put-back renaming is refused at
+    // once; one still LOOKING (its stats, real file reads) is waited for, bounded generously (PUT_BACK_LOOK_MS, said if it passes);
+    // it is refused only if the look ends in a rename. Never a clock raced against the look's reads
+    if (ask.late) {
+      const fact = putBackFacts.get(sid);
+      if (!fact) return within(p, 0);
+      if (fact.renaming) return false;
+      if (!(await within(fact.look, PUT_BACK_LOOK_MS))) { log.warn?.(`[browser] ${who(sid)}'s previous kernel's place could not be looked at within ${secs(PUT_BACK_LOOK_MS)} s — ${ask.asker} waits no longer`); return false; }
+      return !fact.renaming;
+    }
     if (!ask.saidBack) { ask.saidBack = true; log.log?.(`[browser] ${who(sid)}: ${ask.asker} waits for its previous kernel to be put back in its place (≤ ${secs(landWaitMs)} s)`); }
     const ended = await within(p, ask.until - Date.now());
     if (!ended) { ask.late = true; log.warn?.(`[browser] ${who(sid)}'s previous kernel is still being put back after ${secs(landWaitMs)} s — ${ask.asker} waits no longer (the put-back runs on)`); }
@@ -1064,16 +1079,21 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     if (restoring.has(sid)) return restoring.get(sid);
     const w = notWhole(sid); // r7 (p2)
     asked.set(sid, w);
-    const p = putBack(sid, plan).finally(() => { w.end(); asked.delete(sid); restoring.delete(sid); });
+    let endLook = null;
+    const fact = { renaming: false, look: new Promise((r) => { endLook = r; }), endLook: () => endLook() };
+    putBackFacts.set(sid, fact);
+    const p = putBack(sid, plan).finally(() => { fact.endLook(); w.end(); asked.delete(sid); restoring.delete(sid); putBackFacts.delete(sid); });
     restoring.set(sid, p);
     return p;
   }
   async function putBack(sid, plan) {
     const w = asked.get(sid) || { end: () => {} };
-    const sk = `${sid}\0place`, none = () => { saidAside.delete(sk); w.end(); return { none: true }; };
+    const fact = putBackFacts.get(sid) || { endLook: () => {} };
+    const sk = `${sid}\0place`, none = () => { saidAside.delete(sk); w.end(); fact.endLook(); return { none: true }; };
     const unknown = (what, e) => {
       const code = (e && e.code) || (e && e.message) || 'error';
       if (saidAside.get(sk) !== code) { saidAside.set(sk, code); log.warn?.(`[browser] ${who(sid)}'s ${what} could not be read (${code}) — the previous kernel's copy beside its place is left as it is: nothing moves and nothing is deleted, nothing lands meanwhile; asked again at the next start or use`); }
+      fact.endLook(); // B-3dbd: the look ended — nothing moves
       return { unknown: code }; // r8 (s1)
     };
     let aside = false; try { aside = (await io.stat(plan.removingDir)).isDirectory(); } catch (e) { if (e && e.code !== 'ENOENT' && e.code !== 'ENOTDIR') return unknown('copy of its previous kernel', e); }
@@ -1086,12 +1106,14 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     catch (e) { if (!e || e.code !== 'ENOENT') return unknown('kernel place', e); }
     if (place) {
       w.end(); // r7 (p2): a kernel is in its place — whole
+      fact.endLook(); // B-3dbd: nothing is put back (a leftover beside it may still be deleted: the place is whole)
       // a kernel IN its place: the aside copy is a LEFTOVER (the landing's rm failed; an NFS silly-rename) — deleted, never put
       // back over it; only when the place's binary is there (a place without one keeps both — measure says it is missing)
       let exe = null; try { exe = await io.stat(plan.exe); } catch (e) { if (e && e.code !== 'ENOENT' && e.code !== 'ENOTDIR') return unknown('kernel in its place', e); }
       if (exe && exe.isFile()) await fsp.rm(plan.removingDir, { recursive: true, force: true }).then(() => log.log?.(`[browser] ${who(sid)}'s leftover previous kernel beside its place was deleted — a kernel is in its place`), (e) => log.warn?.(`[browser] the leftover previous kernel at ${plan.removingDir} could not be deleted (${e && e.message})`));
       return none();
     }
+    fact.renaming = true; fact.endLook(); // B-3dbd: REALLY being put back from here
     const rec = recOf(sid);
     try { await io.rename(plan.removingDir, plan.targetDir); }
     catch (e) {

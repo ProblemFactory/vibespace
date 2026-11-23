@@ -1626,6 +1626,31 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
   ok(lm.inCleanup && lm.m && lm.m.ok === true && !lm.m.code && !lm.said && lm.a === true,
     'B-4d35 round 3: a forced measure whose ONE bound passed while the landing only deleted the previous kernel goes on and MEASURES — its put-back only looked (a kernel in its place) — never «being put back», never a second bound', lm);
   ok(lmBad.m && lmBad.m.code === 'engine_kernel_landing', 'CONTROL (B-4d35 round 3, a late ask refused at once): that measure is answered «being put back» though nothing was aside', lmBad.m);
+  // B-3dbd (主开发 r3305; bl-tests-a's finding — on a loaded machine the PRODUCT lost, not the leg): the same late forced measure, while
+  // the put-back's own LOOK is held by a PLACED stall (its stats of the copy beside the place and of the place answer 150 ms late —
+  // past the release's 50 ms look) and nothing is to be put back (a kernel in its place): the measure waits for that look and
+  // MEASURES — never «being put back». RED: the release's race (50 ms of wall clock against the look's own file reads)
+  const lateMeasureSlowLook = async (EDM) => {
+    const BOUND = 100, S = {}; let rmIn = false, rmGo = null, stalled = 0, stallOn = true; const rmGate = new Promise((r) => { rmGo = r; });
+    const io = {
+      rm: async (f, o) => { if (f.endsWith('/.removing-linux-x64') && S.L && S.L.receipt() === KSHA.k3) { rmIn = true; await rmGate; } return fs.promises.rm(f, o); },
+      stat: async (f) => { if (rmIn && stallOn && S.L && (f === S.L.plan.removingDir || f === S.L.plan.targetDir)) { stalled++; await sleep(150); } return fs.promises.stat(f); },
+    };
+    const L = light(snapC, { EDM, io, opts: { landWaitMs: BOUND } }); S.L = L;
+    const A = L.ED.landNext(EID);
+    const inCleanup = !!(await until(() => rmIn, 2000));
+    const m = await Promise.race([L.ED.measure(EID, { force: true }).then((r) => ({ ok: r && r.ok, code: r && r.code }), (e) => ({ threw: e && e.code })), sleep(LAND_WAIT_MS / 10).then(() => ({ hung: true }))]);
+    // the stall is the MEASURE's (gate db22b7d1c: left on, it also held the landing's own put-back after its rm, and that ask's line was
+    // counted as the measure's); what the measure SAID is read at its answer
+    const said = L.journal.filter((l) => /is still being put back after|could not be looked at within/.test(l)).length;
+    stallOn = false; rmGo(); const a = await A;
+    return { inCleanup, stalled, m, a, said };
+  };
+  const raceSrc = cut("    if (ask.late) {\n      const fact = putBackFacts.get(sid);\n", "    if (ask.late) return within(p, 50); // the release: 50 ms of wall clock raced against the look's reads\n    if (false) {\n      const fact = putBackFacts.get(sid);\n", 'the late look raced against a clock');
+  const [sl, slBad] = await Promise.all([lateMeasureSlowLook(undefined), lateMeasureSlowLook(load(raceSrc, 'b3dbd-late-look-race'))]);
+  ok(sl.inCleanup && sl.stalled >= 1 && sl.m && sl.m.ok === true && !sl.m.code && !sl.said && sl.a === true,
+    'B-3dbd: the late forced measure whose put-back\'s LOOK is held past 50 ms (a placed stall in its stats) with a kernel in its place waits for the look and MEASURES — judged by the put-back\'s own fact, never «being put back», nothing said', sl);
+  ok(slBad.inCleanup && slBad.stalled >= 1 && slBad.m && slBad.m.code === 'engine_kernel_landing', 'RED CONTROL (B-3dbd, the release\'s race): the same measure is refused «being put back» while nothing is aside — the false refusal a person met on a busy machine', slBad.m);
   // the keeper's first-use road reads the step-aside by its name (never «kernel missing» + a For-you item)
   const ksrc = read('src/server/browser-keeper.js');
   ok(ksrc.includes("if (refused && refused.code === 'engine_kernel_landing') throw namedError('engine_kernel_landing',") && read('src/routes/browser.js').includes('engine_kernel_landing: 409'),
