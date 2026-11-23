@@ -882,7 +882,7 @@ export const SUITES = [
   { name: 'test-progress-archive', tier: 'fast', why: 'in-process · 187 ms (restated 2026-10-20, was 900 ms)' }, // 2.369.204: the Activity log's overflow MOVED to data/task-groups-archive/ (before the trim), paged reads within a byte budget, a clear / delete / Backup & migrate reaching the archive — patched-copy controls
   { name: 'test-record-clear-stores', tier: 'fast', why: 'in-process · 2.8 s (restated 2026-11-22, lane bl-release, 主开发 r1531 — stated 903 ms, read 2.6 s in the whole fast tiers of 11-21 (median of 12, the larger zone): ALONE on the test machine, both zones, 2568 / 2845 ms, run d1505e694-20261122004503-both) (restated 2026-10-20, was 620 ms)' }, // "Clear content…" over the FIVE REAL stores in a scratch data dir + the owner routes + the agent verbs over a fake express + the REAL vibespace-task / vibespace-ask CLIs against a stub server: every derived copy loses the marker — TASK.md, the injected context (single + multi group), the diff snapshot, the task-context / prompt-context routes, the For-you preview + restoreDetails, the current status + the queued override notice, the jobs registry + archive (ARCHIVE FIRST: a failed write changes nothing) + event ring + held stash + spill file + the job's For-you items, the group log (the replacement record appended, the original line kept, the index, paging, unread, reports, the audit row); refusals by name (not_yours / pending_fork / job_token / agent_forbidden / ambiguous); every journal line carries ids only; verify r1: a `--notify` reminder's held notification loses its words (the pre-fix announced-only copy as the control), a detail-only status entry clears the current record's detail (the reason-only copy as the control); verify r2: a cleared job's covered run log is WITHHELD and says so (`logWithheld`; the REAL `vibespace-job logs` / `poll` print it, a run after the clear is served; the pre-fix rule as the control)
   { name: 'test-record-clear-census', tier: 'fast', why: 'in-process (a grep over the tree) · 4.7 s (restated 2026-11-22, lane bl-release, 主开发 r1531 — stated 2.9 s, read 5.6 s in the whole fast tiers of 11-21 (median of 12, the larger zone): ALONE on the test machine, both zones, 4675 / 4577 ms, the median of 5 serial runs a zone (001753, 004503, 012009, 014824, 021256 of d1505e694 …-both)) (B-e601 r2, 2026-11-18: §I, the interpolation census, moved to the heavy twin test-record-clear-census-interp; alone on the test machine, both zones, the median of four — 2894 / 2851 / 2844 / 2860 ms; was 10.2 s with §I) (B-e601, restated 2026-11-18: alone on the test machine, both zones, the median of four — 9.75–10.70 s; the production gate at 2.369.410 read 10.1 s; was 5.6 s) (restated 2026-10-20, was 8.0 s) (verify r8: §I scans all 432 files, memoised per file; verify r9: + the one-level alias pass)' }, // "Clear content…" THE READER CENSUS (verify r3, 2026-09-28 — the round's rule: a class that keeps returning "one more copy" gets a census; verify r8 §I: THE INTERPOLATION CENSUS — every message that embeds a record's words, the journal included): grep-derived from the tree and judged against ONE table — §A each store's data file is named by its owner module only (+ the two in-place migrations); §B every store-log read is inside channel-store, groups-engine's readFolded / clearMessages, or a channels-engine function whose declared gate (known( / an adapter record) stands before the read, and channels-engine never names the groups adapter; §C every store-touching route (60) classified reads / folded / echo / writes / meta / exception and every reader named in the heavy walk's probe list; §D the five broadcasts built where declared; §E every /api path the shipped CLIs call is a census route; §F the derived copies each door rewrites pinned statement by statement, the five doors called only by their owner + the ONE entry point, twelve declared exceptions each with its reason; §G four patched-copy controls (a route reading the group log by path · read() without the fold · a route reading jobs.json off disk · a new agent route serving the Activity log), each RED on its own leg · §H THE CLIENT (verify r5): every browser storage write classified by key (61) and no IndexedDB / CacheStorage / cookie / window.name / URL write, every window title that reads a record's words belongs to a window whose layout record keeps a generic title (persistence WORDLESS_TITLES), THE BELT (every text field of the five kinds a surface reads is worded through the cleared-aware words or declared — 24 rows), the long-lived client caches (43), each surface's repaint on its store's broadcast (12); four patched-copy controls
-  { name: 'test-record-clear-census-interp', tier: 'heavy', why: 'slow for the fast tier — in-process: test-record-clear-census §I (the interpolation census, verify r8 + r9: every message that embeds a record\'s words, over the whole tree, with its 18 planted controls), moved here verbatim (B-e601 r2, the coordinator\'s ruling 2026-11-18: the fast tier keeps at most 12 rows over 10 s — §I «memoised under ten seconds or goes heavy»: it memoises per file already; a CPU profile put its ~5 s in one pass over ~40 MB of sources through character-by-character transforms, not in repeated reads)' },
+  { name: 'test-record-clear-census-interp', tier: 'heavy', why: 'slow for the fast tier — in-process: test-record-clear-census §I (the interpolation census, verify r8 + r9: every message that embeds a record\'s words, over the whole tree, with its 18 planted controls), moved here verbatim (B-e601 r2, the coordinator\'s ruling 2026-11-18: the fast tier keeps at most 12 rows over 10 s — §I «memoised under ten seconds or goes heavy»: it memoises per file already; a CPU profile put its ~5 s in one pass over ~40 MB of sources through character-by-character transforms, not in repeated reads)', everyGate: 'a census of the tree: it starts nothing but git, so every lane gate and every train pick runs it, as well as the heavy runs' },
   // CHANNELS v2 / the communication panel (docs/design-communication-panel.zh.md).
   // All PURE/SHARED logic — no server, no chrome, no vendor call anywhere: the
   // fake adapter talks to nothing.
@@ -924,7 +924,7 @@ export const SUITES = [
   { name: 'test-webhook-pair', tier: 'fast', why: 'in-process · 294 ms (PURE pairing verdicts + RED mutant, then two real engines and two copies of the real routes on loopback: code, join, spent, expired, http, a frame on /hook, re-pair; + the pending code across a restart, the join\'s named refusals, the GET / broadcast / file census, 4 RED controls)' }, // lane webhook-l3-cli-pair + webhook-pair-join
   { name: 'test-webhook-verify-r1', tier: 'fast', why: 'in-process · 416 ms (the credential-class verify r1 rulings on rel249, each a leg + a RED in-memory mutant: opaque replyId, vswp_ / decoded credentials at the door + withheld at the read, one client address + allow-list everywhere, the stranger gate, commit-after-persist, /hook one shape, raw belted, budget words, IPv6 families, no ghost, card words)' }, // int248 r2
   { name: 'test-webhook-cli', tier: 'fast', why: 'in-process · 605 ms (the real vibespace-channels against a stub server: reply --to, ambiguous rows, compose --caller, read callers header; the no-mint verb census and the vswh_ output door, RED controls)' }, // lane webhook-l3-cli-pair
-  { name: 'test-egress-census', tier: 'heavy', reads: ['src/', 'server.js', 'data/bin/', 'scripts/egress-carried-rows.json'], why: 'slow for the fast tier (its stated sum sits at FAST_SUM_CAP_MS) — in-process · 3.9 s (B-9dd0 r1246: the census over every ci.mjs row through the tree\'s own impact scope, measured 3937 / 3074 ms on the test machine); an unlisted row carries nothing, so a drift between heavy runs is never a changed command line' }, // B-9dd0: the rows whose node children the egress reader may carry into, re-derived; red when scripts/egress-carried-rows.json drifts
+  { name: 'test-egress-census', tier: 'heavy', reads: ['src/', 'server.js', 'data/bin/', 'scripts/egress-carried-rows.json'], why: 'slow for the fast tier (its stated sum sits at FAST_SUM_CAP_MS) — in-process · 3.9 s (B-9dd0 r1246: the census over every ci.mjs row through the tree\'s own impact scope, measured 3937 / 3074 ms on the test machine); an unlisted row carries nothing, so a drift between heavy runs is never a changed command line', everyGate: 'a census of the tree: it starts nothing but git, so every lane gate and every train pick runs it, as well as the heavy runs' }, // B-9dd0: the rows whose node children the egress reader may carry into, re-derived; red when scripts/egress-carried-rows.json drifts
   { name: 'test-egress-fence', tier: 'fast', why: 'in-process · 565 ms (loopback stub servers only; every address class, a rebinding resolver asked once, 3xx never followed, lost vs refused, 64 KiB)' }, // lane webhook-l1-server
   { name: 'test-channel-placement', tier: 'fast', why: 'in-process · 2.0 s (restated 2026-11-22, lane bl-release, 主开发 r1531 — stated 408 ms, read 1.8 s in the whole fast tiers of 11-21 (median of 12, the larger zone): ALONE on the test machine, both zones, 1464 / 2003 ms, run d1505e694-20261122012009-both) (restated 2026-10-20, was 200 ms) (the real engine over two scripted vendors, no vendor call; five patched copies)' }, // lane channel-threads, placement round (2026-09-28, the owner: "the boolean is Lark-shaped"): WHERE A REPLY LANDS — chat / quote / thread / thread+chat declared per adapter in its threads cap row (+ rootReply, the vendor's norm); the PURE table per vendor (Lark / Gmail / Agents / the fake shipped, Slack + Telegram as fixture rows), the caps-row census (grep-derived, a planted module found), the registry's send contract, the engine end to end (refused before a proposal exists, stored with the inThread alias, sent, receipted), the words zh/ja/en + wiring pins, controls: PL3 blind to the parent, PL5 / PL4 removed, the declaration unclamped, the unguarded send
   { name: 'test-channel-quote-topic', tier: 'fast', why: 'in-process · 5.5 s (restated 2026-11-22, lane bl-release, 主开发 r1531 — stated 809 ms, read 4.8 s in the whole fast tiers of 11-21 (median of 12, the larger zone): ALONE on the test machine, both zones, 5522 / 4913 ms, run d1505e694-20261122014824-both) (restated 2026-10-20, was 500 ms) (the real engine over a Lark-shaped scripted adapter + the fake accounts, no vendor call; five patched copies)' }, // lane channel-threads, the QUOTE-vs-TOPIC round (owner 2026-09-28, both rulings "是"): a Lark reply without a thread id is a QUOTE, never a thread — ONE PURE classifier (src/channel-thread.js placeKindOf: plain / quote / topic-root / topic-reply / topic-quote) read by the render (strip / chip / tag), the agent's words ("quotes …"), the engine's placement default + its thread read + its walk (not-a-thread, zero vendor calls); the table over the naive pass's real-shape fixtures through the REAL Lark normalizer + the fake-poll rooms (shot 03); zh 话题 never 线程 over every channels surface (a grep-derived key census + a named non-channel list), ja ONE word スレッド, the i18n check; controls: a chain-is-topic classifier, the pre-fix render pair (the shot reproduced) with each layer alone holding, the engine's own parent rule, the walk without its refusal, planted 线程 / トピック
@@ -3363,6 +3363,268 @@ export function hostFilter(suites, want, { sourceOf = () => '' } = {}) {
   if (!HOST_ARG.includes(want)) throw new Error(`--host wants ${HOST_ARG.join(' | ')} (got '${want}')`);
   const keep = new Set(hostPlan(suites, { sourceOf })[want].map((s) => s.name));
   return suites.filter((s) => keep.has(s.name));
+}
+
+// ── EVERY GATE: A CENSUS IS READ WHERE ITS DEBT IS MADE (主开发 r2980 + r2981, lane bl-ci, 2026-11-23) ──────────────────
+// WHY: on 2026-11-22 test-record-clear-census-interp, heavy only because the fast sum had no room for its ~9 s, was red at
+// the release candidate for a day: thirteen new receivers from ten lines and one real breach reached the candidate, and only
+// the hosted run saw them. A lane's gate runs its own list and the census list; a heavy row ran only at the integrator's box
+// rows and at the hosted run, so the lane that made the debt never read it.
+// THE MARK: a heavy row whose suite is a CENSUS OF THE TREE carries `everyGate: EVERY_GATE` (the words below, verbatim). Such a
+// suite lists the tree's tracked files (`git ls-files`, or trackedFiles / listSuiteFiles, which run it) and starts nothing but
+// git: no hub, no socket, no browser, no other child, no worker, no inspector session, no real wait. Every lane's list gate
+// and every train pick runs a marked row, as well as the heavy runs. Its tier stays heavy and the fast cap's law is untouched:
+// only who runs it, and when, changes. The kit and the integrator read the names from the tree at the tip they run
+// (everyGateNames), never from a file of their own.
+// THE CHECK IS STATIC (everyGateOf, pure over the texts). It reads the suite's code, with comments, string text, template
+// text and regex bodies blanked and a short plain literal ('git', 'ls-files', 'node:http') kept. It also reads every suite
+// the suite runs as a twin (an import of ./test-….mjs), and, for each binding the suite takes from a helper module of
+// scripts/ (./….mjs), that binding's top-level declaration plus every top-level declaration of the helper it names,
+// transitively. What a helper runs at its own import is the same for every suite and is not read; a product module the
+// suite requires is the census's object and is not followed. A START is:
+//   - a call of spawn / spawnSync / execFile / execFileSync / execSync / exec / fork whose first argument is not the
+//     literal 'git';
+//   - new Worker( · fetch( · new WebSocket( · createServer( · .listen( · setTimeout( · setInterval( · Atomics.wait(;
+//   - a binding taken from, or a 'node:…' literal of, node:net · http · https · http2 · dgram · tls · ws (a socket),
+//     node:inspector, node:worker_threads, node:timers (a real wait).
+// test-ci-gate-tiers §8i holds the law BOTH WAYS over the real table: every marked row passes the check, and every heavy row
+// that passes it is marked, so a new census suite cannot stay unread. Its stub controls hold each start kind, the helper
+// closure, a twin, and the blanker (a start word inside a comment, a string, a template or a regex is no start).
+export const EVERY_GATE = 'a census of the tree: it starts nothing but git, so every lane gate and every train pick runs it, as well as the heavy runs';
+export const EVERY_GATE_STARTS = Object.freeze({
+  child: 'a child that is not git',
+  worker: 'a worker thread',
+  socket: 'a socket (a hub, a server or a fetch)',
+  inspector: 'an inspector session',
+  wait: 'a real wait',
+});
+const EVERY_MODULE_KIND = new Map([
+  ...['net', 'http', 'https', 'http2', 'dgram', 'tls', 'ws'].map((m) => [m, 'socket']),
+  ['inspector', 'inspector'], ['inspector/promises', 'inspector'],
+  ['worker_threads', 'worker'],
+  ['timers', 'wait'], ['timers/promises', 'wait'],
+]);
+const everyModuleKind = (spec) => EVERY_MODULE_KIND.get(String(spec).replace(/^node:/, '')) || null;
+const EVERY_CALLS = [
+  ['child', /(?:(?<![\w$.])(?:spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)|\.(?:spawn|spawnSync|execFile|execFileSync|execSync|fork))\s*\(\s*(?!['"]git['"]\s*[,)])/g],
+  ['worker', /\bnew\s+Worker\s*\(/g],
+  ['socket', /(?<![\w$.])fetch\s*\(|\bnew\s+WebSocket\s*\(|\bcreateServer\s*\(|\.listen\s*\(/g],
+  ['wait', /(?<![\w$.])(?:setTimeout|setInterval)\s*\(|\bAtomics\.wait\s*\(/g],
+];
+const EVERY_READS_TREE = /'ls-files'|"ls-files"|(?<![\w$])(?:trackedFiles|listSuiteFiles)\s*\(|\.(?:trackedFiles|listSuiteFiles)\s*\(/;
+const EVERY_LITERAL_KEPT = /^[\w./:@ -]{0,40}$/;
+const EVERY_REGEX_AFTER = new Set('(,=:[!&|?{};+-*%<>~^'.split(''));
+const EVERY_REGEX_AFTER_WORD = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'yield', 'await', 'instanceof']);
+const BLANKED = new Map();
+/** PURE: the code of a JavaScript text with its comments, string text, template text and regex bodies turned to spaces (the
+ *  line breaks kept, so a line number reads the same); a string whose text is short and plain ('git', 'node:http') is kept.
+ *  Memoised on the text. A heuristic, not a parser: a `/` after `)`, `]` or a name is a division. */
+export function blankCode(src) {
+  const text = String(src || '');
+  const hit = BLANKED.get(text);
+  if (hit !== undefined) return hit;
+  const n = text.length, out = [], tpl = [], WORD = /[\w$]+/y;
+  const spaces = (s) => s.replace(/[^\n]/g, ' ');
+  let i = 0, from = 0, last = '', word = '';
+  const flush = (to) => { if (to > from) out.push(text.slice(from, to)); };
+  while (i < n) {
+    const c = text[i], d = text[i + 1];
+    if (c === '/' && d === '/') { flush(i); let j = text.indexOf('\n', i); if (j < 0) j = n; out.push(' '.repeat(j - i)); i = from = j; continue; }
+    if (c === '/' && d === '*') { flush(i); let j = text.indexOf('*/', i + 2); j = j < 0 ? n : j + 2; out.push(spaces(text.slice(i, j))); i = from = j; continue; }
+    if (c === '\'' || c === '"') {
+      flush(i);
+      let j = i + 1;
+      while (j < n && text[j] !== c && text[j] !== '\n') j += text[j] === '\\' ? 2 : 1;
+      if (j >= n || text[j] !== c) { out.push(c + spaces(text.slice(i + 1, Math.min(j, n)))); i = from = Math.min(j, n); last = 'x'; word = ''; continue; }
+      const body = text.slice(i + 1, j);
+      out.push(c + (EVERY_LITERAL_KEPT.test(body) ? body : spaces(body)) + c);
+      i = from = j + 1; last = 'x'; word = ''; continue;
+    }
+    if (c === '`' || (c === '}' && tpl.length && tpl[tpl.length - 1] === 0)) {
+      flush(i);
+      if (c === '}') tpl.pop();
+      let j = i + 1;
+      while (j < n && text[j] !== '`' && !(text[j] === '$' && text[j + 1] === '{')) j += text[j] === '\\' ? 2 : 1;
+      j = Math.min(j, n);
+      out.push(c + spaces(text.slice(i + 1, j)));
+      if (j < n && text[j] === '$') { out.push('${'); tpl.push(0); i = from = j + 2; last = '{'; word = ''; continue; }
+      if (j < n) out.push('`');
+      i = from = Math.min(j + 1, n); last = 'x'; word = ''; continue;
+    }
+    if (c === '/' && (last === '' || EVERY_REGEX_AFTER.has(last) || EVERY_REGEX_AFTER_WORD.has(word))) {
+      let j = i + 1, cls = false;
+      while (j < n && text[j] !== '\n') {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '[') cls = true; else if (text[j] === ']') cls = false; else if (text[j] === '/' && !cls) break;
+        j++;
+      }
+      if (j < n && text[j] === '/') {
+        flush(i);
+        let k = j + 1;
+        while (k < n && /[a-z]/i.test(text[k])) k++;
+        out.push('/' + ' '.repeat(j - i - 1) + '/' + ' '.repeat(k - j - 1));
+        i = from = k; last = 'x'; word = ''; continue;
+      }
+    }
+    if (c === '{' && tpl.length) tpl[tpl.length - 1]++;
+    else if (c === '}' && tpl.length) tpl[tpl.length - 1]--;
+    WORD.lastIndex = i;
+    const w = /[\w$]/.test(c) ? WORD.exec(text) : null;
+    if (w) { i += w[0].length; last = 'x'; word = w[0]; continue; }
+    if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') { last = c; word = ''; }
+    i++;
+  }
+  flush(n);
+  const res = out.join('');
+  BLANKED.set(text, res);
+  return res;
+}
+// the import forms a census suite or a helper uses, read off the BLANKED text (a specifier is a short plain literal)
+const EVERY_IMPORT = /^(?:import|export)\s+(?:type\s+)?(?:([\w$]+)\s*,?\s*)?(?:\*\s+as\s+([\w$]+)|\{([^}]*)\})?\s*(?:from\s*)?'([^']+)'/gm;
+const EVERY_DYNAMIC = /(?:const|let|var)\s+(?:([\w$]+)|\{([^}]*)\})\s*=\s*await\s+import\(\s*'([^']+)'\s*\)/g;
+const EVERY_DECL = /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*([\w$]+)|class\s+([\w$]+)|(?:const|let|var)\s+(?:([\w$]+)|\{([^}]*)\}))/;
+const namedParts = (list, flip) => String(list || '').split(',').map((p) => p.trim()).filter(Boolean).map((p) => {
+  const m = flip ? /^(?:\.\.\.)?([\w$]+)(?:\s*:\s*([\w$]+))?/.exec(p) : /^([\w$]+)(?:\s+as\s+([\w$]+))?/.exec(p);
+  return m ? { imported: m[1], local: m[2] || m[1] } : null;
+}).filter(Boolean);
+function everyImports(b) {
+  const out = [];
+  for (const m of b.matchAll(EVERY_IMPORT)) {
+    const [, def, ns, named, spec] = m;
+    if (def) out.push({ local: def, spec, name: 'default' });
+    if (ns) out.push({ local: ns, spec, name: '*' });
+    for (const p of namedParts(named, false)) out.push({ local: p.local, spec, name: p.imported });
+  }
+  for (const m of b.matchAll(EVERY_DYNAMIC)) {
+    const [, ns, named, spec] = m;
+    if (ns) out.push({ local: ns, spec, name: '*' });
+    for (const p of namedParts(named, true)) out.push({ local: p.local, spec, name: p.imported });
+  }
+  return out;
+}
+// the names a text REFERENCES: no property after a dot, no object key, no word inside a kept literal
+const everyNames = (b) => new Set(b.replace(/'[^'\n]*'|"[^"\n]*"/g, "''").replace(/([{,]\s*)[A-Za-z_$][\w$]*(\s*:(?!:))/g, '$1$2').match(/(?<![\w$.])[A-Za-z_$][\w$]*/g) || []);
+const lineAt = (b, at) => b.slice(0, at).split('\n').length;
+/** PURE: one heavy row's verdict — { name, reads, starts: [{ kind, at }], twins, pass }. `read(rel)` returns the text of
+ *  scripts/<rel> or null; `memo` is shared across the rows of one plan. */
+export function everyGateOf(row, { read = () => null, memo = new Map() } = {}) {
+  const modOf = (rel) => {
+    if (memo.has(rel)) return memo.get(rel);
+    const raw = read(rel);
+    let mod = null;
+    if (typeof raw === 'string') {
+      const b = blankCode(raw), lines = b.split('\n'), spans = new Map(), exportAs = new Map();
+      const heads = [];
+      for (let k = 0; k < lines.length; k++) if (/^[A-Za-z_$]/.test(lines[k])) heads.push(k);
+      heads.forEach((k, x) => {
+        const m = EVERY_DECL.exec(lines[k]);
+        if (!m) return;
+        const body = lines.slice(k, x + 1 < heads.length ? heads[x + 1] : lines.length).join('\n');
+        const names = [m[1], m[2], m[3]].filter(Boolean).concat(m[4] ? namedParts(m[4], true).map((p) => p.local) : []);
+        for (const nm of names) spans.set(nm, { body, line: k + 1 });
+        if (/^export\s+default\s/.test(lines[k]) && names[0]) exportAs.set('default', names[0]);
+      });
+      for (const m of b.matchAll(/^export\s*\{([^}]*)\}(?!\s*from)/gm)) for (const p of namedParts(m[1], false)) exportAs.set(p.local, p.imported);
+      mod = { b, spans, exportAs, imports: everyImports(b) };
+    }
+    memo.set(rel, mod);
+    return mod;
+  };
+  const resolve = (dir, spec) => { if (!/^\.\.?\//.test(spec) || !spec.endsWith('.mjs')) return null; const rel = path.posix.normalize(path.posix.join(dir, spec)); return rel.startsWith('../') ? null : rel; };
+  const judgeText = (b, imports, dir, seen, via, line0 = 0) => {
+    const found = [];
+    for (const [kind, re] of EVERY_CALLS) for (const m of b.matchAll(re)) found.push({ kind, at: `${via || 'its code'} line ${line0 + lineAt(b, m.index)}` });
+    for (const m of b.matchAll(/'node:([\w/]+)'/g)) { const k = everyModuleKind(m[1]); if (k) found.push({ kind: k, at: `${via || 'its code'} line ${line0 + lineAt(b, m.index)} ('node:${m[1]}')` }); }
+    const plain = b.replace(EVERY_IMPORT, (s) => s.replace(/[^\n]/g, ' '));
+    const used = everyNames(plain);
+    for (const im of imports) {
+      if (!used.has(im.local)) continue;
+      const k = everyModuleKind(im.spec);
+      if (k) { found.push({ kind: k, at: `${via || 'its code'}: ${im.local} from '${im.spec}'` }); continue; }
+      const rel = resolve(dir, im.spec);
+      if (!rel || /(^|\/)test-[^/]*\.mjs$/.test(rel)) continue;
+      const members = im.name === '*' ? [...new Set([...plain.matchAll(new RegExp(`(?<![\\w$.])${im.local.replace(/\$/g, '\\$')}\\.([A-Za-z_$][\\w$]*)`, 'g'))].map((m) => m[1]))] : [im.name];
+      for (const mem of members) found.push(...judgeBinding(rel, mem, seen));
+    }
+    return found;
+  };
+  const judgeBinding = (rel, name, seen, chain = '') => {
+    const key = `${rel}\0${name}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const mod = modOf(rel);
+    if (!mod) return [];
+    const own = mod.exportAs.get(name) || name;
+    const via = `${rel}: ${chain ? chain + ' → ' : ''}${own}`;
+    const span = mod.spans.get(own);
+    if (!span) {   // an imported name the helper hands on
+      const im = mod.imports.find((x) => x.local === own);
+      const rel2 = im ? resolve(path.posix.dirname(rel), im.spec) : null;
+      if (im && everyModuleKind(im.spec)) return [{ kind: everyModuleKind(im.spec), at: `${via} from '${im.spec}'` }];
+      return rel2 ? judgeBinding(rel2, im.name === '*' ? own : im.name, seen) : [];
+    }
+    const found = judgeText(span.body, mod.imports, path.posix.dirname(rel), seen, via, span.line - 1);
+    for (const nm of everyNames(span.body)) if (nm !== own && mod.spans.has(nm)) found.push(...judgeBinding(rel, nm, seen, chain ? `${chain} → ${own}` : own));
+    return found;
+  };
+  const suiteOf = (name, seenSuites, seen, isTwin = false) => {
+    const rel = `${name}.mjs`, mod = modOf(rel);
+    if (!mod) return null;
+    let reads = EVERY_READS_TREE.test(mod.b);
+    const via = isTwin ? `twin ${name}` : '';
+    const starts = judgeText(mod.b, mod.imports, '.', seen, via), twins = [];
+    for (const m of mod.b.matchAll(/(?:import\(\s*|from\s*|^import\s+)'\.\/(test-[\w.-]+)\.mjs'/gm)) {
+      if (seenSuites.has(m[1])) continue;
+      seenSuites.add(m[1]); twins.push(m[1]);
+      const t = suiteOf(m[1], seenSuites, seen, true);
+      if (t) { reads = reads || t.reads; starts.push(...t.starts); twins.push(...t.twins); }
+    }
+    return { reads, starts, twins };
+  };
+  const s = suiteOf(row.name, new Set([row.name]), new Set());
+  if (!s) return { name: row.name, source: false, reads: false, starts: [], twins: [], pass: false };
+  return { name: row.name, source: true, reads: s.reads, starts: s.starts, twins: s.twins, pass: s.reads && !s.starts.length };
+}
+/** PURE: why a verdict is no census of the tree, in words ('' when it is one). */
+export function everyGateWhy(v) {
+  if (!v) return 'no verdict';
+  if (!v.source) return 'its suite file cannot be read';
+  const why = [];
+  if (!v.reads) why.push('it lists no tracked file of the tree (no git ls-files, trackedFiles or listSuiteFiles)');
+  const byKind = new Map();
+  for (const st of v.starts) if (!byKind.has(st.kind)) byKind.set(st.kind, st.at);
+  if (byKind.size) why.push(`it starts ${[...byKind].map(([k, at]) => `${EVERY_GATE_STARTS[k]} (${at})`).join(', ')}`);
+  return why.join('; ');
+}
+/** PURE: the heavy tier judged both ways — { heavy, judged, marked, pass, verdicts: Map(name → verdict), problems }. A row
+ *  whose text names neither a tree list nor a twin is no census: judged only when it is marked (its verdict then says why). */
+export function everyGatePlan(suites, { read = () => null } = {}) {
+  const out = { heavy: 0, judged: 0, marked: [], pass: [], verdicts: new Map(), problems: [] };
+  const memo = new Map();
+  for (const s of suites) {
+    if (s.everyGate !== undefined && s.tier !== 'heavy') out.problems.push(`${s.name}: everyGate on a ${s.tier} row — the mark is a heavy row's (the fast rows a gate always runs are the census list's)`);
+    if (s.tier !== 'heavy') continue;
+    out.heavy++;
+    const marked = s.everyGate !== undefined;
+    if (marked) {
+      out.marked.push(s.name);
+      if (s.everyGate !== EVERY_GATE) out.problems.push(`${s.name}: everyGate says ${JSON.stringify(String(s.everyGate)).slice(0, 80)}, not EVERY_GATE's words`);
+    }
+    const raw = read(`${s.name}.mjs`);
+    if (!marked && (typeof raw !== 'string' || !(raw.includes('ls-files') || raw.includes('trackedFiles(') || raw.includes('listSuiteFiles(') || raw.includes('./test-')))) continue;
+    out.judged++;
+    const v = everyGateOf(s, { read, memo });
+    out.verdicts.set(s.name, v);
+    if (v.pass) out.pass.push(s.name);
+    if (marked && !v.pass) out.problems.push(`${s.name}: marked everyGate, but ${everyGateWhy(v)}`);
+    if (!marked && v.pass) out.problems.push(`${s.name}: a census of the tree (it lists the tracked files and starts nothing but git) with no everyGate mark — mark it everyGate: EVERY_GATE, so every lane gate and every train pick reads it`);
+  }
+  out.marked.sort(); out.pass.sort();
+  return out;
+}
+/** The heavy rows every lane's list gate and every train pick runs: the marked ones, by name, from the table at this tip. */
+export function everyGateNames(suites = SUITES) {
+  return suites.filter((s) => s.tier === 'heavy' && s.everyGate !== undefined).map((s) => s.name).sort();
 }
 
 // ── IMPACT SCOPE (2026-09-15) ────────────────────────────────────────────────

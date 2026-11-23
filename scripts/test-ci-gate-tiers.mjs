@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test-ci-gate-tiers — a PART of THE RELEASE GATE'S OWN GATE (scripts/test-ci-gate.mjs: its head says what the gate guards and why).
 // lane fast-tier-ratchet (2026-10-20) split the one 37 s process into seven ≤ 10 s suites, every section's text unchanged;
-// the shared kit is scripts/ci-gate-kit.mjs. This part: §6 no fast suite claims a machine-global fixture + no-verdict honesty · §7 no literal date · §7b a leg never passes by its name · §8 lanes / the serial table / the impact scope / the full-tier clock · §8d the xpra window family's parts.
+// the shared kit is scripts/ci-gate-kit.mjs. This part: §6 no fast suite claims a machine-global fixture + no-verdict honesty · §7 no literal date · §7b a leg never passes by its name · §8 lanes / the serial table / the impact scope / the full-tier clock · §8d the xpra window family's parts · §8i the everyGate mark, both ways.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -1101,6 +1101,94 @@ console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named
     && /if \(r\.ok && r\.skips\) skippedLegs\.push\(\{ name: s\.name, n: r\.skips\.n, first: r\.skips\.first, file: keepSkipLog\(s, r, tried\) \}\);/.test(src)
     && /r = again; tried = 2;/.test(src) && /for \(const l of skippedLegsSaid\('ci:heavy', skippedLegs\)\) console\.log\(l\);/.test(src) && /skippedLegs: skippedLegs\.length \?/.test(src),
     'WIRING: ALL GREEN, the fast RED line and the heavy GREEN / RED lines end with the count, a line per skipping suite follows, the heavy loop keeps the try that stood, the heavy marker carries skippedLegs');
+}
+// ── §8i THE EVERY-GATE MARK: A CENSUS IS READ WHERE ITS DEBT IS MADE (主开发 r2980 + r2981, lane bl-ci, 2026-11-23) ──
+// On 2026-11-22 a heavy census (test-record-clear-census-interp) was red at the release candidate for a day: the lanes gate
+// their own list and the census list, and a heavy row ran only at the box rows and the hosted run. ci.mjs now marks the heavy
+// censuses of the tree (`everyGate: EVERY_GATE`): their suites list the tracked files and start nothing but git, and every
+// lane gate and train pick runs them. THE REAL TABLE, BOTH WAYS: every marked row passes the static check (everyGateOf), and
+// every heavy row that passes it is marked, so a new census suite cannot stay unread. Stub tables hold each start kind, the
+// helper closure (a binding's own declaration and what it names, never the rest of the helper), a twin, the git child that
+// passes, and the blanker (a start word in a comment, a string, a template or a regex is no start).
+console.log('\n§8i a heavy census of the tree carries the everyGate mark, and a marked row is one: held both ways over the real table');
+{
+  const ci = await import('./ci.mjs');
+  const readAt = (root) => (rel) => { try { return fs.readFileSync(path.join(root, 'scripts', rel), 'utf8'); } catch { return null; } };
+  const t0 = Date.now();
+  const plan = ci.everyGatePlan(SUITES, { read: readAt(REPO) });
+  console.log(`    ${plan.heavy} heavy rows, ${plan.judged} judged (a tree list or a twin in their text), in ${Date.now() - t0} ms`);
+  for (const n of plan.marked) console.log(`    marked: ${n}${plan.verdicts.get(n) && plan.verdicts.get(n).pass ? '' : ' (FAILS: ' + ci.everyGateWhy(plan.verdicts.get(n)) + ')'}`);
+  const memo = new Map();
+  for (const n of ['test-ci-gate-tiers-deep', 'test-conversation-needs']) {   // the page's two others, by the check's own words
+    const row = SUITES.find((s) => s.name === n);
+    if (row) console.log(`    out: ${n}: ${ci.everyGateWhy(ci.everyGateOf(row, { read: readAt(REPO), memo }))}`);
+  }
+  ok(plan.problems.length === 0 && plan.marked.length >= 2 && plan.marked.every((n) => plan.pass.includes(n)),
+    `THE REAL TABLE, both ways: every marked heavy row is a census of the tree and every heavy census of the tree is marked (${plan.marked.join(', ')})${plan.problems.length ? ': ' + plan.problems.join(' · ') : ''}`);
+  ok(JSON.stringify(ci.everyGateNames(SUITES)) === JSON.stringify(plan.marked) && ci.everyGateNames().length === plan.marked.length,
+    'the names the kit and the integrator read (everyGateNames, from the table at this tip) are the marked rows');
+
+  // STUB TABLES: a census that lists the tree through a git child and starts nothing else
+  const L = (...lines) => lines.join('\n') + '\n';
+  const CENSUS = L("import fs from 'node:fs';", "import { spawnSync } from 'node:child_process';",
+    "const ls = spawnSync('git', ['ls-files', '--', 'src'], { encoding: 'utf8' });",
+    "const files = ls.stdout.split('\\n').filter(Boolean);", "console.log(files.length, fs.existsSync('.'));");
+  const H = (name, extra = {}) => ({ name, tier: 'heavy', why: 'a stub', ...extra });
+  const MARK = { everyGate: ci.EVERY_GATE };
+  const planOf = (rows, files) => ci.everyGatePlan(rows, { read: (rel) => (Object.prototype.hasOwnProperty.call(files, rel) ? files[rel] : null) });
+  const one = (files, extra = MARK, name = 'test-zz-census') => planOf([H(name, extra)], files);
+  const said = (p, re) => p.problems.length === 1 && re.test(p.problems[0]);
+
+  const bare = one({ 'test-zz-census.mjs': CENSUS }, {});
+  ok(said(bare, /^test-zz-census: a census of the tree .* with no everyGate mark/) && bare.pass.join() === 'test-zz-census',
+    `CONTROL: an UNMARKED census of the tree is red: a new census suite cannot stay unread (${bare.problems[0] || 'no problem'})`);
+  const marked = one({ 'test-zz-census.mjs': CENSUS });
+  ok(marked.problems.length === 0 && marked.marked.join() === 'test-zz-census', `the same census, marked, is green (its git child passes: ${marked.problems.join(' · ') || 'no problem'})`);
+
+  const KINDS = [
+    ['wait', 'await new Promise((r) => setTimeout(r, 5));'],
+    ['child', "spawnSync(process.execPath, ['-e', '1']);"],
+    ['worker', "const { Worker } = await import('node:worker_threads'); new Worker('x');"],
+    ['socket', "import('node:net').then((net) => net.connect(sock));"],
+    ['inspector', "import inspector from 'node:inspector';\nconst ses = new inspector.Session();"],
+  ];
+  for (const [kind, line] of KINDS) {
+    const p = one({ 'test-zz-census.mjs': CENSUS + line + '\n' });
+    ok(said(p, new RegExp(`^test-zz-census: marked everyGate, but it starts ${ci.EVERY_GATE_STARTS[kind].replace(/[()]/g, '\\$&')} \\(`)),
+      `CONTROL: a marked census that starts ${ci.EVERY_GATE_STARTS[kind]} is red, by its kind and its line (${p.problems[0] || 'no problem'})`);
+  }
+  const noList = one({ 'test-zz-census.mjs': L("import fs from 'node:fs';", "console.log(fs.readFileSync('src/x.js', 'utf8').length);") });
+  ok(said(noList, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: a marked suite that lists no tracked file of the tree is red (${noList.problems[0] || 'no problem'})`);
+
+  // THE HELPER CLOSURE: the binding taken, and what its declaration names, transitively; never another export
+  const HELPER = L("import { Worker } from 'node:worker_threads';", "import { execFileSync } from 'node:child_process';",
+    "function inner() { return new Worker('x'); }", "export function countRows() { return inner(); }",
+    "export function trackedFiles(repo, ...spec) { return execFileSync('git', ['-C', repo, 'ls-files', '-z', '--', ...spec], { encoding: 'utf8' }).split('\\0'); }");
+  const viaHelper = one({ 'test-zz-census.mjs': L("import { trackedFiles, countRows } from './zz-helper.mjs';", "console.log(trackedFiles('.', 'src').length, countRows());"), 'zz-helper.mjs': HELPER });
+  ok(said(viaHelper, /it starts a worker thread \(zz-helper\.mjs: countRows → inner line 3\)/),
+    `CONTROL: a census whose helper binding reaches a worker through a second declaration is red, the road named (${viaHelper.problems[0] || 'no problem'})`);
+  const helperGit = one({ 'test-zz-census.mjs': L("import { trackedFiles } from './zz-helper.mjs';", "console.log(trackedFiles('.', 'src').length);"), 'zz-helper.mjs': HELPER });
+  ok(helperGit.problems.length === 0, `a census that takes only the helper's git reader (trackedFiles) is green: the helper's other export is not its road (${helperGit.problems.join(' · ') || 'no problem'})`);
+
+  // A TWIN: a suite that runs another suite file is judged with it
+  const twin = one({ 'test-zz-census.mjs': L("process.env.ZZ_DEEP = '1';", "await import('./test-zz-base.mjs');"), 'test-zz-base.mjs': CENSUS + "spawnSync('node', ['-e', '1']);\n" });
+  ok(said(twin, /it starts a child that is not git \(twin test-zz-base line 6\)/), `CONTROL: a marked twin whose base suite starts a node child is red (${twin.problems[0] || 'no problem'})`);
+
+  // THE BLANKER: a start word in a comment, a string, a template or a regex is no start
+  const words = one({ 'test-zz-census.mjs': CENSUS + L("// a census never calls setTimeout(r, 5) or spawn('node')",
+    "const RE = /setTimeout\\(|spawn\\(|new Worker\\(/;", "const said = 'it must not fetch(url) nor spawnSync(node)';",
+    "const t = `setInterval(${files.length}) .listen(0) createServer(x)`;", "/* new WebSocket(u) */ console.log(RE.test(said), t);") });
+  ok(words.problems.length === 0, `a start word inside a comment, a string, a template or a regex is no start (${words.problems.join(' · ') || 'no problem'})`);
+  const BL = "const a = 'spawn(x)'; // setTimeout(\nconst b = /fork\\(/g; const c = `x${'git'}y`;\n";
+  const blanked = ci.blankCode(BL);
+  ok(blanked.split('\n').length === 3 && !/spawn|setTimeout|fork/.test(blanked) && blanked.includes("'git'") && blanked.length === BL.length && blanked.indexOf('const b') === BL.indexOf('const b'),
+    `blankCode keeps every line and every column, and a short plain literal ('git'): ${JSON.stringify(blanked)}`);
+
+  // THE MARK's OWN FORM: a heavy row's, in EVERY_GATE's words
+  const fastMark = planOf([{ name: 'test-zz-census', tier: 'fast', why: 'a stub', ...MARK }], { 'test-zz-census.mjs': CENSUS });
+  ok(said(fastMark, /^test-zz-census: everyGate on a fast row/), `CONTROL: the mark on a fast row is red (${fastMark.problems[0] || 'no problem'})`);
+  const otherWords = one({ 'test-zz-census.mjs': CENSUS }, { everyGate: true });
+  ok(said(otherWords, /^test-zz-census: everyGate says "true", not EVERY_GATE's words/), `CONTROL: a mark in other words is red (${otherWords.problems[0] || 'no problem'})`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
