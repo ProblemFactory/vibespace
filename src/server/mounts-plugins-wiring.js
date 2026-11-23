@@ -690,7 +690,9 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
       try {
         relayUrl = String(await instanceUrl.ensurePublished()).replace(/\/$/, '');
         base = relayUrl;
-      } catch (e) { return res.status(400).json({ error: 'could not publish this instance to the relay: ' + e.message + ' — is the frp plugin installed + started (⚙ → Plugins → Public URLs)?', code: 'relay_unpublished' }); }
+      } catch (e) {
+        if (e && e.code === 'instance_url_unread') return res.status(503).json({ error: e.message, code: e.code });   // r3174: the publish setting is held — refused by name, nothing minted
+        return res.status(400).json({ error: 'could not publish this instance to the relay: ' + e.message + ' — is the frp plugin installed + started (⚙ → Plugins → Public URLs)?', code: 'relay_unpublished' }); }
     } else {
       const v = DF.dialBaseVerdict(req.body?.base ?? req.body?.serverUrl);
       if (!v.ok) return res.status(400).json({ error: `not an address the device can dial (${v.code})`, code: 'bad_base', why: v.code });

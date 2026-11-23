@@ -154,7 +154,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
   /** Publish only because something needs a dial-back address (agent install).
    *  Records + shows it, but stays `auto` so it cannot repoint share links. */
   async function ensurePublished() {
-    if (hold.held()) return null;   // r3009: held — no address is minted while the person's own is unread
+    hold.refuse('publishing this VibeSpace for a machine');   // r3174: held — a NAMED refusal (the release's null became the text «null» at the pairing road: a device minted with a dial address of «null»)
     if (state.url) return state.url;
     const u = await doPublish({});
     if (!state.desired) state.auto = true;
@@ -176,7 +176,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
    *  ONE cycle at a time; `ifFailed` (the vault's unlock — lane fleet-instance-publish) re-tries only a restore that FAILED:
    *  a cycle waiting on its timer has its next try pulled forward, none running ⇒ a new cycle. */
   function restore({ retries = 6, delayMs = 20000, firstMs = 3000, ifFailed = false } = {}) {
-    if (hold.held()) { restoreAsked = { retries, delayMs, firstMs, ifFailed }; return; }   // r3009: held — unread, not «not desired»: the restore runs at the lift
+    if (hold.held()) { restoreAsked = restoreAsked && !restoreAsked.ifFailed ? restoreAsked : { retries, delayMs, firstMs, ifFailed }; return; }   // r3174: the STRONGER ask kept (a vault unlock's «only if it failed» never replaces the start's)   // r3009: held — unread, not «not desired»: the restore runs at the lift
     if (!state.desired) return;
     if (ifFailed && !state.error) return;
     if (nextTry) { if (healTimer) { clearTimeout(healTimer); healTimer = setTimeout(nextTry, firstMs); } return; }
@@ -206,11 +206,11 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     app.get('/api/instance-url', (req, res) => res.json(status()));
     app.post('/api/instance-url/publish', async (req, res) => {
       try { res.json(await publish({ sub: req.body?.sub })); }
-      catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217 its round: the relay's code (the page words it)
+      catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217 its round: the relay's code (the page words it); r3174: the store's own status (503 while instance-url.json is held)
     });
     app.delete('/api/instance-url/publish', async (req, res) => {
       try { res.json(await unpublish()); }
-      catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }
+      catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // r3174: the store's own status (503 while instance-url.json is held)
     });
   }
 

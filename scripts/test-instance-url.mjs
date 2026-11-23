@@ -295,7 +295,8 @@ const mk = (opts = {}) => {
 {
   const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iurl-hold-')), sfile = path.join(sdir, 'instance-url.json');
   fs.writeFileSync(sfile, JSON.stringify({ desired: true, auto: false, sub: 'kept-box', url: 'https://kept-box.relay.example.test/', proto: 'https' }, null, 2));
-  const before = fs.readFileSync(sfile, 'utf8'), pl = fakePlugins(), realRead = fs.readFileSync;
+  const pl0 = fakePlugins(); let relayAsks = 0; const pl = { ...pl0, frpPublish: async (...a) => { relayAsks++; return pl0.frpPublish(...a); } };   // r3174: the relay stand-in counts what it is asked
+  const before = fs.readFileSync(sfile, 'utf8'), realRead = fs.readFileSync;
   fs.readFileSync = function (q, ...a) { if (String(q) === sfile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
   let held = null; try { held = create({ dataDir: sdir, port: 3456, plugins: pl, serverSetting: () => null, authEnabled: () => true, broadcast: () => { } }); } finally { fs.readFileSync = realRead; }
   if (held._hold && held._hold.stop) held._hold.stop();   // the hold's own re-read ladder stays out of this scene (its law is the helper's)
@@ -304,7 +305,7 @@ const mk = (opts = {}) => {
   let unpubErr = null; try { await held.unpublish(); } catch (e) { unpubErr = e; }
   const after = fs.readFileSync(sfile, 'utf8'), st = held.status();
   ok('r3009: instance-url.json read FAILED (a placed EIO) — an agent install\'s ensurePublished, a Publish and an Unpublish write NOTHING over it: the person\'s address survives', after === before, after.slice(0, 240));
-  ok('r3009: …a Publish and an Unpublish are refused BY NAME (503 instance_url_unread), ensurePublished mints nothing, and the status says why', !!pubErr && pubErr.status === 503 && pubErr.code === 'instance_url_unread' && !!unpubErr && unpubErr.code === 'instance_url_unread' && !(ensured && ensured.url && !/kept-box/.test(String(ensured.url))) && /could not be read/.test(String(st.held || '')), JSON.stringify({ pub: pubErr && pubErr.message, unpub: unpubErr && unpubErr.code, ensured, ensureErr: ensureErr && ensureErr.message, held: st.held }));
+  ok('r3009 / r3174: …a Publish, an Unpublish AND ensurePublished are refused BY NAME (503 instance_url_unread) — the relay is asked for nothing — and the status says why', !!pubErr && pubErr.status === 503 && pubErr.code === 'instance_url_unread' && !!unpubErr && unpubErr.code === 'instance_url_unread' && ensured === null && !!ensureErr && ensureErr.code === 'instance_url_unread' && ensureErr.status === 503 && relayAsks === 0 && /could not be read/.test(String(st.held || '')), JSON.stringify({ pub: pubErr && pubErr.message, unpub: unpubErr && unpubErr.code, ensured, ensureErr: ensureErr && ensureErr.message, held: st.held }));
   fs.rmSync(sdir, { recursive: true, force: true });
 }
 // r3104: TORN instance-url.json — its bytes kept aside once (the helper), it starts as not published, and the status NAMES the copy
@@ -319,6 +320,50 @@ const mk = (opts = {}) => {
   ok('r3104: torn instance-url.json — its bytes kept aside once, it starts as not published, and the status names the copy for the panel', copyOk && /^instance-url\.json\.corrupt-/.test(copy) && st.published === false && !st.held, JSON.stringify({ copy, published: st.published, held: st.held }));
   if (tt._hold && tt._hold.stop) tt._hold.stop();
   fs.rmSync(tdir, { recursive: true, force: true });
+}
+// ── r3174 (round wgr2jhoz9): (1) THE PAIRING ROAD (src/server/mounts-plugins-wiring.js, a pairing through the relay) — its own
+// try / catch lifted and driven: the setting held ⇒ refused by name (503 instance_url_unread, the hold's words), NOTHING minted (no
+// base); RED: the release's catch (the wrong advice «is the frp plugin installed», 400). (2) the STRONGER restore ask is kept: a start's
+// ask, then the vault unlock's «only if it failed», then the lift — the relay IS asked; RED: the old line (the later ask replaced it) ──
+{
+  const W8 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const i0 = W8.indexOf("      try {\n        relayUrl = String(await instanceUrl.ensurePublished())"), i1 = i0 >= 0 ? W8.indexOf('\n    } else {', i0) : -1;
+  const block = i0 >= 0 && i1 > i0 ? W8.slice(i0, i1) : '';
+  const pairing = (body, iu) => new Promise((resolve) => {
+    const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ c: this.c, b, base: null }); } };
+    new Function('instanceUrl', 'res', `return (async () => { let relayUrl = null, base = null; ${body}\n return { base }; })();`)(iu, res).then((r) => { if (r) resolve({ c: null, b: null, base: r.base }); }, (e) => resolve({ threw: String(e && e.message) }));
+  });
+  const refusal = Object.assign(new Error('publishing this VibeSpace for a machine: instance-url.json in VibeSpace\'s data folder could not be read (EIO)'), { code: 'instance_url_unread', status: 503 });
+  const heldIu = { ensurePublished: async () => { throw refusal; } };
+  const pNow = block ? await pairing(block, heldIu) : { missing: true };
+  const LINE = "        if (e && e.code === 'instance_url_unread') return res.status(503).json({ error: e.message, code: e.code });   // r3174: the publish setting is held — refused by name, nothing minted\n";
+  const { anchored: anch8 } = await import('./scratch.mjs');
+  const pRed = block && block.split(LINE).length === 2 ? await pairing(anch8(block, LINE, '', 'release-catch'), heldIu) : null;
+  ok('r3174: the pairing road while the publish setting is held — refused by name (503 instance_url_unread, the hold\'s words), nothing minted', !!block && pNow.c === 503 && pNow.b && pNow.b.code === 'instance_url_unread' && /could not be read/.test(String(pNow.b.error)) && !pNow.base, JSON.stringify(pNow));
+  ok('RED CONTROL r3174: the release\'s catch (in a lifted copy) answers 400 with the wrong advice («is the frp plugin installed»)', !!pRed && pRed.c === 400 && /frp plugin/.test(String(pRed.b && pRed.b.error)), JSON.stringify(pRed));
+  // (2) the stronger restore ask
+  const runAsk = async (createFn) => {
+    const dir9 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iurl-ask-')), f9 = path.join(dir9, 'instance-url.json');
+    fs.writeFileSync(f9, JSON.stringify({ desired: true, sub: 'kept-box', url: 'https://kept-box.relay.example.test/' }));
+    const p0 = fakePlugins(); let asks = 0; const pl9 = { ...p0, frpPublish: async (...a) => { asks++; return p0.frpPublish(...a); } };
+    const realRead = fs.readFileSync;
+    fs.readFileSync = function (q, ...a) { if (String(q) === f9) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
+    let iu9 = null; try { iu9 = createFn({ dataDir: dir9, port: 3456, plugins: pl9, serverSetting: () => null, authEnabled: () => true, broadcast: () => { } }); } finally { fs.readFileSync = realRead; }
+    iu9.restore({ retries: 1, delayMs: 5, firstMs: 5 });   // the start's ask
+    iu9.restore({ ifFailed: true, retries: 1, delayMs: 5, firstMs: 5 });   // the vault unlock's, while still held
+    if (iu9._hold && iu9._hold.again) await iu9._hold.again().catch(() => false);   // the LIFT
+    await new Promise((r) => setTimeout(r, 300));
+    try { iu9.stop && iu9.stop(); } catch { }
+    fs.rmSync(dir9, { recursive: true, force: true });
+    return asks;
+  };
+  const askNow = await runAsk(create);
+  const IU = fs.readFileSync(path.join(REPO, 'src/server/instance-url.js'), 'utf8');
+  const STRONG = 'restoreAsked = restoreAsked && !restoreAsked.ifFailed ? restoreAsked : { retries, delayMs, firstMs, ifFailed };';
+  let askRed = null;
+  if (IU.split(STRONG).length === 2) { const { mutantCopies } = await import('./mutant-copy.mjs'); const M9 = mutantCopies('iurl-ask', REPO); askRed = await runAsk(M9.load('src/server/instance-url.js', anch8(IU, STRONG, 'restoreAsked = { retries, delayMs, firstMs, ifFailed };', 'ask-replaced'), 'ask-replaced').create); }
+  ok(`r3174: a restore asked at the start while held, then the vault unlock's «only if it failed», then the lift — the stronger ask is kept: the relay is asked (${askNow})`, askNow >= 1, `relay asks ${askNow}`);
+  ok(`RED CONTROL r3174: the later ask replacing the first (in a copy) — at the lift nothing is asserted again (${askRed} relay asks)`, askRed === 0, `relay asks ${askRed}`);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
