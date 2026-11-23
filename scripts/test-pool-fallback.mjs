@@ -12,6 +12,9 @@
 //      the provider, its env; NO per-session link) — also when every member is signed out (asked before the self-heal); not
 //      listed ⇒ the members' road; the vault locked ⇒ the provider's refusal by name; a pool with no list asks its chooser where
 //      it always did (after the default's heal). CONTROL: a copy without the early road throws «every member … signed out».
+// UNIT F3a — COMING BACK (§5, the same worlds): scene 4 (allow: back after the dwell with the FIRST model, no flap), scene 3 (never: its
+//      line once, the pool's count, a press), scene 7 (removed: back at once / told / stuck), no record ⇒ never by itself. CONTROLS: no
+//      dwell; the provider's model kept on the way back.
 // UNIT F2 — THE MOVE THERE (the real engine on the same stores):
 //   §4 the PURE rule (a fallback takes its own default model); scene 1 (never: nothing moves, ONE item a pool and provider, its
 //      count kept, Allow once moves them at once — the record written first, no prompt, the resume lands on the provider and takes
@@ -503,6 +506,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const wM = world({ cross: 'allow', managedDir: mdir });
   wM.client(); wM.mk('m2');
   await wM.pass();
+  for (let i = 0; i < 12 && !wM.cards.some((c) => c.sid === 'm2'); i++) await wM.settle();   // the refusal is asked off the pass (an async check): its line, bounded
   ok(wM.restarts().length === 0 && !(wM.metas.get('cw-m2') || {}).poolFallback && wM.cards.some((c) => c.sid === 'm2' && c.text === 'DeepSeek cannot take this conversation: this machine\'s managed Claude settings keep a provider\'s key out — nothing moved'),
     '(4) the managed settings refuse the provider ⇒ asked BEFORE the kill: nothing restarted (the conversation never left stopped by the pool), no record, its line says why', wM.cards.map((c) => c.text));
   // (5) A PERSON's PRESS, PACED FOR THE BOX (r3041 MUST): at the head, uncounted, FOUR restarts OUT at a time — a slot is held until
@@ -679,7 +683,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   wForce.am.updatePool(wForce.P, { crossProvider: 'never' });
   await wForce.eng.pumpFallbackMoves(Date.now() + 61e3);
   ok(wForce.restarts().length === 8, 'CONTROL: a copy whose move forces the allow word (the setting not judged at the move) goes on moving after the pool said never ⇒ the MUST\'s leg goes RED', wForce.restarts().length);
-  const SWEEP = "        if (on && !membership.includes(on) && !(poolFallbackSet(accounts.get(a.id)) || new Set()).has(on)) stale.add(on); // (B-d578) a conversation on a LISTED fallback provider is the pool's";
+  const SWEEP = "        if (on && !membership.includes(on) && !(poolFallbackSet(accounts.get(a.id)) || new Set()).has(on) && !(/^pv-/.test(String(on)) && s._poolFallback && s._poolFallback.poolId === a.id)) stale.add(on); // (B-d578) a conversation on a LISTED fallback provider is the pool's; (F3a) one on a REMOVED fallback with its record is the coming-back road's (judgeFallbackReturns), never the removed-member wall's";   // (F3a) the sweep's WHOLE line as F3a wrote it (its comment too: a part-line anchor left the rest as code in the copy)
   const wSw = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, SWEEP, '        if (on && !membership.includes(on)) stale.add(on);', 'the sweep takes a fallback for a removed member'), 'eng-sweep-takes') });
   wSw.mk('sw1', wSw.P, { claudeSessionId: 'cid-sw1', _heldPoolMember: ds.id, _lastPtyDataAt: Date.now() });
   const swept2 = wSw.mute(() => wSw.eng.sweepNonMemberLinks());
@@ -695,6 +699,81 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   wCards.client(); for (const sid of ['c1', 'c2', 'c3', 'c4']) wCards.mk(sid);
   await wCards.pass();
   ok(fbItems(wCards).length === 0 && wCards.items.filter((x) => /^Moving "/.test(x.text || '')).length === 4, 'CONTROL: a copy that files the old card a conversation asks FOUR times ⇒ the one-item leg goes RED', wCards.items.map((x) => x.text));
+  // ── §5 COMING BACK (unit F3a): the new-conversation verdict, the DWELL, the FIRST model, the removal ──
+  const onFb = (w, sid, { ago = 16 * 60e3, rec = true } = {}) => w.mk(sid, w.P, { claudeSessionId: 'cid-' + sid, _heldPoolMember: ds.id, _lastPtyDataAt: Date.now(),
+    ...(rec ? { _poolFallback: { poolId: w.P, provider: ds.id, fromMember: w.A, fromModel: 'sonnet', toModel: 'deepseek-chat', at: Date.now() - ago, by: 'pool' } } : {}) });
+  const heal = (w) => fs.writeFileSync(path.join(w.cacheDir, w.A + '.json'), cacheOf(0.1));
+  const wall = (w) => fs.writeFileSync(path.join(w.cacheDir, w.A + '.json'), cacheOf(1));
+  // SCENE 4 — allow: A resets and is confirmed ⇒ back on A with the FIRST model, through the queue, after the dwell; the line; NO FLAP
+  const w10 = world({ cross: 'allow' });
+  w10.client(); heal(w10); onFb(w10, 'b1');
+  await w10.pass();
+  const back = w10.restarts().find((t) => t.serverId === 'b1');
+  const backRec = (w10.metas.get('cw-b1') || {}).poolFallback || {};
+  const lbl = w10.am.memberProviderOf(w10.A).label;
+  const b1r = w10.mk('b1r', w10.P, { claudeSessionId: 'cid-b1', _lastPtyDataAt: Date.now() });
+  await w10.pass();
+  ok(!!back && back.model === 'sonnet' && !!backRec.back && backRec.back.to === w10.A && w10.eng._fbMovedAt.length === 1 && w10.am.poolCurrentFor(w10.P, 'b1') === w10.A
+    && w10.cards.some((c) => c.sid === 'b1r' && c.text === `Switched back from DeepSeek to Member A (${lbl}) — model deepseek-chat → sonnet`) && Number(b1r._poolFallbackDwell) > 0 && Number((w10.metas.get('cw-b1r') || {}).poolFallbackDwell) > 0,
+    'scene 4, allow: A resets and is confirmed (the new-conversation verdict of its FIRST model) ⇒ the conversation moves BACK through the hub queue (a paced move), its record\'s `back` written first, the restart asks for the FIRST model (sonnet); the resumed one says «Switched back from DeepSeek to Member A … — model deepseek-chat → sonnet» and keeps the dwell\'s start (memory + its meta)',
+    { back, rec: backRec.back, paced: w10.eng._fbMovedAt.length, cards: w10.cards.filter((c) => c.sid === 'b1r').map((c) => c.text) });
+  wall(w10);
+  const queuedBefore = w10.eng._fbQueue.size;
+  await w10.pass();
+  ok(!w10.eng._fbQueue.has('b1r') && !w10.restarts().some((t) => t.serverId === 'b1r'), 'NO FLAP: A walls again INSIDE the dwell ⇒ the conversation the pool just moved back is NOT moved onto the fallback again (nobody moves twice)', { queuedBefore, queue: [...w10.eng._fbQueue.keys()] });
+  const w11 = world({ cross: 'allow' });
+  w11.client(); heal(w11); onFb(w11, 'd1', { ago: 5 * 60e3 });
+  await w11.pass();
+  ok(w11.restarts().length === 0 && w11.eng._fbQueue.size === 0, 'inside its DWELL (5 of 15 minutes since the move there) the pool moves nobody back, A healthy or not', w11.restarts());
+  // SCENE 3 — never: the conversation's own line once, the pool's count, a press at once (uncounted)
+  const w12 = world();
+  w12.client(); heal(w12); onFb(w12, 'n1');
+  await w12.pass(); await w12.pass();
+  const said = w12.cards.filter((c) => c.sid === 'n1' && c.text === `Member A (${w12.am.memberProviderOf(w12.A).label}) can serve again — Move back to Member A`);
+  const st = w12.eng.fallbackStatus(w12.P);
+  const press = w12.eng.fallbackMoveBack(w12.P);
+  await w12.settle();
+  ok(w12.restarts().filter((t) => t.serverId === 'n1').length === 1 && said.length === 1 && st.length === 1 && st[0].provider === ds.id && st[0].running === 1 && st[0].canReturn === 1 && press.queued === 1 && w12.eng._fbMovedAt.length === 0 && w12.restarts()[0].model === 'sonnet',
+    'scene 3, never: nothing moves by itself — its own line says ONCE «Member A (…) can serve again — Move back to Member A»; the pool\'s row reads 1 on DeepSeek, 1 can come back; a press moves it back AT ONCE with its first model (never counted by the pace)',
+    { said: said.length, st, press, restarts: w12.restarts() });
+  // SCENE 7 — the provider removed while conversations run on it
+  const w13 = world({ cross: 'allow' });
+  w13.client(); heal(w13); onFb(w13, 'r1', { ago: 60e3 });
+  w13.am.updatePool(w13.P, { fallbackProviders: [] });   // the removal's prune (F1): the provider left the list
+  await w13.pass();
+  const r1r = w13.mk('r1r', w13.P, { claudeSessionId: 'cid-r1', _lastPtyDataAt: Date.now() });
+  await w13.pass();
+  const swept7 = w13.mute(() => w13.eng.sweepNonMemberLinks());
+  ok(w13.restarts().some((t) => t.serverId === 'r1' && t.model === 'sonnet') && w13.cards.some((c) => c.sid === 'r1r' && c.text === `DeepSeek was removed — this conversation moved back to Member A (${w13.am.memberProviderOf(w13.A).label}) — model deepseek-chat → sonnet`) && !swept7.some((x) => x && x.removed && x.removed.includes(ds.id)),
+    'scene 7, allow: the provider removed (no longer listed) ⇒ back at once when a member can serve (no dwell — it is gone), with its first model and the line «DeepSeek was removed — this conversation moved back to Member A …»; the removed-member wall never takes it (its record makes it this road\'s)', { restarts: w13.restarts(), cards: w13.cards.map((c) => c.text) });
+  const w14 = world();
+  w14.client(); heal(w14); onFb(w14, 'r2');
+  w14.am.updatePool(w14.P, { fallbackProviders: [] });
+  await w14.pass();
+  const w15 = world();
+  w15.client(); onFb(w15, 'r3');
+  w15.am.updatePool(w15.P, { fallbackProviders: [] });
+  await w15.pass();
+  const w16 = world({ cross: 'allow' });
+  w16.client(); heal(w16); onFb(w16, 'x1', { rec: false });
+  await w16.pass();
+  ok(w14.restarts().length === 0 && w14.cards.some((c) => c.sid === 'r2' && c.text === `DeepSeek was removed — this conversation can move back to Member A (${w14.am.memberProviderOf(w14.A).label})`)
+    && w15.restarts().length === 0 && w15.cards.some((c) => c.sid === 'r3' && c.text === 'DeepSeek was removed — this conversation cannot continue on DeepSeek: no member can serve now — Move back when one can')
+    && w16.restarts().length === 0 && w16.cards.some((c) => c.sid === 'x1' && c.text === 'DeepSeek has no record of the model this conversation came from — the pool does not move it back by itself'),
+    'scene 7, never: told it can move back to Member A (nothing moves); no member can serve ⇒ told it cannot continue there and waits; a conversation with NO record of its first model is never moved back by the pool (said once)',
+    { w14: w14.cards.map((c) => c.text), w15: w15.cards.map((c) => c.text), w16: w16.cards.map((c) => c.text) });
+  // RED CONTROLS of §5
+  const DWELL = "    if (!removed && now - (Number(rec.at) || 0) < FALLBACK_DWELL_MS) continue;   // the DWELL: the pool moves nobody back inside it";
+  const wDw = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, DWELL, '', 'no dwell'), 'eng-no-dwell') });
+  wDw.client(); heal(wDw); onFb(wDw, 'dd1', { ago: 5 * 60e3 });
+  await wDw.pass();
+  ok(wDw.restarts().length === 1, 'CONTROL: a copy without the dwell moves it back at 5 minutes ⇒ the dwell leg goes RED', wDw.restarts());
+  const FIRST_MODEL = "toModel: rec.fromModel || null, fallbackOnly: false, back: true, removed } };";
+  const wF = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, FIRST_MODEL, "toModel: rec.toModel || null, fallbackOnly: false, back: true, removed } };", 'the provider\'s model kept on the way back'), 'eng-no-first-model') });
+  wF.client(); heal(wF); onFb(wF, 'ff1');
+  await wF.pass();
+  ok(wF.restarts().length === 1 && wF.restarts()[0].model === 'deepseek-chat', 'CONTROL: a copy that keeps the provider\'s model on the way back restarts on deepseek-chat ⇒ the first-model leg goes RED', wF.restarts());
+
 }
 
 report();

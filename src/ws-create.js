@@ -2051,6 +2051,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             billingHow: session._billingHow || undefined, oatRoad: session._oatRoad || undefined, oatGen: session._oatGen || undefined,
             heldPoolMember: session._heldPoolMember || undefined, // the member a non-hot pool process holds — survives a server restart with the process it describes
             poolFallback: session._poolFallback || undefined, // B-d578 F2: the record of a move onto the pool's fallback provider (the engine stamps it on the resumed conversation)
+            poolFallbackDwell: session._poolFallbackDwell || undefined, // B-d578 F3a: the dwell after a move back (the engine stamps it)
             poolPin: session._poolPin || undefined, // THE CONVERSATION'S PIN (2026-09-28) — survives a server restart (boot-restore's three sites read it back)
             authAtSpawn: session._authAtSpawn || null,
             createdAt: session.createdAt,

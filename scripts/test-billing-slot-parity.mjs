@@ -30,7 +30,7 @@ export const RESOLVERS = Object.freeze(['fireIdentityFor', 'sessionBillingMember
   // them — a spawn's member, the default's fallback, the spend identity through the guard (its verdict) and auto-resume, the credit's
   // identity, the reading's slot, the billing chip. «name@file» = a generic name read in that file only; «spendGuard.authorize» = the
   // guard's verdict called through its own handle (another handle is the alias gap)
-  'poolDefaultOf', '_resolveHomeSpawn', 'resolveForSpawn', 'poolChooserForModel', 'fallbackDefaultTarget', '_wallScope', 'cliTarget', 'identityOf@src/server/spend-guard.js',
+  'poolDefaultOf', '_resolveHomeSpawn', 'resolveForSpawn', 'poolChooserForModel', 'fallbackDefaultTarget', 'fallbackBackTarget', '_wallScope', 'cliTarget', 'identityOf@src/server/spend-guard.js',
   'identityFor@src/server/spend-guard.js', 'fireIdentity@src/server/auto-resume.js', 'identityFor@src/server/auto-resume.js', 'setConversationPin', 'resetCreditOffer',
   'writeResetCredit', 'writeCodexReading', 'demoteWalledAccount', 'refreshCodexForPerson', 'resetCreditPreview', 'projectionBillingIndex', 'claudeBillingIdentity',
   'codexBillingIdentity', 'poolAuth@src/harnesses/claude.js', 'poolAuth@src/harnesses/codex.js', 'billingIdentity@server.js', 'sessionAuth@server.js', 'sessionAuth@src/routes/sessions.js',
@@ -201,6 +201,15 @@ export const ROWS = Object.freeze([
   ['fallbackDefaultTarget', 'src/server/account-usage-routes.js', 'chooseDefault', 'pile', 1],
   ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'memberRemoved', 'pool', 1],
   ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'poolChooserForModel', 'pile', 3],
+  ['poolChooserForModel', 'src/server/usage-pool-engine.js', 'fallbackBackTarget', 'pool', 1],   // B-d578 F3a: the new-conversation verdict of the first model (verdictOnly)
+  ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'judgeFallbackReturns', 'pool', 1],   // B-d578 F3a: each pass judges coming back
+  ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'executeFallbackBack', 'pool', 2],   // B-d578 F3a: re-judged at the move, and again after its record landed
+  ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'fallbackMoveBack', 'pool', 1],   // B-d578 F3a: the person's press (F3b's page)
+  ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'fallbackStatus', 'pool', 1],   // B-d578 F3a: the pool row's count of those that can come back
+  ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'judgeFallbackReturns', 'pool', 1],   // B-d578 F3a: a conversation held by a fallback provider
+  ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'executeFallbackBack', 'pool', 1],
+  ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'fallbackMoveBack', 'pool', 1],
+  ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'fallbackStatus', 'pool', 1],
   ['fireIdentity@src/server/auto-resume.js', 'src/server/auto-resume.js', 'identityFor', 'pile', 1],
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'attemptFire', 'spend', 1],
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'deliver', 'spend', 1],
@@ -285,6 +294,7 @@ export const HOME = Object.freeze({
   "resolveForSpawn": ["src/accounts.js"],
   "poolChooserForModel": ["src/server/usage-pool-engine.js"],
   "fallbackDefaultTarget": ["src/server/usage-pool-engine.js"],
+  "fallbackBackTarget": ["src/server/usage-pool-engine.js"],   // B-d578 F3a: the member a conversation on the fallback comes BACK to (the chooser's new-conversation verdict, then memberCanServe)
   "_wallScope": ["src/server/usage-pool-engine.js"],
   "cliTarget": ["src/routes/provider-models.js"],
   "setConversationPin": ["src/server/usage-pool-engine.js"],
@@ -547,6 +557,9 @@ export const CONSUMERS = Object.freeze({
   "cliDoor": {"file": "src/routes/provider-models.js", "fields": null, "why": "Builds the CLI-models door handler; cliTarget's account keys the listing request inside it, and the factory hands back only the handler.", "gap": "Returns an Express request handler (a closure); its outcome is an HTTP response, not a value any caller reads."},
   "consumeResetCreditFor": {"file": "src/server/usage-pool-engine.js", "fields": ["preview"], "why": "The manual reset-credit use: spends via writeResetCredit on resetCreditPreview's key inside; its return echoes that preview for the route."},
   "createBody": {"file": "src/ws-create.js", "fields": [], "why": "The create path spawns on resolveForSpawn's account and stamps the held member on the session; the async body returns nothing."},
+  "executeFallbackBack": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-d578 F3a: a move BACK made — heldPoolMemberFor names the fallback it leaves, fallbackBackTarget the member (re-judged after the record landed); it restarts there and returns {moved, why} only."},
+  "fallbackMoveBack": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-d578 F3a: the person's press — queues each conversation held by a fallback (heldPoolMemberFor) whose way back fallbackBackTarget names; returns {queued} only."},
+  "fallbackStatus": {"file": "src/server/usage-pool-engine.js", "fields": ["provider"], "why": "B-d578 F3a: the pool row's counts per fallback provider: provider = the member heldPoolMemberFor names (a provider id), canReturn counted by fallbackBackTarget."},
   "crossVerdictNow": {"file": "src/server/usage-pool-engine.js", "fields": ["curFor"], "why": "B-d578 F2: the ONE re-judgement under allow of a conversation (the cross card's answer through crossMoveNow, the fallback queue's move through fallbackJudge): sessionBillingMember/poolCurrentFor give its currentId, returned as curFor beside the verdict so the caller moves FROM that member."},
   "deliver": {"file": "src/server/auto-resume.js", "fields": [], "why": "attemptFire's post-gate closure: re-resolves identityFor, authorizes and charges the continue inside; returns only a boolean delivered."},
   "deliverToConversation": {"file": "src/server/conversation-deliver.js", "fields": ["identity"], "why": "delivers a message after the spend check; a refusal's object echoes the verdict's identity for the refusal's words and the stash"},
@@ -558,6 +571,7 @@ export const CONSUMERS = Object.freeze({
   "handOverGroups": {"file": "src/server/stash-handover.js", "fields": [], "why": "the group hand-over's spend check per group; returns {ok, code, error} and counts — the verdict's identity is said in words only"},
   "handleResetCreditResult": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Settles a reset-credit answer; liveQuotaKeyFor names the attempt's key for the lookup and the ladder walk; returns nothing."},
   "heldPoolUnknown": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (the held member's origin is unknown): a gate that refuses money moves and (B-87fd) files no reading, never the member itself."},
+  "judgeFallbackReturns": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-d578 F3a: after a pass, each conversation held by a fallback (heldPoolMemberFor) is judged for coming back (fallbackBackTarget): said or queued; returns nothing."},
   "holdRemoved": {"file": "src/server/usage-pool-engine.js", "fields": ["to"], "why": "Parks a removed member's conversation; heldPoolMemberFor/poolCurrent/_wallScope only gate the act; to is the verdict's parking target."},
   "linkHold": {"file": "src/server/usage-pool-engine.js", "fields": ["on", "linked", "held", "via", "viaId", "soonest", "rejector"], "why": "Returns the link member's own quotaVerdictFor verdict when blocked; its callers read only usable/blockedUntil/reason to re-arm or hold."},
   "listOnce": {"file": "src/server/cli-models-door.js", "fields": [], "why": "Lists a CLI's models under resolveForSpawn's spawn env for the account; returns only the store's save promise, no account."},

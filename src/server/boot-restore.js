@@ -955,6 +955,7 @@ function restoreSessions() {
       _initialGroupIds: spawnGroupIds(meta), // lane new-session-form: every group it was spawned into (meta `taskIds`; an older meta's one `taskId`)
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
       _poolFallback: poolFallbackOf(meta), // B-d578 F2: the record of a move onto the pool's fallback provider (its first member and model) — the surviving process stays on the fallback
+      _poolFallbackDwell: Number(meta.poolFallbackDwell) || null, // B-d578 F3a: a conversation the pool moved back is not moved onto the fallback again for one dwell
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       _authAtSpawn: meta.authAtSpawn || null,
       _apiKeySource: meta.apiKeySource || null, // CLI-confirmed auth (init record); backfilled from the buffer below when absent
@@ -1194,6 +1195,7 @@ function restoreAgentdPipeSessions() {
       buffer: '', taskId: meta.taskId || null,
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // design-reset-credits r2: the member the surviving pipe process holds
       _poolFallback: poolFallbackOf(meta), // B-d578 F2: the record of a move onto the pool's fallback provider
+      _poolFallbackDwell: Number(meta.poolFallbackDwell) || null, // B-d578 F3a: the dwell after a move back
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
       _forkRequested: restoredForkPending(meta), // a pending fork re-opened by the daemon still adopts its own id (parser or lock capture) — round 3
