@@ -70,6 +70,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
 
   // ── state ──
   let store = null;                // the judged store (lazily loaded)
+  let keptUnread = null;           // r3006: why the file could not be read at this run's load — while set, nothing is written over it
   const latest = new Map();        // bk → { tabs: [{targetId, url, title, active, type}], at, source } — the live list
   const deliberate = new Map();    // bk → { why: 'user'|'agent', at } — a stop the user / the agent asked for
   let flushTimer = null, bcTimer = null, sweepTimer = null, sweeping = null, lastSweep = null, thereTimer = null;
@@ -80,11 +81,13 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); }
     catch (e) {
       if (e && e.code !== 'ENOENT') {
-        // an unreadable store is SET ASIDE with its bytes (the channel-store rule), never silently replaced — and until
-        // the first write, browser-env reads the unreadable file and spares every key-named directory (fail closed)
-        const aside = `${file}.corrupt-${now()}`;
-        try { fs.renameSync(file, aside); log.warn?.(`[browser-kept] ${file} could not be read (${e.message}) — set aside as ${path.basename(aside)}; starting from an empty store (no directory is removed for it)`); }
-        catch (e2) { log.warn?.(`[browser-kept] ${file} could not be read (${e.message}) and could not be set aside (${e2.message})`); }
+        // THE SWEEP'S FAIL-CLOSED LAW (主开发 r3006, lane bl-windows): a store that could not be read — a read refused OR bytes that do
+        // not parse — is NEVER «empty» to the boot sweep. The release SET IT ASIDE: the file became «not there», browser-env's own read
+        // (keptKeySet) then answered an EMPTY set, and the boot sweep removed every kept browser's profile folder, its sign-ins. Now the
+        // file stays where it is: browser-env reads it itself (a read that still fails ⇒ unknown ⇒ every key-named directory spared; a
+        // read that now answers ⇒ its keys), and NOTHING is written over it this run (save() below)
+        keptUnread = String((e && (e.code || e.name)) || 'unreadable');
+        log.warn?.(`[browser-kept] ${file} could not be read (${e.message}) — kept as it is: nothing is written over it this run, and no kept browser's folder is removed for it (the sweep reads the file itself)`);
       }
     }
     store = K.normalizeKeptStore(raw);
@@ -93,6 +96,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   function save() {
     if (!store) return;
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    if (keptUnread) return;   // r3006: a file that could not be read is never written over (its kept browsers would be gone from it)
     try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(file, store); }
     catch (e) { log.warn?.(`[browser-kept] the store could not be written (${e && e.message}) — kept in memory, retried at the next change`); }
   }

@@ -196,7 +196,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   /** The browser keys the kept store names (a set; unreadable ⇒ null, and the callers fail CLOSED: the sweep spares every
    *  key-named directory, the fresh-key rule counts the key as named). */
   const keptKeySet = () => {
-    if (typeof keptKeys === 'function') { try { const v = keptKeys(); return v instanceof Set ? v : new Set(v || []); } catch { return null; } }
+    if (typeof keptKeys === 'function') { try { const v = keptKeys(); if (v == null) return null; return v instanceof Set ? v : new Set(v); } catch { return null; } }   // r3006: an unknown list stays unknown (null), never an empty set
     let raw;
     try { raw = fs.readFileSync(path.join(dataDir, KB.KEPT_FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? new Set() : null; }
     try { return new Set(Object.keys(KB.normalizeKeptStore(JSON.parse(raw)).entries)); } catch { return null; }

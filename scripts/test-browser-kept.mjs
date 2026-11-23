@@ -18,7 +18,7 @@
 //      all), `keyNamed` sees a tabs-only kept key.
 //   ④ the ORCH store: start → tabs → stop (0600 file, a second instance reads it back), D2 (turn-idle reopens, a user
 //      stop does not; the agent's own close heard before or after its stop), nothing kept ⇒ no entry, Forget (refused
-//      while running, a registered profile's directory left in place), a corrupt store set aside, the sweep: ends by
+//      while running, a registered profile's directory left in place), a corrupt store kept as it is (r3006), the sweep: ends by
 //      D1 (bound / carried / grace), trims a stopped directory's caches, removes the least recently used over the total,
 //      never a running one — and a 100-conversation leg on real scratch directories (a fake `du`) holding the bound.
 //      B-7a30: a kept folder's presence is a KEPT FACT — a second instance says «checking» until its first check lands; a folder
@@ -413,10 +413,11 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   s1.noteStop(KEY_A, { why: 'user', hasDir: true, tabs: [] });
   ok(s1.adopted(KEY_A) && !s1.has(KEY_A) && fs.existsSync(dirA), 'an adopt that moved the directory ends the entry (the directory is the profile\'s now — never removed here)');
   fs.rmSync(dirA, { recursive: true, force: true });
-  // a corrupt store is set aside
+  // a corrupt store is KEPT AS IT IS (the sweep's fail-closed law (lane bl-windows, 主开发 r3006)): never set aside — the boot sweep reads it itself and spares every kept folder
   fs.writeFileSync(path.join(S_DATA, KB.KEPT_FILE), '{ torn');
   const s3 = mk();
-  ok(s3.keys().size === 0 && fs.readdirSync(S_DATA).some((n) => n.startsWith(KB.KEPT_FILE + '.corrupt-')), 'an unreadable store is SET ASIDE with its bytes (never silently replaced) and the store starts empty');
+  const s3n = s3.keys().size; s3.noteStart('bk-0000d009', { hasDir: true });
+  ok(s3n === 0 && !fs.readdirSync(S_DATA).some((n) => n.startsWith(KB.KEPT_FILE + '.corrupt-')) && fs.readFileSync(path.join(S_DATA, KB.KEPT_FILE), 'utf8') === '{ torn', 'an unreadable store is KEPT AS IT IS — never set aside, and nothing is written over it this run (a new kept browser lives in memory); the store starts empty in memory');
   for (const n of fs.readdirSync(S_DATA)) if (n.startsWith(KB.KEPT_FILE)) fs.rmSync(path.join(S_DATA, n), { force: true });
   // THE SWEEP: ends
   bcasts.length = 0;
