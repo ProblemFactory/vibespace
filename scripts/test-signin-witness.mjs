@@ -459,7 +459,7 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
 {
   const authCut2 = (pairs, label) => MUT.load('src/auth.js', pairs.reduce((t, [from, to, l]) => anchored(t, from, to, l), AUTH_SRC), `auth-${label}`).Auth;
   const WW = require(path.join(REPO, 'src/signin-witness-worker.js'));
-  const quick = { netBoundMs: 30, netReaskMs: 60 };
+  const quick = { netBoundMs: 30, netReaskMs: 60, netReaskMaxMs: 1000 };
   // the real folder's sign-in set on a network home; the var-tmp copy gone (its system cleared it); `away` ⇒ the data folder missing too
   const netIt = async (name, { away = true } = {}) => {
     const it = install(name), mi = nfsOf(it), a = start(it, { mountinfo: mi, pool: standIn(NONE) }).v;
@@ -485,6 +485,13 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
   const A2 = await netIt('h1-stall-red'), pr = standIn('stall');
   start(A2.it, { mountinfo: A2.mi, pool: pr, ...quick }, RA); await until(() => pr.calls.length > 1);
   ok(pr.calls.length > 1, `RED CONTROL: no «one look at a time» — asks pile on a home that hangs (${pr.calls.length})`);
+  // round wefspq2j3 (r3172): the re-ask BACKS OFF — 60 ms here, doubling (to its bound): after three re-asks the next waits 8 times the first
+  const backoffOf = (a) => (a._net && a._net.timer ? a._net.timer._idleTimeout : -1);
+  ok(backoffOf(a1) >= 8 * 60 && backoffOf(a1) <= 1000, `the re-ask BACKS OFF: after ${a1._net.reasks} re-asks the next waits ${backoffOf(a1)} ms (the first: 60 ms; doubling, to its bound)`);
+  const RBO = authCut2([['const wait = Math.min(this._netReaskMax(), this._netReask() * 2 ** Math.min(n.waits || 0, 20));', 'const wait = this._netReask();', 'backoff-cut']], 'no-backoff');
+  const A3 = await netIt('h1-backoff-red'), a3 = start(A3.it, { mountinfo: A3.mi, pool: standIn('stall'), ...quick }, RBO).v;
+  await until(() => (a3._net.reasks || 0) >= 3);
+  ok(backoffOf(a3) === 60, `RED CONTROL: no backoff — every re-ask waits the first ${backoffOf(a3)} ms, for as long as the home hangs`);
   // (2) «no witness there» opens as a new install does — quietly (r3030 (f): nothing journalled under the bound)
   const B = await netIt('h1-none');
   const bs = start(B.it, { mountinfo: B.mi, pool: standIn(NONE), ...quick }), b1 = bs.v;
@@ -573,6 +580,14 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
   const L3 = await netIt('h1-late-write', { away: false }), l3 = start(L3.it, { mountinfo: L3.mi, ...quick }).v, pl3 = answers(L3, { result: { file: L3.netFile, text: docOf(L3, L3.id) } });
   l3.attachWitnessPool(pl3); await l3._netWrites;
   ok(!l3.held && l3.passwordEnabled && pl3.calls.map((c) => c.op).join(',') === 'netRead,netWrite', `the start-time write when the pool comes: read first, then written (${pl3.calls.map((c) => c.op).join(',')})`);
+  // (6b) round wefspq2j3: server.js hands a FACTORY — the witness pool is BUILT only for a hub whose home is a network mount
+  let built = 0; const factory = () => () => { built++; return standIn(NONE); };
+  const LH = install('h1-lazy-local'), lh = start(LH).v; lh.attachWitnessPool(factory());
+  const NH = await netIt('h1-lazy-net'), nh = start(NH.it, { mountinfo: NH.mi, ...quick }).v, b0 = built; nh.attachWitnessPool(factory()); await until(() => !nh.held);
+  ok(b0 === 0 && built === 1 && !nh.held, `the witness pool is built only for a network home (a local home: ${b0} built; a network home: ${built - b0}), and that hub's look runs on it`);
+  const RLZ = authCut('      if (!f || !f.netHome) return;\n      try { pool = pool(); }', '      try { pool = pool(); }', 'lazy-cut');
+  const bLz = built; start(install('h1-lazy-red'), {}, RLZ).v.attachWitnessPool(factory());
+  ok(built === bLz + 1, 'RED CONTROL: the factory called for a LOCAL home too — a worker thread started for every hub');
   // (7) r2901: a start NEVER HANDED A POOL never sits held and silent
   const G = await netIt('h1-no-pool'), g1 = start(G.it, { mountinfo: G.mi, ...quick }).v;
   await until(() => g1.held && g1.held.kind !== 'checking', 1000);
@@ -583,20 +598,27 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
   await until(() => g2.held && g2.held.kind !== 'checking', 300);
   ok(!!g2.held && g2.held.kind === 'checking', 'RED CONTROL: no word for a pool that never came — held «checking» for ever, silent');
   // (8) THE MUST (round wom600meg): NO SYNCHRONOUS CALL — read OR write — reaches the network home, on every road
-  const NAMES = ['readFileSync', 'statSync', 'lstatSync', 'existsSync', 'readdirSync', 'openSync', 'readlinkSync', 'accessSync', 'realpathSync', 'unlinkSync', 'mkdirSync', 'writeFileSync', 'renameSync', 'rmSync', 'rmdirSync', 'copyFileSync', 'cpSync', 'appendFileSync', 'chmodSync', 'symlinkSync', 'truncateSync'];
-  const watchHome = async (home, fn) => { const seen = [], keep = NAMES.map((n) => [n, fs[n]]); for (const [n, f0] of keep) fs[n] = function (p, ...r) { if (typeof p === 'string' && (p === home || p.startsWith(home + '/'))) seen.push(`${n} ${p}`); return f0.call(this, p, ...r); }; try { await fn(); } finally { for (const [n, f0] of keep) fs[n] = f0; } return seen; };
+  const NAMES = ['readFileSync', 'statSync', 'lstatSync', 'existsSync', 'readdirSync', 'openSync', 'readlinkSync', 'accessSync', 'realpathSync', 'unlinkSync', 'mkdirSync', 'writeFileSync', 'renameSync', 'rmSync', 'rmdirSync', 'copyFileSync', 'cpSync', 'appendFileSync', 'chmodSync', 'symlinkSync', 'truncateSync', 'opendirSync', 'statfsSync', 'utimesSync', 'lutimesSync', 'chownSync', 'lchownSync', 'linkSync', 'mkdtempSync'].filter((n) => typeof fs[n] === 'function');
+  const watchHome = async (home, fn) => { const seen = [], keep = NAMES.map((n) => [n, fs[n]]); for (const [n, f0] of keep) fs[n] = function (...r) { const at = r.find((p) => typeof p === 'string' && (p === home || p.startsWith(home + '/'))); if (at) seen.push(`${n} ${at}`); return f0.apply(this, r); }; try { await fn(); } finally { for (const [n, f0] of keep) fs[n] = f0; } return seen; };
   const roads = {};
   { const W = await netIt('h1-sync-stall'); roads.stalled = await watchHome(W.it.home, async () => { start(W.it, { mountinfo: W.mi, pool: standIn('stall'), ...quick }); }); }
   { const W = await netIt('h1-sync-none'); roads.none = await watchHome(W.it.home, async () => { const a = start(W.it, { mountinfo: W.mi, pool: standIn(NONE), ...quick }).v; await until(() => !a.held); await a._netWrites; }); }
-  const sameId = async (name, A0) => { const W = await netIt(name, { away: false }); fs.unlinkSync(path.join(W.it.data, 'auth.json')); const file = path.join(W.home, 'signin-same.json'); return { W, seen: await watchHome(W.it.home, async () => { const a = start(W.it, { mountinfo: W.mi, pool: answers(W, { result: { file, text: docOf(W, W.id) } }), ...quick }, A0).v; await until(() => !a.held); await a._netWrites; }) }; };
+  const sameId = async (name, A0) => { const W = await netIt(name, { away: false }); fs.unlinkSync(path.join(W.it.data, 'auth.json')); const file = path.join(W.home, 'signin-same.json'); return { W, seen: await watchHome(W.it.home, async () => { const a = start(W.it, { mountinfo: W.mi, pool: answers(W, { result: { file, text: docOf(W, W.id) } }), ...quick }, A0).v; await until(() => !a.held); await a._netWrites;
+    // r3172 (1): THE PERSON's ACTS after that open — a new sign-in word, turning it off, an import — each with the network entry in its copies
+    quiet(() => a.setPassword('pw-same-0002', { userSet: true })); await a._netWrites; quiet(() => a.removePassword()); await a._netWrites; quiet(() => a.importPasswordRecord(REC)); await a._netWrites; }) }; };
+  const REC = (() => { const x = start(install('h1-sync-rec')).v; quiet(() => x.setPassword('pw-rec-0003', { userSet: true })); return x.exportPasswordRecord(); })();
   roads.sameId = (await sameId('h1-sync-same')).seen;
   { const W = await netIt('h1-sync-start-new'); fs.writeFileSync(path.join(W.it.data, SW.START_NEW), ''); roads.startNew = await watchHome(W.it.home, async () => { const a = start(W.it, { mountinfo: W.mi, pool: homeCopy(W), ...quick }).v; await a._netWrites; }); }
+  { const W = install('h1-sync-boot'); roads.boot = await watchHome(W.home, async () => { await withEnv('env-pw-0011', async () => { const a = boot(W, Auth); await until(() => !a.held); await a._netWrites; }); }); }   // r3172 (1): the replayed boot road
   { const W = await netIt('h1-sync-late'); roads.late = await watchHome(W.it.home, async () => { const a = start(W.it, { mountinfo: W.mi, ...quick }).v; a.attachWitnessPool(standIn(NONE)); await until(() => !a.held); await a._netWrites; }); }
   const n8 = Object.values(roads).reduce((t, v) => t + v.length, 0);
-  ok(n8 === 0, `NO synchronous call, read or write, reaches the network home — the stalled look, the answered «none», the answered SAME id (the person removed the sign-in file), the start-new road, the pool handed late: ${n8}`, roads);
+  ok(n8 === 0, `NO synchronous call, read or write, reaches the network home — the stalled look, the answered «none», the answered SAME id (the person removed the sign-in file) and the person's acts after that open (a new sign-in word, turning it off, an import), the start-new road, the replayed boot road, the pool handed late (${NAMES.length} names, every path argument): ${n8}`, roads);
   const RM = authCut("      for (const w of found) if (!w.net) each(w.file, 'removed', () => SW.removeWitness({ file: w.file }));", "      for (const w of found) each(w.file, 'removed', () => SW.removeWitness({ file: w.file }));", 'net-entry-unmarked');   // stale-pins: kept (the red's TO is line 606's remover, put back on purpose)
   const red8 = (await sameId('h1-sync-same-red', RM)).seen;
   ok(red8.some((x) => /^unlinkSync /.test(x)), `RED CONTROL: the network entry taken by the local remover (line 606's form) — an unlinkSync on the network home from the loop (${red8.length})`, red8);
+  const RWR = authCut('found.filter((w) => !w.net && w.writable !== false)', 'found.filter((w) => w.writable !== false)', 'net-entry-written');   // stale-pins: kept (the red's TO is line 642's writer filter, put back on purpose)
+  const red8w = (await sameId('h1-sync-same-red-w', RWR)).seen;
+  ok(red8w.some((x) => /^(writeFileSync|openSync|renameSync) /.test(x)), `RED CONTROL: the network entry taken by the local WRITER at the person's new sign-in word — a synchronous write on the network home from the loop (${red8w.length})`, red8w);
   const ME = swCut("  if (h.dir && h.via === 'home') out.push(h.dir);\n", "  out.push(String(home).replace(/\\/+$/, '') + '/.vibespace/local');\n", 'net-home-read-sync');
   const Wm = await netIt('h1-sync-read-red'), seenM = await watchHome(Wm.it.home, async () => { ME.startFactsSync({ dataDir: Wm.it.data, ...cfgOf(Wm.it, { mountinfo: Wm.mi }) }); });
   ok(seenM.length > 0, `RED CONTROL: the home rung read like a local one — a synchronous read of the network home (${seenM.length})`);
@@ -608,8 +630,12 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
     const f0 = start(F, { mountinfo: mi, pool }).v; await until(() => !f0.held, 8000);
     quiet(() => f0.setPassword('pw-real-0001', { userSet: true })); await f0._netWrites;
     ok(!f0.held && fs.existsSync(mine) && JSON.parse(fs.readFileSync(mine, 'utf-8')).id === idOf(F) && (fs.statSync(mine).mode & 0o777) === 0o600 && (fs.statSync(rung).mode & 0o777) === 0o700 && (WW.machineKey() === '' || path.basename(mine) !== path.basename(older)), `THE REAL worker: the network copy written after the sign-in file — keyed by the root AND this machine (${path.basename(mine)}), the file 0600, its folder 0700`);
-    if (WW.machineKey()) { fs.renameSync(mine, older); const f1 = start(F, { mountinfo: mi, pool }).v; await until(() => !f1.held, 8000); await f1._netWrites;
-      ok(!fs.existsSync(older) && fs.existsSync(mine), 'an OLDER-shape copy (the root alone) is read as this machine\'s once, then rewritten in the machine\'s name and the older one removed'); }
+    if (WW.machineKey()) {   // round wefspq2j3: ONE NAME A MACHINE — the root-only name is a machine-id-less machine's, never this one's
+      const other = docOf({ it: F }, 'vi-0123456789ab'); fs.writeFileSync(older, other);
+      const f1 = start(F, { mountinfo: mi, pool }).v; await until(() => !f1.held, 8000); await f1._netWrites;
+      ok(!f1.held && fs.readFileSync(older, 'utf-8') === other && fs.existsSync(mine), 'a root-only copy beside this machine\'s (the name a machine with NO machine id uses) is left as it is — not read as this machine\'s, not written over, not removed');
+      fs.rmSync(older, { force: true });
+    } else console.log('  · (this machine has no readable machine id: its copy IS the root-only name — the one-name-a-machine leg has nothing to tell apart)');
     fs.rmSync(varWitness(F), { force: true }); fs.renameSync(F.data, F.data + '.real'); fs.mkdirSync(F.data);
     const f2 = start(F, { mountinfo: mi, pool }).v; await until(() => f2.held && f2.held.kind !== 'checking', 8000);
     ok(!!f2.held && f2.held.kind === 'folder' && f2.held.witness === mine, '…and read by the worker at the next start: the data folder missing ⇒ HELD by the network copy', f2.held);
@@ -620,8 +646,89 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
       fs.writeFileSync(mine, '{}'); fs.chmodSync(mine, 0);
       const f4 = start(F, { mountinfo: mi, pool }).v; await until(() => f4.held && f4.held.kind !== 'checking', 8000); fs.chmodSync(mine, 0o600);
       ok(!!f4.held && f4.held.unread === true && f4.held.witness === mine && /EACCES/.test(f4.held.why), 'the REAL worker\'s refused read (EACCES): the copy NAMED with its code, held «unread»', f4.held);
-    }
+    } else console.log('  · SKIPPED (running as root: a mode-000 copy is readable by root) — the real worker\'s refused read (EACCES)');
   } finally { pool.close(); }
+  // (9b) r3172 (3) + (5): THE WRITER's LAW through the real worker's own op, each with its red — a linked folder, one open to others,
+  // another user's: refused by name, nothing written; a write failing at its rename removes its temp; ONE NAME A MACHINE: this machine's
+  // write and removal leave the root-only copy (a machine with no machine id) as it is
+  {
+    const RS = path.join(ROOT, 'rung-law');
+    const WSRC = fs.readFileSync(path.join(REPO, 'src/signin-witness-worker.js'), 'utf-8');
+    const wCut = (from, to, label) => MUT.load('src/signin-witness-worker.js', anchored(WSRC, from, to, label), `worker-${label}`);
+    const tryW = (W0, dir, uid = UID) => { try { W0.runOp('netWrite', { path: dir, root: 'r0', content: J({ v: 1, id: 'vi-00000000000a' }), uid }); return 'written'; } catch (e) { return (e && e.code) || String(e); } };
+    const nameIn = (d) => path.join(d, WW.nameOf('r0', WW.machineKey()));
+    const setOf = (tag) => { const d = path.join(RS, tag); fs.mkdirSync(d, { recursive: true }); const real = path.join(d, 'real'), link = path.join(d, 'link'), open = path.join(d, 'open'), theirs = path.join(d, 'theirs'); fs.mkdirSync(real, { mode: 0o700 }); fs.symlinkSync(real, link); fs.mkdirSync(open); fs.chmodSync(open, 0o755); fs.mkdirSync(theirs, { mode: 0o700 }); return { real, link, open, theirs }; };
+    const L0 = setOf('law'), r0 = [tryW(WW, L0.link), tryW(WW, L0.open), tryW(WW, L0.theirs, UID + 1)];
+    ok(r0.every((x) => x === 'EWITNESSFOLDER') && ![L0.real, L0.open, L0.theirs].some((d) => fs.existsSync(nameIn(d))), `the writer's rung law REFUSES by name — a linked folder, one open to others (0755), another user's (${r0.join(' / ')}) — and writes nothing`);
+    const LAW = wCut("    if (!law.ok) throw Object.assign(new Error(law.why), { code: 'EWITNESSFOLDER' });\n", '', 'rung-law-cut');
+    const L1 = setOf('law-red'), r1 = [tryW(LAW, L1.link), tryW(LAW, L1.open), tryW(LAW, L1.theirs, UID + 1)];
+    ok(r1.every((x) => x === 'written') && fs.existsSync(nameIn(L1.real)), `RED CONTROL: the law cut — written through the link into its target, into the open folder and into another user's (${r1.join(' / ')})`);
+    const tmpsOf = (d) => fs.readdirSync(d).filter((x) => x.includes('.tmp-'));
+    const T0 = path.join(RS, 'temp'); fs.mkdirSync(T0, { recursive: true, mode: 0o700 }); fs.mkdirSync(nameIn(T0));   // the copy's name taken by a FOLDER: the rename fails
+    const t0 = tryW(WW, T0);
+    ok(t0 !== 'written' && tmpsOf(T0).length === 0, `a write failing at its rename (${t0}) removes its temp file — none left`);
+    const TMP = wCut("    } catch (e) { try { fs.unlinkSync(tmp); } catch { /* not made */ } throw e; }\n", "    } catch (e) { throw e; }\n", 'temp-kept');
+    const T1 = path.join(RS, 'temp-red'); fs.mkdirSync(T1, { recursive: true, mode: 0o700 }); fs.mkdirSync(nameIn(T1)); tryW(TMP, T1);
+    ok(tmpsOf(T1).length === 1, 'RED CONTROL: the temp\'s removal cut — the temp is left behind in the home folder');
+    if (WW.machineKey()) {
+      const O0 = path.join(RS, 'one-name'); fs.mkdirSync(O0, { recursive: true, mode: 0o700 }); const theirCopy = path.join(O0, WW.nameOf('r0', ''));
+      fs.writeFileSync(theirCopy, 'theirs'); const w0 = tryW(WW, O0), read0 = WW.runOp('netRead', { path: O0, root: 'r0' }).result.file; WW.runOp('netRemove', { path: O0, root: 'r0' });
+      ok(w0 === 'written' && read0 === nameIn(O0) && fs.readFileSync(theirCopy, 'utf-8') === 'theirs', 'one name a machine: this machine reads, writes and removes only its own name — the root-only copy (a machine with no machine id) stays as it is');
+      const OLD = wCut("    let d = null, note = null;\n", "    try { fs.unlinkSync(path.join(dir, nameOf(root, ''))); } catch { }\n    let d = null, note = null;\n", 'older-removed');
+      tryW(OLD, O0);
+      ok(!fs.existsSync(theirCopy), 'RED CONTROL: line 642\'s form (the older shape removed after the write) — the other machine\'s only copy deleted');
+    } else console.log('  · (this machine has no readable machine id: the one-name-a-machine legs have nothing to tell apart)');
+  }
+  // (10) THE MUST (round wefspq2j3): A HOME THAT HANGS FOR GOOD. Each look's worker blocks IN THE KERNEL (open() of a FIFO with no writer —
+  // placed, never load); the REAL SafeFs ends it at its deadline and its thread cannot exit. No new look past 2 such threads: the hold
+  // stays «home» with its start-new act, said ONCE; the look resumes when a stuck thread exits. RED: the cap cut — the threads grow
+  {
+    const { execFileSync } = require('child_process');
+    const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
+    const wedgeOf = (tag) => {
+      const dir = path.join(ROOT, `wedge-${tag}`); fs.mkdirSync(dir, { recursive: true });
+      const fifo = path.join(dir, 'home.fifo'), flag = path.join(dir, 'stall'), wf = path.join(dir, 'worker.js');
+      execFileSync('mkfifo', [fifo]); fs.writeFileSync(flag, '');
+      fs.writeFileSync(wf, [
+        "const fs = require('fs'); const { parentPort } = require('worker_threads');",
+        'parentPort.on(\'message\', ({ id, op }) => {',
+        `  if (op === 'netRead' && fs.existsSync(${J(flag)})) fs.closeSync(fs.openSync(${J(fifo)}, 'r'));   // blocks in the kernel until a writer comes`,
+        `  parentPort.postMessage({ id, ok: true, result: op === 'netRead' ? { file: ${J(path.join(dir, 'signin-x.json'))}, none: true } : {} });`,
+        '});', ''].join('\n'));
+      const pool = new SafeFs({ workerPath: wf, name: `dc3f-wedge-${tag}`, poolSize: 1, hungMs: 0 });
+      // the release: the flag gone, then the FIFO held open read-write by this thread — a writer now exists, so every open() of it
+      // returns at once (the stuck ones, and one that raced past the flag)
+      let rw = null;
+      const release = () => { fs.rmSync(flag, { force: true }); if (rw === null) rw = fs.openSync(fifo, 'r+'); };
+      const done = () => { if (rw !== null) { fs.closeSync(rw); rw = null; } };
+      return { pool, release, done };
+    };
+    const threads = () => fs.readdirSync('/proc/self/task').length;
+    const cfgW = { netBoundMs: 30, netReaskMs: 60, netReaskMaxMs: 120 };
+    const WG = wedgeOf('fix'), WR = wedgeOf('red'), KG = await netIt('h1-wedge'), KR = await netIt('h1-wedge-red');
+    const RCAP = authCut('    if (ending >= NET_ENDING_MAX) {', '    if (false) {', 'ending-cap-cut');
+    const said = [], warn0 = console.warn, err0 = console.error;
+    console.warn = (...a) => said.push(a.join(' ')); console.error = (...a) => said.push(a.join(' '));
+    try {
+      // the fixed hub takes its pool the way server.js hands it (attachWitnessPool, after the start); the red's is handed at the start
+      const g = start(KG.it, { mountinfo: KG.mi, ...cfgW }).v, r = start(KR.it, { mountinfo: KR.mi, pool: WR.pool, ...cfgW }, RCAP).v;
+      g.attachWitnessPool(WG.pool);
+      await until(() => g._net.parked && WR.pool.stats().ending > 2, 15000);
+      for (let i = 0; i < 6; i++) g._netLook();   // six more re-asks while parked
+      const sg = WG.pool.stats(), sr = WR.pool.stats(), parkedLines = said.filter((l) => l.includes('no new look until') && l.includes(KG.home));
+      ok(g._net.parked && sg.ending === 2 && sg.timeouts === 2 && g.held && g.held.kind === 'home' && api(g).body.fix.includes(SW.START_NEW) && parkedLines.length === 1,
+        `a home that hangs for good: ${sg.timeouts} looks ended at their deadline, ${sg.ending} threads stuck in the kernel — then NO new look over ${g._net.reasks || 0} re-asks and 6 more; held «home» with its start-new act; said once (${parkedLines.length})`, { sg, held: g.held && g.held.kind });
+      ok(sr.ending > 2, `RED CONTROL: the cap cut — each re-ask leaves one more thread stuck in the kernel (${sr.ending} and growing)`, sr);
+      // the red's pool goes first (it keeps ending fresh workers until its home answers); then the fixed pool, whose look is parked:
+      // no look of its own is out, so its thread count moves by its stuck threads only
+      WR.release(); await until(() => !r.held && WR.pool.stats().ending === 0, 8000);
+      const before = threads(), stuck = sg.ending;
+      WG.release();
+      await until(() => WG.pool.stats().ending === 0 && !g.held && before - threads() >= stuck, 8000);
+      const after = threads();
+      ok(WG.pool.stats().ending === 0 && !g.held && !g.passwordEnabled && before - after >= stuck, `the stuck threads EXIT once the kernel lets go (${before} → ${after} threads, ${stuck} were stuck: the pool's count follows the real threads) — and the parked look RESUMES at that exit: the home answers, the instance opens`, { ending: WG.pool.stats().ending, held: g.held && g.held.kind, net: g._net && { parked: g._net.parked, pending: g._net.pending, timer: !!g._net.timer, done: g._net.done }, said: said.slice(-4) });
+    } finally { console.warn = warn0; console.error = err0; WG.release(); WR.release(); WG.pool.close(); WR.pool.close(); WG.done(); WR.done(); }
+  }
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

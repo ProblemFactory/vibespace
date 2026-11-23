@@ -48,7 +48,7 @@ const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, OWN_RULE
 const { loginHtml } = require('./login-page.js');   // the sign-in page, one for both holders
 const SW = require('./signin-witness.js');   // B-dc3f (1): the data folder's own id inside it, the witness outside it (the plain form)
 /** B-dc3f (1), 主开发 r2780 (2) H1 + r2869: the network home's look — its bound, its re-ask (one look out at a time) and its read size */
-const NET_BOUND_MS = 5000, NET_REASK_MS = 30000, NET_MAX_BYTES = 4096;
+const NET_BOUND_MS = 5000, NET_REASK_MS = 30000, NET_REASK_MAX_MS = 8 * 60 * 1000, NET_ENDING_MAX = 2, NET_MAX_BYTES = 4096;
 
 /** the held state's answer (B-dc3f): a page navigation gets the words (in the asked language), an API or a door gets them as
  *  JSON — 503, the way out named. `page` = THE SIGN-IN PAGE itself: it answers AS A PAGE, 200 whatever the request accepts
@@ -72,6 +72,7 @@ class Auth {
     this._dataDir = dataDir; this._witnessCfg = witness; this._facts = null; this._said = new Set();
     // H1: the hub's worker pool (server.js hands it once built; a suite in `witness.pool`), the network home's look, the boot's held password road
     this._pool = (witness && witness.pool) || null; this._net = null; this._netEnsure = null; this._netWrites = null; this._startId = null;
+    if (this._pool && typeof this._pool.onWorkerEnded === 'function') this._pool.onWorkerEnded(() => this._netResume());   // r3172: a stuck worker that exits lets a parked look go on (a pool handed at the start, as by attachWitnessPool)
     this._startNewUsed = false; this._netStartNewOwed = false;   // r2869 (2) + r2926 (1): the person's start-new act at this start
     this._state = null; // { passwordHash, salt, tokens: { token: {createdAt, ua} } }
     this._attempts = new Map(); // ip -> { fails, lockUntil }
@@ -172,23 +173,44 @@ class Auth {
   _netQueue(run, onFail) { const next = (this._netChain || Promise.resolve()).then(run).catch(onFail); this._netChain = next; this._netWrites = next; return next; }
   /** the hub's worker pool, handed by server.js once built (after Auth): the look starts then; the network copy rides it */
   attachWitnessPool(pool) {
-    if (!this._witnessCfg || !pool || typeof pool.call !== 'function') return;
+    if (!this._witnessCfg || !pool) return;
+    if (typeof pool === 'function') {   // round wefspq2j3: a FACTORY — the pool is built only for a hub whose home is a network mount (every other hub starts no worker)
+      const f = this._facts;
+      if (!f || !f.netHome) return;
+      try { pool = pool(); } catch (e) { this._sayOnce('net-pool', `[auth] the sign-in witness's worker for the home folder ${f.netHome} could not be started (${(e && e.message) || e}) — its check holds «unchecked»`); return; }
+    }
+    if (!pool || typeof pool.call !== 'function') return;
     this._pool = pool;
+    if (typeof pool.onWorkerEnded === 'function') pool.onWorkerEnded(() => this._netResume());   // r3172: a stuck worker that exits lets a parked look go on
     if (this._netStartNewOwed) this._netStartNew();   // the start-new removal owed, first on the queue
     if (this._net && !this._net.done) this._netLook();
     else if (!this._held) this._netWitness({ atStart: true, startId: this._startId });   // the start-time write (after it, on the queue)
   }
   _netBound() { const v = Number(this._witnessCfg && this._witnessCfg.netBoundMs); return v > 0 ? v : NET_BOUND_MS; }
   _netReask() { const v = Number(this._witnessCfg && this._witnessCfg.netReaskMs); return v > 0 ? v : NET_REASK_MS; }
+  _netReaskMax() { const v = Number(this._witnessCfg && this._witnessCfg.netReaskMaxMs); return v > 0 ? v : NET_REASK_MAX_MS; }
+  /** r3172: how many workers the pool ended at their deadline still hold their thread (SafeFs stats().ending; a stand-in has none) */
+  _netEnding() { try { const s = this._pool && typeof this._pool.stats === 'function' ? this._pool.stats() : null; return Number(s && s.ending) || 0; } catch { return 0; } }
+  /** r3172: an ended worker's thread exited — a look parked past NET_ENDING_MAX goes on (one at a time, as ever) */
+  _netResume() { const n = this._net; if (!n || n.done || !n.parked || n.pending || n.timer) return; n.parked = false; this._netLook(); }
   _netLook() {
     const n = this._net, f = this._facts;
     if (!n || n.done || n.pending || !this._pool) return;   // ONE look at a time (r2869 (1))
+    if (!n.since) n.since = Date.now();
+    const ending = this._netEnding();
+    if (ending >= NET_ENDING_MAX) {   // round wefspq2j3 (r3172): a look ended at its deadline may leave its worker thread stuck in the kernel (a hard
+      // mount): with NET_ENDING_MAX such threads no new look starts — the hold stays «home» with its start-new act, said once; the look goes on
+      // when one of them exits (attachWitnessPool: the pool's onWorkerEnded), never before
+      n.parked = true;
+      this._sayOnce('net-parked', `[auth] the home folder ${f.netHome} has not answered since ${new Date(n.since).toISOString()}: ${ending} looks ended at their deadline still hold their worker threads (a read stuck in the kernel) — no new look until one of them exits; to start this data folder as a new VibeSpace now, create an empty file ${path.join(this._dataDir, SW.START_NEW)} and restart`);
+      return;
+    }
     const bound = this._netBound();
     n.pending = true; n.looks++;
     let over = false;
     const timer = setTimeout(() => { over = true; this._netAnswer({ answered: false, why: `no answer in ${bound} ms` }); }, bound);
     if (timer.unref) timer.unref();
-    // the look starts AT ONCE, through the witness worker (src/signin-witness-worker.js netRead: the machine's copy, else the older shape)
+    // the look starts AT ONCE, through the witness worker (src/signin-witness-worker.js netRead: this machine's copy)
     this._netAsk('netRead', { path: f.netHome, root: SW.digestOf(f.root), maxBytes: NET_MAX_BYTES })
       .then((result) => ({ result }), (error) => ({ error }))
       .then((res) => {
@@ -204,10 +226,11 @@ class Auth {
     if (!a.answered) {
       if (this._held && (this._held.kind === 'checking' || this._held.kind === 'unchecked')) {
         this._held.kind = 'home';
-        this._held.why = `the home folder ${f.netHome} that keeps the sign-in witness has not answered (${a.why}), so it cannot be known whether the data folder ${this._dataDir} is the one its sign-in was set in`;
+        this._held.why = `the home folder ${f.netHome} that keeps the sign-in witness has not answered since ${new Date(n.since || Date.now()).toISOString()} (${a.why}), so it cannot be known whether the data folder ${this._dataDir} is the one its sign-in was set in`;
         try { console.warn(`[auth] ${heldJournal(this._file, this._held.why, !!this._clerk?.enabled, this._held)}`); } catch { }   // r3030 (f): warn, past the bound only
       }
-      const again = () => { n.timer = setTimeout(() => { n.timer = null; n.reasks = (n.reasks || 0) + 1; if (n.done) return; if (n.pending) { again(); return; } this._netLook(); }, this._netReask()); if (n.timer.unref) n.timer.unref(); };
+      // r3172: the re-ask BACKS OFF — 30 s, doubling, to 8 min (NET_REASK_MAX_MS) — for as long as the home does not answer
+      const again = () => { const wait = Math.min(this._netReaskMax(), this._netReask() * 2 ** Math.min(n.waits || 0, 20)); n.waits = (n.waits || 0) + 1; n.timer = setTimeout(() => { n.timer = null; n.reasks = (n.reasks || 0) + 1; if (n.done) return; if (n.pending) { again(); return; } this._netLook(); }, wait); if (n.timer.unref) n.timer.unref(); };
       if (!n.timer) again();
       return;
     }
@@ -232,7 +255,7 @@ class Auth {
     const f = this._facts;
     if (!f || !f.netHome || !this._pool || this._held || (this._net && !this._net.done) || !f.instance) return null;
     const set = !!(this._state && this._state.passwordHash), id = f.instance.id, home = f.netHome, root = SW.digestOf(f.root);
-    const say = (act, e) => this._sayOnce('net-witness', `[auth] the sign-in witness on the home folder ${home} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start`);
+    const say = (act, e) => this._sayOnce('net-witness', `[auth] the sign-in witness on the home folder ${home} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start${e && e.code === 'EWITNESSFOLDER' ? '; until that folder is mended, a data folder missing at a start is not caught by the home folder\'s copy' : ''}`);
     // this start's look answered already: never read twice; the START-NEW start reads none of the home (r2926): its copy is the act's to remove
     const seen = atStart && this._startNewUsed ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;
     return this._netQueue(async () => {

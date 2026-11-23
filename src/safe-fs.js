@@ -194,6 +194,8 @@ class SafeFs {
     this._seq = 1;
     this._restarts = 0;
     this._timeouts = 0;
+    this._ending = 0;                   // B-dc3f (1) r3172: workers ended at their deadline whose thread has not exited yet (stuck in the kernel)
+    this._endedHooks = new Set();       // …and who hears each exit (src/auth.js: the network home's look resumes)
     this._closed = false;
     this._workers = [];
     for (let i = 0; i < this.poolSize; i++) {
@@ -634,7 +636,11 @@ class SafeFs {
     // terminate in the background (a truly D-state-stuck OS thread may linger,
     // but main is unaffected — it never used the shared pool); the replacement is
     // scheduled at once (the first step, below), never after terminate resolves.
-    try { Promise.resolve(w?.terminate?.()).catch(() => {}); } catch {}
+    // B-dc3f (1) r3172: COUNTED until the thread has really exited (terminate()'s promise settles at the exit; a thread stuck in the
+    // kernel never settles it) — stats().ending; each exit tells onWorkerEnded's hooks
+    this._ending++;
+    const ended = () => { this._ending = Math.max(0, this._ending - 1); for (const f of this._endedHooks) { try { f(); } catch {} } };
+    try { Promise.resolve(w?.terminate?.()).then(ended, ended); } catch { ended(); }
     // B-3b03 follow-up (the coordinator's law): a worker ended AT ITS DEADLINE started and took a call — it comes back at the
     // FIRST step (500 ms), never up the ladder: the ladder (1 s, 2 s … 30 s) is for a worker that cannot START. A dead path that
     // ends every fresh worker at its deadline thus leaves refusal windows of ~500 ms, never 30 s, for healthy paths too
@@ -645,8 +651,11 @@ class SafeFs {
   stats() {
     let inflight = 0, alive = 0;
     for (const r of this._workers) { inflight += r.inflight.size; if (r.alive) alive++; }
-    return { poolSize: this.poolSize, alive, inflight, restarts: this._restarts, timeouts: this._timeouts };
+    return { poolSize: this.poolSize, alive, inflight, restarts: this._restarts, timeouts: this._timeouts, ending: this._ending };
   }
+
+  /** B-dc3f (1) r3172: fn() at each exit of a worker this pool ended at its deadline → the unsubscribe */
+  onWorkerEnded(fn) { if (typeof fn !== 'function') return () => {}; this._endedHooks.add(fn); return () => this._endedHooks.delete(fn); }
 
   close() {
     this._closed = true;

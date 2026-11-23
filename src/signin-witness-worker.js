@@ -5,13 +5,16 @@
  * HERE, on this worker's own thread (sync fs: a hung mount holds this thread only; the pool's deadline ends it) — never on the
  * hub's loop. Ops (`path` = the home rung's folder, `root` = the root's digest; this worker adds the MACHINE's):
  *   netRead({path, root, maxBytes}) — the copy keyed by the root AND this machine (r3030 (b): two machines installed at one path
- *     on one network home never read each other's); none there ⇒ the OLDER shape (the root alone) read once as this machine's
+ *     on one network home never read each other's). ONE NAME A MACHINE (round wefspq2j3): a machine with a machine id reads, writes
+ *     and removes only `signin-<root>-<machine>.json`, never the root-only name — that is the name of a machine with NO readable
+ *     machine id (two such machines share it: a limit, said in the kb); no release ever wrote a network copy, so no older copy waits
+ *     for an update
  *     → {file, text, shape} | {file, unread} (not a plain file, larger than the bound: r3030 (c)) | {file, none: true}
  *     | {file, code} (the read failed: the copy NAMED with its code — EACCES holds it, ESTALE / EIO… is silence: netAnswerOf)
  *   netWrite({path, root, content, uid}) — the one writer's rung law (r3030 (a)): the folder made 0700 and judged (a symlink, not
  *     a folder, another uid's or open to others ⇒ refused by name), the file 0600 through a temp file renamed over it (the temp
- *     removed on a failure); an older-shape copy removed once the machine's is there (the update: read once, then rewritten)
- *   netRemove({path, root}) — both shapes removed; nothing there is no error
+ *     removed on a failure), the folder synced after the rename (best effort: some network filesystems refuse a folder's sync)
+ *   netRemove({path, root}) — this machine's copy removed; nothing there is no error
  * An fs error rides with its code (ENOENT, EACCES, ESTALE…); the caller sorts it (src/signin-witness.js netAnswerOf).
  */
 const fs = require('fs');
@@ -30,25 +33,22 @@ function machineKey() {
   }
   return (MACHINE = '');
 }
-const filesOf = (dir, root) => { const m = machineKey(); return m ? [path.join(dir, nameOf(root, m)), path.join(dir, nameOf(root, ''))] : [path.join(dir, nameOf(root, ''))]; };
+/** this machine's ONE name in the home folder (round wefspq2j3: the root-only name is a machine-id-less machine's, never touched by one with an id) */
+const fileOf = (dir, root) => path.join(dir, nameOf(root, machineKey()));
 
 const OPS = {
   netRead({ path: dir, root, maxBytes = 4096 }) {
-    const files = filesOf(dir, root);
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      let st;
-      const failed = (e) => ({ result: { file, code: String((e && e.code) || 'EUNKNOWN'), message: String((e && e.message) || e).slice(0, 200) } });
-      try { st = fs.lstatSync(file); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue; return failed(e); }
-      if (!st.isFile()) return { result: { file, unread: 'it is not a plain file' } };
-      if (st.size > maxBytes) return { result: { file, unread: `it is larger than ${maxBytes} bytes` } };
-      let text; try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { return failed(e); }
-      return { result: { file, text, shape: i === 0 && files.length === 2 ? 'machine' : 'older' } };
-    }
-    return { result: { file: files[0], none: true } };
+    const file = fileOf(dir, root), shape = machineKey() ? 'machine' : 'root';
+    const failed = (e) => ({ result: { file, code: String((e && e.code) || 'EUNKNOWN'), message: String((e && e.message) || e).slice(0, 200) } });
+    let st;
+    try { st = fs.lstatSync(file); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return { result: { file, none: true } }; return failed(e); }
+    if (!st.isFile()) return { result: { file, unread: 'it is not a plain file' } };
+    if (st.size > maxBytes) return { result: { file, unread: `it is larger than ${maxBytes} bytes` } };
+    let text; try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { return failed(e); }
+    return { result: { file, text, shape } };
   },
   netWrite({ path: dir, root, content, uid = null }) {
-    const [file, older] = filesOf(dir, root);
+    const file = fileOf(dir, root);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const st = fs.lstatSync(dir);
     const law = LI.rungFolderOf({ exists: true, symlink: st.isSymbolicLink(), dir: st.isDirectory(), uid: st.uid, mode: st.mode & 0o7777 }, { uid, dir });
@@ -59,13 +59,16 @@ const OPS = {
       try { fs.writeSync(fd, String(content)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
       fs.renameSync(tmp, file);
     } catch (e) { try { fs.unlinkSync(tmp); } catch { /* not made */ } throw e; }
-    if (older) { try { fs.unlinkSync(older); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; } }
-    return { result: { file } };
+    // the folder synced after the rename, best effort: some network filesystems refuse a folder's sync — the copy is renamed in all the same
+    let d = null, note = null;
+    try { d = fs.openSync(dir, 'r'); fs.fsyncSync(d); } catch (e) { note = `the folder was not synced (${(e && e.code) || e})`; }
+    if (d !== null) { try { fs.closeSync(d); } catch (e) { note = `the folder's handle did not close (${(e && e.code) || e})`; } }
+    return { result: { file, ...(note ? { note } : {}) } };
   },
   netRemove({ path: dir, root }) {
-    const files = filesOf(dir, root);
-    for (const f of files) { try { fs.unlinkSync(f); } catch (e) { if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) throw e; } }
-    return { result: { files } };
+    const file = fileOf(dir, root);
+    try { fs.unlinkSync(file); } catch (e) { if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) throw e; }
+    return { result: { file } };
   },
 };
 function runOp(op, payload = {}) {

@@ -523,10 +523,12 @@ try {
     poolSize: parseInt(process.env.VIBESPACE_SAFEFS_POOL || '', 10) || 4,
   });
   console.log(`[safe-fs] worker pool up (${app.locals.safeFs.poolSize} workers)`);
-  if (signinWitness) auth.attachWitnessPool(new SafeFs({ workerPath: path.join(__dirname, 'src', 'signin-witness-worker.js'), name: 'signin-witness', poolSize: 1, hungMs: 0 }));   // B-dc3f (1) H1 (r3030): the network home's sign-in witness — its OWN worker, off the loop, the rung law
 } catch (e) {
   console.error('[safe-fs] pool init failed — the file routes refuse every file op by name until a restart (B-3b03: never run on the main thread):', e.message);
 }
+// B-dc3f (1) H1 (r3030, round wefspq2j3): the network home's sign-in witness — its OWN one-worker pool, BUILT ONLY for a hub whose home is a
+// network mount (auth calls the factory then; every other hub starts no worker), its failure said by auth in its own words
+if (signinWitness) auth.attachWitnessPool(() => new SafeFs({ workerPath: path.join(__dirname, 'src', 'signin-witness-worker.js'), name: 'signin-witness', poolSize: 1, hungMs: 0 }));
 app.use(fileRoutes);
 
 // Browser proxy — full-rewriting web proxy via node-unblocker
