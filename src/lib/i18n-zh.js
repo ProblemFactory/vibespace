@@ -10705,6 +10705,9 @@ export default {
   "Set a second password first — stored values are shown only behind it": "请先设置第二密码——存储的值只在它之后显示", // lane vault-contents-window
   "That stored value could not be opened": "该存储值无法打开", // lane vault-contents-window
   "The vault's run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute": "保险库的运行设置暂时读不出来，所以没有做任何改动。VibeSpace 会自己再读一次：过一分钟再试", // lane lg-vault-file (主开发 r2920)
+  "The vault's run settings file is a link, which VibeSpace never follows, so nothing was changed. Put the real file in its place; VibeSpace reads it again by itself": "保险库的运行设置文件是一个链接，VibeSpace 从不跟随链接，所以没有做任何改动。请把真正的文件放回原处；VibeSpace 会自己再读一次", // lane lg-vault-file (主开发 r3040 (c))
+  "The vault's run settings file is larger than VibeSpace reads, so nothing was changed. Move it aside; VibeSpace reads it again by itself": "保险库的运行设置文件超出了 VibeSpace 读取的大小，所以没有做任何改动。请把它移开；VibeSpace 会自己再读一次", // lane lg-vault-file (主开发 r3040 (c))
+  "The vault's run settings file is not a regular file, so nothing was changed. Move it aside; VibeSpace reads it again by itself": "保险库的运行设置文件不是普通文件，所以没有做任何改动。请把它移开；VibeSpace 会自己再读一次", // lane lg-vault-file (主开发 r3040 (c))
   "That stored value is not there any more": "该存储值已不存在", // lane vault-contents-window
   "The vault is locked — Unlock… shows what it holds (For you names what is waiting on it).": "保险库已锁定——点「解锁…」后才能查看其中内容（「待你处理」里写明了在等它的事）。", // lane vault-contents-window
   "Token": "令牌", // lane vault-contents-window

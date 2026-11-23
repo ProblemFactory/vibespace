@@ -280,6 +280,7 @@ const TIME_ALLOWED = [
   ['src/server/plugin-install.js', 'trashDir, `${id}-${', 'a trashed plugin\'s directory NAME'],
   ['src/server/conversation-deliver.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],
   ['src/server/vault-run-door.js', 'vault-grant-ends.json.corrupt-${', 'the grant ends\' aside NAME (bytes that did not parse, set aside beside it — bl-vault B-a14b) — never shown as a time'],
+  ['src/server/vault-run-door.js', "const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');", 'the run store\'s torn-copy NAME (主开发 r3040 (a): a dated copy beside the store, the family\'s way) — a file name, never shown as a time'],
   ['src/server/job-secrets-door.js', '.corrupt-${', 'the job-secrets leftover record\'s aside NAME (bytes that did not parse, set aside beside it — bl-vault B-ef1b, 主开发 r333) — never shown as a time'],
   ['src/server/usage-pool-engine.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],
   ['src/server/csp-reports.js', "const today = new Date(now()).toISOString().slice(0, 10);", 'the CSP notice cap\'s DAY KEY (ten notices a day, lane app-page-csp .331 — int332 seam: a site after this census\'s base) — a counter key, never shown'],

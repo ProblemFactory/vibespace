@@ -1312,7 +1312,7 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
     try { d = w.mk(doorMod, SLOW); c = d.setRunnable({ id: 'mounts:m2#secretKey', on: true, reauthed: true }); } finally { undo(); }
     return { code: c && c.code, said: !!(c && /HELD/.test(String(c.words))), kept: bothOff(suspendedOf(w)), held: !!d._storeHeld() };
   };
-  const RELEASE_LOAD = ["    let read;\n    try { read = { text: readBounded(FILE, STORE_MAX).toString('utf8') }; } catch (e) { read = { error: e }; }\n    const a = lawOf(SR.storeAnswer(read, { valid: STORE_VALID }));\n    if (a === 'held') { next.refused = storeHeld.why; next.held = true; db = next; dbEpoch = vault.epoch(); return db; }\n    let raw = null, why = null;\n    if (a.state === 'data') raw = a.value;\n    else if (a.state === 'corrupt') {", "    let raw = null, why = null;\n    try { raw = JSON.parse(readBounded(FILE, STORE_MAX).toString('utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) why = `unreadable (${e.code || 'not JSON'})`; }\n    if (false) {"];   // stale-pins: kept (the replacement IS the release's load)
+  const RELEASE_LOAD = ["    let read;\n    try { const b = readBounded(FILE, STORE_MAX); read = { text: b.toString('utf8'), buf: b }; } catch (e) { read = { error: e }; }\n    const a = lawOf(SR.storeAnswer(read, { valid: STORE_VALID }));\n    if (a === 'held') { next.refused = storeHeld.why; next.held = true; db = next; dbEpoch = vault.epoch(); return db; }\n    let raw = null, why = null;\n    if (a.state === 'data') raw = a.value;\n    else if (a.state === 'corrupt') {", "    let raw = null, why = null;\n    try { raw = JSON.parse(readBounded(FILE, STORE_MAX).toString('utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) why = `unreadable (${e.code || 'not JSON'})`; }\n    if (false) {"];   // stale-pins: kept (the replacement IS the release's load)
   const s1 = await scene(DOOR), s0 = await scene(doorCopy([RELEASE_LOAD], null, 'the release load (a failed read starts empty)'));
   ok(s1.code === 'store_held' && s1.said && s1.kept && s1.held && !s0.kept, `r2920 THE VERIFIER'S SCENE: a store read that failed ONCE at the door's next life HOLDS it — the owner's next switch is refused by name (store_held) and both OFF switches stay on disk; red control: «the release load (a failed read starts empty)» loses them`, { s1, s0 });
   // (2) A SWITCH REFUSED WHILE HELD — the window says it by name (its own words, zh / ja); red control: the save with no hold check
@@ -1323,7 +1323,7 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
     try { d = w.mk(doorMod, SLOW); off = d.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }); on = d.setRunnable({ id: 'mounts:m2#secretKey', on: false }); } finally { undo(); }
     return { codes: [off && off.code, on && on.code], kept: bothOff(suspendedOf(w)) };
   };
-  const r1 = await refusedLeg(DOOR), r0 = await refusedLeg(doorCopy("    if (storeHeld) return named('store_held', { why: storeHeld.why });", '', 'the save with no hold check'));
+  const r1 = await refusedLeg(DOOR), r0 = await refusedLeg(doorCopy("    { const h = heldNow(); if (h) return h; }   // 主开发 r2920: the store is HELD (or its torn bytes' copy in flight) — refused BY NAME, nothing written over the unread file", '', 'the save with no hold check'));
   const winWords = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8'), ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const KEY = "The vault's run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute";
   ok(r1.codes.every((c) => c === 'store_held') && r1.kept && !r0.kept && winWords.includes("if (c === 'store_held') return t(") && ZH.includes(JSON.stringify(KEY).slice(0, 60)) && JA.includes(JSON.stringify(KEY).slice(0, 60)),
@@ -1379,8 +1379,8 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
     fs.writeFileSync(fileOf(w), torn);
     const MS = 777777, again = [];   // the read again's own wait: its timer is kept here and fired by the leg, never by a clock
     const ex = { storeRetry: { firstMs: MS, maxMs: MS, missingMs: MS }, timers: { set: (fn, ms) => (ms === MS ? (again.push(fn), {}) : setTimeout(fn, ms)), clear: (h) => clearTimeout(h) } };
-    const real = fs.promises.writeFile; let fails = 1;
-    fs.promises.writeFile = function (p, ...x) { if (typeof p === 'string' && path.basename(p).startsWith(DOOR.STORE_FILE + '.corrupt-') && fails > 0) { fails--; return Promise.reject(Object.assign(new Error('placed ENOSPC'), { code: 'ENOSPC' })); } return real.call(this, p, ...x); };
+    const real = fs.promises.open; let fails = 1;   // the copy's own open (open · write · sync · close · rename)
+    fs.promises.open = function (p, ...x) { if (typeof p === 'string' && path.basename(p).startsWith(DOOR.STORE_FILE + '.corrupt-') && fails > 0) { fails--; return Promise.reject(Object.assign(new Error('placed ENOSPC'), { code: 'ENOSPC' })); } return real.call(this, p, ...x); };
     let d, first, held, c1, tornStill, lifted, writtenAfter;
     try {
       d = w.mk(doorMod, ex);
@@ -1391,15 +1391,88 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
       tornStill = fs.readFileSync(fileOf(w), 'utf8') === torn;
       if (again.length) again.shift()();   // the read again: the copy's write works now
       lifted = await waitLift(d, 1500);
-      d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // the load after the lift: the bytes are kept already — the write lands
+      d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // the load after the lift: its compare with the copy beside it is in flight (refused by name) …
+      await sleep(60);
+      d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // … then the bytes are kept already — the write lands
       writtenAfter = fs.readFileSync(fileOf(w), 'utf8') !== torn;
-    } finally { fs.promises.writeFile = real; }
+    } finally { fs.promises.open = real; }
     const aside = fs.readdirSync(w.dataDir).filter((f) => f.startsWith(DOOR.STORE_FILE + '.corrupt-'));
     return { first: first && first.code, held, c1: c1 && c1.code, tornStill, lifted, writtenAfter, kept: aside.length === 1 && fs.readFileSync(path.join(w.dataDir, aside[0]), 'utf8') === torn };
   };
   const u1 = await unkeptLeg(DOOR), u0 = await unkeptLeg(doorCopy("if (!kept) hold('not set aside', null, TORN_UNKEPT);", '', 'a failed copy not held'));
   ok(u1.first === 'store_held' && u1.held && u1.c1 === 'store_held' && u1.tornStill && u1.lifted && u1.writtenAfter && u1.kept && !u0.tornStill,
     'r2920 TORN BYTES THAT COULD NOT BE KEPT ASIDE ARE NEVER WRITTEN OVER: while their copy is in flight the switch is refused by name; the copy failed (placed) ⇒ HELD, the next switch refused too and the file is still the torn bytes; the read again keeps them and lifts, and the switch after it lands; red control: «a failed copy not held» writes over their only copy', { u1, u0 });
+  // the read again's timer kept and fired by the leg (its own wait, never a clock) — for the legs below
+  const manualRetry = () => { const MS = 777777, again = []; return { again, ex: { storeRetry: { firstMs: MS, maxMs: MS, missingMs: MS }, timers: { set: (fn, ms) => (ms === MS ? (again.push(fn), {}) : setTimeout(fn, ms)), clear: (h) => clearTimeout(h) } } }; };
+  // (7) 主开发 r3040 (a) — THE TORN COPY, THE FAMILY'S WAY: a short file left from before (a crash between a create and its write) is
+  // never taken for the copy; a copy whose write fails PART-WAY (placed: three bytes written, then ENOSPC) leaves no file behind and
+  // holds the store; the read again writes it WHOLE and lifts; its name is dated, no digest of the bytes; red control: a keep that
+  // trusts «exists»
+  const familyLeg = async (doorMod) => {
+    const w = await world({ doorMod }); const torn = '{"suspended": ["mounts:m1#secretKey"], "ru';
+    fs.writeFileSync(fileOf(w), torn);
+    fs.writeFileSync(path.join(w.dataDir, DOOR.STORE_FILE + '.corrupt-2026-01-01T00-00-00-000Z'), torn.slice(0, 4));   // a short file from before
+    const { again, ex } = manualRetry();
+    const real = fs.promises.open; let fails = 1;   // the copy is written through its own handle (open · write · sync · close · rename)
+    fs.promises.open = async function (p, ...x) { const fh = await real.call(this, p, ...x); if (typeof p === 'string' && path.basename(p).startsWith(DOOR.STORE_FILE + '.corrupt-') && fails > 0) { fails--; const rw = fh.writeFile.bind(fh); fh.writeFile = async (data) => { await rw(Buffer.from(data).subarray(0, 3)); throw Object.assign(new Error('placed ENOSPC'), { code: 'ENOSPC' }); }; } return fh; };
+    let d, held = false, partLeft = true, lifted = false;
+    try {
+      d = w.mk(doorMod, ex);
+      d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // the load: torn bytes — their copy fails part-way
+      await sleep(60);
+      held = !!d._storeHeld();
+      partLeft = fs.readdirSync(w.dataDir).some((f) => f.includes('.part-'));
+      if (again.length) again.shift()();
+      lifted = await waitLift(d, 1500);
+      d.setRunnable({ id: 'mounts:m2#secretKey', on: false });
+      await sleep(60);
+      d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // the owner's switch: writes over the torn file — their copy stands beside it
+    } finally { fs.promises.open = real; }
+    const copies = fs.readdirSync(w.dataDir).filter((f) => f.startsWith(DOOR.STORE_FILE + '.corrupt-'));
+    return { held, partLeft, lifted, whole: copies.some((f) => fs.readFileSync(path.join(w.dataDir, f), 'utf8') === torn), dated: copies.every((f) => /\.corrupt-\d{4}-\d\d-\d\dT[\d-]+Z(-\d)?$/.test(f)), copies: copies.length };
+  };
+  const f1 = await familyLeg(DOOR), f0 = await familyLeg(doorCopy("if (st.isFile() && st.size === bytes.length && (await fs.promises.readFile(p)).equals(bytes)) return true;", 'if (st.isFile()) return true;', 'a keep that trusts «exists»'));
+  ok(f1.held && !f1.partLeft && f1.lifted && f1.whole && f1.dated && !f0.whole, `r3040 (a) THE TORN COPY, THE FAMILY'S WAY: a short file from before is never taken for the copy; a copy that fails part-way leaves no file behind and HOLDS; the read again writes it whole (dated, no digest in its name — ${f1.copies} file(s)) and lifts; red control: «a keep that trusts «exists»» leaves only the short file`, { f1, f0 });
+  // (8) 主开发 r3040 THE MUST — A PERSON'S PRESS WHILE HELD IS ATTENDED: a standing request filed while the store is held, its Allow
+  // pressed (验证是你): refused BY NAME (store_held), the request still OPEN, nothing «put back», the file unchanged; after the lift
+  // the same Allow lands; red control: a press road with no hold check (restore_failed, the request settled «denied»)
+  const pressLeg = async (doorMod) => {
+    const VUGs = R('src/server/vault-use-grants.js'), GSs = R('src/server/grants-store.js');
+    const w = await world({ doorMod }); twoOff(w);
+    const gss = GSs.create({ memory: true });
+    const ugs = VUGs.create({ grants: () => gss, vault: w.vault, dataDir: w.dataDir, log: (m) => w.logs.push(String(m)) });
+    const { again, ex } = manualRetry();
+    const undo = placeSync(fileOf(w), ['EIO']);
+    let d;
+    try { d = w.mk(doorMod, { ...ex, useGrants: ugs, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) }); d.setRunnable({ id: 'mounts:m1#secretKey', on: false }); } finally { undo(); }   // the load: held
+    const before = fs.readFileSync(fileOf(w), 'utf8'), logs0 = w.logs.length;
+    const sq = await d.request({ caller: w.caller, entry: 'vault://mounts/m1/secretKey', purpose: 'a standing approval while the store is held', standing: true, hosts: ['api.example.com'], cwd: w.work });
+    const first = sq && sq.askId ? d.answerRequest(sq.askId, { answer: 'standing', reauthed: true, person: true }) : null;
+    const open1 = !!(sq && sq.askId && d._requests.has(sq.askId));
+    const unchanged = fs.readFileSync(fileOf(w), 'utf8') === before, putBack = w.logs.slice(logs0).some((l) => /could not be put back/.test(l));
+    if (again.length) again.shift()();
+    const lifted = await waitLift(d, 1500);
+    const second = open1 ? d.answerRequest(sq.askId, { answer: 'standing', reauthed: true, person: true }) : null;
+    return { asked: !!(sq && sq.askId), first: first && first.code, open1, unchanged, putBack, lifted, second: !!(second && second.ok), sq: sq && (sq.code || null) };
+  };
+  const p1 = await pressLeg(DOOR), p0 = await pressLeg(doorCopy("    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (THE MUST): a person's press while held is refused BY NAME before any write — never a «could not be put back» over nothing written", '', 'a press road with no hold check'));
+  ok(p1.asked && p1.first === 'store_held' && p1.open1 && p1.unchanged && !p1.putBack && p1.lifted && p1.second && !p0.open1,
+    `r3040 THE MUST — A PERSON'S PRESS WHILE HELD IS ATTENDED: a standing request's Allow while held is refused by name (store_held), the request stays open, nothing is «put back», the file is unchanged; pressed again after the lift it lands; red control: «a press road with no hold check» answers ${p0.first} and settles the request`, { p1, p0 });
+  // (9) 主开发 r3040 (b) + (c) — THE HOLD IS ASKED FIRST at every owner door (a Revoke, a policy, a resume: refused by name, never «done»);
+  // a hold that cannot mend by itself (the file a link) says its cause and what to do; red control: a Revoke with no hold check
+  const firstLeg = async (doorMod) => {
+    const w = await world({ doorMod }); twoOff(w);
+    const link = path.join(w.dataDir, 'vault-run.real.json');
+    fs.renameSync(fileOf(w), link); fs.symlinkSync(link, fileOf(w));   // the store is a link: never followed
+    const d = w.mk(doorMod, SLOW);
+    const sw = d.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
+    const rv = d.revokeApprovals({ id: 'mounts:m1#secretKey' }), pol = d.setPolicy({ id: 'mounts:m1#secretKey', text: '', reauthed: true }), rs = d.resumeGrant({ id: 'mounts:m1#secretKey', principal: 'conversation:c-1', reauthed: true });
+    return { sw: sw && sw.code, cause: sw && sw.cause, words: String(sw && sw.words), rv: rv && (rv.code || (rv.ok ? 'ok' : '?')), pol: pol && pol.code, rs: rs && rs.code };
+  };
+  const g1 = await firstLeg(DOOR), g0 = await firstLeg(doorCopy("    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (b): never «done, 0» over approvals the unread file still holds", '', 'a Revoke with no hold check'));
+  const winW = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8');
+  ok(g1.sw === 'store_held' && g1.cause === 'link' && /is a link/.test(g1.words) && !/try again in a minute/.test(g1.words) && g1.rv === 'store_held' && g1.pol === 'store_held' && g1.rs === 'store_held' && g0.rv === 'ok' && winW.includes("if (c === 'store_held' && r.cause === 'link') return t("),
+    `r3040 (b) + (c): THE HOLD IS ASKED FIRST — a Revoke, a policy and a resume while held are refused by name (never «done»); a store that is a link says so and what to do (cause «${g1.cause}», never «try again in a minute»), worded in the window; red control: «a Revoke with no hold check» answers ${g0.rv}`, { g1, g0 });
 }
 
 console.log('⑦ MUTANTS — patched copies of the door, each RED on its leg');

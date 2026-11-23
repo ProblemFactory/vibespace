@@ -304,6 +304,7 @@ const ROWS = [
   ["src/server/vault-engine.js", "synced", "self-synced-best-effort", "", "writeAtomic"],
   ["src/server/vault-run-door.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
   ["src/server/vault-run-door.js", "move", "move", "the grant ends file that does not parse, set aside (its bytes kept)", "create"],
+  ["src/server/vault-run-door.js", "synced", "self-synced", "the run store's torn bytes kept aside (主开发 r3040 (a), the family's way): written whole under a .part- name, synced (a sync that fails fails the keep — the store stays held), then named", "create > keepTornAside"],
   ["src/server/vault-totp.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
   ["src/server/vault-use-grants.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/window-targets-engine.js", "unsynced", "store", "", "writeJsonAtomic"],

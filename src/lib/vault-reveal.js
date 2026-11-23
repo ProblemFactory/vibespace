@@ -44,6 +44,9 @@ export function revealWords(r) {
   if (c === 'paced' && r.retryInMs && !r.failedTries) return t('Too many values shown — try again in {n} s', { n: Math.max(1, Math.ceil(r.retryInMs / 1000)) });
   if (c === 'not_found') return t('That stored value is not there any more');
   if (c === 'unreadable') return t('That stored value could not be opened');
+  if (c === 'store_held' && r.cause === 'link') return t('The vault\'s run settings file is a link, which VibeSpace never follows, so nothing was changed. Put the real file in its place; VibeSpace reads it again by itself');   // 主开发 r3040 (c): a hold that cannot mend by itself says its cause and what to do
+  if (c === 'store_held' && r.cause === 'too_large') return t('The vault\'s run settings file is larger than VibeSpace reads, so nothing was changed. Move it aside; VibeSpace reads it again by itself');
+  if (c === 'store_held' && r.cause === 'not_a_file') return t('The vault\'s run settings file is not a regular file, so nothing was changed. Move it aside; VibeSpace reads it again by itself');
   if (c === 'store_held') return t('The vault\'s run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute');   // 主开发 r2920: the run door's store HELD (its read failed) — the switch refused by name
   if (c === 'not_revealable') return t('That stored value is never shown — VibeSpace uses it itself');
   if (c === 'vault_use_marks_unread') return t('The vault-use marks could not be read — nothing was changed; VibeSpace reads them again by itself');   // r3104 (a): the page's own words for the held code (until the family's table)
