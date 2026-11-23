@@ -340,7 +340,7 @@ console.log('— ⑥ THE CENSUS: one sign-in reader in the hub\'s tree; no reade
   const files = ['server.js', ...(function walk(d) { return fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'lib' && d === 'src' ? [] : walk(`${d}/${e.name}`)) : e.name.endsWith('.js') ? [`${d}/${e.name}`] : [])); })('src')];
   /** the VENDOR CLI's own auth.json (~/.codex, its account copies), by file and count — never the sign-in table: a new quoted
    *  'auth.json' anywhere else, or one more in these files, is red by name */
-  const VENDOR = { 'src/harnesses/codex.js': 5 /* B-360d: + displayFiles, the accounts list's off-loop read of codex's own per-account auth.json */, 'src/accounts.js': 1, 'src/machine-probes.js': 3, 'src/routes/persistence.js': 1, 'src/login-state.js': 1 };
+  const VENDOR = { 'src/harnesses/codex.js': 6 /* B-360d: + displayFiles, the accounts list's off-loop read of codex's own per-account auth.json; line 442 (B-87fd identity unit 2's follow, 主开发 r2808): + the identity record's reader of the vendor's own per-account file */, 'src/accounts.js': 1, 'src/machine-probes.js': 3, 'src/routes/persistence.js': 1, 'src/login-state.js': 1 };
   function census(texts) {
     const out = [], quoted = new Map();
     for (const [rel, raw] of texts) {
