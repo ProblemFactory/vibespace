@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.417 — 2026-11-23
+
+### Fixed
+- When the accounts file cannot be read, VibeSpace keeps it untouched, changes nothing and starts no conversation on another login until it reads again.
+
 ## 2.369.416 — 2026-11-23
 
 ### Added
