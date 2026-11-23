@@ -489,10 +489,41 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     if (v) loadInto(v);
     for (const k of goneHeld) armed.delete(k);
     for (const [k, r] of mem) { const f = armed.get(k); if (!f || (Number(r && r.at) || 0) >= (Number(f && f.at) || 0)) armed.set(k, r); }
-    for (const [k, r] of memFires) { const f = fires.get(k); if (!f) fires.set(k, r); else if (r && Array.isArray(r.fails) && r.fails.length) fires.set(k, { ...f, fails: [...(Array.isArray(f.fails) ? f.fails : []), ...r.fails] }); }
+    for (const [k, r] of memFires) { const f = fires.get(k); fires.set(k, f ? mergeFire(f, r) : r); }   // r3196 (3): forward, never a count lowered
     goneHeld.clear(); heldSaid.clear();
     save();
-    for (const k of armed.keys()) { try { emit(k); } catch { } }
+    // r3196 (4): EVERY status that carried the held words is said again (an enabled conversation with no arm kept them on its chip),
+    // and the list's own change is told ONCE (the sidebar's card drew `held`)
+    const said = new Set(armed.keys());
+    for (const [k, s2] of activeSessions) if (s2 && !s2.isTmuxView && enabledFor(s2)) said.add(k);
+    for (const k of said) { try { emit(k); } catch { } }
+    if (onListChange) { try { onListChange(); } catch { } }
+  }
+  /** r3196 (3): THE LOOP BREAKER's TWO RECORDS OF ONE CONVERSATION at the lift (the file's, and the one made meanwhile — a pressed bulk
+   *  resume while held writes it): merged FORWARD. A count is never lowered (the two sets of fires are apart: summed, in the newer
+   *  window), a quarantine never shortened (each identity's newest failure), and the pending fire, the reading's spent edge and its
+   *  hold are kept by the newer stamp */
+  function mergeFire(f, r) {
+    if (!r || typeof r !== 'object') return f;
+    if (!f || typeof f !== 'object') return r;
+    const newest = new Map();
+    for (const x of [...(Array.isArray(f.fails) ? f.fails : []), ...(Array.isArray(r.fails) ? r.fails : [])]) { if (!x) continue; const o = newest.get(x.key || null); if (!o || (Number(x.at) || 0) > (Number(o.at) || 0)) newest.set(x.key || null, x); }
+    const later = (x, y, at) => (!x ? y : !y ? x : (Number(at(y)) || 0) > (Number(at(x)) || 0) ? y : x);
+    const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
+    const maxed = (x, y) => { const o = { ...obj(x) }; for (const [k, v] of Object.entries(obj(y))) o[k] = typeof v === 'number' && typeof o[k] === 'number' ? Math.max(o[k], v) : (o[k] === undefined ? v : o[k]); return o; };
+    return {
+      ...f, ...r,
+      n: (Number(f.n) || 0) + (Number(r.n) || 0),
+      windowStart: Math.max(Number(f.windowStart) || 0, Number(r.windowStart) || 0),
+      fails: [...newest.values()],
+      last: later(f.last, r.last, (x) => x.at),
+      lastFireAt: Math.max(Number(f.lastFireAt) || 0, Number(r.lastFireAt) || 0),
+      edgeHeld: later(f.edgeHeld, r.edgeHeld, (x) => x.until),
+      edgeSpent: r.edgeSpent || f.edgeSpent,
+      notified: maxed(f.notified, r.notified), notices: maxed(f.notices, r.notices),
+      refuse: r.refuse || f.refuse || null,
+      noTargetAt: Math.max(Number(f.noTargetAt) || 0, Number(r.noTargetAt) || 0),
+    };
   }
   let timer = null;
 
@@ -979,7 +1010,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       const hrs = Math.round((resets - at) / 3600000);
       log(`[auto-resume] ${id}: reset is ${hrs}h away — watching (no timed continue) instead of arming`);
       const lastN = _refuseNotified.get(id) || 0;
-      if (notify && at - lastN > 3600000) {
+      if (notify && at - lastN > 3600000 && !hold.held()) {   // r3196 (2): while held the watch's «continues when the quota returns» is not true either
         _refuseNotified.set(id, at);
         const ck = liveCause(cause) && liveCause(cause).checking;
         if (ck) { try { notify(id, session, armNoticeFor(reason, resets, at, cause)); } catch { } } else
@@ -1007,6 +1038,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     if (notify) {
       const t = setTimeout(() => {
         _armNotifyTimers.delete(id);
+        if (hold.held()) return;   // r3196 (2): the record unread — the held card already said it does not continue by itself; never «scheduled at T» after it
         const a = armed.get(id);
         if (!a || a.fired || a.resetsAt !== resets) return;
         const s2 = activeSessions.get(id);
@@ -1401,10 +1433,25 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     return true;
   }
 
+  /** r3196 (1) (lane bl-loop-b): A PROMISE THE CONVERSATION OUTLIVED IS STALE. A usage wall's arm answers the stop fact the wall
+   *  wrote just before it (usage-pool-engine onWalledTurn: noteStoppedBy, then armIfEnabled). A turn that RAN since — its first
+   *  output, its start, a normal end — clears that fact, in the session's meta too (so a restart still knows it), and an overload
+   *  replaces it. Either way the conversation went on, and the promise is dropped, never fired. This cures a restart while held,
+   *  which forgets a recovery noted only in memory (goneHeld), and it serves a plain restart as well. A stop fact never written
+   *  (undefined: a session the engine never judged) is not judged here; a removed member's hold arms at a cut turn's END with no
+   *  stop fact and keeps its own rule (the Workflow read's «a wall's arm only» is the same test) */
+  const outlived = (session, a) => {
+    if (!session || (a && a.cause && a.cause.kind === 'removed-member')) return false;
+    const sb = session._stoppedBy;
+    if (sb === undefined) return false;
+    const f = sb ? normalizeStoppedBy(sb) : null;
+    return !f || f.kind !== 'quota';
+  };
   function attemptFire(id, session, a, kind, why, cause = null, origin = null, { claim = false } = {}) {
     const now = Date.now();
     // r3004: the loop-breaker's memory unread = «assume it was broken» — no automatic continue on a guess: it waits (the arm stays)
     if (hold.held()) { if (!heldSaid.has('fire:' + id)) { heldSaid.add('fire:' + id); log(`[auto-resume] ${id}: not continued — ${hold.words()}`); } return false; }
+    if (outlived(session, a)) { noteRecovered(id, 'its stop is over: a turn ran after the promise', { worked: false }); return false; }   // r3196 (1): never a continue into a conversation that went on
     if (session._arFiring) return false;   // a gate is already running for this session (also breaks fireNow ⇄ beforeFire re-entry)
     // THE FOLDER'S STORAGE DOES NOT ANSWER (U3 cure 3 — 主开发's law): every read the cap allows is out and none returned, and THIS
     // arm of a usage wall has no answer of its own — it is NOT fired (not continuing is the safe mistake; the arm stays and fires

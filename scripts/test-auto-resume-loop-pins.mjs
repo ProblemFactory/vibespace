@@ -203,6 +203,7 @@ console.log('— §2 / §3c the notice wiring and the near-arm drift guard (sour
     ['src/server/usage-pool-engine.js', 'codex reset credit consumed', false], // the LIMIT moved; the conversation produced nothing
     ['src/server/usage-pool-engine.js', 'codex reset credit consumed (by another conversation on this account)', false], // design-reset-credits r2: a FOLLOWER of a sibling's credit — the limit moved for it too; it produced nothing
     ['src/server/auto-resume.js', 'disabled', false],                       //  the feature was switched off under a live arm
+    ['src/server/auto-resume.js', 'its stop is over: a turn ran after the promise', false],   // r3196 (lane bl-loop-b): the FIRE found the conversation went on (its stop fact cleared) — a disarm, never proof of work
   ];
   const walk = (d, out = []) => {
     for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) {
@@ -240,7 +241,7 @@ console.log('— §2 / §3c the notice wiring and the near-arm drift guard (sour
   const table = new Set(AUDIT.map(([f, why, worked]) => `${f}|${why}|${worked}`));
   ok('AUDIT: every noteRecovered call site in src/ is classified in the table (an unclassified new caller fails here, not in production)', [...derived].every((k) => table.has(k)), 'unlisted: ' + [...derived].filter((k) => !table.has(k)).join(' ; '));
   ok('AUDIT: …and every row of the table is a real call site (no dead rows)', [...table].every((k) => derived.has(k)), 'dead rows: ' + [...table].filter((k) => !derived.has(k)).join(' ; '));
-  ok('AUDIT: the derivation actually found them all — 2 that claim WORK, 4 that do not', callSites.length === AUDIT.length && callSites.filter((c) => c.worked).length === 2, JSON.stringify(callSites));
+  ok('AUDIT: the derivation actually found them all — 2 that claim WORK, 5 that do not', callSites.length === AUDIT.length && callSites.filter((c) => c.worked).length === 2, JSON.stringify(callSites));
   // …and the ONE non-literal row is not a hole: its callers are enumerated
   // from the source with their own literal whys, so a NEW reading producer that
   // forgets to route through the shared edge is caught here rather than in

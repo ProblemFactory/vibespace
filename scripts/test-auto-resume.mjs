@@ -2206,11 +2206,11 @@ await (async () => {
   ok('18. the reader is async only, lists through a bounded opendir, opens every file O_NOFOLLOW', (() => { const t = read('src/server/auto-resume-workflow.js').replace(/^\s*\/\/.*$/gm, ''); return !/Sync\(/.test(t) && !/readdir\(/.test(t) && /opendir\(/.test(t) && /O_NOFOLLOW/.test(t) && (t.match(/fsp\.open\(/g) || []).length === 2 && (t.match(/fsp\.open\([^)]*OPEN_FLAGS\)/g) || []).length === 2; })());
   fs.rmSync(home, { recursive: true, force: true });
   // through the REAL module: asked while the wall's arm stands, named only fresh — nothing on the money path moves
-  const fire = async (mod, runOf, { stop = { kind: 'quota', at: Date.now() - 3600e3 }, stale = false, rearm = false } = {}) => {
+  const fire = async (mod, runOf, { stop = { kind: 'quota', at: Date.now() - 3600e3 }, stale = false, rearm = false, cause = null } = {}) => {
     const sent = [], sessions = new Map([['s1', sess({ _stoppedBy: stop })]]), asks = [], dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18-'));
     const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: (id, s2, text) => { sent.push(text); return true; }, workflowRunAtWall: (id, s2, o) => { asks.push(o && o.fireAt); return runOf(); } });
     const resets = Date.now() + 10 * 60000;
-    ar.armIfEnabled('s1', sessions.get('s1'), resets, 'usage limit');
+    ar.armIfEnabled('s1', sessions.get('s1'), resets, 'usage limit', cause ? { cause } : undefined);
     ar.tick(resets - 5 * 60000); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
     if (stale) { const w = ar._wfOf && ar._wfOf.get('s1'); if (w) w.at = Date.now() - 10 * 60000; }
     let file = '';
@@ -2227,8 +2227,11 @@ await (async () => {
   ok('18. THE MODULE: no run ⇒ the continue is today\'s, word for word', none.n === 1 && none.sent.length === 1 && none.sent[0] === CPF({ cls: 'reset' }, null), none.sent);
   const stale = await fire(real, async () => ANS(), { stale: true });
   ok('18. THE MODULE: an answer no longer fresh is not named (today\'s words)', stale.n === 1 && stale.sent[0] === CPF({ cls: 'reset' }, null));
-  const hold = await fire(real, async () => ANS(), { stop: null });
+  // a HOLD (a removed member's, src/server/usage-pool-engine.js: armed at a cut turn's end with its cause, no stop fact)
+  const hold = await fire(real, async () => ANS(), { stop: null, cause: { kind: 'removed-member', member: { id: 'm1', name: 'M1' }, holdTo: { id: 'm2', name: 'M2' } } });
   ok('18. THE MODULE: an arm with no usage-wall stop (a hold) asks nothing and names nothing', hold.asks.length === 0 && hold.sent[0] === CPF({ cls: 'reset' }, null));
+  const goneOn = await fire(real, async () => ANS(), { stop: null });
+  ok('18. r3196 (1): an arm with NO cause whose conversation\'s stop fact is gone (a turn ran since) is disarmed at the fire — asked nothing, nothing sent', goneOn.asks.length === 0 && goneOn.n === 0 && goneOn.sent.length === 0, goneOn);
   const thrown = await fire(real, async () => { throw new Error('EIO'); });
   ok('18. THE MODULE: a read that fails ⇒ today\'s words (the continue still goes)', thrown.n === 1 && thrown.sent[0] === CPF({ cls: 'reset' }, null));
   const kept = await fire(real, async () => ANS(), { rearm: true });
@@ -2401,11 +2404,13 @@ await (async () => {
 console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and the loop-breaker (src/store-read-hold.js)');
 {
   const AR_SRC = read('src/server/auto-resume.js');
-  const mkWith = (createFn, dir) => {
-    const sent = [], notes = [], casts = [], sessions = new Map();
+  // r3196: + `extra` (the create's other deps a leg stands in: the pre-fire gate, the list hook, the delayed card's wait)
+  const mkWith = (createFn, dir, extra = {}) => {
+    const sent = [], notes = [], casts = [], sessions = new Map(), gates = [], lists = [];
     const ar = createFn({ dataDir: dir, activeSessions: sessions, serverSetting: (k) => (k === 'claude.autoResumeOnLimit' ? true : undefined),
-      sendToSession: (id, s2, text, carried) => { sent.push({ id, text, note: carried && carried.note || null }); return true; }, notify: (id, s2, text) => notes.push({ id, text }), broadcast: (id, m) => casts.push(m) });
-    return { ar, sent, notes, casts, sessions, dir };
+      sendToSession: (id, s2, text, carried) => { sent.push({ id, text, note: carried && carried.note || null }); return true; }, notify: (id, s2, text) => notes.push({ id, text }), broadcast: (id, m) => casts.push(m),
+      beforeFire: (id) => { gates.push(id); return true; }, onListChange: () => lists.push(1), ...extra });
+    return { ar, sent, notes, casts, sessions, dir, gates, lists };
   };
   const seed = () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-held-')), f = path.join(dir, 'auto-resume.json'), now = Date.now();
@@ -2534,6 +2539,150 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
     ok('19i. …the chat chip says «waiting» (never «continues at») and why, the card\'s tip says it does not continue by itself until the record reads; its optimistic repaint keeps no wait',
       bar.includes("const arLabel = a.armed && heldAr ? ' ' + escHtml(t('waiting')) : a.armed ? (ck ?") && /if \(heldAr\) title = a\.armed \? t\('Usage limit hit — the record of waiting continues could not be read/.test(bar)
       && card.includes("tchip.dataset.tip = on ? (stopF.held ? tr('Auto-continue is on, but the record of waiting continues could not be read") && card.includes("stopF.waiting = !on || !(ahead > 0) || stopF.held ? false :"));
+  }
+
+  // ── r3196 (主开发, round wvdpig0q9): the follow of line 656 ──
+  const stoppedS = (over = {}) => sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60e3, resetsAt: Date.now() + 3600e3 }, ...over });
+  const fileOf = (armed, fires = {}) => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-3196-')), f = path.join(dir, 'auto-resume.json'); fs.writeFileSync(f, JSON.stringify({ armed, fires })); return { dir, f }; };
+  // 19j. A PROMISE THE CONVERSATION OUTLIVED IS DROPPED AT THE FIRE (1): the restart while held forgot a recovery (goneHeld is in memory
+  // only); the person's turn ran, so the engine cleared the stop fact (null — in the meta too: the restore gives null)
+  {
+    const outScene = async (createFn, after) => {
+      const z = seed();
+      const a1 = refusedRead(z.f, () => mkWith(createFn, z.dir));
+      a1.sessions.set('w1', stoppedS()); a1.ar.noteRecovered('w1', 'user sent a prompt'); a1.ar.stop();
+      const a2 = refusedRead(z.f, () => mkWith(createFn, z.dir));   // the restart, still held
+      a2.sessions.set('w1', after);
+      await a2.ar._hold.again();
+      const back = a2.ar._armed.has('w1'); a2.ar._fires.delete('w1');   // (the file's breaker record of w1 is another leg's)
+      const fired = a2.ar.tick(Date.now() + 3 * 3600e3);
+      a2.ar.stop();
+      return { back, fired, sent: a2.sent.length, armedAfter: a2.ar._armed.has('w1') };
+    };
+    const went = await outScene(create, sess({ _stoppedBy: null })), still = await outScene(create, stoppedS());
+    ok('19j. r3196 (1): a restart while held FORGOT the recovery — the file\'s promise is back at the lift, but the conversation went on (its stop fact cleared by the turn that ran): dropped at the fire, NOT fired; one still stopped by its limit is fired',
+      went.back && went.fired === 0 && went.sent === 0 && !went.armedAfter && still.fired === 1 && still.sent === 1, JSON.stringify({ went, still }));
+    const mO = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, /    if \(outlived\(session, a\)\) \{ noteRecovered\([^\n]*\n/, '', 'auto-resume.js'));
+    const wx = await outScene(mO.create, sess({ _stoppedBy: null }));
+    ok('19j RED control (the fire asks nothing of the conversation): a billed continue goes into a conversation that had already gone on (red)', wx.fired === 1 && wx.sent === 1, JSON.stringify(wx));
+  }
+  // 19k. THE DELAYED CARD WHILE HELD (2): the held card says it does not continue by itself; «scheduled at T» never follows it (the
+  // delayed card's own timer is captured and run — no wait on the clock)
+  {
+    const cardScene = (createFn) => {
+      const z = seed();
+      const a = refusedRead(z.f, () => mkWith(createFn, z.dir, { notifyDelayMs: 7 }));
+      a.sessions.set('w2', stoppedS());
+      const caught = [], st0 = global.setTimeout;
+      global.setTimeout = function (fn, ms, ...r) { if (ms === 7) { caught.push(fn); return { unref() { } }; } return st0.call(this, fn, ms, ...r); };
+      try { a.ar.armIfEnabled('w2', a.sessions.get('w2'), Date.now() + 60000, '5h limit'); } finally { global.setTimeout = st0; }
+      for (const fn of caught) fn();
+      a.ar.stop();
+      return { caught: caught.length, notes: a.notes.filter((n) => n.id === 'w2').map((n) => n.text) };
+    };
+    const k = cardScene(create);
+    ok('19k. r3196 (2): while held a new wall\'s conversation hears ONE card — it does not continue by itself until the record reads; the delayed «scheduled at T» card, its timer run, says nothing',
+      k.caught === 1 && k.notes.length === 1 && /读不到它的记录/.test(k.notes[0]), JSON.stringify(k));
+    const mK = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, /        if \(hold\.held\(\)\) return;   \/\/ r3196 \(2\)[^\n]*\n/, '', 'auto-resume.js'));
+    const kx = cardScene(mK.create);
+    ok('19k RED control (the delayed card not held): a second card says it is scheduled to continue, right after the first said it will not (red)', kx.notes.length === 2, JSON.stringify(kx));
+  }
+  // 19l. THE LIFT's MERGE OF ONE CONVERSATION's TWO BREAKER RECORDS (3): forward — the pending fire made while held (a pressed bulk
+  // resume's) keeps its identity, so the rejection that answers it quarantines THAT identity; the file's quarantine stays
+  {
+    const mergeScene = async (createFn) => {
+      const now = Date.now();
+      const z = fileOf({}, { w1: { n: 2, windowStart: now - 60e3, fails: [{ key: 'acct:a1', at: now - 30e3 }], last: null, lastFireAt: now - 30e3 } });
+      const a = refusedRead(z.f, () => mkWith(createFn, z.dir));
+      a.ar._fires.set('w1', { n: 1, windowStart: now - 10e3, fails: [], last: { key: 'acct:b2', at: now - 1e3, kind: 'timed' }, lastFireAt: now - 1e3, notified: {}, notices: {} });   // what noteFired writes for a press while held
+      await a.ar._hold.again();
+      const m = { ...a.ar._fires.get('w1') };
+      const answered = a.ar.noteFireOutcome('w1', false, 'usage limit');
+      const after = a.ar.recentFireFailures('w1');
+      a.ar.stop();
+      return { n: m.n, last: m.last && m.last.key, fails: (m.fails || []).map((x) => x.key), answered, after };
+    };
+    const g = await mergeScene(create);
+    ok('19l. r3196 (3): the lift merges FORWARD — the count summed (never lowered), the file\'s quarantine kept, the pending fire made while held kept with its identity, so its rejection quarantines THAT identity',
+      g.n === 3 && g.last === 'acct:b2' && g.fails.includes('acct:a1') && g.answered === true && g.after.includes('acct:b2') && g.after.includes('acct:a1'), JSON.stringify(g));
+    const mM = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, "    for (const [k, r] of memFires) { const f = fires.get(k); fires.set(k, f ? mergeFire(f, r) : r); }",
+      "    for (const [k, r] of memFires) { const f = fires.get(k); if (!f) fires.set(k, r); else if (r && Array.isArray(r.fails) && r.fails.length) fires.set(k, { ...f, fails: [...(Array.isArray(f.fails) ? f.fails : []), ...r.fails] }); }", 'auto-resume.js'));   // stale-pins: kept — the release's own merge line, put back by the RED
+    const gx = await mergeScene(mM.create);
+    ok('19l RED control (the release\'s merge: the memory record\'s failures only): the pending fire is dropped, so the rejection answers nothing and the identity that refused goes unquarantined (red)', gx.answered === false && !gx.after.includes('acct:b2'), JSON.stringify(gx));
+  }
+  // 19m. THE LIFT RE-SAYS EVERY STATUS THAT CARRIED THE HELD WORDS (4), and tells the list once
+  {
+    const sayScene = async (createFn) => {
+      const z = seed();
+      const a = refusedRead(z.f, () => mkWith(createFn, z.dir));
+      a.sessions.set('w5', sess());   // enabled (the instance's default), not armed: its chip carried the held words
+      const heldSaid = typeof a.ar.statusFor('w5').held === 'string';
+      const c0 = a.casts.length, l0 = a.lists.length;
+      await a.ar._hold.again();
+      const re = a.casts.slice(c0).filter((m) => m && m.sessionId === 'w5');
+      a.ar.stop();
+      return { heldSaid, w5: re.length, held: re.some((m) => m.status && m.status.held), lists: a.lists.length - l0 };
+    };
+    const y = await sayScene(create);
+    ok('19m. r3196 (4): at the lift an enabled conversation with NO arm, whose status said the held words, is said again without them; the list is told once',
+      y.heldSaid && y.w5 >= 1 && !y.held && y.lists === 1, JSON.stringify(y));
+    const mY = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, "    for (const [k, s2] of activeSessions) if (s2 && !s2.isTmuxView && enabledFor(s2)) said.add(k);\n", '', 'auto-resume.js'),
+      "    if (onListChange) { try { onListChange(); } catch { } }\n  }\n  /** r3196 (3)", "  }\n  /** r3196 (3)", 'auto-resume.js'));
+    const yx = await sayScene(mY.create);
+    ok('19m RED control (the release\'s re-say: armed conversations only): the unarmed one keeps the held words until its next status, and the list is not told (red)', yx.w5 === 0 && yx.lists === 0, JSON.stringify(yx));
+  }
+  // 19n. THE LEGS THE ROUND MISSED (5)
+  {
+    // (a) promises whose time PASSED while held: fired by the next tick, each through the pre-fire gate — as many as a plain restart fires
+    const passed = () => { const now = Date.now(); return fileOf({ w1: { at: now - 7200e3, resetsAt: now - 600e3, reason: '5h limit', cid: 'c1', fired: false }, w3: { at: now - 7200e3, resetsAt: now - 300e3, reason: '5h limit', cid: 'c3', fired: false } }); };
+    const zH = passed(), aH = refusedRead(zH.f, () => mkWith(create, zH.dir));
+    aH.sessions.set('w1', stoppedS()); aH.sessions.set('w3', stoppedS());
+    const heldTick = aH.ar.tick(Date.now());
+    await aH.ar._hold.again();
+    const liftTick = aH.ar.tick(Date.now()); aH.ar.stop();
+    const zR = passed(), aR = mkWith(create, zR.dir);
+    aR.sessions.set('w1', stoppedS()); aR.sessions.set('w3', stoppedS());
+    const restartTick = aR.ar.tick(Date.now()); aR.ar.stop();
+    ok('19n (a). promises whose time PASSED while held: none fires while held; the next tick after the lift fires them, each through the pre-fire gate — the same count as a plain restart over the same file',
+      heldTick === 0 && liftTick === 2 && aH.gates.length === 2 && restartTick === 2 && aR.gates.length === 2 && aH.sent.length === aR.sent.length, JSON.stringify({ heldTick, liftTick, gates: aH.gates, restartTick, rgates: aR.gates }));
+    // (b) the toggle OFF while held: the unread promise goes with the switch
+    const offScene = async (createFn) => {
+      const z = seed();
+      const a = refusedRead(z.f, () => mkWith(createFn, z.dir));
+      a.sessions.set('w1', stoppedS()); a.ar.setEnabled('w1', false, { quiet: true });
+      await a.ar._hold.again();
+      const armedAfter = a.ar._armed.has('w1'); a.ar.stop();
+      return armedAfter;
+    };
+    ok('19n (b). the toggle OFF while held: the conversation\'s promise in the unread file stays DROPPED at the lift', (await offScene(create)) === false);
+    const mOff = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, /    if \(!on && hold\.held\(\)\) goneHeld\.add\(id\);[^\n]*\n/, '', 'auto-resume.js'));
+    ok('19n (b) RED control (the switch while held not remembered): the promise comes back at the lift (red)', (await offScene(mOff.create)) === true);
+    // (c) the NEWER arm of one conversation over the file's
+    const newerScene = async (createFn) => {
+      const z = seed(), later = Date.now() + 7200e3;
+      const a = refusedRead(z.f, () => mkWith(createFn, z.dir));
+      a.sessions.set('w1', stoppedS()); a.ar.armIfEnabled('w1', a.sessions.get('w1'), later, '5h limit');
+      await a.ar._hold.again();
+      const r = a.ar._armed.get('w1'); a.ar.stop();
+      return { got: r && r.resetsAt, later };
+    };
+    const nw = await newerScene(create);
+    ok('19n (c). one conversation armed in the file AND again while held: the newer arm stands at the lift (its reset)', nw.got === nw.later, JSON.stringify(nw));
+    const mN = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, "if (!f || (Number(r && r.at) || 0) >= (Number(f && f.at) || 0)) armed.set(k, r);", "if (!f || (Number(r && r.at) || 0) < (Number(f && f.at) || 0)) armed.set(k, r);", 'auto-resume.js'));
+    const nx = await newerScene(mN.create);
+    ok('19n (c) RED control (the comparison turned): the file\'s older arm wins over the one made meanwhile (red)', nx.got !== nx.later, JSON.stringify(nx));
+    // (d) a FORGOTTEN conversation's arm (forget — the tick's gone session takes the same delete) stays dropped at the lift
+    const forgotScene = async (createFn) => {
+      const z = seed();
+      const a = refusedRead(z.f, () => mkWith(createFn, z.dir));
+      a.ar.forget('w1');
+      await a.ar._hold.again();
+      const armedAfter = a.ar._armed.has('w1'); a.ar.stop();
+      return armedAfter;
+    };
+    ok('19n (d). a conversation FORGOTTEN while held (armed only in the unread file): its arm stays dropped at the lift', (await forgotScene(create)) === false);
+    const mF = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, '  class ArmMap extends Map { delete(k) { if (hold && hold.held()) goneHeld.add(k); return super.delete(k); } }', '  class ArmMap extends Map { delete(k) { return super.delete(k); } }', 'auto-resume.js'));
+    ok('19n (d) RED control (a delete while held not remembered): the forgotten conversation\'s arm comes back at the lift (red)', (await forgotScene(mF.create)) === true);
   }
 }
 
