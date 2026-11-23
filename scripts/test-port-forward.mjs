@@ -415,23 +415,40 @@ try {
     fs.rmSync(sdir, { recursive: true, force: true });
   }
   // r3174 smalls: a machine UNPAIRED while held loses its forwards at the LIFT (never before: the list is unread), and /svc answers a
-  // caller who is not signed in with a plain 503 (the hold's words are a signed-in page's)
+  // caller who is not signed in with a plain 503 (the hold's words are a signed-in page's). r3228 (round whu7689zw): each with its RED
+  // CONTROL in a copy — the unpair's held line cut (its forwards come back at the lift), the plain 503 cut (the hold's words reach a
+  // caller who is not signed in)
   {
-    const udir = fs.mkdtempSync(path.join(path.dirname(dataDir), 'pf-unpair-')), ufile = path.join(udir, 'port-forwards.json');
-    fs.writeFileSync(ufile, JSON.stringify({ forwards: [{ id: 'pf-h1-7001', hostId: 'h1', remotePort: 7001, label: 'on h1' }, { id: 'pf-__local__-7002', hostId: '__local__', remotePort: 7002, label: 'local' }] }, null, 2));
-    const before = fs.readFileSync(ufile, 'utf8'), realRead = fs.readFileSync;
-    fs.readFileSync = function (q, ...a) { if (String(q) === ufile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
-    let pu = null; try { pu = new PortForwardManager({ hosts, dataDir: udir, broadcast: () => {}, log: () => {} }); } finally { fs.readFileSync = realRead; }
-    pu.onMachineUnpaired('h1');
-    const heldFile = fs.readFileSync(ufile, 'utf8');
-    const PMu = require('../src/server/path-mounts.js').create({ getPortForwards: () => pu, requestAuthed: () => false });
-    const anon = await new Promise((resolve) => { const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ c: this.c, b }); }, redirect(c, u) { resolve({ c, u }); } }; PMu.handler({ originalUrl: '/svc/x/', url: '/svc/x/', headers: {} }, res); });
-    if (pu._hold && pu._hold.again) await pu._hold.again().catch(() => false);
-    const afterIds = pu.list().map((r) => r.id).sort().join(','), onDisk = JSON.parse(fs.readFileSync(ufile, 'utf8')).forwards.map((r) => r.id).sort().join(',');
-    check('r3174: a machine unpaired WHILE HELD writes nothing then (the file as it was) and loses its forwards at the LIFT (listed and on disk: only the other machine\'s)', heldFile === before && afterIds === 'pf-__local__-7002' && onDisk === 'pf-__local__-7002', JSON.stringify({ afterIds, onDisk }));
-    check('r3174: /svc to a caller NOT signed in while held — a plain 503 (no hold words, no file name)', anon.c === 503 && anon.b && !/port-forwards|could not be read/.test(JSON.stringify(anon.b)), JSON.stringify(anon));
-    clearInterval(pu._watch);
-    fs.rmSync(udir, { recursive: true, force: true });
+    const ROOTu = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    const { anchored: anchU } = await import('./scratch.mjs');
+    const MU = mutantCopies('port-forward-smalls', ROOTu);
+    const unpairScene = async (PFM, PMmod, tag) => {
+      const udir = fs.mkdtempSync(path.join(path.dirname(dataDir), 'pf-unpair-')), ufile = path.join(udir, 'port-forwards.json');
+      fs.writeFileSync(ufile, JSON.stringify({ forwards: [{ id: 'pf-h1-7001', hostId: 'h1', remotePort: 7001, label: 'on h1' }, { id: 'pf-__local__-7002', hostId: '__local__', remotePort: 7002, label: 'local' }] }, null, 2));
+      const before = fs.readFileSync(ufile, 'utf8'), realRead = fs.readFileSync;
+      fs.readFileSync = function (q, ...a) { if (String(q) === ufile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
+      let pu = null; try { pu = new PFM({ hosts, dataDir: udir, broadcast: () => {}, log: () => {} }); } finally { fs.readFileSync = realRead; }
+      pu.onMachineUnpaired('h1');
+      const heldFile = fs.readFileSync(ufile, 'utf8');
+      const PMu = PMmod.create({ getPortForwards: () => pu, requestAuthed: () => false });
+      const anon = await new Promise((resolve) => { const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ c: this.c, b }); }, redirect(c, u) { resolve({ c, u }); } }; PMu.handler({ originalUrl: '/svc/x/', url: '/svc/x/', headers: {} }, res); });
+      if (pu._hold && pu._hold.again) await pu._hold.again().catch(() => false);
+      const afterIds = pu.list().map((r) => r.id).sort().join(','), onDisk = JSON.parse(fs.readFileSync(ufile, 'utf8')).forwards.map((r) => r.id).sort().join(',');
+      clearInterval(pu._watch);
+      fs.rmSync(udir, { recursive: true, force: true });
+      return { tag, heldFile: heldFile === before, afterIds, onDisk, anon };
+    };
+    const PM0 = require('../src/server/path-mounts.js');
+    const u0 = await unpairScene(PortForwardManager, PM0, 'now');
+    check('r3174: a machine unpaired WHILE HELD writes nothing then (the file as it was) and loses its forwards at the LIFT (listed and on disk: only the other machine\'s)', u0.heldFile && u0.afterIds === 'pf-__local__-7002' && u0.onDisk === 'pf-__local__-7002', JSON.stringify(u0));
+    check('r3174: /svc to a caller NOT signed in while held — a plain 503 (no hold words, no file name)', u0.anon.c === 503 && u0.anon.b && !/port-forwards|could not be read/.test(JSON.stringify(u0.anon.b)), JSON.stringify(u0.anon));
+    const PFS = fs.readFileSync(path.join(ROOTu, 'src/port-forward.js'), 'utf8'), PMS = fs.readFileSync(path.join(ROOTu, 'src/server/path-mounts.js'), 'utf8');
+    const UNPAIR_HELD = "    if (this._hold.held()) { (this._unpairedHeld = this._unpairedHeld || new Set()).add(hostId); return; }   // r3174: held — its forwards go at the lift\n";
+    const PLAIN = "res.status(503).json(requestAuthed(req) ? { error: heldW, code: 'ports_unread' } : { error: 'unavailable' })";
+    const u1 = await unpairScene(MU.load('src/port-forward.js', anchU(PFS, UNPAIR_HELD, '', 'unpair-held-cut'), 'unpair-held-cut').PortForwardManager, PM0, 'unpair-held-cut');
+    check('RED CONTROL r3228: the unpair\'s held line cut (in a copy) — the unpaired machine\'s forward comes back at the lift', u1.afterIds.includes('pf-h1-7001'), JSON.stringify(u1));
+    const u2 = await unpairScene(PortForwardManager, MU.load('src/server/path-mounts.js', anchU(PMS, PLAIN, "res.status(503).json({ error: heldW, code: 'ports_unread' })", 'plain-503-cut'), 'plain-503-cut'), 'plain-503-cut');
+    check('RED CONTROL r3228: the plain 503 cut (in a copy) — the hold\'s words (the file\'s name) reach a caller who is not signed in', u2.anon.c === 503 && /port-forwards|could not be read/.test(JSON.stringify(u2.anon.b || {})), JSON.stringify(u2.anon));
   }
   // r3104: TORN BYTES — kept aside once (the helper), the list then starts EMPTY, and the store NAMES the copy for the Ports panel
   // («the list was damaged; its damaged bytes are kept beside it as <name>» — never «restore it»: they are the damaged bytes)

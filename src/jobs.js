@@ -1298,8 +1298,6 @@ class JobManager {
     if (svcLabels.size && this.d.getPorts) {
       try {
         const pf = this.d.getPorts();
-        // r3174: port-forwards.json held — its list reads EMPTY: the relabel is OWED and runs at the lift (portsLifted)
-        if (pf && typeof pf.heldWords === 'function' && pf.heldWords()) { this._relabelOwed = new Set([...(this._relabelOwed || []), ...svcLabels]); this._relabelGone = new Set([...(this._relabelGone || []), ...gone]); }
         for (const rec of (pf && pf.list && pf.list()) || []) {
           if (!svcLabels.has(rec.label)) continue;
           if (sameNameLive(rec)) continue;
@@ -3415,8 +3413,13 @@ class JobManager {
     try {
       const pf = this.d.getPorts && this.d.getPorts();
       if (!pf) return;
-      const rec = await pf.forward('__local__', job.ports[0], { label: 'service: ' + this.labelOf(job) });   // r4: the Ports label is a person's — the NAME belted
-      job._pfId = rec && rec.id; delete job.publishHeld;
+      // r3228 (round whu7689zw): THE ROW SAYS IT IS THIS JOB's (owner); a row the release's engine wrote is claimed by its own label
+      // …and a row that says it is ANOTHER job's that no longer asks for it (removed, stopped) is this service's now — never a person's row
+      const atPort = (() => { try { return ((pf.list && pf.list()) || []).find((r) => r.hostId === '__local__' && !r.targetHost && Number(r.remotePort) === Number(job.ports[0])); } catch { return null; } })();
+      const prevOwner = atPort && atPort.ownerJob && atPort.ownerJob !== job.id ? this.jobs.get(atPort.ownerJob) : null;
+      const reown = atPort && atPort.ownerJob && atPort.ownerJob !== job.id && !(prevOwner && prevOwner.kind === 'service' && prevOwner.publish && ['up', 'starting'].includes(prevOwner.state)) ? atPort.ownerJob : null;
+      const rec = await pf.forward('__local__', job.ports[0], { owner: job.id, claim: this._claimLabels(job), reown, label: 'service: ' + this.labelOf(job) });   // r4: the Ports label is a person's — the NAME belted
+      job._pfId = rec && rec.id; delete job.publishHeld; delete job.publishNotOwned;
       job._publish = { state: 'publishing' }; this._touch(job);
       const waitMs = this.d.publishWaitMs ?? 60_000;
       const up = await this._portAnswers(job, job.ports[0], waitMs, gen);
@@ -3438,27 +3441,65 @@ class JobManager {
     } catch (e) {
       // r3174: refused because port-forwards.json is held — SAID on the job (its card, the agent's status); the lift publishes it again
       if (e && e.code === 'ports_unread') { job._publish = { state: 'held' }; job.publishHeld = 'not published yet: the list of forwards could not be read; published by itself when it reads'; this._touch(job); return; }
+      // r3228: the port's row is a person's (or another service's) — never taken: SAID on the job, the row untouched
+      if (e && (e.code === 'forward_not_owned' || e.code === 'forward_owned')) { job._publish = { state: 'refused' }; job.publishNotOwned = e.message; this._touch(job); return; }
       this.d.log('[jobs] forward failed for', job.id, '—', e.message);
     }
   }
-  /** r3174 (round wgr2jhoz9): port-forwards.json READ AGAIN after a hold — what it refused is done now: every service that asks to be
-   *  published and is up or starting publishes again (so it learns its forward's id: a later stop tears it down), a stop that came
-   *  while held ends its forward now, and a clear's relabel owed while held runs */
-  portsLifted() {
-    for (const job of this.jobs.values()) {
-      if (job.kind !== 'service') continue;
-      if (job._teardownOwed && !['up', 'starting'].includes(job.state)) { job._teardownOwed = false; this._teardownPublish(job).catch(() => { }); continue; }
-      job._teardownOwed = false;
-      if (job.publish && ['up', 'starting'].includes(job.state) && (job.ports || []).length) { delete job.publishHeld; this._ensurePublish(job); }
+  /** r3228: the label the release's engine wrote on a row of this job («service: <its label>», the name through the ONE accessor —
+   *  every publish since .361 relabelled its row so) — the one mark by which a row with no owner yet is claimed as this job's */
+  _claimLabels(job) { return ['service: ' + this.labelOf(job)]; }
+  /** r3228 (round whu7689zw): THE FORWARDS' ONE RECONCILE, from the facts as they are, after the Ports list's own replay settled (at
+   *  every start once the list reads, after every lift — src/port-forward.js restore / _lifted). No mark kept through a hold: a stop,
+   *  a removal or a restart while the list was held all end the same way here.
+   *   1) every row that says it is a job's (ownerJob): its service is up or starting and asks to be published ⇒ it is published and the
+   *      job knows its id (a row the replay already published only teaches the id: never published twice); anything else (the service
+   *      stopped, parked, failed, removed, or no longer asking) ⇒ its address is taken down and the row removed;
+   *   2) every service that asks, is up or starting and has no row ⇒ published.
+   *  A row with no owner yet that the release's engine wrote is claimed first by its own label (_claimLabels), or — its job cleared
+   *  meanwhile — by the cleared job holding that port. A person's row is never touched. → what it did */
+  async forwardsReconcile(why = 'the forwards') {
+    const pf = this.d.getPorts && this.d.getPorts();
+    if (!pf || (typeof pf.heldWords === 'function' && pf.heldWords())) return null;   // held: nothing is known — the lift runs it
+    const out = { why, claimed: [], kept: [], down: [], published: [] }, served = new Set();
+    const wants = (job) => !!job && job.kind === 'service' && !!job.publish && ['up', 'starting'].includes(job.state) && (job.ports || []).length > 0;
+    const services = [...this.jobs.values()].filter((j) => j.kind === 'service');
+    for (const job of services) { delete job.publishHeld; if (job._publish && job._publish.state === 'held') job._publish = null; }   // the list reads now: nothing is held
+    let rows = [];
+    try { rows = (pf.list && pf.list()) || []; } catch { rows = []; }
+    // 0) a row the release's engine wrote (no owner yet, its own «service: …» label, this machine's port): claimed once
+    for (const rec of rows) {
+      if (rec.ownerJob || rec.hostId !== '__local__' || rec.targetHost || !/^service: /.test(String(rec.label || ''))) continue;
+      const onPort = services.filter((j) => Number((j.ports || [])[0]) === Number(rec.remotePort));
+      const job = onPort.find((j) => this._claimLabels(j).includes(rec.label)) || (onPort.length === 1 && onPort[0].clearedAt ? onPort[0] : null);
+      if (!job) continue;
+      try { await pf.forward('__local__', rec.remotePort, { owner: job.id, claim: [rec.label], label: 'service: ' + this.labelOf(job) }); rec.ownerJob = job.id; out.claimed.push(rec.id); } catch (e) { this.d.log(`[jobs] ${why}: ${rec.id} not claimed — ${(e && e.message) || e}`); }
     }
-    const owed = this._relabelOwed, gone = this._relabelGone || new Set(); this._relabelOwed = null; this._relabelGone = null;
-    if (owed && owed.size && this.d.getPorts) {
-      try {
-        const pf = this.d.getPorts();
-        const live = (rec) => [...this.jobs.values()].some((o) => !gone.has(o.id) && o.kind === 'service' && o.publish && ('service: ' + o.name === rec.label || 'service: ' + this.labelOf(o) === rec.label) && (o.ports || []).map(Number).includes(Number(rec.remotePort)));
-        for (const rec of (pf && pf.list && pf.list()) || []) { if (owed.has(rec.label) && !live(rec)) Promise.resolve(pf.forward(rec.hostId, rec.remotePort, { label: 'service: ' + CLEARED_TEXT, targetHost: rec.targetHost || '' })).catch(() => { }); }
-      } catch { }
+    // 1) every row that says it is a job's
+    for (const rec of rows) {
+      if (!rec.ownerJob) continue;
+      const job = this.jobs.get(rec.ownerJob);
+      if (wants(job) && Number(job.ports[0]) === Number(rec.remotePort)) {
+        job._pfId = rec.id; delete job.publishNotOwned; served.add(job.id);
+        if (rec.label !== 'service: ' + this.labelOf(job)) { try { await pf.forward('__local__', rec.remotePort, { owner: job.id, label: 'service: ' + this.labelOf(job) }); } catch { } }   // its row reads its job's name now (a clear meanwhile)
+        if (rec.publicUrl) { if (job.publishedUrl !== rec.publicUrl) { job._publish = null; this._publishOutcome(job, { ok: true, url: rec.publicUrl }); this._touch(job); } out.kept.push(rec.id); }
+        else { this._ensurePublish(job); out.published.push(job.id); }
+        continue;
+      }
+      // its service stopped, parked, failed, was removed or no longer asks: the address down, the row removed (a removed one's name goes too)
+      const forget = !job;
+      if (job) { job._pfId = null; job.publishedUrl = null; this._touch(job); }
+      try { await pf.unpublish(rec.id, { keepName: !forget }); } catch (e) { this.d.log(`[jobs] ${why}: unpublish ${rec.id} — ${(e && e.message) || e}`); }
+      try { await pf.unforward(rec.id, { keepName: !forget }); } catch (e) { this.d.log(`[jobs] ${why}: unforward ${rec.id} — ${(e && e.message) || e}`); }
+      out.down.push(rec.id);
     }
+    // 2) every service that asks, is up or starting, and has no row
+    for (const job of services) {
+      if (!wants(job) || served.has(job.id)) continue;
+      this._ensurePublish(job); out.published.push(job.id);
+    }
+    if (out.claimed.length || out.down.length || out.published.length) this.d.log(`[jobs] ${why}: the forwards reconciled — ${out.claimed.length} claimed, ${out.kept.length} kept, ${out.down.length} taken down, ${out.published.length} published`);
+    return out;
   }
   /** THE ONE PLACE A PUBLISH OUTCOME LANDS (lane job-notice-dedupe): the job's own attempt and the relay's success the Ports
    *  manager adopted (relayPublished). The down record (`publishDown`, persisted — the repeat came at every restart) follows
@@ -3477,8 +3518,9 @@ class JobManager {
   }
   _isJobForward(job, rec) {
     if (!rec) return false;
+    if (rec.ownerJob) return rec.ownerJob === job.id;   // r3228: the row says whose it is
     if (job._pfId) return job._pfId === rec.id;
-    return rec.hostId === '__local__' && !rec.targetHost && Number(rec.remotePort) === Number((job.ports || [])[0]);
+    return false;   // r3228: never found by a port alone (a row with no owner is a person's, or the release's until the reconcile claims it)
   }
   /** THE RELAY'S FACT (lane job-notice-dedupe, fb-666f37fd38 — the URL answered 200 while `poll` still said «NOT published —
    *  the vault is locked»): the Ports manager adopted a public URL for a forward (its heal sweep, a restore, a machine link,
@@ -3643,17 +3685,17 @@ class JobManager {
       const pf = this.d.getPorts && this.d.getPorts();
       job._pubGen = (job._pubGen || 0) + 1; job._publish = null; this._endUrlCheck(job); delete job.urlPending; delete job._urlGaveUp; // B-74f5: a pending URL check (its timer, its give-up mark) ends with the publish
       delete job.publishDown; // the down episode ends with a deliberate stop / park / refusal (never at a restart: that is when it repeated)
-      delete job.publishHeld;
+      delete job.publishHeld; delete job.publishNotOwned;
       if (!pf) return;
-      // r3174: an adopted service may hold no id (its publish was refused while held): its OWN forward by the port, as the adopt does
-      let id = job._pfId;
-      if (!id) { try { const rec = ((pf.list && pf.list()) || []).find((r) => this._isJobForward(job, r)); id = rec ? rec.id : null; } catch { id = null; } }
-      const held = () => typeof pf.heldWords === 'function' && !!pf.heldWords();
-      if (!id) { if (held()) job._teardownOwed = true; return; }   // r3174: held — its forward is unknown now: ended at the lift
+      // r3228 (round whu7689zw): ONLY the row that says it is this job's (its id, else its owner) — never one found by a port. While the
+      // list is held nothing is known and nothing is owed: the reconcile after the lift takes down every row whose service is not wanted
+      let id = job._pfId || null;
+      try { const rows = (pf.list && pf.list()) || []; const rec = id ? rows.find((r) => r.id === id) : rows.find((r) => r.ownerJob === job.id); id = rec && (!rec.ownerJob || rec.ownerJob === job.id) ? rec.id : null; } catch { }
+      if (!id) return;
       let refused = false;
       try { await pf.unpublish(id, { keepName: !forget }); } catch (e) { if (e && e.code === 'ports_unread') refused = true; }
       try { await pf.unforward(id, { keepName: !forget }); } catch (e) { if (e && e.code === 'ports_unread') refused = true; }
-      if (refused) { job._teardownOwed = true; return; }
+      if (refused) return;   // held meanwhile: the reconcile after the lift ends it (from the facts: this service is not up)
       job._pfId = null; job.publishedUrl = null;
       this._touch(job);
     } catch { }
@@ -3800,7 +3842,7 @@ class JobManager {
           // B-2c5c unit 2: IS THIS HUB THAT RUN'S MAIN? asked once here, while our parent chain still reaches its wrapper (a run started
           // after this boot can never be its main) — the answer is kept on the run (a wrapper killed later moves our parent, not the fact)
           { const run0 = job.runs && job.runs[job.runs.length - 1]; if (this._hubIsMain(job, run0)) this.d.log(`[jobs] ${job.id}: its main process is this VibeSpace hub (started as this job)`); }
-          if (job.kind === 'service' && job.publish && (job.ports || []).length) setTimeout(() => this._ensurePublish(job), 8000); // ports manager restores at +5.5s
+          // r3228: its publish is the forwards' ONE reconcile after the Ports list's own replay (src/port-forward.js restore → forwardsReconcile)
           continue;
         }
         const run = job.runs && job.runs[job.runs.length - 1];
@@ -5392,7 +5434,7 @@ class JobManager {
       id: job.id, kind: job.kind, name: author || !job.name ? job.name : this.labelOf(job), note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
       // lane job-notice-dedupe: the down record is the state while the service runs (a re-publish in flight does not hide it);
       // a stopped service has none (teardown ends the episode)
-      publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: job.publishHeld || (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
+      publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: job.publishHeld || job.publishNotOwned || (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
       publishCause: (job.publishDown && job.publishDown.cause) || null, publishWhy: JN.whyOf(job.publishDown), publishSince: (job.publishDown && job.publishDown.sinceAt) || null, publishAttempts: (job.publishDown && job.publishDown.attempts) || 0,
       desiredUp: job.desiredUp, progress: job.progress || null, ports: job.ports, publish: job.publish,
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: this._contextFor(job, author),

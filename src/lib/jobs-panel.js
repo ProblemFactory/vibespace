@@ -17,7 +17,7 @@ import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
 import { nameOrGone } from './plain-words.js'; // lane ui-plain-words M2a: a gone conversation / group is named in words, its id in the tooltip
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, budgetWords, budgetRefusalPersonWords, runLeftWords } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, publishBlockedNote, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, budgetWords, budgetRefusalPersonWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', waiting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -335,10 +335,12 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   // conversations when it passes the bound)
   const hubNote = j.hubMainDown && j.state === 'down' && !j.desiredUp ? (compact ? t('Not restarted: it ran VibeSpace itself.') : t('Not restarted by itself: its main process was VibeSpace itself, and a restart would start a second one. Start it again if you mean to.'))
     : j.runsHub && /^\d/.test(memoryChip(j, t) || '') ? (compact ? t('Runs VibeSpace: its memory bound ends it whole.') : t('This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.')) : '';   // r1610: the compact rail takes a short form
-  if (!compact || j.progress || lastLine || hubNote) {
+  const pubNote = publishBlockedNote(j, t);   // r3228: a publish the Ports list refused — said on the card
+  if (!compact || j.progress || lastLine || hubNote || pubNote) {
     const l2 = document.createElement('div'); l2.className = 'jobs-card-l2';
     if (lastLine) { const ll = document.createElement('span'); ll.className = 'jobs-lastline'; ll.textContent = lastLine; ll.title = lastLine; l2.appendChild(ll); }
     if (hubNote) { const hn = document.createElement('span'); hn.className = 'jobs-note'; hn.textContent = hubNote; l2.appendChild(hn); }
+    if (pubNote) { const pn = document.createElement('span'); pn.className = 'jobs-note'; pn.textContent = pubNote; l2.appendChild(pn); }
     if (j.progress) { const pg = document.createElement('span'); pg.className = 'jobs-chip jobs-chip-prog'; pg.textContent = j.progress; l2.appendChild(pg); }
     if (j.runsCount > 1) { const rc = document.createElement('span'); rc.className = 'jobs-chip'; rc.textContent = '×' + j.runsCount; l2.appendChild(rc); }
     for (const p of j.ports || []) { const c = document.createElement('span'); c.className = 'jobs-chip'; c.textContent = ':' + p; l2.appendChild(c); }

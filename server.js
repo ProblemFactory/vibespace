@@ -1170,7 +1170,7 @@ app.post('/api/hosts/:id/port-forward', async (req, res) => {
   try {
     const b = req.body || {};
     res.json(await portForwards.forward(req.params.id, b.port, { label: b.label || '', targetHost: b.targetHost || '' }));
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 app.delete('/api/port-forward/:id', async (req, res) => {
   try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
@@ -1203,7 +1203,7 @@ publishedPages.registerRoutes(app); // 2.364.0 published pages (/p/<id> + /api/p
 // a published forward is transparently re-published in the new mode
 app.post('/api/port-forward/:id/proto', async (req, res) => {
   try { res.json(await portForwards.setProtoOverride(String(req.params.id), (req.body || {}).proto ?? null)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 // Kill a LOCAL orphaned listener (B-16d9): killOrphan re-verifies the
 // deleted-cwd condition at kill time, so this can't target a healthy process.

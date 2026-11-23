@@ -1663,8 +1663,10 @@ export function installSidebarMounts(Sidebar) {
         };
         body.innerHTML = `<p class="empty-hint" style="margin:0 0 8px">${escHtml(tr('A service listening on this machine’s 127.0.0.1 becomes reachable here (opened through the app’s proxy). Runs over the device link — no public exposure.'))}</p>`;
         // active forwards for this machine
-        let active = [];
-        try { active = ((await api('/api/port-forwards')).forwards || []).filter((f) => f.hostId === h.id); } catch {}
+        let active = [], fwHeld = null, fwTorn = null;   // r3228: the list held (unread, never «none») or torn — said here as on the Ports panel
+        try { const fr = (await api('/api/port-forwards')) || {}; active = (fr.forwards || []).filter((f) => f.hostId === h.id); fwHeld = fr.held || null; fwTorn = fr.torn || null; } catch {}
+        if (fwHeld) body.innerHTML += `<p class="empty-hint" style="margin:0 0 8px">${escHtml(tr('VibeSpace could not read its list of port forwards; it reads it again every few minutes. Nothing is lost: new forwards wait until it reads. Addresses published before stay published at the relay; to take them all down now, stop the relay plugin.'))}</p>`;
+        else if (fwTorn) body.innerHTML += `<p class="empty-hint" style="margin:0 0 8px">${escHtml(tr('The list of port forwards was damaged; its damaged bytes are kept beside it as {name}. Addresses published before stay published at the relay and keep their names: a forward added again for the same port takes its old address back; one on another port that chooses one of those names is refused by the relay until you stop the relay plugin (which takes them all down) or choose another name. Add the forwards again, or mend the file by hand and restart VibeSpace.', { name: fwTorn }))}</p>`;
         if (active.length) {
           const sec = document.createElement('div'); sec.style.marginBottom = '10px';
           sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('Active'))}</div>`;

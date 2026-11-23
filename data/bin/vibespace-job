@@ -89,6 +89,9 @@ function pubLine(j) {
   if (j.publishedUrl) return `public URL: ${j.publishedUrl}${j.publishedExternally ? ' (published from the Ports panel)' : ''} — public: anyone with the link reaches it`;
   if (!j.publish) return '';
   if (j.publishState === 'publishing') return `public URL: publishing… (waiting for port ${(j.ports || [])[0]} to answer)`;
+  // r3228 (round whu7689zw): a publish the Ports list refused — said here, in the hub's words (the list held; the port's row a person's)
+  if (j.publishState === 'held') return `public URL: ${j.publishError || 'not published yet: the list of forwards could not be read; published by itself when it reads'}`;
+  if (j.publishState === 'refused') return `public URL: NOT published — ${j.publishError || 'the port is forwarded by hand in the Ports panel'}`;
   // lane job-notice-dedupe: the cause, since when, how many attempts — the relay's fact (a re-publish the relay made shows the URL above)
   if (j.publishState === 'failed') return `public URL: NOT published — ${j.publishWhy || j.publishError || 'publish failed'}${j.publishSince ? ' — since ' + atWords(j, 'publishSince') + (j.publishAttempts ? ` (${j.publishAttempts} attempt${j.publishAttempts === 1 ? '' : 's'})` : '') : ''}${j.lastPublicUrl ? ' (was ' + j.lastPublicUrl + ')' : ''}`;
   return `public URL: none while ${j.state}${j.lastPublicUrl ? ' — the next start publishes ' + j.lastPublicUrl + ' again' : ''}`;
@@ -378,7 +381,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const q = flags.archived ? '?archived=1' : flags.mine ? '?mine=1' : flags.subscribed ? '?subscribed=1' : flags.all ? '?all=1' : '';
       const r = await call('GET', '/api/agent/jobs' + q);
       if (!r.jobs.length) return console.log(flags.archived ? 'no archived jobs visible to this session.' : flags.mine ? 'no jobs owned by this conversation.' : flags.subscribed ? 'no subscriptions from this conversation.' : 'no jobs visible to this session.');
-      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.archived ? ' (archived' + (j.archivedAt ? ' ' + atWords(j, 'archivedAt') : '') + ')' : ''}${j.mine ? ' ★mine' : ''}${j.mySubscription ? ' ✓sub' + (j.mySubscription.filter ? '/' + j.mySubscription.filter : '') : ''}${j.mine === false ? " · another conversation's" : ''}${j.readByGrant ? ' · read by grant' : ''}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + briefHead(j.context.payload) : ''}${j.publishedUrl ? ' ↗ ' + j.publishedUrl : j.publish && j.publishState ? ' ↗ ' + (j.publishState === 'failed' ? 'publish failed' : 'publishing…') : ''}`);
+      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.archived ? ' (archived' + (j.archivedAt ? ' ' + atWords(j, 'archivedAt') : '') + ')' : ''}${j.mine ? ' ★mine' : ''}${j.mySubscription ? ' ✓sub' + (j.mySubscription.filter ? '/' + j.mySubscription.filter : '') : ''}${j.mine === false ? " · another conversation's" : ''}${j.readByGrant ? ' · read by grant' : ''}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + briefHead(j.context.payload) : ''}${j.publishedUrl ? ' ↗ ' + j.publishedUrl : j.publish && j.publishState ? ' ↗ ' + ({ failed: 'publish failed', held: 'not published yet (the list of forwards is unread)', refused: 'not published (the port is forwarded by hand)' }[j.publishState] || 'publishing…') : ''}`);
       if (flags.archived) console.log('(archived records keep runs/log/ack; poll/show/logs <id> still answer; rm <id> deletes for good)');
       break;
     }

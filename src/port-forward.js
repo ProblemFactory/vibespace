@@ -188,6 +188,7 @@ class PortForwardManager {
    *  machine-ports-new. Ephemeral ports (>32767) and ports already forwarded
    *  are ignored. Gated by setting ports.watchNew (default on). */
   async _watchSweep() {
+    if (this._hold.held()) return;   // r3228: held — which ports are forwarded is unknown: no port is «new» until the list reads
     try { const v = this.serverSetting('ports.watchNew'); if (v !== undefined && !v) return; } catch { }
     let all = [];
     try { all = (this.hosts.list?.() || []); } catch { return; }
@@ -253,13 +254,17 @@ class PortForwardManager {
     this._tornCopy = (facts && facts.setAside) || null;   // r3104: torn bytes lifted as EMPTY — the panel says where they are kept
     if (!Array.isArray(this._state.forwards)) this._state.forwards = [];
     this._emit();
-    if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => {}); }
-    // r3174 (round wgr2jhoz9): what the hold REFUSED is done now — a machine unpaired meanwhile loses its forwards, and the jobs engine
-    // publishes again every service that asks to be (so it learns its forward's id and a later stop tears it down) and ends what
-    // a stop owed while held
+    // r3174: a machine unpaired meanwhile loses its forwards now
     const unpaired = this._unpairedHeld; this._unpairedHeld = null;
     if (unpaired) for (const h of unpaired) { try { this.onMachineUnpaired(h); } catch (e) { this.log('[ports] unpair at the lift: ' + e.message); } }
-    try { const jm = this.getJobs && this.getJobs(); if (jm && typeof jm.portsLifted === 'function') jm.portsLifted(); } catch (e) { this.log('[ports] the jobs at the lift: ' + e.message); }
+    // r3228 (round whu7689zw): THE LIST's OWN REPLAY FIRST (when it was asked while held), THEN the jobs engine's ONE reconcile from
+    // the facts as they are — never beside the replay (a stop's unpublish raced the replay's republish of the same name)
+    if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => {}); }   // restore() ends with the reconcile
+    else this._jobsReconcile('the lift').catch(() => {});
+  }
+  /** r3228: the jobs engine's ONE reconcile of its forwards (src/jobs.js forwardsReconcile), after the list's replay settled */
+  async _jobsReconcile(why) {
+    try { const jm = this.getJobs && this.getJobs(); if (jm && typeof jm.forwardsReconcile === 'function') await jm.forwardsReconcile(why); } catch (e) { this.log('[ports] the jobs reconcile (' + why + '): ' + e.message); }
   }
 
   _emit() {
@@ -280,6 +285,7 @@ class PortForwardManager {
       // public (frp relay) exposure, if published
       publicUrl: r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl,
       publicSub: r.publicSub || null, pathMount: r.pathMount || null, pathPublic: !!r.pathPublic,
+      ownerJob: r.ownerJob || null,   // r3228: the job whose service this row is (written by the jobs engine only); a person's row has none
     }));
   }
 
@@ -514,7 +520,7 @@ class PortForwardManager {
 
   /** Start a forward (idempotent by hostId+remotePort). Binds a local port and
    *  pipes each connection into device.tcpForward(remotePort). */
-  async forward(hostId, remotePort, { label = '', targetHost = '' } = {}) {
+  async forward(hostId, remotePort, { label = '', targetHost = '', owner = null, claim = null, reown = null } = {}) {
     this._hold.refuse('adding a forward');   // r3009: held — refused by name, nothing written
     remotePort = Number(remotePort);
     if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) throw new Error('invalid remote port');
@@ -525,8 +531,20 @@ class PortForwardManager {
     const isLan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost';
     const key = isLan ? `${targetHost}:${remotePort}` : String(remotePort);
     let rec = this._state.forwards.find((r) => r.hostId === hostId && r.remotePort === remotePort && (r.targetHost || '') === (isLan ? targetHost : ''));
+    // r3228 (round whu7689zw): OWNERSHIP IS WRITTEN ON THE ROW — the jobs engine (`owner` = a job id) makes, keeps or takes only a row
+    // that says it is that job's service; a row a person made carries no owner and the engine never takes it. A row the release's
+    // engine wrote (no owner yet) is claimed once by the release's own mark on it: its label «service: <that job's name>» (`claim`)
+    // a row of ANOTHER job: refused — unless the engine names that job as no longer asking for it (`reown`: removed, stopped)
+    if (owner && rec && rec.ownerJob && rec.ownerJob !== owner) {
+      if (!reown || rec.ownerJob !== reown) throw Object.assign(new Error(`port ${remotePort} is forwarded for another service`), { code: 'forward_owned', status: 409 });
+      rec.ownerJob = owner; this._persist();
+    }
+    if (owner && rec && !rec.ownerJob) {
+      if (!(Array.isArray(claim) && claim.includes(rec.label))) throw Object.assign(new Error(`port ${remotePort} is already forwarded in the Ports panel by hand — that forward is not this service's: publish it there, or remove it and start the service again`), { code: 'forward_not_owned', status: 409 });
+      rec.ownerJob = owner; this._persist();
+    }
     if (!rec) {
-      rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}) };
+      rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}), ...(owner ? { ownerJob: owner } : {}) };
       // a stopped service's forward left its public name behind (unforward keepName) — its next start gets it back
       const kept = this._state.names && this._state.names[rec.id];
       if (kept) { rec.publicSub = kept.sub || null; rec.publicPort = kept.port || null; if (kept.proto) rec.proto = kept.proto; delete this._state.names[rec.id]; }
@@ -772,6 +790,7 @@ class PortForwardManager {
     }
     this._persist();
     this._emit();
+    await this._jobsReconcile('the replay');   // r3228: after the replay settled — the jobs engine's ONE reconcile (at every start, after every lift)
   }
 
   /** A machine (re)linked — bring up any of its recorded forwards (incl. the

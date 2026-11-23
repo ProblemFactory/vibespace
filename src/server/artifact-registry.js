@@ -584,6 +584,7 @@ function noteService(job) {
  *  moved forward patches the card IN PLACE (an unchanged block is no edit — normalizers' patch compares). */
 function noteForwards(msg) {
   if (!msg || msg.type !== 'port-forwards-updated') return 0;
+  if (msg.held) return 0;   // r3228: port-forwards.json held — an UNREAD list says nothing of a link: the live cards keep the one they have
   const facts = { ...linkFacts(), forwards: Array.isArray(msg.forwards) ? msg.forwards : forwardsList() };
   const byCid = new Map();
   for (const j of jobsList()) {

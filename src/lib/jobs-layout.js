@@ -16,6 +16,7 @@
  *   budgetRefusalPersonWords(budget, t, {create}) · runLeftWords(run, t)
  *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound);
  *                                       what a run's job left running (round 5)
+ *   publishBlockedNote(job, t)          a service's publish the Ports list refused (held; the port a person's), the card's words (r3228)
  *
  * The client READS `job.ack` (the server computes it over the full record —
  * the snapshot's journal is truncated) and never derives acknowledgement.
@@ -216,6 +217,14 @@ export function memoryWords(mb) {
   return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`;
 }
 const runsNow = (j) => j.state === 'up' || j.state === 'starting' || j.state === 'awaiting-user'; // the run's own bound is the one in force
+/** r3228 (round whu7689zw): a service's publish the Ports list REFUSED, in the card's words — the list held (unread: published by
+ *  itself when it reads), or the port's row a person's (never taken) — '' otherwise. The card draws it (src/lib/jobs-panel.js). */
+export function publishBlockedNote(j, t) {
+  if (!j || !j.publish || j.publishedUrl) return '';
+  if (j.publishState === 'held') return t('Not published yet: the list of forwards could not be read. It is published by itself when it reads.');
+  if (j.publishState === 'refused') return t('Not published: port {port} is already forwarded by hand in the Ports panel. Publish it there, or remove that forward and start the service again.', { port: (j.ports || [])[0] });
+  return '';
+}
 /** «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» — '' from a hub that says nothing; a
  *  bound a limit lowered says so (round 3), and WHICH limit (round 4 — the one that contains the job): «6 GB · rlimit · capped
  *  by the instance’s 8 GB limit» · «24 GB · cgroup · capped by the user slice’s 32 GB limit». A live run's are its own proof's. */

@@ -614,64 +614,6 @@ console.log('§3 the dropped login — the Ports manager says it ONCE per episod
     for (const r of recs) { const l = pf._live.get(r.id); if (l) { try { l.server.close(); } catch { } for (const so of l.sockets) try { so.destroy(); } catch { } } }
   } finally { for (const sv of svcs) try { sv.close(); } catch { } fs.rmSync(d3, { recursive: true, force: true }); }
 }
-// ── r3174 (round wgr2jhoz9, the exposure lens): port-forwards.json HELD at the start (a PLACED refusal of its read). The jobs engine's
-// publish of an ADOPTED service (the +8 s replay) and of a service STARTED while held are refused: each is SAID on the job (its status);
-// at the LIFT the engine publishes both again (it learns its forward's id), and a later stop tears down the forward AND its public address
-// (the relay stand-in records the unpublish). REDs in copies: the lift's republish cut (the started one never published), the release's
-// teardown road (no id, no lookup: the stop leaves the address up), the held words cut (nothing said) ──
-{
-  const { mutantCopies } = await import('./mutant-copy.mjs');
-  const REPO4 = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-  const run4 = async (JM, tag) => {
-    const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-jn-held-')), pdir4 = path.join(d4, 'pf'); fs.mkdirSync(pdir4, { recursive: true }); fs.mkdirSync(path.join(d4, 'bin'), { recursive: true });
-    const PA = 47311, PB = 47312, file4 = path.join(pdir4, 'port-forwards.json');
-    fs.writeFileSync(file4, JSON.stringify({ forwards: [{ id: `pf-__local__-${PA}`, hostId: '__local__', remotePort: PA, label: 'service: kept-web', publicUrl: 'https://kept.relay.test/', publicName: `pf-__local__-${PA}`, publicSub: 'kept', proto: 'http' }] }, null, 2));
-    const unpub = [], pubd = [];
-    const plugins4 = { async frpPublish(name) { pubd.push(name); return { name, subdomain: 'kept', proto: 'http', url: `https://${name}.relay.test/` }; }, async frpUnpublish(name) { unpub.push(name); return { ok: true }; } };
-    let eng = null; const realRead = fs.readFileSync;
-    fs.readFileSync = function (q, ...a) { if (String(q) === file4) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
-    let pf4 = null; try { pf4 = new PortForwardManager({ hosts: { list: () => [] }, dataDir: pdir4, plugins: plugins4, broadcast: () => { }, log: () => { }, getJobs: () => eng }); } finally { fs.readFileSync = realRead; }
-    // the lift is driven by hand below (the helper's own ladder timer is unref'd and cleared at the lift)
-    const E = new JM({ dataDir: d4, broadcast: () => { }, notifyUser: () => { }, log: () => { }, getPorts: () => pf4, publishWaitMs: 30, publishRecheckMs: 60_000, deliverToConversation: async () => ({ ok: true }) });
-    E.init(); eng = E;
-    const owner4 = { conversation: { backend: 'claude', id: 'conv-H' }, sessionId: 'sess-H', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
-    const mkJob = (id, port) => ({ id, kind: 'service', name: id, state: 'up', desiredUp: true, publish: true, ports: [port], owner: owner4, access: { view: 'session', control: 'session' }, runs: [], createdAt: Date.now() });
-    const adopted = mkJob('jb-adopted01', PA), started = mkJob('jb-started01', PB);
-    E.jobs.set(adopted.id, adopted); E.jobs.set(started.id, started);
-    await E._ensurePublish(adopted); await E._ensurePublish(started);   // the +8 s replay of the adopted one; the started one's own publish
-    const saidHeld = { a: adopted.publishHeld || null, b: started.publishHeld || null };
-    // THE LIFT: the file reads again — the hold's own read, as its ladder would
-    if (pf4._hold) { pf4._hold.again && (await pf4._hold.again().catch(() => false)); }
-    // the lift's publishes settle in a few tens of ms (publishWaitMs 30): bounded at 600 ms (a copy that never publishes waits its bound)
-    const t0 = Date.now(); while ((!adopted._pfId || !started._pfId) && Date.now() - t0 < 600) await new Promise((r) => setTimeout(r, 20));
-    await new Promise((r) => setTimeout(r, 60));
-    const lifted = { a: adopted._pfId || null, b: started._pfId || null, bListed: pf4.list().some((r) => Number(r.remotePort) === PB) };
-    // the person stops the adopted service after the lift
-    adopted.state = 'down'; await E._teardownPublish(adopted);
-    const out = { tag, saidHeld, lifted, unpub: unpub.slice() };
-    try { for (const t of E._timers || []) clearInterval(t); E.shutdown(); } catch { }
-    clearInterval(pf4._watch);
-    fs.rmSync(d4, { recursive: true, force: true });
-    return out;
-  };
-  const now4 = await run4(JobManager, 'now');
-  const M4 = mutantCopies('jn-held', REPO4), jsrc = fs.readFileSync(path.join(REPO4, 'src/jobs.js'), 'utf8');
-  const REPUB = "      if (job.publish && ['up', 'starting'].includes(job.state) && (job.ports || []).length) { delete job.publishHeld; this._ensurePublish(job); }\n";
-  const LOOKUP = "      if (!id) { try { const rec = ((pf.list && pf.list()) || []).find((r) => this._isJobForward(job, r)); id = rec ? rec.id : null; } catch { id = null; } }\n";
-  const SAID = "      if (e && e.code === 'ports_unread') { job._publish = { state: 'held' }; job.publishHeld = 'not published yet: the list of forwards could not be read; published by itself when it reads'; this._touch(job); return; }\n";
-  const ld = (src, t) => M4.load('src/jobs.js', src, t).JobManager;
-  const { anchored: anch4 } = await import('./scratch.mjs');
-  const r1 = jsrc.split(REPUB).length === 2 ? await run4(ld(anch4(jsrc, REPUB, '', 'no-republish'), 'no-republish'), 'no-republish') : null;
-  const r2 = jsrc.split(REPUB).length === 2 && jsrc.split(LOOKUP).length === 2 ? await run4(ld(anch4(anch4(jsrc, REPUB, '', 'release-teardown'), LOOKUP, '', 'release-teardown'), 'release-teardown'), 'release-teardown') : null;
-  const r3 = jsrc.split(SAID).length === 2 ? await run4(ld(anch4(jsrc, SAID, '', 'held-unsaid'), 'held-unsaid'), 'held-unsaid') : null;
-  console.log('  r3174, the facts judged: ' + JSON.stringify({ now: now4, noRepublish: r1, releaseTeardown: r2, heldUnsaid: r3 && r3.saidHeld }));
-  const HW = 'not published yet: the list of forwards could not be read; published by itself when it reads';
-  ok(now4.saidHeld.a === HW && now4.saidHeld.b === HW, `r3174: while port-forwards.json is held a service's publish is refused and SAID on the job («${HW}»), the adopted one and the one started while held`, now4.saidHeld);
-  ok(!!now4.lifted.a && !!now4.lifted.b && now4.lifted.bListed, `r3174: at the LIFT the engine publishes both again — each learns its forward's id (${now4.lifted.a}, ${now4.lifted.b}); the one started while held is listed`, now4.lifted);
-  ok(now4.unpub.includes(`pf-__local__-47311`), `r3174: a stop after the lift tears down the adopted service's forward AND its public address (the relay recorded the unpublish: ${now4.unpub.join(', ') || 'nothing'})`, now4.unpub);
-  ok(!!r1 && !r1.lifted.b && !r1.lifted.bListed, 'RED CONTROL r3174: the lift\'s republish cut (in a copy) — the service started while held is never published', r1 && r1.lifted);
-  ok(!!r2 && !r2.unpub.length, 'RED CONTROL r3174: the release\'s teardown road (no id, no lookup by the port, in a copy) — the stop leaves the public address up', r2 && r2.unpub);
-  ok(!!r3 && !r3.saidHeld.a && !r3.saidHeld.b, 'RED CONTROL r3174: the held words cut (in a copy) — the refusal is said nowhere on the job', r3 && r3.saidHeld);
-}
+// r3228 (round whu7689zw): the held-list legs of the jobs engine's forwards moved to scripts/test-job-forwards.mjs (the reconcile)
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
