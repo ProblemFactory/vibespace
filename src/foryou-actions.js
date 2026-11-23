@@ -251,7 +251,7 @@ const ROW_OF = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.type, r])));
 // release-stored sentence keeps its rows or is named here.
 const STORED_WORDS_LEGACY = Object.freeze({
   // r3095 (lane bl-loop-b): the setting holds' «could not be read» notice names no path any more (its list by its plain name) — the line a hub up to 2.369.415 filed stays drawable.
-  'setting-holds-unread-path': Object.freeze({ left: '2.369.415', filedBy: 'src/server/setting-holds.js', key: 'data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}' }),
+  'setting-holds-unread-path': Object.freeze({ left: '2.369.416', filedBy: 'src/server/setting-holds.js', key: 'data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}' }),
   // B-f276 1b (主开发 r809): a channels file is never set aside at a start any more (held as damaged, its one door) — the two heads a hub up to 2.369.415 filed stay drawable.
   // Their `left` is 2.369.415 (主开发 r1522): the hotfix 2.369.415 was cut before 1b and still stored both sentences; 1b was lined before it shipped.
   'channels-set-aside': Object.freeze({ left: '2.369.415', filedBy: 'src/server/channels-engine.js', key: "Channels: {file} could not be read and was set aside as {where}" }),
