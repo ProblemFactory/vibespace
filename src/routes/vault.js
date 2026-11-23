@@ -196,7 +196,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
-    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || (code === 'records-unread' && r && r.words) || (code === 'too_many_jobs' && r && r.words) || (code === 'store_held' && r && r.cause && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence · stage L3's F1: a full row's recipe names its entry
+    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'vault_grants_unread' && r && (r.words || r.why)) || (code === 'todos-unread' && r && r.words) || (code === 'records-unread' && r && r.words) || (code === 'too_many_jobs' && r && r.words) || (code === 'store_held' && r && r.cause && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence · stage L3's F1: a full row's recipe names its entry
   };
   /** The request's password field(s), taken OFF the request (no later reader sees them). */
   const take = (req, ...names) => {

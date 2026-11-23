@@ -67,7 +67,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   const GRANTS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.grants);
   const hold = HOLD.create({
     file: FILE, valid: GRANTS_SHAPE, code: 'vault_grants_unread', aside: (m) => `${FILE}.corrupt-${m}`,
-    words: (h) => (/^torn/.test(String((h && h.code) || '')) ? `${GRANTS_FILE} in VibeSpace's data folder is damaged (${h.code}): VibeSpace keeps its bytes beside it once, then starts the list empty — grant the codes again then; until then no code that needs a grant is given, and a grant, its ✕ or a new two-step entry is refused` : `${GRANTS_FILE} in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No grant is lost: nothing is written over it, no code that needs a grant is given until it reads (an agent's own seed and a browser login's fill need none), and a grant, its ✕ or a new two-step entry is refused until then`),   // r3275 (2) (3): the words true in each state
+    words: (h) => (String((h && h.code) || '') === 'torn bytes, not copied' ? `${GRANTS_FILE} in VibeSpace's data folder is damaged (${h.code}): its bytes could not be kept aside, so nothing is written over it and the list stays as it is — VibeSpace tries again every few minutes; until then no code that needs a grant is given, and a grant, its ✕ or a new two-step entry is refused` : String((h && h.code) || '') === 'torn bytes' ? `${GRANTS_FILE} in VibeSpace's data folder is damaged (${h.code}): VibeSpace keeps its bytes beside it once, then starts the list empty — grant the codes again then; until then no code that needs a grant is given, and a grant, its ✕ or a new two-step entry is refused` : `${GRANTS_FILE} in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No grant is lost: nothing is written over it, no code that needs a grant is given until it reads (an agent's own seed and a browser login's fill need none), and a grant, its ✕ or a new two-step entry is refused until then`),   // r3275 (2) (3): the words true in each state
     log: (s) => log(s),
     onLift: (v, f) => { if (f && f.setAside) { try { writeGrants([], [], f.setAside); } catch (e) { log(`${GRANTS_FILE} could not be started empty after its bytes were kept aside (${e.code || e.message})`); } } },   // r3104: the empty store names WHERE the damaged bytes are (said in the window until the person's next grant)
   });
@@ -84,11 +84,12 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
 
   // ── the grants ──
   function readGrants() {
+    if (handed) { const r = handed; handed = null; return r; }   // r3325: the press's first read, handed on
     if (hold.held()) return { grants: [], carried: [], bad: true };   // r3002 (c): held — read again off the loop; nothing granted until then
     let read; try { read = { text: fs.readFileSync(FILE, 'utf8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: GRANTS_SHAPE });
     if (a.state === 'missing') { carriedNow = []; return { grants: [], carried: [], bad: false }; }   // r3275 (7): a file gone takes its carried rows with it
-    if (a.state !== 'data') { hold.start(a); log(`${GRANTS_FILE} could not be read (${a.code}) — no code is granted and nothing is written over it until it reads`); return { grants: [], carried: [], bad: true }; }
+    if (a.state !== 'data') { hold.start(a); return { grants: [], carried: [], bad: true }; }
     // r3002 (c): a row the reader cannot read is CARRIED verbatim (never dropped, never used)
     const grants = [], carried = [];
     for (const raw of a.value.grants) { const g = T.grantOf(raw); if (g) grants.push(g); else carried.push(raw); }   // r3275 (7): EVERY row the reader cannot read is carried, an object or not
@@ -99,7 +100,8 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   let carriedNow = [];   // the rows the last read carried — every write puts them back as they were
   /** r3275 (1) (3): is the list held NOW? A door that reads the grants asks it first — and a read that fails in mid-life takes the
    *  family's road there (the read sets the hold), so the door answers the hold's code and words, never a plain «failed» */
-  const heldNow = () => { if (!hold.held()) readGrants(); return !!hold.held(); };
+  let handed = null;   // r3325: the read heldNow made, handed to the door's own next read (one read a press, as the release made)
+  const heldNow = () => { handed = null; if (!hold.held()) { const r = readGrants(); if (!hold.held()) handed = r; } return !!hold.held(); };
   const writeGrants = (grants, carried = carriedNow, aside = null) => writeJsonAtomic(FILE, { v: 1, grants: [...grants, ...carried], ...(aside ? { aside } : {}) });   // r3104: `aside` only on the torn lift's empty start — the next grant or ✕ writes it away
   const publicGrant = (g, live) => ({ id: g.id, subject: g.subject, at: g.at, by: g.by, ...(live ? { live: !!live(g) } : {}) });
   /** Every grant of `entry` gone (a delete, an add over a stale name). → true | false (could not be written). */
@@ -252,7 +254,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
    *  still runs — `live(grant)` from the wiring). Names only — never a value, never a run digest. */
   function list({ live = () => true } = {}) {
     const { grants, bad, lostAside } = readGrants();
-    return { ok: true, state: vaultState(), ...(bad ? { grantsUnread: hold.words() || `${GRANTS_FILE} could not be read`, ...(/^torn/.test(String((hold.held() || {}).code || '')) ? { grantsTorn: true } : {}) } : {}), ...(lostAside ? { grantsLost: lostAside } : {}), entries: names().map((s) => ({ name: T.nameOfEntry(s.name), at: s.at || null, grants: grants.filter((g) => g.entry === s.name).map((g) => publicGrant(g, live)) })) };
+    return { ok: true, state: vaultState(), ...(bad ? { grantsUnread: hold.words() || `${GRANTS_FILE} could not be read`, ...(String((hold.held() || {}).code || '') === 'torn bytes' ? { grantsTorn: true } : {}) } : {}), ...(lostAside ? { grantsLost: lostAside } : {}), entries: names().map((s) => ({ name: T.nameOfEntry(s.name), at: s.at || null, grants: grants.filter((g) => g.entry === s.name).map((g) => publicGrant(g, live)) })) };
   }
 
   // ── AN AGENT's door ──

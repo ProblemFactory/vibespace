@@ -88,7 +88,7 @@ const MORE_WORDS = Object.freeze({
 });
 const STATUS = Object.freeze({
   unauthorized: 401, job_no_use: 403, 'todos-unread': 503, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409,
-  bad_answer: 400, vault_use_marks_unread: 503, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
+  bad_answer: 400, vault_use_marks_unread: 503, vault_grants_unread: 503, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
   entry_unknown: 404, words_not_here: 400, words_same: 409, words_pending: 409,   // lane vault-entry-description
   totp_no_door: 409, totp_bad_name: 400, totp_words: 400, totp_host: 400, exists: 409, bad_uri: 400, hotp_unsupported: 400, bad_seed: 400, seed_too_short: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400, name_required: 400, bad_way: 400,   // lane totp-request-card (the two-step add door's own codes)
   login_no_door: 409, login_channel_unmediated: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_bad_origin: 400, login_words: 400, login_password_lines: 400, login_bad_user: 400, bad_totp: 400, not_written: 500, unreadable: 500,   // lane login-request-card (+ the add door's own codes + r29 channel law)
@@ -364,7 +364,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     try { r = totp.addEntry(input, { who: String(by).slice(0, 40) }); }
     catch (e) { log(`${q.requestId}: the two-step code could not be saved (${(e && e.code) || 'error'})`); return named('store_failed'); }
     finally { input.seed = null; input.uri = null; }
-    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && (r.error || r.why)) || MORE_WORDS[c] || P.WORDS[c] || c }; }   // r3275: the two-step store says its words in `why`
+    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (c === 'vault_grants_unread' && r.why) || (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }   // r3275 + r3325: the hold's words (the two-step store says them in `why`); every other refusal keeps the door's own words
     const name = String(r.name);
     let allowed = false, whyNot = null;
     if (t.allow === true && q.conv && typeof totp.grant === 'function') {

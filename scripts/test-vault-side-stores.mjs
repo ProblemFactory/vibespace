@@ -284,6 +284,9 @@ async function main() {
     const noUnd = anchored(anchored(SRCg, "if (rv && U.holds(rv)) out.push({ ...base, ok: false, code: 'marks_undecided' });", 'if (false) { }', 'may-no-undecided'), 'if (v && U.holds(v)) out.push({ id: String(row.resource) });', '', 'list-no-undecided');
     const r3 = await usesScene(RUNR, M.load('src/server/vault-use-grants.js', noUnd, 'no-undecided'));
     ok(!r3.mayUnd && !r3.usesUnd && !r3.listUnd, '(a) CONTROL (a copy without the undecided answers): the undecided row is skipped as «nothing held» everywhere — red', r3);
+    const noExc = anchored(SRCg, " else if (rv && rv.code === 'excepted') { const p = bare(rv.except); out.push({ ...base, ok: false, code: 'excepted', ...(p ? { except: p } : {}) }); }", '', 'no-excepted');
+    const r4 = await usesScene(RUNR, M.load('src/server/vault-use-grants.js', noExc, 'no-excepted'));
+    ok(r4.exOk && !r4.mayExc, '(a) CONTROL (r3325: a copy without the undecided row\'s excepted answer): «left out» is gone from «what it may use» — red', { mayExc: r4.mayExc });
   }
   {
     // SMALL 3: the second word on a DECIDING Save has a red of its own — a copy that drops ONLY the «undecided» half of the check
@@ -314,6 +317,31 @@ async function main() {
     const SRCp = fs.readFileSync(path.join(REPO, 'src/server/vault-paste-door.js'), 'utf8');
     const rp = await pasteScene(MP.load('src/server/vault-paste-door.js', anchored(SRCp, /named\('vault_use_marks_unread', \{ words: dr\.error \|\| MORE_WORDS\.vault_use_marks_unread \}\)/g, "named('vault_use_marks_unread')", 'paste-no-words', { count: 'any' }), 'paste-no-words'));
     ok(rp.r && rp.r.code === 'vault_use_marks_unread' && rp.r.words !== rp.holdWords, '(a) CONTROL (r3275 (5): a paste door that drops the hold\'s words): its reply says the generic words, not the hold\'s — red', { same: rp.r && rp.r.words === rp.holdWords });
+  }
+  {
+    // r3325: the carry's FAIL-CLOSED guard — a carry answer that waits but names nothing (an older use-grants) keeps EVERY row.
+    // RED: a door without the guard (the list emptied while nothing was carried)
+    const VRG = require(path.join(REPO, 'src/vault-run.js'));
+    async function guardScene(runMod) {
+      const w = await marksWorld();
+      fs.writeFileSync(w.MARKS, TORN);
+      const ug = w.mk(); ug.publicFor(w.e2);
+      await until(() => { try { return !fs.readFileSync(w.MARKS, 'utf8').startsWith(TORN); } catch { return false; } }, 3000); await sleep(30); ug.publicFor(w.e2);   // e2 UNDECIDED
+      const old = w.e2, ref = `vault://secrets/${nameOfId(old)}/secret`;
+      const key = VRG.shapeKeyOf({ tool: '/usr/bin/curl', sub: [], flags: ['-s'], args: ['url'], hosts: ['api.router.lan'], entries: [ref], injection: ['env:T'], env: [], templates: [], on: null, script: null, keyed: [] });
+      const body = JSON.stringify({ v: 1, gen: 7, runnable: [old], always: [{ conv: 'cid-made-up-9', key, until: null, entries: [old], at: Date.now(), by: 'user' }] });
+      const STORE = path.join(w.dataDir, RUNR.STORE_FILE);
+      fs.writeFileSync(STORE, JSON.stringify({ ...JSON.parse(body), mark: w.vault.macOf(RUNR.MARK_LABEL, body) }));
+      const older = new Proxy(ug, { get: (o, k) => (k === 'carry' ? (...a) => { const c = o.carry(...a); if (c) delete c.waitedFor; return c; } : o[k]) });   // an answer with no waited list
+      runMod.create({ dataDir: w.dataDir, vault: w.vault, userTodos: null, sources: {}, log: () => { }, useGrants: older }).rowFacts({ id: old, store: 'secrets', entry: nameOfId(old), field: 'secret' });
+      return { kept: ((jsonOr(STORE) || {}).always || []).length };
+    }
+    const r = await guardScene(RUNR);
+    ok(r.kept === 1, '(a) r3325: a carry answer that waits but names nothing keeps EVERY old «always» row (fail closed)', r);
+    const M = mutantCopies('vault-side-stores-guard', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const r2 = await guardScene(M.load('src/server/vault-run-door.js', anchored(SRC, 'const keep = c.held || (!Array.isArray(c.waitedFor) && c.waits) ? db.always.slice() : ', 'const keep = c.held ? db.always.slice() : ', 'no-guard'), 'no-guard'));
+    ok(r2.kept === 0, '(a) CONTROL (a door without the guard): the row is dropped while nothing was carried — red', r2);
   }
   {
     // ALSO (the round's readers): an old «always» row of TWO entries, one UNDECIDED — the door keeps ONLY the entry that waited; the
@@ -457,6 +485,24 @@ async function main() {
     ok(copies.length === 1 && !!copies[0] && lost === copies[0] && !!g2 && g2.ok, '(c) …kept aside ONCE and lifted by the read again in the same life: the window names the copy, the list takes grants again', { copies: copies.length, lost, grant: g2 && (g2.ok ? 'ok' : g2.code) });
   }
   {
+    // r3325: the PASTE CARD's two-step store while the grants are held — refused with the hold's own code and words, nothing stored
+    const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+    const PDc = require(path.join(REPO, 'src/server/vault-paste-door.js'));
+    const w = await totpWorld();
+    const userTodos = new UserTodoManager({ dataDir: w.dataDir, expirySweepMs: 3600e3 });
+    const seed3 = Array.from(crypto.randomBytes(20)).map((b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[b % 32]).join('');   // made up, built here
+    const pr = placeRefusal(w.FILE);
+    let q = null, a = null, t = null;
+    try {
+      t = w.mk();
+      const paste = PDc.create({ vault: w.vault, userTodos, totp: t, log: () => { } });
+      q = paste.request({ caller: { conversationId: 'cid-made-up-p', sessionKey: 'claude:cid-made-up-p', name: 'Made-up asker', scope: 'cid-made-up-p' }, words: 'the CI two-step', purpose: 'sign the release', kind: 'totp', name: 'paste-held' });
+      a = q && q.ok ? paste.answer(q.requestId, { answer: 'store', person: true, totp: { seed: seed3, name: 'paste-held' } }) : null;
+    } finally { pr.lift(); }
+    const stored = (w.vault.secretNames() || []).some((x) => x && /paste-held/.test(String(x.name)));
+    ok(!!q && q.ok && !!a && !a.ok && a.code === 'vault_grants_unread' && !!a.words && a.words === t._hold.words() && !stored, '(c) r3325: the PASTE CARD\'s two-step store while held is refused with the hold\'s own code and words — nothing stored', { request: q && (q.ok ? 'filed' : q.code), answer: a && a.code, same: !!(a && t && a.words === t._hold.words()), stored });
+  }
+  {
     // r3275 (5): a red for the code's OWN held check — a copy without it answers «not granted» while held
     const M = mutantCopies('vault-side-stores-c-use', REPO);
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-totp.js'), 'utf8');
@@ -485,44 +531,63 @@ async function main() {
   async function endsScene(runMod) {
     const dataDir = freshDir('ends');
     const e0 = mkEngine(dataDir); await e0.setup(PW);
-    const ENDS = path.join(dataDir, 'vault-grant-ends.json'), PEND = ENDS + '.pending';
+    const ENDS = path.join(dataDir, 'vault-grant-ends.json');
     const W = SW.storeWriter();
     const mkDoor = (vault) => runMod.create({ dataDir, vault, userTodos: null, sources: {}, log: () => { } });
     const grant = (conv, id) => ({ conv, entries: [id], at: Date.now() - 1000, until: Date.now() + 3600e3, once: false, purpose: 'made-up purpose' });
     const endA = ['cid-made-up-a', 'secrets:secret:aaaa000001#secret'], endB = ['cid-made-up-b', 'secrets:secret:bbbb000002#secret'];
     // life 0: an end on disk (a grant ended by a lock)
     const d0 = mkDoor(e0); d0._grants.set(endA.join('\n'), grant(...endA)); e0.lock('door');
-    await sleep(30); await W.durable(ENDS).catch(() => false);
+    await until(() => fs.existsSync(ENDS), 3000); await W.durable(ENDS).catch(() => false);
     const fileBefore = fs.readFileSync(ENDS, 'utf8');
-    // life 1: the start's read FAILS; a grant ends while held
+    // life 1: the start's read FAILS; a grant ends while held — it lives in MEMORY (no side file); the read again lifts it in this life
     const e1 = mkEngine(dataDir); await e1.unlock(PW);
-    let pr = placeRefusal(ENDS), d1, heldSaid = null;
+    let pr = placeRefusal(ENDS), d1, heldSaid = null, inMemory = false;
     try {
       d1 = mkDoor(e1); d1._grants.set(endB.join('\n'), grant(...endB)); heldSaid = (d1.usesFor({ conversationId: endB[0], scope: endB[0] }) || {}).endedUnread || null; e1.lock('door');
-      await sleep(30); await W.durable(PEND).catch(() => false);
+      await sleep(30);
+      inMemory = [...d1._ended.keys()].some((k) => k.startsWith(endB[0] + '\n'));
     } finally { pr.lift(); }
-    const heldKept = fs.readFileSync(ENDS, 'utf8') === fileBefore;
-    const pendHas = (() => { try { return JSON.parse(fs.readFileSync(PEND, 'utf8')).ends.some((e) => e.conv === endB[0]); } catch { return false; } })();
-    // life 2: a restart STILL held — the side file is read back; then the read again lifts it in this life
+    const heldKept = fs.readFileSync(ENDS, 'utf8') === fileBefore, noSide = !fs.existsSync(ENDS + '.pending');
+    const lifted = await d1._endsHold.again();
+    const convs = () => { try { return JSON.parse(fs.readFileSync(ENDS, 'utf8')).ends.map((e) => e.conv); } catch { return []; } };
+    await until(() => convs().includes(endB[0]), 3000); await W.durable(ENDS).catch(() => false);
+    const fileAfter = convs();
+    // life 2: reading fine — which ends does a door know?
     const e2 = mkEngine(dataDir); await e2.unlock(PW);
-    pr = placeRefusal(ENDS); let d2, knowsBHeld = false;
-    try { d2 = mkDoor(e2); knowsBHeld = [...d2._ended.keys()].some((k) => k.startsWith(endB[0] + '\n')); } finally { pr.lift(); }
-    const lifted = d2._endsHold ? await d2._endsHold.again() : false;
-    await sleep(30); await W.durable(ENDS).catch(() => false); await sleep(50);
-    const fileAfter = (() => { try { return JSON.parse(fs.readFileSync(ENDS, 'utf8')).ends.map((e) => e.conv); } catch { return []; } })();
-    // life 3: reading fine — which ends does a door know?
-    const e3 = mkEngine(dataDir); await e3.unlock(PW);
-    const d3 = mkDoor(e3);
-    const knows = (conv) => [...d3._ended.keys()].some((k) => k.startsWith(conv + '\n'));
-    return { heldKept, pendHas, heldSaid, knowsBHeld, lifted, fileAfter, pendGone: !fs.existsSync(PEND), knowsA: knows(endA[0]), knowsB: knows(endB[0]) };
+    const d2 = mkDoor(e2);
+    const knows = (conv) => [...d2._ended.keys()].some((k) => k.startsWith(conv + '\n'));
+    return { heldKept, inMemory, noSide, heldSaid, lifted, fileAfter, knowsA: knows(endA[0]), knowsB: knows(endB[0]) };
   }
   {
     const r = await endsScene(RUN);
-    ok(r.heldKept && r.pendHas, '(d) a read that failed at the start HOLDS the ends: nothing written over the file, and an end made while held is kept BESIDE it (the side file)', { heldKept: r.heldKept, beside: r.pendHas });
-    ok(r.knowsBHeld, '(d) …a restart while STILL held reads the held life\'s end back from beside the file');
+    ok(r.heldKept && r.inMemory && r.noSide, '(d) a read that failed at the start HOLDS the ends: nothing written over the file, and an end made while held lives in MEMORY — no side file (主开发 r3325)', { heldKept: r.heldKept, inMemory: r.inMemory, noSide: r.noSide });
     ok(typeof r.heldSaid === 'string' && /could not be read/.test(r.heldSaid) && /may miss/.test(r.heldSaid), '(d) …a lookup of the ended list while HELD says so (r3104): the agent\'s `uses` carries the hold\'s words — the list may miss an end', { said: !!r.heldSaid });
-    ok(r.lifted === true && r.fileAfter.includes('cid-made-up-a') && r.fileAfter.includes('cid-made-up-b') && r.pendGone, '(d) …the read again off the loop lifts it: the file\'s ends and the held ones are written ONCE, and the side file goes', { lifted: r.lifted, file: r.fileAfter, sideGone: r.pendGone });
+    ok(r.lifted === true && r.fileAfter.includes('cid-made-up-a') && r.fileAfter.includes('cid-made-up-b'), '(d) …the read again off the loop lifts it: the file\'s ends and the held ones are written ONCE', { lifted: r.lifted, file: r.fileAfter });
     ok(r.knowsA && r.knowsB, '(d) …and the next start knows both ends: none was lost', { a: r.knowsA, b: r.knowsB });
+  }
+  {
+    // r3325: a RESTART while still held loses the ends made meanwhile — NEWS only (said: the list «may miss an end»); the file never
+    // written over, its own ends kept
+    const dataDir = freshDir('ends-restart');
+    const e0 = mkEngine(dataDir); await e0.setup(PW);
+    const ENDS = path.join(dataDir, 'vault-grant-ends.json'), W = SW.storeWriter();
+    const mkDoor = (vault) => RUN.create({ dataDir, vault, userTodos: null, sources: {}, log: () => { } });
+    const endA = ['cid-made-up-ra', 'secrets:secret:dddd000004#secret'], endB = ['cid-made-up-rb', 'secrets:secret:eeee000005#secret'];
+    const grant = (conv, id) => ({ conv, entries: [id], at: Date.now() - 1000, until: Date.now() + 3600e3, once: false, purpose: 'made-up purpose' });
+    const d0 = mkDoor(e0); d0._grants.set(endA.join('\n'), grant(...endA)); e0.lock('door');
+    await until(() => fs.existsSync(ENDS), 3000); await W.durable(ENDS).catch(() => false);
+    const before = fs.readFileSync(ENDS, 'utf8');
+    const e1 = mkEngine(dataDir); await e1.unlock(PW);
+    let pr = placeRefusal(ENDS);
+    try { const d1 = mkDoor(e1); d1._grants.set(endB.join('\n'), grant(...endB)); e1.lock('door'); await sleep(30); } finally { pr.lift(); }
+    const e2 = mkEngine(dataDir); await e2.unlock(PW);
+    pr = placeRefusal(ENDS); let d2, said = null;
+    try { d2 = mkDoor(e2); said = (d2.usesFor({ conversationId: endB[0], scope: endB[0] }) || {}).endedUnread || null; } finally { pr.lift(); }
+    const lifted = await d2._endsHold.again();
+    await sleep(30); await W.durable(ENDS).catch(() => false);
+    const knows = (conv) => [...d2._ended.keys()].some((k) => k.startsWith(conv + '\n'));
+    ok(fs.readFileSync(ENDS, 'utf8') !== '' && lifted === true && knows(endA[0]) && !knows(endB[0]) && /may miss/.test(String(said || '')), '(d) r3325: a RESTART while still held loses the end made meanwhile — news only, said («may miss an end»); the file\'s own end kept, never written over while held', { a: knows(endA[0]), b: knows(endB[0]), said: !!said, unchangedWhileHeld: before.length > 0 });
   }
   {
     // r3104: a TORN lift is told IN PLACE — the agent's ended list says the list was damaged, WHERE its bytes are kept and what to do,
@@ -550,43 +615,47 @@ async function main() {
     ok(r2.copies === 1 && !r2.names && !r2.after, '(d) CONTROL (a lift that names nothing): the ends start empty in silence — red', r2);
   }
   {
-    // r3230's reader table: an end TAKEN BACK while the ends are HELD (here: the entry deleted) never comes back at the lift's merge —
-    // across a restart while still held too. RED: a merge that does not ask what was taken back
+    // r3230's reader table: an end TAKEN BACK while the ends are HELD (here: the entry deleted) never comes back at the lift's merge;
+    // and an end of that entry made AFTER the taking back stands (r3325). RED: a merge that does not ask what was taken back
     async function goneScene(runMod) {
       const dataDir = freshDir('ends-gone');
       const e0 = mkEngine(dataDir); await e0.setup(PW);
-      const ENDS = path.join(dataDir, 'vault-grant-ends.json'), PEND = ENDS + '.pending', W = SW.storeWriter();
+      const ENDS = path.join(dataDir, 'vault-grant-ends.json'), W = SW.storeWriter();
       const mkDoor = (vault) => runMod.create({ dataDir, vault, userTodos: null, sources: {}, log: () => { } });
-      const endA = ['cid-made-up-g', 'secrets:secret:cccc000003#secret'];
-      const d0 = mkDoor(e0); d0._grants.set(endA.join('\n'), { conv: endA[0], entries: [endA[1]], at: Date.now() - 1000, until: Date.now() + 3600e3, once: false, purpose: 'made-up purpose' }); e0.lock('door');
-      await sleep(30); await W.durable(ENDS).catch(() => false);
-      const onDiskBefore = (() => { try { return JSON.parse(fs.readFileSync(ENDS, 'utf8')).ends.some((e) => e.conv === endA[0]); } catch { return false; } })();
+      const endA = ['cid-made-up-g', 'secrets:secret:cccc000003#secret'], endC = ['cid-made-up-h', 'secrets:secret:ffff000006#secret'];
+      const grant = (conv, id, at = Date.now() - 1000) => ({ conv, entries: [id], at, until: Date.now() + 3600e3, once: false, purpose: 'made-up purpose' });
+      const d0 = mkDoor(e0); d0._grants.set(endA.join('\n'), grant(...endA)); d0._grants.set(endC.join('\n'), grant(...endC)); e0.lock('door');
+      await until(() => fs.existsSync(ENDS), 3000); await W.durable(ENDS).catch(() => false);
+      const onDiskBefore = (() => { try { const c = JSON.parse(fs.readFileSync(ENDS, 'utf8')).ends.map((e) => e.conv); return c.includes(endA[0]) && c.includes(endC[0]); } catch { return false; } })();
       const e1 = mkEngine(dataDir); await e1.unlock(PW);
-      let pr = placeRefusal(ENDS);
-      try { const d1 = mkDoor(e1); d1.forgetEntry(endA[1]); await sleep(30); await W.durable(PEND).catch(() => false); } finally { pr.lift(); }   // life 1, held: the entry deleted
-      const e2 = mkEngine(dataDir); await e2.unlock(PW);
-      pr = placeRefusal(ENDS); let d2;
-      try { d2 = mkDoor(e2); } finally { pr.lift(); }   // life 2: a restart STILL held
-      const lifted = await d2._endsHold.again();
+      const pr = placeRefusal(ENDS); let d1;
+      try {
+        d1 = mkDoor(e1);
+        d1.forgetEntry(endA[1]);   // held: entry A deleted
+        d1.forgetEntry(endC[1]); d1._grants.set(endC.join('\n'), grant(endC[0], endC[1], Date.now() + 5)); e1.lock('door');   // held: entry C deleted, then a grant of it given AFTER and ended by a lock
+        await sleep(30);
+      } finally { pr.lift(); }
+      const lifted = await d1._endsHold.again();
       await sleep(30); await W.durable(ENDS).catch(() => false);
-      const back = [...d2._ended.keys()].some((k) => k.startsWith(endA[0] + '\n'));
+      const recOf = (conv) => [...d1._ended.values()].find((e) => e.conv === conv) || null;
       const fileBack = (() => { try { return JSON.parse(fs.readFileSync(ENDS, 'utf8')).ends.some((e) => e.conv === endA[0]); } catch { return null; } })();
-      return { onDiskBefore, lifted, back, fileBack };
+      const c = recOf(endC[0]);
+      return { onDiskBefore, lifted, back: !!recOf(endA[0]), fileBack, laterStands: !!c && c.endedBy === 'lock' };
     }
     const r = await goneScene(RUN);
-    ok(r.onDiskBefore && r.lifted === true && !r.back && r.fileBack === false, '(d) an end TAKEN BACK while held (its entry deleted) never comes back at the lift, across a restart while still held (r3230\'s reader table)', r);
+    ok(r.onDiskBefore && r.lifted === true && !r.back && r.fileBack === false, '(d) an end TAKEN BACK while held (its entry deleted) never comes back at the lift (r3230\'s reader table)', r);
+    ok(r.laterStands, '(d) r3325: …and an end of that entry made AFTER the taking back stands (a later end is never swallowed)', r);
     const M2 = mutantCopies('vault-side-stores-d-gone', REPO);
     const SRC2 = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
     const r2 = await goneScene(M2.load('src/server/vault-run-door.js', anchored(SRC2, "      if ((goneEntriesHeld.get(r.id) || 0) >= r.endedAt || (gonePairsHeld.get(k) || 0) >= r.endedAt) continue;", '', 'merge-forgets-gone'), 'merge-forgets-gone'));
     ok(r2.back, '(d) CONTROL (a merge that does not ask what was taken back): the deleted entry\'s end is back after the lift — red', r2);
   }
   {
+    // the held life's red: a lift that does not fold the FILE's own ends in — the next write keeps only the held ones
     const M = mutantCopies('vault-side-stores-d', REPO);
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-    const cut = "if (!endsHold.writable('a grant end')) { w.dirty(PENDING_FILE, { name: 'vault-grant-ends-pending.write', produce: body, mode: 0o600 }); pendingOwed = true; return; }";
-    ok(SRC.split(cut).length === 2, '(d) the side file is there once (the control below takes it out)');
-    const r = await endsScene(M.load('src/server/vault-run-door.js', anchored(SRC, cut, "if (!endsHold.writable('a grant end')) return;", 'no-pending'), 'no-pending'));
-    ok(!r.knowsB, '(d) CONTROL (a copy that keeps the held ends in memory only): the restart loses the end made while held — red', { b: r.knowsB });
+    const r = await endsScene(M.load('src/server/vault-run-door.js', anchored(SRC, 'if (v && Array.isArray(v.ends)) mergeEnds(v.ends); ', '', 'lift-forgets-file'), 'lift-forgets-file'));
+    ok(!r.knowsA, '(d) CONTROL (a lift that does not fold the file\'s ends in): the file\'s own end is lost at the lift — red', { a: r.knowsA });
   }
 }
 
