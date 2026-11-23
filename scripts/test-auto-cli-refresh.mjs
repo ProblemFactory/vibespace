@@ -343,15 +343,15 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     fs.writeFileSync(path.join(ctl.dataDir, 'auto-cli-state.json'), '{not json');
     const { loadState } = require(REAL_LOOP);
     const e = loadState(ctl.dataDir, T0);
-    ok(e.attempts.size === 0 && e.projReads.size === 0, '③ an unreadable state file starts empty (never throws; the `age >= floorMs` guard is the floor without it)');
+    ok(e.attempts.size === 0 && e.projReads.size === 0 && e.unknownAt === T0, '③ an unreadable state file starts with no stamps and UNKNOWN (never throws; the ban-safety leg in §10b: every unasked account waits the longest backoff from this start)');
     // …and says so, ONCE (quota r3); a missing file (first boot) stays silent
     for (const [label, content] of [['corrupt JSON', '{not json'], ['a JSON array', '[1,2,3]'], ['a bare number', '42']]) {
       fs.writeFileSync(path.join(ctl.dataDir, 'auto-cli-state.json'), content);
       const warns = []; const st2 = loadState(ctl.dataDir, T0, (l) => warns.push(l));
-      ok(st2.attempts.size === 0 && warns.length === 1 && /pacing state unreadable, starting empty/.test(warns[0]), `③ an unreadable state file (${label}) starts empty with ONE warn line naming it (red on quota r2: silent)`, warns);
+      ok(st2.attempts.size === 0 && st2.unknownAt === T0 && warns.length === 1 && /pacing state unreadable, unknown: .* — every account waits the longest backoff \(320 min\)/.test(warns[0]), `③ an unreadable state file (${label}) starts UNKNOWN with ONE warn line naming it and the wait (red on quota r2: silent)`, warns);
     }
     fs.rmSync(path.join(ctl.dataDir, 'auto-cli-state.json'));
-    { const warns = []; loadState(ctl.dataDir, T0, (l) => warns.push(l)); ok(warns.length === 0, '③ …a MISSING file (first boot) starts empty silently', warns); }
+    { const warns = []; const st3 = loadState(ctl.dataDir, T0, (l) => warns.push(l)); ok(warns.length === 0 && st3.unknownAt == null, '③ …a MISSING file (first boot) starts empty silently — never unknown', warns); }
   }
   // THE CLOCK STEPPED BACK (quota r3): a state file whose stamps are in the FUTURE pinned every rung of that account off
   // until the wall clock passed them — and since nothing spawned, nothing rewrote the file
@@ -650,6 +650,51 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     w.rows[3] = { ...w.rows[3], loginState: { state: 'oat-only', login: 'none', oatFile: true }, oatFile: { state: 'written', cli: '2.1.306' } }; // the sweep wrote it
     await w.run(30);
     ok(of(w, 'sub-bad').length === 0 && linesOf(w, 'sub-bad', /not probed — long-lived token in the account's folder: claude 2\.1\.306 prints no quota lines/).length === 1, '§10b …and the token written to its folder is said by its NEW kind (R3: a folder token is read passively, never probed — the verdict is read each tick, its say-memory per kind)', w.logs.filter((l) => l.includes('sub-bad')).slice(-2));
+  }
+  // THE BAN-SAFETY LAW AT A STATE THAT COULD NOT BE READ (主开发 r3003 / r3019, lane hub-loop-stalls): «unknown: wait the longest»,
+  // never «no backoff». The failing row's state on disk: six failures booked, its last attempt ten minutes ago (the backoff 5 min × 2^6,
+  // hours away). The loop's ONE read of it at its start is a PLACED refusal (EIO, once: never a mount, never a mode change) or torn
+  // bytes: no call to ANY row before the longest backoff has passed from that start; a restart inside the wait, the file still unread,
+  // waits again and nothing is written over the file; past the wait the failing row is asked (paced, never silent for good); a MISSING
+  // file (a first start) is asked at once, as before. RED: today's read put back (any read error ⇒ the empty state: «no backoff»)
+  {
+    const WAIT = require(REAL_LOOP).UNKNOWN_WAIT_MS, WAIT_MIN = WAIT / 60e3;
+    const STATE = { v: 1, attempts: { 'sub-bad': T0 - 10 * 60e3 }, fails: { 'sub-bad': 6 }, projReads: {} };
+    const STATE_TAIL = `${path.sep}data${path.sep}auto-cli-state.json`;
+    // the PLACED read: the next read of the state file answers EIO ('eio') or returns torn bytes ('torn'), then real reads
+    const placeState = (mode) => { const real = fs.readFileSync; let n = 0, file = null;
+      fs.readFileSync = function (p, ...a) { if (typeof p === 'string' && p.endsWith(STATE_TAIL) && n < 1) { n++; file = p; if (mode === 'torn') return JSON.stringify(STATE).slice(0, 30); throw Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' }); } return real.call(this, p, ...a); };
+      return { seen: () => n, file: () => file, restore: () => { fs.readFileSync = real; } }; };
+    const placed = (mode, opts) => { const pr = placeState(mode); try { const w = world(opts); return { w, seen: pr.seen(), file: pr.file() }; } finally { pr.restore(); } };
+    const mins = (w) => w.calls.map((c) => (c.t - T0) / 60e3);
+    const bad = (w) => w.calls.filter((c) => c.key === 'sub-bad');
+    // CONTROL: the state read — the failing row is held by its backoff (the row the state does not name is asked at once)
+    const c0 = world({ stateFile: STATE }); await c0.run(60);
+    ok(bad(c0).length === 0 && of(c0, 'sub-ok').length >= 1, `§ban-safety CONTROL: the state read ⇒ the failing row's backoff holds (${bad(c0).length} calls in the hour); a row the state does not name is asked (${of(c0, 'sub-ok').length})`, mins(c0));
+    for (const mode of ['eio', 'torn']) {
+      const { w, seen, file } = placed(mode, { stateFile: STATE });
+      await w.run(WAIT_MIN - 1);
+      const inWait = w.calls.length, bytes = file ? fs.readFileSync(file, 'utf8') : null;
+      ok(seen === 1 && !!file && inWait === 0 && bytes === JSON.stringify(STATE),
+        `§ban-safety (${mode}): the state's one read at the start ${mode === 'eio' ? 'refused (EIO)' : 'torn'} ⇒ NO call to any row in the ${WAIT_MIN - 1} min of the longest backoff (${inWait}), and the file is not written over (${bytes === JSON.stringify(STATE) ? 'its bytes as they were' : 'CHANGED'})`, { calls: mins(w), seen });
+      await w.run(10);
+      ok(bad(w).length >= 1 && (bad(w)[0].t - T0) / 60e3 >= WAIT_MIN, `§ban-safety (${mode}): past the wait the failing row is asked again (${bad(w).length}, at min ${mins(w).join(', ')}) — paced, never silent for good`, mins(w));
+    }
+    { // a restart INSIDE the wait, the file still unread: the wait again from that start — and still nothing written over the file
+      const { w, file } = placed('eio', { stateFile: STATE });
+      await w.run(100);
+      const pr = placeState('eio'); try { w.restart(); } finally { pr.restore(); }
+      await w.run(WAIT_MIN - 1);
+      ok(w.calls.length === 0 && fs.readFileSync(file, 'utf8') === JSON.stringify(STATE), `§ban-safety: a restart at min 100 with the file still unread waits the longest again from that start — no call in ${100 + WAIT_MIN - 1} min (${w.calls.length}), the file as it was`, mins(w));
+    }
+    const fresh = world({ stateFile: null }); await fresh.run(10);
+    ok(bad(fresh).length >= 1 && bad(fresh)[0].t - T0 < 10 * 60e3, `§ban-safety: a MISSING state file (a first start) is no unknown — the failing row is asked in its first minutes, as before (min ${bad(fresh).length ? (bad(fresh)[0].t - T0) / 60e3 : 'none'})`, mins(fresh));
+    // RED: today's read put back — any read error ⇒ the empty state, the row asked at minute 0
+    const OLD = ["  let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { return e && e.code === 'ENOENT' ? st : unknown(e.message); }", "  let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { return st; }"];
+    ok(loopTxt.split(OLD[0]).length === 2, '§ban-safety: the RED\'s anchor is the real loop\'s read, once');
+    const OLD_LOOP = path.join(scratch, 'loop-old-read.js'); fs.writeFileSync(OLD_LOOP, loopTxt.replace(OLD[0], OLD[1]));   // stale-pins: kept — the read as the release had it, planted back as the RED
+    const { w: r0 } = placed('eio', { stateFile: STATE, loopFile: OLD_LOOP }); await r0.run(60);
+    ok(bad(r0).length >= 1 && bad(r0)[0].t - T0 < 10 * 60e3, `§ban-safety RED: today's read (a refused read ⇒ the empty state) asks the failing row in its first minutes (min ${bad(r0).length ? (bad(r0)[0].t - T0) / 60e3 : 'none'}; ${bad(r0).length} calls in the hour)`, mins(r0));
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts
   const loopSrc = fs.readFileSync(REAL_LOOP, 'utf8'), ur = fs.readFileSync(new URL('../src/usage-routes.js', import.meta.url), 'utf8'), acc = fs.readFileSync(new URL('../src/accounts.js', import.meta.url), 'utf8');

@@ -29,8 +29,21 @@
 // spends its vendor call) and again after it (the backoff and the bought
 // bucket) — at most two small writes per 60 s tick, so there is nothing to
 // flush on SIGTERM that is not already on disk. A missing file starts empty
-// silently (first boot); an unreadable one starts empty with ONE warn line
-// naming it (quota r3). The drift/age rungs are restart-safe by construction;
+// silently (first boot). AN UNREADABLE ONE IS «UNKNOWN: WAIT THE LONGEST»,
+// NEVER «NO BACKOFF» (the ban-safety law, 主开发 r3003 / r3019): a file that is
+// there and could not be read — a failed read, bytes that do not parse, not an
+// object — may have held any backoff, so every account this life has not
+// asked waits UNKNOWN_WAIT_MS (the longest backoff, 5 min × 2^6) from the
+// start that met it: no /usage call is ever made sooner because the file
+// failed to read. ONE warn line names it. NOTHING IS WRITTEN OVER THE FILE
+// while unknown (saveState refuses: an unprobeable row's said-once memory
+// stays in memory meanwhile — a write of the empty maps would be read at the
+// next start as «no backoff»), so a restart meanwhile reads the same file
+// again: still unknown ⇒ the wait again from that start; readable ⇒ its own
+// pacing. The tick ends the unknown once the wait has passed (a clock that
+// stepped back moves its start to now); past it the old bytes pace nothing
+// (every backoff, idle and active cadence is shorter) and the next save
+// writes the state over them. The drift/age rungs are restart-safe by construction;
 // the projection's `age >= floorMs` guard is the floor without the file.
 // THE CLOCK CAN STEP BACK (quota r3: a VM snapshot restore, an NTP step after
 // suspend): a stamp in the FUTURE would pin every rung of that account off
@@ -70,6 +83,7 @@ const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, prob
 
 const STATE_FILE = 'auto-cli-state.json';
 const ATTEMPT_KEEP_MS = 24 * 3600e3; // an attempt older than a day paces nothing (the longest backoff is 5 min × 2^6 = 5.3 h)
+const UNKNOWN_WAIT_MS = 5 * 60e3 * Math.pow(2, 6); // a state that could not be read: every unasked account waits the longest backoff (the ban-safety law)
 const CLOCK_SKEW_MS = 60e3; // a stamp further in the future than this is a clock that stepped back, not a race
 
 /** Clamp every stamp to `now` (quota r3) — returns how many it moved. */
@@ -91,9 +105,11 @@ function clampStamps(st, now) {
 function loadState(dataDir, now, warn = () => {}) {
   const st = { attempts: new Map(), fails: new Map(), projReads: new Map(), said: new Map() };
   const fp = path.join(dataDir, STATE_FILE);
-  let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { if (e && e.code !== 'ENOENT') warn(`[auto-cli] pacing state unreadable, starting empty: ${e.message}`); return st; }
-  let raw = null; try { raw = JSON.parse(text); } catch (e) { warn(`[auto-cli] pacing state unreadable, starting empty: ${e.message}`); return st; }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { warn(`[auto-cli] pacing state unreadable, starting empty: not an object (${Array.isArray(raw) ? 'array' : typeof raw})`); return st; }
+  // THE BAN-SAFETY LAW: a file there that could not be read is «unknown» (`unknownAt` = this start) — never «no backoff»
+  const unknown = (why) => { st.unknownAt = now; warn(`[auto-cli] pacing state unreadable, unknown: ${why} — every account waits the longest backoff (${Math.round(UNKNOWN_WAIT_MS / 60e3)} min) before its next /usage read`); return st; };
+  let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { return e && e.code === 'ENOENT' ? st : unknown(e.message); }
+  let raw = null; try { raw = JSON.parse(text); } catch (e) { return unknown(e.message); }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return unknown(`not an object (${Array.isArray(raw) ? 'array' : typeof raw})`);
   const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
   for (const [k, v] of Object.entries(obj(raw.attempts))) if (Number.isFinite(v) && now - v < ATTEMPT_KEEP_MS) st.attempts.set(k, v);
   for (const [k, v] of Object.entries(obj(raw.fails))) if (Number.isFinite(v) && v > 0) st.fails.set(k, v);
@@ -108,6 +124,7 @@ function loadState(dataDir, now, warn = () => {}) {
   return st;
 }
 function saveState(dataDir, st, warn) {
+  if (st.unknownAt != null) return;   // never over a state file that could not be read, while its wait runs (the ban-safety law)
   try {
     const fp = path.join(dataDir, STATE_FILE);
     fs.mkdirSync(dataDir, { recursive: true });
@@ -170,6 +187,7 @@ function createAutoCliLoop(d) {
       const { since: factsSince } = await d.accounts.signinFactsSettled();
       const now = clock();
       if (clampStamps(st, now)) warn('[auto-cli] the clock stepped back — pacing stamps clamped to now');
+      if (st.unknownAt != null) { if (st.unknownAt > now) st.unknownAt = now; else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) st.unknownAt = null; }   // the unknown state's wait: its end (a step back starts it at now)
       const list = [];
       // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
       // a wandering threshold, not a fixed cadence
@@ -200,6 +218,7 @@ function createAutoCliLoop(d) {
         // A LAPSED SUBSCRIPTION (2026-10-08) stays on this rung at the idle cadence — its failures do NOT
         // back off to hours: the next read after a renewal is the evidence that re-admits it (memberServeLapsed)
         const lapsed = !!(d.memberServeLapsed && d.memberServeLapsed(a.id));
+        if (st.unknownAt != null) continue;   // the state unread: «unknown — wait the longest» (the ban-safety law; the tick above ends it)
         if (lapsed ? now - (attempts.get(a.id) || 0) < idleMaxAgeMs : (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6)))) continue;
         let est = null; try { est = raw ? d.usageEstimator.estimateFor(a.id, raw, now) : null; } catch { }
         // B-a5c0: a raw bucket whose window already reset is NO control for the
@@ -262,4 +281,4 @@ function createAutoCliLoop(d) {
   };
 }
 
-module.exports = { createAutoCliLoop, loadState, saveState, clampStamps, lastBoughtInstant, STATE_FILE, projectionBucketBought };
+module.exports = { createAutoCliLoop, loadState, saveState, clampStamps, lastBoughtInstant, STATE_FILE, UNKNOWN_WAIT_MS, projectionBucketBought };
