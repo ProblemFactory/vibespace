@@ -1849,7 +1849,7 @@ console.log('\n§2o a picture is of the page in front: every script that opens a
     'scripts/test-agent-window-chrome.mjs': ['front', OWN_WINDOW, "send('Target.createTarget', { url: 'about:blank', newWindow: true })"],
     'scripts/test-attention-policy-ui.mjs': ['front', "every shot is of the newest /json/new page: d's shots come before ph opens; ph, sp, each loop's p and sb are shot before the next page opens", "const ph = await page(390, 844, 'w=100%25');"],
     'scripts/test-auto-resume-bulk-chrome.mjs': ['front', OWN_WINDOW, "send('Target.createTarget', { url: 'about:blank', newWindow: true })"],
-    'scripts/test-channel-api-chrome.mjs': ['front', "p1 is shot before the next newPage() opens; p3, p9, p10 and pH are each shot before a later page opens", "ok(await p1.shot('api-dialog-zh.png'"],
+    'scripts/test-channel-api-chrome.mjs': ['front', "p1 is shot before the next newPage() opens; p3, p9, p10 and pH are each shot before a later page opens", "await p1.shot('api-dialog-zh.png'"],   // B-1747 (r3179): the anchor reads the same before and after the guard tool's wrap
     'scripts/test-channel-edit-autosize.mjs': ['front', "the desk page is shot before the phone page opens, and the phone page is the newest when shot", "const P = await page(390, 780, 'after.js');"],
     'scripts/test-channel-outbox-window.mjs': ['front', "p1, p2, p3 and p5 are each shot while newest; ocdPage runs one page at a time, so each p is the newest at its shot", "for (const lang of ['zh', 'en']) await ocdPage(lang);"],
     'scripts/test-channel-reauth-line.mjs': ['front', "d is shot before ph opens; ph and lp are each the newest when shot", "const ph = await page(390, 844, 'b=after.js&w=100%25');"],

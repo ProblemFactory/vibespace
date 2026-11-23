@@ -286,6 +286,10 @@ export function anchorHelpers(src, { ast: given = null, plan = false } = {}) {
       if (n.type === 'BinaryExpression' || n.type === 'LogicalExpression') return ofAnchor(n.left) || ofAnchor(n.right);
       if (n.type === 'UnaryExpression') return ofAnchor(n.argument);
       if (n.type === 'MemberExpression') return ofAnchor(n.object);
+      // B-1747 (the coordinator's r3179): the guard tool's wraps — verdictOf / verdictOfGuard / gateOf / gateOfGuard of ONE value —
+      // judge that value: read through them as through `!` (the apply at the cut of 2.369.416 put eleven helpers' checks of their
+      // anchor under such a call, and this walk read them as helpers that do not fail by name)
+      if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && /^(?:verdictOf|gateOf)(?:Guard)?$/.test(n.callee.name) && n.arguments.length === 1) return ofAnchor(n.arguments[0]);
       if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return false;
       if (isEditCall(n) && ev.has(n.arguments[0].name)) return true;
       if (TESTS.test(n.callee.property.name || '') && (n.arguments.some((g) => g.type === 'Identifier' && ev.has(g.name)) || (n.callee.object.type === 'Identifier' && ev.has(n.callee.object.name)))) return true;
