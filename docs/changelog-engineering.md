@@ -39,6 +39,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE REMOVER QUESTION (r3019): NO REMOVER — a `.forgotten-` folder is removed only by deleteForgotten (a person's click on a named row); orphanCandidates skips `.forgotten-` names; nothing else lists or removes them (read over the tree: every use of isForgottenName / FORGOTTEN_SUFFIX / forgottenDirName / loadForgotten).
 - LEGS: test-browser-housekeeping ③b — two placed refusals (a ledger that does not parse; one this process may not read): refused by name, never written over, the same rows after the read again, torn bytes kept aside byte for byte, a Forget afterwards as before (RED at the candidate d458fc27d: run 483b263b6-20261123064018-box, 4 ✗); test-store-write-census ⑧ gains its answer row.
 
+### bl-browser-b — r3079 (R1 of lane bl-machines-b's remover routes): the env's boot sweep reads the conversations' records, or removes nothing
+- THE FIND: src/server/browser-env.js `liveKeysFromMeta` answered an EMPTY set on a failed listing of session-meta/ and skipped a record that did not parse; the boot sweep then removed, past its grace, a RUNNING conversation's indirection (the pin silently reverts, the next launch lands elsewhere) and its own scratch folder — RED at the candidate d458fc27d (run 406794ed9-20261123091734-box: three placements, 4 removed each).
+- THE CURE: `metaKeysRead` → `{keys, known, why}`; unknown ⇒ the pass removes NOTHING (`metaUnreadable`, said); `liveKeysFromMeta` keeps answering the keys it found (the mint's rule unchanged).
+- THE REMOVER (r3019): this IS a remover (the boot sweep: env indirections + scratch folders by the records' silence) — now told «unknown» and removing zero.
+- LEG: test-browser-handles r3079 — three placed refusals (the folder not a folder, a listing refused, a record that does not parse) + a premise + a CONTROL copy with the release's reading (removes the running conversation's indirection).
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
