@@ -485,13 +485,18 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     fs.mkdirSync(path.join(R8, 'w3'), { recursive: true });
     try {
       await G3.rootFactsNow();   // the boot's await: past the deadline, the named late fact
+      const tSync = Date.now();
       const r1 = await W3.sync();   // B-ddf3 unit 2: the watch's sync answers at the registration's landing (a Promise)
       const t1 = timers.length;
       timers.shift()();   // the first re-judge: it awaits the facts (still out), then syncs again
-      for (let i = 0; i < 50 && timers.length < 1; i++) await new Promise((r) => setImmediate(r));
+      // r3301 (B-3dbd unit 2): the re-judge first AWAITS the root facts (a road through the thread pool), then syncs, then arms —
+      // fifty loop turns were a clock on a loaded machine. The wait ends on the FACT (its timer armed), bounded by a wall time read
+      // from this run: twenty of the first sync's own time, at least 2 s
+      const syncMs = Date.now() - tSync, rejudgeBound = Math.max(2000, 20 * syncMs);
+      for (const tEnd = Date.now() + rejudgeBound; timers.length < 1 && Date.now() < tEnd;) await new Promise((r) => setTimeout(r, 5));
       const st3 = G3.rootReadStats();
       console.log = log0;
-      console.log(`  (the boot with facts that never come: the sync ${r1 && r1.refused ? r1.refused.kind : JSON.stringify(r1)}; notices ${JSON.stringify(notes.map((x) => x.slice(0, 120)))}; timers armed ${t1} then ${timers.length}; reads ${JSON.stringify(st3)})`);
+      console.log(`  (the boot with facts that never come: the sync ${r1 && r1.refused ? r1.refused.kind : JSON.stringify(r1)}; notices ${JSON.stringify(notes.map((x) => x.slice(0, 120)))}; timers armed ${t1} then ${timers.length} (waited at most ${rejudgeBound} ms, the first sync ${syncMs} ms); reads ${JSON.stringify(st3)})`);
       ok(!!r1 && r1.skipped === true && r1.refused && r1.refused.kind === 'unknown' && notes.length === 1 && /did not answer in/.test(notes[0]) && t1 === 1 && timers.length === 1 && st3.started === 1 && st3.inFlight === true,
         'B-1425 r827: a BOOT whose facts never come registers nothing, posts ONE owner notice naming the late fact, and its re-judge (one timer at a time) starts NO second read', { r1, notes, t1, timers: timers.length, st3 });
     } finally { console.log = log0; rel3(); }
