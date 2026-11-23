@@ -60,7 +60,9 @@ const filler = () => JSON.stringify({ type: 'assistant', uuid: '11111111-0000-40
 const lines = (chars) => { let s = ''; while (s.length < chars) s += filler() + '\n'; return s; };
 /** the stream parser's expression (src/server/stdout/claude-stream-json.js), chunk by chunk — `trims` counts the cuts */
 const streamThrough = (ring, chars, trim, chunk = 65536) => { const all = lines(chars); let max = 0, trims = 0, at = [], fed = 0; for (let i = 0; i < all.length; i += chunk) { const piece = all.slice(i, i + chunk); fed += piece.length; const before = ring.length + piece.length; ring = trim(ring + piece); if (ring.length < before) { trims++; at.push(fed); } max = Math.max(max, ring.length); } return { ring, last: all.slice(-2000), max, trims, at }; };
-const RELEASE_TRIM = (s) => (s.length > 750000 ? s.slice(-500000) : s);   // the release's writers (the stream parser's numbers)
+const RELEASE_TRIM = (s) => (s.length > 750000 ? s.slice(-500000) : s);
+/** ONE session a stream (line 500's follow): the trim remembers what it carried BY session, as every writer hands its own */
+const trimOne = (mod, ...a) => { const sess = {}; return (s) => mod.trimRing(s, sess, ...a); };   // the release's writers (the stream parser's numbers)
 /** the page's history after an attach: session-store's merge of the ring (with the transcript when one is named), then the normalizer */
 function drawOf(buffer, id = M1, { sid = null, cwd = '/tmp/chat-ring-suite' } = {}) {
   const sm = new SS.SessionMessages({ cwd, backend: 'claude', buffer, ...(sid ? { backendSessionId: sid, claudeSessionId: sid } : {}) }, 'chat-ring-suite');
@@ -75,7 +77,7 @@ const M = mutantCopies('chat-ring', ROOT);
 
 say('① A HELD MESSAGE THROUGH A LONG TURN — the page still draws its bubble and its strip row; one with a PICTURE too');
 WD.section('①');
-const NOCARRY = require(M.write('src/chat-ring.js', anchored(CR_SRC, "  return { buffer: carry + tail, cut: true, carried: keepIdx.size, carriedChars: carry.length, dropped: pick.length - keepIdx.size, droppedIds: [...new Set(droppedIds)] };\n",
+const NOCARRY = require(M.write('src/chat-ring.js', anchored(CR_SRC, "  return { buffer: carry + tail, cut: true, carried: keepIdx.size, carriedChars: carry.length, dropped: pick.length - keepIdx.size, droppedIds: [...new Set(droppedIds)], droppedKinds };\n",
   "  return { buffer: tail, cut: true, carried: 0, carriedChars: 0, dropped: pick.length, droppedIds: [] };   // MUTANT: no carry\n", 'no-carry'), 'no-carry'));
 const OLDBOUND = require(M.write('src/chat-ring.js', anchored(CR_SRC, "const OWED_MAX = 32 * 1024 * 1024;", "const OWED_MAX = 250000;   // MUTANT: 8b6ea0756's carry bound", 'old-bound'), 'old-bound'));
 {
@@ -91,16 +93,16 @@ const OLDBOUND = require(M.write('src/chat-ring.js', anchored(CR_SRC, "const OWE
   ok(mine.ring.endsWith(mine.last) && fin.carried === 3 && fin.dropped === 0 && fin.buffer.startsWith(lead) && tail.length <= CR.RING_KEEP && tail.startsWith('{"type":"assistant"'), `AT a trim: the three owed lines carried in their order, then the kept tail (${tail.length} ≤ ${CR.RING_KEEP} chars) cut AT A LINE`, { carried: fin.carried, tail: tail.length });
   const rel = drawOf(streamThrough(ringAt(M1), 900000, RELEASE_TRIM).ring);
   ok(!rel.bubble && !rel.strip, 'RED: the release\'s trim (.slice(-500000) past 750 000) — no bubble, no strip row for the held message', rel);
-  const nc = drawOf(streamThrough(ringAt(M1), 900000, (s) => NOCARRY.trimRing(s, {})).ring);
+  const nc = drawOf(streamThrough(ringAt(M1), 900000, trimOne(NOCARRY)).ring);
   ok(!nc.bubble && !nc.strip, 'RED: a copy of src/chat-ring.js without the carry — no bubble, no strip row', nc);
   // r1488 (1): THE COMMONEST HELD MESSAGE — a screenshot, inline in the hub's own send record (no transcript yet: it draws)
   const ringP = ringAt(MP, sendRec(MP, PIC));
   const p0 = drawOf(ringP, MP);
-  const pic = streamThrough(ringP, 900000, (s) => CR.trimRing(s, {}, 'chat-ring-suite'));
+  const pic = streamThrough(ringP, 900000, trimOne(CR, 'chat-ring-suite'));
   const dp = drawOf(pic.ring, MP);
   ok(p0.bubble && p0.picture && dp.bubble && dp.words && dp.picture && dp.strip, `a held message WITH A PICTURE (its send record ${sendRec(MP, PIC).length} chars): after 900 000 chars of the turn its bubble still draws, words and picture, and its strip row`, dp);
   const warned = []; const warnWas = console.warn; console.warn = (...a) => warned.push(a.join(' '));
-  const ob = drawOf(streamThrough(ringP, 900000, (s) => OLDBOUND.trimRing(s, {}, 'chat-ring-suite')).ring, MP);
+  const ob = drawOf(streamThrough(ringP, 900000, trimOne(OLDBOUND, 'chat-ring-suite')).ring, MP);
   console.warn = warnWas;
   ok(!ob.bubble && ob.strip && warned.some((w) => w.includes(MP) && w.includes('1 owed record')), 'RED: a copy with 8b6ea0756\'s 250 000-char bound — the picture\'s bubble is GONE (the strip row stays); this tree\'s guard at least SAYS it in the journal by msgId and count', { ob, warned: warned.slice(0, 2) });
   const app = CR.trimRing(mine.ring + lines(300000) + JSON.stringify({ type: 'user', message: { role: 'user', content: 'x' }, msgId: 'later', timestamp: '2026-11-21T10:05:00.000Z', _fromWebui: true }) + '\n', sess, 'chat-ring-suite');
@@ -124,7 +126,7 @@ const FORGETS = require(M.write('src/chat-ring.js', anchored(CR_SRC, "  if (s.le
 say('③ NOT OWED, NOT CARRIED — a message that ran (or was removed: the next queue says so), a handed one once it landed');
 WD.section('③');
 {
-  const ran = streamThrough(ringAt(M3) + queue([]) + '\n', 900000, (s) => CR.trimRing(s, {})).ring;
+  const ran = streamThrough(ringAt(M3) + queue([]) + '\n', 900000, trimOne(CR)).ring;
   ok(!ran.includes(M3), 'a held message that RAN — or was REMOVED: either way the next queue_changed lists it no more (the same rule) — neither its copy nor its queue records are carried');
   const handed = lines(20000) + copy(M2) + '\n' + handover(M2, 'handed') + '\n';
   const sess = {};
@@ -132,7 +134,7 @@ WD.section('③');
   ok(r1.startsWith(copy(M2) + '\n' + handover(M2, 'handed') + '\n') && drawOf(r1, M2).bubble, 'a HANDED message (written into the running turn, not yet landed): its copy and its hand-over carried, its bubble drawn');
   const r2 = streamThrough(r1 + handover(M2, 'landed') + '\n', 900000, (s) => CR.trimRing(s, sess)).ring;
   ok(!r2.includes(M2), 'the same message once it LANDED: nothing carried at the next trim (the transcript holds it now)');
-  const later = streamThrough(ringAt(M1) + lines(10000) + queue([M1]) + '\n', 900000, (s) => CR.trimRing(s, {})).ring;
+  const later = streamThrough(ringAt(M1) + lines(10000) + queue([M1]) + '\n', 900000, trimOne(CR)).ring;
   ok(later.split('"type":"queue_changed"').length === 2, 'a queue said again later: ONE queue record in the ring (the earlier, superseded one is not carried)');
 }
 
@@ -150,6 +152,12 @@ WD.section('④');
   const r = CR.trimRingOf(ring, { owedMax: 130000 });
   ok(r.dropped > 0 && out.includes(copy(ids[5]) + '\n') && !out.includes(copy(ids[0]) + '\n') && warned.length === 1 && warned[0].includes('conv-guard') && warned[0].includes(`${r.dropped} owed record`) && r.droppedIds.every((id) => warned[0].includes(id)),
     `past a guard of 130 000 chars: the newest owed kept, ${r.dropped} oldest left — and the journal says so ONCE, by conversation, count and msgIds («${(warned[0] || '').slice(0, 120)}…»)`, { dropped: r.dropped, warned });
+  const kw = []; const kwWas = console.warn; console.warn = (...a) => kw.push(a.join(' '));
+  const kinds = CR.trimRingOf(handover('msg-kind', 'handed') + '\n' + copy('msg-kind', 'k') + '\n' + lines(800000), { owedMax: 10 });
+  CR.trimRing(handover('msg-kind', 'handed') + '\n' + copy('msg-kind', 'k') + '\n' + lines(800000), {}, 'conv-kinds', { owedMax: 10 });
+  console.warn = kwWas;
+  ok(kinds.dropped === 2 && kinds.droppedKinds.message === 1 && kinds.droppedKinds.handover === 1 && kw.length === 1 && kw[0].includes('2 owed record') && kw[0].includes('msg-kind') && kw[0].includes('1 hand-over record'),
+    `the last guard SAYS WHAT IT LISTS: a held message by its msgId, a hand-over record by its kind (no id of its own) — «${(kw[0] || '').slice(0, 140)}»`, { kinds: kinds.droppedKinds, kw });
   const sys = CR.trimRingOf(lines(20000) + queue([], 2) + '\n' + lines(800000), {});
   ok(sys.buffer.startsWith(queue([], 2) + '\n'), 'a queue holding only frames VibeSpace typed (no msgId) keeps its strip row through a trim');
   ok(CR.OWED_MAX === 32 * 1024 * 1024 && CR.RING_MAX - CR.RING_KEEP === 250000, 'THE NUMBERS: the ring is bounded by RING_MAX (750 000) + what is owed, and what is owed by OWED_MAX (32 MiB — the queue caps no count, a frame only the socket\'s 100 MiB); the next trim ≥ 250 000 chars of stream away');
@@ -168,11 +176,44 @@ WD.section('⑤');
   ].join('\n') + '\n');
   const live = ringAt(M1, sendRec(M1));   // a live hub (no restart): the hub's own send record, not the wrapper's copy
   const untrimmed = drawOf(live, M1, { sid: SID, cwd: CWD });
-  const trimmed = drawOf(streamThrough(live, 900000, (s) => CR.trimRing(s, {})).ring, M1, { sid: SID, cwd: CWD });
+  const trimmed = drawOf(streamThrough(live, 900000, trimOne(CR)).ring, M1, { sid: SID, cwd: CWD });
   ok(!untrimmed.bubble && untrimmed.strip && untrimmed.stripWords && JSON.stringify(trimmed) === JSON.stringify(untrimmed),
     'WHAT A PERSON SEES (a live hub, tool results written after the held send): the held message in the queue strip with its words, no chat bubble from the hub\'s own send record (the merge drops a send record the transcript has passed) — the trimmed ring draws EXACTLY what the untrimmed one does', { untrimmed, trimmed });
-  const restored = drawOf(streamThrough(ringAt(M1), 900000, (s) => CR.trimRing(s, {})).ring, M1, { sid: SID, cwd: CWD });
+  const restored = drawOf(streamThrough(ringAt(M1), 900000, trimOne(CR)).ring, M1, { sid: SID, cwd: CWD });
   ok(restored.bubble && restored.words && restored.strip, 'after a RESTART (the ring seeded with the wrapper\'s copy): the bubble too — a copy is never dropped for a later user record — through the same long turn', restored);
+}
+
+say('⑦ A HAND-OVER NEVER SETTLED (a wrapper that died mid-turn) — the carried copy past the CLI\'s own record draws ONE bubble');
+WD.section('⑦');
+{
+  // the scene (src/chat-ring.js header): the wrapper handed M2's frame to the CLI, the CLI recorded it, the wrapper died before any
+  // settle — the ring (a restore seeds it from that wrapper's file) keeps the copy and its 'handed' record OWED, and a long turn's
+  // trim carries them to the head of a tail whose first transcript match is AFTER the CLI's record of the frame
+  const SID = '22222222-0000-4000-8000-000000000007', CWD = '/tmp/chat-ring-suite-handed';
+  const dir = path.join(HOME, '.claude', 'projects', SS.cwdToProjectDir(CWD)); fs.mkdirSync(dir, { recursive: true });
+  const rec = (o) => JSON.stringify({ sessionId: SID, cwd: CWD, ...o });
+  const stream = lines(900000).split('\n').filter(Boolean);   // the turn's lines, on stdout AND in the transcript
+  fs.writeFileSync(path.join(dir, SID + '.jsonl'), [
+    rec({ type: 'user', uuid: '33333333-0000-4000-8000-000000000071', timestamp: '2026-11-21T09:59:00.000Z', message: { role: 'user', content: 'start the long task' } }),
+    rec(JSON.parse(stream[0])),
+    rec({ type: 'user', uuid: uuidOf(M2), timestamp: '2026-11-21T10:00:05.000Z', message: { role: 'user', content: [{ type: 'text', text: WORDS[M2] }] } }),   // the CLI's own record of the handed frame
+    ...stream.slice(1).map((l) => rec(JSON.parse(l))),
+  ].join('\n') + '\n');
+  const seeded = stream[0] + '\n' + copy(M2) + '\n' + handover(M2, 'handed') + '\n';   // the dead wrapper's file: no settle, no emptied queue
+  const feed = (rest) => { let ring = seeded; const sess = {}; for (let i = 0; i < rest.length; i += 65536) ring = CR.trimRing(ring + rest.slice(i, i + 65536), sess, 'chat-ring-suite'); return ring; };
+  const trimmed = feed(stream.slice(1).join('\n') + '\n');
+  const untrimmed = seeded + stream.slice(1).join('\n') + '\n';
+  const bubblesOf = (buffer, MMClass) => {
+    const sm = new SS.SessionMessages({ cwd: CWD, backend: 'claude', buffer, backendSessionId: SID, claudeSessionId: SID }, 'chat-ring-suite');
+    const mm = new MMClass('chat-ring-suite'); mm.convertHistory(sm.raw());
+    return mm.messages.filter((m) => m.role === 'user' && JSON.stringify(m.content).includes(WORDS[M2])).length;
+  };
+  const MM_SRC = fs.readFileSync(path.join(ROOT, 'src/message-manager.js'), 'utf8');
+  const NOLATE = require(M.write('src/message-manager.js', anchored(MM_SRC, "      if (raw.webui_copy && raw._fromWebui && raw.msgId && typeof raw.cliUuid === 'string' && raw.cliUuid && this._cliUserUuids && this._cliUserUuids.has(raw.cliUuid)) { this.userMessageIds.set(String(raw.msgId), this._cliUserUuids.get(raw.cliUuid)); return; }\n", '', 'no-late-claim'), 'no-late-claim')).MessageManager;
+  const carriedFirst = trimmed.startsWith(copy(M2) + '\n');
+  const u = bubblesOf(untrimmed, MessageManager), t = bubblesOf(trimmed, MessageManager), tRel = bubblesOf(trimmed, NOLATE), uRel = bubblesOf(untrimmed, NOLATE);
+  ok(carriedFirst && u === 1 && t === 1 && uRel === 1 && tRel === 2,
+    `a copy whose hand-over never settled, CARRIED past the CLI's own record of the frame by a trim: ONE bubble (untrimmed ${u}, trimmed ${t}) — RED: a normalizer whose claim runs only when the copy comes first draws ${tRel} after the trim (${uRel} untrimmed)`, { carriedFirst, u, t, uRel, tRel });
 }
 
 say('⑥ THE CENSUS — every write of a session\'s ring in the tree, each a row; a claude ring\'s goes through the one trim');

@@ -2345,6 +2345,10 @@ class MessageManager extends MessageWindow {
       // msgId already has a bubble is that bubble (the live send's or the copy's), and the CLI's own record of those words
       // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
+      // ORDER-FREE (line 500's follow, 主开发 r2710): a copy whose stamp names a CLI record ALREADY drawn is that record's bubble — the
+      // claim below runs only when the copy comes first; a ring trim can carry a copy the wrapper never settled (it died mid-turn)
+      // past the CLI's own record (src/chat-ring.js header), and the merge then puts the copy after it. Never a second bubble.
+      if (raw.webui_copy && raw._fromWebui && raw.msgId && typeof raw.cliUuid === 'string' && raw.cliUuid && this._cliUserUuids && this._cliUserUuids.has(raw.cliUuid)) { this.userMessageIds.set(String(raw.msgId), this._cliUserUuids.get(raw.cliUuid)); return; }
       if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit, raw.mergedSendUuids, true)) { this._turnStartPending = true; return; } // seam touch-chip-cause × claude-steer: the copied frame DELIVERED as a turn's prompt — that turn opens at its next record
       // AN isMeta COMPANION LINE IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own
       // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every
@@ -2359,6 +2363,11 @@ class MessageManager extends MessageWindow {
       // wrapper says what became of it (only a wrapper that publishes its queue says so)
       const afloat = !!(raw._fromWebui && raw.msgId && (raw.webui_copy || (emit && this._turnLive && !this._turnStartPending && this._queuePublished)));
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex, afloat, startsTurn: !afloat && !metaNote });
+      if (!raw._fromWebui && !raw.origin && typeof raw.uuid === 'string' && raw.uuid) {   // line 500's follow: the CLI's records drawn, by their stamps (a batch: every frame it names)
+        const drawn = this._cliUserUuids || (this._cliUserUuids = new Map());
+        for (const u of [raw.uuid, ...(Array.isArray(raw.mergedSendUuids) ? raw.mergedSendUuids : [])]) if (typeof u === 'string' && u) drawn.set(u, msg.id);
+        while (drawn.size > 256) drawn.delete(drawn.keys().next().value);
+      }
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
         msg.midTurn = true; // seam touch-chip-cause × claude-steer: a copy is made only of a MID-TURN frame — it entered a running turn
         this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, ran: 0 });

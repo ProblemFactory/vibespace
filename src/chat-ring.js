@@ -25,6 +25,18 @@
 //     OLDEST owed records go, and the trim SAYS it in the journal by msgId and count (`dropped`, `droppedIds`).
 // A settled record is never carried (a copy carried past its witness would sit before the transcript's own record of the same
 // words and draw twice). Only lines carrying one of MARKS are parsed (a cut of stream lines parses none).
+// LINE 500's FOLLOW (主开发 r2710), three notes the readers asked for:
+//   · A HAND-OVER WITH NO SETTLE: a wrapper that dies mid-turn writes no settlement for a frame it handed (data/bin/chat-wrapper.js
+//     finalize) and its successor's boot baseline clears only the queue (publishQueue at its start) — so that copy and its 'handed'
+//     record stay owed and are CARRIED FOR THE LIFE OF THE CONVERSATION OBJECT (bounded: OWED_MAX). A restore seeds the ring from
+//     that dead wrapper's file. Carried, the copy can come AFTER the CLI's own record of the frame (the merge anchors the carried
+//     head before the kept tail's first transcript match, src/session-store.js); the normalizer's claim ran only for a copy that
+//     comes first — so src/message-manager.js now also takes a copy whose stamp names a CLI record ALREADY drawn as that bubble
+//     (one bubble, never two; test-chat-ring ⑦ with its RED).
+//   · THE MEMORY IS ONE TRIM STALE: the trigger reads what the LAST trim carried; an owed record that settles after it still counts
+//     until the next trim (that trim runs up to its size later, once) — never earlier, never twice.
+//   · THE LAST GUARD names what it drops by kind: held messages by msgId, a queue record and a hand-over record by kind (they have
+//     no msgId of their own).
 //
 // session-store's history merge (bufferRecordsOf) re-parses a ring whose kept span changed (its tail probe decides: a carried
 // head may keep the first chars the same across trims); the carried lines precede the kept tail, so they anchor before its
@@ -70,11 +82,11 @@ function owedOf(records) {
  *  is not owed is within `max`). `owedChars` = what the last trim of this ring carried (the caller's memory, trimRing below). */
 function trimRingOf(buffer, { max = RING_MAX, keep = RING_KEEP, owedMax = OWED_MAX, owedChars = 0 } = {}) {
   const s = String(buffer || '');
-  if (s.length <= max + Math.max(0, owedChars)) return { buffer: s, cut: false, carried: 0, carriedChars: owedChars, dropped: 0, droppedIds: [] };
+  if (s.length <= max + Math.max(0, owedChars)) return { buffer: s, cut: false, carried: 0, carriedChars: owedChars, dropped: 0, droppedIds: [], droppedKinds: { message: 0, queue: 0, handover: 0 } };
   const nl = s.indexOf('\n', s.length - keep);
   const cutAt = nl >= 0 ? nl + 1 : s.length - keep;   // at a line; one line longer than the ring is cut as before
   const gone = s.slice(0, cutAt), tail = s.slice(cutAt);
-  if (!MARKS.some((m) => gone.includes(m))) return { buffer: tail, cut: true, carried: 0, carriedChars: 0, dropped: 0, droppedIds: [] };
+  if (!MARKS.some((m) => gone.includes(m))) return { buffer: tail, cut: true, carried: 0, carriedChars: 0, dropped: 0, droppedIds: [], droppedKinds: { message: 0, queue: 0, handover: 0 } };
   const goneLines = gone.split('\n');
   goneLines.pop();   // what follows the cut part's last newline is the start of the kept tail's first line (or nothing)
   const goneRecs = goneLines.map((l) => (marked(l) ? parse(l) : null));
@@ -93,14 +105,16 @@ function trimRingOf(buffer, { max = RING_MAX, keep = RING_KEEP, owedMax = OWED_M
     else if (r.type === 'input_handover' && r.state === 'handed' && idsOf(r.msg_ids).some((id) => owed.has(id))) pick.push(i);
   }
   // THE LAST GUARD (OWED_MAX): the newest first; what does not fit goes — and is SAID (trimRing), never silently
-  const keepIdx = new Set(), droppedIds = [];
+  const keepIdx = new Set(), droppedIds = [], droppedKinds = { message: 0, queue: 0, handover: 0 };
   let size = 0;
   for (let j = pick.length - 1; j >= 0; j--) {
     const len = goneLines[pick[j]].length + 1;
-    if (size + len <= owedMax) { keepIdx.add(pick[j]); size += len; } else { const id = ownIdOf(goneRecs[pick[j]]); if (id) droppedIds.push(id); }
+    if (size + len <= owedMax) { keepIdx.add(pick[j]); size += len; continue; }
+    const r = goneRecs[pick[j]], id = ownIdOf(r);
+    if (id) { droppedIds.push(id); droppedKinds.message++; } else if (r.type === 'queue_changed') droppedKinds.queue++; else droppedKinds.handover++;
   }
   const carry = pick.filter((i) => keepIdx.has(i)).map((i) => goneLines[i] + '\n').join('');
-  return { buffer: carry + tail, cut: true, carried: keepIdx.size, carriedChars: carry.length, dropped: pick.length - keepIdx.size, droppedIds: [...new Set(droppedIds)] };
+  return { buffer: carry + tail, cut: true, carried: keepIdx.size, carriedChars: carry.length, dropped: pick.length - keepIdx.size, droppedIds: [...new Set(droppedIds)], droppedKinds };
 }
 
 // what the last trim of each ring carried (by its session) — the trim's memory, so it runs only past RING_MAX + what is owed
@@ -112,7 +126,8 @@ function trimRing(buffer, session = null, id = null, opts = {}) {
   const r = trimRingOf(buffer, { ...opts, owedChars: key ? _carried.get(key) || 0 : 0 });
   if (key && r.cut) _carried.set(key, r.carriedChars);
   if (r.dropped) {
-    try { console.warn(`[ring] ${id || 'a conversation'}: ${r.dropped} owed record(s) past OWED_MAX (${opts.owedMax || OWED_MAX} chars) left by a trim — held message(s) ${r.droppedIds.join(', ') || '(no id)'} will draw no bubble at the next attach`); } catch { }
+    const k = r.droppedKinds || {}, rest = [k.queue ? `${k.queue} queue record` : '', k.handover ? `${k.handover} hand-over record(s)` : ''].filter(Boolean).join(', ');
+    try { console.warn(`[ring] ${id || 'a conversation'}: ${r.dropped} owed record(s) past OWED_MAX (${opts.owedMax || OWED_MAX} chars) left by a trim — ${r.droppedIds.length ? `held message(s) ${r.droppedIds.join(', ')} will draw no bubble at the next attach` : 'no held message among them'}${rest ? ` (and ${rest}, no id of their own)` : ''}`); } catch { }
     try { global.__vsEvent?.('ring-owed-dropped', String(r.dropped)); } catch { }
   }
   return r.buffer;
