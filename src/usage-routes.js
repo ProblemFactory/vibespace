@@ -183,7 +183,7 @@ function readUsageCache() {
 // before. Its other writer, the identity repair (src/reading-repair.js repairGlobalFile), flushes this file before it judges it.
 function writeUsageCache({ evenNone = false } = {}) {
   // r2430: a repair's verdict of NONE for the machine login's reading — the copy says none too (`{ claude: null }`: readUsageCache
-  // reads it as none, repairGlobalFile as «absent»), so a restart never seeds back the reading the repair took away
+  // reads it as none, repairGlobalFile as «absent»), so once it lands a restart does not seed back the reading the repair took away
   if (evenNone) { try { require('./store-writer.js').storeWriter().dirty(USAGE_CACHE_FILE, { name: 'usage-cache.write', makeDir: true, produce: () => JSON.stringify({ claude: _rateLimitCache || null }, null, 2) }); } catch { } return; }
   if (!_rateLimitCache) return;
   try {
@@ -373,11 +373,27 @@ let _codexLinkUndecided = false;   // B-360d (round wldn7whag): this pass could 
  *  in the ingestion moves. */
 const REPAIR_VERDICTS = new Set(['replaced', 'emptied', 'stripped']);
 const repairedGlobal = (rep) => { const row = rep && Array.isArray(rep.identities) ? rep.identities.find((r) => r && r.key === '__global__') : null; return !!(row && REPAIR_VERDICTS.has(row.cache)); };
+/** r2933 — AFTER A VERDICT NO READER OF THAT MEMORY HOLDS THE JUDGED READING: an account the repair's report gives a verdict, and any
+ *  named account's row that holds the judged machine-login reading (the same-account merge put it there — a linked account with no
+ *  dated file of its own keeps it, and the merge would take it back as «the newest»), leave memory; the ingestion then takes each
+ *  from its OWN dated folder file, or none, and the merge can no longer bring the judged reading back to either row or the copy. */
+function dropJudged(rep, judged) {
+  for (const r of (rep && Array.isArray(rep.identities) ? rep.identities : [])) if (r && r.key && r.key !== '__global__' && REPAIR_VERDICTS.has(r.cache)) delete _accountUsage[r.key];
+  const t = judged ? Number(judged.fetchedAt) : 0;
+  if (t) for (const [id, row] of Object.entries(_accountUsage)) if (row && Number(row.fetchedAt) === t) delete _accountUsage[id];
+}
 function reloadRateLimitCache(rep = null) {
-  if (repairedGlobal(rep)) {
+  // r2933 (b): the folder's own state is read through its KEPT REPLY — while the reader is held (no reply), the verdict cannot read
+  // it (a failed read is never «none»): this reload keeps the rule below; the folder's next reply brings the repaired file
+  const held = (() => { try { const st = usageFolder.state(); return !!(st && st.held); } catch { return true; } })();
+  if (repairedGlobal(rep) && !held) {
+    const judged = _rateLimitCache;
     let u = null; try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, '__global__.json'), { via: usageFolder.via }); } catch { u = null; }
     _rateLimitCache = u && typeof u.fetchedAt === 'number' ? u : null;
+    dropJudged(rep, judged);
     writeUsageCache({ evenNone: true });
+    // r2933 (c): the copy LANDS now — a kill inside the writer's delay would leave the judged reading as the next start's seed
+    try { require('./store-writer.js').storeWriter().flushSync([USAGE_CACHE_FILE], { waitedBy: 'the repair verdict (usage-cache.json)' }); } catch { }
     ingestPassiveUsage();
     return;
   }

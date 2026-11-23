@@ -18,6 +18,10 @@
 //     whatever the times say, and the copy (the boot's seed) follows ({ claude: null } for none); with no such verdict nothing
 //     moves. The repair's write is the product's own road (the file, then the write path's notice with replace). RED: the reload
 //     without the verdict keeps the reading the repair judged another account's.
+//  ⑦ r2933: AFTER A VERDICT NO READER OF THAT MEMORY HOLDS THE JUDGED READING — a LINKED account with no dated file of its own
+//     (the same-account merge put the judged reading on its row): replaced, emptied and stripped — the judged reading on neither
+//     row and not in the copy, nor after a restart from that copy. RED: today's reload (the linked row kept: the merge puts it back).
+//     PIN: the three callers hand their report.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -89,9 +93,10 @@ const usageWorld = () => {
   fs.writeFileSync(path.join(cacheDir, '__global__.json'), JSON.stringify(g));
   return { dd, cacheDir, file: path.join(dd, 'usage-cache.json'), g };
 };
-const setup = async (routesMod, w) => {
-  const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
-  const accounts = { list: () => ({ accounts: [] }), decisionList: () => ({ accounts: [] }), decisionRowOf: () => null, displayReaderOf: () => null, signinFactsSettled: async () => null, signinFactsNow: async () => null, codexGlobalStatus: () => ({ loggedIn: false, email: null }), subscriptionStatus: () => ({ loggedIn: false, email: null }), subCredsPath: () => path.join(w.dd, 'none', '.credentials.json'), usageToken: () => null };   // + the root's account doors (B-360d accounts list: the decision rows, the sign-in facts' settle)
+const setup = async (routesMod, w, { more = null, handlers = null } = {}) => {
+  const app = { get(p, fn) { if (handlers) handlers['GET ' + p] = fn; }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+  const accounts0 = { list: () => ({ accounts: [] }), decisionList: () => ({ accounts: [] }), decisionRowOf: () => null, displayReaderOf: () => null, signinFactsSettled: async () => null, signinFactsNow: async () => null, codexGlobalStatus: () => ({ loggedIn: false, email: null }), subscriptionStatus: () => ({ loggedIn: false, email: null }), subCredsPath: () => path.join(w.dd, 'none', '.credentials.json'), usageToken: () => null };   // + the root's account doors (B-360d accounts list: the decision rows, the sign-in facts' settle)
+  const accounts = more ? { ...accounts0, ...more } : accounts0;   // r2933: a leg's own accounts (a linked one)
   const realSetInterval = globalThis.setInterval;
   globalThis.setInterval = () => ({ unref() { }, ref() { } });
   try {
@@ -176,7 +181,7 @@ const which = (at) => (at === T ? 'the newer reading' : at === T - 36e5 ? 'the O
 // ═══ ⑥ a repair's verdict outranks memory (r2430) ═══
 console.log('\n— ⑥ a repair\'s verdict for the machine login\'s reading outranks memory');
 const UW = require(path.join(REPO, 'src/usage-cache-write.js'));
-const VERDICT = "  if (repairedGlobal(rep)) {\n    let u = null; try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, '__global__.json'), { via: usageFolder.via }); } catch { u = null; }\n    _rateLimitCache = u && typeof u.fetchedAt === 'number' ? u : null;\n    writeUsageCache({ evenNone: true });\n    ingestPassiveUsage();\n    return;\n  }\n";
+const VERDICT = "  if (repairedGlobal(rep) && !held) {\n";
 const S0 = Math.floor(T / 1000);
 const REPAIRED = { fetchedAt: T - 72e5, source: 'statusline', fiveHour: { utilization: 0.07, resetsAt: S0 + 1800 }, sevenDay: { utilization: 0.04, resetsAt: S0 + 5 * 86400 }, repairedBy: 'identity-repair:manual' };
 const EMPTIED = { orgUuid: 'org-own', emptiedReason: 'no anchor of the machine login agrees with its API-derived window', repairedBy: 'identity-repair:manual' };
@@ -193,6 +198,7 @@ const verdictWorld = async (routesMod, repaired, cache) => {
   let doc = null; try { doc = JSON.parse(fs.readFileSync(w.file, 'utf8')); } catch { doc = null; }
   return { copy: doc ? doc.claude : undefined, at: doc && doc.claude ? doc.claude.fetchedAt : null };
 };
+const w0g = () => ({ fetchedAt: T, source: 'statusline', fiveHour: { utilization: 0.31, resetsAt: S0 + 3600 } });   // the world's reading, its stamp kept (a strip keeps it)
 const said = (r) => (r.copy === null ? 'none' : r.at === T ? 'the reading the repair judged (newer)' : r.at === T - 72e5 ? 'the repaired reading' : String(r.at));
 {
   const ROUTES = require(path.join(REPO, 'src/usage-routes.js'));
@@ -200,12 +206,58 @@ const said = (r) => (r.copy === null ? 'none' : r.at === T ? 'the reading the re
   ok(!!(a.at === T - 72e5 && a.copy && a.copy.sevenDay && a.copy.sevenDay.utilization === 0.04), `⑥ REPLACED: memory takes the repaired reading although it is older, and its copy follows (memory, as its copy lands it: ${said(a)})`, a);
   const b = await verdictWorld(ROUTES, EMPTIED, 'emptied');
   ok(!!(b.copy === null), `⑥ EMPTIED: memory states no reading and its copy says none ({ claude: null }) — a restart seeds nothing back (${said(b)})`, b);
+  const st = await verdictWorld(ROUTES, { ...w0g(), sevenDay: { utilization: 0.12, resetsAt: S0 + 3 * 86400 }, repairedBy: 'identity-repair:manual' }, 'stripped');
+  ok(!!(st.at === T && st.copy && st.copy.repairedBy === 'identity-repair:manual'), `⑥ STRIPPED (the same stamp, a bucket taken away): memory takes the folder's stripped reading and its copy follows (${said(st)})`, st);
   const c = await verdictWorld(ROUTES, REPAIRED, 'kept');
   ok(!!(c.at === T), `⑥ NO VERDICT for the machine login (kept): nothing moves — memory keeps its newer reading over an older folder one (${said(c)})`, c);
 }
 {
-  const NoVerdict = M.load('src/usage-routes.js', anchored(ROUTES_SRC, VERDICT, '', 'the reload without the repair verdict'), 'no-verdict');
+  const NoVerdict = M.load('src/usage-routes.js', anchored(ROUTES_SRC, VERDICT, '  if (false) {\n', 'the reload without the repair verdict'), 'no-verdict');
   const r = await verdictWorld(NoVerdict, REPAIRED, 'replaced');
   ok(!!(r.at === T), `⑥ RED CONTROL the reload without the verdict: the reading the repair judged another account's stays in memory and in its copy (${said(r)})`, r);
+}
+// ═══ ⑦ r2933: AFTER A VERDICT NO READER OF THAT MEMORY HOLDS THE JUDGED READING — a LINKED account with no dated file of its own ═══
+console.log('\n— ⑦ a linked account with no dated file of its own: the judged reading leaves both rows and the copy');
+const X = { id: 'sub-x', name: 'Xavier', email: 'x@example.test', type: 'subscription', backend: 'claude' };
+const LINKED = { list: () => ({ accounts: [X] }), decisionList: () => ({ accounts: [X] }), subscriptionStatus: () => ({ loggedIn: true, email: 'x@example.test' }), get: (id) => (id === X.id ? X : null) };
+const ALIEN = { name: 'alien', resetsAt: S0 + 2 * 86400 }, OWN = { name: 'own', resetsAt: S0 + 5 * 86400 };
+const JUDGED = { fetchedAt: T, source: 'statusline', fiveHour: { utilization: 0.31, resetsAt: S0 + 3600 }, sevenDay: { utilization: 0.12, resetsAt: S0 + 3 * 86400 }, scopedWeekly: [OWN, ALIEN] };
+const VERDICTS = { replaced: REPAIRED, emptied: EMPTIED, stripped: { ...JUDGED, scopedWeekly: [OWN], repairedBy: 'identity-repair:manual' } };
+const getUsage = async (handlers) => { const res = { body: null, json(b) { this.body = b; return this; }, status() { return this; }, set() { return this; }, send() { return this; }, end() { return this; }, setHeader() { } }; await quiet(() => handlers['GET /api/usage']({ query: {}, headers: {}, params: {} }, res)); return res.body || {}; };
+const alien = (x) => JSON.stringify(x || null).includes('"alien"');
+const linkedWorld = async (routesMod, cache) => {
+  const w = usageWorld();
+  const g = path.join(w.cacheDir, '__global__.json');
+  fs.writeFileSync(g, JSON.stringify(JUDGED)); UW.noteWritten(g, JSON.stringify(JUDGED), { replace: true });   // the machine login's reading (another account's)
+  const h1 = {};
+  const api = await setup(routesMod, w, { more: LINKED, handlers: h1 });
+  const before = await getUsage(h1);
+  storeWriter().flushSync([w.file]);
+  const text = JSON.stringify(VERDICTS[cache]);
+  fs.writeFileSync(g, text); UW.noteWritten(g, text, { replace: true });   // the identity repair's own write (the folder's file, replace)
+  await quiet(() => api.reloadRateLimitCache({ identities: [{ key: '__global__', cache }] }));
+  const after = await getUsage(h1);
+  storeWriter().flushSync([w.file]);   // every write the reload and its ingestion owe the copy lands before it is read
+  let copy = null; try { copy = JSON.parse(fs.readFileSync(w.file, 'utf8')); } catch { copy = null; }
+  const h2 = {};
+  await setup(routesMod, w, { more: LINKED, handlers: h2 });   // A RESTART from that copy (the same data folder)
+  const restart = await getUsage(h2);
+  return { before: { login: alien(before.rateLimit), linked: alien(before.accounts && before.accounts[X.id]) }, after: { login: alien(after.rateLimit), linked: alien(after.accounts && after.accounts[X.id]) }, copy: alien(copy), restart: { login: alien(restart.rateLimit), linked: alien(restart.accounts && restart.accounts[X.id]) } };
+};
+{
+  const ROUTES = require(path.join(REPO, 'src/usage-routes.js'));
+  for (const cache of ['replaced', 'emptied', 'stripped']) {
+    const r = await linkedWorld(ROUTES, cache);
+    ok(!!(r.before.login && r.before.linked), `⑦ ${cache.toUpperCase()} — the scene is real: before the repair the judged reading is on the machine login's row AND, through the same-account merge, on the linked account's (${JSON.stringify(r.before)})`, r);
+    ok(!!(!r.after.login && !r.after.linked && !r.copy && !r.restart.login && !r.restart.linked), `⑦ ${cache.toUpperCase()}: after the reload the judged reading is on NEITHER row and not in the copy — nor after a restart from that copy (${JSON.stringify({ after: r.after, copy: r.copy, restart: r.restart })})`, r);
+  }
+  const TodayReload = M.load('src/usage-routes.js', anchored(ROUTES_SRC, '    dropJudged(rep, judged);\n', '', 'today\'s reload (the linked rows kept)'), 'today-reload');
+  const red = await linkedWorld(TodayReload, 'replaced');
+  ok(!!(red.after.linked && red.after.login && red.copy), `⑦ RED CONTROL today's reload (1de87eff9): the linked row keeps the judged reading and the same-account merge puts it back on the machine login's row and in the copy (${JSON.stringify(red)})`, red);
+}
+{
+  // the three callers hand the reload their report (r2933 lens 3: the hourly and the person's road had no pin)
+  const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  ok(!!(SV.includes("const rep = repairIdentityAnchors('boot', { since: settled && settled.since }); usage.reloadRateLimitCache?.(rep);") && SV.includes('if (rep && rep.changed) usage.reloadRateLimitCache?.(rep);') && ROUTES_SRC.includes('  try { reloadRateLimitCache(rep); } catch { }')), 'PIN: the boot\'s, the hourly and the person\'s identity repair each hand their report to the reload');
 }
 report();
