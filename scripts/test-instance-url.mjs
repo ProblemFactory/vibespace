@@ -289,5 +289,36 @@ const mk = (opts = {}) => {
   ok('the vault\'s unlock calls it (mounts-plugins-wiring.js, beside mounts\' own restore after the unlock)', /^vault\.onUnlock\(\(\) => \{ try \{ instanceUrl\?\.restore\?\.\(\{ ifFailed: true \}\); \}/m.test(w));
   fs.rmSync(dir, { recursive: true, force: true });
 }
+// ── r3009 (B-f276 family, lane bl-machines-a): THE STORE-READ LAW for instance-url.json. A read that FAILS (a PLACED refusal of the
+// read call: EIO, a made-up address) is never «not published»: an agent install's ensurePublished — the store's ordinary next write —
+// writes NOTHING over the file and mints no new address; a person's Publish / Unpublish is refused BY NAME; the status says why ──
+{
+  const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iurl-hold-')), sfile = path.join(sdir, 'instance-url.json');
+  fs.writeFileSync(sfile, JSON.stringify({ desired: true, auto: false, sub: 'kept-box', url: 'https://kept-box.relay.example.test/', proto: 'https' }, null, 2));
+  const before = fs.readFileSync(sfile, 'utf8'), pl = fakePlugins(), realRead = fs.readFileSync;
+  fs.readFileSync = function (q, ...a) { if (String(q) === sfile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
+  let held = null; try { held = create({ dataDir: sdir, port: 3456, plugins: pl, serverSetting: () => null, authEnabled: () => true, broadcast: () => { } }); } finally { fs.readFileSync = realRead; }
+  if (held._hold && held._hold.stop) held._hold.stop();   // the hold's own re-read ladder stays out of this scene (its law is the helper's)
+  let ensured = null, ensureErr = null; try { ensured = await held.ensurePublished(); } catch (e) { ensureErr = e; }
+  let pubErr = null; try { await held.publish({ sub: 'another' }); } catch (e) { pubErr = e; }
+  let unpubErr = null; try { await held.unpublish(); } catch (e) { unpubErr = e; }
+  const after = fs.readFileSync(sfile, 'utf8'), st = held.status();
+  ok('r3009: instance-url.json read FAILED (a placed EIO) — an agent install\'s ensurePublished, a Publish and an Unpublish write NOTHING over it: the person\'s address survives', after === before, after.slice(0, 240));
+  ok('r3009: …a Publish and an Unpublish are refused BY NAME (503 instance_url_unread), ensurePublished mints nothing, and the status says why', !!pubErr && pubErr.status === 503 && pubErr.code === 'instance_url_unread' && !!unpubErr && unpubErr.code === 'instance_url_unread' && !(ensured && ensured.url && !/kept-box/.test(String(ensured.url))) && /could not be read/.test(String(st.held || '')), JSON.stringify({ pub: pubErr && pubErr.message, unpub: unpubErr && unpubErr.code, ensured, ensureErr: ensureErr && ensureErr.message, held: st.held }));
+  fs.rmSync(sdir, { recursive: true, force: true });
+}
+// r3104: TORN instance-url.json — its bytes kept aside once (the helper), it starts as not published, and the status NAMES the copy
+// for the Ports panel («the publish setting was damaged; its damaged bytes are kept beside it as <name>» — never «restore it»)
+{
+  const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iurl-torn-')), TORN = '{"desired": true, "sub": "kept-bo';
+  fs.writeFileSync(path.join(tdir, 'instance-url.json'), TORN);
+  const tt = create({ dataDir: tdir, port: 3456, plugins: fakePlugins(), serverSetting: () => null, authEnabled: () => true, broadcast: () => { } });
+  const t0 = Date.now(); while (!tt.status().torn && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 25));
+  const st = tt.status(), copy = st.torn;
+  const copyOk = !!copy && fs.existsSync(path.join(tdir, copy)) && fs.readFileSync(path.join(tdir, copy), 'utf8') === TORN;
+  ok('r3104: torn instance-url.json — its bytes kept aside once, it starts as not published, and the status names the copy for the panel', copyOk && /^instance-url\.json\.corrupt-/.test(copy) && st.published === false && !st.held, JSON.stringify({ copy, published: st.published, held: st.held }));
+  if (tt._hold && tt._hold.stop) tt._hold.stop();
+  fs.rmSync(tdir, { recursive: true, force: true });
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

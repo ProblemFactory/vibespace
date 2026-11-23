@@ -33,6 +33,8 @@
 // refusal names the fix (turn on a password / SSO first).
 const fs = require('fs');
 const path = require('path');
+const HOLD = require('../store-read-hold.js');   // r3009 (B-f276 family): instance-url.json under THE STORE-READ LAW
+const SR = require('../store-read.js');
 
 const PROXY_NAME = 'vibespace-instance';
 const SUB_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -45,10 +47,24 @@ function writeJsonAtomic(file, obj) {
 function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, authEnabled = () => true, broadcast = () => { }, log = () => { } }) {
   const file = path.join(dataDir, 'instance-url.json');
   let state = { desired: false, auto: false, sub: null, url: null, proto: null, at: null, error: null };
-  try { Object.assign(state, JSON.parse(fs.readFileSync(file, 'utf-8')) || {}); } catch { }
+  // r3009 (B-f276 family, lane bl-machines-a): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure as «not
+  // published», and the next write — a Publish or Unpublish, an agent install's ensurePublished (which MINTS an address), a failed
+  // restore — wrote over the file: the person's «Publish this VibeSpace» and its subdomain gone. HELD: the status says why, Publish
+  // and Unpublish are refused by name, ensurePublished mints nothing, nothing is written over the file, the boot's restore waits and
+  // runs at the lift; nothing removes by its silence (the relay's proxy is unpublished only by a person's Unpublish); it is read again
+  // off the loop; torn bytes are kept aside once per content, then it starts as not published
+  let restoreAsked = null, tornCopy = null;
+  const SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const hold = HOLD.create({
+    file, valid: SHAPE, code: 'instance_url_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `instance-url.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. The published address is not lost: nothing is written over it, and Publish and Unpublish wait until it reads.`,
+    log: (m) => log('[instance-url] ' + m),
+    onLift: (v, f) => { Object.assign(state, v || {}); tornCopy = (f && f.setAside) || null; emit(); if (restoreAsked) { const o = restoreAsked; restoreAsked = null; restore(o); } },   // r3104: torn bytes — the copy's base name kept for the panel
+  });
+  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; } const a = SR.storeAnswer(read, { valid: SHAPE }); if (hold.start(a) === 'data') Object.assign(state, a.value || {}); }
   let healTimer = null, nextTry = null;   // nextTry: the running restore cycle's next attempt (null = no cycle)
 
-  const save = () => { try { writeJsonAtomic(file, state); } catch (e) { log('[instance-url] persist failed: ' + e.message); } };
+  const save = () => { if (!hold.writable('a publish change')) return; try { writeJsonAtomic(file, state); } catch (e) { log('[instance-url] persist failed: ' + e.message); } };   // r3009: held ⇒ nothing written over the file
   const settingUrl = () => { try { return String(serverSetting('agentd.publicUrl') || '').trim() || null; } catch { return null; } };
   const envUrl = () => String(process.env.VIBESPACE_PUBLIC_URL || '').trim() || null;
   // the relay's state through the manager's relay door (whichever plugin DECLARES 'relay' — src/plugins.js relayStatus). A read
@@ -89,6 +105,8 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
       url: state.url || null, sub: state.sub || f.selfDialSub || null, at: state.at || null, error: state.error || null,
       settingUrl: settingUrl(), envUrl: envUrl(),
       effectiveUrl: eff.url, source: eff.source, httpsUrl: (() => { try { return httpsUrl() || null; } catch { return null; } })(),
+      held: hold.words(),   // r3009: instance-url.json held (unread, never «not published») — the words a person reads
+      torn: tornCopy,   // r3104: torn bytes lifted as «not published» — where they are kept (base name); never «restore it»
     };
   }
 
@@ -125,6 +143,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
 
   /** The user pressed Publish: this address now speaks for the instance. */
   async function publish({ sub } = {}) {
+    hold.refuse('publishing this VibeSpace');   // r3009: held — refused by name, nothing written
     if (!authEnabled()) throw new Error('publishing the whole instance would expose it to the internet with NO login — turn on a password or SSO in Settings first');
     const u = await doPublish({ sub });
     state.desired = true; state.auto = false;
@@ -135,6 +154,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
   /** Publish only because something needs a dial-back address (agent install).
    *  Records + shows it, but stays `auto` so it cannot repoint share links. */
   async function ensurePublished() {
+    if (hold.held()) return null;   // r3009: held — no address is minted while the person's own is unread
     if (state.url) return state.url;
     const u = await doPublish({});
     if (!state.desired) state.auto = true;
@@ -143,6 +163,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
   }
 
   async function unpublish() {
+    hold.refuse('unpublishing this VibeSpace');   // r3009: held — refused by name, the relay's proxy left as it is
     try { if (plugins) await plugins.frpUnpublish(PROXY_NAME); } catch (e) { log('[instance-url] unpublish: ' + e.message); }
     // the SUBDOMAIN is kept: republishing should land on the same URL
     state.url = null; state.proto = null; state.desired = false; state.auto = false; state.at = null; state.error = null;
@@ -155,6 +176,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
    *  ONE cycle at a time; `ifFailed` (the vault's unlock — lane fleet-instance-publish) re-tries only a restore that FAILED:
    *  a cycle waiting on its timer has its next try pulled forward, none running ⇒ a new cycle. */
   function restore({ retries = 6, delayMs = 20000, firstMs = 3000, ifFailed = false } = {}) {
+    if (hold.held()) { restoreAsked = { retries, delayMs, firstMs, ifFailed }; return; }   // r3009: held — unread, not «not desired»: the restore runs at the lift
     if (!state.desired) return;
     if (ifFailed && !state.error) return;
     if (nextTry) { if (healTimer) { clearTimeout(healTimer); healTimer = setTimeout(nextTry, firstMs); } return; }
@@ -192,7 +214,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     });
   }
 
-  return { url, effective, operatorUrl, status, publish, ensurePublished, unpublish, restore, stop, registerRoutes, onChange, PROXY_NAME };
+  return { url, effective, operatorUrl, status, publish, ensurePublished, unpublish, restore, stop, registerRoutes, onChange, PROXY_NAME, _hold: hold };
 }
 
 module.exports = { create, PROXY_NAME };

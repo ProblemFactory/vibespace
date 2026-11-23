@@ -3098,6 +3098,8 @@ export default {
   "No forwards yet — scan a machine below": "还没有转发——在下方扫描一台机器",
   "The list of port forwards was damaged; its damaged bytes are kept beside it as {name}. Addresses published before stay published at the relay and keep their names: a forward added again for the same port takes its old address back; one on another port that chooses one of those names is refused by the relay until you stop the relay plugin (which takes them all down) or choose another name. Add the forwards again, or mend the file by hand and restart VibeSpace.": "端口转发列表已损坏；损坏的内容另存为 {name}。之前发布的地址仍在中继上发布并保留其名称：为同一端口重新添加的转发会取回原来的地址；在其他端口上选用这些名称之一的转发会被中继拒绝，直到你停止中继插件（这会撤下所有地址）或选择其他名称。请重新添加转发，或手动修复该文件后重启 VibeSpace。",
   "VibeSpace could not read its list of port forwards; it reads it again every few minutes. Nothing is lost: new forwards wait until it reads. Addresses published before stay published at the relay; to take them all down now, stop the relay plugin.": "VibeSpace 无法读取端口转发列表，几分钟后会自动重读。不会丢失任何内容：新的转发会等到读取成功后再进行。之前发布的地址仍在中继上保持发布；如需立即全部撤下，请停止中继插件。",
+  "The publish setting was damaged; its damaged bytes are kept beside it as {name}. Publish again, or mend the file by hand and restart VibeSpace.": "发布设置已损坏；损坏的内容另存为 {name}。请重新发布，或手动修复该文件后重启 VibeSpace。",
+  "VibeSpace could not read its publish setting; it reads it again every few minutes. Publish and Unpublish wait until it reads.": "VibeSpace 无法读取发布设置，几分钟后会自动重读。发布和取消发布会等到读取成功后再进行。",
   "Scan ports": "扫描端口",
   "Scanning…": "扫描中…",
   "Forward this port here": "把这个端口转发到本机",

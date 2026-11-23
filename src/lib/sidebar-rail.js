@@ -983,7 +983,7 @@ export function installSidebarRail(Sidebar) {
       row.className = 'ports-row';
       const label = document.createElement('span');
       label.className = 'ports-row-label';
-      label.textContent = st.published ? st.url : tr('Not mapped to a public URL');
+      label.textContent = st.held ? tr('VibeSpace could not read its publish setting; it reads it again every few minutes. Publish and Unpublish wait until it reads.') : st.torn ? tr('The publish setting was damaged; its damaged bytes are kept beside it as {name}. Publish again, or mend the file by hand and restart VibeSpace.', { name: st.torn }) : st.published ? st.url : tr('Not mapped to a public URL');   // r3009: instance-url.json held — unread, never «not mapped»
       label.title = st.published ? st.url : '';
       const acts = document.createElement('span');
       acts.className = 'ports-row-acts';

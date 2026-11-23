@@ -3098,6 +3098,8 @@ export default {
   "No forwards yet — scan a machine below": "まだ転送がありません——下でマシンをスキャン",
   "The list of port forwards was damaged; its damaged bytes are kept beside it as {name}. Addresses published before stay published at the relay and keep their names: a forward added again for the same port takes its old address back; one on another port that chooses one of those names is refused by the relay until you stop the relay plugin (which takes them all down) or choose another name. Add the forwards again, or mend the file by hand and restart VibeSpace.": "ポート転送の一覧が壊れていました。壊れた内容は {name} として横に保存されています。以前に公開したアドレスはリレーで公開されたまま、その名前も保たれます。同じポートで追加し直した転送は元のアドレスを取り戻します。別のポートでそれらの名前を選んだ転送は、リレープラグインを停止する（すべてのアドレスが取り下げられます）か別の名前を選ぶまで、リレーに拒否されます。転送を追加し直すか、ファイルを手で直して VibeSpace を再起動してください。",
   "VibeSpace could not read its list of port forwards; it reads it again every few minutes. Nothing is lost: new forwards wait until it reads. Addresses published before stay published at the relay; to take them all down now, stop the relay plugin.": "VibeSpace はポート転送の一覧を読み取れませんでした。数分ごとに読み直します。何も失われません。新しい転送は読み取れるまで待ちます。以前に公開したアドレスはリレーで公開されたままです。今すぐすべて取り下げるには、リレープラグインを停止してください。",
+  "The publish setting was damaged; its damaged bytes are kept beside it as {name}. Publish again, or mend the file by hand and restart VibeSpace.": "公開の設定が壊れていました。壊れた内容は {name} として横に保存されています。公開し直すか、ファイルを手で直して VibeSpace を再起動してください。",
+  "VibeSpace could not read its publish setting; it reads it again every few minutes. Publish and Unpublish wait until it reads.": "VibeSpace は公開の設定を読み取れませんでした。数分ごとに読み直します。公開と公開の取り消しは読み取れるまで待ちます。",
   "Scan ports": "ポートをスキャン",
   "Scanning…": "スキャン中…",
   "Forward this port here": "このポートをここへ転送",
