@@ -10482,6 +10482,7 @@ function create(deps = {}) {
   // held list, `none` never touches the index. Row = [class, 'async' | 'sync' | 'const', why].
   const HELD_DOORS = {
     startedCount: ['allow', 'sync', 'how many times the start ran — a counter, reads no family'],
+    grantsUnread: ['allow', 'sync', 'r3059: whether the grants store could not read its file — a fact the removers ask first (unknown removes nothing); reads no channel family'],
     pausedState: ['allow', 'sync', 'the pause itself: the held families by name — never a verdict on what they hold'],
     startDamagedEmpty: ['allow', 'async', 'the ONE door of a damaged family (a person’s route): answers what it did — none when the file is not damaged; it changes only the file that could not be read'],
     bootSweep: ['paused', 'sync', 'the boot census walk of the index rows (B-dfa4 cut 3): boot work — while paused it does nothing (the start runs it after the pause)'],
@@ -10738,6 +10739,7 @@ function create(deps = {}) {
     // design 010: the vendor's own search (the owner's press / scroll), a hit in context, the agent's `--around`
     searchVendor, aroundOwner, readAroundFor, forgetSearchMemo,
     conversationName,   // B-c127: THE NAME LADDER by key (the touches store names a touch by it)
+    grantsUnread: () => CG.unread(),   // r3059: the grants unread — the wall a remover outside the engine asks (the api cards' sweep)
     accountsBrief,   // B-5fe1: the account list a badge's hue is computed from
     healSelfAt,   // R3 (§23): the one-shot derivation of the owner's newest message for rows that predate the field
     setScopeAssignment, estimateScope, effectiveFor: (adapterId, convId) => effectiveFor(store.index.peek(`${adapterId}/${convId}`)), migrateAggregated,

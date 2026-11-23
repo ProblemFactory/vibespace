@@ -86,6 +86,14 @@ function create({ grants = null, dataDir = null } = {}) {
     }
     return s;
   };
+  /** r3059 — THE GRANTS UNREAD (a read-only fact): the store is not there or says it could not read its file. Access stays
+   *  refused (every row reads as none); a REMOVER or a sweep that judges by these rows asks this first and removes, ends and
+   *  withdraws NOTHING while it is true (unknown is never «no one granted»). */
+  function unread() {
+    const s = S();
+    if (!s) return true;
+    try { const h = typeof s.health === 'function' ? s.health() : null; return !!(h && h.readable === false); } catch { return true; }
+  }
   function doorIndex(door, s = S()) {
     let ix = cache.get(door);
     if (ix) return ix;
@@ -493,6 +501,7 @@ function create({ grants = null, dataDir = null } = {}) {
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
     entryOfWatch, watcherOfEntry, rowsCarrying, CARRY_BODIES_MAX,   // lane lg-group-parents B-526c
     rowsShort, healRows, carriedOf,   // r2541 (a) / r2933 / r3020: the heal at a start, by the save's own bounds, in one write
+    unread,   // r3059: the grants unread — the wall every remover asks
   };
 }
 

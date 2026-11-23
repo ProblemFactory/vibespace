@@ -131,7 +131,7 @@ function create({ app, dataDir, lineageOf = null, bcastAll = () => {}, now = () 
   // B-2198: the raw API pass-through's orchestrator (src/server/channel-api.js) — reached by the agent and owner routes as `channels.rawApi`
   channels.rawApi = createChannelApi({ dataDir, engine: channels, getMounts, now, broadcast: (msg) => { bcastAll(msg); if (channels.apiCards) channels.apiCards.onUpdate(msg); } });
   // B-2198 part 2: ONE card per proposal in the chat, the Outbox and For you; the next-turn receipt; the 24 h expiry + withdrawal
-  channels.apiCards = createApiCards({ dataDir, api: () => channels.rawApi, userTodos, deliver, now, names: (adapterId, convId) => channels.conversationName(adapterId, convId) });
+  channels.apiCards = createApiCards({ dataDir, api: () => channels.rawApi, userTodos, deliver, now, names: (adapterId, convId) => channels.conversationName(adapterId, convId), grantsUnread: () => (typeof channels.grantsUnread === 'function' ? channels.grantsUnread() : false) });
   // AGENT GROUPS (design §22): the SAME store (groups.json + the group logs
   // behind its serialized doors), the SAME ladder (a wake is a billed turn —
   // spendReason peer-message, the authorizer inside it), reach = msg-acl over

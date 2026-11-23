@@ -25,7 +25,7 @@ const P = require('../channel-policy.js');   // receiptRoad + COLLECT_WINDOW_MS 
 const INBOX_KEY = 'channels';          // the channels engine's For-you key (src/server/channels-engine.js INBOX_KEY)
 const SWEEP_EVERY_MS = 60 * 1000;
 
-function create({ dataDir, api, userTodos = null, deliver = null, names = null, now = () => Date.now(), log = console, timer = true, collectWindowMs = P.COLLECT_WINDOW_MS } = {}) {
+function create({ dataDir, api, userTodos = null, deliver = null, names = null, now = () => Date.now(), log = console, timer = true, collectWindowMs = P.COLLECT_WINDOW_MS, grantsUnread = () => false } = {}) {
   if (!dataDir) throw new Error('channel-api-cards: dataDir is required');
   const A = () => (typeof api === 'function' ? api() : api);
   const dir = path.join(dataDir, 'channels');
@@ -67,6 +67,7 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
       if (!credIds.has(p.cred)) return mountsHeld && String(p.cred || '').startsWith('mount:') ? null : 'the account was removed';
       let mine = null;
       if (require('./groups-hold.js').held() || (p.principal && p.principal.groupsUnreadable === true)) return null;   // Task Groups held unread, or the card filed while they were: its tier is unknown — a card never ENDS on it («withdrawn» would be false)
+      { let gu = true; try { gu = grantsUnread() === true; } catch { gu = true; } if (gu) return null; }   // r3059 wall: the grants unread — the tier is unknown, a card never ENDS on it («withdrawn» would be false)
       try { mine = a.creds(ctxOf(p)); } catch { return null; }   // an unreadable tier decides nothing
       return mine && mine.ok && !(mine.creds || []).some((c) => c.id === p.cred) ? 'API access to this account was withdrawn' : null;
     };

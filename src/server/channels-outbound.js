@@ -38,7 +38,7 @@ function create(engineCtx) {
     accountsBrief, conversationName, notify, kick, budgetRefusal, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, offerNow,
     threadRefresh, rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, refreshConvCaps, track, policyFor,
     policyRequiresReview, authorityCapsFor, healP2, effectiveFor, billedWake, reachFor, groupsOfSession, inheritedOfSession, convFor, stillSees, effectiveForAccount,
-    accountScopeGrants, recallMessage, collectWindowMs,
+    accountScopeGrants, recallMessage, collectWindowMs, CG,
   } = engineCtx;
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -305,6 +305,7 @@ function create(engineCtx) {
   function stashGate(cid, entry, memo = null) {
     if (!entry || (entry.source !== 'channel' && entry.source !== 'channel-receipt')) return null;
     if (store.wallHeld && store.wallHeld('stashGate')) return { keep: true };   // B-f276 wall (主开发 r520): its reach cannot be judged now — kept, neither delivered nor changed
+    if (CG && typeof CG.unread === 'function' && CG.unread()) return { keep: true };   // r3059 wall: the grants unread — the reach is unknown, never «it no longer reaches the channel»: kept, neither delivered nor changed
     const a = entry.about;
     if (!a || typeof a !== 'object') return null;
     const M = memo instanceof Map ? memo : new Map();

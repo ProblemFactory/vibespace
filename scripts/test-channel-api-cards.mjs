@@ -194,5 +194,58 @@ await om("try { deliver.stashFor(p.conv,", 'try { if (0) deliver.stashFor(p.conv
 }
 await om("todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null, ...objectOf(p),", 'todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null,', 'objectNamed');
 
+// ── r3059 (主开发, MG1): THE GRANTS UNREAD IS A WALL FOR EVERY REMOVER — a grants.json there and unread answers every reader «no one
+// granted» (right for access: refused), and the removers judged by it removed: the channel stash gate (every agent's waiting channel
+// message, «it no longer reaches the channel») and the api cards' sweep (every pending proposal, «API access … was withdrawn»). One
+// read-only fact, the channels grants reader's `unread()`, asked by both: unknown removes and withdraws NOTHING. The store's read is
+// a PLACED refusal (fs.readFileSync answers EIO for grants.json at its load — never a mount, never a mode change); each with its red.
+{
+  console.log('r3059 the grants unread: the removers remove nothing');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const { anchored } = await import('./scratch.mjs');
+  const MUTG = mutantCopies('apicards-grants-wall', ROOT);
+  const GS = require(path.join(ROOT, 'src/server/grants-store.js'));
+  const CGM = require(path.join(ROOT, 'src/server/channels-grants.js'));
+  const unreadStore = () => {
+    const d = fs.mkdtempSync(path.join(tmp, 'grants-')), f = path.join(d, 'grants.json');
+    fs.writeFileSync(f, JSON.stringify({ v: 1, rows: [] }));
+    const real = fs.readFileSync;
+    fs.readFileSync = function (p0, ...a) { if (String(p0) === f) throw Object.assign(new Error(`EIO: a placed refusal of the read, '${p0}'`), { code: 'EIO' }); return real.call(this, p0, ...a); };
+    try { return { d, s: GS.create({ dataDir: d, log: () => { } }) }; } finally { fs.readFileSync = real; }
+  };
+  const u = unreadStore(), CG = CGM.create({ grants: u.s });
+  const readable = GS.create({ dataDir: fs.mkdtempSync(path.join(tmp, 'grants-ok-')), log: () => { } });
+  ok(CG.unread() === true && CG.rowOf(CG.DOORS.reach, 'conversation:fake/c1').to.length === 0 && CGM.create({ grants: readable }).unread() === false,
+    'r3059 the scene is real: the store\'s read refused (EIO) — the channels grants reader says unread, and every row reads «no one» (access refused); a readable store is not unread');
+  // (1) THE CHANNEL STASH GATE (src/server/channels-outbound.js stashGate → conversation-deliver's ladder)
+  const OUT_SRC = fs.readFileSync(path.join(ROOT, 'src/server/channels-outbound.js'), 'utf8');
+  const WALL = "    if (CG && typeof CG.unread === 'function' && CG.unread()) return { keep: true };";
+  const gateOf = (mod) => mod.create({ store: { wallHeld: () => false, outbox: { snapshot: () => ({ proposals: {} }) } }, liveSessions: () => [{ cid: 'agent-1', name: 'Builder', groups: [], inherited: [] }], adapterRecords: () => ({ adapters: [] }), registry: { get: () => ({}) }, stillSees: () => false, CG }).stashGate;
+  const entry = { source: 'channel', text: 'a message for the agent', about: { keys: ['fake/c1'], groups: [], inherited: [] } };
+  const g1 = gateOf(require(path.join(ROOT, 'src/server/channels-outbound.js')))('agent-1', entry);
+  ok(!!(g1 && g1.keep === true && !g1.drop && !g1.text), 'r3059 (1) THE CHANNEL STASH GATE with the grants unread: the waiting message is KEPT — neither removed nor its words replaced', g1);
+  const NoWallOut = MUTG.load('src/server/channels-outbound.js', anchored(OUT_SRC, WALL, '    // (r3059 red: no wall)', 'the stash gate without its grants wall'), 'outbound-no-wall');
+  const g1r = gateOf(NoWallOut)('agent-1', entry);
+  ok(!!(g1r && g1r.drop === true), 'r3059 (1) RED without the wall (today): the unread grants read «it no longer reaches the channel» — the message is REMOVED', g1r);
+  // (2) THE API CARDS' SWEEP (src/server/channel-api-cards.js liveness)
+  const CARDS_SRC = fs.readFileSync(path.join(ROOT, 'src/server/channel-api-cards.js'), 'utf8');
+  const CWALL = '      { let gu = true; try { gu = grantsUnread() === true; } catch { gu = true; } if (gu) return null; }';
+  const sweep = async (mod, wired) => {
+    const ends = [], p = { id: 'api-bbbbbbbbbbbb', status: 'pending', cred: 'lark-1', at: Date.now(), conv: 'agent-1', principal: { kind: 'agent', id: 'agent-1', name: 'Builder' }, method: 'GET', host: 'open.feishu.cn', path: '/x' };
+    const api = { ownerView: () => ({ proposals: ends.length ? [] : [p], creds: [{ id: 'lark-1', grants: [] }] }), creds: () => ({ ok: true, creds: [] }), reject: (id, o) => { ends.push({ id, ...o }); } };   // «no one granted»: what the unread store answers
+    const cards = mod.create({ dataDir: fs.mkdtempSync(path.join(tmp, 'sweep-')), api: () => api, timer: false, log: { warn() { }, log() { }, error() { } }, ...(wired ? { grantsUnread: () => CG.unread() } : {}) });
+    await cards.sync(); cards.stop();
+    return ends;
+  };
+  const e2 = await sweep(require(path.join(ROOT, 'src/server/channel-api-cards.js')), true);
+  ok(e2.length === 0, 'r3059 (2) THE API CARDS\' SWEEP with the grants unread: the pending proposal stays pending — nothing withdrawn', e2);
+  const NoWallCards = MUTG.load('src/server/channel-api-cards.js', anchored(CARDS_SRC, CWALL, '      // (r3059 red: no wall)', 'the api cards\' sweep without its grants wall'), 'cards-no-wall');
+  const e2r = await sweep(NoWallCards, true);
+  ok(e2r.length === 1 && /withdrawn/.test(e2r[0].reason || ''), 'r3059 (2) RED without the wall (today): the unread grants read «API access … was withdrawn» — the proposal is ended', e2r);
+  const WIRING = fs.readFileSync(path.join(ROOT, 'src/server/channels-wiring.js'), 'utf8'), ENG_SRC = fs.readFileSync(path.join(ROOT, 'src/server/channels-engine.js'), 'utf8');
+  ok(WIRING.includes("grantsUnread: () => (typeof channels.grantsUnread === 'function' ? channels.grantsUnread() : false)") && ENG_SRC.includes('    grantsUnread: () => CG.unread(),'),
+    'r3059 PIN: the hub wires the sweep to the engine\'s grants reader (channels-wiring → channels.grantsUnread → CG.unread)');
+}
+
 console.log(fail ? `FAILED: ${fail} of ${pass + fail}` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
