@@ -152,6 +152,64 @@ console.log('— §2 a provider removed leaves every pool\'s list in the same ac
   await store.remove(gone.id);
   ctl.providersChanged();
   ok(eq(ctl.get(cP).fallbackProviders, [ds.id, gone.id]), 'CONTROL: a copy whose providersChanged prunes nothing keeps the removed provider on the pool\'s list ⇒ the leg above goes RED', ctl.get(cP).fallbackProviders);
+  // THE LOOKUP's FLAG, READ AT EACH PRUNE (the F2 cure on the store-read hold — the move onto 2.369.418, 主开发 r3534): the hub
+  // hands accounts the provider store's LIVE answer, the expression below taken from src/server/account-usage-routes.js itself.
+  // (a) A HELD START THAT LIFTS: providers.json's read refused at a start (a placed EIO, this process's fs only), a provider removed
+  //     behind the store meanwhile; while held nothing is pruned, and once the read answers the removed provider leaves the pool.
+  // (b) TORN BYTES: the hold keeps them aside and starts the list EMPTY (damaged) — nothing is pruned (the cure's «unreadable»).
+  // CONTROLS: the taken form's VALUE read once at the start keeps the removed provider after the lift ((a) RED); a live flag that
+  // forgets the torn list's state prunes both over torn bytes ((b) RED).
+  const SRH = require(path.join(REPO, 'src/store-read-hold.js'));
+  const AURk = read('src/server/account-usage-routes.js');
+  const LIVE_EXPR = /setProviderLookup\(\(acct\) => providers\.forAccount\(acct\), (\{ clean: [^\n]*? \})\); \/\*/.exec(AURk)?.[1];
+  const VALUE_EXPR = "{ clean: typeof providers.readClean === 'function' ? providers.readClean() : true }";   // the taken form's
+  const NODMG_EXPR = "{ clean: typeof providers.readClean === 'function' ? () => providers.readClean() : true }";   // live, the torn state forgotten
+  const optsOf = (expr, providers) => new Function('providers', 'return (' + expr + ');')(providers);
+  const refuseReads = (file) => {
+    const realSync = fs.readFileSync, realAsync = fs.promises.readFile;
+    const eio = () => Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+    fs.readFileSync = function (p, ...rest) { if (String(p) === file) throw eio(); return realSync.call(this, p, ...rest); };
+    fs.promises.readFile = function (p, ...rest) { if (String(p) === file) return Promise.reject(eio()); return realAsync.call(this, p, ...rest); };
+    return () => { fs.readFileSync = realSync; fs.promises.readFile = realAsync; };
+  };
+  const lkScene = async (tag, expr, torn) => {
+    const D = scratchDir('pool-fallback-lookup-' + tag), file = path.join(D, 'providers.json');
+    const v = VE.create({ dataDir: D, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false, register: false });
+    await v.setup('correct horse battery staple', {});
+    const s0 = PS.create({ dataDir: D, vault: () => v, log: () => {} });
+    const kept = (await s0.add({ preset: 'deepseek', key: KEY, label: 'Kept' })).provider, gone = (await s0.add({ preset: 'deepseek', key: KEY, label: 'Removed behind the store' })).provider;
+    const am0 = new AccountManager({ dataDir: D }); am0.setProviderLookup((a) => s0.forAccount(a));
+    const mA = am0.createSubscription({ name: 'H' }).id; login(am0, mA);
+    const pool = am0.createPool({ name: 'H', members: [mA] }).id;
+    am0.updatePool(pool, { fallbackProviders: [kept.id, gone.id] });
+    const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+    let lift = () => {}, am = null, s = null, whileHeld = null, after = null;
+    try {
+      if (torn) fs.writeFileSync(file, fs.readFileSync(file, 'utf8').slice(0, 40));   // bytes that are no list
+      else lift = refuseReads(file);
+      s = PS.create({ dataDir: D, vault: () => v, log: () => {}, onLift: () => { try { am && am.providersChanged(); } catch { } } });
+      am = new AccountManager({ dataDir: D });
+      am.setProviderLookup((a) => s.forAccount(a), optsOf(expr, s));   // the start: the hub's wiring, as the routes give it
+      whileHeld = [...(am.get(pool).fallbackProviders || [])];
+      if (torn) { for (let i = 0; i < 100 && s.held(); i++) await new Promise((r) => setTimeout(r, 20)); }   // its copy made off the loop, then it lifts EMPTY
+      else {
+        fs.writeFileSync(file, JSON.stringify({ ...doc, providers: doc.providers.filter((r) => r.id !== gone.id) }, null, 2));   // removed behind the store
+        lift();
+        const row = SRH.holds().find((e) => e.held && e.file === 'providers.json');
+        for (let i = 0; i < 20 && s.held(); i++) { if (row && (await SRH.readAgainOf(row))) break; await new Promise((r) => setTimeout(r, 30)); }
+      }
+      after = [...(am.get(pool).fallbackProviders || [])];
+    } finally { lift(); }
+    return { kept: kept.id, gone: gone.id, whileHeld, after, held: !!(s && s.held()), damaged: !!(s && s.damaged && s.damaged()) };
+  };
+  const la = await lkScene('lift', LIVE_EXPR, false), lb = await lkScene('torn', LIVE_EXPR, true);
+  ok(!!LIVE_EXPR && eq(la.whileHeld, [la.kept, la.gone]) && !la.held && eq(la.after, [la.kept]),
+    '(the move, r3534) A HELD START THAT LIFTS: while providers.json\'s read is refused nothing is pruned (its empty answer is no «every provider removed»); once it reads, the provider removed behind the store leaves the pool\'s list — the hub\'s own flag, read at each prune', la);
+  ok(lb.damaged && !lb.held && eq(lb.whileHeld, [lb.kept, lb.gone]) && eq(lb.after, [lb.kept, lb.gone]),
+    '(the move, r3534) TORN BYTES: the hold keeps them aside and starts the list empty — nothing is pruned (the cure\'s «unreadable»): the pool keeps both its providers', lb);
+  const va = await lkScene('lift-value', VALUE_EXPR, false), nb = await lkScene('torn-nodamaged', NODMG_EXPR, true);
+  ok(!va.held && eq(va.after, [va.kept, va.gone]), 'CONTROL: the taken form\'s VALUE read once at the start keeps the removed provider on the pool\'s list after the lift ⇒ (a) goes RED', va);
+  ok(nb.damaged && !nb.held && eq(nb.after, []), 'CONTROL: a live flag that forgets the torn list\'s state prunes BOTH providers over torn bytes ⇒ (b) goes RED', nb);
 }
 
 console.log('— §3 the spawn road: a listed fallback the chooser placed starts on the provider\'s own road');
@@ -226,7 +284,8 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
   const nowS = () => Math.floor(Date.now() / 1000);
   const cacheOf = (u5) => JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand', fiveHour: { utilization: u5, resetsAt: nowS() + 7200 }, sevenDay: { utilization: 0.4, resetsAt: nowS() + 3 * 86400 } });
-  const world = ({ engM = null, cross = null, bHealthy = false, pools = 1 } = {}) => {
+  const EMPTY_MANAGED = path.join(scratchDir('pool-fallback-managed-none'), 'none');   // the machine's managed Claude settings folder, stood in EMPTY (never the test machine's own)
+  const world = ({ engM = null, cross = null, bHealthy = false, pools = 1, managedDir = EMPTY_MANAGED } = {}) => {
     const dir = scratchDir('pool-fallback-eng'), root = fs.mkdtempSync(path.join(dir, 'w-')), dataDir = path.join(root, 'data');
     const wam = wireAm(AccountManager, dataDir);
     wam.setProviderRows(() => MP.rosterRowsOf(store.thirdParty(), { usable: (p) => vault.state() === 'unlocked' && store.hasKey(p.id) }));
@@ -240,7 +299,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     }
     const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
     fs.writeFileSync(path.join(cacheDir, WA + '.json'), cacheOf(1)); fs.writeFileSync(path.join(cacheDir, WB + '.json'), cacheOf(bHealthy ? 0.1 : 1));
-    const sessions = new Map(), notices = [], sent = [], items = [], cards = [], metas = new Map(), clients = new Set();
+    const sessions = new Map(), notices = [], sent = [], items = [], cards = [], metas = new Map(), clients = new Set(), statusFns = [];
     const meta = { mode: 'ok', held: [] };
     const metaStore = {
       readSessionMeta: (k) => metas.get(k) || null,
@@ -254,7 +313,8 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
       add(key, it) { const id = 'ut-' + (items.length + 1); items.push({ ...it, id, key, status: 'open' }); return { id }; },
       setStatus(id, status, by) { const it = items.find((x) => x.id === id); if (it) { it.status = status; it.by = by; } return it; },
       redrawItem(pred, { text, detail, i18n } = {}) { const it = items.find((x) => x.status === 'open' && pred(x)); if (!it) return { ok: false }; if (text) it.text = text; if (detail) it.detail = detail; if (i18n) it.i18n = i18n; it.redrawn = (it.redrawn || 0) + 1; return { ok: true }; },
-      openItems() { return items.filter((x) => x.status === 'open'); }, onStatus() { },
+      openItems() { return items.filter((x) => x.status === 'open'); }, onStatus(fn) { statusFns.push(fn); },
+      dismiss(id) { const it = items.find((x) => x.id === id); if (!it) return; it.status = 'done'; it.by = 'tray'; for (const f of statusFns) f(it, { status: 'done' }); },
     };
     const eng = (engM || require(path.join(REPO, 'src/server/usage-pool-engine.js'))).create({
       app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
@@ -262,7 +322,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { sent.push({ type: 'FIRE' }); } }),
-      getQuotaProbe: () => null, getSessionMetaStore: () => metaStore, getUserTodos: () => todos,
+      getQuotaProbe: () => null, getSessionMetaStore: () => metaStore, getUserTodos: () => todos, managedClaudeDir: managedDir, vaultState: () => vault.state(),
     });
     eng.usageEstimator.burnFor = () => ({});
     eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });
@@ -279,7 +339,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     const pass = async (pool = poolIds[0]) => { mute(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(pool, { force: true }); }); await settle(); };
     const restarts = () => sent.filter((m) => m.type === 'pool-auto-switched').flatMap((m) => m.affected);
     const client = () => clients.add({ readyState: 1, send: (p) => sent.push(JSON.parse(p)) });
-    return { am: wam, eng, A: WA, B: WB, P: poolIds[0], P2: poolIds[1], pools: poolIds, cacheDir, sessions, notices, sent, items, cards, metas, meta, mk, pass, settle, mute, restarts, client };
+    return { am: wam, eng, A: WA, B: WB, P: poolIds[0], P2: poolIds[1], pools: poolIds, cacheDir, sessions, notices, sent, items, cards, metas, meta, mk, pass, settle, mute, restarts, client, todos };
   };
   const fbItems = (w) => w.items.filter((x) => x.action && x.action.type === 'pool-cross-provider' && x.action.fallback === true);
 
@@ -358,7 +418,8 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await w5.pass();
   const before = w5.restarts().length;
   busy._isStreaming = false; busy._turnState = 'idle';
-  await w5.eng.pumpFallbackMoves(Date.now());
+  w5.mute(() => w5.eng.maybePoolAutoSwitch(busy, { stop: true }));   // the turn's STOP runs its own pass, which pumps (the road production takes)
+  await w5.settle();
   ok(before === 0 && w5.eng._fbQueue.size === 0 && w5.restarts().length === 1 && w5.restarts()[0].serverId === 't1' && !w5.sent.some((m) => m.type === 'FIRE'),
     'scene 5: a conversation in a turn is not moved (its turn finishes where it started); at its end it moves — and nothing continues a turn for it (no automatic continue fired by the move)', { before, after: w5.restarts().length });
 
@@ -393,6 +454,107 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await vault.unlock('correct horse battery staple');
   ok(rows9.length === 0 && fbItems(w9).length === 0 && w9.restarts().length === 0, 'the vault LOCKED (the fallback\'s key unreadable): no fallback row, nothing offered, nothing moved — the conversation waits at the wall as before', { rows: rows9.length, items: w9.items.map((x) => x.text) });
 
+  // ── §4b THE CURE OF ROUND wuq1b1trm (主开发 r2939) ──
+  // THE MUST: a pool-made move is judged against the pool's setting AT THE MOVE; a change of the setting empties its pool-made entries
+  const wS = world({ cross: 'allow' });
+  wS.client(); for (let i = 0; i < 8; i++) wS.mk('q' + i);
+  await wS.pass();
+  const leftS = wS.eng._fbQueue.size;
+  wS.am.updatePool(wS.P, { crossProvider: 'never' });   // the person turns the pool back — no purge called: the move itself must judge it
+  await wS.eng.pumpFallbackMoves(Date.now() + 61e3);
+  const wP = world({ cross: 'allow' });
+  wP.client(); for (let i = 0; i < 8; i++) wP.mk('p' + i);
+  await wP.pass();
+  const pressed = [...wP.eng._fbQueue.values()][0];
+  wP.eng.queueFallbackMove(pressed.poolId, pressed.sid, pressed.to, 'person');
+  wP.eng._fbInFlight.clear();
+  const pressedSid = pressed.sid, otherSid = [...wP.eng._fbQueue.keys()].find((k) => k !== pressedSid);
+  wP.am.updatePool(wP.P, { crossProvider: 'never' }); const purged = wP.eng.purgePoolMadeMoves(wP.P);   // the PATCH route's own act (account-usage-routes)
+  ok(leftS === 2 && wS.restarts().length === 6 && wS.eng._fbQueue.size === 0 && purged === 1 && wP.eng._fbQueue.has(pressedSid) && !wP.eng._fbQueue.has(otherSid)
+    && read('src/server/account-usage-routes.js').includes("if (req.body?.crossProvider !== undefined && typeof engine.purgePoolMadeMoves === 'function') { try { engine.purgePoolMadeMoves(id); } catch { } }"),
+    'THE MUST: the pool turned back to never ⇒ the two pool-made moves still queued are NOT made (judged against the setting at the move) and leave the queue; the setting\'s own door empties the pool\'s pool-made entries at once — a person\'s press stays (its own authority)',
+    { leftS, restarts: wS.restarts().length, queue: wS.eng._fbQueue.size, purged, kept: wP.eng._fbQueue.has(pressedSid) });
+  // (1) THE RECORD rides the moved conversation's own create (test-harness-spawn «THE REAL ROAD»); a record on a conversation that did not move is cleared
+  const wN = world({ cross: 'allow' });
+  wN.mk('nc1');   // no page open: the restart cannot be asked
+  await wN.pass();
+  ok(!(wN.metas.get('cw-nc1') || {}).poolFallback && wN.restarts().length === 0, '(1) a conversation that did NOT move (no page open to restart it) keeps no record of a move', wN.metas.get('cw-nc1'));
+  // (2) AN UNREADABLE META IS NOT AN EMPTY ONE
+  const wU = world({ cross: 'allow' });
+  wU.client(); wU.mk('u1'); wU.metas.delete('cw-u1');   // its meta reads as nothing
+  await wU.pass();
+  ok(wU.restarts().length === 0 && !wU.metas.has('cw-u1') && wU.cards.some((c) => c.sid === 'u1' && /the record of the move could not be saved/.test(c.text)), '(2) a meta that reads as nothing is refused — never a whole new meta holding only the record — nothing moves, its line says so', { metas: [...wU.metas.keys()], cards: wU.cards.map((c) => c.text) });
+  // (3) JUDGED AGAIN AFTER THE AWAITED WRITE; never queued or executed twice across the wait
+  const wH = world({ cross: 'allow' });
+  wH.client(); wH.meta.mode = 'hold'; wH.mk('h2');
+  await wH.pass(); await wH.pass(); await wH.pass();
+  const heldWrites = wH.meta.held.length;
+  fs.writeFileSync(path.join(wH.cacheDir, wH.B + '.json'), cacheOf(0.1));   // B serves again while the write is held
+  wH.meta.held.splice(0).forEach((go) => go());
+  await wH.settle();
+  ok(heldWrites === 1 && wH.restarts().length === 0 && !(wH.metas.get('cw-h2') || {}).poolFallback, '(3) a record write HELD across three passes is ONE write (the conversation never queued twice); B serving again before it lands ⇒ judged again after it landed: not moved, the record cleared', { heldWrites, restarts: wH.restarts().length, rec: (wH.metas.get('cw-h2') || {}).poolFallback });
+  // (4) THE PROVIDER's REFUSALS BEFORE THE KILL — the machine's managed Claude settings name a key helper
+  const mdir = fs.mkdtempSync(path.join(scratchDir('pool-fallback-managed'), 'm-')); fs.writeFileSync(path.join(mdir, 'managed-settings.json'), JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }));
+  const wM = world({ cross: 'allow', managedDir: mdir });
+  wM.client(); wM.mk('m2');
+  await wM.pass();
+  ok(wM.restarts().length === 0 && !(wM.metas.get('cw-m2') || {}).poolFallback && wM.cards.some((c) => c.sid === 'm2' && /^DeepSeek cannot take this conversation: .+ — nothing moved$/.test(c.text)),
+    '(4) the managed settings refuse the provider ⇒ asked BEFORE the kill: nothing restarted (the conversation never left stopped by the pool), no record, its line says why', wM.cards.map((c) => c.text));
+  // (5) A PERSON's PRESS, PACED FOR THE BOX: at the head, uncounted, FOUR restarts at a time
+  const wB = world();
+  wB.client(); for (let i = 0; i < 10; i++) wB.mk('pb' + i);
+  await wB.pass();
+  wB.meta.mode = 'hold';
+  const ansB = wB.eng.answerCrossProviderAsk(fbItems(wB)[0].action.askId, { answer: 'once' });
+  await wB.settle();
+  const atOnce = wB.meta.held.length;
+  let rounds = 0; while (wB.meta.held.length && rounds++ < 6) { wB.meta.held.splice(0).forEach((go) => go()); await wB.settle(); }
+  ok(ansB.moving === 10 && atOnce === wB.eng.PRESS_MOVES_AT_ONCE && wB.eng.PRESS_MOVES_AT_ONCE === 4 && wB.restarts().length === 10 && wB.eng._fbMovedAt.length === 0,
+    '(5) Allow once on 10 waiting conversations: the answer counts 10; FOUR start at a time (the next as these end), all ten restarted in the end, none counted by the pool\'s pace', { moving: ansB.moving, atOnce, restarts: wB.restarts().length, rounds });
+  // (6) THE BUTTON's WORDS: «Always» on the fallback item says it reaches ANY fallback this pool lists; its detail too
+  ok(read('src/lib/user-todos-row.js').includes("act && act.fallback ? t('Always — to any fallback this pool lists') : t('Always for this pool')") && /to ANY fallback this pool lists/.test(fbItems(wB)[0].detail || ''),
+    '(6) the fallback item\'s «Always» says it plainly — always, to ANY fallback this pool lists (the pool\'s one setting) — in its button and its detail');
+  // (a) (b) (c) THE ITEM's ANSWERS: Always sets THIS pool only; Deny keeps the pool and provider quiet for 6 h; a tray dismissal is a Deny
+  const wA = world({ pools: 2 });
+  wA.client(); wA.mk('aa1'); wA.mk('aa2', wA.P2);
+  await wA.pass(wA.P); await wA.pass(wA.P2);
+  const itP = fbItems(wA).find((x) => x.action.poolId === wA.P), itP2 = fbItems(wA).find((x) => x.action.poolId === wA.P2);
+  wA.eng.answerCrossProviderAsk(itP.action.askId, { answer: 'always' });
+  await wA.settle();
+  const alw = { p: wA.am.get(wA.P).crossProvider, p2: wA.am.get(wA.P2).crossProvider, moved: wA.restarts().some((t) => t.serverId === 'aa1') };
+  wA.todos.dismiss(itP2.id);
+  await wA.pass(wA.P2);
+  const wD = world();
+  wD.client(); wD.mk('dd1');
+  await wD.pass();
+  wD.eng.answerCrossProviderAsk(fbItems(wD)[0].action.askId, { answer: 'deny' });
+  await wD.pass();
+  ok(alw.p === 'allow' && alw.p2 === undefined && alw.moved && fbItems(wA).filter((x) => x.action.poolId === wA.P2 && x.status === 'open').length === 0
+    && fbItems(wD).filter((x) => x.status === 'open').length === 0 && fbItems(wD).length === 1 && wD.restarts().length === 0,
+    '(a) Always sets THIS pool\'s setting only and moves its conversations; (b) Deny moves nothing and the next pass files no item (6 h quiet); (c) the item dismissed in the tray is a Deny — the next pass files none', { alw, d: fbItems(wD).map((x) => x.status) });
+  // (7) A LOCKED VAULT: the conversation's own line says the fallback waits for it
+  await vault.lock('test', { quiet: true });
+  const wV = world();
+  wV.client(); wV.mk('v1');
+  await wV.pass(); await wV.pass();
+  const peekLocked = wV.eng.poolChooserForModel(wV.P, { model: 'deepseek-chat', resumeOf: 'cid-v1', fallbackOnly: true });
+  await vault.unlock('correct horse battery staple');
+  ok(wV.cards.filter((c) => c.sid === 'v1' && c.text === 'DeepSeek could take this conversation while every member is out, but the vault is locked — For you names what waits on it; Unlock… there and the pool can move it').length === 1 && wV.restarts().length === 0 && peekLocked === null,
+    '(7) the vault LOCKED: nothing moves and the conversation\'s own line says ONCE that DeepSeek waits for the vault (its press: the vault\'s item in For you); the peek names nothing', wV.cards.map((c) => c.text));
+  // (8) THE MEMBER ABOUT TO RETURN: held near its login\'s end, near its limit, unknown ⇒ the pool\'s own member, never the provider; a wall a minute from its reset: the shape has no wait (F3a\'s dwell brings it back)
+  const near = (w, how) => {
+    if (how === 'unknown') fs.writeFileSync(path.join(w.cacheDir, w.B + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand' }));   // a reading that states no bucket: B is UNKNOWN, never «out»
+    if (how === 'soft') fs.writeFileSync(path.join(w.cacheDir, w.B + '.json'), cacheOf(0.93));   // near its limit, above its hard floor
+    if (how === 'login') { fs.writeFileSync(path.join(w.cacheDir, w.B + '.json'), cacheOf(0.1)); fs.writeFileSync(path.join(w.am.subDir(w.B), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 10 * 60e3, subscriptionType: 'max' } }), { mode: 0o600 }); }   // quota fine, its login about to end
+  };
+  const eight = {};
+  for (const how of ['unknown', 'soft', 'login']) { const w = world({ cross: 'allow' }); w.client(); near(w, how); w.mk('e-' + how); await w.pass(); eight[how] = { on: w.am.poolCurrentFor(w.P, 'e-' + how) === w.B, fb: w.restarts().some((t) => t.model === 'deepseek-chat') || w.eng._fbQueue.size > 0 }; }
+  const wR = world({ cross: 'allow' });
+  wR.client(); fs.writeFileSync(path.join(wR.cacheDir, wR.A + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand', fiveHour: { utilization: 1, resetsAt: nowS() + 60 }, sevenDay: { utilization: 0.4, resetsAt: nowS() + 3 * 86400 } }));
+  wR.mk('r60');
+  await wR.pass();
+  ok(Object.values(eight).every((x) => x.on && !x.fb) && wR.restarts().some((t) => t.serverId === 'r60' && t.model === 'deepseek-chat'),
+    '(8) B unknown, B near its limit, B\'s login near its end ⇒ the pool\'s OWN member takes it, never the provider; A a minute from its reset with B spent ⇒ the provider IS chosen (the settled shape has no reset wait — F3a\'s dwell brings it back)', { eight, r60: wR.restarts().map((t) => t.model) });
   // RED CONTROLS
   const ENG = read('src/server/usage-pool-engine.js');
   const PACE = "    if (e.by !== 'person' && _fbMovedAt.length >= FALLBACK_MOVES_PER_MIN) continue;";
@@ -400,6 +562,20 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   wPace.client(); for (let i = 0; i < 8; i++) wPace.mk('p' + i);
   await wPace.pass();
   ok(wPace.restarts().length === 8, 'CONTROL: a copy without the pace restarts all 8 in the minute ⇒ the 6-a-minute leg goes RED', wPace.restarts().length);
+  const SET1 = "  if (by !== 'person' && crossProviderMode((accounts.get(poolId) || {}).crossProvider) !== 'allow') return { why: 'setting' };";
+  const SET2 = "    if (e.by !== 'person' && crossProviderMode((accounts.get(e.poolId) || {}).crossProvider) !== 'allow') { _fbQueue.delete(e.sid); continue; }   // (r2939 MUST) the pool's setting is no longer 'allow': its own entries go";
+  const wForce = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(anchored(ENG, SET1, '', 'the move forces allow'), SET2, '', 'the queue keeps the pool\'s entries'), 'eng-forced-allow') });
+  wForce.client(); for (let i = 0; i < 8; i++) wForce.mk('f' + i);
+  await wForce.pass();
+  wForce.am.updatePool(wForce.P, { crossProvider: 'never' });
+  await wForce.eng.pumpFallbackMoves(Date.now() + 61e3);
+  ok(wForce.restarts().length === 8, 'CONTROL: a copy whose move forces the allow word (the setting not judged at the move) goes on moving after the pool said never ⇒ the MUST\'s leg goes RED', wForce.restarts().length);
+  const SWEEP = "        if (on && !membership.includes(on) && !(poolFallbackSet(accounts.get(a.id)) || new Set()).has(on)) stale.add(on); // (B-d578) a conversation on a LISTED fallback provider is the pool's";
+  const wSw = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, SWEEP, '        if (on && !membership.includes(on)) stale.add(on);', 'the sweep takes a fallback for a removed member'), 'eng-sweep-takes') });
+  wSw.mk('sw1', wSw.P, { claudeSessionId: 'cid-sw1', _heldPoolMember: ds.id, _lastPtyDataAt: Date.now() });
+  const swept2 = wSw.mute(() => wSw.eng.sweepNonMemberLinks());
+  ok(swept2.some((x) => x && Array.isArray(x.removed) && x.removed.includes(ds.id)), 'CONTROL: a copy of the stale-member sweep without the fallback\'s exemption takes the conversation on DeepSeek for a removed member ⇒ the sweep leg goes RED', swept2);
+  ok(BR.poolFallbackOf({ poolFallback: { poolId: 'p', provider: 'acct-1' } }) === null && BR.poolFallbackOf({ poolFallback: 'x' }) === null && BR.poolFallbackOf({}) === null, 'boot-restore reads a malformed record — another kind of id, a string, none — as NO record (nothing guessed)');
   const FIRST = '  const saved = await writeFallbackRecord(j.s2, record);';
   const wRec = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, FIRST, '  const saved = (writeFallbackRecord(j.s2, record), true);', 'restart before the record'), 'eng-no-record-first') });
   wRec.client(); wRec.meta.mode = 'fail'; wRec.mk('r1');

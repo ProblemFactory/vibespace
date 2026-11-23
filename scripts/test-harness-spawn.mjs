@@ -576,7 +576,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(pCut.x.spawned.length === 1 && !pCut.err, 'CONTROL: the create before pool unit (d) spawns that pooled DeepSeek start under the managed helper (the organisation\'s credential toward the provider\'s address): the refusal leg goes RED', pCut.err);
   // THE REAL ROAD (B-d578, the fallback member F1 + F2 — 主开发 r2858: bl-keys-misc's not-kept legs as the acceptance): the stand-in
   // store above is now the store's OWN answer — a real pool that lists DeepSeek as its FALLBACK, the conversation's chooser naming it
-  // (the engine names it from F2, through the carry of a conversation it moved): the start LANDS on DeepSeek (its address in the env),
+  // (the engine names it through the carry of a conversation it moved — the chooser below answers as the engine does): the start LANDS on DeepSeek (its address in the env),
   // is STAMPED as it (the held member — billed to the provider, unit (c)) and the provider's model rule ran first (unit (d)).
   const realSub = am.createSubscription({ name: 'Real member' }).id;
   fs.writeFileSync(path.join(am.subDir(realSub), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, subscriptionType: 'max' } }), { mode: 0o600 });
@@ -587,6 +587,17 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(pReal.spawned.length === 1 && pModel(pReal) === 'deepseek-chat' && !!pReal.session && pReal.session._accountId === realPool && pReal.session._heldPoolMember === ds.id && pRealEnv.ANTHROPIC_BASE_URL === 'https://api.deepseek.com/anthropic',
     'THE REAL ROAD (r2858\'s acceptance): a real pool listing DeepSeek as its FALLBACK, the chooser naming it ⇒ the pooled start LANDS on DeepSeek, is STAMPED as it (the held member: billed to the provider) and ran the provider\'s model rule (deepseek-chat, never «opus»)',
     { spawned: pReal.spawned.length, model: pModel(pReal), held: pReal.session && pReal.session._heldPoolMember, acct: pReal.session && pReal.session._accountId, base: pRealEnv.ANTHROPIC_BASE_URL, err: (pReal.sent || []).filter((m) => m.type === 'error').map((m) => m.message) });
+  // …and THE RESUME of a conversation the pool moved, the chooser answering as the ENGINE does (F2 cure, round wuq1b1trm): the store's
+  // PEEK (`fallbackOnly`) names the fallback, the create's question (`carryRecord`) hands the move's record — which rides the create's
+  // FIRST meta write (r2939 (1): a hub restart after the create finds it there); no ordinary ask is made
+  const REC = { poolId: realPool, provider: ds.id, fromMember: realSub, fromModel: 'sonnet', toModel: 'deepseek-chat', at: Date.now(), by: 'pool' };
+  const asked = [], metaWrites = [];
+  const chooserReal = (pid, o = {}) => { asked.push(o.carryRecord ? 'record' : o.fallbackOnly ? 'peek' : 'ordinary'); return o.carryRecord ? REC : o.fallbackOnly ? ds.id : null; };
+  const pRes = await drive(wsCreate, { backend: 'claude', accountId: realPool, resume: true, resumeId: 'conv-moved-1', ignoreNoConvo: true }, { accounts: am, managedClaudeDir: path.join(scratchDir('hspawn-pool-real-r'), 'no-managed'), poolChooser: chooserReal, writeSessionMeta: (k, m) => { metaWrites.push(m); return Promise.resolve(true); } });
+  const firstMeta = metaWrites[0] || {};
+  ok(pRes.spawned.length === 1 && !!pRes.session && pRes.session._heldPoolMember === ds.id && asked.includes('peek') && asked.includes('record') && !asked.includes('ordinary') && !!firstMeta.poolFallback && firstMeta.poolFallback.fromModel === 'sonnet' && firstMeta.poolFallback.provider === ds.id && firstMeta.heldPoolMember === ds.id,
+    'THE RESUME the pool moved (r2939 (1)): the PEEK names DeepSeek, the resume lands there, and the move\'s record is in the create\'s FIRST meta write beside the held member — never only in a carry held in memory',
+    { spawned: pRes.spawned.length, held: pRes.session && pRes.session._heldPoolMember, asked, first: firstMeta.poolFallback || null, writes: metaWrites.length, err: (pRes.sent || []).filter((m) => m.type === 'error').map((m) => m.message) });
   // THE MANAGED ENV BLOCK (its reader's MUST): the CLI copies a managed `env` over the spawn's own — an Anthropic credential there
   // goes to the provider, an address there sends the provider's key to the organisation: both refuse like a helper
   const ORG_TOKEN = ['org', 'bearer', 'from', 'policy'].join('-');

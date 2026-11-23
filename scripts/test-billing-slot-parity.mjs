@@ -248,6 +248,7 @@ export const ROWS = Object.freeze([
   ['writeSnap@src/server/usage-pool-engine.js', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 2],
   // ── the census cure 3 (主开发 2026-11-19 09:12Z): the chooser handed on, its received names' calls ──
   ['poolChooser@src/ws-create.js', 'src/ws-create.js', 'chooseMember', 'pile', 1],   // ws-create's chooseMember arrow calls the engine's chooser it received
+  ['poolChooser@src/ws-create.js', 'src/ws-create.js', 'createBody', 'pile', 1],   // B-d578 F2 cure (r2939 (1)): the create asks the engine's chooser for the fallback move's RECORD (carryRecord) — no member is chosen there
   ['chooseMember@src/accounts.js', 'src/accounts.js', 'resolveForSpawn', 'pile', 4],   // the member a new pooled start bills (+1, B-d578 F2: the PEEK before the self-heal — the fallback a conversation was moved to, nothing else)
   ['chooseMember@src/accounts.js', 'src/accounts.js', '_resolveHomeSpawn', 'pile', 1],
   ['chooseMember@src/accounts.js', 'src/accounts.js', 'activeAlt', 'pile', 1],   // resolveForSpawn's own closure (INNER)

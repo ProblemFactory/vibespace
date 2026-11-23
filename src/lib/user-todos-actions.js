@@ -602,6 +602,8 @@ export function inboxModel(app) {
       // before anything moves and says what it found; the item is resolved server-side.
       const r = await fetchJson(`/api/accounts/pool-cross/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
       if (r && r.ok) {
+        // (B-d578 F2 cure) the FALLBACK item answers how many it queued — the moves are made a few at a time, each judged again: the count, never «moved»
+        if (rec.action.fallback && r.state !== 'denied') { showToast(r.moving ? t('Moving {n} conversations to the fallback — each restarts there when its turn is over', { n: r.moving }) : t('Nothing moved — no conversation waits any more'), { type: r.moving ? 'success' : 'info' }); return true; }
         showToast(r.state === 'denied' ? t('denied') : r.moved ? (r.state === 'always' ? t('Moved — this pool now moves a conversation to another provider by itself') : t('Moved — the conversation restarts on the other provider')) : r.why === 'gone' ? t('Nothing moved — the conversation is gone') : r.why === 'own-provider-again' ? t('Nothing moved — a member of its own provider can take it again') : r.why === 'no-client' ? t('Nothing moved — no open page could restart it; the pool asks again') : t('Nothing moved — that member cannot take it now'));
         return true;
       }

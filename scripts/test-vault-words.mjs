@@ -43,6 +43,8 @@ const K1 = 'The vault is locked — unlock it first (Unlock… at the top of the
 const K1N = 'The vault is locked — unlock it first';   // the rows' needle: a site that drops a fact stays ITS row's, judged without it
 const TAIL = 'Unlock… at the top of the page; For you names what is waiting on it';
 const ROWS = {
+  // B-d578 F2 cure (r2939 (7)): a conversation at every member's wall whose pool's fallback the locked vault keeps out — its own line, once (zh / ja)
+  'src/server/usage-pool-engine.js': [['but the vault is locked — For you names what waits on it; Unlock… there', 'person', 'the pool\'s fallback waits for the vault: its own line in the conversation, once an episode (lane lg-providers)']],
   // lane human-cli: `vibespace chat` opened read-only on a session the hub last said waits for the vault (its row's inputHeld) — the person at the machine
   'data/bin/vibespace': [['the hub\'s vault is locked and the session waits for it', 'person', 'lane human-cli: the person\'s CLI says why a chat is read-only (inputHeld vault-locked, the hub\'s last word with its age)']],
   // lane passkey-sink: the kernel road's refusal when the passkeys' sealed key cannot be opened (refusedText 'webauthn_key_locked') —

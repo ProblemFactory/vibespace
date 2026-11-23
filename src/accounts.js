@@ -2326,7 +2326,7 @@ class AccountManager {
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name, provider: this._providerBrief(this.memberProviderOf(x.id)) }));
   }
   /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
-  setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; if (this._providerLookup) { try { this.pruneFallbackProviders(); } catch { } } }   // (B-d578 F2, round wokm0ktwv) ONE prune at a start: a removal's two files with a crash between them still end in the same act
+  setProviderLookup(fn, { clean = true } = {}) { this._providerLookup = typeof fn === 'function' ? fn : null; this._providerStoreClean = typeof clean === 'function' ? clean : () => clean !== false; if (this._providerLookup) { try { this.pruneFallbackProviders(); } catch { } } }   // (B-d578 F2, round wokm0ktwv) ONE prune at a start: a removal's two files with a crash between them still end in the same act
   /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
   providersChanged() { this.pruneFallbackProviders(); this._notify(); }
   /** THE POOL'S FALLBACK PROVIDERS (row B-d578, the fallback member — ruling r1516 / the scene page r2733): third-party providers
@@ -2365,7 +2365,7 @@ class AccountManager {
    *  none is left). Only with the store's lookup wired: without one every record reads as gone, and nothing is pruned.
    *  → [{ poolId, gone: [pv-…] }] */
   pruneFallbackProviders() {
-    if (!this._providerLookup) return [];
+    if (!this._providerLookup || (typeof this._providerStoreClean === 'function' && this._providerStoreClean() === false)) return [];   // (F2 cure, the lens of round wuq1b1trm) an UNREADABLE providers.json is no «every provider removed»: nothing pruned
     const out = [];
     for (const a of this._state.accounts) {
       if (this._acctType(a) !== 'pooled' || !Array.isArray(a.fallbackProviders) || !a.fallbackProviders.length) continue;

@@ -874,6 +874,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           }
           // the DECLARED pool row (caps.pool) on a harness whose credentials VibeSpace manages — or a harness whose creds
           // declare how a named account spawns (creds.spawnForm) without a pool: antigravity's per-session Google accounts
+          let poolFallbackRec = null;   // (B-d578 F2 cure, r2939 (1)) the record of a move onto the pool's fallback — rides THIS create's first meta write
           if (harness && harness.creds && accounts && (capsOf(backend).pool || !!harness.creds.spawnForm)) {
             try {
               // Plan C (2.315.0): a LOCAL pooled session gets its own link,
@@ -1000,6 +1001,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // here, now that the member is known, before anything spawns
             const pooledPv = !data.hostId && spawnAccount && spawnAccount.pooled && spawnAccount.kind === 'provider' && /^pv-/.test(String(spawnAccount.poolTarget || '')) ? String(spawnAccount.poolTarget) : null;
             if (pooledPv) {
+              // the record a move onto this fallback left in the engine's carry (the resume of a conversation the pool moved): the session takes it now
+              if (data.resumeId && !data.fork) { try { const rec = poolChooser?.(spawnAccount.id, { resumeOf: String(data.resumeId), carryRecord: true }); if (rec && rec.provider === pooledPv) poolFallbackRec = rec; } catch { } }
               const pm = pvModelOf(pooledPv);
               if (pm && !pm.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pm.code, message: pm.message })); return; }
               if (pm) {   // the member's own row is what the spawn COMMANDS (the command was fixed before the member was known)
@@ -1237,6 +1240,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // env); a linked account spawns via the host's login but IS that
             // account — keep its identity (2.241.0)
             _accountId: spawnAccount?.id || linkedAccountId || null,
+            _poolFallback: poolFallbackRec, // B-d578 F2 cure: the fallback move's record, in the create's FIRST meta write (poolFallback)
             _heldPoolMember: heldPoolMember, // the pool member this (non-hot) process bills for its life — src/server/usage-pool-engine.js heldPoolMemberFor
             _oatRoad: oatEnvRoad ? 'env' : (spawnAccount && !data.hostId ? 'file' : null), // src/server/usage-pool-engine.js tokenGenOf
             _oatGen: oatEnvRoad && Number(spawnAccount.oatGen) > 0 ? Number(spawnAccount.oatGen) : null,
