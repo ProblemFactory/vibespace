@@ -536,6 +536,19 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     r.M.mountTokens.list = () => [{ id: 'tok-0001', kind: 'reverse-mount', owner: 'h-0001' }, { id: 'tok-0002', kind: 'reverse-mount', owner: 'h-0002' }];
     await r.M.onMachineUnpaired('h-0001');
     ok(r.revoked.join() === 'tok-0001', 'a PERSON decides: removing that machine revokes ITS token (by owner) — the other machine\'s stays', r.revoked);
+    // round wgbjnr750: THE TIME CUT — a true orphan minted AFTER the torn lift is revoked as before (only what the mark makes unknown
+    // is kept); RED CONTROL: the cut read as «every token while marked»
+    const tc = (M) => { const got = []; M.mountTokens.list = () => [{ id: 'tok-0003', kind: 'reverse-mount' }, { id: 'tok-0009', kind: 'reverse-mount', createdAt: (Number(M._state.tornAt) || 0) + 1000 }]; M.mountTokens.revoke = (id) => got.push(id); M.gcOrphanTokens(); return got; };
+    const tcA = tc(r.M);
+    const MSRCc = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8');
+    const rc = await run(MJ.load('src/machine-mounts.js', anchored(MSRCc, "          if (tornAt && !(Number(t.createdAt) > tornAt)) { unknown++; continue; }", "          if (tornAt) { unknown++; continue; }", 'srl-u2-time-cut'), 'time-cut-gone'), 'mounts-torn-time-ctl');
+    ok(tcA.join() === 'tok-0009' && tc(rc.M).length === 0, 'THE TIME CUT (round wgbjnr750): a token minted after the torn lift is revoked as an orphan as before; one minted before it is kept — RED CONTROL (in a copy): the mark read as «every token»', { real: tcA });
+    // round wgbjnr750: THE UN-PAIRING's refusal — after a torn lift, while mount-tokens.json is held, removing a machine is refused by
+    // name (its tokens may have no record here, and a held store revokes nothing); RED CONTROL: that line cut
+    r.M.mountTokens.unreadWords = () => 'mount-tokens.json in VibeSpace\'s data folder could not be read (EIO)';
+    const rx2 = await run(MJ.load('src/machine-mounts.js', anchored(MSRCc, "    if (this._state.tornAt && this.mountTokens && typeof this.mountTokens.unreadWords === 'function' && this.mountTokens.unreadWords()) return this.mountTokens.unreadWords();", "    if (false) return null;", 'srl-u2-unpair'), 'unpair-unasked'), 'mounts-torn-unpair-ctl');
+    rx2.M.mountTokens.unreadWords = r.M.mountTokens.unreadWords;
+    ok(/could not be read/.test(String(r.M.revokeHeldFor('h-0001'))) && rx2.M.revokeHeldFor('h-0001') === null, 'THE UN-PAIRING (round wgbjnr750): after a torn lift with the folder links held, revokeHeldFor names the hold (the un-pairing refused before any side effect) — RED CONTROL (in a copy): no refusal');
     const MSRCt = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8');
     const rx = await run(MJ.load('src/machine-mounts.js', anchored(MSRCt, "          if (tornAt && !(Number(t.createdAt) > tornAt)) { unknown++; continue; }   // minted before the torn lift: its record is UNKNOWN — kept\n", '', 'srl-u2-torn-sweep'), 'torn-sweep-unasked'), 'mounts-torn-sweep-ctl');
     ok(rx.revoked.includes('tok-0001'), 'RED CONTROL — the mark not asked (the release\'s road, in a copy): the same restore revokes the machine\'s token over the empty list', rx.revoked);

@@ -296,7 +296,11 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   /** THE CALL. → the answer, `api_pending` (a proposal filed), or a refusal by name. `touch` = the chat's call row. */
   // B-f276 A2 (主开发 r487): while the channels are PAUSED nothing is fetched or sent on a channels credential — a call and an
   // approval refused BY NAME (store-blocked) before any vendor request; a lent mount's credential is not the channels'
-  const pausedOf = (cred) => { if (String(cred || '').startsWith('mount:')) return null; const e = eng(); return e && typeof e.pausedState === 'function' ? e.pausedState() : null; };
+  // B-f276 family unit 2 (round wgbjnr750's MUST — MS1's second road): a `mount:` credential while mounts.json is HELD is UNKNOWN, never
+  // «gone»: a person's Approve / Resubmit and an agent's call are refused BY NAME before anything changes (the card stays pending, the
+  // press works after the lift) — the sweep's road was cured in commit 2
+  const mountsHeldOf = () => { try { const m = getMounts(); return m && typeof m.unreadWords === 'function' ? m.unreadWords() || null : null; } catch { return null; } };
+  const pausedOf = (cred) => { if (String(cred || '').startsWith('mount:')) { const w = mountsHeldOf(); return w ? { error: w, code: 'storage_unread' } : null; } const e = eng(); return e && typeof e.pausedState === 'function' ? e.pausedState() : null; };
   async function call(ctx, input = {}) {
     const cred = String(input.cred || '');
     { const pz = pausedOf(cred); if (pz) return { ok: false, code: 'store-blocked', error: pz.error }; }
@@ -467,6 +471,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (hold.held()) return heldRefusal();
     const p = state.proposals[String(id || '')];
     if (!p) return { ok: false, code: 'not-found', error: 'no such API proposal' };
+    { const pz = pausedOf(p.cred); if (pz) return { ok: false, code: 'store-blocked', error: pz.error }; }   // (MS1's second road: the resubmit beside the approve)
     if (p.status !== 'failed' || !p.redirect || p.resubmittedAs) return { ok: false, code: 'not-resubmittable', error: p.resubmittedAs ? `this card was resubmitted already (${p.resubmittedAs})` : 'only a card whose run the vendor redirected can be resubmitted' };
     if (!digest || digest !== (p.frozen && p.frozen.digest)) return { ok: false, code: 'api_frozen_mismatch', error: 'the card you pressed is not the request on record — reopen API access… and look again' };
     const orig = F.thaw(p.frozen), c = credentialOf(p.cred);

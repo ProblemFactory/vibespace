@@ -314,17 +314,19 @@ try {
     const byRow = await H.readAgainOf(rows.find((x) => x.key === ha._key));
     ok(rows.length === 2 && rows[0].key !== rows[1].key && !rows.some((x) => /\//.test(JSON.stringify(x))) && byName === false && stillBoth && byRow === true && !ha.held() && !!hb.held(), 'two held stores of ONE base name in two folders: the shared base name matches NEITHER; a row (its opaque key) reads its own store again only — no row hands out a path', { rows, byName, byRow });
     ha.stop(); hb.stop();
-    // round w9jhivwdo (4): a hold's code is the error's CODE or NAME, never its message (which may name a path)
-    const dc = dirOf('code'), fc = path.join(dc, 'c.json'); fs.writeFileSync(fc, '{}');
-    const hc = H.create({ file: fc, code: 'c', aside: (m) => fc + '.corrupt-' + m, words: () => 'c' });
-    hc.start(SR.storeAnswer({ error: new TypeError('could not read /made/up/home/folder/c.json') }));
-    const rc = H.holds().find((x) => x.key === hc._key);
-    hc.stop();
-    const hc2 = H.create({ file: fc, code: 'c', aside: (m) => fc + '.corrupt-' + m, words: () => 'c' });
-    hc2.start(SR.storeAnswer({ error: Object.assign(new Error('EIO: i/o error, read /made/up/home/folder/c.json'), { code: 'EIO' }) }));
-    const rc2 = H.holds().find((x) => x.key === hc2._key);
-    hc2.stop();
-    ok(!!rc && rc.code === 'TypeError' && !!rc2 && rc2.code === 'EIO' && ![rc.code, rc2.code].some((c) => /\/|made|folder/.test(c)), 'a hold\'s code is the error\'s own code or name, clamped — a message naming a path never reaches the list', { a: rc && rc.code, b: rc2 && rc2.code });
+    // round w9jhivwdo (4) — round wgbjnr750's MUST: a hold's code is the error's CODE or NAME, never its message (which may name a
+    // path). The inputs that tell the cure from the base: an answer whose code IS a sentence with a path, and an error with no code
+    // and no name whose message holds one (the base took the answer's code — store-read's codeOf falls to the message — as it was)
+    const clampRun = (Mod) => {
+      const dc = dirOf('code'), fc = path.join(dc, 'c.json'); fs.writeFileSync(fc, '{}');
+      const nameless = new Error('read of /made/up/home/folder/c.json did not answer'); nameless.name = '';
+      const inputs = [SR.storeAnswer({ error: new TypeError('could not read /made/up/home/folder/c.json') }), SR.storeAnswer({ error: Object.assign(new Error('EIO: i/o error, read /made/up/home/folder/c.json'), { code: 'EIO' }) }),
+        { state: 'unreadable', code: 'could not read /made/up/home/folder/c.json', why: 'the read failed' }, SR.storeAnswer({ error: nameless })];
+      return inputs.map((a) => { const h = Mod.create({ file: fc, code: 'c', aside: (m) => fc + '.corrupt-' + m, words: () => 'c' }); h.start(a); const r = Mod.holds().find((x) => x.key === h._key); h.stop(); return r ? r.code : null; });
+    };
+    const cl = clampRun(H), clx = clampRun(mutant('src/store-read-hold.js', [["  if (typeof c === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(c)) return c;", "  if (a && a.code) return String(a.code);   /* the base: the answer's code as it was */"]]));
+    ok(cl.join() === 'TypeError,EIO,unreadable,unreadable' && !cl.some((c) => /\/|made|folder/.test(String(c))), 'a hold\'s code is the error\'s own code or name, clamped — a code that is a sentence with a path, and an error with no code and no name, both read «unreadable»: no path reaches the list', cl);
+    ok(clx.some((c) => /\/made\/up/.test(String(c))), 'RED CONTROL — the clamp cut (the base, in a copy): the path reaches the list as the hold\'s code', clx);
     const dt = dirOf('tokens-torn-words'), ft = path.join(dt, 'mount-tokens.json'); fs.writeFileSync(ft, '{"tokens": [ torn');
     const st = new MountTokens({ dataDir: dt, log: quiet }); await lifted(st);
     ok(/^mount-tokens\.json\.corrupt-\d+/.test(String(st.tornCopy())), 'a TORN lift of the folder links names its copy for that run (GET /api/mount-tokens answers it; the Bridge tokens section says each push mount must be pushed again)', st.tornCopy());

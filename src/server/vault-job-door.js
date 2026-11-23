@@ -616,6 +616,8 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   function revokeAll(jobId, { by = 'user' } = {}) {
     const j = String(jobId || '');
     const job = jm && JOB_RE.test(j) ? jm.jobs.get(j) : null;
+    // B-f276 family unit 2 (round wgbjnr750): jobs.json HELD — the job is unknown, never «a bad revoke»: refused by name, nothing taken back
+    if (!job && jm && jm._unread && jm._unread.store) return { ok: false, code: 'records-unread', words: typeof jm.unreadWords === 'function' ? jm.unreadWords('a job\'s approvals cannot be taken back while the job records cannot be read') : 'the Background Work records cannot be read right now' };   // its own words: the press's line above is a control's anchor
     if (!job) return named('bad_revoke');
     // EVERY vault-job row that names the job (主开发 r2666 (2)) — an approval of an entry the job has since dropped never outlives the
     // card's take-back — and the entries it declares now (a row the store cannot list is still asked by its id)

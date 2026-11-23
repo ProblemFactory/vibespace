@@ -39,6 +39,7 @@ const STATUS = Object.freeze({
   password_too_short: 400, password_too_long: 400, password_not_text: 400, same_as_sign_in: 400, same_password: 400, bad_hours: 400,
   human_only: 403, cross_site: 403, unauthorized: 401, vault_locked: 423, no_link: 404,
   reveal_needs_password: 403, not_found: 404, unreadable: 500, // lane vault-contents-window
+  'records-unread': 503, // B-f276 family unit 2 (round wgbjnr750): the Background Work records held — the job card's press refused by name
   not_revealable: 403, // int317: a machine's link token / a sealed file's key — never shown
   // design q-047 L1 (lane vault-totp): the two-step doors
   exists: 409, bad_seed: 400, seed_too_short: 400, bad_uri: 400, hotp_unsupported: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400,
@@ -189,7 +190,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
-    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || (code === 'too_many_jobs' && r && r.words) || (code === 'store_held' && r && r.cause && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence · stage L3's F1: a full row's recipe names its entry
+    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || (code === 'records-unread' && r && r.words) || (code === 'too_many_jobs' && r && r.words) || (code === 'store_held' && r && r.cause && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence · stage L3's F1: a full row's recipe names its entry
   };
   /** The request's password field(s), taken OFF the request (no later reader sees them). */
   const take = (req, ...names) => {

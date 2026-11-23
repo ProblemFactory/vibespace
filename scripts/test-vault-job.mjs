@@ -581,6 +581,10 @@ async function legHeldPress(doorSrc = null) {
   await W.door.factsLanded();
   rows.held = h; rows.open = cards(W).length;
   row(!!h && h.ok === false && h.code === 'records-unread' && cards(W).length === 1, 'jobs.json HELD (its memory empty because unread): a press on a job\'s approval card is REFUSED BY NAME (records-unread) — the card stays open, never closed as over', { h, open: cards(W).length });
+  const rv = W.door.revokeAll(job.id, { by: 'user' });
+  row(!!rv && rv.ok === false && rv.code === 'records-unread' && cards(W).length === 1, 'round wgbjnr750: the job card\'s ✕ while held is refused BY NAME (records-unread), never «bad_revoke» — nothing taken back', rv);
+  { const VR = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
+    row(VR.includes("'records-unread': 503,") && VR.includes("(code === 'records-unread' && r && r.words)"), 'round wgbjnr750 (pin): the route answers a held refusal 503 with the hold\'s words — never the bare code with 400'); }
   W.jm.jobs.clear(); for (const [k, v] of keep) W.jm.jobs.set(k, v); W.jm._unread.store = was;
   const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
   await W.door.factsLanded();

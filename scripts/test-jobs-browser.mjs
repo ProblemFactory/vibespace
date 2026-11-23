@@ -394,6 +394,18 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   k.reconcile({ graceMs: 120000 });
   ok(tabsH2.length > 0 && await until(() => !model.windows.has(winH2) && tabsH2.every((t) => model.targets.get(t).state === 'closed'), 15000), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, ...f11State(winH2, tabsH2, leaseRoots(H2), 0) });
   ok(H2 && !k._reg().children[H2] && !leasesOf(H2).length, 'THE SWEEP: a job that ended without its finalize hook is released at the next reconcile (evidence: not running)', { H2, children: Object.keys(k._reg().children) });
+  // round wgbjnr750 (J1's end): an UNVERIFIED job keeps its handle until the PERSON removes it (the panel's Remove — Stop leaves it
+  // unverified) or it is archived: then the next reconcile releases its handle (the real reconcile)
+  { jobs.set('jb-0000cccc', { id: 'jb-0000cccc', name: 'third', state: 'up', owner: { conversation: { id: 'conv-userW-1' } } }); tokens.set('jbt_cccc', 'jb-0000cccc');
+    await call('/api/agent/browser/resolve', 'jbt_cccc', { argv: ['snapshot'] });
+    const H3 = handleOf('jb-0000cccc'); jobs.get('jb-0000cccc').state = 'unverified';
+    k.reconcile({ graceMs: 0 }); const keptU = !!(H3 && k._reg().children[H3]);
+    jobs.delete('jb-0000cccc'); k.reconcile({ graceMs: 0 });
+    ok(!!H3 && keptU && !k._reg().children[H3], 'AN UNVERIFIED JOB\'s end (r3115 (1), round wgbjnr750): its handle is kept while unverified, and released by the next reconcile once the person REMOVES it', { H3, keptU });
+  }
+  // round wgbjnr750 (pin): the wiring hands the keeper the settings hold — a dropped line would leave every keeper leg green
+  { const MW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+    ok(/settingsHeld: \(\) => \(typeof persistenceRouter\.settingsHeld === 'function' \? persistenceRouter\.settingsHeld\(\) : null\),\s+\/\/ B-f276 family unit 2: the CLI pin/.test(MW), 'THE WIRING (pin): the browser keeper is handed the settings hold (persistenceRouter.settingsHeld)'); }
   ok(jl.some((x) => /job jb-0000aaaa uses the conversation's browser as bk-00000a01\.\d+/.test(x)) && jl.some((x) => /job handle released \(the job run ended\)/.test(x)), 'the journal names the job by its ID at the mint and the release (never its name)', jl.filter((x) => /job/.test(x)));
   // THE .229 RULE'S SECOND ORDERING (lane jobs-browser-f11-race — F11 red on the rel251/rel253 runners: roots at the release
   // [0009…, 0005…], tab 0004 left open): the narrowing's close of a holder's session (closeLeaseSession: `tab close`, `close`,
