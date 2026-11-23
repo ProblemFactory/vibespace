@@ -182,7 +182,7 @@ try {
   };
   { const g = mergeTie(am2);
     ok(!g.err && g.carried && g.hadFrom && g.fromGone, 'r2915: the MERGE carries the tie onto the survivor (its folder now holds the folded sign-in: its deadline on the row); r2972 5: the folded row\'s fingerprint leaves with it', JSON.stringify(g));
-    const NoCarry = copyAM("    this._noteLoginTie(intoId, { fresh: true });   // the MERGE carries the tie onto the survivor: its folder now holds the folded sign-in (r2915)\n", '', 'the merge carries no tie (RED)'); // stale-pins: kept
+    const NoCarry = copyAMs([["    this._noteLoginTie(intoId, { fresh: true });   // the MERGE carries the tie onto the survivor: its folder now holds the folded sign-in (r2915)\n", ''], ["      if (seed) { try { this._seedTieAt(id, o); } catch { } }   // a row's own landing seeds a row with no tie (r3022 (2))\n", '']], 'the merge carries no tie, nor does the landing (RED)'); // stale-pins: kept — unit 4: the landing seeds too
     if (!NoCarry.err) { const r = mergeTie(new NoCarry({ dataDir: path.join(tmp, 'red-merge') })); ok(!r.carried, 'r2972 2 RED: in a copy without the carry the survivor holds NO tie of its folded sign-in', JSON.stringify(r)); } else ok(false, 'RED CONTROL built: the merge without the carry', NoCarry.err); }
   // r2915 (a): a second press JOINS the run still out; an errored run starts afresh
   const joins = (M) => {

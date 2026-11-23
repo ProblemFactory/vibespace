@@ -219,6 +219,7 @@ console.log('— ⑧ THE POOL\'S READS OF THE ESTIMATOR (law B3): every one a ro
     viewFor: 'bookkeeping — reads off the loop what the sweep\'s fresh step will ask of one identity\'s anchors file (B-360d part 3 U1); no prediction read',
     withView: 'bookkeeping — serves the sweep\'s step from that view (B-360d part 3 U1); no prediction read',
     noteLive: 'bookkeeping — hands the estimator a live usage record (its odometer ring); a write INTO it, no prediction read',
+    retireRates: 'bookkeeping — a split name\'s rates entry dropped before its anchors file is archived (B-87fd identity unit 4, r3022 (1)); no prediction read',
     estimateFor: 'auto-cli-loop only: the burn-aware CLI rung\'s drift (2.329.0, its own ruling) — when to read, never a placement',
   };
   const codeOf = (t) => t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');

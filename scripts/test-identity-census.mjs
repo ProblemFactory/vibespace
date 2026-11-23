@@ -164,9 +164,12 @@ const groupsWorld = async () => {
       getAutoResume: () => null, getQuotaProbe: () => null });
     groups = eng.usageIdentityGroups();
   } catch (e) { err = e.message; }
+  // identity unit 4: groups kept APART for want of proof answer «unproven» (the one comparison's own answer), apart by proof «different»
+  const recs = new Map(); for (const id of ids.values()) { try { recs.set(id, am.identityRecordOf(id, { withinMs: 60000 })); } catch { recs.set(id, null); } }
+  const { sameAccount: same1 } = require(path.join(REPO, 'src/account-identity.js'));
   await closeAm(am);   // the groups are computed: the engine has no stop (its timers end with the process at report())
   const groupOf = (id) => { if (!groups) return null; for (const [k, g] of groups) if (g && Array.isArray(g.accountIds) && g.accountIds.includes(id)) return k; return null; };
-  return { err, answer: (p) => { const i = PAIRS.indexOf(p); const gx = groupOf(ids.get(`${i}:x`)), gy = groupOf(ids.get(`${i}:y`)); return gx && gx === gy ? 'same' : 'different'; } };
+  return { err, answer: (p) => { const i = PAIRS.indexOf(p), x = ids.get(`${i}:x`), y = ids.get(`${i}:y`); const gx = groupOf(x), gy = groupOf(y); if (gx && gx === gy) return 'same'; return same1(recs.get(x), recs.get(y)) === 'unproven' ? 'unproven' : 'different'; } };
 };
 const gw = await groupsWorld();
 ok(!gw.err, 'the pool engine builds over the census world (a real AccountManager, its facts settled) and answers its identity groups', gw.err || '');
@@ -246,7 +249,7 @@ const RIGHT = {
   _usageGlobalLink: ['same-both-org', 'same-one-org', 'same-no-org', 'same-declared-conflict', 'same-renamed', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
   // identity unit 4 (主开发 r3011): the engine's groups on the one comparison — same-one-org, seats-one-org and seats-org-only now
   // right; same-no-org (an address with no organisation proves no account, Q4) and same-declared-conflict (ruling [1]) fall APART
-  usageIdentityGroups: ['same-both-org', 'same-one-org', 'same-renamed', 'seats-one-org', 'seats-org-only', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
+  usageIdentityGroups: ['same-both-org', 'same-one-org', 'same-renamed', 'seats-one-org', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],   // seats-org-only answers «unproven» (apart for want of a fact)
   // the one comparison: «unproven» on same-no-org (an address with no organisation), same-declared-conflict (nobody's twin until
   // the person resolves it) and seats-org-only (signed-out rows: no fact) — never wrong
   sameAccount: ['same-both-org', 'same-one-org', 'same-renamed', 'seats-one-org', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],

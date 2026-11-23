@@ -10,7 +10,11 @@
 //  5. the spend slot (data/spend-budget.json's key, r3011 (3)) is the same under today's keying and the one comparison;
 //  6. THE UPDATE (r3022 (2)): rows signed in before the tie existed are SEEDED at their first landing — one account in two rows
 //     stays one group and nothing is renamed, a second start writes nothing; two accounts the release grouped by name split; a
-//     row whose snapshot cannot be read seeds nothing; the sweep that comes BEFORE the landing judges nothing.
+//     row whose snapshot cannot be read seeds nothing; the sweep that comes BEFORE the landing judges nothing;
+//  7. THE RETIRE (r3022 (1)), the sweep's alone: only a PROVEN split archives the bare name's file beside itself (dated, never
+//     removed) after its rates entry is on disk, said once by kind and the rows' names and ids; one account, an unreadable row,
+//     an unproven split and a sweep before the landing retire nothing; a crash inside the retire is finished by the next pass.
+// RED CONTROLS: the release-keyed engine; a retire that archives before its rates entry is on disk; a retire on «unproven».
 // RED CONTROL: a copy of the engine keyed by today's key (the release's grouping) — legs 1, 2 and 4 fail on it.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -36,7 +40,7 @@ const engMod = require(engPath);
 const MUT = mutantCopies('engine-identity-groups', REPO);
 const engSrc = fs.readFileSync(engPath, 'utf8');
 let todayMod = null, todayErr = null;
-try { todayMod = require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, '  for (const [name, ms] of identityGroupsOf(members)) {\n', '  for (const [name, ms] of members.reduce((acc, x) => acc.set(x.today, [...(acc.get(x.today) || []), x]), new Map())) {\n', 'the release keying (RED)'))); } catch (e) { todayErr = e.message; }
+try { todayMod = require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, '  const judged = identityGroupsOf(members);\n', '  const judged = members.reduce((acc, x) => acc.set(x.today, [...(acc.get(x.today) || []), x]), new Map());\n', 'the release keying (RED)'))); } catch (e) { todayErr = e.message; }
 ok(!todayErr && todayMod && typeof todayMod.create === 'function', 'RED CONTROL built: a copy of the engine grouped by today\'s key', todayErr || '');
 
 // ── a made-up world: organisations and people are invented; no id or address of a real account ──
@@ -66,7 +70,7 @@ const closeAm = async (am) => { try { await am.displaySettled(); } catch { } try
 /** `update: true` = THE UPDATE: the rows were signed in before the tie existed (their record holds none) and the hub starts again
  *  on the same data (`beforeLanding(am, ids)` runs on the new store before anything lands); `land: false` = the engine is built
  *  before the new store's first landing */
-const world = async (rows, { update = false, land = true, beforeLanding = null } = {}) => {
+const world = async (rows, { update = false, land = true, beforeLanding = null, copies = {} } = {}) => {
   const root = tmpdir('vs-eig-'), dataDir = path.join(root, 'data'), cacheDir = path.join(dataDir, 'usage-cache');
   fs.mkdirSync(cacheDir, { recursive: true });
   let am = new AccountManager({ dataDir, onChange: () => { } });
@@ -85,11 +89,13 @@ const world = async (rows, { update = false, land = true, beforeLanding = null }
     if (beforeLanding) beforeLanding(am, ids);
   }
   if (land) await am.signinFactsSettled(null, { withinMs: 0 });
-  const mk = (mod) => mod.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
+  const apps = [];
+  const mk = (mod) => mod.create({ app: (apps[apps.length] = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }), rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
     serverSetting: (k) => (k === 'accounts.cliSelfMeasure' ? false : undefined), getAccounts: () => am,   // the self-measure stays off: no CLI forked from a fast suite
     getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
-  const eng = mk(engMod), today = todayMod ? mk(todayMod) : null;
-  return { am, ids, eng, today, dataDir, close: () => closeAm(am) };
+  const eng = mk(engMod), app = apps[0], today = todayMod ? mk(todayMod) : null;
+  const copy = Object.fromEntries(Object.entries(copies).map(([k, mod]) => { const e = mk(mod); return [k, { eng: e, app: apps[apps.length - 1] }]; }));
+  return { am, ids, eng, app, today, copy, dataDir, close: () => closeAm(am) };
 };
 const groupOf = (e, id) => { for (const [, g] of e.usageIdentityGroups()) if (g.accountIds.includes(id)) return g.accountIds.slice().sort().join(','); return id; };   // the groups asked NOW (the engine's 30 s memo would answer an older ask)
 const usableOf = (e, id) => { try { const v = e.quotaVerdictFor(id); return v ? v.usable : 'no-verdict'; } catch (err) { return 'threw: ' + err.message; } };
@@ -170,6 +176,85 @@ if (typeof process.getuid === 'function' && process.getuid() !== 0) {   // a PLA
   ok(early.group === [X, Y].sort().join(',') && JSON.stringify(early.names) === JSON.stringify([`org:${O.toLowerCase()}`]), '6. THE SWEEP COMES FIRST: before the rows\' first landing nothing is judged — the name keeps its rows together as the release had them', JSON.stringify({ group: early.group === [X, Y].sort().join(','), names: early.names.length }));
   await W.am.signinFactsSettled(null, { withinMs: 0 });
   ok(groupOf(W.eng, X) === X && groupOf(W.eng, Y) === Y, '6. …and once both have landed (each seeded from its own snapshot) the two accounts are judged apart', JSON.stringify([groupOf(W.eng, X), groupOf(W.eng, Y)].map((g) => g.split(',').length)));
+  await W.close(); }
+
+// ── 7. THE RETIRE (r3022 (1)) — the sweep's alone ──
+const UA = require(path.join(REPO, 'src/usage-anchors.js'));
+const anchorsDir = (W) => path.join(W.dataDir, 'usage-anchors');
+const bareOf = (W, key) => path.join(anchorsDir(W), 'anchors-' + UA.anchorSlug(key) + '.ndjson');
+const plant = (W, key) => {   // the bare name's history as the release wrote it (made-up anchors) and its rates entry, beside another's
+  fs.mkdirSync(anchorsDir(W), { recursive: true });
+  const at = Date.now() - 3600e3;
+  fs.writeFileSync(bareOf(W, key), [0, 1].map((i) => JSON.stringify({ fetchedAt: at + i * 60e3, identityKey: key, accountId: null })).join('\n') + '\n');
+  fs.writeFileSync(path.join(anchorsDir(W), 'rates.json'), JSON.stringify({ [key]: { computedAt: at, nAnchors: 2, buckets: {} }, 'acct:someone-else': { computedAt: at, nAnchors: 1, buckets: {} } }));
+  // a rewrite from outside the estimator is followed by its reload, as server.js does after the boot's migrations (reloadRates)
+  for (const a of [W.app, ...Object.values(W.copy || {}).map((c) => c.app)]) { try { a.locals.usageEstimator.reloadRates(); } catch { } }
+};
+const stateOf = (W, key) => {
+  const name = path.basename(bareOf(W, key)), files = fs.readdirSync(anchorsDir(W));
+  let rates = null; try { rates = JSON.parse(fs.readFileSync(path.join(anchorsDir(W), 'rates.json'), 'utf8')); } catch { }
+  return { bare: files.includes(name), archived: files.filter((f) => f.startsWith(name + '.retired-')).length, ratesHas: !!(rates && key in rates), otherKept: !!(rates && 'acct:someone-else' in rates) };
+};
+const said = [];
+const sweep = async (e) => { const was = console.log; console.log = (...a) => { const s = a.join(' '); if (s.startsWith('[usage] ')) said.push(s); else was(...a); }; try { await e.sweepUsageAnchors(); } finally { console.log = was; } };
+const twoSeats = (tag) => { const O = org(); return { O, rows: [{ as: { address: `${tag}-a@example.invalid`, orgId: O }, cache: { ago: 60, u5: 0.3, orgId: O } }, { as: { address: `${tag}-b@example.invalid`, orgId: O }, cache: { ago: 30, u5: 0.3, orgId: O } }] }; };
+{ const { O, rows } = twoSeats('ret'), W = await world(rows, { update: true }), key = `org:${O.toLowerCase()}`;
+  plant(W, key); said.length = 0;
+  await sweep(W.eng); const s1 = stateOf(W, key), line = said.slice();
+  ok(!s1.bare && s1.archived === 1 && !s1.ratesHas && s1.otherKept, '7. a PROVEN split at the update: the bare name\'s file is ARCHIVED beside itself under a dated name and its rates entry dropped (another\'s kept)', JSON.stringify(s1));
+  ok(line.length === 1 && line[0].includes("an organisation's shared usage history") && !line[0].includes(O) && !line[0].includes('@') && W.ids.every((id) => line[0].includes(id)), '7. …said ONCE in the journal by its kind and its rows\' ids — never the organisation\'s id, never an address', JSON.stringify({ n: line.length, hasOrg: line.some((l) => l.includes(O)), hasAt: line.some((l) => l.includes('@')) }));
+  ok(fs.readdirSync(anchorsDir(W)).every((f) => !/^anchors-.*\.ndjson$/.test(f) || !f.includes('.retired-')), '7. the archive is listed by no anchors reader (its name does not end in .ndjson)');
+  await sweep(W.eng);
+  ok(stateOf(W, key).archived === 1 && said.length === 1, '7. a second pass finds no bare file and does nothing (no state of its own; one archive a split)', JSON.stringify({ archived: stateOf(W, key).archived, said: said.length }));
+  await W.close(); }
+{ const O = org(), acct = { address: 'keep@example.invalid', orgId: O }, W = await world([{ as: acct, cache: { ago: 60, u5: 0.3, orgId: O } }, { as: acct, cache: { ago: 30, u5: 0.3, orgId: O } }], { update: true }), key = `org:${O.toLowerCase()}`;
+  plant(W, key); said.length = 0; await sweep(W.eng); const s = stateOf(W, key);
+  ok(s.bare && s.archived === 0 && s.ratesHas && said.length === 0, '7. ONE account in two rows at the update: nothing split, nothing retired, nothing said', JSON.stringify({ ...s, said: said.length }));
+  await W.close(); }
+const REt = (() => { try { return require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, "      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx) && x.rec && y.rec && x.rec.tie && y.rec.tie && same(x.rec, y.rec) === 'different') proven = true;\n", "      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx)) proven = true;\n", 'a retire on «unproven» (RED)'))); } catch (e) { return { err: e.message }; } })();
+{ const O = org(), W = await world([{ as: { address: 'token-twin@example.invalid', orgId: O }, cache: { ago: 60, u5: 0.3, orgId: O } }, { as: 'token', cache: { ago: 30, u5: 0.3, orgId: O } }], { copies: REt.err ? {} : { unproven: REt } }), key = `org:${O.toLowerCase()}`;
+  plant(W, key); said.length = 0; await sweep(W.eng); const s = stateOf(W, key);
+  ok(s.bare && s.archived === 0 && s.ratesHas && said.length === 0, '7. an UNPROVEN split (a long-lived-token row beside a signed-in one: no seat to compare) retires NOTHING — it stands apart, its history kept', JSON.stringify({ ...s, said: said.length }));
+  if (!REt.err) { said.length = 0; await sweep(W.copy.unproven.eng); ok(stateOf(W, key).archived === 1, 'RED: a copy whose retire does not ask for a PROVEN split archives that history', JSON.stringify(stateOf(W, key))); } else ok(false, 'RED CONTROL built: a retire on «unproven»', REt.err);
+  await W.close(); }
+if (typeof process.getuid === 'function' && process.getuid() !== 0) {
+  const O = org(), acct = { address: 'shut@example.invalid', orgId: O }; let refused = null;
+  const W = await world([{ as: acct, cache: { ago: 60, u5: 0.3, orgId: O } }, { as: acct, cache: { ago: 30, u5: 0.3, orgId: O } }], { update: true, beforeLanding: (am, ids) => { refused = credsAt(am.subDir(ids[1])); fs.chmodSync(refused, 0o000); } }), key = `org:${O.toLowerCase()}`;
+  plant(W, key); said.length = 0; await sweep(W.eng); const s = stateOf(W, key);
+  ok(s.bare && s.archived === 0 && said.length === 0, '7. a row whose snapshot could not be read: the retire has not happened and the pass ends without a word', JSON.stringify({ ...s, said: said.length }));
+  try { fs.chmodSync(refused, 0o600); } catch { }
+  await W.close(); }
+{ const { O, rows } = twoSeats('early'), W = await world(rows, { update: true, land: false }), key = `org:${O.toLowerCase()}`;
+  plant(W, key); said.length = 0; await sweep(W.eng); const s0 = stateOf(W, key);
+  await W.am.signinFactsSettled(null, { withinMs: 0 }); await sweep(W.eng); const s1 = stateOf(W, key);
+  ok(s0.bare && s0.archived === 0 && !s1.bare && s1.archived === 1 && said.length === 1, '7. THE SWEEP BEFORE THE LANDING retires nothing; once both rows landed (seeded, different) the next pass retires the name once', JSON.stringify({ before: s0, after: s1, said: said.length }));
+  await W.close(); }
+const ROrder = (() => { try { return require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, "      await usageEstimator.retireRates(s.key);\n      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]|\\.\\d+/g, ''));\n", "      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]|\\.\\d+/g, ''));\n      await usageEstimator.retireRates(s.key);\n", 'the archive before the rates entry (RED)'))); } catch (e) { return { err: e.message }; } })();
+{ const { O, rows } = twoSeats('crash'), W = await world(rows, { update: true }), key = `org:${O.toLowerCase()}`;
+  // (i) the archive refused once, AFTER the rates entry was dropped: the next pass finishes it
+  plant(W, key); said.length = 0;
+  const rename = fs.promises.rename; let once = true;
+  fs.promises.rename = async (...a) => { if (once && String(a[0]).endsWith('.ndjson')) { once = false; throw Object.assign(new Error('a refused rename (placed)'), { code: 'EIO' }); } return rename(...a); };
+  try { await sweep(W.eng); } finally { fs.promises.rename = rename; }
+  const c1 = stateOf(W, key); await sweep(W.eng); const c2 = stateOf(W, key);
+  ok(c1.bare && !c1.ratesHas && said.length === 1 && !c2.bare && c2.archived === 1, '7. A CRASH INSIDE THE RETIRE (the archive refused after the rates entry was on disk): no word, the bare file still there — the next pass finishes it, said once', JSON.stringify({ first: c1, second: c2, said: said.length }));
+  await W.close(); }
+{ const { O, rows } = twoSeats('crash2'), W = await world(rows, { update: true, copies: ROrder.err ? {} : { order: ROrder } }), key = `org:${O.toLowerCase()}`;
+  // (ii) the rates write refused once: nothing archived, the next pass does both (each world its own estimator: the one writer)
+  plant(W, key); said.length = 0;
+  const est = W.app.locals.usageEstimator, real = est.retireRates.bind(est); let fail = true;
+  est.retireRates = async (k) => { if (fail) { fail = false; throw new Error('the rates file was not written (placed)'); } return real(k); };
+  await sweep(W.eng); const d1 = stateOf(W, key); await sweep(W.eng); const d2 = stateOf(W, key);
+  ok(d1.bare && d1.ratesHas && !d2.bare && !d2.ratesHas && said.length === 1, '7. …and a rates write refused: nothing archived, the next pass drops it and archives', JSON.stringify({ first: d1, second: d2, said: said.length }));
+  await W.close(); }
+{ const { O, rows } = twoSeats('crash3'), W = await world(rows, { update: true, copies: ROrder.err ? {} : { order: ROrder } }), key = `org:${O.toLowerCase()}`;
+  if (!ROrder.err) {
+    plant(W, key);
+    const oe = W.copy.order.app.locals.usageEstimator; let f2 = true; const r2 = oe.retireRates.bind(oe);
+    oe.retireRates = async (k) => { if (f2) { f2 = false; throw new Error('the rates file was not written (placed)'); } return r2(k); };
+    await sweep(W.copy.order.eng); await sweep(W.copy.order.eng); const o = stateOf(W, key);
+    ok(!o.bare && o.ratesHas, 'RED: a copy that archives BEFORE its rates entry is on disk leaves that entry for ever after the same refused write (no bare file left to tell)', JSON.stringify(o));
+  } else ok(false, 'RED CONTROL built: the archive before the rates entry', ROrder.err);
   await W.close(); }
 
 // ── the PURE grouping alone: a row with no record stands alone; «unproven» is apart ──

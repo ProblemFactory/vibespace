@@ -357,7 +357,7 @@ const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test
 
     const eng = read('src/server/usage-pool-engine.js');
     ok('§16c SOURCE PIN: the sweep anchors the FRESHEST cache of an identity group, so the machine login\'s snapshot is what the next tick records for the whole identity',
-      /if \(!g\.cache \|\| cache\.fetchedAt > g\.cache\.fetchedAt\) \{ g\.cache = cache; g\.accountId = accountId; \}/.test(eng)
+      /if \(!g\.cache \|\| (?:m\.)?cache\.fetchedAt > g\.cache\.fetchedAt\) \{ g\.cache = (?:m\.)?cache; g\.accountId = (?:m\.)?accountId; \}/.test(eng)   // B-87fd identity unit 4: the group's members first, each member's own fields
       // B-a5c0: the per-group step moved into usage-estimator's sweepAnchorGroup — the engine hands it the group whole
       && /sweepAnchorGroup\(\{\s*identityKey, group: g, anchors: usageAnchors,/.test(eng)
       // (no-5h-window r5: the freshest cache is read through the identity's own «no 5h limit» — `group.tomb5h`)

@@ -303,6 +303,7 @@ const ROWS = [
   ["src/server/usage-pool-engine.js", "synced", "self-synced", "", "create > persistResetCreditTries"],   // r3154 (4): the reset-credit attempts' copy is written synced (flush) before the link or the rename
   ["src/server/usage-pool-engine.js", "move", "move", "", "create > applyResetCreditTriesRead"],
   ["src/server/usage-pool-engine.js", "move", "move", "", "create > asideTornTriesAsync"],
+  ["src/server/usage-pool-engine.js", "move", "move", "", "create > retireSplitNames"],   // B-87fd identity unit 4: a split name's anchors file archived beside itself (r3022 (1))
   ["src/server/usage-probe-log.js", "move", "move", "", "appendProbeLog"],
   ["src/server/provider-spawn.js", "unsynced", "derived", "a spawn plan's file (B-d578 P1-a: OpenCode's one config under the provider's home), written again from its plan at every spawn", "writePlanFile"],
   ["src/server/vault-engine.js", "synced", "self-synced-best-effort", "", "writeAtomic"],

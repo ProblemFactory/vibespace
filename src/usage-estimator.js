@@ -1247,6 +1247,25 @@ class UsageEstimator {
       require('./store-writer.js').storeWriter().dirty(fp, { name: 'usage-rates.write', produce: () => JSON.stringify(this._ratesAll, null, 1) });
     } catch { }
   }
+  /** A SPLIT NAME's RATES RETIRED (B-87fd identity unit 4, 主开发 r3022 (1)(c)): its rates.json entry dropped and ON DISK before
+   *  the sweep archives the name's anchors file, and every rate, kept line and meta of it forgotten. Idempotent. A rates file it
+   *  could not read (anything but «not there») or a write not made durable THROWS: the retire has not happened */
+  async retireRates(key) {
+    const fp = path.join(this.dir, 'rates.json');
+    if (!this._ratesAll) {
+      let text = null;
+      try { text = await fs.promises.readFile(fp, 'utf-8'); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+      const all = text ? JSON.parse(text) : {};
+      if (!this._ratesAll) this._ratesAll = all && typeof all === 'object' ? all : {};   // a copy loaded meanwhile wins
+    }
+    for (const m of [this._rateCache, this._lineCache, this._meta, this._folds, this._foldFail]) { try { if (m && typeof m.delete === 'function') m.delete(key); } catch { } }
+    if (!Object.prototype.hasOwnProperty.call(this._ratesAll, key)) return true;
+    delete this._ratesAll[key];
+    const sw = require('./store-writer.js').storeWriter();
+    sw.dirty(fp, { name: 'usage-rates.write', produce: () => JSON.stringify(this._ratesAll, null, 1) });
+    if (!(await sw.whenDurable([fp]))) throw new Error('the rates file was not written');
+    return true;
+  }
   /** the rates written NOW, on this thread — a one-shot repair (src/ledger-slot-backfill.js) records itself only after the
    *  rates it re-learned are on disk (a kill inside it re-learns them at the retry) */
   flushRates() { try { require('./store-writer.js').storeWriter().flushSync([path.join(this.dir, 'rates.json')]); } catch { } }
