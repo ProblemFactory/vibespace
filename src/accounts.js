@@ -860,9 +860,10 @@ class AccountManager {
    *  a new sign-in replaces it — src/login-expiry.js) is kept on the row (a deadline, no identity); the refresh token it saw, by its
    *  fingerprint (src/login-tie.js) kept in MEMORY only (never written, never logged, never answered). The record names a seat only
    *  from a config tied so */
-  _noteLoginTie(id) {
+  _noteLoginTie(id, { fresh = false } = {}) {
     const a = this.get(id);
     if (!a) return;
+    if (fresh) { try { RR.forget(this.subDir(id)); } catch { } }   // a file this run just moved or wrote: read it again
     let o = null;
     try { o = JSON.parse(RR.facts(this.subCredsPath(id)).text)?.claudeAiOauth || null; } catch { o = null; }
     if (!this._loginTies) this._loginTies = new Map();
@@ -870,9 +871,11 @@ class AccountManager {
     if (rt) this._loginTies.set(id, tokenTieOf(rt)); else this._loginTies.delete(id);
     const rte = o && Number.isFinite(o.refreshTokenExpiresAt) ? o.refreshTokenExpiresAt : null;
     const was = a.loginTie && a.loginTie.rte;
-    if (rte && rt) { if (was !== rte) { a.loginTie = { rte }; this._save(); } }
+    if (rte) { if (was !== rte) { a.loginTie = { rte }; this._save(); } }   // a live sign-in's deadline — or the CLI's blanked residue's, its login's
     else if (a.loginTie) { delete a.loginTie; this._save(); }
   }
+  /** a tie on record for row `id` (its deadline on the row, or its refresh token's fingerprint this process saw) */
+  _hasTie(id) { const a = this.get(id); return !!((a && a.loginTie) || (this._loginTies && this._loginTies.has(id))); }
   /** → (claudeAiOauth) ⇒ tied to the login session the product's own sign-in saw for row `id` (its deadline, or its refresh token's hash) */
   _tiedFn(id) {
     return (o) => {
@@ -925,8 +928,19 @@ class AccountManager {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription' || !capsOf(this._acctBackend(a)).oauthUsage) return null;   // the declared capability the relogin route asks (never a harness id: test-architecture §78)
     if (a.reloginAsk) return 'ask-open';
+    // A SECOND PRESS JOINS THE RUN STILL OUT (主开发 r2915 (a)): its BEFORE and attempt stand (the same command again) — never a
+    // replaced attempt that leaves the first run's sign-in unjudged; only an errored run or a BEFORE past its time starts afresh
+    const was = this._reloginBefore && this._reloginBefore.get(id);
+    if (was && Date.now() - was.at <= RELOGIN_BEFORE_TTL_MS) {
+      const st0 = this._loginStatusRaw(id);
+      if (!(st0 && st0.attempt === was.attempt && st0.state === 'error')) return { attempt: was.attempt, joined: true };
+    }
     const be = this._acctBackend(a), creds = this._credsOf(be), dir = this.subDir(id), word = reloginWordOf(a);
     try { this._lookAgain(id); } catch { }
+    // A ROW WITH NO TIE ON RECORD (signed in before the tie existed, or a merge's survivor before r2915) takes its tie from the
+    // credentials in its folder NOW — its own folder trusted as the release trusted it (主开发 r2915): a wrong seed names the config's
+    // older seat, and the fresh sign-in of any other account then reads DIFFERENT (a move or a new row) — never a silent adoption
+    if (!this._hasTie(id)) this._noteLoginTie(id);
     let live = null, last = null;
     const tied = this._tiedFn(id);   // a config untied to the credentials beside it names no seat (r2779: a /login inside one of the row's sessions)
     try { live = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(dir, RR, { tied }) : null; } catch { live = null; }
@@ -972,11 +986,13 @@ class AccountManager {
     let afterAuth = null;
     // AFTER: the helper's success for this sign-in vouches that its credentials and config were written together (tied); without it
     // (a lost before with no helper road) the row's own tie decides
-    const vouched = !!(st && st.state === 'success');
+    // r2915 (b): on the LOST road only a success that names THIS attempt vouches (a BEFORE past its time still knows it); after a
+    // restart, a status naming some attempt is not known to be this one — only a helper road with no attempt at all vouches
+    const vouched = !lost ? true : kept ? !!(st && st.state === 'success' && st.attempt === kept.attempt) : !(st && st.attempt);
     try { afterAuth = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(src, RR, { tied: vouched ? () => true : this._tiedFn(id) }) : null; } catch { afterAuth = null; }
     const after = accountIdentity.identityRecordOf({ harness: be, declared: null, auth: afterAuth });
     const verdict = accountIdentity.beforeAfterVerdict({ before: lost ? null : kept.record, after, word: lost ? reloginWordOf(a) : kept.word, lost });
-    if (verdict === 'same') return { outcome: 'same', account: this.finalizeSubscription(id) };
+    if (verdict === 'same') return { outcome: 'same', account: this.finalizeSubscription(id, { tie: vouched }) };   // a stale success ties nothing
     if (verdict === 'ask') {
       // HELD, not adopted: the row stays signed out until the person answers on it (reloginAnswer). The MARK goes on disk BEFORE the
       // move (a crash between leaves a question that can be answered — r2734 (c)); a sign-in that could not be moved is never left
@@ -985,18 +1001,27 @@ class AccountManager {
       this._save();
       let moved = 0;
       try { moved = this._moveLogin(src, path.join(src, RELOGIN_HELD)); } catch { moved = 0; }
-      if (!moved) { delete a.reloginAsk; this._save(); throw new Error('the new sign-in could not be set aside to ask about it, so this row was not asked — sign in again'); }
+      // r2915 (c): the refusal REACHES THE PERSON — an answer the page shows (and stops on), never a throw it polls into every 3 s
+      if (!moved) { delete a.reloginAsk; this._save(); return { outcome: 'refused', code: 'relogin_hold_failed', error: 'the new sign-in could not be set aside to ask about it, so this row was not asked — sign in again' }; }
       this._displaySeed(a);   // B-360d: this folder just changed — its facts set in this step
       this._notify();
       return { outcome: 'ask', keptName: a.name, ...(lost ? { lost: true } : {}) };
     }
     // ── different: the row whose record is «same» as the sign-in, else a NEW row ──
-    const other = this._state.accounts.find((x) => x.id !== id
-      && capsOf(this._acctBackend(x)).oauthUsage && this._acctType(x) === 'subscription'
-      && accountIdentity.sameAccount(this.identityRecordOf(x.id, { withinMs: RELOGIN_BEFORE_TTL_MS }), after) === 'same');
+    const other = this._state.accounts.find((x) => {
+      if (x.id === id || !capsOf(this._acctBackend(x)).oauthUsage || this._acctType(x) !== 'subscription') return false;
+      let rec = this.identityRecordOf(x.id, { withinMs: RELOGIN_BEFORE_TTL_MS });
+      if (!this._hasTie(x.id)) {   // r2915: another account's row with NO tie on record is seeded from its own credentials and read now (it takes the move)
+        this._noteLoginTie(x.id);
+        let auth = null;
+        try { auth = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(this.subDir(x.id), RR, { tied: this._tiedFn(x.id) }) : null; } catch { auth = null; }
+        rec = auth ? accountIdentity.identityRecordOf({ harness: be, declared: x.email || null, auth }) : null;
+      }
+      return accountIdentity.sameAccount(rec, after) === 'same';
+    });
     if (other) {
       this._moveLogin(src, this.subDir(other.id));
-      this._noteLoginTie(other.id);   // the moved sign-in is the product's own: its tie goes with it
+      if (vouched) this._noteLoginTie(other.id, { fresh: true });   // the moved sign-in is the product's own: its tie goes with it (a stale success ties nothing)
       this._displaySeed(this.get(other.id)); this._displaySeed(a);   // B-360d: both folders just changed — their facts set in this step
       this._notify();
       return { outcome: 'moved', movedTo: { id: other.id, name: other.name }, freshEmail: fresh.email, keptName: a.name };
@@ -1004,7 +1029,7 @@ class AccountManager {
     const created = this.createSubscription({ name: (fresh.email || 'Subscription').slice(0, 60) });
     this._moveLogin(src, this.subDir(created.id));
     this._displaySeed(a);   // B-360d: this record's folder lost its login in this step (the created one is seeded by its finalize)
-    const finalized = this.finalizeSubscription(created.id);
+    const finalized = this.finalizeSubscription(created.id, { tie: vouched });
     this._notify();
     return { outcome: 'split', account: finalized, freshEmail: fresh.email, keptName: a.name };
   }
@@ -1028,11 +1053,11 @@ class AccountManager {
     return { outcome: 'split', account: finalized, keptName: a.name };
   }
 
-  finalizeSubscription(id) {
+  finalizeSubscription(id, { tie = true } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
     const info = this.readSubCreds(id);
-    this._noteLoginTie(id);   // the product's own sign-in: the tie between its credentials and its config (r2779)
+    if (tie) this._noteLoginTie(id);   // the product's own sign-in: the tie between its credentials and its config (r2779); a stale success ties nothing (r2915 (b))
     const loginStatus = this._subscriptionLoginStatus(id);
     if (info.loggedIn && (!a.name || a.name === 'Subscription')) {
       a.name = (info.email || (info.subscriptionType ? info.subscriptionType[0].toUpperCase() + info.subscriptionType.slice(1) : 'Subscription')).slice(0, 60);
@@ -1372,6 +1397,7 @@ class AccountManager {
     this._save();
     this._oatCheckReplaced(fromId, foldedCheck, 'the row was folded into ' + (into.name || intoId));
     if (into.oatEnc) this.syncOatFile(intoId).catch(() => { }); // ours is re-derived on the survivor
+    this._noteLoginTie(intoId, { fresh: true });   // the MERGE carries the tie onto the survivor: its folder now holds the folded sign-in (r2915)
     this._displayForget(from); this._displaySeed(into);   // B-360d: the folded folder is gone; the survivor's facts are what the fold just wrote
     this._notify();
     return this.rowOf(intoId);   // B-360d: one row by its id, never a whole list

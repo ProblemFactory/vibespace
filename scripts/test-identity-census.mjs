@@ -276,7 +276,7 @@ const DOOR_MARKS = {
   evaluateOnHost: { 'evaluateOnHost(': { 'src/accounts.js': 1, 'src/ws-create.js': 2, 'src/routes/account-tails.js': 1, 'src/server/account-usage-routes.js': 1 } },
   _usageGlobalLink: { '_usageGlobalLink = ': { 'src/usage-routes.js': 4 } },
   usageIdentityGroups: { 'usageIdentityGroups(': { 'src/server/usage-pool-engine.js': 3 }, 'groupKeyOf(': { 'src/server/usage-pool-engine.js': 3 } },
-  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 2, 'src/accounts.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 5 } },
+  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 2, 'src/accounts.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 6 } },   // + the move search's seeded read of an untied row (r2915)
   'usage-anchors identityKeyFor (alone)': { 'identityKeyFor(': { 'src/reading-repair.js': 1, 'src/usage-anchors.js': 1, 'src/server/usage-pool-engine.js': 1 } },
   // two of identityVerdict's four are a NAMESAKE: the mac helper's code-signing verdict (agentd), not an account door
   'oat-mint-model identityVerdict': { 'identityVerdict(': { 'src/oat-mint-model.js': 1, 'src/server/oat-mint.js': 1, 'src/mac-helper-identity.js': 1, 'src/agentd/stream-mac.js': 1 } },

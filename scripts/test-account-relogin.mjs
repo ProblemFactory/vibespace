@@ -149,6 +149,49 @@ try {
     ok(!Old.err && !Old2.err, 'RED CONTROLS built: no ask check in the resolve; no ask check at the press', (Old.err || Old2.err) || '');
     if (!Old.err) { const g = asking(new Old({ dataDir: path.join(tmp, 'red-ask') })); ok(g.heldIs !== 'at-b33@example.invalid', 'RED: without the resolve\'s check the asking row moves on — the question\'s own sign-in is replaced by C\'s', JSON.stringify(g)); }
     if (!Old2.err) { const g = asking(new Old2({ dataDir: path.join(tmp, 'red-press') })); ok(g.again === 'kept', 'RED: without the press\'s check a new BEFORE is taken on an asking row', JSON.stringify(g)); } }
+  // ── r2915: A ROW WITH NO TIE ON RECORD (signed in before the tie existed) — SEED IT at the press, never ask ──
+  const untie = (M, id) => { const x = M.get(id); delete x.loginTie; if (M._loginTies) M._loginTies.delete(id); M._save(); };
+  const preCure = (M, scene) => {
+    const s = M.createSubscription({}).id; live(M.subDir(s), 'a40@example.invalid'); M.finalizeSubscription(s); untie(M, s);
+    if (scene === 1) expired(M.subDir(s)); else blank(M.subDir(s));
+    return relogin(s, 'a40@example.invalid', undefined, M).outcome;
+  };
+  ok(preCure(am2, 1) === 'same' && preCure(am2, 2) === 'same', 'r2915 MUST: a row with NO tie on record (signed in before the update) — scene 1 and scene 2 with the same person back ⇒ SAME, in place, no question (the press seeds the tie from its own folder)');
+  { const NoSeed = copyAM("    if (!this._hasTie(id)) this._noteLoginTie(id);\n", '', 'the press does not seed a missing tie (RED)'); // stale-pins: kept — the RED takes the seed out
+    ok(!NoSeed.err, 'RED CONTROL built: the press without the seed', NoSeed.err || '');
+    if (!NoSeed.err) { const M = new NoSeed({ dataDir: path.join(tmp, 'red-seed') }); ok(preCure(M, 1) === 'ask', 'RED: in that copy the same person back on a pre-update row is ASKED (the commonest scene)'); } }
+  const untiedMove = async (M) => {
+    const o = M.createSubscription({}).id; live(M.subDir(o), 'm42@example.invalid'); M.finalizeSubscription(o); untie(M, o);
+    // as a row signed in before the update is kept: its facts read UNTIED (its stamp moved, so the keeper reads it again)
+    fs.utimesSync(credsAt(M.subDir(o)), new Date(), new Date(Date.now() + 5000)); await M.displayRefresh(o);
+    const s = M.createSubscription({}).id; live(M.subDir(s), 'a43@example.invalid'); M.finalizeSubscription(s);
+    const r = relogin(s, 'm42@example.invalid', undefined, M);
+    return { r: r.outcome, to: r.movedTo && r.movedTo.id === o, oIn: M.readSubCreds(o).loggedIn };
+  };
+  { const u = await untiedMove(am2);
+    ok(u.r === 'moved' && u.to && u.oIn, 'r2915 MUST: the OTHER account\'s row with no tie on record TAKES THE MOVE (seeded from its own credentials, read now) — never a duplicate row', JSON.stringify(u));
+    const NoSeed2 = copyAM("      if (!this._hasTie(x.id)) {", "      if (false) {", 'a move target with no tie is not seeded (RED)'); // stale-pins: kept
+    if (!NoSeed2.err) { const u2 = await untiedMove(new NoSeed2({ dataDir: path.join(tmp, 'red-move') })); ok(u2.r === 'split', 'RED: in that copy the untied row of the same account gets a DUPLICATE (a split)', JSON.stringify(u2)); } else ok(false, 'RED CONTROL built: the move without the seed', NoSeed2.err); }
+  { const into = am2.createSubscription({}).id; live(am2.subDir(into), 'a44@example.invalid'); am2.finalizeSubscription(into); untie(am2, into);
+    const from = am2.createSubscription({}).id; live(am2.subDir(from), 'a44@example.invalid');
+    let err = null; try { am2.mergeSubscription(from, into, { preferFromCreds: true }); } catch (e) { err = e.message; }
+    const tie = am2.get(into) && am2.get(into).loginTie;
+    ok(!err && tie && tie.rte === rteOf(am2.subDir(into)), 'r2915: the MERGE carries the tie onto the survivor (its folder now holds the folded sign-in: its deadline on the row)', JSON.stringify({ err, tie, now: rteOf(am2.subDir(into)) })); }
+  // r2915 (a): a second press JOINS the run still out; an errored run starts afresh
+  { const s = row('a45@example.invalid'); expired(am2.subDir(s)); const b1 = am2.reloginBegin(s);
+    helper(am2.subDir(s), 'running', b1.attempt); const b2 = am2.reloginBegin(s);
+    helper(am2.subDir(s), 'error', b1.attempt); const b3 = am2.reloginBegin(s);
+    ok(b2 && b2.attempt === b1.attempt && b2.joined === true && b3 && b3.attempt !== b1.attempt, 'r2915 (a): a second press while the first run still runs JOINS it (the same attempt, the same command); after an ERRORED run a press starts afresh', JSON.stringify({ b1: !!b1, joined: b2 && b2.joined, fresh: b3 && b3.attempt !== b1.attempt })); }
+  // r2915 (b): after a restart a status naming some attempt does not vouch — a stale success TIES NOTHING
+  { const d = path.join(tmp, 'stale'), A3 = new AccountManager({ dataDir: d });
+    const s = A3.createSubscription({}).id; live(A3.subDir(s), 'a46@example.invalid'); A3.finalizeSubscription(s);
+    const tie0 = A3.get(s).loginTie.rte, b = A3.reloginBegin(s); live(A3.subDir(s), 'a46@example.invalid'); helper(A3.subDir(s), 'success', b.attempt);
+    const B3 = new AccountManager({ dataDir: d }), r = B3.reloginResolve(s);
+    ok(r.outcome === 'same' && B3.get(s).loginTie && B3.get(s).loginTie.rte === tie0, 'r2915 (b): on the LOST road (a restart) a success naming an attempt this process never saw vouches nothing: the row\'s word settles it (SAME) and NO tie is recorded from those credentials', JSON.stringify({ r: r.outcome, tie: B3.get(s).loginTie, tie0 })); }
+  // r2915 (d): the two refusals reach the page in the person's language
+  { const MAsrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8'), zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    const words = ['Answer the question on this row first — its two presses are right there.', 'The new sign-in could not be set aside to ask about it, so this row was not asked — sign in again.'];
+    ok(MAsrc.includes("r?.code === 'relogin_ask_open' ? t('" + words[0] + "')") && MAsrc.includes("fin?.outcome === 'refused'") && MAsrc.includes("t('" + words[1] + "')") && words.every((w) => zh.includes(JSON.stringify(w) + ':') && ja.includes(JSON.stringify(w) + ':')), 'r2915 (d): the press\'s refusal (by its code) and the hold\'s refusal go through t(), with zh and ja rows'); }
   // ── r2734's REQUIRED LINE and smalls ──
   { const R = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
     const ans = R.slice(R.indexOf("app.post('/api/accounts/:id/relogin-answer'"), R.indexOf("app.post('/api/accounts/:id/relogin-answer'") + 400), start = R.slice(R.indexOf("app.post('/api/accounts/:id/relogin',"), R.indexOf("app.post('/api/accounts/:id/relogin-finalize'"));
@@ -157,8 +200,8 @@ try {
   { const s = row('a34@example.invalid'); blank(am2.subDir(s)); fs.rmSync(cfgAt(am2.subDir(s))); const b = am2.reloginBegin(s);
     fs.writeFileSync(path.join(am2.subDir(s), '.vibespace-relogin-held'), 'a file where the hold would go');   // the move into the hold cannot happen
     live(am2.subDir(s), 'b34@example.invalid'); helper(am2.subDir(s), 'success', b.attempt);
-    let refused = null; try { am2.reloginResolve(s); } catch (e) { refused = e.message; }
-    ok(/could not be set aside/.test(refused || '') && !am2.list().accounts.find((x) => x.id === s).reloginAsk, '(a) a sign-in that could not be moved into the hold: refused by name, the row NOT asking (never a live sign-in in a row that asks)', refused); }
+    let threw = null, r = null; try { r = am2.reloginResolve(s); } catch (e) { threw = e.message; }
+    ok(!threw && r && r.outcome === 'refused' && r.code === 'relogin_hold_failed' && !am2.list().accounts.find((x) => x.id === s).reloginAsk, '(a) + r2915 (c): a sign-in that could not be moved into the hold: REFUSED by name in an ANSWER the page shows and stops on (never a throw polled every 3 s), the row NOT asking', JSON.stringify({ threw, r })); }
   { const src = path.join(tmp, 'mv2-src'), dst = path.join(tmp, 'mv2-dst'); live(src, 'a35@example.invalid', { cfg: false }); fs.mkdirSync(cfgAt(src)); live(dst, 'old@example.invalid');
     const n = am2._moveLogin(src, dst);
     ok(n === 1 && fs.existsSync(credsAt(dst)) && !fs.existsSync(cfgAt(dst)), '(b) the config\'s rename FAILS (not ENOENT) after the credentials moved ⇒ the destination\'s old config is removed — never new credentials beside an old record', n); }

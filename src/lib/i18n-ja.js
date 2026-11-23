@@ -1632,6 +1632,8 @@ export default {
   "✓ “{name}” signed in again": "✓ 「{name}」が再ログインしました",
   "The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.": "このログインは別のアカウント（{email}）のものです——新しいエントリ「{new}」として保存しました。「{name}」はログアウトのままです。",
   "Is the new sign-in the same account as this row?": "新しいサインインはこの行と同じアカウントですか？",
+  "Answer the question on this row first — its two presses are right there.": "まずこの行の質問に答えてください——その二つのボタンがそこにあります。",
+  "The new sign-in could not be set aside to ask about it, so this row was not asked — sign in again.": "新しいサインインを脇に置いて確認できなかったため、この行では質問していません——もう一度サインインしてください。",
   "This sign-in could not be compared with what this row had — is it the same account as this row?": "このサインインはこの行にあったものと比べられません——この行と同じアカウントですか？",
   "The same account: keep this row": "同じアカウント：この行を使う",
   "Another account: make a new row": "別のアカウント：新しい行を作る",

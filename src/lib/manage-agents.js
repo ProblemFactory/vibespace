@@ -1354,7 +1354,7 @@ export function installManageAgents(App, ctx = {}) {
     let r;
     try { r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/relogin`, { method: 'POST' }); }
     catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
-    if (!r?.loginCmd) { showToast(r?.error || t('Could not start'), { type: 'error' }); return; }
+    if (!r?.loginCmd) { showToast(r?.code === 'relogin_ask_open' ? t('Answer the question on this row first — its two presses are right there.') : (r?.error || t('Could not start')), { type: 'error' }); return; }
     const baseline = r.baselineAttempt || null;
     this.openSignInTerminal(undefined, { initialCommand: r.loginCmd });
     showToast(t('A terminal opened — sign in as “{name}”. Only this account’s login is refreshed; every other login is untouched.', { name: a?.name || '' }), { duration: 6000 });
@@ -1377,6 +1377,11 @@ export function installManageAgents(App, ctx = {}) {
           // original record stays signed-out and keeps its history
           clearInterval(iv);
           showToast(t('The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.', { email: fin.freshEmail || '?', new: fin.account?.name || '', name: fin.keptName || a?.name || '' }), { duration: 10000 });
+          refresh?.();
+        } else if (fin?.outcome === 'refused') {
+          // the sign-in could not be set aside to ask about it (r2915 (c)): said, and the watch ends
+          clearInterval(iv);
+          showToast(t('The new sign-in could not be set aside to ask about it, so this row was not asked — sign in again.'), { type: 'error', duration: 10000 });
           refresh?.();
         } else if (fin?.outcome === 'ask') {
           // the facts could not prove whose sign-in it is: HELD, the row asks (row B-87fd identity unit 3)
