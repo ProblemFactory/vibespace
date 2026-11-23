@@ -19,9 +19,16 @@
 //     the next tick starts no second read (never two pool threads a store, never two copies of one content).
 //   THE FAMILY'S CEILING on the hub's shared file pool: at most CEILING (4) of these reads in flight across EVERY store — a store over
 //     it keeps its ladder armed and waits its turn (twenty stores on a data folder that hangs hold four threads, never twenty).
-//   THE LIVE HOLDS AS A LIST: holds() — one read-only list of every hold alive ({ file, code, since, torn, copy, held }; a lift from
-//     torn bytes stays listed with held false and its copy's name until the store stops: the person is told where the copy is) and
-//     readAgainOf(file) — a read again of one of them (the family's one notice reads them).
+//     FOUR HUNG READS HOLD THEIR SLOTS UNTIL A RESTART (round w9jhivwdo (1)): every store of ONE storage hangs alike, so nothing is
+//     lost; a store on a SECOND storage that answers would starve behind them — no such store exists today (all of them live in the
+//     data folder): the lane that adds one gives it its own ceiling. PAST THE CEILING the order is whichever store's timer fires
+//     first (round w9jhivwdo (2)) — no queue, no priority.
+//   THE LIVE HOLDS AS A LIST: holds() — one read-only list of every hold alive ({ key, file, code, since, torn, copy, held }; a lift
+//     from torn bytes stays listed with held false and its copy's name until the store stops: the person is told where the copy is)
+//     and readAgainOf(key | row | base name) — a read again of one of them (the family's one notice reads them). A store is matched
+//     by its FULL PATH inside (its row's opaque `key`); the rows hand out the BASE name only; a base name two held stores share in
+//     two folders matches neither (round w9jhivwdo (3)). A hold's code is the error's own CODE or NAME, clamped — never its message,
+//     which may hold a path (round w9jhivwdo (4)).
 //   A TORN LIFT SAYS SO: onLift's facts carry setAside, and torn() answers { copy, since, at } for that run (the store's words).
 const fs = require('fs');
 const path = require('path');
@@ -29,6 +36,13 @@ const SR = require('./store-read.js');
 const COPY_LOOK = 20;   // the newest copies of torn bytes compared at a keep (more beside one store are a person's to clear)
 const CEILING = 4;      // round wom600meg (2): the helper's reads in flight across ALL stores (the hub's file pool is shared)
 let active = 0;         // …the reads (with their copies) in flight now, every store's
+let keys = 0;           // the opaque keys the list hands out (a hold's full path stays inside)
+/** a read's answer → the hold's code: the error's own CODE or NAME (a word), never its message (which may name a path) */
+function codeOf(a) {
+  const e = a && a.error, c = e ? (e.code || e.name) : (a && a.code);   // (an answer with no error object: its own code, clamped the same)
+  if (typeof c === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(c)) return c;
+  return a && a.state === 'corrupt' ? 'torn bytes' : 'unreadable';
+}
 const LIVE = new Set(); // every hold made and not stopped (holds() reads their facts)
 // B-f276 unit B (主开发 r3032, lane bl-phone-ui): THE SET's CHANGE — a hold begun, lifted or stopped tells its listeners (the family's ONE
 // notice: src/server/held-lists.js broadcasts the list); a listener's throw never reaches a store
@@ -69,7 +83,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
   function start(a) {
     if (a && (a.state === 'data' || a.state === 'missing')) return a.state;
     const torn = !!a && a.state === 'corrupt';
-    held = { code: torn ? 'torn bytes' : String((a && a.code) || 'unreadable'), why: (a && a.why) || null, since: now(), torn };
+    held = { code: torn ? 'torn bytes' : codeOf(a), why: (a && a.why) || null, since: now(), torn };
     log(torn ? `${name} did not parse (${held.why}) — held while its bytes are copied aside; then it starts empty`
       : `${name} could not be read (${held.code}) — held: nothing is written over it, changes to it are refused, and it is read again off the main loop`);
     if (torn) Promise.resolve().then(again).catch(onErr); else arm();   // torn: the copy at once (off the loop); failed: the ladder
@@ -88,7 +102,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
       const read = await fs.promises.readFile(file).then((buf) => ({ text: buf.toString('utf8'), buf }), (error) => ({ error }));
       if (!held || stopped) return false;
       a = SR.storeAnswer(read, { valid });
-      if (a.state === 'unreadable') { held.code = String(a.code || 'unreadable'); missingAt = 0; return false; }
+      if (a.state === 'unreadable') { held.code = codeOf(a); missingAt = 0; return false; }
       if (a.state === 'missing' && !missingAt) { missingAt = now(); return false; }
       if (a.state === 'corrupt') {
         held.torn = true;
@@ -109,6 +123,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
   const facts = () => (held ? { file: name, code: held.code, since: held.since } : null);
   /** the refusal BY NAME (503, the caller's code) — `what` the change refused */
   const refusal = (what) => Object.assign(new Error(`${what}: ${words(facts())}`), { code, status: 503 });
+  const key = 'h' + (++keys);
   const H = {
     start, again, refusal, held: facts,
     /** a lift from torn bytes in this run: { copy, since, at } (the copy's basename) — null when none */
@@ -122,8 +137,9 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     stop() { const listed = !!held || !!tornLift; stopped = true; LIVE.delete(H); if (timer) { clearTimeout(timer); timer = null; } if (listed) changed(); },
     file,
     /** (the list's row — holds() below) */
-    _entry: () => (held ? { file: name, code: held.code, since: held.since, torn: !!held.torn, copy: null, held: true, next: nextAt || null }
-      : tornLift ? { file: name, code: 'torn bytes', since: tornLift.since, torn: true, copy: tornLift.copy, held: false } : null),
+    _key: key,
+    _entry: () => (held ? { key, file: name, code: held.code, since: held.since, torn: !!held.torn, copy: null, held: true, next: nextAt || null }
+      : tornLift ? { key, file: name, code: 'torn bytes', since: tornLift.since, torn: true, copy: tornLift.copy, held: false } : null),
   };
   LIVE.add(H);
   return H;
@@ -132,7 +148,13 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
 /** THE LIVE HOLDS (round wom600meg (3)): every hold alive, and every lift from torn bytes of this run (held: false, its copy named) —
  *  a frozen list of frozen rows; nothing here acts */
 function holds() { const out = []; for (const h of LIVE) { const e = h._entry(); if (e) out.push(Object.freeze(e)); } return Object.freeze(out); }
-/** a read again of ONE held store, by its file's base name → true when it lifted (false: not held, not found, or its turn not come) */
-async function readAgainOf(fileName) { for (const h of LIVE) if (path.basename(h.file) === String(fileName) && h.held()) return h.again(); return false; }
+/** a read again of ONE held store — by its row (or the row's key), else by a base name that ONE held store alone carries (two stores
+ *  of one base name in two folders match neither) → true when it lifted (false: not held, not found, ambiguous, or its turn not come) */
+async function readAgainOf(which) {
+  const key = which && typeof which === 'object' ? which.key : String(which || '');
+  for (const h of LIVE) if (h._key === key) return h.held() ? h.again() : false;
+  const named = [...LIVE].filter((h) => path.basename(h.file) === key && h.held());
+  return named.length === 1 ? named[0].again() : false;
+}
 
 module.exports = { create, holds, readAgainOf, onHoldsChange, CEILING };

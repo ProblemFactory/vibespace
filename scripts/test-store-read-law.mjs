@@ -517,6 +517,29 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const asides = fs.readdirSync(d).filter((n) => /^machine-mounts\.json\.corrupt-\d+$/.test(n));
     ok(!M.unreadWords() && M.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"mounts": [', 'torn bytes are KEPT aside (a copy) and the mounts list starts empty — never a hold');
   }
+  // B-f276 family unit 2 (主开发 r3081 — the law of r3019): TORN BYTES NEVER LIFT AS AN EMPTY LIST BY THEMSELVES. The lift is MARKED
+  // (tornAt, saved at once); the REAL restore's first step, the orphan token sweep, revokes NOTHING minted before it (each push record
+  // is unknown) — the release revoked every machine's token over the empty list; a PERSON's removal of a machine revokes its own
+  {
+    const run = async (Mod, name) => {
+      const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'machine-mounts.json'), '{"mounts": [ {"id": "mm-0001", "dir": "push", "hostId": "h-0001", "tokenId": "tok-0001"');   // torn: a push record cut mid-write
+      const revoked = [], logs = [];
+      const M = new Mod.MachineMounts(deps(d, revoked, logs)); clearInterval(M._sweep);
+      const tornAt = M._state.tornAt;
+      let saved = null; try { saved = JSON.parse(fs.readFileSync(path.join(d, 'machine-mounts.json'), 'utf8')); } catch { }
+      try { await M.restore(); } catch { }
+      return { M, revoked, tornAt, markSaved: !!saved && saved.tornAt === tornAt, copy: typeof M.tornCopy === 'function' ? M.tornCopy() : null, said: logs.filter((l) => /KEPT|revoked/.test(String(l))) };
+    };
+    const r = await run(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-torn-sweep');
+    ok(r.revoked.length === 0 && typeof r.tornAt === 'number' && r.markSaved && /^machine-mounts\.json\.corrupt-\d+$/.test(String(r.copy)) && r.said.some((l) => /minted before machine-mounts\.json's torn bytes are KEPT/.test(l)), 'TORN BYTES (r3081): the lift is MARKED, the mark saved at once; the REAL restore\'s orphan sweep revokes NOTHING minted before it (said once) — the copy named for the page', { revoked: r.revoked, tornAt: r.tornAt, markSaved: r.markSaved, copy: r.copy, said: r.said });
+    r.M.mountTokens.list = () => [{ id: 'tok-0001', kind: 'reverse-mount', owner: 'h-0001' }, { id: 'tok-0002', kind: 'reverse-mount', owner: 'h-0002' }];
+    await r.M.onMachineUnpaired('h-0001');
+    ok(r.revoked.join() === 'tok-0001', 'a PERSON decides: removing that machine revokes ITS token (by owner) — the other machine\'s stays', r.revoked);
+    const MSRCt = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8');
+    const rx = await run(MJ.load('src/machine-mounts.js', anchored(MSRCt, "          if (tornAt && !(Number(t.createdAt) > tornAt)) { unknown++; continue; }   // minted before the torn lift: its record is UNKNOWN — kept\n", '', 'srl-u2-torn-sweep'), 'torn-sweep-unasked'), 'mounts-torn-sweep-ctl');
+    ok(rx.revoked.includes('tok-0001'), 'RED CONTROL — the mark not asked (the release\'s road, in a copy): the same restore revokes the machine\'s token over the empty list', rx.revoked);
+  }
   // «missing» right after an unreadable answer: read once more before anything is written there
   {
     const d = path.join(D, 'mounts-gone'); fs.mkdirSync(d, { recursive: true });
@@ -666,7 +689,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   ok(/async function unpairDialDevice\(deviceId\) \{\n(?:  if \(hosts\.held && hosts\.held\(\)\) throw [^\n]*\n)?(?:  \/\/[^\n]*\n)*  if \(machineMounts\.unreadWords && machineMounts\.unreadWords\(\)\) throw /.test(DPM) && /res\.status\(e && e\.status === 503 \? 503 : 400\)/.test(ERM),
     'WIRING (its read r1, M3): removing a dial machine while machine-mounts.json is held is refused BEFORE any side effect (its push tokens would never be revoked) — 503 with the words (the meeting with hosts.json\'s cure: its own belt, the held machines, may stand first)');
   const SV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
-  ok(SV.includes("app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}) }));"), 'WIRING: the mounts list answers WHY it is empty while held (GET /api/machine-mounts `unread`)');
+  ok(SV.includes("app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}), ...(machineMounts.tornCopy?.() ? { torn: machineMounts.tornCopy() } : {}) }));"), 'WIRING: the mounts list answers WHY it is empty while held (GET /api/machine-mounts `unread`) — and a torn lift\'s copy (`torn`, B-f276 family unit 2)');
 }
 
 console.log('§5 job-notifications.json (src/jobs.js) — every job notice still waiting for its conversation');

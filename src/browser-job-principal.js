@@ -36,6 +36,15 @@ const JOB_ROUTES_ALLOWED = Object.freeze(['profiles', 'status', 'providers', 're
 const JOB_ROUTES_REFUSED = Object.freeze(['use', 'pin', 'new', 'new-child', 'detach', 'backend', 'blocked', 'site-hint', 'site-reset', 'resume', 'restart', 'takeover-request']); // int220: `restart` (lane browser-unresponsive) stops the browser under every holder — a conversation's act, never a job's // lane browser-takeover-queue: `ask-human`'s route — asking a person to take over is the conversation's (a job's run asks nobody)
 
 function isRunningJob(job) { return !!job && typeof job === 'object' && RUNNING_STATES.includes(job.state); }
+/** B-f276 family unit 2 (主开发 r3084 — the law of r3019): is job `jobId` running, asked of the jobs engine `jm` → true | false |
+ *  'unknown'. While the jobs store is HELD (its read failed: `jm._unread.store`) its memory is EMPTY because it is unread — every job
+ *  would read as «not running» and the keeper's reconcile would release every job's browser handle and close its tabs: the answer is
+ *  'unknown', and the release rule below keeps a handle on 'unknown' (nothing is removed on a store's silence) */
+function jobRunningIn(jm, jobId) {
+  if (jm && jm._unread && jm._unread.store) return 'unknown';
+  const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(String(jobId)) : null;
+  return isRunningJob(j);
+}
 function ownerConversationOf(job) {
   const cid = job && job.owner && job.owner.conversation && job.owner.conversation.id;
   return typeof cid === 'string' && cid ? cid : null;
@@ -102,7 +111,9 @@ function carriedJobHandles(children, isRunning) {
   for (const { handle, jobId } of jobHandles(children)) { let on = false; try { on = !!isRunning(jobId); } catch { on = false; } if (on) out.add(handle); }
   return out;
 }
-/** THE RELEASE RULE (evidence, never a name): a job handle whose job is not running — finished, archived, unknown. */
+/** THE RELEASE RULE (evidence, never a name): a job handle whose job is not running — finished, archived, an id the engine does not
+ *  know. A job whose state is UNKNOWN (isRunning answers 'unknown' — the jobs store held: jobRunningIn) is CARRIED: never released on
+ *  a store's silence (B-f276 family unit 2, r3084) */
 function jobChildrenToRelease(children, isRunning) {
   const carried = carriedJobHandles(children, isRunning);
   return jobHandles(children).filter((x) => !carried.has(x.handle));
@@ -110,6 +121,6 @@ function jobChildrenToRelease(children, isRunning) {
 
 module.exports = {
   RUNNING_STATES, JOB_ROUTES_ALLOWED, JOB_ROUTES_REFUSED,
-  isRunningJob, ownerConversationOf, jobLabelOf, jobPrincipalOf, jobRouteVerdict, jobResolveVerdict,
+  isRunningJob, jobRunningIn, ownerConversationOf, jobLabelOf, jobPrincipalOf, jobRouteVerdict, jobResolveVerdict,
   jobHandleOf, jobHandles, carriedJobHandles, jobChildrenToRelease,
 };

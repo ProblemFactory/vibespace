@@ -226,8 +226,8 @@ class MachineMounts {
    *  refused by name, and the file is read again off the loop; read, the boot's restore runs then */
   _loadAnswer(a, { atLift = false } = {}) {
     if (a.state === 'unreadable') return this._unreadHold(a);
+    let aside = null;
     if (a.state === 'corrupt') {
-      let aside = null;
       try { aside = this._asideName(); fs.copyFileSync(this._file, aside, fs.constants.COPYFILE_EXCL); } catch { aside = null; }
       const b = SR.afterSetAside(a, aside);
       if (b.state !== 'missing') return this._unreadHold(b);   // its only copy: never written over
@@ -235,6 +235,12 @@ class MachineMounts {
     }
     this._state = a.state === 'data' ? a.value : { mounts: [] };
     if (!Array.isArray(this._state.mounts)) this._state.mounts = [];
+    // B-f276 family unit 2 (主开发 r3081): TORN BYTES NEVER LIFT AS AN EMPTY LIST BY THEMSELVES — the orphan token sweep (restore's
+    // first step) would revoke every machine's reverse-mount token over it. The lift is MARKED, and the mark saved at once: a token
+    // minted before it is UNKNOWN to the sweep, which revokes none of them until the list reads (the copy put back: no mark) or a
+    // person decides (a machine removed revokes its own — onMachineUnpaired)
+    const tornCopy = a.state === 'corrupt' ? (aside && path.basename(aside)) : a.state === 'missing' && a.setAside ? a.setAside : null;
+    if (tornCopy) { this._state.tornAt = Date.now(); this._tornCopy = tornCopy; this._save(); }
     // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
     // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
     if (a.state !== 'data' && !atLift) this._migrateLegacy();
@@ -1239,15 +1245,19 @@ class MachineMounts {
     let n = 0;
     try {
       const referenced = new Set(this._state.mounts.filter((m) => m.dir === 'push').map((m) => m.tokenId));
+      const tornAt = Number(this._state.tornAt) || 0;   // B-f276 family unit 2 (r3081): the list came from torn bytes at this time
+      let unknown = 0;
       for (const t of this.mountTokens.list?.() || []) {
         // structured kind (not a name-prefix hack): only reverse-mount tokens
         // with no backing push record are orphans; user 'share' tokens are
         // never touched
         if (t.kind === 'reverse-mount' && !referenced.has(t.id)) {
+          if (tornAt && !(Number(t.createdAt) > tornAt)) { unknown++; continue; }   // minted before the torn lift: its record is UNKNOWN — kept
           try { this.mountTokens.revoke?.(t.id); n++; } catch { }
         }
       }
       if (n) this.log(`revoked ${n} orphan reverse-mount token(s) (no matching mount record)`);
+      if (unknown && !this._tornSaid) { this._tornSaid = true; this.log(`${unknown} reverse-mount token(s) minted before machine-mounts.json's torn bytes are KEPT — the list that would name them is unknown; removing a machine revokes its own`); }
     } catch { }
     return n;
   }
@@ -1299,13 +1309,23 @@ class MachineMounts {
    *  BEFORE any side effect — its own unmounts run inside a swallow) → the words, or null */
   revokeHeldFor(hostId) {
     for (const rec of this._state.mounts) if (rec.hostId === hostId) { const w = this._revokeHeldWords(rec); if (w) return w; }
+    // B-f276 family unit 2 (r3081): after a torn lift the machine's tokens may have no record here — its removal revokes them by owner
+    if (this._state.tornAt && this.mountTokens && typeof this.mountTokens.unreadWords === 'function' && this.mountTokens.unreadWords()) return this.mountTokens.unreadWords();
     return null;
   }
+  /** B-f276 family unit 2 (r3081): the torn lift of this run — the copy's base name (the Machines section says where it is) or null */
+  tornCopy() { return this._tornCopy || null; }
 
   async onMachineUnpaired(hostId) {
     if (!hostId) return;
     for (const rec of [...this._state.mounts.filter((m) => m.hostId === hostId)]) {
       try { await this.unmount(rec.id); } catch { }
+    }
+    // B-f276 family unit 2 (r3081): a PERSON removed this machine — its reverse-mount tokens with no record here (minted before a torn
+    // lift: unknown to the sweep) are revoked now, by their owner (the un-pairing asked revokeHeldFor first: the token store reads)
+    if (this._state.tornAt) {
+      const referenced = new Set(this._state.mounts.filter((m) => m.dir === 'push').map((m) => m.tokenId));
+      for (const t of this.mountTokens?.list?.() || []) if (t.kind === 'reverse-mount' && t.owner === hostId && !referenced.has(t.id)) { try { this.mountTokens.revoke(t.id); } catch (e) { this.log(`a token of the removed machine ${hostId} was not revoked: ${(e && e.message) || e}`); } }
     }
   }
 

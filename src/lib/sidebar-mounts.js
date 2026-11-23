@@ -426,6 +426,7 @@ export function installSidebarMounts(Sidebar) {
         const hlist = document.createElement('div');
         hlist.className = 'mounts-list';
         hlist.appendChild(this._buildLocalMachineRow());
+        if (mm && typeof mm.torn === 'string' && mm.torn) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its list of machine mounts (the file was damaged), so it started empty. The old bytes are kept beside it as {name}; the machines’ folder links stay valid until you remove a machine.', { name: mm.torn }) }));   // B-f276 family unit 2 (r3081)
         if (hostsHeld || mountsHeld) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint',
           textContent: hostsHeld ? tr('VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.')
             : tr('VibeSpace cannot read the machines’ mounts right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to mounts wait until then.') }));

@@ -1124,7 +1124,7 @@ const machineMounts = new MachineMounts({
   log: (m) => console.log('[machine-mounts]', m),
 });
 setTimeout(() => { machineMounts.restore().catch(() => {}); }, 5000); // heal pull mounts + re-own push tunnel ports
-app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}) }));   // B-f276 remainder: why the list is empty while held
+app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}), ...(machineMounts.tornCopy?.() ? { torn: machineMounts.tornCopy() } : {}) }));   // B-f276 remainder: why the list is empty while held (B-f276 family unit 2: and a torn lift's copy, r3081)
 app.post('/api/machine-mounts/:hostId', async (req, res) => {
   try {
     const b = req.body || {};

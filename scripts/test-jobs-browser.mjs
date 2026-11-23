@@ -258,7 +258,7 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const tokens = new Map([['jbt_aaaa', 'jb-0000aaaa'], ['jbt_bbbb', 'jb-0000bbbb']]);
   const eng = Object.assign(Object.create(require('../src/jobs.js').JobManager.prototype), { d: { dataDir: path.join(O, 'data-job'), log() { } } });
   const jm = { ready: true, jobs, jobByToken: (t) => jobs.get(tokens.get(t)) || null, labelOf: (j) => eng.labelOf(j) };   // r5: + the ONE name accessor (the engine's own)
-  const k = mk(K, { dataDir: path.join(O, 'data-job'), jobRunning: (id) => J.isRunningJob(jobs.get(id)) }); await k._facts.probeVersion();
+  const k = mk(K, { dataDir: path.join(O, 'data-job'), jobRunning: (id) => J.jobRunningIn(jm, id) }); await k._facts.probeVersion();   // B-f276 family unit 2: the wiring's own question (the engine, its hold asked)
   const pBank = k.createProfile({ label: 'Bank' });
   const pOther = k.createProfile({ label: 'Other' });
   // the owner conversation (KA) is live, pinned to Bank
@@ -331,6 +331,20 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   ok(leasesOf(H).includes(pBank.id) && !leasesOf(KA).length, 'the owner conversation is gone (its lease dropped) — the RUNNING job\'s lease is kept (a running job carries its handle)', { job: leasesOf(H), owner: leasesOf(KA) });
   const r3 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] });
   ok(r3.status === 200 && r3.j && r3.j.ok, '…and it still resolves (the owner\'s recorded key + its pin) — it keeps browsing until the job ends', r3);
+  // B-f276 family unit 2 (主开发 r3084 — the law of r3019): THE JOBS STORE HELD (its read failed: the engine keeps an EMPTY memory
+  // while held) — the keeper's reconcile asks the hold («unknown») and releases NOTHING: the real reconcile, as at boot and every tick
+  { const keep = new Map(jobs); jobs.clear(); jm._unread = { store: { code: 'EIO' } };
+    const winHeld = lw(H), tabsHeld = windowTabs(winHeld), jl0 = jl.length;
+    k.reconcile({ graceMs: 0 });
+    await new Promise((r) => setTimeout(r, 50));
+    const kept = !!k._reg().children[H] && leasesOf(H).includes(pBank.id) && model.windows.has(winHeld) && tabsHeld.length > 0 && tabsHeld.every((t) => model.targets.get(t).state !== 'closed') && !jl.slice(jl0).some((x) => /job handle released/.test(x));
+    ok(kept, 'THE JOBS STORE HELD (r3084): the real reconcile over the held, EMPTY job list releases NOTHING — the job\'s handle, its lease, its window and its tabs all kept', { children: Object.keys(k._reg().children), tabs: tabsHeld.length, said: jl.slice(jl0) });
+    const MH = mutantCopies('jobs-browser-held', REPO), JSRC = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
+    const JX = MH.load('src/browser-job-principal.js', anchored(JSRC, "  if (jm && jm._unread && jm._unread.store) return 'unknown';\n", '', 'B-f276 r3084: the hold not asked'));
+    ok(JX.jobChildrenToRelease(k._reg().children, (id) => JX.jobRunningIn(jm, id)).some((x) => x.handle === H) && !J.jobChildrenToRelease(k._reg().children, (id) => J.jobRunningIn(jm, id)).some((x) => x.handle === H), 'RED CONTROL — the hold not asked (the release\'s road, in a copy): the rule releases that job\'s handle over the held list');
+    for (const row of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    jobs.clear(); for (const [a, b] of keep) jobs.set(a, b); delete jm._unread;
+  }
   // THE .229 MIRROR (F11 red on the Actions runner: window 104 left open, its tab never closed): a tab read in flight while the
   // job's window gained a tab — the CDP read taken BEFORE the tab, the holders read AFTER its root was stamped — pruned that
   // root as gone, so the finalize found nothing of the job's to close. A root stamped after the read began survives the read.
@@ -516,7 +530,7 @@ console.log('— ⑤ the wiring: the CLI reads the job token, a run\'s end relea
   ok(/_finalizeRun\(job, run, exit, why\) \{\n(\s*if \(run\.endedAt\) return; \/\/ ONE JUDGE PER RUN END[^\n]*\n)?\s*run\.endedAt = exit\.endedAt \|\| now\(\);\n[^\n]*\n\s*try \{ this\.d\.onRunEnded\?\.\(job, run\); \} catch \{ \}/.test(read('src/jobs.js')), 'the run\'s finalize calls onRunEnded FIRST (before any state branch — every run end releases)');
   ok(/onRunEnded: \(job, run\) => onRunEnded\(job, run\)/.test(read('src/server/jobs-wiring.js')) && /onRunEnded: \(job\) => \{ try \{ browserKeeper\?\.releaseJob\?\.\(job\.id, 'the job run ended'\); \} catch \{ \} \}/.test(read('server.js')), 'jobs-wiring forwards it and server.js releases the job\'s browser handle (keeper.releaseJob)');
   const mw = read('src/server/mounts-plugins-wiring.js');
-  ok(/jobRunning: \(jobId\) => \{[^\n]*isRunningJob\(j\)/.test(mw) && /getJobs: \(\) => \(getJobs \? getJobs\(\) : null\),\n\s*bindingsLookup: \(cid\) =>/.test(mw) && /getJobs: \(\) => jobsWiring\.getJobs\(\)/.test(read('server.js')), 'the keeper asks the engine which jobs run; the routes get the engine + the owner\'s recorded key');
+  ok(/jobRunning: \(jobId\) => \{[^\n]*jobRunningIn\(jm, jobId\)/.test(mw) && /getJobs: \(\) => \(getJobs \? getJobs\(\) : null\),\n\s*bindingsLookup: \(cid\) =>/.test(mw) && /getJobs: \(\) => jobsWiring\.getJobs\(\)/.test(read('server.js')), 'the keeper asks the engine which jobs run; the routes get the engine + the owner\'s recorded key');
   const kp = read('src/server/browser-keeper.js');
   ok(/for \(const \{ handle \} of J\.jobChildrenToRelease\(reg\.children, jobRunning\)\) releaseJobHandle\(handle, 'its job is not running'\);\n\s*const live = liveKeys\(\);/.test(kp), 'the reconcile (boot + every tick) releases a job handle whose job is not running BEFORE the carrier rule');
   ok(/function liveKeys\(\) \{[\s\S]{0,200}sessionLiveKeys\(\)[\s\S]{0,200}J\.carriedJobHandles\(reg\.children, jobRunning\)/.test(kp), 'the keeper\'s live set = the live sessions\' keys + the handles RUNNING jobs carry');

@@ -244,37 +244,49 @@ try {
     const DP = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8'), ask = DP.indexOf('machineMounts.revokeHeldFor(hosts.findByDeviceId(deviceId)?.id)'), unm = DP.indexOf('await machineMounts.onMachineUnpaired(');
     ok(ask > 0 && unm > ask, 'THE MACHINE\'S REMOVAL (pin): unpairDialDevice asks revokeHeldFor BEFORE any side effect — its unmounts run inside a swallow');
   }
-  const H = require('../src/store-read-hold.js');
+  const H = require('../src/store-read-hold.js'), SR = require('../src/store-read.js');
   {
     console.log('⑤ the helper: one in flight is the read AND its copy');
-    const d = dirOf('busy'), f = path.join(d, 'z.json'); fs.writeFileSync(f, 'torn {');
-    const rd = fs.promises.readdir, rf = fs.promises.readFile; let reads = 0, release = null;
-    fs.promises.readdir = function (p, ...a) { if (String(p) === d && !release) return new Promise((r) => { release = () => r(rd.call(fs.promises, p, ...a)); }); return rd.call(fs.promises, p, ...a); };
-    fs.promises.readFile = function (p, ...a) { if (String(p) === f) reads++; return rf.call(fs.promises, p, ...a); };
-    let h = null, during = -1, up = false;
-    try {
-      h = H.create({ file: f, code: 'z', aside: (m) => f + '.corrupt-' + m, words: () => 'z' });
-      h.start({ state: 'corrupt', why: 'did not parse' });
-      await until(() => !!release);   // the copy's folder listing hangs
-      await h.again(); await h.again();
-      during = reads;
-      release(); up = await until(() => !h.held());
-    } finally { fs.promises.readdir = rd; fs.promises.readFile = rf; if (h) h.stop(); }
-    ok(during === 1 && up && fs.readdirSync(d).filter((n) => n.startsWith('z.json.corrupt-')).length === 1, 'while the copy\'s listing hangs, two more tries start NO second read (one pool thread a store, one copy of one content)', { during, up });
+    const inFlight = async (Mod, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'z.json'); fs.writeFileSync(f, 'torn {');
+      const rd = fs.promises.readdir, rf = fs.promises.readFile; let reads = 0, release = null;
+      fs.promises.readdir = function (p, ...a) { if (String(p) === d && !release) return new Promise((r) => { release = () => r(rd.call(fs.promises, p, ...a)); }); return rd.call(fs.promises, p, ...a); };
+      fs.promises.readFile = function (p, ...a) { if (String(p) === f) reads++; return rf.call(fs.promises, p, ...a); };
+      let h = null, during = -1, up = false;
+      try {
+        h = Mod.create({ file: f, code: 'z', aside: (m) => f + '.corrupt-' + m, words: () => 'z' });
+        h.start({ state: 'corrupt', why: 'did not parse' });
+        await until(() => !!release);   // the copy's folder listing hangs
+        await Promise.race([Promise.all([h.again(), h.again()]), new Promise((r) => setTimeout(r, 200))]);
+        during = reads;
+        if (release) release(); up = await until(() => !h.held());
+      } finally { fs.promises.readdir = rd; fs.promises.readFile = rf; if (h) h.stop(); }
+      return { during, up, copies: fs.readdirSync(d).filter((n) => n.startsWith('z.json.corrupt-')).length };
+    };
+    const fl = await inFlight(H, 'busy');
+    ok(fl.during === 1 && fl.up && fl.copies === 1, 'while the copy\'s listing hangs, two more tries start NO second read (one pool thread a store, one copy of one content)', fl);
+    const flx = await inFlight(mutant('src/store-read-hold.js', [['    if (busy || active >= CEILING) return false;', '    if (active >= CEILING) return false;']]), 'busy-ctl');
+    ok(flx.during > 1, 'RED CONTROL (round w9jhivwdo (5)) — the in-flight mark cut: the tries start a second read while the copy hangs', flx);
   }
   {
     console.log('⑤ the helper: the family\'s ceiling on the shared pool');
-    const d = dirOf('ceiling'), files = Array.from({ length: 24 }, (_, i) => path.join(d, `s${i}.json`)); files.forEach((x) => fs.writeFileSync(x, '{}'));
-    const rf = fs.promises.readFile, pend = []; let started = 0, first = -1, second = -1;
-    fs.promises.readFile = function (p, ...a) { if (files.includes(String(p))) { started++; return new Promise((_, no) => pend.push(() => no(Object.assign(new Error('EIO (placed)'), { code: 'EIO' })))); } return rf.call(fs.promises, p, ...a); };
-    const hs = [];
-    try {
-      for (const x of files) { const h = H.create({ file: x, code: 'c', aside: (m) => x + '.corrupt-' + m, words: () => 'c' }); h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' }); hs.push(h); }
-      const ps = hs.map((h) => h.again()); first = started;
-      pend.splice(0).forEach((no) => no()); await Promise.all(ps);
-      const ps2 = hs.slice(4, 12).map((h) => h.again()); second = started - first;
-      pend.splice(0).forEach((no) => no()); await Promise.all(ps2);
-    } finally { fs.promises.readFile = rf; pend.splice(0).forEach((no) => no()); hs.forEach((h) => h.stop()); }
+    const ceiling = async (Mod, tag) => {
+      const d = dirOf(tag), files = Array.from({ length: 24 }, (_, i) => path.join(d, `s${i}.json`)); files.forEach((x) => fs.writeFileSync(x, '{}'));
+      const rf = fs.promises.readFile, pend = []; let started = 0, first = -1, second = -1;
+      fs.promises.readFile = function (p, ...a) { if (files.includes(String(p))) { started++; return new Promise((_, no) => pend.push(() => no(Object.assign(new Error('EIO (placed)'), { code: 'EIO' })))); } return rf.call(fs.promises, p, ...a); };
+      const hs = [];
+      try {
+        for (const x of files) { const h = Mod.create({ file: x, code: 'c', aside: (m) => x + '.corrupt-' + m, words: () => 'c' }); h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' }); hs.push(h); }
+        const ps = hs.map((h) => h.again()); first = started;
+        pend.splice(0).forEach((no) => no()); await Promise.all(ps);
+        const ps2 = hs.slice(4, 12).map((h) => h.again()); second = started - first;
+        pend.splice(0).forEach((no) => no()); await Promise.all(ps2);
+      } finally { fs.promises.readFile = rf; pend.splice(0).forEach((no) => no()); hs.forEach((h) => h.stop()); }
+      return { first, second };
+    };
+    const { first, second } = await ceiling(H, 'ceiling');
+    const cx = await ceiling(mutant('src/store-read-hold.js', [['    if (busy || active >= CEILING) return false;', '    if (busy) return false;']]), 'ceiling-ctl');
+    ok(cx.first === 24, 'RED CONTROL (round w9jhivwdo (5)) — the ceiling cut: twenty-four held stores hold twenty-four reads', cx);
     ok(H.CEILING === 4 && first === 4 && second === 4, 'twenty-four held stores over reads that never answer hold FOUR reads; the others wait their turn, ladders armed — and the ceiling frees with its reads (the next tries read four again)', { first, second });
   }
   {
@@ -293,6 +305,26 @@ try {
     ok(!!r2 && r2.held === false && r2.torn === true && /^m\.json\.corrupt-\d+/.test(String(r2.copy)) && !!h2.torn() && h2.torn().copy === r2.copy, 'a lift from TORN bytes stays listed (held false) with its copy\'s name, and torn() says it to its store', r2);
     h2.stop();
     ok(!H.holds().some((x) => x.file === 'm.json'), 'a stopped hold leaves the list');
+    // round w9jhivwdo (3): two held stores of ONE base name in two folders — the base name matches neither; the row's key, its own
+    const da = dirOf('dup-a'), db = dirOf('dup-b'), fa = path.join(da, 'dup.json'), fb = path.join(db, 'dup.json'); fs.writeFileSync(fa, '{}'); fs.writeFileSync(fb, '{}');
+    const ha = H.create({ file: fa, code: 'd', aside: (m) => fa + '.corrupt-' + m, words: () => 'd' }), hb = H.create({ file: fb, code: 'd', aside: (m) => fb + '.corrupt-' + m, words: () => 'd' });
+    ha.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' }); hb.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
+    const rows = H.holds().filter((x) => x.file === 'dup.json');
+    const byName = await H.readAgainOf('dup.json'), stillBoth = !!ha.held() && !!hb.held();
+    const byRow = await H.readAgainOf(rows.find((x) => x.key === ha._key));
+    ok(rows.length === 2 && rows[0].key !== rows[1].key && !rows.some((x) => /\//.test(JSON.stringify(x))) && byName === false && stillBoth && byRow === true && !ha.held() && !!hb.held(), 'two held stores of ONE base name in two folders: the shared base name matches NEITHER; a row (its opaque key) reads its own store again only — no row hands out a path', { rows, byName, byRow });
+    ha.stop(); hb.stop();
+    // round w9jhivwdo (4): a hold's code is the error's CODE or NAME, never its message (which may name a path)
+    const dc = dirOf('code'), fc = path.join(dc, 'c.json'); fs.writeFileSync(fc, '{}');
+    const hc = H.create({ file: fc, code: 'c', aside: (m) => fc + '.corrupt-' + m, words: () => 'c' });
+    hc.start(SR.storeAnswer({ error: new TypeError('could not read /made/up/home/folder/c.json') }));
+    const rc = H.holds().find((x) => x.key === hc._key);
+    hc.stop();
+    const hc2 = H.create({ file: fc, code: 'c', aside: (m) => fc + '.corrupt-' + m, words: () => 'c' });
+    hc2.start(SR.storeAnswer({ error: Object.assign(new Error('EIO: i/o error, read /made/up/home/folder/c.json'), { code: 'EIO' }) }));
+    const rc2 = H.holds().find((x) => x.key === hc2._key);
+    hc2.stop();
+    ok(!!rc && rc.code === 'TypeError' && !!rc2 && rc2.code === 'EIO' && ![rc.code, rc2.code].some((c) => /\/|made|folder/.test(c)), 'a hold\'s code is the error\'s own code or name, clamped — a message naming a path never reaches the list', { a: rc && rc.code, b: rc2 && rc2.code });
     const dt = dirOf('tokens-torn-words'), ft = path.join(dt, 'mount-tokens.json'); fs.writeFileSync(ft, '{"tokens": [ torn');
     const st = new MountTokens({ dataDir: dt, log: quiet }); await lifted(st);
     ok(/^mount-tokens\.json\.corrupt-\d+/.test(String(st.tornCopy())), 'a TORN lift of the folder links names its copy for that run (GET /api/mount-tokens answers it; the Bridge tokens section says each push mount must be pushed again)', st.tornCopy());
